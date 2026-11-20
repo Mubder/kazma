@@ -125,7 +125,7 @@ def _observer(language: str) -> list[Problem]:
     open_ones = [i for i in observer.get("incidents_7d") or [] if isinstance(i, dict) and not i.get("ended_at")]
     return [Problem(_pid("observer", i.get("id") or i.get("started_at")), "observer",
                     str(i.get("title") or i.get("condition") or ""), str(i.get("detail") or ""),
-                    i.get("started_at"), "/settings?tab=system", "critical")
+                    i.get("started_at"), "/settings?tab=alerts", "critical")
             for i in open_ones]
 
 

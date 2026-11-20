@@ -207,6 +207,8 @@ CATALOG: tuple[_Entry, ...] = (
          "وجهة النسخ الاحتياطي الخارجية للقراءة فقط", page=_BACKUP),
     _ops("backup.restic_snapshot_failed", "warn", "A restic repository missed a snapshot",
          "فات مستودع restic لقطة", page=_BACKUP),
+    _ops("backup.restic_local_made", "warn", "A new local backup repository was made",
+         "أُنشئ مستودع نسخ احتياطي محلي جديد", page=_BACKUP),
     _ops("backup.restic_check_failed", "critical", "A backup repository failed verification",
          "فشل التحقق من مستودع نسخ احتياطي", page=_BACKUP),
     _ops("backup.restore_drill_failed", "critical", "Backup verification failed", "فشل التحقق من النسخ الاحتياطي",

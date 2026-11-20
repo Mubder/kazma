@@ -1497,15 +1497,44 @@ def _apply_neo4j_env_defaults(out: dict[str, Any]) -> None:
         # Fill missing URL from env when provider already neo4j
         if not str(g.get("url") or "").strip() and env_url:
             g["url"] = env_url
-        if not str(g.get("password") or "").strip():
-            pw = (
-                os.environ.get("KAZMA_NEO4J_PASSWORD")
-                or os.environ.get("NEO4J_PASSWORD")
-                or ""
-            ).strip()
-            if pw:
-                g["password"] = pw
+        pw = (
+            os.environ.get("KAZMA_NEO4J_PASSWORD")
+            or os.environ.get("NEO4J_PASSWORD")
+            or ""
+        ).strip()
+        if pw and (not str(g.get("password") or "").strip()
+                   or (want_default and _same_local_server(str(g.get("url") or ""), env_url))):
+            # The container `kazma setup install` made (KAZMA_NEO4J_DEFAULT,
+            # at the address in KAZMA_NEO4J_URL) answers to the password setup
+            # wrote for it: a different one stored in the settings -- an older
+            # container's, or another machine's carried in by a migration
+            # bundle -- is refused there (live 2026-11-20: "the sign-in was
+            # refused", 17 changes waiting).
+            g["password"] = pw
+            user = (os.environ.get("KAZMA_NEO4J_USER") or os.environ.get("NEO4J_USER") or "").strip()
+            if user and want_default:
+                g["user"] = user
         out["graph"] = g
+
+
+_LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _same_local_server(stored: str, env_url: str) -> bool:
+    """True when *stored* and *env_url* name the same Neo4j on this machine:
+    both loopback (``localhost``, ``127.0.0.1``, ``::1`` are one machine)
+    and the same port. A server elsewhere is never assumed to be setup's."""
+    from urllib.parse import urlsplit
+
+    if not stored or not env_url:
+        return False
+    try:
+        a, b = urlsplit(stored), urlsplit(env_url)
+        same_port = (a.port or 7687) == (b.port or 7687)
+    except ValueError:
+        return False
+    return (same_port and (a.hostname or "").lower() in _LOOPBACK_NAMES
+            and (b.hostname or "").lower() in _LOOPBACK_NAMES)
 
 
 def mask_backends_cfg(cfg: dict[str, Any] | None = None) -> dict[str, Any]:

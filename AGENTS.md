@@ -1578,6 +1578,15 @@ best-effort and never raises. Since 2026-10-13 (Memory audits M12, M13):
 Gate: `tests/test_memory_queue_retries.py` (each with its negative control:
 the ignored None, the one-None extractor, no backoff, the old purge, the old
 batch-claim loop, one lane).
+- **A handler that fails says why** (2026-11-20): `return
+  failed_because("...")` (`task_queue.failed_because`, always False) puts the
+  reason in the task's `error_log`, which the Running work card, the
+  Dashboard's incident (its bell text is `name: reason`, `runs.notify`) and
+  the Memory page's queue show; a reason given in a worker thread is kept, and
+  it is masked (`redact_secrets`). A bare `return False` recorded "handler
+  returned False": live 2026-11-19 a failed Postgres dump copy said nothing
+  more. Gate: `tests/test_task_failure_reasons.py` (no registered handler
+  returns a bare False, a planted one as the control).
 
 **D2. No slow call under a memory write lock; one vector per row** (2026-10-13,
 Memory audits M14, M15, `memory/vector_write.py`). No embedding, Postgres
@@ -2988,6 +2997,31 @@ drawing, the rest by extraction.
   `tests/e2e/test_memory_page_browser.py` (by the sidebar, EN/AR, desktop
   and phone; nothing marked hidden is drawn, the page without the rule as
   the negative control).
+- **The map is a radial hierarchy** (2026-11-20, the owner: the major nodes
+  "hide within the many nodes available"; `memory_console.js`
+  `_v2gAssignRanks`, `_v2gStep`). Rank 1 the hub (you), held at the
+  centre; rank 2 the things marked major (the entity's `is_major` column), or, when none
+  is, the hub's five most connected neighbours, evenly on an inner ring; rank
+  3 the rest on an outer band of up to four lanes, pulled to the side of the
+  major it shares most lines with. Each rank has its size (hub largest), its
+  label (always shown for ranks 1 and 2), its line (the hub's spokes to its
+  majors) and its push; faint orbit rings mark the two rings; a dot the
+  person placed keeps its place. Majors are the accent, the hub its own
+  colour (majors were an amber beside the hub's yellow). A name that cannot
+  sit under its dot tries above it, then beside it. Gate:
+  `tests/e2e/test_memory_map_radial.py` (by the sidebar, EN/AR: the hub at
+  the centre, the majors on their ring and evenly spaced, the rest beyond on
+  their major's side, sizes by rank; with nothing marked, the most connected
+  stand in).
+- **A memory problem says what to do and where** (2026-11-20): every
+  memory health check that can warn or fail passes `fix` (one sentence) and
+  `link` (the page where it is done) to `health._comp`, and the health answer
+  lists `problems` (detail, fix, link) beside `issues`; the Memory page's
+  "Needs attention" shows "What to do:" and Open (links of this site only).
+  It said what was wrong and never how to fix it ("Neo4j does not answer (the
+  sign-in was refused); 17 changes waiting"). Gate:
+  `tests/test_problems_say_how_to_fix.py` (a check that can fail with no
+  `fix=`, a planted one as the control).
 - **Every operator memory change leaves a trail and a real status** (2026-10-13,
   Memory audit M35, `kazma_ui/memory_actions.py`): `MemoryActionRecorder`,
   mounted with the memory API, records every POST/PUT/PATCH/DELETE under
@@ -5451,6 +5485,17 @@ Express gaining a part never installs one the owner declined.
   `KAZMA_NEO4J_HEAP` / `KAZMA_NEO4J_PAGECACHE`); Kazma uses it through
   `KAZMA_NEO4J_URL` and `KAZMA_NEO4J_DEFAULT=1` (`memory.backends`, SQLite
   stays the source of truth, Neo4j the dual-written copy).
+- **The Neo4j setup made answers to setup's password**
+  (`memory.backends._apply_neo4j_env_defaults`, 2026-11-20). For the
+  container setup made -- `KAZMA_NEO4J_DEFAULT` on and the stored graph
+  address the same Neo4j on this machine as `KAZMA_NEO4J_URL`
+  (`_same_local_server`: loopback names, the same port) -- the password
+  (and user) in `.env` win over the settings. A restore carried the old
+  machine's password into the settings, the new container refused it, and
+  every graph sync failed "the sign-in was refused". A Neo4j the owner
+  chose elsewhere keeps the password stored for it. Gate:
+  `tests/test_neo4j_setup_password_wins.py` (the old fill-empty-only rule as
+  the control).
 - **No service sends usage data home**: the Neo4j compose sets
   `NEO4J_dbms_usage__report_enabled=false` (Neo4j's default reports;
   `tests/test_container_services.py` holds every row to it, a Neo4j without
@@ -7294,6 +7339,20 @@ signal 1-3 ms before the server marks its stop). The dump raises
 says so, and the handler pages nobody; the base backup raises
 `child_stop.StoppedByKazma`, which a new backup tool the server starts and
 pages on raises too. Tests: `tests/test_child_stop.py` (real children).
+
+**D2c. A missing local repository is made, and said once**
+(`restic_repo._local_repo_made`, from `restic_repo.backup`, 2026-11-20).
+Nothing in Kazma made the local repository (`<data dir>/backups/restic`): an
+install restored from a migration bundle (the passphrase travels, the
+backups never) had a passphrase and no repository, so every copy into it
+failed "repository does not exist" and the Postgres dump's copy gave up as a
+failed task. A copy into the install's own local repository makes it first
+and raises `backup.restic_local_made` (earlier local snapshots are not in
+it); a missing remote is never made (it may be a wrong address). Every restic
+backup goes through `restic_repo.backup`. Gate:
+`tests/test_restic_local_repo_made.py` (real restic; the copy without the
+step fails as live did; the gate on the one backup function, a planted one
+as the control).
 
 **D3. A restore can be removed by the account that made it**
 (`restic_repo.restore`, 2026-11-13). restic restores a snapshot under the
@@ -11594,7 +11653,12 @@ is the reasoning setting below plus the tool count per turn (open).
   `system.problems.seen`, admin-only. A source that cannot be read is named.
   The daily digest reads the same list (`_open_problems_line`). Gates:
   `tests/test_open_problems.py`, `tests/e2e/test_problems_panel.py` (EN/AR,
-  reached by the sidebar).
+  reached by the sidebar). **Every problem says what to do** (2026-11-20):
+  a problem with no command of its own shows its kind's "what to do" line
+  (`problems.todo.<source>`, EN/AR) beside when it closes; a failed run's
+  bell text carries its reason; the observer's problem opens Settings →
+  Alerts. Gate: `tests/test_problems_say_how_to_fix.py` (every kind the card
+  knows has its line in both languages).
 - **The weekly report against targets** (G3, `observability/weekly_targets.py`):
   uptime (the observer's), turns that succeed, restarts not asked for, the
   median time to recover, backups fresh every day, stops over budget and

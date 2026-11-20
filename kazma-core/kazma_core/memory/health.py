@@ -95,7 +95,13 @@ def _comp(
     status: str,
     detail: str,
     meta: dict[str, Any] | None = None,
+    fix: str = "",
+    link: str = "",
 ) -> dict[str, Any]:
+    """One check. ``fix`` says what to do when it warns or fails, in one
+    sentence; ``link`` is the page of Kazma where it is done (a path of this
+    site), or "" when the fix is a command or nothing is needed. Every check
+    that can warn or fail passes a fix (tests/test_problems_say_how_to_fix.py)."""
     return {
         "id": id_,
         "name": name,
@@ -103,6 +109,8 @@ def _comp(
         "status": status,  # ok | warn | error | off
         "detail": detail,
         "meta": meta or {},
+        "fix": fix if status in ("warn", "error") else "",
+        "link": link if status in ("warn", "error") else "",
     }
 
 
@@ -112,6 +120,17 @@ _GRAPH_COPY_DOWN = {
     "driver_missing": "The neo4j driver is not installed in Kazma's Python: no fact reaches Neo4j "
                       '(uv pip install -e ".[neo4j]", then restart).',
     "needs_url": "The graph store is Neo4j but has no address (memory.backends.graph.url).",
+}
+
+#: What to do for each state of the Neo4j copy that needs it.
+_GRAPH_COPY_FIX = {
+    "refused": "Open Settings → Memory → Graph and press Test Neo4j. For the Neo4j Kazma set up, its "
+               "password is KAZMA_NEO4J_PASSWORD in the install's .env, and Kazma uses it after a reload; "
+               "for a Neo4j of your own, type its password there and save.",
+    "unreachable": "Open Settings → Memory → Graph and press Test Neo4j. If Kazma set Neo4j up, "
+                   "kazma setup install starts its container again.",
+    "driver_missing": "Run kazma update --reinstall -y (it installs the neo4j driver), then reload Kazma.",
+    "needs_url": "Open Settings → Memory → Graph, give Neo4j's address, save and press Test Neo4j.",
 }
 
 
@@ -136,12 +155,16 @@ def _graph_copy_component(copy: dict[str, Any], gcap: dict[str, Any], get_backen
                 "Settings → Memory → Test Neo4j (re-enter password if masked)."
             ),
             meta={**meta, "online": online},
+            fix=_GRAPH_COPY_FIX["unreachable"], link="/settings?tab=memory",
         )
     if status in _GRAPH_COPY_DOWN:
         waiting = count_noun(int(copy.get("pending_changes") or 0), "change")
         detail = _GRAPH_COPY_DOWN[status].format(reason=copy.get("reason") or "no answer", waiting=waiting)
+        refused = "refused" in str(copy.get("reason") or "")
+        fix = _GRAPH_COPY_FIX["refused" if status == "unreachable" and refused else status]
         return _comp("graph_neo4j", "Neo4j dual-write", ok=False, status="warn", detail=detail,
-                     meta={**meta, "online": False})
+                     meta={**meta, "online": False}, fix=fix,
+                     link="/settings?tab=packages" if status == "driver_missing" else "/settings?tab=memory")
     behind = int(copy.get("behind") or 0)
     detail = (
         "Neo4j online; its copy of the memory graph is in step with the facts."
@@ -220,6 +243,7 @@ def _findability_component(fnd: dict[str, Any]) -> dict[str, Any]:
         status="warn" if (waiting or pending or stranded or catching_up) else "ok",
         detail=" ".join(parts),
         meta=fnd,
+        fix="Nothing to do: the maintenance pass works through it every 15 minutes.",
     )
 
 
@@ -298,6 +322,7 @@ def build_memory_health() -> dict[str, Any]:
             if recall_degraded_now
             else "No recall failures recorded in this process."
         ),
+        fix="If it repeats, check the Embedder and the stores in this list; the details are in kazma.log.",
         meta=recall_state,
     ))
 
@@ -418,6 +443,9 @@ def build_memory_health() -> dict[str, Any]:
     components.append(_comp(
         "embedder", "Embedder",
         ok=emb_ok, status=emb_status, detail=emb_detail, meta=emb_meta,
+        fix="Open Settings → Memory → Embedder: check the provider, model, address and key, or choose "
+            "the local model.",
+        link="/settings?tab=memory",
     ))
 
     # ── V2 cognitive-engine store counts ───────────────────────────────
@@ -444,6 +472,7 @@ def build_memory_health() -> dict[str, Any]:
     components.append(_comp(
         "vector_memory", "V2 cognitive engine",
         ok=v2_ok, status=v2_status,
+        fix="memory_state.db cannot be opened: check the data folder (kazma doctor says), then reload Kazma.",
         detail=(
             f"V2 stack active — {bel.get('active', 0)} active beliefs, "
             f"{(ep.get('recall', 0) + ep.get('episodic', 0))} episodes, "
@@ -462,6 +491,7 @@ def build_memory_health() -> dict[str, Any]:
     components.append(_comp(
         "layer_l1", "V2 beliefs (SQLite SoT)",
         ok=v2_ok, status=v2_status,
+        fix="memory_state.db cannot be opened: check the data folder (kazma doctor says), then reload Kazma.",
         detail=(
             f"Bi-temporal beliefs: {bel.get('active', 0)} active, "
             f"{bel.get('superseded', 0)} superseded, {bel.get('archived', 0)} archived. "
@@ -473,6 +503,7 @@ def build_memory_health() -> dict[str, Any]:
     components.append(_comp(
         "layer_l2", "V2 episodes",
         ok=v2_ok, status=v2_status,
+        fix="memory_state.db cannot be opened: check the data folder (kazma doctor says), then reload Kazma.",
         detail=(
             f"4-tier episodes: {ep.get('working', 0)} working, {ep.get('recall', 0)} recall, "
             f"{ep.get('episodic', 0)} episodic, {ep.get('archived', 0)} archived."
@@ -486,6 +517,7 @@ def build_memory_health() -> dict[str, Any]:
     components.append(_comp(
         "layer_l3", "V2 procedural + queue",
         ok=v2_ok, status=v2_status,
+        fix="memory_state.db cannot be opened: check the data folder (kazma doctor says), then reload Kazma.",
         detail=(
             f"{(v2.get('procedural_dags') or {}).get('active', 0)} procedural DAGs; "
             f"queue {(v2.get('queue') or {}).get('pending', 0)} pending / "
@@ -497,6 +529,7 @@ def build_memory_health() -> dict[str, Any]:
     components.append(_comp(
         "layer_l4", "V2 entities",
         ok=v2_ok, status=v2_status,
+        fix="memory_state.db cannot be opened: check the data folder (kazma doctor says), then reload Kazma.",
         detail=(
             f"{v2.get('entities', 0)} resolved entities (3-tier merge cascade)."
             if v2_ok else "Entity store unavailable."
@@ -529,6 +562,8 @@ def build_memory_health() -> dict[str, Any]:
             "graph_neo4j", "Neo4j dual-write",
             ok=False, status="warn",
             detail=_failed("Graph backend probe failed", exc),
+            fix="Open Settings → Memory → Graph and press Test Neo4j; the error is in kazma.log.",
+            link="/settings?tab=memory",
         ))
 
     # Knowledge Library → chat inject (product merge)
@@ -555,6 +590,7 @@ def build_memory_health() -> dict[str, Any]:
             "kb_merge", "KB → chat inject",
             ok=True, status="warn",
             detail="Could not read merge_knowledge_into_chat flag (defaults on).",
+            fix="Nothing to do unless it stays: the setting is read again next time.",
         ))
 
     # Consolidation flag
@@ -665,6 +701,8 @@ def build_memory_health() -> dict[str, Any]:
                     id_, name,
                     ok=False, status="error",
                     detail=f"{mod} missing while Postgres is configured — {why}",
+                    fix="Run kazma update --reinstall -y (it installs Kazma's packages), then reload Kazma.",
+                    link="/settings?tab=packages",
                 ))
                 continue
         if kind == "neo4j":
@@ -680,6 +718,8 @@ def build_memory_health() -> dict[str, Any]:
                     id_, name,
                     ok=False, status="error",
                     detail=f"{mod} missing while Neo4j is configured — {why}",
+                    fix="Run kazma update --reinstall -y (it installs the neo4j driver), then reload Kazma.",
+                    link="/settings?tab=packages",
                 ))
                 continue
         if kind == "optional":
@@ -703,6 +743,8 @@ def build_memory_health() -> dict[str, Any]:
                 if present
                 else f"{mod} not installed — {why}"
             ),
+            fix="Run kazma update --reinstall -y (it installs Kazma's packages), then reload Kazma.",
+            link="/settings?tab=packages",
         ))
 
     # ── Persistence backends (ConfigStore / swarm / checkpoints) ──────
@@ -747,6 +789,7 @@ def build_memory_health() -> dict[str, Any]:
                         "store_config", "ConfigStore",
                         ok=False, status="error",
                         detail="KAZMA_DATABASE_URL set but Postgres pool is unavailable.",
+                        fix="Check that Postgres is running (kazma doctor says) and that KAZMA_DATABASE_URL in the install's .env is right; Kazma reconnects by itself when it answers.",
                         meta={"backend": "postgres"},
                     )
                 else:
@@ -756,6 +799,7 @@ def build_memory_health() -> dict[str, Any]:
                     "store_config", "ConfigStore",
                     ok=False, status="error",
                     detail=_failed("Postgres pool probe failed", exc),
+                    fix="Check that Postgres is running (kazma doctor says) and that KAZMA_DATABASE_URL in the install's .env is right; Kazma reconnects by itself when it answers.",
                     meta={"backend": "postgres"},
                 )
         else:
@@ -772,6 +816,7 @@ def build_memory_health() -> dict[str, Any]:
             "store_config", "ConfigStore",
             ok=False, status="warn",
             detail=_failed("Could not resolve DB backend", exc),
+            fix="Check that Postgres is running (kazma doctor says) and that KAZMA_DATABASE_URL in the install's .env is right; Kazma reconnects by itself when it answers.",
         ))
 
     # Checkpointer backend is best-effort (module may not expose status)
@@ -817,6 +862,8 @@ def build_memory_health() -> dict[str, Any]:
                     "not `python -m uvicorn`."
                 ),
                 meta={"backend": "sqlite_fallback", "saver": live_name},
+                fix="Reload Kazma through its guard (kazma_guard.py --reload --when-idle); if it stays, "
+                    "the reason is in kazma.log.",
             ))
         elif is_postgres():
             backend_meta["checkpoints"] = "sqlite_fallback"
@@ -830,6 +877,8 @@ def build_memory_health() -> dict[str, Any]:
                     "graph state may use SQLite fallback. pip install -e '.[postgres]' and restart."
                 ),
                 meta={"backend": "sqlite_fallback"},
+                fix="Run kazma update --reinstall -y (it installs the Postgres packages), then reload Kazma.",
+                link="/settings?tab=packages",
             ))
         else:
             components.append(_comp(
@@ -845,6 +894,7 @@ def build_memory_health() -> dict[str, Any]:
             "store_checkpoints", "LangGraph checkpoints",
             ok=False, status="warn",
             detail=_failed("Checkpoint probe failed", exc),
+            fix="Reload Kazma when idle; if it stays, the reason is in kazma.log.",
         ))
 
     # ── Overall rollup ────────────────────────────────────────────────
@@ -879,6 +929,13 @@ def build_memory_health() -> dict[str, Any]:
         for c in components
         if c["status"] in ("error", "warn")
     ]
+    # The same problems with what to do and where (the Memory page shows
+    # them so): "Needs attention" said what was wrong and never how to fix it.
+    problems = [
+        {"id": c["id"], "detail": c["detail"], "fix": c.get("fix") or "", "link": c.get("link") or ""}
+        for c in components
+        if c["status"] in ("error", "warn")
+    ]
 
     ok_n = sum(1 for c in components if c["status"] == "ok")
     cfg_backend = backend_meta.get("config", "sqlite")
@@ -896,6 +953,7 @@ def build_memory_health() -> dict[str, Any]:
         "status": overall,
         "components": components,
         "issues": issues[:12],
+        "problems": problems[:12],
         "summary": f"{ok_n}/{len(components)} components healthy",
         "headline": headline,
         "backend": backend_meta,

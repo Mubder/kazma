@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import dataclasses
 import json
 import logging
@@ -38,6 +39,7 @@ __all__ = [
     "stop_worker",
     "purge_completed_tasks",
     "MEMORY_LANE",
+    "failed_because",
 ]
 
 # Reclaim threshold: a task stuck in 'processing' longer than this (seconds)
@@ -219,6 +221,30 @@ def _task_space(binding: TaskBinding) -> Iterator[None]:
 def register_handler(task_type: str, handler: TaskHandler) -> None:
     """Register an async handler for a task type."""
     _HANDLERS[task_type] = handler
+
+
+#: The reason the running handler gave for failing (a list the queue binds
+#: around each call: a list, so a reason given in a worker thread, whose
+#: context is a copy, still reaches it).
+_FAILURE_REASONS: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "kazma_task_failure_reasons", default=None
+)
+
+
+def failed_because(reason: str) -> bool:
+    """A handler's failure with its reason: ``return failed_because("...")``.
+
+    The task's ``error_log`` -- what the Running work card, the Dashboard's
+    incident and the Memory page's queue show -- says what went wrong, in a
+    sentence the owner can act on. A bare ``return False`` recorded only
+    "handler returned False" (live 2026-11-19: a failed Postgres dump copy
+    shown with no reason). Always False, so the handler's answer is unchanged."""
+    from kazma_core.errors import redact_secrets
+
+    box = _FAILURE_REASONS.get()
+    if box is not None:
+        box.append(redact_secrets(str(reason or "").strip())[:500])
+    return False
 
 
 # ── Enqueue ───────────────────────────────────────────────────────────────
@@ -540,12 +566,18 @@ class _MemoryWorker:
                 except Exception:
                     payload = {}
                 binding = await asyncio.to_thread(_task_binding, task_type, payload)
-                with _task_space(binding):
-                    success = await handler(payload)
+                reasons: list[str] = []
+                reasons_token = _FAILURE_REASONS.set(reasons)
+                try:
+                    with _task_space(binding):
+                        success = await handler(payload)
+                finally:
+                    _FAILURE_REASONS.reset(reasons_token)
                 await asyncio.to_thread(
                     self._ack, task,
                     success=bool(success),
-                    error=None if success else "handler returned False",
+                    error=None if success else (reasons[-1] if reasons and reasons[-1]
+                                                else "handler returned False"),
                     # A handler that answered False while Postgres is away
                     # failed for the database, not for itself (plan A3).
                     outage=not success and _database_away(),

@@ -225,6 +225,7 @@ def register_system_routes(self: Any) -> None:
             "v2": v2_block,
             "components": health.get("components", []),
             "issues": health.get("issues", []),
+            "problems": health.get("problems", []),
             "summary": health.get("summary", ""),
             "headline": health.get("headline", ""),
             "backend": health.get("backend", {}),

@@ -714,8 +714,53 @@ def unlock_stale(repo: str, password: str) -> ResticResult:
     return _run(["unlock"], repo, password, action="unlock", timeout=600)
 
 
+def _is_local_repo(repo: str) -> bool:
+    """True when *repo* is the install's own local repository
+    (``repo_paths()["local"]``): never a remote, whatever its spelling."""
+    local = repo_paths().get("local") or ""
+    if not local or not repo:
+        return False
+    try:
+        return Path(repo).resolve() == Path(local).resolve()
+    except OSError:
+        return False
+
+
+def _local_repo_made(repo: str, password: str) -> ResticResult | None:
+    """Make the install's local repository when restic is set up for it (a
+    passphrase) and the repository itself is missing; None when there is
+    nothing to make. Nothing in Kazma made it, so an install restored from a
+    bundle (which carries the passphrase, never the backups) had a passphrase
+    and no repository: every copy into it failed "repository does not
+    exist", and the Postgres dump's copy gave up as a failed task (live
+    2026-11-19). Only the local repository, on Kazma's own disk: a remote
+    that is missing may be a wrong address, and is never made by itself.
+    The new repository is said once (earlier local snapshots are not in it)."""
+    if not _is_local_repo(repo) or (Path(repo) / "config").is_file():
+        return None
+    made = init_repo(repo, password)
+    if made.ok and not made.detail.get("already"):
+        logger.warning("[restic] the local repository %s was missing: a new one was made "
+                       "(earlier local snapshots are not in it)", repo)
+        from kazma_core.observability.ops_alerts import alert  # never raises
+
+        alert("backup.restic_local_made",
+              "A new local backup repository was made",
+              "The local restic repository was missing (for example after a restore from "
+              "a migration bundle, which carries its passphrase but not the backups), so "
+              "Kazma made a new one. Local snapshots from before are not in it; the "
+              "offsite copy, if set up, keeps its own.",
+              severity="warn")
+    return made
+
+
 def backup(repo: str, password: str, paths: list[str], *,
            tags: list[str] | None = None) -> ResticResult:
+    made = _local_repo_made(repo, password) if password and restic_available() else None
+    if made is not None and not made.ok:
+        made.action = "backup"
+        made.error = f"the local repository could not be made: {made.error}"
+        return made
     args = ["backup", "--json"]
     for t in (tags or ["kazma"]):
         args += ["--tag", t]

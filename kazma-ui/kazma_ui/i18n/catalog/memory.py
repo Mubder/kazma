@@ -656,6 +656,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أخرى",
         "en": "Other",
     },
+    "memory.console.problem_fix": {
+        "ar": "ما العمل:",
+        "en": "What to do:",
+    },
+    "memory.console.problem_open": {
+        "ar": "افتح",
+        "en": "Open",
+    },
     "memory.console.group_ok": {
         "ar": "{ok}/{n} سليمة",
         "en": "{ok}/{n} OK",

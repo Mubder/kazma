@@ -1117,6 +1117,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "problems.source.advisory": {"en": "Security advisory", "ar": "تنبيه أمني"},
     "problems.source.observer": {"en": "Outside watch", "ar": "المراقبة من الخارج"},
     "problems.resolved.alert": {"en": "It closes when the service recovers.", "ar": "تُغلق عندما تتعافى الخدمة."},
+    "problems.todo.alert": {
+        "en": "Open it: the page it names is where it is fixed.",
+        "ar": "افتحه: الصفحة التي يذكرها هي مكان إصلاحه.",
+    },
+    "problems.todo.incident": {
+        "en": "Open it to see why it stopped; once the cause is fixed, retry it there, or close it.",
+        "ar": "افتحه لترى سبب توقفه؛ بعد إصلاح السبب أعد تشغيله من هناك أو أغلقه.",
+    },
+    "problems.todo.acquisition": {
+        "en": "Open it to read what was saved, then resume it or dismiss it.",
+        "ar": "افتحه لتقرأ ما حُفظ، ثم استأنفه أو تجاهله.",
+    },
+    "problems.todo.requirements": {
+        "en": "Open Settings → Packages: it names the command that installs what is missing.",
+        "ar": "افتح الإعدادات ← الحزم: تذكر الأمر الذي يثبّت الناقص.",
+    },
+    "problems.todo.advisory": {
+        "en": "Open Settings → Packages to see the version that fixes it, then update Kazma.",
+        "ar": "افتح الإعدادات ← الحزم لترى الإصدار الذي يصلحها، ثم حدّث Kazma.",
+    },
+    "problems.todo.observer": {
+        "en": "Open Settings → Alerts to see what Kazma Watch saw from outside.",
+        "ar": "افتح الإعدادات ← التنبيهات لترى ما رآه Kazma Watch من الخارج.",
+    },
     "problems.resolved.incident": {
         "en": "It closes when the work moves on or you decide it.",
         "ar": "تُغلق عندما يتقدم العمل أو تقرر بشأنه.",

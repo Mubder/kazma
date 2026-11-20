@@ -59,6 +59,14 @@
     return pair[0] ? tr(pair[0], pair[1]) : String(source);
   }
 
+  // What to do about a problem of this kind (the page's words): every
+  // problem says it, beside when it closes (2026-11-20, the owner: "there is
+  // no guide or directions on how to fix this").
+  function todoLine(source) {
+    var key = 'problems.todo.' + (SOURCES[source] ? source : 'alert');
+    return tr(key, 'Open it: the page it names is where it is fixed.');
+  }
+
   function resolvedLine(source) {
     var key = 'problems.resolved.' + (SOURCES[source] ? source : 'alert');
     return tr(key, 'It closes by itself when it is resolved.');
@@ -108,6 +116,9 @@
       code.setAttribute('dir', 'ltr');
       fix.appendChild(code);
       main.appendChild(fix);
+    } else {
+      // No command to run: say what to do, for this kind of problem.
+      main.appendChild(el('p', 'problems-todo', todoLine(problem.source)));
     }
     main.appendChild(el('p', 'problems-resolved', resolvedLine(problem.source)));
     var tools = el('div', 'problems-tools');

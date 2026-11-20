@@ -361,6 +361,38 @@
     );
   }
 
+  function _memEsc(text) {
+    return String(text == null ? '' : text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // A page of this site only: "/settings?tab=memory", never "//host" or an
+  // address elsewhere.
+  function _memSiteLink(link) {
+    const s = String(link || '');
+    return s.charAt(0) === '/' && s.charAt(1) !== '/' && s.charAt(1) !== '\\' ? s : '';
+  }
+
+  // One problem: what is wrong, what to do, and the page where it is done.
+  // The server's sentences are content (translate="no"); the labels are the
+  // page's own words.
+  function _memProblemHtml(p) {
+    const problem = (p && typeof p === 'object') ? p : { detail: p };
+    const link = _memSiteLink(problem.link);
+    let html = '<li style="margin-bottom:6px;"><span translate="no">' + _memEsc(problem.detail) + '</span>';
+    if (problem.fix) {
+      html += '<div class="mem-problem-fix" style="margin-top:2px;"><strong>' +
+        _memEsc(_mt('memory.console.problem_fix', 'What to do:')) + '</strong> <span translate="no">' +
+        _memEsc(problem.fix) + '</span>';
+      if (link) {
+        html += ' <a class="btn btn-sm btn-secondary" href="' + _memEsc(link) + '">' +
+          _memEsc(_mt('memory.console.problem_open', 'Open')) + '</a>';
+      }
+      html += '</div>';
+    }
+    return html + '</li>';
+  }
+
   function renderMemoryComponents(data) {
     const grid = document.getElementById('memory-components-grid');
     const summaryEl = document.getElementById('memory-health-summary');
@@ -401,18 +433,18 @@
       _memCompWireGroups(grid);
     }
 
-    const issues = Array.isArray(data.issues) ? data.issues : [];
+    // Each problem says what is wrong, what to do and where (``problems``);
+    // an older server sends the sentences alone (``issues``).
+    const problems = Array.isArray(data.problems) && data.problems.length
+      ? data.problems
+      : (Array.isArray(data.issues) ? data.issues : []).map(function(i) { return { detail: i }; });
     if (issuesEl) {
-      if (issues.length) {
+      if (problems.length) {
         issuesEl.style.display = 'block';
         issuesEl.innerHTML =
           '<div style="font-weight:700;margin-bottom:4px;">' + (I18N.issuesHeading || 'Needs attention') + '</div>' +
           '<ul style="margin:0;padding-inline-start:1.1rem;">' +
-          issues.map(function(i) {
-            // The server's own diagnosis ("sentence_transformers not
-            // installed -- Fix: pip install ..."): content, not interface.
-            return '<li translate="no" style="margin-bottom:3px;">' + String(i).replace(/</g, '&lt;') + '</li>';
-          }).join('') +
+          problems.map(_memProblemHtml).join('') +
           '</ul>';
       } else {
         issuesEl.style.display = 'none';
@@ -2027,7 +2059,10 @@
   // and the SVG export need resolved colours, cached per theme and dropped
   // on kazma:themechange (or a data-theme/style change on <html>).
   var _V2G_USER_TOKEN = '--warning';
-  var _V2G_MAJOR_TOKEN = '--cat-2';
+  // The major things: the accent, as the tier palette's "major" below. It was
+  // --cat-2, an amber next to the hub's yellow: the hub and its majors read
+  // as one colour (2026-11-20).
+  var _V2G_MAJOR_TOKEN = '--accent';
   var _V2G_TYPE_TOKENS = {
     person: '--cat-1',
     tool: '--cat-5',
@@ -2250,24 +2285,152 @@
     };
   }
 
+  // ── The radial hierarchy (2026-11-20, the owner: "make the MAIN node
+  // central and the Major nodes little smaller but little far from the
+  // center, and the smaller nodes which is the sub-nodes"). Three ranks:
+  //   1  the hub (you), held at the centre;
+  //   2  the major things -- the ones marked major, or, when none is marked,
+  //      the hub's most connected neighbours -- evenly spaced on an inner ring;
+  //   3  everything else, on an outer band, drawn towards the side of the
+  //      major thing it shares most lines with.
+  // Each rank has its size, its label and its pull; a dot the person placed
+  // stays where they put it.
+  var _V2G_RING = { r2: 170, r3: 340, lanes: 1, hub: -1, majors: [] };
+  var _V2G_AUTO_MAJORS = 5;
+  var _V2G_LANE = 58;
+
+  function _v2gRadiusFor(q) {
+    var bonus = Math.sqrt(q.beliefCount || 1);
+    if (q.rank === 1) return 22 + Math.min(6, bonus);
+    if (q.rank === 2) return 14 + Math.min(5, bonus * 0.8);
+    if (q.isBlob) return _v2gNodeBaseR - 3 + Math.min(4, bonus);
+    return (q.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR) + Math.min(5, bonus * 1.2);
+  }
+
+  function _v2gAssignRanks(W, H) {
+    var n = _v2gPts.length;
+    var hub = -1, i, q;
+    for (i = 0; i < n && hub < 0; i++) {
+      q = _v2gPts[i];
+      if (_v2gIsUser(q) && (q.isHub || String(q.id).toLowerCase() === 'user')) hub = i;
+    }
+    for (i = 0; i < n && hub < 0; i++) if (_v2gIsUser(_v2gPts[i])) hub = i;
+    var majors = [];
+    for (i = 0; i < n; i++) {
+      q = _v2gPts[i];
+      q.rank = 3; q.anchor = -1; q.autoMajor = false; q.ringAngle = undefined;
+      if (i === hub) { q.rank = 1; continue; }
+      if (q.isMajor && !_v2gIsUser(q)) { q.rank = 2; majors.push(i); }
+    }
+    if (!majors.length && hub >= 0) {
+      // Nothing marked major: the hub's most connected neighbours stand in.
+      var near = {};
+      _v2gEdges.forEach(function(ed) {
+        if (ed.a === hub) near[ed.b] = true;
+        if (ed.b === hub) near[ed.a] = true;
+      });
+      Object.keys(near).map(Number).filter(function(k) {
+        var c = _v2gPts[k];
+        return c && !c.isValue && !c.isVirtual && !c.isEpisode && !c.isBlob && (c.degree || 0) >= 3;
+      }).sort(function(a, b) {
+        return (_v2gPts[b].degree || 0) - (_v2gPts[a].degree || 0);
+      }).slice(0, _V2G_AUTO_MAJORS).forEach(function(k) {
+        _v2gPts[k].rank = 2; _v2gPts[k].autoMajor = true; majors.push(k);
+      });
+    }
+    // A sub-node's anchor: the major thing it shares most lines with.
+    var shared = {};
+    _v2gEdges.forEach(function(ed) {
+      var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
+      if (!A || !B) return;
+      var minor = A.rank === 3 && B.rank === 2 ? ed.a : (B.rank === 3 && A.rank === 2 ? ed.b : -1);
+      if (minor < 0) return;
+      var major = minor === ed.a ? ed.b : ed.a;
+      shared[minor] = shared[minor] || {};
+      shared[minor][major] = (shared[minor][major] || 0) + 1;
+    });
+    Object.keys(shared).forEach(function(k) {
+      var best = -1, most = 0;
+      Object.keys(shared[k]).forEach(function(m) {
+        if (shared[k][m] > most) { most = shared[k][m]; best = Number(m); }
+      });
+      _v2gPts[Number(k)].anchor = best;
+    });
+    // The rings are as large as what they hold: majors at least 160px
+    // apart; the outer band about 54px of circle per dot, in up to four
+    // lanes, the most connected on the inner lane.
+    var m = majors.length;
+    var minors = [];
+    for (i = 0; i < n; i++) if (_v2gPts[i].rank === 3) minors.push(i);
+    var r2 = Math.max(170, (m * 160) / (2 * Math.PI));
+    var lanes = Math.max(1, Math.min(4, Math.ceil(minors.length / 60)));
+    var r3 = Math.max(r2 + 160, (minors.length * 54) / (2 * Math.PI * lanes) + (lanes - 1) * _V2G_LANE / 2);
+    _V2G_RING = { r2: r2, r3: r3, lanes: lanes, hub: hub, majors: majors };
+    majors.forEach(function(k, idx) {
+      _v2gPts[k].ringAngle = -Math.PI / 2 + idx * 2 * Math.PI / Math.max(1, m);
+      _v2gPts[k].ringR = r2;
+    });
+    minors.sort(function(a, b) { return (_v2gPts[b].degree || 0) - (_v2gPts[a].degree || 0); });
+    minors.forEach(function(k, idx) {
+      _v2gPts[k].ringR = r3 + ((idx % lanes) - (lanes - 1) / 2) * _V2G_LANE;
+    });
+    if (hub >= 0) _v2gPts[hub].ringR = 0;
+    for (i = 0; i < n; i++) _v2gPts[i].r = _v2gRadiusFor(_v2gPts[i]);
+    // First places: the hub at the centre, the majors on their ring, each
+    // sub-node on its lane by its major's side (a dot already placed, by the
+    // person or an earlier layout, and a grouped one keep theirs).
+    var cx = W / 2, cy = H / 2;
+    var spread = m ? (Math.PI / m) * 0.85 : Math.PI;
+    for (i = 0; i < n; i++) {
+      q = _v2gPts[i];
+      if (q.fromCache || (q.groupParent !== undefined && q.groupParent >= 0)) continue;
+      var ang;
+      if (q.rank === 1) { q.x = cx; q.y = cy; continue; }
+      if (q.rank === 2) ang = q.ringAngle;
+      else if (q.anchor >= 0 && _v2gPts[q.anchor].ringAngle !== undefined) {
+        // A deterministic place across the major's own sector.
+        var frac = ((i * 0.618034) % 1) * 2 - 1;
+        ang = _v2gPts[q.anchor].ringAngle + frac * spread;
+      } else {
+        ang = i * 2.39996;
+      }
+      q.x = cx + Math.cos(ang) * q.ringR;
+      q.y = cy + Math.sin(ang) * q.ringR;
+    }
+  }
+
+  // The length a line between two ranks rests at.
+  function _v2gLinkLen(A, B) {
+    var lo = Math.min(A.rank || 3, B.rank || 3), hi = Math.max(A.rank || 3, B.rank || 3);
+    if (lo === 1 && hi === 2) return _V2G_RING.r2;
+    if (lo === 1 && hi === 3) return _V2G_RING.r3;
+    if (lo === 2 && hi === 3) return Math.max(90, _V2G_RING.r3 - _V2G_RING.r2);
+    if (lo === 2 && hi === 2) return _V2G_RING.r2;
+    return 80;
+  }
+
   // Force sim step: repulsion + spring + gravity + collision. Spaced for
   // labels (2026-11-18 review): a dot's label sits under it, so lines are
   // longer and dots keep a gap a label fits in.
   function _v2gStep(W, H) {
     var n = _v2gPts.length; if (!n) return;
     var cx = W / 2, cy = H / 2;
-    // Repulsion (Coulomb) — O(n²) but capped at _v2gCap nodes
+    // Repulsion (Coulomb) — O(n²) but capped at _v2gCap nodes. A larger
+    // dot pushes harder (the hub, then the majors), so the small ones fan out
+    // around them instead of crowding them.
     var charge = n > 120 ? 1400 : 2200;
+    var push = { 1: 1.8, 2: 1.35, 3: 0.85 };
     for (var i = 0; i < n; i++) {
       for (var j = i + 1; j < n; j++) {
         var a = _v2gPts[i], b = _v2gPts[j];
         var dx = b.x - a.x, dy = b.y - a.y;
         var d2 = dx * dx + dy * dy + 0.01;
         var d = Math.sqrt(d2);
-        var force = charge * _v2gAlpha / d2;
+        var force = charge * (push[a.rank] || 1) * (push[b.rank] || 1) * _v2gAlpha / d2;
         // Collision: two dots closer than their radii and a label's gap push
         // apart hard, so neither hides the other.
-        var minD = a.r + b.r + 26;
+        // Two dots of the outer band keep a label's width between them.
+        var minD = a.r + b.r + (a.rank === 3 && b.rank === 3 ? 56 : 26);
         if (d < minD) force += (minD - d) * 0.35 * _v2gAlpha;
         var fx = (dx / d) * force, fy = (dy / d) * force;
         // Pinned / dragged nodes are fixed anchors (user layout sticks)
@@ -2281,8 +2444,11 @@
       if (!A || !B) continue;
       var dx = B.x - A.x, dy = B.y - A.y;
       var d = Math.sqrt(dx * dx + dy * dy + 0.01);
-      var targetLen = 110;
-      var k = 0.035 * (0.5 + (ed.confidence || 0.5));
+      var targetLen = _v2gLinkLen(A, B);
+      // A line from the hub to a sub-node is weak: the sub-node's ring holds
+      // it, and many such lines would pull the outer band inwards.
+      var hubToMinor = (A.rank === 1 && B.rank === 3) || (A.rank === 3 && B.rank === 1);
+      var k = (hubToMinor ? 0.008 : 0.035) * (0.5 + (ed.confidence || 0.5));
       var f = (d - targetLen) * k * _v2gAlpha;
       var fx = (dx / d) * f, fy = (dy / d) * f;
       if (!(_v2gDrag && _v2gDrag.idx === ed.a) && !_v2gIsPinned(A)) { A.vx += fx; A.vy += fy; }
@@ -2324,8 +2490,31 @@
         _v2gRememberPos(pt);
         continue;
       }
-      pt.vx += (cx - pt.x) * 0.003 * _v2gAlpha;
-      pt.vy += (cy - pt.y) * 0.003 * _v2gAlpha;
+      if (pt.rank === 1) {
+        // The hub: held at the centre.
+        pt.vx += (cx - pt.x) * 0.25;
+        pt.vy += (cy - pt.y) * 0.25;
+      } else if (typeof pt.ringR === 'number') {
+        // Every other dot: pulled to its ring's radius...
+        var rx = pt.x - cx, ry = pt.y - cy;
+        var rd = Math.sqrt(rx * rx + ry * ry) + 0.01;
+        var rk = pt.rank === 2 ? 0.12 : 0.06;
+        var rf = (pt.ringR - rd) * rk * _v2gAlpha;
+        pt.vx += (rx / rd) * rf; pt.vy += (ry / rd) * rf;
+        // ...a major to its own place on the inner ring (evenly spaced), a
+        // sub-node towards the side of its major.
+        var side = pt.rank === 2 ? pt.ringAngle
+          : (pt.anchor >= 0 && _v2gPts[pt.anchor]
+            ? Math.atan2(_v2gPts[pt.anchor].y - cy, _v2gPts[pt.anchor].x - cx) : undefined);
+        if (side !== undefined) {
+          var sk = (pt.rank === 2 ? 0.05 : 0.012) * _v2gAlpha;
+          pt.vx += (cx + Math.cos(side) * pt.ringR - pt.x) * sk;
+          pt.vy += (cy + Math.sin(side) * pt.ringR - pt.y) * sk;
+        }
+      } else {
+        pt.vx += (cx - pt.x) * 0.003 * _v2gAlpha;
+        pt.vy += (cy - pt.y) * 0.003 * _v2gAlpha;
+      }
       pt.vx *= 0.8; pt.vy *= 0.8;
       var sp = Math.sqrt(pt.vx * pt.vx + pt.vy * pt.vy);
       if (sp > 16) { pt.vx = pt.vx / sp * 16; pt.vy = pt.vy / sp * 16; }
@@ -2451,6 +2640,10 @@
         return {
           x: x, y: y,
           vx: 0, vy: 0, id: nd.id,
+          beliefCount: bc,
+          // Placed by the person or by an earlier layout of this page: the
+          // radial seed (_v2gAssignRanks) leaves it where it is.
+          fromCache: !!(cached && typeof cached.x === 'number' && typeof cached.y === 'number'),
           name: d.rawName,
           label: d.display.slice(0, 22),
           fullLabel: d.display,
@@ -2543,6 +2736,9 @@
         if (_v2gPts[ed.a]) _v2gPts[ed.a].degree++;
         if (_v2gPts[ed.b]) _v2gPts[ed.b].degree++;
       });
+      // The radial hierarchy: you at the centre, the major things on the
+      // inner ring, the rest beyond them (sizes, rings and first places).
+      _v2gAssignRanks(W, H);
       // Drop selected edge if topology rebuilt without it
       if (_v2gOps.selectedEdgeIdx >= _v2gEdges.length) _v2gOps.selectedEdgeIdx = -1;
       // Keep pan/zoom if we already had a layout; only reset on first paint.
@@ -2693,6 +2889,23 @@
     var smallMap = _v2gEdges.length <= 60;
     var edgeLabels = [];
 
+    // ── The orbits: faint rings where the majors and the rest sit, around
+    // the hub, so the hierarchy reads at a glance. ──
+    var hubPt = _V2G_RING.hub >= 0 ? _v2gPts[_V2G_RING.hub] : null;
+    if (hubPt) {
+      var hx = _v2gSX(hubPt.x), hy = _v2gSY(hubPt.y);
+      var orbits = [];
+      if (_V2G_RING.majors.length) orbits.push(_V2G_RING.r2);
+      if (_v2gPts.length > _V2G_RING.majors.length + 1) orbits.push(_V2G_RING.r3);
+      ctx.setLineDash([2, 7]);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = _v2gHexAlpha(theme.ink2, focusId ? 0.07 : 0.14);
+      orbits.forEach(function(rad) {
+        ctx.beginPath(); ctx.arc(hx, hy, rad * _v2gView.scale, 0, 2 * Math.PI); ctx.stroke();
+      });
+      ctx.setLineDash([]);
+    }
+
     // ── Lines ──
     for (var e = 0; e < _v2gEdges.length; e++) {
       var ed = _v2gEdges[e]; var A = _v2gPts[ed.a], B = _v2gPts[ed.b];
@@ -2717,7 +2930,13 @@
       else if (opsEdge) { color = theme.user; width = 2.6; alpha = 1; }
       else if (hot) { color = theme.accent; width = 2.2; alpha = 0.9; }
       else if (ed.superseded) { color = theme.muted; width = 1.2; alpha = 0.5; }
-      else { color = theme.ink2; width = 1.1 + (ed.confidence || 0.5) * 0.7; alpha = dimmed ? 0.12 : 0.32; }
+      else if ((A.rank === 1 && B.rank === 2) || (A.rank === 2 && B.rank === 1)) {
+        // A spoke: the hub to one of its major things.
+        color = theme.major; width = 2.6; alpha = dimmed ? 0.15 : 0.55;
+      } else if ((A.rank === 2 && B.rank === 3) || (A.rank === 3 && B.rank === 2)) {
+        color = theme.ink2; width = 1.4; alpha = dimmed ? 0.12 : 0.4;
+      }
+      else { color = theme.ink2; width = 1.1 + (ed.confidence || 0.5) * 0.7; alpha = dimmed ? 0.12 : 0.28; }
       // Start and end at the dots' edges, so the arrowhead is seen.
       var x1 = ax + ux * (A.r + 2), y1 = ay + uy * (A.r + 2);
       var x2 = bx - ux * (B.r + 3), y2 = by - uy * (B.r + 3);
@@ -2757,6 +2976,15 @@
       // Dots that do not touch the focus fade, so the eye goes to the chosen one.
       var dim = focusId && !isSel && !isHover && p.id !== focusId && !focusNbr[p.id];
       ctx.globalAlpha = faded ? 0.35 : (dim ? 0.45 : 1);
+      if (p.rank === 1 || p.rank === 2) {
+        // The hub glows; a major thing wears a soft halo of its colour.
+        var halo = p.rank === 1 ? r + 16 : r + 8;
+        var glow = ctx.createRadialGradient(x, y, r * 0.6, x, y, halo);
+        glow.addColorStop(0, _v2gHexAlpha(color, p.rank === 1 ? 0.32 : 0.24));
+        glow.addColorStop(1, _v2gHexAlpha(color, 0));
+        ctx.beginPath(); ctx.arc(x, y, halo, 0, 2 * Math.PI);
+        ctx.fillStyle = glow; ctx.fill();
+      }
       if (p.isBlob && !isUser) {
         // A long note: a small rounded chip, dashed, so it never reads as a
         // person or a place.
@@ -2814,6 +3042,7 @@
       if (q.id === _v2gSelectedId) return 1e9;
       if (idx === _v2gHover) return 1e8;
       if (_v2gIsUser(q)) return 1e7;
+      if (q.rank === 2) return 5e6 + (q.degree || 0);
       if (focusNbr[q.id]) return 1e6 + (q.degree || 0);
       return (q.isMajor ? 1e5 : 0) + (q.degree || 0) * 10 + (q.isVirtual ? 0 : 5);
     }
@@ -2850,22 +3079,37 @@
       var idx = order[n2];
       var q = _v2gPts[idx];
       var qx = _v2gSX(q.x), qy = _v2gSY(q.y);
-      var must = q.id === _v2gSelectedId || idx === _v2gHover || _v2gIsUser(q);
+      // You and the major things always have their names; their type is
+      // larger and bolder, the rest smaller.
+      var must = q.id === _v2gSelectedId || idx === _v2gHover || _v2gIsUser(q) || q.rank === 2;
       var bold = _v2gIsUser(q) || q.id === _v2gSelectedId;
-      ctx.font = (bold ? '600 ' : '') + _v2gFont(bold ? 13 : 12);
+      var size = q.rank === 1 ? 15 : (q.rank === 2 ? 13 : (bold ? 13 : 11));
+      var weight = q.rank === 1 ? '700 ' : (q.rank === 2 || bold ? '600 ' : '');
+      ctx.font = weight + _v2gFont(size);
       var full = q.fullLabel || q.label || String(q.id || '');
       ctx.direction = _v2gIsRtl(full) ? 'rtl' : 'ltr';
       var lab = _v2gFit(ctx, full, must ? 220 : 150);
-      var lw = ctx.measureText(lab).width + 10, lh = 18;
-      var ly = qy + q.r + 6;
-      var rect = { x: qx - lw / 2, y: ly, w: lw, h: lh };
-      if (!must && _v2gOverlaps(rect, placed)) continue;
+      var lw = ctx.measureText(lab).width + 10, lh = size + 7;
+      // Under the dot first; when that place is taken, above it, then beside
+      // it (a crowded fan of small dots hid most of its names).
+      var spots = [
+        { x: qx - lw / 2, y: qy + q.r + 6 },
+        { x: qx - lw / 2, y: qy - q.r - 6 - lh },
+        { x: qx + q.r + 6, y: qy - lh / 2 },
+        { x: qx - q.r - 6 - lw, y: qy - lh / 2 },
+      ];
+      var rect = null;
+      for (var sp2 = 0; sp2 < (must ? 1 : spots.length); sp2++) {
+        var cand = { x: spots[sp2].x, y: spots[sp2].y, w: lw, h: lh };
+        if (must || !_v2gOverlaps(cand, placed)) { rect = cand; break; }
+      }
+      if (!rect) continue;
       placed.push(rect);
       var dimLabel = focusId && !must && ranks[idx] < 1e6;
       _v2gRoundRect(ctx, rect.x, rect.y, rect.w, rect.h, 6);
       ctx.fillStyle = _v2gHexAlpha(theme.card, dimLabel ? 0.7 : 0.9); ctx.fill();
       ctx.fillStyle = dimLabel ? _v2gHexAlpha(theme.ink, 0.55) : theme.ink;
-      ctx.fillText(lab, qx, ly + lh / 2 + 0.5);
+      ctx.fillText(lab, rect.x + rect.w / 2, rect.y + lh / 2 + 0.5);
     }
     ctx.direction = 'inherit';
     ctx.textBaseline = 'alphabetic';
@@ -5376,9 +5620,18 @@
   // P2: positions by id (for tests + operator inspection of the tree layout).
   window._v2gGetNodePos = function(id) {
     for (var i = 0; i < _v2gPts.length; i++) {
-      if (_v2gPts[i].id === id) return { x: _v2gPts[i].x, y: _v2gPts[i].y, tier: _v2gPts[i].tier, groupParent: _v2gPts[i].groupParent };
+      if (_v2gPts[i].id === id) {
+        return { x: _v2gPts[i].x, y: _v2gPts[i].y, tier: _v2gPts[i].tier, groupParent: _v2gPts[i].groupParent,
+                 rank: _v2gPts[i].rank, r: _v2gPts[i].r, ringR: _v2gPts[i].ringR };
+      }
     }
     return null;
+  };
+  // The radial hierarchy's rings and who sits where (for tests).
+  window._v2gGetRings = function() {
+    return { r2: _V2G_RING.r2, r3: _V2G_RING.r3, lanes: _V2G_RING.lanes,
+             hub: _V2G_RING.hub >= 0 && _v2gPts[_V2G_RING.hub] ? _v2gPts[_V2G_RING.hub].id : null,
+             majors: _V2G_RING.majors.map(function(k) { return _v2gPts[k] && _v2gPts[k].id; }) };
   };
   // The view (scale and offset) and the drawn dots' screen boxes, for tests:
   // zoom, Show all and label placement are read from here.

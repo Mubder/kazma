@@ -216,6 +216,13 @@ async def send_diagnosis(row: dict[str, Any], text: str) -> None:
     await _send_text(row, message, "diagnosis")
 
 
+def _bell_reason(row: Any) -> str:
+    """The incident's name and, when it has one, why: ``name: reason``."""
+    name = str(row.get("title") or row["run_id"])
+    detail = str(row.get("detail") or "").strip()
+    return f"{name}: {detail}" if detail and detail != name else name
+
+
 def bell_alerts(language: str = "en") -> list[dict[str, Any]]:
     """Open incidents in the notification bell's shape (``/api/alerts/recent``)."""
     from kazma_core.runs.incidents import get_incident_store
@@ -228,7 +235,9 @@ def bell_alerts(language: str = "en") -> list[dict[str, Any]]:
             "id": f"run-incident-{row['id']}",
             "title": f"{_label(row['kind'], language)}: {_CONDITION.get(condition, ('', ''))[1 if ar else 0]}",
             "subsystem": "Runs", "status": condition,
-            "reason": row.get("title") or row["run_id"],
+            # What stopped and why: a failed task's own reason (its detail),
+            # never the task's name alone ("native_pg_offsite" said nothing).
+            "reason": _bell_reason(row),
             "callback_id": "link:/dashboard?incident=" + row["id"],
             "button_text": "عرض واتخاذ إجراء" if ar else "View and act",
             "timestamp": float(row["opened_at"]),

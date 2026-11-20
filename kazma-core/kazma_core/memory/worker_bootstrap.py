@@ -24,6 +24,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from kazma_core.memory.task_queue import failed_because
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -426,7 +428,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
     try:
         episode_id = payload.get("episode_id")
         if not episode_id:
-            return False
+            return failed_because("The task names no memory to read (no episode id).")
         from kazma_core.memory.belief_extractor import extract_beliefs_for_turn
 
         prep = await asyncio.to_thread(_micro_consolidation_prepare, str(episode_id))
@@ -449,7 +451,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
                     "[memory_worker] micro_consolidation of %s: the model is unavailable -- retried later",
                     episode_id,
                 )
-                return False
+                return failed_because("The model is unavailable; the deep pass runs again later.")
             if raw:
                 # The facts were stated when the turn happened, not when this
                 # deep pass got to it (minutes later, or after a restart): a
@@ -470,9 +472,9 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
             return True
         finally:
             await asyncio.to_thread(lambda: (primary.close(), ops.close()))
-    except Exception:
+    except Exception as exc:
         logger.warning("[memory_worker] micro_consolidation handler failed", exc_info=True)
-        return False
+        return failed_because(f"The deep pass failed ({type(exc).__name__}); the details are in kazma.log.")
 
 
 def start_memory_worker() -> None:
@@ -1667,9 +1669,9 @@ async def _handle_native_backup(payload: dict[str, Any]) -> bool:
         # loop (a loop-stall dump caught _backup_one on it, 2026-09-13).
         written = await asyncio.to_thread(perform_native_backups, retention=retention)
         logger.info("[memory_worker] native_backup done: %d file(s)", len(written))
-    except Exception:
+    except Exception as exc:
         logger.warning("[memory_worker] native_backup handler failed", exc_info=True)
-        return False
+        return failed_because(f"The memory backup failed ({type(exc).__name__}); the details are in kazma.log.")
     # Document store backup is independent — a failure here must not fail the
     # memory backup that already succeeded.
     try:
@@ -1734,7 +1736,7 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
             # A failed piece is a failed export (Memory audit M20): the queue
             # retries it, then keeps it as a dead letter.
             logger.warning("[memory_worker] nightly_export of %s incomplete: %s", tenant_id, ", ".join(failed))
-            return False
+            return failed_because(f"The nightly export left out: {', '.join(failed)}.")
         logger.info("[memory_worker] nightly_export done: %d file(s)", len(written))
 
         # M-04 guard: nightly mirror-drift assertion (audit
@@ -1764,9 +1766,9 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
         except Exception:
             logger.debug("[memory_worker] mirror drift check skipped", exc_info=True)
         return True
-    except Exception:
+    except Exception as exc:
         logger.warning("[memory_worker] nightly_export handler failed", exc_info=True)
-        return False
+        return failed_because(f"The nightly export failed ({type(exc).__name__}); the details are in kazma.log.")
 
 
 async def _handle_connector_health(payload: dict[str, Any]) -> bool:
@@ -1898,11 +1900,12 @@ async def _handle_native_pg_offsite(payload: dict[str, Any]) -> bool:
         return True
     if not path.is_file():
         await asyncio.to_thread(_alert_pg_offsite, ["missing-file"])
-        return False
+        return failed_because(f"The Postgres dump {path.name} is no longer on disk, so it cannot be copied.")
     failed = await asyncio.to_thread(_snapshot_pg_to_restic, path)
     if failed:
         await asyncio.to_thread(_alert_pg_offsite, failed)
-        return False
+        return failed_because(f"The Postgres dump was not copied into: {', '.join(failed)}. restic's "
+                              "answer is in kazma.log; the copy is tried again.")
     logger.info("[memory_worker] pg offsite copy done: %s", path.name)
     return True
 
@@ -1995,7 +1998,7 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
             if last_pg_backup_interrupted():
                 # Kazma's own stop ended pg_dump (a reload): nothing to page.
                 logger.info("[memory_worker] native_pg_backup interrupted by Kazma's stop; it runs again")
-                return False
+                return failed_because("Kazma's own stop ended the Postgres dump; it runs again.")
             reason = last_pg_backup_failure()
             logger.warning("[memory_worker] native_pg_backup produced no dump: %s", reason)
             try:
@@ -2013,10 +2016,12 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
                 )
             except Exception:
                 logger.debug("[memory_worker] pg dump alert failed", exc_info=True)
-            return False  # real failure — let the queue retry
+            # A real failure: the queue retries it.
+            return failed_because("The Postgres dump was not made"
+                                  + (f": {reason[:300]}" if reason else " (see kazma.log)"))
         logger.info("[memory_worker] native_pg_backup done: %s", path.name)
         return True
-    except Exception:
+    except Exception as exc:
         logger.warning("[memory_worker] native_pg_backup handler failed", exc_info=True)
         try:
             from kazma_core.observability.ops_alerts import alert
@@ -2030,4 +2035,4 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
             )
         except Exception:
             logger.debug("[memory_worker] pg dump alert failed", exc_info=True)
-        return False
+        return failed_because(f"The Postgres dump failed ({type(exc).__name__}); the details are in kazma.log.")
