@@ -371,7 +371,14 @@ def _space_home() -> Path | str | None:
     except space_files.SpaceKindUnknown as exc:
         return str(exc)
     if space is None:
-        return None
+        # A host space other than the owner's (S1-34): its own workspace, and
+        # nothing of the machine's -- not the admin's extra folders, not a
+        # path grant.
+        try:
+            own = space_files.host_space_root()
+        except space_files.SpaceKindUnknown as exc:
+            return str(exc)
+        return None if own is None else resolve_active_root()
     home = space_files.space_dir(space)
     home.mkdir(parents=True, exist_ok=True)
     return home.resolve()

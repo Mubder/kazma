@@ -408,6 +408,32 @@ def _vault_rows(space: str) -> list[tuple[str, str | None]]:
             (space, len(first), first, len(second), second))]
 
 
+def _workspace_rows(space: str) -> list[dict[str, Any]]:
+    """The space's own workspaces (S1-34: a host space's), from the
+    ``workspaces`` table of ``settings.db``."""
+    from kazma_core import paths
+
+    path = Path(paths.settings_db())
+    if not path.is_file():
+        return []
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        if "space_id" not in _columns(conn, "workspaces"):
+            return []
+        return [dict(r) for r in conn.execute("SELECT * FROM workspaces WHERE space_id = ?", (space,))]
+
+
+def _erase_workspaces(space: str) -> int:
+    from kazma_core import paths
+
+    if not _workspace_rows(space):
+        return 0
+    with closing(sqlite3.connect(paths.settings_db(), timeout=30)) as conn:
+        gone = conn.execute("DELETE FROM workspaces WHERE space_id = ?", (space,)).rowcount
+        conn.commit()
+    return gone
+
+
 # ── files ───────────────────────────────────────────────────────────────
 
 
@@ -477,6 +503,7 @@ def count_space(space: str) -> dict[str, Any]:
         "rows": sum(stores.values()),
         "settings": len(_settings_keys(space, ctx.ids["threads"])) + len(_mapping_entries(space)),
         "secrets": len(_vault_rows(space)),
+        "workspaces": len(_workspace_rows(space)),
         "files": _file_count(folders),
         "libraries": len(ctx.ids["libraries"]),
         "chats": len(ctx.ids["threads"]),
@@ -544,6 +571,7 @@ def export_space(space: str, target: Path, *, password: str | None = None) -> di
                 holder = holder.get(step, {})
             settings[key] = {space: holder.get(space)}
         zipped.writestr("settings.json", json.dumps(settings, ensure_ascii=False, indent=1, default=str))
+        zipped.writestr("workspaces.json", json.dumps(_workspace_rows(space), indent=1, default=str))
         zipped.writestr("secrets.json", json.dumps(
             [{"name": name, "space": tenant or ""} for name, tenant in _vault_rows(space)], indent=1))
         for folder in _folders(space):
@@ -658,6 +686,7 @@ def erase_space(space: str, *, by: str) -> dict[str, Any]:
         "rows": _erase_rows(found, ctx),
         "settings": _erase_settings(space, ctx.ids["threads"]),
         "secrets": _erase_secrets(space),
+        "workspaces": _erase_workspaces(space),
         "libraries": len(ctx.ids["libraries"]),
         "files": 0,
     }

@@ -750,7 +750,8 @@ SPACE_RULES: dict[str, SpaceRule] = {
     "settings.db": SpaceRule(
         "row",
         why="every key is classed install, space or account; install keys (providers, models, "
-            "the guard) stay the install's, and the workspaces table names the host's folders",
+            "the guard) stay the install's, and a workspace row belongs to its space "
+            "(space_id, S1-34): the owner's name the machine's folders",
         content={"settings": ("value",), "bookmarks": ("name", "target")},
         today="whole"),
     "knowledge.db": SpaceRule(

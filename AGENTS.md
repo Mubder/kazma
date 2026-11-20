@@ -13926,6 +13926,17 @@ product can turn it on, so an install with one account behaves as before.
   `tests/test_bell_and_problems_per_person.py` (words planted in one
   person's topic and chat title, read through the real routes as everyone
   else; the lists of before as the control).
+- **Each host space has its own root (S1-34, 2026-11-20).** Workspace rows
+  carry their space (`space_id`; existing rows the owner's) and each space
+  has its own active one; a switch or clone moves only its own space's, and
+  only the owner's space moves the process pin and the MCP servers
+  (`notify_root_changed`). `resolve_active_root` answers the bound space's
+  active workspace; a host space other than the owner's with none works in
+  its own folder (`spaces.files.host_space_root`), its file tools stay in
+  its workspace (`path_policy._space_home`). The IDE service, code index,
+  IDE undo and the MCP guard follow the root. Gate:
+  `tests/test_host_space_roots.py` (one active row for the install as the
+  control).
 
 ## UI Conventions (Web)
 

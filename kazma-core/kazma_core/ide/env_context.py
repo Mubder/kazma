@@ -294,7 +294,8 @@ _APPROVAL_TOOLS = ("file_apply_patch_set", "file_apply_patch", "file_write", "sh
 
 
 def _sandboxed_space_note() -> str:
-    """The note of a turn in a sandboxed space (Spaces S1-31): its own folder,
+    """The note of a turn in a sandboxed space (Spaces S1-31), or a host space
+    other than the owner's (S1-34): its own folder,
     named only by relative paths, and the tools it has. Never the install's
     folder, workspace, repository, MCP binding or host shell: a member's
     turn is told none of them."""
@@ -363,7 +364,10 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
     from kazma_core.spaces import files as space_files
 
     try:
-        sandboxed = space_files.sandboxed_space() is not None
+        # A sandboxed space, or a host space other than the owner's (S1-34):
+        # neither is told the machine's workspace, MCP root or host shell.
+        sandboxed = (space_files.sandboxed_space() is not None
+                     or space_files.host_space_root() is not None)
     except space_files.SpaceKindUnknown:
         sandboxed = True  # a space whose kind cannot be read is never told the machine's
     if sandboxed:
