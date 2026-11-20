@@ -13967,8 +13967,10 @@ product can turn it on, so an install with one account behaves as before.
     own facts and turns as `user` / `User:`, another member's under their
     name, a note outside the fence. Whose facts a question is about is
     chosen before ranking (`recall._whose_facts`: named first, then self
-    first; `speakers.refers_to_asker` reads the first person); chosen after,
-    another member's best match pushed the asker's own out by the gap.
+    first; `speakers.refers_to_asker` reads the first person, from the
+    grammar: a three-letter imperfect, an object "me" on another person's
+    verb and MSA "لديّ" are named apart); chosen after, another member's
+    best match pushed the asker's own out by the gap.
   - **The speakers benchmark** (`benchmark_data/speakers.json`,
     `run_speaker_benchmark`) has its own ratchet (`thresholds.json`
     `speakers`, `scripts/memory_bench.py lock`); the study's vectors are

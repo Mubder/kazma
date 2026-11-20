@@ -450,6 +450,66 @@ def test_the_first_person_reading() -> None:
         assert not refers_to_asker(asks, names), asks
 
 
+# Three Arabic forms the first version of the reading missed (the held-out
+# questions showed them; the main session asked for each to be written from
+# the grammar). The sentences here are new: none is a held-out question.
+FIRST_PERSON_FORMS = {
+    # An object "me" on another person's verb ("-ني" after "ي"/"ت").
+    "object_me": ["متى يذكرني التطبيق بالموعد؟", "شنو الفيلم اللي يعجبني؟", "كم يكلفني الاشتراك؟",
+                  "مين يوصلني للمطار؟"],
+    # A three-letter first-person imperfect (a doubled or weak root; alef madda).
+    "short_verb": ["وين أحط المفاتيح عادة؟", "شنو أحب من الحلويات؟", "شنو آكل على الفطور؟",
+                   "آخذ أي دوا للضغط؟", "متى أجي بكرة؟"],
+    # MSA "I have".
+    "msa_have": ["ما الموعد المسجل لديّ غدا؟", "هل لدي حساسية من شيء؟"],
+}
+#: Words that look like those forms and are not the asker.
+NOT_FIRST_PERSON = [
+    "مطعم يمني قريب؟",  # "-ني" with one letter before it: an adjective of origin
+    "مطعم يوناني قريب؟",  # "-اني": an adjective of origin
+    "الأكل هنا زين؟",  # the noun, with its article
+    "أكل البيت أحسن من المطاعم؟",  # the noun "food", hamza, not madda
+    "آخر مرة متى كانت؟",  # "آخر", a noun with madda
+    "أهل عمر وين؟",  # a three-letter noun with alef
+    "هل لديه سيارة؟",  # "he has"
+]
+
+
+def _old_refers_to_asker(question: str, names: list[str]) -> bool:
+    """The reading as S1-11 first shipped it (commit 43691ea48): the
+    control."""
+    from kazma_core.memory import speakers as sp
+
+    not_mine = {w for name in names for w in sp._words(name)}
+    for word in sp._words(question):
+        if word in sp._EN_SELF:
+            return True
+        if not sp._is_arabic(word) or word in not_mine:
+            continue
+        if word in sp._AR_SELF - {"لدي"}:
+            return True
+        bare = word[1:] if len(word) > 4 and word[0] in ("و", "ف") else word
+        if bare in sp._AR_NOT_MINE or bare in not_mine or bare.startswith("ال"):
+            continue
+        if len(bare) >= 4 and bare.endswith("ي") and bare[0] != "ي":
+            return True
+        if len(bare) >= 4 and bare[0] == "ا" and bare not in sp._AR_ALEF_NOT_I:
+            return True
+    return False
+
+
+@pytest.mark.parametrize("form", sorted(FIRST_PERSON_FORMS))
+def test_each_arabic_first_person_form_is_read(form) -> None:
+    from kazma_core.memory.speakers import refers_to_asker
+
+    names = ["Sara", "سارة", "Omar", "عمر"]
+    for asks in FIRST_PERSON_FORMS[form]:
+        assert refers_to_asker(asks, names), asks
+        assert not _old_refers_to_asker(asks, names), f"the old rule already read {asks}"
+    for asks in NOT_FIRST_PERSON:
+        assert not refers_to_asker(asks, names), asks
+
+
 # ── Forget by entry (N36) and who may forget (N32, N33) ──────────────────
 
 

@@ -140,12 +140,41 @@ def _forms(word: str) -> set[str]:
 #: "us" include others: a question in the plural shows everyone's facts.
 _EN_SELF = frozenset({"i", "i'm", "im", "i've", "ive", "i'd", "i'll", "me", "my", "mine", "myself"})
 #: Arabic (folded) words that are the speaker by themselves: the pronoun,
-#: "I have", "to me", "with me", "from me", "about me", "in me", "I want"
-#: (Gulf "ابي", "ابغي", "ودي"), "mine" (Gulf "حقي", "مالي"), "myself".
+#: "I have" (Gulf "عندي", MSA "لديّ"), "to me", "with me", "from me", "about
+#: me", "in me", "I want" (Gulf "ابي", "ابغي", "ودي"), "mine" (Gulf "حقي",
+#: "مالي"), "myself".
 _AR_SELF = frozenset({
-    "انا", "اني", "عندي", "لي", "ليا", "معي", "مني", "عني", "فيني", "ابي", "ابغي", "ودي",
+    "انا", "اني", "عندي", "لدي", "لي", "ليا", "معي", "مني", "عني", "فيني", "ابي", "ابغي", "ودي",
     "حقي", "حقتي", "مالي", "مالتي", "نفسي", "روحي",
 })
+#: First-person imperfects that are three letters long: a doubled root's
+#: (C2 = C3, written once: "أحبّ", "أظنّ", "أشكّ"), and a weak root's whose
+#: last radical falls away or is a vowel ("أجي", "أرى"). The general rule
+#: below needs four letters, because most three-letter words that start
+#: with alef are nouns or particles ("أهل", "أمس", "أين"); these are named.
+_AR_SHORT_I_VERBS = frozenset({
+    "احب", "احس", "اظن", "اشك", "اود", "احط", "اشم", "احل", "اعد", "اجي", "اري",
+})
+#: A hamza-initial root's first-person imperfect is written with alef madda
+#: and three letters ("آكل", "آخذ": the "أ" of "I" and the root's own hamza);
+#: these words with alef madda are nouns or adjectives instead.
+_AR_MADDA_NOT_I = frozenset({"آخر", "آمن", "آية", "آلة", "آدم", "آسف"})
+#: Arabic's short vowel marks and the tatweel: taken off a word before its
+#: written form is read.
+_AR_MARKS_RE = re.compile("[\u064B-\u065F\u0670\u0640]")
+
+
+def _object_me(word: str) -> bool:
+    """An imperfect verb of the third or second person (prefix "ي" or "ت")
+    with the object suffix "ني", "me": "يتعبني" (it tires me), "يعجبني",
+    "تساعدني". At least three letters stand between the two, and the last of
+    them is not a long "ا" or "و": a word ending "-اني" or "-وني" is an
+    adjective of origin ("يوناني", "تلفزيوني"), and with less between them
+    the word is a noun or a particle ("يمني", "تقني", "يعني")."""
+    if len(word) < 6 or word[0] not in ("ي", "ت") or not word.endswith("ني"):
+        return False
+    stem = word[1:-2]
+    return len(stem) >= 3 and stem[-1] not in ("ا", "و")
 #: Folded Arabic words ending in ي that are not "my ...": particles,
 #: pronouns, question words, demonstratives, numbers, and "علي" ("on" or the
 #: name Ali), read as the speaker's only when standing alone (above).
@@ -174,6 +203,9 @@ def refers_to_asker(question: str, names: Iterable[str] = ()) -> bool:
     ("بيتي", "حساسيتي") or an imperfect verb with the first-person "أ"
     ("أسكن", "أشتغل"). The plural ("we", "our", "نا") is not the asker
     alone. *names* are the members' names: "أحمد" is a name, not a verb.
+    Three forms are named apart: a three-letter first-person imperfect
+    ("أحب", "آكل"), an object "me" on another person's verb ("يتعبني"), and
+    MSA "لديّ".
 
     It leans one way: a question read as the asker's shows the asker's own
     facts and hides other members' (their turns stay); a question it misses
@@ -181,16 +213,24 @@ def refers_to_asker(question: str, names: Iterable[str] = ()) -> bool:
     on narrow evidence.
     """
     not_mine = {w for name in names for w in _words(name)}
-    for word in _words(question):
+    written = _WORD_RE.findall(_AR_MARKS_RE.sub("", str(question or "")).replace("’", "'"))
+    for raw in written:
+        word = _fold(raw)
         if word in _EN_SELF:
             return True
         if not _is_arabic(word) or word in not_mine:
             continue
         if word in _AR_SELF:
             return True
-        bare = word[1:] if len(word) > 4 and word[0] in ("و", "ف") else word
+        joined = len(word) > 4 and word[0] in ("و", "ف")
+        bare = word[1:] if joined else word
         if bare in _AR_NOT_MINE or bare in not_mine or bare.startswith("ال"):
             continue
+        if bare in _AR_SHORT_I_VERBS or _object_me(bare):
+            return True
+        unjoined = raw[1:] if joined else raw
+        if len(unjoined) == 3 and unjoined[0] == "آ" and unjoined not in _AR_MADDA_NOT_I:
+            return True
         if len(bare) >= 4 and bare.endswith("ي") and bare[0] != "ي":
             return True
         if len(bare) >= 4 and bare[0] == "ا" and bare not in _AR_ALEF_NOT_I:
