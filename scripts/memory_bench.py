@@ -6,6 +6,9 @@
   python scripts/memory_bench.py lock              # raise the CI ratchet to today's scores
   python scripts/memory_bench.py lock --trade "why"  # a reviewed trade (see TRADE_RULE)
   python scripts/memory_bench.py lock --new-recording "why"  # lock a new recording of the model's pass
+  python scripts/memory_bench.py lock --edge q601 "why"  # name a hit that flips inside the rounding (EDGE_RULE)
+  python scripts/memory_bench.py lock-pgvector --from LOG --run "CI run"  # the pgvector floors, from a named run
+  python scripts/memory_bench.py sealed --look "why"    # score the sealed set: every look is logged
   python scripts/memory_bench.py extraction           # extraction scores from the recorded replies
                                                     # (recorded by scripts/memory_extraction_record.py)
   python scripts/memory_bench.py writes               # the write scenarios: what passes, what does not
@@ -43,6 +46,10 @@ WRITES = DATASET.with_name("writes.json")
 LLM_REPLIES = REPO / "tests" / "fixtures" / "memory_bench" / "extraction_llm.json"
 #: The speakers case set's vectors (Spaces S1-11; recorded by the R3 study).
 SPEAKER_VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "speakers_vectors.npz"
+#: The sealed set (benchmark audit R8, docs/plans/MEMORY_SEALED_SET.md): written
+#: by another session, scored only by ``sealed --look "why"``.
+SEALED = REPO / "tests" / "fixtures" / "memory_bench" / "sealed_questions.json"
+SEALED_VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "sealed_vectors.npz"
 
 SEED = 20260926
 
@@ -698,14 +705,19 @@ QUESTIONS: list[tuple[str, str, str, list[str], list[str]]] = [
 ]
 
 
-#: Held out (Memory audit M24): recall's thresholds were swept on QUESTIONS, so
-#: their scores say how well the tuning fits them. These were written after
-#: the last sweep, against the same memories, and are never used to choose a
-#: threshold: the gap between the two is how far the tuning generalizes.
-#: ``mixed`` asks in one language about a memory in the other, or switches
-#: language inside the question. Several abstain questions come close to a
-#: real memory (a dentist, a car), which is where injecting nothing is hard.
-HELDOUT: list[tuple[str, str, str, list[str], list[str]]] = [
+#: The second set (Memory audit M24; renamed 2026-11-20, benchmark audit R8
+#: and the owner's decision 4). Recall's thresholds were swept on QUESTIONS;
+#: these 40 were written after the last sweep, against the same memories, and
+#: no threshold is swept on them. They are a second check, not an unseen
+#: test: two decisions were taken by looking at them (2026-10-14 and
+#: 2026-10-15, the guide's "Benchmark report"), and they are gated in the
+#: same lock, so every change kept is one that did not lower them. They stay
+#: gated; a held-out set is a sealed one, written by another session and
+#: scored only on request. ``mixed`` asks in one language about a memory in the other, or
+#: switches language inside the question. Several abstain questions come close
+#: to a real memory (a dentist, a car), which is where injecting nothing is
+#: hard.
+SECOND_SET: list[tuple[str, str, str, list[str], list[str]]] = [
     ("h001", "What's my partner's name?", "single", ["p02#2|f07"], []),
     ("h002", "Which breed is Pixel?", "single", ["p01#2|f37"], ["x03"]),
     ("h003", "What's the name of my guitar teacher?", "single", ["p12#1|f19|h08#1"], []),
@@ -800,12 +812,12 @@ def build() -> dict[str, Any]:
     if len(summary_ids) != len(summaries) or summary_ids & (fact_ids | refs):
         raise ValueError("duplicate summary id")
     questions = _questions(QUESTIONS, refs, fact_ids, summary_ids)
-    heldout = _questions(HELDOUT, refs, fact_ids, summary_ids)
-    if {q["id"] for q in questions} & {q["id"] for q in heldout} or {q["text"] for q in questions} & {
-            q["text"] for q in heldout}:
-        raise ValueError("a held-out question repeats a tuning question")
+    second = _questions(SECOND_SET, refs, fact_ids, summary_ids)
+    if {q["id"] for q in questions} & {q["id"] for q in second} or {q["text"] for q in questions} & {
+            q["text"] for q in second}:
+        raise ValueError("a question of the second set repeats a tuning question")
     return {"version": 5, "seed": SEED, "sessions": sessions, "facts": facts,
-            "summaries": summaries, "questions": questions, "heldout": heldout}
+            "summaries": summaries, "questions": questions, "second": second}
 
 
 #: The extraction benchmark (Memory audit M24): one chat turn each, in English,
@@ -1301,13 +1313,13 @@ def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
         extra = "  ".join(f"{k} {v}" for k, v in row.items() if k not in ("n",))
         print(f"  {name:<11} n={row['n']:<3} {extra}")
     print("overall:", json.dumps(report["overall"]))
-    held = report.get("heldout")
+    held = report.get("second")
     if held:
-        print(f"held out: {held['overall']['questions']} questions")
+        print(f"second set: {held['overall']['questions']} questions")
         for name, row in held["categories"].items():
             extra = "  ".join(f"{k} {v}" for k, v in row.items() if k not in ("n",))
             print(f"  {name:<11} n={row['n']:<3} {extra}")
-        print("held-out overall:", json.dumps(held["overall"]))
+        print("second-set overall:", json.dumps(held["overall"]))
     from kazma_core.memory.benchmark import gated_scores
 
     scores = gated_scores(report)
@@ -1322,7 +1334,7 @@ def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
 
 #: Where recall should get to, not a floor: injecting nothing for a question
 #: nothing answers (Memory audit M24). The report shows the distance.
-TARGETS = {"abstain.hit_rate": 0.6, "heldout.abstain.hit_rate": 0.6}
+TARGETS = {"abstain.hit_rate": 0.6, "second.abstain.hit_rate": 0.6}
 
 #: A reviewed trade (``lock --trade "why"``): a change may lower gated scores
 #: only when every lowered score drops by at most TRADE_MAX_DROP, at least one
@@ -1332,7 +1344,7 @@ TARGETS = {"abstain.hit_rate": 0.6, "heldout.abstain.hit_rate": 0.6}
 #: review sees it in the diff.
 TRADE_MAX_DROP = 0.05
 TRADE_MIN_GAIN = 0.05
-_NEVER_TRADED = ("abstain.hit_rate", "heldout.abstain.hit_rate")
+_NEVER_TRADED = ("abstain.hit_rate", "second.abstain.hit_rate")
 
 
 def trade_problems(old: dict[str, float], new: dict[str, float]) -> list[str]:
@@ -1351,7 +1363,53 @@ def trade_problems(old: dict[str, float], new: dict[str, float]) -> list[str]:
     return problems
 
 
-def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | None = None) -> int:
+#: How the edge list is left (``lock --edge QUESTION "why"``): a hit that flips
+#: when the recorded vectors move inside their rounding stops the lock
+#: (benchmark audit R4, the owner's decision 3). Fix the question or the
+#: ranking, or name the question here: the list says its margin, how often it
+#: flipped and why it stays. Never move a threshold to save one question.
+EDGE_RULE = "a flipping hit stops the lock; the edge list, with its margin named, is the only exit"
+
+
+def _edge_lock(
+    base: dict[str, Any], old: dict[str, Any], *, fresh: bool, name: list[tuple[str, str]] | None,
+) -> tuple[dict[str, Any], list[str], list[str]]:
+    """The lock's edge check: (the ``edges`` section to write, why the lock
+    is refused, the questions no longer at the edge)."""
+    import datetime as _dt
+
+    from kazma_core.memory import benchmark
+
+    check = benchmark.edge_check(VECTORS, base)
+    data = benchmark.load_dataset()
+    questions = {q["id"]: q for q in data["questions"] + data.get("second", [])}
+    results = {r["id"]: r for r in list(base.get("results", []))
+               + list((base.get("second") or {}).get("results", []))}
+    listed = {} if fresh else {e["id"]: e for e in old.get("hits", [])}
+    adding = dict(name or [])
+    problems = [f"--edge {qid}: its hit does not flip in the {check['draws']} draws; there is nothing to name"
+                for qid in sorted(adding) if qid not in check["flips"]]
+    hits = []
+    for qid, flipped in check["flips"].items():
+        q, r = questions[qid], results[qid]
+        why = adding.get(qid) or listed.get(qid, {}).get("why")
+        if not why:
+            problems.append(
+                f"{qid} ({q['category']}, {q['text']!r}): its hit {'holds' if r['hit'] else 'misses'} by "
+                f"{abs(r['margin'] or 0.0)} of recall's cut and flips in {flipped} of {check['draws']} draws "
+                f"inside the recorded vectors' rounding. Fix the question or the ranking -- never move a "
+                f"threshold to save it -- or name it: lock --edge {qid} \"why\"")
+            continue
+        hits.append({"id": qid, "category": q["category"], "question": q["text"], "hit": bool(r["hit"]),
+                     "margin": r["margin"], "flipped": flipped, "why": why,
+                     "since": listed.get(qid, {}).get("since") or _dt.date.today().isoformat()})
+    section = {"draws": check["draws"], "seed": check["seed"], "move": check["move"],
+               "largest_move": check["largest_move"], "hits": hits, "shown": check["shown"]}
+    return section, problems, sorted(set(listed) - set(check["flips"]))
+
+
+def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | None = None,
+              edges: list[tuple[str, str]] | None = None) -> int:
     """Write the replayed scores as the ratchet; refuse to lower any of them.
 
     The ratchet names the dataset versions it was measured on (the recall
@@ -1401,7 +1459,8 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
     replay = ReplayEmbedder(VECTORS)
     a, b = _patched(replay, replay.model)
     with a, b:
-        scores = gated_scores(run_benchmark())
+        base = run_benchmark(keep_results=True)
+    scores = gated_scores(base)
     old_scores = {} if recall_new else old.get("scores", {})
     lower = {k: (v, scores.get(k)) for k, v in old_scores.items() if scores.get(k, -1.0) < v}
     trades = list(old.get("trades", []))
@@ -1426,6 +1485,12 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         print("refusing to lower the ratchet: fix the regression, or propose a reviewed "
               "trade with --trade \"why\"", file=sys.stderr)
         return 1
+    edge, problems, settled = _edge_lock(base, old.get("edges") or {}, fresh=recall_new, name=edges)
+    if problems:
+        for line in problems:
+            print(f"  {line}", file=sys.stderr)
+        print(f"refusing to lock: {EDGE_RULE}", file=sys.stderr)
+        return 1
     from kazma_core.memory.benchmark import StaleRecordingError
 
     try:
@@ -1444,10 +1509,13 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         return 1
     THRESHOLDS.write_text(
         json.dumps({"dataset_version": version, "scores": scores, "targets": TARGETS,
-                    "trades": trades, "extraction": extraction, "writes": writes, "speakers": speakers,
-                    # The opt-in Postgres-primary run's floors
-                    # (tests/test_memory_benchmark_pg.py), on the same dataset only.
-                    "postgres_primary": {} if recall_new else old.get("postgres_primary", {})},
+                    "trades": trades, "edges": edge,
+                    "extraction": extraction, "writes": writes, "speakers": speakers,
+                    # The pgvector path's floors (tests/test_memory_benchmark_pg.py),
+                    # locked from a named CI run by `lock-pgvector`; same dataset only.
+                    "pgvector": {} if recall_new else old.get("pgvector", {}),
+                    # Every look at the sealed set, kept whatever the lock does.
+                    **({"sealed": old["sealed"]} if old.get("sealed") else {})},
                    indent=1, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -1465,6 +1533,13 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         print(f"  {k}: {was} -> {now}")
     for sid in now_pass:
         print(f"  writes: {sid} passes now")
+    for hit in edge["hits"]:
+        print(f"  edge: {hit['id']} {'holds' if hit['hit'] else 'misses'} by {abs(hit['margin'] or 0.0)}, "
+              f"flips in {hit['flipped']} of {edge['draws']} draws ({hit['why']})")
+    for qid in settled:
+        print(f"  edge: {qid} no longer flips; off the edge list")
+    if edge["shown"]:
+        print(f"  shown changes inside the rounding (listed in the lock): {edge['shown']}")
     return 0
 
 
@@ -1489,7 +1564,12 @@ def _extraction_lock(
     """
     import datetime as _dt
 
-    from kazma_core.memory.benchmark import RECORD_AGAIN, extraction_scores, run_extraction_benchmark
+    from kazma_core.memory.benchmark import (
+        RECORD_AGAIN,
+        extraction_rests_on,
+        extraction_scores,
+        run_extraction_benchmark,
+    )
 
     if not LLM_REPLIES.is_file():
         return {}, [f"no recording of the model's pass ({LLM_REPLIES.name}): it cannot be locked without "
@@ -1530,7 +1610,9 @@ def _extraction_lock(
             "replaced": {"recording": old.get("recording"),
                          "scores": {k: v for k, v in sorted(was.items()) if k.startswith("llm.")}},
         })
-    return {"version": report["version"], "recording": identity, "scores": now, "recordings": history}, problems
+    return {"version": report["version"], "recording": identity, "scores": now,
+            # What each row rests on, for the benchmarks page (decision 6).
+            "rests_on": extraction_rests_on(report), "recordings": history}, problems
 
 
 def _speakers_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[str, Any], list[str]]:
@@ -1614,6 +1696,162 @@ def _cmd_extraction() -> int:
     return 0
 
 
+#: The pgvector path's search modes (tests/test_memory_benchmark_pg.py MODES).
+PGVECTOR_MODES = ("approximate", "exact")
+
+
+def _measurement_from(text: str) -> dict[str, dict[str, float]]:
+    """The pgvector measurement in *text*: the file the test writes
+    (``KAZMA_TEST_MEMORY_BENCH_PG_OUT``), or a CI log holding its
+    ``PGVECTOR_MEASUREMENT`` line (the last one wins)."""
+    lines = [line.split("PGVECTOR_MEASUREMENT ", 1)[1] for line in text.splitlines()
+             if "PGVECTOR_MEASUREMENT " in line]
+    return json.loads(lines[-1] if lines else text)
+
+
+def _cmd_lock_pgvector(source: str, run: str | None, mode: str) -> int:
+    """Lock the pgvector path's floors from one measurement, naming the run
+    it came from (benchmark audit R7, the owner's decision 5): the floors
+    become ``verified``, and the test then fails on a difference both ways.
+    *mode* is the search the floors hold (the other is kept for the record)."""
+    import datetime as _dt
+
+    if not str(run or "").strip():
+        print("name the run the floors come from: lock-pgvector --from FILE --run \"<the CI run>\"",
+              file=sys.stderr)
+        return 1
+    try:
+        measurement = _measurement_from(Path(source).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"no pgvector measurement in {source}: {exc}", file=sys.stderr)
+        return 1
+    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
+    missing = [m for m in PGVECTOR_MODES if not isinstance(measurement.get(m), dict)]
+    if missing:
+        print(f"the measurement has no {', '.join(missing)} run", file=sys.stderr)
+        return 1
+    floors = {k: float(v) for k, v in measurement[mode].items()}
+    if set(floors) != set(locked.get("scores") or {}):
+        print("the measurement's scores are not the lock's: another dataset version? run it again",
+              file=sys.stderr)
+        return 1
+    other = next(m for m in PGVECTOR_MODES if m != mode)
+    was = (locked.get("pgvector") or {}).get("floors") or {}
+    locked["pgvector"] = {
+        "status": "verified", "mode": mode, "run": run.strip(), "date": _dt.date.today().isoformat(),
+        "measured": f"{run.strip()}, {mode} search", "floors": dict(sorted(floors.items())),
+        f"{other}_for_the_record": dict(sorted((measurement[other] or {}).items())),
+    }
+    THRESHOLDS.write_text(json.dumps(locked, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    moved = [(k, was.get(k), v) for k, v in sorted(floors.items()) if was.get(k) != v]
+    print(f"{THRESHOLDS.name}: pgvector floors from {run.strip()} ({mode} search), {len(moved)} changed")
+    for k, before, now in moved:
+        print(f"  {k}: {before} -> {now}")
+    return 0
+
+
+def _sealed_vectors(questions: list[dict[str, Any]], replay_model: str) -> str | None:
+    """Record the sealed questions' vectors with the real model the first
+    time (never the memories': they replay from the benchmark's recording).
+    Returns why it cannot, or None."""
+    from kazma_core.memory.benchmark import ReplayEmbedder, RecordingEmbedder, _text_key
+
+    if SEALED_VECTORS.is_file():
+        held = ReplayEmbedder(SEALED_VECTORS)
+        if held.model != replay_model:
+            return f"{SEALED_VECTORS.name} is {held.model}'s, the benchmark's vectors are {replay_model}'s"
+        if all(_text_key(q["text"]) in held._index for q in questions):
+            return None
+    from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
+
+    _limit_cpu_threads()
+    real = get_embedder()
+    if real is None:
+        return "the sealed questions have no recorded vectors and no embedder is configured (the rag extra)"
+    model = get_embedding_model_name()
+    if model != replay_model:
+        return f"the embedder is {model}, the benchmark's vectors are {replay_model}'s"
+    recorder = RecordingEmbedder(real)
+    for q in questions:
+        recorder.encode(q["text"])
+    recorder.save(SEALED_VECTORS, model=model)
+    return None
+
+
+def _cmd_sealed(look: str | None, decided: bool = False) -> int:
+    """Score the sealed set: the only way it is scored, and every look is
+    logged in the lock (date, reason, commit, the file's hash, the scores). A
+    look that decides a change (``--decided``) spends the set: the next look
+    is refused until its questions are new (benchmark audit R8, the owner's
+    decision 4)."""
+    import datetime as _dt
+    import hashlib
+    import subprocess
+
+    from kazma_core.memory.benchmark import (
+        ReplayEmbedder,
+        SpeakerReplay,
+        gated_scores,
+        load_dataset,
+        run_benchmark,
+        sealed_dataset,
+        sealed_problems,
+    )
+
+    if not str(look or "").strip():
+        print("a look at the sealed set needs its reason: sealed --look \"why\" (every look is logged)",
+              file=sys.stderr)
+        return 1
+    if not SEALED.is_file():
+        print(f"no sealed set yet ({SEALED.name}): docs/plans/MEMORY_SEALED_SET.md says who writes it",
+              file=sys.stderr)
+        return 1
+    raw = SEALED.read_bytes()
+    sealed = json.loads(raw.decode("utf-8"))
+    data = load_dataset()
+    problems = sealed_problems(sealed, data)
+    if problems:
+        for line in problems:
+            print(f"  {line}", file=sys.stderr)
+        print("the sealed set is not the one specified: it is not scored", file=sys.stderr)
+        return 1
+    file_sha = hashlib.sha256(raw).hexdigest()
+    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
+    section = locked.get("sealed") or {}
+    looks = list(section.get("looks") or [])
+    spent = [x for x in looks if x.get("decided") and x.get("file_sha256") == file_sha]
+    if spent:
+        print(f"the sealed set is spent: a change was decided by looking at it on {spent[-1]['date']} "
+              f"({spent[-1]['reason']}); new questions, written by another session, are needed",
+              file=sys.stderr)
+        return 1
+    replay = ReplayEmbedder(VECTORS)
+    why_not = _sealed_vectors(sealed["questions"], replay.model)
+    if why_not:
+        print(f"cannot score the sealed set: {why_not}", file=sys.stderr)
+        return 1
+    embedder = SpeakerReplay(VECTORS, SEALED_VECTORS)
+    a, b = _patched(embedder, replay.model)
+    with a, b:
+        report = run_benchmark(sealed_dataset(sealed, data))
+    scores = {f"sealed.{k}": v for k, v in gated_scores(report).items()}
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(REPO), capture_output=True,
+                                text=True, timeout=10, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        commit = "unknown"
+    looks.append({"date": _dt.date.today().isoformat(), "reason": look.strip(), "decided": bool(decided),
+                  "commit": commit, "file_sha256": file_sha, "questions": len(sealed["questions"]),
+                  "written_by": sealed.get("written_by"), "scores": dict(sorted(scores.items()))})
+    locked["sealed"] = {"file": SEALED.name, "looks": looks}
+    THRESHOLDS.write_text(json.dumps(locked, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"sealed set: {len(sealed['questions'])} questions, look {len(looks)} logged in {THRESHOLDS.name}"
+          + (" (decided: the set is now spent)" if decided else ""))
+    for key in ("sealed.overall.hit_rate", "sealed.overall.mrr", "sealed.overall.precision"):
+        print(f"  {key}: {scores.get(key)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1626,6 +1864,18 @@ def main(argv: list[str] | None = None) -> int:
                       help="lower some scores for a larger gain elsewhere, under TRADE_RULE; recorded")
     lock.add_argument("--new-recording", metavar="REASON",
                       help="lock a new recording of the model's extraction pass; its scores replace the old")
+    lock.add_argument("--edge", nargs=2, action="append", metavar=("QUESTION", "REASON"),
+                      help="name a question whose hit flips inside the vectors' rounding (EDGE_RULE); recorded")
+    pgv = sub.add_parser("lock-pgvector", help="lock the pgvector path's floors from a named run")
+    pgv.add_argument("--from", dest="source", required=True,
+                     help="the measurement file, or a CI log holding its PGVECTOR_MEASUREMENT line")
+    pgv.add_argument("--run", help="the run the numbers come from (required, recorded)")
+    pgv.add_argument("--mode", choices=PGVECTOR_MODES, default="approximate",
+                     help="the search the floors hold (the product's is approximate today)")
+    sealed = sub.add_parser("sealed", help="score the sealed set; every look is logged in the lock")
+    sealed.add_argument("--look", metavar="REASON", help="why this look (required, logged)")
+    sealed.add_argument("--decided", action="store_true",
+                        help="a change was decided by this look: the set is spent after it")
     sub.add_parser("extraction")
     sub.add_parser("writes")
     run = sub.add_parser("run")
@@ -1638,7 +1888,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "vectors":
         return _cmd_vectors()
     if args.cmd == "lock":
-        return _cmd_lock(args.rebaseline, args.trade, args.new_recording)
+        return _cmd_lock(args.rebaseline, args.trade, args.new_recording,
+                         [tuple(e) for e in args.edge] if args.edge else None)
+    if args.cmd == "lock-pgvector":
+        return _cmd_lock_pgvector(args.source, args.run, args.mode)
+    if args.cmd == "sealed":
+        return _cmd_sealed(args.look, args.decided)
     if args.cmd == "extraction":
         return _cmd_extraction()
     if args.cmd == "writes":

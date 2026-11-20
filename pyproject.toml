@@ -335,6 +335,7 @@ markers = [
     "eval: Industry eval pack (golden trajectories, no live LLM)",
     "e2e: Browser smoke (Playwright; separate CI job)",
     "postgres: Verified against a real Postgres; the CI Postgres job runs these (scripts/postgres_suite.py)",
+    "pgvector: Needs a Postgres with the pgvector extension; the CI pgvector job runs these (scripts/postgres_suite.py --marker pgvector)",
     "real_docker: Runs real containers on the developer's own Docker engine (the docker CLI's own settings are not swapped for an empty folder)",
 ]
 

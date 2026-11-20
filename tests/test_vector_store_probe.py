@@ -782,6 +782,7 @@ def _real_dsn() -> tuple[str, Any]:
 
 
 @pytest.mark.postgres
+@pytest.mark.pgvector
 def test_a_real_postgres_is_used_only_if_it_can_hold_vectors(monkeypatch):
     """On a server with no pgvector (CI's postgres:16) nothing is created; on
     one that ships it, a vector round-trips. Verified against both
@@ -816,7 +817,7 @@ def test_a_real_postgres_is_used_only_if_it_can_hold_vectors(monkeypatch):
                 conn.commit()
 
 
-@pytest.mark.postgres
+@pytest.mark.pgvector
 def test_a_real_table_of_another_size_is_refused_before_writing(monkeypatch):
     """Needs pgvector (skips on CI's postgres:16); verified on pgvector/pgvector:pg16."""
     monkeypatch.setattr(backends, "_pg_driver_errors", _REAL_DRIVER_ERRORS)

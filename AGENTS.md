@@ -2018,10 +2018,30 @@ four injected were noise.
   re-recorded with the real model. The Dashboard's golden eval seeds facts
   the same way; a case marked `needs_meaning` is skipped without an
   embedder and must pass with one. **Dataset v5 (2026-10-14, Memory audit
-  M24)** adds 40 held-out questions (`HELDOUT`: never used to choose a
-  threshold; the builder refuses one that repeats a tuning question; a
+  M24)** adds a second set of 40 questions (`SECOND_SET`: no threshold is
+  swept on it; the builder refuses one that repeats a tuning question; a
   `mixed` category asks across languages), scored apart
-  (`report["heldout"]`, gated as `heldout.*`); an extraction benchmark
+  (`report["second"]`, gated as `second.*`). **It is not held out**
+  (renamed 2026-11-20, benchmark audit R8, the owner's decision 4): two
+  decisions were taken by looking at it and it is gated in the same lock,
+  so it stays gated as a second check, and only a sealed set (another
+  session's questions, scored on request) may be called held out
+  (`test_nothing_calls_the_second_set_held_out`: the page, the guide, the
+  builder and the benchmark's docstring; the old words as the negative
+  control). **The sealed set** (2026-11-20, R8, decision 4;
+  `docs/plans/MEMORY_SEALED_SET.md`) is written by a session that does not
+  build or tune recall, as `tests/fixtures/memory_bench/sealed_questions.json`.
+  CI checks its shape only (`sealed_problems`: 8 questions or more in each of
+  `SEALED_CATEGORIES`, Arabic in each but keyword, every gold id in the
+  dataset, no repeat of a question the benchmark asks), never its scores:
+  `scripts/memory_bench.py sealed --look "why"` is the only way it is scored
+  (its question vectors recorded with the real model once, in
+  `sealed_vectors.npz`), every look is logged in the lock's `sealed` section
+  (date, reason, commit, the file's hash, the scores) and kept by every
+  `lock`, and a look with `--decided` spends the set until its questions are
+  new. The page prints the last look apart. Gate:
+  `tests/test_memory_benchmark_sealed.py` (a planted set; a test that scores
+  the sealed file as the negative control). An extraction benchmark
   (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 30 turns
   EN/AR/mixed; the heuristic pass in CI, the model's deep pass from
   recorded replies, `tests/fixtures/memory_bench/extraction_llm.json`,
@@ -2065,11 +2085,74 @@ four injected were noise.
   Explicit abstention targets (`TARGETS`, 0.6, goals not
   gates); a reviewed trade (`lock --trade "why"`, `trade_problems`: no
   score falls more than 0.05, one rises 0.05 or more, abstention never
-  falls; recorded in `trades`); and the Postgres-primary run
-  (`tests/test_memory_benchmark_pg.py`, opt-in, pgvector, floors in
-  `postgres_primary`). The report (both backends, held out, extraction) is
+  falls; recorded in `trades`); and two Postgres measurements under two
+  names: the Postgres-primary keyword path (`tests/test_memory_pg_primary.py`,
+  the Postgres job, within `PRIMARY_DELTA` of local) and the pgvector path
+  (`tests/test_memory_benchmark_pg.py`, the pgvector job, held to the lock's
+  `pgvector` floors both ways). The report (both backends, the second set, extraction) is
   the guide's "Benchmark report"; the measured limits at 10x and 100x are
   the guide's "Measured limits" (`tests/test_memory_scale_bench.py`).
+- **A hit at the edge stops the lock** (2026-11-20, benchmark audit R4, the
+  owner's decision 3). The recorded vectors keep one byte a number, so the
+  model's vector is anywhere within half a rounding step of the recording,
+  and another machine's model differs by about that much: q601 cleared the
+  belief floor by 0.0004 and flipped in 7 of 30 such moves (audit F5).
+  `lock` replays the benchmark `EDGE_DRAWS` (10) times with every recorded
+  number moved inside its rounding (`_MovedEmbedder`, seeded,
+  `EDGE_MOVE` = half a step) and refuses when a hit flips, naming the
+  question and its margin, unless the question is on the edge list (`lock
+  --edge QUESTION "why"`, `edges` in `thresholds.json`: margin, draws
+  flipped, reason, since): the only exit. Never move a threshold to save one
+  question. A question that no longer flips leaves the list, one that does
+  not flip cannot be named, a new dataset version starts the list again;
+  the questions whose shown memories change inside the rounding are listed
+  in the lock (`shown`). The margin is each answer's distance to the cut
+  recall applied (the floor, or the gap behind the best), read from the
+  ranking itself (`recall.trace_evidence`, bound by the benchmark only),
+  positive exactly when the hit holds. CI asks the draws again for the
+  questions within `EDGE_WATCH` of the cut (at least three times the largest
+  move a lock measured), so a change that brings a question to the edge
+  without moving a score is seen. A float recording has no rounding to move
+  inside: `_MovedEmbedder` refuses it until its spread is measured. Gate:
+  `tests/test_memory_benchmark_edges.py` (today's dataset without q601 on
+  the list refuses the lock; an unnamed flip, a wrong margin and a stale
+  entry each fail the CI check).
+- **pgvector in CI, measured both ways; a named skip fails** (2026-11-20,
+  benchmark audit R7 and R11, the owner's decision 5). A second CI job,
+  "Tests (pgvector)", runs the tests marked `pgvector` on
+  `pgvector/pgvector:0.8.7-pg18` (pinned by digest), beside the plain
+  `postgres:18` job (the server live runs); a test may carry both marks.
+  `scripts/postgres_suite.py --marker` picks the job, and `MUST_RUN` names
+  the tests each job exists for: one that skips, fails or does not run fails
+  the job (read from pytest's JUnit report through `safe_xml`). Both
+  Postgres jobs install `ci-light`: without numpy the Postgres-primary
+  benchmark skipped on every run while AGENTS.md quoted it. **Exact against
+  approximate is measured, not decided by default**: the pgvector benchmark
+  asks every question with the product's search (the planner may answer
+  from the HNSW index) and with index scans off on the test's own connection
+  (`EXACT_OPTIONS`; the product is unchanged), and prints both
+  (`PGVECTOR_MEASUREMENT`, shown by `-rP`). The product's mode is held to
+  the lock's `pgvector` floors both ways; floors not marked `verified` (the
+  run made by hand on 2026-10-14, until a CI run is locked) report a
+  difference instead of failing, since every CI job is a required check.
+  `memory_bench.py lock-pgvector --from LOG --run "<the run>"` locks the
+  floors from a run's measurement and marks them verified. Gates:
+  `tests/test_postgres_suite.py` (pytest alone calls the planted skip
+  green: the negative control) and `tests/test_memory_benchmark_pg.py`'s
+  rules without a database (the same lower run fails against verified floors
+  and is only reported against unverified ones).
+- **The benchmarks page says what a number rests on** (2026-11-20,
+  benchmark audit R12, the owner's decision 6). The extraction lock writes
+  `rests_on` (`extraction_rests_on`: per pass and language the turns, the
+  gold facts, the turns with nothing to keep, and for the model's pass the
+  askings, turns times the recording's askings a turn), and
+  `scripts/benchmarks_page.py` prints it in a "Rests on" column; a
+  model-pass row the lock does not count is refused, never printed. The page
+  also prints each edge-list hit from the lock (its question, margin and
+  flips). Gates: `test_the_lock_counts_what_each_extraction_row_rests_on`
+  (the lock's count is the replay's; a typed count fails) and
+  `tests/test_benchmarks_page.py` (a lock without the count refuses the
+  page, a changed count changes it).
 - **Nothing on the hot path parses `kazma.yaml` (S4):**
   `config_loader.install_yaml_section` -- the install root's file, parsed
   once per file version (mtime + size). Gate: `tests/test_install_yaml.py`.
@@ -2742,8 +2825,10 @@ an answer ("User prefers dark mode").
   covers `state_backend.py`). Recall drops every row whose local copy is a
   tombstone or whose turn the forget ledger names (`recall._locally_forgotten`),
   whoever wrote it. Measured on the retrieval benchmark with the mirror as
-  primary and the index on the same vectors: hit rate and MRR equal to local,
-  precision 0.0166 lower (`PRIMARY_DELTA`). Gate:
+  primary and the local vector index on the same vectors (the
+  Postgres-primary keyword path, not pgvector): hit rate and MRR equal to
+  local, precision 0.0166 lower (`PRIMARY_DELTA`). The pgvector path is the
+  other measurement (§15G, "pgvector in CI"). Gate:
   `tests/test_memory_pg_primary.py` (real Postgres: a forget with the mirror
   write failing, left out of recall, repaired by one pass; each with its
   negative control). The mirror tables are in `KAZMA_PG_TABLES` (§21A).

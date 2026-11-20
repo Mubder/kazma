@@ -69,6 +69,58 @@ def _num(value: float | None) -> str:
     return "–" if value is None else f"{value:.2f}"
 
 
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _rests_on(extraction: dict, kind: str, lang: str) -> str:
+    """What one extraction row rests on, from the lock (the owner's decision
+    6): a model-pass row the lock does not count is not printed as a number."""
+    row = ((extraction.get("rests_on") or {}).get(kind) or {}).get(lang)
+    if not row:
+        raise ValueError(f"the lock does not say what {kind}.{lang} rests on: "
+                         "python scripts/memory_bench.py lock")
+    turns = int(row["turns"])
+    if kind != "llm":
+        return _count(turns, "turn")
+    askings = int(row["askings"])
+    each = askings // turns if turns else 0
+    return f"{_count(askings, 'asking')} ({_count(turns, 'turn')}, {each} each)"
+
+
+def _edges(data: dict) -> list[str]:
+    """The hits that hold only by the recorded vectors' rounding (the edge
+    list in the lock, benchmark audit R4)."""
+    edges = data.get("edges") or {}
+    out = []
+    for hit in edges.get("hits") or []:
+        out.append(
+            f"One answer stands at the edge of what the recorded vectors can tell: \"{hit['question']}\" "
+            f"({_MEMORY_NAMES.get(hit['category'], hit['category'])}) is "
+            f"{'shown' if hit['hit'] else 'missed'} by {abs(hit['margin'])} of evidence, and with the vectors "
+            f"moved inside their rounding it changes in {hit['flipped']} of {edges['draws']} replays. Its hit "
+            "counts in the table above; the lock names it (`lock --edge`) instead of moving a threshold for it.")
+    return out + [""] if out else []
+
+
+def _sealed(data: dict) -> list[str]:
+    """The sealed set's last look, apart from the gated scores (benchmark
+    audit R8): it is scored only on request, every look logged in the lock."""
+    looks = (data.get("sealed") or {}).get("looks") or []
+    if not looks:
+        return []
+    last = looks[-1]
+    s = last.get("scores") or {}
+    return [
+        f"**The sealed set**: {last.get('questions')} questions written by a session that does not build "
+        f"recall, never in the per-commit gate and scored only on request: "
+        f"{_pct(s.get('sealed.overall.hit_rate'))} hit rate, {_num(s.get('sealed.overall.mrr'))} MRR and "
+        f"{_pct(s.get('sealed.overall.precision'))} precision at its last look ({last.get('date')}; "
+        f"{_count(len(looks), 'look')} so far, each logged with its reason).",
+        "",
+    ]
+
+
 def _memory(data: dict) -> list[str]:
     s = data["scores"]
     lines = [
@@ -88,15 +140,22 @@ def _memory(data: dict) -> list[str]:
                          f"{_pct(s.get(f'{key}.precision'))} |")
     lines.append(f"| **All questions** | **{_pct(s.get('overall.hit_rate'))}** | **{_num(s.get('overall.mrr'))}** | "
                  f"**{_pct(s.get('overall.precision'))}** |")
-    lines.append(f"| **Held out** (never used to choose a setting) | **{_pct(s.get('heldout.overall.hit_rate'))}** | "
-                 f"**{_num(s.get('heldout.overall.mrr'))}** | **{_pct(s.get('heldout.overall.precision'))}** |")
+    lines.append(f"| **Second set** (see below) | **{_pct(s.get('second.overall.hit_rate'))}** | "
+                 f"**{_num(s.get('second.overall.mrr'))}** | **{_pct(s.get('second.overall.precision'))}** |")
     target = (data.get("targets") or {}).get("abstain.hit_rate")
     lines += [
         "",
         f"Questions it has no memory for are answered with nothing in {_pct(s.get('abstain.hit_rate'))} of cases "
-        f"({_pct(s.get('heldout.abstain.hit_rate'))} held out); the goal is {_pct(target)}: the weakest "
+        f"({_pct(s.get('second.abstain.hit_rate'))} in the second set); the goal is {_pct(target)}: the weakest "
         "number on this page.",
         "",
+        "The second set was written after the settings were chosen, and no setting is chosen by sweeping it. "
+        "It is not an unseen test: two decisions were taken by looking at it, and a change that lowers it "
+        "fails the build like any other score, so it is a second check on the same memories. A set nobody "
+        "has looked at would be a sealed one, scored only on request.",
+        "",
+        *_sealed(data),
+        *_edges(data),
     ]
     extraction = data.get("extraction") or {}
     ex = extraction.get("scores") or {}
@@ -114,17 +173,18 @@ def _memory(data: dict) -> list[str]:
             "not count). **Same name**: of those, the share kept under a name on the list (a fact kept under two "
             "names is two facts to Kazma). **Right**: the facts kept that hold a value the turn gives, about the "
             "right person, and are not on the turn's list of what must not be kept; the name is scored apart. "
-            "**Quiet**: turns with nothing to learn that taught nothing.",
+            "**Quiet**: turns with nothing to learn that taught nothing. **Rests on**: the turns behind the row; "
+            "for the model pass, the askings (one asking is one model call for one turn).",
             "",
-            "| Pass | Language | Found | Same name | Right | Quiet |",
-            "|---|---|---|---|---|---|",
+            "| Pass | Language | Found | Same name | Right | Quiet | Rests on |",
+            "|---|---|---|---|---|---|---|",
         ]
         for kind, label in (("heuristic", "Quick pass"), ("llm", model_label)):
             for lang, lang_label in (("en", "English"), ("ar", "Arabic"), ("mixed", "Mixed")):
                 if f"{kind}.{lang}.found" in ex:
                     lines.append(f"| {label} | {lang_label} | {_pct(ex[f'{kind}.{lang}.found'])} | "
                                  f"{_pct(ex[f'{kind}.{lang}.named'])} | {_pct(ex[f'{kind}.{lang}.right'])} | "
-                                 f"{_pct(ex[f'{kind}.{lang}.quiet'])} |")
+                                 f"{_pct(ex[f'{kind}.{lang}.quiet'])} | {_rests_on(extraction, kind, lang)} |")
         if recording:
             lines += [
                 "",
@@ -133,13 +193,18 @@ def _memory(data: dict) -> list[str]:
                 "differently, so a number from one asking can move by a few facts with nothing changed.",
             ]
         lines.append("")
-    pg = data.get("postgres_primary") or {}
-    if pg:
-        lines += [
-            f"With Postgres as the memory store, the same questions score {_pct(pg.get('overall.hit_rate'))} hit "
-            f"rate, {_num(pg.get('overall.mrr'))} MRR and {_pct(pg.get('overall.precision'))} precision.",
-            "",
-        ]
+    pg = data.get("pgvector") or {}
+    floors = pg.get("floors") or {}
+    if floors:
+        scores = (f"{_pct(floors.get('overall.hit_rate'))} hit rate, {_num(floors.get('overall.mrr'))} MRR and "
+                  f"{_pct(floors.get('overall.precision'))} precision")
+        if pg.get("status") == "verified":
+            lines += [f"With Postgres and pgvector as the memory store ({pg.get('run')}, {pg.get('mode')} "
+                      f"search), the same questions score {scores}.", ""]
+        else:
+            lines += [f"With Postgres and pgvector as the memory store, a run made by hand on 2026-10-14 scored "
+                      f"{scores}. CI's pgvector job now measures it, with pgvector's own search and with every "
+                      "row compared, and these numbers are not locked from it yet.", ""]
     lines += ["Reproduce: `python scripts/memory_bench.py run` (add `--real` to use the real model), and "
               "`python -m pytest tests/test_memory_benchmark.py`.", ""]
     return lines
@@ -248,9 +313,9 @@ def render() -> str:
         "results (`scripts/benchmarks_page.py`), so it says what the code does today. Every dataset, script and "
         "result file is in the repository; the commands under each table reproduce it.",
         "",
-        "The datasets are Kazma's own, built for these questions in English, Arabic and both, with questions "
-        "held out from tuning. They are not a public leaderboard's: compare runs of Kazma with each other, not "
-        "with numbers measured elsewhere.",
+        "The datasets are Kazma's own, built for these questions in English, Arabic and both; the memory and "
+        "Knowledge datasets each keep a second set of questions apart from tuning. They are not a public "
+        "leaderboard's: compare runs of Kazma with each other, not with numbers measured elsewhere.",
         "",
     ]
     lines += _memory(memory) + _knowledge(knowledge) + _fidelity(fidelity)

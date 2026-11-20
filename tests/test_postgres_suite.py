@@ -77,6 +77,108 @@ def test_the_marked_suite_is_not_empty_and_keeps_its_anchors():
         assert anchor in files, f"{anchor} lost its postgres marker"
 
 
+def _job(ci_text: str, name: str) -> str:
+    rest = ci_text.split(f"\n  {name}:\n", 1)[1]
+    return re.split(r"\n  [a-z0-9][a-z0-9_-]*:\n", rest, maxsplit=1)[0]
+
+
+def test_a_second_job_runs_the_pgvector_tests():
+    """The owner's decision 5: a second service and job, beside the plain
+    postgres:18 live runs."""
+    ci = CI.read_text(encoding="utf-8")
+    plain, vector = _job(ci, "postgres"), _job(ci, "pgvector")
+    assert "image: postgres:18" in plain and "pgvector" not in plain.split("steps:")[0]
+    assert re.search(r"image: pgvector/pgvector:[\w.-]+@sha256:[0-9a-f]{64}\n", vector), "pin it by digest"
+    # -rP: the benchmark's measurement (both search modes) is printed in the log.
+    assert "run: python scripts/postgres_suite.py --marker pgvector -rP" in vector
+    assert 'KAZMA_TEST_ALLOW_REAL_DB: "1"' in vector
+    # numpy: without it the recorded-vector benchmarks skipped (R11).
+    for job in (plain, vector):
+        assert "groups: ci-light" in job
+
+
+def test_the_pgvector_marker_is_registered_and_used():
+    import tomllib
+
+    markers = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))[
+        "tool"]["pytest"]["ini_options"]["markers"]
+    assert any(m.startswith("pgvector:") for m in markers)
+    assert {p.name for p in _suite().marked_files(marker="pgvector")} >= {
+        "test_memory_benchmark_pg.py", "test_vector_store_probe.py"}
+
+
+def _markers_of(path: Path, name: str) -> set[str]:
+    """The pytest marks on test *name* in *path*: its decorators and the
+    module's ``pytestmark``."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    marks: set[str] = set()
+
+    def collect(node: ast.AST) -> None:
+        for sub in ast.walk(node):
+            if (isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Attribute)
+                    and sub.value.attr == "mark"):
+                marks.add(sub.attr)
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "pytestmark" for t in node.targets):
+            collect(node.value)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            for deco in node.decorator_list:
+                collect(deco)
+            return marks
+    raise AssertionError(f"{path.name} defines no {name}")
+
+
+def test_every_named_test_exists_and_carries_its_jobs_marker():
+    for marker, named in _suite().MUST_RUN.items():
+        assert named, marker
+        for node in named:
+            rel, name = node.split("::")
+            path = REPO / rel
+            assert path.is_file(), node
+            assert marker in _markers_of(path, name), f"{node} is named by the {marker} job but not marked"
+
+
+def _junit(*cases: str) -> str:
+    return f'<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite>{"".join(cases)}</testsuite></testsuites>'
+
+
+def test_a_named_test_that_skips_fails_the_job():
+    named = ("tests/test_memory_benchmark_pg.py::test_the_benchmark_on_postgres_primary",)
+    problems = _suite().named_problems
+    ran = '<testcase classname="tests.test_memory_benchmark_pg" name="test_the_benchmark_on_postgres_primary"/>'
+    skipped = ('<testcase classname="tests.test_memory_benchmark_pg" name="test_the_benchmark_on_postgres_primary">'
+               '<skipped message="pgvector is not available on this database"/></testcase>')
+    failed = ('<testcase classname="tests.test_memory_benchmark_pg" name="test_the_benchmark_on_postgres_primary">'
+              '<failure message="x"/></testcase>')
+    assert problems(_junit(ran), named) == []
+    assert "skipped (pgvector is not available" in problems(_junit(skipped), named)[0]
+    assert problems(_junit(failed), named)[0].endswith("failed")
+    assert "did not run" in problems(_junit(), named)[0]
+    # A parametrized test passes only when every case does.
+    param = ('<testcase classname="tests.test_memory_benchmark_pg" name="test_the_benchmark_on_postgres_primary[a]"/>'
+             '<testcase classname="tests.test_memory_benchmark_pg" name="test_the_benchmark_on_postgres_primary[b]">'
+             '<skipped message="b"/></testcase>')
+    assert "skipped" in problems(_junit(param), named)[0]
+
+
+def test_pytest_alone_calls_a_skip_green(tmp_path):
+    """Negative control: the job's old pass condition, pytest's exit code, is
+    0 when the only test it exists for skips; the named check is not."""
+    import subprocess
+
+    (tmp_path / "test_planted.py").write_text(
+        "import pytest\n\ndef test_needs_pgvector():\n    pytest.skip('no pgvector here')\n", encoding="utf-8")
+    report = tmp_path / "junit.xml"
+    code = subprocess.call([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                            f"--junitxml={report}", "test_planted.py"], cwd=str(tmp_path),
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    assert code == 0
+    problems = _suite().named_problems(report.read_text(encoding="utf-8"),
+                                       ("test_planted.py::test_needs_pgvector",))
+    assert problems and "skipped (no pgvector here)" in problems[0]
+
+
 def test_the_marker_detector_sees_both_spellings():
     detect = _suite().carries_marker
     assert detect("import pytest\npytestmark = pytest.mark.postgres\n")

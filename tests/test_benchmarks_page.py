@@ -41,4 +41,52 @@ def test_every_number_comes_from_a_result_file() -> None:
     text = (ROOT / "docs" / "docs" / "reference" / "benchmarks.md").read_text(encoding="utf-8")
     for source in ("scripts/memory_bench.py", "scripts/knowledge_bench.py", "scripts/document_fidelity.py"):
         assert source.split("/")[-1].removesuffix(".py") in text
-    assert "held out" in text.lower() and "Arabic" in text
+    assert "second set" in text.lower() and "Arabic" in text
+
+
+def test_each_model_pass_row_says_how_many_askings_it_rests_on() -> None:
+    """The owner's decision 6 (benchmark audit R12), from the lock."""
+    text = (ROOT / "docs" / "docs" / "reference" / "benchmarks.md").read_text(encoding="utf-8")
+    rows = [line for line in text.splitlines() if line.startswith("| Model pass")]
+    assert len(rows) == 3
+    for row in rows:
+        assert row.rstrip(" |").split("|")[-1].strip().split(" ")[1] in ("asking", "askings"), row
+
+
+def test_a_model_pass_row_the_lock_does_not_count_is_not_printed(tmp_path, monkeypatch) -> None:
+    """Negative control: a lock without the count refuses the page, and a
+    changed count changes it."""
+    import json
+
+    import pytest
+
+    module = _page_module()
+    data = json.loads(module.MEMORY.read_text(encoding="utf-8"))
+    changed = tmp_path / "thresholds.json"
+    data["extraction"]["rests_on"]["llm"]["ar"]["askings"] = 50
+    changed.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(module, "MEMORY", changed)
+    assert "50 askings (10 turns, 5 each)" in module.render()
+    assert module.main(["--check"]) == 1
+    del data["extraction"]["rests_on"]
+    changed.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="rests on"):
+        module.render()
+
+
+def test_the_sealed_set_is_printed_apart_with_its_looks(tmp_path, monkeypatch) -> None:
+    """Benchmark audit R8: the sealed set's last look, apart from the gated
+    scores, with how many looks; nothing while none was made."""
+    import json
+
+    module = _page_module()
+    data = json.loads(module.MEMORY.read_text(encoding="utf-8"))
+    if not (data.get("sealed") or {}).get("looks"):
+        assert "The sealed set" not in module.render()
+    data["sealed"] = {"looks": [{"date": "2026-12-01", "questions": 96, "scores": {
+        "sealed.overall.hit_rate": 0.8125, "sealed.overall.mrr": 0.7, "sealed.overall.precision": 0.6}}]}
+    changed = tmp_path / "thresholds.json"
+    changed.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(module, "MEMORY", changed)
+    text = module.render()
+    assert "The sealed set**: 96 questions" in text and "81.2 %" in text and "1 look so far" in text

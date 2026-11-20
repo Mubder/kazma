@@ -26,9 +26,11 @@ noise, arabic, fact, overview, abstain):
 It never touches live memory: its own temp database, its own tenant id, and
 ``recall(local_only=True)`` so no state mirror or remote index is consulted.
 
-Held out (dataset v5, Memory audit M24): ``heldout`` questions are scored the
-same way and reported apart (``report["heldout"]``); recall's thresholds were
-never swept on them. The extraction benchmark
+The second set (dataset v5, Memory audit M24): ``second`` questions are
+scored the same way and reported apart (``report["second"]``, gated as
+``second.*``). No threshold is swept on them, but decisions were taken by
+looking at them, so they are a second check, not an unseen test
+(benchmark audit R8, renamed 2026-11-20). The extraction benchmark
 (:func:`run_extraction_benchmark`) scores what the heuristic pass -- and,
 from recorded replies, the model's deep pass -- keeps from single turns in
 English, Arabic and mixed.
@@ -47,12 +49,22 @@ from typing import Any
 
 __all__ = [
     "DATASET_PATH",
+    "EDGE_DRAWS",
+    "EDGE_MOVE",
+    "EDGE_SEED",
+    "EDGE_WATCH",
+    "edge_check",
+    "SEALED_CATEGORIES",
+    "SEALED_PER_CATEGORY",
+    "sealed_dataset",
+    "sealed_problems",
     "EXTRACTION_PATH",
     "EXTRACTION_SCORES",
     "RECORD_AGAIN",
     "RecordingEmbedder",
     "ReplayEmbedder",
     "StaleRecordingError",
+    "extraction_rests_on",
     "extraction_scores",
     "gated_scores",
     "load_dataset",
@@ -218,6 +230,39 @@ def _score(
     return out
 
 
+def _margin(
+    question: dict[str, Any], refs: dict[str, str], covers: dict[str, set[str]],
+    trace: list[dict[str, Any]],
+) -> float | None:
+    """How far the question's hit stands from changing, in evidence.
+
+    Each memory's distance to the cut recall held it to (``trace_evidence``:
+    the floor, or the gap behind the best), positive when it clears it. A
+    piece of the answer stands by its best alternative (a summary standing
+    for it counts); the question by its weakest piece. For a question
+    nothing answers, by the best memory's distance below the cut. Positive:
+    the hit holds by that much; negative: it misses by that much. None: an
+    answer that was never a candidate (not near the cut). The limit on how
+    many are shown is not counted (benchmark audit R4, the edge rule).
+    """
+    dist: dict[str, float] = {}
+    for row in trace:
+        for mid, ev in row["evidence"].items():
+            d = ev - row["cut"]
+            dist[mid] = max(d, dist.get(mid, d))
+    pieces = [{refs[a] for a in piece.split("|")} for piece in question["gold"]]
+    if not pieces:
+        return round(-max(dist.values()), 4) if dist else None
+    margins = []
+    for piece in pieces:
+        alternatives = piece | {s for s, covered in covers.items() if covered & piece}
+        here = [dist[a] for a in alternatives if a in dist]
+        if not here:
+            return None
+        margins.append(max(here))
+    return round(min(margins), 4)
+
+
 def _summarise(results: list[dict[str, Any]], latencies: list[float]) -> dict[str, Any]:
     cats: dict[str, dict[str, Any]] = {}
     for r in results:
@@ -263,7 +308,7 @@ def gated_scores(report: dict[str, Any]) -> dict[str, float]:
     code's.
     """
     out: dict[str, float] = {}
-    for prefix, part in (("", report), ("heldout.", report.get("heldout"))):
+    for prefix, part in (("", report), ("second.", report.get("second"))):
         if not part:
             continue
         out.update({f"{prefix}overall.{k}": float(v) for k, v in part["overall"].items()
@@ -282,7 +327,7 @@ def run_benchmark(
     keep_results: bool = False,
 ) -> dict[str, Any]:
     """Seed a private database, ask every question, return the scores."""
-    from kazma_core.memory.recall import recall
+    from kazma_core.memory.recall import recall, trace_evidence
     from kazma_core.memory.schema_v2 import ensure_primary_schema
 
     data = dataset or load_dataset()
@@ -298,25 +343,29 @@ def run_benchmark(
             results, latencies = [], []
             for q in questions:
                 started = time.perf_counter()
-                res = recall(q["text"], conn=conn, tenant_id=BENCH_TENANT, limit=limit,
-                             local_only=True)
+                with trace_evidence() as trace:
+                    res = recall(q["text"], conn=conn, tenant_id=BENCH_TENANT, limit=limit,
+                                 local_only=True)
                 latencies.append(time.perf_counter() - started)
                 # Facts, history, then weekly summaries: the order format_recall_block shows.
                 injected = (
                     [h.id for h in res.beliefs[:limit]] + [h.id for h in res.episodes[:limit]]
                     + [h.id for h in res.summaries]
                 )
-                results.append(_score(q, refs, injected, covers))
+                scored = _score(q, refs, injected, covers)
+                if keep_results:
+                    scored["margin"] = _margin(q, refs, covers, trace)
+                results.append(scored)
             return results, latencies
 
         results, latencies = ask(data["questions"])
         report = _summarise(results, latencies)
         report["memories"] = len(refs)
-        if data.get("heldout"):
-            held, held_latencies = ask(data["heldout"])
-            report["heldout"] = _summarise(held, held_latencies)
+        if data.get("second"):
+            held, held_latencies = ask(data["second"])
+            report["second"] = _summarise(held, held_latencies)
             if keep_results:
-                report["heldout"]["results"] = held
+                report["second"]["results"] = held
         if keep_results:
             report["results"] = results
         return report
@@ -396,6 +445,232 @@ class ReplayEmbedder:
                 "run: python scripts/memory_bench.py vectors"
             )
         return (self._vecs[i].astype("float32") * self._scale[i]).tolist()
+
+
+# ── The edge (benchmark audit R4; the owner's decision 3, 2026-11-18) ───────
+#
+# The recording keeps one byte a number, so the model's real vector is
+# anywhere within half a rounding step of the recorded one, and another
+# machine's model differs from it by about that much (audit F5: bge-m3's own
+# vectors moved 2 of the 78 scores). A hit that holds on the fourth decimal
+# of one similarity holds on this machine's recording only. ``lock`` replays
+# the benchmark with the vectors moved inside their rounding (EDGE_DRAWS
+# seeded draws, the same move for the same text) and refuses when a hit
+# flips, unless the question is on the edge list with its margin named: the
+# only exit. Never a threshold moved to save one question.
+
+#: Seeded draws the lock replays; the seed makes every lock see the same moves.
+EDGE_DRAWS = 10
+EDGE_SEED = 20261120
+#: How far each recorded number moves, in its own rounding steps (uniform in
+#: plus or minus this): half a step, the band the model's value lies in.
+EDGE_MOVE = 0.5
+#: CI asks the draws again for the questions this close to recall's cut (in
+#: evidence), so a change that brings a question to the edge without moving a
+#: score is seen: at least three times the largest move a lock measured
+#: (``largest_move`` in the lock, 0.0023 on 2026-11-20).
+EDGE_WATCH = 0.01
+
+
+class _MovedEmbedder(ReplayEmbedder):
+    """The recorded vectors, each number moved at random by at most
+    :data:`EDGE_MOVE` of its rounding step; the same move for the same text
+    in one draw."""
+
+    def __init__(self, path: str | os.PathLike[str], seed: int, move: float = EDGE_MOVE) -> None:
+        super().__init__(path)
+        if str(self._vecs.dtype) != "int8":
+            # A float recording has no rounding step: its edge needs the
+            # model's measured spread, not this one. Never a quiet pass.
+            raise ValueError(
+                f"the edge moves an int8 recording inside its rounding; this one is "
+                f"{self._vecs.dtype}: measure its spread and give the edge check that"
+            )
+        self._seed = int(seed)
+        self._move = float(move)
+
+    def encode(self, text: str) -> list[float]:
+        import hashlib
+
+        import numpy as np
+
+        key = _text_key(text)
+        i = self._index.get(key)
+        if i is None:
+            return super().encode(text)  # the replay's own refusal
+        digest = hashlib.sha256(f"{self._seed}:{key}".encode()).digest()
+        noise = np.random.default_rng(int.from_bytes(digest[:8], "big")).uniform(
+            -self._move, self._move, self._vecs.shape[1])
+        return ((self._vecs[i].astype("float32") + noise.astype("float32")) * self._scale[i]).tolist()
+
+
+def _all_results(report: dict[str, Any]) -> list[dict[str, Any]]:
+    return list(report.get("results", [])) + list((report.get("second") or {}).get("results", []))
+
+
+def edge_check(
+    vectors: str | os.PathLike[str],
+    base: dict[str, Any],
+    *,
+    draws: int = EDGE_DRAWS,
+    only: set[str] | None = None,
+    dataset: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Replay the benchmark *draws* times with the recorded vectors moved
+    inside their rounding, against *base* (``run_benchmark(keep_results=
+    True)`` on the vectors as recorded).
+
+    Returns the draws' settings, ``flips`` (question id -> in how many draws
+    its hit changed), ``shown`` (question id -> in how many draws what it
+    showed changed while its hit held: one memory more or less, another
+    order), and ``largest_move`` (the most a question's margin moved in any
+    draw). *only* asks just those questions (CI's check of the questions near
+    the edge); the lock asks every one.
+    """
+    from unittest import mock
+
+    data = dataset or load_dataset()
+    if only is not None:
+        data = {**data, "questions": [q for q in data["questions"] if q["id"] in only],
+                "second": [q for q in data.get("second", []) if q["id"] in only]}
+    was = {r["id"]: r for r in _all_results(base)}
+    flips: dict[str, int] = {}
+    shown: dict[str, int] = {}
+    largest = 0.0
+    for i in range(draws):
+        moved = _MovedEmbedder(vectors, EDGE_SEED + i)
+        with mock.patch("kazma_core.memory.embedder.get_embedder", lambda e=moved: e), \
+                mock.patch("kazma_core.memory.embedder.get_embedding_model_name", lambda m=moved.model: m):
+            report = run_benchmark(data, keep_results=True)
+        for r in _all_results(report):
+            b = was[r["id"]]
+            if bool(r["hit"]) != bool(b["hit"]):
+                flips[r["id"]] = flips.get(r["id"], 0) + 1
+            elif any(r.get(k) != b.get(k) for k in ("injected", "rr", "precision", "order")):
+                shown[r["id"]] = shown.get(r["id"], 0) + 1
+            if r.get("margin") is not None and b.get("margin") is not None:
+                largest = max(largest, abs(r["margin"] - b["margin"]))
+    return {"draws": draws, "seed": EDGE_SEED, "move": EDGE_MOVE,
+            "flips": dict(sorted(flips.items())), "shown": dict(sorted(shown.items())),
+            "largest_move": round(largest, 4)}
+
+
+# ── The sealed set (benchmark audit R8; the owner's decision 4) ─────────────
+#
+# Questions written by a session that does not build or tune recall
+# (docs/plans/MEMORY_SEALED_SET.md), kept out of the per-commit gate: CI checks
+# the file's shape only (:func:`sealed_problems`), and the set is scored only
+# by ``scripts/memory_bench.py sealed --look "why"``, every look logged in the
+# lock, a deciding look spending it.
+
+#: The categories the sealed set covers, each with at least this many
+#: questions (the benchmark audit's R6 minimum for a locked category).
+SEALED_CATEGORIES = ("single", "paraphrase", "assistant", "multi", "update", "keyword", "noise", "fact",
+                     "overview", "arabic", "mixed", "abstain")
+SEALED_PER_CATEGORY = 8
+#: Categories other than these hold at least two Arabic questions.
+_SEALED_NOT_ARABIC = ("arabic", "mixed", "keyword")
+
+
+def _folded_question(text: str) -> str:
+    import re
+
+    return " ".join(re.findall(r"\w+", str(text or "").casefold()))
+
+
+def sealed_problems(sealed: dict[str, Any], dataset: dict[str, Any]) -> list[str]:
+    """Why *sealed* is not the set the specification asks for (empty: it is).
+
+    Its shape only: never a score. Counts per category, unique ``sNNN`` ids,
+    languages, every gold and ``below`` id present in *dataset*, nothing to
+    show for ``abstain``, no repeat of a tuning or second-set question.
+    """
+    import re
+
+    problems: list[str] = []
+    for key in ("version", "dataset_version", "written_by", "written_on", "questions"):
+        if not sealed.get(key):
+            problems.append(f"no {key}")
+    if sealed.get("dataset_version") not in (None, dataset.get("version")):
+        problems.append(f"written for dataset v{sealed.get('dataset_version')}, the dataset is "
+                        f"v{dataset.get('version')}: check its ids, and have it rewritten if they moved")
+    refs = {f"{s['id']}#{i}" for s in dataset["sessions"] for i in range(1, len(s["turns"]) + 1)}
+    refs |= {f["id"] for f in dataset.get("facts", [])} | {s["id"] for s in dataset.get("summaries", [])}
+    # The second set under either key: "heldout" until the rename reached the
+    # dataset everywhere (2026-11-20).
+    second = dataset.get("second") or dataset.get("heldout") or []
+    existing = {_folded_question(q["text"]) for q in dataset["questions"] + second}
+    seen_ids: set[str] = set()
+    seen_texts: set[str] = set()
+    counts: dict[str, int] = {}
+    arabic: dict[str, int] = {}
+    dialects: dict[str, int] = {}
+    for q in sealed.get("questions") or []:
+        qid = str(q.get("id") or "")
+        where = qid or "a question with no id"
+        if not re.fullmatch(r"s\d{3}", qid):
+            problems.append(f"{where}: an id is s001 to s096")
+        if qid in seen_ids:
+            problems.append(f"{where}: the id is used twice")
+        seen_ids.add(qid)
+        category = q.get("category")
+        if category not in SEALED_CATEGORIES:
+            problems.append(f"{where}: no category {category!r}")
+            continue
+        counts[category] = counts.get(category, 0) + 1
+        lang = q.get("lang")
+        if lang not in ("en", "ar", "mixed"):
+            problems.append(f"{where}: lang is en, ar or mixed, not {lang!r}")
+        if lang == "ar":
+            arabic[category] = arabic.get(category, 0) + 1
+            if q.get("dialect") not in ("gulf", "msa"):
+                problems.append(f"{where}: an Arabic question names its dialect (gulf or msa)")
+            elif category == "arabic":
+                dialects[q["dialect"]] = dialects.get(q["dialect"], 0) + 1
+        # A mixed question may be asked wholly in one language about a memory
+        # said in the other (the specification): its lang is the question's.
+        if category == "arabic" and lang != "ar":
+            problems.append(f"{where}: an arabic question has lang ar")
+        folded = _folded_question(q.get("text"))
+        if not folded:
+            problems.append(f"{where}: no text")
+        elif folded in existing:
+            problems.append(f"{where}: repeats a question the benchmark already asks")
+        elif folded in seen_texts:
+            problems.append(f"{where}: asked twice in the sealed set")
+        seen_texts.add(folded)
+        gold = q.get("gold")
+        if not isinstance(gold, list):
+            problems.append(f"{where}: gold is a list")
+            gold = []
+        if category == "abstain" and gold:
+            problems.append(f"{where}: an abstain question has no gold (nothing should be shown)")
+        if category != "abstain" and not gold:
+            problems.append(f"{where}: an answerable question names the memories that answer it")
+        for piece in gold:
+            unknown = [a for a in str(piece).split("|") if a not in refs]
+            if unknown:
+                problems.append(f"{where}: no memory {', '.join(unknown)} in the dataset")
+        unknown_below = [b for b in q.get("below") or [] if b not in refs]
+        if unknown_below:
+            problems.append(f"{where}: no memory {', '.join(unknown_below)} in the dataset (below)")
+        if not str(q.get("why") or "").strip():
+            problems.append(f"{where}: no why")
+    for category in SEALED_CATEGORIES:
+        if counts.get(category, 0) < SEALED_PER_CATEGORY:
+            problems.append(f"{category}: {counts.get(category, 0)} questions, at least {SEALED_PER_CATEGORY}")
+        if category not in _SEALED_NOT_ARABIC and arabic.get(category, 0) < 2:
+            problems.append(f"{category}: {arabic.get(category, 0)} Arabic questions, at least 2")
+    for dialect in ("gulf", "msa"):
+        if dialects.get(dialect, 0) < 3:
+            problems.append(f"arabic: {dialects.get(dialect, 0)} {dialect} questions, about half of the category")
+    return problems
+
+
+def sealed_dataset(sealed: dict[str, Any], dataset: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The benchmark's memories, asked the sealed questions only."""
+    data = dataset or load_dataset()
+    return {**data, "questions": list(sealed["questions"]), "second": []}
 
 
 # ── Extraction (Memory audit M24; scored by value since 2026-11) ───────────
@@ -700,6 +975,27 @@ def run_extraction_benchmark(
 
 #: The extraction scores the lock holds, per pass and language.
 EXTRACTION_SCORES = ("found", "named", "right", "quiet")
+
+
+def extraction_rests_on(report: dict[str, Any]) -> dict[str, dict[str, dict[str, int]]]:
+    """What each extraction row rests on, per pass and language: the turns,
+    the gold facts behind ``found``, the turns with nothing to keep behind
+    ``quiet``, and for the model's pass the askings (turns times the
+    recording's askings a turn). The lock writes it; the benchmarks page
+    prints it beside the scores (benchmark audit R12, the owner's decision 6).
+    """
+    askings = int((report.get("llm_recording") or {}).get("askings") or 0)
+    out: dict[str, dict[str, dict[str, int]]] = {}
+    for pass_name in ("heuristic", "llm"):
+        part = report.get(pass_name) or {}
+        for lang, row in sorted(part.items()):
+            if not isinstance(row, dict):
+                continue
+            entry = {"turns": int(row["turns"]), "gold": int(row["gold"]), "quiet_turns": int(row["quiet_turns"])}
+            if pass_name == "llm":
+                entry["askings"] = int(row["turns"]) * askings
+            out.setdefault(pass_name, {})[lang] = entry
+    return out
 
 
 def extraction_scores(report: dict[str, Any]) -> dict[str, float]:

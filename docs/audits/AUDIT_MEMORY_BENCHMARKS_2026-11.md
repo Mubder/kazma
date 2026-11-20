@@ -671,6 +671,65 @@ again and one rebaseline.
 Until step 3 is done, the public page should not print the Model pass rows
 as they are, or should say beside them "one asking a turn; see the audit".
 
+### Status of the steps
+
+Added as each step lands (the owner decided section 7 on 2026-11-18: the
+framework audit's section 6.2, decisions 3 to 6).
+
+- **Step 1.** R3's two checks are in (a recording names the prompt it
+  answered, and no recording is a failure), and R11's plain `import numpy`
+  in the gate file (commit `7a71ef6bc`). The Postgres suite naming the tests
+  that must run comes with step 6.
+- **Step 2.** Done: the deep pass is scored by value (`found`, `named`,
+  `right`, `quiet`), extraction dataset version 2 (commit `7a71ef6bc`).
+- **Step 4, 2026-11-20: the edge check is in; the float recording is not.**
+  `lock` replays the benchmark in ten seeded draws with every recorded
+  number moved inside its rounding (half a step) and refuses when a hit
+  flips, naming the question and its margin; the edge list in
+  `thresholds.json` is the only exit (decision 3). On today's dataset it
+  stops on q601 (it flips in 1 of the 10 draws), which is on the list with
+  its margin, 0.0004, and its reason. Ten other questions change what they
+  show in some draw; the lock lists them. CI asks the draws again for the
+  questions within 0.01 of recall's cut, so a change that brings a question
+  to the edge is seen without a lock (`tests/test_memory_benchmark_edges.py`).
+  Not done: the float32 recording and the check of the model's commit, which
+  need the embedder and belong with step 5's re-record, and the real-model
+  run before a lock.
+- **Step 6, R7 (and R11's second half), 2026-11-20: built; its first CI run
+  measures.** A second CI job runs the tests marked `pgvector` on
+  `pgvector/pgvector:0.8.7-pg18` (pinned by digest), beside the plain
+  `postgres:18` job, and the Postgres suite names the tests each job exists
+  for: one that skips fails the job. Both jobs install numpy (`ci-light`),
+  without which the Postgres-primary benchmark skipped on every run. The two
+  measurements have two names. The pgvector benchmark asks every question
+  with pgvector's own search and with every row compared, prints both, and
+  holds the product's to the lock's floors both ways; the floors are the
+  2026-10-14 run made by hand, marked unverified, so a difference is
+  reported, not failed, until `lock-pgvector` locks them from a named CI
+  run. Exact against approximate (decision 5) is settled from those numbers,
+  not by default: the product's search is unchanged.
+- **Step 8, R8, 2026-11-20: today's set is renamed, and stays gated.** The
+  40 questions are the second set everywhere a reader sees them (the
+  dataset's key, the lock's `second.*` scores, the benchmarks page, the
+  guide and its 2026-10-14 report, which says why) and they stay in the
+  per-commit gate (decision 4). A check holds the words: nothing on the
+  page, in the guide, the builder or the benchmark's docstring calls a set
+  held out unless it names it sealed (`tests/test_memory_benchmark.py`,
+  the old words as the negative control). The sealed set itself is to be
+  written by another session: `docs/plans/MEMORY_SEALED_SET.md` specifies
+  what it covers, the file and the format. What scores it is built: CI
+  checks the file's shape only, `memory_bench.py sealed --look "why"` alone
+  scores it, every look is logged in the lock, and a deciding look spends
+  the set (`tests/test_memory_benchmark_sealed.py`, on a planted set until
+  the real one is written).
+- **Step 8, R12, 2026-11-20: the page says how many askings each model-pass
+  row rests on** (decision 6). The extraction lock counts, per pass and
+  language, the turns, the gold facts and the askings, and the page prints
+  them in a "Rests on" column: 12, 10 and 8 askings, one a turn. A lock that
+  does not count a row refuses the page. The page also prints the edge
+  list's hit (q601, step 4). Not done here: the spread beside a recorded
+  score, which needs several askings a turn (step 3).
+
 ---
 
 ## 7. Decisions for the owner

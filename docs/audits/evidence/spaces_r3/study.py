@@ -1019,9 +1019,9 @@ def _print(report: dict[str, Any]) -> None:
     for variant, row in report["v5_one_member"].items():
         s = row["scores"]
         print(f"  {variant:<9} equal_to_locked {row['equal_to_locked']}  overall hit {s['overall.hit_rate']} "
-              f"mrr {s['overall.mrr']} precision {s['overall.precision']}  heldout hit "
-              f"{s['heldout.overall.hit_rate']} mrr {s['heldout.overall.mrr']} precision "
-              f"{s['heldout.overall.precision']}  changed {len(row['different_from_locked'])}")
+              f"mrr {s['overall.mrr']} precision {s['overall.precision']}  second-set hit "
+              f"{s['second.overall.hit_rate']} mrr {s['second.overall.mrr']} precision "
+              f"{s['second.overall.precision']}  changed {len(row['different_from_locked'])}")
     e = report["extraction"]
     print("extraction")
     print("  quick tagged == untagged:", list(e["quick_tagged"].values()) == list(e["quick_untagged"].values()))
