@@ -153,6 +153,28 @@ def test_the_shape_check_refuses_each_fault(fault, expect):
     assert any(expect in p for p in problems), problems
 
 
+def test_a_repeat_is_seen_under_either_key_of_the_second_set():
+    """The dataset named the second set ``heldout`` until 2026-11-20: a
+    repeat of one of its questions is refused under either key."""
+    sealed, _ = _planted()
+    data = benchmark.load_dataset()
+    sealed["questions"][5]["text"] = data["second"][0]["text"]
+    old = {k: v for k, v in data.items() if k != "second"}
+    old["heldout"] = data["second"]
+    for dataset in (data, old):
+        assert any("repeats a question" in p for p in benchmark.sealed_problems(sealed, dataset))
+
+
+def test_a_mixed_question_may_be_asked_in_one_language():
+    """The specification: asked in one language about a memory said in the
+    other. Its lang is the question's own."""
+    sealed, _ = _planted()
+    for q in sealed["questions"]:
+        if q["category"] == "mixed":
+            q.update(lang="ar", dialect="gulf")
+    assert benchmark.sealed_problems(sealed, benchmark.load_dataset()) == []
+
+
 # ── The look: scored on request, logged, spent by a decision ──────────────
 
 

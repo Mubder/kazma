@@ -596,7 +596,10 @@ def sealed_problems(sealed: dict[str, Any], dataset: dict[str, Any]) -> list[str
                         f"v{dataset.get('version')}: check its ids, and have it rewritten if they moved")
     refs = {f"{s['id']}#{i}" for s in dataset["sessions"] for i in range(1, len(s["turns"]) + 1)}
     refs |= {f["id"] for f in dataset.get("facts", [])} | {s["id"] for s in dataset.get("summaries", [])}
-    existing = {_folded_question(q["text"]) for q in dataset["questions"] + dataset.get("second", [])}
+    # The second set under either key: "heldout" until the rename reached the
+    # dataset everywhere (2026-11-20).
+    second = dataset.get("second") or dataset.get("heldout") or []
+    existing = {_folded_question(q["text"]) for q in dataset["questions"] + second}
     seen_ids: set[str] = set()
     seen_texts: set[str] = set()
     counts: dict[str, int] = {}
@@ -624,8 +627,10 @@ def sealed_problems(sealed: dict[str, Any], dataset: dict[str, Any]) -> list[str
                 problems.append(f"{where}: an Arabic question names its dialect (gulf or msa)")
             elif category == "arabic":
                 dialects[q["dialect"]] = dialects.get(q["dialect"], 0) + 1
-        if (category == "arabic" and lang != "ar") or (category == "mixed" and lang != "mixed"):
-            problems.append(f"{where}: a {category} question has lang {'ar' if category == 'arabic' else 'mixed'}")
+        # A mixed question may be asked wholly in one language about a memory
+        # said in the other (the specification): its lang is the question's.
+        if category == "arabic" and lang != "ar":
+            problems.append(f"{where}: an arabic question has lang ar")
         folded = _folded_question(q.get("text"))
         if not folded:
             problems.append(f"{where}: no text")
