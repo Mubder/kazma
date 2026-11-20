@@ -221,6 +221,128 @@ def _list_available_tools() -> list[str]:
         return list(_ANNOUNCED_TOOLS)
 
 
+def _identity_lines() -> list[str]:
+    """Runtime identity -- stops the agent "diagnosing" that Kazma is offline
+    while it is the process serving this chat (a common smoke-test failure)."""
+    listen_hint = (
+        os.environ.get("KAZMA_PUBLIC_URL")
+        or os.environ.get("KAZMA_BASE_URL")
+        or ""
+    ).strip()
+    from kazma_core.server_port import server_port
+
+    port_hint = str(server_port())  # a number: nothing to escape in the URL
+    lines: list[str] = [
+        "## You are Kazma (this process)",
+        "- You **are** the Kazma agent for this deployment — not an external inspector.",
+        "- The web UI / API you serve is **already running in this process**.",
+        f"- Default local URL: `http://127.0.0.1:{port_hint}` (and `http://localhost:{port_hint}`).",
+    ]
+    if listen_hint:
+        lines.append(
+            f"- Public / configured base URL: `{_sanitize_env_field(listen_hint, max_len=200)}`"
+        )
+    lines.extend(
+        [
+            "- Do **not** conclude the server is down just because `browser_navigate` "
+            "to ports 3000/8000 fails — those are often wrong ports.",
+            "- Prefer `file_*`, config tools, and in-app APIs over shell probes of "
+            "unrelated ports when verifying yourself.",
+        ]
+    )
+    return lines
+
+
+def _max_rounds_lines() -> list[str]:
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw_mi = get_config_store().get("agent.max_iterations", 15)
+        max_iter = max(5, min(100, int(raw_mi)))
+    except Exception:
+        return []
+    return [
+        f"- **Max tool rounds this process:** {max_iter} "
+        "(Settings → Agent; Chat≈15, Deep≈30, Research≈40)."
+    ]
+
+
+def _visible_work_lines() -> list[str]:
+    return [
+        "",
+        "### Visible work (UI workbench) — required for multi-step tasks",
+        "When you will use **2+ tools** (or any long mission), your **first** "
+        "assistant message content in that turn MUST open with a plan fence "
+        "(even if you also emit tool_calls in the same turn):",
+        "",
+        "```plan",
+        "- Inspect project identity",
+        "- Run the relevant tools",
+        "- Write findings / deliverable",
+        "```",
+        "",
+        "Rules: 3–7 bullets; concrete verbs; no empty plan. Close the fence "
+        "with ``` alone on its own line, then a blank line, then the answer — "
+        "never glue prose onto the ticks (wrong: ```Saved.). The UI pins this "
+        "above Activity (tools/status). After tools, give a clear final answer. "
+        "A plan with no tool_calls is not a finished turn.",
+    ]
+
+
+#: The announced tools that need approval before they run.
+_APPROVAL_TOOLS = ("file_apply_patch_set", "file_apply_patch", "file_write", "shell_exec", "git_push")
+
+
+def _sandboxed_space_note() -> str:
+    """The note of a turn in a sandboxed space (Spaces S1-31): its own folder,
+    named only by relative paths, and the tools it has. Never the install's
+    folder, workspace, repository, MCP binding or host shell: a member's
+    turn is told none of them."""
+    from kazma_core.spaces.tools import host_allowance, host_refusal
+
+    lines = _identity_lines()
+    lines.extend(
+        [
+            "",
+            "## This space's folder (BINDING — not optional)",
+            "- This space keeps its files in a folder of its own. `file_*` and "
+            "`python_exec` work there: use **relative paths** (for example `notes/plan.md`).",
+            "- Nothing outside this space's folder is reachable from here. This space "
+            "has no shell, git, IDE or MCP servers: they act on the machine Kazma runs "
+            "on, and do not exist here.",
+        ]
+    )
+    lines.extend(_max_rounds_lines())
+    from kazma_core.safety.deployment_policy import policy_read_failures
+
+    try:
+        from kazma_core.tools.code_exec import jail_note_for_tool
+
+        lines.append("- **Python execution policy:** " + jail_note_for_tool("python_exec"))
+    except policy_read_failures():
+        lines.append("- **Execution policy:** unavailable; do not claim execution is permitted.")
+    lines.extend(
+        [
+            "",
+            "### Hard rules (must follow)",
+            "1. **Only this space's folder is in scope.** Prefer relative paths; do not "
+            "ask for or guess a path outside it.",
+            "2. Do not claim to see the machine Kazma runs on, its other folders or its "
+            "other people's work: none of it is reachable from this space.",
+        ]
+    )
+    lines.extend(_visible_work_lines())
+    allowance = host_allowance()
+    tools = [t for t in _list_available_tools() if host_refusal(t, allowance) is None]
+    lines.append("")
+    if tools:
+        lines.append("Available tools in this space: " + ", ".join(tools) + ".")
+    asking = [t for t in _APPROVAL_TOOLS if t in tools]
+    if asking:
+        lines.append(f"These ask for approval before they run: {', '.join(asking)}.")
+    return "\n".join(lines)
+
+
 def _build_env_context_sync(workspace_id: str | None = None) -> str:
     """Build the environment-awareness markdown block (blocking variant).
 
@@ -238,6 +360,16 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
         A markdown block describing the workspace, repo, branch, and
         available tools. Always non-empty. Safe to prepend to any prompt.
     """
+    from kazma_core.spaces import files as space_files
+
+    try:
+        sandboxed = space_files.sandboxed_space() is not None
+    except space_files.SpaceKindUnknown:
+        sandboxed = True  # a space whose kind cannot be read is never told the machine's
+    if sandboxed:
+        if workspace_id:
+            logger.debug("[env_context] a sandboxed space's task names a workspace; its own folder is told")
+        return _sandboxed_space_note()
     try:
         root = _resolve_root(workspace_id)
     except Exception:  # pragma: no cover - defensive
@@ -262,33 +394,9 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
     slug = _sanitize_env_field(detect_repo_slug(root))
     branch = _sanitize_env_field(detect_branch(root))
 
-    # Runtime identity — stops the agent "diagnosing" that Kazma is offline
-    # while it is the process serving this chat (common smoke-test failure).
-    listen_hint = (
-        os.environ.get("KAZMA_PUBLIC_URL")
-        or os.environ.get("KAZMA_BASE_URL")
-        or ""
-    ).strip()
-    from kazma_core.server_port import server_port
-
-    port_hint = str(server_port())  # a number: nothing to escape in the URL
-
-    lines: list[str] = [
-        "## You are Kazma (this process)",
-        "- You **are** the Kazma agent for this deployment — not an external inspector.",
-        "- The web UI / API you serve is **already running in this process**.",
-        f"- Default local URL: `http://127.0.0.1:{port_hint}` (and `http://localhost:{port_hint}`).",
-    ]
-    if listen_hint:
-        lines.append(
-            f"- Public / configured base URL: `{_sanitize_env_field(listen_hint, max_len=200)}`"
-        )
+    lines = _identity_lines()
     lines.extend(
         [
-            "- Do **not** conclude the server is down just because `browser_navigate` "
-            "to ports 3000/8000 fails — those are often wrong ports.",
-            "- Prefer `file_*`, config tools, and in-app APIs over shell probes of "
-            "unrelated ports when verifying yourself.",
             "",
             "## Active Workspace (BINDING — not optional)",
             f"- **Workspace name:** {_sanitize_env_field(ws_name)}",
@@ -303,17 +411,7 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
             "Shell cwd is already this workspace — do not use `cd`.",
         ]
     )
-    try:
-        from kazma_core.config_store import get_config_store
-
-        raw_mi = get_config_store().get("agent.max_iterations", 15)
-        max_iter = max(5, min(100, int(raw_mi)))
-        lines.append(
-            f"- **Max tool rounds this process:** {max_iter} "
-            "(Settings → Agent; Chat≈15, Deep≈30, Research≈40)."
-        )
-    except Exception:
-        pass
+    lines.extend(_max_rounds_lines())
     try:
         from kazma_core.workspace.binding import get_bound_mcp_root
 
@@ -360,25 +458,9 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
             "you found. If it conflicts with the user's request, report the conflict.",
             "5. Never claim the folder *name* is the product if package metadata "
             "says otherwise — report both.",
-            "",
-            "### Visible work (UI workbench) — required for multi-step tasks",
-            "When you will use **2+ tools** (or any long mission), your **first** "
-            "assistant message content in that turn MUST open with a plan fence "
-            "(even if you also emit tool_calls in the same turn):",
-            "",
-            "```plan",
-            "- Inspect project identity",
-            "- Run the relevant tools",
-            "- Write findings / deliverable",
-            "```",
-            "",
-            "Rules: 3–7 bullets; concrete verbs; no empty plan. Close the fence "
-            "with ``` alone on its own line, then a blank line, then the answer — "
-            "never glue prose onto the ticks (wrong: ```Saved.). The UI pins this "
-            "above Activity (tools/status). After tools, give a clear final answer. "
-            "A plan with no tool_calls is not a finished turn.",
         ]
     )
+    lines.extend(_visible_work_lines())
 
     # GitHub integration availability hint: the space's own sign-in (Spaces
     # S1-17 part c); the environment's token is the owner's space's only.

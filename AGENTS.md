@@ -13906,6 +13906,15 @@ product can turn it on, so an install with one account behaves as before.
   enforced Settings' generic save wrote the switch (`identity.ENFORCED_KEY`), turning Spaces
   on before S1-33's checks. Gate: `tests/test_settings_scope.py` (the rule
   of before as the control).
+- **The environment note is the space's own (S1-31, 2026-11-20).** In a
+  sandboxed space `ide/env_context._sandboxed_space_note` names the space's
+  folder by relative paths only, the Python policy and the tools the space
+  has; never the install's workspace, data folder, repository, branch, MCP
+  root, host shell or GitHub sign-in (a task naming a workspace, or a space
+  whose kind cannot be read, is told nothing of the machine). The admin's
+  space and an install without Spaces keep the note they always had. Gate:
+  `tests/test_environment_note_per_space.py` (a real turn through the
+  supervisor graph; a sandboxed space read as a host one as the control).
 
 ## UI Conventions (Web)
 
