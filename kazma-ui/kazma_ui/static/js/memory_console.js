@@ -1671,20 +1671,30 @@
       el.innerHTML = rows.map(function(c) {
         const reading = c.kind === 'reading';
         const pending = c.kind === 'pending' || reading;
+        // An ending: the fact stopped being true, with no new value (the
+        // memory framework audit's part C2, retractions).
+        const ending = !reading && !c.new_value;
         const title = reading
           ? _mt('memory.console.change_reading_title', "Kazma's reading of your message")
           : pending
-            ? _mt('memory.console.change_pending_title', 'Is this a change? Kazma kept the earlier fact')
-            : _mt('memory.console.change_update_title', 'Changed from what you said');
+            ? (ending ? _mt('memory.console.change_pending_end_title', 'Has this ended? Kazma kept the fact')
+                      : _mt('memory.console.change_pending_title', 'Is this a change? Kazma kept the earlier fact'))
+            : (ending ? _mt('memory.console.change_ended_title', 'Ended from what you said')
+                      : _mt('memory.console.change_update_title', 'Changed from what you said'));
         const lines = reading
           ? _changeLine(_mtHtml('memory.console.change_read', 'Kazma read: {value}', _changeValue(c.new_value)))
           : pending
             ? _changeLine(_mtHtml('memory.console.change_kept', 'Kept: {value}', _changeValue(c.old_value))) +
-              _changeLine(_mtHtml('memory.console.change_heard', 'You may have said: {value}', _changeValue(c.new_value)))
-            : _changeLine(_mtHtml('memory.console.change_was', 'Before: {value}', _changeValue(c.old_value))) +
-              _changeLine(_mtHtml('memory.console.change_now', 'Now: {value}', _changeValue(c.new_value)));
+              (ending ? _changeLine(_esc(_mt('memory.console.change_heard_end', 'You may have said it is no longer true')))
+                      : _changeLine(_mtHtml('memory.console.change_heard', 'You may have said: {value}', _changeValue(c.new_value))))
+            : ending
+              ? _changeLine(_mtHtml('memory.console.change_no_longer', 'No longer: {value}', _changeValue(c.old_value)))
+              : _changeLine(_mtHtml('memory.console.change_was', 'Before: {value}', _changeValue(c.old_value))) +
+                _changeLine(_mtHtml('memory.console.change_now', 'Now: {value}', _changeValue(c.new_value)));
         const readingAttr = reading ? ' data-reading="1"' : '';
-        const yes = reading ? _mt('memory.console.change_reading_right', 'This is right') : _mt('memory.console.change_confirm', 'Yes, change it');
+        const yes = reading ? _mt('memory.console.change_reading_right', 'This is right')
+          : ending ? _mt('memory.console.change_confirm_end', 'Yes, it ended')
+            : _mt('memory.console.change_confirm', 'Yes, change it');
         const no = reading ? _mt('memory.console.change_reading_not_me', 'Not me') : _mt('memory.console.change_dismiss', 'No, keep it');
         const buttons = pending
           ? '<button type="button" class="btn btn-sm btn-primary v2-change-act" data-id="' + _attr(c.id) + '"' + readingAttr + ' data-decision="confirm">' + _esc(yes) + '</button>' +

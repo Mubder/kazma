@@ -479,9 +479,14 @@ def _memory_changes(sub: str, parts: list[str], tenant: str) -> str:
         for change in rows:
             ref = changes.short_ref(change["id"])
             what = str(change["predicate"]).replace("_", " ")
-            if change["kind"] == "update":
+            if change["kind"] == "update" and changes.is_ending(change):
+                lines.append(f"• {what}: no longer {change['old_value']}. Undo it: `/memory undo {ref}`")
+            elif change["kind"] == "update":
                 lines.append(f"• {what}: was {change['old_value']}, now {change['new_value']}. "
                              f"Undo it: `/memory undo {ref}`")
+            elif changes.is_ending(change):
+                lines.append(f"• {what}: Kazma kept {change['old_value']}; you may have said it is no longer "
+                             f"true. `/memory confirm {ref}` ends it, `/memory dismiss {ref}` keeps it.")
             elif change["kind"] == "reading":
                 lines.append(f"• {what}: Kazma read {change['new_value']} in your message. "
                              f"`/memory confirm {ref}` if this is right, `/memory dismiss {ref}` if not you.")
@@ -506,6 +511,8 @@ def _memory_changes(sub: str, parts: list[str], tenant: str) -> str:
         if reading:
             return f"✅ Kept as yours: {what} is {change['new_value']}."
         again = f" `/memory undo {out['update_ref']}` takes it back." if out.get("update_ref") else ""
+        if changes.is_ending(change):
+            return f"✅ Ended: {what} is no longer {change['old_value']}.{again}"
         return f"✅ Changed: {what} is now {change['new_value']}.{again}"
     if reading:
         return f"👍 Removed: Kazma no longer reads {what} as {change['new_value']}, and will not file it again."

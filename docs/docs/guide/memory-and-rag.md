@@ -552,6 +552,13 @@ Kazma** lists them:
   remember something and its memory tool would replace one of your facts:
   "I'm visiting Dubai next week, remember that for the itinerary" asks
   before it touches your home.
+- **Has this ended? Kazma kept the fact.** You said one of your facts
+  stopped being true ("I don't live in Paris anymore", "بطلت أستخدم فيم"),
+  and only the model read it. Kazma keeps the fact and asks: **Yes, it
+  ended** ends it (shown as **Ended from what you said**, "No longer:
+  Paris", with **Undo**), **No, keep it** leaves it. A fact Kazma or its
+  model wrote ends at once. Someone else's ending ("My sister doesn't live
+  in Paris anymore") or a question asks nothing.
 - **Kazma's reading of your message.** The first time only the model reads
   one of your facts (your home, your name, the name you go by, your
   employer, your role), Kazma keeps it as its own reading, not as yours,

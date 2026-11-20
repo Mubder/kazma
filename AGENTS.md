@@ -2588,6 +2588,31 @@ four injected were noise.
   reached by the sidebar, `tests/e2e/test_memory_changes_browser.py` (an
   undo, a confirmation and Kazma's reading answered, the database read
   after each, EN/AR).
+- **A fact said to have stopped being true is ended, by the same rules**
+  (2026-11-20, the framework audit's part C2, retractions). The deep pass
+  may return a fact with `"ended": true` (strictly the JSON true), naming
+  the held fact it ends ("replaces", F4's numbers) or matching a current
+  fact of the same subject, same-words name and value
+  (`belief_extractor._apply_ending`, `_current_fact`); it is never written
+  as a new fact. `belief_mutation.end_belief` ends it under the mutation
+  lock in one transaction (`valid_until` = when it was said; the mirror
+  and graph copies follow from their outboxes), and the trust gate
+  decides: the model's own reading ends at once, a fact the user stated
+  answers `blocked: lower_trust_source`. That is put to the user
+  (`changes.record_pending_end`) only when the value stands in the user's
+  own words with no one else named (`clause_subject.ends_in_own_words`:
+  `names_no_one_else` with the denial allowed, since an ending denies; a
+  question, a quote or someone else's ending asks nothing). An ending is a
+  change with no new value (`changes.is_ending`): "Yes, it ended" (confirm)
+  ends the fact at the user's trust and records an ending update, which
+  Undo reverses; the page ("Has this ended?", "Ended from what you said",
+  "No longer: ..."; catalog `memory.console.change_*end*`, EN/AR), the
+  turn note and `/memory changes` say it. The quick pass reads no endings:
+  the user's own words are asked about, as a correction only the model
+  reads. Gates: `tests/test_memory_retractions.py` (the ending ignored, and
+  the statement rule on a denial, as negative controls), the write
+  scenarios' `retraction` category, and `tests/e2e/test_memory_changes_browser.py`
+  (an ending confirmed and undone on the page, EN/AR).
 - The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
   with "I live in" and stored the employer as `lives_in`), and the local
   embedder remembers short texts (<= 256 characters, 4,096 of them): each

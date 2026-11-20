@@ -194,7 +194,7 @@
   },
   "recordings": [],
   "pending_recording": {
-   "prompt_sha256": "5a8fdebd62c615b8aa4ea97802b6a1c60f46c692e53c0ede1014d9c697daecb5",
+   "prompt_sha256": "5ed9488a99decb87545384b5e9e5e1d7f477d5a9b664fed21a2d3c9eb6880afd",
    "message_shape": 3,
    "replaces_prompt_sha256": "3499be576e8493a660ee6105cfa25dbde9660826fa2a8d8e38270c07d969781b",
    "replaces_message_shape": 1,
@@ -211,12 +211,18 @@
      "why": "Part C2, F4 second layer: the deep pass is shown the facts held about the turn's people and things, numbered, and may say which one a new fact replaces",
      "prompt_sha256": "5a8fdebd62c615b8aa4ea97802b6a1c60f46c692e53c0ede1014d9c697daecb5",
      "message_shape": 3
+    },
+    {
+     "date": "2026-11-20",
+     "why": "Part C2, retractions: a fact this turn says stopped being true is returned with ended: true",
+     "prompt_sha256": "5ed9488a99decb87545384b5e9e5e1d7f477d5a9b664fed21a2d3c9eb6880afd",
+     "message_shape": 3
     }
    ]
   }
  },
  "writes": {
-  "version": 6,
+  "version": 7,
   "recording": {
    "sha256": "89c1b101b6ddbede2743d37b1ea2f2040f1ff1497cad515c2d035614f8f89157",
    "turns": 30,
@@ -239,6 +245,8 @@
    "quoted.mixed.passed": 1.0,
    "replaces.ar.passed": 1.0,
    "replaces.en.passed": 1.0,
+   "retraction.ar.passed": 1.0,
+   "retraction.en.passed": 1.0,
    "short.ar.passed": 1.0,
    "short.en.passed": 1.0,
    "someone_else.ar.passed": 1.0,

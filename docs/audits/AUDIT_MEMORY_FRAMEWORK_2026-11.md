@@ -862,6 +862,15 @@ Added as each piece lands.
   then "hana works_as captain, replaces f1" leaves Hana a captain, not
   both. The write scenarios gain a `replaces` category (six, English and
   Arabic, passing on written replies). Gate: `tests/test_memory_held_facts.py`.
+- **Retractions, 2026-11-20: built, not yet recorded.** The deep pass may
+  say a fact stopped being true ("I stopped", "no longer"); Kazma ends it
+  instead of writing it. The model's own reading ends at once; a fact the
+  user stated is asked about first ("Has this ended?", only when the value
+  stands in the user's own words with no one else named), and "Yes, it
+  ended" records an ending the user can undo. The quick pass reads no
+  endings. The write scenarios gain a `retraction` category (seven, English
+  and Arabic). Gates: `tests/test_memory_retractions.py`, the browser test
+  of the change list.
   Gate: `tests/test_memory_recall_dates.py`; control: recall without the
   dating step.
 

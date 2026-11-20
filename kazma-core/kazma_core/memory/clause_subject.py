@@ -324,6 +324,21 @@ def names_no_one_else(message: str | None, value: str | None) -> str | None:
     return _said(message, value, (SPEAKER, None)) or _said(message, value, (SPEAKER, None), reader=last_words)
 
 
+def ends_in_own_words(message: str | None, value: str | None) -> str | None:
+    """The user's own spelling of *value* when it stands in the user's own
+    words of *message* with no one but the speaker named before it, in a
+    sentence that is no question and no request -- a denial allowed, since
+    an ending denies ("I don't live in Paris anymore", "ما عدت ساكن في
+    الكويت") -- else None: "My sister doesn't live in Paris anymore" and
+    "Do I still live in Paris?" answer nothing. The model's reading that one
+    of the user's facts ended is put to the user only when this answers
+    (``changes.record_pending_end``; the memory framework audit's part C2)."""
+    from kazma_core.memory.own_words import last_words
+
+    return (_said(message, value, (SPEAKER, None), allow_denied=True)
+            or _said(message, value, (SPEAKER, None), reader=last_words, allow_denied=True))
+
+
 def _negates(token: str, following: str) -> bool:
     """Whether *token* denies what follows it: a negation word, or one
     written with "و"/"ف" onto it ("وما"). "No"/"لا" before a mark or at the
@@ -336,11 +351,12 @@ def _negates(token: str, following: str) -> bool:
     return True
 
 
-def _asserted(raw: list[str]) -> list[bool]:
+def _asserted(raw: list[str], *, allow_denied: bool = False) -> list[bool]:
     """For each word of *raw*: whether its sentence states something -- no
-    negation before it in its sentence, the sentence neither a question
-    (``?``/``؟`` at its end, or a word that asks at its start) nor a request
-    to act on a text. One pass each way."""
+    negation before it in its sentence (unless *allow_denied*: an ending is
+    said by denying), the sentence neither a question (``?``/``؟`` at its
+    end, or a word that asks at its start) nor a request to act on a text.
+    One pass each way."""
     n = len(raw)
     asks_at_end = [False] * (n + 1)
     for j in range(n - 1, -1, -1):
@@ -352,7 +368,7 @@ def _asserted(raw: list[str]) -> list[bool]:
         if start and token not in _SENTENCE_END:
             asking = _fold(token).lower() in _ASKING_STARTS
             start, denied = False, False
-        out[j] = not (denied or asking or asks_at_end[j])
+        out[j] = not ((denied and not allow_denied) or asking or asks_at_end[j])
         if token in _SENTENCE_END:
             start, denied, asking = True, False, False
         elif _negates(token, raw[j + 1] if j + 1 < n else ""):
@@ -361,7 +377,7 @@ def _asserted(raw: list[str]) -> list[bool]:
 
 
 def _said(message: str | None, value: str | None, accept: tuple[str | None, ...], *,
-          reader: Callable[[str | None], str] | None = None) -> str | None:
+          reader: Callable[[str | None], str] | None = None, allow_denied: bool = False) -> str | None:
     """The user's own spelling of *value* where the nearest person-naming
     word before it is one of *accept*, in a sentence that states it
     (:func:`_asserted`: never denied before it, never a question or a
@@ -377,7 +393,7 @@ def _said(message: str | None, value: str | None, accept: tuple[str | None, ...]
     raw = _TOKEN_RE.findall((reader or own_words)(message))
     folded = [_fold(t) for t in raw]
     named = subjects(raw)
-    stated = _asserted(raw)
+    stated = _asserted(raw, allow_denied=allow_denied)
     # Where each word's sentence ends, and whether a third-person pronoun
     # comes after it in that sentence: one pass from the end.
     pronoun_after = [False] * (len(raw) + 1)

@@ -101,7 +101,8 @@ Return ONLY valid JSON (no markdown fences) with this shape:
       "confidence": 0.0 to 1.0,
       "importance": 1 to 5,
       "since": "optional: when the fact began, YYYY-MM-DD, YYYY-MM or YYYY",
-      "replaces": "optional: the number of a held fact this one replaces, f1, f2, ..."
+      "replaces": "optional: the number of a held fact this one replaces, f1, f2, ...",
+      "ended": "optional: true when this turn says the fact stopped being true"
     }
   ]
 }
@@ -119,6 +120,10 @@ Rules:
   another name -- add "replaces": its number ("f2"), and use the held fact's
   predicate when it names the same kind of fact. Only a held fact about the same
   subject. Do not return a held fact again unchanged.
+- When this turn says a fact stopped being true ("I stopped", "no longer", "not
+  anymore", "I quit"), return that fact with "ended": true, and "replaces": its
+  number when it is held. Only a fact this turn ends; a fact about someone else
+  is filed under that person.
 - functional = single-valued (lives_in, name_is, works_at, favorite_*, active_project,
   grok_next_reset, zcode_next_reset, *_next_reset, *_weekly_reset).
   A new value supersedes the old one — only ONE active value per (subject, predicate).
@@ -437,6 +442,8 @@ def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
     replaces = _REF_RE.fullmatch(str(b.get("replaces") or "").strip().lower())
     if replaces:
         clean["replaces"] = f"f{int(replaces[1])}"
+    if b.get("ended") is True:
+        clean["ended"] = True
     return clean
 
 
@@ -523,6 +530,48 @@ def _close_replaced_entry(entry: dict[str, Any], clean: dict[str, Any], method: 
     else:
         invalidate_belief(entry["id"], conn=conn, now=now, tenant_id=tenant_id)
     stats["replaced_entries"] = stats.get("replaced_entries", 0) + 1
+
+
+def _apply_ending(clean: dict[str, Any], replaced: dict[str, Any] | None, method: str, *, conn: Any,
+                  ops_conn: Any, tenant_id: str, now: float | None, session_id: str | None, turn: int | None,
+                  user_text: str | None, stats: dict[str, Any]) -> None:
+    """A fact this turn says stopped being true (``"ended": true``; the
+    memory framework audit's part C2, retractions): the held fact it names,
+    else the current fact of the same subject, name and value, is ended
+    (``belief_mutation.end_belief``) -- never written as a new fact. The
+    trust gate decides: a fact the user stated ends only by their own words,
+    so a model's reading of its end is put to them
+    (``changes.record_pending_end``)."""
+    from kazma_core.memory import changes
+    from kazma_core.memory.belief_mutation import end_belief
+
+    target = replaced["id"] if replaced else _current_fact(conn, clean, tenant_id)
+    if target is None:
+        stats["ended_unknown"] = stats.get("ended_unknown", 0) + 1
+        return
+    result = end_belief(conn, target, tenant_id=tenant_id, extraction_method=method, now=now, ops_conn=ops_conn,
+                        source_session=session_id, source_turn=turn)
+    stats["actions"].append(result)
+    if result.get("action") == "ended":
+        stats["ended"] = stats.get("ended", 0) + 1
+    elif result.get("blocked") and user_text and changes.record_pending_end(
+            conn, tenant_id=tenant_id, belief_id=target, user_text=user_text, session=session_id, turn=turn,
+            now=now):
+        stats["end_asked"] = stats.get("end_asked", 0) + 1
+
+
+def _current_fact(conn: Any, clean: dict[str, Any], tenant_id: str) -> str | None:
+    """The current fact of *clean*'s subject that holds its value under the
+    same name (the same words: ``predicates._predicate_key``), if any."""
+    from kazma_core.memory.predicates import _predicate_key
+
+    for fact_id, predicate, value in conn.execute(
+            "SELECT id, predicate, object FROM beliefs WHERE tenant_id = ? AND subject = ? AND valid_until IS NULL "
+            "AND invalidated_at IS NULL AND COALESCE(object, '') != '' ORDER BY valid_from DESC",
+            (tenant_id, clean["subject"])).fetchall():
+        if _predicate_key(predicate) == _predicate_key(clean["predicate"]) and _same_value_text(value, clean["object"]):
+            return str(fact_id)
+    return None
 
 
 def _same_value_text(a: Any, b: Any) -> bool:
@@ -970,6 +1019,12 @@ def _apply_beliefs_to_v2(
                 stats["rejected"] += 1
                 stats["skipped_low_confidence"] = stats.get("skipped_low_confidence", 0) + 1
                 continue
+        if clean.get("ended"):
+            # It stopped being true: the fact it names is ended, never written
+            # anew (the memory framework audit's part C2, retractions).
+            _apply_ending(clean, replaced, _method, conn=primary_conn, ops_conn=ops_conn, tenant_id=tenant_id,
+                          now=now, session_id=session_id, turn=turn, user_text=user_text, stats=stats)
+            continue
         # Resolve entities through the 3-tier cascade (Tier-2 vector active).
         # Payload objects (status strings, paths) must NOT be minted as
         # concept entities — that mint made write-time payload detection

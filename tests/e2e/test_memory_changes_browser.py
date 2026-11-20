@@ -207,3 +207,82 @@ def test_the_user_undoes_an_update_and_confirms_a_correction(harness: Harness, l
         assert "تغيّرت بناءً على كلامك" in out["update"]
         assert "هل هذا تغيير؟" in out["pending"]
         assert out["confirm_label"] == "نعم، غيّرها"
+
+
+# ── An ending (the memory framework audit's part C2, retractions) ─────────
+#
+# The model read that the user's fact stopped being true ("I don't live in
+# Paris anymore"); the trust gate kept Paris and the ending waits for the
+# user. On the page they say "Yes, it ended", which ends it and records an
+# update they can undo; Undo brings Paris back.
+
+
+def _seed_ending() -> None:
+    from kazma_core.memory import changes
+    from kazma_core.memory.belief_mutation import end_belief, mutate_belief
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.paths import primary_memory_db
+
+    c = sqlite3.connect(primary_memory_db())
+    try:
+        ensure_primary_schema(c)
+        fact = mutate_belief(c, "user", "lives_in", "Paris", extraction_method="user_stated", source_session="chat-a",
+                             source_turn=1, now=time.time() - 900)
+        refused = end_belief(c, fact["belief_id"], tenant_id="default", extraction_method="llm_inferred")
+        assert refused.get("blocked") == "lower_trust_source"
+        assert changes.record_pending_end(c, tenant_id="default", belief_id=fact["belief_id"],
+                                          user_text="I don't live in Paris anymore.", session="chat-a", turn=2)
+    finally:
+        c.close()
+
+
+def _end_and_undo_on_the_page(harness: Harness, lang: str) -> dict:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        host = harness.base.split("//", 1)[1].split(":", 1)[0]
+        context = browser.new_context(viewport={"width": 1400, "height": 1000}, locale="en-US")
+        context.add_cookies([{"name": "kazma-lang", "value": lang, "domain": host, "path": "/"}])
+        try:
+            pg = context.new_page()
+            errors: list[str] = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto(f"{harness.base}/", wait_until="domcontentloaded", timeout=30000)
+            pg.locator("a.nav-link[href='/memory']").first.click()
+            pg.wait_for_function("location.pathname === '/memory'", timeout=15000)
+            pending = pg.locator("#v2-changes-list .v2-change[data-kind='pending']")
+            pending.wait_for(timeout=30000)
+            shown = {"pending": pending.inner_text(),
+                     "confirm_label": pending.locator("[data-decision='confirm']").inner_text()}
+            pending.locator("[data-decision='confirm']").click()
+            update = pg.locator("#v2-changes-list .v2-change[data-kind='update']")
+            update.wait_for(timeout=15000)
+            shown["ended"] = update.inner_text()
+            after_end = _current("lives_in")
+            update.locator("[data-decision='undo']").click()
+            pg.wait_for_function(
+                "() => !document.querySelector(\"#v2-changes-list .v2-change[data-kind='update']\")", timeout=15000)
+            return {**shown, "after_end": after_end, "after_undo": _current("lives_in"), "errors": errors}
+        finally:
+            context.close()
+            browser.close()
+
+
+@pytest.mark.parametrize("lang", ["en", "ar"])
+def test_the_user_confirms_an_ending_and_undoes_it(harness: Harness, lang: str) -> None:
+    _seed_ending()
+    assert _current("lives_in") == [("Paris", "user_stated")]
+    out = _end_and_undo_on_the_page(harness, lang)
+    assert out["errors"] == []
+    assert out["after_end"] == []
+    assert out["after_undo"] == [("Paris", "user_stated")]
+    assert "Paris" in out["pending"] and "Paris" in out["ended"]
+    if lang == "en":
+        assert "Has this ended?" in out["pending"] and "no longer true" in out["pending"]
+        assert out["confirm_label"] == "Yes, it ended"
+        assert "Ended from what you said" in out["ended"] and "No longer:" in out["ended"]
+    else:
+        assert "هل انتهت هذه؟" in out["pending"]
+        assert out["confirm_label"] == "نعم، انتهت"
+        assert "انتهت حسب كلامك" in out["ended"] and "لم تعد:" in out["ended"]

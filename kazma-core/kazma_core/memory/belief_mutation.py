@@ -728,6 +728,90 @@ def mutate_belief(
         _unbind_write_context(tokens)
 
 
+def end_belief(
+    primary_conn: sqlite3.Connection,
+    belief_id: str,
+    *,
+    tenant_id: str,
+    extraction_method: str,
+    now: float | None = None,
+    ops_conn: sqlite3.Connection | None = None,
+    source_session: str | None = None,
+    source_turn: int | None = None,
+    confirms_change: tuple[str, str] | None = None,
+) -> dict[str, Any]:
+    """End a current fact: it stopped being true ("I stopped", "no longer";
+    the memory framework audit's part C2, retractions). *now* is when that
+    was said: the fact held until then.
+
+    The trust gate decides as for any change (``provenance.may_overrule``):
+    a fact the user stated ends only by the user's own words. A model's
+    reading answers ``blocked: lower_trust_source`` and changes nothing; the
+    caller puts it to the user (``changes.record_pending_end``). The user's
+    own fact ended records an update they can undo (``changes.record_update``
+    with no new value); *confirms_change* is the pending change it answers.
+    Closed under the mutation lock in one transaction, which queues the
+    mirror's and the graph's copies (their outboxes): nothing else leaves
+    the database here."""
+    from kazma_core.memory import changes
+    from kazma_core.memory.hygiene import beliefs_write
+    from kazma_core.memory.provenance import USER_SOURCES, may_overrule
+
+    recorded = time.time()
+    ended_at = recorded if now is None else float(now)
+    change_id = None
+    with _mutation_lock:
+        began = not primary_conn.in_transaction
+        if began:
+            primary_conn.execute("BEGIN IMMEDIATE")
+        committed = False
+        try:
+            row = primary_conn.execute(
+                "SELECT subject, predicate, object, extraction_method, valid_from FROM beliefs WHERE id = ? "
+                "AND tenant_id = ? AND valid_until IS NULL AND invalidated_at IS NULL AND COALESCE(object, '') != ''",
+                (belief_id, tenant_id)).fetchone()
+            if row is None or not may_overrule(row[3], extraction_method):
+                blocked = {"blocked": "lower_trust_source"} if row is not None else {"reason": "not_current"}
+                return {"action": "noop", "belief_id": belief_id, **blocked}
+            beliefs_write(primary_conn, "UPDATE beliefs SET valid_until = ?, invalidated_at = ? WHERE id = ? "
+                          "AND tenant_id = ? AND valid_until IS NULL",
+                          (max(float(row[4] or ended_at), ended_at), recorded, belief_id, tenant_id))
+            if row[3] in USER_SOURCES:
+                change_id = changes.record_update(
+                    primary_conn, tenant_id=tenant_id, subject=str(row[0]), predicate=str(row[1]),
+                    old_belief_id=belief_id, old_value=str(row[2] or ""), new_belief_id=None, new_value="",
+                    session=source_session, turn=source_turn, now=recorded, confirms=confirms_change)
+            if began:
+                primary_conn.commit()
+            committed = True
+        finally:
+            # A refusal or a failure leaves nothing changed, and the write
+            # lock released (only a transaction this call opened).
+            if began and not committed and primary_conn.in_transaction:
+                primary_conn.rollback()
+    _write_audit(ops_conn, tenant_id=tenant_id, event_type="end", target_id=belief_id,
+                 actor=str(extraction_method), reason="the fact stopped being true",
+                 state_before={"id": belief_id}, state_after={"id": belief_id, "ended": True})
+    _after_ending(primary_conn, row, tenant_id=tenant_id)
+    return {"action": "ended", "belief_id": belief_id, "change_id": change_id}
+
+
+def _after_ending(conn: sqlite3.Connection, row: Any, *, tenant_id: str) -> None:
+    """What follows a fact's end, after its transaction: the entities'
+    counts. The state mirror and the graph copy follow from their outboxes,
+    which the close queued in its own transaction (``schema_v2``'s
+    triggers; the mirror and graph syncs drain them), so a *private*
+    database sends nothing anywhere."""
+    try:
+        from kazma_core.memory.entity_counts import recompute_entity_counts
+
+        recompute_entity_counts(conn, [str(row[0] or ""), str(row[2] or "")], tenant_id=tenant_id)
+        if conn.in_transaction:
+            conn.commit()
+    except sqlite3.Error:
+        logger.warning("[belief_mutate] entity counts after an ending were not recomputed", exc_info=True)
+
+
 def _same_fact_again(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *, began: bool) -> dict:
     """The outcome of writing the fact *belief_id* already holds: a start
     its turn names is added (:func:`_add_named_start`), else nothing."""

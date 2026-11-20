@@ -959,7 +959,10 @@ def build_extraction() -> dict[str, Any]:
 #: statement is asked about), ``temporal`` (the start a turn names is kept
 #: beside the fact, worked out from the turn's day; a start after the turn
 #: or in words is never kept), ``replaces`` (the model says which held fact
-#: a new one replaces: the same subject only, the trust gate still decides).
+#: a new one replaces: the same subject only, the trust gate still decides),
+#: ``retraction`` (a fact the turn says stopped being true is ended: the
+#: model's own reading at once, the user's own fact only when the user says
+#: so -- asked first).
 #: ``pending`` names the corrections that must wait
 #: for the user (``memory/changes.py``), and only those; an ``("", ("answer",
 #: "confirm"))`` turn is the user answering the newest one.
@@ -968,11 +971,15 @@ def _said(subject: str, predicate: str, kind: str, obj: str) -> dict[str, Any]:
 
 
 def _now(subject: str, obj: str, trust: str | None = None, *, exact: bool = False,
-         started: str | bool | None = False, predicate: str | None = None) -> dict[str, Any]:
+         started: str | bool | None = False, predicate: str | None = None,
+         ended: bool = False) -> dict[str, Any]:
     """A fact that must be current (or must not). *started*: the start kept
     beside it (``metadata.started``), None for none; False checks nothing.
-    *predicate*: the name it must be under."""
+    *predicate*: the name it must be under. *ended*: a change waiting for the
+    user that would end the fact (``pending`` only)."""
     out: dict[str, Any] = {"subject": subject, "object": obj}
+    if ended:
+        out["ended"] = True
     if predicate:
         out["predicate"] = predicate
     if trust:
@@ -987,6 +994,13 @@ def _now(subject: str, obj: str, trust: str | None = None, *, exact: bool = Fals
 def _began(fact: dict[str, Any], since: str) -> dict[str, Any]:
     """*fact* with the start the model gives it (``since``)."""
     return {**fact, "since": since}
+
+
+def _ending(fact: dict[str, Any], subject: str | None = None, predicate: str | None = None) -> dict[str, Any]:
+    """*fact* said to have stopped being true (``"ended": true``), naming the
+    held fact it ends when *subject* and *predicate* are given."""
+    out = {**fact, "ended": True}
+    return _replacing(out, subject, predicate) if subject and predicate else out
 
 
 def _replacing(fact: dict[str, Any], subject: str, predicate: str) -> dict[str, Any]:
@@ -1270,6 +1284,45 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
          ("written", [_replacing(_said("user", "residence", "functional", "الدوحة"), "user", "lives_in")]))],
      "current": [_now("user", "الكويت", "user")], "not_current": [_now("user", "الدوحة")],
      "pending": [_now("user", "الدوحة")]},
+    # ── retraction: a fact the turn says stopped being true ─────────────────
+    # ("I stopped", "no longer"; the framework audit's part C2). The model's
+    # own reading is ended at once; a fact the user stated ends only by the
+    # user's own say -- the model's reading of its end is asked first
+    # (``pending``, ``ended``), and the user's "Yes, it ended" ends it.
+    {"id": "retraction-en-reading-ended", "category": "retraction", "lang": "en", "turns": [
+        ("Vim is the editor on my laptop.", ("written", [_said("user", "uses_tool", "set", "vim")])),
+        ("I stopped using vim.", ("written", [_ending(_said("user", "uses_tool", "set", "vim"), "user", "uses_tool")]))],
+     "current": [], "not_current": [_now("user", "vim")]},
+    {"id": "retraction-ar-reading-ended", "category": "retraction", "lang": "ar", "turns": [
+        ("فيم هو المحرر في لابتوبي.", ("written", [_said("user", "uses_tool", "set", "فيم")])),
+        ("بطلت أستخدم فيم.", ("written", [_ending(_said("user", "uses_tool", "set", "فيم"), "user", "uses_tool")]))],
+     "current": [], "not_current": [_now("user", "فيم")]},
+    {"id": "retraction-en-users-fact-asked", "category": "retraction", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("I don't live in Paris anymore.",
+         ("written", [_ending(_said("user", "lives_in", "functional", "Paris"), "user", "lives_in")]))],
+     "current": [_now("user", "Paris", "user")], "not_current": [],
+     "pending": [_now("user", "Paris", ended=True)]},
+    {"id": "retraction-en-users-fact-confirmed", "category": "retraction", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("I don't live in Paris anymore.",
+         ("written", [_ending(_said("user", "lives_in", "functional", "Paris"), "user", "lives_in")])),
+        ("", ("answer", "confirm"))],
+     "current": [], "not_current": [_now("user", "Paris")]},
+    {"id": "retraction-ar-users-fact-asked", "category": "retraction", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("ما عدت ساكن في الكويت.",
+         ("written", [_ending(_said("user", "lives_in", "functional", "الكويت"), "user", "lives_in")]))],
+     "current": [_now("user", "الكويت", "user")], "not_current": [],
+     "pending": [_now("user", "الكويت", ended=True)]},
+    {"id": "retraction-ar-someone-else", "category": "retraction", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("أختي ما عادت ساكنة في الكويت.",
+         ("written", [_ending(_said("user", "lives_in", "functional", "الكويت"), "user", "lives_in")]))],
+     "current": [_now("user", "الكويت", "user")], "not_current": []},
+    {"id": "retraction-en-nothing-held", "category": "retraction", "lang": "en", "turns": [
+        ("I no longer use emacs.", ("written", [_ending(_said("user", "uses_tool", "set", "emacs"))]))],
+     "current": [], "not_current": [_now("user", "emacs")]},
 ]
 
 #: The write scenarios' version. 3: a correction only the model reads waits
@@ -1278,8 +1331,8 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
 #: itself (rule A of the second security review, 2026-11-18); its first
 #: reading of a fact is Kazma's own and no question. 5: ``temporal`` (the
 #: framework audit's part C2, 2026-11-20). 6: ``replaces`` (C2, F4's second
-#: layer).
-WRITES_VERSION = 6
+#: layer). 7: ``retraction`` (C2).
+WRITES_VERSION = 7
 
 
 def build_writes() -> dict[str, Any]:
@@ -1299,7 +1352,7 @@ def build_writes() -> dict[str, Any]:
                     if not all(fact.get(k) for k in ("subject", "predicate", "predicate_type", "object")):
                         raise ValueError(f"{sc['id']}: a written reply needs subject, predicate, type and object")
                     if set(fact) - {"subject", "predicate", "predicate_type", "object", "confidence", "since",
-                                    "replaces"}:
+                                    "replaces", "ended"}:
                         raise ValueError(f"{sc['id']}: a written reply holds only what the model's reply holds")
                 turns.append({"user": text, "written": reply})
             elif kind == "answer":

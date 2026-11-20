@@ -1,5 +1,5 @@
 {
- "version": 6,
+ "version": 7,
  "scenarios": [
   {
    "id": "update-en-moved",
@@ -2063,6 +2063,311 @@
     {
      "subject": "user",
      "object": "الدوحة"
+    }
+   ]
+  },
+  {
+   "id": "retraction-en-reading-ended",
+   "category": "retraction",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "Vim is the editor on my laptop.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "vim",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "I stopped using vim.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "vim",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "uses_tool"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "vim"
+    }
+   ]
+  },
+  {
+   "id": "retraction-ar-reading-ended",
+   "category": "retraction",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "فيم هو المحرر في لابتوبي.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "فيم",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "بطلت أستخدم فيم.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "فيم",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "uses_tool"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "فيم"
+    }
+   ]
+  },
+  {
+   "id": "retraction-en-users-fact-asked",
+   "category": "retraction",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "I don't live in Paris anymore.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "lives_in"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Paris",
+     "trust": "user"
+    }
+   ],
+   "not_current": [],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "Paris",
+     "ended": true
+    }
+   ]
+  },
+  {
+   "id": "retraction-en-users-fact-confirmed",
+   "category": "retraction",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "I don't live in Paris anymore.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "lives_in"
+       }
+      }
+     ]
+    },
+    {
+     "answer": "confirm"
+    }
+   ],
+   "current": [],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Paris"
+    }
+   ]
+  },
+  {
+   "id": "retraction-ar-users-fact-asked",
+   "category": "retraction",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "ما عدت ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "lives_in"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "trust": "user"
+    }
+   ],
+   "not_current": [],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "ended": true
+    }
+   ]
+  },
+  {
+   "id": "retraction-ar-someone-else",
+   "category": "retraction",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "أختي ما عادت ساكنة في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9,
+       "ended": true,
+       "replaces": {
+        "subject": "user",
+        "predicate": "lives_in"
+       }
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "trust": "user"
+    }
+   ],
+   "not_current": []
+  },
+  {
+   "id": "retraction-en-nothing-held",
+   "category": "retraction",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I no longer use emacs.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "uses_tool",
+       "predicate_type": "set",
+       "object": "emacs",
+       "confidence": 0.9,
+       "ended": true
+      }
+     ]
+    }
+   ],
+   "current": [],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "emacs"
     }
    ]
   }

@@ -1172,6 +1172,8 @@ def _expected_holds(expected: dict[str, Any], row: dict[str, Any]) -> bool:
         return False
     if "predicate" in expected and row.get("predicate") != expected["predicate"]:
         return False
+    if "ended" in row and bool(row["ended"]) != bool(expected.get("ended")):
+        return False
     return expected.get("trust") != "user" or row["extraction_method"] in _USER_SOURCES
 
 
@@ -1244,7 +1246,8 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
             "AS started FROM beliefs WHERE tenant_id = ? "
             "AND valid_until IS NULL AND invalidated_at IS NULL ORDER BY valid_from", (BENCH_TENANT,))]
         waiting = [dict(r) for r in primary.execute(
-            "SELECT subject, new_value AS object FROM memory_changes WHERE tenant_id = ? AND kind = 'pending' "
+            "SELECT subject, CASE WHEN new_value = '' THEN old_value ELSE new_value END AS object, "
+            "new_value = '' AS ended FROM memory_changes WHERE tenant_id = ? AND kind = 'pending' "
             "AND state = 'open' ORDER BY created_at", (BENCH_TENANT,))]
     finally:
         primary.close()

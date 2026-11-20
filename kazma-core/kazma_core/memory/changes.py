@@ -70,8 +70,10 @@ __all__ = [
     "format_changes_note",
     "list_changes",
     "open_changes",
+    "is_ending",
     "record_first_reading",
     "record_pending",
+    "record_pending_end",
     "record_update",
     "resolve_ref",
     "short_ref",
@@ -113,6 +115,12 @@ class ChangeRefusedError(ValueError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+def is_ending(row: dict[str, Any]) -> bool:
+    """Whether a change ends the user's fact (it stopped being true: no new
+    value) rather than replacing it (the memory framework audit's part C2)."""
+    return row.get("kind") in (UPDATE, PENDING) and not str(row.get("new_value") or "")
 
 
 def _new_id() -> str:
@@ -205,6 +213,32 @@ def record_pending(
     return _insert(conn, kind=PENDING, tenant=tenant, subject=subject, predicate=predicate,
                    old_belief_id=refused["belief_id"], old_value=old_value, new_belief_id=None,
                    new_value=new_value, session=session, turn=turn, now=now)
+
+
+def record_pending_end(
+    conn: sqlite3.Connection, *, tenant_id: str, belief_id: str, user_text: str | None, session: str | None,
+    turn: int | None, now: float | None = None,
+) -> str | None:
+    """Put to the user that their fact *belief_id* may have stopped being
+    true: the model read an ending ("I don't work there anymore") the trust
+    gate did not let it make. Recorded only when the fact's value stands in
+    the user's own words with no one else named before it (a sister who quit
+    asks nothing about the user's job); never twice for one fact. Returns the
+    change id, or None. Commits."""
+    from kazma_core.memory.clause_subject import ends_in_own_words
+
+    tenant = tenant_id
+    stated = conn.execute(
+        "SELECT subject, predicate, object FROM beliefs WHERE id = ? AND tenant_id = ? AND valid_until IS NULL "
+        "AND invalidated_at IS NULL", (belief_id, tenant)).fetchone()
+    if stated is None or not ends_in_own_words(user_text, str(stated[2] or "")):
+        return None
+    subject, predicate, old_value = str(stated[0]), str(stated[1]), str(stated[2] or "")
+    if _recorded(conn, tenant, PENDING, subject, predicate, "", ("open",)):
+        return None
+    return _insert(conn, kind=PENDING, tenant=tenant, subject=subject, predicate=predicate,
+                   old_belief_id=belief_id, old_value=old_value, new_belief_id=None, new_value="",
+                   session=session, turn=turn, now=now)
 
 
 #: The user's own facts a first reading is shown for: Kazma's names for a
@@ -324,6 +358,8 @@ def confirm(
         raise ChangeRefusedError("not_open")
     if row["kind"] == READING and not _current(conn, row["new_belief_id"], tenant):
         raise ChangeRefusedError("replaced_since")  # the model read something else since
+    if is_ending(row):
+        return _confirm_ending(conn, row, tenant=tenant, actor=actor)
     from kazma_core.memory.fact_names import users_names
 
     subject, predicate = users_names(row["subject"], row["predicate"])  # recorded so already; one rule
@@ -343,6 +379,22 @@ def confirm(
         conn.commit()
     return {"ok": True, "change_id": change_id, "belief_id": result.get("belief_id"),
             "action": result.get("action")}
+
+
+def _confirm_ending(conn: sqlite3.Connection, row: dict[str, Any], *, tenant: str, actor: str) -> dict[str, Any]:
+    """The user says their fact did stop being true: it is ended at their own
+    trust, which records an update they can still undo."""
+    from kazma_core.memory.belief_mutation import end_belief
+
+    if not _current(conn, row["old_belief_id"], tenant):
+        raise ChangeRefusedError("replaced_since")
+    result = end_belief(conn, str(row["old_belief_id"]), tenant_id=tenant, extraction_method="user_explicit",
+                        source_session=row["source_session"], source_turn=row["source_turn"],
+                        confirms_change=(row["id"], actor))
+    if result.get("action") != "ended":
+        raise ChangeRefusedError("not_written")
+    return {"ok": True, "change_id": row["id"], "belief_id": None, "action": "ended",
+            "update_id": result.get("change_id")}
 
 
 def _current(conn: sqlite3.Connection, belief_id: str | None, tenant: str) -> bool:
@@ -454,13 +506,15 @@ def undo(
             old = conn.execute(
                 "SELECT object FROM beliefs WHERE id = ? AND tenant_id = ?", (row["old_belief_id"], tenant),
             ).fetchone()
-            if new is None:
+            # An ending (no new fact) has nothing to close.
+            if new is None and row["new_belief_id"]:
                 raise ChangeRefusedError("replaced_since")
             if old is None or not str(old[0] or ""):
                 raise ChangeRefusedError("forgotten")
             now = time.time()
-            beliefs_write(conn, "UPDATE beliefs SET valid_until = ?, invalidated_at = ? WHERE id = ? "
-                          "AND tenant_id = ?", (now, now, row["new_belief_id"], tenant))
+            if row["new_belief_id"]:
+                beliefs_write(conn, "UPDATE beliefs SET valid_until = ?, invalidated_at = ? WHERE id = ? "
+                              "AND tenant_id = ?", (now, now, row["new_belief_id"], tenant))
             # The old fact and the user's other list entries the update closed
             # with it: every one back, never one forgotten since (its value
             # emptied), nor one the user has said again since (it is current
@@ -557,9 +611,14 @@ def format_changes_note(rows: list[dict[str, Any]]) -> str:
     for row in rows[:_NOTE_MAX]:
         what = str(row.get("predicate") or "").replace("_", " ")
         ref = short_ref(str(row.get("id") or ""))
-        if row.get("kind") == UPDATE:
+        if row.get("kind") == UPDATE and is_ending(row):
+            lines.append(f"- {ref} ended from the user's own words: {what}: no longer \"{row.get('old_value')}\"")
+        elif row.get("kind") == UPDATE:
             lines.append(f"- {ref} updated from the user's own words: {what}: was "
                          f"\"{row.get('old_value')}\", now \"{row.get('new_value')}\"")
+        elif is_ending(row):
+            lines.append(f"- {ref} not applied, waiting for the user: {what}: still \"{row.get('old_value')}\"; "
+                         "their message may have meant it is no longer true")
         else:
             lines.append(f"- {ref} not applied, waiting for the user: {what}: still "
                          f"\"{row.get('old_value')}\"; their message may have meant \"{row.get('new_value')}\"")
@@ -735,7 +794,7 @@ def decide_change(ref: str, decision: str, *, tenant_id: str, actor: str) -> dic
             out = undo(conn, change_id, tenant_id=tenant, actor=actor, ops_conn=ops)
         elif decision == "confirm":
             out = confirm(conn, change_id, tenant_id=tenant, actor=actor)
-            made = conn.execute(
+            made = (out["update_id"],) if out.get("update_id") else conn.execute(
                 "SELECT id FROM memory_changes WHERE tenant_id = ? AND kind = ? AND state = 'open' "
                 "AND new_belief_id = ? ORDER BY created_at DESC LIMIT 1",
                 (tenant, UPDATE, out.get("belief_id")),
