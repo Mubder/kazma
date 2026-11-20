@@ -741,18 +741,53 @@ def _recording_identity(llm_replies: dict[str, Any]) -> dict[str, Any]:
         "provider": llm_replies.get("provider"),
         "recorded_on": llm_replies.get("recorded_on"),
         "prompt_sha256": llm_replies.get("prompt_sha256"),
+        "message_shape": _recording_shape(llm_replies),
     }
 
 
-def _check_recording(llm_replies: dict[str, Any]) -> None:
-    """Refuse a recording that does not say which prompt it answered, or
-    answered another one (benchmark audit F4: with the prompt replaced by
-    "Keep nothing", every deep-pass score stayed the same)."""
+#: How a prompt change is declared until it is recorded (framework audit part
+#: C2: the prompt changes land first and are recorded once, with the owner's
+#: yes, after them).
+DECLARE_PENDING = 'python scripts/memory_bench.py lock --prompt-changed "why"'
+
+
+def _recording_shape(llm_replies: dict[str, Any]) -> int:
+    """The form of the user message the recording was asked in (form 1 when
+    it does not say: every recording made before the form was named)."""
+    return int(llm_replies.get("message_shape") or 1)
+
+
+def _check_recording(llm_replies: dict[str, Any], pending: dict[str, Any] | None = None) -> str:
+    """How a recording can be replayed against today's extractor:
+
+    * ``"current"``: it answered today's prompt, in today's message form.
+    * ``"previous"``: it answered the prompt before a change the lock
+      declares (``extraction.pending_recording``, written by
+      :data:`DECLARE_PENDING`): the change is named, dated and waits for its
+      recording. The replay is then a drift check -- the recorded replies
+      through today's parser, sanitizer and scorer -- never a measure of the
+      new prompt.
+
+    Anything else is refused (benchmark audit F4: with the prompt replaced by
+    "Keep nothing", every deep-pass score used to stay the same)."""
+    from kazma_core.memory.belief_extractor import MESSAGE_SHAPE
+
     recorded = llm_replies.get("prompt_sha256")
     if not recorded:
         raise StaleRecordingError(f"the recording does not say which extraction prompt it answered: {RECORD_AGAIN}")
-    if recorded != _extraction_prompt_sha256():
-        raise StaleRecordingError(f"the extraction prompt changed since the recording: {RECORD_AGAIN}")
+    current = _extraction_prompt_sha256()
+    if recorded == current and _recording_shape(llm_replies) == MESSAGE_SHAPE:
+        return "current"
+    if (pending and pending.get("prompt_sha256") == current
+            and int(pending.get("message_shape") or 1) == MESSAGE_SHAPE
+            and pending.get("replaces_prompt_sha256") == recorded
+            and int(pending.get("replaces_message_shape") or 1) == _recording_shape(llm_replies)):
+        return "previous"
+    if recorded == current:
+        raise StaleRecordingError(f"the extractor's message changed since the recording: {RECORD_AGAIN}, "
+                                  f"or declare the change until then: {DECLARE_PENDING}")
+    raise StaleRecordingError(f"the extraction prompt changed since the recording: {RECORD_AGAIN}, "
+                              f"or declare the change until then: {DECLARE_PENDING}")
 
 
 def _slug(text: str) -> str:
@@ -885,21 +920,51 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
 
 def _llm_blob(user_text: str) -> str:
     """The user message ``belief_extractor._llm_extract`` sends for a turn
-    with no vocabulary (the benchmark asks with none)."""
+    with no vocabulary (the benchmark asks with none): the product's own
+    builder, :func:`belief_extractor.turn_message`."""
+    from kazma_core.memory.belief_extractor import turn_message
+
+    return turn_message(user_text)
+
+
+def _recorded_message(user_text: str, shape: int) -> str:
+    """The user message a recording asked in form *shape* was asked for a
+    turn. Form 1 is the turn's text and an empty answer; today's form is the
+    product's builder; any other form is a recording Kazma can no longer
+    replay."""
+    from kazma_core.memory.belief_extractor import MESSAGE_SHAPE
     from kazma_core.memory.limits import DEEP_PASS_QUESTION
 
-    return f"User: {user_text[:DEEP_PASS_QUESTION]}\nAssistant: "
+    if shape == MESSAGE_SHAPE:
+        return _llm_blob(user_text)
+    if shape == 1:
+        return f"User: {user_text[:DEEP_PASS_QUESTION]}\nAssistant: "
+    raise StaleRecordingError(f"the recording was asked in message form {shape}, which Kazma no longer "
+                              f"builds: {RECORD_AGAIN}")
+
+
+def _reply_key(user_text: str, llm_replies: dict[str, Any], mode: str) -> str:
+    """The key of a turn's recorded reply: the message today's extractor
+    sends (``current``), or the one the recording was asked (``previous``)."""
+    if mode == "current":
+        return _text_key(_llm_blob(user_text))
+    return _text_key(_recorded_message(user_text, _recording_shape(llm_replies)))
 
 
 class _ReplayClient:
     """Answers the extraction prompt from recorded replies; a prompt nobody
     recorded is an error (the dataset changed: record again). It also checks
-    the system message it is sent against the recording's: a prompt built
-    another way at run time is a recording of something else."""
+    the system message it is sent against the prompt it expects: a prompt
+    built another way at run time is a recording of something else.
+
+    In the ``previous`` mode (:func:`_check_recording`) it expects today's prompt
+    and answers each turn with the reply recorded for it (``answer``), not by
+    the message it is sent: the recording was asked another message."""
 
     def __init__(self, replies: dict[str, str], prompt_sha256: str) -> None:
         self._replies = replies
         self._prompt = prompt_sha256
+        self.answer: str | None = None
         self.stale = False
         self.unrecorded: list[str] = []
 
@@ -911,14 +976,16 @@ class _ReplayClient:
         if _sha256(system) != self._prompt:
             self.stale = True
             return ""
-        key = _text_key(messages[-1]["content"])
+        key = self.answer or _text_key(messages[-1]["content"])
         if key not in self._replies:
             self.unrecorded.append(str(messages[-1]["content"])[:80])
             return ""
         return self._replies[key]
 
 
-def _replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def _replayed_extraction(
+    turns: list[dict[str, Any]], llm_replies: dict[str, Any], *, mode: str = "current",
+) -> dict[str, list[dict[str, Any]]]:
     """What the deep pass keeps from each turn, from the recorded replies,
     read by the product's own parser and sanitizer."""
     import asyncio
@@ -926,18 +993,19 @@ def _replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any
 
     from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief
 
-    _check_recording(llm_replies)
-    missing = [t["id"] for t in turns if _text_key(_llm_blob(t["user"])) not in llm_replies["replies"]]
+    missing = [t["id"] for t in turns if _reply_key(t["user"], llm_replies, mode) not in llm_replies["replies"]]
     if missing:
         # Checked here: the extractor reads any failed call as "the model is
         # down", which would score a stale recording as an outage.
         raise KeyError(f"no recorded reply for {missing}: {RECORD_AGAIN}")
-    client = _ReplayClient(llm_replies["replies"], llm_replies["prompt_sha256"])
+    expected = llm_replies["prompt_sha256"] if mode == "current" else _extraction_prompt_sha256()
+    client = _ReplayClient(llm_replies["replies"], expected)
     registry = type("_Registry", (), {"get_client": lambda self: client})()
 
     async def ask_all() -> dict[str, list[dict[str, Any]]]:
         got = {}
         for t in turns:
+            client.answer = None if mode == "current" else _reply_key(t["user"], llm_replies, mode)
             beliefs, _down = await _llm_extract(t["user"], "")
             got[t["id"]] = [b for b in (_sanitize_belief(x) for x in beliefs or []) if b]
         return got
@@ -954,9 +1022,13 @@ def _replayed_extraction(turns: list[dict[str, Any]], llm_replies: dict[str, Any
 
 def run_extraction_benchmark(
     dataset: dict[str, Any] | None = None, *, llm_replies: dict[str, Any] | None = None,
+    pending: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Score the heuristic pass, and the model's pass when *llm_replies* (the
-    recorded file) is given."""
+    recorded file) is given. *pending* is the lock's declared prompt change
+    (``extraction.pending_recording``), if any: with it, a recording of the
+    prompt before the change is replayed as a drift check (:func:`_check_recording`),
+    and the report says so (``llm_replay``)."""
     from kazma_core.memory.belief_extractor import extract_beliefs_heuristic
 
     data = dataset or json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))
@@ -968,8 +1040,10 @@ def run_extraction_benchmark(
     if not llm_replies:
         report["llm"] = {"recorded": False}
         return report
-    report["llm"] = _score_extraction(turns, _replayed_extraction(turns, llm_replies))
+    mode = _check_recording(llm_replies, pending)
+    report["llm"] = _score_extraction(turns, _replayed_extraction(turns, llm_replies, mode=mode))
     report["llm_recording"] = _recording_identity(llm_replies)
+    report["llm_replay"] = mode
     return report
 
 
@@ -1040,9 +1114,10 @@ class _ScriptedClient:
         return self.reply
 
 
-def _turn_reply(turn: dict[str, Any], recorded: dict[str, str]) -> str:
+def _turn_reply(turn: dict[str, Any], recorded: dict[str, str], llm_replies: dict[str, Any] | None = None,
+                mode: str = "current") -> str:
     if "recorded" in turn:
-        key = _text_key(_llm_blob(turn["user"]))
+        key = _reply_key(turn["user"], llm_replies or {}, mode)
         if key not in recorded:
             raise KeyError(f"no recorded reply for {turn['recorded']}: {RECORD_AGAIN}")
         return recorded[key]
@@ -1063,7 +1138,8 @@ def _expected_holds(expected: dict[str, Any], row: dict[str, Any]) -> bool:
     return expected.get("trust") != "user" or row["extraction_method"] in _USER_SOURCES
 
 
-def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: dict[str, str]) -> dict[str, Any]:
+def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: dict[str, str],
+                  llm_replies: dict[str, Any] | None = None, mode: str = "current") -> dict[str, Any]:
     import asyncio
 
     from kazma_core.memory.belief_extractor import (
@@ -1106,7 +1182,7 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
             at = BASE_TIME + number * 86400
             extract_and_apply_beliefs_sync(primary, ops, turn["user"], session_id=session, turn=number,
                                            tenant_id=BENCH_TENANT, now=at, private=True)
-            client.reply = _turn_reply(turn, recorded)
+            client.reply = _turn_reply(turn, recorded, llm_replies, mode)
             raw, stats = asyncio.run(extract_beliefs_for_turn(
                 turn["user"], "", vocabulary=predicate_vocabulary(primary, tenant_id=BENCH_TENANT),
                 entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT)))
@@ -1152,22 +1228,23 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
 
 def run_write_scenarios(
     dataset: dict[str, Any] | None = None, *, llm_replies: dict[str, Any] | None = None,
+    pending: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Every write scenario through the write path; what passed, by category
     and language. *llm_replies* is the recording the ``recorded`` turns
-    replay (the extraction benchmark's)."""
+    replay (the extraction benchmark's), and *pending* the lock's declared
+    prompt change, as :func:`run_extraction_benchmark` takes them."""
     from unittest import mock
 
     data = dataset or json.loads(WRITES_PATH.read_text(encoding="utf-8"))
-    if llm_replies:
-        _check_recording(llm_replies)
+    mode = _check_recording(llm_replies, pending) if llm_replies else "current"
     recorded = (llm_replies or {}).get("replies") or {}
     client = _ScriptedClient()
     registry = type("_Registry", (), {"get_client": lambda self: client})()
     # Facts are judged by their rows: no vector is needed, and none is made.
     with mock.patch("kazma_core.model_registry.get_model_registry", lambda: registry), \
             mock.patch("kazma_core.memory.embedder.get_embedder", lambda: None):
-        results = [_run_scenario(s, client, recorded) for s in data["scenarios"]]
+        results = [_run_scenario(s, client, recorded, llm_replies, mode) for s in data["scenarios"]]
     groups: dict[str, dict[str, int]] = {}
     for r in results:
         for key in (f"{r['category']}.{r['lang']}", "overall"):
@@ -1182,6 +1259,7 @@ def run_write_scenarios(
     }
     if llm_replies:
         report["llm_recording"] = _recording_identity(llm_replies)
+        report["llm_replay"] = mode
     return report
 
 
@@ -1201,7 +1279,7 @@ async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[s
     registry = get_model_registry()
     client = registry.get_client()
     replies: dict[str, str] = {}
-    from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM
+    from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM, MESSAGE_SHAPE
 
     for t in data["turns"]:
         blob = _llm_blob(t["user"])
@@ -1214,7 +1292,8 @@ async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[s
 
     return {"model": str(model), "provider": str(getattr(registry, "_active_provider", "") or "unknown"),
             "recorded_on": _dt.date.today().isoformat(), "askings": 1,
-            "prompt_sha256": _sha256(_EXTRACT_SYSTEM), "extraction_version": data["version"],
+            "prompt_sha256": _sha256(_EXTRACT_SYSTEM), "message_shape": MESSAGE_SHAPE,
+            "extraction_version": data["version"],
             "replies": replies}
 
 

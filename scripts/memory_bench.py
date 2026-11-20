@@ -6,6 +6,7 @@
   python scripts/memory_bench.py lock              # raise the CI ratchet to today's scores
   python scripts/memory_bench.py lock --trade "why"  # a reviewed trade (see TRADE_RULE)
   python scripts/memory_bench.py lock --new-recording "why"  # lock a new recording of the model's pass
+  python scripts/memory_bench.py lock --prompt-changed "why"  # a prompt change waiting for its recording
   python scripts/memory_bench.py lock --edge q601 "why"  # name a hit that flips inside the rounding (EDGE_RULE)
   python scripts/memory_bench.py lock-pgvector --from LOG --run "CI run"  # the pgvector floors, from a named run
   python scripts/memory_bench.py sealed --look "why"    # score the sealed set: every look is logged
@@ -1409,7 +1410,7 @@ def _edge_lock(
 
 
 def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | None = None,
-              edges: list[tuple[str, str]] | None = None) -> int:
+              edges: list[tuple[str, str]] | None = None, prompt_changed: str | None = None) -> int:
     """Write the replayed scores as the ratchet; refuse to lower any of them.
 
     The ratchet names the dataset versions it was measured on (the recall
@@ -1495,8 +1496,9 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
 
     try:
         extraction, problems = _extraction_lock(old.get("extraction") or {}, fresh=extraction_new,
-                                                new_recording=new_recording)
-        writes, more = _writes_lock(old.get("writes") or {}, fresh=writes_new, new_recording=new_recording)
+                                                new_recording=new_recording, prompt_changed=prompt_changed)
+        writes, more = _writes_lock(old.get("writes") or {}, fresh=writes_new, new_recording=new_recording,
+                                    pending=extraction.get("pending_recording"))
         problems += more
         speakers, more = _speakers_lock(old.get("speakers") or {}, fresh=speakers_new)
         problems += more
@@ -1543,8 +1545,46 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
     return 0
 
 
+def _declare_prompt_change(
+    replies: dict[str, Any], pending: dict[str, Any] | None, why: str,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """The lock's declaration that the extraction prompt (or its message)
+    changed and waits for its recording (``lock --prompt-changed "why"``),
+    and why it is refused. One declaration covers every change until the
+    recording: each change adds its date, reason and prompt to ``changes``;
+    ``since`` is the first change's date."""
+    import datetime as _dt
+
+    from kazma_core.memory.belief_extractor import MESSAGE_SHAPE
+    from kazma_core.memory.benchmark import _extraction_prompt_sha256, _recording_shape
+
+    current, recorded = _extraction_prompt_sha256(), replies.get("prompt_sha256")
+    shape, recorded_shape = MESSAGE_SHAPE, _recording_shape(replies)
+    if current == recorded and shape == recorded_shape:
+        return pending, ["--prompt-changed: the prompt and its message are the ones the recording answered"]
+    if pending and pending.get("prompt_sha256") == current and int(pending.get("message_shape") or 1) == shape:
+        return pending, ["--prompt-changed: this prompt is already declared"]
+    keep = pending if pending and pending.get("replaces_prompt_sha256") == recorded else None
+    today = _dt.date.today().isoformat()
+    return {
+        "prompt_sha256": current, "message_shape": shape,
+        "replaces_prompt_sha256": recorded, "replaces_message_shape": recorded_shape,
+        "since": (keep or {}).get("since") or today,
+        "changes": [*((keep or {}).get("changes") or []),
+                    {"date": today, "why": why, "prompt_sha256": current, "message_shape": shape}],
+    }, []
+
+
+def _relabelled(locked: dict[str, Any], identity: dict[str, Any]) -> bool:
+    """The locked replies now say they answered another prompt, or were asked
+    in another message form: a relabelled recording, never a new one."""
+    return (locked.get("prompt_sha256") != identity["prompt_sha256"]
+            or int(locked.get("message_shape") or 1) != int(identity.get("message_shape") or 1))
+
+
 def _extraction_lock(
     old: dict[str, Any], *, fresh: bool = False, new_recording: str | None = None,
+    prompt_changed: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """The extraction part of the lock, and why it is refused (empty: it is not).
 
@@ -1561,6 +1601,12 @@ def _extraction_lock(
       score, is a floor no recording reaches. The change is written down.
     * No recording, a prompt it did not answer, or a locked score missing
       from today's run: refused, never a shorter lock.
+    * A prompt change waiting for its recording (framework audit part C2)
+      is declared with ``--prompt-changed "why"`` (:func:`_declare_prompt_change`):
+      until the recording, the model's pass replays the recording of the
+      prompt before the change as a drift check, compared exactly, and the
+      lock says so (``pending_recording``). A recording of today's prompt
+      ends it.
     """
     import datetime as _dt
 
@@ -1574,17 +1620,25 @@ def _extraction_lock(
     if not LLM_REPLIES.is_file():
         return {}, [f"no recording of the model's pass ({LLM_REPLIES.name}): it cannot be locked without "
                     f"one; {RECORD_AGAIN}"]
-    report = run_extraction_benchmark(llm_replies=json.loads(LLM_REPLIES.read_text(encoding="utf-8")))
+    replies = json.loads(LLM_REPLIES.read_text(encoding="utf-8"))
+    pending, problems = old.get("pending_recording"), []
+    if prompt_changed:
+        pending, problems = _declare_prompt_change(replies, pending, prompt_changed)
+    report = run_extraction_benchmark(llm_replies=replies, pending=pending)
     now = extraction_scores(report)
     identity = report["llm_recording"]
     was = {} if fresh else (old.get("scores") or {})
     history = list(old.get("recordings") or [])
-    problems = [f"{k}: locked, and missing from today's run" for k in was if k not in now]
+    previous = report["llm_replay"] == "previous"
+    if previous and new_recording:
+        problems.append("--new-recording: the recording answered the prompt before the declared change; a new "
+                        "recording answers today's prompt")
+    problems += [f"{k}: locked, and missing from today's run" for k in was if k not in now]
     problems += [f"{k}: {now[k]} < {v}" for k, v in sorted(was.items())
                  if k.startswith("heuristic.") and k in now and now[k] < v]
     locked = old.get("recording") or {}
     same = locked.get("sha256") == identity["sha256"]
-    if same and locked.get("prompt_sha256") != identity["prompt_sha256"]:
+    if same and _relabelled(locked, identity):
         # The replies are the ones locked, and the file now says they answer
         # another prompt: a relabelled recording, never a new one.
         problems.append("the recording now says it answered another prompt than the one locked: a recording "
@@ -1609,10 +1663,14 @@ def _extraction_lock(
             "date": _dt.date.today().isoformat(), "reason": new_recording,
             "replaced": {"recording": old.get("recording"),
                          "scores": {k: v for k, v in sorted(was.items()) if k.startswith("llm.")}},
+            # The prompt changes this recording measures for the first time.
+            **({"answers": old["pending_recording"]} if old.get("pending_recording") else {}),
         })
     return {"version": report["version"], "recording": identity, "scores": now,
             # What each row rests on, for the benchmarks page (decision 6).
-            "rests_on": extraction_rests_on(report), "recordings": history}, problems
+            "rests_on": extraction_rests_on(report), "recordings": history,
+            # A declared prompt change still waiting for its recording.
+            **({"pending_recording": pending} if previous else {})}, problems
 
 
 def _speakers_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[str, Any], list[str]]:
@@ -1637,6 +1695,7 @@ def _speakers_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[st
 
 def _writes_lock(
     old: dict[str, Any], *, fresh: bool = False, new_recording: str | None = None,
+    pending: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """The write scenarios' part of the lock, and why it is refused.
 
@@ -1651,14 +1710,14 @@ def _writes_lock(
 
     if not LLM_REPLIES.is_file():
         return {}, ["no recording of the model's pass: the write scenarios replay it"]
-    report = run_write_scenarios(llm_replies=json.loads(LLM_REPLIES.read_text(encoding="utf-8")))
+    report = run_write_scenarios(llm_replies=json.loads(LLM_REPLIES.read_text(encoding="utf-8")), pending=pending)
     now = write_scores(report)
     identity = report["llm_recording"]
     was = {} if fresh else (old.get("scores") or {})
     locked = old.get("recording") or {}
     same = locked.get("sha256") == identity["sha256"]
     problems = [f"writes {k}: locked, and missing from today's run" for k in was if k not in now]
-    if same and locked.get("prompt_sha256") != identity["prompt_sha256"]:
+    if same and _relabelled(locked, identity):
         problems.append("writes: the recording now says it answered another prompt than the one locked")
     if fresh or (not same and new_recording):
         pass
@@ -1673,11 +1732,18 @@ def _writes_lock(
             "failing": report["failing"]}, problems
 
 
+def _locked_pending() -> dict[str, Any] | None:
+    """The lock's declared prompt change waiting for its recording, if any."""
+    if not THRESHOLDS.is_file():
+        return None
+    return (json.loads(THRESHOLDS.read_text(encoding="utf-8")).get("extraction") or {}).get("pending_recording")
+
+
 def _cmd_writes() -> int:
     from kazma_core.memory.benchmark import run_write_scenarios
 
     replies = json.loads(LLM_REPLIES.read_text(encoding="utf-8")) if LLM_REPLIES.is_file() else None
-    report = run_write_scenarios(llm_replies=replies)
+    report = run_write_scenarios(llm_replies=replies, pending=_locked_pending())
     for r in report["results"]:
         print(("pass  " if r["passed"] else "FAIL  ") + r["id"])
         for line in r["problems"]:
@@ -1692,7 +1758,8 @@ def _cmd_extraction() -> int:
     # The replies are recorded by scripts/memory_extraction_record.py, which
     # loads an install's .env to reach its model; this script stays env-free.
     replies = json.loads(LLM_REPLIES.read_text(encoding="utf-8")) if LLM_REPLIES.is_file() else None
-    print(json.dumps(run_extraction_benchmark(llm_replies=replies), ensure_ascii=True, indent=1))
+    print(json.dumps(run_extraction_benchmark(llm_replies=replies, pending=_locked_pending()), ensure_ascii=True,
+                     indent=1))
     return 0
 
 
@@ -1864,6 +1931,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="lower some scores for a larger gain elsewhere, under TRADE_RULE; recorded")
     lock.add_argument("--new-recording", metavar="REASON",
                       help="lock a new recording of the model's extraction pass; its scores replace the old")
+    lock.add_argument("--prompt-changed", metavar="REASON",
+                      help="declare a change of the extraction prompt that waits for its recording; recorded")
     lock.add_argument("--edge", nargs=2, action="append", metavar=("QUESTION", "REASON"),
                       help="name a question whose hit flips inside the vectors' rounding (EDGE_RULE); recorded")
     pgv = sub.add_parser("lock-pgvector", help="lock the pgvector path's floors from a named run")
@@ -1889,7 +1958,7 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_vectors()
     if args.cmd == "lock":
         return _cmd_lock(args.rebaseline, args.trade, args.new_recording,
-                         [tuple(e) for e in args.edge] if args.edge else None)
+                         [tuple(e) for e in args.edge] if args.edge else None, args.prompt_changed)
     if args.cmd == "lock-pgvector":
         return _cmd_lock_pgvector(args.source, args.run, args.mode)
     if args.cmd == "sealed":

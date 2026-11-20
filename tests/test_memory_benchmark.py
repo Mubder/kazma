@@ -285,6 +285,12 @@ def _turns() -> list[dict]:
     return json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
 
 
+def _pending() -> dict | None:
+    """The lock's declared prompt change waiting for its recording (framework
+    audit part C2; tests/test_memory_pending_recording.py), if any."""
+    return _locked_extraction().get("pending_recording")
+
+
 def test_the_extraction_dataset_is_what_the_builder_builds():
     built = _build_script().build_extraction()
     assert json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8")) == json.loads(
@@ -309,7 +315,7 @@ def test_the_lock_counts_what_each_extraction_row_rests_on():
     from the lock, and the lock's count is the replay's (a hand-edited count
     fails here)."""
     locked = _locked_extraction()
-    report = benchmark.run_extraction_benchmark(llm_replies=_recording())
+    report = benchmark.run_extraction_benchmark(llm_replies=_recording(), pending=_pending())
     assert locked["rests_on"] == benchmark.extraction_rests_on(report)
     for lang, row in locked["rests_on"]["llm"].items():
         assert row["askings"] == row["turns"] * locked["recording"]["askings"], lang
@@ -320,7 +326,7 @@ def test_the_lock_counts_what_each_extraction_row_rests_on():
 
 def test_extraction_only_improves():
     locked = _locked_extraction()
-    report = benchmark.run_extraction_benchmark(llm_replies=_recording())
+    report = benchmark.run_extraction_benchmark(llm_replies=_recording(), pending=_pending())
     assert report["version"] == locked["version"], (
         "the extraction dataset changed: python scripts/memory_bench.py lock --rebaseline")
     problems = _recording_problems(report, locked)
@@ -632,7 +638,7 @@ def test_the_models_pass_replays_recorded_replies():
 
 @pytest.fixture(scope="module")
 def writes_report():
-    return benchmark.run_write_scenarios(llm_replies=_recording())
+    return benchmark.run_write_scenarios(llm_replies=_recording(), pending=_pending())
 
 
 def _locked_writes() -> dict:
@@ -676,7 +682,7 @@ def test_the_write_scenarios_see_a_gate_that_lets_anything_replace_the_user(monk
     holds the gate fails."""
     assert "other-en-sister-moved" not in writes_report["failing"]
     monkeypatch.setattr("kazma_core.memory.provenance.may_overrule", lambda *_a, **_k: True)
-    open_gate = benchmark.run_write_scenarios(llm_replies=_recording())
+    open_gate = benchmark.run_write_scenarios(llm_replies=_recording(), pending=_pending())
     assert "other-en-sister-moved" in open_gate["failing"]
 
 

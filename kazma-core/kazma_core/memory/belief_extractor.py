@@ -224,6 +224,32 @@ async def extract_beliefs_with_llm(
     return beliefs
 
 
+#: The form of the user message :func:`turn_message` builds. A recording of
+#: the deep pass says which form it was asked in (``message_shape``; a
+#: recording that says none was asked in form 1), so a change of form is a
+#: change the benchmark sees: bump this with any change to the message.
+MESSAGE_SHAPE = 1
+
+
+def turn_message(
+    user_text: str,
+    assistant_text: str = "",
+    *,
+    vocabulary: list[str] | None = None,
+    entities: list[str] | None = None,
+) -> str:
+    """The user message the deep pass sends for a turn: the one builder, for
+    the product and the benchmark's recordings alike."""
+    from kazma_core.memory.limits import DEEP_PASS_ANSWER, DEEP_PASS_QUESTION
+
+    blob = f"User: {user_text[:DEEP_PASS_QUESTION]}\nAssistant: {(assistant_text or '')[:DEEP_PASS_ANSWER]}"
+    if vocabulary:
+        blob += "\n\nPredicates already in use: " + ", ".join(vocabulary[:60])
+    if entities:
+        blob += "\n\nSubjects already in use: " + ", ".join(entities[:60])
+    return blob
+
+
 async def _llm_extract(
     user_text: str,
     assistant_text: str = "",
@@ -241,16 +267,10 @@ async def _llm_extract(
         client = get_model_registry().get_client()
         if client is None:
             raise LookupError("no active LLM client returned by the model registry")
-        from kazma_core.memory.limits import DEEP_PASS_ANSWER, DEEP_PASS_QUESTION
-
-        blob = f"User: {user_text[:DEEP_PASS_QUESTION]}\nAssistant: {(assistant_text or '')[:DEEP_PASS_ANSWER]}"
-        if vocabulary:
-            blob += "\n\nPredicates already in use: " + ", ".join(vocabulary[:60])
-        if entities:
-            blob += "\n\nSubjects already in use: " + ", ".join(entities[:60])
         messages = [
             {"role": "system", "content": _EXTRACT_SYSTEM},
-            {"role": "user", "content": blob},
+            {"role": "user", "content": turn_message(user_text, assistant_text, vocabulary=vocabulary,
+                                                     entities=entities)},
         ]
         raw = await client.chat(messages)
     except Exception as exc:  # noqa: BLE001 - no client, or no answer: retry later

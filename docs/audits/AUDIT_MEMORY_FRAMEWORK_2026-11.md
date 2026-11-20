@@ -838,6 +838,13 @@ Added as each piece lands.
   London in October, now reads "[since Oct 2026] user lives in London;
   before that: Paris (May 2026 to Oct 2026)" and "[28 May 2026] User: I
   live in Paris".
+- **Before the prompt changes, 2026-11-20: a declared change waits for its
+  recording.** `lock --prompt-changed "why"` names each change in the lock;
+  until the recording the model-pass rows replay the old recording through
+  today's code (a drift check) and the benchmarks page says they do not
+  measure the new prompt. The product and the benchmark build the deep
+  pass's message with one function, and a recording names its message form.
+  Gate: `tests/test_memory_pending_recording.py`.
   Gate: `tests/test_memory_recall_dates.py`; control: recall without the
   dating step.
 

@@ -2083,7 +2083,23 @@ four injected were noise.
   resets the extraction part when its dataset version changes. Gates in
   `tests/test_memory_benchmark.py`, each with its negative control (a
   renamed extractor keeps `found`; "Keep nothing" as the prompt is refused;
-  the old max-of-two floor). **Write scenarios** (`benchmark_data/writes.json`,
+  the old max-of-two floor). **A prompt change waits for its recording,
+  declared** (2026-11-20, framework audit part C2: its prompt changes land
+  first and are recorded once, with the owner's yes). `lock --prompt-changed
+  "why"` writes `extraction.pending_recording` (the prompt and message form
+  it waits for, the recording it replaces, each change dated with its
+  reason; `memory_bench._declare_prompt_change`); until a recording of
+  today's prompt ends it, `benchmark._check_recording` answers `previous` and the
+  model's pass and the write scenarios replay the old recording by turn
+  through today's parser and scorer (a drift check, compared exactly), and
+  the benchmarks page says those rows do not measure the new prompt. An
+  undeclared change is refused as before. The deep pass's message has one
+  builder for the product and the benchmark (`belief_extractor.turn_message`),
+  and a recording says its form (`message_shape`; none is form 1); a new
+  form is `belief_extractor.MESSAGE_SHAPE` bumped and declared like a prompt
+  change. Gate: `tests/test_memory_pending_recording.py` (an undeclared
+  change and a sanitizer that drops every fact as negative controls).
+  **Write scenarios** (`benchmark_data/writes.json`,
   `run_write_scenarios`, 2026-11): a few turns of one chat through the write
   path in the live order (the quick pass, `extract_and_apply_beliefs_sync`;
   then the deep pass, `extract_beliefs_for_turn` with the names in use and

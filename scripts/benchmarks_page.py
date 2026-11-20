@@ -162,7 +162,9 @@ def _memory(data: dict) -> list[str]:
     if ex:
         recording = extraction.get("recording") or {}
         askings = int(recording.get("askings") or 1)
-        model_label = f"Model pass ({askings} asking{'' if askings == 1 else 's'} a turn)"
+        pending = extraction.get("pending_recording") or {}
+        model_label = (f"Model pass ({askings} asking{'' if askings == 1 else 's'} a turn"
+                       f"{', previous prompt' if pending else ''})")
         lines += [
             "### Learning facts from a conversation {#memory-facts}",
             "",
@@ -192,6 +194,14 @@ def _memory(data: dict) -> list[str]:
                 f"{askings} asking{'' if askings == 1 else 's'} a turn. Asked again, a model answers a little "
                 "differently, so a number from one asking can move by a few facts with nothing changed.",
             ]
+            if pending:
+                changes = len(pending.get("changes") or [])
+                lines.append(
+                    f"Kazma's extraction prompt has changed since that recording ({changes} "
+                    f"change{'' if changes == 1 else 's'} since {pending.get('since')}). The model-pass rows replay "
+                    "the recording through today's code, which checks that the code reading the model's replies "
+                    "still keeps what it kept; they do not measure the new prompt, which is measured when it is "
+                    "recorded.")
         lines.append("")
     pg = data.get("pgvector") or {}
     floors = pg.get("floors") or {}

@@ -14,8 +14,10 @@ It costs one model call per turn (the turns of
 checkout (``python scripts/memory_bench.py extraction``, then
 ``lock --new-recording "why"``: a new recording replaces the model pass's
 scores only on purpose). The file says what it is: the model, the provider,
-the date, the askings a turn and the hash of the system prompt it answered;
-a later change to that prompt makes the benchmark refuse it.
+the date, the askings a turn, the hash of the system prompt it answered and
+the form of the message it was asked (``message_shape``); a later change to
+either makes the benchmark refuse it, unless the change is declared in the
+lock until it is recorded (``memory_bench.py lock --prompt-changed "why"``).
 ``--out`` is required so a run inside an install never writes into the
 install's own checkout. ``scripts/memory_bench.py`` stays env-free: it builds
 its benchmarks on temporary databases, and an install's ``.env`` would point
