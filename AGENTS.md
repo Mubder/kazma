@@ -2255,6 +2255,24 @@ four injected were noise.
   the recording. Gates: `tests/test_memory_extractor_context.py` (the
   worker without the context and a writer that drops the start as negative
   controls), the write scenarios' `temporal` category.
+- **The deep pass is shown the facts held and may say which one a new fact
+  replaces** (2026-11-20, framework audit F4's second layer, part C2).
+  `belief_extractor.held_facts` reads the current facts about the turn's
+  people and things -- the speaker's own first (`user`; their entry in a
+  shared space, shown as `user`), then each subject whose words the turn
+  holds (`query_terms.content_terms`), never another member's entry,
+  another tenant's or a forgotten fact -- at most
+  `limits.DEEP_PASS_HELD_FACTS`, values cut at `DEEP_PASS_HELD_VALUE`,
+  numbered `f1`... in the message (form 3). A fact whose `replaces` names
+  one (`_REF_RE`) goes by that fact's name and kind (`_take_replaces`) only
+  for the same subject (after filing) and only while it is still current;
+  the trust gate then decides as for any change. A replaced list entry is
+  closed when `provenance.may_overrule` lets the source change it, else
+  counted `replace_refused` (`_close_replaced_entry`; on a private database
+  no mirror or graph call). The worker passes the same list to the message
+  and the write. Gates: `tests/test_memory_held_facts.py` ("replaces"
+  ignored as the negative control), the write scenarios' `replaces`
+  category.
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
   0.00 Arabic recall). Token rules from the grammar, compared folded: a

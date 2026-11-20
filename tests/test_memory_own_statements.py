@@ -122,7 +122,7 @@ def _deep_pass(mem, monkeypatch, *, value_first: str | None, then: str, model: l
                    created_at=turn_time)
 
     async def llm(user_text, assistant_text="", *, use_llm=True, ignore_filler=False, vocabulary=None,
-                  entities=None, said_on=None, previous=None):
+                  entities=None, said_on=None, previous=None, held=None):
         return ([dict(b, confidence=0.9, importance=4) for b in model],
                 {"skipped_filler": False, "source": "llm", "applied": 0, "rejected": 0, "actions": []})
 

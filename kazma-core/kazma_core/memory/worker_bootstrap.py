@@ -390,11 +390,12 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
 
 
 def _turn_context(primary: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
-    """The turn's day in the operator's zone and the turn before it in the
-    same chat (``said_on``, ``previous``), for the deep pass's message
-    (framework audit F2 step 2). A forgotten turn is never the one before:
+    """The turn's day in the operator's zone, the turn before it in the
+    same chat and the facts held about its people and things (``said_on``,
+    ``previous``, ``held``), for the deep pass's message (framework audit F2
+    step 2, F4's second layer). A forgotten turn is never the one before:
     its text is gone, and its chat's next remembered turn is taken."""
-    from kazma_core.memory.belief_extractor import _turn_zone, said_on_iso
+    from kazma_core.memory.belief_extractor import _turn_zone, held_facts, said_on_iso
 
     before = None
     if row["session_id"] and row["turn_number"] is not None:
@@ -406,7 +407,10 @@ def _turn_context(primary: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
             (row["tenant_id"] or "default", row["session_id"], int(row["turn_number"])),
         ).fetchone()
     return {"said_on": said_on_iso(row["created_at"], _turn_zone()),
-            "previous": (before[0] or "", before[1] or "") if before else None}
+            "previous": (before[0] or "", before[1] or "") if before else None,
+            "held": held_facts(primary, tenant_id=row["tenant_id"] or "default",
+                               text=f"{row['user_text'] or ''}\n{row['assistant_text'] or ''}",
+                               said_by=row["said_by"])}
 
 
 #: The deep pass's rules: an episode marked with this version (``metadata.
@@ -469,7 +473,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
             raw, stats = await extract_beliefs_for_turn(
                 row["user_text"] or "", row["assistant_text"] or "", use_llm=prep["use_llm"],
                 vocabulary=prep.get("vocabulary"), entities=prep.get("entities"),
-                said_on=prep.get("said_on"), previous=prep.get("previous"),
+                said_on=prep.get("said_on"), previous=prep.get("previous"), held=prep.get("held"),
             )
             if prep["use_llm"] and stats.get("model_unavailable"):
                 # The model could not be asked: the deep pass is retried with
@@ -496,6 +500,8 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
                     tenant_id=row["tenant_id"], now=row["created_at"], user_text=row["user_text"] or "",
                     # The turn's author, kept on its episode (Spaces S1-11).
                     said_by=row.get("said_by"),
+                    # The facts the model was shown, by number ("replaces").
+                    held=prep.get("held"),
                 )
             await asyncio.to_thread(_mark_deep_pass, primary, str(episode_id))
             logger.info(

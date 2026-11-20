@@ -100,7 +100,8 @@ Return ONLY valid JSON (no markdown fences) with this shape:
       "object": "the fact value",
       "confidence": 0.0 to 1.0,
       "importance": 1 to 5,
-      "since": "optional: when the fact began, YYYY-MM-DD, YYYY-MM or YYYY"
+      "since": "optional: when the fact began, YYYY-MM-DD, YYYY-MM or YYYY",
+      "replaces": "optional: the number of a held fact this one replaces, f1, f2, ..."
     }
   ]
 }
@@ -113,6 +114,11 @@ Rules:
   this turn ("last month" said on 2026-05-31 is "2026-04"; "two weeks ago" said on
   2026-05-31 is "2026-05-17"). Leave "since" out when the turn names no time;
   never guess one.
+- The message may list facts Kazma holds now, numbered. When a fact you return
+  replaces one of them -- a new job, a move, a correction, or the same fact under
+  another name -- add "replaces": its number ("f2"), and use the held fact's
+  predicate when it names the same kind of fact. Only a held fact about the same
+  subject. Do not return a held fact again unchanged.
 - functional = single-valued (lives_in, name_is, works_at, favorite_*, active_project,
   grok_next_reset, zcode_next_reset, *_next_reset, *_weekly_reset).
   A new value supersedes the old one — only ONE active value per (subject, predicate).
@@ -237,8 +243,9 @@ async def extract_beliefs_with_llm(
 #: the deep pass says which form it was asked in (``message_shape``; a
 #: recording that says none was asked in form 1), so a change of form is a
 #: change the benchmark sees: bump this with any change to the message.
-#: Form 2 (2026-11-20): the turn's date and the turn before it.
-MESSAGE_SHAPE = 2
+#: Form 2 (2026-11-20): the turn's date and the turn before it. Form 3: the
+#: facts Kazma holds about the turn's people and things, numbered.
+MESSAGE_SHAPE = 3
 
 
 def _turn_zone() -> Any:
@@ -268,9 +275,14 @@ def turn_message(
     entities: list[str] | None = None,
     said_on: str | None = None,
     previous: tuple[str, str] | None = None,
+    held: list[dict[str, Any]] | None = None,
 ) -> str:
     """The user message the deep pass sends for a turn: the one builder, for
     the product and the benchmark's recordings alike.
+
+    *held* is the facts Kazma holds about the turn's people and things
+    (:func:`held_facts`), shown numbered so the model can say which one a
+    new fact replaces (framework audit F4, second layer).
 
     *said_on* is the turn's day (``YYYY-MM-DD``, :func:`said_on_iso`), so the
     model can turn "last month" into a date; *previous* is the turn before
@@ -281,6 +293,7 @@ def turn_message(
 
     from kazma_core.memory.limits import (
         DEEP_PASS_ANSWER,
+        DEEP_PASS_HELD_VALUE,
         DEEP_PASS_PREVIOUS_ANSWER,
         DEEP_PASS_PREVIOUS_QUESTION,
         DEEP_PASS_QUESTION,
@@ -295,6 +308,11 @@ def turn_message(
         head.append("The turn before, to understand this one (learn nothing from it):\n"
                     f"User: {(asked or '')[:DEEP_PASS_PREVIOUS_QUESTION]}\n"
                     f"Assistant: {(answered or '')[:DEEP_PASS_PREVIOUS_ANSWER]}")
+    if held:
+        head.append("Facts Kazma holds now about this turn's people and things (a fact you return that "
+                    "replaces one of them says \"replaces\": its number):\n"
+                    + "\n".join(f"{h['ref']}. {h['shown']} {h['predicate']} "
+                                 f"{' '.join(str(h['object']).split())[:DEEP_PASS_HELD_VALUE]}" for h in held))
     if head:
         blob = "\n\n".join(head) + "\n\nThis turn:\n" + blob
     if vocabulary:
@@ -312,6 +330,7 @@ async def _llm_extract(
     entities: list[str] | None = None,
     said_on: str | None = None,
     previous: tuple[str, str] | None = None,
+    held: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]] | None, bool]:
     """``(beliefs, model_unavailable)``: None with True when the model could
     not be asked or did not answer (no client, the call raised -- retry
@@ -326,7 +345,8 @@ async def _llm_extract(
         messages = [
             {"role": "system", "content": _EXTRACT_SYSTEM},
             {"role": "user", "content": turn_message(user_text, assistant_text, vocabulary=vocabulary,
-                                                     entities=entities, said_on=said_on, previous=previous)},
+                                                     entities=entities, said_on=said_on, previous=previous,
+                                                     held=held)},
         ]
         raw = await client.chat(messages)
     except Exception as exc:  # noqa: BLE001 - no client, or no answer: retry later
@@ -414,7 +434,101 @@ def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
     since = _since_value(b.get("since"))
     if since:
         clean["since"] = since
+    replaces = _REF_RE.fullmatch(str(b.get("replaces") or "").strip().lower())
+    if replaces:
+        clean["replaces"] = f"f{int(replaces[1])}"
     return clean
+
+
+#: A held fact's number in the deep pass's message (:func:`held_facts`).
+_REF_RE = re.compile(r"f([0-9]{1,3})")
+
+
+def held_facts(conn: Any, *, tenant_id: str, text: str, said_by: str | None = None) -> list[dict[str, Any]]:
+    """The current facts about a turn's people and things, numbered ``f1``,
+    ``f2``... for the deep pass's message (framework audit F4, second layer):
+    the speaker's own first (``user``; their entry in a shared space, shown
+    as ``user``), then each subject the turn names, newest first, at most
+    :data:`limits.DEEP_PASS_HELD_FACTS`. Another member's entry is never
+    shown. A forgotten fact holds no value and is left out."""
+    from kazma_core.memory.limits import DEEP_PASS_HELD_FACTS
+    from kazma_core.memory.query_terms import content_terms
+    from kazma_core.memory.speakers import is_member_entry
+    from kazma_core.memory.speakers import room as speakers_room
+
+    people = speakers_room(tenant_id)
+    own = people.entry_for(said_by) if people.shared else "user"
+    current = "valid_until IS NULL AND invalidated_at IS NULL AND COALESCE(object, '') != ''"
+    words = content_terms(text or "")
+    named = []
+    for (subject,) in conn.execute(
+            f"SELECT DISTINCT subject FROM beliefs WHERE tenant_id = ? AND {current}",  # nosec B608 - fixed clause
+            (tenant_id,)).fetchall():
+        wanted = content_terms(str(subject or "").replace("_", " "))
+        if subject and subject not in (own, "user") and not is_member_entry(subject) and wanted and wanted <= words:
+            named.append(subject)
+    out: list[dict[str, Any]] = []
+    for subject in ([own] if own else []) + sorted(named):
+        rows = conn.execute(
+            "SELECT id, subject, predicate, predicate_type, object, extraction_method FROM beliefs "
+            f"WHERE tenant_id = ? AND subject = ? AND {current} ORDER BY valid_from DESC, id LIMIT ?",  # nosec B608
+            (tenant_id, subject, DEEP_PASS_HELD_FACTS - len(out))).fetchall()
+        for r in rows:
+            out.append({"ref": f"f{len(out) + 1}", "id": r[0], "subject": r[1],
+                        "shown": "user" if r[1] == own else r[1], "predicate": r[2],
+                        "predicate_type": r[3] or "set", "object": r[4], "method": r[5]})
+        if len(out) >= DEEP_PASS_HELD_FACTS:
+            break
+    return out
+
+
+def _take_replaces(clean: dict[str, Any], held: list[dict[str, Any]] | None, conn: Any,
+                   tenant_id: str) -> dict[str, Any] | None:
+    """The held fact *clean* replaces (its ``replaces`` number), when it is
+    about the same subject and still current: *clean* then goes by that
+    fact's name and kind, so the trust gate decides as for any change of it
+    (a fact the user stated yields only to the user's own words). Anything
+    else is ignored: the fact is written as it came."""
+    ref = clean.pop("replaces", None)
+    entry = next((h for h in held or () if h["ref"] == ref), None)
+    if entry is None or entry["subject"] != clean["subject"]:
+        return None
+    if conn.execute("SELECT 1 FROM beliefs WHERE id = ? AND tenant_id = ? AND valid_until IS NULL "
+                    "AND invalidated_at IS NULL", (entry["id"], tenant_id)).fetchone() is None:
+        return None
+    clean["predicate"], clean["predicate_type"] = entry["predicate"], entry["predicate_type"]
+    return entry
+
+
+def _close_replaced_entry(entry: dict[str, Any], clean: dict[str, Any], method: str, *, conn: Any,
+                          tenant_id: str, now: float | None, private: bool, stats: dict[str, Any]) -> None:
+    """A list entry replaced by another value ("I switched from vim to
+    emacs"): the new entry is appended like any, and the old one closed when
+    the trust gate lets this source change it (a list entry the user stated
+    yields only to the user's own words)."""
+    from kazma_core.memory.provenance import may_overrule
+
+    if entry["predicate_type"] != "set" or _same_value_text(entry["object"], clean["object"]):
+        return
+    if not may_overrule(entry["method"], method):
+        stats["replace_refused"] = stats.get("replace_refused", 0) + 1
+        return
+    from kazma_core.memory.hygiene import beliefs_write, invalidate_belief
+
+    if private:
+        # A private database (the benchmark's): nothing may leave it, so no
+        # mirror tombstone or graph edge (``invalidate_belief`` sends both).
+        beliefs_write(conn, "UPDATE beliefs SET valid_until = ?, invalidated_at = ? WHERE id = ? AND tenant_id = ? "
+                            "AND valid_until IS NULL", (now, now, entry["id"], tenant_id))
+    else:
+        invalidate_belief(entry["id"], conn=conn, now=now, tenant_id=tenant_id)
+    stats["replaced_entries"] = stats.get("replaced_entries", 0) + 1
+
+
+def _same_value_text(a: Any, b: Any) -> bool:
+    from kazma_core.memory.belief_mutation import _same_value
+
+    return _same_value(str(a or ""), str(b or ""))
 
 
 #: The forms a fact's start may take (``since``): a year, a month or a day.
@@ -620,12 +734,13 @@ async def extract_beliefs_for_turn(
     entities: list[str] | None = None,
     said_on: str | None = None,
     previous: tuple[str, str] | None = None,
+    held: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
     """The extraction half, with no database: ``(raw_beliefs, stats)``.
 
     LLM preferred, heuristic fallback; filler and slash commands skipped.
-    *said_on* and *previous* are the turn's day and the turn before it
-    (:func:`turn_message`).
+    *said_on*, *previous* and *held* are the turn's day, the turn before it
+    and the facts held about it (:func:`turn_message`).
     """
     stats: dict[str, Any] = {
         "skipped_filler": False,
@@ -653,7 +768,7 @@ async def extract_beliefs_for_turn(
         else:
             raw_beliefs, unavailable = await _llm_extract(
                 user_text, assistant_text, vocabulary=vocabulary, entities=entities, said_on=said_on,
-                previous=previous,
+                previous=previous, held=held,
             )
             if unavailable:
                 stats["model_unavailable"] = True
@@ -735,8 +850,13 @@ def _apply_beliefs_to_v2(
     user_text: str | None = None,
     said_by: str | None = None,
     not_again: set[tuple[str, ...]] | None = None,
+    held: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
+
+    *held* is the numbered facts the deep pass was shown (:func:`held_facts`):
+    a fact that says it ``replaces`` one about the same subject goes by its
+    name and kind (:func:`_take_replaces`).
 
     *not_again*: ``(subject, predicate, casefolded object)`` facts a member
     forgot about themself, never filed from this turn again (N33).
@@ -831,6 +951,7 @@ def _apply_beliefs_to_v2(
             if not_again and (filed, clean["predicate"], str(clean["object"]).casefold()) in not_again:
                 stats["rejected"] += 1
                 continue
+        replaced = _take_replaces(clean, held, primary_conn, tenant_id)
         if clean["subject"] == "user":
             # "Not me" on Kazma's reading of this value: never filed again by
             # the model (the user's own words still can).
@@ -932,6 +1053,9 @@ def _apply_beliefs_to_v2(
         if action["action"] != "noop":
             stats["applied"] += 1
         stats["actions"].append(action)
+        if replaced:
+            _close_replaced_entry(replaced, clean, _method, conn=primary_conn, tenant_id=tenant_id, now=now,
+                                  private=private, stats=stats)
         # The model's reading of one of the user's own facts, in the user's
         # own words with no one else named, is put to the user, never
         # applied as theirs (memory/changes.py, F1): a question over the

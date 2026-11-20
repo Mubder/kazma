@@ -958,7 +958,9 @@ def build_extraction() -> dict[str, Any]:
 #: model chose may not fit the words: the user's fact stands, and a
 #: statement is asked about), ``temporal`` (the start a turn names is kept
 #: beside the fact, worked out from the turn's day; a start after the turn
-#: or in words is never kept). ``pending`` names the corrections that must wait
+#: or in words is never kept), ``replaces`` (the model says which held fact
+#: a new one replaces: the same subject only, the trust gate still decides).
+#: ``pending`` names the corrections that must wait
 #: for the user (``memory/changes.py``), and only those; an ``("", ("answer",
 #: "confirm"))`` turn is the user answering the newest one.
 def _said(subject: str, predicate: str, kind: str, obj: str) -> dict[str, Any]:
@@ -966,10 +968,13 @@ def _said(subject: str, predicate: str, kind: str, obj: str) -> dict[str, Any]:
 
 
 def _now(subject: str, obj: str, trust: str | None = None, *, exact: bool = False,
-         started: str | bool | None = False) -> dict[str, Any]:
+         started: str | bool | None = False, predicate: str | None = None) -> dict[str, Any]:
     """A fact that must be current (or must not). *started*: the start kept
-    beside it (``metadata.started``), None for none; False checks nothing."""
+    beside it (``metadata.started``), None for none; False checks nothing.
+    *predicate*: the name it must be under."""
     out: dict[str, Any] = {"subject": subject, "object": obj}
+    if predicate:
+        out["predicate"] = predicate
     if trust:
         out["trust"] = trust
     if exact:
@@ -982,6 +987,13 @@ def _now(subject: str, obj: str, trust: str | None = None, *, exact: bool = Fals
 def _began(fact: dict[str, Any], since: str) -> dict[str, Any]:
     """*fact* with the start the model gives it (``since``)."""
     return {**fact, "since": since}
+
+
+def _replacing(fact: dict[str, Any], subject: str, predicate: str) -> dict[str, Any]:
+    """*fact* saying it replaces the held fact *subject predicate*: the
+    scenario names it, and the runner gives the number the model would see
+    (``benchmark._numbered``)."""
+    return {**fact, "replaces": {"subject": subject, "predicate": predicate}}
 
 
 def _attached(message: str, filename: str, mime: str, document: str) -> str:
@@ -1220,6 +1232,44 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
         ("ساكن في الدوحة من سنتين.",
          ("written", [_began(_said("user", "lives_in", "functional", "الدوحة"), "قبل سنتين")]))],
      "current": [_now("user", "الدوحة", started=None)], "not_current": []},
+    # ── replaces: the model says which held fact a new one replaces ─────────
+    # It is shown the facts held about the turn's people and things, numbered
+    # (framework audit F4, second layer). A fact under another name that
+    # replaces one goes by its name, so it supersedes instead of standing
+    # beside it; only for the same subject, and the trust gate still decides.
+    {"id": "replaces-en-job", "category": "replaces", "lang": "en", "turns": [
+        ("My sister Hana is a pilot.", ("written", [_said("hana", "occupation", "functional", "pilot")])),
+        ("Hana is a captain now.",
+         ("written", [_replacing(_said("hana", "works_as", "functional", "captain"), "hana", "occupation")]))],
+     "current": [_now("hana", "captain", predicate="occupation")], "not_current": [_now("hana", "pilot")]},
+    {"id": "replaces-ar-job", "category": "replaces", "lang": "ar", "turns": [
+        ("أختي هند طيارة.", ("written", [_said("هند", "occupation", "functional", "طيارة")])),
+        ("هند صارت كابتن.",
+         ("written", [_replacing(_said("هند", "works_as", "functional", "كابتن"), "هند", "occupation")]))],
+     "current": [_now("هند", "كابتن", predicate="occupation")], "not_current": [_now("هند", "طيارة")]},
+    {"id": "replaces-en-other-name", "category": "replaces", "lang": "en", "turns": [
+        ("Tea is my favourite drink.", ("written", [_said("user", "favorite_drink", "functional", "tea")])),
+        ("These days my morning drink is coffee.",
+         ("written", [_replacing(_said("user", "favorite_morning_drink", "functional", "coffee"),
+                                 "user", "favorite_drink")]))],
+     "current": [_now("user", "coffee", predicate="favorite_drink")],
+     "not_current": [_now("user", "tea"), _now("user", "coffee", predicate="favorite_morning_drink")]},
+    {"id": "replaces-ar-list-entry", "category": "replaces", "lang": "ar", "turns": [
+        ("أستخدم فيم للبرمجة.", ("written", [_said("user", "uses_tool", "set", "فيم")])),
+        ("تركت فيم وصرت أستخدم إيماكس.",
+         ("written", [_replacing(_said("user", "uses_tool", "set", "إيماكس"), "user", "uses_tool")]))],
+     "current": [_now("user", "إيماكس")], "not_current": [_now("user", "فيم")]},
+    {"id": "replaces-en-other-subject-refused", "category": "replaces", "lang": "en", "turns": [
+        ("My sister Hana is a pilot.", ("written", [_said("hana", "occupation", "functional", "pilot")])),
+        ("Unlike Hana, I am a teacher.",
+         ("written", [_replacing(_said("user", "occupation", "functional", "teacher"), "hana", "occupation")]))],
+     "current": [_now("hana", "pilot"), _now("user", "teacher")], "not_current": []},
+    {"id": "replaces-ar-users-fact-asked", "category": "replaces", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("رحنا الدوحة الشهر اللي طاف.",
+         ("written", [_replacing(_said("user", "residence", "functional", "الدوحة"), "user", "lives_in")]))],
+     "current": [_now("user", "الكويت", "user")], "not_current": [_now("user", "الدوحة")],
+     "pending": [_now("user", "الدوحة")]},
 ]
 
 #: The write scenarios' version. 3: a correction only the model reads waits
@@ -1227,8 +1277,9 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
 #: category (2026-11-18). 4: a model's reading never gets the user's trust by
 #: itself (rule A of the second security review, 2026-11-18); its first
 #: reading of a fact is Kazma's own and no question. 5: ``temporal`` (the
-#: framework audit's part C2, 2026-11-20).
-WRITES_VERSION = 5
+#: framework audit's part C2, 2026-11-20). 6: ``replaces`` (C2, F4's second
+#: layer).
+WRITES_VERSION = 6
 
 
 def build_writes() -> dict[str, Any]:
@@ -1247,7 +1298,8 @@ def build_writes() -> dict[str, Any]:
                 for fact in reply:
                     if not all(fact.get(k) for k in ("subject", "predicate", "predicate_type", "object")):
                         raise ValueError(f"{sc['id']}: a written reply needs subject, predicate, type and object")
-                    if set(fact) - {"subject", "predicate", "predicate_type", "object", "confidence", "since"}:
+                    if set(fact) - {"subject", "predicate", "predicate_type", "object", "confidence", "since",
+                                    "replaces"}:
                         raise ValueError(f"{sc['id']}: a written reply holds only what the model's reply holds")
                 turns.append({"user": text, "written": reply})
             elif kind == "answer":

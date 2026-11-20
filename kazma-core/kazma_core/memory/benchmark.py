@@ -918,22 +918,26 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
     return out
 
 
-def _llm_blob(user_text: str, *, said_on: str | None = None, previous: tuple[str, str] | None = None) -> str:
+def _llm_blob(user_text: str, *, said_on: str | None = None, previous: tuple[str, str] | None = None,
+              held: list[dict[str, Any]] | None = None) -> str:
     """The user message ``belief_extractor._llm_extract`` sends for a turn
     with no vocabulary (the benchmark asks with none): the product's own
     builder, :func:`belief_extractor.turn_message`."""
     from kazma_core.memory.belief_extractor import turn_message
 
-    return turn_message(user_text, said_on=said_on, previous=previous)
+    return turn_message(user_text, said_on=said_on, previous=previous, held=held)
 
 
 def _turn_context(turn: dict[str, Any]) -> dict[str, Any]:
-    """An extraction turn's day and the turn before it, as the dataset gives
-    them (``said_on``, ``previous``: the memory worker reads both from the
-    episode store)."""
+    """An extraction turn's day, the turn before it and the facts held about
+    it, as the dataset gives them (``said_on``, ``previous``, ``held``: the
+    memory worker reads them from the memory store)."""
     previous = turn.get("previous")
+    held = [{"ref": f"f{i}", "id": f"held-{i}", "subject": s, "shown": s, "predicate": p, "predicate_type": "set",
+             "object": o, "method": ""} for i, (s, p, o) in enumerate(turn.get("held") or (), 1)]
     return {"said_on": turn.get("said_on"),
-            "previous": (previous.get("user", ""), previous.get("assistant", "")) if previous else None}
+            "previous": (previous.get("user", ""), previous.get("assistant", "")) if previous else None,
+            "held": held or None}
 
 
 def _recorded_message(user_text: str, shape: int) -> str:
@@ -1129,7 +1133,7 @@ def _extraction_turns() -> dict[str, dict[str, Any]]:
 
 
 def _turn_reply(turn: dict[str, Any], recorded: dict[str, str], llm_replies: dict[str, Any] | None = None,
-                mode: str = "current") -> str:
+                mode: str = "current", held: list[dict[str, Any]] | None = None) -> str:
     if "recorded" in turn:
         # The reply the recording holds for the extraction turn this one
         # names, asked as that turn was asked (its day, the turn before).
@@ -1138,7 +1142,19 @@ def _turn_reply(turn: dict[str, Any], recorded: dict[str, str], llm_replies: dic
         if key not in recorded:
             raise KeyError(f"no recorded reply for {turn['recorded']}: {RECORD_AGAIN}")
         return recorded[key]
-    return json.dumps({"beliefs": turn["written"]}, ensure_ascii=False)
+    return json.dumps({"beliefs": [_numbered(fact, held) for fact in turn["written"]]}, ensure_ascii=False)
+
+
+def _numbered(fact: dict[str, Any], held: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """A written reply's ``replaces``, named in the scenario by the held
+    fact's subject and predicate, as the number the model would see for it
+    (``f0``, which names nothing, when the turn was shown no such fact)."""
+    named = fact.get("replaces")
+    if not isinstance(named, dict):
+        return fact
+    ref = next((h["ref"] for h in held or () if h["shown"] == named["subject"]
+                and h["predicate"] == named["predicate"]), "f0")
+    return {**fact, "replaces": ref}
 
 
 def _expected_holds(expected: dict[str, Any], row: dict[str, Any]) -> bool:
@@ -1154,6 +1170,8 @@ def _expected_holds(expected: dict[str, Any], row: dict[str, Any]) -> bool:
         return False
     if "started" in expected and row.get("started") != expected["started"]:
         return False
+    if "predicate" in expected and row.get("predicate") != expected["predicate"]:
+        return False
     return expected.get("trust") != "user" or row["extraction_method"] in _USER_SOURCES
 
 
@@ -1167,6 +1185,7 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
         _apply_beliefs_to_v2,
         extract_and_apply_beliefs_sync,
         extract_beliefs_for_turn,
+        held_facts,
         said_on_iso,
     )
     from kazma_core.memory.entity_resolution import entity_vocabulary
@@ -1205,17 +1224,21 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
             at = BASE_TIME + number * 86400
             extract_and_apply_beliefs_sync(primary, ops, turn["user"], session_id=session, turn=number,
                                            tenant_id=BENCH_TENANT, now=at, private=True)
-            client.reply = _turn_reply(turn, recorded, llm_replies, mode)
-            # The turn's day and the turn before, as the memory worker gives
-            # them (worker_bootstrap._turn_context), on the benchmark's clock.
+            # The turn's day, the turn before and the facts held about it,
+            # as the memory worker gives them (worker_bootstrap._turn_context),
+            # on the benchmark's clock.
+            held = held_facts(primary, tenant_id=BENCH_TENANT, text=turn["user"])
+            client.reply = _turn_reply(turn, recorded, llm_replies, mode, held)
             raw, stats = asyncio.run(extract_beliefs_for_turn(
                 turn["user"], "", vocabulary=predicate_vocabulary(primary, tenant_id=BENCH_TENANT),
                 entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT),
-                said_on=said_on_iso(at, UTC), previous=(asked_before, "") if asked_before else None))
+                said_on=said_on_iso(at, UTC), previous=(asked_before, "") if asked_before else None,
+                held=held))
             asked_before = turn["user"]
             if raw:
                 _apply_beliefs_to_v2(raw, primary, ops, stats=stats, session_id=session, turn=number,
-                                     tenant_id=BENCH_TENANT, now=at, private=True, user_text=turn["user"])
+                                     tenant_id=BENCH_TENANT, now=at, private=True, user_text=turn["user"],
+                                     held=held)
         rows = [dict(r) for r in primary.execute(
             "SELECT subject, predicate, object, extraction_method, json_extract(metadata_json, '$.started') "
             "AS started FROM beliefs WHERE tenant_id = ? "

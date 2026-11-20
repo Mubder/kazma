@@ -854,6 +854,14 @@ Added as each piece lands.
   scenarios gain a `temporal` category (four, English and Arabic, passing
   on written replies). What the model does with the new message is
   measured by the recording. Gate: `tests/test_memory_extractor_context.py`.
+- **The subject's current facts and "replaces" (F4, second layer),
+  2026-11-20: built, not yet recorded.** The deep pass is shown the facts
+  held about the turn's people and things, numbered, and may say which one
+  a new fact replaces; Kazma takes it only for the same subject and a fact
+  still current, and the trust gate still decides. "hana occupation pilot"
+  then "hana works_as captain, replaces f1" leaves Hana a captain, not
+  both. The write scenarios gain a `replaces` category (six, English and
+  Arabic, passing on written replies). Gate: `tests/test_memory_held_facts.py`.
   Gate: `tests/test_memory_recall_dates.py`; control: recall without the
   dating step.
 

@@ -36,6 +36,8 @@ import logging
 
 __all__ = [
     "DEEP_PASS_ANSWER",
+    "DEEP_PASS_HELD_FACTS",
+    "DEEP_PASS_HELD_VALUE",
     "DEEP_PASS_PREVIOUS_ANSWER",
     "DEEP_PASS_PREVIOUS_QUESTION",
     "DEEP_PASS_QUESTION",
@@ -133,6 +135,12 @@ DEEP_PASS_ANSWER = 800
 #: its answer, bounded smaller (it is context, never a source of facts).
 DEEP_PASS_PREVIOUS_QUESTION = 600
 DEEP_PASS_PREVIOUS_ANSWER = 400
+
+#: The facts Kazma holds about a turn's people and things, shown to the deep
+#: pass so it can say which one a new fact replaces (framework audit F4,
+#: second layer): at most this many, each value cut to this length.
+DEEP_PASS_HELD_FACTS = 30
+DEEP_PASS_HELD_VALUE = 200
 
 
 def episode_text(text: str | None, *, field: str = "text") -> str:
