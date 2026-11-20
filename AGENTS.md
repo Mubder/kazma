@@ -2070,6 +2070,31 @@ four injected were noise.
   `postgres_primary`). The report (both backends, held out, extraction) is
   the guide's "Benchmark report"; the measured limits at 10x and 100x are
   the guide's "Measured limits" (`tests/test_memory_scale_bench.py`).
+- **A hit at the edge stops the lock** (2026-11-20, benchmark audit R4, the
+  owner's decision 3). The recorded vectors keep one byte a number, so the
+  model's vector is anywhere within half a rounding step of the recording,
+  and another machine's model differs by about that much: q601 cleared the
+  belief floor by 0.0004 and flipped in 7 of 30 such moves (audit F5).
+  `lock` replays the benchmark `EDGE_DRAWS` (10) times with every recorded
+  number moved inside its rounding (`_MovedEmbedder`, seeded,
+  `EDGE_MOVE` = half a step) and refuses when a hit flips, naming the
+  question and its margin, unless the question is on the edge list (`lock
+  --edge QUESTION "why"`, `edges` in `thresholds.json`: margin, draws
+  flipped, reason, since): the only exit. Never move a threshold to save one
+  question. A question that no longer flips leaves the list, one that does
+  not flip cannot be named, a new dataset version starts the list again;
+  the questions whose shown memories change inside the rounding are listed
+  in the lock (`shown`). The margin is each answer's distance to the cut
+  recall applied (the floor, or the gap behind the best), read from the
+  ranking itself (`recall.trace_evidence`, bound by the benchmark only),
+  positive exactly when the hit holds. CI asks the draws again for the
+  questions within `EDGE_WATCH` of the cut (at least three times the largest
+  move a lock measured), so a change that brings a question to the edge
+  without moving a score is seen. A float recording has no rounding to move
+  inside: `_MovedEmbedder` refuses it until its spread is measured. Gate:
+  `tests/test_memory_benchmark_edges.py` (today's dataset without q601 on
+  the list refuses the lock; an unnamed flip, a wrong margin and a stale
+  entry each fail the CI check).
 - **Nothing on the hot path parses `kazma.yaml` (S4):**
   `config_loader.install_yaml_section` -- the install root's file, parsed
   once per file version (mtime + size). Gate: `tests/test_install_yaml.py`.

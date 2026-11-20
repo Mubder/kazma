@@ -38,7 +38,7 @@ import threading
 import time
 import weakref
 from collections import OrderedDict
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -1595,6 +1595,30 @@ def _evidence_rules(kind: str) -> tuple[float, float, float, float, float, float
             _RECENCY_WEIGHT, 0.0)
 
 
+#: Every ranking's evidence and cut, while a caller asks for them
+#: (:func:`trace_evidence`). Unset (the product's path) nothing is kept.
+_EVIDENCE_TRACE: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
+    "kazma_recall_evidence_trace", default=None)
+
+
+@contextlib.contextmanager
+def trace_evidence() -> Iterator[list[dict[str, Any]]]:
+    """Collect, for the recalls made inside it on this context, each
+    ranking's memories with their evidence and the cut they had to clear
+    (``{"kind", "cut", "evidence": {id: evidence}}``).
+
+    The recall benchmark reads it to say how far a question's answer stands
+    from being shown or cut (benchmark audit R4, the edge rule); nothing in
+    the product's path binds it.
+    """
+    rows: list[dict[str, Any]] = []
+    token = _EVIDENCE_TRACE.set(rows)
+    try:
+        yield rows
+    finally:
+        _EVIDENCE_TRACE.reset(token)
+
+
 def _rank_by_evidence(
     query: str,
     candidates: list[_Candidate],
@@ -1630,9 +1654,18 @@ def _rank_by_evidence(
         cov = coverage(terms, cand.text)
         scored.append((cand, lift + cov_weight * cov, lift, cov))
     passing = [row for row in scored if row[1] >= floor]
-    if not passing:
+    best = max((row[1] for row in passing), default=None)
+    trace = _EVIDENCE_TRACE.get()
+    if trace is not None:
+        # The cut a memory must clear to be shown: the floor, or, behind the
+        # best, the gap (the benchmark's edge margin, ``trace_evidence``).
+        trace.append({
+            "kind": kind,
+            "cut": floor if best is None else max(floor, best - gap),
+            "evidence": {cand.id: ev for cand, ev, _lift, _cov in scored},
+        })
+    if best is None:
         return []
-    best = max(row[1] for row in passing)
     kept = [row for row in passing if row[1] >= best - gap]
     # Rank by time, equal times sharing a rank: the facts one turn yielded were
     # all stated at once, and list position is not newer.

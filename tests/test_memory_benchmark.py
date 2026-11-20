@@ -31,6 +31,10 @@ FIXTURES = REPO / "tests" / "fixtures" / "memory_bench"
 THRESHOLDS = FIXTURES / "thresholds.json"
 #: Scores are exact (recorded vectors, fixed clock); a change this small is noise.
 SLACK = 0.0001
+#: The lock's edge check when no hit is near the edge (the tests that stub the
+#: scores; the edge rule's own tests are tests/test_memory_benchmark_edges.py).
+NO_EDGE = {"draws": benchmark.EDGE_DRAWS, "seed": benchmark.EDGE_SEED, "move": benchmark.EDGE_MOVE,
+           "largest_move": 0.0, "flips": {}, "shown": {}}
 
 
 def _build_script():
@@ -128,6 +132,7 @@ def test_the_lock_never_lowers_the_ratchet(tmp_path, monkeypatch):
     scores = {"single.hit_rate": 0.9, "abstain.hit_rate": 0.5}
     monkeypatch.setattr(benchmark, "gated_scores", lambda _report: dict(scores))
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
+    monkeypatch.setattr(benchmark, "edge_check", lambda *_a, **_kw: dict(NO_EDGE))
     parts = _locked_parts()
 
     def write(version_, values):
@@ -205,6 +210,7 @@ def test_a_trade_inside_the_rule_is_recorded(tmp_path, monkeypatch):
     monkeypatch.setattr(benchmark, "gated_scores",
                         lambda _r: {"single.mrr": 0.9, "noise.precision": 0.67, "abstain.hit_rate": 0.4})
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
+    monkeypatch.setattr(benchmark, "edge_check", lambda *_a, **_kw: dict(NO_EDGE))
     locked.write_text(json.dumps({"dataset_version": version, "scores": {
         "single.mrr": 0.8, "noise.precision": 0.7, "abstain.hit_rate": 0.4},
         **_locked_parts()}), encoding="utf-8")
@@ -504,6 +510,7 @@ def test_a_new_extraction_dataset_is_rebaselined(tmp_path, monkeypatch):
     monkeypatch.setattr(script, "THRESHOLDS", locked)
     monkeypatch.setattr(benchmark, "gated_scores", lambda _r: {"single.hit_rate": 0.9})
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
+    monkeypatch.setattr(benchmark, "edge_check", lambda *_a, **_kw: dict(NO_EDGE))
     older = {**_locked_extraction(), "version": 1}
     locked.write_text(json.dumps({"dataset_version": version, "scores": {"single.hit_rate": 0.9},
                                   **_locked_parts(), "extraction": older}), encoding="utf-8")

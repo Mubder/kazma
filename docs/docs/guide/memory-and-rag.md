@@ -129,8 +129,14 @@ real model's recorded vectors and holds every score to a ratchet
 (`tests/test_memory_benchmark.py`); `lock` raises it. A score can fall only
 in a reviewed trade (`lock --trade "why"`: no score falls by more than 0.05,
 one rises by 0.05 or more, abstention never falls), written into the
-thresholds file with its reason. The report for this dataset is under
-"Benchmark report" below.
+thresholds file with its reason. A hit that holds only by the rounding of
+the recorded vectors stops the lock: `lock` replays the questions ten times
+with every recorded number moved inside its rounding, and a hit that flips
+is refused, naming its margin, unless the question is named on the edge
+list (`lock --edge QUESTION "why"`); no threshold moves to save one
+question. One question is on it: "what is it that I do for a living?",
+whose answer clears the fact floor by 0.0004 (`tests/test_memory_benchmark_edges.py`).
+The report for this dataset is under "Benchmark report" below.
 
 **Meaning search is exact over every memory** (`vector_engine.py`, since
 2026-09-26): every episode and every current fact whose vector comes from

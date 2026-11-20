@@ -85,6 +85,36 @@
   "heldout.abstain.hit_rate": 0.6
  },
  "trades": [],
+ "edges": {
+  "draws": 10,
+  "seed": 20261120,
+  "move": 0.5,
+  "largest_move": 0.0023,
+  "hits": [
+   {
+    "id": "q601",
+    "category": "noise",
+    "question": "what is it that I do for a living?",
+    "hit": true,
+    "margin": 0.0004,
+    "flipped": 1,
+    "why": "benchmark audit F5: its answering fact clears the belief floor (0.06) by 0.0004; kept as measured until R6's dataset version records the vectors again, and no threshold moves for one question",
+    "since": "2026-11-20"
+   }
+  ],
+  "shown": {
+   "h012": 1,
+   "h015": 2,
+   "h019": 3,
+   "h026": 1,
+   "q001": 2,
+   "q003": 2,
+   "q012": 1,
+   "q017": 4,
+   "q810": 3,
+   "q957": 1
+  }
+ },
  "extraction": {
   "version": 2,
   "recording": {

@@ -47,6 +47,11 @@ from typing import Any
 
 __all__ = [
     "DATASET_PATH",
+    "EDGE_DRAWS",
+    "EDGE_MOVE",
+    "EDGE_SEED",
+    "EDGE_WATCH",
+    "edge_check",
     "EXTRACTION_PATH",
     "EXTRACTION_SCORES",
     "RECORD_AGAIN",
@@ -218,6 +223,39 @@ def _score(
     return out
 
 
+def _margin(
+    question: dict[str, Any], refs: dict[str, str], covers: dict[str, set[str]],
+    trace: list[dict[str, Any]],
+) -> float | None:
+    """How far the question's hit stands from changing, in evidence.
+
+    Each memory's distance to the cut recall held it to (``trace_evidence``:
+    the floor, or the gap behind the best), positive when it clears it. A
+    piece of the answer stands by its best alternative (a summary standing
+    for it counts); the question by its weakest piece. For a question
+    nothing answers, by the best memory's distance below the cut. Positive:
+    the hit holds by that much; negative: it misses by that much. None: an
+    answer that was never a candidate (not near the cut). The limit on how
+    many are shown is not counted (benchmark audit R4, the edge rule).
+    """
+    dist: dict[str, float] = {}
+    for row in trace:
+        for mid, ev in row["evidence"].items():
+            d = ev - row["cut"]
+            dist[mid] = max(d, dist.get(mid, d))
+    pieces = [{refs[a] for a in piece.split("|")} for piece in question["gold"]]
+    if not pieces:
+        return round(-max(dist.values()), 4) if dist else None
+    margins = []
+    for piece in pieces:
+        alternatives = piece | {s for s, covered in covers.items() if covered & piece}
+        here = [dist[a] for a in alternatives if a in dist]
+        if not here:
+            return None
+        margins.append(max(here))
+    return round(min(margins), 4)
+
+
 def _summarise(results: list[dict[str, Any]], latencies: list[float]) -> dict[str, Any]:
     cats: dict[str, dict[str, Any]] = {}
     for r in results:
@@ -282,7 +320,7 @@ def run_benchmark(
     keep_results: bool = False,
 ) -> dict[str, Any]:
     """Seed a private database, ask every question, return the scores."""
-    from kazma_core.memory.recall import recall
+    from kazma_core.memory.recall import recall, trace_evidence
     from kazma_core.memory.schema_v2 import ensure_primary_schema
 
     data = dataset or load_dataset()
@@ -298,15 +336,19 @@ def run_benchmark(
             results, latencies = [], []
             for q in questions:
                 started = time.perf_counter()
-                res = recall(q["text"], conn=conn, tenant_id=BENCH_TENANT, limit=limit,
-                             local_only=True)
+                with trace_evidence() as trace:
+                    res = recall(q["text"], conn=conn, tenant_id=BENCH_TENANT, limit=limit,
+                                 local_only=True)
                 latencies.append(time.perf_counter() - started)
                 # Facts, history, then weekly summaries: the order format_recall_block shows.
                 injected = (
                     [h.id for h in res.beliefs[:limit]] + [h.id for h in res.episodes[:limit]]
                     + [h.id for h in res.summaries]
                 )
-                results.append(_score(q, refs, injected, covers))
+                scored = _score(q, refs, injected, covers)
+                if keep_results:
+                    scored["margin"] = _margin(q, refs, covers, trace)
+                results.append(scored)
             return results, latencies
 
         results, latencies = ask(data["questions"])
@@ -396,6 +438,114 @@ class ReplayEmbedder:
                 "run: python scripts/memory_bench.py vectors"
             )
         return (self._vecs[i].astype("float32") * self._scale[i]).tolist()
+
+
+# ── The edge (benchmark audit R4; the owner's decision 3, 2026-11-18) ───────
+#
+# The recording keeps one byte a number, so the model's real vector is
+# anywhere within half a rounding step of the recorded one, and another
+# machine's model differs from it by about that much (audit F5: bge-m3's own
+# vectors moved 2 of the 78 scores). A hit that holds on the fourth decimal
+# of one similarity holds on this machine's recording only. ``lock`` replays
+# the benchmark with the vectors moved inside their rounding (EDGE_DRAWS
+# seeded draws, the same move for the same text) and refuses when a hit
+# flips, unless the question is on the edge list with its margin named: the
+# only exit. Never a threshold moved to save one question.
+
+#: Seeded draws the lock replays; the seed makes every lock see the same moves.
+EDGE_DRAWS = 10
+EDGE_SEED = 20261120
+#: How far each recorded number moves, in its own rounding steps (uniform in
+#: plus or minus this): half a step, the band the model's value lies in.
+EDGE_MOVE = 0.5
+#: CI asks the draws again for the questions this close to recall's cut (in
+#: evidence), so a change that brings a question to the edge without moving a
+#: score is seen: at least three times the largest move a lock measured
+#: (``largest_move`` in the lock, 0.0023 on 2026-11-20).
+EDGE_WATCH = 0.01
+
+
+class _MovedEmbedder(ReplayEmbedder):
+    """The recorded vectors, each number moved at random by at most
+    :data:`EDGE_MOVE` of its rounding step; the same move for the same text
+    in one draw."""
+
+    def __init__(self, path: str | os.PathLike[str], seed: int, move: float = EDGE_MOVE) -> None:
+        super().__init__(path)
+        if str(self._vecs.dtype) != "int8":
+            # A float recording has no rounding step: its edge needs the
+            # model's measured spread, not this one. Never a quiet pass.
+            raise ValueError(
+                f"the edge moves an int8 recording inside its rounding; this one is "
+                f"{self._vecs.dtype}: measure its spread and give the edge check that"
+            )
+        self._seed = int(seed)
+        self._move = float(move)
+
+    def encode(self, text: str) -> list[float]:
+        import hashlib
+
+        import numpy as np
+
+        key = _text_key(text)
+        i = self._index.get(key)
+        if i is None:
+            return super().encode(text)  # the replay's own refusal
+        digest = hashlib.sha256(f"{self._seed}:{key}".encode()).digest()
+        noise = np.random.default_rng(int.from_bytes(digest[:8], "big")).uniform(
+            -self._move, self._move, self._vecs.shape[1])
+        return ((self._vecs[i].astype("float32") + noise.astype("float32")) * self._scale[i]).tolist()
+
+
+def _all_results(report: dict[str, Any]) -> list[dict[str, Any]]:
+    return list(report.get("results", [])) + list((report.get("heldout") or {}).get("results", []))
+
+
+def edge_check(
+    vectors: str | os.PathLike[str],
+    base: dict[str, Any],
+    *,
+    draws: int = EDGE_DRAWS,
+    only: set[str] | None = None,
+    dataset: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Replay the benchmark *draws* times with the recorded vectors moved
+    inside their rounding, against *base* (``run_benchmark(keep_results=
+    True)`` on the vectors as recorded).
+
+    Returns the draws' settings, ``flips`` (question id -> in how many draws
+    its hit changed), ``shown`` (question id -> in how many draws what it
+    showed changed while its hit held: one memory more or less, another
+    order), and ``largest_move`` (the most a question's margin moved in any
+    draw). *only* asks just those questions (CI's check of the questions near
+    the edge); the lock asks every one.
+    """
+    from unittest import mock
+
+    data = dataset or load_dataset()
+    if only is not None:
+        data = {**data, "questions": [q for q in data["questions"] if q["id"] in only],
+                "heldout": [q for q in data.get("heldout", []) if q["id"] in only]}
+    was = {r["id"]: r for r in _all_results(base)}
+    flips: dict[str, int] = {}
+    shown: dict[str, int] = {}
+    largest = 0.0
+    for i in range(draws):
+        moved = _MovedEmbedder(vectors, EDGE_SEED + i)
+        with mock.patch("kazma_core.memory.embedder.get_embedder", lambda e=moved: e), \
+                mock.patch("kazma_core.memory.embedder.get_embedding_model_name", lambda m=moved.model: m):
+            report = run_benchmark(data, keep_results=True)
+        for r in _all_results(report):
+            b = was[r["id"]]
+            if bool(r["hit"]) != bool(b["hit"]):
+                flips[r["id"]] = flips.get(r["id"], 0) + 1
+            elif any(r.get(k) != b.get(k) for k in ("injected", "rr", "precision", "order")):
+                shown[r["id"]] = shown.get(r["id"], 0) + 1
+            if r.get("margin") is not None and b.get("margin") is not None:
+                largest = max(largest, abs(r["margin"] - b["margin"]))
+    return {"draws": draws, "seed": EDGE_SEED, "move": EDGE_MOVE,
+            "flips": dict(sorted(flips.items())), "shown": dict(sorted(shown.items())),
+            "largest_move": round(largest, 4)}
 
 
 # ── Extraction (Memory audit M24; scored by value since 2026-11) ───────────

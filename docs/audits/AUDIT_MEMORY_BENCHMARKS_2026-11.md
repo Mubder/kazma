@@ -671,6 +671,31 @@ again and one rebaseline.
 Until step 3 is done, the public page should not print the Model pass rows
 as they are, or should say beside them "one asking a turn; see the audit".
 
+### Status of the steps
+
+Added as each step lands (the owner decided section 7 on 2026-11-18: the
+framework audit's section 6.2, decisions 3 to 6).
+
+- **Step 1.** R3's two checks are in (a recording names the prompt it
+  answered, and no recording is a failure), and R11's plain `import numpy`
+  in the gate file (commit `7a71ef6bc`). The Postgres suite naming the tests
+  that must run comes with step 6.
+- **Step 2.** Done: the deep pass is scored by value (`found`, `named`,
+  `right`, `quiet`), extraction dataset version 2 (commit `7a71ef6bc`).
+- **Step 4, 2026-11-20: the edge check is in; the float recording is not.**
+  `lock` replays the benchmark in ten seeded draws with every recorded
+  number moved inside its rounding (half a step) and refuses when a hit
+  flips, naming the question and its margin; the edge list in
+  `thresholds.json` is the only exit (decision 3). On today's dataset it
+  stops on q601 (it flips in 1 of the 10 draws), which is on the list with
+  its margin, 0.0004, and its reason. Ten other questions change what they
+  show in some draw; the lock lists them. CI asks the draws again for the
+  questions within 0.01 of recall's cut, so a change that brings a question
+  to the edge is seen without a lock (`tests/test_memory_benchmark_edges.py`).
+  Not done: the float32 recording and the check of the model's commit, which
+  need the embedder and belong with step 5's re-record, and the real-model
+  run before a lock.
+
 ---
 
 ## 7. Decisions for the owner

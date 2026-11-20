@@ -6,6 +6,7 @@
   python scripts/memory_bench.py lock              # raise the CI ratchet to today's scores
   python scripts/memory_bench.py lock --trade "why"  # a reviewed trade (see TRADE_RULE)
   python scripts/memory_bench.py lock --new-recording "why"  # lock a new recording of the model's pass
+  python scripts/memory_bench.py lock --edge q601 "why"  # name a hit that flips inside the rounding (EDGE_RULE)
   python scripts/memory_bench.py extraction           # extraction scores from the recorded replies
                                                     # (recorded by scripts/memory_extraction_record.py)
   python scripts/memory_bench.py writes               # the write scenarios: what passes, what does not
@@ -1351,7 +1352,53 @@ def trade_problems(old: dict[str, float], new: dict[str, float]) -> list[str]:
     return problems
 
 
-def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | None = None) -> int:
+#: How the edge list is left (``lock --edge QUESTION "why"``): a hit that flips
+#: when the recorded vectors move inside their rounding stops the lock
+#: (benchmark audit R4, the owner's decision 3). Fix the question or the
+#: ranking, or name the question here: the list says its margin, how often it
+#: flipped and why it stays. Never move a threshold to save one question.
+EDGE_RULE = "a flipping hit stops the lock; the edge list, with its margin named, is the only exit"
+
+
+def _edge_lock(
+    base: dict[str, Any], old: dict[str, Any], *, fresh: bool, name: list[tuple[str, str]] | None,
+) -> tuple[dict[str, Any], list[str], list[str]]:
+    """The lock's edge check: (the ``edges`` section to write, why the lock
+    is refused, the questions no longer at the edge)."""
+    import datetime as _dt
+
+    from kazma_core.memory import benchmark
+
+    check = benchmark.edge_check(VECTORS, base)
+    data = benchmark.load_dataset()
+    questions = {q["id"]: q for q in data["questions"] + data.get("heldout", [])}
+    results = {r["id"]: r for r in list(base.get("results", []))
+               + list((base.get("heldout") or {}).get("results", []))}
+    listed = {} if fresh else {e["id"]: e for e in old.get("hits", [])}
+    adding = dict(name or [])
+    problems = [f"--edge {qid}: its hit does not flip in the {check['draws']} draws; there is nothing to name"
+                for qid in sorted(adding) if qid not in check["flips"]]
+    hits = []
+    for qid, flipped in check["flips"].items():
+        q, r = questions[qid], results[qid]
+        why = adding.get(qid) or listed.get(qid, {}).get("why")
+        if not why:
+            problems.append(
+                f"{qid} ({q['category']}, {q['text']!r}): its hit {'holds' if r['hit'] else 'misses'} by "
+                f"{abs(r['margin'] or 0.0)} of recall's cut and flips in {flipped} of {check['draws']} draws "
+                f"inside the recorded vectors' rounding. Fix the question or the ranking -- never move a "
+                f"threshold to save it -- or name it: lock --edge {qid} \"why\"")
+            continue
+        hits.append({"id": qid, "category": q["category"], "question": q["text"], "hit": bool(r["hit"]),
+                     "margin": r["margin"], "flipped": flipped, "why": why,
+                     "since": listed.get(qid, {}).get("since") or _dt.date.today().isoformat()})
+    section = {"draws": check["draws"], "seed": check["seed"], "move": check["move"],
+               "largest_move": check["largest_move"], "hits": hits, "shown": check["shown"]}
+    return section, problems, sorted(set(listed) - set(check["flips"]))
+
+
+def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | None = None,
+              edges: list[tuple[str, str]] | None = None) -> int:
     """Write the replayed scores as the ratchet; refuse to lower any of them.
 
     The ratchet names the dataset versions it was measured on (the recall
@@ -1401,7 +1448,8 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
     replay = ReplayEmbedder(VECTORS)
     a, b = _patched(replay, replay.model)
     with a, b:
-        scores = gated_scores(run_benchmark())
+        base = run_benchmark(keep_results=True)
+    scores = gated_scores(base)
     old_scores = {} if recall_new else old.get("scores", {})
     lower = {k: (v, scores.get(k)) for k, v in old_scores.items() if scores.get(k, -1.0) < v}
     trades = list(old.get("trades", []))
@@ -1426,6 +1474,12 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         print("refusing to lower the ratchet: fix the regression, or propose a reviewed "
               "trade with --trade \"why\"", file=sys.stderr)
         return 1
+    edge, problems, settled = _edge_lock(base, old.get("edges") or {}, fresh=recall_new, name=edges)
+    if problems:
+        for line in problems:
+            print(f"  {line}", file=sys.stderr)
+        print(f"refusing to lock: {EDGE_RULE}", file=sys.stderr)
+        return 1
     from kazma_core.memory.benchmark import StaleRecordingError
 
     try:
@@ -1444,7 +1498,8 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         return 1
     THRESHOLDS.write_text(
         json.dumps({"dataset_version": version, "scores": scores, "targets": TARGETS,
-                    "trades": trades, "extraction": extraction, "writes": writes, "speakers": speakers,
+                    "trades": trades, "edges": edge,
+                    "extraction": extraction, "writes": writes, "speakers": speakers,
                     # The opt-in Postgres-primary run's floors
                     # (tests/test_memory_benchmark_pg.py), on the same dataset only.
                     "postgres_primary": {} if recall_new else old.get("postgres_primary", {})},
@@ -1465,6 +1520,13 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         print(f"  {k}: {was} -> {now}")
     for sid in now_pass:
         print(f"  writes: {sid} passes now")
+    for hit in edge["hits"]:
+        print(f"  edge: {hit['id']} {'holds' if hit['hit'] else 'misses'} by {abs(hit['margin'] or 0.0)}, "
+              f"flips in {hit['flipped']} of {edge['draws']} draws ({hit['why']})")
+    for qid in settled:
+        print(f"  edge: {qid} no longer flips; off the edge list")
+    if edge["shown"]:
+        print(f"  shown changes inside the rounding (listed in the lock): {edge['shown']}")
     return 0
 
 
@@ -1626,6 +1688,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="lower some scores for a larger gain elsewhere, under TRADE_RULE; recorded")
     lock.add_argument("--new-recording", metavar="REASON",
                       help="lock a new recording of the model's extraction pass; its scores replace the old")
+    lock.add_argument("--edge", nargs=2, action="append", metavar=("QUESTION", "REASON"),
+                      help="name a question whose hit flips inside the vectors' rounding (EDGE_RULE); recorded")
     sub.add_parser("extraction")
     sub.add_parser("writes")
     run = sub.add_parser("run")
@@ -1638,7 +1702,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "vectors":
         return _cmd_vectors()
     if args.cmd == "lock":
-        return _cmd_lock(args.rebaseline, args.trade, args.new_recording)
+        return _cmd_lock(args.rebaseline, args.trade, args.new_recording,
+                         [tuple(e) for e in args.edge] if args.edge else None)
     if args.cmd == "extraction":
         return _cmd_extraction()
     if args.cmd == "writes":
