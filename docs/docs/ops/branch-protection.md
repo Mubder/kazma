@@ -28,6 +28,7 @@ checks for `.github/workflows/ci.yml`:
 |---|---|
 | `Tests` | the full suite (`scripts/fast_test.py --chunks 4`) |
 | `Tests (Postgres backend)` | every `@pytest.mark.postgres` test on a real Postgres |
+| `Tests (pgvector)` | the Postgres-primary memory benchmark on a real pgvector, pgvector's own search beside the exact comparison; its floors report until they are locked from a named run, and a named test that skips fails it |
 | `Document worker container profile (real Docker)` | the worker and broker images build, the container policy attests from inside the image, the container-profile qualification suite passes with no skips, and the compose-shaped broker topology leaves no container behind |
 | `Unified turn lifecycle (GATE)` | the chat turn in real browsers: approvals, reloads, watchers, chunked delivery |
 | `Playwright smoke` | health, composer, HITL view model, every page loads clean |
