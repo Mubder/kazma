@@ -61,7 +61,11 @@ __all__ = [
     "install_steps",
     "preflight",
     "remove",
+    "remove_shutdown_service",
     "run_action",
+    "shutdown_service_current",
+    "shutdown_service_installed",
+    "shutdown_service_step",
 ]
 
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -70,11 +74,18 @@ DISTRO = KAZMA_DISTRO
 CONTEXT = KAZMA_CONTEXT
 TASK_NAME = "KazmaEngine"
 #: The service that takes Windows' preshutdown notice and holds the shutdown
-#: while keep-engine.ps1 stops the engine (``engine-shutdown.cs``).
+#: while Kazma's servers stop (``kazma_core.shutdown_notice``) and then
+#: keep-engine.ps1 stops the engine (``engine-shutdown.cs``). Installed with
+#: Kazma's engine and with Kazma's own service (``kazma setup install``'s
+#: service part), so a Windows restart stops Kazma cleanly on any engine.
 SHUTDOWN_SERVICE = "KazmaEngineShutdown"
 #: How long the service holds a Windows shutdown for the engine's stop: the
 #: slowest container's own stop timeout (10 s unless it sets one), with room.
 SHUTDOWN_BUDGET_S = 120
+#: How long it holds the shutdown for Kazma's servers to stop first: the
+#: server's own stop budget (the guard's grace less 10 s, 50 s) plus its exit
+#: margin, with room.
+SHUTDOWN_KAZMA_BUDGET_S = 75
 PORT = 2376
 #: What an action answers when Windows must restart before the next step
 #: (the WSL features were just turned on).
@@ -277,7 +288,7 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
     code, _ = _out(run, ["schtasks", "/Query", "/TN", TASK_NAME])
     if code != 0:
         missing.append("task")
-    if _service_state(run) != "RUNNING" or not (_keep_engine_current() and _stop_helpers_current()):
+    if not (shutdown_service_current(run) and _keep_engine_current() and _stop_helpers_current()):
         missing.append("shutdown")
     version = ""
     # The engine is asked through any docker CLI there is (Docker Desktop's
@@ -336,6 +347,36 @@ def _service_state(run: Runner) -> str | None:
     return None
 
 
+def _service_command_line(run: Runner) -> str | None:
+    """The command line the service is registered with (``sc.exe qc``)."""
+    code, text = _out(run, ["sc.exe", "qc", SHUTDOWN_SERVICE])
+    if code != 0:
+        return None
+    for line in text.splitlines():
+        key, _, value = line.partition(":")
+        if key.strip() == "BINARY_PATH_NAME":
+            return value.strip()
+    return None
+
+
+def shutdown_service_current(run: Runner = subprocess.run) -> bool:
+    """The shutdown service runs, built from this build's ``engine-shutdown.cs``
+    and with this build's command line. An older copy runs without stopping
+    Kazma first (before 2026-11-20 it stopped the engine only): read from the
+    source the build left beside the program, without starting anything."""
+    if os.name != "nt" and run is subprocess.run:
+        return False
+    if _service_state(run) != "RUNNING":
+        return False
+    try:
+        built = (_shutdown_service_dir() / "kazma-engine-shutdown.cs").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if built.replace("\r\n", "\n") != _asset("engine-shutdown.cs"):
+        return False
+    return (_service_command_line(run) or "").split() == _service_command().split()
+
+
 def preflight(run: Runner = subprocess.run, *, wslconfig: Path | None = None) -> str:
     """What would stop Kazma's engine on this machine, said before anything is
     installed; ``""`` when nothing does. (The CPU's virtualization is
@@ -374,8 +415,17 @@ _TITLES = {
     "engine:context": "connect Windows to it (the kazma-engine Docker context)",
     "engine:task": "start it at boot with nobody signed in (the KazmaEngine task)",
     "engine:shutdown": "stop it cleanly when Windows shuts down (the KazmaEngineShutdown service)",
+    "engine:shutdown_service": "stop Kazma cleanly when Windows shuts down (the KazmaEngineShutdown service)",
     "engine:record": "check it answers, and record it",
 }
+
+
+def shutdown_service_step() -> Any:
+    """The step that puts the ``KazmaEngineShutdown`` service in alone: Kazma's
+    own service part's, on any engine (administrators only)."""
+    from kazma_core.postgres_service import Step
+
+    return Step(_TITLES["engine:shutdown_service"], action="engine:shutdown_service", admin=True)
 
 
 def install_steps(found: EngineCheck) -> list[Any]:
@@ -645,7 +695,7 @@ def _service_command() -> str:
     """The service's command line: its program and how long it may hold a
     shutdown for the engine's stop."""
     exe = _shutdown_service_dir() / "kazma-engine-shutdown.exe"
-    return f'"{exe}" --budget {SHUTDOWN_BUDGET_S}'
+    return f'"{exe}" --budget {SHUTDOWN_BUDGET_S} --kazma-budget {SHUTDOWN_KAZMA_BUDGET_S}'
 
 
 def _service_script() -> str:
@@ -658,12 +708,12 @@ def _service_script() -> str:
         f"$name='{SHUTDOWN_SERVICE}'; $bin='{command}';"
         "$svc=Get-CimInstance Win32_Service -Filter \"Name='$name'\";"
         "if ($svc) { $r=Invoke-CimMethod -InputObject $svc -MethodName Change "
-        "-Arguments @{PathName=$bin; StartMode='Automatic'}; "
+        "-Arguments @{PathName=$bin; StartMode='Automatic'; DisplayName='Kazma: clean stop at shutdown'}; "
         "if ($r.ReturnValue -ne 0) { throw \"changing the service failed ($($r.ReturnValue))\" } } "
         "else { New-Service -Name $name -BinaryPathName $bin -StartupType Automatic "
-        "-DisplayName 'Kazma container engine: clean stop at shutdown' "
-        "-Description \"Stops Kazma's container engine (the kazma-engine WSL distro) before Windows shuts "
-        "down, so its containers stop cleanly.\" | Out-Null };"
+        "-DisplayName 'Kazma: clean stop at shutdown' "
+        "-Description \"Stops Kazma, then its container engine (the kazma-engine WSL distro), before Windows "
+        "shuts down, so nothing stops mid-write.\" | Out-Null };"
         "sc.exe failure $name reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null;"
         "Start-Service -Name $name"
     )
@@ -690,6 +740,18 @@ def _action_shutdown(run: Runner, log: Callable[[str], None], opener: Any) -> tu
         if there:
             _out(run, ["schtasks", "/End", "/TN", TASK_NAME])
             _out(run, ["schtasks", "/Run", "/TN", TASK_NAME])
+    if shutdown_service_current(run):
+        return True, f"{SHUTDOWN_SERVICE} runs this build: at a shutdown it stops Kazma, then the engine"
+    return _action_shutdown_service(run, log, opener)
+
+
+def _action_shutdown_service(run: Runner, log: Callable[[str], None], opener: Any) -> tuple[bool, str]:
+    """The ``KazmaEngineShutdown`` service alone, built from this build's
+    ``engine-shutdown.cs`` and started: what stops Kazma's servers at a
+    Windows shutdown (and the engine, where Kazma's engine is set up). The
+    step of Kazma's own service part (``kazma setup install``), on any engine."""
+    if shutdown_service_current(run):
+        return True, f"{SHUTDOWN_SERVICE} already runs this build"
     csc = _csc()
     if not csc.is_file():
         return False, f"the .NET Framework's C# compiler is not at {csc}"
@@ -712,8 +774,8 @@ def _action_shutdown(run: Runner, log: Callable[[str], None], opener: Any) -> tu
                       timeout=120)
     if code != 0 or _service_state(run) != "RUNNING":
         return False, f"installing the {SHUTDOWN_SERVICE} service failed: {text.strip()[-300:]}"
-    return True, (f"{SHUTDOWN_SERVICE} runs: at a shutdown it stops the engine's containers first "
-                  f"(up to {SHUTDOWN_BUDGET_S} s)")
+    return True, (f"{SHUTDOWN_SERVICE} runs: at a shutdown it stops Kazma first (up to "
+                  f"{SHUTDOWN_KAZMA_BUDGET_S} s), then the engine's containers (up to {SHUTDOWN_BUDGET_S} s)")
 
 
 def _action_record(run: Runner, log: Callable[[str], None], opener: Any,
@@ -756,6 +818,7 @@ _ACTIONS: dict[str, Callable[..., tuple[bool, str]]] = {
     "engine:context": _action_context,
     "engine:task": _action_task,
     "engine:shutdown": _action_shutdown,
+    "engine:shutdown_service": _action_shutdown_service,
     "engine:record": _action_record,
 }
 
@@ -785,6 +848,28 @@ def _foreign_containers(run: Runner = subprocess.run) -> list[str] | None:
     return sorted(n for n in text.split() if n and not n.startswith("kazma-"))
 
 
+def shutdown_service_installed(run: Runner = subprocess.run) -> bool:
+    """Whether the ``KazmaEngineShutdown`` service is registered (any build)."""
+    if os.name != "nt" and run is subprocess.run:
+        return False
+    return _service_state(run) is not None
+
+
+def remove_shutdown_service(run: Runner = subprocess.run) -> tuple[bool, str]:
+    """Stop and delete the ``KazmaEngineShutdown`` service and its program
+    (administrators only)."""
+    _out(run, ["sc.exe", "stop", SHUTDOWN_SERVICE])
+    _out(run, ["sc.exe", "delete", SHUTDOWN_SERVICE])
+    shutil.rmtree(_shutdown_service_dir(), ignore_errors=True)
+    for _ in range(20):  # a delete waits for open handles to close
+        if _service_state(run) is None:
+            break
+        time.sleep(0.25)
+    else:
+        return False, f"the {SHUTDOWN_SERVICE} service is still registered"
+    return True, f"the {SHUTDOWN_SERVICE} service is removed"
+
+
 def remove(run: Runner = subprocess.run, log: Callable[[str], None] | None = None,
            *, force: bool = False) -> tuple[bool, str]:
     """Remove Kazma's engine: its tasks, its shutdown service, its distro (every
@@ -801,9 +886,7 @@ def remove(run: Runner = subprocess.run, log: Callable[[str], None] | None = Non
                            + ". Move them first, or remove with --force (their data goes with it)")
     _out(run, ["schtasks", "/End", "/TN", TASK_NAME])
     _out(run, ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"])
-    _out(run, ["sc.exe", "stop", SHUTDOWN_SERVICE])
-    _out(run, ["sc.exe", "delete", SHUTDOWN_SERVICE])
-    shutil.rmtree(_shutdown_service_dir(), ignore_errors=True)
+    remove_shutdown_service(run)
     code, text = _out(run, ["wsl.exe", "--unregister", DISTRO], timeout=300, env=_wsl_env())
     if code != 0 and DISTRO in (_distros(run) or []):
         return False, f"wsl --unregister failed: {text.strip()[-300:]}"

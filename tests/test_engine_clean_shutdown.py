@@ -164,12 +164,48 @@ def test_an_older_keep_engine_is_restarted_with_this_one(machine, monkeypatch, c
 
 
 def test_the_running_service_is_stopped_before_its_program_is_replaced(machine, monkeypatch, csc):
+    # A copy from before Kazma's own stop (2026-11-20): its command line has
+    # no Kazma budget, so the step builds this one over it.
+    machine.service_command = f'"{ces._shutdown_service_dir() / "kazma-engine-shutdown.exe"}" --budget 120'
     _service_installs(machine)
     ok, _ = _shutdown_step(machine, monkeypatch)
     assert ok
     stop = next(i for i, a in enumerate(machine.ran) if a[:3] == ["sc.exe", "stop", ces.SHUTDOWN_SERVICE])
     build = next(i for i, a in enumerate(machine.ran) if a[0] == str(csc))
     assert stop < build
+
+
+def test_a_service_of_this_build_is_left_running(machine, monkeypatch, csc):
+    _service_installs(machine)
+    ok, detail = _shutdown_step(machine, monkeypatch)
+    assert ok and "this build" in detail, detail
+    assert not any(a[:2] == ["sc.exe", "stop"] for a in machine.ran)
+    assert not any(a[0] == str(csc) for a in machine.ran)
+
+
+def test_an_older_service_source_is_not_current(machine):
+    """What tells setup a copy is older: the source the build left beside the
+    program, and the registered command line."""
+    assert ces.shutdown_service_current(machine)
+    source = ces._shutdown_service_dir() / "kazma-engine-shutdown.cs"
+    source.write_text(ces._asset("engine-shutdown.cs").replace("StopKazma", "StopNothing"), encoding="utf-8")
+    assert not ces.shutdown_service_current(machine)
+    source.write_text(ces._asset("engine-shutdown.cs"), encoding="utf-8")
+    machine.service_command = f'"{ces._shutdown_service_dir() / "kazma-engine-shutdown.exe"}" --budget 120'
+    assert not ces.shutdown_service_current(machine)
+
+
+def test_the_service_alone_is_its_own_step(machine, monkeypatch, csc):
+    """Kazma's own service part puts the service in on any engine: no distro,
+    no keep-engine.ps1, no WSL is asked."""
+    machine.service = None
+    _service_installs(machine)
+    monkeypatch.setattr(ces.time, "sleep", lambda s: None)
+    ok, detail = ces.run_action("engine:shutdown_service", run=machine)
+    assert ok, detail
+    assert machine.service == "RUNNING"
+    assert not any(Path(a[0]).name.lower() == "wsl.exe" for a in machine.ran)
+    assert f"--kazma-budget {ces.SHUTDOWN_KAZMA_BUDGET_S}" in ces._service_command()
 
 
 def test_control_helpers_that_do_not_say_ready_fail_the_step(machine, monkeypatch, csc):
@@ -200,7 +236,7 @@ def test_the_docker_step_installs_the_helpers_too(machine, monkeypatch):
 
 def test_removing_takes_the_service_and_its_program(machine):
     folder = ces._shutdown_service_dir()
-    folder.mkdir(parents=True)
+    folder.mkdir(parents=True, exist_ok=True)
     (folder / "kazma-engine-shutdown.exe").write_bytes(b"service")
     ok, detail = ces.remove(machine)
     assert ok, detail

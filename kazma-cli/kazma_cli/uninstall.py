@@ -205,8 +205,15 @@ def _service_items(machine: Machine, owner: str | None) -> list[Item]:
         # The rest is the computer's, and the other Kazma uses it.
         return items
     if machine.os_name == "windows":
+        from kazma_core.container_engine import RECORD_KEY
+        from kazma_core.container_engine_setup import SHUTDOWN_SERVICE
         from kazma_core.system_deps import FRESHCLAM_TASK
 
+        # Installed with Kazma's service too (it stops Kazma at a Windows
+        # shutdown); the engine's removal takes it where Kazma's engine is set up.
+        if not machine.record.get(RECORD_KEY) and _answers(machine, ["sc.exe", "query", SHUTDOWN_SERVICE]):
+            items.append(Item(f"Kazma's clean stop at a Windows shutdown (the {SHUTDOWN_SERVICE} service)",
+                              "remove", action="shutdown_service", admin=True))
         if _answers(machine, ["schtasks", "/Query", "/TN", FRESHCLAM_TASK]):
             items.append(Item("ClamAV's daily signature task setup made", "remove",
                               argv=("schtasks", "/Delete", "/TN", FRESHCLAM_TASK, "/F"), admin=True))
@@ -424,6 +431,10 @@ def _do(item: Item, machine: Machine, target: Path) -> tuple[bool, str]:
         from kazma_core import container_engine_setup
 
         return container_engine_setup.remove(machine.run)
+    if item.action == "shutdown_service":
+        from kazma_core import container_engine_setup
+
+        return container_engine_setup.remove_shutdown_service(machine.run)
     if item.action == "remove_later":
         return _remove_later(path, machine)
     if item.action in ("remove_tree", "delete_tree"):

@@ -130,6 +130,13 @@ try:
 
     prepare_server_exit()
 
+    # A Windows shutdown reaches the server in time through the
+    # KazmaEngineShutdown service's pipe (kazma_core.shutdown_notice): the
+    # guard is ended with the other scheduled tasks when it begins.
+    from kazma_core.shutdown_notice import start as listen_for_windows_shutdown
+
+    listen_for_windows_shutdown()
+
     # In-process uvicorn so Windows gets SelectorEventLoop via
     # uvicorn_loop_factory. `python -m uvicorn` (the old subprocess path)
     # hardcodes ProactorEventLoop on Windows in 0.36+, which makes

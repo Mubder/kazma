@@ -20,13 +20,22 @@ class Runner:
     folder it starts, in UTF-16 as schtasks writes it); records every other
     command."""
 
-    def __init__(self, tasks: tuple[str, ...] = ("KazmaAgent", "KazmaFreshclam"), folder: str | None = None) -> None:
+    def __init__(self, tasks: tuple[str, ...] = ("KazmaAgent", "KazmaFreshclam"), folder: str | None = None,
+                 services: tuple[str, ...] = ()) -> None:
         self.tasks = tasks
         self.folder = folder
+        #: Windows services registered (``sc.exe query`` answers them; a
+        #: delete takes one off).
+        self.services = list(services)
         self.ran: list[list[str]] = []
 
     def __call__(self, argv: list[str], **_kw: Any) -> subprocess.CompletedProcess[Any]:
         argv = list(argv)
+        if argv[:2] == ["sc.exe", "query"]:
+            there = argv[2] in self.services
+            return subprocess.CompletedProcess(argv, 0 if there else 1060, "STATE : 4 RUNNING" if there else "", "")
+        if argv[:2] == ["sc.exe", "delete"] and argv[2] in self.services:
+            self.services.remove(argv[2])
         if argv[:2] == ["schtasks", "/Query"]:
             there = argv[3] in self.tasks
             if "/XML" in argv:
@@ -165,6 +174,28 @@ def test_nothing_runs_before_the_plan_is_accepted(tmp_path) -> None:
                    say=said.append) == un.EXIT_CANCELLED
     assert machine.data.exists()
     assert un.main([], machine=machine, ask=lambda _q: "uninstall", say=said.append) == un.EXIT_DONE
+
+
+def test_the_shutdown_service_is_taken_off_with_kazma(tmp_path, monkeypatch) -> None:
+    """Kazma's service part installs KazmaEngineShutdown on any engine (it
+    stops Kazma at a Windows shutdown): with no engine of Kazma's to remove,
+    the uninstaller takes it off itself."""
+    from kazma_core import container_engine_setup as ces
+
+    monkeypatch.setenv("ProgramW6432", str(tmp_path / "Program Files"))
+    monkeypatch.setattr(ces.time, "sleep", lambda _s: None)
+    machine = _machine(tmp_path, runner=Runner(services=(ces.SHUTDOWN_SERVICE,)))
+    items = [i for i in un.build_plan(machine) if "KazmaEngineShutdown" in i.what]
+    assert len(items) == 1 and items[0].how == "remove" and items[0].admin
+    assert un.main([], machine=machine, ask=lambda _q: "uninstall", say=lambda _m: None) == un.EXIT_DONE
+    assert ["sc.exe", "delete", ces.SHUTDOWN_SERVICE] in machine.run.ran
+    assert machine.run.services == []
+    # Not twice: where Kazma's engine is set up, its removal takes the service.
+    from kazma_core.container_engine import RECORD_KEY
+
+    engine = _machine(tmp_path / "engine", record={RECORD_KEY: {"engine": "kazma"}},
+                      runner=Runner(services=(ces.SHUTDOWN_SERVICE,)))
+    assert not [i for i in un.build_plan(engine) if "KazmaEngineShutdown" in i.what]
 
 
 def test_a_task_that_is_not_there_is_not_in_the_plan(tmp_path) -> None:

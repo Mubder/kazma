@@ -1731,6 +1731,23 @@ def _record_child(pid: int | None) -> None:
     )
 
 
+def windows_shutting_down() -> bool:
+    """Whether Windows is shutting down or restarting (``SM_SHUTTINGDOWN``).
+
+    The KazmaEngineShutdown service stops the server at Windows' preshutdown
+    notice (kazma_core/shutdown_notice.py). A guard still alive then -- one
+    not run by Task Scheduler, which ends its tasks at once -- must not start
+    the server again behind it."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        return ctypes.windll.user32.GetSystemMetrics(0x2000) != 0
+    except Exception:
+        return False
+
+
 def _port_from_url(url: str) -> int:
     try:
         parsed = urllib.parse.urlparse(url)
@@ -5036,6 +5053,7 @@ class Guard:
         # squatter the guard cannot kill repeats every spawn cycle, and
         # paging on each one trains the operator to ignore the channel.
         self._last_stale_holder_notified: int | None = None
+        self._said_windows_shutting_down = False
         self._last_page_fp = ""
         self._last_page_at = 0.0
         self._awaiting_recovery = ""
@@ -5774,6 +5792,13 @@ class Guard:
                         continue
                     if self._stop:
                         break
+                    if windows_shutting_down():
+                        if not self._said_windows_shutting_down:
+                            self._said_windows_shutting_down = True
+                            self.log("info", "guard.windows_shutting_down",
+                                     note="the server is not started again while Windows shuts down")
+                        self._sleep(2.0)
+                        continue
                     # The port is read again before every start: `kazma
                     # setup port` changes it in .env and asks for a reload,
                     # and this guard runs from boot to boot.

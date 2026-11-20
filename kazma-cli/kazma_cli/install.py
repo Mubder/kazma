@@ -290,7 +290,18 @@ def _playwright_chromium() -> bool:
     return chromium_installed()
 
 
-def _service_state(platform, run) -> tuple[bool | None, str]:
+def _shutdown_service_current(run, finder=None) -> bool:
+    """Whether the KazmaEngineShutdown service runs this build
+    (``container_engine_setup.shutdown_service_current``); *finder* answers
+    instead on a test's machine."""
+    if finder is not None:
+        return bool(finder())
+    from kazma_core.container_engine_setup import shutdown_service_current
+
+    return shutdown_service_current(run)
+
+
+def _service_state(platform, run, shutdown_current=None) -> tuple[bool | None, str]:
     os_name = platform.os
 
     def out(argv: list[str]) -> tuple[int, str]:
@@ -303,7 +314,15 @@ def _service_state(platform, run) -> tuple[bool | None, str]:
 
     if os_name == "windows":
         code, _ = out(["schtasks", "/Query", "/TN", SERVICE_TASK])
-        return code == 0, ("the KazmaAgent task is registered" if code == 0 else "no KazmaAgent task")
+        if code != 0:
+            return False, "no KazmaAgent task"
+        # The task alone leaves a Windows restart cutting Kazma off: Task
+        # Scheduler ends the guard at once, and the server hears of the
+        # shutdown only after the database has stopped (2026-11-20).
+        if not _shutdown_service_current(run, shutdown_current):
+            return False, ("the KazmaAgent task is registered, but nothing stops Kazma cleanly when Windows "
+                           "shuts down (the KazmaEngineShutdown service is missing or older than this build)")
+        return True, "the KazmaAgent task is registered; the KazmaEngineShutdown service stops Kazma at a shutdown"
     if os_name == "macos":
         code, _ = out(["launchctl", "list", SERVICE_LABEL])
         return code == 0, (f"{SERVICE_LABEL} is loaded" if code == 0 else f"{SERVICE_LABEL} is not loaded")
@@ -321,7 +340,7 @@ class PartState:
 
 #: Finders that stand in for Kazma's engine (tests), not for a system
 #: dependency's finder (``system_deps.check_all`` takes those).
-_NOT_SYSTEM_FINDERS = frozenset({"engine", "engine_action", "engine_preflight"})
+_NOT_SYSTEM_FINDERS = frozenset({"engine", "engine_action", "engine_preflight", "shutdown_service"})
 
 
 def _system_finders(machine: Machine) -> dict:
@@ -396,7 +415,7 @@ def _check_parts(parts, machine: Machine, platform, docker: str = "system") -> t
         elif container_services.by_part(part.id) is not None:
             ok, detail = _container_service_state(container_services.by_part(part.id), machine, env_path)
         elif part.id == "service":
-            ok, detail = _service_state(platform, machine.run)
+            ok, detail = _service_state(platform, machine.run, machine.finders.get("shutdown_service"))
         found[part.id] = PartState(ok, detail)
     return found, states
 
@@ -634,14 +653,34 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
             "reload Kazma so it uses them (when no chat is running)",
             (python, str(root / "scripts" / "service" / "kazma_guard.py"), "--reload", "--when-idle"))))
     if "service" in todo_ids and root is not None:
-        plan.append(PlannedStep("service", Step(
-            "install Kazma as a service (its guard starts at boot)",
-            (python, str(root / "scripts" / "service" / "install_service.py"), "--install"),
-            admin=platform.os == "windows")))
-        if platform.os == "windows":
-            plan.append(PlannedStep("service", Step("start it now", ("schtasks", "/Run", "/TN", SERVICE_TASK),
-                                                    admin=True)))
+        task_there = platform.os == "windows" and _windows_task_registered(machine.run)
+        if not task_there:
+            plan.append(PlannedStep("service", Step(
+                "install Kazma as a service (its guard starts at boot)",
+                (python, str(root / "scripts" / "service" / "install_service.py"), "--install"),
+                admin=platform.os == "windows")))
+            if platform.os == "windows":
+                plan.append(PlannedStep("service", Step("start it now", ("schtasks", "/Run", "/TN", SERVICE_TASK),
+                                                        admin=True)))
+        # What stops Kazma cleanly at a Windows shutdown, on any engine. Kazma's
+        # engine's own shutdown step puts the same service in, but may wait
+        # for a restart (WSL): this one runs now, and the later one finds it
+        # current.
+        if (platform.os == "windows"
+                and not _shutdown_service_current(machine.run, machine.finders.get("shutdown_service"))):
+            from kazma_core.container_engine_setup import shutdown_service_step
+
+            plan.append(PlannedStep("service", shutdown_service_step()))
     return plan
+
+
+def _windows_task_registered(run) -> bool:
+    try:
+        done = run(["schtasks", "/Query", "/TN", SERVICE_TASK], stdin=subprocess.DEVNULL, capture_output=True,
+                   text=True, timeout=30, check=False, encoding="utf-8", errors="replace")
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
 
 
 # -- choosing -----------------------------------------------------------------------------------

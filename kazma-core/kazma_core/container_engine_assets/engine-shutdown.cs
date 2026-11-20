@@ -22,18 +22,31 @@
 // budget. A holder that ends (an update, a restart of this service) is started
 // again by keep-engine.ps1, which this service accepts in its place.
 //
+// Kazma's own server is stopped first, the same way (2026-11-20). At a
+// restart the guard is ended with the other tasks and nothing stopped the
+// server: it heard of the shutdown only at the very end, after the database
+// service had stopped, and was ended mid-stop ("the last run did not shut down
+// cleanly"). Each Kazma server connects to a third pipe, KazmaShutdownNotice
+// (kazma_core/shutdown_notice.py); at the preshutdown notice this service
+// writes "stop" to every one and waits, within its own budget, until each has
+// closed its end -- its process has ended -- and only then stops the engine.
+// Windows stops the database service after every preshutdown service is done.
+//
 // Control 128 (`sc.exe control KazmaEngineShutdown 128`, administrators only)
-// makes the same stop without a shutdown: a drill. keep-engine.ps1 then starts
-// the engine again, as after any end of the distro.
+// makes the engine's stop without a shutdown: a drill. keep-engine.ps1 then
+// starts the engine again, as after any end of the distro. Control 129 makes
+// Kazma's stop the same way (its guard starts the server again).
 //
 // Built at setup with the .NET Framework's own csc.exe (part of every Windows 10
 // and 11); runs as LocalSystem from a folder only administrators can write;
 // says what it did in the Application event log (source KazmaEngineShutdown).
 //
-//   kazma-engine-shutdown.exe --budget <seconds>
+//   kazma-engine-shutdown.exe --budget <seconds> --kazma-budget <seconds>
+//   kazma-engine-shutdown.exe --notice-drill <seconds before the stop>   (not a service: tests)
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -48,7 +61,9 @@ public static class KazmaEngineShutdown
     const string Name = "KazmaEngineShutdown";
     const string PipeIn = "KazmaEngineHold-in";    // this service writes; the holder's stdin
     const string PipeOut = "KazmaEngineHold-out";  // the holder's stdout; this service reads
+    const int NOTICE_INSTANCES = 16;               // Kazma servers at once (installs on this machine)
     const int DRILL_CONTROL = 128;
+    const int KAZMA_DRILL_CONTROL = 129;
     const int SERVICE_WIN32_OWN_PROCESS = 0x10;
     const int SERVICE_STOPPED = 1, SERVICE_START_PENDING = 2, SERVICE_STOP_PENDING = 3, SERVICE_RUNNING = 4;
     const int SERVICE_ACCEPT_STOP = 0x1, SERVICE_ACCEPT_PRESHUTDOWN = 0x100;
@@ -104,12 +119,27 @@ public static class KazmaEngineShutdown
     static extern bool CloseServiceHandle(IntPtr handle);
 
     static int budgetSeconds = 120;
+    static int kazmaBudgetSeconds = 75;
+    // Kazma's servers connect here (--notice-pipe names another, for a test).
+    static string pipeNotice = "KazmaShutdownNotice";
+    // --notice-drill: not a service; says what it did on the console.
+    static bool consoleOnly;
 
     static IntPtr statusHandle;
     static SERVICE_STATUS status;
     static readonly object statusLock = new object();
     static readonly ManualResetEvent finished = new ManualResetEvent(false);
     static int stopping;
+    static int checkPoint;
+    // Kazma's servers now connected: each one's pipe and its end.
+    sealed class Listener
+    {
+        public NamedPipeServerStream Pipe;
+        public readonly ManualResetEvent Gone = new ManualResetEvent(false);
+    }
+    static readonly object listenersLock = new object();
+    static readonly List<Listener> listeners = new List<Listener>();
+    static string lastWaitMessage = "";
     // The holder now connected: the pipe to write to, its lines, and its end.
     static readonly object holderLock = new object();
     static NamedPipeServerStream holderIn;
@@ -121,10 +151,26 @@ public static class KazmaEngineShutdown
 
     public static int Main(string[] args)
     {
+        int noticeDrill = -1;
         for (int i = 0; i < args.Length; i++)
         {
             string next = i + 1 < args.Length ? args[i + 1] : "";
             if (args[i] == "--budget") { budgetSeconds = Math.Max(10, int.Parse(next)); i++; }
+            else if (args[i] == "--kazma-budget") { kazmaBudgetSeconds = Math.Max(1, int.Parse(next)); i++; }
+            else if (args[i] == "--notice-pipe") { pipeNotice = next; i++; }
+            else if (args[i] == "--notice-drill") { noticeDrill = Math.Max(0, int.Parse(next)); i++; }
+        }
+        if (noticeDrill >= 0)
+        {
+            // A test of Kazma's stop with no service and no shutdown: listen,
+            // then make the stop a preshutdown notice makes.
+            consoleOnly = true;
+            new Thread(AcceptListeners) { IsBackground = true }.Start();
+            Say("notice drill: listening on " + pipeNotice + " for " + noticeDrill + " s");
+            Thread.Sleep(noticeDrill * 1000);
+            bool stopped = StopKazma("a notice drill");
+            finished.Set();
+            return stopped ? 0 : 2;
         }
         mainFn = ServiceMain;
         handlerFn = Handler;
@@ -151,8 +197,10 @@ public static class KazmaEngineShutdown
         Report(SERVICE_START_PENDING, 0, 5000);
         SetOwnPreshutdownTimeout();
         new Thread(AcceptHolders) { IsBackground = true }.Start();
+        new Thread(AcceptListeners) { IsBackground = true }.Start();
         Report(SERVICE_RUNNING, 0, 0);
-        Say("ready: at a shutdown, Kazma's engine gets up to " + budgetSeconds + " s to stop");
+        Say("ready: at a shutdown, Kazma gets up to " + kazmaBudgetSeconds + " s to stop, then its engine up to "
+            + budgetSeconds + " s");
         finished.WaitOne();
         Report(SERVICE_STOPPED, 0, 0);
     }
@@ -172,7 +220,15 @@ public static class KazmaEngineShutdown
                 if (Interlocked.Exchange(ref stopping, 1) == 0)
                 {
                     new Thread(() => {
-                        try { StopEngine("Windows is shutting down", true); } finally { finished.Set(); }
+                        // Kazma first, while the database and the engine still
+                        // run; then the engine. Windows waits for both.
+                        var ticking = Ticking(true);
+                        try
+                        {
+                            StopKazma("Windows is shutting down");
+                            StopEngine("Windows is shutting down", true);
+                        }
+                        finally { ticking.Dispose(); finished.Set(); }
                     }) { IsBackground = true }.Start();
                 }
                 return NO_ERROR;
@@ -180,6 +236,12 @@ public static class KazmaEngineShutdown
                 if (Interlocked.CompareExchange(ref stopping, 0, 0) == 0)
                 {
                     new Thread(() => StopEngine("a drill (control 128)", false)) { IsBackground = true }.Start();
+                }
+                return NO_ERROR;
+            case KAZMA_DRILL_CONTROL:
+                if (Interlocked.CompareExchange(ref stopping, 0, 0) == 0)
+                {
+                    new Thread(() => StopKazma("a drill (control 129)")) { IsBackground = true }.Start();
                 }
                 return NO_ERROR;
             default:
@@ -196,7 +258,10 @@ public static class KazmaEngineShutdown
         IntPtr svc = OpenService(scm, Name, 0x0002 /* SERVICE_CHANGE_CONFIG */);
         if (svc != IntPtr.Zero)
         {
-            var info = new SERVICE_PRESHUTDOWN_INFO { dwPreshutdownTimeout = (budgetSeconds + 30) * 1000 };
+            var info = new SERVICE_PRESHUTDOWN_INFO
+            {
+                dwPreshutdownTimeout = (kazmaBudgetSeconds + budgetSeconds + 30) * 1000
+            };
             if (!ChangeServiceConfig2(svc, SERVICE_CONFIG_PRESHUTDOWN_INFO, ref info))
             {
                 Say("the preshutdown timeout could not be set: " + Marshal.GetLastWin32Error());
@@ -235,7 +300,114 @@ public static class KazmaEngineShutdown
             PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
             PipeAccessRights.ReadWrite, AccessControlType.Allow));
+        // The account this runs as makes the pipe's next instances (LocalSystem
+        // as a service; the person running a --notice-drill).
+        security.AddAccessRule(new PipeAccessRule(WindowsIdentity.GetCurrent().User,
+            PipeAccessRights.FullControl, AccessControlType.Allow));
         return security;
+    }
+
+    // Kazma's servers, any number at once: each connects and says nothing; its
+    // end closes when its process ends, which is how this service knows it
+    // stopped.
+    static void AcceptListeners()
+    {
+        while (!finished.WaitOne(0))
+        {
+            NamedPipeServerStream pipe = null;
+            try
+            {
+                pipe = new NamedPipeServerStream(pipeNotice, PipeDirection.InOut, NOTICE_INSTANCES,
+                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, Security());
+                var waiting = pipe.BeginWaitForConnection(null, null);
+                if (WaitHandle.WaitAny(new WaitHandle[] { waiting.AsyncWaitHandle, finished }) != 0)
+                {
+                    return;
+                }
+                pipe.EndWaitForConnection(waiting);
+                var listener = new Listener { Pipe = pipe };
+                pipe = null;  // the listener's now
+                lock (listenersLock) { listeners.Add(listener); }
+                new Thread(() => WatchListener(listener)) { IsBackground = true }.Start();
+                lastWaitMessage = "";
+            }
+            catch (Exception e)
+            {
+                // Said once, not every two seconds (seventeen installs, say).
+                if (!finished.WaitOne(0) && e.Message != lastWaitMessage)
+                {
+                    lastWaitMessage = e.Message;
+                    Say("waiting for Kazma's servers: " + e.Message);
+                }
+                Thread.Sleep(2000);
+            }
+            finally
+            {
+                if (pipe != null) { try { pipe.Dispose(); } catch (Exception) { } }
+            }
+        }
+    }
+
+    static void WatchListener(Listener listener)
+    {
+        try
+        {
+            var buffer = new byte[64];
+            while (listener.Pipe.Read(buffer, 0, buffer.Length) > 0) { }
+        }
+        catch (Exception)
+        {
+        }
+        finally
+        {
+            lock (listenersLock) { listeners.Remove(listener); }
+            listener.Gone.Set();
+            try { listener.Pipe.Dispose(); } catch (Exception) { }
+        }
+    }
+
+    // Tell every Kazma server to stop, and wait until each has ended. True when
+    // every one did (or none listens).
+    static bool StopKazma(string why)
+    {
+        DateTime asked = DateTime.UtcNow;
+        Listener[] now;
+        lock (listenersLock) { now = listeners.ToArray(); }
+        if (now.Length == 0)
+        {
+            Say(why + ": no Kazma server is listening: nothing to stop");
+            return true;
+        }
+        Say(why + ": stopping Kazma (" + now.Length + " server" + (now.Length == 1 ? "" : "s") + ")");
+        var told = new List<Listener>();
+        foreach (var listener in now)
+        {
+            try { Send(listener.Pipe, "stop\n"); told.Add(listener); }
+            catch (Exception e) { Say("a Kazma server could not be told to stop: " + e.Message); }
+        }
+        DateTime until = asked.AddSeconds(kazmaBudgetSeconds);
+        int left = 0;
+        foreach (var listener in told)
+        {
+            int ms = (int)Math.Max(0, (until - DateTime.UtcNow).TotalMilliseconds);
+            if (!listener.Gone.WaitOne(ms)) { left++; }
+        }
+        string took = (DateTime.UtcNow - asked).TotalSeconds.ToString("0.0");
+        if (left == 0 && told.Count == now.Length)
+        {
+            Say("Kazma stopped after " + took + " s");
+            return true;
+        }
+        Say((left + now.Length - told.Count) + " of " + now.Length + " Kazma server(s) did not stop within "
+            + kazmaBudgetSeconds + " s; going on");
+        return false;
+    }
+
+    static Timer Ticking(bool forWindows)
+    {
+        return new Timer(_ => {
+            if (forWindows) Report(SERVICE_STOP_PENDING, Interlocked.Increment(ref checkPoint), 10000);
+        }, null, 0, 2000);
     }
 
     // One holder at a time: both pipes, then its lines until it goes away.
@@ -316,9 +488,7 @@ public static class KazmaEngineShutdown
             return;
         }
         Say(why + ": stopping Kazma's engine");
-        int checkPoint = 0;
-        var ticking = new Timer(_ => { if (forWindows) Report(SERVICE_STOP_PENDING, Interlocked.Increment(ref checkPoint), 10000); },
-                                null, 0, 2000);
+        // Windows is told the stop goes on by the caller's Ticking.
         try
         {
             string line;
@@ -341,10 +511,6 @@ public static class KazmaEngineShutdown
         {
             Say("the stop failed: " + e.Message);
         }
-        finally
-        {
-            ticking.Dispose();
-        }
     }
 
     static void Send(Stream pipe, string text)
@@ -356,6 +522,12 @@ public static class KazmaEngineShutdown
 
     static void Say(string message)
     {
+        if (consoleOnly)
+        {
+            Console.WriteLine(message);
+            Console.Out.Flush();
+            return;
+        }
         try
         {
             // LocalSystem creates the source on first use.

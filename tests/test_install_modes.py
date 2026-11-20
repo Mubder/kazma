@@ -23,7 +23,6 @@ import tomllib
 from pathlib import Path
 
 import pytest
-
 from kazma_core import install_components as ic
 from kazma_core import system_deps as sd
 from kazma_core.postgres_service import Platform
@@ -294,6 +293,11 @@ class Box:
         self.engine_missing = ["distro", "docker", "cli", "context", "task", "shutdown"]
         self.engine_actions: list[str] = []
         self.engine_problem = ""
+        #: The KazmaEngineShutdown service runs this build (it stops Kazma at a
+        #: Windows shutdown): put in by the engine's shutdown step or by the
+        #: service part's own.
+        self.shutdown_service = False
+        self.service_actions: list[str] = []
 
     def engine_check(self):
         from kazma_core.container_engine_setup import EngineCheck
@@ -306,6 +310,12 @@ class Box:
     def engine_action(self, action):
         from kazma_core.container_engine_setup import RESTART
 
+        if action == "engine:shutdown_service":
+            # Kazma's own service part's step, on any engine: not one of the
+            # container engine's steps.
+            self.shutdown_service = True
+            self.service_actions.append(action)
+            return True, "done"
         self.engine_actions.append(action)
         if action == "engine:wsl":
             self.wsl = True
@@ -314,6 +324,8 @@ class Box:
                  "engine:context": "context", "engine:task": "task", "engine:shutdown": "shutdown"}
         if action in gives and gives[action] in self.engine_missing:
             self.engine_missing.remove(gives[action])
+        if action in ("engine:shutdown", "engine:shutdown_service"):
+            self.shutdown_service = True
         if action == "engine:cli":
             self.docker = True
         return True, "done"
@@ -337,6 +349,7 @@ class Box:
                 "house_font": self.house_font,
                 "engine": self.engine_check,
                 "engine_action": self.engine_action,
+                "shutdown_service": lambda: self.shutdown_service,
                 "engine_preflight": lambda: self.engine_problem}
 
     def run(self, argv, **kw):
@@ -589,6 +602,34 @@ def test_full_where_docker_cannot_run_installs_the_rest_and_says_why(box, capsys
     assert ic.by_id("private_search").lacks in out
 
 
+def test_kazmas_service_comes_with_its_clean_stop_at_a_windows_shutdown(box, capsys):
+    """2026-11-20: a Windows restart cut Kazma off (Task Scheduler ends the
+    guard at once). The service part puts in the KazmaEngineShutdown service,
+    which stops Kazma at the preshutdown notice, on any engine: here none can
+    run. A task already registered with an older service gets the service
+    alone, not the task again."""
+    from kazma_cli.install import EXIT_DONE, install
+
+    box.virtualization = _facts("Dell Inc. OptiPlex", False, False)
+    assert install(_options(yes=True), _machine(box)) == EXIT_DONE
+    assert box.service and box.shutdown_service and box.service_actions == ["engine:shutdown_service"]
+    assert box.engine_actions == [], "not the container engine's step"
+    # An install from before 2026-11-20: the task is there, the service older.
+    box.shutdown_service = False
+    box.service_actions.clear()
+    ran_before = len(box.ran)
+    assert install(_options(yes=True), _machine(box)) == EXIT_DONE
+    assert box.service_actions == ["engine:shutdown_service"] and box.shutdown_service
+    assert not any("install_service.py" in " ".join(a) for a in box.ran[ran_before:]), "the task is left as it is"
+    # Control: the service part's check before this change (the task alone)
+    # called that install complete, and a restart kept cutting Kazma off.
+    from kazma_cli import install as installer
+
+    box.shutdown_service = False
+    ok, detail = installer._service_state(type("P", (), {"os": "windows"})(), box.run, lambda: box.shutdown_service)
+    assert ok is False and "nothing stops Kazma cleanly" in detail
+
+
 def test_express_where_containers_cannot_run_ends_as_done_and_says_what_kazma_lacks(box, capsys):
     """The owner (2026-11-13): SearXNG and Neo4j in Express. A computer with
     virtualization off gets every other part, is told what it lacks, and the
@@ -731,9 +772,7 @@ def test_a_searxng_that_never_answers_fails_its_step_in_bounded_time(box, capsys
 
 
 def test_full_installs_wsl_first_and_asks_for_the_restart(box, capsys):
-    from kazma_cli.install import install
-
-    from kazma_cli.install import EXIT_RESTART
+    from kazma_cli.install import EXIT_RESTART, install
 
     box.wsl = False
     assert install(_options(mode="full", yes=True), _machine(box)) == EXIT_RESTART

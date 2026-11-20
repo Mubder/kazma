@@ -42,6 +42,8 @@ class Machine:
         self.task = True
         #: The KazmaEngineShutdown service's state (None: not installed).
         self.service: str | None = "RUNNING"
+        #: Its registered command line (None: this build's).
+        self.service_command: str | None = None
         self.engine_version = "29.9.3"
         self.containers = ["kazma-searxng"]
         self.ran: list[list[str]] = []
@@ -87,6 +89,9 @@ class Machine:
             if argv[1] == "query":
                 return 0, (f"SERVICE_NAME: {ces.SHUTDOWN_SERVICE}\n        TYPE               : 10  WIN32_OWN_PROCESS\n"
                            f"        STATE              : 4  {self.service}\n")
+            if argv[1] == "qc":
+                return 0, (f"SERVICE_NAME: {ces.SHUTDOWN_SERVICE}\n        BINARY_PATH_NAME   : "
+                           f"{self.service_command or ces._service_command()}\n")
             if argv[1] == "stop":
                 self.service = "STOPPED"
             if argv[1] == "delete":
@@ -139,6 +144,11 @@ def _clean_stop_installed() -> None:
     folder = ces._engine_dir()
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "keep-engine.ps1").write_text(ces._asset("keep-engine.ps1"), encoding="utf-8")
+    # The service built from this build's source: the build leaves the source
+    # beside the program, which is how setup tells an older copy.
+    service = ces._shutdown_service_dir()
+    service.mkdir(parents=True, exist_ok=True)
+    (service / "kazma-engine-shutdown.cs").write_text(ces._asset("engine-shutdown.cs"), encoding="utf-8")
     ces._stop_helpers_stamp().write_text(
         hashlib.sha256(ces._asset("engine-stop.sh").encode("utf-8")).hexdigest() + "\n", encoding="ascii")
 

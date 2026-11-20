@@ -12807,6 +12807,52 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   scripts run under bash with stand-ins, their first versions as negative
   controls; the service built with `csc` on Windows),
   `tests/test_engine_shutdown_drill.py`.
+- **A Windows shutdown stops Kazma first** (2026-11-20, `kazma_core/shutdown_notice.py`).
+  The owner's restart and Windows Update's after it cut Kazma off: the start
+  card said "the last run did not shut down cleanly". Task Scheduler ends the
+  guard at the start of a shutdown; the server lived on, heard of the
+  shutdown only at the very end (Windows' console shutdown event, 37 s in),
+  after the database service had stopped, logged "Shutdown signal sent" and
+  was ended in the same second, with no stop stamp written.
+  - The `KazmaEngineShutdown` service serves a third pipe,
+    `KazmaShutdownNotice` (16 instances: one per Kazma server on the
+    machine). Each server connects from `serve.py`
+    (`shutdown_notice.start`, a daemon thread; never another process: a
+    test's app never connects to the machine's real service) and says
+    nothing.
+  - At the preshutdown notice the service writes `stop` to every connected
+    server. A server stops the way the guard's CTRL_BREAK stops it
+    (`signal.raise_signal(SIGBREAK)`: uvicorn's handler, then the app's own
+    shutdown and `exit_after_shutdown`). It keeps its end of the pipe open
+    until its process ends, and the service waits for every end within
+    `SHUTDOWN_KAZMA_BUDGET_S` (75), before it stops the engine.
+  - Windows stops the database service after every preshutdown service is
+    done. The service's preshutdown timeout is Kazma's budget plus the
+    engine's plus 30 s. Control 129 makes Kazma's stop alone (a drill; the
+    guard then starts the server again). `--notice-drill N --notice-pipe
+    NAME` runs the same stop with no service, for tests.
+  - The guard starts no server while Windows shuts down
+    (`kazma_guard.windows_shutting_down`, `SM_SHUTTINGDOWN`).
+  - The service is installed with Kazma's own service, on any engine:
+    `kazma setup install`'s service part counts as done only when it runs
+    this build (`container_engine_setup.shutdown_service_current`: running,
+    the source the build left beside the program equal to this build's, the
+    registered command line equal). The part's step
+    `engine:shutdown_service` (`shutdown_service_step`, administrators only)
+    puts it in alone; the task is registered again only when missing. The
+    engine's own shutdown step uses the same build, and either finds the
+    other's work current. `kazma uninstall` takes the service off
+    (`remove_shutdown_service`) unless the engine's removal does.
+  - A server with no service listening says so once: a WARNING under the
+    guard, naming `kazma setup install` in an administrator terminal. Lines
+    said before the app sets up logging are held and said after
+    (`shutdown_notice._log`).
+  - Gates: `tests/test_windows_shutdown_notice.py` (the real service
+    program built with `csc` and the real listener: two servers told and
+    waited for, the real SIGBREAK ending a process; a server that never
+    ends, and no server, as controls), the install, uninstall and engine
+    tests (the task alone as the service part's control).
+  - The real restart is `scripts/restart_drill.py` on the drill VM.
 
 ### 65. A2A: other agents call Kazma (`kazma_ui/a2a_api.py`, 2026-11-14)
 
