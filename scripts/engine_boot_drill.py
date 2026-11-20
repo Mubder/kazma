@@ -64,7 +64,11 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 
 VM_NAME = "KazmaVMs"
-CHECKPOINT = "clean Windows + SSH + nested virtualization (2026-11-12)"
+#: The VM's clean state. The 2026-11-12 checkpoint was lost with the PC reset
+#: of 19 Nov (the VM was flattened, and its virtual TPM, locked to the old
+#: Windows' guardian certificates, was switched off on 20 Nov): this one is
+#: the same Windows with SSH, nested virtualization and 8 GB, no TPM.
+CHECKPOINT = "clean Windows + SSH, no TPM (2026-11-20)"
 SSH_HOST = "kazma-drill"
 #: On the VM: the install, and the drill's own folder (probe, logs).
 VM_ROOT = r"C:\kazma-drill"
