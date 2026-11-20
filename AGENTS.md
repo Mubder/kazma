@@ -2102,6 +2102,18 @@ four injected were noise.
   `tests/test_memory_benchmark_edges.py` (today's dataset without q601 on
   the list refuses the lock; an unnamed flip, a wrong margin and a stale
   entry each fail the CI check).
+- **The benchmarks page says what a number rests on** (2026-11-20,
+  benchmark audit R12, the owner's decision 6). The extraction lock writes
+  `rests_on` (`extraction_rests_on`: per pass and language the turns, the
+  gold facts, the turns with nothing to keep, and for the model's pass the
+  askings, turns times the recording's askings a turn), and
+  `scripts/benchmarks_page.py` prints it in a "Rests on" column; a
+  model-pass row the lock does not count is refused, never printed. The page
+  also prints each edge-list hit from the lock (its question, margin and
+  flips). Gates: `test_the_lock_counts_what_each_extraction_row_rests_on`
+  (the lock's count is the replay's; a typed count fails) and
+  `tests/test_benchmarks_page.py` (a lock without the count refuses the
+  page, a changed count changes it).
 - **Nothing on the hot path parses `kazma.yaml` (S4):**
   `config_loader.install_yaml_section` -- the install root's file, parsed
   once per file version (mtime + size). Gate: `tests/test_install_yaml.py`.

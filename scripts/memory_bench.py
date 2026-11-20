@@ -1556,7 +1556,12 @@ def _extraction_lock(
     """
     import datetime as _dt
 
-    from kazma_core.memory.benchmark import RECORD_AGAIN, extraction_scores, run_extraction_benchmark
+    from kazma_core.memory.benchmark import (
+        RECORD_AGAIN,
+        extraction_rests_on,
+        extraction_scores,
+        run_extraction_benchmark,
+    )
 
     if not LLM_REPLIES.is_file():
         return {}, [f"no recording of the model's pass ({LLM_REPLIES.name}): it cannot be locked without "
@@ -1597,7 +1602,9 @@ def _extraction_lock(
             "replaced": {"recording": old.get("recording"),
                          "scores": {k: v for k, v in sorted(was.items()) if k.startswith("llm.")}},
         })
-    return {"version": report["version"], "recording": identity, "scores": now, "recordings": history}, problems
+    return {"version": report["version"], "recording": identity, "scores": now,
+            # What each row rests on, for the benchmarks page (decision 6).
+            "rests_on": extraction_rests_on(report), "recordings": history}, problems
 
 
 def _speakers_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[str, Any], list[str]]:

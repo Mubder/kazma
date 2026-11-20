@@ -60,6 +60,7 @@ __all__ = [
     "RecordingEmbedder",
     "ReplayEmbedder",
     "StaleRecordingError",
+    "extraction_rests_on",
     "extraction_scores",
     "gated_scores",
     "load_dataset",
@@ -852,6 +853,27 @@ def run_extraction_benchmark(
 
 #: The extraction scores the lock holds, per pass and language.
 EXTRACTION_SCORES = ("found", "named", "right", "quiet")
+
+
+def extraction_rests_on(report: dict[str, Any]) -> dict[str, dict[str, dict[str, int]]]:
+    """What each extraction row rests on, per pass and language: the turns,
+    the gold facts behind ``found``, the turns with nothing to keep behind
+    ``quiet``, and for the model's pass the askings (turns times the
+    recording's askings a turn). The lock writes it; the benchmarks page
+    prints it beside the scores (benchmark audit R12, the owner's decision 6).
+    """
+    askings = int((report.get("llm_recording") or {}).get("askings") or 0)
+    out: dict[str, dict[str, dict[str, int]]] = {}
+    for pass_name in ("heuristic", "llm"):
+        part = report.get(pass_name) or {}
+        for lang, row in sorted(part.items()):
+            if not isinstance(row, dict):
+                continue
+            entry = {"turns": int(row["turns"]), "gold": int(row["gold"]), "quiet_turns": int(row["quiet_turns"])}
+            if pass_name == "llm":
+                entry["askings"] = int(row["turns"]) * askings
+            out.setdefault(pass_name, {})[lang] = entry
+    return out
 
 
 def extraction_scores(report: dict[str, Any]) -> dict[str, float]:

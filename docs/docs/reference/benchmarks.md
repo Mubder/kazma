@@ -33,18 +33,20 @@ Questions it has no memory for are answered with nothing in 27.8 % of cases (0.0
 
 The second set was written after the settings were chosen, and no setting is chosen by sweeping it. It is not an unseen test: two decisions were taken by looking at it, and a change that lowers it fails the build like any other score, so it is a second check on the same memories. A set nobody has looked at would be a sealed one, scored only on request.
 
+One answer stands at the edge of what the recorded vectors can tell: "what is it that I do for a living?" (A question with noise around it) is shown by 0.0004 of evidence, and with the vectors moved inside their rounding it changes in 1 of 10 replays. Its hit counts in the table above; the lock names it (`lock --edge`) instead of moving a threshold for it.
+
 ### Learning facts from a conversation {#memory-facts}
 
-Turns in English, Arabic and both, with the facts a person would expect remembered. **Quick pass**: Kazma's own rules, on every turn. **Model pass**: the model reading the turn afterwards (recorded replies). **Found**: the facts expected, kept with their whole value about the right person, whatever the model called them (a name that turns the fact around, such as "dislikes" or "former", does not count). **Same name**: of those, the share kept under a name on the list (a fact kept under two names is two facts to Kazma). **Right**: the facts kept that hold a value the turn gives, about the right person, and are not on the turn's list of what must not be kept; the name is scored apart. **Quiet**: turns with nothing to learn that taught nothing.
+Turns in English, Arabic and both, with the facts a person would expect remembered. **Quick pass**: Kazma's own rules, on every turn. **Model pass**: the model reading the turn afterwards (recorded replies). **Found**: the facts expected, kept with their whole value about the right person, whatever the model called them (a name that turns the fact around, such as "dislikes" or "former", does not count). **Same name**: of those, the share kept under a name on the list (a fact kept under two names is two facts to Kazma). **Right**: the facts kept that hold a value the turn gives, about the right person, and are not on the turn's list of what must not be kept; the name is scored apart. **Quiet**: turns with nothing to learn that taught nothing. **Rests on**: the turns behind the row; for the model pass, the askings (one asking is one model call for one turn).
 
-| Pass | Language | Found | Same name | Right | Quiet |
-|---|---|---|---|---|---|
-| Quick pass | English | 46.2 % | 100.0 % | 100.0 % | 100.0 % |
-| Quick pass | Arabic | 63.6 % | 100.0 % | 100.0 % | 100.0 % |
-| Quick pass | Mixed | 60.0 % | 100.0 % | 100.0 % | 100.0 % |
-| Model pass (1 asking a turn) | English | 100.0 % | 76.9 % | 100.0 % | 100.0 % |
-| Model pass (1 asking a turn) | Arabic | 100.0 % | 90.9 % | 100.0 % | 100.0 % |
-| Model pass (1 asking a turn) | Mixed | 100.0 % | 70.0 % | 91.7 % | 100.0 % |
+| Pass | Language | Found | Same name | Right | Quiet | Rests on |
+|---|---|---|---|---|---|---|
+| Quick pass | English | 46.2 % | 100.0 % | 100.0 % | 100.0 % | 12 turns |
+| Quick pass | Arabic | 63.6 % | 100.0 % | 100.0 % | 100.0 % | 10 turns |
+| Quick pass | Mixed | 60.0 % | 100.0 % | 100.0 % | 100.0 % | 8 turns |
+| Model pass (1 asking a turn) | English | 100.0 % | 76.9 % | 100.0 % | 100.0 % | 12 askings (12 turns, 1 each) |
+| Model pass (1 asking a turn) | Arabic | 100.0 % | 90.9 % | 100.0 % | 100.0 % | 10 askings (10 turns, 1 each) |
+| Model pass (1 asking a turn) | Mixed | 100.0 % | 70.0 % | 91.7 % | 100.0 % | 8 askings (8 turns, 1 each) |
 
 The model pass is deepseek-flash's replies, recorded on 2026-10-15, 1 asking a turn. Asked again, a model answers a little differently, so a number from one asking can move by a few facts with nothing changed.
 

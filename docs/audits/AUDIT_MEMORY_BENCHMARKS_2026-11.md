@@ -703,7 +703,15 @@ framework audit's section 6.2, decisions 3 to 6).
   page, in the guide, the builder or the benchmark's docstring calls a set
   held out unless it names it sealed (`tests/test_memory_benchmark.py`,
   the old words as the negative control). The sealed set itself is to be
-  written by another session; its specification comes next.
+  written by another session: `docs/plans/MEMORY_SEALED_SET.md` specifies
+  what it covers, the file and the format.
+- **Step 8, R12, 2026-11-20: the page says how many askings each model-pass
+  row rests on** (decision 6). The extraction lock counts, per pass and
+  language, the turns, the gold facts and the askings, and the page prints
+  them in a "Rests on" column: 12, 10 and 8 askings, one a turn. A lock that
+  does not count a row refuses the page. The page also prints the edge
+  list's hit (q601, step 4). Not done here: the spread beside a recorded
+  score, which needs several askings a turn (step 3).
 
 ---
 

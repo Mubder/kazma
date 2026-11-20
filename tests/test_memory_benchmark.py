@@ -304,6 +304,20 @@ def _recording_problems(report: dict, locked: dict) -> list[str]:
     return problems
 
 
+def test_the_lock_counts_what_each_extraction_row_rests_on():
+    """The owner's decision 6: the askings beside each model-pass row come
+    from the lock, and the lock's count is the replay's (a hand-edited count
+    fails here)."""
+    locked = _locked_extraction()
+    report = benchmark.run_extraction_benchmark(llm_replies=_recording())
+    assert locked["rests_on"] == benchmark.extraction_rests_on(report)
+    for lang, row in locked["rests_on"]["llm"].items():
+        assert row["askings"] == row["turns"] * locked["recording"]["askings"], lang
+    edited = json.loads(json.dumps(locked["rests_on"]))
+    edited["llm"]["ar"]["askings"] += 40  # control: a count typed in is not the replay's
+    assert edited != benchmark.extraction_rests_on(report)
+
+
 def test_extraction_only_improves():
     locked = _locked_extraction()
     report = benchmark.run_extraction_benchmark(llm_replies=_recording())

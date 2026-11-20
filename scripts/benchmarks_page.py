@@ -69,6 +69,40 @@ def _num(value: float | None) -> str:
     return "–" if value is None else f"{value:.2f}"
 
 
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _rests_on(extraction: dict, kind: str, lang: str) -> str:
+    """What one extraction row rests on, from the lock (the owner's decision
+    6): a model-pass row the lock does not count is not printed as a number."""
+    row = ((extraction.get("rests_on") or {}).get(kind) or {}).get(lang)
+    if not row:
+        raise ValueError(f"the lock does not say what {kind}.{lang} rests on: "
+                         "python scripts/memory_bench.py lock")
+    turns = int(row["turns"])
+    if kind != "llm":
+        return _count(turns, "turn")
+    askings = int(row["askings"])
+    each = askings // turns if turns else 0
+    return f"{_count(askings, 'asking')} ({_count(turns, 'turn')}, {each} each)"
+
+
+def _edges(data: dict) -> list[str]:
+    """The hits that hold only by the recorded vectors' rounding (the edge
+    list in the lock, benchmark audit R4)."""
+    edges = data.get("edges") or {}
+    out = []
+    for hit in edges.get("hits") or []:
+        out.append(
+            f"One answer stands at the edge of what the recorded vectors can tell: \"{hit['question']}\" "
+            f"({_MEMORY_NAMES.get(hit['category'], hit['category'])}) is "
+            f"{'shown' if hit['hit'] else 'missed'} by {abs(hit['margin'])} of evidence, and with the vectors "
+            f"moved inside their rounding it changes in {hit['flipped']} of {edges['draws']} replays. Its hit "
+            "counts in the table above; the lock names it (`lock --edge`) instead of moving a threshold for it.")
+    return out + [""] if out else []
+
+
 def _memory(data: dict) -> list[str]:
     s = data["scores"]
     lines = [
@@ -102,6 +136,7 @@ def _memory(data: dict) -> list[str]:
         "fails the build like any other score, so it is a second check on the same memories. A set nobody "
         "has looked at would be a sealed one, scored only on request.",
         "",
+        *_edges(data),
     ]
     extraction = data.get("extraction") or {}
     ex = extraction.get("scores") or {}
@@ -119,17 +154,18 @@ def _memory(data: dict) -> list[str]:
             "not count). **Same name**: of those, the share kept under a name on the list (a fact kept under two "
             "names is two facts to Kazma). **Right**: the facts kept that hold a value the turn gives, about the "
             "right person, and are not on the turn's list of what must not be kept; the name is scored apart. "
-            "**Quiet**: turns with nothing to learn that taught nothing.",
+            "**Quiet**: turns with nothing to learn that taught nothing. **Rests on**: the turns behind the row; "
+            "for the model pass, the askings (one asking is one model call for one turn).",
             "",
-            "| Pass | Language | Found | Same name | Right | Quiet |",
-            "|---|---|---|---|---|---|",
+            "| Pass | Language | Found | Same name | Right | Quiet | Rests on |",
+            "|---|---|---|---|---|---|---|",
         ]
         for kind, label in (("heuristic", "Quick pass"), ("llm", model_label)):
             for lang, lang_label in (("en", "English"), ("ar", "Arabic"), ("mixed", "Mixed")):
                 if f"{kind}.{lang}.found" in ex:
                     lines.append(f"| {label} | {lang_label} | {_pct(ex[f'{kind}.{lang}.found'])} | "
                                  f"{_pct(ex[f'{kind}.{lang}.named'])} | {_pct(ex[f'{kind}.{lang}.right'])} | "
-                                 f"{_pct(ex[f'{kind}.{lang}.quiet'])} |")
+                                 f"{_pct(ex[f'{kind}.{lang}.quiet'])} | {_rests_on(extraction, kind, lang)} |")
         if recording:
             lines += [
                 "",
