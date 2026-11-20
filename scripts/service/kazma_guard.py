@@ -1744,7 +1744,7 @@ def windows_shutting_down() -> bool:
         import ctypes
 
         return ctypes.windll.user32.GetSystemMetrics(0x2000) != 0
-    except Exception:
+    except (AttributeError, OSError):  # no user32 (a stripped-down Windows): never "shutting down"
         return False
 
 

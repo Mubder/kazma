@@ -64,7 +64,6 @@ __all__ = [
     "remove_shutdown_service",
     "run_action",
     "shutdown_service_current",
-    "shutdown_service_installed",
     "shutdown_service_step",
 ]
 
@@ -846,13 +845,6 @@ def _foreign_containers(run: Runner = subprocess.run) -> list[str] | None:
     if code != 0:
         return None
     return sorted(n for n in text.split() if n and not n.startswith("kazma-"))
-
-
-def shutdown_service_installed(run: Runner = subprocess.run) -> bool:
-    """Whether the ``KazmaEngineShutdown`` service is registered (any build)."""
-    if os.name != "nt" and run is subprocess.run:
-        return False
-    return _service_state(run) is not None
 
 
 def remove_shutdown_service(run: Runner = subprocess.run) -> tuple[bool, str]:

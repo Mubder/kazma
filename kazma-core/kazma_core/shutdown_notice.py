@@ -86,7 +86,7 @@ def _log(level: int, message: str, *args: object) -> None:
     logger.log(level, message, *args)
 
 
-def pipe_path(name: str = PIPE_NAME) -> str:
+def _pipe_path(name: str = PIPE_NAME) -> str:
     """The pipe's path, ``\\\\.\\pipe\\<name>``."""
     return "\\\\.\\pipe\\" + name
 
@@ -135,7 +135,7 @@ def listen(pipe_name: str = PIPE_NAME, *, on_stop: Callable[[], None] = _request
         supervised = bool(os.environ.get("KAZMA_GUARD_STATE_FILE"))
     said_missing = False
     said_listening = False
-    path = pipe_path(pipe_name)
+    path = _pipe_path(pipe_name)
     while not stop_event.is_set():
         try:
             pipe = open(path, "r+b", buffering=0)  # noqa: SIM115 - held for the process's life
@@ -161,7 +161,7 @@ def listen(pipe_name: str = PIPE_NAME, *, on_stop: Callable[[], None] = _request
             _log(logging.INFO, "[shutdown-notice] Windows is shutting down: Kazma stops now")
             try:
                 on_stop()
-            except Exception:
+            except (OSError, ValueError):  # what signal.raise_signal raises
                 logger.warning("[shutdown-notice] the stop could not be started", exc_info=True)
             # Held open until the process ends: the service waits for this
             # end to close before it stops the container engine.

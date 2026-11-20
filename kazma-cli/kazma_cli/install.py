@@ -653,25 +653,32 @@ def build_plan(parts, found: dict[str, PartState], states, machine: Machine, pla
             "reload Kazma so it uses them (when no chat is running)",
             (python, str(root / "scripts" / "service" / "kazma_guard.py"), "--reload", "--when-idle"))))
     if "service" in todo_ids and root is not None:
-        task_there = platform.os == "windows" and _windows_task_registered(machine.run)
-        if not task_there:
-            plan.append(PlannedStep("service", Step(
-                "install Kazma as a service (its guard starts at boot)",
-                (python, str(root / "scripts" / "service" / "install_service.py"), "--install"),
-                admin=platform.os == "windows")))
-            if platform.os == "windows":
-                plan.append(PlannedStep("service", Step("start it now", ("schtasks", "/Run", "/TN", SERVICE_TASK),
-                                                        admin=True)))
-        # What stops Kazma cleanly at a Windows shutdown, on any engine. Kazma's
-        # engine's own shutdown step puts the same service in, but may wait
-        # for a restart (WSL): this one runs now, and the later one finds it
-        # current.
-        if (platform.os == "windows"
-                and not _shutdown_service_current(machine.run, machine.finders.get("shutdown_service"))):
-            from kazma_core.container_engine_setup import shutdown_service_step
-
-            plan.append(PlannedStep("service", shutdown_service_step()))
+        plan.extend(_service_steps(machine, platform, root, python))
     return plan
+
+
+def _service_steps(machine: Machine, platform, root: Path, python: str) -> list[PlannedStep]:
+    """Kazma's own service: the task (or unit) when it is not there, and on
+    Windows the KazmaEngineShutdown service, which stops Kazma cleanly at a
+    shutdown on any engine. Kazma's engine's own shutdown step puts the same
+    service in, but may wait for a restart (WSL): this one runs now, and the
+    later one finds it current."""
+    from kazma_core.postgres_service import Step
+
+    steps: list[PlannedStep] = []
+    windows = platform.os == "windows"
+    if not (windows and _windows_task_registered(machine.run)):
+        steps.append(PlannedStep("service", Step(
+            "install Kazma as a service (its guard starts at boot)",
+            (python, str(root / "scripts" / "service" / "install_service.py"), "--install"), admin=windows)))
+        if windows:
+            steps.append(PlannedStep("service", Step("start it now", ("schtasks", "/Run", "/TN", SERVICE_TASK),
+                                                     admin=True)))
+    if windows and not _shutdown_service_current(machine.run, machine.finders.get("shutdown_service")):
+        from kazma_core.container_engine_setup import shutdown_service_step
+
+        steps.append(PlannedStep("service", shutdown_service_step()))
+    return steps
 
 
 def _windows_task_registered(run) -> bool:

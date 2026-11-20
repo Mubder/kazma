@@ -116,7 +116,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_GUARD_LOG` | (none) | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_GUARD_PAGES_FILE` | (none) | `kazma_core.observability.page_receipts` | yes |
 | `KAZMA_GUARD_RELOAD_FILE` | (none) | `kazma_core.observability.guard_pager`, `kazma_core.observability.supervisor_watch` | yes |
-| `KAZMA_GUARD_STATE_FILE` | (none) | `kazma_core.documents.broker_supervision`, `kazma_core.install_requirements`, `kazma_core.observability.outside_watch` +2 | yes |
+| `KAZMA_GUARD_STATE_FILE` | (none) | `kazma_core.documents.broker_supervision`, `kazma_core.install_requirements`, `kazma_core.observability.outside_watch` +3 | yes |
 | `KAZMA_HARD_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_HITL_CANONICAL_FLOOR` | `""` | `kazma_core.safety.hitl` | yes |
 | `KAZMA_HITL_GRANT_TTL_SECONDS` | (none) | `kazma_core.safety.hitl_grants` | yes |
