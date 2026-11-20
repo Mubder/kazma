@@ -307,29 +307,106 @@ def _where_word(word: str) -> dict[str, int]:
 # ── the world ───────────────────────────────────────────────────────────
 
 
-def plant_world(monkeypatch):
-    """Build the two spaces and plant them; a test module's ``world``
-    fixture yields from this."""
+#: The module singletons and caches the world's stores keep: reset for the
+#: world's own data folder, and put back after (monkeypatch). A store added
+#: to ``_make_stores`` that keeps one goes here, or its rows reach the
+#: session's folder and every later test in the process
+#: (``tests/test_space_world_leaves_nothing.py`` fails).
+_SINGLETONS: tuple[tuple[str, str, Any], ...] = (
+    ("kazma_core.agent.artifacts", "_store", None),
+    ("kazma_core.agent.task_ledger", "_store", None),
+    ("kazma_ui.session_manager", "_session_manager", None),
+    ("kazma_core.swarm.memory.pipeline_logger", "_conn", None),
+    ("kazma_core.swarm.memory.pipeline_logger", "_pipeline_logger", None),
+    ("kazma_core.x_api.publication_store", "_store", None),
+    ("kazma_core.x_api.reply_store", "_store", None),
+    ("kazma_core.x_api.schedule", "_store", None),
+    ("kazma_core.runs.incidents", "_store", None),
+    ("kazma_core.stores.knowledge", "_knowledge_store", None),
+    ("kazma_core.observability.llm_ledger", "_conn", None),
+    ("kazma_core.safety.hitl_gates", "_db_path_override", None),
+    ("kazma_core.safety.hitl_gates", "_schema_ready", False),
+    ("kazma_core.time_travel_audit", "_override", None),
+)
+
+
+def _own_data_folder(monkeypatch, folder: Path) -> Path:
+    """Point this test at a data folder of its own: every store the world
+    makes, and every walk that reads them, finds it through
+    ``paths.data_dir()``; the singletons are made afresh there."""
+    import importlib
+
+    data = folder / "kazma-data"
+    data.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(data))
+    for module, attr, fresh in _SINGLETONS:
+        monkeypatch.setattr(importlib.import_module(module), attr, fresh)
+    monkeypatch.setattr(threads, "_spaces", {})
+    # Two stores bound their default path at import: opened here on purpose.
+    from kazma_core.observability import llm_ledger
+    from kazma_core.swarm.memory import pipeline_logger
+
+    llm_ledger._get_conn(str(data / "llm_calls.db"))
+    pipeline_logger._get_conn(str(data / "pipeline_logs.db"))
+    return data
+
+
+def _close_singletons() -> None:
+    """Close what the world opened in its folder, before monkeypatch puts the
+    session's singletons back."""
+    import importlib
+
+    for module, attr, _fresh in _SINGLETONS:
+        made = getattr(importlib.import_module(module), attr, None)
+        close = getattr(made, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001 -- a test folder's handle; the folder goes anyway
+                pass
+
+
+def plant_world(monkeypatch, folder: Path):
+    """Build the two spaces and plant them, in a data folder of the test's
+    own (*folder*): nothing is left in the session's, for any later test of
+    the process (``tests/test_space_world_leaves_nothing.py``). A test
+    module's ``world`` fixture yields from this.
+
+    The memory and settings databases are in that folder too, as on an
+    install: a backup of the folder copies them.
+    """
+    from kazma_core.config_store import ConfigStore, set_config_store
     from kazma_core.security import vault as vault_mod
     from kazma_core.security.vault import reset_posture_cache
 
+    data = _own_data_folder(monkeypatch, folder)
+    monkeypatch.setenv("KAZMA_MEMORY_STATE_DB", str(data / "memory_state.db"))
+    monkeypatch.setenv("KAZMA_MEMORY_OPS_DB", str(data / "memory_ops.db"))
+    settings = ConfigStore(db_path=str(data / "settings.db"), yaml_path=str(folder / "kazma.yaml"))
+    # monkeypatch puts the store the test had back afterwards.
+    from kazma_core import config_store as config_store_module
+
+    monkeypatch.setattr(config_store_module, "_config_store", config_store_module._config_store)
+    set_config_store(settings)
     # A vault of this test's own, in the data folder the scan reads.
     monkeypatch.setenv("KAZMA_VAULT_KEY", "a" * 64)
-    vault_path = paths.data_dir() / f"vault-{uuid.uuid4().hex[:8]}.db"
+    vault_path = data / f"vault-{uuid.uuid4().hex[:8]}.db"
     own_vault = vault_mod.SecretVault(db_path=str(vault_path))
     monkeypatch.setattr(vault_mod, "_vault", own_vault)
     monkeypatch.setattr(vault_mod, "_vault_init_attempted", True)
     monkeypatch.setattr(paths, "vault_db_path", lambda: str(vault_path))
     monkeypatch.setattr(scope, "_enforced", True)
-    for space in (A, B):
-        if space not in identity.read_registry()["spaces"]:
-            identity.create_space(space, created_by=OWNER_ACCOUNT_ID, space_id=space)
-    made = _make_stores()
-    words = {A: _word(A), B: _word(B)}
-    planted = {space: _plant(space, words[space]) for space in (A, B)}
     try:
-        yield {"words": words, "planted": planted, "made": made}
+        for space in (A, B):
+            if space not in identity.read_registry()["spaces"]:
+                identity.create_space(space, created_by=OWNER_ACCOUNT_ID, space_id=space)
+        made = _make_stores()
+        words = {A: _word(A), B: _word(B)}
+        planted = {space: _plant(space, words[space]) for space in (A, B)}
+        yield {"words": words, "planted": planted, "made": made, "data": data}
     finally:
         get_config_store().delete(identity.REGISTRY_KEY)
         own_vault.close()
         reset_posture_cache()
+        _close_singletons()
+        settings.close()

@@ -349,11 +349,21 @@ class XReplyStore:
                      decision_json=json.dumps(decision, ensure_ascii=False))
 
     def notification_current(self, notice: dict[str, Any]) -> bool:
-        summon, revision = notice["event_key"].removeprefix("reply:").rsplit(":", 1)
+        """Whether a queued reply notice still names the candidate awaiting
+        approval (``reply:<summon>:<revision>``). A key that cannot be read
+        -- an older build's, a restored file's -- is not current: it is
+        finished as superseded, so one bad row never stops the drain of
+        every notice behind it."""
+        key = str(notice.get("event_key") or "").removeprefix("reply:")
+        summon, sep, revision = key.rpartition(":")
+        if not sep or not summon or not revision.isdigit():
+            logger.warning("[x-replies] a reply notification's key cannot be read (%r); it is "
+                           "finished as superseded", key[:80])
+            return False
         with self._lock:
             conn = self._connect()
             try:
-                row = conn.execute("SELECT revision, status, archived_at FROM x_replies WHERE summon_id = ? AND tenant_id = ?", (summon, notice["tenant_id"])).fetchone()
+                row = conn.execute("SELECT revision, status, archived_at FROM x_replies WHERE summon_id = ? AND tenant_id = ?", (summon, notice.get("tenant_id"))).fetchone()
                 return bool(row and row["revision"] == int(revision) and row["status"] == STATUS_AWAITING and row["archived_at"] is None)
             finally:
                 if conn.in_transaction:

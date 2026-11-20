@@ -121,24 +121,10 @@ def _counts(found: Any, *, with_secrets: bool = False) -> Any:
 
 @pytest.fixture
 def world(monkeypatch, tmp_path):
-    """The two spaces, with the settings and memory databases in the data
-    folder, as on an install: the backup copies what is there (the session
-    keeps them in each test's own folder)."""
-    from kazma_core.config_store import ConfigStore, set_config_store
-
-    monkeypatch.setenv("KAZMA_MEMORY_STATE_DB", str(paths.data_dir() / "memory_state.db"))
-    monkeypatch.setenv("KAZMA_MEMORY_OPS_DB", str(paths.data_dir() / "memory_ops.db"))
-    # The data folder's settings.db (the session's workspace store has it
-    # open too): the settings this world writes are taken out after.
-    store = ConfigStore(db_path=str(paths.data_dir() / "settings.db"), yaml_path=str(tmp_path / "kazma.yaml"))
-    set_config_store(store)
-    try:
-        yield from plant_world(monkeypatch)
-    finally:
-        for key in list(store.get_all().get("x", {})) + list(store.get_all().get("runtime", {})):
-            if key.startswith((f"tenant.{A}.", f"tenant.{B}.", "long_task.thread-erase-")):
-                store.delete(key)
-        store.close()
+    """The two spaces in a data folder of the test's own, with the settings
+    and memory databases in it, as on an install: the backup copies what is
+    there (the session keeps them in each test's own folder)."""
+    yield from plant_world(monkeypatch, tmp_path)
 
 
 def _threads_of(space: str) -> list[str]:
@@ -158,6 +144,17 @@ def _before(world) -> dict[str, Any]:
     }
 
 
+def _carried_store(name: str) -> bool:
+    """Whether a migration bundle carries the store *name*, as the registry
+    declares it: a ``machine`` store never travels (the session manager's
+    pytest names, ``chat_sessions_test*``, are such: the product's
+    ``chat_sessions.db`` does)."""
+    from kazma_core.store_registry import STORE_FAMILIES, STORES
+
+    declared = STORES.get(name) or STORE_FAMILIES.get(name)
+    return declared is not None and declared.migration != "machine"
+
+
 def _carried_settings(space: str) -> int:
     """The space's settings a migration bundle carries: never a chat's
     running state (``settings_restore`` RUNTIME, FA-255)."""
@@ -173,8 +170,10 @@ def _assert_apart(judged: dict[str, Any], before: dict[str, Any], world, *, with
     for space in (A, B):
         got = _counts(judged["counts"][space], with_secrets=with_secrets)
         had = _counts(before["counts"][space], with_secrets=with_secrets)
-        if not with_secrets:  # a migration: only the settings a bundle carries
+        if not with_secrets:  # a migration: only the settings and stores a bundle carries
             had["settings"] = before["carried_settings"][space]
+            had["stores"] = {k: v for k, v in had["stores"].items() if _carried_store(k)}
+            had["rows"] = sum(had["stores"].values())
         assert got == had, (space, got, had)
         for thread in before["threads"][space]:
             assert judged["homes"][thread] == space, (space, thread)
