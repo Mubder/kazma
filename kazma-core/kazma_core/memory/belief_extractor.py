@@ -505,7 +505,8 @@ def held_facts(conn: Any, *, tenant_id: str, text: str, said_by: str | None = No
     for subject in ([own] if own else []) + sorted(named):
         rows = conn.execute(
             "SELECT id, subject, predicate, predicate_type, object, extraction_method FROM beliefs "
-            f"WHERE tenant_id = ? AND subject = ? AND {current} ORDER BY valid_from DESC, id LIMIT ?",  # nosec B608
+            f"WHERE tenant_id = ? AND subject = ? AND {current} "  # nosec B608 - fixed clause, values bound
+            "ORDER BY valid_from DESC, id LIMIT ?",
             (tenant_id, subject, DEEP_PASS_HELD_FACTS - len(out))).fetchall()
         for r in rows:
             out.append({"ref": f"f{len(out) + 1}", "id": r[0], "subject": r[1],

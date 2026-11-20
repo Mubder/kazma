@@ -394,9 +394,13 @@ def _turn_context(primary: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
     same chat and the facts held about its people and things (``said_on``,
     ``previous``, ``held``), for the deep pass's message (framework audit F2
     step 2, F4's second layer). A forgotten turn is never the one before:
-    its text is gone, and its chat's next remembered turn is taken."""
+    its text is gone, and its chat's next remembered turn is taken.
+
+    The space is the episode's own (``tenant_id``, NOT NULL): the deep pass
+    is a row-named task, bound to its row's space (``task_queue.ROW_NAMED_TASKS``)."""
     from kazma_core.memory.belief_extractor import _turn_zone, held_facts, said_on_iso
 
+    space = row["tenant_id"]
     before = None
     if row["session_id"] and row["turn_number"] is not None:
         before = primary.execute(
@@ -404,11 +408,11 @@ def _turn_context(primary: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
             "AND turn_number < ? AND tier != 'forgotten' "
             "AND (COALESCE(user_text, '') != '' OR COALESCE(assistant_text, '') != '') "
             "ORDER BY turn_number DESC, created_at DESC LIMIT 1",
-            (row["tenant_id"] or "default", row["session_id"], int(row["turn_number"])),
+            (space, row["session_id"], int(row["turn_number"])),
         ).fetchone()
     return {"said_on": said_on_iso(row["created_at"], _turn_zone()),
             "previous": (before[0] or "", before[1] or "") if before else None,
-            "held": held_facts(primary, tenant_id=row["tenant_id"] or "default",
+            "held": held_facts(primary, tenant_id=space,
                                text=f"{row['user_text'] or ''}\n{row['assistant_text'] or ''}",
                                said_by=row["said_by"])}
 

@@ -580,31 +580,55 @@ def extraction_scores(report: dict[str, Any]) -> dict[str, float]:
     return dict(sorted(out.items()))
 
 
+#: The form of the deep pass's message the study asked, and its recordings
+#: answered (the memory benchmark's form 1: the turn's text and an empty
+#: answer, ``benchmark._recorded_message``). The product's message has changed
+#: since (the memory framework audit's part C2: form 4, fenced, with the
+#: turn's day, the turn before and the facts held); the study replays what
+#: it asked on 2026-11-18, turn by turn, never today's message.
+ASKED_FORM = 1
+
+
+def _asked(user_text: str) -> str:
+    """The deep pass's message for *user_text* as the study asked it."""
+    from kazma_core.memory.benchmark import _recorded_message
+
+    return _recorded_message(user_text, ASKED_FORM)
+
+
+def _v1_turns() -> list[dict[str, Any]]:
+    """The 30 turns of the extraction benchmark the study measured (dataset
+    v2's; the turns v3 added carry ``new_in``)."""
+    from kazma_core.memory.benchmark import EXTRACTION_PATH
+
+    return [t for t in json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"] if not t.get("new_in")]
+
+
 class _ReplayClient:
-    """Answers the extraction prompt from recorded replies, by the user
-    message alone (the replay of 2026-11-18 morning)."""
+    """Answers the extraction prompt from recorded replies: each turn with
+    the reply recorded for the message the study asked for it (``answer``,
+    set before each turn), whatever message the product builds today. A
+    turn with no recorded reply is an error."""
 
     def __init__(self, replies: dict[str, str]) -> None:
         self._replies = replies
+        self.answer: str | None = None
 
     async def chat(self, messages: list[dict[str, Any]], **_kw: Any) -> str:
-        from kazma_core.memory.benchmark import _text_key
-
-        key = _text_key(messages[-1]["content"])
-        if key not in self._replies:
+        if self.answer not in self._replies:
             raise KeyError("no recorded reply for this turn")
-        return self._replies[key]
+        return self._replies[self.answer]
 
 
 def run_extraction(cases: dict[str, Any]) -> dict[str, Any]:
     import asyncio
 
     from kazma_core.memory.belief_extractor import _llm_extract, _sanitize_belief, extract_beliefs_heuristic
-    from kazma_core.memory.benchmark import EXTRACTION_PATH
+    from kazma_core.memory.benchmark import _recording_shape, _text_key
     from kazma_core.memory.entity_resolution import slug
 
     members = cases["members"]
-    v1 = json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))
+    v1 = {"turns": _v1_turns()}
     turns = _tagged(v1["turns"], members)
 
     def gold_for(turn: dict[str, Any]) -> dict[str, Any]:
@@ -623,11 +647,16 @@ def run_extraction(cases: dict[str, Any]) -> dict[str, Any]:
         "quick_other_subject_facts": sum(1 for got in plain.values() for b in got if b["subject"] != "user"),
     }
     replies = json.loads(LLM_REPLIES.read_text(encoding="utf-8"))
-    registry = type("_Registry", (), {"get_client": lambda self: _ReplayClient(replies["replies"])})()
+    if _recording_shape(replies) != ASKED_FORM:
+        raise ValueError(f"{LLM_REPLIES.name} was asked in another message form than the study replays: the "
+                         "study measured the recording of 2026-10-15")
+    client = _ReplayClient(replies["replies"])
+    registry = type("_Registry", (), {"get_client": lambda self: client})()
 
     async def deep() -> dict[str, list[dict[str, Any]]]:
         got = {}
         for t in turns:
+            client.answer = _text_key(_asked(t["user"]))
             beliefs, _down = await _llm_extract(t["user"], "")
             got[t["id"]] = [b for b in (_sanitize_belief(x) for x in beliefs or []) if b]
         return got
@@ -701,28 +730,27 @@ def _people_for(turn: dict[str, Any], index: int, members: dict[str, Any]) -> tu
 
 
 def deep_jobs(cases: dict[str, Any]) -> list[dict[str, Any]]:
-    """Every deep-pass message of the study: the 30 turns of the extraction
-    benchmark with the speaker lines, and the speaker turns with and without."""
-    from kazma_core.memory.benchmark import EXTRACTION_PATH, _llm_blob
-
+    """Every deep-pass message of the study, as it asked them (:func:`_asked`):
+    the 30 turns of the extraction benchmark with the speaker lines, and the
+    speaker turns with and without."""
     members = cases["members"]
     jobs: list[dict[str, Any]] = []
-    v1 = json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
+    v1 = _v1_turns()
     for i, turn in enumerate(v1):
         speaker, others = _people_for(turn, i, members)
         jobs.append({"set": "v1_lines", "turn": turn, "speaker": speaker, "others": others,
-                     "blob": _llm_blob(turn["user"]) + speaker_lines(speaker, others)})
+                     "blob": _asked(turn["user"]) + speaker_lines(speaker, others)})
     for i, turn in enumerate(v1):
         if turn["id"] in ASKED_AGAIN:
             speaker, others = _people_for(turn, i, members)
             jobs.append({"set": "v1_again", "turn": turn, "speaker": speaker, "others": others,
-                         "blob": _llm_blob(turn["user"])})
+                         "blob": _asked(turn["user"])})
     for i, turn in enumerate(cases["extraction"]):
         speaker, others = _people_for(turn, i, members)
         jobs.append({"set": "speaker_plain", "turn": turn, "speaker": speaker, "others": others,
-                     "blob": _llm_blob(turn["user"])})
+                     "blob": _asked(turn["user"])})
         jobs.append({"set": "speaker_lines", "turn": turn, "speaker": speaker, "others": others,
-                     "blob": _llm_blob(turn["user"]) + speaker_lines(speaker, others)})
+                     "blob": _asked(turn["user"]) + speaker_lines(speaker, others)})
     return jobs
 
 
@@ -860,14 +888,12 @@ def run_deep(cases: dict[str, Any]) -> dict[str, Any]:
         "subjects_as_written": raw_subjects,
     }
     # The same message asked twice: the existing recording, and once more.
-    from kazma_core.memory.benchmark import _llm_blob
-
     first = json.loads(LLM_REPLIES.read_text(encoding="utf-8"))["replies"]
     again: dict[str, Any] = {}
     for turn in gold.get("v1_again", []):
         speaker = next(j["speaker"] for j in deep_jobs(cases) if j["set"] == "v1_again" and j["turn"]["id"] == turn["id"])
         others = next(j["others"] for j in deep_jobs(cases) if j["set"] == "v1_again" and j["turn"]["id"] == turn["id"])
-        before = _filed_among(asyncio.run(parsed(first[_text_key(_llm_blob(turn["user"]))], turn["user"])),
+        before = _filed_among(asyncio.run(parsed(first[_text_key(_asked(turn["user"]))], turn["user"])),
                               speaker, others)
 
         def found(beliefs: list[dict[str, Any]], facts: list[Any] = turn["facts"]) -> int:

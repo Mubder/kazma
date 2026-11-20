@@ -102,12 +102,22 @@ def test_an_arabic_turn_reaches_memory_as_the_users_own_words(tmp_path, monkeypa
 
 def test_without_the_arabic_pass_the_benchmark_reads_no_arabic(monkeypatch):
     """Negative control: the measurement sees the pass. With it switched off
-    the Arabic recall is back to the 0.00 the audit measured."""
+    the Arabic recall is back to the 0.00 the audit measured.
+
+    Measured on the turns the audit measured (dataset v2's): the turns v3
+    added (``new_in``) ask what the deep pass alone gives -- a start, the
+    fact a new one replaces, an ending -- so they are no measure of the
+    quick pass's Arabic."""
+    import json
+
     from kazma_core.memory import benchmark
 
+    data = json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))
+    audited = {"version": data["version"], "turns": [t for t in data["turns"] if not t.get("new_in")]}
+    assert any(t["lang"] == "ar" for t in audited["turns"])
     monkeypatch.setattr("kazma_core.memory.arabic_facts.extract_arabic_facts", lambda _t: [])
-    report = benchmark.run_extraction_benchmark()
+    report = benchmark.run_extraction_benchmark(audited)
     assert report["heuristic"]["ar"]["recall"] == 0.0
     on = benchmark.run_extraction_benchmark  # the same run with the pass
     monkeypatch.undo()
-    assert on()["heuristic"]["ar"]["recall"] > 0.5
+    assert on(audited)["heuristic"]["ar"]["recall"] > 0.5

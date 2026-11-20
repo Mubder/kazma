@@ -50,6 +50,27 @@ def _differences(ran: object, held: object, where: str = "") -> list[str]:
                                    f"{json.dumps(ran, ensure_ascii=False)[:120]}"]
 
 
+def test_the_study_replays_the_messages_it_asked() -> None:
+    """The deep pass's message changed after the study (the memory framework
+    audit's part C2: form 4). The study replays the 30 turns it measured, each
+    by the message it asked then (form 1). Negative control: today's message
+    is in neither recording, so a study that asked it again would replay
+    nothing."""
+    from kazma_core.memory.benchmark import _llm_blob, _text_key
+
+    study = _study()
+    turns = study._v1_turns()
+    assert len(turns) == 30 and not any(t.get("new_in") for t in turns)
+    deep = json.loads(study.DEEP.read_text(encoding="utf-8"))["replies"]
+    first = json.loads(study.LLM_REPLIES.read_text(encoding="utf-8"))["replies"]
+    asked = {_text_key(study._asked(t["user"])) for t in turns}
+    assert asked <= set(first)
+    cases = json.loads(study.CASES.read_text(encoding="utf-8"))
+    assert all(_text_key(j["blob"]) in deep for j in study.deep_jobs(cases))
+    today = {_text_key(_llm_blob(t["user"])) for t in turns}
+    assert not today & (set(first) | set(deep))
+
+
 def test_the_r3_study_reproduces_its_results() -> None:
     study = _study()
     report = json.loads(json.dumps(study.build_report(study._Vectors(record=False)), ensure_ascii=False))
