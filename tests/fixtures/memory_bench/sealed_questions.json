@@ -1,0 +1,1182 @@
+{
+ "version": 1,
+ "dataset_version": 5,
+ "written_by": "sealed-set writer agent (main session)",
+ "written_on": "2026-11-20",
+ "note": "Written apart from recall's builders, from the dataset and this specification only; never scored by its writer.",
+ "questions": [
+  {
+   "id": "s001",
+   "category": "single",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "شنو اسم كلب صاحبي تياغو؟",
+   "gold": [
+    "h03#1|x03"
+   ],
+   "below": [
+    "p01#2",
+    "f05"
+   ],
+   "why": "Tiago's greyhound Bolt, asked in Arabic about an English memory; the user's own greyhound Pixel must rank under it."
+  },
+  {
+   "id": "s002",
+   "category": "single",
+   "lang": "en",
+   "text": "Which day did I book the sports massage for?",
+   "gold": [
+    "r09#1"
+   ],
+   "below": [],
+   "why": "The massage booked for Thursday in the last taper check-in; Thursday also holds guitar and gym."
+  },
+  {
+   "id": "s003",
+   "category": "single",
+   "lang": "en",
+   "text": "Which of my colleagues cycles to work?",
+   "gold": [
+    "h01#1|x01"
+   ],
+   "below": [],
+   "why": "Pedro, a colleague, said only once; the existing set used this memory only as a near miss."
+  },
+  {
+   "id": "s004",
+   "category": "single",
+   "lang": "en",
+   "text": "What can't Noor's sister Rana eat?",
+   "gold": [
+    "h02#1|x02"
+   ],
+   "below": [
+    "p02#1",
+    "f06"
+   ],
+   "why": "Rana's peanut allergy; the user's own shellfish allergy is the near miss that must rank under it."
+  },
+  {
+   "id": "s005",
+   "category": "single",
+   "lang": "en",
+   "text": "Who was my manager at my first job?",
+   "gold": [
+    "h04#1|x04"
+   ],
+   "below": [
+    "p06#2",
+    "f13"
+   ],
+   "why": "Paulo Mendes, the old manager; the current manager Ines is the near miss."
+  },
+  {
+   "id": "s006",
+   "category": "single",
+   "lang": "en",
+   "text": "What is Inês presenting on Friday?",
+   "gold": [
+    "h06#1|x06"
+   ],
+   "below": [],
+   "why": "The Douro viaduct inspection; Ines also appears as the user's manager, a different memory."
+  },
+  {
+   "id": "s007",
+   "category": "single",
+   "lang": "en",
+   "text": "What pace did I hold on the 13 km run?",
+   "gold": [
+    "r03#1"
+   ],
+   "below": [
+    "r07#1"
+   ],
+   "why": "5:40 per km on the 13 km run; the 18 km run's 5:35 per km is the near miss."
+  },
+  {
+   "id": "s008",
+   "category": "single",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "دورة الرسم حقت بنتي أي يوم بالأسبوع؟",
+   "gold": [
+    "a06#1|g07"
+   ],
+   "below": [
+    "p28#1",
+    "f31"
+   ],
+   "why": "Maya's Wednesday drawing class (Arabic memory); her Saturday swimming is another weekly activity."
+  },
+  {
+   "id": "s009",
+   "category": "paraphrase",
+   "lang": "en",
+   "text": "Does the man who gives me music lessons also make instruments?",
+   "gold": [
+    "h08#1|x08"
+   ],
+   "below": [],
+   "why": "Rui is a luthier; no word of the question is in the memory (no guitar, teacher or luthier)."
+  },
+  {
+   "id": "s010",
+   "category": "paraphrase",
+   "lang": "en",
+   "text": "What age has the family hound reached?",
+   "gold": [
+    "p01#2|f37"
+   ],
+   "below": [
+    "h03#1",
+    "x03"
+   ],
+   "why": "Pixel is four; hound/age/family are not the memory's words, and Tiago's greyhound is a near miss."
+  },
+  {
+   "id": "s011",
+   "category": "paraphrase",
+   "lang": "en",
+   "text": "What stopped me from doing my big weekend jog that one week?",
+   "gold": [
+    "r04#1"
+   ],
+   "below": [],
+   "why": "The skipped long run because of retrofit work; jog/weekend/stopped replace skipped/long run."
+  },
+  {
+   "id": "s012",
+   "category": "paraphrase",
+   "lang": "en",
+   "text": "How picky is Inês about the little things?",
+   "gold": [
+    "p06#2"
+   ],
+   "below": [
+    "h06#1",
+    "x06"
+   ],
+   "why": "'Very detail oriented' said of Ines; picky/little things are not the memory's words."
+  },
+  {
+   "id": "s013",
+   "category": "paraphrase",
+   "lang": "en",
+   "text": "Is there a word ending I told you to steer clear of when brainstorming names for the bread shop idea?",
+   "gold": [
+    "z07"
+   ],
+   "below": [],
+   "why": "The no '-ify' naming rule for the bakery side project, asked without bakery, naming rule or -ify."
+  },
+  {
+   "id": "s014",
+   "category": "paraphrase",
+   "lang": "en",
+   "text": "When do I sit down to take stock of my unfinished to-dos?",
+   "gold": [
+    "z08"
+   ],
+   "below": [],
+   "why": "The Friday 16:00 weekly review (close open tasks); no shared content word."
+  },
+  {
+   "id": "s015",
+   "category": "paraphrase",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "وين ناوين نقضي إجازة آخر السنة؟",
+   "gold": [
+    "a04#1|g05"
+   ],
+   "below": [
+    "a08#1"
+   ],
+   "why": "The December Istanbul trip asked as an end-of-year holiday; a08 shares the word for holiday but is about a novel."
+  },
+  {
+   "id": "s016",
+   "category": "paraphrase",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "ما نوع الوقود الذي تستهلكه سيارتي؟",
+   "gold": [
+    "p09#1|f17"
+   ],
+   "below": [
+    "p29#1",
+    "f36"
+   ],
+   "why": "The Octavia is diesel; asked in MSA without car model words; the electric Kia only considered is a near miss."
+  },
+  {
+   "id": "s017",
+   "category": "assistant",
+   "lang": "en",
+   "text": "Where did you say I could get passport photos done in Porto?",
+   "gold": [
+    "h05#1"
+   ],
+   "below": [
+    "p05#1"
+   ],
+   "why": "Kazma's Fotoplus answer; the passport expiry memory shares the word passport."
+  },
+  {
+   "id": "s018",
+   "category": "assistant",
+   "lang": "en",
+   "text": "What time did you suggest I set my alarm on school mornings?",
+   "gold": [
+    "p08#1"
+   ],
+   "below": [],
+   "why": "The 7:30 alarm is only in Kazma's reply; the user's turn holds 8:40 and 8:10."
+  },
+  {
+   "id": "s019",
+   "category": "assistant",
+   "lang": "en",
+   "text": "How much interest in total did you say the mortgage would cost me?",
+   "gold": [
+    "p11#1"
+   ],
+   "below": [],
+   "why": "Kazma's 129,000 euros of interest, not the monthly payment the existing set asks about."
+  },
+  {
+   "id": "s020",
+   "category": "assistant",
+   "lang": "en",
+   "text": "What did you tell me to check before buying the Kia?",
+   "gold": [
+    "p29#1"
+   ],
+   "below": [],
+   "why": "Kazma's 'check home charging first' in the turn where the EV6 was only considered."
+  },
+  {
+   "id": "s021",
+   "category": "assistant",
+   "lang": "en",
+   "text": "On which date did you offer to remind me about my mum's birthday?",
+   "gold": [
+    "p20#1"
+   ],
+   "below": [],
+   "why": "Kazma offered 1 June; the birthday itself (11 June) is the user's half of the same turn."
+  },
+  {
+   "id": "s022",
+   "category": "assistant",
+   "lang": "en",
+   "text": "Which seafoods did you say you'd leave out of anything you suggest for me?",
+   "gold": [
+    "p02#1"
+   ],
+   "below": [
+    "h02#1"
+   ],
+   "why": "Kazma listed shrimp, crab, lobster, mussels and clams; Rana's allergy is a near miss."
+  },
+  {
+   "id": "s023",
+   "category": "assistant",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "شنو نصحتني ناخذ معانا لسفرة إسطنبول؟",
+   "gold": [
+    "a04#1"
+   ],
+   "below": [],
+   "why": "Kazma's advice to take jackets for a cold December in Istanbul."
+  },
+  {
+   "id": "s024",
+   "category": "assistant",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "ماذا عرضتَ عليّ حين أخبرتك أننا سننتقل إلى براغا؟",
+   "gold": [
+    "p14#1"
+   ],
+   "below": [
+    "p15#1"
+   ],
+   "why": "Kazma offered a moving checklist, asked in MSA; the later Braga arrival reply is a near miss."
+  },
+  {
+   "id": "s025",
+   "category": "multi",
+   "lang": "en",
+   "text": "Which two novels have you recommended to me?",
+   "gold": [
+    "p19#1",
+    "a08#1"
+   ],
+   "below": [],
+   "why": "One recommendation in English (Ishiguro) and one in Arabic (Tayeb Salih): two memories in two languages."
+  },
+  {
+   "id": "s026",
+   "category": "multi",
+   "lang": "en",
+   "text": "What are the names of Maya's school and the pool where she swims?",
+   "gold": [
+    "p07#1|f14",
+    "p28#1|f31"
+   ],
+   "below": [],
+   "why": "Escola Azul and Piscina Municipal da Rodovia, said 88 days apart."
+  },
+  {
+   "id": "s027",
+   "category": "multi",
+   "lang": "en",
+   "text": "I'm planning treats: what does Noor love to eat, and which flowers does my mum like?",
+   "gold": [
+    "p04#1",
+    "p20#1|f24"
+   ],
+   "below": [],
+   "why": "Noor loves seafood (only in the restaurant turn) and the mother loves orchids."
+  },
+  {
+   "id": "s028",
+   "category": "multi",
+   "lang": "en",
+   "text": "Which evenings are taken up by guitar and by the gym?",
+   "gold": [
+    "p12#1|f19",
+    "p16#1|f21"
+   ],
+   "below": [
+    "p13#1",
+    "f20"
+   ],
+   "why": "Thursday guitar and the newer Monday/Thursday gym evenings; the old morning gym days must rank under."
+  },
+  {
+   "id": "s029",
+   "category": "multi",
+   "lang": "en",
+   "text": "How long was my first Sunday long run in training, and what was my finishing time in the race?",
+   "gold": [
+    "r00#1|sr0",
+    "r10#1|sr10"
+   ],
+   "below": [],
+   "why": "The 8 km of week one and the 1:56:40 result, ten weeks apart; each piece has its weekly summary as an alternative."
+  },
+  {
+   "id": "s030",
+   "category": "multi",
+   "lang": "en",
+   "text": "Where do Pedro and I each live?",
+   "gold": [
+    "h01#1|x01",
+    "p15#1|f25"
+   ],
+   "below": [
+    "p01#1",
+    "f02"
+   ],
+   "why": "Pedro in Lisbon and the user now in Braga; the user's old Porto home must rank under."
+  },
+  {
+   "id": "s031",
+   "category": "multi",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "منو دكتورة أسناني، ومنو دكتور الأطفال حق مايا؟",
+   "gold": [
+    "p18#1|f22",
+    "n02"
+   ],
+   "below": [],
+   "why": "The dentist turn and the paediatrician note, both English, asked together in Gulf Arabic."
+  },
+  {
+   "id": "s032",
+   "category": "multi",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "ما فصيلة دمي، وما رقم ملفي في المستشفى؟",
+   "gold": [
+    "p10#1|f18",
+    "a05#1|g06"
+   ],
+   "below": [],
+   "why": "Blood type said in English and the hospital file number said in Arabic, asked together in MSA."
+  },
+  {
+   "id": "s033",
+   "category": "update",
+   "lang": "en",
+   "text": "Have we finished moving yet, or is it still ahead of us?",
+   "gold": [
+    "p15#1|f25"
+   ],
+   "below": [
+    "p14#1"
+   ],
+   "why": "The move was announced as coming (p14) then reported done (p15); only the newer turn answers."
+  },
+  {
+   "id": "s034",
+   "category": "update",
+   "lang": "en",
+   "text": "What was my longest training run before race day?",
+   "gold": [
+    "r07#1"
+   ],
+   "below": [
+    "r06#1",
+    "r05#1"
+   ],
+   "why": "The 18 km 'longest ever' supersedes the 16 km and 14 km runs."
+  },
+  {
+   "id": "s035",
+   "category": "update",
+   "lang": "en",
+   "text": "Is my left calf still bothering me?",
+   "gold": [
+    "r03#1"
+   ],
+   "below": [
+    "r02#1"
+   ],
+   "why": "Tight calf (r02) then 'calf is fine now' (r03); the question's words match the stale turn better."
+  },
+  {
+   "id": "s036",
+   "category": "update",
+   "lang": "en",
+   "text": "Is the gym still a morning thing for me before work?",
+   "gold": [
+    "p16#1|f21"
+   ],
+   "below": [
+    "p13#1",
+    "f20"
+   ],
+   "why": "Gym moved from mornings to Monday/Thursday evenings; the question uses the stale value's words."
+  },
+  {
+   "id": "s037",
+   "category": "update",
+   "lang": "en",
+   "text": "Am I still working at Aurelia Bridges?",
+   "gold": [
+    "p17#1|f33"
+   ],
+   "below": [
+    "p01#1",
+    "f03"
+   ],
+   "why": "The switch to Norte Engenharia; the question names only the old employer."
+  },
+  {
+   "id": "s038",
+   "category": "update",
+   "lang": "en",
+   "text": "Is Noor still just teaching chemistry, or has her role changed?",
+   "gold": [
+    "p26#1|f30"
+   ],
+   "below": [
+    "p02#2",
+    "f08"
+   ],
+   "why": "Noor's promotion to head of science supersedes the plain chemistry-teacher memory the words match."
+  },
+  {
+   "id": "s039",
+   "category": "update",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "موعد الدكتور للحين يوم الأحد ولا تغير؟",
+   "gold": [
+    "a07#1|g08"
+   ],
+   "below": [
+    "a02#1",
+    "g03"
+   ],
+   "why": "The appointment moved from Sunday to Tuesday; the question names the stale day."
+  },
+  {
+   "id": "s040",
+   "category": "update",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "هل ما زلتُ أتدرّب لنصف ماراثون لشبونة؟",
+   "gold": [
+    "r10#1"
+   ],
+   "below": [
+    "p03#1",
+    "f09"
+   ],
+   "why": "The race is finished (r10); the training plan and its fact are stale, asked in MSA."
+  },
+  {
+   "id": "s041",
+   "category": "keyword",
+   "lang": "en",
+   "text": "Who is travelling on flight TP1330?",
+   "gold": [
+    "h07#1|x07"
+   ],
+   "below": [
+    "p23#1",
+    "f26"
+   ],
+   "why": "The brother-in-law's TP1330; the user's own TP1352 differs by two characters."
+  },
+  {
+   "id": "s042",
+   "category": "keyword",
+   "lang": "en",
+   "text": "What is policy AU-448120 for?",
+   "gold": [
+    "n03"
+   ],
+   "below": [],
+   "why": "The car insurance policy code, found by the code alone."
+  },
+  {
+   "id": "s043",
+   "category": "keyword",
+   "lang": "en",
+   "text": "What's my job at Norte Engenharia?",
+   "gold": [
+    "p17#1|f34"
+   ],
+   "below": [
+    "p01#1",
+    "f04"
+   ],
+   "why": "Senior structural engineer, found by the company name; the old title at Aurelia is stale."
+  },
+  {
+   "id": "s044",
+   "category": "keyword",
+   "lang": "en",
+   "text": "What's the PELICAN-7734 note about?",
+   "gold": [
+    "z11"
+   ],
+   "below": [],
+   "why": "The stress-run marker note, found by its check word."
+  },
+  {
+   "id": "s045",
+   "category": "keyword",
+   "lang": "en",
+   "text": "Which restaurant is on Rua Mouzinho da Silveira?",
+   "gold": [
+    "p04#1"
+   ],
+   "below": [],
+   "why": "Cantinho do Avillez, found by the street name in Kazma's reply."
+  },
+  {
+   "id": "s046",
+   "category": "keyword",
+   "lang": "en",
+   "text": "Who did I mention on Rua de Santa Catarina?",
+   "gold": [
+    "p18#1|f22"
+   ],
+   "below": [],
+   "why": "Dr. Marta Pires, found by the street name."
+  },
+  {
+   "id": "s047",
+   "category": "keyword",
+   "lang": "en",
+   "text": "What did I tell you about Clinica Veterinaria do Lima?",
+   "gold": [
+    "p25#1|f28"
+   ],
+   "below": [],
+   "why": "Pixel's vet, found by its exact name."
+  },
+  {
+   "id": "s048",
+   "category": "keyword",
+   "lang": "en",
+   "text": "What did I note down about Dona Rosa?",
+   "gold": [
+    "n01"
+   ],
+   "below": [],
+   "why": "The neighbour in flat 3B with the spare key, found by her name."
+  },
+  {
+   "id": "s049",
+   "category": "noise",
+   "lang": "en",
+   "text": "so, er, which day of the week is it that the little one has her swim, then?",
+   "gold": [
+    "p28#1|f31"
+   ],
+   "below": [],
+   "why": "Maya's Saturday swimming behind filler; 'little one' instead of her name."
+  },
+  {
+   "id": "s050",
+   "category": "noise",
+   "lang": "en",
+   "text": "right, so, um, about how many weeks was it, the whole running plan thing, start to finish?",
+   "gold": [
+    "p03#1"
+   ],
+   "below": [],
+   "why": "The 12-week plan in Kazma's reply, behind filler words."
+  },
+  {
+   "id": "s051",
+   "category": "noise",
+   "lang": "en",
+   "text": "so like, um, what time is it again that the plane to Lisbon goes off in the morning?",
+   "gold": [
+    "p23#1|f26"
+   ],
+   "below": [
+    "h07#1",
+    "x07"
+   ],
+   "why": "The 07:15 departure behind filler; the brother-in-law's flight is a near miss."
+  },
+  {
+   "id": "s052",
+   "category": "noise",
+   "lang": "en",
+   "text": "hmm, okay, and what was it that I was hoping to do the race in, time-wise, or whatever?",
+   "gold": [
+    "r08#1"
+   ],
+   "below": [
+    "r10#1"
+   ],
+   "why": "The under-2-hours goal (r08), not the result (r10), behind filler."
+  },
+  {
+   "id": "s053",
+   "category": "noise",
+   "lang": "en",
+   "text": "uh, so, the thing I added into my running that one week, what was that again, the extra bit?",
+   "gold": [
+    "r05#1"
+   ],
+   "below": [],
+   "why": "The added interval session, asked almost only in stopwords."
+  },
+  {
+   "id": "s054",
+   "category": "noise",
+   "lang": "en",
+   "text": "erm, so, like, is our dog, you know, a lively one or not so much?",
+   "gold": [
+    "p01#2"
+   ],
+   "below": [
+    "h03#1"
+   ],
+   "why": "Pixel is very lazy; only the turn says so, and Tiago's greyhound is a near miss."
+  },
+  {
+   "id": "s055",
+   "category": "noise",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "يعني امم، بنتي مايا، كم صار عمرها الحين تقريبا؟",
+   "gold": [
+    "p07#1|f15"
+   ],
+   "below": [],
+   "why": "Maya is seven, asked in Gulf Arabic with filler about an English memory."
+  },
+  {
+   "id": "s056",
+   "category": "noise",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "حسنًا، أعني، متى قلتَ إنك ستذكّرني بموضوع تجديد ذلك الجواز يا ترى؟",
+   "gold": [
+    "p05#1"
+   ],
+   "below": [],
+   "why": "Kazma's September 2030 reminder, asked in MSA with filler; the expiry date is the other half of the turn."
+  },
+  {
+   "id": "s057",
+   "category": "fact",
+   "lang": "en",
+   "text": "Which code editor do I use, and with what theme?",
+   "gold": [
+    "z04"
+   ],
+   "below": [],
+   "why": "VS Code with the dark theme, a fact with no turn behind it."
+  },
+  {
+   "id": "s058",
+   "category": "fact",
+   "lang": "en",
+   "text": "What's my account name on X?",
+   "gold": [
+    "z05"
+   ],
+   "below": [],
+   "why": "sami_builds on X, a fact with no turn behind it."
+  },
+  {
+   "id": "s059",
+   "category": "fact",
+   "lang": "en",
+   "text": "What topic am I interested in?",
+   "gold": [
+    "z09"
+   ],
+   "below": [],
+   "why": "History of bridge design, a fact with no turn; broad wording."
+  },
+  {
+   "id": "s060",
+   "category": "fact",
+   "lang": "en",
+   "text": "What name did I introduce myself with?",
+   "gold": [
+    "f01|p01#1"
+   ],
+   "below": [],
+   "why": "The name fact Sami, its intro turn as the alternative."
+  },
+  {
+   "id": "s061",
+   "category": "fact",
+   "lang": "en",
+   "text": "Which electric car was I thinking of buying?",
+   "gold": [
+    "f36|p29#1"
+   ],
+   "below": [],
+   "why": "The considered Kia EV6; the later keep-the-Octavia decision does not answer which car."
+  },
+  {
+   "id": "s062",
+   "category": "fact",
+   "lang": "en",
+   "text": "What was the original deadline for the Tagus retrofit?",
+   "gold": [
+    "f12a|p06#1"
+   ],
+   "below": [
+    "f12b",
+    "p27#1"
+   ],
+   "why": "The first deadline (end of June) asked on purpose; the newer mid-September value is the near miss."
+  },
+  {
+   "id": "s063",
+   "category": "fact",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "ذكرني، شلون قلت لك أبي ردودك تكون، طويلة ولا مختصرة؟",
+   "gold": [
+    "z10"
+   ],
+   "below": [],
+   "why": "The preference for short answers with bullet points, asked in Gulf Arabic."
+  },
+  {
+   "id": "s064",
+   "category": "fact",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "ما المنطقة الزمنية المسجّلة لي لديك؟",
+   "gold": [
+    "z06"
+   ],
+   "below": [],
+   "why": "The Europe/Lisbon timezone fact, asked in MSA."
+  },
+  {
+   "id": "s065",
+   "category": "overview",
+   "lang": "en",
+   "text": "What did week one of the running plan look like?",
+   "gold": [
+    "sr0|r00#1"
+   ],
+   "below": [],
+   "why": "The week-one summary (three easy 5 km runs and an 8 km long run)."
+  },
+  {
+   "id": "s066",
+   "category": "overview",
+   "lang": "en",
+   "text": "How were my knees holding up early in the training?",
+   "gold": [
+    "sr1|r01#1"
+   ],
+   "below": [],
+   "why": "The first check-in summary, where the knees felt fine."
+  },
+  {
+   "id": "s067",
+   "category": "overview",
+   "lang": "en",
+   "text": "Remind me how the taper went before the race.",
+   "gold": [
+    "sr8|sr9|r08#1|r09#1"
+   ],
+   "below": [],
+   "why": "The taper week and last long run summaries, either of which answers."
+  },
+  {
+   "id": "s068",
+   "category": "overview",
+   "lang": "en",
+   "text": "What came of my laptop's battery draining so fast?",
+   "gold": [
+    "sw4|p21#1"
+   ],
+   "below": [],
+   "why": "The weekly summary that pairs the Lisbon bookings with the ThinkPad battery fix."
+  },
+  {
+   "id": "s069",
+   "category": "overview",
+   "lang": "en",
+   "text": "Where did we land on Noor's birthday dinner?",
+   "gold": [
+    "sw1|p04#1"
+   ],
+   "below": [],
+   "why": "The first weekly summary: Cantinho do Avillez suggested, booking left open."
+  },
+  {
+   "id": "s070",
+   "category": "overview",
+   "lang": "en",
+   "text": "Fill me in on where things stand with my passport.",
+   "gold": [
+    "sw2|p05#1"
+   ],
+   "below": [],
+   "why": "The second weekly summary's passport expiry and planned renewal reminder."
+  },
+  {
+   "id": "s071",
+   "category": "overview",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "عطني ملخص عن سفرتنا لتركيا.",
+   "gold": [
+    "sw6|a04#1|g05"
+   ],
+   "below": [],
+   "why": "The Istanbul trip summary, asked by the country's name instead of the city's."
+  },
+  {
+   "id": "s072",
+   "category": "overview",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "ذكّرني بما جرى في الأسبوع الذي فاتني فيه الجري الطويل.",
+   "gold": [
+    "sr4|r04#1"
+   ],
+   "below": [],
+   "why": "The missed-long-run week summary (English), asked in MSA."
+  },
+  {
+   "id": "s073",
+   "category": "abstain",
+   "lang": "en",
+   "text": "How old is Tiago's dog Bolt?",
+   "gold": [],
+   "below": [],
+   "why": "Bolt is held, his age is not; Pixel's age must not be shown in its place."
+  },
+  {
+   "id": "s074",
+   "category": "abstain",
+   "lang": "en",
+   "text": "What is Rui's surname?",
+   "gold": [],
+   "below": [],
+   "why": "Rui is held twice (teacher, luthier) but never with a surname."
+  },
+  {
+   "id": "s075",
+   "category": "abstain",
+   "lang": "en",
+   "text": "What time does Maya's drawing class start on Wednesdays?",
+   "gold": [],
+   "below": [],
+   "why": "The Wednesday drawing class is held, its time is not."
+  },
+  {
+   "id": "s076",
+   "category": "abstain",
+   "lang": "en",
+   "text": "What did Inês think of my status reports?",
+   "gold": [],
+   "below": [],
+   "why": "Ines and status reports are both in memory; her opinion is not."
+  },
+  {
+   "id": "s077",
+   "category": "abstain",
+   "lang": "en",
+   "text": "Which breeder did we get Pixel from?",
+   "gold": [],
+   "below": [],
+   "why": "Pixel is held in detail; where she came from is not."
+  },
+  {
+   "id": "s078",
+   "category": "abstain",
+   "lang": "en",
+   "text": "What did the mechanic say at the Octavia's last service?",
+   "gold": [],
+   "below": [],
+   "why": "The Octavia is held; no service or mechanic is."
+  },
+  {
+   "id": "s079",
+   "category": "abstain",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "كم ليلة بنقعد في الفندق بإسطنبول؟",
+   "gold": [],
+   "below": [],
+   "why": "The Istanbul hotel is held, the number of nights is not."
+  },
+  {
+   "id": "s080",
+   "category": "abstain",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "ما اسم معلّمة مايا في دورة الرسم؟",
+   "gold": [],
+   "below": [],
+   "why": "Maya's drawing class is held, its teacher is not."
+  },
+  {
+   "id": "s081",
+   "category": "arabic",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "شنو نوع القهوة اللي أحبها، تركية ولا عربية؟",
+   "gold": [
+    "a03#1|g04"
+   ],
+   "below": [
+    "p24#1",
+    "f27"
+   ],
+   "why": "As single: Arabic coffee with cardamom and saffron; the English cortado order is a near miss."
+  },
+  {
+   "id": "s082",
+   "category": "arabic",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "الرقم 55821 حق شنو؟",
+   "gold": [
+    "a05#1|g06"
+   ],
+   "below": [],
+   "why": "As keyword: the hospital file number, found by the number alone."
+  },
+  {
+   "id": "s083",
+   "category": "arabic",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "قبل موعد الدكتور بكم قلت إنك بتذكرني؟",
+   "gold": [
+    "a02#1"
+   ],
+   "below": [],
+   "why": "As assistant: Kazma's 'an hour before', only in the first appointment's reply."
+  },
+  {
+   "id": "s084",
+   "category": "arabic",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "عداد الكهربا اللي عطيتك رقمه، حق أي بيت؟",
+   "gold": [
+    "n04"
+   ],
+   "below": [],
+   "why": "As fact: the meter note names the Braga house."
+  },
+  {
+   "id": "s085",
+   "category": "arabic",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "متى كان موعدي مع الطبيب قبل أن نغيّره؟",
+   "gold": [
+    "a02#1|g03"
+   ],
+   "below": [
+    "a07#1",
+    "g08"
+   ],
+   "why": "As fact: the original Sunday 4 pm appointment asked on purpose; the newer Tuesday value is the near miss."
+  },
+  {
+   "id": "s086",
+   "category": "arabic",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "في أي مستشفى سيكون موعدي مع الطبيب؟",
+   "gold": [
+    "a02#1|g03"
+   ],
+   "below": [],
+   "why": "As single: Dar Al Shifa is named only in the first appointment turn; the newer turn changed only the time."
+  },
+  {
+   "id": "s087",
+   "category": "arabic",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "من مؤلّف الرواية العربية التي اقترحتَها عليّ لأقرأها في العطلة؟",
+   "gold": [
+    "a08#1"
+   ],
+   "below": [],
+   "why": "As assistant: Tayeb Salih, the author in Kazma's reply."
+  },
+  {
+   "id": "s088",
+   "category": "arabic",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "في أي مؤسسة مالية يعمل شقيقي؟",
+   "gold": [
+    "a01#1|g02"
+   ],
+   "below": [],
+   "why": "As paraphrase: the brother's bank asked in MSA words the Gulf memory does not use."
+  },
+  {
+   "id": "s089",
+   "category": "mixed",
+   "lang": "en",
+   "text": "What spices do I like in my Arabic coffee?",
+   "gold": [
+    "a03#1|g04"
+   ],
+   "below": [
+    "p24#1",
+    "f27"
+   ],
+   "why": "English question about the Arabic coffee memory; the English cortado memory is a near miss."
+  },
+  {
+   "id": "s090",
+   "category": "mixed",
+   "lang": "en",
+   "text": "Which square is our Istanbul hotel close to?",
+   "gold": [
+    "a04#1|g05"
+   ],
+   "below": [],
+   "why": "English question about Taksim Square, said only in Arabic."
+  },
+  {
+   "id": "s091",
+   "category": "mixed",
+   "lang": "en",
+   "text": "What art activity does Maya do every week?",
+   "gold": [
+    "a06#1|g07"
+   ],
+   "below": [
+    "p28#1",
+    "f31"
+   ],
+   "why": "English question about the Arabic drawing-class memory; her English swimming memory is a near miss."
+  },
+  {
+   "id": "s092",
+   "category": "mixed",
+   "lang": "ar",
+   "dialect": "gulf",
+   "text": "شنو اسم الكتاب اللي اقترحته علينا لنادي القراءة؟",
+   "gold": [
+    "p19#1"
+   ],
+   "below": [
+    "a08#1"
+   ],
+   "why": "Gulf question about the English book-club novel; the Arabic novel recommendation is a near miss."
+  },
+  {
+   "id": "s093",
+   "category": "mixed",
+   "lang": "ar",
+   "dialect": "msa",
+   "text": "بالقرب من أي معلم يقع بيتنا الجديد؟",
+   "gold": [
+    "p15#1|f25"
+   ],
+   "below": [
+    "p01#1",
+    "f02"
+   ],
+   "why": "MSA question about the Bom Jesus landmark, said in English; the old Porto home is stale."
+  },
+  {
+   "id": "s094",
+   "category": "mixed",
+   "lang": "mixed",
+   "text": "متى صار الـ deadline الجديد حق مشروع Tagus؟",
+   "gold": [
+    "p27#1|f12b"
+   ],
+   "below": [
+    "p06#1",
+    "f12a"
+   ],
+   "why": "Gulf Arabic switching to English for deadline and Tagus; the end-of-June value is stale."
+  },
+  {
+   "id": "s095",
+   "category": "mixed",
+   "lang": "mixed",
+   "text": "Remind me, شنو رقم عداد الكهربا in the Braga house?",
+   "gold": [
+    "n04"
+   ],
+   "below": [],
+   "why": "English switching to Gulf Arabic mid-question, about an Arabic note."
+  },
+  {
+   "id": "s096",
+   "category": "mixed",
+   "lang": "mixed",
+   "text": "Which novel did you suggest I read في الإجازة?",
+   "gold": [
+    "a08#1"
+   ],
+   "below": [
+    "p19#1"
+   ],
+   "why": "English switching to Arabic for 'on holiday'; the English book-club novel is a near miss."
+  }
+ ]
+}

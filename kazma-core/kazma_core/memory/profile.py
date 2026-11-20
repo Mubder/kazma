@@ -177,8 +177,8 @@ def copy_from_personal(tenant_id: str, account: str | None) -> dict[str, Any]:
     shared space *tenant_id*, once (N31): the two are independent after that.
     Refused with a code: ``not_shared`` (a personal space has one text),
     ``no_account``, ``no_personal_space``, ``nothing_to_copy``."""
-    tenant = tenant_id or "default"
-    if not _shared(tenant):
+    tenant = tenant_id
+    if not tenant or not _shared(tenant):
         return {"ok": False, "error": "not_shared", "code": "not_shared"}
     if not account:
         return {"ok": False, "error": "no_account", "code": "no_account"}
