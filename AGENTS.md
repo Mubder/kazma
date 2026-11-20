@@ -13915,6 +13915,17 @@ product can turn it on, so an install with one account behaves as before.
   space and an install without Spaces keep the note they always had. Gate:
   `tests/test_environment_note_per_space.py` (a real turn through the
   supervisor graph; a sandboxed space read as a host one as the control).
+- **The bell, open problems and Running work are per person (S1-32,
+  2026-11-20).** The acquisition monitor records each research and crawl
+  notice's space (`web_acquire/monitor._crawl_space`; unreadable: shown to
+  nobody, sent nowhere) and lists it only in its space
+  (`monitor._shown_here`); another space's notice stays off the install's
+  channels (O1). The install's own notices -- service alerts, requirements,
+  advisories, the outside watcher -- are the admin's
+  (`runs.spaces.install_notices_here`). Gate:
+  `tests/test_bell_and_problems_per_person.py` (words planted in one
+  person's topic and chat title, read through the real routes as everyone
+  else; the lists of before as the control).
 
 ## UI Conventions (Web)
 

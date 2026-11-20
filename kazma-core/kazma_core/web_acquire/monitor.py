@@ -94,17 +94,19 @@ _AGENT_RUN_KINDS = frozenset({'research_crawl', 'research_pipeline'})
 
 
 def _collect():
-    """Fresh local reads only. Session and pipeline rows describe ONE run.
+    """Fresh local reads only. Each job names its space (S1-32): a session's
+    own, a crawl's library or working folder's. Session and pipeline rows describe ONE run.
     The fourth item is the keys of the jobs left to the agent that ran them;
     the fifth, the key of every run still stored (a deleted session or an
     evicted crawl is not among them)."""
+    from kazma_core.runs.spaces import space_of
     from kazma_core.tools import research_session
     from kazma_core.web_acquire import accounting, crawl_jobs, credits
 
     connection = research_session._conn()
     try:
         research_session._reconcile_sessions(connection)
-        sessions = connection.execute("SELECT id, depth, status, stage, sources, created_at, updated_at, report_path, meta_json, length(summary)>0 AS has_summary FROM research_sessions WHERE depth != 'chat' ORDER BY created_at DESC LIMIT 257").fetchall()
+        sessions = connection.execute("SELECT id, depth, status, stage, sources, created_at, updated_at, report_path, meta_json, length(summary)>0 AS has_summary, tenant_id FROM research_sessions WHERE depth != 'chat' ORDER BY created_at DESC LIMIT 257").fetchall()
     finally:
         connection.close()
     if len(sessions) > 256:
@@ -117,8 +119,12 @@ def _collect():
         jobs.append(dict(key='session:' + s['id'], status=s['status'], stage=s['stage'],
             created=s['created_at'], updated=s['updated_at'], sources=s['sources'],
             progress=[s['stage'], s['sources']], link='/research?session=' + quote(s['id'], safe=''),
-            result_available=bool(s['report_path'] or s['has_summary']), kind='research'))
+            result_available=bool(s['report_path'] or s['has_summary']), kind='research',
+            space=space_of(s['tenant_id'])))
     crawl_jobs.recover()
+    from kazma_core.runs.adapters.research import _CrawlSpaces
+
+    crawl_spaces = _CrawlSpaces()
     left_to_agent = set()
     stored = {'session:' + s['id'] for s in sessions}
     rows = list(crawl_jobs._read()[1].values())
@@ -168,11 +174,40 @@ def _collect():
             result_available=row['fetched'] > 0 or effects.get('terminal-summary', {}).get('status') == 'completed', kind='research' if research else 'crawl',
             # The library a crawl fills: its next successful run settles
             # this one's warnings. Notes are the limits and exclusions.
-            subject=None if research else row['library_id'], notes=list(row.get('notes', []))))
+            subject=None if research else row['library_id'], notes=list(row.get('notes', [])),
+            space=_crawl_space(crawl_spaces, row)))
     return jobs, credits.snapshot(), accounting._read_evidence(), left_to_agent, stored
 
 
 _library_check_failed = False
+
+#: A crawl whose space could not be read: shown to nobody, sent nowhere,
+#: until a later pass reads it (a notice is never guessed into a space).
+UNKNOWN_SPACE = '?'
+_crawl_space_failed = False
+
+
+def _crawl_space(spaces, row):
+    """The space a crawl's notice belongs to (S1-32). Read only once Spaces is
+    enforced: before, every notice is everyone's, as it always was."""
+    global _crawl_space_failed
+    import sqlite3
+
+    from kazma_core.runs.spaces import space_of
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+
+    if not spaces_enforced():
+        return OWNER_SPACE_ID
+    try:
+        found = space_of(spaces.of(row))
+    except (sqlite3.Error, OSError) as exc:
+        if not _crawl_space_failed:
+            logger.warning('[acquisition] the space of a crawl could not be read (%s); its notices '
+                           'wait until it can', type(exc).__name__)
+        _crawl_space_failed = True
+        return UNKNOWN_SPACE
+    _crawl_space_failed = False
+    return found
 
 
 def _finished_crawl_of(row, gone):
@@ -311,7 +346,7 @@ def _observe_jobs(state, jobs, cfg, now, event):
             if terminal and not baseline:
                 if cfg['notify_completed'] or status not in {'done', 'completed'}:
                     event(key, status, job['link'], sources=job['sources'], result_available=job['result_available'],
-                          subject=job.get('subject'), notes=job.get('notes'))
+                          subject=job.get('subject'), notes=job.get('notes'), space=job.get('space', INSTALL))
                 elif status in _SUCCESS:  # not announced, still settles the library's warnings
                     _settle_for_success(state, dict(key=key, subject=job.get('subject'), timestamp=now))
         elif previous['signature'] != signature:
@@ -328,7 +363,7 @@ def _observe_jobs(state, jobs, cfg, now, event):
             elif terminal or was_stalled:
                 if not terminal or cfg['notify_completed'] or status not in {'done', 'completed'}:
                     event(key, status if terminal else 'resumed', job['link'], sources=job['sources'], result_available=job['result_available'],
-                          subject=job.get('subject'), notes=job.get('notes'))
+                          subject=job.get('subject'), notes=job.get('notes'), space=job.get('space', INSTALL))
                 else:
                     for old in state['events']:
                         if old['key'] == key and old['condition'] == 'stalled':
@@ -336,7 +371,8 @@ def _observe_jobs(state, jobs, cfg, now, event):
                     _settle_for_success(state, dict(key=key, subject=job.get('subject'), timestamp=now))
         if not terminal and not previous['stalled'] and now - previous['since'] >= cfg['stall_seconds']:
             previous['stalled'] = True
-            event(key, 'stalled', job['link'], sources=job['sources'], result_available=job['result_available'])
+            event(key, 'stalled', job['link'], sources=job['sources'], result_available=job['result_available'],
+                  space=job.get('space', INSTALL))
         previous['observed_at'] = job['updated']
     state['jobs'] = {key: value for key, value in state['jobs'].items() if key in retained}
     return retained
@@ -410,7 +446,7 @@ def tick(*, now=None):
 
         def event(key, condition, link, *, sources=None, result_available=False,
                   provider=None, remaining=None, observed_at=None, http_status=None,
-                  subject=None, notes=None):
+                  subject=None, notes=None, space=INSTALL):
             for old in state['events']:
                 if old['key'] == key and old['condition'] == 'stalled':
                     old['resolved'] = condition != 'stalled'
@@ -419,7 +455,7 @@ def tick(*, now=None):
                 timestamp=now, link=link, sources=sources, result_available=result_available,
                 resolved=False, dispatch='uncertain', provider=provider, remaining=remaining,
                 observed_at=observed_at, http_status=http_status, subject=subject,
-                notes=list(notes or []))
+                notes=list(notes or []), space=space)
             state['events'].append(row)
             emitted.append(row)
             if condition in _SUCCESS:
@@ -451,10 +487,17 @@ def tick(*, now=None):
 
     mutate('monitor', change, entries=5, bytes_limit=2 * 1024**2)
     from kazma_core.observability.ops_alerts import alert
+    from kazma_core.runs.spaces import kept_in_its_space
+
     grouped = {}
-    for row in emitted:
-        grouped.setdefault(row['condition'], []).append(row)
     outcomes = {}
+    for row in emitted:
+        if row.get('space') != INSTALL and kept_in_its_space(row.get('space')):
+            # Another space's news stays off the install's channels (O1):
+            # the bell of its space shows it (S1-32).
+            outcomes[row['id']] = 'kept_in_its_space'
+            continue
+        grouped.setdefault(row['condition'], []).append(row)
     for condition, rows in grouped.items():
         title = _LABELS[condition][0]
         detail = '\n'.join(_detail(row, 'en') + ' ' + row['link'] for row in rows[:6])
@@ -545,6 +588,10 @@ def recent_alerts(language='en'):
         return _recent_alerts(language)
     except (*_storage_failures(), AcquisitionError, ValueError, TypeError, KeyError, AttributeError):
         # A broken acquisition ledger must not erase unrelated system alerts.
+        from kazma_core.runs.spaces import install_notices_here
+
+        if not install_notices_here():
+            return []
         ar = language == 'ar'
         return [dict(id='acquisition-monitor-storage-unavailable',
             title='مراقبة الأبحاث والزحف غير متاحة' if ar else 'Research/crawl monitoring unavailable',
@@ -555,19 +602,45 @@ def recent_alerts(language='en'):
             timestamp=time.time(), severity='ERROR')]
 
 
+#: The space of a notice about the install itself (a provider's balance, an
+#: allowance, the monitor's own health), as opposed to one space's run.
+INSTALL = ''
+
+
+def _shown_here(space, install_ok):
+    """Whether a notice of *space* is shown to the person bound now (S1-32):
+    every notice while Spaces is not enforced; once it is, a run's in its own
+    space, the install's to the admin. A notice stored before notices named a
+    space is the owner's (N19)."""
+    from kazma_core.runs.spaces import visible_here
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return True
+    if space == INSTALL:
+        return install_ok
+    return visible_here(space)
+
+
 def _recent_alerts(language):
+    from kazma_core.runs.spaces import install_notices_here
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+
     ar = language == 'ar'
     result = []
     state = _read()
+    install_ok = install_notices_here() if spaces_enforced() else True
     for row in state.get('events', []):
         if row.get('resolved'):
+            continue
+        if not _shown_here(row.get('space', OWNER_SPACE_ID), install_ok):
             continue
         result.append(dict(id=row['id'], title=_LABELS[row['condition']][int(ar)],
             subsystem='Acquisition', status=row['condition'], reason=_detail(row, language),
             callback_id='link:' + row['link'], button_text='عرض التنفيذ والنتائج' if ar else 'View run and results',
             timestamp=row['timestamp'], severity=_severity(row['condition']), dispatch=row['dispatch']))
     checked = state.get('checked_at') or _LAUNCHED_AT
-    if settings()['enabled'] and checked and time.time() - checked > 60:
+    if install_ok and settings()['enabled'] and checked and time.time() - checked > 60:
         result.append(dict(id='acquisition-monitor-unavailable-' + str(int(checked)),
             title='مراقبة الأبحاث والزحف غير متاحة' if ar else 'Research/crawl monitoring unavailable',
             subsystem='AcquisitionMonitor', status='unavailable',
