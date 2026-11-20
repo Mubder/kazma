@@ -94,6 +94,15 @@
   var _activeWorkspaceId = '';
 
   function refreshWorkspaceId() {
+    // A space without Development has no project folder to name, and its
+    // /api/workspaces answers 403 (Spaces S1-20): the page drawn for it
+    // says so (chat-root's data-development), and nothing is asked.
+    var root = document.getElementById('chat-root');
+    if (root && root.getAttribute('data-development') !== '1') {
+      _activeWorkspaceId = '';
+      try { window.__kazmaWorkspaceId = ''; } catch (e) { /* ignore */ }
+      return;
+    }
     fetch('/api/workspaces')
       .then(function(r) { return r.ok ? r.json() : {}; })
       .then(function(data) {

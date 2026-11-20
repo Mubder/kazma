@@ -13782,7 +13782,13 @@ product can turn it on, so an install with one account behaves as before.
     refused by the tenant middleware where Development is not (403
     `host_only`); the sidebar's Workspace and IDE entries sit inside
     `{% if development_here() %}` (no read while drawing). A new Development
-    page or route goes in the rules.
+    page or route goes in the rules. A page that is not Workspace or the IDE
+    asks a Development route only after reading the flag its page was drawn
+    with (the chat page's `#chat-root` `data-development`): the chat page
+    asked `/api/workspaces` on every load, two or three 403s in a sandboxed
+    space, and main's browser job failed on Linux from 2026-11-20
+    (`tests/test_development_routes_asked_where_offered.py`, the old chat
+    page as the control; `tests/e2e/test_two_tabs_two_spaces.py`).
   - A clone builds its environment with `security.git_auth.clone_env`:
     outside the owner's space, none of the machine's credentials.
   - **Work on the machine acts as the admin** (`kazma_core/spaces/machine.py`,
