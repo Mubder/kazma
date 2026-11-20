@@ -2512,7 +2512,7 @@
         <div class="settings-group mb-6">
             <h3>{{ t('settings.space_data_title') }}</h3>
             <p class="form-hint">{{ t('settings.space_data_help') }}</p>
-            <div class="notice tone-danger" x-show="spaceDataError" x-cloak x-text="spaceDataError"></div>
+            <div class="notice tone-danger" x-show="spaceDataError" x-cloak x-text="spaceDataError" translate="no"></div>
             <div class="account-list-table" x-show="spaceDataLoaded" x-cloak>
               <div class="account-list-row"><span class="account-list-name">{{ t('settings.space_data_name') }}</span><span class="account-list-meta"><bdi translate="no" x-text="spaceData.name"></bdi></span></div>
               <div class="account-list-row"><span class="account-list-name">{{ t('settings.space_data_rows') }}</span><span class="account-list-meta" x-text="KazmaFormat.number(spaceData.rows || 0)"></span></div>
@@ -2523,8 +2523,8 @@
               <div class="account-list-row"><span class="account-list-name">{{ t('settings.space_data_secrets') }}</span><span class="account-list-meta" x-text="KazmaFormat.number(spaceData.secrets || 0)"></span></div>
             </div>
             <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;" x-show="spaceDataLoaded" x-cloak>
-                <button class="btn btn-secondary" type="button" id="space-data-export" x-show="spaceData.role === 'owner'" :disabled="spaceDataBusy" @click="exportThisSpace()">{{ t('settings.space_data_export') }}</button>
-                <button class="btn btn-danger" type="button" id="space-data-delete" x-show="spaceData.role === 'owner' && !spaceData.personal" :disabled="spaceDataBusy" @click="deleteThisSpace()">{{ t('settings.space_data_delete') }}</button>
+                <button class="btn btn-secondary" type="button" id="space-data-export" x-show="spaceData.role === 'owner'" x-cloak :disabled="spaceDataBusy" @click="exportThisSpace()">{{ t('settings.space_data_export') }}</button>
+                <button class="btn btn-danger" type="button" id="space-data-delete" x-show="spaceData.role === 'owner' && !spaceData.personal" x-cloak :disabled="spaceDataBusy" @click="deleteThisSpace()">{{ t('settings.space_data_delete') }}</button>
             </div>
             <p class="form-hint" x-show="spaceDataLoaded && spaceData.personal" x-cloak>{{ t('settings.space_data_personal_hint') }}</p>
         </div>

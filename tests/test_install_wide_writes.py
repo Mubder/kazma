@@ -69,6 +69,9 @@ NOT_INSTALL_WIDE: dict[tuple[str, str], str] = {
     ("POST", "/api/chat/stream"): "names a provider key only to resolve the chat's model",
     ("POST", "/api/voice/stt"): "names the speech provider's key to call it",
     ("POST", "/api/webhooks/telegram"): "Telegram's update, read by the adapter",
+    ("POST", "/api/spaces/{space_id}/export"): "reads the password the export is sealed with; "
+    "one zip of the caller's own space (its owner only) is written to a temporary folder and "
+    "sent back: nothing install-wide changes",
 }
 
 _BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
