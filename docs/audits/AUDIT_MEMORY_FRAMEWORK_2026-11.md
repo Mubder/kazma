@@ -892,6 +892,14 @@ Added as each piece lands.
   `tests/test_swarm_results_follow_their_chat.py`. Not done: the weekly
   summary still groups a swarm result with the user's turns (reported, not
   read).
+- **The recording's machinery (benchmark audit R2), 2026-11-20: built, no
+  call made.** A recording holds five askings a turn; every asking is
+  scored, a score is the total over them, and its spread is kept in the
+  lock. The recorder asks through the product's own call, saves after every
+  reply, goes on where it stopped and never past its call limit; a new
+  recording is locked only with five askings a turn and finished. Gates:
+  `tests/test_memory_extraction_record.py` and the askings cases in
+  `tests/test_memory_benchmark.py`.
 
 What I would not do:
 

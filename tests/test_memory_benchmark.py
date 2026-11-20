@@ -301,6 +301,59 @@ def _asked_today(recording: dict, prompt_sha256: str | None = None) -> dict:
             "prompt_sha256": prompt_sha256 or benchmark._extraction_prompt_sha256()}
 
 
+def _askings(recording: dict, n: int, *, complete: bool = True) -> dict:
+    """*recording* asked *n* times, each asking answered as the first was,
+    by a recorder that finished (*complete*) or not (benchmark audit R2)."""
+    return {**recording, "askings": n, "complete": complete,
+            "replies": {k: [v] * n for k, v in recording["replies"].items()}}
+
+
+def test_a_new_recording_needs_the_standard_askings_and_a_finished_recorder(tmp_path, monkeypatch):
+    """Benchmark audit R2: one asking has no spread, so a new recording is
+    locked only with ``ASKINGS_STANDARD`` askings a turn, and only once its
+    recorder finished. Negative control: today's one-reply file is refused."""
+    script = _build_script()
+    today = _asked_today(json.loads(json.dumps(_recording())))
+    path = tmp_path / "extraction_llm.json"
+    monkeypatch.setattr(script, "LLM_REPLIES", path)
+    for recording, refused in ((today, "5 askings a turn"),
+                               (_askings(today, benchmark.ASKINGS_STANDARD, complete=False), "stopped before"),
+                               (_askings(today, benchmark.ASKINGS_STANDARD - 1), "5 askings a turn")):
+        path.write_text(json.dumps(recording, ensure_ascii=False), encoding="utf-8")
+        _part, problems = script._extraction_lock(_locked_extraction(), new_recording="asked again")
+        assert any(refused in p for p in problems), (refused, problems)
+    path.write_text(json.dumps(_askings(today, benchmark.ASKINGS_STANDARD), ensure_ascii=False), encoding="utf-8")
+    part, problems = script._extraction_lock(_locked_extraction(), new_recording="asked again")
+    assert not problems, problems
+    assert part["recording"]["askings"] == benchmark.ASKINGS_STANDARD
+    # Five askings answered alike: no spread, and the same scores as one.
+    assert all(v == 0.0 for row in part["spread"].values() for v in row.values())
+    assert part["rests_on"]["llm"]["en"]["askings"] == part["rests_on"]["llm"]["en"]["turns"] * 5
+
+
+def test_a_score_is_the_total_over_the_askings_and_its_spread_how_they_differ():
+    """Benchmark audit R2: every asking scored; the total over them, and two
+    standard errors of their scores. Negative control: the first asking alone
+    is not the total."""
+    today = _asked_today(json.loads(json.dumps(_recording())))
+    a01 = next(t for t in _turns() if t["id"] == "a01")
+    key = benchmark._text_key(benchmark._llm_blob(a01["user"], **benchmark._turn_context(a01)))
+    asked = _askings(today, 2)
+    asked["replies"][key] = [today["replies"][key], '{"beliefs": []}']   # the second asking keeps nothing
+    report = benchmark.run_extraction_benchmark(llm_replies=asked)
+    first = benchmark.run_extraction_benchmark(llm_replies=today)
+    lang = a01["lang"]
+    in_a01 = benchmark.run_extraction_benchmark(
+        {"version": first["version"], "turns": [a01]}, llm_replies=today)["llm"][lang]["gold_found"]
+    assert in_a01 > 0
+    row, alone = report["llm"][lang], first["llm"][lang]
+    assert row["askings"] == 2 and row["gold"] == alone["gold"]
+    assert row["gold_found"] == 2 * alone["gold_found"] - in_a01
+    assert row["found"] == round(row["gold_found"] / (2 * row["gold"]), 4) < alone["found"]
+    assert report["llm_spread"][lang]["found"] > 0
+    assert report["llm_recording"]["askings"] == 2
+
+
 def _today_shape() -> int:
     """The form of the message the deep pass sends today: a recording made
     today says it."""
@@ -561,6 +614,7 @@ def test_a_second_recording_is_locked_only_on_purpose(tmp_path, monkeypatch):
     # A recording of today's prompt (a declared change is answered by one).
     second = _asked_today(json.loads(json.dumps(recording)))
     second["replies"][benchmark._text_key(benchmark._llm_blob(a01["user"]))] = '{"beliefs": []}'
+    second = _askings(second, benchmark.ASKINGS_STANDARD)
     path = tmp_path / "extraction_llm.json"
     path.write_text(json.dumps(second, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(script, "LLM_REPLIES", path)

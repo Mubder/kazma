@@ -2077,7 +2077,20 @@ four injected were noise.
   down". The gate and the lock compare the locked prompt hash too: the same
   replies relabelled as another prompt's are refused, flag or not, also
   when they are keyed by another message (`replies_sha256`, the replies
-  alone, `_same_replies`). The lock
+  alone, `_same_replies`). **Several askings a turn** (benchmark audit R2,
+  2026-11-20): a recording holds a list of replies a turn; every asking is
+  scored, a score is the total over the askings (`_total_over_askings`) and
+  its spread two standard errors of theirs (`_spread`, kept in the lock as
+  `spread`); a new recording is locked only with `ASKINGS_STANDARD` (5)
+  askings a turn and a finished recorder (`memory_bench._new_recording_problems`);
+  the write scenarios replay the first asking. The recorder
+  (`record_llm_extraction`, `scripts/memory_extraction_record.py --out PATH
+  --limit N`) asks through the product's own `_llm_extract`, every turn's
+  first asking before any second, saves after every reply, continues its
+  file without asking again what it has, and stops at its call limit
+  (`complete`: false). Gates: `tests/test_memory_extraction_record.py`, the
+  askings cases in `tests/test_memory_benchmark.py` (today's one-reply file
+  refused as a new recording, the first asking alone as the controls). The lock
   (`_extraction_lock`): the quick pass is a ratchet; the model's pass
   compares exactly on the same recording, a new recording is locked only with
   `lock --new-recording "why"` and replaces the old scores exactly (written

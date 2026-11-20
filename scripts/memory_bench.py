@@ -1737,13 +1737,16 @@ def _extraction_lock(
     is new (``--rebaseline``), so today's scores are its first lock.
 
     * The quick pass is Kazma's own code: a ratchet, never lowered.
-    * The model's pass is scored from one recording (benchmark audit F3). On
-      the same recording its scores are compared exactly: only a change in
-      the parser or the scorer moves them, and a drop is refused. A different
-      recording is locked only on purpose (``--new-recording "why"``), and
-      its scores replace the old ones exactly: one asking a turn has no
-      spread to compare against, and the higher of two recordings, score by
-      score, is a floor no recording reaches. The change is written down.
+    * The model's pass is scored from one recording (benchmark audit F3),
+      every asking of it, a score the total over the askings (R2). On the
+      same recording its scores are compared exactly: only a change in the
+      parser or the scorer moves them, and a drop is refused. A different
+      recording is locked only on purpose (``--new-recording "why"``), only
+      with ``ASKINGS_STANDARD`` askings a turn and finished
+      (:func:`_new_recording_problems`), and its scores replace the old ones
+      exactly; its spread is kept beside them, for the next recording of the
+      same prompt to be compared against (R3, not built yet). The change is
+      written down.
     * No recording, a prompt it did not answer, or a locked score missing
       from today's run: refused, never a shorter lock.
     * A prompt change waiting for its recording (framework audit part C2)
@@ -1791,6 +1794,7 @@ def _extraction_lock(
                         f"is not relabelled; {RECORD_AGAIN}")
     if fresh:
         if old.get("recording") and not same:
+            problems += _new_recording_problems(replies, identity)
             history.append({"date": _dt.date.today().isoformat(),
                             "reason": f"a new extraction dataset (v{report['version']})",
                             "replaced": {"recording": old.get("recording"),
@@ -1805,6 +1809,7 @@ def _extraction_lock(
         problems.append("the recording of the model's pass changed: a new recording is locked only on purpose, "
                         "with lock --new-recording \"why\" (its scores replace the old ones)")
     else:
+        problems += _new_recording_problems(replies, identity)
         history.append({
             "date": _dt.date.today().isoformat(), "reason": new_recording,
             "replaced": {"recording": old.get("recording"),
@@ -1813,10 +1818,30 @@ def _extraction_lock(
             **({"answers": old["pending_recording"]} if old.get("pending_recording") else {}),
         })
     return {"version": report["version"], "recording": identity, "scores": now,
+            # How far each model-pass score could move with the model asked
+            # again (two standard errors over the askings; R2).
+            **({"spread": report["llm_spread"]} if report.get("llm_spread") else {}),
             # What each row rests on, for the benchmarks page (decision 6).
             "rests_on": extraction_rests_on(report), "recordings": history,
             # A declared prompt change still waiting for its recording.
             **({"pending_recording": pending} if previous else {})}, problems
+
+
+def _new_recording_problems(replies: dict[str, Any], identity: dict[str, Any]) -> list[str]:
+    """Why a new recording of the model's pass cannot be locked: fewer
+    askings a turn than the standard (benchmark audit R2: one asking has no
+    spread), or a recording its recorder did not finish."""
+    from kazma_core.memory.benchmark import ASKINGS_STANDARD
+
+    problems = []
+    if int(identity.get("askings") or 0) < ASKINGS_STANDARD:
+        problems.append(f"--new-recording: a recording has {ASKINGS_STANDARD} askings a turn (benchmark audit R2); "
+                        f"this one has {identity.get('askings')} on some turn: record the rest (the recorder "
+                        "continues its file)")
+    if replies.get("complete") is False:
+        problems.append("--new-recording: the recorder stopped before the end (its call limit): run it again to "
+                        "finish the recording")
+    return problems
 
 
 def _speakers_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[str, Any], list[str]]:

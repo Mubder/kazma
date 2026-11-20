@@ -733,20 +733,48 @@ def _recording_identity(llm_replies: dict[str, Any]) -> dict[str, Any]:
     description beside them can be completed without making it another
     recording."""
     replies = llm_replies.get("replies") or {}
+    values = [v if isinstance(v, str) else json.dumps(v, ensure_ascii=False) for v in replies.values()]
     return {
         "sha256": _sha256(json.dumps(replies, ensure_ascii=False, sort_keys=True)),
         # The replies alone, whatever message they are keyed by: the same
         # replies keyed by another message and labelled with another prompt
         # are a relabelled recording, never a new one (``memory_bench``).
-        "replies_sha256": _sha256(json.dumps(sorted(replies.values()), ensure_ascii=False)),
+        "replies_sha256": _sha256(json.dumps(sorted(values), ensure_ascii=False)),
         "turns": len(replies),
-        "askings": int(llm_replies.get("askings") or 1),
+        "askings": _recording_askings(llm_replies) or int(llm_replies.get("askings") or 1),
         "model": llm_replies.get("model"),
         "provider": llm_replies.get("provider"),
         "recorded_on": llm_replies.get("recorded_on"),
         "prompt_sha256": llm_replies.get("prompt_sha256"),
         "message_shape": _recording_shape(llm_replies),
     }
+
+
+#: The askings a turn a new recording of the model's pass has (benchmark
+#: audit R2; the owner's decision 2: 150 askings for the 30 turns). One asking
+#: has no spread: asked again, the model answers a little differently.
+ASKINGS_STANDARD = 5
+
+
+def _reply_list(value: Any) -> list[str]:
+    """A turn's recorded replies, one per asking: a recording made before R2
+    holds one reply a turn (a string), a later one the list of its askings."""
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
+def _recording_askings(llm_replies: dict[str, Any]) -> int:
+    """The askings every turn of the recording has (the fewest any turn has;
+    0 with no replies)."""
+    replies = llm_replies.get("replies") or {}
+    return min((len(_reply_list(v)) for v in replies.values()), default=0)
+
+
+def _asking(llm_replies: dict[str, Any], i: int) -> dict[str, Any]:
+    """The recording as its *i*-th asking alone: each turn's *i*-th reply."""
+    return {**llm_replies,
+            "replies": {k: _reply_list(v)[i] for k, v in (llm_replies.get("replies") or {}).items()}}
 
 
 #: How a prompt change is declared until it is recorded (framework audit part
@@ -905,20 +933,63 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
         if not gold:
             row["quiet_turns"] += 1
             row["quiet_kept_nothing"] += int(not got)
-    out = {}
-    for lang, row in sorted(by_lang.items()):
-        found, kept = row["gold_found"], row["kept"]
-        out[lang] = {
-            **row,
-            "found": round(found / row["gold"], 4) if row["gold"] else 0.0,
-            "named": round(row["gold_named"] / found, 4) if found else 1.0,
-            "right": round((kept - row["kept_unwanted"]) / kept, 4) if kept else 1.0,
-            "quiet": round(row["quiet_kept_nothing"] / row["quiet_turns"], 4) if row["quiet_turns"] else 1.0,
-            # The reading before 2026-11 (a fact counts only under a listed
-            # name), kept for comparison; not gated.
-            "recall": round(row["gold_named"] / row["gold"], 4) if row["gold"] else 0.0,
-            "precision": round(row["kept_listed"] / kept, 4) if kept else 1.0,
-        }
+    return {lang: _with_ratios(row) for lang, row in sorted(by_lang.items())}
+
+
+#: A language row's counts that add up over askings (``turns``, ``gold`` and
+#: ``quiet_turns`` are the dataset's, the same in every asking).
+_ASKING_COUNTS = ("gold_found", "gold_named", "kept", "kept_unwanted", "kept_listed", "quiet_kept_nothing")
+
+
+def _with_ratios(row: dict[str, Any], askings: int = 1) -> dict[str, Any]:
+    """A language row's scores from its counts, over *askings* askings: a
+    score is the total over all askings (benchmark audit R2)."""
+    found, kept = row["gold_found"], row["kept"]
+    gold, quiet_turns = row["gold"] * askings, row["quiet_turns"] * askings
+    out = {
+        **row,
+        "found": round(found / gold, 4) if gold else 0.0,
+        "named": round(row["gold_named"] / found, 4) if found else 1.0,
+        "right": round((kept - row["kept_unwanted"]) / kept, 4) if kept else 1.0,
+        "quiet": round(row["quiet_kept_nothing"] / quiet_turns, 4) if quiet_turns else 1.0,
+        # The reading before 2026-11 (a fact counts only under a listed
+        # name), kept for comparison; not gated.
+        "recall": round(row["gold_named"] / gold, 4) if gold else 0.0,
+        "precision": round(row["kept_listed"] / kept, 4) if kept else 1.0,
+    }
+    if askings > 1:
+        out["askings"] = askings
+    return out
+
+
+def _total_over_askings(parts: list[dict[str, Any]]) -> dict[str, Any]:
+    """One score per language from each asking's scoring (one ``_score_extraction``
+    a part): the counts added up, the dataset's own counts kept."""
+    if len(parts) == 1:
+        return parts[0]
+    total: dict[str, Any] = {}
+    for i, part in enumerate(parts, 1):
+        for lang, row in part.items():
+            into = total.setdefault(lang, {**row, **{k: 0 for k in _ASKING_COUNTS}, "unwanted": []})
+            for k in _ASKING_COUNTS:
+                into[k] += row[k]
+            into["unwanted"] += [f"asking {i}, {u}" for u in row["unwanted"]]
+    return {lang: _with_ratios(row, len(parts)) for lang, row in sorted(total.items())}
+
+
+def _spread(parts: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    """How far each score could move with the model asked again: two standard
+    errors of the askings' scores, per language and score (benchmark audit R2;
+    empty with one asking, which has no spread)."""
+    import math
+    import statistics
+
+    if len(parts) < 2:
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    for lang in sorted(parts[0]):
+        out[lang] = {k: round(2 * statistics.stdev([p[lang][k] for p in parts]) / math.sqrt(len(parts)), 4)
+                     for k in EXTRACTION_SCORES}
     return out
 
 
@@ -1058,7 +1129,13 @@ def run_extraction_benchmark(
         report["llm"] = {"recorded": False}
         return report
     mode = _check_recording(llm_replies, pending)
-    report["llm"] = _score_extraction(turns, _replayed_extraction(turns, llm_replies, mode=mode))
+    # Every asking is scored, through the product's parser; a score is the
+    # total over all askings, and its spread how much the askings differ.
+    parts = [_score_extraction(turns, _replayed_extraction(turns, _asking(llm_replies, i), mode=mode))
+             for i in range(max(1, _recording_askings(llm_replies)))]
+    report["llm"] = _total_over_askings(parts)
+    if len(parts) > 1:
+        report["llm_spread"] = _spread(parts)
     report["llm_recording"] = _recording_identity(llm_replies)
     report["llm_replay"] = mode
     return report
@@ -1296,7 +1373,9 @@ def run_write_scenarios(
 
     data = dataset or json.loads(WRITES_PATH.read_text(encoding="utf-8"))
     mode = _check_recording(llm_replies, pending) if llm_replies else "current"
-    recorded = (llm_replies or {}).get("replies") or {}
+    # A scenario replays the first asking (a scenario measures Kazma's rules
+    # around one reply, never the model).
+    recorded = _asking(llm_replies, 0)["replies"] if llm_replies and llm_replies.get("replies") else {}
     client = _ScriptedClient()
     registry = type("_Registry", (), {"get_client": lambda self: client})()
     # Facts are judged by their rows: no vector is needed, and none is made.
@@ -1327,32 +1406,92 @@ def write_scores(report: dict[str, Any]) -> dict[str, float]:
     return {f"{k}.passed": float(v["share"]) for k, v in sorted(report["groups"].items())}
 
 
-async def record_llm_extraction(dataset: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Ask the configured model the extraction prompt for every turn and
-    return its raw replies (``scripts/memory_extraction_record.py``;
-    costs one call a turn)."""
+class _CapturingClient:
+    """The configured model's client, keeping the last message it was sent
+    and the raw reply it gave (the recorder asks through the product's own
+    call, ``belief_extractor._llm_extract``)."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self.message: str | None = None
+        self.reply: str | None = None
+
+    async def chat(self, messages: list[dict[str, Any]], **kw: Any) -> Any:
+        raw = await self._client.chat(messages, **kw)
+        self.message = str(messages[-1]["content"])
+        self.reply = raw.content if hasattr(raw, "content") else str(raw or "")
+        return raw
+
+
+async def record_llm_extraction(
+    dataset: dict[str, Any] | None = None, *, limit: int, askings: int = ASKINGS_STANDARD,
+    held: dict[str, Any] | None = None, save: Any = None,
+) -> dict[str, Any]:
+    """Ask the configured model the deep pass's question for every turn,
+    *askings* times, and return the recording (``scripts/memory_extraction_record.py``;
+    the benchmark audit's R2).
+
+    Each question is the product's own call (``belief_extractor._llm_extract``,
+    with the turn's day, the turn before and the facts held), and the raw
+    reply it got is kept. Every turn's first asking comes before any turn's
+    second, so a recording cut short still covers each turn the same number
+    of times. *held* is a recording made before, of the same prompt, message
+    form and dataset: what it holds is never asked again. *save* is called
+    with the recording after every reply. At most *limit* calls are made; a
+    recording that stopped there says so (``complete``: false)."""
+    import datetime as _dt
+    from unittest import mock
+
+    from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM, MESSAGE_SHAPE, _llm_extract
     from kazma_core.model_registry import get_model_registry
 
     data = dataset or json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))
     registry = get_model_registry()
     client = registry.get_client()
-    replies: dict[str, str] = {}
-    from kazma_core.memory.belief_extractor import _EXTRACT_SYSTEM, MESSAGE_SHAPE
-
-    for t in data["turns"]:
-        blob = _llm_blob(t["user"], **_turn_context(t))
-        raw = await client.chat([{"role": "system", "content": _EXTRACT_SYSTEM}, {"role": "user", "content": blob}])
-        replies[_text_key(blob)] = raw.content if hasattr(raw, "content") else str(raw or "")
+    if client is None:
+        raise LookupError("no model is configured: nothing can be recorded")
+    prompt = _sha256(_EXTRACT_SYSTEM)
+    replies: dict[str, list[str]] = {}
+    if held:
+        if (held.get("prompt_sha256"), _recording_shape(held), held.get("extraction_version")) != (
+                prompt, MESSAGE_SHAPE, data["version"]):
+            raise StaleRecordingError("the recording to continue answered another prompt, message form or "
+                                      "dataset: record into a new file")
+        replies = {k: _reply_list(v) for k, v in (held.get("replies") or {}).items()}
     # The provider client keeps its model on its config (``LLMProvider.config``).
     model = (getattr(getattr(client, "config", None), "model", None) or getattr(client, "model", None)
              or getattr(registry, "active_model", None) or "unknown")
-    import datetime as _dt
-
-    return {"model": str(model), "provider": str(getattr(registry, "_active_provider", "") or "unknown"),
-            "recorded_on": _dt.date.today().isoformat(), "askings": 1,
-            "prompt_sha256": _sha256(_EXTRACT_SYSTEM), "message_shape": MESSAGE_SHAPE,
-            "extraction_version": data["version"],
-            "replies": replies}
+    recording: dict[str, Any] = {
+        "model": str(model), "provider": str(getattr(registry, "_active_provider", "") or "unknown"),
+        "recorded_on": _dt.date.today().isoformat(), "askings": askings, "complete": False,
+        "prompt_sha256": prompt, "message_shape": MESSAGE_SHAPE, "extraction_version": data["version"],
+        "replies": replies}
+    capture = _CapturingClient(client)
+    calls = 0
+    with mock.patch("kazma_core.model_registry.get_model_registry",
+                    lambda: type("_Registry", (), {"get_client": lambda self: capture})()):
+        for asking in range(askings):
+            for t in data["turns"]:
+                context = _turn_context(t)
+                key = _text_key(_llm_blob(t["user"], **context))
+                have = replies.setdefault(key, [])
+                if len(have) > asking:
+                    continue
+                if calls >= limit:
+                    return recording
+                capture.message = capture.reply = None
+                await _llm_extract(t["user"], "", **context)
+                calls += 1
+                if capture.reply is None:
+                    raise RuntimeError(f"the model did not answer turn {t['id']}: the recording keeps what it has")
+                if _text_key(capture.message or "") != key:
+                    raise RuntimeError(f"the deep pass sent turn {t['id']} another message than the benchmark "
+                                       "replays: the two builders differ")
+                have.append(capture.reply)
+                if save is not None:
+                    save(recording)
+    recording["complete"] = True
+    return recording
 
 
 # ── Several members in one shared space (Spaces S1-11; the R3 study) ──────
