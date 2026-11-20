@@ -87,7 +87,7 @@ def test_the_old_mirror_call_counted_it_ok(mem):
     """Negative control: the call that ignored mirror_episode's None."""
     from kazma_core.memory import consolidator, dual_write
 
-    def old(messages, *, session_id, turn, tenant_id="default", created_at=None):
+    def old(messages, *, session_id, turn, tenant_id="default", created_at=None, said_by=None):
         user, answer = consolidator.extract_turn_texts(messages)
         dual_write.mirror_episode(session_id=session_id or "unknown", turn_number=int(turn or 0),
                                   user_text=user, assistant_text=answer, tenant_id=tenant_id,

@@ -59,7 +59,7 @@ def test_a_poison_turn_is_set_aside_and_later_turns_get_their_facts(mem):
     _reconciled(mem)
     seen: list[int] = []
 
-    def extract(messages, *, session_id, turn, tenant_id, now):
+    def extract(messages, *, session_id, turn, tenant_id, now, said_by=None):
         seen.append(turn)
         if turn == 1:
             raise ValueError("this turn always fails")

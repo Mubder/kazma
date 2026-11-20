@@ -1252,7 +1252,10 @@ def forget_entry(entry_id: str, *, tenant_id: str, conn: sqlite3.Connection | No
 
     if account_of_entry(entry_id) is None:
         return {"ok": False, "error": "not_an_entry"}
-    owner = tenant_id or "default"
+    if not tenant_id:
+        # An entry is one space's: never forgotten for no one.
+        return {"ok": False, "error": "no_space"}
+    owner = tenant_id
     seq = forget_journal.append("entry", tenant_id=owner, session_key=entry_id) if journal else None
     own = conn is None
     conn = conn or _open()

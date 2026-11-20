@@ -69,15 +69,15 @@ def _speakers_here(tenant: str) -> tuple[Any, str | None]:
     return room(tenant), bound_asker()
 
 
-def _fact_said_by(belief_id: str, tenant: str | None) -> str | None:
-    """Who stated a fact, in a shared space (its ``said_by``)."""
+def _fact_said_by(belief_id: str, space: str) -> str | None:
+    """Who stated a fact of *space*, in a shared space (its ``said_by``)."""
     from kazma_core.paths import primary_memory_db
 
     conn = sqlite3.connect(primary_memory_db())
     try:
         row = conn.execute(
             "SELECT json_extract(metadata_json, '$.said_by') FROM beliefs WHERE id = ? AND tenant_id = ?",
-            (belief_id, tenant or "default"),
+            (belief_id, space),
         ).fetchone()
         return str(row[0]) if row and row[0] else None
     except sqlite3.Error:
@@ -367,7 +367,7 @@ def register_memory_tools(registry: Any) -> None:
                 raise RefusedBeforeEffect(
                     "Error: that fact's turn is another member's; only its author or the space's "
                     "owner can forget it. Forget the fact alone (forget_source_turn=false).")
-            notes = notes_for_forgotten_facts([bid], tenant_id=tenant or "default", asker=asker)
+            notes = notes_for_forgotten_facts([bid], tenant_id=tenant, asker=asker)
             # The turn's tenant, like the list tools above: an id from another
             # tenant reads as not found.
             result = invalidate_belief(bid, remove_graph=True, tenant_id=tenant)

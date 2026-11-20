@@ -182,10 +182,21 @@ def _save_merged(new: dict[str, list[float]], model: str) -> int:
 _REAL_GET_EMBEDDER: Any = None
 
 
+def _stored_text(subject: object, predicate: object, obj: object) -> str:
+    """A fact's vector text as every variant was measured: the subject as
+    stored. S1-11 made the product embed a member's entry as ``user`` (the
+    ``id_uv`` text, :func:`kazma_core.memory.speakers.fact_vector_text`), so
+    unpinned the ``id`` and ``id_names`` variants measured ``id_uv``'s
+    vectors. Which variant embeds as ``user`` is :attr:`_Vectors.as_user`'s
+    to say."""
+    return f"{subject or ''} {predicate or ''} {obj or ''}".strip()
+
+
 def _patched(vectors: _Vectors):
     return (
         mock.patch("kazma_core.memory.embedder.get_embedder", lambda: vectors),
         mock.patch("kazma_core.memory.embedder.get_embedding_model_name", lambda: vectors.model),
+        mock.patch("kazma_core.memory.speakers.fact_vector_text", _stored_text),
     )
 
 
@@ -957,9 +968,9 @@ def build_report(vectors: _Vectors) -> dict[str, Any]:
     model is shown are kept for :data:`SHOWN_FOR` only."""
     cases = json.loads(CASES.read_text(encoding="utf-8"))
     thresholds = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
-    a, b = _patched(vectors)
+    a, b, c = _patched(vectors)
     report: dict[str, Any] = {"cases_version": cases["version"], "embedding_model": vectors.model}
-    with a, b:
+    with a, b, c:
         speakers = {}
         everyone = (*cases["members"].values(), V5_MEMBER)
         as_user = {"name_uv": tuple(f"{self_id('name', m)} " for m in everyone),

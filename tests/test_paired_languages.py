@@ -277,6 +277,23 @@ def _memory_read_line(text: str) -> bool:
     return all(detect_user_language(line.replace("memory_read", "")) == detect_user_language(text)
                for line in (middle, last))
 
+def _asker_meant(text: str) -> bool:
+    """Whether a question in a shared space is about its asker (Spaces S1-11)."""
+    from kazma_core.memory.speakers import refers_to_asker
+
+    return refers_to_asker(text, ["Omar", "عمر", "Sara", "سارة"])
+
+
+def _members_named(text: str) -> list[str]:
+    from types import MappingProxyType
+
+    from kazma_core.memory.speakers import Member, Room
+
+    room = Room(space="team", shared=True, members=MappingProxyType({
+        "omar": Member("omar", "Omar", ("عمر",)), "sara": Member("sara", "Sara", ("سارة",))}))
+    return sorted(room.named_in(text))
+
+
 M = "kazma-core/kazma_core/"
 
 PAIRS: list[Pair] = [
@@ -418,6 +435,16 @@ PAIRS: list[Pair] = [
          "hello, are you there?", "مرحبا، أنت موجود؟", _read_only_notice, True),
     Pair("private_notice", ("kazma-gateway/kazma_gateway/sender_rule.py",),
          "hello, who are you?", "مرحبا، من أنت؟", _private_notice, True),
+    # Who a question in a shared space is about (Spaces S1-11): the asker,
+    # in either language, or a member it names.
+    Pair("asker_possessive", (M + "memory/speakers.py",),
+         "Where is my car parked?", "وين سيارتي واقفة؟", _asker_meant, True),
+    Pair("asker_verb", (M + "memory/speakers.py",),
+         "What do I like to eat?", "شنو أحب آكل؟", _asker_meant, True),
+    Pair("asker_not_meant", (M + "memory/speakers.py",),
+         "Where does Omar live?", "وين ساكن عمر؟", _asker_meant, False),
+    Pair("member_named", (M + "memory/speakers.py",),
+         "When is Omar's birthday?", "متى عيد ميلاد عمر؟", _members_named, ["omar"]),
 ]
 
 
