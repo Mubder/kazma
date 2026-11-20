@@ -13710,6 +13710,28 @@ product can turn it on, so an install with one account behaves as before.
     turn, a scheduled fire and a swarm task; the ledger without the stamp
     and a call site with nothing bound as controls; a socket registered as
     before as the feed's control), `tests/_traces_space_cases.py`.
+- **Settings in three areas (S1-23, 2026-11-20).** Guards act only where
+  Spaces is enforced; not enforced, Settings and its saves are as before.
+  - `kazma_core/settings_scope.py` holds every settings key's scope:
+    `install` (the admin's), `space` (a space's own: its connected
+    accounts, its chats' state, its Soul) or `account` (a person's sign-in
+    and sessions). `_scope_of_key` is the one answer (the longest pattern
+    decides; a key under `tenant.<id>.` is that space's). A new key goes
+    under a rule there, or `tests/test_settings_scope.py` fails.
+  - The install's own writers write install keys only
+    (`install_writer_refusal`): Settings' generic and batch saves answer
+    400 and `config_save` raises `RefusedBeforeEffect` for a space's or a
+    person's key. Such a key is changed through its own route, in its space.
+  - Settings is three areas, My account, This space and Install
+    (`#settings-root`'s `data-areas`, `settings._settings_areas`). A member
+    reaches `/settings`, their password and their sessions
+    (`platform_rbac._reaches_own_settings`) and is shown My account and This
+    space; Install, the API tokens and the platform users are the admin's
+    and are not on a member's page at all. A new Settings tab is placed in
+    an area (`settings_core.js` `_tabArea`).
+  - Gates: `tests/test_settings_scope.py` (a planted key, the
+    not-enforced save and a page built for everyone as controls),
+    `tests/e2e/test_settings_areas_browser.py` (EN and AR, by the sidebar).
 
 ## UI Conventions (Web)
 

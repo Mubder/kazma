@@ -340,8 +340,12 @@
         },
 
         async loadAccount() {
+            // The API tokens are the owner's account's and the platform users
+            // the admin's (Install): a member's page reads their own sessions
+            // alone (Spaces S1-23).
+            const installShown = !this.settingsAreas || this.settingsAreas.indexOf('install') !== -1;
             const [tokens, sessions] = await Promise.all([
-                this._fetch('/api/settings/account/tokens?_=' + Date.now()),
+                installShown ? this._fetch('/api/settings/account/tokens?_=' + Date.now()) : Promise.resolve([]),
                 this._fetch('/api/settings/account/sessions?_=' + Date.now()),
             ]);
             // Always replace arrays so Alpine x-for sees a new reference.
@@ -349,7 +353,7 @@
             this.apiTokensLoaded = Array.isArray(tokens);
             this.sessions = Array.isArray(sessions) ? sessions.slice() : [];
             this.sessionsLoaded = Array.isArray(sessions);
-            await this.loadSaasAdmin();
+            if (installShown) await this.loadSaasAdmin();
         },
 
         async loadSaasAdmin() {

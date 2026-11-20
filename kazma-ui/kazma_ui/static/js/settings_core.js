@@ -16,6 +16,10 @@
         tab: 'providers_connectors',
         loading: true,
         saving: false,
+        // The areas of Settings this page shows (Spaces S1-23): the server
+        // says, on #settings-root's data-areas. A member is shown My account
+        // and This space; Install is the admin's.
+        settingsAreas: ['account', 'space', 'install'],
 
         // ── Providers Tab ──
         // The providers UI lives entirely in the `hub*` state below. An older
@@ -615,9 +619,32 @@
         xReplyPreview: { text: '', handle: '', subject_id: '', mood: '', result: null, busy: false },
         xReplyRecent: [],
 
+        /* The area a tab is in: My account, This space or Install. */
+        _tabArea(tab) {
+            if (tab === 'account') return 'account';
+            if (tab === 'email' || tab === 'x') return 'space';
+            return 'install';
+        },
+
+        _tabShown(tab) {
+            return this.settingsAreas.indexOf(this._tabArea(tab)) !== -1;
+        },
+
         async init() {
             const self = this;
             self.loading = true;
+            const areasRoot = document.getElementById('settings-root');
+            const areas = areasRoot && areasRoot.getAttribute('data-areas');
+            if (areas) self.settingsAreas = areas.split(',').filter(Boolean);
+            if (self.settingsAreas.indexOf('install') === -1) {
+                // A member's page: nothing of Install is loaded (its routes are
+                // the admin's), and the page opens on My account or the tab
+                // the address asked for when it is shown here.
+                self.loading = false;
+                const asked = areasRoot && areasRoot.getAttribute('data-tab');
+                await self.onTabChange(asked && self._tabShown(asked) ? asked : 'account');
+                return;
+            }
             try {
                 // Load all settings in parallel
                 const [settings, personalities, shortcuts, agentCfg, contextCfg, safetyCfg, appearanceCfg, nonstopCfg] = await Promise.all([
@@ -915,6 +942,8 @@
                 scrollEmbedder = true;
                 newTab = 'memory';
             }
+            // A tab of an area this page does not show is never opened.
+            if (!this._tabShown(newTab)) newTab = 'account';
             this.tab = newTab;
             try {
                 // Only Settings' own address: before a soft navigation has

@@ -2463,6 +2463,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أنت مساعد ذكاء اصطناعي مفيد...",
         "en": "You are a helpful AI assistant...",
     },
+    "settings.area_account": {"en": "My account", "ar": "حسابي"},
+    "settings.area_install": {"en": "Install", "ar": "التثبيت"},
+    "settings.area_space": {"en": "This space", "ar": "هذه المساحة"},
     "settings.tab_account": {
         "ar": "الحساب",
         "en": "Account",

@@ -1961,6 +1961,35 @@ tbody tr:last-child td {
   scrollbar-width: thin;
   scroll-snap-type: x proximity;
 }
+/* Settings' three areas (Spaces S1-23): My account, This space, Install.
+   Each area is its label over its own row of pills; the rail (.settings-nav)
+   keeps the hairline, the rows inside it draw none and never stick alone. */
+.settings-nav {
+  align-items: flex-end;
+  gap: var(--sp-4);
+}
+.settings-area {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.settings-area-label {
+  padding-inline-start: 14px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.settings-area-tabs.tabs {
+  position: static;
+  padding: 0;
+  margin-bottom: 0;
+  border-bottom: 0;
+  background: transparent;
+  overflow: visible;
+}
+
 .tab,
 .tab-btn,
 .settings-tab {
