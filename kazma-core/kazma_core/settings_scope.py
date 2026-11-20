@@ -22,7 +22,10 @@ longest pattern decides, as in ``settings_restore.KEY_RULES``; a key under
 writers -- Settings' generic save, a batch save, the agent's ``config_save``
 -- write install keys only (:func:`install_writer_refusal`): a space's key
 written there would land in the owner's space whatever space the request is
-in, and a person's in no one's.
+in, and a person's in no one's. And they write settings only
+(``settings_restore.classify``): Kazma's own records -- the identity store,
+its record of resets, sign-ins, grants, the Soul -- have their own writers,
+or the admin could add themselves to any space (S1-25).
 
 No I/O.
 """
@@ -165,13 +168,27 @@ def _scope_of_key(key: str) -> str | None:
     return best.scope if best is not None else None
 
 
+#: Kazma's own record of who is who, and the switch that turns Spaces on:
+#: written only by their own code, in every mode (S1-30's check of the docs'
+#: claim that nothing in the product turns Spaces on before its switch).
+_IDENTITY_KEYS = ("identity.",)
+
+
 def install_writer_refusal(key: str) -> str | None:
     """Why the install's own writers (Settings' generic save, a batch save,
-    the agent's ``config_save``) refuse *key*, or None. Only once Spaces is
-    enforced, and only for a key that is a space's or a person's: each is
-    changed on its own page, in its own space or account."""
+    the agent's ``config_save``) refuse *key*, or None.
+
+    The identity store and the Spaces switch, in every mode: written here
+    before Spaces is enforced, the switch would turn Spaces on before the
+    checks that must pass first, and the store would take a person into a
+    space with no record. Once Spaces is enforced, also a key that is a
+    space's or a person's (each is changed on its own page, in its own space
+    or account) and every key that is not a setting."""
     from kazma_core.spaces.scope import spaces_enforced
 
+    if key.startswith(_IDENTITY_KEYS):
+        return (f"'{key}' is Kazma's own record of who is who, written only by its own code, "
+                "never as a setting.")
     if not spaces_enforced():
         return None
     scope = _scope_of_key(key)
@@ -181,4 +198,13 @@ def install_writer_refusal(key: str) -> str | None:
     if scope == ACCOUNT:
         return (f"'{key}' belongs to a person: it is changed in their own account "
                 "(Settings -> My account), never as an install setting.")
+    from kazma_core.settings_restore import SETTING, classify
+
+    kind = classify(key)
+    if kind != SETTING:
+        # Kazma's own record -- the identity store and its record of resets,
+        # sign-ins, grants -- is written only by its own code: written here,
+        # the admin could add themselves to any space (S1-25, plan 4.10).
+        return (f"'{key}' is Kazma's own record ({kind}), written only by its own code, "
+                "never as a setting.")
     return None

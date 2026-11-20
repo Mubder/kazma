@@ -993,6 +993,27 @@ class SecretVault:
             logger.info("[Vault] Deleted secret '%s' (tenant=%s)", name, tid or "global")
         return deleted
 
+    def erase_space(self, space_id: str) -> int:
+        """Delete every secret of *space_id* (Spaces S1-27): the rows stored
+        under its id, and those whose name carries it (``space:<id>:``,
+        ``cfg:tenant.<id>.``). The space is named here, so nothing depends
+        on the scope bound: an erase runs in its eraser's space, never the
+        one erased. Returns the rows deleted."""
+        from kazma_core.spaces.scope import OWNER_SPACE_ID, valid_space_id
+
+        if not valid_space_id(space_id) or space_id == OWNER_SPACE_ID:
+            raise ValueError(f"not a space whose secrets can be erased: {space_id!r}")
+        refuse_write("vault", f"{_SPACE_NAME_PREFIX}{space_id}:")
+        prefixes = (f"{_SPACE_NAME_PREFIX}{space_id}:", f"cfg:tenant.{space_id}.")
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM secrets WHERE tenant_id = ? OR substr(name, 1, ?) = ? OR substr(name, 1, ?) = ?",
+                (space_id, len(prefixes[0]), prefixes[0], len(prefixes[1]), prefixes[1]),
+            )
+        if cur.rowcount > 0:
+            logger.info("[Vault] Erased the secrets of space %s (%d row(s))", space_id, cur.rowcount)
+        return cur.rowcount
+
     @property
     def count(self) -> int:
         """Total number of stored secrets."""

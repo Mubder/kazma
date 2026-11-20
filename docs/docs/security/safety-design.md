@@ -16,9 +16,11 @@ What each mechanism does **not** stop is on its own page, the
 [threat model](https://kazma.ai/docs/security/threat-model/), which is meant
 to be read alongside this one. In short: Kazma protects one operator from the
 agent -- its mistakes, and the untrusted pages, documents and messages it
-reads. It does not protect an install from its own operator, and it is not a
-boundary between people who do not trust each other. No independent security
-review of Kazma has been done yet.
+reads. It does not protect an install from its own operator. Spaces (section
+10), once it is switched on, will keep the people who use an install apart
+from each other; it is not switched on in any release yet, and it keeps
+nothing from the person who runs the machine. No independent security review
+of Kazma has been done yet.
 
 ## The principles
 
@@ -223,6 +225,42 @@ learned from the turns taken back.
   are drilled with the real tools.
 - Every alert, approval and automatic decision lands in the daily digest and
   the weekly report.
+
+## 10. People apart: Spaces
+
+Spaces lets an install be shared by a few people, each in a space of their
+own ([the guide](../guide/spaces)). It is being built and is not switched on
+in any release yet; the switch is written only by Kazma's own code, never as
+a setting. How it is built:
+
+- **No default space.** Work names the space it acts in and the person it
+  acts for, bound together; code that needs a space and has none bound is
+  refused, never handed the owner's. A chat thread is recorded once with its
+  space, and every turn, scheduled job, swarm task and queued memory task
+  runs in the space its own record names.
+- **Membership, not role.** A page names its space on every request and
+  socket, and the server checks that the person is a member, every time.
+  An admin is not a member of anyone else's space, and Settings' own
+  writers never write the record of who is in which.
+- **Every store declares how it keeps a space apart**: by a space column,
+  by a thread of the space, by a folder, or as the install's own. A table
+  with no rule refuses the walk that counts, exports and erases one space,
+  so nothing is skipped silently.
+- **One space against another, for everything.** A test harness runs every
+  route and every agent tool as one space against another, and a new route
+  or tool with no case fails it. A word planted in every table of two spaces
+  shows that one space's export holds none of the other's, and that erasing
+  one leaves the other whole.
+- **Host tools exist only where they belong.** A sandboxed space has no
+  shell, git, IDE or MCP servers -- absent from what the model is offered
+  and refused if called -- and works in its own folder.
+- **What reaches the admin is counts, not content.** The admin sees each
+  person's spend and how much work they ran; log lines, the daily digest
+  and alerts say how long someone's words are, never the words.
+
+What it does not do: it is not a boundary against the person who runs the
+machine, who can read the disk and the backups; per-space encryption is
+planned, not built; and it has not been reviewed independently.
 
 ## How it is tested, and what is not yet
 

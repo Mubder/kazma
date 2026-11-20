@@ -100,7 +100,9 @@ def resolve_active_root() -> Path:
       0. The bound space's own folder, when Spaces is enforced and the
          space is a sandboxed one (``spaces.files``).
       1. Per-task ``workspace_scope`` (swarm concurrent multi-repo).
-      2. Active WorkspaceStore row (Switch Repo / clone — user intent).
+      2. The bound space's active WorkspaceStore row (Switch Repo / clone —
+         user intent); a host space other than the owner's with none works
+         in its own folder (Spaces S1-34).
       3. Process pin from :func:`configure_workspace`.
       4. ``KAZMA_WORKSPACE`` env.
       5. :func:`default_sandbox_root`.
@@ -126,18 +128,26 @@ def resolve_active_root() -> Path:
     except Exception:
         pass
 
-    # 2. Active WorkspaceStore
+    # 2. Active WorkspaceStore -- the bound space's own (Spaces S1-34). Only
+    #    the owner's space (the machine's workspace) sets the process pin.
+    from kazma_core.spaces.files import host_space_root
+
+    own_root = host_space_root()
     try:
         from kazma_core.stores import get_workspace_store
 
         active = get_workspace_store().get_active_workspace()
         if active and active.get("root_path"):
             active_path = Path(active["root_path"]).expanduser().resolve()
-            if _WORKSPACE_ROOT is None or _WORKSPACE_ROOT.resolve() != active_path:
+            if own_root is None and (_WORKSPACE_ROOT is None or _WORKSPACE_ROOT.resolve() != active_path):
                 _WORKSPACE_ROOT = active_path
             return active_path
     except Exception:
         pass
+    # 2b. A host space other than the owner's with no workspace of its own
+    #     works in its own folder, never the machine's (pin, variable, sandbox).
+    if own_root is not None:
+        return own_root
 
     # 3. Process pin
     if _WORKSPACE_ROOT is not None:

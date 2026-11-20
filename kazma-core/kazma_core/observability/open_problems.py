@@ -13,6 +13,11 @@ resolved leaves by itself:
 * open dependency advisories (``security.advisory_watch``);
 * the outside observer's open incident (``observability.outside_watch``).
 
+Once Spaces is enforced the list is the person's (S1-32): the problems of
+the space bound to the page (its incidents, its research and crawls), and
+the install's own (alerts, requirements, advisories, the outside watcher)
+for the admin only.
+
 Each problem says when it is resolved, and can be acknowledged (hidden until
 it changes) or snoozed for 24 hours; those choices are kept under
 ``system.problems.seen`` (Kazma's own state). The Dashboard's card
@@ -130,6 +135,9 @@ def _observer(language: str) -> list[Problem]:
 
 
 _SOURCES = (_alerts, _incidents, _acquisition, _requirements, _advisories, _observer)
+#: The install's own problems: the admin's only once Spaces is enforced
+#: (S1-32). The incidents and acquisition alerts keep to their space.
+_INSTALL_SOURCES = (_alerts, _requirements, _advisories, _observer)
 
 
 def _seen() -> dict[str, dict[str, Any]]:
@@ -147,6 +155,10 @@ def open_problems(language: str = "en", *, now: float | None = None, include_hid
     Blocking (stores, files, the observer): call it from a thread."""
     now = time.time() if now is None else now
     sources = _SOURCES if sources is None else sources
+    from kazma_core.runs.spaces import install_notices_here
+
+    if any(source in _INSTALL_SOURCES for source in sources) and not install_notices_here():
+        sources = tuple(source for source in sources if source not in _INSTALL_SOURCES)
     found: list[Problem] = []
     unreadable: list[str] = []
     for source in sources:

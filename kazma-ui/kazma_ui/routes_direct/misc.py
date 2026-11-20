@@ -357,7 +357,12 @@ def register_misc_routes(self: Any) -> None:
         except store_errors() as exc:  # a store that cannot answer: everything counts as unread
             logger.warning("[alerts] the read notifications could not be read: %s", type(exc).__name__)
             read = set()
-        for a in [*AlertDispatcher.get_recent_alerts(), *recent_alerts(current_language()), *incidents]:
+        from kazma_core.runs.spaces import install_notices_here
+
+        # The install's own alerts are the admin's once Spaces is enforced;
+        # a run's notices keep to its space (S1-32).
+        install = AlertDispatcher.get_recent_alerts() if install_notices_here() else []
+        for a in [*install, *recent_alerts(current_language()), *incidents]:
             item = a.to_dict() if hasattr(a, "to_dict") else a
             try:
                 encoded = jsonable_encoder(item)

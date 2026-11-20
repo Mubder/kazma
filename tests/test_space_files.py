@@ -245,7 +245,10 @@ def test_a_host_space_other_than_the_owners_keeps_its_own_folders(matrix, enforc
             machine = resolve_active_root()
         with bind_scope("matrix-dev", OWNER_ACCOUNT_ID):
             assert space_files.sandboxed_space() is None
-            assert resolve_active_root() == machine  # its own root is S1-34's
+            # Its own root (S1-34): its own folder until it activates a
+            # workspace of its own, never the machine's.
+            assert resolve_active_root() == (space_files.space_dir("matrix-dev") / "files").resolve()
+            assert resolve_active_root() != machine
             assert space_files.space_folder("images", create=False) == (
                 space_files.space_dir("matrix-dev") / "images")
     finally:

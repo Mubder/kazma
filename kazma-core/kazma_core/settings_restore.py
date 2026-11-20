@@ -30,6 +30,15 @@ password inside a URL are written as ``****``.
   it is now;
 - deletes nothing.
 
+**Other spaces** (Spaces S1-28): once Spaces is enforced the Settings file
+is the admin's, so it holds the install's settings and the owner's space's
+own, never another space's (:func:`_held_by_another_space`: a
+``tenant.<id>.`` key of a space but the owner's, and the documents that keep
+every space's entry, such as their Souls), and a restore never writes one --
+an older file must not write into a member's space or bring back an erased
+one. A space's settings travel with the whole install (the universal backup,
+a migration bundle), beside the identity store that says whose they are.
+
 ``_plan_restore`` only reads: the page shows its plan and writes only after the
 owner confirms that plan (its ``digest``). ``_apply_restore`` writes it in one
 ``batch_set`` and keeps an undo record (:data:`UNDO_KEY`):
@@ -424,12 +433,31 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+#: The settings documents that keep one entry per space but the owner's.
+_EVERY_SPACES = ("self_improvement.space_evolution", "email.accounts_by_space")
+
+
+def _held_by_another_space(key: str) -> bool:
+    """Whether *key* is another space's than the owner's, on an install that
+    enforces Spaces: such a key is never in the admin's Settings file and
+    never written by a restore (S1-28)."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    if base_key(key) in _EVERY_SPACES:
+        return True
+    parts = key.split(".", 2)
+    # ``tenant.<id>.<key>`` (base_key's shape): the space ``<id>``'s.
+    return len(parts) > 2 and parts[0] == "tenant" and parts[1] != OWNER_SPACE_ID
+
+
 def _backup_document(store: Any) -> dict[str, Any]:
     """What a backup holds (see the module docstring)."""
     rows, _categories = _stored_rows(store)
     settings: dict[str, Any] = {}
     for key in sorted(rows):
-        if classify(key) in (RUNTIME, CREDENTIAL):
+        if classify(key) in (RUNTIME, CREDENTIAL) or _held_by_another_space(key):
             continue
         settings[key] = _mask_backup_secrets(base_key(key), rows[key])
     return {
@@ -537,6 +565,7 @@ class RestorePlan:
     keys_to_reenter: list[str] = field(default_factory=list)
     refused: dict[str, str] = field(default_factory=dict)
     not_selected: int = 0
+    kept_other_spaces: list[str] = field(default_factory=list)
 
     @property
     def digest(self) -> str:
@@ -560,6 +589,7 @@ class RestorePlan:
                 "keys": len(self.kept_keys),
                 "learned": len(self.kept_learned),
                 "retired_defaults": len(self.kept_retired),
+                "other_spaces": len(self.kept_other_spaces),
             },
             "kept_keys": sorted(self.kept_keys),
             "keys_restored": sorted(self.keys_restored),
@@ -721,6 +751,9 @@ class _Planner:
         base = base_key(key)
         if self.sections is not None and base.split(".", 1)[0] not in self.sections:
             plan.not_selected += 1
+            return
+        if _held_by_another_space(key):
+            plan.kept_other_spaces.append(key)
             return
         kind = classify(key)
         if kind == RUNTIME:

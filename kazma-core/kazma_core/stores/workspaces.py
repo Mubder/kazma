@@ -196,6 +196,24 @@ class WorkspaceStore:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _space() -> str | None:
+        """The space whose workspaces a call reads and changes (Spaces
+        S1-34): None while Spaces is not enforced (one list, one active
+        row, as before); once it is, the bound space's, and the owner's for
+        the install's own work (the MCP binding, the code index, health:
+        the machine's workspace)."""
+        from kazma_core.spaces.scope import OWNER_SPACE_ID, current_scope, spaces_enforced
+
+        if not spaces_enforced():
+            return None
+        bound = current_scope()
+        return bound.space_id if bound is not None else OWNER_SPACE_ID
+
+    @staticmethod
+    def _where_space(space: str | None) -> tuple[str, tuple[Any, ...]]:
+        return ("", ()) if space is None else (" AND space_id = ?", (space,))
+
+    @staticmethod
     def _migrate_repo_columns(conn: sqlite3.Connection) -> None:
         """Idempotently add the repo-identity columns if absent.
 
@@ -207,6 +225,9 @@ class WorkspaceStore:
         from kazma_core.db.sqlite_columns import add_missing_columns
 
         add_missing_columns(conn, "workspaces", _REPO_COLUMNS)
+        # The space a workspace belongs to (Spaces S1-34); every row of an
+        # install from before Spaces is the owner's.
+        add_missing_columns(conn, "workspaces", (("space_id", "TEXT NOT NULL DEFAULT 'default'"),))
 
     # ------------------------------------------------------------------
     # Repo identity (Phase 2)
@@ -285,14 +306,18 @@ class WorkspaceStore:
         ws_id = str(uuid.uuid4())
         created_at = datetime.now(UTC).isoformat()
         resolved_path = str(Path(path).resolve())
+        from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+        space = self._space() or OWNER_SPACE_ID
 
         with self._lock:
             conn = self._get_conn()
             try:
                 conn.execute("BEGIN")
                 conn.execute(
-                    "INSERT INTO workspaces (id, name, root_path, created_at, is_active) VALUES (?, ?, ?, ?, 0)",
-                    (ws_id, name.strip(), resolved_path, created_at),
+                    "INSERT INTO workspaces (id, name, root_path, created_at, is_active, space_id) "
+                    "VALUES (?, ?, ?, ?, 0, ?)",
+                    (ws_id, name.strip(), resolved_path, created_at, space),
                 )
                 conn.execute("COMMIT")
             except Exception as exc:
@@ -311,21 +336,23 @@ class WorkspaceStore:
 
     def list_workspaces(self) -> list[dict[str, Any]]:
         """Return all registered workspaces (including repo identity)."""
+        where, args = self._where_space(self._space())
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
                 f"SELECT id, name, root_path, created_at, is_active, {_REPO_COLS} "
-                "FROM workspaces ORDER BY created_at"
+                f"FROM workspaces WHERE 1 = 1{where} ORDER BY created_at", args
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
     def get_active_workspace(self) -> dict[str, Any] | None:
         """Return the currently active workspace dictionary or None."""
+        where, args = self._where_space(self._space())
         with self._lock:
             conn = self._get_conn()
             row = conn.execute(
                 f"SELECT id, name, root_path, created_at, is_active, {_REPO_COLS} "
-                "FROM workspaces WHERE is_active = 1"
+                f"FROM workspaces WHERE is_active = 1{where}", args
             ).fetchone()
         if row:
             return self._row_to_dict(row, active=True)
@@ -349,12 +376,13 @@ class WorkspaceStore:
 
     def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
         """Return one workspace by id, or None."""
+        where, args = self._where_space(self._space())
         with self._lock:
             conn = self._get_conn()
             row = conn.execute(
                 f"SELECT id, name, root_path, created_at, is_active, {_REPO_COLS} "
-                "FROM workspaces WHERE id = ?",
-                (workspace_id,),
+                f"FROM workspaces WHERE id = ?{where}",
+                (workspace_id, *args),
             ).fetchone()
         if not row:
             return None
@@ -402,11 +430,13 @@ class WorkspaceStore:
             True if setting succeeded, False if the workspace was not found.
         """
         root_path: str | None = None
+        space = self._space()
+        where, args = self._where_space(space)
         with self._lock:
             conn = self._get_conn()
-            # Validate workspace exists and capture root for tool pin
+            # Validate workspace exists (in this space) and capture root for tool pin
             row = conn.execute(
-                "SELECT root_path FROM workspaces WHERE id = ?", (workspace_id,)
+                f"SELECT root_path FROM workspaces WHERE id = ?{where}", (workspace_id, *args)
             ).fetchone()
             if not row:
                 return False
@@ -414,7 +444,9 @@ class WorkspaceStore:
 
             try:
                 conn.execute("BEGIN")
-                conn.execute("UPDATE workspaces SET is_active = 0")
+                # One active row per space (S1-34): a switch in one space
+                # never moves another's.
+                conn.execute(f"UPDATE workspaces SET is_active = 0 WHERE 1 = 1{where}", args)
                 conn.execute(
                     "UPDATE workspaces SET is_active = 1 WHERE id = ?",
                     (workspace_id,),
@@ -427,6 +459,13 @@ class WorkspaceStore:
                 raise exc
 
         # Outside the lock: pin tools + fire binding bus (MCP rebind, etc.).
+        # The process pin and the MCP servers are the machine's: only the
+        # owner's space moves them (S1-34); another space's switch moves only
+        # its own active row.
+        from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+        if root_path and space not in (None, OWNER_SPACE_ID):
+            return True
         if root_path:
             try:
                 from kazma_core.workspace.binding import notify_root_changed

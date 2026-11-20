@@ -13825,6 +13825,118 @@ product can turn it on, so an install with one account behaves as before.
     turn, every INFO line, alert, the digest and the weekly report read for
     a planted word; the log's words as before, today's digest and every
     call sent to Langfuse as controls).
+- **The admin boundary (S1-25, 2026-11-20).** Guards act only where Spaces
+  is enforced; not enforced, the older user routes answer and there is no
+  People tab.
+  - The admin opens no space they are not a member of: the membership check
+    (`space_binding.space_for_request`), never a role check, on every route
+    and socket. A new way into a space's data asks membership too.
+  - Settings' own writers write settings only
+    (`settings_scope.install_writer_refusal` asks `settings_restore.classify`):
+    the identity store and every other record of Kazma's are written by
+    their own code, or the admin could add themselves to any space.
+  - People (`kazma_core/spaces/people.py`, `kazma_ui/people_api.py`, Settings
+    -> Install -> People): add (an account and its sandboxed personal space),
+    reset (sessions end), delete (sessions end, every membership goes, the
+    personal space stays closed, `account_deleted_at`, for S1-27). Every
+    change is an event of the identity store's record, in the same step; the
+    record is append-only (`identity.update_registry`) and hash-chained
+    (`people.broken_at`). A reset is told to the person at their next page
+    load, once (`/api/account/notices`, `account_notices.js`). The older
+    mode's user routes refuse once enforced (`use_people_page`).
+  - Gates: `tests/test_admin_cannot_open_a_space.py` (a role check alone
+    and an untouched record as controls), `tests/e2e/test_people_page_browser.py`
+    (EN and AR, by the sidebar; no tab without Spaces as the control).
+- **Count, export and erase one space (S1-27, 2026-11-20).** Only once
+  Spaces is enforced (409 `spaces_off`); never the owner's personal space
+  (`owners_space`); not yet on Postgres or with memory's Postgres copy
+  (`postgres_not_yet`).
+  - `kazma_core/spaces/space_data.py` walks every table of every `row` store
+    (`store_registry.SPACE_RULES`) and finds the space's rows by its rule:
+    `TABLE_RULES`, else a space column (`tenant_id`, `tenant`, `space`,
+    `space_id`), else an FTS index its triggers keep, else its thread. A
+    table with none refuses the count, the export and the erase (500
+    `unknown_table`): a new table, or one the app makes at start, gets a
+    rule in the same change (`keep` says why it holds no space's words).
+    Settings, secrets (`SecretVault.erase_space`, whatever scope is bound)
+    and libraries (`knowledge_lifecycle.delete_library`) go through their
+    own stores; the space's folders after; then it leaves the identity
+    store, recorded (`space_erased`).
+  - An erase first closes the space (`people.close_space`: `erasing_at`, and
+    `identity.is_member` is False for everyone); one that stopped half way is
+    run again. Each store file's rows go in one transaction.
+  - Who may (`kazma_ui/spaces_api.py`, from the memberships): the admin or a
+    member counts (numbers only); the space's owner exports; an owner deletes
+    a shared space; the admin erases the closed personal space of a deleted
+    person and never exports a member's. The export is sealed with a
+    password the person chooses (decision N10, `security/sealed_zip.py`:
+    WinZip AES-256, at least 12 characters).
+  - Pages: Settings -> This space -> This space's data; People lists the
+    closed spaces with Erase.
+  - Gates: `tests/test_space_export_erase.py` (a word planted in every table
+    of A and of B; A's export holds A's only; erasing A leaves no column or
+    file holding A's word, B whole; yesterday's erase that misses a store, a
+    table with no rule and a Postgres copy of memory as controls),
+    `tests/test_sealed_zip.py` (7-Zip and bsdtar open it with the password
+    only, ZIP64 too; a big-endian counter as the control),
+    `tests/e2e/test_people_page_browser.py` (EN and AR, by the sidebar).
+- **Backups carry the identity store; a restore keeps spaces apart (S1-28,
+  2026-11-20).** The universal backup, the Postgres dump and a migration
+  bundle carry the identity store (a settings row) and the thread records
+  (`thread_scopes.db`) with the stores: a restore keeps every chat in its
+  space. Guards act only where Spaces is enforced.
+  - The Settings file is the admin's (`settings_restore._held_by_another_space`):
+    it holds no other space's `tenant.<id>.` keys and no other space's Soul,
+    and a restore of an older file writes none (`kept.other_spaces`).
+  - With a second account, no plain copy of the backup leaves the machine
+    (decision N10, `universal._plain_copy_refused`): restic's encrypted copy
+    only.
+  - Gate: `tests/test_backup_restore_spaces.py` (a real universal backup and
+    a real migration of two planted spaces, judged by a child pinned to the
+    restored folder; a restore without the identity store, the Settings
+    file of before and the plain-copy check of before as controls).
+- **The docs say what Spaces promises and what it does not (S1-30,
+  2026-11-20):** the threat model's first section and section 6, the safety
+  design's section 10, and `docs/docs/guide/spaces.md`. Each says Spaces is
+  not switched on in any release yet, keeps nothing from the person who runs
+  the machine, and has not been reviewed independently;
+  `tests/test_threat_model_accuracy.py` holds them to the code. **The
+  identity store and the Spaces switch are written only by their own code,
+  in every mode** (`settings_scope.install_writer_refusal`): before Spaces is
+  enforced Settings' generic save wrote the switch (`identity.ENFORCED_KEY`), turning Spaces
+  on before S1-33's checks. Gate: `tests/test_settings_scope.py` (the rule
+  of before as the control).
+- **The environment note is the space's own (S1-31, 2026-11-20).** In a
+  sandboxed space `ide/env_context._sandboxed_space_note` names the space's
+  folder by relative paths only, the Python policy and the tools the space
+  has; never the install's workspace, data folder, repository, branch, MCP
+  root, host shell or GitHub sign-in (a task naming a workspace, or a space
+  whose kind cannot be read, is told nothing of the machine). The admin's
+  space and an install without Spaces keep the note they always had. Gate:
+  `tests/test_environment_note_per_space.py` (a real turn through the
+  supervisor graph; a sandboxed space read as a host one as the control).
+- **The bell, open problems and Running work are per person (S1-32,
+  2026-11-20).** The acquisition monitor records each research and crawl
+  notice's space (`web_acquire/monitor._crawl_space`; unreadable: shown to
+  nobody, sent nowhere) and lists it only in its space
+  (`monitor._shown_here`); another space's notice stays off the install's
+  channels (O1). The install's own notices -- service alerts, requirements,
+  advisories, the outside watcher -- are the admin's
+  (`runs.spaces.install_notices_here`). Gate:
+  `tests/test_bell_and_problems_per_person.py` (words planted in one
+  person's topic and chat title, read through the real routes as everyone
+  else; the lists of before as the control).
+- **Each host space has its own root (S1-34, 2026-11-20).** Workspace rows
+  carry their space (`space_id`; existing rows the owner's) and each space
+  has its own active one; a switch or clone moves only its own space's, and
+  only the owner's space moves the process pin and the MCP servers
+  (`notify_root_changed`). `resolve_active_root` answers the bound space's
+  active workspace; a host space other than the owner's with none works in
+  its own folder (`spaces.files.host_space_root`), its file tools stay in
+  its workspace (`path_policy._space_home`). The IDE service, code index,
+  IDE undo and the MCP guard follow the root. Gate:
+  `tests/test_host_space_roots.py` (one active row for the install as the
+  control).
 
 ## UI Conventions (Web)
 

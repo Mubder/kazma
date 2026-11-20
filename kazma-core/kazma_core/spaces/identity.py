@@ -17,6 +17,11 @@ What it holds:
   ``member``).
 * ``links``, ``space_keys``, ``policies`` -- kept empty here; stages 2 and 3
   and item S1-26 fill them.
+* ``events`` -- the record of what was done to accounts (Spaces S1-25:
+  created, a password reset, deleted), hash-chained and append-only:
+  :func:`update_registry` refuses a change that edits or drops an earlier
+  event. ``events_seen`` holds how far each person has read the notices
+  about them (``kazma_core.spaces.people``).
 
 **The owner is always there.** An install with no stored registry reads as
 one account (:data:`OWNER_ACCOUNT_ID`, the admin) in one space
@@ -174,6 +179,8 @@ def _empty_registry() -> dict[str, Any]:
         "links": [],
         "space_keys": {},
         "policies": {},
+        "events": [],
+        "events_seen": {},
         "moved_platform_users": False,
     }
 
@@ -189,10 +196,10 @@ def _normalized(raw: Any) -> dict[str, Any]:
         )
     reg = copy.deepcopy(raw)
     base = _empty_registry()
-    for table in ("accounts", "spaces", "space_keys", "policies"):
+    for table in ("accounts", "spaces", "space_keys", "policies", "events_seen"):
         if not isinstance(reg.get(table), dict):
             reg[table] = {}
-    for table in ("memberships", "links"):
+    for table in ("memberships", "links", "events"):
         if not isinstance(reg.get(table), list):
             reg[table] = []
     reg["accounts"].setdefault(OWNER_ACCOUNT_ID, base["accounts"][OWNER_ACCOUNT_ID])
@@ -271,8 +278,13 @@ def update_registry(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
             for account_id, account_ in _legacy_accounts(legacy).items():
                 reg["accounts"].setdefault(account_id, account_)
             reg["moved_platform_users"] = True
+        recorded = copy.deepcopy(reg["events"])
         try:
             change(reg)
+            if reg.get("events", [])[: len(recorded)] != recorded:
+                # The record is append-only: no change edits or drops an
+                # earlier event (S1-25).
+                raise IdentityError("record_is_append_only", "the record of account changes is append-only")
             _check(reg)
         except IdentityError as exc:
             refused.append(exc)
@@ -332,7 +344,7 @@ def _check(reg: dict[str, Any]) -> None:
         if space_.get("kind") not in _SPACE_KINDS:
             raise IdentityError("bad_space_kind", f"not a space kind: {space_.get('kind')!r}")
         personal_of = space_.get("personal_of")
-        if personal_of and personal_of not in reg["accounts"]:
+        if personal_of and personal_of not in reg["accounts"] and not space_.get("account_deleted_at"):
             raise IdentityError("no_such_account", f"no account {personal_of!r}")
     seen: set[tuple[str, str]] = set()
     members: dict[str, list[str]] = {}
@@ -350,6 +362,15 @@ def _check(reg: dict[str, Any]) -> None:
         members.setdefault(pair[1], []).append(pair[0])
     for space_id, space_ in reg["spaces"].items():
         personal_of = space_.get("personal_of")
+        if space_.get("account_deleted_at"):
+            # Its person was deleted (S1-25): nobody is in it, and nobody is
+            # ever added; its data waits to be erased (S1-27).
+            if members.get(space_id):
+                raise IdentityError(
+                    "personal_space_is_private",
+                    f"the space {space_id!r} of a deleted account has no member",
+                )
+            continue
         if personal_of and members.get(space_id, []) != [personal_of]:
             # A personal space has one member forever (decision N5).
             raise IdentityError(
@@ -388,10 +409,14 @@ def spaces_of(account_id: str) -> list[dict[str, Any]]:
 
 def is_member(account_id: str, space_id: str) -> bool:
     """True when the account is a member of the space. An unreadable store
-    raises: "not a member" is never guessed."""
+    raises: "not a member" is never guessed. Nobody is a member of a space
+    being erased (``erasing_at``, S1-27): no request or job binds it."""
+    reg = read_registry()
+    if (reg["spaces"].get(space_id) or {}).get("erasing_at"):
+        return False
     return any(
         m.get("account") == account_id and m.get("space") == space_id
-        for m in read_registry()["memberships"]
+        for m in reg["memberships"]
     )
 
 

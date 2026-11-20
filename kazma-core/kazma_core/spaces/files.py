@@ -43,6 +43,7 @@ from kazma_core.spaces.scope import (
 )
 
 __all__ = [
+    "host_space_root",
     "FOLDER_KINDS",
     "SpaceKindUnknown",
     "another_spaces_path",
@@ -168,6 +169,25 @@ def sandboxed_files_root() -> Path | None:
     if space is None:
         return None
     root = space_dir(space) / FILES
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
+def host_space_root() -> Path | None:
+    """The own folder of the bound space when it is a host space other than
+    the owner's (Spaces S1-34): such a space has its own workspaces and, with
+    none active, works here -- never in the machine's workspace. None for the
+    owner's space, a sandboxed one, work with no space bound, and an install
+    that does not enforce Spaces. ``SpaceKindUnknown`` when its kind cannot be
+    read."""
+    if not spaces_enforced():
+        return None
+    bound = current_scope()
+    if bound is None or bound.space_id == OWNER_SPACE_ID:
+        return None
+    if space_kind(bound.space_id) != "host":
+        return None
+    root = space_dir(bound.space_id) / FILES
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve()
 

@@ -79,6 +79,26 @@ def visible_here(space: Any) -> bool:
     return bound is not None and space_of(space) == bound.space_id
 
 
+def install_notices_here() -> bool:
+    """Whether the person bound now is shown the install's own notices -- a
+    service alert, an unmet requirement, an advisory, the outside watcher, the
+    acquisition monitor's own: always while Spaces is not enforced; once it
+    is, the admin only (S1-32: they are the admin's to act on, and a member's
+    bell is their own). Blocking (the identity store); a store that cannot say
+    shows none."""
+    if not spaces_enforced():
+        return True
+    bound = current_scope()
+    if bound is None or not bound.asker:
+        return False
+    from kazma_core.spaces import identity
+
+    try:
+        return identity.is_admin_account(bound.asker)
+    except (identity.IdentityUnavailable, identity.IdentityError):
+        return False
+
+
 def kept_in_its_space(space: Any) -> bool:
     """Whether news of work of *space* stays off the install's channels (the
     run's chat address, the ops alerts): once Spaces is enforced, every

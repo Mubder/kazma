@@ -56,6 +56,11 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
         "acquisition.outputs", "acquisition.outputs_revision",
         "acquisition.monitor", "acquisition.monitor_revision"),
     "kazma-core/kazma_core/web_acquire/accounting.py::_mutate": ("acquisition.allowances", "acquisition.allowances_revision"),
+    # Erasing a space (S1-27) deletes the keys it holds, each already named
+    # by a rule (tenant.<id>., a chat's state), and takes the space's entry
+    # out of the documents kept by space.
+    "kazma-core/kazma_core/spaces/space_data.py::_erase_settings": (
+        "self_improvement.space_evolution", "email.accounts_by_space"),
     # One row and revision per job (Knowledge KB-E04), admission under the
     # registry revision; the old single value is moved in, then removed.
     "kazma-core/kazma_core/web_acquire/crawl_jobs.py::_mutate": ("acquisition.crawl.", "acquisition.crawls_revision"),

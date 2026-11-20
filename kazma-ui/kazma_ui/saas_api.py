@@ -31,6 +31,19 @@ def create_saas_router() -> APIRouter:
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
         return JSONResponse({"error": "Admin role required"}, status_code=403)
 
+    def _people_page_refusal() -> JSONResponse | None:
+        """Once Spaces is enforced, people are created, reset and deleted on
+        the People page, where every change is recorded and a reset is told
+        to the member (S1-25): the older mode's routes would reset a password
+        silently, the one way an admin reaches a member's space."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if not spaces_enforced():
+            return None
+        return JSONResponse({"ok": False, "error": "use_people_page",
+                             "message": "People are changed on the People page once Spaces is on."},
+                            status_code=409)
+
     @router.get("/status")
     def saas_status(request: Request) -> JSONResponse:
         denied = _require_admin(request)
@@ -89,6 +102,9 @@ def create_saas_router() -> APIRouter:
         denied = await asyncio.to_thread(_require_admin, request)
         if denied:
             return denied
+        refused = _people_page_refusal()
+        if refused:
+            return refused
         try:
             body = await read_json(request)
         except InvalidJsonBody:
@@ -137,6 +153,9 @@ def create_saas_router() -> APIRouter:
         denied = _require_admin(request)
         if denied:
             return denied
+        refused = _people_page_refusal()
+        if refused:
+            return refused
         from kazma_core.security.platform_rbac import (
             PlatformUsersUnavailable,
             _update_users,
@@ -171,6 +190,9 @@ def create_saas_router() -> APIRouter:
         denied = await asyncio.to_thread(_require_admin, request)
         if denied:
             return denied
+        refused = _people_page_refusal()
+        if refused:
+            return refused
         try:
             body = await read_json(request, allow_empty=True)
         except InvalidJsonBody:
