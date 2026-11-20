@@ -116,7 +116,7 @@ def _locked_extraction() -> dict:
 def _locked_parts() -> dict:
     """The parts of the lock beside the recall scores, as committed."""
     locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
-    return {"extraction": locked["extraction"], "writes": locked["writes"]}
+    return {"extraction": locked["extraction"], "writes": locked["writes"], "speakers": locked["speakers"]}
 
 
 def test_the_lock_never_lowers_the_ratchet(tmp_path, monkeypatch):

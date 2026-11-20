@@ -13937,6 +13937,55 @@ product can turn it on, so an install with one account behaves as before.
   IDE undo and the MCP guard follow the root. Gate:
   `tests/test_host_space_roots.py` (one active row for the install as the
   control).
+- **Who is "I" in a shared space (S1-11, 2026-11-20; the R3 study,
+  N30 to N36).** `kazma_core/memory/speakers.py` is the one module that
+  knows about members; everything else asks it.
+  - **Which spaces file by member** (`speakers.room`): a shared space (no
+    `personal_of`) once Spaces is enforced, from its first turn. A personal
+    space, and every space while Spaces is not enforced, keeps the one
+    `user` entry, and its rows are stored exactly as before (no `said_by`,
+    subject `user`). An unreadable identity store raises: nothing is filed
+    under a guessed member.
+  - **Where a fact goes** (`Room.filed`): ``user`` (what the passes write
+    for "I", as a subject or an object) is the speaker's entry
+    `member_<account>`; a member's name, or one they are called by
+    (`identity.set_called_names`), is theirs. A model never writes an entry
+    (`belief_extractor._sanitize_belief`, the memory tools). With no speaker
+    a first-person fact is not filed; the turn is still remembered.
+  - **The speaker travels with the turn**: `respond_node`'s record
+    (`said_by`), the post-turn thread and queue, the episode
+    (`metadata.said_by`), the quick and deep passes, turn reconcile (the
+    chat store's `author`), history imports, the memory tools. A new writer
+    from a turn passes `said_by` (or the episode's `metadata`):
+    `test_every_writer_from_a_turn_passes_its_speaker`.
+  - **Whose words** (`Room.label`): another member's words about a member
+    are `member_stated`, which never replaces that member's own (N34).
+  - **One vector text** (`speakers.fact_vector_text`): a member's facts
+    embed as `user <predicate> <object>` (the study's 4.3). No fact vector is
+    built by hand (`test_one_text_for_a_facts_vector`).
+  - **Recall reads a shared space for its asker** (`recall(asker=)`): their
+    own facts and turns as `user` / `User:`, another member's under their
+    name, a note outside the fence. Whose facts a question is about is
+    chosen before ranking (`recall._whose_facts`: named first, then self
+    first; `speakers.refers_to_asker` reads the first person); chosen after,
+    another member's best match pushed the asker's own out by the gap.
+  - **The speakers benchmark** (`benchmark_data/speakers.json`,
+    `run_speaker_benchmark`) has its own ratchet (`thresholds.json`
+    `speakers`, `scripts/memory_bench.py lock`); the study's vectors are
+    replayed (`speakers_vectors.npz`).
+  - **About me** is each member's own in a shared space
+    (`memory_member_profile`, N31), with "Copy from my personal space".
+  - **Forget** (N32, N33, N36): a shared turn is its author's and the space
+    owner's to forget (`speakers.may_forget_turn`), a shared chat its
+    opener's and the owner's to keep out; a fact about oneself another
+    member stated goes, never filed from that message again
+    (`metadata.not_again`), and Forget says the message stays
+    (`forget.notes_for_forgotten_facts`); `forget.forget_entry` forgets every
+    fact under an entry, journaled (kind `entry`).
+  - **The notice** "Memory here is shared with ..." near the composer and
+    on the Memory page (`static/js/shared_memory_notice.js`, N35).
+  - Gates: `tests/test_memory_speakers.py` (each rule with its control),
+    `tests/e2e/test_shared_memory_notice.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

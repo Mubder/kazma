@@ -88,10 +88,12 @@ def _tenants_of(mem, sql: str, *params: Any) -> list[str]:
 def test_each_spaces_about_me_is_its_own(mem) -> None:
     from kazma_core.memory.profile import about_for_turn, set_about
 
+    # A and B are shared spaces (no person's own): About me there is each
+    # member's own (Spaces S1-11, N31).
     assert set_about(OWNER_SPACE_ID, "I am the owner.")["ok"]
-    assert set_about(A, "We are team alpha.")["ok"]
-    assert about_for_turn(A)["about"] == "We are team alpha."
-    assert about_for_turn(B)["about"] == ""  # not the owner's
+    assert set_about(A, "We are team alpha.", account=OWNER_ACCOUNT_ID)["ok"]
+    assert about_for_turn(A, OWNER_ACCOUNT_ID)["about"] == "We are team alpha."
+    assert about_for_turn(B, OWNER_ACCOUNT_ID)["about"] == ""  # not the owner's
     assert about_for_turn(OWNER_SPACE_ID)["about"] == "I am the owner."
 
 

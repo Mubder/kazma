@@ -49,7 +49,9 @@ __all__ = [
     "state",
 ]
 
-KINDS = ("turn", "chat", "keep_out", "remember", "summary", "rewind")
+#: ``entry``: every fact filed under a member's entry in a shared space
+#: (Spaces S1-11, N36); the entry's id is the ``session_key``.
+KINDS = ("turn", "chat", "keep_out", "remember", "summary", "rewind", "entry")
 
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS forget_journal (
@@ -196,6 +198,10 @@ def _apply(conn: sqlite3.Connection, e: Entry) -> None:
     elif e.kind in ("keep_out", "remember"):
         forget.set_chat_remembered(e.session_key, e.kind == "remember", tenant_id=e.tenant_id,
                                    conn=conn, journal=False)
+    elif e.kind == "entry":
+        out = forget.forget_entry(e.session_key, tenant_id=e.tenant_id, conn=conn, journal=False)
+        if not out.get("ok"):
+            raise RuntimeError(f"forget of entry {e.session_key} failed: {out}")
     elif e.kind == "summary":
         from kazma_core.memory.topic_summaries import forget_summary
 

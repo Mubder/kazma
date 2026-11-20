@@ -791,6 +791,7 @@ jobs:
             tests/e2e/test_sidebar_brand_and_build.py \
             tests/e2e/test_settings_areas_browser.py \
             tests/e2e/test_people_page_browser.py \
+            tests/e2e/test_shared_memory_notice.py \
             tests/e2e/test_attached_text_browser.py \
             tests/e2e/test_return_to_running_turn.py \
             tests/e2e/test_update_notice.py \

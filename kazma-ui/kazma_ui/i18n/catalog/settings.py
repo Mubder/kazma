@@ -99,6 +99,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مثال: اسمي سارة، مديرة منتجات في دبي. أفضّل الإجابات المختصرة، وبالعربية إذا كتبت بالعربية.",
         "en": "e.g. I'm Sara, a product manager in Dubai. I prefer short answers, and Arabic when I write in Arabic.",
     },
+    "settings.about_me_copy_personal": {
+        "ar": "انسخ من مساحتي الشخصية",
+        "en": "Copy from my personal space",
+    },
+    "settings.about_me_copied": {
+        "ar": "نُسخ من مساحتك الشخصية.",
+        "en": "Copied from your personal space.",
+    },
+    "settings.about_me_nothing_to_copy": {
+        "ar": "قسم «عني» في مساحتك الشخصية فارغ.",
+        "en": "Your personal space's About me is empty.",
+    },
     "settings.about_me_save": {
         "ar": "حفظ",
         "en": "Save About me",

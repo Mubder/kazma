@@ -35,6 +35,7 @@ score that no rule ever read, removed on 2026-09-23 (``macro_sleep.py``).
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import functools
 import hashlib
 import json
@@ -339,6 +340,11 @@ def _established_kind(
     return ptype
 
 
+#: The account whose words the write in progress are (``mutate_belief``'s
+#: *said_by*), read where the row is built.
+_SAID_BY: contextvars.ContextVar[str | None] = contextvars.ContextVar("kazma_belief_said_by", default=None)
+
+
 def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
     """The ladder of ``memory.provenance``, as a weight."""
     v2 = (cfg or {}).get("v2") or {}
@@ -350,6 +356,10 @@ def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
         return float(v2.get("trust_weight_tool", 0.85))
     if extraction_method == "agent_asserted":
         return float(v2.get("trust_weight_agent", 0.65))
+    if extraction_method == "member_stated":
+        # One member's words about another (Spaces S1-11, N34): a person's
+        # word, but not theirs about themself.
+        return float(v2.get("trust_weight_member", 0.7))
     return float(v2.get("trust_weight_llm", 0.60))
 
 
@@ -430,8 +440,15 @@ def mutate_belief(
     private: bool = False,
     confirms_change: tuple[str, str] | None = None,
     replaces_users_fact: bool = True,
+    said_by: str | None = None,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
+
+    *said_by* is the account whose words these are, in a shared space
+    (Spaces S1-11, ``memory/speakers.py``): kept in the fact's metadata, so
+    the fact names who said it. Nothing else reads it here: the keys and the
+    rules are the same for every speaker. None (every personal space) keeps
+    the row exactly as it was.
 
     *confirms_change* is ``(change id, actor)`` of the pending change this
     write answers (``changes.confirm``): marked confirmed in the write's own
@@ -547,6 +564,7 @@ def mutate_belief(
     now = recorded if now is None else float(now)
 
     result: dict[str, Any] | None = None
+    said_token = _SAID_BY.set(str(said_by) if said_by else None)
     try:
         with _mutation_lock:
             # W6: the name the subject already uses for the same words and
@@ -696,6 +714,8 @@ def mutate_belief(
         return result
     except Exception as exc:
         return _after_failure(exc, result)
+    finally:
+        _SAID_BY.reset(said_token)
 
 
 def _after_failure(exc: Exception, result: dict[str, Any] | None) -> dict[str, Any]:
@@ -729,7 +749,9 @@ def _store_belief_vector(
     skipped for a private database (Memory audits M14, M15)."""
     from kazma_core.memory.vector_write import encode_vector, index_remotely, write_local_vector
 
-    vec = encode_vector(f"{sub} {pred} {obj}")
+    from kazma_core.memory.speakers import fact_vector_text
+
+    vec = encode_vector(fact_vector_text(sub, pred, obj))
     if not vec:
         return
     try:
@@ -769,6 +791,9 @@ def _insert_belief(
     recorded: float | None = None,
 ) -> dict[str, Any]:
     meta = {"memory_class": mem_class}
+    said_by = _SAID_BY.get()
+    if said_by:
+        meta["said_by"] = said_by
     try:
         from kazma_core.memory.embedder import get_embedding_model_name
 

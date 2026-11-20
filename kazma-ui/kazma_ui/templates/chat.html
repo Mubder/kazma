@@ -86,6 +86,9 @@
       <div id="chat-attachments" class="chat-attachments" hidden aria-live="polite"></div>
       {# A new, empty chat: whether Kazma remembers it, chosen before its first
          message (resilience plan I). chat.js shows it while the chat is empty. #}
+      {# A shared space says its memory is shared, with whom, before anyone
+         types something private (Spaces S1-11, N35). #}
+      <p class="shared-memory-notice" role="note" data-shared-memory-notice hidden></p>
       <button id="chat-memory-choice" type="button" class="chat-memory-choice" aria-pressed="false" hidden
               data-label="{{ t('chat.memory_choice') }}" data-label-set="{{ t('chat.memory_choice_set') }}">{{ t('chat.memory_choice') }}</button>
       <div class="composer-dock">
@@ -553,4 +556,5 @@ function setupWall() {
 <script src="/static/js/chat_slash.js?v={{ js_version() }}"></script>
 <script src="/static/js/turn_detail.js?v={{ js_version() }}"></script>
 <script src="/static/js/chat.js?v={{ js_version() }}"></script>
+<script src="/static/js/shared_memory_notice.js?v={{ js_version() }}"></script>
 {% endblock %}

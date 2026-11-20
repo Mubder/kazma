@@ -524,6 +524,41 @@ def holds_development(account_id: str) -> bool:
     return _is_admin_account(account_)
 
 
+#: The other names one account may be called by (Spaces S1-11): Latin and
+#: Arabic spellings of the name, a nickname. Memory files a statement that
+#: names a member by one of them under that member's entry.
+MAX_CALLED_NAMES = 8
+MAX_CALLED_NAME_CHARS = 60
+
+
+def set_called_names(account_id: str, names: list[str] | tuple[str, ...]) -> list[str]:
+    """Keep the names *account_id* is called by besides its own name, in
+    order, each once. Refused (``IdentityError``): more than
+    :data:`MAX_CALLED_NAMES`, a name past :data:`MAX_CALLED_NAME_CHARS`, a
+    name with a line break or a control character, an account that does not
+    exist. Returns what was kept."""
+    kept: list[str] = []
+    for raw in names:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        if len(name) > MAX_CALLED_NAME_CHARS or any(ord(ch) < 32 for ch in name):
+            raise IdentityError("bad_called_name", f"not a name: {name[:40]!r}")
+        if name.lower() not in {k.lower() for k in kept}:
+            kept.append(name)
+    if len(kept) > MAX_CALLED_NAMES:
+        raise IdentityError("too_many_called_names", f"at most {MAX_CALLED_NAMES} names")
+
+    def _change(reg: dict[str, Any]) -> None:
+        account_ = reg["accounts"].get(account_id)
+        if account_ is None:
+            raise IdentityError("no_such_account", f"no account {account_id!r}")
+        account_["called"] = list(kept)
+
+    update_registry(_change)
+    return kept
+
+
 def _set_development(account_id: str, held: bool) -> None:
     """Turn the feature Development on or off for *account_id*. The caller is
     the admin's own surface (the People page, S2-10)."""

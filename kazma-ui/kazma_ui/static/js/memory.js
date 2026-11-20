@@ -566,6 +566,15 @@ function memoryPage() {
           d.undo_token,
           { kind: "invalidate" }
         );
+        // A fact about you that another member stated (Spaces S1-11, N33):
+        // their message stays and still holds the words.
+        (d.notes || []).forEach(function (note) {
+          if (note && note.code === "others_message_stays") {
+            toast(tx("memory.page.others_message_stays",
+              "Forgotten. {author}'s message still holds these words and can still be recalled; {author} or the space's owner can forget it.",
+              { author: note.author || "" }), "info");
+          }
+        });
         await this.loadBeliefs();
         await this.loadSummary();
         await refreshGraph();

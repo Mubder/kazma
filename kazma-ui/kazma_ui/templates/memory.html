@@ -222,6 +222,8 @@
 </style>
 
   <p class="mem-intro">{{ t('memory.page.intro') }}</p>
+  {# A shared space says its memory is shared, with whom (Spaces S1-11, N35). #}
+  <p class="notice tone-info shared-memory-notice" role="note" data-shared-memory-notice hidden></p>
 
   {# Status, the memory map, the facts Kazma knows, the conversations it
      remembers (components/memory_console.html). #}
@@ -506,6 +508,7 @@
 {% block scripts %}
 <script src="/static/js/memory.js?v={{ js_version() }}"></script>
 <script src="/static/js/memory_console.js?v={{ js_version() }}"></script>
+<script src="/static/js/shared_memory_notice.js?v={{ js_version() }}"></script>
 <script src="/static/js/history_import.js?v={{ js_version() }}"></script>
 <script>
   // Deep links: /memory#hygiene (the Dashboard's link), #entities, #beliefs,

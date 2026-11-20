@@ -139,6 +139,9 @@
         aboutMeMax: 2000,
         aboutMeSaving: false,
         aboutMeError: '',
+        // A shared space (Spaces S1-11, N31): this member's own text, and
+        // "Copy from my personal space".
+        aboutMeShared: false,
         memoryNeo4jStatus: '',
         memoryNeo4jOk: false,
         memoryStateSyncStatus: '',

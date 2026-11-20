@@ -168,7 +168,9 @@ def client():
 
 def test_the_settings_routes_round_trip(client):
     assert client.get("/api/memory/v2/profile").json() == {
-        "ok": True, "about": "", "updated_at": None, "max_chars": profile.ABOUT_MAX_CHARS}
+        "ok": True, "about": "", "updated_at": None, "max_chars": profile.ABOUT_MAX_CHARS,
+        # A personal space: no other member's memory (Spaces S1-11, N35).
+        "shared": False, "members": []}
     assert client.put("/api/memory/v2/profile", json={"about": ABOUT}).json() == {"ok": True, "about": ABOUT}
     assert client.get("/api/memory/v2/profile").json()["about"] == ABOUT
     assert client.put("/api/memory/v2/profile", json={"text": "wrong key"}).json()["ok"] is False

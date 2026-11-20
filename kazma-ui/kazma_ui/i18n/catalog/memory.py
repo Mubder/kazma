@@ -1657,6 +1657,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل تحميل التغييرات",
         "en": "Changes load failed",
     },
+    "memory.err.not_yours": {
+        "ar": "هذا لعضو آخر؛ لا ينساه إلا هو أو مالك المساحة",
+        "en": "This is another member's; only they or the space's owner can forget it",
+    },
+    "memory.shared_notice": {
+        "ar": "الذاكرة هنا مشتركة مع {names}.",
+        "en": "Memory here is shared with {names}.",
+    },
+    "memory.page.others_message_stays": {
+        "ar": "نُسيت. رسالة {author} ما زالت تحمل هذه الكلمات ويمكن استرجاعها؛ يستطيع {author} أو مالك المساحة نسيانها.",
+        "en": "Forgotten. {author}'s message still holds these words and can still be recalled; {author} or the space's owner can forget it.",
+    },
     "memory.err.not_open": {
         "ar": "حُسم هذا من قبل",
         "en": "This was already decided",

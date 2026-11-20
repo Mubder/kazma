@@ -267,6 +267,17 @@ CREATE TABLE IF NOT EXISTS memory_profile (
   updated_at  REAL NOT NULL
 );
 
+-- "About me" of each member of a shared space (Spaces S1-11, N31): one text
+-- per member per space, shown only in that member's own turns and edited
+-- only by them. A personal space keeps memory_profile.
+CREATE TABLE IF NOT EXISTS memory_member_profile (
+  tenant_id   TEXT NOT NULL,
+  account     TEXT NOT NULL,
+  about       TEXT NOT NULL,
+  updated_at  REAL NOT NULL,
+  PRIMARY KEY (tenant_id, account)
+);
+
 -- Weekly topic summaries (plan C2, topic_summaries.py): what one week of
 -- conversations said about one topic, written by the model from those turns.
 -- Derived memory: memory_summary_sources names the turns, and forgetting one

@@ -55,7 +55,7 @@ async def _ledger_synthesis_call(
         priced=bool(getattr(resp, "cost_known", True)),
     )
 
-from kazma_core.spaces.scope import space_of_state
+from kazma_core.spaces.scope import bound_asker, space_of_state
 
 logger = logging.getLogger(__name__)
 
@@ -429,6 +429,9 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             # The turn's space (the bound scope's once Spaces is enforced:
             # a checkpoint from before may hold another value).
             "tenant_id": space_of_state(state),
+            # Who asked (Spaces S1-11): in a shared space their "I" is filed
+            # under their own entry (memory/speakers.py). Never guessed.
+            "said_by": bound_asker(),
         },
     }
 

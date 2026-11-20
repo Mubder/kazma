@@ -295,6 +295,13 @@ def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
         ptype = "set"
     if not (subject and predicate and obj):
         return None
+    # A member's entry (Spaces S1-11) is Kazma's to write: a model that names
+    # one -- copied from a recall block, or planted in a message -- is refused.
+    from kazma_core.memory.speakers import is_member_entry
+
+    if is_member_entry(subject) or is_member_entry(obj):
+        logger.info("[belief_extract] rejected a member's entry written by the model")
+        return None
     # Hygiene: reject stack/version subjects mistaken for product entities
     try:
         from kazma_core.memory.hygiene import is_blocked_belief_triple
@@ -435,6 +442,7 @@ async def extract_and_apply_beliefs(
     use_llm: bool = True,
     extraction_method: str | None = None,
     ignore_filler: bool = False,
+    said_by: str | None = None,
 ) -> dict[str, Any]:
     """ASYNC extraction pipeline — turns conversation into bi-temporal beliefs.
 
@@ -472,6 +480,7 @@ async def extract_and_apply_beliefs(
         cfg=cfg,
         extraction_method=extraction_method,
         user_text=user_text,
+        said_by=said_by,
     )
 
 
@@ -604,8 +613,18 @@ def _apply_beliefs_to_v2(
     now: float | None = None,
     private: bool = False,
     user_text: str | None = None,
+    said_by: str | None = None,
+    not_again: set[tuple[str, ...]] | None = None,
 ) -> dict[str, Any]:
     """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
+
+    *not_again*: ``(subject, predicate, casefolded object)`` facts a member
+    forgot about themself, never filed from this turn again (N33).
+
+    *said_by* is the account whose turn this is (Spaces S1-11). In a shared
+    space ``user`` is that member's own entry and a member's name is theirs
+    (``memory/speakers.py``); with no speaker a first-person fact is not
+    filed there. A personal space files as it always did.
 
     *user_text* is the turn's message. A fact the model read never gets the
     user's trust by itself: it is written as the model's inference. A reading
@@ -630,9 +649,14 @@ def _apply_beliefs_to_v2(
     """
     from kazma_core.memory.belief_mutation import mutate_belief
     from kazma_core.memory.entity_resolution import resolve_entity
+    from kazma_core.memory.speakers import is_member_entry
+    from kazma_core.memory.speakers import room as speakers_room
 
     if stats is None:
         stats = {"skipped_filler": False, "source": "none", "applied": 0, "rejected": 0, "actions": []}
+    # Who "I" is here: read once (an unreadable identity store raises, and
+    # the turn is retried: nothing is filed under a guessed member).
+    people = speakers_room(tenant_id)
 
     # Lazily embed a text via the shared embedder (returns bytes or None).
     def _embed(text: str) -> bytes | None:
@@ -669,6 +693,24 @@ def _apply_beliefs_to_v2(
         from kazma_core.memory.fact_names import users_names
 
         clean["subject"], clean["predicate"] = users_names(clean.get("subject"), clean["predicate"])
+        if people.shared:
+            # A shared space files by member (Spaces S1-11, N30): "I" is the
+            # speaker's entry, a member's name theirs; with no speaker known a
+            # first-person fact is not filed (the turn is still remembered).
+            filed = people.filed(clean["subject"], said_by)
+            filed_object = people.filed(clean["object"], said_by) if clean["object"] == "user" else clean["object"]
+            if not filed or not filed_object:
+                stats["rejected"] += 1
+                stats["no_speaker"] = stats.get("no_speaker", 0) + 1
+                continue
+            clean["subject"], clean["object"] = filed, filed_object
+            if is_member_entry(filed):
+                # A member's facts go by the names the user's do (fact_names).
+                _, clean["predicate"] = users_names("user", clean["predicate"])
+            _method = people.label(_method, filed, said_by)
+            if not_again and (filed, clean["predicate"], str(clean["object"]).casefold()) in not_again:
+                stats["rejected"] += 1
+                continue
         if clean["subject"] == "user":
             # "Not me" on Kazma's reading of this value: never filed again by
             # the model (the user's own words still can).
@@ -702,10 +744,11 @@ def _apply_beliefs_to_v2(
                 subject_should_mint_entity,
             )
 
-            subject_is_node = clean["subject"] == "user" or subject_should_mint_entity(
-                clean["subject"]
-            )
-            if clean["subject"] and clean["subject"] != "user" and subject_is_node:
+            # A member's entry is treated as ``user`` is: always a node,
+            # never resolved onto another entity, never anchored.
+            subject_is_self = clean["subject"] == "user" or is_member_entry(clean["subject"])
+            subject_is_node = subject_is_self or subject_should_mint_entity(clean["subject"])
+            if clean["subject"] and not subject_is_self and subject_is_node:
                 sub_vec = _embed(clean["subject"].replace("_", " "))
                 sub_res = resolve_entity(
                     primary_conn, clean["subject"].replace("_", " "),
@@ -721,6 +764,7 @@ def _apply_beliefs_to_v2(
                 subject_is_node
                 and clean["object"]
                 and clean["object"] != "user"
+                and not is_member_entry(clean["object"])
                 and object_should_mint_entity(
                     primary_conn, clean["object"], predicate=clean["predicate"], tenant_id=tenant_id
                 )
@@ -759,6 +803,7 @@ def _apply_beliefs_to_v2(
             subject_id=subject_id,
             now=now,
             private=private,
+            said_by=people.said_by(said_by),
         )
         if action["action"] != "noop":
             stats["applied"] += 1
@@ -780,7 +825,7 @@ def _apply_beliefs_to_v2(
         try:
             from kazma_core.memory.ego_anchor import anchor_leaf_subject
 
-            if clean["subject"] and clean["subject"] != "user":
+            if clean["subject"] and clean["subject"] != "user" and not is_member_entry(clean["subject"]):
                 from kazma_core.memory.entity_resolution import canonical_entity_id
                 from kazma_core.memory.entity_resolution import slug as _belief_slug
 
@@ -815,6 +860,7 @@ def extract_and_apply_beliefs_sync(
     extraction_method: str | None = None,
     now: float | None = None,
     private: bool = False,
+    said_by: str | None = None,
 ) -> dict[str, Any]:
     """SYNC extraction pipeline (heuristic only — NO LLM, NO httpx).
 
@@ -858,4 +904,5 @@ def extract_and_apply_beliefs_sync(
         now=now,
         private=private,
         user_text=user_text,
+        said_by=said_by,
     )

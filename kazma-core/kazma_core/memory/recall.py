@@ -86,6 +86,10 @@ class RecallResult:
     #: Why this recall is incomplete (meaning search unavailable), or None.
     #: "Degraded" is not "empty": nothing found is not nothing remembered.
     degraded: str | None = None
+    #: In a shared space with other members (Spaces S1-11): who the model is
+    #: talking with, and that facts under other names are those members'.
+    #: Kazma's own line, put OUTSIDE the fence by ``format_recall_block``.
+    speakers_note: str | None = None
 
     @property
     def empty(self) -> bool:
@@ -217,21 +221,137 @@ def recall(
     session_id: str | None = None,
     explain: bool | None = None,
     local_only: bool = False,
+    asker: str | None = None,
 ) -> RecallResult:
     """Unified V2 recall (:func:`_recall`) under a deadline for the question's
     embedding, which is attempted once. A result that lacks meaning search
-    says so in ``degraded``."""
+    says so in ``degraded``.
+
+    *asker* is the account asking (Spaces S1-11). In a shared space their own
+    facts and turns read as ``user`` / ``User:`` and every other member's
+    under that member's name; a question about the asker shows their own
+    facts before others', a question naming a member that member's
+    (``_for_asker``). A personal space reads exactly as it always did."""
+    from kazma_core.memory import speakers
+    from kazma_core.spaces.identity import IdentityUnavailable
+
     query = _bounded_question(query)
+    try:
+        people = speakers.room(tenant_id)
+    except IdentityUnavailable:
+        # Who is who cannot be read: no line could be shown without risking
+        # another member's fact read as the asker's (AUD-026's rule).
+        logger.warning("[recall] the space's members could not be read", exc_info=True)
+        return _failed_recall("members_unavailable")
     memo: dict[str, Any] = {"vectors": {}, "deadline": time.monotonic() + _recall_deadline_s(),
                             "degraded": None}
     token = _QUERY_MEMO.set(memo)
+    names = _ENTRY_NAMES.set(people.ranking_names() if people.shared else {})
+    keeps = _BELIEF_KEEP.set(_whose_facts(people, asker, query) if people.shared else None)
     try:
         result = _recall(query, conn=conn, vector_engine=vector_engine, tenant_id=tenant_id, limit=limit,
                          session_id=session_id, explain=explain, local_only=local_only)
+        if people.shared and not result.failed:
+            result = _for_asker(result, people, asker, query, limit, conn)
     finally:
+        _BELIEF_KEEP.reset(keeps)
+        _ENTRY_NAMES.reset(names)
         _QUERY_MEMO.reset(token)
     if memo["degraded"] and result.degraded is None:
         result.degraded = memo["degraded"]
+    return result
+
+
+#: Which facts a shared space's question is about (``_whose_facts``): a
+#: subject -> keep? test, for this recall only.
+_BELIEF_KEEP: contextvars.ContextVar[Any] = contextvars.ContextVar("kazma_recall_belief_keep", default=None)
+
+
+def _whose_facts(people: Any, asker: str | None, query: str) -> Any:
+    """The study's "named first" and "self first" (section 2.4), as a test
+    of a fact's subject: a question that names a member is about that
+    member's facts and the facts about no member; a question about the asker
+    is about theirs and the facts about no member; any other question is
+    about everyone's. None: keep every fact."""
+    from kazma_core.memory.speakers import account_of_entry, refers_to_asker
+
+    named = people.named_in(query) - {asker}
+    if named:
+        wanted: set[str | None] = {None, *named}
+    elif asker and refers_to_asker(query, people.all_names()):
+        wanted = {None, asker}
+    else:
+        return None
+    return lambda subject: account_of_entry(subject) in wanted
+
+
+#: A member's entry -> the name recall ranks it by (``speakers.Room
+#: .ranking_names``), for this recall only.
+_ENTRY_NAMES: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar(
+    "kazma_recall_entry_names", default={})
+
+
+def _authors(conn: sqlite3.Connection | None, ids: list[str]) -> dict[str, str]:
+    """``episode id -> said_by`` for the turns among *ids* that name an
+    author (the local copy holds them on every path)."""
+    if not ids:
+        return {}
+    own = conn is None
+    if own:
+        from kazma_core.paths import primary_memory_db
+
+        conn = _connect_existing(primary_memory_db())
+        if conn is None:
+            return {}
+    try:
+        marks = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            f"SELECT id, json_extract(metadata_json, '$.said_by') FROM episodes WHERE id IN ({marks})",
+            ids,
+        ).fetchall()
+        return {str(r[0]): str(r[1]) for r in rows if r[1]}
+    finally:
+        if own:
+            conn.close()
+
+
+def _for_asker(result: RecallResult, people: Any, asker: str | None, query: str, limit: int,
+               conn: sqlite3.Connection | None) -> RecallResult:
+    """A shared space's recall, as *asker* reads it (Spaces S1-11, the R3
+    study's section 2.4): every line shown under its owner, and the note the
+    block puts outside its fence. Whose facts were chosen before ranking
+    (``_whose_facts``)."""
+    from kazma_core.memory.speakers import USER
+
+    beliefs = list(result.beliefs)
+    for hit in beliefs:
+        meta = hit.metadata or {}
+        sub = people.shown_subject(str(meta.get("subject") or ""), asker)
+        obj = people.shown_subject(str(meta.get("object") or ""), asker)
+        pred = str(meta.get("predicate") or "").replace("_", " ")
+        hit.content = f"{sub.replace('_', ' ')} {pred} {obj}".strip()
+    result.beliefs = beliefs[:limit]
+    episodes = list(result.episodes[:limit])
+    said = _authors(conn, [h.id for h in episodes])
+    for hit in episodes:
+        name = people.shown_author(said.get(hit.id), asker)
+        shown = str((hit.metadata or {}).get("display") or "")
+        if name and shown.startswith("User: "):
+            # Another member's turn: their name, never "User:" (which the
+            # model reads as the asker).
+            hit.metadata["display"] = f"{name}: {shown[len('User: '):]}"
+    result.episodes = episodes
+    others = people.others(asker)
+    if others:
+        me = people.display_name(asker) if asker in people.members else ""
+        names = ", ".join(m.name or m.account for m in others)
+        result.speakers_note = (
+            "## Who is speaking\n"
+            + (f"- You are talking with {me}. Facts shown as \"{USER}\" and turns shown as "
+               f"\"User:\" are theirs.\n" if me else "")
+            + f"- This is a shared space. Facts and turns under another name ({names}) are "
+            "about or by that member, never the person you are talking with.\n\n"
+        )
     return result
 
 
@@ -1122,6 +1242,12 @@ def _recall_beliefs(
     if not sources:
         return []
     rows = {str(r["id"]): r for r in _hydrate_beliefs(conn, list(sources), tenant_id)}
+    keep = _BELIEF_KEEP.get()
+    if keep is not None:
+        # A shared space's choice of whose facts a question is about (Spaces
+        # S1-11): made on the candidates, before they are ranked, so another
+        # member's best match never pushes the asker's own out by the gap.
+        rows = {bid: r for bid, r in rows.items() if keep(str(_field(r, "subject") or ""))}
     sims = {bid: sim for bid, sim in dense}
     missing = [bid for bid in rows if bid not in sims]
     if missing:
@@ -1264,9 +1390,15 @@ def _format_belief_text(row: Any) -> str:
     read as words; the object is the fact's own text and is left as stored
     (a file path or a code keeps its underscores).
     """
-    sub = str(_field(row, "subject") or "").replace("_", " ")
+    names = _ENTRY_NAMES.get()
+    sub = str(_field(row, "subject") or "")
+    obj = _field(row, "object") or ""
+    # In a shared space a member's entry is ranked by the member's name
+    # (Spaces S1-11): "omar lives in lusail" holds the word "omar".
+    sub = names.get(sub, sub).replace("_", " ")
+    obj = names.get(str(obj), obj)
     pred = str(_field(row, "predicate") or "").replace("_", " ")
-    return f"{sub} {pred} {_field(row, 'object') or ''}".strip()
+    return f"{sub} {pred} {obj}".strip()
 
 
 # ── Episode search (keywords + meaning, ranked on evidence) ───────────────
@@ -2650,7 +2782,7 @@ def format_recall_block(
         "in part; read it whole with memory_read before relying on what it "
         "leaves out.\n\n"
     )
-    return rules + format_untrusted_block(body, source=fence_source)
+    return rules + (result.speakers_note or "") + format_untrusted_block(body, source=fence_source)
 
 
 def build_memory_explain_payload(

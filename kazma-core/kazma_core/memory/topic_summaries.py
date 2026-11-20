@@ -220,6 +220,9 @@ class _Turn:
     answer: str
     vector: bytes | None = None
     note: bool = False
+    #: The member who asked, by name, in a shared space (Spaces S1-11); ""
+    #: everywhere else, where a turn is shown as the user's.
+    author: str = ""
 
 
 @dataclass(slots=True)
@@ -260,7 +263,10 @@ def _load_turns(
         params.extend([float(start), float(end)])
     sql += " ORDER BY session_id, created_at, turn_number, id"
 
+    from kazma_core.memory.speakers import room
+
     model = get_embedding_model_name()
+    people = room(tenant_id)
     turns: list[_Turn] = []
     seen: set[str] = set()
     sizes: dict[int, int] = {}
@@ -288,10 +294,19 @@ def _load_turns(
             vector = bytes(row["embedding"])
             sizes[len(vector)] = sizes.get(len(vector), 0) + 1
         chat = str(row["session_id"] or "")
+        author = ""
+        if people.shared:
+            try:
+                said_by = (json.loads(row["metadata_json"] or "{}") or {}).get("said_by")
+            except (TypeError, ValueError):
+                said_by = None
+            # Each turn under its author's name (asker None: nobody is "User").
+            author = people.shown_author(said_by, None) or ""
         turns.append(_Turn(
             id=str(row["id"]), chat=chat, at=float(row["created_at"] or 0),
             question=question, answer=answer, vector=vector,
             note=chat == _NOTES_CHAT or _NOTE_SOURCE in str(row["metadata_json"] or ""),
+            author=author,
         ))
     size = max(sizes, key=lambda s: sizes[s]) if sizes else 0
     for turn in turns:
@@ -451,7 +466,7 @@ def _clip(text: str, limit: int) -> str:
 
 def _render(turn: _Turn) -> str:
     when = _dt.datetime.fromtimestamp(turn.at).strftime("%a %b %d %H:%M")
-    lines = [f"[{when}] User: {_clip(turn.question, _QUESTION_CHARS)}"]
+    lines = [f"[{when}] {turn.author or 'User'}: {_clip(turn.question, _QUESTION_CHARS)}"]
     if turn.answer:
         lines.append(f"Assistant: {_clip(turn.answer, _ANSWER_CHARS)}")
     return "\n".join(lines)
@@ -487,10 +502,24 @@ def _messages(turns: list[_Turn], period_key: str, start: float) -> list[dict[st
         + (f", {notes} of them notes Kazma saved" if notes else "")
         + (f"; {len(shown)} shown." if len(shown) < len(turns) else ".")
     )
+    system = _SYSTEM_PROMPT % _words(turns)
+    if any(t.author for t in turns):
+        # A shared space (Spaces S1-11): one week of its members'
+        # conversations, each turn under its author's name.
+        system += _SHARED_SPACE_LINES
     return [
-        {"role": "system", "content": _SYSTEM_PROMPT % _words(turns)},
+        {"role": "system", "content": system},
         {"role": "user", "content": head + "\n\n" + "\n\n".join(rendered[i] for i in shown)},
     ]
+
+
+#: What a shared space's summary prompt adds (Spaces S1-11): a personal
+#: space's prompt is unchanged.
+_SHARED_SPACE_LINES = (
+    "\nThese are the conversations of several members of one shared space: each turn is "
+    "shown under the name of the member who wrote it. Name who decided, asked for or "
+    "said what; never merge two members into one \"user\"."
+)
 
 
 def _scrub(text: str) -> str:

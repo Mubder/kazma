@@ -300,14 +300,17 @@ def import_history(history: History, *, tenant_id: str | None = None,
     the space named, else the one this work is bound to (the owner's on an
     install that does not enforce Spaces)."""
     from kazma_core.memory.dual_write import episode_row, write_episode
-    from kazma_core.spaces.scope import require_space_id
+    from kazma_core.memory.speakers import episode_metadata
+    from kazma_core.spaces.scope import bound_asker, require_space_id
 
     tenant_id = tenant_id or require_space_id()
+    # Whose conversations these are (Spaces S1-11): the person importing.
+    author = episode_metadata(tenant_id, bound_asker()) or {}
     report = ImportReport()
     total, done = history.turn_count, 0
     for index, chat in enumerate(history.chats, 1):
         session = _session_of(history.source, chat, index)
-        meta = {"imported_from": history.source, "chat_title": chat.title}
+        meta = {"imported_from": history.source, "chat_title": chat.title, **author}
         rows = [episode_row(session_id=session, turn_number=n, user_text=t.user, assistant_text=t.assistant,
                             tenant_id=tenant_id, source=SOURCE, created_at=t.at or None, metadata=meta)
                 for n, t in enumerate(chat.turns, 1)]
