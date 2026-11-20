@@ -2759,6 +2759,17 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   a test chat's token ("pebble-live") outlived the chat as a current fact.
   Gate: `tests/test_memory_tool_provenance.py` (every memory write in the
   agent's tool code names its chat).
+- **A swarm task's result follows the chat that started it** (2026-11-20,
+  the framework audit's F10, part C2). The dispatch hands the task's
+  conversation (`source_thread_id`, `worker_dispatch._source_chat`) and its
+  space to `swarm_bridge.store_swarm_result(chat=)`: the result names its
+  chat (`metadata.chat`), a chat kept out of memory stores nothing (the
+  forget ledger asked for the chat too), and forgetting the chat takes it
+  (`forget._chat_notes`, with no turn; a turn forgotten alone leaves it).
+  A task no chat started is the worker's alone. Gate:
+  `tests/test_swarm_results_follow_their_chat.py` (the dispatch without
+  the chat, and a forget that does not look for results, as negative
+  controls).
 - **Compaction stores nothing in memory** (2026-09-27). Its summary was a
   second record of the chat under the session "compaction" and the tenant
   "default", out of reach of both controls above; every turn already

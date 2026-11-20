@@ -885,6 +885,13 @@ Added as each piece lands.
   to Kuwait City" is stored "Kuwait City", still the model's reading. The
   old recording, replayed through it, scores the same. Gate:
   `tests/test_memory_users_spelling.py`.
+- **Swarm results (F10, its first half), 2026-11-20: done.** A swarm
+  task's result names the chat that started it and its space; a chat kept
+  out of memory stores nothing from its tasks, and forgetting the chat
+  takes them. No prompt change. Gate:
+  `tests/test_swarm_results_follow_their_chat.py`. Not done: the weekly
+  summary still groups a swarm result with the user's turns (reported, not
+  read).
 
 What I would not do:
 

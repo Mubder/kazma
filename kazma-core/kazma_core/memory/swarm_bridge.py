@@ -102,8 +102,12 @@ def _insert_episode(
     metadata: dict[str, Any],
     eid: str | None = None,
     tenant_id: str = "default",
+    chat: str | None = None,
 ) -> str:
-    """Insert one V2 episode row. Caller owns the connection."""
+    """Insert one V2 episode row. Caller owns the connection.
+
+    *chat*: the conversation the row came from (a swarm task's), asked of
+    the forget ledger as well: a chat kept out of memory keeps it out."""
     now = time.time()
     if eid is None:
         eid = bridge_episode_id(
@@ -119,7 +123,7 @@ def _insert_episode(
         session_id=session_id,
         turn_number=turn_number,
         user_text=user_text,
-    ):
+    ) or (chat and refuses_write(conn, tenant_id=tenant_id, session_id=chat, turn_number=0, user_text=None)):
         return ""  # not written: callers treat a falsy id as nothing stored
     # The `source` param is the authoritative V2 categorization — it must
     # win over any caller-supplied metadata["source"] (e.g. the legacy
@@ -186,11 +190,18 @@ def store_swarm_result(
     snippet: str,
     metadata: dict[str, Any] | None = None,
     tenant_id: str | None = None,
+    *,
+    chat: str | None = None,
 ) -> str | None:
     """Persist a successful swarm worker result as a V2 episode, for
     *tenant_id*: the space named, else the one this work is bound to (the
     owner's on an install that does not enforce Spaces; with Spaces enforced
     and nothing bound, nothing is stored).
+
+    *chat* is the conversation that started the task: it is recorded
+    (``metadata.chat``), a chat kept out of memory stores nothing, and
+    forgetting the chat takes the result (``forget._chat_notes``; the memory
+    framework audit's F10). A task with no chat is the worker's alone.
 
     Replaces ``worker_dispatch._index_worker_l4_memory``. The ``snippet``
     is the same ``"Task: …\\nResult: …"`` blob the V1 path indexed. The
@@ -210,6 +221,8 @@ def store_swarm_result(
         meta.setdefault("source", "swarm_worker")
         meta.setdefault("task_id", task_id)
         meta.setdefault("type", "swarm_result")
+        if chat:
+            meta["chat"] = chat
 
         conn = _open_primary()
         if conn is None:
@@ -225,6 +238,7 @@ def store_swarm_result(
                 importance=3,
                 metadata=meta,
                 tenant_id=tenant_id,
+                chat=chat,
             )
             # No worker→produced belief is written here: nothing reads it
             # (recall goes through episodes) and it flooded the Beliefs UI
