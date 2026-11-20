@@ -22,7 +22,10 @@ longest pattern decides, as in ``settings_restore.KEY_RULES``; a key under
 writers -- Settings' generic save, a batch save, the agent's ``config_save``
 -- write install keys only (:func:`install_writer_refusal`): a space's key
 written there would land in the owner's space whatever space the request is
-in, and a person's in no one's.
+in, and a person's in no one's. And they write settings only
+(``settings_restore.classify``): Kazma's own records -- the identity store,
+its record of resets, sign-ins, grants, the Soul -- have their own writers,
+or the admin could add themselves to any space (S1-25).
 
 No I/O.
 """
@@ -181,4 +184,13 @@ def install_writer_refusal(key: str) -> str | None:
     if scope == ACCOUNT:
         return (f"'{key}' belongs to a person: it is changed in their own account "
                 "(Settings -> My account), never as an install setting.")
+    from kazma_core.settings_restore import SETTING, classify
+
+    kind = classify(key)
+    if kind != SETTING:
+        # Kazma's own record -- the identity store and its record of resets,
+        # sign-ins, grants -- is written only by its own code: written here,
+        # the admin could add themselves to any space (S1-25, plan 4.10).
+        return (f"'{key}' is Kazma's own record ({kind}), written only by its own code, "
+                "never as a setting.")
     return None

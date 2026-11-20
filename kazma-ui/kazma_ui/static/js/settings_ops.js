@@ -439,6 +439,103 @@
             }
         },
 
+        // ── People (Spaces S1-25): create, reset, delete ──
+        people: [],
+        peopleLoaded: false,
+        peopleFailed: false,
+        peopleRecordWhole: true,
+        newPerson: { name: '', password: '' },
+
+        _peopleError(data) {
+            const code = (data && data.error) || 'failed';
+            return _t('settings.people_err.' + code, _t('settings.people_err.failed', 'That did not work. Try again.'));
+        },
+
+        async loadPeople() {
+            this.peopleFailed = false;
+            const data = await window.kazmaGetJson('/api/people');
+            if (!data || !Array.isArray(data.people)) {
+                this.peopleFailed = true;
+                return;
+            }
+            this.people = data.people;
+            this.peopleRecordWhole = data.record_whole !== false;
+            this.peopleLoaded = true;
+        },
+
+        async createPerson() {
+            try {
+                const resp = await fetch('/api/people', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: this.newPerson.name, password: this.newPerson.password }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    showToast(this._peopleError(data), 'error');
+                    return;
+                }
+                showToast(_t('settings.people_created', '{name} can sign in now.', { name: _iso(this.newPerson.name) }), 'success');
+                this.newPerson = { name: '', password: '' };
+            } catch (e) {
+                showToast(this._peopleError(null), 'error');
+                return;
+            }
+            await this.loadPeople();
+        },
+
+        async resetPerson(person) {
+            const password = await window.kazmaPrompt({
+                title: _t('settings.people_reset', 'Reset password'),
+                message: _t('settings.people_reset_prompt',
+                    'A new password for {name}. Their sessions end, and they are told at their next sign-in that you reset it.',
+                    { name: _iso(person.name) }),
+                inputType: 'password',
+            });
+            if (password === null || password === undefined) return;
+            try {
+                const resp = await fetch('/api/people/' + encodeURIComponent(person.id) + '/reset', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: password }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    showToast(this._peopleError(data), 'error');
+                    return;
+                }
+                showToast(_t('settings.people_reset_done', 'Password reset. {name} will be told.', { name: _iso(person.name) }), 'success');
+            } catch (e) {
+                showToast(this._peopleError(null), 'error');
+            }
+        },
+
+        async deletePerson(person) {
+            const ok = await window.kazmaConfirm({
+                title: _t('settings.people_delete_title', 'Delete {name}?', { name: _iso(person.name) }),
+                message: _t('settings.people_delete_confirm',
+                    'They can no longer sign in and leave every space. Their own space stays, closed, until it is erased.'),
+                danger: true,
+                confirmText: _t('settings.delete', 'Delete'),
+            });
+            if (!ok) return;
+            try {
+                const resp = await fetch('/api/people/' + encodeURIComponent(person.id), {
+                    method: 'DELETE', credentials: 'same-origin',
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    showToast(this._peopleError(data), 'error');
+                    return;
+                }
+                showToast(_t('settings.people_deleted', '{name} was deleted.', { name: _iso(person.name) }), 'success');
+            } catch (e) {
+                showToast(this._peopleError(null), 'error');
+                return;
+            }
+            await this.loadPeople();
+        },
+
         async createTenant() {
             if (!this.newTenant.id) {
                 showToast(_t('settings.tenant_id_required', 'Tenant id required'), 'error');

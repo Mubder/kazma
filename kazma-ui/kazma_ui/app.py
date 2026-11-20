@@ -1405,9 +1405,11 @@ class KazmaAppBuilder:
         self.app.include_router(settings_router)
         try:
             from kazma_ui.account_spaces_api import create_account_spaces_router
+            from kazma_ui.people_api import create_people_router
             from kazma_ui.saas_api import create_saas_router
 
             self.app.include_router(create_account_spaces_router())
+            self.app.include_router(create_people_router())
 
             self.app.include_router(create_saas_router())
             logger.info("[SaaS] multi-user / tenant API mounted at /api/saas")

@@ -991,6 +991,7 @@
                 case 'appearance': break;
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
+                case 'people': await this.loadPeople(); break;
                 case 'tools': await this.loadTools(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadTurnTimeout(); await this.loadReportUrl(); await this.loadA2a(); await this.loadTurnSpending(); await this.loadChatReasoning(); await this.loadContainerEngine(); await this.loadProxy(); await this.loadRestoreUndo(); break;
                 case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig(), this.syncBackupState()]); break;

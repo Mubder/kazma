@@ -690,7 +690,8 @@ def test_negative_control_translated_text_passes(snippet, helpers) -> None:
 #: What modules/stores.js reads from each dialog's options.
 DIALOG_OPTIONS = {
     "kazmaConfirm": {"title", "message", "confirmText", "cancelText", "danger", "checkbox"},
-    "kazmaPrompt": {"title", "message", "label", "placeholder", "defaultValue", "confirmText", "cancelText"},
+    "kazmaPrompt": {"title", "message", "label", "placeholder", "defaultValue", "confirmText", "cancelText",
+                    "inputType"},
     "kazmaAlert": {"title", "message", "size", "okText", "variant"},
 }
 

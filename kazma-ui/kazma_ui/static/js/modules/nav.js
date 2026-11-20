@@ -47,6 +47,7 @@ const GLOBAL_LIB_PATHS = [
     '/static/js/space_scope.js',
     '/static/js/auth-guard.js',
     '/static/js/locale_format.js',
+    '/static/js/account_notices.js',
     '/static/js/bidi.js',
 ];
 

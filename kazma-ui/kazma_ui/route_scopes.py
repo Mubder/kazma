@@ -150,6 +150,7 @@ ROUTE_SCOPE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/backup", INSTALL),
     # People and spaces administration.
     ("/api/saas", INSTALL),
+    ("/api/people", INSTALL),
     ("/api/security", INSTALL),
     ("/api/divisions", INSTALL),
     # A problem report is the install's diagnostics, sent by the admin. The

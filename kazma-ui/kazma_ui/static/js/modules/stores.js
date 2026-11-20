@@ -254,6 +254,9 @@ export function registerStores() {
                         // textbox at all (reproduced 2026-08-26).
                         input: opts.placeholder || opts.label || opts.message || ' ',
                         inputValue: opts.defaultValue || '',
+                        // A password is typed into a password field (People's
+                        // reset, S1-25), never shown as it is typed.
+                        inputType: opts.inputType === 'password' ? 'password' : 'text',
                         onClose: function () { settle(null); },
                         actions: [
                             { label: cancelText, variant: 'btn-outline', close: true, handler: function () { settle(null); } },

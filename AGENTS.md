@@ -13825,6 +13825,28 @@ product can turn it on, so an install with one account behaves as before.
     turn, every INFO line, alert, the digest and the weekly report read for
     a planted word; the log's words as before, today's digest and every
     call sent to Langfuse as controls).
+- **The admin boundary (S1-25, 2026-11-20).** Guards act only where Spaces
+  is enforced; not enforced, the older user routes answer and there is no
+  People tab.
+  - The admin opens no space they are not a member of: the membership check
+    (`space_binding.space_for_request`), never a role check, on every route
+    and socket. A new way into a space's data asks membership too.
+  - Settings' own writers write settings only
+    (`settings_scope.install_writer_refusal` asks `settings_restore.classify`):
+    the identity store and every other record of Kazma's are written by
+    their own code, or the admin could add themselves to any space.
+  - People (`kazma_core/spaces/people.py`, `kazma_ui/people_api.py`, Settings
+    -> Install -> People): add (an account and its sandboxed personal space),
+    reset (sessions end), delete (sessions end, every membership goes, the
+    personal space stays closed, `account_deleted_at`, for S1-27). Every
+    change is an event of the identity store's record, in the same step; the
+    record is append-only (`identity.update_registry`) and hash-chained
+    (`people.broken_at`). A reset is told to the person at their next page
+    load, once (`/api/account/notices`, `account_notices.js`). The older
+    mode's user routes refuse once enforced (`use_people_page`).
+  - Gates: `tests/test_admin_cannot_open_a_space.py` (a role check alone
+    and an untouched record as controls), `tests/e2e/test_people_page_browser.py`
+    (EN and AR, by the sidebar; no tab without Spaces as the control).
 
 ## UI Conventions (Web)
 
