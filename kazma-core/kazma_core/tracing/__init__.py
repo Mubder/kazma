@@ -40,6 +40,41 @@ class TraceEntry:
     #: False for a model call whose price Kazma does not know: its cost is
     #: counted as 0, and the dashboard says the total is unknown, not $0.
     priced: bool = True
+    #: The space and person the call or step was for (Spaces S1-22),
+    #: stamped by :meth:`TraceStore.add` from the scope bound where it was
+    #: made. Empty: Kazma's own work, or nothing bound -- the owner's space's.
+    space: str = ""
+    asker: str = ""
+
+
+def _space_of(space: str) -> str:
+    """The space a trace is shown in: its own, else the owner's."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    return space or OWNER_SPACE_ID
+
+
+class _Totals:
+    """Running totals of one view (the install, or one space)."""
+
+    __slots__ = ("cost", "tokens", "llm_calls", "unpriced_llm_calls", "tool_calls")
+
+    def __init__(self) -> None:
+        self.cost = 0.0
+        self.tokens = 0
+        self.llm_calls = 0
+        self.unpriced_llm_calls = 0
+        self.tool_calls = 0
+
+    def add(self, entry: TraceEntry) -> None:
+        self.cost += entry.cost
+        self.tokens += entry.tokens
+        if entry.trace_type == "llm":
+            self.llm_calls += 1
+            if not entry.priced:
+                self.unpriced_llm_calls += 1
+        elif entry.trace_type == "tool":
+            self.tool_calls += 1
 
 
 class TraceStore:
@@ -48,71 +83,78 @@ class TraceStore:
     Feeds the real-time observability dashboard without needing
     Langfuse or OpenTelemetry. Default capacity: 500 entries.
     Broadcasts new entries to connected WebSocket clients.
+
+    Each entry carries its space (Spaces S1-22). A reader passes the space
+    it shows (:meth:`recent`, :meth:`stats`; None: every one, as before
+    Spaces), and a socket registered for a space is sent that space's
+    entries and totals only: a trace's label and details are a turn's, never
+    another space's to see.
     """
 
     def __init__(self, max_entries: int = 500) -> None:
         self._traces: deque[TraceEntry] = deque(maxlen=max_entries)
-        self._total_cost: float = 0.0
-        self._total_tokens: int = 0
-        self._total_llm_calls: int = 0
-        self._unpriced_llm_calls: int = 0
-        self._total_tool_calls: int = 0
+        self._all = _Totals()
+        self._by_space: dict[str, _Totals] = {}
         self._start_time: float = time.time()
-        self._ws_clients: set[Any] = set()
+        #: socket -> the space it shows (None: every one).
+        self._ws_clients: dict[Any, str | None] = {}
 
-    def register_ws(self, websocket: Any) -> None:
-        self._ws_clients.add(websocket)
+    def register_ws(self, websocket: Any, space: str | None = None) -> None:
+        self._ws_clients[websocket] = space
 
     def unregister_ws(self, websocket: Any) -> None:
-        self._ws_clients.discard(websocket)
+        self._ws_clients.pop(websocket, None)
+
+    def _metrics(self, space: str | None) -> dict[str, Any]:
+        stats = self.stats(space)
+        return {
+            "total_cost": round(float(stats["total_cost"]), 6),
+            "total_tokens": stats["total_tokens"],
+            "total_llm_calls": stats["total_llm_calls"],
+            "unpriced_llm_calls": stats["unpriced_llm_calls"],
+            "total_tool_calls": stats["total_tool_calls"],
+            "total_traces": stats["total_traces"],
+            "uptime_seconds": stats["uptime_seconds"],
+        }
 
     async def _broadcast(self, entry: TraceEntry) -> None:
-        """Broadcast a new trace entry to all connected WebSocket clients."""
+        """Broadcast a new trace entry to the connected sockets that show
+        its space."""
         import json
         import time as t
 
-        payload = json.dumps(
-            {
-                "type": "trace",
-                "data": {
-                    "timestamp": t.strftime("%H:%M:%S", t.localtime(entry.timestamp)),
-                    "trace_type": entry.trace_type,
-                    "label": entry.label,
-                    "status": entry.status,
-                    "duration_ms": f"{entry.duration_ms:.0f}",
-                    "tokens": entry.tokens,
-                    "cost": f"${entry.cost:.4f}",
-                },
-                "metrics": {
-                    "total_cost": round(self._total_cost, 6),
-                    "total_tokens": self._total_tokens,
-                    "total_llm_calls": self._total_llm_calls,
-                    "unpriced_llm_calls": self._unpriced_llm_calls,
-                    "total_tool_calls": self._total_tool_calls,
-                    "total_traces": len(self._traces),
-                    "uptime_seconds": time.time() - self._start_time,
-                },
-            }
-        )
+        data = {
+            "timestamp": t.strftime("%H:%M:%S", t.localtime(entry.timestamp)),
+            "trace_type": entry.trace_type,
+            "label": entry.label,
+            "status": entry.status,
+            "duration_ms": f"{entry.duration_ms:.0f}",
+            "tokens": entry.tokens,
+            "cost": f"${entry.cost:.4f}",
+        }
         dead = set()
-        for ws in self._ws_clients:
+        for ws, shown in list(self._ws_clients.items()):
+            if shown is not None and _space_of(entry.space) != shown:
+                continue
+            payload = json.dumps({"type": "trace", "data": data, "metrics": self._metrics(shown)})
             try:
                 await ws.send_text(payload)
             except Exception as _e:
                 logger.debug("WS client send failed, removing: %s", _e)
                 dead.add(ws)
-        self._ws_clients -= dead
+        for ws in dead:
+            self._ws_clients.pop(ws, None)
 
     def add(self, entry: TraceEntry) -> None:
+        if not entry.space and not entry.asker:
+            from kazma_core.spaces.scope import current_scope
+
+            bound = current_scope()
+            if bound is not None:
+                entry.space, entry.asker = bound.space_id, bound.asker
         self._traces.append(entry)
-        self._total_cost += entry.cost
-        self._total_tokens += entry.tokens
-        if entry.trace_type == "llm":
-            self._total_llm_calls += 1
-            if not entry.priced:
-                self._unpriced_llm_calls += 1
-        elif entry.trace_type == "tool":
-            self._total_tool_calls += 1
+        self._all.add(entry)
+        self._by_space.setdefault(_space_of(entry.space), _Totals()).add(entry)
         try:
             import asyncio
 
@@ -122,19 +164,46 @@ class TraceStore:
         except RuntimeError:
             pass
 
-    def recent(self, limit: int = 50) -> list[TraceEntry]:
-        return list(self._traces)[-limit:]
+    def recent(self, limit: int = 50, space: str | None = None) -> list[TraceEntry]:
+        """The newest *limit* entries; of *space* only when it is given."""
+        if space is None:
+            return list(self._traces)[-limit:]
+        return [e for e in self._traces if _space_of(e.space) == space][-limit:]
 
-    def stats(self) -> dict[str, Any]:
+    def stats(self, space: str | None = None) -> dict[str, Any]:
+        """The running totals; of *space* only when it is given."""
+        totals = self._all if space is None else self._by_space.get(space, _Totals())
+        kept = len(self._traces) if space is None else sum(1 for e in self._traces if _space_of(e.space) == space)
         return {
-            "total_cost": round(self._total_cost, 4),
-            "total_tokens": self._total_tokens,
-            "total_llm_calls": self._total_llm_calls,
-            "unpriced_llm_calls": self._unpriced_llm_calls,
-            "total_tool_calls": self._total_tool_calls,
-            "total_traces": len(self._traces),
+            "total_cost": round(totals.cost, 4),
+            "total_tokens": totals.tokens,
+            "total_llm_calls": totals.llm_calls,
+            "unpriced_llm_calls": totals.unpriced_llm_calls,
+            "total_tool_calls": totals.tool_calls,
+            "total_traces": kept,
             "uptime_seconds": time.time() - self._start_time,
         }
+
+
+
+def shown_space() -> str | None:
+    """The space a reader of the trace feed shows (Spaces S1-22): the one
+    bound now once Spaces is enforced ("" with none bound: no space's), every
+    one (None) before. No I/O."""
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    bound = current_scope()
+    return bound.space_id if bound is not None else ""
+
+
+def view(store: TraceStore, limit: int, space: str | None) -> tuple[list[TraceEntry], dict[str, Any]]:
+    """The newest *limit* entries and the totals a reader shows: *space*'s,
+    or -- with None, as before Spaces -- every one, asked the old way."""
+    if space is None:
+        return store.recent(limit), store.stats()
+    return store.recent(limit, space), store.stats(space)
 
 
 # Global trace store singleton
@@ -160,6 +229,8 @@ __all__ = [
     "TracingBackend",
     "create_tracer",
     "get_trace_store",
+    "shown_space",
+    "view",
     "TelemetryEvent",
     "EventBridge",
     "langfuse_keys",

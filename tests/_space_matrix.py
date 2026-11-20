@@ -125,7 +125,7 @@ CASE_MODULES: tuple[str, ...] = (
     "tests._research_space_cases", "tests._mail_space_cases", "tests._x_space_cases",
     "tests._github_space_cases", "tests._document_space_cases",  # S1-12
     "tests._vault_space_cases", "tests._files_space_cases",
-    "tests._host_tools_space_cases", "tests._runs_space_cases",
+    "tests._host_tools_space_cases", "tests._runs_space_cases", "tests._traces_space_cases",
 )
 
 
@@ -188,13 +188,11 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # tests/_github_space_cases.py; a clone is S1-20's, above.)
     # (S1-21 -- approvals and running work -- wrote its cases:
     # tests/_runs_space_cases.py.)
-    # ── The Dashboard and the traces of tool and model calls ──────────────
-    # No item names them. The page is per person with S1-32; the trace feed
-    # is the record of each call, which S1-22 gives a space and an asker.
+    # ── The Dashboard ──────────────────────────────────────────────────────
+    # The page is per person with S1-32. (S1-22 -- the trace feed: the Agents
+    # page and API and the Dashboard's socket -- wrote its cases:
+    # tests/_traces_space_cases.py.)
     ("/dashboard$", "S1-32"),
-    ("/ws/dashboard$", "S1-22"),
-    ("/agents$", "S1-22"),
-    ("/api/agents", "S1-22"),
 )
 
 

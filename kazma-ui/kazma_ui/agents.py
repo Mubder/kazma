@@ -3,6 +3,10 @@
 Provides a local web UI at /agents showing running agent status, current state
 (idle/thinking/acting), tool execution history, reasoning steps from the
 LangGraph trace, and start/stop controls.
+
+Once Spaces is enforced the page and its routes show the space bound to the
+request (S1-22): its traces, its totals and whether one of its turns runs,
+never another space's (a trace's details are the start of a turn's prompt).
 """
 
 from __future__ import annotations
@@ -110,8 +114,9 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
     @router.get("/api/agents/tools")
     def agents_tool_history(limit: int = 50) -> JSONResponse:
         """Return tool execution history (filtered trace of type 'tool')."""
-        store = _get_trace_store()
-        entries = [e for e in store.recent(limit) if e.trace_type == "tool"]
+        from kazma_core.tracing import shown_space, view
+
+        entries = [e for e in view(_get_trace_store(), limit, shown_space())[0] if e.trace_type == "tool"]
         return JSONResponse(
             {
                 "tools": [_format_trace_entry(e) for e in entries],
@@ -122,8 +127,9 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
     @router.get("/api/agents/reasoning")
     def agents_reasoning(limit: int = 50) -> JSONResponse:
         """Return reasoning steps (LLM call traces from LangGraph)."""
-        store = _get_trace_store()
-        entries = [e for e in store.recent(limit) if e.trace_type == "llm"]
+        from kazma_core.tracing import shown_space, view
+
+        entries = [e for e in view(_get_trace_store(), limit, shown_space())[0] if e.trace_type == "llm"]
         return JSONResponse(
             {
                 "steps": [_format_trace_entry(e) for e in entries],
@@ -139,10 +145,31 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
     return router
 
 
+def _turns_running(space: str | None) -> int:
+    """How many chat turns run now: every one (*space* None), else those of
+    *space* (each turn's thread record says its space; a thread with none is
+    the owner's, N19). Blocking: the thread records."""
+    from kazma_ui.active_turns import running_turn_count, running_turns
+
+    if space is None:
+        return running_turn_count()
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+    from kazma_core.spaces.threads import record_of
+
+    count = 0
+    for thread_id in running_turns():
+        record = record_of(thread_id)
+        if (record.space_id if record is not None else OWNER_SPACE_ID) == space:
+            count += 1
+    return count
+
+
 def _get_agent_info(agent: Any) -> dict[str, Any]:
     """Get agent information for the management page."""
-    store = _get_trace_store()
-    stats = store.stats()
+    from kazma_core.tracing import shown_space, view
+
+    shown = shown_space()
+    recent_traces, stats = view(_get_trace_store(), 10, shown)
 
     config = getattr(agent, "config", None)
 
@@ -187,11 +214,8 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
     # The agent answers whenever the server serves. The page used to read
     # agent.is_running, a flag set only by its own Start/Stop buttons and
     # read by nothing else, so it said "Stopped" over a working agent.
-    recent_traces = store.recent(10)
     running = _serving()
-    from kazma_ui.active_turns import running_turn_count
-
-    agent_state = _derive_agent_state(running, recent_traces, running_turn_count())
+    agent_state = _derive_agent_state(running, recent_traces, _turns_running(shown))
 
     # Build a human-readable description of the last activity (if any)
     # A trace's label (data, shown as it is); the page says itself, in its

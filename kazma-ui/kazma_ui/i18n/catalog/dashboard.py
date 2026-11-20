@@ -867,6 +867,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تنظيف لقطات السفر عبر الزمن؟",
         "en": "Clean up time-travel snapshots?",
     },
+    "dashboard.spend_people": {
+        "ar": "إنفاق كل شخص اليوم",
+        "en": "Spent today, per person",
+    },
+    "dashboard.spend_people_calls": {
+        "ar": "استدعاءات النموذج",
+        "en": "Model calls",
+    },
+    "dashboard.spend_people_cost": {
+        "ar": "التكلفة",
+        "en": "Cost",
+    },
+    "dashboard.spend_people_hint": {
+        "ar": "الإنفاق والأعداد فقط: لا محادثة ولا نص لأحد.",
+        "en": "Spend and counts only: no one's chat or text.",
+    },
+    "dashboard.spend_people_kazma": {
+        "ar": "عمل كازما نفسه",
+        "en": "Kazma's own work",
+    },
+    "dashboard.spend_people_owner": {
+        "ar": "المالك",
+        "en": "The owner",
+    },
+    "dashboard.spend_people_person": {
+        "ar": "الشخص",
+        "en": "Person",
+    },
     "dashboard.spend_today": {
         "ar": "إنفاق اليوم",
         "en": "Spent today",

@@ -50,6 +50,7 @@
       if (!document.hidden) {
         refreshCharts();
         fetchSpendToday();
+        fetchSpendByPerson();
       }
     }, 60000));
 
@@ -158,6 +159,7 @@
   function fetchInitialData() {
     fetchAnswerQuality();
     fetchSpendToday();
+    fetchSpendByPerson();
     refreshCharts();
     fetch('/api/dashboard/status')
       .then(function(r) { return r.json(); })
@@ -276,6 +278,48 @@
       if (unpriced && window.kazmaCount) {
         sub.textContent += ' · ' + window.kazmaCount('dashboard.spend_unpriced', unpriced);
       }
+    }).catch(function() { /* keep the last reading */ });
+  }
+
+  // What each person's model calls cost today (Spaces S1-22): the admin's,
+  // spend and counts only. Shown once two people have spent, or Spaces is
+  // enforced; an install with one account sees the page as before.
+  function fetchSpendByPerson() {
+    var card = $('spend-people-card');
+    var body = $('spend-people-rows');
+    if (!card || !body) return;
+    var get = window.kazmaGetJson ? window.kazmaGetJson('/api/dashboard/spend-by-person')
+      : fetch('/api/dashboard/spend-by-person').then(function(r) { return r.ok ? r.json() : null; });
+    Promise.resolve(get).then(function(data) {
+      if (!data || !data.available) return;  // a failed read keeps the last reading
+      var people = (data.people || []).filter(function(p) { return !p.kazma; });
+      if (people.length < 2 && !data.enforced) { card.hidden = true; return; }
+      body.textContent = '';
+      (data.people || []).forEach(function(p) {
+        var row = document.createElement('tr');
+        var who = document.createElement('td');
+        if (p.kazma) {
+          who.textContent = window.tOr('dashboard.spend_people_kazma', "Kazma's own work");
+        } else if (p.owner) {
+          who.textContent = window.tOr('dashboard.spend_people_owner', 'The owner');
+        } else {
+          var name = document.createElement('bdi');
+          name.setAttribute('translate', 'no');
+          name.textContent = p.name || '';
+          who.appendChild(name);
+        }
+        var cost = document.createElement('td');
+        var dollars = Number(p.cost) || 0;
+        var unpriced = Number(p.unpriced) || 0;
+        cost.textContent = unpriced && !dollars ? '—' : (unpriced ? '≥ ' : '') + '$' + dollars.toFixed(dollars < 1 ? 4 : 2);
+        var calls = document.createElement('td');
+        calls.textContent = fmtNumber(Number(p.calls) || 0);
+        row.appendChild(who);
+        row.appendChild(cost);
+        row.appendChild(calls);
+        body.appendChild(row);
+      });
+      card.hidden = false;
     }).catch(function() { /* keep the last reading */ });
   }
 

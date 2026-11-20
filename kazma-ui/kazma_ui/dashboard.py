@@ -110,11 +110,11 @@ def get_dashboard_context() -> dict[str, Any]:
 
 def _get_trace_data() -> list[dict[str, Any]]:
     """Get recent traces from the in-memory store, formatted for the template."""
-    from kazma_core.tracing import get_trace_store
+    from kazma_core.tracing import get_trace_store, shown_space, view
 
-    store = get_trace_store()
     traces = []
-    for entry in reversed(store.recent(50)):  # newest first
+    # The bound space's traces once Spaces is enforced (S1-22).
+    for entry in reversed(view(get_trace_store(), 50, shown_space())[0]):  # newest first
         t = time.strftime("%H:%M:%S", time.localtime(entry.timestamp))
         # A status is a status badge (dashboard.js prependTraceRow keeps the
         # same map): an error was the sky-blue "premium" tier badge.
@@ -174,10 +174,11 @@ def _get_metrics() -> dict[str, Any]:
     format them (legacy string forms like ``"$0.12"`` / ``"1,234"`` broke
     ``Number()`` and painted NaN/0 on refresh).
     """
-    from kazma_core.tracing import get_trace_store
+    from kazma_core.tracing import get_trace_store, shown_space
 
-    store = get_trace_store()
-    stats = store.stats()
+    store, shown = get_trace_store(), shown_space()
+    # The bound space's totals once Spaces is enforced (S1-22).
+    stats = store.stats() if shown is None else store.stats(shown)
     uptime_s = float(stats.get("uptime_seconds") or 0)
     return {
         "total_cost": float(stats.get("total_cost") or 0.0),
@@ -410,6 +411,49 @@ def usage_over_time(request: Request, range: str = "hour") -> JSONResponse:  # n
             "unpriced": sum(b.get("unpriced", 0) for b in buckets),
         },
     })
+
+
+@router.get("/api/dashboard/spend-by-person")
+def spend_by_person_today(request: Request) -> JSONResponse:
+    """What each person's model calls cost today, for the admin (Spaces
+    S1-22, N11: spend and counts per person, never a title or a text).
+
+    "Today" is the daily limit's day (midnight in the operator's zone). An
+    entry names the person (``name``, from the identity store) or, for the
+    calls that name nobody, ``kazma`` (Kazma's own work, and calls recorded
+    before calls named their person). ``available`` False when the ledger
+    cannot be read."""
+    if (denied := require_admin(request)) is not None:
+        return denied
+    from kazma_core.agent.turn_token_budget import _local_midnight
+    from kazma_core.cron.scheduler import resolve_cron_zone
+    from kazma_core.observability.llm_ledger import spend_by_person
+
+    zone, _zone_name = resolve_cron_zone()
+    rows = spend_by_person(_local_midnight(zone))
+    if rows is None:
+        return JSONResponse({"available": False})
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, spaces_enforced
+
+    names = _account_names()
+    return JSONResponse({"available": True, "enforced": spaces_enforced(), "people": [
+        {**{k: row[k] for k in ("calls", "tokens", "cost", "unpriced", "spaces")},
+         "kazma": not row["asker"], "owner": row["asker"] == OWNER_ACCOUNT_ID,
+         "name": names.get(row["asker"], row["asker"])}
+        for row in rows
+    ]})
+
+
+def _account_names() -> dict[str, str]:
+    """``account id -> the name the admin knows them by``. Blocking."""
+    from kazma_core.spaces import identity
+
+    try:
+        accounts = identity.list_accounts()
+    except identity.IdentityUnavailable:
+        return {}
+    return {str(a.get("id") or ""): str(a.get("name") or a.get("username") or a.get("id") or "")
+            for a in accounts}
 
 
 @router.get("/api/dashboard/spend-today")

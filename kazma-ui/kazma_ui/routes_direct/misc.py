@@ -434,10 +434,24 @@ def register_misc_routes(self: Any) -> None:
             await websocket.close(code=4403, reason="Forbidden for your role")
             return
         from kazma_core.shutdown import is_shutting_down
+        from kazma_core.spaces.scope import spaces_enforced
         from kazma_core.tracing import get_trace_store
 
+        # The feed of the space the page names, checked at the handshake
+        # like every request (Spaces S1-22): another space's traces are
+        # never sent to it.
+        shown: str | None = None
+        if spaces_enforced():
+            from kazma_ui import space_binding
+
+            try:
+                binding = await asyncio.to_thread(space_binding.space_for_socket, principal, websocket)
+            except space_binding.SpaceRefused as refused:
+                await websocket.close(code=4003, reason=refused.code)
+                return
+            shown = binding.space_id
         store = get_trace_store()
-        store.register_ws(websocket)
+        store.register_ws(websocket, shown)
         try:
             import json
 

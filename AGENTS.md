@@ -13683,6 +13683,33 @@ product can turn it on, so an install with one account behaves as before.
     today's supervisor paging a member's stuck X post with its words, and
     the decision path without its space checks as controls),
     `tests/_runs_space_cases.py`.
+- **Model calls name their space and asker (S1-22, 2026-11-20).**
+  - The per-call ledger stamps each row with the scope bound where the
+    call was made (`llm_ledger._whose`, read in the caller's own context by
+    `arecord_llm_call`): a turn's, a scheduled fire's, a swarm worker's.
+    Kazma's own work and a call with nothing bound name nobody. Columns
+    `space` and `asker` are added to an older file; rows from before name
+    nobody. A new model call site needs no argument: it is made inside the
+    work's scope, or it is Kazma's own.
+  - `llm_ledger.spend_by_person(since)` is the admin's view (N11: spend and
+    counts, never a text): `GET /api/dashboard/spend-by-person` (admin), the
+    Dashboard's "Spent today, per person" card, shown once two people have
+    spent or Spaces is enforced (an install with one account sees the page as
+    before).
+  - **The trace feed keeps to its space**: a `TraceEntry` carries `space`
+    and `asker` (stamped by `TraceStore.add` from the bound scope; a trace's
+    details are the start of a turn's prompt); `TraceStore.recent` and
+    `stats` take the space shown (`tracing.shown_space`, `tracing.view`:
+    every one, asked the old way, while Spaces is not enforced), per-space
+    totals are kept, and a socket registered for a space is sent that
+    space's entries and totals only. The Agents page and API, the Dashboard's
+    trace list and totals, and `/ws/dashboard` (membership checked at the
+    handshake, `space_binding.space_for_socket`) show the bound space's; the
+    Agents page counts the running turns of its space.
+  - Gates: `tests/test_ledger_names_the_asker.py` (every call of a real
+    turn, a scheduled fire and a swarm task; the ledger without the stamp
+    and a call site with nothing bound as controls; a socket registered as
+    before as the feed's control), `tests/_traces_space_cases.py`.
 
 ## UI Conventions (Web)
 
