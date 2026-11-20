@@ -291,9 +291,9 @@ _ENTRY_NAMES: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar(
     "kazma_recall_entry_names", default={})
 
 
-def _authors(conn: sqlite3.Connection | None, ids: list[str]) -> dict[str, str]:
-    """``episode id -> said_by`` for the turns among *ids* that name an
-    author (the local copy holds them on every path)."""
+def _authors(conn: sqlite3.Connection | None, ids: list[str], tenant_id: str) -> dict[str, str]:
+    """``episode id -> said_by`` for *tenant_id*'s turns among *ids* that
+    name an author (the local copy holds them on every path)."""
     if not ids:
         return {}
     own = conn is None
@@ -306,8 +306,9 @@ def _authors(conn: sqlite3.Connection | None, ids: list[str]) -> dict[str, str]:
     try:
         marks = ",".join("?" for _ in ids)
         rows = conn.execute(
-            f"SELECT id, json_extract(metadata_json, '$.said_by') FROM episodes WHERE id IN ({marks})",
-            ids,
+            f"SELECT id, json_extract(metadata_json, '$.said_by') FROM episodes "
+            f"WHERE tenant_id = ? AND id IN ({marks})",
+            [tenant_id, *ids],
         ).fetchall()
         return {str(r[0]): str(r[1]) for r in rows if r[1]}
     finally:
@@ -332,7 +333,7 @@ def _for_asker(result: RecallResult, people: Any, asker: str | None, query: str,
         hit.content = f"{sub.replace('_', ' ')} {pred} {obj}".strip()
     result.beliefs = beliefs[:limit]
     episodes = list(result.episodes[:limit])
-    said = _authors(conn, [h.id for h in episodes])
+    said = _authors(conn, [h.id for h in episodes], people.space)
     for hit in episodes:
         name = people.shown_author(said.get(hit.id), asker)
         shown = str((hit.metadata or {}).get("display") or "")
