@@ -13880,6 +13880,21 @@ product can turn it on, so an install with one account behaves as before.
     `tests/test_sealed_zip.py` (7-Zip and bsdtar open it with the password
     only, ZIP64 too; a big-endian counter as the control),
     `tests/e2e/test_people_page_browser.py` (EN and AR, by the sidebar).
+- **Backups carry the identity store; a restore keeps spaces apart (S1-28,
+  2026-11-20).** The universal backup, the Postgres dump and a migration
+  bundle carry the identity store (a settings row) and the thread records
+  (`thread_scopes.db`) with the stores: a restore keeps every chat in its
+  space. Guards act only where Spaces is enforced.
+  - The Settings file is the admin's (`settings_restore._held_by_another_space`):
+    it holds no other space's `tenant.<id>.` keys and no other space's Soul,
+    and a restore of an older file writes none (`kept.other_spaces`).
+  - With a second account, no plain copy of the backup leaves the machine
+    (decision N10, `universal._plain_copy_refused`): restic's encrypted copy
+    only.
+  - Gate: `tests/test_backup_restore_spaces.py` (a real universal backup and
+    a real migration of two planted spaces, judged by a child pinned to the
+    restored folder; a restore without the identity store, the Settings
+    file of before and the plain-copy check of before as controls).
 
 ## UI Conventions (Web)
 

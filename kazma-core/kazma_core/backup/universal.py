@@ -555,6 +555,31 @@ def _zip_backup_dir(dest: Path) -> Path:
                 pass
 
 
+def _plain_copy_refused() -> str:
+    """Why a plain copy of the backup may not leave the machine, or "".
+
+    Decision N10 (Spaces S1-28): once the install enforces Spaces and holds
+    a second account, the backup holds other people's spaces, and every copy
+    that leaves the machine is encrypted -- restic's. The plain copies (a
+    native provider's zip, rclone's folder) are refused; an identity store
+    that cannot be read refuses too. One account: nothing changes."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return ""
+    from kazma_core.spaces.identity import IdentityUnavailable, read_registry
+
+    try:
+        several = len(read_registry()["accounts"]) > 1
+    except IdentityUnavailable:
+        return ("The accounts could not be read, so no plain copy of the backup left the machine; "
+                "restic's encrypted copy is not affected.")
+    if not several:
+        return ""
+    return ("This install holds several people's spaces, so a plain copy of its backup does not leave "
+            "the machine. Use restic's encrypted copy (Settings -> Backup) and turn the plain copy off.")
+
+
 def _offsite_sync(dest: Path) -> dict[str, Any]:
     """Upload the finished backup to the configured cloud provider (fail-open).
 
@@ -569,6 +594,10 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
     cfg = _offsite_config()
     if not cfg["enabled"]:
         return {"skipped": "offsite sync disabled"}
+    refused = _plain_copy_refused()
+    if refused:
+        logger.warning("[universal-backup] %s", refused)
+        return {"ok": False, "error": refused, "refused": "plain_copy"}
 
     async def _rclone(reason: str = "") -> dict[str, Any]:
         """Copy the backup out with rclone. The independent second path.
