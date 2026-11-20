@@ -259,7 +259,108 @@ def recall(
         _QUERY_MEMO.reset(token)
     if memo["degraded"] and result.degraded is None:
         result.degraded = memo["degraded"]
+    if not result.failed and not result.empty:
+        _date_hits(result, conn=conn, tenant_id=tenant_id)
     return result
+
+
+# ── Dates (framework audit F2, step 1) ────────────────────────────────────
+#
+# Kazma keeps when each turn was said and when each fact became true, and
+# showed neither: "Where do I live?" was answered from "user lives in London"
+# and "User: I live in Paris" with no way to tell which came last, and "We
+# moved last month" could not be placed. Every remembered turn now carries its
+# day, every fact the month it became true, and a single-valued fact the value
+# it replaced. In the operator's zone, as every other date Kazma writes.
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _memory_zone() -> Any:
+    """The operator's zone (``cron.timezone``, else ``KAZMA_TZ``, else UTC;
+    an unreadable store or an unknown name falls back to UTC there)."""
+    from kazma_core.cron.scheduler import resolve_cron_zone
+
+    return resolve_cron_zone()[0]
+
+
+def _local(ts: Any, zone: Any) -> Any:
+    from datetime import datetime
+
+    try:
+        value = float(ts)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return datetime.fromtimestamp(value, zone)
+
+
+def _said_on(ts: Any, zone: Any) -> str:
+    """"12 Jan 2026": the day a turn was said."""
+    when = _local(ts, zone)
+    return f"{when.day} {_MONTHS[when.month - 1]} {when.year}" if when else ""
+
+
+def _month_of(ts: Any, zone: Any) -> str:
+    """"May 2026": the month a fact became (or stopped being) true."""
+    when = _local(ts, zone)
+    return f"{_MONTHS[when.month - 1]} {when.year}" if when else ""
+
+
+def _replaced_values(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dict[str, tuple]:
+    """``fact id -> (value, from, until)`` of the fact each one replaced
+    (``supersedes_id``), when it still holds its value (a forgotten fact
+    keeps none)."""
+    marks = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT cur.id, prev.object, prev.valid_from, prev.valid_until FROM beliefs cur "
+        f"JOIN beliefs prev ON prev.id = cur.supersedes_id AND prev.tenant_id = cur.tenant_id "
+        f"WHERE cur.tenant_id = ? AND cur.id IN ({marks}) AND COALESCE(prev.object, '') != ''",
+        (tenant_id, *ids)).fetchall()
+    return {str(r[0]): (r[1], r[2], r[3]) for r in rows}
+
+
+def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_id: str) -> None:
+    """Put the dates on what recall shows: ``said_on`` on each turn,
+    ``since`` on each fact, and ``before`` (the value it replaced, with its
+    months) on a single-valued fact. :func:`format_recall_block` prints them.
+    A date that cannot be read is left out, with a WARNING: the memories are
+    shown either way."""
+    zone = _memory_zone()
+    for hit in result.episodes:
+        day = _said_on((hit.metadata or {}).get("at"), zone)
+        if day:
+            hit.metadata["said_on"] = day
+    singles = []
+    for hit in result.beliefs:
+        since = _month_of((hit.metadata or {}).get("valid_from"), zone)
+        if since:
+            hit.metadata["since"] = since
+        if (hit.metadata or {}).get("predicate_type") in ("functional", "state"):
+            singles.append(hit.id)
+    if not singles:
+        return
+    own = conn is None
+    try:
+        if own:
+            from kazma_core.paths import primary_memory_db
+
+            conn = _connect_existing(primary_memory_db())
+            if conn is None:
+                return
+        before = _replaced_values(conn, singles, tenant_id)
+    except sqlite3.Error:
+        logger.warning("[recall] could not read the values recalled facts replaced", exc_info=True)
+        return
+    finally:
+        if own and conn is not None:
+            conn.close()
+    for hit in result.beliefs:
+        if hit.id in before:
+            value, start, end = before[hit.id]
+            span = " to ".join(m for m in (_month_of(start, zone), _month_of(end, zone)) if m)
+            hit.metadata["before"] = f"{value} ({span})" if span else str(value)
 
 
 #: Which facts a shared space's question is about (``_whose_facts``): a
@@ -1690,6 +1791,9 @@ def _rank_by_evidence(
                 "coverage": round(cov, 3),
                 "evidence": round(ev, 4),
                 "strength": "strong" if ev >= strong else "weak",
+                # When it was said (a turn) or became true (a fact): the date
+                # the block shows (``_date_hits``, framework audit F2).
+                "at": cand.created_at,
                 **({"display": cand.display} if cand.display else {}),
                 **({"more": cand.more} if cand.more else {}),
             },
@@ -2668,6 +2772,22 @@ def _one_line(text: str) -> str:
     return " ".join(str(text or "").split())
 
 
+def _dated_line(hit: RecallHit, shown: str) -> str:
+    """*shown* with the dates recall put on *hit* (``_date_hits``): a turn's
+    day before it, a fact's month before its value and the value it replaced
+    after it. Before the text, where nothing the text holds can move them."""
+    meta = hit.metadata or {}
+    if meta.get("said_on"):
+        return f"[{meta['said_on']}] {shown}"
+    if hit.kind != "belief":
+        return shown
+    if meta.get("since"):
+        shown = f"[since {meta['since']}] {shown}"
+    if meta.get("before"):
+        shown = f"{shown}; before that: {_one_line(meta['before'])}"
+    return shown
+
+
 def format_recall_block(
     result: RecallResult,
     *,
@@ -2715,6 +2835,7 @@ def format_recall_block(
             # A memory is kept whole and shown bounded: how much is left out,
             # and the tool that reads it (memory/limits.py).
             shown = f"{shown} {more_note(more, h.id, shown)}"
+        shown = _dated_line(h, shown)
         tag = _reading_tag(h)
         if tag:
             # Before the value, where nothing the value holds can push it away.

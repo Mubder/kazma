@@ -1988,6 +1988,19 @@ four injected were noise.
   not yet in the remote index was invisible to meaning search. Both are
   searched and merged by id; the local store's score wins (it is the source
   of truth).
+- **The block carries the dates Kazma holds** (2026-11-20, framework audit
+  F2 step 1, part C2). `recall` ends with `recall._date_hits`: each turn
+  gets its day (`said_on`, from the candidate's `at`), each fact the month
+  it became true (`since`, its `valid_from`), and a functional or state
+  fact the value it replaced with its months (`before`, read through
+  `supersedes_id` in the fact's tenant; a forgotten value, `object = ''`,
+  is never shown). In the operator's zone (`_memory_zone`:
+  `resolve_cron_zone`). `_dated_line` puts them BEFORE the text ("[since
+  Oct 2026] user lives in London; before that: Paris (May 2026 to Oct
+  2026)"), after the reading tag, one line. No model, no new storage; a
+  read that fails leaves the dates out with a WARNING. Gate:
+  `tests/test_memory_recall_dates.py` (recall without the dating step as
+  the negative control).
 - **One fact, one predicate name (W6, `memory/predicates.py`).** The
   extractor names predicates freely; under two names a single-valued fact is
   never superseded (live 2026-09-27: "daily_tweet_cap" 16 and

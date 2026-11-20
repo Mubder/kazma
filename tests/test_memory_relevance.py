@@ -265,7 +265,10 @@ def test_a_thin_match_is_shown_as_possibly_related(store):
     assert [h.id for h in hits] == ["e_thin"]
     assert hits[0].metadata["strength"] == "weak"
     block = format_recall_block(RecallResult([], hits), explain=False)
-    assert "(possibly related) Travel documents folder" in block
+    # The turn's day sits between the mark and the text (framework audit F2).
+    import re
+
+    assert re.search(r"\(possibly related\) \[\d{1,2} [A-Z][a-z]{2} \d{4}\] Travel documents folder", block), block
 
     strong = recall_mod.RecallHit(id="x", content="Strong one", score=0.3,
                                   metadata={"strength": "strong"})

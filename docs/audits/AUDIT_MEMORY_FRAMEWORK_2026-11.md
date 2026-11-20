@@ -827,6 +827,20 @@ the gain and close all five measured faults. D, G and H do not depend on C
 and can run in other sessions beside it. B's benchmark work and C1 can run
 in two sessions at once: they touch different files.
 
+### 4.3 Status of part C2
+
+Added as each piece lands.
+
+- **Dates shown (F2 step 1), 2026-11-20: done.** Every recalled turn
+  carries its day, every fact the month it became true, and a single-valued
+  fact the value it replaced with its months, in the operator's zone
+  (`recall._date_hits`). Probe 4's shape, seeded with Paris in May and
+  London in October, now reads "[since Oct 2026] user lives in London;
+  before that: Paris (May 2026 to Oct 2026)" and "[28 May 2026] User: I
+  live in Paris".
+  Gate: `tests/test_memory_recall_dates.py`; control: recall without the
+  dating step.
+
 What I would not do:
 
 - **Not a graph database as the source of truth.** Zep's design needs one;

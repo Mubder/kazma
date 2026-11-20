@@ -113,7 +113,13 @@ related or not.
 4. **Content words** (`memory/query_terms.py`): English and Gulf/MSA
    stopwords dropped, Arabic folded with the article and one-letter prefixes
    handled, light plurals, whole words only ("out" is not in "about").
-5. Fence: `format_untrusted_block(..., source="memory_v2_recall")`.
+5. **Dates.** Every conversation memory is shown with the day it was said
+   ("[12 Jan 2026] User: ..."), every fact with the month it became true
+   ("[since May 2026] user lives in London"), and a fact that holds one
+   value with the value it replaced ("before that: Paris (Jan 2026 to May
+   2026)"), in the time zone set for scheduled tasks. A value you asked
+   Kazma to forget is never shown as "before that".
+6. Fence: `format_untrusted_block(..., source="memory_v2_recall")`.
 
 When memory has nothing for a question, the **past-chats fallback** searches
 earlier chats; a chat must hold more than half of the question's content
