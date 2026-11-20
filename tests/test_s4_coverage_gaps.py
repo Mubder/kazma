@@ -301,7 +301,7 @@ class TestTraceStore:
     def test_ring_buffer_and_metrics(self) -> None:
         store = TraceStore(max_entries=3)
         for i in range(5):
-            store._traces.append(
+            store.add(
                 TraceEntry(
                     timestamp=float(i),
                     trace_type="llm",
@@ -312,8 +312,5 @@ class TestTraceStore:
                     cost=0.01,
                 )
             )
-            store._total_tokens += 10
-            store._total_cost += 0.01
-            store._total_llm_calls += 1
         assert len(store._traces) == 3  # ring capacity
-        assert store._total_llm_calls == 5
+        assert store.stats()["total_llm_calls"] == 5  # the totals count every call

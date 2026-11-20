@@ -61,6 +61,9 @@ class AskOptions:
     model: str = ""
     help: bool = False
     stream: bool = True
+    #: The space to act in (Spaces S1-20): the owner's personal space when
+    #: empty; one the owner is not a member of is refused before anything runs.
+    space: str = ""
 
 
 @dataclass
@@ -122,6 +125,14 @@ def parse_ask_argv(argv: list[str]) -> AskOptions:
             opts.model = args[i + 1]
             i += 2
             continue
+        if a == "--space" and i + 1 < len(args):
+            opts.space = args[i + 1]
+            i += 2
+            continue
+        if a.startswith("--space="):
+            opts.space = a.split("=", 1)[1]
+            i += 1
+            continue
         if a == "--":
             rest.extend(args[i + 1 :])
             break
@@ -150,6 +161,8 @@ def ask_help_text() -> str:
         "  --no-stream           Wait for the full reply (no live tokens)\n"
         "  --thread ID           Reuse a thread id\n"
         "  --model NAME          Switch model for this process\n"
+        "  --space ID            Act in this space (once Spaces is on: the admin's own\n"
+        "                        spaces only; default: your personal space)\n"
         "  --acp                 Agent Client Protocol stdio server\n"
         "\n"
         "No prompt on a TTY enters a multi-turn REPL (same thread). /exit /quit "
@@ -484,6 +497,25 @@ async def run_ask(
     text = (prompt or opts.prompt or "").strip()
     if not text:
         return AskResult(ok=False, text="", error="Empty prompt")
+    from kazma_core.spaces.machine import SpaceRefused, bound_on_the_machine, machine_space
+
+    try:
+        space = await asyncio.to_thread(machine_space, opts.space)
+    except SpaceRefused as exc:
+        _emit(on_event, {"event": "error", "text": str(exc)})
+        return AskResult(ok=False, text=str(exc), error=str(exc))
+    with bound_on_the_machine(space):
+        return await _run_ask_in_scope(text, opts, on_event=on_event, hitl_decide=hitl_decide)
+
+
+async def _run_ask_in_scope(
+    text: str,
+    opts: AskOptions,
+    *,
+    on_event: Callable[[dict[str, Any]], Any] | None,
+    hitl_decide: Callable[[dict[str, Any]], Any] | None,
+) -> AskResult:
+    """One turn of :func:`run_ask`, in the scope it bound."""
     _boot_env(workspace=opts.workspace, model=opts.model)
     thread_id = (opts.thread_id or "").strip() or f"cli-{uuid.uuid4()}"
     if opts.plan:
@@ -949,8 +981,32 @@ async def run_acp_stdio(
     stdout: TextIO | None = None,
     yolo: bool = False,
     workspace: str = "",
+    space: str = "",
 ) -> int:
-    """Serve ACP on stdio until EOF. Logs go to stderr."""
+    """Serve ACP on stdio until EOF. Logs go to stderr.
+
+    Every session acts in one space (Spaces S1-20): *space*, else the
+    owner's personal space; one the owner is not a member of is refused
+    before anything is served (exit code 2)."""
+    from kazma_core.spaces.machine import SpaceRefused, bound_on_the_machine, machine_space
+
+    try:
+        space_id = await asyncio.to_thread(machine_space, space)
+    except SpaceRefused as exc:
+        print(f"[kazma acp] {exc}", file=sys.stderr, flush=True)
+        return 2
+    with bound_on_the_machine(space_id):
+        return await _serve_acp(stdin=stdin, stdout=stdout, yolo=yolo, workspace=workspace)
+
+
+async def _serve_acp(
+    *,
+    stdin: TextIO | None,
+    stdout: TextIO | None,
+    yolo: bool,
+    workspace: str,
+) -> int:
+    """:func:`run_acp_stdio`'s loop, in the scope it bound."""
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     state = AcpSessionState(yolo=yolo, workspace=workspace)

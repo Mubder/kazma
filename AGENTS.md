@@ -13700,9 +13700,131 @@ product can turn it on, so an install with one account behaves as before.
     page or route goes in the rules.
   - A clone builds its environment with `security.git_auth.clone_env`:
     outside the owner's space, none of the machine's credentials.
+  - **Work on the machine acts as the admin** (`kazma_core/spaces/machine.py`,
+    2026-11-20): once enforced `kazma ask`/`acp` and `kazma mcp` bind the
+    owner's account in the owner's personal space, or in a space they name
+    (`--space`) that the owner is a member of (`machine_space`, read off the
+    loop in async code); any other space is refused before anything runs.
+    The terminal app's and the CLI's calls name the owner's personal space
+    (`local_api.auth_headers`). A new entry point that runs work on the
+    machine binds the same way.
   - Gates: `tests/test_host_tools_absent.py` (controls: a policy that only
     hides the tool, the route rule taken out, the clone environment as it
-    was), `tests/_host_tools_space_cases.py`.
+    was), `tests/_host_tools_space_cases.py`,
+    `tests/test_machine_work_acts_as_the_admin.py` (nothing bound and a call
+    naming no space as controls).
+- **Running work and approvals carry their space (S1-21, 2026-11-20).**
+  Guards act only where Spaces is enforced; not enforced, every surface lists
+  and acts as before (the older multi-user mode keeps its refusal).
+  - `kazma_core/runs/spaces.py` holds the rules: `visible_here` (a run or
+    incident of the space bound now; none with no space bound),
+    `kept_in_its_space` (O1: news of a space other than the owner's stays
+    off the install's channels), `may_act` (its asker or an owner of its
+    space, `spaces.shared_work.may_change`), `runs_refusal`.
+  - **Every run carries `space` and `asker`** (`contract.Run`), stamped by
+    its adapter from the kind's own record: a thread record, a swarm task's
+    metadata, a job's tenant and creator, a document job's tenant and actor,
+    a research session's columns, a crawl's working folder
+    (`spaces.files.space_of_folder`) or library, an X operation's tenant, a
+    memory task's payload. Empty is the install's own work and work from
+    before Spaces: the owner's space's (N19). A new adapter names `space=`
+    on every `Run(` (gate; `maintenance.py` is declared install work).
+    Adapters read every space's runs (the swarm with the task store's `"*"`
+    once enforced; a chat turn's title inside its thread's own space).
+  - **The registry keeps a surface to the bound space**
+    (`list_runs(everyone=False)`); the supervisor alone reads `everyone`.
+    `perform` refuses another space's run ("gone") and anyone but its asker
+    or an owner of its space (`not_yours`, 403); a kind's own control may be
+    stricter (a swarm task answers only its asker, N4).
+  - **Incidents carry `space` and `asker`** (columns added to an older
+    file); `recent(space=)` and `live(space=)` keep a surface to its space,
+    a row with none being the owner's. The supervisor opens another space's
+    incident with `notify = suppressed` (`KEPT_IN_ITS_SPACE`), `deliver` and
+    the recovery and diagnosis notes refuse it as a second line, the bell
+    shows the bound space's, and the runbooks step only on the owner's
+    work, as the owner. Delivering a member's incident to them is S2-05's.
+  - `/api/runs` answers in the bound space; a member decides on their own
+    space's incidents (the admin rule stays while not enforced). Chat apps'
+    `/runs` and a card's button refuse until their chats are bound to a
+    space (stage 3).
+  - **An approval gate names whose work asked**: `GateRow.asker` (column
+    added to an older file), stamped by `register_gate` from the bound
+    scope, and its tenant from the bound space when the writer named none.
+    The pending list was already per space (the chat store, a bridge gate's
+    tenant); an MCP server's sampling request is shown only where
+    Development is. Only the asker answering is S2-05's.
+  - Gates: `tests/test_gates_and_runs_spaces.py` (the unfiltered listing,
+    today's supervisor paging a member's stuck X post with its words, and
+    the decision path without its space checks as controls),
+    `tests/_runs_space_cases.py`.
+- **Model calls name their space and asker (S1-22, 2026-11-20).**
+  - The per-call ledger stamps each row with the scope bound where the
+    call was made (`llm_ledger._whose`, read in the caller's own context by
+    `arecord_llm_call`): a turn's, a scheduled fire's, a swarm worker's.
+    Kazma's own work and a call with nothing bound name nobody. Columns
+    `space` and `asker` are added to an older file; rows from before name
+    nobody. A new model call site needs no argument: it is made inside the
+    work's scope, or it is Kazma's own.
+  - `llm_ledger.spend_by_person(since)` is the admin's view (N11: spend and
+    counts, never a text): `GET /api/dashboard/spend-by-person` (admin), the
+    Dashboard's "Spent today, per person" card, shown once two people have
+    spent or Spaces is enforced (an install with one account sees the page as
+    before).
+  - **The trace feed keeps to its space**: a `TraceEntry` carries `space`
+    and `asker` (stamped by `TraceStore.add` from the bound scope; a trace's
+    details are the start of a turn's prompt); `TraceStore.recent` and
+    `stats` take the space shown (`tracing.shown_space`, `tracing.view`:
+    every one, asked the old way, while Spaces is not enforced), per-space
+    totals are kept, and a socket registered for a space is sent that
+    space's entries and totals only. The Agents page and API, the Dashboard's
+    trace list and totals, and `/ws/dashboard` (membership checked at the
+    handshake, `space_binding.space_for_socket`) show the bound space's; the
+    Agents page counts the running turns of its space.
+  - Gates: `tests/test_ledger_names_the_asker.py` (every call of a real
+    turn, a scheduled fire and a swarm task; the ledger without the stamp
+    and a call site with nothing bound as controls; a socket registered as
+    before as the feed's control), `tests/_traces_space_cases.py`.
+- **Settings in three areas (S1-23, 2026-11-20).** Guards act only where
+  Spaces is enforced; not enforced, Settings and its saves are as before.
+  - `kazma_core/settings_scope.py` holds every settings key's scope:
+    `install` (the admin's), `space` (a space's own: its connected
+    accounts, its chats' state, its Soul) or `account` (a person's sign-in
+    and sessions). `_scope_of_key` is the one answer (the longest pattern
+    decides; a key under `tenant.<id>.` is that space's). A new key goes
+    under a rule there, or `tests/test_settings_scope.py` fails.
+  - The install's own writers write install keys only
+    (`install_writer_refusal`): Settings' generic and batch saves answer
+    400 and `config_save` raises `RefusedBeforeEffect` for a space's or a
+    person's key. Such a key is changed through its own route, in its space.
+  - Settings is three areas, My account, This space and Install
+    (`#settings-root`'s `data-areas`, `settings._settings_areas`). A member
+    reaches `/settings`, their password and their sessions
+    (`platform_rbac._reaches_own_settings`) and is shown My account and This
+    space; Install, the API tokens and the platform users are the admin's
+    and are not on a member's page at all. A new Settings tab is placed in
+    an area (`settings_core.js` `_tabArea`).
+  - Gates: `tests/test_settings_scope.py` (a planted key, the
+    not-enforced save and a page built for everyone as controls),
+    `tests/e2e/test_settings_areas_browser.py` (EN and AR, by the sidebar).
+- **What reaches the admin carries no member content (S1-24, 2026-11-20).**
+  Guards act only where Spaces is enforced, except the finished-turn line's
+  `asker=`, which is always written.
+  - Every log line at INFO or above that quotes someone's words goes through
+    `kazma_core/observability/log_words.py` (`words_for_log`,
+    `args_for_log`): once enforced it says how long they are, never the
+    words. A new such line uses it.
+  - The finished-turn line names the person by account id (`asker=`, read
+    by `turn_line.read_turn_asker`). Once enforced the daily digest shows
+    the turns by person, counts what ran without asking in a chat another
+    person opened under that person (`daily_digest._others_chats`: never
+    the chat's id or its tools), and counts other people's open problems by
+    person; its own list is the owner's space's.
+  - Langfuse gets only the owner's space's work once enforced
+    (`KazmaTracer._to_langfuse`); the rest gets the console line.
+  - Gate: `tests/test_admin_signals_hold_no_content.py` (a member's real
+    turn, every INFO line, alert, the digest and the weekly report read for
+    a planted word; the log's words as before, today's digest and every
+    call sent to Langfuse as controls).
 
 ## UI Conventions (Web)
 

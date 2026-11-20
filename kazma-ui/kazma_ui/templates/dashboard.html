@@ -113,6 +113,26 @@
     </div>
   </div>
 
+  <!-- ── Spend per person today (the admin's; Spaces S1-22, N11: spend and
+       counts, never a chat). Shown once more than one person has spent, or
+       Spaces is enforced. ── -->
+  <section class="card" id="spend-people-card" hidden aria-labelledby="spend-people-title">
+    <div class="card-header">
+      <h2 id="spend-people-title" class="card-title">{{ t('dashboard.spend_people') }}</h2>
+      <p class="card-sub">{{ t('dashboard.spend_people_hint') }}</p>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th scope="col">{{ t('dashboard.spend_people_person') }}</th>
+          <th scope="col">{{ t('dashboard.spend_people_cost') }}</th>
+          <th scope="col">{{ t('dashboard.spend_people_calls') }}</th>
+        </tr>
+      </thead>
+      <tbody id="spend-people-rows"></tbody>
+    </table>
+  </section>
+
   <!-- ── Charts Row ── -->
   <div class="charts-row dash-grid-2">
     <section class="card chart-card" aria-labelledby="token-chart-title">

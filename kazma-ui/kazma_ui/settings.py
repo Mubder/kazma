@@ -32,6 +32,7 @@ from kazma_core.errors import safe_error, validation_error
 # The masker is kazma_core's, shared with the agent's config_read tool.
 from kazma_core.security.config_mask import MASK, key_is_secret, mask_deep
 from kazma_core.settings_restore import MAX_BACKUP_BYTES, NotABackup, PlanChanged
+from kazma_core.settings_scope import install_writer_refusal
 from kazma_core.settings_validation import SettingRejected, validate_setting
 from kazma_core.swarm.task_store import (
     DEFAULT_TASK_RETENTION_DAYS,
@@ -129,6 +130,20 @@ async def _read_backup_body(request: Request) -> str:
         ) from None
 
 
+def _settings_areas(request: Request) -> list[str]:
+    """The areas of Settings this request is shown (Spaces S1-23): every
+    one while Spaces is not enforced (the page is the admin's, as before);
+    once it is, My account and This space for everyone, and Install for the
+    admin. Blocking: the admin decision reads the session store."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    from kazma_ui.auth import admin_decision
+
+    if not spaces_enforced() or admin_decision(request) == "ok":
+        return ["account", "space", "install"]
+    return ["account", "space"]
+
+
 class SettingsRouterBuilder:
     """Builder that decomposes the massive settings router into modular sub-routers."""
 
@@ -166,7 +181,15 @@ class SettingsRouterBuilder:
 
         @router.get("/settings", response_class=HTMLResponse)
         def settings_page(request: Request) -> HTMLResponse:
-            """Render the settings page."""
+            """Render the settings page: its three areas, My account, This
+            space and Install (Spaces S1-23). Once Spaces is enforced a member
+            is shown the first two, and the page carries no install value."""
+            areas = _settings_areas(request)
+            if "install" not in areas:
+                return templates.TemplateResponse(request, "settings.html", {
+                    "model": {}, "agent": {}, "connectors": {}, "config": None,
+                    "active_page": "settings", "settings_areas": areas,
+                })
             # Use the agent's facade method to avoid direct llm_config access.
             llm_cfg = agent.get_llm_config()
             try:
@@ -215,6 +238,7 @@ class SettingsRouterBuilder:
                     "connectors": connector_settings,
                     "config": agent.config,
                     "active_page": "settings",
+                    "settings_areas": areas,
                 },
             )
 
@@ -344,6 +368,11 @@ class SettingsRouterBuilder:
             value one save refuses, the batch refuses, and writes nothing."""
             items = []
             for u in updates:
+                # Once Spaces is enforced the install's writers write install
+                # keys only: a space's or a person's key has its own page (S1-23).
+                refused = install_writer_refusal(u.key)
+                if refused:
+                    raise HTTPException(status_code=400, detail=refused)
                 try:
                     value, category = validate_setting(u.key, u.value)
                 except SettingRejected as exc:
@@ -359,6 +388,9 @@ class SettingsRouterBuilder:
             read, a server-status event Kazma does not send -- is refused with
             what it may hold (kazma_core.settings_validation, the one check a
             batch save and a restore apply too)."""
+            refused = install_writer_refusal(setting.key)
+            if refused:
+                raise HTTPException(status_code=400, detail=refused)
             try:
                 value, category = validate_setting(setting.key, setting.value)
             except SettingRejected as exc:

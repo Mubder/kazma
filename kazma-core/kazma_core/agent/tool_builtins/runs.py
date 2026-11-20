@@ -5,7 +5,8 @@ run registry (``kazma_core.runs``), the same read model the Dashboard and
 ``/runs`` show. A run's title and failure reason are its own data (a prompt,
 a file name, an error a remote service wrote): they reach the model fenced.
 Acting on a run is the owner's, through the incident card or the page, never
-these tools.
+these tools. Once Spaces is enforced they answer for the space the turn runs
+in (S1-21): its runs only, never another space's.
 """
 
 from __future__ import annotations
@@ -35,12 +36,11 @@ def register_run_tools(registry: Any) -> None:
     async def list_runs(include_finished: bool = False) -> str:
         from kazma_core.runs.registry import list_runs as _list
         from kazma_core.runs.text import format_listing
+        from kazma_core.runs.spaces import runs_refusal
         from kazma_core.safety.prompt_fence import fence_untrusted
-        from kazma_core.security.single_operator import single_operator_refusal
 
         refusal = await asyncio.to_thread(
-            single_operator_refusal,
-            "Running work is shown on a single-operator install only.")
+            runs_refusal, "Running work is shown on a single-operator install only.")
         if refusal:
             return f"Error: {refusal}"
         listing = await _list()
@@ -59,12 +59,11 @@ def register_run_tools(registry: Any) -> None:
         from kazma_core.runs.incidents import get_incident_store
         from kazma_core.runs.registry import get_run
         from kazma_core.runs.text import describe_run
+        from kazma_core.runs.spaces import runs_refusal
         from kazma_core.safety.prompt_fence import fence_untrusted
-        from kazma_core.security.single_operator import single_operator_refusal
 
         refusal = await asyncio.to_thread(
-            single_operator_refusal,
-            "Running work is shown on a single-operator install only.")
+            runs_refusal, "Running work is shown on a single-operator install only.")
         if refusal:
             return f"Error: {refusal}"
         try:

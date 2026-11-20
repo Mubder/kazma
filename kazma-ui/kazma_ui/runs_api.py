@@ -10,9 +10,14 @@
 * ``GET`` / ``PUT /api/runs/runbooks`` -- the automatic first steps and
   whether each is on (``runs.runbooks``, all off by default). PUT is admin.
 
-Single-operator only (decision D1): with platform users every route answers
-409 ``runs_single_operator``. Words a person reads (states, actions) come in
-the page's language; run titles and failure reasons are the runs' own data.
+Not enforcing Spaces, single-operator only (decision D1): with platform
+users every route answers 409 ``runs_single_operator``. Once Spaces is
+enforced (S1-21) the routes answer for the space the request is bound to: its
+runs and incidents only, never another space's (O1). A member acts on an
+incident of their own space -- its run's asker or an owner of the space
+(``runs.spaces.may_act``) -- and the automatic first steps stay the admin's.
+Words a person reads (states, actions) come in the page's language; run
+titles and failure reasons are the runs' own data.
 """
 
 from __future__ import annotations
@@ -44,9 +49,31 @@ class _Act(BaseModel):
 
 
 async def _refusal() -> str | None:
-    from kazma_core.security.single_operator import single_operator_refusal
+    from kazma_core.runs.spaces import runs_refusal
 
-    return await asyncio.to_thread(single_operator_refusal, _REFUSAL)
+    return await asyncio.to_thread(runs_refusal, _REFUSAL)
+
+
+def _space_shown() -> str | None:
+    """The space whose incidents a request is shown: the bound one once
+    Spaces is enforced, every one (None) before. No I/O."""
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    bound = current_scope()
+    return bound.space_id if bound is not None else ""
+
+
+async def _may_decide(request: Request) -> JSONResponse | None:
+    """Who may decide on an incident: the admin, as before, while Spaces is
+    not enforced; once it is, a member of the space -- the registry then
+    holds the run to its asker or an owner of its space."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if spaces_enforced():
+        return None
+    return await _admin_denied(request)
 
 
 async def _admin_denied(request: Request) -> JSONResponse | None:
@@ -88,7 +115,8 @@ def _incident_view(row: dict[str, Any], lang: str) -> dict[str, Any]:
     # (the stored detail is the English log line).
     detail = str(row.get("notify_detail") or "")
     data["quiet_reason"] = ("before_start" if detail.startswith("ended before") else
-                            "announced" if detail.startswith("announced by") else "")
+                            "announced" if detail.startswith("announced by") else
+                            "kept_in_space" if detail.startswith("kept in its space") else "")
     return data
 
 
@@ -110,7 +138,7 @@ def create_runs_router() -> APIRouter:
 
         lang = current_language()
         listing = await list_runs()
-        incidents = await asyncio.to_thread(get_incident_store().recent, limit=30)
+        incidents = await asyncio.to_thread(get_incident_store().recent, limit=30, space=_space_shown())
         return JSONResponse({
             "ok": True,
             "runs": [_run_view(r, lang) for r in listing.runs],
@@ -125,7 +153,7 @@ def create_runs_router() -> APIRouter:
         refusal = await _refusal()
         if refusal:
             return JSONResponse({"ok": False, "code": REFUSAL_CODE, "error": refusal}, status_code=409)
-        denied = await _admin_denied(request)
+        denied = await _may_decide(request)
         if denied is not None:
             return denied
         from kazma_core.runs.decide import decide
@@ -138,7 +166,7 @@ def create_runs_router() -> APIRouter:
         status = 200
         if not outcome.ok:
             status = {"unknown_incident": 404, "already_decided": 409, "resolved": 409, "expired": 409,
-                      "diagnosis_running": 409, "not_offered": 409}.get(outcome.code, 422)
+                      "diagnosis_running": 409, "not_offered": 409, "not_yours": 403}.get(outcome.code, 422)
         lang = current_language()
         return JSONResponse({"ok": outcome.ok, "code": outcome.code, "message": outcome.message,
                              "incident": _incident_view(outcome.incident, lang) if outcome.incident else None},

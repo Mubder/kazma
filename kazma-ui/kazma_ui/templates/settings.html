@@ -7,33 +7,55 @@
 {% block content %}
 {# data-tab: the tab this page was asked for. A soft navigation runs the
    page script before it pushes the new address (settings_core.js). #}
-<div id="settings-root" data-tab="{{ request.query_params.get('tab', '') | e }}" x-data="settingsApp()">
+<div id="settings-root" data-tab="{{ request.query_params.get('tab', '') | e }}" data-areas="{{ (settings_areas if settings_areas is defined else ['account', 'space', 'install']) | join(',') }}" x-data="settingsApp()">
 
     <!-- ═══ Settings Navigation ═══ -->
-    <nav class="settings-nav tabs" role="tablist">
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'providers_connectors' ? 'true' : 'false'" :class="{ active: tab === 'providers_connectors' }" @click="onTabChange('providers_connectors')">{{ t('settings.tab_providers_connectors') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'agent' ? 'true' : 'false'" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">{{ t('settings.tab_agent') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'alerts' ? 'true' : 'false'" :class="{ active: tab === 'alerts' }" @click="onTabChange('alerts')">{{ t('settings.tab_alerts') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'memory' ? 'true' : 'false'" :class="{ active: tab === 'memory' }" @click="onTabChange('memory')">{{ t('settings.tab_memory') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'mcp' ? 'true' : 'false'" :class="{ active: tab === 'mcp' }" @click="onTabChange('mcp')">{{ t('settings.tab_mcp') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'skills' ? 'true' : 'false'" :class="{ active: tab === 'skills' }" @click="onTabChange('skills')">{{ t('settings.tab_skills') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'appearance' ? 'true' : 'false'" :class="{ active: tab === 'appearance' }" @click="onTabChange('appearance')">{{ t('settings.tab_appearance') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'shortcuts' ? 'true' : 'false'" :class="{ active: tab === 'shortcuts' }" @click="onTabChange('shortcuts')">{{ t('settings.tab_shortcuts') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'account' ? 'true' : 'false'" :class="{ active: tab === 'account' }" @click="onTabChange('account')">{{ t('settings.tab_account') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'tools' ? 'true' : 'false'" :class="{ active: tab === 'tools' }" @click="onTabChange('tools')">{{ t('settings.tab_tools') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'system' ? 'true' : 'false'" :class="{ active: tab === 'system' }" @click="onTabChange('system')">{{ t('settings.tab_system') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'backup' ? 'true' : 'false'" :class="{ active: tab === 'backup' }" @click="onTabChange('backup')">{{ t('settings.tab_backup') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'packages' ? 'true' : 'false'" :class="{ active: tab === 'packages' }" @click="onTabChange('packages')">{{ t('settings.tab_packages') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'import' ? 'true' : 'false'" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'voice' ? 'true' : 'false'" :class="{ active: tab === 'voice' }" @click="onTabChange('voice')">{{ t('settings.tab_voice') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'email' ? 'true' : 'false'" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'x' ? 'true' : 'false'" :class="{ active: tab === 'x' }" @click="onTabChange('x')">{{ t('settings.tab_x') }}</button>
-        <button class="settings-tab tab" role="tab" :aria-selected="tab === 'documents' ? 'true' : 'false'" :class="{ active: tab === 'documents' }" @click="onTabChange('documents')">{{ t('settings.tab_documents') }}</button>
+    {# Three areas (Spaces S1-23): My account and This space are each person's,
+       Install the admin's. Once Spaces is enforced a member is shown the
+       first two (kazma_ui.settings._settings_areas), and nothing of Install. #}
+    {% set install_area = settings_areas is not defined or 'install' in settings_areas %}
+    <nav class="settings-nav" aria-label="{{ t('settings.title') }}">
+        <div class="settings-area" data-area="account">
+          <span class="settings-area-label" id="settings-area-account">{{ t('settings.area_account') }}</span>
+          <div class="tabs settings-area-tabs" role="tablist" aria-labelledby="settings-area-account">
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'account' ? 'true' : 'false'" :class="{ active: tab === 'account' }" @click="onTabChange('account')">{{ t('settings.tab_account') }}</button>
+          </div>
+        </div>
+        <div class="settings-area" data-area="space">
+          <span class="settings-area-label" id="settings-area-space">{{ t('settings.area_space') }}</span>
+          <div class="tabs settings-area-tabs" role="tablist" aria-labelledby="settings-area-space">
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'email' ? 'true' : 'false'" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'x' ? 'true' : 'false'" :class="{ active: tab === 'x' }" @click="onTabChange('x')">{{ t('settings.tab_x') }}</button>
+          </div>
+        </div>
+        {% if install_area %}
+        <div class="settings-area" data-area="install">
+          <span class="settings-area-label" id="settings-area-install">{{ t('settings.area_install') }}</span>
+          <div class="tabs settings-area-tabs" role="tablist" aria-labelledby="settings-area-install">
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'providers_connectors' ? 'true' : 'false'" :class="{ active: tab === 'providers_connectors' }" @click="onTabChange('providers_connectors')">{{ t('settings.tab_providers_connectors') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'agent' ? 'true' : 'false'" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">{{ t('settings.tab_agent') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'alerts' ? 'true' : 'false'" :class="{ active: tab === 'alerts' }" @click="onTabChange('alerts')">{{ t('settings.tab_alerts') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'memory' ? 'true' : 'false'" :class="{ active: tab === 'memory' }" @click="onTabChange('memory')">{{ t('settings.tab_memory') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'mcp' ? 'true' : 'false'" :class="{ active: tab === 'mcp' }" @click="onTabChange('mcp')">{{ t('settings.tab_mcp') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'skills' ? 'true' : 'false'" :class="{ active: tab === 'skills' }" @click="onTabChange('skills')">{{ t('settings.tab_skills') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'appearance' ? 'true' : 'false'" :class="{ active: tab === 'appearance' }" @click="onTabChange('appearance')">{{ t('settings.tab_appearance') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'shortcuts' ? 'true' : 'false'" :class="{ active: tab === 'shortcuts' }" @click="onTabChange('shortcuts')">{{ t('settings.tab_shortcuts') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'tools' ? 'true' : 'false'" :class="{ active: tab === 'tools' }" @click="onTabChange('tools')">{{ t('settings.tab_tools') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'system' ? 'true' : 'false'" :class="{ active: tab === 'system' }" @click="onTabChange('system')">{{ t('settings.tab_system') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'backup' ? 'true' : 'false'" :class="{ active: tab === 'backup' }" @click="onTabChange('backup')">{{ t('settings.tab_backup') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'packages' ? 'true' : 'false'" :class="{ active: tab === 'packages' }" @click="onTabChange('packages')">{{ t('settings.tab_packages') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'import' ? 'true' : 'false'" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'voice' ? 'true' : 'false'" :class="{ active: tab === 'voice' }" @click="onTabChange('voice')">{{ t('settings.tab_voice') }}</button>
+            <button class="settings-tab tab" role="tab" :aria-selected="tab === 'documents' ? 'true' : 'false'" :class="{ active: tab === 'documents' }" @click="onTabChange('documents')">{{ t('settings.tab_documents') }}</button>
+          </div>
+        </div>
+        {% endif %}
     </nav>
 
     <!-- Loading indicator -->
     <div :class="{ hidden: !loading }" x-cloak style="padding:40px;text-align:center;color:var(--text-muted)">{{ t('settings.loading') }}</div>
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 1: PROVIDERS & CONNECTORS (Unified Secrets Hub)
          ═══════════════════════════════════════════════════════════════ -->
@@ -1299,7 +1321,9 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 3: AGENT
          ═══════════════════════════════════════════════════════════════ -->
@@ -1630,7 +1654,9 @@
             </p>
         </div>
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB: MEMORY (isolation, KB merge, backends, Neo4j)
          ═══════════════════════════════════════════════════════════════ -->
@@ -2041,7 +2067,9 @@
         </div>
         </div><!-- /memory-embedder-section -->
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          MCP
          ═══════════════════════════════════════════════════════════════ -->
@@ -2122,7 +2150,9 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 6: SKILLS
          ═══════════════════════════════════════════════════════════════ -->
@@ -2164,7 +2194,9 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 7: APPEARANCE
          ═══════════════════════════════════════════════════════════════ -->
@@ -2203,7 +2235,9 @@
 
         <button class="btn btn-primary" @click="saveAppearance()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save_appearance') }}'"></button>
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 8: SHORTCUTS
          ═══════════════════════════════════════════════════════════════ -->
@@ -2240,6 +2274,7 @@
             </template>
         </div>
     </div>
+    {% endif %}
 
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 9: ACCOUNT
@@ -2265,7 +2300,8 @@
             <button class="btn btn-primary" @click="changePassword()">{{ t('settings.change_password') }}</button>
         </div>
 
-        <!-- API Tokens -->
+        {% if install_area %}
+        <!-- API Tokens: the owner's account's (an API token is the owner's, S1-03) -->
         <div class="settings-group mb-6">
             <h3>{{ t('settings.api_tokens') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">
@@ -2314,6 +2350,7 @@
             </div>
             <div x-show="apiTokensLoaded && apiTokens.length === 0 && !lastCreatedToken" class="empty-state" style="padding:16px" x-cloak>{{ t('settings.no_api_tokens') }}</div>
         </div>
+        {% endif %}
 
         <!-- Sessions -->
         <div class="settings-group mb-6">
@@ -2337,6 +2374,7 @@
             <div x-show="sessionsLoaded && sessions.length === 0" class="empty-state" style="padding:16px" x-cloak>{{ t('settings.no_active_sessions') }}</div>
         </div>
 
+        {% if install_area %}
         <!-- Platform users (SaaS multi-user) — admin only -->
         <div class="settings-group mb-6" x-show="saasStatus && (saasStatus.principal?.role === 'admin' || saasStatus.principal?.source === 'secret')" x-cloak>
             <h3>{{ t('settings.platform_users') }}</h3>
@@ -2402,8 +2440,10 @@
               </template>
             </ul>
         </div>
+        {% endif %}
     </div>
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 10: TOOLS
          ═══════════════════════════════════════════════════════════════ -->
@@ -2454,7 +2494,9 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          ALERTS (the unified alerts plan, Stage 3): where Kazma's alerts go,
          the server status messages, the guard's pager, Kazma Watch, notices
@@ -2740,7 +2782,9 @@
             </div>
         </section>
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 11: SYSTEM
          ═══════════════════════════════════════════════════════════════ -->
@@ -3093,8 +3137,10 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 12: PACKAGES & DEPENDENCIES
          ═══════════════════════════════════════════════════════════════ -->
@@ -3289,7 +3335,9 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 13: IMPORT/EXPORT
          ═══════════════════════════════════════════════════════════════ -->
@@ -3344,7 +3392,9 @@
             <button class="btn btn-primary" @click="importConfig()" :disabled="restoring"><span x-show="!restoring" x-cloak>{{ t('settings.import_configuration') }}</span><span x-show="restoring" x-cloak>{{ t('settings.restoring') }}</span></button>
         </div>
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB: EMAIL (Connect Gmail / Microsoft / status)
          ═══════════════════════════════════════════════════════════════ -->
@@ -3458,6 +3508,7 @@
             <span translate="no" class="form-hint" style="margin-inline-start:8px;" x-text="documentsStatus"></span>
         </div>
     </div>
+    {% endif %}
 
     <div x-show="tab === 'email'" x-transition x-cloak>
         <div class="settings-group mb-6">
@@ -4654,6 +4705,7 @@
         </div>
     </div>
 
+    {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 14: VOICE SETTINGS
          ═══════════════════════════════════════════════════════════════ -->
@@ -4904,7 +4956,9 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
+    {% if install_area %}
     <!-- Backup tab — universal backup (all DBs + assets + Postgres) -->
     <div x-show="tab === 'backup'" x-transition x-cloak>
         <div class="settings-group mb-6">
@@ -5148,6 +5202,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
 </div>
 

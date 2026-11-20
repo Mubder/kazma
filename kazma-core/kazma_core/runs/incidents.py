@@ -27,6 +27,11 @@ mechanism already tells the owner (``KindSpec.announced_by``).
 An ``acting`` row at start belongs to a process that died mid-action: the
 action may have run. It is closed as ``interrupted`` and never replayed.
 
+An incident carries its run's space and asker (Spaces S1-21, ``space``,
+``asker``; a row from before them is the owner's space's, N19). The readers a
+surface uses (:meth:`IncidentStore.recent`, :meth:`IncidentStore.live`) take
+the space to keep to; the supervisor reads every space's.
+
 Blocking (SQLite): async callers use ``asyncio.to_thread``.
 """
 
@@ -88,12 +93,24 @@ CREATE TABLE IF NOT EXISTS run_incidents (
     lineage TEXT NOT NULL DEFAULT '',
     diagnosis TEXT NOT NULL DEFAULT '',
     diagnosis_state TEXT NOT NULL DEFAULT '',
-    diagnosed_at REAL
+    diagnosed_at REAL,
+    space TEXT NOT NULL DEFAULT '',
+    asker TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_run_incidents_live
     ON run_incidents(run_id, condition) WHERE state IN ('open', 'acting');
 CREATE INDEX IF NOT EXISTS idx_run_incidents_state ON run_incidents(state, updated_at);
 """
+
+#: Columns added after the first release of the table (an older file gets them).
+_ADDED_COLUMNS = (
+    ("space", "TEXT NOT NULL DEFAULT ''"),
+    ("asker", "TEXT NOT NULL DEFAULT ''"),
+)
+
+#: A row of *space*: its own, and the rows with none (the install's work and
+#: rows from before Spaces) for the owner's space. Two parameters: the space twice.
+_OF_SPACE = "(space = ? OR (? = 'default' AND space = ''))"
 
 _LIVE = ("open", "acting")
 _DECIDED = ("closed", "dismissed", "expired")
@@ -117,8 +134,9 @@ def _row(cur_row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 
 def public(row: dict[str, Any]) -> dict[str, Any]:
-    """An incident as the pages see it: never the delivery address."""
-    out = {k: v for k, v in row.items() if k not in ("origin", "decided_by")}
+    """An incident as the pages see it: never the delivery address, nor who
+    decided or asked."""
+    out = {k: v for k, v in row.items() if k not in ("origin", "decided_by", "asker")}
     out["origin"] = {"platform": (row.get("origin") or {}).get("platform", "")}
     out["decided"] = bool(row.get("decided_action"))
     return out
@@ -142,6 +160,13 @@ class IncidentStore:
         if not self._schema_ready:
             with self._schema_lock:
                 if not self._schema_ready:
+                    from kazma_core.db.sqlite_columns import add_missing_columns
+
+                    # An older file's table first gets its new columns, then
+                    # the script (which also creates a table that is missing).
+                    if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                                    "AND name = 'run_incidents'").fetchone():
+                        add_missing_columns(conn, "run_incidents", _ADDED_COLUMNS)
                     conn.executescript(_SCHEMA)
                     self._schema_ready = True
         return conn
@@ -179,14 +204,25 @@ class IncidentStore:
                           "ORDER BY opened_at DESC LIMIT 1", (run_id,))
         return rows[0] if rows else None
 
-    def live(self) -> list[dict[str, Any]]:
-        return self._read("SELECT * FROM run_incidents WHERE state IN ('open', 'acting') ORDER BY opened_at DESC")
+    def live(self, *, space: str | None = None) -> list[dict[str, Any]]:
+        """The live incidents; of *space* only when it is given."""
+        if space is None:
+            return self._read("SELECT * FROM run_incidents WHERE state IN ('open', 'acting') "
+                              "ORDER BY opened_at DESC")
+        return self._read(f"SELECT * FROM run_incidents WHERE state IN ('open', 'acting') AND {_OF_SPACE} "
+                          "ORDER BY opened_at DESC", (space, space))
 
-    def recent(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        """Live incidents first, then the newest finished ones."""
+    def recent(self, *, limit: int = 50, space: str | None = None) -> list[dict[str, Any]]:
+        """Live incidents first, then the newest finished ones; of *space*
+        only when it is given."""
+        bound = max(1, min(int(limit), 500))
+        if space is None:
+            return self._read(
+                "SELECT * FROM run_incidents ORDER BY (state IN ('open', 'acting')) DESC, updated_at DESC LIMIT ?",
+                (bound,))
         return self._read(
-            "SELECT * FROM run_incidents ORDER BY (state IN ('open', 'acting')) DESC, updated_at DESC LIMIT ?",
-            (max(1, min(int(limit), 500)),))
+            f"SELECT * FROM run_incidents WHERE {_OF_SPACE} "
+            "ORDER BY (state IN ('open', 'acting')) DESC, updated_at DESC LIMIT ?", (space, space, bound))
 
     def decided_keys(self) -> set[tuple[str, str, str]]:
         """``(run_id, condition, run_version)`` of every decided incident: a
@@ -239,11 +275,12 @@ class IncidentStore:
             ident = "inc_" + secrets.token_hex(6)
             conn.execute(
                 "INSERT INTO run_incidents (id, run_id, kind, condition, state, opened_at, updated_at, title, "
-                "detail, run_state, run_version, effects, actions, origin, link, notify, notify_detail, lineage) "
-                "VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "detail, run_state, run_version, effects, actions, origin, link, notify, notify_detail, lineage, "
+                "space, asker) VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (ident, run.run_id, run.kind, condition, stamp, stamp, run.title[:200], run.detail[:500],
                  str(run.state), run.version, run.effects, json.dumps(actions), json.dumps(origin),
-                 run.link, notify, notify_detail[:300], run.lineage or run.run_id))
+                 run.link, notify, notify_detail[:300], run.lineage or run.run_id,
+                 str(run.space or "")[:120], str(run.asker or "")[:120]))
             return _row(conn.execute("SELECT * FROM run_incidents WHERE id = ?", (ident,)).fetchone()), True
 
         return self._write(change)

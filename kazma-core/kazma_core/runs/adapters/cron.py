@@ -90,6 +90,7 @@ class _CronAdapter:
             ended_at=epoch(job.finished_at), effects="unknown" if native == "delivery_unknown" else "none",
             version=str(job.version), actions=actions, link="/scheduled",
             detail=detail, origin=origin_from(job.delivery_target, job.thread_id),
+            space=str(getattr(job, "tenant_id", "") or ""), asker=str(getattr(job, "creator", "") or ""),
         )
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:

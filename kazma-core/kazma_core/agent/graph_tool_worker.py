@@ -1104,9 +1104,11 @@ async def tool_worker_node(
                 _tier = get_tool_tier(tc["name"])
             except Exception:
                 _tier = "unknown"
+            from kazma_core.observability.log_words import args_for_log
+
             logger.info(
                 "[ToolWorker] exec name=%s tier=%s args=%s",
-                tc["name"], _tier, _summarize_args_for_hitl(_args),
+                tc["name"], _tier, args_for_log(_args, _summarize_args_for_hitl(_args)),
             )
             # Workbench activity. LangGraph emits no on_tool_* for this
             # worker (it calls the registry directly, not a LangChain tool

@@ -53,6 +53,7 @@ __all__ = [
     "space_dir",
     "space_folder",
     "space_kind",
+    "space_of_folder",
 ]
 
 logger = logging.getLogger(__name__)
@@ -182,6 +183,19 @@ def is_space_files_path(path: Path) -> bool:
         return False
     parts = relative.parts
     return len(parts) >= 2 and parts[1] == FILES
+
+
+def space_of_folder(path: Path) -> str | None:
+    """The space whose folder holds *path* (``<data dir>/spaces/<id>/...``),
+    or None for any other place -- the machine's workspace, the owner's.
+    For work that recorded the folder it ran in (a research job's journal
+    row, S1-21). Resolves the path; no other I/O."""
+    try:
+        relative = path.resolve().relative_to(_spaces_root().resolve())
+    except (ValueError, OSError, RuntimeError):
+        return None
+    parts = relative.parts
+    return parts[0] if parts and parts[0] else None
 
 
 def another_spaces_path(path: Path) -> bool:

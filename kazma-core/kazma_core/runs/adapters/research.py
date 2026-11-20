@@ -43,6 +43,34 @@ def _monitor_since() -> dict[str, float]:
     return {key: float(row.get("since") or 0.0) for key, row in jobs.items() if isinstance(row, dict)}
 
 
+class _CrawlSpaces:
+    """The space of each crawl-journal job (Spaces S1-21): a research job's
+    is the space whose folder it worked in (``spaces/<id>/files``; any
+    other folder is the machine's workspace, the owner's), a Knowledge
+    crawl's the space of its library. A library this store no longer holds
+    names no space: the owner's. Blocking; one library read per library."""
+
+    def __init__(self) -> None:
+        self._libraries: dict[str, str] = {}
+
+    def of(self, row: dict[str, Any]) -> str:
+        folder = ((row.get("policy") or {}).get("workspace") if isinstance(row.get("policy"), dict) else None)
+        if isinstance(folder, str) and folder:
+            from pathlib import Path
+
+            from kazma_core.spaces.files import space_of_folder
+
+            return space_of_folder(Path(folder)) or ""
+        library = str(row.get("library_id") or "")
+        if not library:
+            return ""
+        if library not in self._libraries:
+            from kazma_core.stores.knowledge import get_knowledge_store
+
+            self._libraries[library] = get_knowledge_store().library_space(library) or ""
+        return self._libraries[library]
+
+
 class _Sessions:
     STATE_MAP: dict[str, str] = {
         "pending": RunState.QUEUED,
@@ -64,7 +92,7 @@ class _Sessions:
         connection = research_session._conn()
         try:
             rows = connection.execute(
-                "SELECT id, topic, status, stage, sources, created_at, updated_at, error "
+                "SELECT id, topic, status, stage, sources, created_at, updated_at, error, tenant_id, asker "
                 "FROM research_sessions WHERE depth != 'chat' AND "
                 "(status IN ('pending', 'running', 'cancelling') OR updated_at >= ?) "
                 "ORDER BY updated_at DESC LIMIT 200",
@@ -92,6 +120,7 @@ class _Sessions:
             actions=("cancel",) if native in ("pending", "running") else (),
             link="/research?session=" + quote(row["id"], safe=""),
             detail=short_title(row["error"] or "", 200) if state == RunState.FAILED else "",
+            space=str(row["tenant_id"] or ""), asker=str(row["asker"] or ""),
         )
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:
@@ -124,6 +153,7 @@ class _Crawls:
 
         jobs = crawl_jobs._read()[1]
         since = _monitor_since()
+        spaces = _CrawlSpaces()
         runs: list[Run] = []
         for row in jobs.values():
             if row["status"] != "running" and float(row.get("updated_at") or 0.0) < now - window_s:
@@ -134,11 +164,12 @@ class _Crawls:
                     owner_gone = crawl_jobs._owner_gone(row, now)
                 except AcquisitionError:
                     owner_gone = None
-            runs.append(self._run(row, since, owner_gone, row.get("kind") in _AGENT_RUN_KINDS))
+            runs.append(self._run(row, since, owner_gone, row.get("kind") in _AGENT_RUN_KINDS,
+                                  spaces.of(row)))
         return runs
 
     def _run(self, row: dict[str, Any], since: dict[str, float], owner_gone: bool | None,
-             agent_run: bool) -> Run:
+             agent_run: bool, space: str = "") -> Run:
         from kazma_core.web_acquire.crawl_jobs import _summary_counts, failure_reason
 
         native = str(row["status"])
@@ -160,6 +191,7 @@ class _Crawls:
             link=("/research?job=" if research else "/knowledge?job=") + quote(row["job_id"], safe=""),
             detail=failure_reason(row) if state == RunState.FAILED else "",
             announced_by="the agent turn that ran it" if agent_run else "",
+            space=space,
         )
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:

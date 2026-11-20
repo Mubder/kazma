@@ -22,10 +22,10 @@ import re
 
 from kazma_core.observability.log_lines import opens_with
 
-__all__ = ["TURN_MARKER", "read_turn_line"]
+__all__ = ["TURN_MARKER", "read_turn_asker", "read_turn_line"]
 
 TURN_MARKER = "[turn] Turn finished:"
-_LINE = re.compile(r"\[turn\] Turn finished: platform=(\S+) key=(\S+) failed=(\S+)")
+_LINE = re.compile(r"\[turn\] Turn finished: platform=(\S+) key=(\S+) failed=(\S+)(?: asker=(\S+))?")
 #: Values of ``failed=`` that mean the turn failed. ``yes`` is what the
 #: writer says; ``True`` is kept for a line written by hand in a test or a
 #: log from a build that never shipped.
@@ -38,3 +38,14 @@ def read_turn_line(message: str) -> tuple[str, str, bool] | None:
     if match is None:
         return None
     return match.group(1), match.group(2), match.group(3).strip().lower() in _FAILED
+
+
+def read_turn_asker(message: str) -> str | None:
+    """The account a finished turn ran for (``asker=``, Spaces S1-24), or
+    None: a line written before it, or a turn that bound no person (``-``).
+    An account id names a person, never their words: the digest counts
+    turns per person with it."""
+    match = opens_with(message, _LINE)
+    if match is None or match.group(4) in (None, "-"):
+        return None
+    return match.group(4)

@@ -161,6 +161,30 @@ _INSTALL_ACCOUNT_PIECES = (
 )
 
 
+# Once Spaces is enforced, Settings is everyone's page, split in three
+# (Spaces S1-23): My account and This space are each person's, Install the
+# admin's. A member opens the page and changes their own password and sees
+# their own browsers' sessions; the API tokens (the owner's account), the
+# platform users and every install setting stay the admin's. Not enforced,
+# Settings stays the admin's page, as before.
+_OWN_SETTINGS = (
+    ("/settings", "GET"),
+    ("/api/settings/account/password", "PUT"),
+    ("/api/settings/account/sessions", "GET"),
+)
+
+
+def _reaches_own_settings(path: str, method: str) -> bool:
+    """Whether *path* is a person's own part of Settings, which any
+    signed-in account reaches once Spaces is enforced (:data:`_OWN_SETTINGS`).
+    Read from memory (``spaces_enforced``): no settings read."""
+    if (path.rstrip("/") or "/", method.upper()) not in _OWN_SETTINGS:
+        return False
+    from kazma_core.spaces.scope import spaces_enforced
+
+    return spaces_enforced()
+
+
 def _under(path: str, prefixes: tuple[str, ...]) -> bool:
     return any(path == p or path.startswith(p + "/") for p in prefixes)
 
@@ -238,6 +262,8 @@ def role_allows(role: str, path: str, method: str = "GET") -> bool:
     # the X rule below, which keeps them the admin's otherwise.
     if _connects_a_spaces_own_account(path):
         return rank >= ROLE_RANK["operator"]
+    if _reaches_own_settings(path, m):
+        return rank >= ROLE_RANK["viewer"]
     # Credentials and publication policy grant continuing authority. Operators
     # can review individual drafts, but only administrators can change that grant.
     if ((path.rstrip("/") in ("/api/x/reply", "/api/x/reply/qualification") and m == "PUT")

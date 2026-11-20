@@ -32,6 +32,30 @@ def _ops_db() -> str:
     return memory_ops_db()
 
 
+def _task_space(task_type: str, payload: Any) -> str:
+    """The space a queued memory task works for (Spaces S1-21), by the rule
+    the worker binds it with (``task_queue._task_binding``): the tenant its
+    payload names; a row-named task's row's tenant, read only while Spaces is
+    enforced (nothing filters runs before); the install's own tasks and a
+    task naming none: "" (the owner's space's). Blocking."""
+    import json
+
+    from kazma_core.memory.task_queue import INSTALL_TASKS, ROW_NAMED_TASKS, _row_tenant
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if task_type in INSTALL_TASKS:
+        return ""
+    try:
+        data = json.loads(payload) if isinstance(payload, str) and payload else {}
+    except ValueError:
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    tenant = str(data.get("tenant_id") or "").strip()
+    if not tenant and task_type in ROW_NAMED_TASKS and spaces_enforced():
+        tenant = _row_tenant(*ROW_NAMED_TASKS[task_type], data) or ""
+    return tenant
+
+
 class _MemoryQueueAdapter:
     STATE_MAP: dict[str, str] = {
         "pending": RunState.QUEUED,
@@ -54,7 +78,7 @@ class _MemoryQueueAdapter:
         try:
             rows = conn.execute(
                 "SELECT id, task_type, status, attempts, max_attempts, created_at, updated_at, "
-                "error_log, next_attempt_at FROM memory_task_queue "
+                "error_log, next_attempt_at, payload_json FROM memory_task_queue "
                 "WHERE status = 'processing' OR (status = 'pending' AND attempts > 0) "
                 "OR (status = 'failed' AND updated_at >= ?) ORDER BY updated_at DESC LIMIT 200",
                 (now - window_s,),
@@ -65,9 +89,10 @@ class _MemoryQueueAdapter:
             raise
         finally:
             conn.close()
-        return [self._run(row, now, _STUCK_THRESHOLD_SEC) for row in rows]
+        return [self._run(row, now, _STUCK_THRESHOLD_SEC, _task_space(row["task_type"], row["payload_json"]))
+                for row in rows]
 
-    def _run(self, row: Any, now: float, stuck_after: float) -> Run:
+    def _run(self, row: Any, now: float, stuck_after: float, space: str = "") -> Run:
         native = str(row["status"])
         state = RunState(self.STATE_MAP.get(native, RunState.UNKNOWN))
         updated = float(row["updated_at"] or 0.0) or None
@@ -86,6 +111,7 @@ class _MemoryQueueAdapter:
             actions=("retry",) if native == "failed" else (),
             link="/memory",
             detail=short_title(row["error_log"] or "", 200) if native == "failed" else "",
+            space=space,
         )
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:

@@ -9,6 +9,11 @@ agent's ``list_runs`` tool, the supervisor itself -- sees one answer.
 A kind whose store cannot be read is reported as such (``errors``), never as
 "nothing running": the other kinds are still listed.
 
+Once Spaces is enforced a surface sees the runs of the space bound to its
+request only (``runs.spaces``, S1-21): every adapter reads every space's runs
+and stamps each with its space, and the listing keeps the bound space's.
+Kazma's own reader -- the supervisor -- asks for ``everyone``.
+
 An action goes through :func:`perform`, which asks the adapter for the run as
 it is NOW and refuses an action the run no longer offers. The adapter's
 ``act`` calls the kind's own control -- the function its page already uses.
@@ -26,6 +31,7 @@ from typing import Any, Protocol
 
 from kazma_core.runs.contract import ActionResult, Run, judge, with_verdict
 from kazma_core.runs.kinds import KINDS
+from kazma_core.runs.spaces import may_act, visible_here
 
 __all__ = [
     "Adapter",
@@ -97,6 +103,7 @@ async def _kind_runs(kind: str, now: float, window_s: float) -> list[Run]:
 async def list_runs(
     *, kinds: tuple[str, ...] | None = None, now: float | None = None,
     window_s: float = FINISHED_WINDOW_S, mark_handled: bool = True,
+    everyone: bool = False,
 ) -> _RunListing:
     """Every run of *kinds* (all by default): the active ones and those that
     finished within *window_s*, newest first, each judged.
@@ -104,7 +111,11 @@ async def list_runs(
     With *mark_handled*, a run the owner already decided about (an incident
     about it, at its current version, acted on, dismissed or closed) is
     marked ``handled``: it no longer needs attention. The supervisor reads
-    the decisions itself and passes False."""
+    the decisions itself and passes False.
+
+    Once Spaces is enforced only the runs of the space bound now are
+    listed, none with no space bound; *everyone* (Kazma's own reader, the
+    supervisor) lists every space's."""
     stamp = time.time() if now is None else now
     wanted = [k for k in (kinds or tuple(KINDS)) if k in KINDS]
     results = await asyncio.gather(*(_kind_runs(k, stamp, window_s) for k in wanted),
@@ -123,7 +134,7 @@ async def list_runs(
             logger.warning("[runs] %s runs could not be read: %s", kind, said, exc_info=not timed_out)
             errors[kind] = reason
             continue
-        runs.extend(result)
+        runs.extend(result if everyone else [run for run in result if visible_here(run.space)])
     runs.sort(key=lambda r: (r.ended_at is None, r.progress_at or r.started_at or 0.0), reverse=True)
     if mark_handled and runs:
         runs = await _mark_handled(runs)
@@ -162,6 +173,10 @@ async def perform(run_id: str, action: str, *, actor: str) -> ActionResult:
 
     Refused, nothing done, when the run is gone or no longer offers the
     action (it finished, recovered, or changed state since it was shown).
+    Once Spaces is enforced the run is looked for in the space bound now
+    only (another space's is "gone"), and only its asker or an owner of its
+    space acts on it (``runs.spaces.may_act``); the kind's control may be
+    stricter.
     """
     try:
         kind, native = _split_run_id(run_id)
@@ -175,6 +190,9 @@ async def perform(run_id: str, action: str, *, actor: str) -> ActionResult:
     if action not in run.actions:
         return ActionResult(False, "not_offered",
                             f"The run is {run.state} now and does not offer {action}.")
+    if not await asyncio.to_thread(may_act, run.space, run.asker):
+        return ActionResult(False, "not_yours",
+                            "Only the person who asked, or an owner of its space, acts on this run.")
     result = await adapter_for(kind).act(native, action, actor=actor)
     logger.info("[runs] action run=%s action=%s actor=%s ok=%s code=%s",
                 run_id, action, actor or "-", result.ok, result.code)

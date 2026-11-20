@@ -56,10 +56,18 @@ class _SwarmAdapter:
 
     @staticmethod
     def _stored(store: Any, since: float) -> list[Any]:
-        """RUNNING and PENDING rows, and the newest finished ones since *since*."""
+        """RUNNING and PENDING rows, and the newest finished ones since *since*.
+
+        Once Spaces is enforced every space's (the store's ``"*"``, Kazma's
+        own work): each run carries its space and the registry keeps a
+        surface to its own (S1-21). With nothing bound the store refused the
+        list, and the supervisor read no swarm task at all."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        every = {"tenant_id": "*"} if spaces_enforced() else None
         found: list[Any] = []
         for status in ("running", "pending", "paused", *_FINISHED):
-            listed = store.list_tasks(status=status, page_size=_PER_STATUS)
+            listed = store.list_tasks(status=status, page_size=_PER_STATUS, metadata_filter=every)
             for task in listed:
                 if status in _FINISHED and (epoch(task.completed_at) or 0.0) < since:
                     continue
@@ -98,6 +106,7 @@ class _SwarmAdapter:
             link="/swarm?task=" + task.id, detail=detail,
             origin=origin_from(meta.get("source_delivery_target"), meta.get("source_thread_id")),
             lineage="swarm_task:" + str(meta.get("retry_of") or task.id),
+            space=str(meta.get("tenant_id") or ""), asker=str(meta.get("asker") or ""),
         )
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:

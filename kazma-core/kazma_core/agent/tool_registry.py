@@ -875,9 +875,12 @@ class LocalToolRegistry:
                     missing = [p for p in required if p not in valid_params]
                     if missing:
                         schema_hint = tool.input_schema or {}
+                        from kazma_core.observability.log_words import args_for_log
+
                         logger.warning(
                             "Tool '%s' called without required args %s — raw arguments: %s",
-                            tool_name, missing, json.dumps(arguments, ensure_ascii=False)[:500],
+                            tool_name, missing,
+                            args_for_log(arguments, json.dumps(arguments, ensure_ascii=False)[:500]),
                         )
                         await asyncio.to_thread(_record_procedural_outcome, tool_name, arguments, success=False)
                         return {

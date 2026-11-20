@@ -125,7 +125,7 @@ CASE_MODULES: tuple[str, ...] = (
     "tests._research_space_cases", "tests._mail_space_cases", "tests._x_space_cases",
     "tests._github_space_cases", "tests._document_space_cases",  # S1-12
     "tests._vault_space_cases", "tests._files_space_cases",
-    "tests._host_tools_space_cases",
+    "tests._host_tools_space_cases", "tests._runs_space_cases", "tests._traces_space_cases",
 )
 
 
@@ -186,17 +186,13 @@ PENDING_ROUTE_RULES: tuple[tuple[Pattern, str], ...] = (
     # (Mail and calendar, X, then GitHub: written. Their cases are in
     # tests/_mail_space_cases.py, tests/_x_space_cases.py and
     # tests/_github_space_cases.py; a clone is S1-20's, above.)
-    # ── S1-21: approvals and running work ─────────────────────────────────
-    ("/api/approve", "S1-21"),
-    ("/api/pending-approvals", "S1-21"),
-    ("/api/runs", "S1-21"),
-    # ── The Dashboard and the traces of tool and model calls ──────────────
-    # No item names them. The page is per person with S1-32; the trace feed
-    # is the record of each call, which S1-22 gives a space and an asker.
+    # (S1-21 -- approvals and running work -- wrote its cases:
+    # tests/_runs_space_cases.py.)
+    # ── The Dashboard ──────────────────────────────────────────────────────
+    # The page is per person with S1-32. (S1-22 -- the trace feed: the Agents
+    # page and API and the Dashboard's socket -- wrote its cases:
+    # tests/_traces_space_cases.py.)
     ("/dashboard$", "S1-32"),
-    ("/ws/dashboard$", "S1-22"),
-    ("/agents$", "S1-22"),
-    ("/api/agents", "S1-22"),
 )
 
 
@@ -230,7 +226,8 @@ _PENDING_TOOLS_BY_ITEM: dict[str, tuple[str, ...]] = {
     # (S1-20 -- host tools: the shell, git, the code index, MCP servers,
     # skills and packages, settings, the machine, the chat apps' senders --
     # wrote its cases: tests/_host_tools_space_cases.py.)
-    "S1-21": ("list_runs", "run_status"),
+    # (S1-21 -- the agent's run tools -- wrote its cases:
+    # tests/_runs_space_cases.py.)
 }
 
 

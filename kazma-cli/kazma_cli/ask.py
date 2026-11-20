@@ -70,7 +70,7 @@ def run(argv: list[str]) -> int:
         print(ask_help_text())
         return 0
     if opts.acp:
-        return asyncio.run(run_acp_stdio(yolo=opts.yolo, workspace=opts.workspace))
+        return asyncio.run(run_acp_stdio(yolo=opts.yolo, workspace=opts.workspace, space=opts.space))
 
     prompt = opts.prompt
     stdin_consumed = False

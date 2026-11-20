@@ -222,6 +222,13 @@ def register_system_tools(registry: Any) -> None:
         if is_sensitive_config_key(key):
             raise RefusedBeforeEffect(f"Error: '{key}' is a sensitive credential. "
                 "Change it in Settings UI — not via tools.")
+        # Once Spaces is enforced the install's writers write install keys
+        # only: a space's or a person's key has its own page (S1-23).
+        from kazma_core.settings_scope import install_writer_refusal
+
+        refused = install_writer_refusal(key)
+        if refused:
+            raise RefusedBeforeEffect(f"Error: {refused}")
         # The value checks the Settings page applies (a time zone the
         # scheduler can resolve, a retention the sweep can read...).
         from kazma_core.settings_validation import SettingRejected, validate_setting

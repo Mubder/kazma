@@ -9,6 +9,12 @@ what happened: ``delivered`` only when a platform took it.
 
 The chat apps' messages are English (the chat apps' rule); the bell, read by
 the web page, is in the page's language.
+
+Once Spaces is enforced an incident of a space other than the owner's sends
+nothing to the install's channels -- neither its card nor a recovery or a
+diagnosis (``runs.spaces.kept_in_its_space``, O1): they are the owner's until
+people link their own chat apps (stage 3). The bell shows the incidents of
+the space bound to the page.
 """
 
 from __future__ import annotations
@@ -20,6 +26,7 @@ from typing import Any
 
 from kazma_core.runs.claims import WORK_FAILURES, settle_on_error
 from kazma_core.runs.kinds import KINDS
+from kazma_core.runs.spaces import kept_in_its_space
 from kazma_core.runs.text import action_word, ago
 
 __all__ = ["bell_alerts", "deliver", "send_diagnosis", "send_recovery"]
@@ -112,6 +119,13 @@ async def deliver(row: dict[str, Any]) -> str:
     store = get_incident_store()
     if not await asyncio.to_thread(store.claim_notification, row["id"]):
         return "already_claimed"
+    if kept_in_its_space(row.get("space")):
+        # The supervisor opens such an incident with nothing to send; one
+        # left pending from before (Spaces switched on since) is closed here,
+        # never sent to the owner's channels with another space's words.
+        await asyncio.to_thread(store.finish_notification, row["id"], outcome="refused",
+                                detail="kept in its space: the install's channels are the owner's")
+        return "refused"
     origin = row.get("origin") or {}
     platform = str(origin.get("platform") or "")
     target = str(origin.get("target") or "")
@@ -174,7 +188,10 @@ async def _send_text(row: dict[str, Any], text: Any, key: str) -> None:
     """A follow-up (recovery, diagnosis) to where the incident went; best effort.
 
     *text* is called with ``code=True`` for a chat and ``code=False`` for the
-    ops channels."""
+    ops channels. Nothing about another space's incident leaves it (O1)."""
+    if kept_in_its_space(row.get("space")):
+        logger.info("[runs] %s for %s kept in its space", key, row["id"])
+        return
     origin = row.get("origin") or {}
     platform = str(origin.get("platform") or "")
     target = str(origin.get("target") or "")
@@ -224,12 +241,23 @@ def _bell_reason(row: Any) -> str:
 
 
 def bell_alerts(language: str = "en") -> list[dict[str, Any]]:
-    """Open incidents in the notification bell's shape (``/api/alerts/recent``)."""
+    """Open incidents in the notification bell's shape (``/api/alerts/recent``).
+
+    Once Spaces is enforced, the incidents of the space bound to the page
+    only, and none with no space bound (S1-21). Blocking (SQLite)."""
     from kazma_core.runs.incidents import get_incident_store
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
 
     ar = language == "ar"
     out: list[dict[str, Any]] = []
-    for row in get_incident_store().live():
+    if spaces_enforced():
+        bound = current_scope()
+        if bound is None:
+            return out
+        rows = get_incident_store().live(space=bound.space_id)
+    else:
+        rows = get_incident_store().live()
+    for row in rows:
         condition = row["condition"]
         out.append({
             "id": f"run-incident-{row['id']}",

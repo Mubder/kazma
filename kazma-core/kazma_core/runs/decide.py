@@ -9,6 +9,10 @@ action that was refused leaves the incident open with the reason.
 
 "Ask Kazma to diagnose" is not a decision: it starts a read-only look at the
 run (``runs.diagnose``) and leaves the incident open.
+
+Once Spaces is enforced an incident of another space answers as an unknown
+one, before anything is claimed (S1-21); acting on its run is then for the
+run's asker or an owner of its space (``registry.perform``).
 """
 
 from __future__ import annotations
@@ -55,8 +59,13 @@ def _already(row: dict[str, Any] | None) -> DecisionOutcome:
 async def decide(incident_id: str, action: str, *, actor: str, platform: str) -> DecisionOutcome:
     """Carry out *action* on incident *incident_id* for *actor* on *platform*."""
     store = get_incident_store()
+    from kazma_core.runs.spaces import visible_here
+
+    seen = await asyncio.to_thread(store.get, incident_id)
+    if seen is not None and not visible_here(seen.get("space")):
+        return _already(None)
     if action == "diagnose":
-        row = await asyncio.to_thread(store.get, incident_id)
+        row = seen
         if row is None or row["state"] not in ("open", "acting"):
             return _already(row)
         from kazma_core.runs.diagnose import start_diagnosis

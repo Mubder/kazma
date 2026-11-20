@@ -15,6 +15,13 @@ Async code records through :func:`arecord_llm_call`, never
 stalls every chat stream -- on a busy disk for the whole busy timeout
 (AGENTS §26 E, §35). ``resilient_chat`` (swarm workers, research) wrote its
 rows on the loop until 2026-10-15.
+
+Every row names the space and the person the call was made for (Spaces
+S1-22, ``space``, ``asker``): the scope bound where the call was made -- a
+turn's, a scheduled fire's, a swarm worker's -- read in the caller's own
+context. Kazma's own work (``install_work``) and a call with nothing bound
+name nobody. :func:`spend_by_person` is the admin's view (N11: spend, never
+text).
 """
 
 from __future__ import annotations
@@ -31,6 +38,7 @@ __all__ = [
     "close_llm_ledger",
     "query_recent",
     "record_llm_call",
+    "spend_by_person",
     "thread_usage",
     "turn_usage",
     "usage_series",
@@ -61,7 +69,9 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     error_kind TEXT DEFAULT '',
     failover_from TEXT DEFAULT '',
     turn_id TEXT DEFAULT '',
-    priced INTEGER DEFAULT 1
+    priced INTEGER DEFAULT 1,
+    space TEXT DEFAULT '',
+    asker TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_llm_calls_ts ON llm_calls(ts);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_thread ON llm_calls(thread_id);
@@ -95,7 +105,8 @@ _LOCAL_PROVIDERS = ("ollama", "lm-studio", "lmstudio", "local")
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Columns added after the ledger was first made: ``turn_id``
-    (2026-09-26) and ``priced`` (2026-11-08).
+    (2026-09-26), ``priced`` (2026-11-08), ``space`` and ``asker``
+    (2026-11-20, Spaces S1-22: a row from before names nobody).
 
     Rows written before ``priced`` existed were priced at gpt-4o-mini's
     $0.15 / $0.60 whatever the model (kazma_core.model_prices). Once, as the
@@ -106,7 +117,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     from kazma_core.db.sqlite_columns import add_missing_columns
 
     added = add_missing_columns(
-        conn, "llm_calls", (("turn_id", "TEXT DEFAULT ''"), ("priced", "INTEGER DEFAULT 1")),
+        conn, "llm_calls", (("turn_id", "TEXT DEFAULT ''"), ("priced", "INTEGER DEFAULT 1"),
+                            ("space", "TEXT DEFAULT ''"), ("asker", "TEXT DEFAULT ''")),
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_turn ON llm_calls(turn_id)")
     if "priced" in added:
@@ -169,6 +181,8 @@ def record_llm_call(
     failover_from: str = "",
     turn_id: str | None = None,
     priced: bool = True,
+    space: str | None = None,
+    asker: str | None = None,
 ) -> None:
     """Record one LLM call. Best-effort: never raises, never blocks the turn.
 
@@ -185,6 +199,10 @@ def record_llm_call(
             from kazma_core.observability.correlation import current_turn_id
 
             turn_id = current_turn_id()
+        if space is None or asker is None:
+            bound_space, bound_asker = _whose()
+            space = bound_space if space is None else space
+            asker = bound_asker if asker is None else asker
         with _lock:
             conn = _get_conn()
             # Commits, or rolls back when the insert raises: an open
@@ -196,8 +214,8 @@ def record_llm_call(
                        (ts, thread_id, iteration, provider, model,
                         prompt_tokens, completion_tokens, total_tokens,
                         cost_usd, duration_ms, status, error_kind, failover_from,
-                        turn_id, priced)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        turn_id, priced, space, asker)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         datetime.now(UTC).isoformat(),
                         thread_id,
@@ -214,10 +232,21 @@ def record_llm_call(
                         failover_from,
                         str(turn_id or ""),
                         1 if priced else 0,
+                        str(space or "")[:120],
+                        str(asker or "")[:120],
                     ),
                 )
     except Exception as exc:  # noqa: BLE001 — observability must be invisible
         logger.debug("[llm-ledger] record failed (non-fatal): %s", exc)
+
+
+def _whose() -> tuple[str, str]:
+    """(space, asker) of the scope bound where the call is made, ("", "")
+    with none (Kazma's own work, or nothing bound). No I/O."""
+    from kazma_core.spaces.scope import current_scope
+
+    bound = current_scope()
+    return (bound.space_id, bound.asker) if bound is not None else ("", "")
 
 
 def _record_if_enabled(**fields: Any) -> None:
@@ -267,6 +296,13 @@ async def arecord_llm_call(**fields: Any) -> None:
         from kazma_core.safety.hitl import get_current_thread_id
 
         fields["thread_id"] = get_current_thread_id() or ""
+    if fields.get("space") is None or fields.get("asker") is None:
+        # Whose call it is, read here in the caller's own context (S1-22).
+        space, asker = _whose()
+        if fields.get("space") is None:
+            fields["space"] = space
+        if fields.get("asker") is None:
+            fields["asker"] = asker
     from kazma_core.background import spawn_background
 
     write = spawn_background(asyncio.to_thread(_record_if_enabled, **fields), name="llm-ledger-write")
@@ -345,6 +381,29 @@ def thread_usage(thread_id: str) -> dict[str, Any] | None:
         logger.warning("[llm-ledger] a chat's usage is unreadable: %s", exc)
         return None
     return _usage(*row)
+
+
+def spend_by_person(since: datetime) -> list[dict[str, Any]] | None:
+    """What each person's model calls cost since *since*: one entry per
+    account the calls were made for (``asker``), with its calls, tokens,
+    dollars and the calls of unknown price, the most first. The calls that
+    name nobody -- Kazma's own work, and rows from before Spaces S1-22 --
+    are the entry with an empty ``asker``. Spend and counts only, never a
+    chat or a model's text (N11). None when the ledger cannot be read.
+    Blocking (SQLite)."""
+    stamp = (since if since.tzinfo else since.replace(tzinfo=UTC)).astimezone(UTC).isoformat()
+    try:
+        with _lock:
+            conn = _get_conn()
+            rows = conn.execute(
+                f"SELECT asker, {_SUMS}, COUNT(DISTINCT space) FROM llm_calls WHERE ts >= ? "
+                "GROUP BY asker ORDER BY SUM(cost_usd) DESC, SUM(total_tokens) DESC",
+                (stamp,),
+            ).fetchall()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[llm-ledger] spend per person could not be read: %s", exc)
+        return None
+    return [{"asker": str(row[0] or ""), **_usage(*row[1:5]), "spaces": int(row[5] or 0)} for row in rows]
 
 
 def usage_since(since: datetime) -> dict[str, Any] | None:

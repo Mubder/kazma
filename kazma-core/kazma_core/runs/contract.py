@@ -116,6 +116,11 @@ class Run:
     #: per lineage, so a retry that fails again is not retried again by
     #: itself. Empty: the run id.
     lineage: str = ""
+    #: The space the run belongs to and the account that asked (Spaces
+    #: S1-21, ``runs.spaces``). Empty: the install's own work, or work from
+    #: before Spaces -- the owner's space's (N19).
+    space: str = ""
+    asker: str = ""
     verdict: Verdict | None = None
     #: The owner already decided about this run as it is now (an incident
     #: about it was acted on, dismissed or closed): it no longer needs them.
@@ -129,6 +134,9 @@ class Run:
         # The delivery address stays on the server (SCH-S10's rule): the
         # page shows the platform only.
         data["origin"] = {"platform": self.origin.get("platform", "")} if self.origin else {}
+        # Who asked stays on the server too: the page shows its own space's
+        # runs, and acting on one is checked there.
+        data.pop("asker", None)
         return data
 
 
