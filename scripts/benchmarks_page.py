@@ -193,13 +193,18 @@ def _memory(data: dict) -> list[str]:
                 "differently, so a number from one asking can move by a few facts with nothing changed.",
             ]
         lines.append("")
-    pg = data.get("postgres_primary") or {}
-    if pg:
-        lines += [
-            f"With Postgres as the memory store, the same questions score {_pct(pg.get('overall.hit_rate'))} hit "
-            f"rate, {_num(pg.get('overall.mrr'))} MRR and {_pct(pg.get('overall.precision'))} precision.",
-            "",
-        ]
+    pg = data.get("pgvector") or {}
+    floors = pg.get("floors") or {}
+    if floors:
+        scores = (f"{_pct(floors.get('overall.hit_rate'))} hit rate, {_num(floors.get('overall.mrr'))} MRR and "
+                  f"{_pct(floors.get('overall.precision'))} precision")
+        if pg.get("status") == "verified":
+            lines += [f"With Postgres and pgvector as the memory store ({pg.get('run')}, {pg.get('mode')} "
+                      f"search), the same questions score {scores}.", ""]
+        else:
+            lines += [f"With Postgres and pgvector as the memory store, a run made by hand on 2026-10-14 scored "
+                      f"{scores}. CI's pgvector job now measures it, with pgvector's own search and with every "
+                      "row compared, and these numbers are not locked from it yet.", ""]
     lines += ["Reproduce: `python scripts/memory_bench.py run` (add `--real` to use the real model), and "
               "`python -m pytest tests/test_memory_benchmark.py`.", ""]
     return lines

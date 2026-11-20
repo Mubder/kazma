@@ -157,10 +157,15 @@ stays on sqlite-vec, says so once at boot, and Settings → Memory shows why
 ([Postgres & SaaS](../ops/postgres-and-saas) has the states and the fix).
 Postgres-primary ranks the mirror's keyword matches and the index's
 nearest memories on the same evidence (a keyword match's meaning comes from
-the index) — not keyword-only. On the retrieval benchmark (dataset v5) it
-finds nearly the same answers as local recall: hit rate 0.895 against 0.925,
-MRR 0.83 against 0.84, precision 0.62 against 0.64; the gap is one
-stopword-heavy question its keyword search misses. It reads only memories
+the index) — not keyword-only. pgvector may answer from its HNSW index,
+which is approximate (the local search compares every row). CI asks the
+retrieval benchmark's questions on both Postgres paths: the mirror's keyword
+search with the local vector index (held within 0.01 hit rate, 0.01 MRR and
+0.02 precision of local recall), and pgvector, measured with its own search
+and with every row compared, to settle which Kazma should use. A run made by
+hand on 2026-10-14 scored hit rate 0.895 against 0.925; the question it lost
+stands at the edge of the recorded vectors' rounding (benchmark audit F5),
+which is the likelier cause, not the keyword search it was put down to. It reads only memories
 recall may show, ranks the mirror's keyword matches by how many of your
 words each holds, and leaves out anything this install forgot, even when the
 shared copy still holds it; the 15-minute mirror sync then repairs that copy.
@@ -852,7 +857,10 @@ Recall on the retrieval benchmark, the tuning questions and the second
 set, on both paths (vectors replayed from bge-m3). The second set was
 called "held out" when this was written; the two decisions below were
 taken by looking at it, which is why it is the second set now and a
-sealed set is the held-out one (benchmark audit R8):
+sealed set is the held-out one (benchmark audit R8). The Postgres-primary
+columns are a run made by hand with pgvector's own (approximate) search;
+since 2026-11-20 CI's pgvector job measures it, approximate and exact, and
+the lock's floors are locked from a named run (benchmark audit R7):
 
 | | Local (SQLite) tuning | Local second set | Postgres-primary tuning | Postgres-primary second set |
 |---|---|---|---|---|

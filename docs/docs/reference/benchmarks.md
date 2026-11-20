@@ -50,7 +50,7 @@ Turns in English, Arabic and both, with the facts a person would expect remember
 
 The model pass is deepseek-flash's replies, recorded on 2026-10-15, 1 asking a turn. Asked again, a model answers a little differently, so a number from one asking can move by a few facts with nothing changed.
 
-With Postgres as the memory store, the same questions score 89.5 % hit rate, 0.83 MRR and 62.1 % precision.
+With Postgres and pgvector as the memory store, a run made by hand on 2026-10-14 scored 89.5 % hit rate, 0.83 MRR and 62.1 % precision. CI's pgvector job now measures it, with pgvector's own search and with every row compared, and these numbers are not locked from it yet.
 
 Reproduce: `python scripts/memory_bench.py run` (add `--real` to use the real model), and `python -m pytest tests/test_memory_benchmark.py`.
 

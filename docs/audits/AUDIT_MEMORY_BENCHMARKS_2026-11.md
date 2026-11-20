@@ -695,6 +695,19 @@ framework audit's section 6.2, decisions 3 to 6).
   Not done: the float32 recording and the check of the model's commit, which
   need the embedder and belong with step 5's re-record, and the real-model
   run before a lock.
+- **Step 6, R7 (and R11's second half), 2026-11-20: built; its first CI run
+  measures.** A second CI job runs the tests marked `pgvector` on
+  `pgvector/pgvector:0.8.7-pg18` (pinned by digest), beside the plain
+  `postgres:18` job, and the Postgres suite names the tests each job exists
+  for: one that skips fails the job. Both jobs install numpy (`ci-light`),
+  without which the Postgres-primary benchmark skipped on every run. The two
+  measurements have two names. The pgvector benchmark asks every question
+  with pgvector's own search and with every row compared, prints both, and
+  holds the product's to the lock's floors both ways; the floors are the
+  2026-10-14 run made by hand, marked unverified, so a difference is
+  reported, not failed, until `lock-pgvector` locks them from a named CI
+  run. Exact against approximate (decision 5) is settled from those numbers,
+  not by default: the product's search is unchanged.
 - **Step 8, R8, 2026-11-20: today's set is renamed, and stays gated.** The
   40 questions are the second set everywhere a reader sees them (the
   dataset's key, the lock's `second.*` scores, the benchmarks page, the

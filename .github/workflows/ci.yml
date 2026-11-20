@@ -289,6 +289,9 @@ jobs:
         uses: ./.github/actions/install-locked
         with:
           extras: test postgres
+          # numpy (the recorded vectors): without it the Postgres-primary
+          # benchmark skipped here on every run (benchmark audit F7, R11).
+          groups: ci-light
       - name: Run the Postgres-marked tests against a real Postgres
         # Marked tests rather than a broad `-k`: a keyword sweep drags in
         # SQLite-shaped tests that fail for reasons that are not the backend,
@@ -353,6 +356,49 @@ jobs:
           KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5432/kazma_test
           # Without this the root conftest.py force-pins sqlite and strips the
           # DSN, and this job would silently prove nothing (audit F-7).
+          KAZMA_TEST_ALLOW_REAL_DB: "1"
+
+  pgvector:
+    name: Tests (pgvector)
+    runs-on: ubuntu-latest
+    # The second Postgres service (benchmark audit R7, the owner's decision
+    # 5): the job above runs the plain postgres:18 live runs, which has no
+    # pgvector, so every pgvector test skipped there and the floors the
+    # public page quoted came from a run made by hand. Here a Postgres that
+    # ships the extension runs the tests marked `pgvector`, and the suite
+    # fails when a test it names skips (MUST_RUN in scripts/postgres_suite.py).
+    # The benchmark is measured with pgvector's own search and with every row
+    # compared, both printed (PGVECTOR_MEASUREMENT, shown by -rP); while the
+    # lock's floors are unverified it reports a difference instead of failing.
+    services:
+      postgres:
+        # pgvector 0.8.7 on Postgres 18 (the tag pg18 on 2026-11-12), pinned.
+        image: pgvector/pgvector:0.8.7-pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782
+        env:
+          POSTGRES_USER: kazma
+          POSTGRES_PASSWORD: kazma
+          POSTGRES_DB: kazma_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kazma"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install deps
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test postgres
+          groups: ci-light
+      - name: Run the pgvector-marked tests against a Postgres with pgvector
+        run: python scripts/postgres_suite.py --marker pgvector -rP
+        env:
+          KAZMA_DB_BACKEND: postgres
+          KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5432/kazma_test
           KAZMA_TEST_ALLOW_REAL_DB: "1"
 
   recovery-drills:

@@ -7,6 +7,8 @@
   python scripts/memory_bench.py lock --trade "why"  # a reviewed trade (see TRADE_RULE)
   python scripts/memory_bench.py lock --new-recording "why"  # lock a new recording of the model's pass
   python scripts/memory_bench.py lock --edge q601 "why"  # name a hit that flips inside the rounding (EDGE_RULE)
+  python scripts/memory_bench.py lock-pgvector --from LOG --run "CI run"  # the pgvector floors, from a named run
+  python scripts/memory_bench.py sealed --look "why"    # score the sealed set: every look is logged
   python scripts/memory_bench.py extraction           # extraction scores from the recorded replies
                                                     # (recorded by scripts/memory_extraction_record.py)
   python scripts/memory_bench.py writes               # the write scenarios: what passes, what does not
@@ -1509,9 +1511,9 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         json.dumps({"dataset_version": version, "scores": scores, "targets": TARGETS,
                     "trades": trades, "edges": edge,
                     "extraction": extraction, "writes": writes, "speakers": speakers,
-                    # The opt-in Postgres-primary run's floors
-                    # (tests/test_memory_benchmark_pg.py), on the same dataset only.
-                    "postgres_primary": {} if recall_new else old.get("postgres_primary", {}),
+                    # The pgvector path's floors (tests/test_memory_benchmark_pg.py),
+                    # locked from a named CI run by `lock-pgvector`; same dataset only.
+                    "pgvector": {} if recall_new else old.get("pgvector", {}),
                     # Every look at the sealed set, kept whatever the lock does.
                     **({"sealed": old["sealed"]} if old.get("sealed") else {})},
                    indent=1, ensure_ascii=False) + "\n",
@@ -1694,6 +1696,60 @@ def _cmd_extraction() -> int:
     return 0
 
 
+#: The pgvector path's search modes (tests/test_memory_benchmark_pg.py MODES).
+PGVECTOR_MODES = ("approximate", "exact")
+
+
+def _measurement_from(text: str) -> dict[str, dict[str, float]]:
+    """The pgvector measurement in *text*: the file the test writes
+    (``KAZMA_TEST_MEMORY_BENCH_PG_OUT``), or a CI log holding its
+    ``PGVECTOR_MEASUREMENT`` line (the last one wins)."""
+    lines = [line.split("PGVECTOR_MEASUREMENT ", 1)[1] for line in text.splitlines()
+             if "PGVECTOR_MEASUREMENT " in line]
+    return json.loads(lines[-1] if lines else text)
+
+
+def _cmd_lock_pgvector(source: str, run: str | None, mode: str) -> int:
+    """Lock the pgvector path's floors from one measurement, naming the run
+    it came from (benchmark audit R7, the owner's decision 5): the floors
+    become ``verified``, and the test then fails on a difference both ways.
+    *mode* is the search the floors hold (the other is kept for the record)."""
+    import datetime as _dt
+
+    if not str(run or "").strip():
+        print("name the run the floors come from: lock-pgvector --from FILE --run \"<the CI run>\"",
+              file=sys.stderr)
+        return 1
+    try:
+        measurement = _measurement_from(Path(source).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"no pgvector measurement in {source}: {exc}", file=sys.stderr)
+        return 1
+    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
+    missing = [m for m in PGVECTOR_MODES if not isinstance(measurement.get(m), dict)]
+    if missing:
+        print(f"the measurement has no {', '.join(missing)} run", file=sys.stderr)
+        return 1
+    floors = {k: float(v) for k, v in measurement[mode].items()}
+    if set(floors) != set(locked.get("scores") or {}):
+        print("the measurement's scores are not the lock's: another dataset version? run it again",
+              file=sys.stderr)
+        return 1
+    other = next(m for m in PGVECTOR_MODES if m != mode)
+    was = (locked.get("pgvector") or {}).get("floors") or {}
+    locked["pgvector"] = {
+        "status": "verified", "mode": mode, "run": run.strip(), "date": _dt.date.today().isoformat(),
+        "measured": f"{run.strip()}, {mode} search", "floors": dict(sorted(floors.items())),
+        f"{other}_for_the_record": dict(sorted((measurement[other] or {}).items())),
+    }
+    THRESHOLDS.write_text(json.dumps(locked, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    moved = [(k, was.get(k), v) for k, v in sorted(floors.items()) if was.get(k) != v]
+    print(f"{THRESHOLDS.name}: pgvector floors from {run.strip()} ({mode} search), {len(moved)} changed")
+    for k, before, now in moved:
+        print(f"  {k}: {before} -> {now}")
+    return 0
+
+
 def _sealed_vectors(questions: list[dict[str, Any]], replay_model: str) -> str | None:
     """Record the sealed questions' vectors with the real model the first
     time (never the memories': they replay from the benchmark's recording).
@@ -1810,6 +1866,12 @@ def main(argv: list[str] | None = None) -> int:
                       help="lock a new recording of the model's extraction pass; its scores replace the old")
     lock.add_argument("--edge", nargs=2, action="append", metavar=("QUESTION", "REASON"),
                       help="name a question whose hit flips inside the vectors' rounding (EDGE_RULE); recorded")
+    pgv = sub.add_parser("lock-pgvector", help="lock the pgvector path's floors from a named run")
+    pgv.add_argument("--from", dest="source", required=True,
+                     help="the measurement file, or a CI log holding its PGVECTOR_MEASUREMENT line")
+    pgv.add_argument("--run", help="the run the numbers come from (required, recorded)")
+    pgv.add_argument("--mode", choices=PGVECTOR_MODES, default="approximate",
+                     help="the search the floors hold (the product's is approximate today)")
     sealed = sub.add_parser("sealed", help="score the sealed set; every look is logged in the lock")
     sealed.add_argument("--look", metavar="REASON", help="why this look (required, logged)")
     sealed.add_argument("--decided", action="store_true",
@@ -1828,6 +1890,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "lock":
         return _cmd_lock(args.rebaseline, args.trade, args.new_recording,
                          [tuple(e) for e in args.edge] if args.edge else None)
+    if args.cmd == "lock-pgvector":
+        return _cmd_lock_pgvector(args.source, args.run, args.mode)
     if args.cmd == "sealed":
         return _cmd_sealed(args.look, args.decided)
     if args.cmd == "extraction":

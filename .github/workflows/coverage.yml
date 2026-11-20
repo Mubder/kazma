@@ -92,6 +92,7 @@ jobs:
       - uses: ./.github/actions/install-locked
         with:
           extras: test postgres
+          groups: ci-light
       - uses: ./.github/actions/coverage-setup
       - name: Run the Postgres-marked tests under coverage
         continue-on-error: true

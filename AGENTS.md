@@ -2085,9 +2085,11 @@ four injected were noise.
   Explicit abstention targets (`TARGETS`, 0.6, goals not
   gates); a reviewed trade (`lock --trade "why"`, `trade_problems`: no
   score falls more than 0.05, one rises 0.05 or more, abstention never
-  falls; recorded in `trades`); and the Postgres-primary run
-  (`tests/test_memory_benchmark_pg.py`, opt-in, pgvector, floors in
-  `postgres_primary`). The report (both backends, the second set, extraction) is
+  falls; recorded in `trades`); and two Postgres measurements under two
+  names: the Postgres-primary keyword path (`tests/test_memory_pg_primary.py`,
+  the Postgres job, within `PRIMARY_DELTA` of local) and the pgvector path
+  (`tests/test_memory_benchmark_pg.py`, the pgvector job, held to the lock's
+  `pgvector` floors both ways). The report (both backends, the second set, extraction) is
   the guide's "Benchmark report"; the measured limits at 10x and 100x are
   the guide's "Measured limits" (`tests/test_memory_scale_bench.py`).
 - **A hit at the edge stops the lock** (2026-11-20, benchmark audit R4, the
@@ -2115,6 +2117,30 @@ four injected were noise.
   `tests/test_memory_benchmark_edges.py` (today's dataset without q601 on
   the list refuses the lock; an unnamed flip, a wrong margin and a stale
   entry each fail the CI check).
+- **pgvector in CI, measured both ways; a named skip fails** (2026-11-20,
+  benchmark audit R7 and R11, the owner's decision 5). A second CI job,
+  "Tests (pgvector)", runs the tests marked `pgvector` on
+  `pgvector/pgvector:0.8.7-pg18` (pinned by digest), beside the plain
+  `postgres:18` job (the server live runs); a test may carry both marks.
+  `scripts/postgres_suite.py --marker` picks the job, and `MUST_RUN` names
+  the tests each job exists for: one that skips, fails or does not run fails
+  the job (read from pytest's JUnit report through `safe_xml`). Both
+  Postgres jobs install `ci-light`: without numpy the Postgres-primary
+  benchmark skipped on every run while AGENTS.md quoted it. **Exact against
+  approximate is measured, not decided by default**: the pgvector benchmark
+  asks every question with the product's search (the planner may answer
+  from the HNSW index) and with index scans off on the test's own connection
+  (`EXACT_OPTIONS`; the product is unchanged), and prints both
+  (`PGVECTOR_MEASUREMENT`, shown by `-rP`). The product's mode is held to
+  the lock's `pgvector` floors both ways; floors not marked `verified` (the
+  run made by hand on 2026-10-14, until a CI run is locked) report a
+  difference instead of failing, since every CI job is a required check.
+  `memory_bench.py lock-pgvector --from LOG --run "<the run>"` locks the
+  floors from a run's measurement and marks them verified. Gates:
+  `tests/test_postgres_suite.py` (pytest alone calls the planted skip
+  green: the negative control) and `tests/test_memory_benchmark_pg.py`'s
+  rules without a database (the same lower run fails against verified floors
+  and is only reported against unverified ones).
 - **The benchmarks page says what a number rests on** (2026-11-20,
   benchmark audit R12, the owner's decision 6). The extraction lock writes
   `rests_on` (`extraction_rests_on`: per pass and language the turns, the
@@ -2799,8 +2825,10 @@ an answer ("User prefers dark mode").
   covers `state_backend.py`). Recall drops every row whose local copy is a
   tombstone or whose turn the forget ledger names (`recall._locally_forgotten`),
   whoever wrote it. Measured on the retrieval benchmark with the mirror as
-  primary and the index on the same vectors: hit rate and MRR equal to local,
-  precision 0.0166 lower (`PRIMARY_DELTA`). Gate:
+  primary and the local vector index on the same vectors (the
+  Postgres-primary keyword path, not pgvector): hit rate and MRR equal to
+  local, precision 0.0166 lower (`PRIMARY_DELTA`). The pgvector path is the
+  other measurement (§15G, "pgvector in CI"). Gate:
   `tests/test_memory_pg_primary.py` (real Postgres: a forget with the mirror
   write failing, left out of recall, repaired by one pass; each with its
   negative control). The mirror tables are in `KAZMA_PG_TABLES` (§21A).
