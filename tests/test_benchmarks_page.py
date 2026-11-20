@@ -74,6 +74,32 @@ def test_a_model_pass_row_the_lock_does_not_count_is_not_printed(tmp_path, monke
         module.render()
 
 
+def test_the_pgvector_line_says_both_searches(tmp_path, monkeypatch) -> None:
+    """Benchmark audit R7: the page names the run and says what the other
+    search scored. Negative control: a run whose exact search differs is
+    printed as different, with its numbers; one without it says so."""
+    import json
+
+    module = _page_module()
+    data = json.loads(module.MEMORY.read_text(encoding="utf-8"))
+    pg = data["pgvector"]
+    if pg.get("status") == "verified":
+        assert pg["run"] in module.render()
+    pg.update(status="verified", mode="approximate", run="CI run 1")
+    pg["exact_for_the_record"] = dict(pg["floors"])
+    changed = tmp_path / "thresholds.json"
+    changed.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(module, "MEMORY", changed)
+    assert "Comparing every row (exact search) scores the same on every measure." in module.render()
+    pg["exact_for_the_record"]["overall.precision"] = 0.7
+    changed.write_text(json.dumps(data), encoding="utf-8")
+    text = module.render()
+    assert "scores differently on 1 measure" in text and "70.0 % precision" in text
+    del pg["exact_for_the_record"]
+    changed.write_text(json.dumps(data), encoding="utf-8")
+    assert "The exact search was not measured in that run." in module.render()
+
+
 def test_the_sealed_set_is_printed_apart_with_its_looks(tmp_path, monkeypatch) -> None:
     """Benchmark audit R8: the sealed set's last look, apart from the gated
     scores, with how many looks; nothing while none was made."""

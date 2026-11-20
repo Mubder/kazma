@@ -2163,11 +2163,14 @@ four injected were noise.
   from the HNSW index) and with index scans off on the test's own connection
   (`EXACT_OPTIONS`; the product is unchanged), and prints both
   (`PGVECTOR_MEASUREMENT`, shown by `-rP`). The product's mode is held to
-  the lock's `pgvector` floors both ways; floors not marked `verified` (the
-  run made by hand on 2026-10-14, until a CI run is locked) report a
-  difference instead of failing, since every CI job is a required check.
+  the lock's `pgvector` floors both ways; floors not marked `verified` (as
+  the run made by hand on 2026-10-14 was) report a difference instead of
+  failing, since every CI job is a required check.
   `memory_bench.py lock-pgvector --from LOG --run "<the run>"` locks the
-  floors from a run's measurement and marks them verified. Gates:
+  floors from a run's measurement and marks them verified, keeping the
+  other search's scores (`exact_for_the_record`), which the benchmarks page
+  compares. Locked from CI run 44732367729 (2026-11-20): exact and
+  approximate scored the same on every measure. Gates:
   `tests/test_postgres_suite.py` (pytest alone calls the planted skip
   green: the negative control) and `tests/test_memory_benchmark_pg.py`'s
   rules without a database (the same lower run fails against verified floors
