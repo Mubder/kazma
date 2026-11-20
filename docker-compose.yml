@@ -67,7 +67,7 @@ services:
     # Pinned by version and digest (2026-11-13): `latest` ran whatever the
     # registry served at each start. Dependabot's docker-compose updates
     # propose new ones as reviewed pull requests.
-    image: docker.io/searxng/searxng:2026.11.12-de722ab1b@sha256:0b104e2e1117b0ca83a36f3ac6ecda7d9ee948ccea6ead74750a03e1b856229a
+    image: docker.io/searxng/searxng:2026.11.17-d3a35cf45@sha256:0e824adf440b3c3c5020e85bc819e6580a79a5cf5b23f14bc2b0180fe64a5779
     container_name: kazma-searxng
     ports:
       - "${SEARXNG_PUBLISH_HOST:-127.0.0.1}:${SEARXNG_HOST_PORT:-8088}:8080"
