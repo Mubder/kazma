@@ -2272,9 +2272,22 @@ four injected were noise.
   read. `memory_bench.py vectors` reuses the file's vectors for texts it
   holds (`--fresh` embeds all). Measured: precision 0.581 -> 0.487 and no
   unanswerable question empty (0.278 before): unrelated turns of the
-  question's topic clear the floor once nothing is a copy. Not re-tuned
-  (the owner's call); the scale run holds within 0.02 of hit rate and MRR,
-  precision 0.05 lower. Gate: `tests/test_memory_benchmark_pool.py` (every
+  question's topic clear the floor once nothing is a copy. **Chosen again,
+  unchanged** (2026-11-21, `scripts/memory_threshold_sweep.py`, evidence in
+  `docs/audits/evidence/memory_thresholds_v8/`): every floor, gap and weight,
+  chosen on half the questions (by category and script) with the other half
+  kept to judge it, on all four stores the benchmark builds -- the store, four times
+  its unrelated chat, a small store per question, the speakers' shared
+  space -- by a rule fixed in the script: no answer lost on any store, then
+  more unanswerable questions empty (one question is a tie), then precision
+  plus MRR, then the fewest moves, and a value moves only where its grid
+  neighbours lose no answer either. A turns' floor from 0.05 loses answers
+  at four times the store, a gap of 0.14 or less in small stores; on the
+  store alone floor 0.06 and gap 0.04 would have raised precision 0.488 ->
+  0.605 (judging half 0.439 -> 0.555) and lost five answers elsewhere (judging
+  half four). A sweep on one store is never the evidence for a threshold.
+  The scale run holds within 0.02 of hit rate and MRR, precision 0.05
+  lower. Gate: `tests/test_memory_benchmark_pool.py` (every
   turn once, v7's pool failing the same check as the control; v7's
   fingerprint; nothing about the person, a planted turn as control; the
   scale lock).
@@ -2296,6 +2309,12 @@ four injected were noise.
   answered 0.47 from the block, 0.77 read whole, 0.72 from the whole history,
   0.94 oracle; Arabic 87.5 % against English 85.0 %. Most missed answers were
   shown but cut by the block's per-memory bounds (`limits.RECALL_SHOW_*`).
+  The bounds measured (`scripts/recall_block_bounds.py`, evidence in
+  `docs/audits/evidence/recall_block_bounds/`; a proposal, not built):
+  0.48 today; every round shown whole 0.59, the budget raised to 4,000
+  tokens 0.58; the best round at up to 1,500 characters around the
+  question's words and the others at 500 (250 when the 1,500-token budget
+  needs it), list answers too, 0.74, no line left out.
   Gate: `tests/test_longmemeval_harness.py` (a history without its evidence
   round finds nothing: the control; the page's refusal with its control; no
   dataset text in a result file).
@@ -3637,8 +3656,8 @@ memory framework audit's part H, findings F14 and F15; no model calls).
   least the store's own mean plus `recall._TAIL_OFFSET` (how far a full
   store's background sits above a small store's mean, its 5th percentile,
   bge-m3 only; `scripts/small_store_offsets.py`; on dataset v8 it measures
-  0.115, and 0.093 stays until v8's thresholds are chosen again, the
-  owner's call). Only with at least `recall._SMALL_TAIL_MIN` (5) memories
+  0.115, and 0.093 stays: chosen again with v8's thresholds, 0.115 loses an
+  answer on the speakers set). Only with at least `recall._SMALL_TAIL_MIN` (5) memories
   past the top three: in a store of a few memories that all match, their
   mean is the answers' own, and raised above it every answer was dropped
   (the full suite: an archived and an active memory of one question, a

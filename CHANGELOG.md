@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Memory: v8's thresholds chosen again; the recall block's bounds measured (2026-11-21)
+
+- Recall's thresholds were chosen again on dataset v8, on half the
+  questions with the other half kept to judge it, on all four stores the benchmark
+  builds (`scripts/memory_threshold_sweep.py`). Nothing moved: a higher
+  floor loses answers when the store is four times larger, a narrower gap
+  loses them in small stores. Chosen on one store alone, they would have
+  raised its precision 0.49 to 0.61 and lost five answers elsewhere.
+- The recall block's bounds were measured on LongMemEval
+  (`scripts/recall_block_bounds.py`): showing more of every conversation
+  stops at 0.59 of questions answered (today 0.48); showing the best one at
+  up to 1,500 characters around the question's words and the others short
+  reaches 0.74, inside today's 1,500-token budget. A proposal; the product
+  is unchanged.
+
 ## Memory against a public benchmark: LongMemEval, in English and Arabic (2026-11-21)
 
 - Kazma's memory measured on 100 LongMemEval questions, through its own

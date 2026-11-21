@@ -1,0 +1,785 @@
+{
+ "today": {
+  "cfg": {
+   "_EVIDENCE_FLOOR": 0.04,
+   "_EVIDENCE_GAP": 0.15
+  },
+  "secs": 63,
+  "main": {
+   "overall.hit_rate": 0.9005,
+   "overall.mrr": 0.7487,
+   "overall.precision": 0.4872,
+   "abstain.hit_rate": 0.0,
+   "second.overall.hit_rate": 0.8625,
+   "second.overall.precision": 0.4042,
+   "second.abstain.hit_rate": 0.0
+  },
+  "main_lower": {},
+  "main_miss": [
+   "h004",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q1309",
+   "q955"
+  ],
+  "small": {
+   "answered": 0.9638,
+   "precision": 0.6752,
+   "abstained": 0.0385
+  },
+  "small_miss": [
+   "h004",
+   "h015",
+   "q1001",
+   "q1002",
+   "q1003"
+  ],
+  "scale": {
+   "overall.hit_rate": 0.897,
+   "overall.mrr": 0.7364,
+   "overall.precision": 0.4379,
+   "abstain.hit_rate": 0.0556,
+   "second.overall.hit_rate": 0.8417,
+   "second.overall.mrr": 0.7305,
+   "second.overall.precision": 0.3603,
+   "second.abstain.hit_rate": 0.0
+  },
+  "scale_miss": [
+   "h004",
+   "h009",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q1307",
+   "q1309",
+   "q955"
+  ],
+  "speakers_lower": {},
+  "speakers": {
+   "overall.hit_rate": 1.0,
+   "overall.mrr": 0.9479,
+   "overall.precision": 0.6078,
+   "overall.fact_hit_rate": 0.9355
+  }
+ },
+ "floor_only": {
+  "cfg": {
+   "_EVIDENCE_FLOOR": 0.06,
+   "_EVIDENCE_GAP": 0.15
+  },
+  "secs": 40,
+  "main": {
+   "overall.hit_rate": 0.9074,
+   "overall.mrr": 0.7513,
+   "overall.precision": 0.5206,
+   "abstain.hit_rate": 0.1111,
+   "second.overall.hit_rate": 0.8703,
+   "second.overall.precision": 0.51,
+   "second.abstain.hit_rate": 0.125
+  },
+  "main_lower": {
+   "multi.precision": [
+    0.7381,
+    0.7143
+   ]
+  },
+  "main_miss": [
+   "h004",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q1309",
+   "q955"
+  ],
+  "small": {
+   "answered": 0.9638,
+   "precision": 0.6909,
+   "abstained": 0.0385
+  },
+  "small_miss": [
+   "h004",
+   "h015",
+   "q1001",
+   "q1002",
+   "q1003"
+  ],
+  "scale": {
+   "overall.hit_rate": 0.8814,
+   "overall.mrr": 0.728,
+   "overall.precision": 0.4755,
+   "abstain.hit_rate": 0.0556,
+   "second.overall.hit_rate": 0.8104,
+   "second.overall.mrr": 0.711,
+   "second.overall.precision": 0.4281,
+   "second.abstain.hit_rate": 0.0
+  },
+  "scale_miss": [
+   "h004",
+   "h009",
+   "h041",
+   "h043",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q107",
+   "q1203",
+   "q1307",
+   "q1309",
+   "q707",
+   "q955"
+  ],
+  "speakers_lower": {
+   "overall.hit_rate": [
+    1.0,
+    0.9714
+   ],
+   "overall.mrr": [
+    0.9479,
+    0.9323
+   ],
+   "overall.precision": [
+    0.6078,
+    0.5984
+   ],
+   "lang:mixed.hit_rate": [
+    1.0,
+    0.875
+   ],
+   "lang:mixed.mrr": [
+    0.9286,
+    0.8571
+   ],
+   "lang:mixed.precision": [
+    0.6905,
+    0.5952
+   ],
+   "category:other.hit_rate": [
+    1.0,
+    0.8333
+   ],
+   "category:other.mrr": [
+    0.9167,
+    0.8333
+   ],
+   "category:other.precision": [
+    0.6667,
+    0.5833
+   ]
+  },
+  "speakers": {
+   "overall.hit_rate": 0.9714,
+   "overall.mrr": 0.9323,
+   "overall.precision": 0.5984,
+   "overall.fact_hit_rate": 0.9355
+  }
+ },
+ "gap_only": {
+  "cfg": {
+   "_EVIDENCE_FLOOR": 0.04,
+   "_EVIDENCE_GAP": 0.04
+  },
+  "secs": 41,
+  "main": {
+   "overall.hit_rate": 0.9005,
+   "overall.mrr": 0.7513,
+   "overall.precision": 0.5635,
+   "abstain.hit_rate": 0.0,
+   "second.overall.hit_rate": 0.8625,
+   "second.overall.precision": 0.5484,
+   "second.abstain.hit_rate": 0.0
+  },
+  "main_lower": {
+   "dense.mrr": [
+    0.3774,
+    0.3714
+   ],
+   "rollup.precision": [
+    0.442,
+    0.4375
+   ],
+   "second.overall.mrr": [
+    0.7574,
+    0.7572
+   ],
+   "second.rollup.mrr": [
+    0.3333,
+    0.25
+   ],
+   "second.rollup.precision": [
+    0.4,
+    0.25
+   ]
+  },
+  "main_miss": [
+   "h004",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q1309",
+   "q955"
+  ],
+  "small": {
+   "answered": 0.942,
+   "precision": 0.7015,
+   "abstained": 0.0385
+  },
+  "small_miss": [
+   "h004",
+   "h015",
+   "q007",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q303"
+  ],
+  "scale": {
+   "overall.hit_rate": 0.8814,
+   "overall.mrr": 0.7307,
+   "overall.precision": 0.518,
+   "abstain.hit_rate": 0.0556,
+   "second.overall.hit_rate": 0.8417,
+   "second.overall.mrr": 0.7292,
+   "second.overall.precision": 0.4863,
+   "second.abstain.hit_rate": 0.0
+  },
+  "scale_miss": [
+   "h004",
+   "h009",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q107",
+   "q1203",
+   "q1307",
+   "q1309",
+   "q707",
+   "q955"
+  ],
+  "speakers_lower": {
+   "overall.hit_rate": [
+    1.0,
+    0.9714
+   ],
+   "overall.mrr": [
+    0.9479,
+    0.9375
+   ],
+   "lang:ar.hit_rate": [
+    1.0,
+    0.9
+   ],
+   "lang:ar.mrr": [
+    0.9259,
+    0.8889
+   ],
+   "lang:ar.precision": [
+    0.5981,
+    0.5926
+   ],
+   "category:self.hit_rate": [
+    1.0,
+    0.9565
+   ],
+   "category:self.mrr": [
+    0.971,
+    0.9565
+   ]
+  },
+  "speakers": {
+   "overall.hit_rate": 0.9714,
+   "overall.mrr": 0.9375,
+   "overall.precision": 0.6667,
+   "overall.fact_hit_rate": 0.9355
+  }
+ },
+ "chosen": {
+  "cfg": {
+   "_EVIDENCE_FLOOR": 0.06,
+   "_EVIDENCE_GAP": 0.04
+  },
+  "secs": 41,
+  "main": {
+   "overall.hit_rate": 0.9074,
+   "overall.mrr": 0.7532,
+   "overall.precision": 0.5772,
+   "abstain.hit_rate": 0.1111,
+   "second.overall.hit_rate": 0.8703,
+   "second.overall.precision": 0.5885,
+   "second.abstain.hit_rate": 0.125
+  },
+  "main_lower": {
+   "second.rollup.mrr": [
+    0.3333,
+    0.25
+   ],
+   "second.rollup.precision": [
+    0.4,
+    0.25
+   ]
+  },
+  "main_miss": [
+   "h004",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q1309",
+   "q955"
+  ],
+  "small": {
+   "answered": 0.942,
+   "precision": 0.709,
+   "abstained": 0.0385
+  },
+  "small_miss": [
+   "h004",
+   "h015",
+   "q007",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q303"
+  ],
+  "scale": {
+   "overall.hit_rate": 0.8814,
+   "overall.mrr": 0.7314,
+   "overall.precision": 0.5291,
+   "abstain.hit_rate": 0.0556,
+   "second.overall.hit_rate": 0.8104,
+   "second.overall.mrr": 0.711,
+   "second.overall.precision": 0.5173,
+   "second.abstain.hit_rate": 0.0
+  },
+  "scale_miss": [
+   "h004",
+   "h009",
+   "h041",
+   "h043",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q107",
+   "q1203",
+   "q1307",
+   "q1309",
+   "q707",
+   "q955"
+  ],
+  "speakers_lower": {
+   "overall.hit_rate": [
+    1.0,
+    0.9429
+   ],
+   "overall.mrr": [
+    0.9479,
+    0.9219
+   ],
+   "lang:ar.hit_rate": [
+    1.0,
+    0.9
+   ],
+   "lang:ar.mrr": [
+    0.9259,
+    0.8889
+   ],
+   "lang:ar.precision": [
+    0.5981,
+    0.5926
+   ],
+   "lang:mixed.hit_rate": [
+    1.0,
+    0.875
+   ],
+   "lang:mixed.mrr": [
+    0.9286,
+    0.8571
+   ],
+   "lang:mixed.precision": [
+    0.6905,
+    0.6429
+   ],
+   "category:other.hit_rate": [
+    1.0,
+    0.8333
+   ],
+   "category:other.mrr": [
+    0.9167,
+    0.8333
+   ],
+   "category:other.precision": [
+    0.6667,
+    0.6389
+   ],
+   "category:self.hit_rate": [
+    1.0,
+    0.9565
+   ],
+   "category:self.mrr": [
+    0.971,
+    0.9565
+   ]
+  },
+  "speakers": {
+   "overall.hit_rate": 0.9429,
+   "overall.mrr": 0.9219,
+   "overall.precision": 0.6458,
+   "overall.fact_hit_rate": 0.9355
+  }
+ },
+ "f06g08": {
+  "cfg": {
+   "_EVIDENCE_FLOOR": 0.06,
+   "_EVIDENCE_GAP": 0.08
+  },
+  "secs": 54,
+  "main": {
+   "overall.hit_rate": 0.9074,
+   "overall.mrr": 0.7518,
+   "overall.precision": 0.5488,
+   "abstain.hit_rate": 0.1111,
+   "second.overall.hit_rate": 0.8703,
+   "second.overall.precision": 0.5638,
+   "second.abstain.hit_rate": 0.125
+  },
+  "main_lower": {},
+  "main_miss": [
+   "h004",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q1309",
+   "q955"
+  ],
+  "small": {
+   "answered": 0.942,
+   "precision": 0.6961,
+   "abstained": 0.0385
+  },
+  "small_miss": [
+   "h004",
+   "h015",
+   "q007",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q303"
+  ],
+  "scale": {
+   "overall.hit_rate": 0.8814,
+   "overall.mrr": 0.7299,
+   "overall.precision": 0.5017,
+   "abstain.hit_rate": 0.0556,
+   "second.overall.hit_rate": 0.8104,
+   "second.overall.mrr": 0.711,
+   "second.overall.precision": 0.4805,
+   "second.abstain.hit_rate": 0.0
+  },
+  "scale_miss": [
+   "h004",
+   "h009",
+   "h041",
+   "h043",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q107",
+   "q1203",
+   "q1307",
+   "q1309",
+   "q707",
+   "q955"
+  ],
+  "speakers_lower": {
+   "overall.hit_rate": [
+    1.0,
+    0.9714
+   ],
+   "overall.mrr": [
+    0.9479,
+    0.9323
+   ],
+   "lang:mixed.hit_rate": [
+    1.0,
+    0.875
+   ],
+   "lang:mixed.mrr": [
+    0.9286,
+    0.8571
+   ],
+   "lang:mixed.precision": [
+    0.6905,
+    0.6429
+   ],
+   "category:other.hit_rate": [
+    1.0,
+    0.8333
+   ],
+   "category:other.mrr": [
+    0.9167,
+    0.8333
+   ],
+   "category:other.precision": [
+    0.6667,
+    0.6389
+   ]
+  },
+  "speakers": {
+   "overall.hit_rate": 0.9714,
+   "overall.mrr": 0.9323,
+   "overall.precision": 0.6432,
+   "overall.fact_hit_rate": 0.9355
+  }
+ },
+ "f06g10": {
+  "cfg": {
+   "_EVIDENCE_FLOOR": 0.06,
+   "_EVIDENCE_GAP": 0.1
+  },
+  "secs": 60,
+  "main": {
+   "overall.hit_rate": 0.9074,
+   "overall.mrr": 0.7518,
+   "overall.precision": 0.5362,
+   "abstain.hit_rate": 0.1111,
+   "second.overall.hit_rate": 0.8703,
+   "second.overall.precision": 0.5465,
+   "second.abstain.hit_rate": 0.125
+  },
+  "main_lower": {},
+  "main_miss": [
+   "h004",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q1309",
+   "q955"
+  ],
+  "small": {
+   "answered": 0.9493,
+   "precision": 0.6955,
+   "abstained": 0.0385
+  },
+  "small_miss": [
+   "h004",
+   "h015",
+   "q007",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q303"
+  ],
+  "scale": {
+   "overall.hit_rate": 0.8814,
+   "overall.mrr": 0.7285,
+   "overall.precision": 0.4902,
+   "abstain.hit_rate": 0.0556,
+   "second.overall.hit_rate": 0.8104,
+   "second.overall.mrr": 0.711,
+   "second.overall.precision": 0.4685,
+   "second.abstain.hit_rate": 0.0
+  },
+  "scale_miss": [
+   "h004",
+   "h009",
+   "h041",
+   "h043",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q107",
+   "q1203",
+   "q1307",
+   "q1309",
+   "q707",
+   "q955"
+  ],
+  "speakers_lower": {
+   "overall.hit_rate": [
+    1.0,
+    0.9714
+   ],
+   "overall.mrr": [
+    0.9479,
+    0.9323
+   ],
+   "lang:mixed.hit_rate": [
+    1.0,
+    0.875
+   ],
+   "lang:mixed.mrr": [
+    0.9286,
+    0.8571
+   ],
+   "lang:mixed.precision": [
+    0.6905,
+    0.6429
+   ],
+   "category:other.hit_rate": [
+    1.0,
+    0.8333
+   ],
+   "category:other.mrr": [
+    0.9167,
+    0.8333
+   ],
+   "category:other.precision": [
+    0.6667,
+    0.5833
+   ]
+  },
+  "speakers": {
+   "overall.hit_rate": 0.9714,
+   "overall.mrr": 0.9323,
+   "overall.precision": 0.6167,
+   "overall.fact_hit_rate": 0.9355
+  }
+ },
+ "f06g12": {
+  "cfg": {
+   "_EVIDENCE_FLOOR": 0.06,
+   "_EVIDENCE_GAP": 0.12
+  },
+  "secs": 41,
+  "main": {
+   "overall.hit_rate": 0.9074,
+   "overall.mrr": 0.7513,
+   "overall.precision": 0.5283,
+   "abstain.hit_rate": 0.1111,
+   "second.overall.hit_rate": 0.8703,
+   "second.overall.precision": 0.5274,
+   "second.abstain.hit_rate": 0.125
+  },
+  "main_lower": {
+   "multi.precision": [
+    0.7381,
+    0.7143
+   ]
+  },
+  "main_miss": [
+   "h004",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q1203",
+   "q1309",
+   "q955"
+  ],
+  "small": {
+   "answered": 0.9493,
+   "precision": 0.6934,
+   "abstained": 0.0385
+  },
+  "small_miss": [
+   "h004",
+   "h015",
+   "q007",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q303"
+  ],
+  "scale": {
+   "overall.hit_rate": 0.8814,
+   "overall.mrr": 0.728,
+   "overall.precision": 0.4817,
+   "abstain.hit_rate": 0.0556,
+   "second.overall.hit_rate": 0.8104,
+   "second.overall.mrr": 0.711,
+   "second.overall.precision": 0.4543,
+   "second.abstain.hit_rate": 0.0
+  },
+  "scale_miss": [
+   "h004",
+   "h009",
+   "h041",
+   "h043",
+   "h048",
+   "h049",
+   "q1001",
+   "q1002",
+   "q1003",
+   "q107",
+   "q1203",
+   "q1307",
+   "q1309",
+   "q707",
+   "q955"
+  ],
+  "speakers_lower": {
+   "overall.hit_rate": [
+    1.0,
+    0.9714
+   ],
+   "overall.mrr": [
+    0.9479,
+    0.9323
+   ],
+   "lang:mixed.hit_rate": [
+    1.0,
+    0.875
+   ],
+   "lang:mixed.mrr": [
+    0.9286,
+    0.8571
+   ],
+   "lang:mixed.precision": [
+    0.6905,
+    0.6429
+   ],
+   "category:other.hit_rate": [
+    1.0,
+    0.8333
+   ],
+   "category:other.mrr": [
+    0.9167,
+    0.8333
+   ],
+   "category:other.precision": [
+    0.6667,
+    0.5833
+   ]
+  },
+  "speakers": {
+   "overall.hit_rate": 0.9714,
+   "overall.mrr": 0.9323,
+   "overall.precision": 0.6167,
+   "overall.fact_hit_rate": 0.9355
+  }
+ }
+}

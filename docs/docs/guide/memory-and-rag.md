@@ -1089,6 +1089,26 @@ tokens. The whole history was cut from its oldest conversations to fit the
 reader's window. Run with an agent that calls `memory_read` itself is the
 next measurement.
 
+**The block's bounds, measured** (`scripts/recall_block_bounds.py`, the
+same reader and judge; not yet built into the product):
+
+| How each recalled conversation is shown | Answered | Block (characters, median) |
+|---|---|---|
+| Today: 200 of the question, 300 of the reply | 0.48 | 3,926 |
+| Twice today's bounds | 0.58 | 4,392 |
+| Each as wide as the block's budget allows | 0.59 | 4,979 |
+| Every one whole, no budget | 0.59 | 5,221 |
+| The best one at up to 1,500 characters around the question's words, the others at 500 | 0.74 | 5,344 |
+
+Showing more of every conversation stops helping at 0.59, and a budget of
+4,000 tokens instead of 1,500 adds nothing. What helps is giving the best
+conversation room, around the words the question asks about, and keeping
+the others short (500 characters, 250 when the 1,500-token budget needs it;
+no line is ever left out). Questions that count across conversations
+("how many") gain most when their list lines are handled the same way.
+On the benchmark's own store nothing changes: its conversations are all
+shorter than today's bounds.
+
 **In English and in Arabic**: 40 of the sample's questions and the 84
 conversations holding their answers, in one memory, in English and
 translated into Arabic (the user's messages in Gulf Arabic, the replies in
@@ -1130,14 +1150,35 @@ pool of different conversations, the unrelated turns that share a
 question's topic clear the floor ("Why do cats purr?" for "Do I have any
 cats?", the week's money questions for "Which bank do I use?"), where v7's
 copies had filled the background ranks and kept them out. No unanswerable
-tuning question comes back empty. The thresholds were chosen on the copies;
-choosing them again on v8 is a decision for later, not made here. The
+tuning question comes back empty. The thresholds were chosen on the copies,
+and were chosen again on v8 (below): nothing moved. The
 scale run (`benchmark.run_scale_benchmark`, 4,774 memories, the scale
 pool's 900 conversations said once as well) shows the scores hold as the
 unrelated chat grows four times: hit rate and MRR within 0.02, precision
 0.05 lower. Its scores have a ratchet of their own (`scale` in the lock).
 q601 stays on the edge list (its fact clears the floor by 0.0004, as on
 v7).
+
+**The thresholds, chosen again on v8.** Every floor, gap and word weight
+of conversations, facts and summaries was swept on half the questions
+(92, divided by category and script), with the other half kept back to
+judge the choice, on the four stores the benchmark builds: its own, four
+times its unrelated chat, a small store per question, and a shared space
+of several people. The rule, in the script with how it came to be: no
+answer lost on any store, then more unanswerable questions empty, then
+precision and MRR. A
+one-question difference never decides, and a value moves only where the
+values next to it lose nothing either. Nothing moved. Raising the
+conversations' floor loses answers at four times the store; narrowing
+their gap loses them in small stores. On the benchmark's own store alone,
+a higher floor and a narrower gap would have raised precision from 0.49
+to 0.61 (0.44 to 0.56 on the judging half) without losing an answer there,
+and lost five on the other stores (four on the judging half). The lower
+precision of v8 is not the thresholds' to buy back. The judging half is
+not a sealed set: every question was read once while finding where the
+first choice lost answers; the final choice moved nothing
+(`scripts/memory_threshold_sweep.py`; every configuration measured is in
+`docs/audits/evidence/memory_thresholds_v8/`).
 
 ### Benchmark report (dataset v7, part G, 2026-11-21)
 

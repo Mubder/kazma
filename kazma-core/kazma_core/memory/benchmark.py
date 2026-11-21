@@ -38,6 +38,7 @@ English, Arabic and mixed.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import random
@@ -45,6 +46,7 @@ import sqlite3
 import statistics
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -391,6 +393,73 @@ def gated_scores(report: dict[str, Any]) -> dict[str, float]:
     return dict(sorted(out.items()))
 
 
+@contextlib.contextmanager
+def _seeded_store(data: dict[str, Any]) -> Iterator[tuple[sqlite3.Connection, dict[str, str], dict[str, set[str]]]]:
+    """A private database seeded with *data*'s memories: the connection, the
+    dataset's ids to the stored rows' ids, and what each summary stands for.
+    Removed when the block ends. The benchmark's one store; the threshold
+    sweep (``scripts/memory_threshold_sweep.py``) asks it many times."""
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    fd, path = tempfile.mkstemp(prefix="kazma-bench-", suffix=".db")
+    os.close(fd)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        ensure_primary_schema(conn)
+        refs = _seed(conn, data)
+        yield conn, refs, _covers(data, refs)
+    finally:
+        conn.close()
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.remove(path + suffix)
+            except OSError:
+                pass
+
+
+def _ask_questions(
+    conn: sqlite3.Connection, refs: dict[str, str], covers: dict[str, set[str]],
+    questions: list[dict[str, Any]], *, limit: int = 5, keep_results: bool = False,
+) -> tuple[list[dict[str, Any]], list[float]]:
+    """Ask each question of a seeded store the way the supervisor asks it;
+    each question's score and how long recall took."""
+    from datetime import UTC
+    from unittest import mock
+
+    from kazma_core.memory.question_shape import standalone_query
+    from kazma_core.memory.recall import recall, trace_evidence
+
+    results, latencies = [], []
+    for q in questions:
+        started = time.perf_counter()
+        query = standalone_query(q["text"], q.get("context"))
+        asked_on = BASE_TIME + float(q.get("now_day", _ASKED_ON_DAY)) * 86400
+        zone = mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC)
+        with trace_evidence() as trace, zone:
+            res = recall(query, conn=conn, tenant_id=BENCH_TENANT, limit=limit,
+                         local_only=True, now=asked_on)
+        latencies.append(time.perf_counter() - started)
+        # Facts, history, then weekly summaries: the order format_recall_block
+        # shows, all of what recall returned (it bounds them itself).
+        injected = [h.id for h in res.beliefs] + [h.id for h in res.episodes] + [h.id for h in res.summaries]
+        # A fact's line shows the value it replaced ("before that:
+        # Paris"): that fact is shown too, at the line's place.
+        shown_before = {h.id: {str(h.metadata["before_id"])} for h in res.beliefs
+                        if (h.metadata or {}).get("before_id")}
+        # A turn's line shows the follow-ups joined to it (part F).
+        joined = {h.id: set(h.metadata["joined"]) for h in res.episodes
+                  if (h.metadata or {}).get("joined")}
+        shown_with = {**covers, **shown_before, **joined}
+        scored = _score(q, refs, injected, shown_with)
+        if keep_results:
+            # A memory shown on another's line stands by that line's
+            # margin (a joined follow-up, a replaced value).
+            scored["margin"] = _margin(q, refs, shown_with, trace)
+        results.append(scored)
+    return results, latencies
+
+
 def run_benchmark(
     dataset: dict[str, Any] | None = None,
     *,
@@ -403,70 +472,21 @@ def run_benchmark(
     words are read against it) in UTC, and a follow-up with the user's
     earlier messages (``context``), the way the supervisor asks it
     (``question_shape.standalone_query``)."""
-    from datetime import UTC
-    from unittest import mock
-
-    from kazma_core.memory.question_shape import standalone_query
-    from kazma_core.memory.recall import recall, trace_evidence
-    from kazma_core.memory.schema_v2 import ensure_primary_schema
-
     data = dataset or load_dataset()
-    fd, path = tempfile.mkstemp(prefix="kazma-bench-", suffix=".db")
-    os.close(fd)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    try:
-        ensure_primary_schema(conn)
-        refs = _seed(conn, data)
-        covers = _covers(data, refs)
-        def ask(questions: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[float]]:
-            results, latencies = [], []
-            for q in questions:
-                started = time.perf_counter()
-                query = standalone_query(q["text"], q.get("context"))
-                asked_on = BASE_TIME + float(q.get("now_day", _ASKED_ON_DAY)) * 86400
-                zone = mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC)
-                with trace_evidence() as trace, zone:
-                    res = recall(query, conn=conn, tenant_id=BENCH_TENANT, limit=limit,
-                                 local_only=True, now=asked_on)
-                latencies.append(time.perf_counter() - started)
-                # Facts, history, then weekly summaries: the order format_recall_block
-                # shows, all of what recall returned (it bounds them itself).
-                injected = [h.id for h in res.beliefs] + [h.id for h in res.episodes] + [h.id for h in res.summaries]
-                # A fact's line shows the value it replaced ("before that:
-                # Paris"): that fact is shown too, at the line's place.
-                shown_before = {h.id: {str(h.metadata["before_id"])} for h in res.beliefs
-                                if (h.metadata or {}).get("before_id")}
-                # A turn's line shows the follow-ups joined to it (part F).
-                joined = {h.id: set(h.metadata["joined"]) for h in res.episodes
-                          if (h.metadata or {}).get("joined")}
-                shown_with = {**covers, **shown_before, **joined}
-                scored = _score(q, refs, injected, shown_with)
-                if keep_results:
-                    # A memory shown on another's line stands by that line's
-                    # margin (a joined follow-up, a replaced value).
-                    scored["margin"] = _margin(q, refs, shown_with, trace)
-                results.append(scored)
-            return results, latencies
-
-        results, latencies = ask(data["questions"])
+    with _seeded_store(data) as (conn, refs, covers):
+        results, latencies = _ask_questions(conn, refs, covers, data["questions"], limit=limit,
+                                            keep_results=keep_results)
         report = _summarise(results, latencies)
         report["memories"] = len(refs)
         if data.get("second"):
-            held, held_latencies = ask(data["second"])
+            held, held_latencies = _ask_questions(conn, refs, covers, data["second"], limit=limit,
+                                                  keep_results=keep_results)
             report["second"] = _summarise(held, held_latencies)
             if keep_results:
                 report["second"]["results"] = held
         if keep_results:
             report["results"] = results
         return report
-    finally:
-        conn.close()
-        for suffix in ("", "-wal", "-shm"):
-            try:
-                os.remove(path + suffix)
-            except OSError:
-                pass
 
 
 # ── Recorded vectors: the real model's answers, replayed without the model ──

@@ -268,6 +268,13 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "it reads no install"
     ),
     "scripts/small_store_offsets.py": "reads the benchmark's recorded vectors only; no store, no setting",
+    "scripts/memory_threshold_sweep.py": (
+        "asks the retrieval benchmark's private temp stores with recorded vectors; reads no install"
+    ),
+    "scripts/recall_block_bounds.py": (
+        "measures the recall block on private temp stores (LongMemEval's in a temp data folder) with "
+        "recorded vectors; the DeepSeek key, when answering, comes from the shell, never an install"
+    ),
     "scripts/knowledge_bench.py": (
         "builds and scores the Knowledge retrieval benchmark on a private store under a "
         "temporary data directory; an install's .env would point it at the install"

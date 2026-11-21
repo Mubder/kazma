@@ -2194,6 +2194,20 @@ def _with_neighbours(conn: sqlite3.Connection, hits: list[RecallHit], tenant_id:
 # my dog's name", "who looks after my teeth" and a present for mum go unfound;
 # at 0.04 those are found and four unanswerable questions get one to three
 # weak hits. Below 0.04 nothing more is found until abstention is gone.
+#
+# Chosen again on dataset v8, where the unrelated chat says each turn once
+# (2026-11-21, ``scripts/memory_threshold_sweep.py``; evidence in
+# docs/audits/evidence/memory_thresholds_v8/): every floor, gap and weight of
+# turns, facts and summaries, chosen on half the questions with the other
+# half kept to judge it, and judged on the four stores the benchmark builds (the
+# store, four times its unrelated chat, each question in a small store, a
+# shared space). Nothing moved. A turns' floor from 0.05 loses answers at
+# four times the store, a gap of 0.14 or less loses them in small stores,
+# the facts' gap of 0.06 sits one step from a lost answer. On the store
+# alone, floor 0.06 and gap 0.04 lost no answer there and raised precision
+# 0.488 -> 0.605 (judging half 0.439 -> 0.555), and lost five answers on the
+# other stores (judging half four): v8's lower precision is not the thresholds'
+# to buy back.
 _DENSE_POOL = 40  # nearest memories by meaning considered per question
 _BACKGROUND_RANKS = (3, 15)  # meaning ranks 4-15: the level unrelated memories reach
 _COVERAGE_WEIGHT = 0.12  # a memory holding every content word earns this much lift
@@ -2316,8 +2330,10 @@ def _question_background(dense_scores: Iterable[float], *, kind: str = "episode"
 #: facts lane keeps its own window (unanswerable questions in a small store
 #: still show unrelated facts: 1 of 26 comes back empty).
 #: ``scripts/small_store_offsets.py`` measures the offsets again: on dataset
-#: v8 (the pool without repeats) the turns' 5th percentile is 0.115; the
-#: offset stays v7's until v8's thresholds are chosen again (the owner's call).
+#: v8 (the pool without repeats) the turns' 5th percentile is 0.115. Chosen
+#: again with v8's thresholds (2026-11-21), the offset stays v7's: 0.115
+#: loses an answer on the speakers set (hit rate 1.0 -> 0.971), the rule the
+#: thresholds were chosen by.
 _TAIL_OFFSET = {"episode": 0.093}
 #: Memories past the top three below which a store is not judged as small: a
 #: store of only a few memories that all match the question keeps its window.
