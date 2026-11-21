@@ -259,14 +259,14 @@ def test_control_with_no_check_the_second_account_is_made_with_everything_missin
     with no question asked."""
     store = get_config_store()
     store.delete(identity.REGISTRY_KEY)
-    assert len(preconditions.missing(for_switch=True)) >= 4
+    assert len(preconditions.missing(for_switch=True)) >= 3
     monkeypatch.setattr(people, "_require_preconditions", lambda: None)
     store.set(identity.ENFORCED_KEY, True, category="identity")  # the switch with no check
     identity.prime_enforcement()
     try:
         person = people.create_person("Layla", "a-long-password", by="owner")
         assert person["id"] in _accounts()
-        assert len(preconditions.missing()) >= 4
+        assert len(preconditions.missing()) >= 3
     finally:
         scope.set_enforced(False)
         store.delete(identity.ENFORCED_KEY)
@@ -527,9 +527,11 @@ def test_check_names_what_is_missing_and_writes_nothing(vault, capsys) -> None:
     _plant_two_rows(vault)
     assert run(["migrate", "--check"]) == 1
     said = capsys.readouterr().out
-    for pid in ("unbound_work", "vault_copies", "daily_limits", "feature_grants", "owner_token"):
+    for pid in ("unbound_work", "vault_copies", "feature_grants", "owner_token"):
         title = preconditions.PRECONDITIONS[pid][0]
         assert f"[MISSING] {title}" in said, pid
+    # S2-02 is built: every person has a daily limit (the limit for people).
+    assert f"[ok] {preconditions.PRECONDITIONS['daily_limits'][0]}" in said
     assert "[ok] Copies that leave the machine are encrypted" in said and GITHUB in said
     assert "the-july-token" not in said and "the-september-token" not in said
     assert run(["migrate", "--dry-run"]) == 0

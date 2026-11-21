@@ -14999,6 +14999,41 @@ an install with one account behaves as before.
     the chat's stream and live voice): the session id in the owner's space,
     a fresh id in any other. Gate: `tests/test_web_thread_ids.py` (no web
     code gives a thread its session id itself, but two declared places).
+- **A daily spending limit per person (S2-02, 2026-11-22; decision N8).**
+  Only where Spaces is enforced: an install that does not enforce it reads
+  nothing more (`daily_limits.may_apply`, a check in memory).
+  - `kazma_core/spaces/daily_limits.py` is the one rule. A limit is tokens
+    always (every call, a model of unknown price too) and dollars where the
+    price is known (0: none). Whose: a person's own
+    (`identity` `policies[account]["daily_limit"]`), else the limit for
+    people (`identity` `defaults["daily_limit"]`), else `SHIPPED_DEFAULT`
+    (1,000,000 tokens and $1.00); the admin has none unless one is set for
+    them (the install's own `agent.daily_cost_limit_usd` covers the admin
+    and is unchanged).
+  - Counted from the ledger by the person the calls were for
+    (`llm_ledger.usage_of`, `asker` and `ts`, index `idx_llm_calls_asker_ts`)
+    since the local midnight (`cron.timezone`). A spend that cannot be
+    counted (the ledger off or unreadable) refuses: a person's limit is
+    never taken as unspent.
+  - Asked where a model is called for a person: the supervisor refuses a
+    turn at iteration 0 before any model call (`verdict`, off the loop,
+    after the install's own check), and `resilient_chat` refuses a call
+    outside a turn (`call_refusal`: `LLMError(kind="daily_limit")`, a swarm
+    worker's, research's). A turn that started under the limit runs to its
+    end; its own token budget bounds how far past. A new place that calls a
+    model for a person outside these two asks `call_refusal` too.
+  - The admin sets limits on People (`people.set_daily_limit`,
+    `set_default_daily_limit`, `PUT /api/people/{account_id}/daily-limit`,
+    `PUT /api/people/default-limit`), each change an event of the identity
+    store's record; `GET /api/people` gives each person's limit and today's
+    spend (counts and money, N11). Deleting a person takes their limit.
+  - The precondition of a second account (`daily_limits.precondition`,
+    S1-33) holds while the ledger counts and every person but the admin
+    resolves to a limit.
+  - Gates: `tests/test_person_daily_limit.py` (the real supervisor graph and
+    `resilient_chat`; the install-wide sum as the control, the checks taken
+    out fail seven), `tests/e2e/test_person_daily_limit_browser.py` (by the
+    sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

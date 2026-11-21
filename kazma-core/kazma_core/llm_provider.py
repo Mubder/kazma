@@ -2406,6 +2406,8 @@ class LLMError(Exception):
     * ``"unusable_answer"`` — the provider answered, with something that is
       no model answer (not JSON, an error, no choices); ``answer`` says what.
     * ``"stream_truncated"`` — the stream closed before the answer ended.
+    * ``"daily_limit"`` — not sent: the person the call is for reached their
+      daily limit (Spaces S2-02, ``spaces.daily_limits``).
     """
 
     def __init__(

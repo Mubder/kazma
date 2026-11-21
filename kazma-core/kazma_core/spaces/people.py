@@ -16,6 +16,10 @@ a password, sign in as them), so it is never silent:
   shows each reset of their password that someone else made, until they
   have read it.
 
+The admin also sets each person's daily limit and the limit for people who
+have none of their own (S2-02, ``spaces.daily_limits``): recorded like the
+rest.
+
 A new person gets a personal space (sandboxed, one member forever). Deleting
 a person ends their sessions and takes them out of every space; their
 personal space stays, with no member, marked ``account_deleted_at``, until
@@ -51,16 +55,20 @@ __all__ = [
     "create_person",
     "forget_space",
     "delete_person",
+    "limits_for_people",
     "list_people",
     "mark_seen",
     "notices_for",
     "reset_password",
+    "set_daily_limit",
+    "set_default_daily_limit",
 ]
 
 logger = logging.getLogger(__name__)
 
 #: What the record holds.
-_KINDS = ("account_created", "password_reset", "account_deleted", "space_erased")
+_KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
+          "daily_limit_set", "default_daily_limit_set")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset",)
 _NAME_MAX = 64
@@ -155,8 +163,11 @@ def broken_at(events: list[dict[str, Any]] | None = None) -> int | None:
 
 def list_people() -> list[dict[str, Any]]:
     """Every account, the owner first: id, name, install role, enabled,
-    when made, its personal space. Never a password hash, never a word of a
-    space's data."""
+    when made, its personal space, its daily limit (its own, ``None`` for
+    none, and the one it has: ``limit``, ``limit_source``). Never a password
+    hash, never a word of a space's data."""
+    from kazma_core.spaces.daily_limits import limit_of
+
     reg = identity.read_registry()
     personal = {space.get("personal_of"): space_id for space_id, space in reg["spaces"].items()
                 if space.get("personal_of") and not space.get("account_deleted_at")}
@@ -169,10 +180,30 @@ def list_people() -> list[dict[str, Any]]:
             "created_at": str(account.get("created_at") or ""),
             "personal_space": personal.get(account_id, ""),
             "owner": account_id == OWNER_ACCOUNT_ID,
+            **_limits_of(reg, account_id, limit_of),
         }
         for account_id, account in reg["accounts"].items()
     ]
     return sorted(people, key=lambda p: (not p["owner"], p["name"].lower()))
+
+
+def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str, Any]:
+    policy = reg["policies"].get(account_id) or {}
+    own = policy.get("daily_limit") if isinstance(policy, dict) else None
+    limit, source = limit_of(reg, account_id)
+    return {"daily_limit": own if isinstance(own, dict) else None,
+            "limit": limit.as_dict() if limit else None, "limit_source": source}
+
+
+def limits_for_people() -> dict[str, Any]:
+    """The limit for people who have none of their own: ``limit``, whether
+    the admin set it (``set``) and Kazma's own (``shipped``)."""
+    from kazma_core.spaces.daily_limits import SHIPPED_DEFAULT, default_limit
+
+    reg = identity.read_registry()
+    return {"limit": default_limit(reg).as_dict(),
+            "set": isinstance(reg["defaults"].get("daily_limit"), dict),
+            "shipped": SHIPPED_DEFAULT.as_dict()}
 
 
 def closed_spaces() -> list[dict[str, Any]]:
@@ -326,6 +357,7 @@ def delete_person(account_id: str, *, by: str) -> None:
         account = _person(reg, account_id)
         legacy[:] = [str(account.get("legacy_user_id") or account_id)]
         del reg["accounts"][account_id]
+        reg["policies"].pop(account_id, None)
         reg["memberships"] = [m for m in reg["memberships"] if m.get("account") != account_id]
         now = _now()
         for space in reg["spaces"].values():
@@ -337,6 +369,54 @@ def delete_person(account_id: str, *, by: str) -> None:
     _changed(_change)
     _end_sessions_of(legacy[0] if legacy else account_id)
     logger.warning("[people] account deleted id=%s by=%s", account_id, by)
+
+
+def _checked_limit(raw: Any) -> Any:
+    from kazma_core.spaces.daily_limits import LimitRefused, parse_limit
+
+    try:
+        return parse_limit(raw)
+    except LimitRefused as exc:
+        raise PeopleRefused(exc.code, 400, str(exc)) from exc
+
+
+def set_daily_limit(account_id: str, raw: dict[str, Any] | None, *, by: str) -> None:
+    """Set a person's own daily limit (``{"tokens", "usd"}``), or take it
+    away (``None``, or no tokens): they then have the limit for people, and
+    the admin none. Recorded."""
+    _require_enforced()
+    limit = _checked_limit(raw)
+
+    def _change(reg: dict[str, Any]) -> None:
+        if account_id not in reg["accounts"]:
+            raise identity.IdentityError("no_such_account", "There is no such person.")
+        policy = dict(reg["policies"].get(account_id) or {})
+        if limit is None:
+            policy.pop("daily_limit", None)
+        else:
+            policy["daily_limit"] = limit.as_dict()
+        reg["policies"][account_id] = policy
+        _record(reg, "daily_limit_set", account_id, by)
+
+    _changed(_change)
+    logger.info("[people] daily limit set id=%s by=%s", account_id, by)
+
+
+def set_default_daily_limit(raw: dict[str, Any] | None, *, by: str) -> None:
+    """Set the limit for people who have none of their own, or go back to
+    Kazma's own (``None``). Recorded."""
+    _require_enforced()
+    limit = _checked_limit(raw)
+
+    def _change(reg: dict[str, Any]) -> None:
+        if limit is None:
+            reg["defaults"].pop("daily_limit", None)
+        else:
+            reg["defaults"]["daily_limit"] = limit.as_dict()
+        _record(reg, "default_daily_limit_set", "", by)
+
+    _changed(_change)
+    logger.info("[people] the daily limit for people was set by=%s", by)
 
 
 def _end_sessions(reg: dict[str, Any], account_id: str) -> None:

@@ -428,6 +428,24 @@ async def supervisor_node(
                     ),
                 }],
             }
+        # The person's own daily limit (Spaces S2-02): only where Spaces is
+        # enforced and a person is bound -- may_apply is a check in memory,
+        # so an install with one account reads nothing more here.
+        from kazma_core.spaces import daily_limits as _person_limits
+
+        if _person_limits.may_apply():
+            _mine = await asyncio.to_thread(_person_limits.verdict)
+            if _mine and _mine.get("over"):
+                logger.warning("[Supervisor] a person's daily limit is reached -- turn refused")
+                return {
+                    **breaker_reset,
+                    **_mission_carry,
+                    "next_node": NodeName.RESPOND,
+                    "messages": messages + [{
+                        "role": "assistant",
+                        "content": _person_limits.refusal_text(_turn_user_text, _mine),
+                    }],
+                }
     _token_limit = _ttb.effective_limit(_turn_view, _token_base)
     _turn_tokens_used = int(_turn_view.get("turn_tokens") or 0)
 

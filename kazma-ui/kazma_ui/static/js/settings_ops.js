@@ -446,6 +446,11 @@
         peopleRecordWhole: true,
         closedSpaces: [],
         newPerson: { name: '', password: '' },
+        // Daily limits (Spaces S2-02).
+        limitForPeople: { limit: null, set: false, shipped: null },
+        limitDraftForPeople: { tokens: '', usd: '' },
+        limitEditing: '',
+        limitDraft: { tokens: '', usd: '' },
 
         _peopleError(data) {
             const code = (data && data.error) || 'failed';
@@ -462,7 +467,97 @@
             this.people = data.people;
             this.closedSpaces = Array.isArray(data.closed_spaces) ? data.closed_spaces : [];
             this.peopleRecordWhole = data.record_whole !== false;
+            if (data.limit_for_people && data.limit_for_people.limit) {
+                this.limitForPeople = data.limit_for_people;
+                this.limitDraftForPeople = {
+                    tokens: String(data.limit_for_people.limit.tokens || ''),
+                    usd: String(data.limit_for_people.limit.usd || 0),
+                };
+            }
             this.peopleLoaded = true;
+        },
+
+        _tokensText(n) {
+            return window.kazmaCount('settings.people_tokens', Number(n) || 0,
+                { n: window.KazmaFormat ? window.KazmaFormat.number(Number(n) || 0) : String(n) });
+        },
+
+        _dollars(usd) {
+            return window.KazmaFormat
+                ? window.KazmaFormat.number(Number(usd) || 0, { style: 'currency', currency: 'USD' })
+                : '$' + (Number(usd) || 0).toFixed(2);
+        },
+
+        limitText(limit) {
+            if (!limit) return '';
+            const tokens = this._tokensText(limit.tokens);
+            if (Number(limit.usd) > 0) {
+                return _t('settings.people_limit_text', '{tokens} and {usd} a day',
+                    { tokens: tokens, usd: this._dollars(limit.usd) });
+            }
+            return _t('settings.people_limit_text_tokens', '{tokens} a day', { tokens: tokens });
+        },
+
+        personLimitText(person) {
+            if (!person.limit) return _t('settings.people_limit_none', "None: the install's own limit");
+            const whose = person.limit_source === 'own'
+                ? _t('settings.people_limit_own', 'Their own')
+                : _t('settings.people_limit_from_default', 'The limit for people');
+            return this.limitText(person.limit) + ' (' + whose + ')';
+        },
+
+        spentText(person) {
+            const spent = person.spent_today;
+            if (!spent) return _t('settings.people_spent_unknown', 'Not counted');
+            return _t('settings.people_spent_text', '{tokens}, {usd}',
+                { tokens: this._tokensText(spent.tokens), usd: this._dollars(spent.cost) });
+        },
+
+        async _putLimit(url, limit) {
+            try {
+                const resp = await fetch(url, {
+                    method: 'PUT', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ limit: limit }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    showToast(this._peopleError(data), 'error');
+                    return false;
+                }
+            } catch (e) {
+                showToast(this._peopleError(null), 'error');
+                return false;
+            }
+            showToast(_t('settings.people_limit_saved', 'Limit saved.'), 'success');
+            await this.loadPeople();
+            return true;
+        },
+
+        async saveLimitForPeople() {
+            await this._putLimit('/api/people/default-limit',
+                { tokens: this.limitDraftForPeople.tokens, usd: this.limitDraftForPeople.usd });
+        },
+
+        async useShippedLimit() {
+            await this._putLimit('/api/people/default-limit', null);
+        },
+
+        editLimit(person) {
+            const own = person.daily_limit || person.limit || {};
+            this.limitDraft = { tokens: String(own.tokens || ''), usd: String(own.usd || 0) };
+            this.limitEditing = person.id;
+        },
+
+        async savePersonLimit(person) {
+            const done = await this._putLimit('/api/people/' + encodeURIComponent(person.id) + '/daily-limit',
+                { tokens: this.limitDraft.tokens, usd: this.limitDraft.usd });
+            if (done) this.limitEditing = '';
+        },
+
+        async clearPersonLimit(person) {
+            const done = await this._putLimit('/api/people/' + encodeURIComponent(person.id) + '/daily-limit', null);
+            if (done) this.limitEditing = '';
         },
 
         // ── A space's data (Spaces S1-27): count, export, erase ──

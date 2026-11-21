@@ -34,8 +34,8 @@ kazma spaces migrate --check
 
 It changes nothing and lists each one as holding or missing, with what
 closes it. While one is missing, adding a second person is refused and the
-refusal names it. Today the daily limits and the per-person features are
-not built yet, so the list is never empty. The plan, with every step and
+refusal names it. Today the per-person features are not built yet, so the
+list is never empty. The plan, with every step and
 its state, is `docs/plans/SPACES_PLAN.md`.
 
 This page describes what Spaces does once it is on.
@@ -94,6 +94,22 @@ space's folder.
 A password reset is never silent: it is recorded in the identity store's
 record, which cannot be edited without the edit showing, and the person is
 told the next time they open Kazma.
+
+## A daily limit per person
+
+Your friends use your model keys, so each person but you has a daily
+limit, counted from midnight: a number of tokens, which every model call
+counts, and an amount in dollars, which the calls of known price count (0
+for none). A model whose price Kazma does not know is still covered by the
+tokens. When a person reaches their limit, their requests stop until
+midnight and they are told; a request that had already started finishes.
+Your own use is covered by the install's limit (Settings → System).
+
+Settings → People sets the limit for people (Kazma's own is 1,000,000
+tokens and $1.00 a day) and, for any person, a limit of their own, and
+shows what each person used today: counts and money, never what they
+asked. Each change is recorded. The limit counts what the per-call ledger
+records, so with the ledger off a person's requests are refused.
 
 ## Taking your space with you, and deleting it
 
