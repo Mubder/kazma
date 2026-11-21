@@ -2283,16 +2283,20 @@ def _question_background(dense_scores: Iterable[float], *, kind: str = "episode"
     background is then at least the store's own mean plus
     :data:`_TAIL_OFFSET` (:func:`_tail_offset`): how far a full store's
     background sits above a small store's mean, its 5th percentile, so only
-    what even a generous full-store judgement drops is dropped. Never for a
-    question asking for every memory (its answers are many), and only for
-    the model it was measured on.
+    what even a generous full-store judgement drops is dropped. Only with at
+    least :data:`_SMALL_TAIL_MIN` memories past the top three: in a store of a
+    few memories that all match, their mean is the answers' own, and raised
+    above it every answer was dropped (2026-11-21, the full suite: an archived
+    and an active memory of one question, a space's one matching memory).
+    Never for a question asking for every memory (its answers are many), and
+    only for the model it was measured on.
     """
     ordered = sorted((float(x) for x in dense_scores), reverse=True)
     lo, hi = _BACKGROUND_RANKS
     window = ordered[lo:hi]
     missing = max(0, _BACKGROUND_MIN_SAMPLES - len(window))
     own = (sum(window) + _BACKGROUND_PRIOR * missing) / (len(window) + missing)
-    if ordered and len(ordered) < _DENSE_POOL and not _LISTING.get():
+    if len(ordered) - lo >= _SMALL_TAIL_MIN and len(ordered) < _DENSE_POOL and not _LISTING.get():
         offset = _tail_offset(kind)
         if offset is not None:
             return max(own, sum(ordered) / len(ordered) + offset)
@@ -2311,8 +2315,13 @@ def _question_background(dense_scores: Iterable[float], *, kind: str = "episode"
 #: benchmark's fact hit rate 0.936 -> 0.871, Arabic 0.889 -> 0.667, so the
 #: facts lane keeps its own window (unanswerable questions in a small store
 #: still show unrelated facts: 1 of 26 comes back empty).
-#: ``scripts/small_store_offsets.py`` measures the offsets again.
+#: ``scripts/small_store_offsets.py`` measures the offsets again: on dataset
+#: v8 (the pool without repeats) the turns' 5th percentile is 0.115; the
+#: offset stays v7's until v8's thresholds are chosen again (the owner's call).
 _TAIL_OFFSET = {"episode": 0.093}
+#: Memories past the top three below which a store is not judged as small: a
+#: store of only a few memories that all match the question keeps its window.
+_SMALL_TAIL_MIN = 5
 
 
 def _tail_offset(kind: str) -> float | None:

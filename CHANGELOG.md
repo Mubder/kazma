@@ -47,6 +47,9 @@
   memories and a few unrelated ones: precision 0.620 to 0.694, every answer
   shown 0.978 to 0.964 (two hard cases). The main benchmark is unchanged;
   the speakers benchmark's precision rose. Both are locked.
+- The rule waits until a store holds more than a handful of memories: in
+  a store of two or three memories that all match the question, it had
+  dropped every one of them.
 - The Postgres-primary path now answers part F's questions (time, lists,
   follow-ups) as the local path does; CI's Postgres job is green again.
 

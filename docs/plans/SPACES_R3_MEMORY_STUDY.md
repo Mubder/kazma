@@ -296,6 +296,26 @@ By language, today against the chosen design:
 | Mixed, `control` | 8 | 0.875 | 0.571 | 0.726 | 0.512 | 16 |
 | Mixed, chosen | 8 | 1.000 | 0.857 | 0.929 | 0.643 | 0 |
 
+**Re-run on 2026-11-21.** Recall now judges a small store's turns as a
+full store would (`recall._question_background`, the small-store rule of
+the memory framework audit's part H), and the study was run again with it
+(`results.json`). Only these runs moved; every other number in this report
+is unchanged:
+
+- The chosen design (`id_uv`, `named_first`, and `name_uv` with it):
+  precision 0.592 to 0.623 (English 0.604 to 0.608, Arabic 0.532 to 0.598,
+  Mixed 0.643 to 0.690; another member by name 0.539 to 0.667). Hit, fact
+  hit and mrr are the same.
+- Every other design's precision rose too: `self_first` 0.564 to 0.579,
+  `name` 0.587 to 0.601, `id_names` 0.578 to 0.609, `label` 0.431 to
+  0.443, the raw id 0.430 to 0.442.
+- `control` (today's single entry): hit 0.886 to 0.857, mrr 0.630 to
+  0.624, precision 0.446 to 0.453, misattributed 84 items to 80; Arabic hit
+  0.900 to 0.800; another member by name, hit 0.833 to 0.667 and mrr 0.617
+  to 0.583. With every member filed as one `user`, the answering turn is
+  one more matching memory in a tiny store, and the raised background left
+  one of them out. The design the study chose does not file that way.
+
 By kind of question, chosen design (today in brackets): about the asker,
 fact hit 0.957 (0.522) and mrr 0.971 (0.621); the asker never said, 3 of 3
 show nothing as the asker's (0 of 3); another member by name, hit 1.000

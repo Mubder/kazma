@@ -102,3 +102,17 @@ class _Var:
 
     def get(self):
         return self.value
+
+
+def test_a_few_memories_that_all_match_keep_their_window(bge, monkeypatch):
+    """A store of a few memories, every one of them about the question: their
+    mean is the answers' own, and the background raised above it dropped them
+    all (the full suite, 2026-11-21: an archived and an active memory of one
+    question; a space's one matching memory)."""
+    few = [0.71, 0.69, 0.68, 0.40, 0.38]
+    own = rm._question_background(few)
+    assert 0.68 - own >= rm._EVIDENCE_FLOOR
+    # Control: without the size guard the answers fall below the floor.
+    monkeypatch.setattr(rm, "_SMALL_TAIL_MIN", 0)
+    raised = rm._question_background(few)
+    assert raised > own and 0.68 - raised < rm._EVIDENCE_FLOOR

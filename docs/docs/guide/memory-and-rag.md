@@ -1022,8 +1022,10 @@ three to five unrelated conversations, marked "possibly related". In a store
 that small, recall's sense of "what unrelated memories reach" was the
 average of everything, so the nearest unrelated conversations always looked
 related. A small store's conversations are now judged as a full store would
-judge them, and the check passes 6 of 6. The benchmark page has a
-small-store run of its own.
+judge them, and the check passes 6 of 6. A store of only a few memories,
+all of them about the question, keeps them all: the rule waits until a
+store holds more than a handful. The benchmark page has a small-store run
+of its own.
 
 **Search past a size.** Below 20,000 memories, search by meaning compares
 every memory exactly. Past it, a short code of each vector picks the

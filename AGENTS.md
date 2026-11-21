@@ -3636,7 +3636,13 @@ memory framework audit's part H, findings F14 and F15; no model calls).
   unanswerable question came back empty. The turns' background is now at
   least the store's own mean plus `recall._TAIL_OFFSET` (how far a full
   store's background sits above a small store's mean, its 5th percentile,
-  bge-m3 only; `scripts/small_store_offsets.py`). Not for a list question,
+  bge-m3 only; `scripts/small_store_offsets.py`; on dataset v8 it measures
+  0.115, and 0.093 stays until v8's thresholds are chosen again, the
+  owner's call). Only with at least `recall._SMALL_TAIL_MIN` (5) memories
+  past the top three: in a store of a few memories that all match, their
+  mean is the answers' own, and raised above it every answer was dropped
+  (the full suite: an archived and an active memory of one question, a
+  space's one matching memory). Not for a list question,
   not for facts (measured on facts it lowered the speakers benchmark's fact
   hit rate, 0.936 to 0.871), not for another embedding model. The main
   benchmark is unchanged (full pools); the speakers benchmark's precision
@@ -3644,8 +3650,11 @@ memory framework audit's part H, findings F14 and F15; no model calls).
   locked as `small`): every answer shown 0.978 -> 0.964 (two hard cases:
   q1001, thirty near-identical wedding turns; h004, "boss" for "manager"),
   precision 0.620 -> 0.694, unanswerable questions empty 0 -> 0.04 (the
-  facts lane still shows unrelated facts there: a follow-up). Gate:
-  `tests/test_memory_small_store.py` (the old background as the control).
+  facts lane still shows unrelated facts there: a follow-up). The Spaces R3
+  study was run again with it (`docs/plans/SPACES_R3_MEMORY_STUDY.md` says
+  which numbers moved: every design's precision rose, today's single entry
+  lost one hit). Gate: `tests/test_memory_small_store.py` (the old
+  background, and the rule with no size guard, as the controls).
 
 ### 16. Scheduled reminders and tasks (`kazma-core/kazma_core/cron/`)
 
