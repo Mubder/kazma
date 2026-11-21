@@ -75,7 +75,7 @@ class _Mirror:
                                                      ("user_text", "assistant_text", "summary_text")), terms)]
         return rows[: max(1, min(int(limit), 50))]
 
-    def episodes_between(self, start, end, *, tenant_id="default", limit=50):
+    def episodes_between(self, start, end, *, tenant_id, limit=50):
         rows = self._episode_rows(tenant_id, (start, end))
         rows.sort(key=lambda r: float(r["created_at"] or 0), reverse=True)
         return rows[:limit]

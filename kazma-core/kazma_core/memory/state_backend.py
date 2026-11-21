@@ -130,7 +130,7 @@ class _NullStateBackend:
         return []
 
     def episodes_between(
-        self, start: float, end: float, *, tenant_id: str = "default", limit: int = 50
+        self, start: float, end: float, *, tenant_id: str, limit: int = 50
     ) -> list[dict[str, Any]]:
         return []
 
@@ -656,7 +656,7 @@ class PostgresStateBackend:
             return []
 
     def episodes_between(
-        self, start: float, end: float, *, tenant_id: str = "default", limit: int = 50
+        self, start: float, end: float, *, tenant_id: str, limit: int = 50
     ) -> list[dict[str, Any]]:
         """The tenant's recallable turns said in ``[start, end)``, newest first,
         at most *limit*: a question about a period is answered by its turns
@@ -1908,7 +1908,7 @@ def search_state_episodes(
 
 
 def state_episodes_between(
-    start: float, end: float, *, tenant_id: str = "default", limit: int = 50
+    start: float, end: float, *, tenant_id: str, limit: int = 50
 ) -> list[dict[str, Any]]:
     """The mirror's turns said in ``[start, end)``, newest first (a backend
     without the read answers none). A failure raises (recall's primary path:
