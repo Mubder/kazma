@@ -264,3 +264,34 @@ the benchmarks page regenerated.
    most 150 ms p50 and 400 ms p95 to a recall on this PC, anytime; the large
    reranker ships only if the small one cannot meet the targets and the
    large one fits the budget.
+
+## 7. Found while measuring, to fix (not inside W0)
+
+1. **A fact told once is kept twice, and forgetting one copy leaves it
+   known.** In the real-use suite (`scripts/memory_real_use.py`, 22 Nov)
+   "My sister Noura works as a dentist." became two memories: the turn, and
+   a note the model wrote itself with `memory_store`. The Memory page's
+   search for "dentist" listed both. The first English trial forgot only
+   the first the page listed, then asked "What does my sister do for work?"
+   in a new chat, and the judge scored the answer wrong: Kazma did not say
+   it did not know (that trial kept no reply text). With both forgotten it
+   said it did not know, in every later run (the suite now forgets each
+   match, as a person would once they see two). A person who forgets "it"
+   and is still answered has been told memory forgets when it does not.
+   Evidence: `docs/audits/evidence/memory_real_use/w0_baseline.json`
+   (`"forgotten": 2` in both languages); a trial's server log (kept outside
+   the repository) shows `memory_store` called on the telling turns. To
+   decide: whether a note that restates the turn is written at all, and
+   whether Forget offers the memories that say the same thing.
+2. **Telling Kazma about a move asks for an approval.** "I moved to Porto
+   last month." made the model call `memory_invalidate` (danger tier) to
+   retire the old city; the turn waited on an approval card. Seen in one of
+   the two English runs. Evidence: the trial result's `approval_tools`.
+3. **An Arabic question about "my sister" was read as Kazma's sister.**
+   "شنو تشتغل أختي؟" after the fact was forgotten was answered "I don't have a
+   sister, I'm Kazma". LongMemEval's abstention judge passed it (it said no
+   answer); the reply misread the question.
+4. **Recall finds less than plain retrieval.** On the 200 dev questions,
+   Kazma's recall shows every answering conversation for 82.0 %, bge-m3's 10
+   nearest rounds for 91.8 % (`tests/fixtures/longmemeval/retrieval_dev.json`).
+   Kazma shows 4.5 memories to their 10. Input to W3 + W2 and W4.
