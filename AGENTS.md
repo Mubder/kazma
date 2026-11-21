@@ -2310,8 +2310,10 @@ four injected were noise.
   result files (`retrieval.json`, `answers.json`, `parallel.json`) hold ids
   and scores only, and the benchmarks page prints them, refusing an
   end-to-end run without its two baselines. Measured: answer shown 91.5 %;
-  answered 0.47 from the block, 0.77 read whole, 0.72 from the whole history,
-  0.94 oracle; Arabic 87.5 % against English 85.0 %. Most missed answers were
+  answered 0.47 from the block, 0.77 read whole, 0.72 from the history cut
+  to fit (440,000 characters; since 22 Nov `FULL_MAX_CHARS` is None, the
+  reader's window holds the longest history, and the page names a cut run
+  "History cut to fit"), 0.94 oracle; Arabic 87.5 % against English 85.0 %. Most missed answers were
   shown but cut by the block's per-memory bounds (`limits.RECALL_SHOW_*`).
   The bounds measured (`scripts/recall_block_bounds.py`, evidence in
   `docs/audits/evidence/recall_block_bounds/`; a proposal, not built):

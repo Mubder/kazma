@@ -179,6 +179,26 @@ def test_the_page_refuses_an_end_to_end_run_without_its_baselines(tmp_path):
     assert "Whole history" in text and "80.0" in text
 
 
+def test_a_history_cut_to_fit_is_never_called_whole(tmp_path):
+    """The run of 21 Nov cut every history at 440,000 characters: the page
+    names that column "History cut to fit" (the plan's W0); an uncut run
+    keeps "Whole history"."""
+    page = _page()
+    run = _answers({"kazma": 0.5, "full": 0.6, "oracle": 0.8, "prompt_tokens_mean": {"full": 100000}})
+    (tmp_path / "answers.json").write_text(json.dumps({**run, "full_max_chars": 440000}), encoding="utf-8")
+    text = "\n".join(page._longmemeval(tmp_path))
+    assert "History cut to fit" in text and "Whole history" not in text and "440,000" in text
+    (tmp_path / "answers.json").write_text(json.dumps({**run, "full_max_chars": None}), encoding="utf-8")
+    text = "\n".join(page._longmemeval(tmp_path))
+    assert "Whole history" in text and "cut to fit" not in text
+
+
+def test_the_whole_history_is_sent_uncut(lme):
+    """The reader's window holds the longest history (115,818 tokens, 22 Nov):
+    the full-context baseline is not cut."""
+    assert lme.FULL_MAX_CHARS is None
+
+
 def test_the_judge_prompt_is_longmemevals_for_each_kind(lme):
     item = {"question_id": "q", "question_type": "temporal-reasoning", "question": "When?", "answer": "May"}
     assert "off-by-one" in lme.judge_prompt(item, "in May")

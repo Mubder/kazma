@@ -433,9 +433,12 @@ JUDGE = {
 #: read whole (what the model gets when it opens them with ``memory_read``,
 #: which a one-shot reader cannot call); the whole history; the oracle.
 CONDITIONS = ("kazma", "kazma_whole", "full", "oracle")
-#: The whole history is cut from its oldest session to fit the reader's
-#: window (characters; about 4 a token). Said in the result.
-FULL_MAX_CHARS = 440_000
+#: The whole history, uncut (None), or cut from its oldest session to this
+#: many characters. Uncut since 22 Nov: the longest of the 500 histories
+#: (540,508 characters, 115,818 tokens) was served whole by deepseek-flash
+#: and deepseek-v4-pro; cut at 440,000 every dev history lost sessions, and
+#: 33 of the first 100 an answer session. Said in the result.
+FULL_MAX_CHARS: int | None = None
 
 
 def judge_prompt(item: dict[str, Any], response: str) -> str:
@@ -575,10 +578,16 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
 
     def run(qid: str, condition: str) -> None:
         item = by_id[qid]
+        prompt = READER.format(histories[qid][condition], item["question_date"], item["question"])
+        # A reply answers the prompt it was asked: one made from another
+        # prompt (a cut history, another block) is asked again.
+        digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:24]
         entry = cache.setdefault(qid, {}).setdefault(condition, {})
+        if entry.get("prompt_sha") != digest:
+            entry.clear()
+            entry["prompt_sha"] = digest
         if "hypothesis" not in entry:
-            text, usage = chat.ask(READER.format(histories[qid][condition], item["question_date"], item["question"]),
-                                   max_tokens=800)
+            text, usage = chat.ask(prompt, max_tokens=800)
             entry.update({"hypothesis": text, "reader_usage": usage})
         if "verdict" not in entry and entry["hypothesis"]:
             verdict, usage = chat.ask(judge_prompt(item, entry["hypothesis"]), max_tokens=10)
@@ -616,7 +625,8 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
         "source": SOURCE, "split": split, "sample": len(items), "reader": model, "judge": model, "provider": base_url.split("//")[-1],
         "made_on": datetime.now(UTC).date().isoformat(), "limit": LIMIT, "full_max_chars": FULL_MAX_CHARS,
         "what": "One reader answers each question from Kazma's recall block, from the same recalled rounds read "
-                "whole, from the whole history (oldest sessions cut to fit) and from the answer sessions alone; "
+                "whole, from the whole history (uncut unless full_max_chars says) and from the answer sessions "
+                "alone; "
                 "LongMemEval's judge prompts score each answer. Scores and token counts only.",
         "usage": usage, **summary, "results": results,
     }, indent=1) + "\n", encoding="utf-8", newline="\n")

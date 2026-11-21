@@ -84,7 +84,7 @@ Recall took 26.0 ms (median) on these stores.
 
 **Answering from it** (100 questions; reader and judge deepseek-flash, LongMemEval's own judge prompts): the share of answers the judge called correct, from Kazma's recall as the model is shown it, from the same recalled conversations read whole (what the model gets when it opens them with `memory_read`, which this one-shot reader cannot call), from the whole history (the full-context baseline) and from the conversations holding the answer alone (the oracle).
 
-| Question | Kazma's recall | Read whole | Whole history | Oracle |
+| Question | Kazma's recall | Read whole | History cut to fit | Oracle |
 |---|---|---|---|---|
 | Something the user said | 64.3 % | 100.0 % | 92.9 % | 100.0 % |
 | Something Kazma said | 45.5 % | 90.9 % | 90.9 % | 100.0 % |
@@ -94,7 +94,7 @@ Recall took 26.0 ms (median) on these stores.
 | Across several conversations | 29.6 % | 44.4 % | 59.3 % | 85.2 % |
 | **All questions** | **47.0 %** | **77.0 %** | **72.0 %** | **94.0 %** |
 
-The reader was sent about 1,017 tokens a question from Kazma's recall, 2,214 with its conversations read whole, 96,356 for the whole history (its oldest conversations cut to fit the reader's window) and 6,306 for the oracle. Scores from different readers are not comparable: compare the columns with each other.
+The reader was sent about 1,017 tokens a question from Kazma's recall, 2,214 with its conversations read whole, 96,356 for the history cut to 440,000 characters (its oldest conversations left out) and 6,306 for the oracle. Scores from different readers are not comparable: compare the columns with each other.
 
 **The same memories in English and Arabic**: 40 of the sample's questions and the 84 conversations holding their answers, in one memory, in English and translated into Arabic (the user's messages in Gulf Arabic, the replies in Modern Standard Arabic; translated by a model, kept outside the repository). Each question is asked in its language.
 

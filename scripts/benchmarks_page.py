@@ -378,6 +378,12 @@ def _longmemeval(folder: Path) -> list[str]:
             raise SystemExit(f"{answers}: an end-to-end run without its full-context and oracle baselines "
                              "proves nothing; run them on the same reader")
         tokens = o.get("prompt_tokens_mean") or {}
+        # A run before 22 Nov cut every history to fit (full_max_chars); one
+        # uncut says so by the column's name.
+        cut_at = a.get("full_max_chars")
+        full_name = "History cut to fit" if cut_at else "Whole history"
+        full_what = (f"history cut to {cut_at:,} characters (its oldest conversations left out)" if cut_at
+                     else "whole history, uncut")
         lines += [
             f"**Answering from it** ({a['sample']} questions; reader and judge {a['reader']}, LongMemEval's own "
             "judge prompts): the share of answers the judge called correct, from Kazma's recall as the model is "
@@ -385,7 +391,7 @@ def _longmemeval(folder: Path) -> list[str]:
             "with `memory_read`, which this one-shot reader cannot call), from the whole history (the "
             "full-context baseline) and from the conversations holding the answer alone (the oracle).",
             "",
-            "| Question | Kazma's recall | Read whole | Whole history | Oracle |",
+            f"| Question | Kazma's recall | Read whole | {full_name} | Oracle |",
             "|---|---|---|---|---|",
         ]
         for key, name in _LME_TYPES.items():
@@ -399,8 +405,8 @@ def _longmemeval(folder: Path) -> list[str]:
             "",
             f"The reader was sent about {tokens.get('kazma', 0):,} tokens a question from Kazma's recall, "
             f"{tokens.get('kazma_whole', 0):,} with its conversations read whole, "
-            f"{tokens.get('full', 0):,} for the whole history (its oldest conversations cut to fit the reader's "
-            f"window) and {tokens.get('oracle', 0):,} for the oracle. Scores from different readers are not "
+            f"{tokens.get('full', 0):,} for the {full_what} and {tokens.get('oracle', 0):,} for the oracle. "
+            "Scores from different readers are not "
             "comparable: compare the columns with each other.",
             "",
         ]
