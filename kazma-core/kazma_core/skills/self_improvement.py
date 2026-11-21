@@ -767,41 +767,41 @@ def _soul_document(value: Any) -> dict[str, Any]:
     return data
 
 
-def _update_soul(space: str, change: Callable[[dict[str, Any]], bool]) -> bool:
+def _update_soul(space: str, change: Callable[[dict[str, Any]], bool]) -> None:
     """Read, change and write the Soul document of *space* in ONE step of the
     settings store (``atomic_update``: one transaction holding the key, across
     processes too). *change* edits the document it is given in place and says
-    whether it changed it; returns that.
+    whether it changed it: a space's Soul it did not change is not added to
+    the spaces' document. A caller that needs a count keeps it in its own
+    *change* (``forget_text``): nothing read this function's answer, so it
+    has none (SonarCloud S3516, 2026-11-21).
 
     The read is inside the step: read outside it, a lesson another process
     wrote between the read and the write was lost (S1-10 review), and two
     first saves of the spaces' document could each start from nothing.
     ``_agent_evo_lock`` still orders this process's own changes.
     """
-    changed = False
-
-    def own(value: Any) -> dict[str, Any]:
-        nonlocal changed
-        data = _soul_document(value)
-        changed = bool(change(data))
-        return data
-
     store = get_config_store()
     if space == _owner_space():
-        store.atomic_update(_AGENT_EVO_KEY, own)
-        return changed
+
+        def owners(value: Any) -> dict[str, Any]:
+            data = _soul_document(value)
+            change(data)
+            return data
+
+        store.atomic_update(_AGENT_EVO_KEY, owners)
+        return
 
     def spaces(value: Any) -> dict[str, Any]:
         every = value if isinstance(value, dict) else {}
         held = every.get("spaces") if isinstance(every.get("spaces"), dict) else {}
-        data = own(held.get(space))
-        if changed or space in held:
+        data = _soul_document(held.get(space))
+        if change(data) or space in held:
             held[space] = data
         every["spaces"] = held
         return every
 
     store.atomic_update(_SPACE_EVO_KEY, spaces)
-    return changed
 
 
 def _soul_spaces(tenant_id: str | None) -> list[str]:

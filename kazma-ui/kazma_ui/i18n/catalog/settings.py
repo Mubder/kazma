@@ -492,6 +492,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اختر مجلداً قبل تشغيل النسخ إليه.",
         "en": "Choose a folder before switching the copy on.",
     },
+    "settings.bkf.problem_device": {
+        "ar": "هذا مسار جهاز وليس مجلداً: اكتب حرف قرص أو مجلداً مشتركاً مثل ‎\\\\server\\share.",
+        "en": "That is a device path, not a folder: type a drive letter or a share such as \\\\server\\share.",
+    },
     "settings.bkf.problem_relative": {
         "ar": "اكتب مساراً كاملاً: حرف قرص أو مجلداً مشتركاً على الشبكة.",
         "en": "Type a full path: a drive letter or a network share.",

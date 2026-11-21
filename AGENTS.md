@@ -5365,6 +5365,23 @@ never a network path: listing one connects to its host). Gates:
 repository, the notice without its mark and the maintenance with the default
 policy as negative controls), `tests/e2e/test_backup_folder_browser.py` (by the
 sidebar, EN/AR, the picker, a refused save, Test).
+**The folder's rules hold for every name a path can have** (2026-11-21, the
+SonarCloud review of the Test). `folder_copy.path_problem` answers one of
+`folder_copy.PATH_PROBLEMS`, and the save refuses every one of them (it
+named two and kept a path with any other): a device path (`\\.\`, `\\?\`,
+`\??\`: a named pipe, a raw disk) is refused on its text before anything
+opens it (`remote_paths.device_path_reason`; a plain `\\server\share` is a
+folder, choosing one is the feature); "inside the data folder" is judged by
+the real path AND by each folder's identity (`folder_copy._identity`: volume
+and file id), since `\\?\C:\...` and a loopback share
+(`\\localhost\C$\...`) resolve to themselves; the walk up stops at the first
+folder that does not answer (`folder_copy._not_made_yet`: an offline share
+waits out a network timeout per question); "the same disk" is the volume
+(`st_dev`), never the drive letter. Gate:
+`tests/test_backup_folder_path_rules.py` (the Test, the save and a stored
+path; every code worded by the page in both languages; the old rule, the old
+save and the drive-letter check as negative controls; the loopback share
+where this account can reach it).
 
 **Every copy of a live SQLite database is one step, through one helper**
 (`kazma_core.db.sqlite_snapshot.snapshot_copy`, 2026-10-13, Memory audit M19):
@@ -13442,6 +13459,32 @@ with a test that fails on the old code and a gate for its class:
   out vendored libraries, examples and the audits' evidence scripts. Marking
   the false positives that remain is done in SonarCloud with the owner's
   account.
+- **The second pass, BLOCKER and HIGH (2026-11-21)**: 20 open issues, each
+  read against the code.
+  - **A ContextVar's default is never an object a caller can change**
+    (python:S8508): `ContextVar(..., default={})` makes ONE dict that every
+    context which never set the variable shares, so a write into what
+    `.get()` answered outside a recall would reach every later recall.
+    Recall's member names (`recall._ENTRY_NAMES`) default to None and are
+    read through `recall._entry_names()` (an empty mapping nothing can
+    write). Gate: `tests/test_context_var_defaults_immutable.py` (every
+    `ContextVar(` in the product packages and `scripts/`; the old declaration
+    and the old default's leak as negative controls).
+  - **The backup folder's Test** (pythonsecurity:S2083 x4): the folder the
+    admin types is written to by design; reading its rules found device
+    paths taken for folders, a second name of the data folder taken for
+    another place and a save that kept a path with an unnamed refusal code,
+    all fixed (section 21 F, `tests/test_backup_folder_path_rules.py`).
+  - **A return value no caller reads is dropped**: `self_improvement._update_soul`
+    answers nothing (python:S3516; its three callers count in their own
+    *change*). `setup-engine.sh` uses `[[ ]]` throughout: setup runs it only
+    as `bash -s` (shell:S7688).
+  - Judged safe, for the owner to mark: WinZip AES's fixed algorithms in
+    `security/sealed_zip.py` (S4790, S5344, S5542), the operator's own
+    command-line arguments in `kazma migrate` and `scripts/` (S8705, S8707),
+    and two S3516 whose one returned object is built or edited before it is
+    returned (`research_pipeline._candidate_report_roots`, an
+    `atomic_update` updater in `space_data._erase_settings`).
 
 ### 70. Spaces: the foundation (`kazma_core/spaces/`, 2026-11-17)
 
