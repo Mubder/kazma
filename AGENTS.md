@@ -3157,11 +3157,27 @@ an answer ("User prefers dark mode").
   whoever wrote it. Measured on the retrieval benchmark with the mirror as
   primary and the local vector index on the same vectors (the
   Postgres-primary keyword path, not pgvector): hit rate and MRR equal to
-  local, precision 0.0166 lower (`PRIMARY_DELTA`). The pgvector path is the
-  other measurement (§15G, "pgvector in CI"). Gate:
+  local, precision 0.0003 lower (2026-11-21, dataset v7; `PRIMARY_DELTA`).
+  The pgvector path is the other measurement (§15G, "pgvector in CI"). Gate:
   `tests/test_memory_pg_primary.py` (real Postgres: a forget with the mirror
   write failing, left out of recall, repaired by one pass; each with its
   negative control). The mirror tables are in `KAZMA_PG_TABLES` (§21A).
+- **The primary path takes the local path's question-shape steps**
+  (2026-11-21; CI's Postgres job was red from part F on, MRR 0.6889 against
+  local 0.7133). After ranking, `_primary_episodes_as_local` and
+  `_primary_beliefs_as_local` apply what `_recall_episodes` and
+  `_recall_beliefs` do: the chat's own turns left out, the question's time
+  (a period's turns and facts, or only them), the same text once, a list's
+  compact lines and siblings, follow-ups joined to their turn. Candidates:
+  a period's matches and turns from the mirror (`_primary_period_rows`;
+  `search_state_episodes(between=)`, `state_episodes_between`) and a fact's
+  earlier values from this install's database (`_primary_belief_rows`: the
+  mirror keeps no chain of replaced values; a shared space's choice of whose
+  facts too). A new step after ranking on the local path is added to both.
+  Gates: the Postgres benchmark (without the steps as the negative control:
+  CI's numbers) and, with no Postgres, `tests/test_memory_primary_parity.py`
+  (a stand-in mirror over the same rows: every time, list, follow-up and
+  roll-up question injects what local recall injects).
 - **The top-up reads only other installs' rows.** Mirror writes carry the
   writer's install id (`metadata.install`, `<data dir>/install_id`);
   `written_elsewhere` admits a remote-only row only when another install

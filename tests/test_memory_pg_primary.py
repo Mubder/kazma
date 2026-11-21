@@ -280,7 +280,26 @@ def test_a_fact_holding_every_word_beats_more_important_ones_holding_one(pg):
 #: on the same evidence (``recall._rank_by_evidence``) but its candidates are
 #: the mirror's keyword matches and the vector index's nearest memories -- no
 #: local full-text index and no graph walk for facts -- so it is close, not equal.
+#: Measured again on 2026-11-21 (dataset v7, after the primary path took the
+#: local path's part F steps): hit rate and MRR equal, precision 0.0003 lower
+#: (one question, q403: the mirror's keyword search finds "work" in "working
+#: tree clean", which FTS5 does not).
 PRIMARY_DELTA = {"hit_rate": 0.01, "mrr": 0.01, "precision": 0.02}
+
+
+def _without_the_local_steps(monkeypatch) -> None:
+    """The primary path as it was from part F (2026-11-21) to the fix: none of
+    the local path's question-shape steps -- a period's own turns, a fact's
+    earlier values, the question's time, the same text once, a list's
+    siblings, follow-ups joined to their turn."""
+    from kazma_core.memory import recall as recall_mod
+
+    monkeypatch.setattr(recall_mod, "_primary_period_rows", lambda query, tenant_id, limit: [])
+    monkeypatch.setattr(recall_mod, "_primary_belief_rows", lambda rows, local, tenant_id: rows)
+    monkeypatch.setattr(recall_mod, "_primary_episodes_as_local",
+                        lambda ranked, rows, local, tenant_id, limit: ranked[:limit])
+    monkeypatch.setattr(recall_mod, "_primary_beliefs_as_local",
+                        lambda ranked, rows, local, tenant_id, limit: ranked)
 
 
 def _bench(conn, refs, covers, dataset) -> dict:
@@ -303,8 +322,11 @@ def test_the_benchmark_with_postgres_primary_is_within_the_stated_delta(tmp_path
     sync pass, asked twice: locally and with Postgres as the primary (the
     vector index answering with the same recorded vectors). Measured
     2026-10-13: hit rate 0.9253 and MRR 0.8444 both ways, precision 0.6443
-    local and 0.6277 primary. Negative control: the primary run with its
-    vector index down drops below the delta."""
+    local and 0.6277 primary. 2026-11-21 (dataset v7): local 0.8588 / 0.7133
+    / 0.5493, primary 0.8588 / 0.7133 / 0.5490. Negative controls: the
+    primary run with its vector index down drops below the delta, and so
+    does the primary path without the local path's part F steps (CI's
+    Postgres job from part F to the fix: MRR 0.6889, precision 0.5208)."""
     np = pytest.importorskip("numpy")  # noqa: F841 - the replayed vectors need it
     from pathlib import Path
 
@@ -346,6 +368,14 @@ def test_the_benchmark_with_postgres_primary_is_within_the_stated_delta(tmp_path
         # channel scores the same as the new one on this dataset: the index
         # finds what the slice dropped. The slice is held by
         # test_an_older_memory_holding_every_word_beats_newer_ones_holding_one.)
+        # Negative control: the primary path without the local path's part F
+        # steps (what CI's Postgres job measured from part F to the fix).
+        with monkeypatch.context() as mp:
+            _without_the_local_steps(mp)
+            unlike = _bench(conn, refs, covers, data)
+        print("no part F steps", unlike["overall"])
+        assert any(unlike["overall"][k] < local["overall"][k] - d for k, d in PRIMARY_DELTA.items()), unlike
+
         monkeypatch.setattr("kazma_core.memory.backends.get_vector_backend", lambda conn_=None, **_k: None)
         degraded = _bench(conn, refs, covers, data)
         print("no index", degraded["overall"])

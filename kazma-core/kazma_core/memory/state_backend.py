@@ -124,7 +124,13 @@ class _NullStateBackend:
         return {}
 
     def search_episodes(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
+        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False,
+        between: tuple[float, float] | None = None,
+    ) -> list[dict[str, Any]]:
+        return []
+
+    def episodes_between(
+        self, start: float, end: float, *, tenant_id: str = "default", limit: int = 50
     ) -> list[dict[str, Any]]:
         return []
 
@@ -565,10 +571,14 @@ class PostgresStateBackend:
             conn.close()
 
     def search_episodes(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
+        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False,
+        between: tuple[float, float] | None = None,
     ) -> list[dict[str, Any]]:
         """Keyword search over mirrored episode text (multi-replica read).
         *strict*: a failure raises, never [] (recall's primary path).
+        *between*: only turns said in that window, ``(start, end)`` epoch
+        seconds (a question about a period, part F: recall's local search
+        does the same).
 
         The question's content words only (``memory/query_terms.py``): ORing
         every token as a substring matched "is" and "my" everywhere, so this
@@ -606,6 +616,10 @@ class PostgresStateBackend:
                 params: list[Any] = [f"%{t}%" for t in terms]
                 params.append(tenant_id)
                 params.extend(RECALLABLE_TIERS)
+                period = ""
+                if between is not None:
+                    period = "AND created_at >= %s AND created_at < %s"
+                    params.extend([float(between[0]), float(between[1])])
                 for t in terms:
                     pat = f"%{t}%"
                     params.extend([pat, pat, pat])
@@ -616,7 +630,7 @@ class PostgresStateBackend:
                            tier, structural_importance, created_at, metadata_json,
                            ({score}) AS words_held
                     FROM kazma_episodes
-                    WHERE tenant_id = %s AND tier IN ({tiers}) AND ({clauses})
+                    WHERE tenant_id = %s AND tier IN ({tiers}) {period} AND ({clauses})
                     ORDER BY words_held DESC, created_at DESC
                     LIMIT %s
                     """,
@@ -640,6 +654,41 @@ class PostgresStateBackend:
                 raise
             logger.debug("[state_backend] postgres episode search failed", exc_info=True)
             return []
+
+    def episodes_between(
+        self, start: float, end: float, *, tenant_id: str = "default", limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """The tenant's recallable turns said in ``[start, end)``, newest first,
+        at most *limit*: a question about a period is answered by its turns
+        whatever words they hold (part F; recall's local ``_period_turns``).
+        A failure raises: its one reader is recall's primary path, where the
+        mirror is memory and a failed read is a failed recall."""
+        if not self._dsn:
+            return []
+        from kazma_core.memory.vector_engine import RECALLABLE_TIERS
+
+        conn = self._connect()
+        try:
+            self._ensure(conn)
+            cur = conn.cursor()
+            tiers = ",".join("%s" for _ in RECALLABLE_TIERS)
+            cur.execute(
+                f"""
+                SELECT id, session_id, turn_number, user_text, assistant_text, summary_text,
+                       tier, structural_importance, created_at, metadata_json
+                FROM kazma_episodes
+                WHERE tenant_id = %s AND tier IN ({tiers}) AND created_at >= %s AND created_at < %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                [tenant_id, *RECALLABLE_TIERS, float(start), float(end), max(1, min(int(limit), 200))],
+            )
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        finally:
+            conn.close()
 
     def search_beliefs(
         self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
@@ -1836,22 +1885,38 @@ def backfill_state_mirror(*, tenant_id: str = "default") -> dict[str, Any]:
 
 
 def search_state_episodes(
-    query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
+    query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False,
+    between: tuple[float, float] | None = None,
 ) -> list[dict[str, Any]]:
     """The mirror's keyword matches. *strict*: a search that fails raises
     (recall on the Postgres-primary path, where the mirror IS memory: a
     failure read as "no matches" told the user nothing was remembered --
-    part F, framework audit F9); else [] (a top-up that may be skipped)."""
+    part F, framework audit F9); else [] (a top-up that may be skipped).
+    *between*: only turns said in that window (passed only when given, so a
+    backend from before it still answers the plain search)."""
+    period = {} if between is None else {"between": between}
     try:
         return list(
             get_state_backend().search_episodes(
-                query, tenant_id=tenant_id, limit=limit, strict=strict
+                query, tenant_id=tenant_id, limit=limit, strict=strict, **period
             )
         )
     except Exception:
         if strict:
             raise
         return []
+
+
+def state_episodes_between(
+    start: float, end: float, *, tenant_id: str = "default", limit: int = 50
+) -> list[dict[str, Any]]:
+    """The mirror's turns said in ``[start, end)``, newest first (a backend
+    without the read answers none). A failure raises (recall's primary path:
+    a failed read is a failed recall)."""
+    read = getattr(get_state_backend(), "episodes_between", None)
+    if not callable(read):
+        return []
+    return list(read(start, end, tenant_id=tenant_id, limit=limit))
 
 
 def search_state_beliefs(

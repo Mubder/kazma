@@ -808,6 +808,7 @@ def _recall_postgres_primary(
             pass
         return _failed_recall("primary_unavailable")
 
+    local = _local_reader()
     try:
         episodes = _pg_primary_episodes(
             query,
@@ -815,6 +816,7 @@ def _recall_postgres_primary(
             limit=limit,
             state_backend=be,
             explain=do_explain,
+            local=local,
         )
         beliefs = _pg_primary_beliefs(
             query,
@@ -822,6 +824,7 @@ def _recall_postgres_primary(
             limit=limit,
             state_backend=be,
             explain=do_explain,
+            local=local,
         )
         for hit in beliefs:
             hit.source = hit.source or "postgres_primary"
@@ -842,6 +845,28 @@ def _recall_postgres_primary(
         except Exception:
             pass
         return _failed_recall("primary_search_failed")
+    finally:
+        if local is not None:
+            local.close()
+
+
+def _local_reader() -> sqlite3.Connection | None:
+    """This install's memory database, read-only use, for the Postgres-primary
+    path's steps that read it (what the user took back, a fact's earlier
+    values, a recalled turn's follow-ups, the chat's own turns): the local
+    database is the truth for this install's memories. None when there is
+    none yet, or it cannot be opened (a WARNING: those steps are skipped)."""
+    from kazma_core.paths import primary_memory_db
+
+    try:
+        conn = _connect_existing(primary_memory_db())
+    except sqlite3.Error:
+        logger.warning("[recall] the local memory database could not be opened for the primary path",
+                       exc_info=True)
+        return None
+    if conn is not None:
+        conn.row_factory = sqlite3.Row
+    return conn
 
 
 def _available_vector_backend() -> Any | None:
@@ -949,13 +974,16 @@ def _pg_primary_episodes(
     limit: int,
     state_backend: Any,
     explain: bool,
+    local: sqlite3.Connection | None = None,
 ) -> list[RecallHit]:
     """Postgres-primary episode recall, ranked on evidence like the local path.
 
     Candidates: the vector index's nearest memories and the mirror's
-    content-word matches. A candidate only its words found is scored by
-    meaning through the index (``similarities``); an index that cannot say
-    leaves it to its words alone.
+    content-word matches, and for a question about a period the mirror's
+    matches and turns of that period (part F, as locally). A candidate only
+    its words found is scored by meaning through the index
+    (``similarities``); an index that cannot say leaves it to its words
+    alone. Then the local path's steps (:func:`_primary_episodes_as_local`).
     """
     from kazma_core.memory.state_backend import search_state_episodes
 
@@ -981,12 +1009,16 @@ def _pg_primary_episodes(
                                      limit=limit * 3, strict=True):
         if row.get("id"):
             rows[str(row["id"])] = row
+    for row in _primary_period_rows(query, tenant_id, limit):
+        rows.setdefault(str(row["id"]), row)
     fetch = getattr(state_backend, "fetch_episodes", None)
     need = [eid for eid in sims if eid not in rows]
     if need and callable(fetch):
-        for row in fetch(need, tenant_id=tenant_id) or []:
-            if row.get("id"):
-                rows[str(row["id"])] = row
+        # The mirror answers 50 ids a call.
+        for start in range(0, len(need), 50):
+            for row in fetch(need[start:start + 50], tenant_id=tenant_id) or []:
+                if row.get("id"):
+                    rows[str(row["id"])] = row
     # What this install forgot stays forgotten, whatever the shared store
     # still holds (a tombstone a blip kept from it, another replica's copy).
     gone = _locally_forgotten(rows, tenant_id=tenant_id)
@@ -1038,7 +1070,49 @@ def _pg_primary_episodes(
         if explain:
             hit.metadata["sources"] = [hit.source, "postgres_primary"]
     ranked.sort(key=lambda h: h.score, reverse=True)
-    return ranked[:limit]
+    return _primary_episodes_as_local(ranked, rows, local, tenant_id, limit)
+
+
+def _primary_period_rows(query: str, tenant_id: str, limit: int) -> list[dict[str, Any]]:
+    """For a question about a period: the mirror's keyword matches said in
+    it and its turns, newest first, as the local path reads them (part F;
+    ``_recall_episodes``): a common word can fill every slot with turns of
+    other months, and a period's turn may hold no word of the question.
+    Strict: a failed read is a failed recall."""
+    from kazma_core.memory.state_backend import search_state_episodes, state_episodes_between
+
+    ask = _ASK.get()
+    if ask is None or not ask.period:
+        return []
+    window = (ask.start - _PERIOD_MARGIN_S, ask.end + _PERIOD_MARGIN_S)
+    rows = (search_state_episodes(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 3,
+                                  strict=True, between=window)
+            + state_episodes_between(*window, tenant_id=tenant_id, limit=_PERIOD_TURNS))
+    return [r for r in rows if r.get("id")]
+
+
+def _primary_episodes_as_local(ranked: list[RecallHit], rows: dict[str, dict[str, Any]],
+                               local: sqlite3.Connection | None, tenant_id: str, limit: int) -> list[RecallHit]:
+    """The local path's steps after ranking (``_recall_episodes``), on the
+    Postgres-primary path's ranked turns: the chat's own turns the model
+    reads left out, the question's time (a period's turns, or only them),
+    the same text once, a list's shorter lines, and each turn's follow-ups
+    joined to its line. Without them the primary path answered "what did I
+    tell you last week" with turns of other months, and showed a turn and
+    its follow-ups as separate memories (CI's Postgres job, from part F on).
+    The steps that read this install's rows need *local*; a turn only the
+    mirror holds (another install's) is kept as found."""
+    if local is not None:
+        ranked = _not_in_context(local, ranked, tenant_id)
+    ranked = _turns_in_time(ranked, _ASK.get())
+    listing = _LISTING.get()
+    if listing:
+        for hit in ranked:
+            row = rows.get(hit.id) or {}
+            hit.metadata.update(_shown(row.get("user_text"), row.get("assistant_text"),
+                                       row.get("summary_text"), compact=True))
+    hits = _dedup_gate(ranked)[:limit]
+    return _with_neighbours(local, hits, tenant_id, compact=listing) if local is not None else hits
 
 
 def _state_belief_hit(
@@ -1078,8 +1152,13 @@ def _pg_primary_beliefs(
     limit: int,
     state_backend: Any,
     explain: bool,
+    local: sqlite3.Connection | None = None,
 ) -> list[RecallHit]:
-    """Postgres-primary belief recall, ranked on evidence like the local path."""
+    """Postgres-primary belief recall, ranked on evidence like the local path,
+    with its steps: a fact's earlier values for a question about a period or
+    about before (read from this install's database: the mirror keeps no
+    chain of replaced values), a shared space's choice of whose facts, the
+    question's time, and a list's siblings (part F, Spaces S1-11)."""
     from kazma_core.memory.state_backend import search_state_beliefs
 
     qvec = _encode_query(query)
@@ -1105,9 +1184,11 @@ def _pg_primary_beliefs(
     fetch = getattr(state_backend, "fetch_beliefs", None)
     need = [bid for bid in sims if bid not in rows]
     if need and callable(fetch):
-        for row in fetch(need, tenant_id=tenant_id) or []:
-            if row.get("id"):
-                rows[str(row["id"])] = row
+        for start in range(0, len(need), 50):
+            for row in fetch(need[start:start + 50], tenant_id=tenant_id) or []:
+                if row.get("id"):
+                    rows[str(row["id"])] = row
+    rows = _primary_belief_rows(rows, local, tenant_id)
     lookup = getattr(backend, "similarities", None)
     unscored = [bid for bid in rows if bid not in sims]
     if unscored and qvec and callable(lookup):
@@ -1115,6 +1196,11 @@ def _pg_primary_beliefs(
             sims.update(lookup(qvec, unscored, tenant_id=tenant_id, kind="belief") or {})
         except Exception:
             logger.debug("[recall] vector index belief similarity failed", exc_info=True)
+    still = [bid for bid in rows if bid not in sims]
+    if still and qvec and local is not None:
+        # An earlier value the index does not hold (it keeps current facts):
+        # its stored vector here, as the local path reads it.
+        sims.update(_similarities(local, still, qvec, kind="belief"))
     by_meaning = {str(bid) for bid, _sim in dense_pairs}
     candidates = [
         _belief_candidate(bid, rows[bid], sims.get(bid), bid in by_meaning)
@@ -1124,12 +1210,40 @@ def _pg_primary_beliefs(
     ranked = _rank_by_evidence(
         query, candidates, _question_background(sim for _b, sim in dense_pairs), kind="belief"
     )
+    ranked = _primary_beliefs_as_local(ranked, rows, local, tenant_id, limit)
     sources = {
         bid: (["dense", "pgvector"] if bid in by_meaning else ["postgres_state"]) for bid in rows
     }
     hits = _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
     _add_local_methods(hits, tenant_id=tenant_id)
     return hits
+
+
+def _primary_belief_rows(rows: dict[str, Any], local: sqlite3.Connection | None,
+                         tenant_id: str) -> dict[str, Any]:
+    """The facts' candidates as the local path takes them
+    (``_recall_beliefs``): for a question about a period or about before,
+    the values the found facts replaced (read from this install's database:
+    the mirror keeps no chain of replaced values); in a shared space, only
+    the facts of whom the question is about (Spaces S1-11)."""
+    ask = _ASK.get()
+    if local is not None and ask is not None and (ask.period or ask.history):
+        rows = {**rows, **_belief_history(local, tenant_id, list(rows))}
+    keep = _BELIEF_KEEP.get()
+    if keep is not None:
+        rows = {bid: r for bid, r in rows.items() if keep(str(_field(r, "subject") or ""))}
+    return rows
+
+
+def _primary_beliefs_as_local(ranked: list[RecallHit], rows: dict[str, Any],
+                              local: sqlite3.Connection | None, tenant_id: str, limit: int) -> list[RecallHit]:
+    """The local path's steps after ranking facts (``_recall_beliefs``): the
+    question's time ("where was I living in June": June's value, not
+    today's) and a list's siblings (read from this install's database)."""
+    ranked = _facts_in_time(ranked, rows, _ASK.get())
+    if _LISTING.get() and local is not None:
+        ranked = _with_list_siblings(local, tenant_id, ranked, rows, limit)
+    return ranked
 
 
 def _add_local_methods(hits: list[RecallHit], *, tenant_id: str) -> None:
