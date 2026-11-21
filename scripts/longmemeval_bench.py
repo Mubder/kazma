@@ -401,6 +401,10 @@ def summarise(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "every_answer_session": round(sum(r["every_answer_session"] for r in answerable) / len(answerable), 4),
                 "precision": round(statistics.fmean(precisions), 4) if precisions else 0.0,
             })
+            for key in ("plain_bge_evidence", "plain_bge_every_session", "plain_bm25_evidence",
+                        "plain_bm25_every_session"):
+                if all(key in r for r in answerable):
+                    out[key] = round(sum(r[key] for r in answerable) / len(answerable), 4)
             worded = [r for r in answerable if r.get("answer_in_block") is not None]
             if worded:
                 # The free proxies: of the questions whose answer is a word or
@@ -427,6 +431,86 @@ def summarise(results: list[dict[str, Any]]) -> dict[str, Any]:
                     "latency_p95_ms": lat[min(len(lat) - 1, int(len(lat) * 0.95))] if lat else 0.0},
         "types": {t: part([r for r in results if r["type"] == t]) for t in types},
     }
+
+
+# ── The plain retrieval baselines ──────────────────────────────────────────
+#
+# What Kazma's recall is measured against (the memory plan's W0): the rounds
+# nearest the question by bge-m3 alone (cosine of the same vectors Kazma
+# stores, no background, no word coverage, no gap) and by BM25 over each
+# round's words, PLAIN_K of each, read whole like any recalled round.
+
+PLAIN_K = 10
+#: BM25's usual constants (Robertson and Zaragoza).
+BM25_K1, BM25_B = 1.5, 0.75
+
+
+def _round_words(entry: dict[str, Any]) -> list[str]:
+    row = entry["row"]
+    return re.findall(r"\w+", f"{row['user_text']} {row['assistant_text']}".casefold())
+
+
+def plain_top(question: str, rows: list[dict[str, Any]], how: str, *, embedder: Any = None,
+              k: int = PLAIN_K) -> list[dict[str, Any]]:
+    """The *k* rounds of *rows* nearest *question*: ``how`` is ``bge`` (the
+    cosine of the stored vectors' texts, by *embedder*) or ``bm25``; best
+    first, ties by the history's order."""
+    import math
+
+    if how == "bge":
+        import numpy as np
+
+        def unit(vec: Any) -> Any:
+            v = np.asarray(vec, dtype=np.float32)
+            return v / (np.linalg.norm(v) or 1.0)
+
+        q = unit(embedder.encode(question))
+        scored = [(float(unit(embedder.encode(e["row"]["embed_text"])) @ q), i)
+                  for i, e in enumerate(rows) if e["row"]["embed_text"]]
+    elif how == "bm25":
+        docs = [_round_words(e) for e in rows]
+        n = len(docs) or 1
+        avg = sum(len(d) for d in docs) / n
+        df: dict[str, int] = {}
+        for d in docs:
+            for w in set(d):
+                df[w] = df.get(w, 0) + 1
+        terms = set(re.findall(r"\w+", question.casefold()))
+        scored = []
+        for i, d in enumerate(docs):
+            tf: dict[str, int] = {}
+            for w in d:
+                if w in terms:
+                    tf[w] = tf.get(w, 0) + 1
+            s = sum(math.log(1 + (n - df[w] + 0.5) / (df[w] + 0.5))
+                    * f * (BM25_K1 + 1) / (f + BM25_K1 * (1 - BM25_B + BM25_B * len(d) / (avg or 1)))
+                    for w, f in tf.items())
+            scored.append((s, i))
+    else:
+        raise ValueError(f"unknown baseline {how!r}")
+    best = sorted(scored, key=lambda pair: (-pair[0], pair[1]))[:k]
+    return [rows[i] for _s, i in best]
+
+
+def read_whole(entries: list[dict[str, Any]]) -> str:
+    """Rounds as a reader reads them whole: dated, oldest first."""
+    shown = sorted((e["row"] for e in entries), key=lambda r: r["created_at"])
+    return "\n\n".join(
+        f"[{datetime.fromtimestamp(r['created_at'], UTC):%Y/%m/%d %H:%M}]\nUser: {r['user_text']}\n"
+        f"Assistant: {r['assistant_text']}" for r in shown)
+
+
+def plain_scores(item: dict[str, Any], rows: list[dict[str, Any]], embedder: Any) -> dict[str, Any]:
+    """Each baseline's retrieval measures for *item*: the evidence round among
+    its rounds, and every answer session among them."""
+    answer_sessions = {str(s) for s in item.get("answer_session_ids") or []}
+    out: dict[str, Any] = {}
+    for how in ("bge", "bm25"):
+        top = plain_top(str(item["question"]), rows, how, embedder=embedder)
+        sessions = {e["session"] for e in top}
+        out[f"plain_{how}_evidence"] = any(e["evidence"] for e in top)
+        out[f"plain_{how}_every_session"] = bool(answer_sessions) and answer_sessions <= sessions
+    return out
 
 
 # ── End to end: one reader, three histories, LongMemEval's judge ────────────
@@ -471,7 +555,7 @@ JUDGE = {
 #: Kazma's recall block as the model sees it; the same recalled rounds
 #: read whole (what the model gets when it opens them with ``memory_read``,
 #: which a one-shot reader cannot call); the whole history; the oracle.
-CONDITIONS = ("kazma", "kazma_whole", "full", "oracle")
+CONDITIONS = ("kazma", "kazma_whole", "full", "oracle", "bge_top10", "bm25_top10")
 #: The whole history, uncut (None), or cut from its oldest session to this
 #: many characters. Uncut since 22 Nov: the longest of the 500 histories
 #: (540,508 characters, 115,818 tokens) was served whole by deepseek-flash
@@ -535,10 +619,7 @@ def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str
             result = recall(str(item["question"]), conn=conn, tenant_id=TENANT, limit=LIMIT,
                             local_only=True, now=parse_date(item["question_date"]))
             block = format_recall_block(result, explain=False) if not result.empty else ""
-        shown = sorted((back[h.id]["row"] for h in result.episodes if h.id in back), key=lambda r: r["created_at"])
-        whole = "\n\n".join(
-            f"[{datetime.fromtimestamp(r['created_at'], UTC):%Y/%m/%d %H:%M}]\nUser: {r['user_text']}\n"
-            f"Assistant: {r['assistant_text']}" for r in shown)
+        whole = read_whole([back[h.id] for h in result.episodes if h.id in back])
     finally:
         conn.close()
         for suffix in ("", "-wal", "-shm"):
@@ -608,10 +689,13 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
             mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0):
         for item in items:
             qid = str(item["question_id"])
-            block, whole, shown = kazma_history(item, history_rows(item))
+            rows = history_rows(item)
+            block, whole, shown = kazma_history(item, rows)
             full, dropped = history_string(item, max_chars=FULL_MAX_CHARS)
             oracle, _ = history_string(item, only={str(s) for s in item.get("answer_session_ids") or []})
-            histories[qid] = {"kazma": block, "kazma_whole": whole, "full": full, "oracle": oracle,
+            plain = {f"{how}_top10": read_whole(plain_top(str(item["question"]), rows, how, embedder=embedder))
+                     or "(no memories)" for how in ("bge", "bm25")}
+            histories[qid] = {"kazma": block, "kazma_whole": whole, "full": full, "oracle": oracle, **plain,
                               "dropped": dropped, **shown}
     chat = Chat(model=model, base_url=base_url, key=key)
 
@@ -974,7 +1058,8 @@ def _cmd_retrieve(data: Path, limit: int | None, split: str = "sample", look: st
     with mock.patch("kazma_core.memory.embedder.get_embedder", lambda: cached), \
             mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0):
         for n, item in enumerate(items, 1):
-            results.append(ask(item, histories[str(item["question_id"])]))
+            rows = histories[str(item["question_id"])]
+            results.append({**ask(item, rows), **plain_scores(item, rows, cached)})
             if n % 10 == 0:
                 print(f"  asked {n} of {len(items)}", flush=True)
     summary = summarise(results)

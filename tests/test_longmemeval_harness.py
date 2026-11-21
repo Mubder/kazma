@@ -146,6 +146,35 @@ def test_the_free_proxies_tell_a_cut_answer_from_a_shown_one(lme, monkeypatch, t
         {**short, "answer": "3"}, lme.history_rows(short))["answer_in_block"] is None
 
 
+class _WordVectors:
+    """A stand-in embedder: one dimension a word of a small vocabulary."""
+
+    VOCAB = ("degree", "graduated", "business", "egg", "boil", "film", "space", "capital", "peru")
+
+    def encode(self, text: str) -> list[float]:
+        words = text.casefold().replace("?", " ").replace(".", " ").split()
+        return [float(sum(w.startswith(v) for w in words)) + 1e-6 for v in self.VOCAB]
+
+
+def test_the_plain_baselines_rank_the_rounds_without_kazmas_ranking(lme):
+    """The plan's W0 baselines: bge-m3's nearest rounds by plain cosine, and
+    BM25's, each read whole, oldest first."""
+    item = _item("q5", "single-session-user", "Which degree did I graduate with?",
+                 "I graduated with a degree in Business Administration last year.",
+                 ["How do I boil an egg?", "Recommend a film about space.", "What is the capital of Peru?"])
+    rows = lme.history_rows(item)
+    for how in ("bm25", "bge"):
+        top = lme.plain_top(item["question"], rows, how, embedder=_WordVectors(), k=1)
+        assert top[0]["evidence"], how
+    # Control: a question sharing no word with the evidence round does not
+    # find it first.
+    assert not lme.plain_top("Where is the capital of Peru?", rows, "bm25", k=1)[0]["evidence"]
+    scores = lme.plain_scores(item, rows, _WordVectors())
+    assert scores["plain_bm25_evidence"] and scores["plain_bge_every_session"]
+    whole = lme.read_whole(list(reversed(rows[:2])))
+    assert whole.index("Business Administration") < whole.index("boil an egg")
+
+
 def test_control_without_the_evidence_round_it_is_not_found(lme, monkeypatch, tmp_path):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)

@@ -2301,7 +2301,9 @@ four injected were noise.
   `tests/fixtures/longmemeval/split.json`), `retrieve` (with the free
   proxies, no model: every answer session shown, and an answer that is a
   word or a phrase found in the rounds shown, `answer_in_shown`, and in the
-  block itself, `answer_in_block`)
+  block itself, `answer_in_block`; and the plain retrieval baselines,
+  `plain_top`: bge-m3's 10 nearest rounds by plain cosine and BM25's 10,
+  each also a reader condition, read whole)
   (each history written as the product writes a turn, one memory per round,
   dated; the real `recall()`; no model call), `answer` (one reader, four
   histories: Kazma's recall block, the same rounds read whole, the whole
