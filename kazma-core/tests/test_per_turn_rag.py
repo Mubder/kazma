@@ -155,7 +155,7 @@ async def test_retrieval_injects_at_iteration_0(monkeypatch):
 
     captured_queries: list[str] = []
 
-    def _fake_recall(query, limit=5, session_id=None, tenant_id=None, explain=False, asker=None):
+    def _fake_recall(query, limit=5, session_id=None, tenant_id=None, explain=False, asker=None, in_context=None):
         captured_queries.append(query)
         return _FakeRecallResult()
 

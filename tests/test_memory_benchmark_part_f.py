@@ -107,3 +107,49 @@ def test_without_joining_stored_follow_ups_their_questions_lose_answers(answered
     control = _without(lambda mp: mp.setattr(
         "kazma_core.memory.recall._with_neighbours", lambda _conn, hits, *_a, **_k: hits))
     assert _lost(answered, control, "follow_up"), (answered.get("follow_up"), control.get("follow_up"))
+
+
+# ── v6 only added: a sealed set or a study written for v5 still holds ────
+
+
+def test_the_dataset_holds_the_memories_of_the_version_it_names():
+    data = benchmark.load_dataset()
+    held = data["ids_hold_since"]
+    assert benchmark.memory_fingerprint(data, as_of=held["version"]) == held["sha256"]
+
+
+def test_a_changed_memory_of_that_version_breaks_the_claim():
+    """Negative control: one v5 turn reworded."""
+    data = benchmark.load_dataset()
+    session = next(s for s in data["sessions"] if not s.get("new_in"))
+    session["turns"][0]["user"] += " (reworded)"
+    held = data["ids_hold_since"]
+    assert benchmark.memory_fingerprint(data, as_of=held["version"]) != held["sha256"]
+
+
+def test_v5_as_of_v6_is_v5_and_the_new_parts_are_v6s():
+    data = benchmark.load_dataset()
+    v5 = benchmark.dataset_as_of(data, 5)
+    assert v5["version"] == 5 and not {q["category"] for q in v5["questions"] + v5["second"]} & set(CATEGORIES)
+    assert len(v5["sessions"]) < len(data["sessions"]) and len(v5["questions"]) < len(data["questions"])
+    assert benchmark.memory_fingerprint(v5) == data["ids_hold_since"]["sha256"]
+
+
+def _sealed_for(version: int) -> dict:
+    return {"version": 1, "dataset_version": version, "written_by": "test", "written_on": "2026-11-21",
+            "questions": []}
+
+
+def test_a_sealed_set_written_for_v5_is_not_refused_for_its_version():
+    data = benchmark.load_dataset()
+    problems = benchmark.sealed_problems(_sealed_for(5), data)
+    assert not [p for p in problems if p.startswith("written for dataset")], problems
+
+
+def test_without_the_claim_a_v5_sealed_set_is_refused():
+    """Negative control: the dataset without ``ids_hold_since``."""
+    data = {k: v for k, v in benchmark.load_dataset().items() if k != "ids_hold_since"}
+    problems = benchmark.sealed_problems(_sealed_for(5), data)
+    assert any(p.startswith("written for dataset v5") for p in problems), problems
+    assert any(p.startswith("written for dataset v4") for p in benchmark.sealed_problems(
+        _sealed_for(4), benchmark.load_dataset())), "v4 was never claimed"

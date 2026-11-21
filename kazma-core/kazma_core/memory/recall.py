@@ -1362,9 +1362,9 @@ def search_with_status(
     query: str,
     limit: int = 5,
     *,
+    tenant_id: str,
     session_id: str | None = None,
     kind: str | None = None,
-    tenant_id: str = "default",
 ) -> tuple[list[dict[str, Any]], str | None]:
     """:func:`search`'s hits and what kept the search from being whole
     (``RecallResult.degraded``; None when it was). For a surface that shows
@@ -1849,7 +1849,7 @@ def _recall_episodes(
     sparse, dense = _own_episodes(conn, tenant_id, sparse), _own_episodes(conn, tenant_id, dense)
 
     # ── Evidence, not ranks: what is about the question, best first ──
-    ranked = _rank_episodes_by_evidence(conn, q, sparse, dense, tenant_id)
+    ranked = _rank_episodes_by_evidence(conn, q, sparse, dense)
     # The chat's own turns the model reads in the conversation are not shown
     # again (part F), and the question's time decides what comes first.
     fused = _turns_in_time(_not_in_context(conn, ranked, tenant_id), ask)[: limit * 2]
@@ -2351,7 +2351,6 @@ def _rank_episodes_by_evidence(
     query: str,
     sparse: list[RecallHit],
     dense: list[RecallHit],
-    tenant_id: str = "default",
 ) -> list[RecallHit]:
     """Local episodes that are about the question, best first; [] when none is."""
     ids = list(dict.fromkeys([h.id for h in dense] + [h.id for h in sparse]))
@@ -3496,13 +3495,14 @@ def recall_incomplete_note(result: RecallResult) -> str:
     so a recall that could not search by meaning, or could not search at
     all, looked like "nothing remembered". Empty when recall was whole. Put
     OUTSIDE any fence by the caller (a registered turn note)."""
-    if not result.degraded:
+    degraded = getattr(result, "degraded", None)  # a result that says nothing was whole
+    if not degraded:
         return ""
-    what = ("could not search at all" if result.failed
+    what = ("could not search at all" if getattr(result, "failed", False)
             else "could not search by meaning (keyword matches only)")
     return (
         "## Memory search was incomplete\n"
-        f"- This turn's memory search {what} ({result.degraded}). An empty or short memory block "
+        f"- This turn's memory search {what} ({degraded}). An empty or short memory block "
         "does NOT mean nothing is remembered.\n"
         "- If the answer depends on the past, say the memory search was incomplete, and try "
         "memory_search again; never tell the user you have no memory of it.\n"

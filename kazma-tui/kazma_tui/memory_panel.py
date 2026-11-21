@@ -367,8 +367,11 @@ class MemoryTab(VerticalScroll):
             return
         try:
             from kazma_core.memory.recall import search_with_status
+            from kazma_core.spaces.scope import require_space_id
 
-            hits, degraded = search_with_status(q, limit=20)
+            # The machine's own search: the space bound, the owner's when
+            # nothing is (Spaces S1-20).
+            hits, degraded = search_with_status(q, limit=20, tenant_id=require_space_id())
         except Exception as exc:
             logger.debug("graph search failed: %s", exc)
             try:

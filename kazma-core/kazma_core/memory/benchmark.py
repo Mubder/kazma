@@ -626,6 +626,20 @@ def memory_fingerprint(dataset: dict[str, Any], *, as_of: int | None = None) -> 
     return _sha256(json.dumps(rows, ensure_ascii=False, sort_keys=True))
 
 
+def dataset_as_of(dataset: dict[str, Any], version: int) -> dict[str, Any]:
+    """*dataset* as version *version* held it: every session, fact,
+    summary and question added after it (``new_in``) left out. Dataset v6
+    only added (``ids_hold_since``), so ``dataset_as_of(load_dataset(), 5)``
+    is v5's memories and questions: what a study measured on v5 replays on
+    (``docs/audits/evidence/spaces_r3/study.py``)."""
+    def kept(item: dict[str, Any]) -> bool:
+        return int(item.get("new_in") or 0) <= version
+
+    return {**dataset, "version": version,
+            **{part: [x for x in dataset.get(part) or [] if kept(x)]
+               for part in ("sessions", "facts", "summaries", "questions", "second")}}
+
+
 def _sealed_versions(dataset: dict[str, Any]) -> set[Any]:
     """The dataset versions a sealed set may be written for: this one, and
     every one since the version whose memories it still holds unchanged

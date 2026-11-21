@@ -395,6 +395,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "قراءة ذاكرة واحدة كاملة، صفحة بعد صفحة.",
         "en": "Read one memory whole, a page at a time.",
     },
+    "tool.desc.memory_list": {
+        "ar": "سرد كل ما في الذاكرة عن موضوع أو من فترة، صفحة بعد صفحة.",
+        "en": "List every memory about a subject or from a time, a page at a time.",
+    },
     "tool.desc.memory_store": {
         "ar": "تخزين معلومة أو تفضيل في الذاكرة طويلة المدى.",
         "en": "Store a fact or preference in long-term memory.",

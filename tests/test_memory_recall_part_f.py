@@ -608,7 +608,7 @@ def _degraded_result(*_a, **_k):
 
 def test_search_with_status_says_what_kept_it_from_being_whole(monkeypatch):
     monkeypatch.setattr(recall_mod, "recall", _degraded_result)
-    hits, degraded = recall_mod.search_with_status("favourite tea")
+    hits, degraded = recall_mod.search_with_status("favourite tea", tenant_id="t1")
     assert [h["id"] for h in hits] == ["e_tea"] and degraded.startswith("meaning search")
     # ``search`` (Kazma's own context) keeps its list-only shape.
     assert [h["id"] for h in recall_mod.search("favourite tea")] == ["e_tea"]

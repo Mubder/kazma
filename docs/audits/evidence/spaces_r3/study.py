@@ -69,7 +69,9 @@ MAX_DEEP_CALLS = 60
 #: were chosen after seeing the first replies.
 ASKED_AGAIN = ("e07", "a04", "a06", "m05", "m07", "m08")
 V5_VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "vectors.npz"
-THRESHOLDS = ROOT / "tests" / "fixtures" / "memory_bench" / "thresholds.json"
+# The memory benchmark lock's dataset v5 scores, which the one-member runs
+# were compared with: the lock moved to dataset v6 (part F, 2026-11-21).
+V5_LOCKED = HERE / "locked_v5_scores.json"
 # The extraction recording the study measured (2026-10-15, message form 1),
 # kept under its date when part C2's recording replaced it.
 LLM_REPLIES = ROOT / "tests" / "fixtures" / "memory_bench" / "extraction_llm_2026-10-15.json"
@@ -470,9 +472,10 @@ def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 def run_v5(variant: str) -> dict[str, Any]:
     from kazma_core.memory import recall as recall_module
-    from kazma_core.memory.benchmark import gated_scores, load_dataset, run_benchmark
+    from kazma_core.memory.benchmark import dataset_as_of, gated_scores, load_dataset, run_benchmark
 
-    data = load_dataset()
+    # Dataset v5 as the study measured it: v6 only added (ids_hold_since).
+    data = dataset_as_of(load_dataset(), 5)
     if variant != "control":
         subject = self_id(variant, V5_MEMBER)
         for fact in data["facts"]:
@@ -995,7 +998,7 @@ def build_report(vectors: _Vectors) -> dict[str, Any]:
     """Every part of the study, as ``results.json`` holds it: the lines the
     model is shown are kept for :data:`SHOWN_FOR` only."""
     cases = json.loads(CASES.read_text(encoding="utf-8"))
-    thresholds = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
+    thresholds = json.loads(V5_LOCKED.read_text(encoding="utf-8"))
     a, b, c = _patched(vectors)
     report: dict[str, Any] = {"cases_version": cases["version"], "embedding_model": vectors.model}
     with a, b, c:

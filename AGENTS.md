@@ -2304,7 +2304,11 @@ four injected were noise.
     (`tests/test_memory_benchmark_part_f.py`; `memory_bench.py vectors`
     records the raw follow-ups too, under a long recall deadline). The
     dataset records `ids_hold_since` (`benchmark.memory_fingerprint` of v5's
-    own file): a sealed set written for v5 still holds. A memory shown on
+    own file): a sealed set written for v5 still holds, and
+    `benchmark.dataset_as_of(data, 5)` is v5 exactly (what v6 added says
+    `new_in`): the Spaces R3 study replays on it against the v5 lock's
+    scores (`docs/audits/evidence/spaces_r3/locked_v5_scores.json`) and
+    reproduces with part F's code. A memory shown on
     another's line (a joined follow-up, a replaced value) stands by that
     line's margin; a list question's margin describes no hit (siblings, the
     summary limit) and the edge test leaves it out. A new dataset version's

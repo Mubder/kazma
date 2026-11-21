@@ -294,9 +294,50 @@ def _members_named(text: str) -> list[str]:
     return sorted(room.named_in(text))
 
 
+def _time_asked(text: str) -> tuple:
+    """What a question's time words ask for (part F): the period's first and
+    last day, said or true, history."""
+    from datetime import UTC, datetime
+
+    from kazma_core.memory.time_words import read_time
+
+    ask = read_time(text, now=datetime(2026, 9, 25, 12, tzinfo=UTC).timestamp(), zone=UTC)
+    if ask is None:
+        return ()
+    day = (lambda ts: datetime.fromtimestamp(ts, UTC).date().isoformat() if ts is not None else None)
+    return (day(ask.start), day(ask.end), ask.said, ask.history)
+
+
+def _follow_up(text: str) -> bool:
+    from kazma_core.memory.question_shape import is_follow_up
+
+    return is_follow_up(text)
+
+
+def _asks_for_all(text: str) -> bool:
+    from kazma_core.memory.question_shape import asks_for_all
+
+    return asks_for_all(text)
+
+
 M = "kazma-core/kazma_core/"
 
 PAIRS: list[Pair] = [
+    Pair("time_said_last_month", (M + "memory/time_words.py",),
+         "What did I tell you last month?", "شنو قلت لك الشهر الماضي؟", _time_asked,
+         ("2026-08-01", "2026-09-01", True, False)),
+    Pair("time_true_in_june", (M + "memory/time_words.py",),
+         "Where was I living in June?", "وين كنت ساكن في يونيو؟", _time_asked,
+         ("2026-06-01", "2026-07-01", False, False)),
+    Pair("time_at_first", (M + "memory/time_words.py",),
+         "Where did we live at first?", "في البداية وين كنا ساكنين؟", _time_asked,
+         (None, None, False, True)),
+    Pair("follow_up", (M + "memory/question_shape.py",),
+         "And where does she work?", "ووين تشتغل؟", _follow_up, True),
+    Pair("not_follow_up", (M + "memory/question_shape.py",),
+         "Where does my sister work?", "وين تشتغل أختي؟", _follow_up, False),
+    Pair("asks_for_all", (M + "memory/question_shape.py",),
+         "How many times did I go to the gym?", "كم مرة رحت النادي؟", _asks_for_all, True),
     Pair("language_lock", (M + "language_lock.py",),
          "Please summarise the meeting notes for me.", "لخص لي ملاحظات الاجتماع لو سمحت.", _lock, True),
     Pair("fixed_reply", (M + "language_lock.py", M + "agent/graph_supervisor.py",

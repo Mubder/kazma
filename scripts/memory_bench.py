@@ -947,8 +947,14 @@ def _questions(rows, refs, fact_ids, summary_ids) -> list[dict[str, Any]]:
         extras = QUESTION_EXTRAS.get(qid, {})
         out.append({"id": qid, "text": text, "category": cat, "gold": gold, "below": below,
                     "now_day": int(extras.get("now_day", ASKED_ON_DAY)),
-                    **({"context": list(extras["context"])} if extras.get("context") else {})})
+                    **({"context": list(extras["context"])} if extras.get("context") else {}),
+                    **({"new_in": 6} if cat in _V6_CATEGORIES else {})})
     return out
+
+
+#: The categories dataset v6 added (part F): their questions say ``new_in``,
+#: so ``benchmark.dataset_as_of(data, 5)`` gives v5's questions back.
+_V6_CATEGORIES = frozenset({"dense", "follow_up", "list", "temporal"})
 
 
 def build() -> dict[str, Any]:
