@@ -454,6 +454,14 @@ def _apply_if_still_remembered(raw, primary, ops, *, stats, episode_id: str, now
     return _apply_beliefs_to_v2(raw, primary, ops, stats=stats, now=now, not_again=not_again, **kw)
 
 
+async def _deep_pass_outcome(ok: bool, row: Any) -> None:
+    """One model deep pass's outcome, for the extraction watch
+    (``memory/quality_watch.py``). Off the loop; never raises."""
+    from kazma_core.memory.quality_watch import deep_pass_outcome
+
+    await asyncio.to_thread(deep_pass_outcome, ok, tenant_id=str(row["tenant_id"]))
+
+
 async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
     """Re-extract beliefs from a stored episode (background deep-consolidation).
 
@@ -479,6 +487,11 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
                 vocabulary=prep.get("vocabulary"), entities=prep.get("entities"),
                 said_on=prep.get("said_on"), previous=prep.get("previous"), held=prep.get("held"),
             )
+            if prep["use_llm"]:
+                # Every deep pass the model was asked for is one outcome of
+                # the extraction watch (part H, F14): a week of failures is
+                # one page, not one an hour.
+                await _deep_pass_outcome(not stats.get("model_unavailable"), row)
             if prep["use_llm"] and stats.get("model_unavailable"):
                 # The model could not be asked: the deep pass is retried with
                 # backoff, never "done" with the heuristic facts the turn's
@@ -1116,9 +1129,44 @@ def _repair_memory_vectors() -> None:
     # pass (docs/plans/MEMORY_NOTHING_LOST_PLAN.md, item F). Until 2026-09-26
     # this ran once a day for 100 missing vectors, and a model switch waited
     # for someone to click Rebuild. Logs what it re-encodes.
+    from kazma_core.memory.embedder import get_embedding_model_name
     from kazma_core.memory.reembed import run_vector_repair_pass
+    from kazma_core.memory.sweep_cursors import idle_skip
 
-    run_vector_repair_pass()
+    # Skipped while no memory row changed and the model is the same (part H).
+    with idle_skip("memory vector repair", extra=str(get_embedding_model_name() or "")) as cursor:
+        if cursor.skip:
+            return
+        out = run_vector_repair_pass()
+        cursor.idle = (out.get("remaining", 0) == 0 and not out.get("episodes") and not out.get("beliefs")
+                       and not out.get("entities"))
+
+
+def _fill_vector_codes() -> None:
+    # The approximate index meaning search narrows by past a size (part H,
+    # F15, memory/vector_codes.py): a code for each vector that has none, a
+    # budget a pass, skipped while no memory row changed.
+    import sqlite3
+
+    from kazma_core.config_store import apply_sqlite_pragmas
+    from kazma_core.memory.sweep_cursors import idle_skip
+    from kazma_core.memory.vector_codes import fill_codes
+    from kazma_core.paths import primary_memory_db
+
+    with idle_skip("memory vector codes") as cursor:
+        if cursor.skip:
+            return
+        conn = sqlite3.connect(primary_memory_db(), timeout=30)
+        try:
+            apply_sqlite_pragmas(conn)
+            out = fill_codes(conn)
+        except sqlite3.OperationalError as exc:
+            if "no such" not in str(exc).lower():
+                raise
+            return
+        finally:
+            conn.close()
+        cursor.idle = not out["made"] and not out["waiting"]
 
 
 def _repair_entity_counts() -> None:
@@ -1131,15 +1179,19 @@ def _repair_entity_counts() -> None:
 
     from kazma_core.config_store import apply_sqlite_pragmas
     from kazma_core.memory.entity_counts import repair_entity_counts
+    from kazma_core.memory.sweep_cursors import idle_skip
     from kazma_core.paths import primary_memory_db
 
-    conn = sqlite3.connect(primary_memory_db(), timeout=30)
-    try:
-        apply_sqlite_pragmas(conn)
-        with conn:
-            repair_entity_counts(conn)
-    finally:
-        conn.close()
+    with idle_skip("entity count repair") as cursor:
+        if cursor.skip:
+            return
+        conn = sqlite3.connect(primary_memory_db(), timeout=30)
+        try:
+            apply_sqlite_pragmas(conn)
+            with conn:
+                cursor.idle = not repair_entity_counts(conn)
+        finally:
+            conn.close()
 
 
 def _embed_knowledge_chunks() -> None:
@@ -1178,8 +1230,14 @@ def _recover_erased_memories() -> None:
     # sources that still hold them, verified (item D). Rows get one verdict
     # each, so once they have one this pass is a single SELECT. Logs its report.
     from kazma_core.memory.rehydrate import run_rehydrate_pass
+    from kazma_core.memory.sweep_cursors import idle_skip
 
-    run_rehydrate_pass()
+    with idle_skip("memory recovery") as cursor:
+        if cursor.skip:
+            return
+        report = run_rehydrate_pass() or {}
+        cursor.idle = bool(report) and not int(report.get("candidates") or 0) and not int(
+            ((report.get("legacy_archive") or {}).get("restored")) or 0)
 
 
 def _converge_forgets() -> None:
@@ -1198,8 +1256,12 @@ def _retire_knowledge_promotions() -> None:
     # 2026-10-13, as the user's words and on the loop (Memory audit M04): the
     # copy is gone, the library keeps the text. One SELECT once they are.
     from kazma_core.memory.forget import retire_knowledge_promotions
+    from kazma_core.memory.sweep_cursors import idle_skip
 
-    retire_knowledge_promotions()
+    with idle_skip("retired knowledge promotions") as cursor:
+        if cursor.skip:
+            return
+        cursor.idle = not (retire_knowledge_promotions() or {}).get("retired")
 
 
 def _reconcile_memory_turns() -> None:
@@ -1218,9 +1280,13 @@ def _fill_cut_memory_text() -> None:
     # holds the turn whole, verified, the forget ledger first, one write each
     # (memory/text_fill.py). After turn reconcile, so the rows it just wrote
     # are whole already; before the mirror sync, which pushes what changed.
+    from kazma_core.memory.sweep_cursors import idle_skip
     from kazma_core.memory.text_fill import run_text_fill_pass
 
-    run_text_fill_pass()
+    with idle_skip("memory text fill") as cursor:
+        if cursor.skip:
+            return
+        cursor.idle = not any(run_text_fill_pass().values())
 
 
 def _sync_memory_mirror() -> None:
@@ -1257,9 +1323,16 @@ def _queue_topic_summaries() -> None:
     # Weekly topic summaries (plan C2): the weeks that ended over a day ago
     # (two a pass, oldest first) and the summaries a forgotten turn emptied.
     # Queues only; the model calls run on the durable queue.
+    from datetime import UTC, datetime
+
+    from kazma_core.memory.sweep_cursors import idle_skip
     from kazma_core.memory.topic_summaries import queue_due_work
 
-    queue_due_work()
+    with idle_skip("memory topic summaries", extra=datetime.now(UTC).strftime("%Y-%m-%d %H")) as cursor:
+        if cursor.skip:
+            return
+        queued = queue_due_work() or {}
+        cursor.idle = not any(int(v or 0) for v in queued.values() if isinstance(v, (int, float)))
 
 
 async def _handle_topic_summaries(payload: dict[str, Any]) -> bool:
@@ -1414,6 +1487,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("settings snapshot", _settings_snapshot),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
+    ("memory vector codes", _fill_vector_codes),
     ("memory recovery", _recover_erased_memories),
     ("retired knowledge promotions", _retire_knowledge_promotions),
     ("memory turn reconcile", _reconcile_memory_turns),
@@ -1478,10 +1552,12 @@ async def _run_sweeps(sweeps: tuple[tuple[str, Callable[[], None]], ...]) -> Non
     outage, from ``db.availability``, never one per sweep per pass).
     """
     from kazma_core.db import availability
+    from kazma_core.memory.sweep_cursors import SWEEPS as _BUDGETS
 
     for label, sweep in sweeps:
         state = _SWEEP_STATE.setdefault(label, {"last_ok_at": None, "last_failed_at": None,
                                                 "consecutive_failures": 0, "last_error": None})
+        started = time.monotonic()
         try:
             await asyncio.to_thread(sweep)
         except Exception as exc:
@@ -1506,6 +1582,18 @@ async def _run_sweeps(sweeps: tuple[tuple[str, Callable[[], None]], ...]) -> Non
             state["consecutive_failures"] = 0
             state["last_ok_at"] = time.time()
             state.pop("waiting_for_database", None)
+        finally:
+            # Each memory sweep's budget (part H, F15: memory/sweep_cursors.py):
+            # the pass's time is kept, and a pass over it is said.
+            took = round(time.monotonic() - started, 3)
+            state["last_seconds"] = took
+            budget = _BUDGETS.get(label)
+            if budget is not None:
+                state["budget_seconds"] = budget.seconds
+                if took > budget.seconds:
+                    state["over_budget"] = int(state.get("over_budget") or 0) + 1
+                    logger.warning("[memory_worker] %s took %.1f s; its budget is %.0f s (%d time(s))",
+                                   label, took, budget.seconds, state["over_budget"])
 
 
 def _start_commitment_gc_scheduler() -> None:
@@ -1855,8 +1943,8 @@ async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
             ensure_password,
             forget_prune,
             repo_paths,
-            unlock_stale,
             restic_available,
+            unlock_stale,
         )
 
         # Each of these reads settings or the vault (a Postgres round trip)

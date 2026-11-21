@@ -833,6 +833,7 @@ jobs:
             tests/e2e/test_memory_hostile_type.py \
             tests/e2e/test_memory_changes_browser.py \
             tests/e2e/test_about_me_suggestions_browser.py \
+            tests/e2e/test_memory_about_you_browser.py \
             tests/e2e/test_memory_page_browser.py \
             tests/e2e/test_memory_map_radial.py \
             tests/e2e/test_sidebar_brand_and_build.py \

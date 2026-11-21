@@ -1,66 +1,213 @@
 {
-  "version": 1,
-  "description": "Memory V2 golden set — setup turns then query must contain expected substring",
+  "version": 2,
+  "description": "A quick recall check: each case's memories among twenty unrelated ones; the answer must be shown and none of the unrelated ones (must_not_show).",
   "cases": [
     {
       "id": "favorite_color",
       "setup": [
-        {"role": "user", "content": "Remember my favorite color is teal."}
+        {
+          "role": "user",
+          "content": "Remember my favorite color is teal."
+        }
       ],
       "query": "What color do I like?",
-      "expect_contains": ["teal"]
+      "expect_contains": [
+        "teal"
+      ]
     },
     {
       "id": "lives_in_bridge",
       "setup": [
-        {"role": "user", "content": "I just moved to Paris last month."}
+        {
+          "role": "user",
+          "content": "I just moved to Paris last month."
+        }
       ],
       "query": "where do I live",
-      "expect_contains": ["paris"],
+      "expect_contains": [
+        "paris"
+      ],
       "optional": true,
       "needs_meaning": true
     },
     {
       "id": "multi_hop_work",
       "setup_beliefs": [
-        {"subject": "user", "predicate": "works_at", "object": "AcmeCorp"},
-        {"subject": "AcmeCorp", "predicate": "located_in", "object": "Paris"}
+        {
+          "subject": "user",
+          "predicate": "works_at",
+          "object": "AcmeCorp"
+        },
+        {
+          "subject": "AcmeCorp",
+          "predicate": "located_in",
+          "object": "Paris"
+        }
       ],
       "query": "where does the user company sit",
-      "expect_contains": ["paris", "acme"],
+      "expect_contains": [
+        "paris",
+        "acme"
+      ],
       "match_any": true,
       "needs_meaning": true
     },
     {
       "id": "multi_hop_three",
       "setup_beliefs": [
-        {"subject": "user", "predicate": "reports_to", "object": "Jordan Lee"},
-        {"subject": "Jordan Lee", "predicate": "manages", "object": "Platform Team"},
-        {"subject": "Platform Team", "predicate": "owns", "object": "Kazma Gateway"}
+        {
+          "subject": "user",
+          "predicate": "reports_to",
+          "object": "Jordan Lee"
+        },
+        {
+          "subject": "Jordan Lee",
+          "predicate": "manages",
+          "object": "Platform Team"
+        },
+        {
+          "subject": "Platform Team",
+          "predicate": "owns",
+          "object": "Kazma Gateway"
+        }
       ],
       "query": "what product does my manager team own",
-      "expect_contains": ["gateway", "kazma", "platform"],
+      "expect_contains": [
+        "gateway",
+        "kazma",
+        "platform"
+      ],
       "match_any": true
     },
     {
       "id": "preference_stack",
       "setup_beliefs": [
-        {"subject": "user", "predicate": "prefers", "object": "dark mode"},
-        {"subject": "user", "predicate": "timezone", "object": "Asia/Riyadh"}
+        {
+          "subject": "user",
+          "predicate": "prefers",
+          "object": "dark mode"
+        },
+        {
+          "subject": "user",
+          "predicate": "timezone",
+          "object": "Asia/Riyadh"
+        }
       ],
       "query": "what is my timezone preference",
-      "expect_contains": ["riyadh", "asia"],
+      "expect_contains": [
+        "riyadh",
+        "asia"
+      ],
       "match_any": true
     },
     {
       "id": "project_name",
       "setup": [
-        {"role": "user", "content": "Remember that Project Orion is our Q4 launch codename."}
+        {
+          "role": "user",
+          "content": "Remember that Project Orion is our Q4 launch codename."
+        }
       ],
       "query": "what is Project Orion",
-      "expect_contains": ["orion", "q4", "launch"],
+      "expect_contains": [
+        "orion",
+        "q4",
+        "launch"
+      ],
       "match_any": true,
       "optional": true
+    }
+  ],
+  "distractors": [
+    {
+      "content": "My cousin is getting married next spring.",
+      "marker": "married"
+    },
+    {
+      "content": "I bought a secondhand kayak for weekend river trips.",
+      "marker": "kayak"
+    },
+    {
+      "content": "The plumber fixed the leaking kitchen sink on Tuesday.",
+      "marker": "plumber"
+    },
+    {
+      "content": "Our book club is reading a novel about lighthouse keepers.",
+      "marker": "lighthouse"
+    },
+    {
+      "content": "I started learning the cello this autumn.",
+      "marker": "cello"
+    },
+    {
+      "content": "The dentist cleaned my teeth and found no cavities.",
+      "marker": "dentist"
+    },
+    {
+      "content": "We adopted a tortoise named Biscuit.",
+      "marker": "tortoise"
+    },
+    {
+      "content": "My sourdough starter finally doubled overnight.",
+      "marker": "sourdough"
+    },
+    {
+      "content": "The marathon training plan has a long run every Sunday.",
+      "marker": "marathon"
+    },
+    {
+      "content": "I need to renew the car insurance before it lapses.",
+      "marker": "insurance"
+    },
+    {
+      "content": "The neighbours replaced their wooden fence with stone.",
+      "marker": "fence"
+    },
+    {
+      "content": "I found an old chess set in the attic.",
+      "marker": "chess"
+    },
+    {
+      "content": "The museum's dinosaur exhibit has a new skeleton.",
+      "marker": "dinosaur"
+    },
+    {
+      "content": "My laptop battery barely lasts two hours now.",
+      "marker": "battery"
+    },
+    {
+      "content": "We are planning a camping trip with friends.",
+      "marker": "camping"
+    },
+    {
+      "subject": "garden",
+      "predicate": "grows",
+      "object": "heirloom tomatoes",
+      "marker": "tomatoes"
+    },
+    {
+      "subject": "cousin_maria",
+      "predicate": "studies",
+      "object": "marine biology",
+      "marker": "marine"
+    },
+    {
+      "subject": "bicycle",
+      "predicate": "needs",
+      "object": "new brake pads",
+      "marker": "brake"
+    },
+    {
+      "subject": "bakery",
+      "predicate": "sells",
+      "object": "cardamom buns",
+      "marker": "cardamom"
+    },
+    {
+      "subject": "violin_teacher",
+      "predicate": "charges",
+      "object": "forty dinars a lesson",
+      "marker": "violin"
     }
   ]
 }

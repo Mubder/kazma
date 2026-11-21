@@ -125,6 +125,9 @@ TABLE_RULES: dict[tuple[str, str], TableRule] = {
     ("*", "memory_graph_outbox"): _keep("ids only: what the Neo4j copy is sent next (the erased facts' edges go)"),
     ("*", "memory_forget_applied"): _keep("the install's forget journal marks: sequence numbers only"),
     ("*", "memory_reconcile_state"): _keep("the install's reconcile cursors, by chat store row: no words"),
+    ("*", "memory_incidents"): _keep("the install's open memory incidents: a name, a time and counts"),
+    ("*", "memory_change_seq"): _keep("the install's one change counter for the memory sweeps: a number"),
+    ("*", "memory_sweep_cursors"): _keep("the install's memory sweep cursors: names, numbers and times"),
     ("*", "commitment_events"): _ids("commitment_id", "commitments"),
     # scheduling
     ("cron.db", "cron_events"): _ids("job_id", "jobs"),

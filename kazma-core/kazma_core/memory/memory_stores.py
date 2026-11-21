@@ -217,6 +217,26 @@ MEMORY_TABLES: tuple[MemoryStore, ...] = (
         bound="one row per replaced user fact or refused correction, pruned on write",
     ),
     MemoryStore(
+        "memory_vector_codes", "state", "forget", "ids_only",
+        forget="triggers: a code goes with its vector (a forget drops the vector, and the code with it), "
+               "its row and its move to another space (vector_codes.py, part H)",
+        export="", excluded="an index rebuilt from the vectors: one sign bit per dimension",
+        retention="kept while its vector is", bound="one per memory or fact with a vector",
+    ),
+    MemoryStore(
+        "memory_change_seq", "state", "no_turn_text", "ids_only",
+        forget="nothing a turn said: one counter of the changes the memory sweeps act on "
+               "(sweep_cursors.py, part H)",
+        export="", excluded="the install's own counter, not memory",
+        bound="one row",
+    ),
+    MemoryStore(
+        "memory_sweep_cursors", "state", "no_turn_text", "ids_only",
+        forget="nothing a turn said: a sweep's name, the counter it last found nothing at, a time",
+        export="", excluded="the install's own sweep cursors, not memory",
+        bound="one row per memory sweep",
+    ),
+    MemoryStore(
         "procedural_dags", "state", "no_turn_text", "names_only",
         forget="nothing a turn wrote: tool names and argument NAMES (values were stripped "
                "2026-10-13, procedural.strip_argument_values)",
@@ -228,6 +248,28 @@ MEMORY_TABLES: tuple[MemoryStore, ...] = (
         forget="forget._redact_audit: the event stays, the forgotten values become a hash",
         export="fact_changes",
         retention="kept", bound="one row per fact write",
+    ),
+    MemoryStore(
+        "memory_recall_records", "ops", "no_turn_text", "ids_only",
+        forget="nothing a turn said: the ids recall showed a turn, never their text, and flags "
+               "(empty, degraded, failed, used) and a time (recall_records.py, part H)",
+        export="", excluded="what recall showed each turn: memory ids and flags, an operational record",
+        retention="30 days, at most 50,000 rows (recall_records.RETENTION_DAYS, MAX_ROWS)",
+        bound="one row per turn that recalled",
+    ),
+    MemoryStore(
+        "memory_deep_passes", "ops", "no_turn_text", "ids_only",
+        forget="nothing a turn said: when a model deep pass ran and whether the model answered "
+               "(quality_watch.py, part H)",
+        export="", excluded="an outcome and a time per deep pass, for the extraction incident",
+        retention="30 days (quality_watch.DEEP_PASS_RETENTION_S)", bound="one row per model deep pass",
+    ),
+    MemoryStore(
+        "memory_incidents", "ops", "no_turn_text", "ids_only",
+        forget="nothing a turn said: the name of an open memory incident, when it opened and its counts "
+               "(quality_watch.py, part H)",
+        export="", excluded="the install's own open incidents, not memory",
+        retention="deleted when the incident ends", bound="at most one row per incident kind (three)",
     ),
     MemoryStore(
         "memory_task_queue", "ops", "forget", "turn_text",

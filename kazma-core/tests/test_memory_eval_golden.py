@@ -10,6 +10,12 @@ and the test measured something the product never did.
 CI has no embedder: a case marked ``needs_meaning`` (its question shares no
 word with its answer) is skipped there, with that reason, and must pass
 where an embedder runs.
+
+It is the Memory page's quick recall check (the benchmarks audit's F11 and
+R10, 2026-11-21): every case runs among the fixture's twenty unrelated
+memories and passes only when none of them is shown. A recall that shows
+every memory whatever was asked fails every case; without the unrelated
+memories (the eval as it was) it passed every one -- the negative control.
 """
 
 from __future__ import annotations
@@ -77,3 +83,45 @@ def test_golden_facts_are_stored_the_way_extraction_stores_them(no_embedder, mon
     row = conn.execute("SELECT subject, predicate, object, valid_from FROM beliefs").fetchone()
     assert tuple(row) == ("platform_team", "owns", "Kazma Gateway", 1.0)
     assert shared == []
+
+
+def _show_everything(query, *, conn, **_kw):
+    """A recall that shows every memory, whatever was asked."""
+    from kazma_core.memory.recall import RecallHit, RecallResult
+
+    episodes = [RecallHit(id=str(r[0]), content=str(r[1] or ""), score=1.0)
+                for r in conn.execute("SELECT id, user_text FROM episodes")]
+    beliefs = [RecallHit(id=str(r[0]), content=f"{r[1]} {r[2]} {r[3]}", score=1.0, kind="belief")
+               for r in conn.execute("SELECT id, subject, predicate, object FROM beliefs")]
+    return RecallResult(beliefs=beliefs, episodes=episodes)
+
+
+def test_every_case_runs_among_twenty_unrelated_memories(no_embedder):
+    from kazma_core.memory.eval_golden import _distractors, run_golden_eval
+
+    distractors = _distractors()
+    assert len(distractors) == 20 and all(d.get("marker") for d in distractors)
+    assert len({d["marker"] for d in distractors}) == 20
+    report = run_golden_eval()
+    assert report["unrelated_per_case"] == 20
+    ran = [c for c in report["cases"] if c["status"] != "skipped"]
+    assert ran and all(c["shown_wrongly"] == [] for c in ran)
+
+
+def test_a_recall_that_shows_everything_fails_every_case(no_embedder, monkeypatch):
+    from kazma_core.memory import eval_golden
+
+    monkeypatch.setattr("kazma_core.memory.recall.recall", _show_everything)
+    report = eval_golden.run_golden_eval()
+    assert report["passed"] == 0 and report["failed"] >= 3
+    assert all(c["found"] and c["shown_wrongly"] for c in report["cases"] if c["status"] == "fail")
+
+
+def test_control_without_the_unrelated_memories_showing_everything_passes(no_embedder, monkeypatch):
+    """The eval as it was (each case alone): the same recall passes every case."""
+    from kazma_core.memory import eval_golden
+
+    monkeypatch.setattr("kazma_core.memory.recall.recall", _show_everything)
+    monkeypatch.setattr(eval_golden, "_distractors", lambda: [])
+    report = eval_golden.run_golden_eval()
+    assert report["failed"] == 0 and report["passed"] >= 3

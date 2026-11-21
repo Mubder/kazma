@@ -122,7 +122,8 @@ the model was shown, counted and listed. It is stored with the turn (a reload
 shows it) and appears in every tab watching the chat. With **Settings →
 Memory → Explain recall** on (the default), each line names the channels that
 found it (`fts5`, `dense`, `belief_ppr`, `kb_rrf`, …). The Dashboard probe
-uses the same tags; **Run golden eval** exercises the golden recall set.
+uses the same tags; **Quick recall check** asks the fixture's questions, each
+among twenty unrelated memories, and fails a case that shows one of them.
 
 ## Email (Settings → Email)
 

@@ -238,6 +238,7 @@ ROUTE_SCOPE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/sessions", SPACE),
     # Memory, the lessons learned from a space's turns, imported history.
     ("/memory$", SPACE),
+    ("/memory/you$", SPACE),
     ("/api/memory", SPACE),
     ("/api/commitment", SPACE),
     ("/api/import/history", SPACE),

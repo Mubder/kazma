@@ -32,11 +32,12 @@ from __future__ import annotations
 import heapq
 import logging
 import sqlite3
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["BELIEF_ACTIVE_SQL", "RECALLABLE_TIERS", "VectorEngine"]
+__all__ = ["BELIEF_ACTIVE_SQL", "NARROW_AUDIT_EVERY", "RECALLABLE_TIERS", "VectorEngine", "narrowing_health"]
 
 #: Every episode tier recall may return. Archived memories are recallable:
 #: they rank below active ones (recall weights them) but are never out of
@@ -47,6 +48,21 @@ RECALLABLE_TIERS: tuple[str, ...] = ("working", "recall", "episodic", "archived"
 BELIEF_ACTIVE_SQL = "valid_until IS NULL AND invalidated_at IS NULL"
 
 _NUMPY_CHUNK = 2048
+#: More candidates than this (most rows without a code: a model switch, the
+#: first passes of the code sweep) and the search reads every row instead.
+_NARROW_IN_MAX = 20_000
+#: The first narrowed search and every this-many-th also read every row
+#: (:meth:`VectorEngine._narrowed`): what narrowing missed is counted.
+NARROW_AUDIT_EVERY = 50
+_NARROW_LOCK = threading.Lock()
+_NARROW_STATE: dict[str, int] = {"searches": 0, "audited": 0, "differed": 0}
+
+
+def narrowing_health() -> dict[str, int]:
+    """This process's narrowed searches, how many were also read in full,
+    and how many of those differed (memory health)."""
+    with _NARROW_LOCK:
+        return dict(_NARROW_STATE)
 
 
 def _current_model_name() -> str:
@@ -136,7 +152,7 @@ class VectorEngine:
         elif tier:
             where.append("tier = ?")
             params.append(str(tier))
-        return self._exact("episodes", where, params, query_vec, limit)
+        return self._exact("episodes", where, params, query_vec, limit, narrow=("episode", tenant_id))
 
     def search_beliefs(
         self,
@@ -147,7 +163,8 @@ class VectorEngine:
     ) -> list[tuple[str, float]]:
         """Rank EVERY current belief by cosine; return ``(id, similarity)``."""
         return self._exact(
-            "beliefs", ["tenant_id = ?", BELIEF_ACTIVE_SQL], [tenant_id], query_vec, limit
+            "beliefs", ["tenant_id = ?", BELIEF_ACTIVE_SQL], [tenant_id], query_vec, limit,
+            narrow=("belief", tenant_id),
         )
 
     def nearest_entities(
@@ -203,12 +220,73 @@ class VectorEngine:
         params: list[Any],
         query_vec: list[float] | None,
         limit: int,
+        *,
+        narrow: tuple[str, str] | None = None,
     ) -> list[tuple[str, float]]:
         if not query_vec or limit <= 0 or not self.available:
             return []
         clause, clause_params = self.comparable_clause(len(query_vec))
         predicate = " AND ".join([*where, clause])
         all_params = [*params, *clause_params]
+        if narrow is not None and self.has_numpy:
+            narrowed = self._narrowed(table, predicate, all_params, query_vec, limit, narrow)
+            if narrowed is not None:
+                return narrowed
+        return self._exact_scan(table, predicate, all_params, query_vec, limit)
+
+    def _narrowed(
+        self, table: str, predicate: str, params: list[Any], query_vec: list[float], limit: int,
+        narrow: tuple[str, str],
+    ) -> list[tuple[str, float]] | None:
+        """Past :data:`vector_codes.NARROW_FROM` coded rows of the kind in the
+        space: the candidates by their codes, re-scored exactly
+        (:mod:`kazma_core.memory.vector_codes`). None: search in full."""
+        from kazma_core.memory import vector_codes
+
+        kind, tenant = narrow
+        try:
+            if vector_codes.coded_count(self.conn, kind, tenant) < vector_codes.NARROW_FROM:
+                return None
+            rowids = vector_codes.candidates(self.conn, self._numpy, kind=kind, predicate=predicate,
+                                             params=params, query_vec=query_vec, limit=limit)
+        except (sqlite3.Error, ValueError):
+            logger.warning("[vector_engine] narrowing %s failed; searching in full", table, exc_info=True)
+            return None
+        if len(rowids) > _NARROW_IN_MAX:
+            return None  # most rows have no code yet (a model switch): the full scan
+        found = self._rescore(table, predicate, params, rowids, query_vec, limit) if rowids else []
+        with _NARROW_LOCK:
+            _NARROW_STATE["searches"] += 1
+            audit = (_NARROW_STATE["searches"] - 1) % NARROW_AUDIT_EVERY == 0
+        if audit:
+            # Exact search stays the truth: the first narrowed search and
+            # every NARROW_AUDIT_EVERY-th also read every row, and a
+            # difference is said, and the full answer used.
+            full = self._exact_scan(table, predicate, params, query_vec, limit)
+            with _NARROW_LOCK:
+                _NARROW_STATE["audited"] += 1
+                differed = [i for i, _s in full] != [i for i, _s in found]
+                if differed:
+                    _NARROW_STATE["differed"] += 1
+            if differed:
+                logger.warning("[vector_engine] the narrowed %s search differed from the full scan "
+                               "(%d candidates for %d): the full answer is used", table, len(rowids), limit)
+                return full
+        return found
+
+    def _rescore(
+        self, table: str, predicate: str, params: list[Any], rowids: list[int], query_vec: list[float],
+        limit: int,
+    ) -> list[tuple[str, float]]:
+        """The exact scores of exactly these rows, by the full scan's own
+        query (rowid order, so equal scores keep a full scan's order)."""
+        marks = ",".join("?" for _ in rowids)
+        return self._exact_scan(table, f"{predicate} AND rowid IN ({marks})", [*params, *rowids],
+                                query_vec, limit)
+
+    def _exact_scan(
+        self, table: str, predicate: str, all_params: list[Any], query_vec: list[float], limit: int,
+    ) -> list[tuple[str, float]]:
         if self.has_sqlite_vec:
             try:
                 return self._exact_sqlite_vec(table, predicate, all_params, query_vec, limit)

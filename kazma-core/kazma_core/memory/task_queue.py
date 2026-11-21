@@ -97,6 +97,17 @@ def _report_dead_letters(task_types: list[str], error: str | None) -> None:
         "letters until retried or cleared on the Memory page",
         len(task_types), ", ".join(sorted(set(task_types))), (error or "")[:200],
     )
+    from kazma_core.memory import quality_watch
+
+    # A deep pass that gave up while extraction as a whole is failing is
+    # that outage's, which memory.extraction_failing pages once (part H,
+    # F14): one page an hour for a week of the same outage was 168.
+    if any(t in quality_watch.EXTRACTION_TASKS for t in task_types) and quality_watch.incident_open("extraction"):
+        task_types = [t for t in task_types if t not in quality_watch.EXTRACTION_TASKS]
+        logger.info("[task_queue] the deep passes that gave up belong to the open extraction incident: "
+                    "memory.extraction_failing paged it")
+        if not task_types:
+            return
     from kazma_core.observability.ops_alerts import alert  # never raises (AGENTS §33)
 
     alert(

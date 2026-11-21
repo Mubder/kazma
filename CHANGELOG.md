@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Memory part H: running it (2026-11-21)
+
+- **What recall did, every turn.** One record per turn: which memories were
+  shown, whether recall came back empty, degraded or failed, and how long it
+  took (no text stored, 30 days). Whether the answer used what was shown,
+  and whether the user corrected a shown fact soon after, are read from it;
+  memory health shows the week, and the daily digest has a "Memory:" line.
+- **Three pages, once each, with their recovery.** The deep pass failing,
+  most recalls unable to search by meaning, and recall slow (the slowest
+  twentieth over 8 s): each opens an incident that pages once and says when
+  it is over. A week of failed extraction is one page, not one an hour; the
+  deep pass's dead-letter page is held while that incident is open.
+- **Search past a size narrows, then scores exactly.** Past 20,000 memories
+  a sign code per vector picks the candidates and every one is scored
+  exactly; the benchmark answers every question as the full scan does. The
+  first narrowed search and every 50th also read every row, and the full
+  answer wins when they differ.
+- **The memory sweeps have budgets and cursors.** A sweep with nothing to do
+  no longer reads every row every 15 minutes: it waits until something it
+  reads changes. Every pass is timed, and one over its budget is said.
+- **What Kazma knows about you** (Memory -> "What Kazma knows about you"):
+  your own facts, where each came from, since when and what it was before;
+  correct one in your own words or say it is no longer true, and undo either
+  under Changes. English and Arabic.
+- **The quick recall check** (it was "Run golden eval") runs each case among
+  twenty unrelated memories and fails when one of them is shown; a recall
+  that shows everything used to pass it.
+
 ## Spaces S1-33: the check before a second person is added (2026-11-21)
 
 - **Eight preconditions, one table** (`kazma_core/spaces/preconditions.py`):

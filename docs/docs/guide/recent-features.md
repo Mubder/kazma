@@ -9,6 +9,19 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 > This page is published at [kazma.ai/docs/recent-features/](https://kazma.ai/docs/recent-features/) ([Arabic](https://kazma.ai/ar/docs/recent-features/)).
 
+**New in 2026-11-21 — memory says how it is doing.** Every turn's recall
+is recorded (what was shown, whether it was empty or degraded, how long it
+took; no text), and memory health and the daily digest show the week: how
+often an answer used what was shown, and how often you corrected a shown
+fact soon after. Three problems page once each and say when they are over:
+the model's reading of turns failing, recall unable to search by meaning,
+and recall slow. The Memory page has **What Kazma knows about you**: your
+own facts, where each came from, since when and what it was before, with
+Correct and No longer true (see [Memory and
+RAG](memory-and-rag.md#what-kazma-knows-about-you)). Past 20,000 memories
+search narrows first and scores every candidate exactly; the memory sweeps
+wait while nothing they read has changed.
+
 **New in 2026-11-21 — a check before a second person is added.** Several
 people on one Kazma ([Spaces](spaces.md)) is still not switched on in any
 release. `kazma spaces migrate --check` now lists what must hold first and
@@ -447,7 +460,7 @@ detail in `CHANGELOG.md` and `AGENTS.md` §21–§23. Audit:
 | Knowledge Library | Smart re-index, gone-URL prune, hybrid inject; **document_index** bridge | `/knowledge`, Settings → Memory, Documents → Index |
 | Memory admin | Graph dedupe, rename, list↔graph, belief edit, hub brand, Group/Ungroup, truncation honesty | `/memory` |
 | Memory explain | The turn's Memory used row (with channels) + Dashboard probe | Settings → Memory → Explain recall |
-| Golden eval | Offline recall regression | Dashboard → Run golden eval |
+| Quick recall check | Each case's answer among twenty unrelated memories; fails when one of them shows | Memory page → Quick recall check |
 | Topic-shift focus | **Explicit** pivot disarms recall; inferred drift only re-ranks. Interrogative check-ins never count as drift | Settings → `agent.topic_drift.*`; AGENTS.md §29 |
 | Non-Stop & Self-Healing | Supervisor watchdog, model failover chain, call ledger, orphan recovery, HITL timeout | Settings → Agent → Non-Stop Execution |
 | Scraper Hardening | Size caps (5MB default), 5xx retry backoff, robots.txt compliance | `read_url`, `crawl_site`, `KAZMA_FETCH_MAX_BYTES` |
@@ -719,7 +732,7 @@ replaced it on 2026-09-27.)
 
 - **Memory probe** — same channel chips  
 - **Federated** — memory + KB labeled  
-- **Run golden eval** — offline fixture pass rate (`POST /api/memory/v2/eval/golden`)
+- **Quick recall check** (it was "Run golden eval") — each case among twenty unrelated memories; a case passes only when the answer shows and none of them does (`POST /api/memory/v2/eval/golden`)
 
 ### Belief multi-hop (PPR)
 
@@ -874,7 +887,7 @@ Industry-grade web scraping resilience and model output truncation recovery.
 | GET/PUT | `/api/settings/agent/nonstop` | Non-Stop & Self-Healing settings |
 | POST | `/api/memory/v2/probe` | Recall dry-run (explain on) |
 | POST | `/api/memory/v2/federated-search` | Memory + KB labeled |
-| POST | `/api/memory/v2/eval/golden` | Golden recall suite |
+| POST | `/api/memory/v2/eval/golden` | The quick recall check |
 | GET | `/api/memory/v2/graph` | Belief canvas payload (unique ids, hub label, embedded `groups`) |
 | DELETE | `/api/memory/v2/graph/groups/{id}` | Ungroup (view-only) |
 | POST | `/api/memory/graph/clear` | Tenant-scoped bi-temporal invalidate + Neo4j cleanup |

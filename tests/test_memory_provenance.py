@@ -349,6 +349,10 @@ USER_CHANNEL_SITES = {
     "kazma-core/kazma_core/memory/changes.py": (
         "confirm: the user's own answer to a waiting correction (the Memory page, a chat command)"
     ),
+    "kazma-core/kazma_core/memory/about_you.py": (
+        "What Kazma knows about you (part H): the signed-in person's correction or ending of their own "
+        "fact, typed on their own page; another member's fact is not reachable (tests/test_memory_about_you.py)"
+    ),
 }
 
 

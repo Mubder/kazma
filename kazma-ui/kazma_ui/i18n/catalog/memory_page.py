@@ -528,4 +528,69 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إعادة الذاكرة إلى النسخة المنشأة {when}؟ سيُستبدل ما تعلّمه Kazma منذ ذلك الحين؛ وتُقرأ المحادثات "
               "منذئذ من جديد، ويبقى منسيًا ما طلبت منه نسيانه.",
     },
+
+    # ── What Kazma knows about you (part H, memory/about_you.py) ──
+    "memory.you.title": {"en": "What Kazma knows about you", "ar": "ما يعرفه Kazma عنك"},
+    "memory.you.intro": {
+        "en": "The facts Kazma holds about you: where each came from, since when, and what it was before. "
+              "Correct one in your own words, or say it is no longer true.",
+        "ar": "الحقائق التي يحتفظ بها Kazma عنك: من أين جاءت كل واحدة، ومنذ متى، وما كانت قبل ذلك. "
+              "صحّح أيًّا منها بكلماتك، أو قل إنها لم تعد صحيحة.",
+    },
+    "memory.you.open": {"en": "What Kazma knows about you", "ar": "ما يعرفه Kazma عنك"},
+    "memory.you.back": {"en": "Back to Memory", "ar": "العودة إلى الذاكرة"},
+    "memory.you.loading": {"en": "Reading what Kazma knows…", "ar": "جارٍ قراءة ما يعرفه Kazma…"},
+    "memory.you.failed": {
+        "en": "Kazma could not read what it knows about you. Try again in a moment.",
+        "ar": "تعذّر على Kazma قراءة ما يعرفه عنك. حاول مجددًا بعد قليل.",
+    },
+    "memory.you.empty": {
+        "en": "Kazma holds no facts about you yet. Tell it something about yourself in a chat.",
+        "ar": "لا يحتفظ Kazma بأي حقيقة عنك بعد. أخبره بشيء عن نفسك في محادثة.",
+    },
+    "memory.you.source_you": {"en": "You said it", "ar": "قلتها أنت"},
+    "memory.you.source_reading": {"en": "Kazma's reading of a conversation", "ar": "قراءة Kazma لمحادثة"},
+    "memory.you.source_agent": {"en": "Kazma noted it", "ar": "دوّنها Kazma"},
+    "memory.you.source_tool": {"en": "A tool reported it", "ar": "أفادت بها أداة"},
+    "memory.you.source_unknown": {"en": "Source unknown", "ar": "مصدر غير معروف"},
+    "memory.you.since": {"en": "Since {since}", "ar": "منذ {since}"},
+    "memory.you.since_started": {"en": "Since {started} (noted {since})", "ar": "منذ {started} (دُوّنت في {since})"},
+    "memory.you.period": {"en": "{from} to {until}", "ar": "من {from} إلى {until}"},
+    "memory.you.history_count.zero": {"en": "Before: {n} values", "ar": "قبل ذلك: لا قيم"},
+    "memory.you.history_count.one": {"en": "Before: 1 value", "ar": "قبل ذلك: قيمة واحدة"},
+    "memory.you.history_count.two": {"en": "Before: {n} values", "ar": "قبل ذلك: قيمتان"},
+    "memory.you.history_count.few": {"en": "Before: {n} values", "ar": "قبل ذلك: {n} قيم"},
+    "memory.you.history_count.many": {"en": "Before: {n} values", "ar": "قبل ذلك: {n} قيمة"},
+    "memory.you.history_count.other": {"en": "Before: {n} values", "ar": "قبل ذلك: {n} قيمة"},
+    "memory.you.correct": {"en": "Correct", "ar": "صحّح"},
+    "memory.you.end": {"en": "No longer true", "ar": "لم تعد صحيحة"},
+    "memory.you.new_value": {"en": "The right value", "ar": "القيمة الصحيحة"},
+    "memory.you.save": {"en": "Save", "ar": "احفظ"},
+    "memory.you.cancel": {"en": "Cancel", "ar": "إلغاء"},
+    "memory.you.end_title": {"en": "No longer true?", "ar": "لم تعد صحيحة؟"},
+    "memory.you.end_message": {
+        "en": "Kazma will stop treating this as true. It stays in the history.",
+        "ar": "سيتوقف Kazma عن اعتبار هذا صحيحًا. سيبقى في السجل.",
+    },
+    "memory.you.corrected": {
+        "en": "Corrected. You can undo it under Changes on the Memory page.",
+        "ar": "صُحّحت. يمكنك التراجع عن ذلك من قسم التغييرات في صفحة الذاكرة.",
+    },
+    "memory.you.ended": {
+        "en": "Ended. You can undo it under Changes on the Memory page.",
+        "ar": "انتهت. يمكنك التراجع عن ذلك من قسم التغييرات في صفحة الذاكرة.",
+    },
+    "memory.you.err_not_found": {
+        "en": "This fact has changed since the page was loaded. Reload the page.",
+        "ar": "تغيّرت هذه الحقيقة منذ تحميل الصفحة. أعد تحميل الصفحة.",
+    },
+    "memory.you.err_no_account": {
+        "en": "Sign in as yourself to see what Kazma knows about you here.",
+        "ar": "سجّل الدخول بحسابك لترى ما يعرفه Kazma عنك هنا.",
+    },
+    "memory.you.err_empty": {"en": "Write the value.", "ar": "اكتب القيمة."},
+    "memory.you.err_too_long": {"en": "That is too long for one fact.", "ar": "هذا أطول من أن يكون حقيقة واحدة."},
+    "memory.you.err_unchanged": {"en": "That is what Kazma already holds.", "ar": "هذا ما يحتفظ به Kazma أصلًا."},
+    "memory.you.err_refused": {"en": "Kazma could not change this fact.", "ar": "تعذّر على Kazma تغيير هذه الحقيقة."},
+    "memory.you.err_failed": {"en": "Kazma could not save this. Try again.", "ar": "تعذّر على Kazma حفظ هذا. حاول مجددًا."},
 }

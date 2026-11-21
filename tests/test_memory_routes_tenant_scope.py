@@ -231,6 +231,13 @@ REQUESTS: dict[tuple[str, str], list[tuple[str, Any]]] = {
     ("POST", "/api/memory/v2/profile/suggestions/{belief_id}/dismiss"): [
         ("/api/memory/v2/profile/suggestions/beta9_home/dismiss", None),
     ],
+    # Part H: what Kazma knows about you (memory/about_you.py). beta's own
+    # fact (beta9_home) is never listed for alpha, nor corrected or ended.
+    ("GET", "/api/memory/v2/you"): [("/api/memory/v2/you", None)],
+    ("POST", "/api/memory/v2/you/{belief_id}/correct"): [
+        ("/api/memory/v2/you/beta9_home/correct", {"value": "coffee"}),
+    ],
+    ("POST", "/api/memory/v2/you/{belief_id}/end"): [("/api/memory/v2/you/beta9_home/end", None)],
     # The audit's F1: what changed in the user's facts (memory/changes.py).
     ("GET", "/api/memory/v2/changes"): [
         ("/api/memory/v2/changes", None),
@@ -301,6 +308,7 @@ NO_DATA = {
     ("GET", "/api/memory/graph/stats"): "retired: answers 410",
     ("GET", "/api/memory/graph/export"): "retired: answers 410",
     ("GET", "/memory"): "the page shell; its data comes from the routes above",
+    ("GET", "/memory/you"): "the page shell; its data comes from /api/memory/v2/you",
 }
 
 
@@ -635,7 +643,7 @@ def _memory_routes(app) -> set[tuple[str, str]]:
     out: set[tuple[str, str]] = set()
     for route in _all_routes(app.routes):
         path = getattr(route, "path", "")
-        if not (path.startswith("/api/memory") or path == "/memory"):
+        if not (path.startswith("/api/memory") or path == "/memory" or path.startswith("/memory/")):
             continue
         for method in getattr(route, "methods", None) or ():
             if method not in ("HEAD", "OPTIONS"):

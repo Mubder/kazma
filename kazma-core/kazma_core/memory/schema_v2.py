@@ -500,6 +500,50 @@ CREATE INDEX IF NOT EXISTS idx_audit_tenant_time
 
 CREATE INDEX IF NOT EXISTS idx_audit_event_type
   ON memory_audit_log(event_type, timestamp);
+
+-- What recall showed each turn (the memory framework audit's F14, part H;
+-- memory/recall_records.py): the ids shown, never their text; whether it was
+-- empty, degraded or failed; how long it took; whether the answer used what
+-- was shown (NULL until the turn ends, or when nothing was shown).
+CREATE TABLE IF NOT EXISTS memory_recall_records (
+  turn_key    TEXT PRIMARY KEY,
+  tenant_id   TEXT NOT NULL,
+  asker       TEXT NOT NULL DEFAULT '',
+  at          REAL NOT NULL,
+  shown_json  TEXT NOT NULL DEFAULT '{}',
+  shown_count INTEGER NOT NULL DEFAULT 0,
+  empty       INTEGER NOT NULL DEFAULT 0,
+  degraded    TEXT NOT NULL DEFAULT '',
+  failed      INTEGER NOT NULL DEFAULT 0,
+  latency_ms  INTEGER NOT NULL DEFAULT 0,
+  used        INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_recall_records_tenant_at
+  ON memory_recall_records(tenant_id, at);
+
+CREATE INDEX IF NOT EXISTS idx_recall_records_at
+  ON memory_recall_records(at);
+
+-- Each model deep pass's outcome (part H): when, and whether the model
+-- answered. The extraction watch reads it (memory/quality_watch.py).
+CREATE TABLE IF NOT EXISTS memory_deep_passes (
+  at        REAL NOT NULL,
+  tenant_id TEXT NOT NULL,
+  ok        INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_deep_passes_at
+  ON memory_deep_passes(at);
+
+-- Memory's own incidents (part H): one row while a condition lasts, paged
+-- once when it opens and once when it closes (memory/quality_watch.py).
+CREATE TABLE IF NOT EXISTS memory_incidents (
+  name       TEXT PRIMARY KEY,
+  opened_at  REAL NOT NULL,
+  paged      INTEGER NOT NULL DEFAULT 0,
+  detail     TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -566,6 +610,16 @@ def ensure_primary_schema(conn: Any) -> None:
     _ensure_fts5(conn)
     _ensure_mirror_outbox(conn)
     _ensure_graph_outbox(conn)
+    # The approximate index meaning search narrows by past a size (part H,
+    # F15): a code per vector, taken with it by triggers.
+    from kazma_core.memory.vector_codes import ensure_codes_schema
+
+    ensure_codes_schema(conn)
+    # What the memory sweeps act on changed, or not (part H, F15): a pass
+    # with nothing new reads nothing (memory/sweep_cursors.py).
+    from kazma_core.memory.sweep_cursors import ensure_cursor_schema
+
+    ensure_cursor_schema(conn)
     _refuse_rows_with_no_tenant(conn)
     # Phase 3: one-shot backfill of stale entity counts on first boot after
     # the columns are added (rows default to -1). Idempotent — only touches
@@ -576,7 +630,12 @@ def ensure_primary_schema(conn: Any) -> None:
     from kazma_core.memory.procedural import strip_argument_values
 
     strip_argument_values(conn)
-    # FK enforcement must be set per-connection in SQLite.
+    # FK enforcement must be set per-connection in SQLite, and outside a
+    # transaction: inside one the pragma does nothing. A step above may have
+    # written (the sweeps' change counter's first row, part H), so commit
+    # first; a fresh database's connection had foreign keys off otherwise.
+    if conn.in_transaction:
+        conn.commit()
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
     logger.debug("[schema_v2] primary schema ensured")

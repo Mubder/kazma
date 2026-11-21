@@ -20,7 +20,6 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from kazma_core.errors import safe_error
-
 from kazma_core.memory.tenant_view import narrowed_to, sees_every_tenant
 
 logger = logging.getLogger(__name__)
@@ -397,6 +396,11 @@ def register_memory_page(app: Any, templates: Any, agent: Any) -> None:
                 "active_page": "memory",
             },
         )
+
+    @app.get("/memory/you", response_class=HTMLResponse)
+    def what_kazma_knows_page(request: Request) -> HTMLResponse:
+        """What Kazma knows about you (part H): the asker's own facts."""
+        return templates.TemplateResponse(request, "memory_you.html", {"active_page": "memory"})
 
 
 # ── Health snapshot (compact for page header) ────────────────────────────
@@ -2668,6 +2672,59 @@ def dismiss_about_me_suggestion(belief_id: str) -> dict[str, Any]:
     try:
         return dismiss_suggestion(conn, tenant_id=_memory_tenant_id(), account=bound_asker(),
                                   belief_id=belief_id)
+    finally:
+        conn.close()
+
+
+# ── What Kazma knows about you (part H, memory/about_you.py) ─────────────
+
+
+@router.get("/api/memory/v2/you")
+def what_kazma_knows_about_you() -> dict[str, Any]:
+    """The caller's own facts: each with where it came from, since when, what
+    it was before. In a shared space, the caller's own entry only."""
+    from kazma_core.memory.about_you import facts_about
+    from kazma_core.spaces.scope import bound_asker
+
+    conn = _conn()
+    try:
+        return facts_about(conn, tenant_id=_memory_tenant_id(), account=bound_asker())
+    finally:
+        conn.close()
+
+
+@router.post("/api/memory/v2/you/{belief_id}/correct")
+async def correct_what_kazma_knows(belief_id: str, request: Request) -> dict[str, Any]:
+    """The caller's correction of one of their own facts. Body:
+    ``{"value": "..."}``. Refused with a code the page words (``not_found``,
+    ``no_account``, ``empty``, ``too_long``, ``unchanged``, ``refused``)."""
+    return await asyncio.to_thread(_correct_what_kazma_knows_sync, belief_id, await _read_json(request))
+
+
+def _correct_what_kazma_knows_sync(belief_id: str, payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`correct_what_kazma_knows` -- off the event loop."""
+    from kazma_core.memory.about_you import correct_fact
+    from kazma_core.spaces.scope import bound_asker
+
+    if payload is _INVALID_JSON or not isinstance(payload, dict) or not isinstance(payload.get("value"), str):
+        return {"ok": False, "error": "body must be {\"value\": \"...\"}"}
+    conn = _conn()
+    try:
+        return correct_fact(conn, belief_id, payload["value"], tenant_id=_memory_tenant_id(),
+                            account=bound_asker())
+    finally:
+        conn.close()
+
+
+@router.post("/api/memory/v2/you/{belief_id}/end")
+def end_what_kazma_knows(belief_id: str) -> dict[str, Any]:
+    """The caller says one of their own facts is no longer true."""
+    from kazma_core.memory.about_you import end_fact
+    from kazma_core.spaces.scope import bound_asker
+
+    conn = _conn()
+    try:
+        return end_fact(conn, belief_id, tenant_id=_memory_tenant_id(), account=bound_asker())
     finally:
         conn.close()
 

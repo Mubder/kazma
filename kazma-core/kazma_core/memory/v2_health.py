@@ -131,7 +131,31 @@ _INSTALL_ONLY = (
     "embedder",
     "sweeps",
     "tenants",
+    "incidents",
+    "narrowing",
 )
+
+
+def _quality(out: dict[str, Any], tenant_id: str | None, *, scoped: bool) -> None:
+    """The week's quality signals for the space (the memory framework
+    audit's F14, part H: recalls, empty, degraded, used, corrected, growth;
+    ``recall_records.signals``) and memory's open incidents
+    (``quality_watch``). An open incident marks health degraded. Unscoped
+    (the install's view) the signals are every space's."""
+    import time as _time
+
+    from kazma_core.memory.quality_watch import open_incidents
+    from kazma_core.memory.recall_records import signals
+    from kazma_core.memory.vector_engine import narrowing_health
+
+    out["quality"] = signals(since=_time.time() - 7 * 86400.0, tenant_id=tenant_id if scoped else None)
+    out["incidents"] = open_incidents()
+    # Meaning search narrowed past a size, checked against the full scan
+    # (part H, F15): how often it was, and differed.
+    out["narrowing"] = narrowing_health()
+    if out["incidents"] and out.get("status") != "OFF":
+        out["status"] = "DEGRADED"
+        out["status_detail"] = "memory_incident"
 
 
 def build_v2_health(
@@ -257,10 +281,10 @@ def build_v2_health(
     primary_conn = None
     ops_conn = None
     try:
+        import os
+
         from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
         from kazma_core.paths import memory_ops_db, primary_memory_db
-
-        import os
 
         if not os.path.exists(primary_memory_db()):
             return out
@@ -402,6 +426,7 @@ def build_v2_health(
                     conn.close()
                 except Exception:
                     pass
+    _quality(out, tenant_id, scoped=scoped)
     if not install_details:
         for key in _INSTALL_ONLY:
             out.pop(key, None)

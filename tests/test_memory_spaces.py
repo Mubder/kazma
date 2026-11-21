@@ -577,7 +577,7 @@ def test_control_the_check_that_kept_nothing_read_as_nothing_found(mem) -> None:
 
 
 _SWEEPS = (
-    "_converge_forgets", "_repair_memory_vectors", "_recover_erased_memories",
+    "_converge_forgets", "_repair_memory_vectors", "_fill_vector_codes", "_recover_erased_memories",
     "_retire_knowledge_promotions", "_reconcile_memory_turns", "_fill_cut_memory_text",
     "_sync_memory_mirror",
     "_sync_memory_graph", "_queue_topic_summaries", "_repair_entity_counts",

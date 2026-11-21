@@ -1052,7 +1052,7 @@
         out.innerHTML = lines.join('') +
           '<div class="mem-muted" style="margin-top:6px;font-size:0.68rem;">' + _esc(_mt('memory.console.channels_hint', 'Channels: fts5 · dense · belief_ppr · session_boost (enable Explain recall in Settings → Memory)')) + '</div>' +
           '<button type="button" class="btn btn-sm btn-secondary" id="v2-probe-path-btn" style="margin-top:8px;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>' +
-          '<button type="button" class="btn btn-sm btn-outline" id="v2-eval-golden-btn" style="margin-top:8px;margin-inline-start:6px;">' + _esc(_mt('memory.console.run_golden_eval', 'Run golden eval')) + '</button>';
+          '<button type="button" class="btn btn-sm btn-outline" id="v2-eval-golden-btn" style="margin-top:8px;margin-inline-start:6px;">' + _esc(_mt('memory.console.run_golden_eval', 'Quick recall check')) + '</button>';
         document.getElementById('v2-probe-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
         document.getElementById('v2-eval-golden-btn')?.addEventListener('click', runGoldenEval);
         _wireHitForgets(out);
@@ -1357,7 +1357,7 @@
   }
   async function runGoldenEval() {
     const out = document.getElementById('v2-probe-results');
-    if (out) out.textContent = _mt('memory.console.running_eval', 'Running golden eval…');
+    if (out) out.textContent = _mt('memory.console.running_eval', 'Running the quick recall check…');
     try {
       const resp = await fetch('/api/memory/v2/eval/golden', {
         method: 'POST',
@@ -1377,18 +1377,23 @@
       }
       const lines = [
         '<div style="margin-bottom:6px;">' +
-        _mt('memory.console.eval_summary', '<strong>Golden eval</strong> — pass {passed}/{total} (rate {rate})', {
+        _mt('memory.console.eval_summary', '<strong>Quick recall check</strong> — pass {passed}/{total} (rate {rate})', {
           passed: data.passed || 0,
           total: data.total || 0,
           rate: _esc((data.pass_rate != null) ? data.pass_rate : '—'),
         }) +
+        (data.unrelated_per_case && window.kazmaCount
+          ? ' · ' + _esc(window.kazmaCount('memory.console.eval_unrelated_n', data.unrelated_per_case)) : '') +
         (data.skipped ? ' · ' + _esc(_mt('memory.console.eval_skipped', 'skipped {n}', { n: data.skipped })) : '') + '</div>'
       ];
       (data.cases || []).forEach(function(c) {
         const color = c.status === 'pass' ? 'var(--success)' : (c.status === 'skipped' ? 'var(--text-muted)' : 'var(--danger)');
         lines.push('<div style="font-size:0.72rem;margin-bottom:2px;"><span style="color:' + color + ';font-weight:700;">' +
           _esc(_mt('memory.console.case_' + String(c.status || 'unknown').toLowerCase(), String(c.status || '?').toUpperCase())) + '</span> ' +
-          '<span translate="no">' + _esc(c.id || '') + (c.query ? ' — ' + _esc(c.query) : '') + '</span></div>');
+          '<span translate="no">' + _esc(c.id || '') + (c.query ? ' — ' + _esc(c.query) : '') + '</span>' +
+          ((c.shown_wrongly && c.shown_wrongly.length)
+            ? ' · ' + _esc(_mt('memory.console.eval_shown_wrongly', 'showed unrelated: {words}', { words: c.shown_wrongly.join(', ') }))
+            : '') + '</div>');
       });
       out.innerHTML = lines.join('');
     } catch (e) {

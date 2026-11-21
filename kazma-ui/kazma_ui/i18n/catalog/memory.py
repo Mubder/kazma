@@ -1147,8 +1147,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Show path on graph →",
     },
     "memory.console.run_golden_eval": {
-        "ar": "شغّل التقييم المرجعي",
-        "en": "Run golden eval",
+        "ar": "فحص سريع للاسترجاع",
+        "en": "Quick recall check",
     },
     "memory.console.loading": {
         "ar": "جارٍ التحميل…",
@@ -1346,8 +1346,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Federated search error: {error}",
     },
     "memory.console.running_eval": {
-        "ar": "جارٍ تشغيل التقييم المرجعي…",
-        "en": "Running golden eval…",
+        "ar": "جارٍ الفحص السريع للاسترجاع…",
+        "en": "Running the quick recall check…",
     },
     "memory.console.eval_failed_http": {
         "ar": "فشل التقييم: HTTP {status}",
@@ -1358,8 +1358,24 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Eval failed",
     },
     "memory.console.eval_summary": {
-        "ar": "<strong>التقييم المرجعي</strong> — نجح {passed}/{total} (النسبة {rate})",
-        "en": "<strong>Golden eval</strong> — pass {passed}/{total} (rate {rate})",
+        "ar": "<strong>الفحص السريع للاسترجاع</strong> — نجح {passed}/{total} (النسبة {rate})",
+        "en": "<strong>Quick recall check</strong> — pass {passed}/{total} (rate {rate})",
+    },
+    "memory.console.eval_unrelated_n.zero": {
+        "en": "each case among {n} unrelated memories", "ar": "كل حالة بلا ذكريات لا علاقة لها بها"},
+    "memory.console.eval_unrelated_n.one": {
+        "en": "each case among 1 unrelated memory", "ar": "كل حالة مع ذكرى واحدة لا علاقة لها بها"},
+    "memory.console.eval_unrelated_n.two": {
+        "en": "each case among {n} unrelated memories", "ar": "كل حالة بين ذكريين لا علاقة لهما بها"},
+    "memory.console.eval_unrelated_n.few": {
+        "en": "each case among {n} unrelated memories", "ar": "كل حالة بين {n} ذكريات لا علاقة لها بها"},
+    "memory.console.eval_unrelated_n.many": {
+        "en": "each case among {n} unrelated memories", "ar": "كل حالة بين {n} ذكرى لا علاقة لها بها"},
+    "memory.console.eval_unrelated_n.other": {
+        "en": "each case among {n} unrelated memories", "ar": "كل حالة بين {n} ذكرى لا علاقة لها بها"},
+    "memory.console.eval_shown_wrongly": {
+        "ar": "عُرض ما لا علاقة له: {words}",
+        "en": "showed unrelated: {words}",
     },
     "memory.console.eval_skipped": {
         "ar": "تُخطّي {n}",

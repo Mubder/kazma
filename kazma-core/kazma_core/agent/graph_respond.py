@@ -408,6 +408,18 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     from kazma_core.observability.answer_quality import record as record_quality
 
     await asyncio.to_thread(record_quality, quality_draft, messages, state)
+    # Whether the answer used what memory showed (part H, F14): judged on the
+    # turn's recall record, off the loop, never failing the turn.
+    if not state.get("turn_failed"):
+        from kazma_core.memory.recall_records import judge_used, turn_key as recall_turn_key
+
+        _last = messages[-1] if messages else {}
+        _answer = _last.get("content") if isinstance(_last, dict) and isinstance(_last.get("content"), str) else ""
+        if _answer:
+            from kazma_core.agent.turn_input import extract_latest_user_text
+
+            await asyncio.to_thread(judge_used, recall_turn_key(state.get("thread_id"), messages),
+                                    answer=_answer, question=extract_latest_user_text(messages))
 
     # Post-turn memory: mark this turn as finished so the turn's closer
     # (kazma_ui.turn_runtime.close_turn, which every transport runs) hands

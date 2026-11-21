@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% set active_page = "memory" %}
+{% block title %}Kazma — {{ t('memory.you.title') }}{% endblock %}
+{% block page_title %}
+  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-inline-end:6px;">
+    <circle cx="12" cy="8" r="4"/>
+    <path d="M4 21c0-4 4-7 8-7s8 3 8 7"/>
+  </svg>
+  {{ t('memory.you.title') }}
+{% endblock %}
+
+{# What Kazma knows about you (the memory framework audit's F14, part H):
+   the asker's own facts, each with its source, since when, what it was
+   before, and the asker's correction. Script: static/js/memory_you.js;
+   routes: kazma_ui/memory_api.py (/api/memory/v2/you). #}
+{% block content %}
+<div class="memory-you" id="memory-you" x-data="memoryYou()" style="max-width:960px;margin:0 auto;padding:0 0.75rem 2.5rem;">
+  <p class="mem-intro" style="color:var(--text-secondary);margin:0 0 1rem;">{{ t('memory.you.intro') }}</p>
+  <p style="margin:0 0 1rem;"><a class="btn btn-ghost btn-sm" href="/memory" id="memory-you-back">{{ t('memory.you.back') }}</a></p>
+
+  <p class="notice tone-info" role="status" id="memory-you-loading" x-show="!loaded && !failed">{{ t('memory.you.loading') }}</p>
+  <p class="notice tone-danger" role="alert" id="memory-you-failed" x-show="failed" x-cloak>
+    <span x-show="!loadError">{{ t('memory.you.failed') }}</span><span translate="no" x-show="loadError" x-text="loadError"></span>
+  </p>
+  <div class="empty-state" id="memory-you-empty" x-show="loaded && !failed && facts.length === 0" x-cloak>
+    <p>{{ t('memory.you.empty') }}</p>
+  </div>
+  <p role="status" id="memory-you-said" x-show="said" x-cloak x-text="said" class="notice tone-success"></p>
+
+  <div id="memory-you-list" x-show="loaded && facts.length > 0" x-cloak>
+    <template x-for="fact in facts" :key="fact.id">
+      <div class="card memory-you-fact" :data-fact-id="fact.id" style="margin-bottom:0.75rem;">
+        <div class="card-header" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline;">
+          <h3 class="card-title" style="margin:0;"><bdi translate="no" x-text="fact.label"></bdi></h3>
+          <span class="badge" translate="no" :class="sourceBadge(fact.source)" x-text="sourceText(fact.source)"></span>
+        </div>
+        <p class="memory-you-value" style="font-size:1.05rem;margin:0.25rem 0;" x-show="editing !== fact.id">
+          <bdi translate="no" x-text="fact.value"></bdi>
+        </p>
+        <div x-show="editing === fact.id" x-cloak class="form-group" style="margin:0.25rem 0;">
+          <label class="form-label" :for="'memory-you-input-' + fact.id">{{ t('memory.you.new_value') }}</label>
+          <input class="form-input memory-you-input" type="text" :id="'memory-you-input-' + fact.id"
+                 x-model="draft" maxlength="4000" @keydown.enter.prevent="save(fact)" @keydown.escape.prevent="cancel()">
+        </div>
+        <p class="card-sub memory-you-dates" x-text="datesText(fact)"></p>
+        <p class="form-hint memory-you-error" translate="no" role="alert" x-show="errorFor === fact.id" x-cloak x-text="error"></p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:0.5rem;">
+          <template x-if="editing !== fact.id">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm memory-you-correct" type="button" @click="edit(fact)"
+                      :disabled="busy !== ''">{{ t('memory.you.correct') }}</button>
+              <button class="btn btn-ghost btn-sm memory-you-end" type="button" @click="end(fact)"
+                      :disabled="busy !== ''">{{ t('memory.you.end') }}</button>
+            </div>
+          </template>
+          <template x-if="editing === fact.id">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-primary btn-sm memory-you-save" type="button" @click="save(fact)"
+                      :disabled="busy !== '' || !draft.trim()">{{ t('memory.you.save') }}</button>
+              <button class="btn btn-ghost btn-sm memory-you-cancel" type="button" @click="cancel()">{{ t('memory.you.cancel') }}</button>
+            </div>
+          </template>
+        </div>
+        <details class="memory-you-history" x-show="fact.history.length > 0" style="margin-top:0.5rem;">
+          <summary x-text="historyText(fact)"></summary>
+          <ul style="margin:0.5rem 0 0;padding-inline-start:1.25rem;">
+            <template x-for="(old, i) in fact.history" :key="fact.id + '-' + i">
+              <li><bdi translate="no" x-text="old.value"></bdi> <span class="card-sub" x-text="periodText(old)"></span></li>
+            </template>
+          </ul>
+        </details>
+      </div>
+    </template>
+  </div>
+</div>
+<script src="/static/js/memory_you.js?v={{ js_version() }}"></script>
+{% endblock %}

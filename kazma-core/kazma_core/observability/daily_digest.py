@@ -731,6 +731,45 @@ def _open_problems_line(labels: dict[str, str] | None = None) -> str | None:
     return line
 
 
+def _memory_line(since: float) -> str | None:
+    """Memory's day (the memory framework audit's F14, part H): the turns
+    recalled, how many came back empty, degraded or failed, how long the
+    slowest took, how often the answer used what was shown, what was
+    corrected, and the deep passes. Counts only, never a space's words; None
+    when no turn recalled and no deep pass ran."""
+    from kazma_core.memory.recall_records import signals
+
+    s = signals(since=since)
+    if not s.get("available"):
+        return "Memory: the recall records could not be read"
+    deep_ok, deep_failed = s["deep_passes_ok"], s["deep_passes_failed"]
+    if not s["turns"] and not deep_ok and not deep_failed:
+        return None
+    line = (f"Memory: {count_noun(s['turns'], 'recall')} ({s['empty']} empty, {s['degraded']} degraded, "
+            f"{s['failed']} failed; slowest 5 % over {s['latency_p95_ms'] / 1000:.1f} s)")
+    if s["judged"]:
+        line += f"; answers used what was shown in {s['used']} of {s['judged']}"
+    if s["corrected"]:
+        line += f"; {s['corrected']} corrected soon after"
+    return line + f"; deep passes {deep_ok} done, {deep_failed} failed"
+
+
+def _memory_incident_lines() -> list[str]:
+    """Memory's open incidents (``memory/quality_watch.py``), paged once when
+    they opened: here every day until they end."""
+    from kazma_core.memory.quality_watch import open_incidents
+    from kazma_core.observability.alert_catalog import entry_for
+
+    zone, _name = _operator_zone()
+    lines = []
+    for incident in open_incidents():
+        entry = entry_for(incident["key"])
+        title = entry.title if entry is not None else incident["name"]
+        since = datetime.fromtimestamp(incident["since"], zone).strftime("%Y-%m-%d %H:%M")
+        lines.append(f"  memory: {title} (since {since})")
+    return lines
+
+
 def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     """Render the digest. A log or the approval registry that cannot be read
     is skipped and said, so a usable digest goes out regardless."""
@@ -766,6 +805,9 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     delivered = app.get("scheduled messages delivered", 0)
     if delivered:
         lines.append(f"Scheduled messages delivered: {delivered}")
+    memory = _memory_line(since)
+    if memory:
+        lines.append(memory)
     # How the install looked from outside the machine this week (resilience
     # plan B1), only once it is paired with the observer.
     outside = _outside_watch_line()
@@ -832,7 +874,7 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
 
     problems.update(digest_problems())
     problems = {k: v for k, v in problems.items() if v}
-    packages = _package_lines()
+    packages = _package_lines() + _memory_incident_lines()
     if problems or packages:
         lines.append("")
         lines.append("Needs attention:")

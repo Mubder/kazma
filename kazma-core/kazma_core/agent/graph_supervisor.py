@@ -17,14 +17,13 @@ from kazma_core.agent.graph_helpers import (
     _ensure_about_user,
     _ensure_base_prompt,
     _ensure_environment_note,
-    _ensure_space_lessons,
     _ensure_personality,
+    _ensure_space_lessons,
     _memory_explain_cv,
     _rag_top_k,
     is_unusable_assistant_content,
     sanitize_tool_chains,
 )
-from kazma_core.spaces.scope import bound_asker, space_of_state
 from kazma_core.agent.plan_fence import (
     AUTO_CONTINUE_PROMPT,
     PLAN_EXECUTE_CONTINUE,
@@ -52,6 +51,7 @@ from kazma_core.agent.task_ledger import (
 )
 from kazma_core.llm_provider import LLMProvider
 from kazma_core.llm_stream import invoke_llm_chat
+from kazma_core.spaces.scope import bound_asker, space_of_state
 from kazma_core.summarizer import _normalize_msg
 from kazma_core.turn_notes import note_kind, opens_with
 
@@ -139,6 +139,30 @@ def _last_tool_tests_failed(messages: list[Any]) -> bool:
         if role == "user":
             return False
     return False
+
+
+def _recall_turn_key(state: Any, messages: list[Any]) -> str | None:
+    """The turn's recall-record key (``recall_records.turn_key``; pure: no
+    I/O); None with no thread."""
+    from kazma_core.memory.recall_records import turn_key
+
+    return turn_key(state.get("thread_id"), messages)
+
+
+async def _record_turn_recall(key: str | None, state: Any, result: Any, started: float, *,
+                              error: bool = False) -> None:
+    """Keep what the turn's recall showed (``memory/recall_records.py``, the
+    memory framework audit's F14, part H): the ids, empty, degraded, failed
+    (recall answers a failure in its result; *error* when it raised) and how
+    long it took. Off the loop; ``record_recall`` never raises, so it never
+    fails the turn."""
+    if not key:
+        return
+    from kazma_core.memory.recall_records import record_recall
+
+    await asyncio.to_thread(
+        record_recall, key, tenant_id=space_of_state(state), asker=bound_asker() or "",
+        result=result, latency_ms=(time.perf_counter() - started) * 1000.0, error=error)
 
 
 async def supervisor_node(
@@ -1223,6 +1247,10 @@ async def supervisor_node(
             pass
 
         if _use_v2:
+            # Set once recall starts and once its record is kept: a recall that
+            # raised is recorded failed by the handler below (part H, F14).
+            _recall_started: float | None = None
+            _recall_kept = False
             try:
                 _top_k = await asyncio.to_thread(_rag_top_k)
                 from kazma_core.memory.recall import format_recall_block, recall
@@ -1262,6 +1290,8 @@ async def supervisor_node(
                     _in_context = turns_in_context(messages, max_tokens=_ctx_budget)
                 # to_thread: recall() is synchronous SQLite + embedding work
                 # — running it on the loop stalled concurrent SSE/WS turns.
+                # Timed and recorded, one record per turn (part H, F14).
+                _recall_started = time.perf_counter()
                 result = await asyncio.to_thread(
                     recall,
                     _recall_query or last_user_content,
@@ -1274,6 +1304,8 @@ async def supervisor_node(
                     asker=bound_asker(),
                     in_context=_in_context,
                 )
+                await _record_turn_recall(_recall_turn_key(state, messages), state, result, _recall_started)
+                _recall_kept = True
                 # A recall that could not search by meaning, or at all, is
                 # said to the model (part F): empty is not "nothing known".
                 from kazma_core.memory.recall import recall_incomplete_note
@@ -1371,6 +1403,9 @@ async def supervisor_node(
                     "[Supervisor] V2 recall failed — skipping memory injection",
                     exc_info=True,
                 )
+                if _recall_started is not None and not _recall_kept:
+                    await _record_turn_recall(_recall_turn_key(state, messages), state, None, _recall_started,
+                                              error=True)
 
     if _kb_inject is not None and _kb_inject.block:
         from kazma_core.safety.prompt_fence import format_untrusted_block

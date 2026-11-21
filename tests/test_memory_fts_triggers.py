@@ -74,14 +74,20 @@ def _outbox_rows(conn: sqlite3.Connection) -> int:
                for queue in ("memory_mirror_outbox", "memory_graph_outbox"))
 
 
+def _change_count(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("SELECT seq FROM memory_change_seq WHERE name = 'rows'").fetchone()[0])
+
+
 def _rows_written(conn: sqlite3.Connection, sql: str) -> int:
     """Rows the statement wrote, the change queues' entries aside: a tier or
     validity change is one the Postgres mirror (Memory audit M31) and the
-    Neo4j graph copy (graph_sync) must hear about, and those queues are not
-    the full-text index this file measures."""
-    before, queued = conn.total_changes, _outbox_rows(conn)
+    Neo4j graph copy (graph_sync) must hear about, and the memory sweeps'
+    change counter counts (part H, ``memory/sweep_cursors.py``: one bump, one
+    row written); none is the full-text index this file measures."""
+    before, queued, bumped = conn.total_changes, _outbox_rows(conn), _change_count(conn)
     conn.execute(sql)
-    return conn.total_changes - before - (_outbox_rows(conn) - queued)
+    return (conn.total_changes - before - (_outbox_rows(conn) - queued)
+            - (_change_count(conn) - bumped))
 
 
 def _integrity(conn: sqlite3.Connection) -> None:

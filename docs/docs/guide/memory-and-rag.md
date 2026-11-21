@@ -667,6 +667,27 @@ A question you leave unanswered is let go after 30 days. Forgetting the
 fact, the conversation or the words a change holds forgets the change too,
 and the changes are in the memory export. Nothing here calls a model.
 
+## What Kazma knows about you {#what-kazma-knows-about-you}
+
+The Memory page's **What Kazma knows about you** (`/memory/you`) lists the
+facts Kazma holds about you, and only you: in a shared space, your own
+entry, never another member's. Each shows:
+
+- **where it came from**: you said it, Kazma's reading of a conversation,
+  Kazma noted it with a memory tool, or a tool reported it;
+- **since when** it holds, and the start you named for it ("since 2024"),
+  if you did;
+- **what it was before**, under "Before", each earlier value with when it
+  held.
+
+**Correct** puts your words in its place: the fact becomes yours (as if
+you had told Kazma), the earlier value stays in its history, and the
+change is under [Changes to what you told
+Kazma](#changes-to-what-you-told-kazma) with Undo. For a list (the
+languages you speak), the entry you correct is ended and the new value
+added; the others stay. **No longer true** ends the fact, also with Undo.
+Nothing here calls a model.
+
 ## One fact, one name
 
 When Kazma learns a fact it names it (`timezone`, `works_at` ...). The same
@@ -970,6 +991,49 @@ the hub, never from its code (`memory/entity_protection.py`).
 | `kazma_ui/static/js/memory.js` | Entities/beliefs list + list↔graph bridge |
 
 ---
+
+## How memory is watched {#how-memory-is-watched}
+
+Every turn's recall is recorded: which memories were shown, whether recall
+came back empty, could not search by meaning, or failed, and how long it
+took. No text is kept, and a record goes after 30 days. Two things are read
+from it: whether the answer used what was shown (a fact's value in the
+answer, or a remembered turn sharing words with the answer the question did
+not hold), and whether you corrected a shown fact within two days (you
+replaced or forgot it). Memory health shows the last week, with what was
+added and replaced; the daily digest has a "Memory:" line.
+
+Three problems page once each, and once more when they are over:
+
+| Page | When |
+|------|------|
+| The model's reading of turns is failing | Three deep passes failed since the last that worked, the first ten minutes back or more |
+| Recall cannot search by meaning | Most of the last twenty recalls degraded or failed |
+| Recall is slow | The slowest twentieth of the last twenty over 8 seconds |
+
+While the first is open, a deep pass given up on does not page again.
+
+**The quick recall check** (Memory page; it was "Run golden eval") writes
+each case's memories among twenty unrelated ones and passes only when the
+answer shows and none of the unrelated ones does. Measured with the
+embedding model on 2026-11-21, 2 of its 6 cases pass: where the answer is a
+fact, recall also shows three to five unrelated conversations, marked
+"possibly related". It is a check that can fail, and today it does.
+
+**Search past a size.** Below 20,000 memories, search by meaning compares
+every memory exactly. Past it, a short code of each vector picks the
+nearest candidates first (eight times what was asked, at least 400; a
+memory with no code yet is always one), and every candidate is compared
+exactly; the retrieval benchmark answers every question the same with this
+on. The first narrowed search after a start, and every 50th, also compares
+every memory, and the full answer is used when they differ (memory health,
+`narrowing`).
+
+**The memory sweeps.** Each memory sweep of the 15-minute maintenance pass
+has a time budget, and one over it is said in the log. A sweep whose work
+appears only when memories change waits while nothing it reads has changed
+since a pass found nothing to do; forgetting, turn reconcile and the copies
+in Postgres and Neo4j keep cursors of their own.
 
 ## Scale (trigger only)
 

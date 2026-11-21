@@ -1,8 +1,27 @@
-"""Golden-set recall evaluator — industry regression for V2 hybrid retrieval.
+"""The quick recall check (the Memory page's button; it was "golden eval").
 
-Runs fixture cases from ``kazma-core/tests/fixtures/memory_golden.json``
-against a private memory database (a temp file of its own, or an injected
-connection that is not the live one). No live LLM.
+Runs the cases of ``kazma-core/tests/fixtures/memory_golden.json`` against a
+private memory database (a temp file of its own, or an injected connection
+that is not the live one). No live LLM. It is a smoke test: recall finds the
+answer to an obvious question. The measurement of recall's quality is the
+retrieval benchmark (``memory/benchmark.py``).
+
+**A case passes only when the answer is shown and nothing unrelated is**
+(the memory benchmarks audit's F11 and R10, 2026-11-21). Every case's own
+memories are written among the fixture's twenty unrelated ones
+(``distractors``: turns and facts about other things), and no word of theirs
+(``marker``), nor any word the case lists in ``must_not_show``, may come
+back. Each case had only its own one to three memories, so a recall that
+showed every memory whatever was asked passed every case; it now fails every
+one (``kazma-core/tests/test_memory_eval_golden.py``).
+
+Measured with the real embedder (bge-m3) on 2026-11-21: 2 of the 6 cases
+pass. The other four find their answer and also show 3 to 5 of the twenty
+unrelated turns, nearly all as "possibly related" (evidence 0.04 to 0.10;
+one at 0.12, strong): where the answer is a fact, the turns' own lane keeps
+its best unrelated turns. A finding about recall in a small store, left for
+a decision, not tuned away here. Without an embedder (CI) the cases pass on
+their words.
 
 It never touches the live memory database or the process-wide episode
 writer. Until 2026-09-26 it rebound ``paths.primary_memory_db`` to its temp
@@ -25,7 +44,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-__all__ = ["run_golden_eval", "load_golden_cases", "GOLDEN_PATH"]
+__all__ = ["GOLDEN_PATH", "load_golden_cases", "run_golden_eval"]
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +53,30 @@ GOLDEN_PATH = (
 )
 
 
-def load_golden_cases() -> list[dict[str, Any]]:
+def _fixture() -> dict[str, Any]:
     if not GOLDEN_PATH.is_file():
-        return []
-    data = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
-    return list(data.get("cases") or [])
+        return {}
+    return json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
+
+
+def load_golden_cases() -> list[dict[str, Any]]:
+    return list(_fixture().get("cases") or [])
+
+
+def _distractors() -> list[dict[str, Any]]:
+    """The unrelated memories every case is written among: a turn
+    (``content``) or a fact (``subject``, ``predicate``, ``object``), each with
+    the word of it that must never come back (``marker``)."""
+    return list(_fixture().get("distractors") or [])
+
+
+def _seed_distractors(conn: sqlite3.Connection, distractors: list[dict[str, Any]], *, now: float) -> None:
+    for turn, item in enumerate(distractors, start=1):
+        if item.get("content"):
+            _seed_episode(conn, session_id="golden-unrelated", turn=turn, content=str(item["content"]),
+                          now=now - 3600)
+        else:
+            _seed_belief(conn, item, now=now - 3600)
 
 
 def _is_live_memory_db(conn: sqlite3.Connection) -> bool:
@@ -146,8 +184,12 @@ def run_golden_eval(
             "cases": [],
         }
 
+    # Imported at each run (a test's stand-in recall is the module's).
     from kazma_core.memory.recall import recall
     from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    distractors = _distractors()
+    unrelated = [str(d.get("marker") or "").lower() for d in distractors if d.get("marker")]
 
     owns = conn is None
     tmp_path = ""
@@ -186,6 +228,7 @@ def run_golden_eval(
             conn.execute("DELETE FROM episodes")
             conn.execute("DELETE FROM beliefs")
             now = time.time()
+            _seed_distractors(conn, distractors, now=now)
             for b in case.get("setup_beliefs") or []:
                 _seed_belief(conn, b, now=now)
             session = f"golden-{case.get('id')}"
@@ -208,12 +251,16 @@ def run_golden_eval(
                 explain=True,
             )
             blob = " ".join(
-                [(h.content or "").lower() for h in (result.beliefs + result.episodes)]
+                [(h.content or "").lower()
+                 for h in (result.beliefs + result.episodes + list(getattr(result, "summaries", []) or []))]
             )
             if match_any:
-                ok = any(e in blob for e in expect) if expect else True
+                found = any(e in blob for e in expect) if expect else True
             else:
-                ok = all(e in blob for e in expect) if expect else True
+                found = all(e in blob for e in expect) if expect else True
+            must_not = unrelated + [str(x).lower() for x in (case.get("must_not_show") or [])]
+            shown_wrongly = sorted({w for w in must_not if w and w in blob})
+            ok = found and not shown_wrongly
 
             if ok:
                 passed += 1
@@ -228,6 +275,8 @@ def run_golden_eval(
                     "query": query,
                     "expect": expect,
                     "match_any": match_any,
+                    "found": found,
+                    "shown_wrongly": shown_wrongly,
                     "preview": (blob or "")[:240],
                 }
             )
@@ -250,6 +299,7 @@ def run_golden_eval(
         "skipped": skipped,
         "total": total,
         "pass_rate": round(rate, 3),
+        "unrelated_per_case": len(distractors),
         "cases": results,
         "fixture": str(GOLDEN_PATH),
     }
