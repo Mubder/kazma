@@ -40,8 +40,9 @@ _KINDS = {"pdf": "pdf_path", "docx": "docx_path"}
 def _run_entry(turn: str) -> dict[str, Any] | None:
     """The newest research paper this turn registered, or None."""
     from kazma_core.config_store import get_config_store
+    from kazma_core.tools.research_pipeline import papers_index_key
 
-    items = get_config_store().get("research.papers_index") or []
+    items = get_config_store().get(papers_index_key()) or []
     if not isinstance(items, list):
         return None
     for item in items:  # newest first (``_register_paper`` prepends)
@@ -115,7 +116,9 @@ def keep_final_paper(
                 final.update(merged)
         return items
 
-    items = get_config_store().atomic_update("research.papers_index", attach, category="research")
+    from kazma_core.tools.research_pipeline import papers_index_key
+
+    items = get_config_store().atomic_update(papers_index_key(), attach, category="research")
     if not final:
         return None
     try:

@@ -49,6 +49,9 @@ _SKIP_FILES = frozenset({
 DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     # The one writer of the Spaces switch (S1-33), by its constant.
     "kazma-core/kazma_core/spaces/preconditions.py::switch_on": ("identity.enforced",),
+    # The papers index of the space the work is in (papers_index_key):
+    # research.papers_index, under tenant.<id>. for every space but the owner's.
+    "kazma-core/kazma_core/tools/research_final_paper.py::keep_final_paper": ("research.papers_index",),
     # ``mutate(name, ...)`` writes acquisition.<name> and its revision; the
     # names are read from its callers by test_every_durable_state_name_is_declared.
     "kazma-core/kazma_core/web_acquire/durable_state.py::mutate": (

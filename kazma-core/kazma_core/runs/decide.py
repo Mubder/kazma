@@ -56,6 +56,23 @@ def _already(row: dict[str, Any] | None) -> DecisionOutcome:
                            f"Already handled: {what}, by {who} on {where}.{tail}", row)
 
 
+def _not_theirs(row: dict[str, Any]) -> DecisionOutcome | None:
+    """A refusal when the person bound now may not decide on *row*'s
+    incident, else None. Blocking (the identity store)."""
+    from kazma_core.runs.spaces import may_act
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    try:
+        allowed = may_act(row.get("space"), row.get("asker"))
+    except IdentityUnavailable:
+        return DecisionOutcome(False, "identity_unavailable",
+                               "Accounts cannot be read right now. Try again.", row)
+    if allowed:
+        return None
+    return DecisionOutcome(False, "not_yours",
+                           "Only the person who asked, or an owner of its space, decides on this.", row)
+
+
 async def decide(incident_id: str, action: str, *, actor: str, platform: str) -> DecisionOutcome:
     """Carry out *action* on incident *incident_id* for *actor* on *platform*."""
     store = get_incident_store()
@@ -64,6 +81,14 @@ async def decide(incident_id: str, action: str, *, actor: str, platform: str) ->
     seen = await asyncio.to_thread(store.get, incident_id)
     if seen is not None and not visible_here(seen.get("space")):
         return _already(None)
+    if seen is not None:
+        # Who may decide is asked before anything is claimed, for every
+        # action -- a dismissal and a diagnosis too: the person who asked,
+        # or an owner of its space (runs.spaces.may_act, the rule
+        # registry.perform asks again for the actions that reach the run).
+        refusal = await asyncio.to_thread(_not_theirs, seen)
+        if refusal is not None:
+            return refusal
     if action == "diagnose":
         row = seen
         if row is None or row["state"] not in ("open", "acting"):

@@ -75,8 +75,11 @@ def resolve_voice_session(session_id: str) -> tuple[Any, str] | None:
         logger.warning("[voice] refused a chat whose thread is not the caller's alone")
         return None
     if not session.thread_id:
-        # Web session_id == LangGraph thread_id (same rule as the SSE route).
-        session.thread_id = sid
+        # The rule the chat's stream follows (spaces.threads.new_web_thread_id):
+        # the session id in the owner's space, a fresh id in any other.
+        from kazma_core.spaces.threads import new_web_thread_id
+
+        session.thread_id = new_web_thread_id(sid)
         try:
             store.put(session)
         except Exception:

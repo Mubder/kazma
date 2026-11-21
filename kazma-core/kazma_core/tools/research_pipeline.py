@@ -47,7 +47,12 @@ def _get_ws_root() -> Path:
 
 
 def _candidate_report_roots() -> list[Path]:
-    """All places we may have written research/reports (workspace can vary)."""
+    """All places we may have written research/reports (workspace can vary).
+
+    Once Spaces is enforced the machine's other roots (``KAZMA_WORKSPACE``,
+    the default sandbox, the process folder) are the owner's space's only:
+    every other space -- sandboxed, or a host space with a root of its own
+    (S1-34) -- reads its reports under its own root and nowhere else."""
     roots: list[Path] = []
     seen: set[str] = set()
 
@@ -67,9 +72,9 @@ def _candidate_report_roots() -> list[Path]:
     _add(_get_ws_root())
     from kazma_core.spaces.files import in_sandboxed_space
 
-    if in_sandboxed_space():
-        # A sandboxed space's reports are in its own folder and nowhere
-        # else (Spaces S1-19): never the machine's workspaces.
+    if in_sandboxed_space() or not _owners_space_here():
+        # A space's reports are under its own root and nowhere else (Spaces
+        # S1-19, S1-34): never the machine's workspaces or the owner's.
         return roots
     env = (os.environ.get("KAZMA_WORKSPACE") or "").strip()
     if env:
@@ -91,6 +96,38 @@ def _candidate_report_roots() -> list[Path]:
     except Exception:
         pass
     return roots
+
+
+def _owners_space_here() -> bool:
+    """True before Spaces, and once enforced for work in the owner's space
+    only (nothing bound is no one's)."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return True
+    bound = current_scope()
+    return bound is not None and bound.space_id == OWNER_SPACE_ID
+
+
+#: The papers index's key in the owner's space (and before Spaces).
+PAPERS_INDEX_KEY = "research.papers_index"
+
+
+def papers_index_key() -> str:
+    """The settings key of the papers index of the space this work is in.
+
+    Before Spaces one index for the install, as it always was. Once enforced
+    each space has its own: the owner's keeps ``research.papers_index``,
+    every other space's is under ``tenant.<id>.`` (so a space's count,
+    export and erase reach it with its other keys, S1-27). Work bound to no
+    space has none (``NoSpaceBound``)."""
+    from kazma_core.spaces.scope import require_space_id, spaces_enforced
+
+    if not spaces_enforced():
+        return PAPERS_INDEX_KEY
+    from kazma_core.tenant_isolation import tenant_key
+
+    return tenant_key(PAPERS_INDEX_KEY, tenant_id=require_space_id())
 
 
 def _names_a_root(text: str) -> bool:
@@ -222,7 +259,7 @@ def _register_paper(meta: dict[str, Any]) -> None:
             items = current if isinstance(current, list) else []
             items = [it for it in items if isinstance(it, dict) and it.get("report_path") != rp]
             return [meta, *items][:100]
-        items = cs.atomic_update("research.papers_index", register, category="research")
+        items = cs.atomic_update(papers_index_key(), register, category="research")
     except Exception as exc:
         logger.debug("[research_pipeline] ConfigStore paper register failed: %s", exc)
         raise
@@ -253,7 +290,7 @@ def list_research_papers(*, limit: int = 50) -> list[dict[str, Any]]:
     try:
         from kazma_core.config_store import get_config_store
 
-        items = get_config_store().get("research.papers_index") or []
+        items = get_config_store().get(papers_index_key()) or []
         if isinstance(items, list):
             for it in items:
                 if isinstance(it, dict) and it.get("report_path"):

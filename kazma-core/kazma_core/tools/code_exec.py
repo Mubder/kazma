@@ -237,6 +237,18 @@ def local_exec_forbidden() -> bool:
     """
     from kazma_core.safety.deployment_policy import container_required, policy_read_failures
 
+    # Once Spaces is enforced, only the owner's space runs code on the
+    # machine itself: every other space -- sandboxed, or a host space with a
+    # root of its own (S1-34) -- a container or nothing, whatever the lab
+    # switch says, since a computed path there reaches the vault and every
+    # other space's files; work bound to no space, nothing. (Readiness, with
+    # nothing bound, then asks for a container backend.)
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, current_scope, spaces_enforced
+
+    if spaces_enforced():
+        bound = current_scope()
+        if bound is None or bound.space_id != OWNER_SPACE_ID:
+            return True
     # A sandboxed space's code never runs on the machine itself (Spaces
     # S1-19, plan 4.8): a container or nothing, whatever the lab switch says.
     # A space whose kind cannot be read counts as sandboxed.

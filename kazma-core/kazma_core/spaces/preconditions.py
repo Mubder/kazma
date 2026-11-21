@@ -245,19 +245,35 @@ _BUILT_BY = {
 }
 
 
-def _is_built(module: str) -> bool:
+def _module_answer(module: str) -> tuple[bool, str] | None:
+    """What the module that builds a per-person rule says of it, or None
+    when the module is not there. A module present is not the rule in
+    force: it must name ``precondition() -> (holds, why)``, its own check
+    that the rule applies to every person, and that check must hold."""
     try:
-        return importlib.util.find_spec(module) is not None
+        if importlib.util.find_spec(module) is None:
+            return None
     except (ImportError, ValueError):
-        return False
+        return None
+    loaded = importlib.import_module(module)
+    check = getattr(loaded, "precondition", None)
+    if not callable(check):
+        return False, f"{module} names no precondition() of its own"
+    holds, why = check()
+    return bool(holds), str(why or "")
 
 
 def _built(which: str, what: str) -> tuple[bool, str, str]:
     module, item = _BUILT_BY[which]
-    if _is_built(module):
-        return True, f"{what} is built ({item})", ""
-    return (False, f"{what} is not built yet (plan item {item})",
-            f"It closes with the Kazma update that builds {item}.")
+    answer = _module_answer(module)
+    if answer is None:
+        return (False, f"{what} is not built yet (plan item {item})",
+                f"It closes with the Kazma update that builds {item}.")
+    holds, why = answer
+    if holds:
+        return True, f"{what} holds ({item}): {why}" if why else f"{what} holds ({item})", ""
+    return (False, f"{what} does not hold yet ({item}): {why}" if why else f"{what} does not hold yet ({item})",
+            f"See {item}'s own setting.")
 
 
 def _daily_limits() -> tuple[bool, str, str]:

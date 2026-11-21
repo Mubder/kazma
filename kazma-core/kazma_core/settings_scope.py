@@ -105,6 +105,8 @@ SCOPE_RULES: tuple[_ScopeRule, ...] = (
     _ScopeRule("chat.models", SPACE, "each chat app's own model, by chat"),
     _ScopeRule("swarm.approval.", SPACE, "a swarm request's shared approval; it records its "
               "space and asker (S1-15)"),
+    _ScopeRule("research.papers_index", SPACE, "the owner's space's research papers (every other "
+              "space's is under tenant.<id>.)"),
     # ── the install's ───────────────────────────────────────────────────
     _ScopeRule("acquisition.", INSTALL, "the web acquisition journal, allowances and monitor: "
               "the install's; each crawl row names its library or folder"),
@@ -144,7 +146,7 @@ SCOPE_RULES: tuple[_ScopeRule, ...] = (
     _ScopeRule("providers.", INSTALL, "LLM providers"),
     _ScopeRule("proxy.", INSTALL, "the scraping proxy"),
     _ScopeRule("registry.", INSTALL, "the model chosen, found and checked"),
-    _ScopeRule("research.", INSTALL, "the papers index (each paper is in its space's folder, S1-19)"),
+    _ScopeRule("research.", INSTALL, "research settings (each space's papers index is its own)"),
     _ScopeRule("runs.", INSTALL, "the run supervisor's automatic first steps"),
     _ScopeRule("safety.", INSTALL, "approval and safety settings"),
     _ScopeRule("security.", INSTALL, "the sign-in secret, the disclosure key, the execution policy"),

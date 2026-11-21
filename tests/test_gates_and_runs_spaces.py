@@ -404,6 +404,7 @@ def test_control_without_the_space_checks_a_member_acts_on_another_space(fake, m
     monkeypatch.setattr(run_spaces, "visible_here", lambda space: True)
     monkeypatch.setattr(registry, "visible_here", lambda space: True)
     monkeypatch.setattr(registry, "may_act", lambda space, asker: True)
+    monkeypatch.setattr("kazma_core.runs.decide._not_theirs", lambda row: None)
     with matrix.as_a():
         outcome = _decide(row["id"])
     assert outcome.ok and fake.acted == [("b", "cancel")]
@@ -507,3 +508,37 @@ def test_run_records_keep_the_asker_on_the_server() -> None:
     assert "asker" not in run.to_dict() and run.to_dict()["space"] == "matrix-a"
     assert "asker" not in public({"origin": {}, "asker": "acct-secret", "decided_action": ""})
     assert contract.Run.__dataclass_fields__["space"].default == ""
+
+
+@pytest.mark.parametrize("action", ["dismiss", "diagnose", "cancel"])
+def test_in_a_shared_space_no_decision_on_another_members_incident_is_claimed(
+    fake, matrix, enforced, action
+) -> None:
+    """Who may decide is asked before anything is claimed, for every action:
+    another member's dismissal leaves the incident open, as their cancel does."""
+    shared = identity.create_space("Shared", created_by=matrix.account_a, space_id="matrix-shared")["id"]
+    identity.add_member(shared, matrix.account_b)
+    fake.runs = [_run("by-a", shared, matrix.account_a)]
+    store = get_incident_store()
+    by_a, _ = store.open_incident(fake.runs[0], "failed", origin={})
+    with scope.bind_scope(shared, matrix.account_b):
+        refused = _decide(by_a["id"], action)
+    assert refused.code == "not_yours" and fake.acted == []
+    assert store.get(by_a["id"])["state"] == "open"
+    with scope.bind_scope(shared, matrix.account_a):  # the person who asked
+        assert _decide(by_a["id"], "dismiss").ok
+
+
+def test_control_a_dismissal_without_the_check_closes_another_members_incident(
+    fake, matrix, enforced, monkeypatch
+) -> None:
+    from kazma_core.runs import decide as decide_module
+
+    shared = identity.create_space("Shared", created_by=matrix.account_a, space_id="matrix-shared")["id"]
+    identity.add_member(shared, matrix.account_b)
+    fake.runs = [_run("by-a", shared, matrix.account_a)]
+    by_a, _ = get_incident_store().open_incident(fake.runs[0], "failed", origin={})
+    monkeypatch.setattr(decide_module, "_not_theirs", lambda row: None)
+    with scope.bind_scope(shared, matrix.account_b):
+        assert _decide(by_a["id"], "dismiss").ok
+    assert get_incident_store().get(by_a["id"])["state"] != "open"

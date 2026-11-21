@@ -343,8 +343,6 @@ def create_sse_chat_router(
         ``gw-telegram-…``. Those ids **are** the LangGraph thread_id, so
         Web and Telegram share one checkpointer season.
         """
-        from kazma_core.tenant_isolation import require_tenant_id
-
         store = _get_store()
         session = store.get(session_id)
         if session is None:
@@ -359,10 +357,10 @@ def create_sse_chat_router(
         if session is None or not session.thread_id:
             if session_id.startswith("gw-"):
                 raise PermissionError("Session unavailable")
-            new_thread = (
-                session_id if require_tenant_id() == "default" else str(uuid.uuid4())
-            )
-            session = store.get_or_create(session_id, durable=durable, thread_id=new_thread)
+            from kazma_core.spaces.threads import new_web_thread_id
+
+            session = store.get_or_create(session_id, durable=durable,
+                                          thread_id=new_web_thread_id(session_id))
         if not store.thread_is_exclusive(session.thread_id):
             raise PermissionError("Session unavailable")
         return session, session.thread_id

@@ -14669,8 +14669,9 @@ an install with one account behaves as before.
     under `scope.as_if_enforced`, plus `TENANT_FALLBACKS_LEFT`, held equal
     to the S1-02 ratchet's baseline), one value per secret
     (`SecretVault.copies_that_disagree`), a daily limit per person and
-    features per person (missing until the modules `_BUILT_BY` names exist:
-    S2-02, S2-11), no plain copy of the
+    features per person (missing until the modules `_BUILT_BY` names exist
+    and their own `precondition()` holds -- a module alone is not the rule in
+    force, `preconditions._module_answer`: S2-02, S2-11), no plain copy of the
     backup leaving the machine (`universal.plain_copy_configured`, N10), the
     owner's API token for the deploy check (N15), a key per space
     (`space_keys.report`), and for the switch alone no account left by the
@@ -14892,6 +14893,40 @@ an install with one account behaves as before.
     `tests/test_chat_apps_once_enforced.py` (the real handler on four
     platforms; no scope bound as the control; every tenant or scope the
     gateway binds comes from this rule or is declared).
+  - **Research is each space's** (`tools/research_pipeline.py`): the papers
+    index is per space (`papers_index_key`: the owner's keeps
+    `research_pipeline.PAPERS_INDEX_KEY`, every other space's is under `tenant.<id>.`,
+    so its count, export and erase reach it); the machine's other report
+    roots (`KAZMA_WORKSPACE`, the default sandbox, the process folder) are
+    the owner's space's only (`_owners_space_here`), every other space reads
+    under its own root; a research job freezes its space in its policy
+    (its `space`, read first by `runs.adapters.research._CrawlSpaces`,
+    which the acquisition monitor uses too; a resume in another space is
+    refused). Gate: `tests/test_research_papers_per_space.py` (one index for
+    the install, the roots of before, the folder guess as controls).
+  - **Only the owner's space runs code on the machine itself**
+    (`code_exec.local_exec_forbidden`): every other space, and work bound
+    to no space, a container or nothing, whatever the lab switch says.
+  - **A URL password in a space's setting is that space's**
+    (`config_store._secret_vault_name`: a `tenant.<id>.` key's goes under
+    `cfg:tenant.<id>.`); `cfg-url:tenant.<id>.` is read as the same space's
+    (`vault.secret_scope`, `_install_scope_rule`), and
+    `vault.space_name_prefixes` is the one list of names that carry a space
+    (erase, and the count and export's `space_data._vault_rows`). Gate:
+    `tests/test_space_url_secrets.py`.
+  - **Who may decide on a run incident is asked before anything is claimed**
+    (`runs/decide._not_theirs`, every action, a dismissal and a diagnosis
+    too); the run's own control is asked again by `registry.perform`.
+    Gate: `tests/test_gates_and_runs_spaces.py`.
+  - **A space's swarm approval rows go with it**: `space_data._settings_keys`
+    reads a settings row that records its space
+    (`_SPACE_RECORDING_PREFIXES`: `swarm.approval.`) beside `tenant.<id>.`
+    keys and its chats' state. Gate:
+    `tests/test_space_erase_takes_its_approvals.py`.
+  - **A new web chat's thread id is one rule** (`threads.new_web_thread_id`,
+    the chat's stream and live voice): the session id in the owner's space,
+    a fresh id in any other. Gate: `tests/test_web_thread_ids.py` (no web
+    code gives a thread its session id itself, but two declared places).
 
 ## UI Conventions (Web)
 

@@ -45,16 +45,22 @@ def _monitor_since() -> dict[str, float]:
 
 class _CrawlSpaces:
     """The space of each crawl-journal job (Spaces S1-21): a research job's
-    is the space whose folder it worked in (``spaces/<id>/files``; any
-    other folder is the machine's workspace, the owner's), a Knowledge
-    crawl's the space of its library. A library this store no longer holds
-    names no space: the owner's. Blocking; one library read per library."""
+    is the space its policy records (``space``, frozen when the job started
+    once Spaces is enforced); a job from before names none, and its space is
+    the one whose folder it worked in (``spaces/<id>/files``; any other
+    folder is the machine's workspace, the owner's). A Knowledge crawl's is
+    the space of its library; a library this store no longer holds names no
+    space: the owner's. Blocking; one library read per library."""
 
     def __init__(self) -> None:
         self._libraries: dict[str, str] = {}
 
     def of(self, row: dict[str, Any]) -> str:
-        folder = ((row.get("policy") or {}).get("workspace") if isinstance(row.get("policy"), dict) else None)
+        policy = row.get("policy") if isinstance(row.get("policy"), dict) else {}
+        recorded = policy.get("space")
+        if isinstance(recorded, str) and recorded:
+            return recorded
+        folder = policy.get("workspace")
         if isinstance(folder, str) and folder:
             from pathlib import Path
 

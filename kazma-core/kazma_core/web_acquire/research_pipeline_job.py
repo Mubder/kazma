@@ -274,6 +274,11 @@ async def pipeline_job(topic, root, options, *, resume_job_id=None):
     output = previous['policy']['output'] if previous and previous.get('kind') == 'research_pipeline' else 'research/reports/pipeline-' + uuid.uuid4().hex
     frozen = dict(options, schema=1, workspace=str(root), output=output,
                   mode=policy.mode, providers=sorted(policy.providers), configuration=signature)
+    from kazma_core.spaces.scope import require_space_id, spaces_enforced
+
+    if spaces_enforced():
+        # Whose job it is (runs.adapters.research._CrawlSpaces reads it).
+        frozen['space'] = require_space_id()
     job = await crawl_jobs.call(crawl_jobs.start,
         'research-pipeline:' + hashlib.sha256(str(root).encode()).hexdigest()[:32],
         topic, frozen, job_id=identity, resume=resume_job_id is not None,

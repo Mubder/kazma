@@ -103,6 +103,14 @@ async def research_job(seed, workspace, options, *, resume_job_id=None):
         raise AcquisitionError(FetchErrorCode.POLICY, str(exc)) from exc
     frozen = dict(options, kind='research_crawl', workspace=str(workspace), mode=policy.mode,
                   providers=sorted(policy.providers))
+    from kazma_core.spaces.scope import require_space_id, spaces_enforced
+
+    if spaces_enforced():
+        # Whose job it is, recorded once Spaces is enforced: the runs and
+        # their notices read it (runs.adapters.research._CrawlSpaces), never a
+        # guess from the folder. A resume in another space is refused (the
+        # frozen policy must match).
+        frozen['space'] = require_space_id()
     if not valid(dict(policy=frozen, pages=[])):
         raise AcquisitionError(FetchErrorCode.LIMIT, 'Research options exceed their durable budget.')
     library = 'research-crawl:' + hashlib.sha256(str(workspace).encode()).hexdigest()[:32]

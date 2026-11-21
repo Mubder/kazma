@@ -70,7 +70,13 @@ those of the spaces they are a member of only:
   secrets in the vault;
 - files: uploads, generated images and documents, and the space's working
   folder;
-- running work, its incidents, and the notices about them.
+- running work, its incidents, and the notices about them;
+- a finished answer's push notification, which goes to the devices of the
+  person whose chat it is.
+
+The admin's own Settings, `/config` and the agent's `config_read` show the
+install's settings and their own space's, never another space's, and none
+of Kazma's own records.
 
 The tools a space has follow its kind: a sandboxed space has no shell, git,
 IDE or MCP servers, and its code runs in a container that sees only the
@@ -130,9 +136,10 @@ of who is in which, so a restore puts every chat back in its space.
   so this keeps spaces apart from each other, not from them.
 - **It has not been reviewed independently yet.**
 - **Chat apps belong to the admin until a later stage.** Telegram, Discord,
-  Slack and WhatsApp answer the admin's own accounts; other people use the
-  web. Until they link their own chat apps, only the admin books scheduled
-  jobs, because a job is delivered to a chat.
+  Slack and WhatsApp answer the admin's own accounts and work in the admin's
+  own space; a chat that belongs to another space is refused there. Other
+  people use the web. Until they link their own chat apps, only the admin
+  books scheduled jobs, because a job is delivered to a chat.
 - **A backup taken before an erase** still holds the erased space until it
   ages out.
 

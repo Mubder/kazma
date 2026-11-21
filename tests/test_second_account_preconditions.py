@@ -69,7 +69,7 @@ def install(vault, monkeypatch):
     store.delete(identity.REGISTRY_KEY)
     store.delete(identity.ENFORCED_KEY)
     monkeypatch.setattr(preconditions, "TENANT_FALLBACKS_LEFT", 0)
-    monkeypatch.setattr(preconditions, "_is_built", lambda module: True)
+    monkeypatch.setattr(preconditions, "_module_answer", lambda module: (True, "every person has one"))
     preconditions._make_owner_token()
     assert preconditions.missing(for_switch=True) == []
     try:
@@ -134,11 +134,13 @@ def _break_copies(vault, monkeypatch) -> None:
 
 
 def _break_limits(vault, monkeypatch) -> None:
-    monkeypatch.setattr(preconditions, "_is_built", lambda module: not module.endswith("daily_limits"))
+    monkeypatch.setattr(preconditions, "_module_answer",
+                        lambda module: None if module.endswith("daily_limits") else (True, ""))
 
 
 def _break_grants(vault, monkeypatch) -> None:
-    monkeypatch.setattr(preconditions, "_is_built", lambda module: not module.endswith("features"))
+    monkeypatch.setattr(preconditions, "_module_answer",
+                        lambda module: None if module.endswith("features") else (True, ""))
 
 
 def _break_copy(vault, monkeypatch) -> None:
@@ -751,3 +753,41 @@ def test_control_a_planted_account_writer_fails_the_gate() -> None:
                "def invite(reg, account):\n    reg['accounts'][account['id']] = account\n"}
     assert _account_writers(planted) == ["kazma-core/kazma_core/elsewhere.py:invite"]
     assert not set(_account_writers(planted)) <= set(ACCOUNT_WRITERS)
+
+
+# ── A per-person rule is met by its own check, never by a file ──────────
+
+
+def _planted_module(name: str, **attrs):
+    import importlib.machinery
+    import types
+
+    module = types.ModuleType(name)
+    module.__spec__ = importlib.machinery.ModuleSpec(name, None)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+@pytest.mark.parametrize("attrs, holds", [
+    ({}, False),                                                   # names no check
+    ({"precondition": lambda: (False, "two people have none")}, False),
+    ({"precondition": lambda: (True, "every person has one")}, True),
+])
+def test_a_built_rule_holds_only_by_its_own_check(attrs, holds) -> None:
+    from tests._module_stubs import stub_modules
+
+    name = "kazma_core.spaces.daily_limits"
+    with stub_modules({name: _planted_module(name, **attrs)}):
+        ok, detail, _fix = preconditions._built("daily_limits", "a daily spending limit per person")
+    assert ok is holds, detail
+
+
+def test_control_the_check_of_before_passed_on_a_module_alone() -> None:
+    import importlib.util
+
+    from tests._module_stubs import stub_modules
+
+    name = "kazma_core.spaces.daily_limits"
+    with stub_modules({name: _planted_module(name)}):
+        assert importlib.util.find_spec(name) is not None  # what the check of before asked

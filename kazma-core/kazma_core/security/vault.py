@@ -146,7 +146,11 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
 
 
 def _install_scope_rule(name: str) -> str | None:
-    """Which copy wins for *name* (``"newest"``/``"global"``), or ``None`` if per-tenant."""
+    """Which copy wins for *name* (``"newest"``/``"global"``), or ``None`` if per-tenant.
+    A URL password of a space's setting (``cfg-url:tenant.<id>.``) is that
+    space's, never the install's."""
+    if name.startswith("cfg-url:tenant."):
+        return None
     for entry, authority in INSTALL_SCOPED_SECRETS:
         if name.startswith(entry) if entry.endswith((".", ":")) else name == entry:
             return authority
@@ -193,6 +197,22 @@ _SPACE_NAME_PREFIX = "space:"
 #: name is ``cfg:tenant.<id>.<key>``.
 _SPACE_SETTING_PREFIX = CONFIG_SECRET_PREFIX + "tenant."
 
+#: A URL password the settings store moved out of a space's setting under a
+#: key that is not a credential's (``config_store.URL_SECRET_PREFIX``). The
+#: settings store names such a secret ``cfg:tenant.<id>.<key>`` (S1-18's
+#: space name); this spelling is read as the same space's wherever it is
+#: found, never the install's.
+_SPACE_URL_SETTING_PREFIX = "cfg-url:tenant."
+
+
+def space_name_prefixes(space_id: str) -> tuple[str, ...]:
+    """Every vault-name prefix that names *space_id* itself: its connected
+    accounts (``space:<id>:``), its settings' secrets (``cfg:tenant.<id>.``)
+    and a URL password of its settings (``cfg-url:tenant.<id>.``). The one
+    list for a space's erase, export and count."""
+    return (f"{_SPACE_NAME_PREFIX}{space_id}:", f"{_SPACE_SETTING_PREFIX}{space_id}.",
+            f"{_SPACE_URL_SETTING_PREFIX}{space_id}.")
+
 #: Settings whose secrets are a space's connected account, kept under the
 #: plain key in the owner's space (``spaces.connected_accounts``): the X
 #: account and the GitHub sign-in. Every other setting is the install's until
@@ -237,9 +257,10 @@ def secret_scope(name: str) -> tuple[str, str | None]:
     if clean.startswith(_SPACE_NAME_PREFIX):
         space, sep, _rest = clean[len(_SPACE_NAME_PREFIX):].partition(":")
         return "space", (space if sep else "")
-    if clean.startswith(_SPACE_SETTING_PREFIX):
-        space, sep, _rest = clean[len(_SPACE_SETTING_PREFIX):].partition(".")
-        return "space", (space if sep else "")
+    for prefix in (_SPACE_SETTING_PREFIX, _SPACE_URL_SETTING_PREFIX):
+        if clean.startswith(prefix):
+            space, sep, _rest = clean[len(prefix):].partition(".")
+            return "space", (space if sep else "")
     from kazma_core.spaces.connected_accounts import (
         INSTALL_ACCOUNT_SECRETS,
         OWNER_ACCOUNT_PREFIXES,
@@ -1463,7 +1484,11 @@ class SecretVault:
         if not valid_space_id(space_id) or space_id == OWNER_SPACE_ID:
             raise ValueError(f"not a space whose secrets can be erased: {space_id!r}")
         refuse_write("vault", f"{_SPACE_NAME_PREFIX}{space_id}:")
-        prefixes = (f"{_SPACE_NAME_PREFIX}{space_id}:", f"cfg:tenant.{space_id}.")
+        prefixes = space_name_prefixes(space_id)
+        named = " OR ".join("substr(name, 1, ?) = ?" for _ in prefixes)
+        params: list[Any] = [space_id]
+        for prefix in prefixes:
+            params += [len(prefix), prefix]
         with self._lock:
             # The rows and the keys that seal them go in one step: with its
             # key gone, a sealed copy left anywhere in this file opens with
@@ -1472,8 +1497,7 @@ class SecretVault:
             erased = False
             try:
                 cur = self._conn.execute(
-                    "DELETE FROM secrets WHERE tenant_id = ? OR substr(name, 1, ?) = ? OR substr(name, 1, ?) = ?",
-                    (space_id, len(prefixes[0]), prefixes[0], len(prefixes[1]), prefixes[1]),
+                    f"DELETE FROM secrets WHERE tenant_id = ? OR {named}", params,  # nosec B608: placeholders only
                 )
                 self._conn.execute("DELETE FROM space_keys WHERE space_id = ?", (space_id,))
                 self._conn.execute("COMMIT")

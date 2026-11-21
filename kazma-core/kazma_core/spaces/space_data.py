@@ -367,6 +367,10 @@ _CHAT_STATE_PREFIXES = (
 )
 #: Settings that hold every space's entry in one mapping.
 _BY_SPACE_MAPPINGS = (("email.accounts_by_space", ()), ("self_improvement.space_evolution", ("spaces",)))
+#: Settings whose row records the space it belongs to (``"space"`` in the
+#: stored value): a swarm request's shared approval (S1-15) names its space,
+#: its asker, the tool and the arguments' hash.
+_SPACE_RECORDING_PREFIXES = ("swarm.approval.",)
 
 
 def _settings_keys(space: str, threads: list[str]) -> list[str]:
@@ -378,11 +382,13 @@ def _settings_keys(space: str, threads: list[str]) -> list[str]:
     wanted = set(threads)
     keys: list[str] = []
     for group in get_config_store().get_all().values():
-        for key in group:
+        for key, value in group.items():
             if key.startswith(f"tenant.{space}."):
                 keys.append(key)
             elif key.startswith(_CHAT_STATE_PREFIXES) and wanted and any(
                     part in wanted for part in key.split(".")):
+                keys.append(key)
+            elif key.startswith(_SPACE_RECORDING_PREFIXES) and isinstance(value, dict)                     and str(value.get("space") or "") == space:
                 keys.append(key)
     return sorted(keys)
 
@@ -408,12 +414,17 @@ def _vault_rows(space: str) -> list[tuple[str, str | None]]:
     path = Path(paths.vault_db_path())
     if not path.is_file():
         return []
+    from kazma_core.security.vault import space_name_prefixes
+
+    prefixes = space_name_prefixes(space)
+    named = " OR ".join("substr(name, 1, ?) = ?" for _ in prefixes)
+    params: list[Any] = [space]
+    for prefix in prefixes:
+        params += [len(prefix), prefix]
     with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
-        first, second = f"space:{space}:", f"cfg:tenant.{space}."
         return [(str(name), tenant) for name, tenant in conn.execute(
-            "SELECT name, tenant_id FROM secrets WHERE tenant_id = ? "
-            "OR substr(name, 1, ?) = ? OR substr(name, 1, ?) = ?",
-            (space, len(first), first, len(second), second))]
+            f"SELECT name, tenant_id FROM secrets WHERE tenant_id = ? OR {named}",  # nosec B608: placeholders only
+            params)]
 
 
 def _vault_keys(space: str) -> int:

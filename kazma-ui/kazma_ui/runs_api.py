@@ -166,7 +166,8 @@ def create_runs_router() -> APIRouter:
         status = 200
         if not outcome.ok:
             status = {"unknown_incident": 404, "already_decided": 409, "resolved": 409, "expired": 409,
-                      "diagnosis_running": 409, "not_offered": 409, "not_yours": 403}.get(outcome.code, 422)
+                      "diagnosis_running": 409, "not_offered": 409, "not_yours": 403,
+                      "identity_unavailable": 503}.get(outcome.code, 422)
         lang = current_language()
         return JSONResponse({"ok": outcome.ok, "code": outcome.code, "message": outcome.message,
                              "incident": _incident_view(outcome.incident, lang) if outcome.incident else None},

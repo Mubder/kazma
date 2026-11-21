@@ -57,6 +57,7 @@ __all__ = [
     "require_thread",
     "scope_for_turn",
     "thread_scopes_db",
+    "new_web_thread_id",
 ]
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,19 @@ class ThreadRecord:
     space_id: str
     opener: str
     created_at: str
+
+
+def new_web_thread_id(session_id: str) -> str:
+    """The thread id a web chat gets when its first message makes it, the
+    same for every mouth (the chat's stream, live voice): its session id in
+    the owner's space -- one id everywhere, as before Spaces -- and a fresh
+    one in any other, since two spaces' browsers may hold the same session
+    id and a thread id names one chat for good."""
+    import uuid
+
+    from kazma_core.tenant_isolation import require_tenant_id
+
+    return session_id if require_tenant_id() == _scope.OWNER_SPACE_ID else str(uuid.uuid4())
 
 
 def thread_scopes_db() -> str:

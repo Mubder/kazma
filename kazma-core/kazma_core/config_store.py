@@ -277,6 +277,12 @@ def _secret_vault_name(key: str, value: Any) -> str | None:
     from kazma_core.security.vault import is_install_scoped_secret
 
     name = _vault_secret_name(key)
+    if key.startswith("tenant."):
+        # A space's own setting (``tenant.<id>.<key>``): its password is that
+        # space's secret, under the space's name (``cfg:tenant.<id>.``) --
+        # sealed with its key, read in its space, erased and exported with
+        # it -- never an install-wide copy.
+        return name
     return name if is_install_scoped_secret(name) else f"{URL_SECRET_PREFIX}{key}"
 
 
@@ -2790,7 +2796,10 @@ class ConfigStore(_ChangeNotices):
         names: list[str] = []
         if is_sensitive_config_key(key):
             names.append(_vault_secret_name(key))
-        elif is_vault_ref(raw) and str(raw).startswith(f"{_VAULT_REF_PREFIX}{URL_SECRET_PREFIX}"):
+        elif is_vault_ref(raw) and (str(raw).startswith(f"{_VAULT_REF_PREFIX}{URL_SECRET_PREFIX}")
+                                    or str(raw) == _vault_ref_for_key(key)):
+            # A URL password moved out of the row: under ``cfg-url:<key>``,
+            # or a space's setting's own name (``cfg:tenant.<id>.<key>``).
             names.append(str(raw)[len(_VAULT_REF_PREFIX):])
         if deleted and names:
             vault = _try_get_vault()
