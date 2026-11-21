@@ -379,9 +379,9 @@ is left under Program Files, unused.
 Drilled on a Windows VM with a second disk (`scripts/data_folder_drill.py`,
 21 November 2026): Kazma's database moved off C: in 30 seconds with its data
 and its archive working, then PostgreSQL removed with its own uninstaller
-and set up again, the kept database attached. The engine's move and a first
-install with the folder chosen beforehand are held by tests on a fake
-machine, not yet drilled.
+and set up again, the kept database attached; and a first install with the
+folder chosen beforehand, its new database made on the second drive. The
+engine's move is held by tests on a fake machine, not yet drilled.
 
 **Disks that ask for a password at boot.** A Mac with FileVault on, a Windows
 PC whose BitLocker asks for a PIN, and a Linux disk encrypted with LUKS that

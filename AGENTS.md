@@ -5589,9 +5589,11 @@ engine's disk in `%LOCALAPPDATA%\Kazma\engine`, while the install folder
   a mark written before read back, a forced WAL switch archived into the
   new archive), then PostgreSQL's own uninstaller removed it and `kazma setup
   install` attached the kept database to the new service (the mark, a new
-  segment archived there). Not drilled: the engine's move (`wsl --manage
-  --move` across drives) and the installer's `--datadir` on a fresh machine
-  with the folder chosen first.
+  segment archived there). Its `fresh` mode (also `passed`): a first `kazma
+  setup install --data-folder E:\Kazma` on a clean VM, the installer's
+  `--datadir` under the restricted `postgres-18` folder, Kazma's data kept
+  and archived there. Not drilled: the engine's move (`wsl --manage --move`
+  across drives; it needs WSL on the VM).
 
 ### 21b. Every system dependency is installed by Kazma (`kazma_core/system_deps.py`)
 
