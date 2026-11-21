@@ -1238,6 +1238,28 @@ async def supervisor_node(
                     )
                 except Exception:
                     _explain = False
+                from kazma_core.memory.question_shape import (
+                    earlier_user_texts,
+                    standalone_query,
+                    turns_in_context,
+                )
+
+                # A follow-up ("And her sister?") is searched with the user's
+                # message before it (part F, framework audit F9; no model,
+                # decision 14). A query the intent rules already chose stays.
+                if not _recall_query or _recall_query == last_user_content:
+                    _recall_query = standalone_query(last_user_content, earlier_user_texts(messages))
+                # The chat's own turns the model reads in this conversation
+                # are not recalled into the block a second time (part F).
+                # The trim's own budget (below), the same model it reads.
+                _in_context = None
+                if _recall_session_id:
+                    _ctx_model = state.get("last_model") or routed_model
+                    _ctx_budget = await asyncio.to_thread(
+                        resolve_trim_token_budget,
+                        last_model=_ctx_model if isinstance(_ctx_model, str) else None,
+                    )
+                    _in_context = turns_in_context(messages, max_tokens=_ctx_budget)
                 # to_thread: recall() is synchronous SQLite + embedding work
                 # — running it on the loop stalled concurrent SSE/WS turns.
                 result = await asyncio.to_thread(
@@ -1250,7 +1272,17 @@ async def supervisor_node(
                     # Who asks (Spaces S1-11): in a shared space their own
                     # facts read as "user", every other member's by name.
                     asker=bound_asker(),
+                    in_context=_in_context,
                 )
+                # A recall that could not search by meaning, or at all, is
+                # said to the model (part F): empty is not "nothing known".
+                from kazma_core.memory.recall import recall_incomplete_note
+
+                _incomplete = recall_incomplete_note(result)
+                if _incomplete:
+                    messages.insert(1, {"role": "system", "content": _incomplete})
+                    # INFO: the embedder's own breaker says the outage once.
+                    logger.info("[Supervisor] memory search incomplete this turn: %s", result.degraded)
                 if not result.empty:
                     mem_block = await asyncio.to_thread(format_recall_block, result, explain=_explain)
                     if mem_block:

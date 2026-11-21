@@ -43,6 +43,10 @@ _MEMORY_NAMES = {
     "arabic": "Asked in Arabic",
     "mixed": "Arabic and English mixed",
     "noise": "A question with noise around it",
+    "dense": "One topic over many turns",
+    "follow_up": "A follow-up to the message before",
+    "list": "How many, or list them all",
+    "temporal": "A time, or what was true before",
 }
 _KNOWLEDGE_NAMES = {
     "exact": "The exact words of the page",
@@ -262,6 +266,14 @@ def _memory(data: dict) -> list[str]:
         if pg.get("status") == "verified":
             lines += [f"With Postgres and pgvector as the memory store ({pg.get('run')}, {pg.get('mode')} "
                       f"search), the same questions score {scores}. {_other_search(pg)}", ""]
+        elif pg.get("local"):
+            # A new dataset version: no pgvector run has been named yet, and
+            # the floors are the local path's own scores (never printed as
+            # pgvector's).
+            lines += [f"With Postgres and pgvector as the memory store: not yet measured on dataset version "
+                      f"{data['dataset_version']}. CI's pgvector job measures it on every run, with pgvector's "
+                      "own search and with every row compared, and its numbers are printed here once they "
+                      "are locked from a named run.", ""]
         else:
             lines += [f"With Postgres and pgvector as the memory store, a run made by hand on 2026-10-14 scored "
                       f"{scores}. CI's pgvector job now measures it, with pgvector's own search and with every "

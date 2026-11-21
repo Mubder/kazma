@@ -238,7 +238,96 @@ PERSONA: list[tuple[str, int, list[tuple[str, str]]]] = [
         ("أبي رواية عربية حلوة أقراها في الإجازة.",
          "أنصحك برواية موسم الهجرة إلى الشمال للطيب صالح."),
     ]),
+    # A follow-up stored as it was typed (v6, framework audit F9): the turn
+    # that holds the decision says "it" and "yes"; what it is about is in the
+    # turn before it.
+    ("p31", 96, [
+        ("Should I book the Bom Jesus funicular tour for when Noor's parents visit?",
+         "Good idea: it is one of the oldest water-powered funiculars still running."),
+        ("Yes, book it for Saturday at 10.",
+         "Done, Saturday at 10:00."),
+    ]),
+    ("p32", 98, [
+        ("What would be a good present for Noor's sister Rana? She cooks a lot.",
+         "A good cookbook: Ottolenghi's Simple, or Salt Fat Acid Heat by Samin Nosrat."),
+        ("Get her the first one, and have it gift-wrapped.",
+         "Ordered, gift-wrapped."),
+    ]),
+    ("a09", 102, [
+        ("أفكر أشتري لأبوي ساعة بمناسبة تقاعده، وش رايك؟",
+         "فكرة حلوة، الساعة هدية تعيش معاه."),
+        ("خلاص، اطلبها من محل الحجي، الذهبية.",
+         "تم الطلب."),
+    ]),
 ]
+
+# ── Dense topics (v6, framework audit F9): many turns on one subject ─────────
+# Measured by the audit (docs/audits/evidence/memory_framework_2026_11/
+# dense_topic.py, 2026-11-18): thirty Arabic turns about one wedding, asked
+# about in Arabic paraphrase, found 5 of 8 -- their answers sat under the
+# background recall read from meaning ranks 4-15, which the wedding's own
+# turns filled; and near-identical weekly log lines lost one question in ten.
+# Turns only, one a chat, as the audit measured them.
+DENSE_WEDDING: list[tuple[str, str]] = [
+    ("حجزنا قاعة الراية لعرس نورة يوم ١٢ ديسمبر.", "تم: قاعة الراية، ١٢ ديسمبر."),
+    ("العربون للقاعة ألف دينار ودفعناه اليوم.", "عربون القاعة ألف دينار، مدفوع."),
+    ("المصورة اسمها هيا العتيبي وسعرها ٦٠٠ دينار.", "المصورة هيا العتيبي، ٦٠٠ دينار."),
+    ("الكوشة بتكون ورد أبيض وأخضر من محل زهور الياسمين.", "كوشة بيضاء وخضراء من زهور الياسمين."),
+    ("فستان العروس من مصممة لبنانية والتسليم بعد شهر.", "الفستان يوصل بعد شهر."),
+    ("البوفيه من مطعم السرايا، مشاوي وأكل كويتي.", "البوفيه من السرايا."),
+    ("عدد المعازيم تقريباً ثلاثمية وخمسين.", "حوالي ٣٥٠ معزوم."),
+    ("بطاقات الدعوة بنطبعها في مطبعة الفجر، لون ذهبي.", "البطاقات ذهبية من مطبعة الفجر."),
+    ("الفرقة اللي بتغني فرقة الأصيل، ساعتين.", "فرقة الأصيل لمدة ساعتين."),
+    ("الكوافيرة هدى بتيي البيت الساعة ثلاث العصر.", "هدى تيي الساعة ثلاث."),
+    ("شهر العسل في المالديف، أسبوع كامل.", "أسبوع في المالديف."),
+    ("حجزنا تذاكر المالديف على طيران الإمارات.", "التذاكر على طيران الإمارات."),
+    ("الكيكة خمس طوابق من حلويات لورين.", "كيكة خمس طوابق من لورين."),
+    ("أم العريس تبي توزيعات عطور صغيرة للمعازيم.", "توزيعات عطور للمعازيم."),
+    ("السيارة اللي بتزف العروس رولز رويس بيضا مأجرة.", "رولز رويس بيضاء بالإيجار."),
+    ("الحنة قبل العرس بيومين في بيت الجدة.", "الحنة في بيت الجدة قبل العرس بيومين."),
+    ("دفعنا للمصورة نص المبلغ مقدم.", "نص مبلغ المصورة مدفوع."),
+    ("خاتم الزواج من مجوهرات الدهام، ألماس.", "خاتم ألماس من الدهام."),
+    ("القاعة تقفل الساعة وحدة بالليل.", "القاعة لين الساعة وحدة."),
+    ("البروفة الأخيرة للفستان يوم خمسة ديسمبر.", "بروفة الفستان خمسة ديسمبر."),
+    ("منسقة العرس اسمها دانة وتاخذ عشرة بالمية.", "دانة المنسقة، عشرة بالمية."),
+    ("طلبنا مئة كرسي زيادة للحديقة برا القاعة.", "مئة كرسي زيادة للحديقة."),
+    ("الإضاءة بتكون شموع وثريات كريستال.", "شموع وثريات كريستال."),
+    ("بنت خالتي ريم بتمسك استقبال المعازيم.", "ريم على الاستقبال."),
+    ("العشا يتقدم الساعة عشر ونص.", "العشا عشر ونص."),
+    ("حجزنا جناح في فندق الفورسيزنز ليلة العرس.", "جناح في الفورسيزنز ليلة العرس."),
+    ("العريس بيلبس بشت أسود من خياط البغلي.", "بشت أسود من البغلي."),
+    ("الفيديو بيكون درون مع المصورة بزيادة ميتين دينار.", "درون بزيادة ميتين دينار."),
+    ("مواقف السيارات محجوزة مع خدمة فاليه.", "المواقف مع فاليه."),
+    ("الميزانية كلها عشرين ألف دينار وإلى الحين صرفنا اثنعش.", "صرفنا اثنعش ألف من عشرين."),
+]
+_RIDE_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+_RIDE_ROUTES = ["the Cávado river path", "the Gerês hills", "the Braga ring road", "Ponte de Lima",
+                "the Ecovia do Rio Este", "Sameiro"]
+_RIDE_FEEL = ["strong", "tired", "fine", "slow", "sore", "light"]
+
+
+def _ride_log(count: int = 40) -> list[tuple[str, str]]:
+    """Near-identical weekly log lines (the audit's shape, on a bike rather
+    than running, so they do not answer the half-marathon questions)."""
+    rows = []
+    for week in range(1, count + 1):
+        km = 25 + (week * 7) % 41
+        speed = 21 + (week * 5) % 8
+        rows.append((
+            f"Week {week} bike ride: {km} km on {_RIDE_DAYS[week % 7]} along {_RIDE_ROUTES[week % 6]}, "
+            f"average {speed} km/h, felt {_RIDE_FEEL[week % 6]}.",
+            f"Logged week {week}: {km} km.",
+        ))
+    return rows
+
+
+def _dense_sessions() -> list[tuple[str, int, list[tuple[str, str]]]]:
+    """The dense topics, one turn a chat: the wedding every other day from
+    day 20, the ride log every other day from day 32."""
+    wedding = [(f"w{i:02d}", 20 + 2 * (i - 1), [pair]) for i, pair in enumerate(DENSE_WEDDING, 1)]
+    rides = [(f"c{i:02d}", 32 + 2 * (i - 1), [pair]) for i, pair in enumerate(_ride_log(), 1)]
+    return wedding + rides
+
 
 # ── Near misses: true facts about OTHER people, sharing words with persona facts.
 HARD_NEGATIVES: list[tuple[str, int, list[tuple[str, str]]]] = [
@@ -703,6 +792,60 @@ QUESTIONS: list[tuple[str, str, str, list[str], list[str]]] = [
     ("q958", "What long runs have I done for the half marathon so far?", "overview",
      ["sr7|r07#1|sr6|r06#1|sr5|r05#1"], []),
     ("q959", "What happened with my calf during training?", "overview", ["sr2|sr3|r02#1|r03#1"], []),
+    # v6 (framework audit F9 and F2, part F): the categories recall failed
+    # when they were added.
+    # dense: many turns on one subject; Arabic paraphrase of a dense topic
+    # (the audit's measured loss), and near-identical log lines.
+    ("q1001", "منو اللي بتصور العرس وكم تاخذ؟", "dense", ["w03#1"], []),
+    ("q1002", "من وين أكل العرس؟", "dense", ["w06#1"], []),
+    ("q1003", "وين بنسافر بعد العرس؟", "dense", ["w11#1"], []),
+    ("q1004", "كم طابق الكيكة ومن وين؟", "dense", ["w13#1"], []),
+    ("q1005", "متى الحنة ووين؟", "dense", ["w16#1"], []),
+    ("q1006", "شنو اسم اللي تنظم العرس وكم نسبتها؟", "dense", ["w21#1"], []),
+    ("q1007", "وين بنبات ليلة العرس؟", "dense", ["w26#1"], []),
+    ("q1008", "كم صرفنا لحد الحين؟", "dense", ["w30#1"], []),
+    ("q1011", "How far did I cycle in week 4?", "dense", ["c04#1"], []),
+    ("q1012", "How far did I cycle in week 11?", "dense", ["c11#1"], []),
+    ("q1013", "How far did I cycle in week 17?", "dense", ["c17#1"], []),
+    ("q1014", "How far did I cycle in week 23?", "dense", ["c23#1"], []),
+    ("q1015", "How far did I cycle in week 30?", "dense", ["c30#1"], []),
+    ("q1016", "How far did I cycle in week 38?", "dense", ["c38#1"], []),
+    # follow_up: asked after another question (QUESTION_EXTRAS "context"), or
+    # about a turn that was itself a follow-up ("Yes, book it for Saturday").
+    ("q1101", "And what does she teach?", "follow_up", ["p02#2|f08"], []),
+    ("q1102", "Where is her practice?", "follow_up", ["p18#1|f22"], []),
+    ("q1103", "Did we end up selling it?", "follow_up", ["p30#1|f35"], ["p29#1", "f36"]),
+    ("q1104", "And when are her shots due?", "follow_up", ["p25#1|f29"], []),
+    ("q1105", "ووين يشتغل؟", "follow_up", ["a01#1|g02"], []),
+    ("q1106", "ووين حاجزين؟", "follow_up", ["a04#1|g05"], []),
+    ("q1107", "When is the funicular tour booked for?", "follow_up", ["p31#2"], []),
+    ("q1108", "Which cookbook did I pick for Rana?", "follow_up", ["p32#1", "p32#2"], []),
+    ("q1109", "شنو الهدية اللي قررت أعطيها لأبوي ومن وين؟", "follow_up", ["a09#1", "a09#2"], []),
+    # list: how many, all of them -- more than five memories answer.
+    ("q1201", "How many long runs did I complete for the half marathon? List them all.", "list",
+     ["r00#1|sr0", "r01#1|sr1", "r02#1|sr2", "r03#1|sr3", "r05#1|sr5", "r06#1|sr6", "r07#1|sr7",
+      "r08#1|sr8", "r09#1|sr9"], []),
+    ("q1202", "List every note I asked you to keep.", "list",
+     ["n01", "n02", "n03", "n04", "z07", "z08", "z11"], []),
+    ("q1203", "What are all the books you've recommended to me?", "list", ["p19#1", "a08#1"], []),
+    ("q1204", "List everything I've told you about Maya's activities.", "list",
+     ["p28#1|f31", "a06#1|g07"], []),
+    ("q1205", "كم مرة غيرت أيام النادي؟ عطني كل الأيام.", "list", ["p13#1|f20", "p16#1|f21"], []),
+    ("q1206", "How many times did the Tagus retrofit deadline change? Give me every deadline.", "list",
+     ["p06#1|f12a", "p27#1|f12b"], []),
+    # temporal: time words in the question (QUESTION_EXTRAS "now_day": when
+    # it is asked). "Before", "at first", "originally" ask for what was true
+    # then; a month or "last week" asks for that time.
+    ("q1301", "Where did I live before we moved to Braga?", "temporal", ["f02|p01#1"], []),
+    ("q1302", "Which company did I work for before Norte Engenharia?", "temporal", ["f03|p01#1"], []),
+    ("q1303", "What were my gym days at first?", "temporal", ["f20|p13#1"], ["p16#1"]),
+    ("q1305", "متى كان موعد الدكتور قبل ما نغيره؟", "temporal", ["g03|a02#1"], ["a07#1"]),
+    ("q1306", "What did I tell you about Pixel in August?", "temporal", ["p25#1|f28|f29"], ["p01#2"]),
+    ("q1307", "وش قلت لك عن مايا في يوليو؟", "temporal", ["a06#1|g07"], ["p07#1", "p28#1"]),
+    ("q1308", "Where was I living in June?", "temporal", ["f02|p01#1|p14#1"], ["f25", "p15#1"]),
+    ("q1309", "What did I tell you about my running last week?", "temporal", ["r10#1|sr10"],
+     ["r00#1", "r01#1", "r02#1", "r03#1"]),
+    ("q1310", "When did we move to Braga?", "temporal", ["p15#1|p14#1|f25"], []),
 ]
 
 
@@ -759,7 +902,40 @@ SECOND_SET: list[tuple[str, str, str, list[str], list[str]]] = [
     ("h038", "وش رقم سيارتي؟", "abstain", [], []),
     ("h039", "What was my finishing time in the Lisbon half?", "overview", ["sr10|r10#1"], []),
     ("h040", "What do you know about our Istanbul plans?", "overview", ["sw6|a04#1|g05"], []),
+    # v6: written with the v6 categories, before recall was changed for them;
+    # no value is chosen by looking at these.
+    ("h041", "منو بيغني في الحفلة؟", "dense", ["w09#1"], []),
+    ("h042", "كم معزوم بيحضر؟", "dense", ["w07#1"], []),
+    ("h043", "وش لون الورد اللي بيزين مكان العروس؟", "dense", ["w04#1"], []),
+    ("h044", "How long was my ride in week 25?", "dense", ["c25#1"], []),
+    ("h045", "And what else does he do?", "follow_up", ["h08#1|x08"], []),
+    ("h046", "What does she like?", "follow_up", ["p20#1|f24"], []),
+    ("h047", "وأي يوم؟", "follow_up", ["a06#1|g07"], []),
+    ("h048", "List every flight number I've given you.", "list", ["p23#1|f26", "h07#1|x07"], []),
+    ("h049", "عطني كل أرقام الملفات والعدادات اللي قلت لك عنها", "list", ["a05#1|g06", "n04"], []),
+    ("h050", "Which electric car was I looking at in September?", "temporal", ["p29#1|f36"], []),
+    ("h051", "متى كان آخر موعد لمشروع الجسر قبل ما يتأجل؟", "temporal", ["f12a|p06#1"], ["p27#1"]),
 ]
+
+#: What a question needs besides its text (v6): ``now_day``, the benchmark day
+#: it is asked on (time words are read against it; else the day after the
+#: last memory); ``context``, the user's earlier messages in the chat it is
+#: asked in, newest last (a follow-up is read with them).
+QUESTION_EXTRAS: dict[str, dict[str, Any]] = {
+    "q1101": {"context": ["Who is my partner?"]},
+    "q1102": {"context": ["Who is my dentist?"]},
+    "q1103": {"context": ["What car do I drive?"]},
+    "q1104": {"context": ["Which vet does Pixel see?"]},
+    "q1105": {"context": ["شنو اسم أخوي؟"]},
+    "q1106": {"context": ["متى رحلتنا لإسطنبول؟"]},
+    "h045": {"context": ["Who teaches me guitar?"]},
+    "h046": {"context": ["When is my mother's birthday?"]},
+    "h047": {"context": ["وش تحب مايا تسوي؟"]},
+    "q1309": {"now_day": 78},
+    "h050": {"now_day": 140},
+}
+#: The day a question is asked on when it names none: after every memory.
+ASKED_ON_DAY = 116
 
 
 def _questions(rows, refs, fact_ids, summary_ids) -> list[dict[str, Any]]:
@@ -768,16 +944,22 @@ def _questions(rows, refs, fact_ids, summary_ids) -> list[dict[str, Any]]:
         for ref in [a for piece in gold for a in piece.split("|")] + below:
             if ref not in refs and ref not in fact_ids and ref not in summary_ids:
                 raise ValueError(f"{qid}: unknown memory {ref}")
-        out.append({"id": qid, "text": text, "category": cat, "gold": gold, "below": below})
+        extras = QUESTION_EXTRAS.get(qid, {})
+        out.append({"id": qid, "text": text, "category": cat, "gold": gold, "below": below,
+                    "now_day": int(extras.get("now_day", ASKED_ON_DAY)),
+                    **({"context": list(extras["context"])} if extras.get("context") else {})})
     return out
 
 
 def build() -> dict[str, Any]:
+    from kazma_core.memory.benchmark import memory_fingerprint
+
     rng = random.Random(SEED)
     sessions = [
-        {"id": sid, "day": day, "kind": kind, "turns": [{"user": u, "assistant": a} for u, a in turns]}
+        {"id": sid, "day": day, "kind": kind, "turns": [{"user": u, "assistant": a} for u, a in turns],
+         **({"new_in": 6} if kind == "dense" or sid in _NEW_IN_V6 else {})}
         for kind, group in (("persona", PERSONA), ("hard_negative", HARD_NEGATIVES),
-                            ("distractor", _distractor_sessions(rng)))
+                            ("distractor", _distractor_sessions(rng)), ("dense", _dense_sessions()))
         for sid, day, turns in group
     ]
     refs = {f"{s['id']}#{i}" for s in sessions for i in range(1, len(s["turns"]) + 1)}
@@ -817,8 +999,29 @@ def build() -> dict[str, Any]:
     if {q["id"] for q in questions} & {q["id"] for q in second} or {q["text"] for q in questions} & {
             q["text"] for q in second}:
         raise ValueError("a question of the second set repeats a tuning question")
-    return {"version": 5, "seed": SEED, "sessions": sessions, "facts": facts,
+    unknown = set(QUESTION_EXTRAS) - {q["id"] for q in questions + second}
+    if unknown:
+        raise ValueError(f"extras for questions that do not exist: {sorted(unknown)}")
+    data = {"version": 6, "seed": SEED, "sessions": sessions, "facts": facts,
             "summaries": summaries, "questions": questions, "second": second}
+    held = memory_fingerprint(data, as_of=IDS_HOLD_SINCE)
+    if held != IDS_HOLD_SINCE_SHA256:
+        raise ValueError(f"a memory of dataset v{IDS_HOLD_SINCE} moved or changed (fingerprint {held}): "
+                         "a sealed set written for it no longer holds; set IDS_HOLD_SINCE to this version")
+    data["ids_hold_since"] = {"version": IDS_HOLD_SINCE, "sha256": IDS_HOLD_SINCE_SHA256}
+    return data
+
+
+#: Sessions dataset v6 added beside its ``dense`` ones (``new_in``): a
+#: memory added after a sealed set was written is not one it can name.
+_NEW_IN_V6 = frozenset({"p31", "p32", "a09"})
+#: The version since which every memory id holds with the same text, and
+#: ``benchmark.memory_fingerprint`` of that version's own dataset file
+#: (``git show <v5 commit>:.../dataset.json``, taken 2026-11-21): a sealed
+#: set written for v5 still names the memories it meant. A version that
+#: moves or changes one sets both to itself.
+IDS_HOLD_SINCE = 5
+IDS_HOLD_SINCE_SHA256 = "a9ed825564294bb84a663a81525930d944214146ce7221d4c93364c9ce3be822"
 
 
 #: The extraction benchmark (Memory audit M24): one chat turn each, in English,
@@ -1486,8 +1689,16 @@ def _limit_cpu_threads() -> None:
     torch.set_num_threads(max(1, min(4, (os.cpu_count() or 2) // 4)))
 
 
+def _follow_ups_only(dataset: dict[str, Any]) -> dict[str, Any]:
+    """*dataset* with only its questions that carry earlier messages (both
+    sets): the raw follow-up control's run."""
+    return {**dataset,
+            "questions": [q for q in dataset["questions"] if q.get("context")],
+            "second": [q for q in dataset.get("second") or [] if q.get("context")]}
+
+
 def _cmd_vectors() -> int:
-    from kazma_core.memory.benchmark import RecordingEmbedder, run_benchmark
+    from kazma_core.memory.benchmark import RecordingEmbedder, load_dataset, run_benchmark
     from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
 
     _limit_cpu_threads()
@@ -1498,8 +1709,17 @@ def _cmd_vectors() -> int:
     model = get_embedding_model_name()
     recorder = RecordingEmbedder(real)
     a, b = _patched(recorder, model)
-    with a, b:
+    # A recording never holds a degraded run: on a busy machine a question's
+    # embedding can outlast recall's 5 s deadline, and the run then records
+    # no vector for it (part F, measured while building v6).
+    deadline = mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0)
+    with a, b, deadline:
         report = run_benchmark()
+        # The negative control's texts too: each follow-up asked as typed,
+        # without the message before it (tests/test_memory_benchmark_part_f.py).
+        raw = mock.patch("kazma_core.memory.question_shape.standalone_query", lambda q, _earlier: q)
+        with raw:
+            run_benchmark(_follow_ups_only(load_dataset()))
     VECTORS.parent.mkdir(parents=True, exist_ok=True)
     n = recorder.save(VECTORS, model=model)
     print(f"{VECTORS}: {n} vectors from {model}")
@@ -1727,7 +1947,11 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
                     "extraction": extraction, "writes": writes, "speakers": speakers,
                     # The pgvector path's floors (tests/test_memory_benchmark_pg.py),
                     # locked from a named CI run by `lock-pgvector`; same dataset only.
-                    "pgvector": {} if recall_new else old.get("pgvector", {}),
+                    # A new dataset version starts unverified (the job reports,
+                    # never fails, until a run is named).
+                    "pgvector": (_pgvector_unverified(scores, version)
+                                 if recall_new or not (old.get("pgvector") or {}).get("floors")
+                                 else old["pgvector"]),
                     # Every look at the sealed set, kept whatever the lock does.
                     **({"sealed": old["sealed"]} if old.get("sealed") else {})},
                    indent=1, ensure_ascii=False) + "\n",
@@ -2023,6 +2247,18 @@ def _measurement_from(text: str) -> dict[str, dict[str, float]]:
     lines = [line.split("PGVECTOR_MEASUREMENT ", 1)[1] for line in text.splitlines()
              if "PGVECTOR_MEASUREMENT " in line]
     return json.loads(lines[-1] if lines else text)
+
+
+def _pgvector_unverified(scores: dict[str, float], version: Any) -> dict[str, Any]:
+    """The pgvector section a new dataset version starts with: unverified
+    floors that are the local path's own scores, saying so (``local``), so
+    CI's pgvector job reports how far the pgvector path stands from local
+    recall and fails nothing until ``lock-pgvector`` names a run (benchmark
+    audit R7). An empty section broke the gate that the floors are named
+    (``test_the_lock_names_its_floors_unverified_until_a_run_is_named``)."""
+    return {"status": "unverified", "local": True,
+            "measured": f"dataset v{version}: the local path's scores, until lock-pgvector names a CI run",
+            "floors": dict(sorted(scores.items()))}
 
 
 def _cmd_lock_pgvector(source: str, run: str | None, mode: str) -> int:

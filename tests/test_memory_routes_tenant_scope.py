@@ -838,6 +838,7 @@ def test_the_agent_invalidate_tool_reaches_the_row_it_may_change(seeded):
 TOOL_CALLS: dict[str, list[dict]] = {
     "memory_search": [{"query": "where does Alice live"}],
     "memory_read": [{"id": "alpha_e1"}],
+    "memory_list": [{"about": "Paris"}, {"about": ""}],
     "memory_admin": [
         {"action": "list_beliefs", "q": "Paris"},
         {"action": "list_entities", "q": "Alice"},

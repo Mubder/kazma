@@ -285,6 +285,7 @@ case("POST /api/import/history/stop", ITEM)(_import_case(_import_stop))
 THEIR_IDS: dict[str, list[dict[str, Any]]] = {
     "memory_search": [{"query": "BETA9 Berlin Bob"}],
     "memory_read": [{"id": "beta9_e0"}],
+    "memory_list": [{"about": "BETA9"}, {"about": "Berlin"}, {"about": ""}, {"when": "2026"}],
     "memory_admin": [
         {"action": "list_beliefs", "q": "BETA9"},
         {"action": "list_entities", "q": "BETA9"},

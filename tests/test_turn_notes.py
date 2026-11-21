@@ -49,7 +49,7 @@ def _built_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
     from kazma_core.language_lock import language_lock_message
     from kazma_core.memory.changes import format_changes_note
     from kazma_core.memory.procedural import format_procedural_hints
-    from kazma_core.memory.recall import RecallHit, RecallResult, format_recall_block
+    from kazma_core.memory.recall import RecallHit, RecallResult, format_recall_block, recall_incomplete_note
     from kazma_core.memory.transcript_recall import format_transcript_block
     from kazma_core.safety.prompt_fence import format_untrusted_block
 
@@ -66,6 +66,9 @@ def _built_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
             beliefs=[RecallHit(id="b1", content="tasks-api release day Friday", score=0.9,
                                kind="belief", source="belief_fts")],
             episodes=[],
+        )),
+        "memory_incomplete": recall_incomplete_note(RecallResult(
+            beliefs=[], episodes=[], degraded="meaning search is unavailable (the embedder failed)",
         )),
         "past_chats": format_transcript_block([{
             "title": "Release planning", "created_at": "2026-09-20",

@@ -120,4 +120,15 @@ file.
   looks and the date of the last one.
 - **A new dataset version** (the benchmark audit's step 5 records the
   vectors again and may renumber memories) needs the file checked against
-  it, and rewritten by another session if its ids no longer hold.
+  it, and rewritten by another session if its ids no longer hold. The
+  builder checks it: the dataset records the version since which every
+  memory id holds with the same text (`ids_hold_since`, anchored to that
+  version's own fingerprint, `benchmark.memory_fingerprint`; a memory added
+  later says `new_in`), and a set written for that version or later passes.
+  Dataset v6 (part F, 2026-11-21) only added memories: a set written for v5
+  holds.
+- **A question the benchmark comes to ask** fails the shape check (no
+  repeat). On 2026-11-21 part F's new temporal question q1304, written
+  without the set, turned out to repeat s062: q1304 was dropped from the
+  benchmark, and s062's text is now known to the session that builds
+  recall. Replacing s062 is the writer's.

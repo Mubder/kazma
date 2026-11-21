@@ -44,7 +44,13 @@ from types import MappingProxyType
 from typing import Any
 
 from kazma_core.memory.episode_text import display_parts, is_small_talk, match_text, more_note
-from kazma_core.memory.limits import KEYWORD_HIT_CHARS
+from kazma_core.memory.limits import (
+    KEYWORD_HIT_CHARS,
+    LIST_LIMIT,
+    LIST_SHOW_ANSWER,
+    LIST_SHOW_ONE,
+    LIST_SHOW_QUESTION,
+)
 from kazma_core.memory.vector_engine import BELIEF_ACTIVE_SQL, RECALLABLE_TIERS
 
 logger = logging.getLogger(__name__)
@@ -54,8 +60,10 @@ __all__ = [
     "RecallResult",
     "recall",
     "search",
+    "search_with_status",
     "format_recall_block",
     "build_memory_explain_payload",
+    "recall_incomplete_note",
     "shown_text",
 ]
 
@@ -91,6 +99,11 @@ class RecallResult:
     #: talking with, and that facts under other names are those members'.
     #: Kazma's own line, put OUTSIDE the fence by ``format_recall_block``.
     speakers_note: str | None = None
+    #: The question asked for every memory of a kind (part F): more lines,
+    #: shorter, and a note that ``memory_list`` lists the rest.
+    listing: bool = False
+    #: The time words the question named ("in August", "before"), as read.
+    time_named: str = ""
 
     @property
     def empty(self) -> bool:
@@ -223,6 +236,8 @@ def recall(
     explain: bool | None = None,
     local_only: bool = False,
     asker: str | None = None,
+    now: float | None = None,
+    in_context: frozenset[str] | None = None,
 ) -> RecallResult:
     """Unified V2 recall (:func:`_recall`) under a deadline for the question's
     embedding, which is attempted once. A result that lacks meaning search
@@ -232,8 +247,18 @@ def recall(
     facts and turns read as ``user`` / ``User:`` and every other member's
     under that member's name; a question about the asker shows their own
     facts before others', a question naming a member that member's
-    (``_for_asker``). A personal space reads exactly as it always did."""
+    (``_for_asker``). A personal space reads exactly as it always did.
+
+    Part F (framework audit F2 step 3, F9): the question's time words are
+    read at *now* (default: now) in the operator's zone
+    (``time_words.read_time``), and a question asking for every memory of a
+    kind gets up to ``limits.LIST_LIMIT`` of each (``question_shape
+    .asks_for_all``). *in_context* is the chat's turns the model reads in
+    the conversation itself (``turn_key`` of each user message): the chat's
+    own memories of them are left out, never boosted into the block a
+    second time."""
     from kazma_core.memory import speakers
+    from kazma_core.memory.question_shape import asks_for_all
     from kazma_core.spaces.identity import IdentityUnavailable
 
     query = _bounded_question(query)
@@ -246,23 +271,67 @@ def recall(
         return _failed_recall("members_unavailable")
     memo: dict[str, Any] = {"vectors": {}, "deadline": time.monotonic() + _recall_deadline_s(),
                             "degraded": None}
+    ask = _time_ask(query, now)
+    listing = asks_for_all(query)
+    shown = max(limit, LIST_LIMIT) if listing else limit
     token = _QUERY_MEMO.set(memo)
     names = _ENTRY_NAMES.set(people.ranking_names() if people.shared else None)
     keeps = _BELIEF_KEEP.set(_whose_facts(people, asker, query) if people.shared else None)
+    asked = _ASK.set(ask)
+    lists = _LISTING.set(listing)
+    seen = _IN_CONTEXT.set((session_id, in_context) if session_id and in_context else None)
     try:
-        result = _recall(query, conn=conn, vector_engine=vector_engine, tenant_id=tenant_id, limit=limit,
+        result = _recall(query, conn=conn, vector_engine=vector_engine, tenant_id=tenant_id, limit=shown,
                          session_id=session_id, explain=explain, local_only=local_only)
         if people.shared and not result.failed:
-            result = _for_asker(result, people, asker, query, limit, conn)
+            result = _for_asker(result, people, asker, query, shown, conn)
     finally:
+        _IN_CONTEXT.reset(seen)
+        _LISTING.reset(lists)
+        _ASK.reset(asked)
         _BELIEF_KEEP.reset(keeps)
         _ENTRY_NAMES.reset(names)
         _QUERY_MEMO.reset(token)
     if memo["degraded"] and result.degraded is None:
         result.degraded = memo["degraded"]
+    result.listing = listing
+    result.time_named = ask.named if ask is not None else ""
     if not result.failed and not result.empty:
         _date_hits(result, conn=conn, tenant_id=tenant_id)
     return result
+
+
+#: What this recall's question asks (part F), for this recall only: its time
+#: words (``time_words.TimeAsk``), whether it asks for every memory of a kind,
+#: and the chat turns the model already reads (``(session id, turn keys)``).
+_ASK: contextvars.ContextVar[Any] = contextvars.ContextVar("kazma_recall_time_ask", default=None)
+_LISTING: contextvars.ContextVar[bool] = contextvars.ContextVar("kazma_recall_listing", default=False)
+_IN_CONTEXT: contextvars.ContextVar[Any] = contextvars.ContextVar("kazma_recall_in_context", default=None)
+#: A question asking for every memory keeps candidates this many times
+#: further behind the best (its answers are many, not one).
+_LIST_GAP_FACTOR = 2.0
+
+
+def _time_ask(query: str, now: float | None) -> Any:
+    """``time_words.read_time`` for *query* at *now*, in the operator's zone;
+    None when it names no time, or the zone cannot be read (a WARNING: recall
+    still runs, as before the time words were read)."""
+    from kazma_core.memory.time_words import read_time
+
+    try:
+        return read_time(query, now=time.time() if now is None else float(now), zone=_memory_zone())
+    except (ValueError, OverflowError, OSError):
+        logger.warning("[recall] the question's time words could not be read", exc_info=True)
+        return None
+
+
+def _without_time_words(terms: list[str]) -> list[str]:
+    """*terms* without the question's time words: "August" or "week" is the
+    time asked about, never a word the memory says."""
+    ask = _ASK.get()
+    if ask is None or not ask.words:
+        return terms
+    return [t for t in terms if t not in ask.words]
 
 
 # ── Dates (framework audit F2, step 1) ────────────────────────────────────
@@ -310,14 +379,14 @@ def _month_of(ts: Any, zone: Any) -> str:
 
 
 def _fact_dates(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dict[str, tuple]:
-    """``fact id -> (started, kind, replaced value, its from, its until)``:
+    """``fact id -> (started, kind, replaced value, its from, its until, its id)``:
     the start its turn named (``metadata.started``), and the fact it replaced
     (``supersedes_id``) when that still holds its value (a forgotten fact
     keeps none)."""
     marks = ",".join("?" for _ in ids)
     rows = conn.execute(
         f"SELECT cur.id, json_extract(cur.metadata_json, '$.started'), cur.predicate_type, prev.object, "
-        f"prev.valid_from, prev.valid_until FROM beliefs cur "
+        f"prev.valid_from, prev.valid_until, prev.id FROM beliefs cur "
         f"LEFT JOIN beliefs prev ON prev.id = cur.supersedes_id AND prev.tenant_id = cur.tenant_id "
         f"AND COALESCE(prev.object, '') != '' "
         f"WHERE cur.tenant_id = ? AND cur.id IN ({marks})",
@@ -355,6 +424,11 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
         since = _month_of((hit.metadata or {}).get("valid_from"), zone)
         if since:
             hit.metadata["since"] = since
+        until = _month_of((hit.metadata or {}).get("valid_until"), zone)
+        if until:
+            # An earlier value, shown because the question asked about a
+            # time (part F): the months it held.
+            hit.metadata["until"] = until
     if not result.beliefs:
         return
     own = conn is None
@@ -373,9 +447,9 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
         if own and conn is not None:
             conn.close()
     for hit in result.beliefs:
-        if hit.id not in dates:
+        if hit.id not in dates or hit.metadata.get("until"):
             continue
-        started, kind, value, start, end = dates[hit.id]
+        started, kind, value, start, end, prev_id = dates[hit.id]
         # The start the turn named ("we moved last month") is the fact's own;
         # the month it was said is the fallback.
         label = _started_label(started)
@@ -384,6 +458,8 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
         if value is not None and (kind or (hit.metadata or {}).get("predicate_type")) in ("functional", "state"):
             span = " to ".join(m for m in (_month_of(start, zone), _month_of(end, zone)) if m)
             hit.metadata["before"] = f"{value} ({span})" if span else str(value)
+            # Which fact that line shows (the benchmark scores it as shown).
+            hit.metadata["before_id"] = str(prev_id)
 
 
 #: Which facts a shared space's question is about (``_whose_facts``): a
@@ -803,11 +879,17 @@ def _backend_search(
         return []
 
 
-def _shown(user_text: Any, assistant_text: Any, summary_text: Any) -> dict[str, Any]:
+def _shown(user_text: Any, assistant_text: Any, summary_text: Any, *, compact: bool = False) -> dict[str, Any]:
     """An episode's display (``episode_text.display_parts``) and, when the
     display leaves some of it out, how many characters (``more``): the recall
-    block says so after it, with how to read the rest (``memory_read``)."""
-    text, more = display_parts(user_text, assistant_text, summary_text)
+    block says so after it, with how to read the rest (``memory_read``).
+    *compact*: a question asking for every memory of a kind shows more of
+    them, each in a shorter line (``limits.LIST_SHOW_*``, part F)."""
+    if compact:
+        text, more = display_parts(user_text, assistant_text, summary_text, question_max=LIST_SHOW_QUESTION,
+                                   answer_max=LIST_SHOW_ANSWER, one_max=LIST_SHOW_ONE)
+    else:
+        text, more = display_parts(user_text, assistant_text, summary_text)
     return {"display": text, **({"more": more} if more else {})}
 
 
@@ -893,7 +975,10 @@ def _pg_primary_episodes(
     )
     sims = {str(eid): float(sim) for eid, sim in dense_pairs}
     rows: dict[str, dict[str, Any]] = {}
-    for row in search_state_episodes(query, tenant_id=tenant_id, limit=limit * 3):
+    # Strict: on this path the mirror is memory, and a failed search is a
+    # failed recall, never "no matches" (part F, framework audit F9).
+    for row in search_state_episodes(" ".join(_search_words(query)), tenant_id=tenant_id,
+                                     limit=limit * 3, strict=True):
         if row.get("id"):
             rows[str(row["id"])] = row
     fetch = getattr(state_backend, "fetch_episodes", None)
@@ -1013,7 +1098,8 @@ def _pg_primary_beliefs(
     )
     sims = {str(bid): float(sim) for bid, sim in dense_pairs}
     rows: dict[str, dict[str, Any]] = {}
-    for row in search_state_beliefs(query, tenant_id=tenant_id, limit=limit * 3):
+    for row in search_state_beliefs(" ".join(_search_words(query)), tenant_id=tenant_id,
+                                    limit=limit * 3, strict=True):
         if row.get("id"):
             rows[str(row["id"])] = row
     fetch = getattr(state_backend, "fetch_beliefs", None)
@@ -1186,7 +1272,7 @@ def _merge_remote_state_hits(
     if not getattr(be, "available", False) or getattr(be, "name", "") == "null":
         return episodes, beliefs
 
-    terms = content_terms(query)
+    terms = _without_time_words(content_terms(query))
 
     def _held_locally(table: str, ids: list[str]) -> set[str]:
         wanted = [i for i in ids if i]
@@ -1211,7 +1297,7 @@ def _merge_remote_state_hits(
 
     seen_ep = {h.id for h in episodes}
     if len(episodes) < limit:
-        remote = search_state_episodes(query, tenant_id=tenant_id, limit=limit * 2)
+        remote = search_state_episodes(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 2)
         held = _held_locally("episodes", [str(r.get("id") or "") for r in remote])
         for i, row in enumerate(remote):
             eid = str(row.get("id") or "")
@@ -1250,7 +1336,7 @@ def _merge_remote_state_hits(
 
     seen_b = {h.id for h in beliefs}
     if len(beliefs) < limit:
-        remote_b = search_state_beliefs(query, tenant_id=tenant_id, limit=limit * 2)
+        remote_b = search_state_beliefs(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 2)
         held_b = _held_locally("beliefs", [str(r.get("id") or "") for r in remote_b])
         for i, row in enumerate(remote_b):
             bid = str(row.get("id") or "")
@@ -1270,6 +1356,36 @@ def _merge_remote_state_hits(
 
 
 # ── Dict-shape compat shim ────────────────────────────────────────────────
+
+
+def search_with_status(
+    query: str,
+    limit: int = 5,
+    *,
+    session_id: str | None = None,
+    kind: str | None = None,
+    tenant_id: str = "default",
+) -> tuple[list[dict[str, Any]], str | None]:
+    """:func:`search`'s hits and what kept the search from being whole
+    (``RecallResult.degraded``; None when it was). For a surface that shows
+    the hits to a person: an empty list from a recall that failed is not
+    "no hits" (part F, framework audit F9). Raises what recall raises."""
+    result = recall(query, limit=limit, session_id=session_id, tenant_id=tenant_id)
+    out: list[dict[str, Any]] = []
+    hits = list(result.beliefs) + list(result.episodes)
+    if kind:
+        hits = [h for h in hits if h.kind == kind]
+    for h in hits[:limit]:
+        source_layer = f"v2:{h.kind}:{h.source}" if h.source else f"v2:{h.kind}"
+        out.append({
+            "id": h.id,
+            "content": shown_text(h),
+            "text": shown_text(h),  # alias for retrieve_memories fallback
+            "score": h.score,
+            "source_layer": source_layer,
+            "metadata": dict(h.metadata),
+        })
+    return out, result.degraded
 
 
 def search(
@@ -1298,25 +1414,12 @@ def search(
         kind: Optional — restrict to one hit kind (``"belief"`` or
             ``"episode"``). ``None`` returns both, beliefs first.
 
-    Best-effort: never raises; returns ``[]`` on any failure.
+    Best-effort: never raises; returns ``[]`` on any failure. Context for
+    Kazma's own work only: a surface that shows hits to a person uses
+    :func:`search_with_status`, which says when the search was not whole.
     """
     try:
-        result = recall(query, limit=limit, session_id=session_id, tenant_id=tenant_id)
-        out: list[dict[str, Any]] = []
-        hits = list(result.beliefs) + list(result.episodes)
-        if kind:
-            hits = [h for h in hits if h.kind == kind]
-        for h in hits[:limit]:
-            source_layer = f"v2:{h.kind}:{h.source}" if h.source else f"v2:{h.kind}"
-            out.append({
-                "id": h.id,
-                "content": shown_text(h),
-                "text": shown_text(h),  # alias for retrieve_memories fallback
-                "score": h.score,
-                "source_layer": source_layer,
-                "metadata": dict(h.metadata),
-            })
-        return out
+        return search_with_status(query, limit, session_id=session_id, kind=kind, tenant_id=tenant_id)[0]
     except Exception:
         logger.debug("[recall.search] failed — returning []", exc_info=True)
         return []
@@ -1379,6 +1482,13 @@ def _recall_beliefs(
     if not sources:
         return []
     rows = {str(r["id"]): r for r in _hydrate_beliefs(conn, list(sources), tenant_id)}
+    ask = _ASK.get()
+    if ask is not None and (ask.period or ask.history):
+        # What was true before (part F, framework audit F2 step 3): the
+        # values the found facts replaced, their history, are candidates too.
+        history = _belief_history(conn, tenant_id, list(rows))
+        _found(list(history), "belief_history")
+        rows.update(history)
     keep = _BELIEF_KEEP.get()
     if keep is not None:
         # A shared space's choice of whose facts a question is about (Spaces
@@ -1398,7 +1508,156 @@ def _recall_beliefs(
     ranked = _rank_by_evidence(
         q, candidates, _question_background(sim for _bid, sim in dense), kind="belief"
     )
+    ranked = _facts_in_time(ranked, rows, ask)
+    if _LISTING.get():
+        ranked = _with_list_siblings(conn, tenant_id, ranked, rows, limit)
     return _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
+
+
+#: A question asking for every memory of a kind: the best facts' siblings --
+#: the facts of the same subject under the same name ("user noted ...") --
+#: come with them (part F). Read for this many of the best.
+_LIST_SIBLINGS_OF = 3
+
+
+def _with_list_siblings(conn: sqlite3.Connection, tenant_id: str, ranked: list[RecallHit],
+                        rows: dict[str, Any], limit: int) -> list[RecallHit]:
+    """*ranked* with every current fact sharing a subject and a name with
+    one of its best (:data:`_LIST_SIBLINGS_OF`), each right after the hits
+    of its kind, up to *limit*. "List every note I asked you to keep" finds
+    one note by meaning; the notes are the facts ``user noted ...``. A
+    sibling stands on its kind's evidence, never on its own words."""
+    out = list(ranked)
+    seen = {h.id for h in out}
+    keep = _BELIEF_KEEP.get()
+    for best in ranked[:_LIST_SIBLINGS_OF]:
+        row = rows.get(best.id)
+        sub, pred = _field(row, "subject"), _field(row, "predicate")
+        if not sub or not pred or _field(row, "valid_until") is not None:
+            continue
+        try:
+            siblings = conn.execute(
+                "SELECT id FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? "
+                f"AND {BELIEF_ACTIVE_SQL} AND COALESCE(object, '') != '' ORDER BY valid_from DESC LIMIT ?",
+                (tenant_id, sub, pred, limit),
+            ).fetchall()
+        except sqlite3.Error:
+            logger.debug("[recall] a fact's siblings could not be read", exc_info=True)
+            continue
+        fresh = [str(r[0]) for r in siblings if str(r[0]) not in seen]
+        for sib in _hydrate_beliefs(conn, fresh, tenant_id):
+            sid = str(sib["id"])
+            if keep is not None and not keep(str(_field(sib, "subject") or "")):
+                continue
+            rows[sid] = sib
+            seen.add(sid)
+            out.append(RecallHit(id=sid, content=_format_belief_text(sib), score=best.score, kind="belief",
+                                 source="belief_sibling",
+                                 metadata={k: v for k, v in best.metadata.items()
+                                           if k in ("strength", "evidence")}))
+    return out[: max(limit, len(ranked))]
+
+
+#: The steps back a fact's history is followed (a value it replaced, the one
+#: that one replaced...).
+_HISTORY_DEPTH = 5
+
+
+def _belief_history(conn: sqlite3.Connection, tenant_id: str, ids: list[str]) -> dict[str, Any]:
+    """The values the facts *ids* replaced, and those they replaced, up to
+    :data:`_HISTORY_DEPTH` steps (``supersedes_id``): ``id -> row``, rows
+    that still hold their value (a forgotten fact keeps none and is never
+    shown). Only *tenant_id*'s rows."""
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    try:
+        rows = conn.execute(
+            f"""WITH RECURSIVE chain(id, depth) AS (
+                    SELECT supersedes_id, 1 FROM beliefs
+                     WHERE tenant_id = ? AND id IN ({marks}) AND supersedes_id IS NOT NULL
+                    UNION
+                    SELECT b.supersedes_id, c.depth + 1 FROM beliefs b JOIN chain c ON b.id = c.id
+                     WHERE b.tenant_id = ? AND b.supersedes_id IS NOT NULL AND c.depth < ?
+                )
+                SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type, b.confidence,
+                       b.structural_importance, b.valid_from, b.valid_until, b.source_trust_weight,
+                       b.embedding, b.extraction_method, b.metadata_json
+                  FROM beliefs b JOIN chain c ON b.id = c.id
+                 WHERE b.tenant_id = ? AND COALESCE(b.object, '') != ''""",  # nosec B608 - '?' placeholders only
+            (tenant_id, *ids, tenant_id, _HISTORY_DEPTH, tenant_id),
+        ).fetchall()
+    except sqlite3.Error:
+        logger.debug("[recall] a fact's history could not be read", exc_info=True)
+        return {}
+    return {str(r["id"]): r for r in rows}
+
+
+def _started_at(row: Any) -> float | None:
+    """When a fact began by its turn's own words (``metadata.started``, C2),
+    as the start of that day, month or year; None when it names none."""
+    import json
+    from datetime import UTC, datetime
+
+    try:
+        started = str((json.loads(_field(row, "metadata_json") or "{}") or {}).get("started") or "")
+    except (TypeError, ValueError):
+        return None
+    parts = started.split("-")
+    try:
+        year = int(parts[0])
+        month = int(parts[1]) if len(parts) > 1 else 1
+        day = int(parts[2]) if len(parts) > 2 else 1
+        return datetime(year, max(1, min(12, month)), max(1, min(28, day)), tzinfo=UTC).timestamp()
+    except (ValueError, IndexError):
+        return None
+
+
+def _held_in(row: Any, ask: Any) -> bool:
+    """Whether the fact *row* was true during the question's period: from
+    when it began (its turn's own start, else when it was said) to when it
+    stopped (or now)."""
+    began = float(_field(row, "valid_from") or 0.0)
+    started = _started_at(row)
+    if started is not None:
+        began = min(began, started)
+    ended = _field(row, "valid_until")
+    return began < ask.end and (ended is None or float(ended) > ask.start)
+
+
+def _facts_in_time(ranked: list[RecallHit], rows: dict[str, Any], ask: Any) -> list[RecallHit]:
+    """*ranked* facts by the question's time (part F, framework audit F2
+    step 3). A period: what was SAID in it keeps the facts stated then; what
+    was TRUE in it keeps the facts that held then ("where was I living in
+    June": the value of June, not today's) -- none when none did. History
+    ("before we moved", "at first"): a fact's earlier values come right
+    before it. No time named: unchanged, and no earlier value is shown."""
+    if ask is None:
+        return [h for h in ranked if _field(rows.get(h.id), "valid_until") is None]
+    if ask.period:
+        if ask.said:
+            return [h for h in ranked if _in_period(_field(rows.get(h.id), "valid_from"), ask)]
+        return [h for h in ranked if rows.get(h.id) is not None and _held_in(rows[h.id], ask)]
+    if not ask.history:
+        return [h for h in ranked if _field(rows.get(h.id), "valid_until") is None]
+    # History: each chain's earlier values first, the current one after them.
+    order: list[RecallHit] = []
+    placed: set[str] = set()
+    chain_of = {h.id: (_field(rows.get(h.id), "subject"), _field(rows.get(h.id), "predicate")) for h in ranked}
+    for hit in ranked:
+        if hit.id in placed:
+            continue
+        if _field(rows.get(hit.id), "valid_until") is None:
+            earlier = [h for h in ranked if h.id not in placed and h.id != hit.id
+                       and chain_of[h.id] == chain_of[hit.id]
+                       and _field(rows.get(h.id), "valid_until") is not None]
+            earlier.sort(key=lambda h: float(_field(rows.get(h.id), "valid_from") or 0.0))
+            for h in earlier:
+                order.append(h)
+                placed.add(h.id)
+        order.append(hit)
+        placed.add(hit.id)
+    return order
 
 
 def _belief_candidate(
@@ -1426,7 +1685,7 @@ def _finish_beliefs(
     taken: set[str] = set()
     for hit in ranked:
         row = rows[hit.id]
-        if _field(row, "predicate_type") == "functional":
+        if _field(row, "predicate_type") == "functional" and _field(row, "valid_until") is None:
             key = f"{_field(row, 'subject')}|{_field(row, 'predicate')}"
             if key in taken:
                 continue
@@ -1439,6 +1698,7 @@ def _finish_beliefs(
             "confidence": _field(row, "confidence"),
             "importance": _field(row, "structural_importance"),
             "valid_from": _field(row, "valid_from"),
+            "valid_until": _field(row, "valid_until"),
             "extraction_method": _field(row, "extraction_method"),
         })
         if sources is not None:
@@ -1562,6 +1822,19 @@ def _recall_episodes(
 
     # ── Sparse: real FTS5 MATCH+bm25 (LIKE fallback) ──
     sparse = _episode_fts(conn, q, tenant_id, limit * 3)
+    ask = _ASK.get()
+    if ask is not None and ask.period:
+        # The period's own keyword matches (part F): a common word ("Maya")
+        # can fill every keyword slot with turns from other months. And the
+        # period's turns themselves, the newest first: "what did I tell you
+        # last week about my running" is answered by a race result that
+        # holds neither word.
+        held = {h.id for h in sparse}
+        for h in (_episode_fts(conn, q, tenant_id, limit * 3, between=(ask.start, ask.end))
+                  + _period_turns(conn, tenant_id, ask)):
+            if h.id not in held:
+                sparse.append(h)
+                held.add(h.id)
     for h in sparse:
         sources.setdefault(h.id, []).append(h.source or "fts5")
 
@@ -1576,7 +1849,10 @@ def _recall_episodes(
     sparse, dense = _own_episodes(conn, tenant_id, sparse), _own_episodes(conn, tenant_id, dense)
 
     # ── Evidence, not ranks: what is about the question, best first ──
-    fused = _rank_episodes_by_evidence(conn, q, sparse, dense)[: limit * 2]
+    ranked = _rank_episodes_by_evidence(conn, q, sparse, dense, tenant_id)
+    # The chat's own turns the model reads in the conversation are not shown
+    # again (part F), and the question's time decides what comes first.
+    fused = _turns_in_time(_not_in_context(conn, ranked, tenant_id), ask)[: limit * 2]
 
     # ── Session bias: boost same-thread episodes (Phase A) ──
     if session_id:
@@ -1601,8 +1877,9 @@ def _recall_episodes(
     # new. Deduplicating before the text was loaded compared ids, so one
     # question asked in five sessions took all five slots.
     out: list[RecallHit] = []
+    listing = _LISTING.get()
     for hit in fused:
-        text, shown = _episode_texts(conn, hit.id)
+        text, shown = _episode_texts(conn, hit.id, compact=listing)
         if text:
             meta = dict(hit.metadata or {})
             meta.update(shown)
@@ -1618,7 +1895,165 @@ def _recall_episodes(
                     metadata=meta,
                 )
             )
-    return _dedup_gate(out)[:limit]
+    return _with_neighbours(conn, _dedup_gate(out)[:limit], tenant_id, compact=listing)
+
+
+#: A turn said this close to a period's edge is in it (a day either side):
+#: "in August" asked of a turn said late on 31 July in another zone.
+_PERIOD_MARGIN_S = 86400.0
+
+
+#: The most turns of a period a question about it considers (the newest).
+_PERIOD_TURNS = 50
+
+
+def _period_turns(conn: sqlite3.Connection, tenant_id: str, ask: Any) -> list[RecallHit]:
+    """The tenant's turns said in the question's period, newest first, at
+    most :data:`_PERIOD_TURNS`: candidates of their own, judged on meaning
+    like any other."""
+    try:
+        rows = conn.execute(
+            f"SELECT id FROM episodes WHERE tenant_id = ? AND tier IN {_TIER_SQL} "  # nosec B608 - fixed tier list
+            "AND created_at >= ? AND created_at < ? ORDER BY created_at DESC LIMIT ?",
+            (tenant_id, ask.start - _PERIOD_MARGIN_S, ask.end + _PERIOD_MARGIN_S, _PERIOD_TURNS),
+        ).fetchall()
+    except sqlite3.Error:
+        logger.debug("[recall] the period's turns could not be read", exc_info=True)
+        return []
+    return [RecallHit(id=str(r[0]), content="", score=0.0, source="period") for r in rows]
+
+
+def _in_period(at: Any, ask: Any) -> bool:
+    try:
+        when = float(at)
+    except (TypeError, ValueError):
+        return False
+    return ask.start - _PERIOD_MARGIN_S <= when < ask.end + _PERIOD_MARGIN_S
+
+
+def _turns_in_time(hits: list[RecallHit], ask: Any) -> list[RecallHit]:
+    """*hits* ordered by the question's time (part F, framework audit F2
+    step 3): a question about what was SAID in a period ("what did I tell
+    you in August") keeps the turns said in it, and none when there are
+    none; a question about what was true in a period ("where was I living in
+    June") shows the turns said in it first. No period: as ranked."""
+    if ask is None or not ask.period or not hits:
+        return hits
+    inside = [h for h in hits if _in_period((h.metadata or {}).get("at"), ask)]
+    if ask.said:
+        return inside
+    outside = [h for h in hits if h not in inside]
+    return inside + outside
+
+
+def _not_in_context(conn: sqlite3.Connection, hits: list[RecallHit], tenant_id: str) -> list[RecallHit]:
+    """*hits* without the chat's own turns that the model reads in the
+    conversation (``recall(in_context=...)``, part F): shown again in the
+    block they took a place an older memory needed -- and the session boost
+    put them first. Turns of the chat that fell out of the model's context
+    stay, boosted."""
+    seen = _IN_CONTEXT.get()
+    if not seen or not hits:
+        return hits
+    from kazma_core.memory.limits import turn_key
+    from kazma_core.memory.tenant_view import narrowed_to
+
+    session, keys = seen
+    only = narrowed_to(tenant_id)
+    ids = [h.id for h in hits if h.id]
+    marks = ",".join("?" for _ in ids)
+    try:
+        rows = conn.execute(
+            f"SELECT id, session_id, user_text FROM episodes WHERE id IN ({marks}) "  # nosec B608 - '?' placeholders only
+            "AND (? IS NULL OR tenant_id = ?)",
+            (*ids, only, only),
+        ).fetchall()
+    except sqlite3.Error:
+        logger.debug("[recall] the chat's own turns could not be read", exc_info=True)
+        return hits
+    read = {str(r[0]) for r in rows if (r[1] or "") == session and turn_key(r[2]) in keys}
+    return [h for h in hits if h.id not in read]
+
+
+#: At most this many turns of a chat are joined to a recalled turn of it
+#: (``_with_neighbours``): the turn it goes on from, and the follow-ups after.
+_JOINED_MAX = 3
+_FOLLOWERS_PER_TURN = 2
+
+
+def _with_neighbours(conn: sqlite3.Connection, hits: list[RecallHit], tenant_id: str, *,
+                     compact: bool = False) -> list[RecallHit]:
+    """*hits*, each with its chat's follow-ups joined to its line (part F,
+    framework audit F9): the turns after it that only go on from it ("Yes,
+    book it for Saturday at 10."), and, for a hit that is itself a follow-up,
+    the turn it goes on from. Stored as typed, a follow-up's vector is made
+    from "Yes, book it for Saturday at 10." and no question reaches it by
+    meaning; read with the turn it follows, it is the answer.
+
+    Joined, never added: the line is one memory and its continuation, so a
+    continuation takes no place of its own (as separate lines, they took the
+    places of other memories). Nothing is copied between rows, so a turn
+    forgotten is gone from its neighbour's line too. ``metadata["joined"]``
+    names the turns joined; the ids they are read by are on the line.
+
+    Not in a shared space (Spaces S1-11): a joined turn may be another
+    member's, and the line would show it as "User:" (the asker's)."""
+    if not hits or _ENTRY_NAMES.get():
+        return hits
+    from kazma_core.memory.question_shape import is_follow_up
+    from kazma_core.memory.tenant_view import narrowed_to
+
+    only = narrowed_to(tenant_id)
+    ids = [h.id for h in hits if h.id]
+    marks = ",".join("?" for _ in ids)
+    tiers = ",".join("?" for _ in RECALLABLE_TIERS)
+    try:
+        leads = {
+            str(r[0]): (str(r[1] or ""), int(r[2] or 0), str(r[3] or ""))
+            for r in conn.execute(
+                f"SELECT id, session_id, turn_number, user_text FROM episodes "  # nosec B608 - '?' placeholders only
+                f"WHERE id IN ({marks}) AND (? IS NULL OR tenant_id = ?)",
+                (*ids, only, only),
+            )
+        }
+        shown = set(ids)
+        for hit in hits:
+            lead = leads.get(hit.id)
+            if lead is None or not lead[0]:
+                continue
+            session, turn, user_text = lead
+            rows = conn.execute(
+                f"SELECT id, turn_number, user_text, assistant_text, summary_text FROM episodes "  # nosec B608 - '?' placeholders only
+                f"WHERE session_id = ? AND turn_number BETWEEN ? AND ? AND tier IN ({tiers}) "
+                "AND (? IS NULL OR tenant_id = ?) ORDER BY turn_number",
+                (session, turn - 1, turn + _FOLLOWERS_PER_TURN, *RECALLABLE_TIERS, only, only),
+            ).fetchall()
+            by_turn = {int(r[1]): r for r in rows}
+            before = by_turn.get(turn - 1) if is_follow_up(user_text) else None
+            after = []
+            for step in range(1, _FOLLOWERS_PER_TURN + 1):
+                row = by_turn.get(turn + step)
+                if row is None or not is_follow_up(row[2]):
+                    break
+                after.append(row)
+            joined = [r for r in ([before] if before is not None else []) + after
+                      if str(r[0]) not in shown][:_JOINED_MAX]
+            if not joined:
+                continue
+            meta = hit.metadata
+            text = str(meta.get("display") or hit.content or "")
+            for row in joined:
+                part, _more = display_parts(row[2], row[3], row[4], question_max=LIST_SHOW_QUESTION,
+                                            answer_max=LIST_SHOW_ANSWER, one_max=LIST_SHOW_ONE)
+                text = (f"(before that: {part}) {text}" if row is before
+                        else f"{text} -> then: {part}")
+                shown.add(str(row[0]))
+            meta["display"] = text
+            meta["joined"] = [str(r[0]) for r in joined]
+        return hits
+    except sqlite3.Error:
+        logger.debug("[recall] the turns beside a recalled turn could not be read", exc_info=True)
+        return hits
 
 
 # ── Episode relevance: evidence, not ranks (Stage 2, R1/R2) ───────────────
@@ -1685,6 +2120,9 @@ _SUMMARY_BACKGROUND_PRIOR = 0.34
 #: (the Memory page has the whole text).
 _SUMMARY_LIMIT = 2
 _SUMMARY_SHOW_CHARS = 900
+#: A question asking for every memory of a kind (part F): more weeks, shorter.
+_LIST_SUMMARY_LIMIT = 6
+_LIST_SUMMARY_SHOW_CHARS = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -1708,6 +2146,17 @@ def _question_background(dense_scores: Iterable[float]) -> float:
     The mean of meaning ranks 4-15 (:data:`_BACKGROUND_RANKS`), blended with
     :data:`_BACKGROUND_PRIOR` while fewer than
     :data:`_BACKGROUND_MIN_SAMPLES` of those ranks exist.
+
+    Part F measured a statistic of the whole store instead (the median, and
+    quantiles 0.85-0.95 of the question's similarity with a spread sample of
+    the tenant's memories) on the benchmark's v6 ``dense`` category, thirty
+    Arabic wedding turns and forty near-identical ride logs: the background
+    is one number per question, so it changes which candidates clear the
+    floor, never their order, and the dense questions were lost on order
+    (the answer behind its own topic's turns by the gap). No setting kept
+    every earlier answer (4 to 15 lost a question each), so the window
+    stays. Weighing a question's rare words, or its numbers, more in the
+    word coverage was measured too and moved nothing (2026-11-21).
     """
     ordered = sorted((float(x) for x in dense_scores), reverse=True)
     lo, hi = _BACKGROUND_RANKS
@@ -1784,11 +2233,17 @@ def _rank_by_evidence(
         # The floors above assume a meaning lift; on words alone they asked
         # a fact to hold every word of the question.
         cov_weight, floor, strong, gap = 1.0, _WORDS_ONLY_FLOOR, 1.0, _WORDS_ONLY_GAP
-    terms = content_terms(query)
+    if _LISTING.get():
+        # Every memory of a kind is asked for: its answers are many, and
+        # the tenth is as much an answer as the first (part F).
+        gap *= _LIST_GAP_FACTOR
+    # A one-digit number counts ("week 4"): it tells near-identical memories
+    # apart, and dropped, "week 4" matched "week 14" as well (part F).
+    terms = _without_time_words(content_terms(query, digits=True))
     scored: list[tuple[_Candidate, float, float, float]] = []
     for cand in candidates:
         lift = (cand.similarity - background) if cand.similarity is not None else 0.0
-        cov = coverage(terms, cand.text)
+        cov = coverage(terms, cand.text, digits=True)
         scored.append((cand, lift + cov_weight * cov, lift, cov))
     passing = [row for row in scored if row[1] >= floor]
     best = max((row[1] for row in passing), default=None)
@@ -1808,6 +2263,11 @@ def _rank_by_evidence(
     # all stated at once, and list position is not newer.
     times = sorted({row[0].created_at for row in kept})
     step = {t: i / (len(times) - 1) if len(times) > 1 else 1.0 for i, t in enumerate(times)}
+    ask = _ASK.get()
+    if ask is not None and ask.history and len(times) > 1:
+        # "At first", "originally", "before we moved": the earlier statement
+        # first among close candidates (part F).
+        step = {t: 1.0 - v for t, v in step.items()}
     recency = {row[0].id: step[row[0].created_at] for row in kept}
     top_standing = max(row[0].standing for row in kept) or 1.0
     hits = [
@@ -1891,6 +2351,7 @@ def _rank_episodes_by_evidence(
     query: str,
     sparse: list[RecallHit],
     dense: list[RecallHit],
+    tenant_id: str = "default",
 ) -> list[RecallHit]:
     """Local episodes that are about the question, best first; [] when none is."""
     ids = list(dict.fromkeys([h.id for h in dense] + [h.id for h in sparse]))
@@ -2017,6 +2478,13 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
         for row in rows
     ]
     hits = _rank_by_evidence(query, candidates, _summary_background(sims.values()), kind="summary")
+    if _LISTING.get():
+        # Every memory of a kind (part F): more weeks, each shorter.
+        for hit in hits[:_LIST_SUMMARY_LIMIT]:
+            text = str(hit.metadata.get("display") or "")
+            if len(text) > _LIST_SUMMARY_SHOW_CHARS:
+                hit.metadata["display"] = text[: _LIST_SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
+        return hits[:_LIST_SUMMARY_LIMIT]
     return hits[:_SUMMARY_LIMIT]
 
 
@@ -2102,11 +2570,20 @@ def _fts_match_query(query: str) -> str:
     is quoted and prefix-matched, so "vaccine" also finds "vaccines". Empty
     when the question has no content word.
     """
-    from kazma_core.memory.query_terms import search_terms
-
     # Each content word gives at most two forms (as written, folded).
-    words = [w.replace('"', "") for w in search_terms(query)][: 2 * _QUESTION_MAX_TERMS]
+    words = [w.replace('"', "") for w in _search_words(query)][: 2 * _QUESTION_MAX_TERMS]
     return " OR ".join(f'"{w}"*' for w in words if w)
+
+
+def _search_words(query: str) -> list[str]:
+    """``query_terms.search_terms`` of *query* without the question's time
+    words (part F, ``_ASK``): "August" is the time asked about, not a word
+    the memory holds."""
+    from kazma_core.memory.query_terms import content_terms, search_terms
+
+    ask = _ASK.get()
+    skip = ask.words if ask is not None else frozenset()
+    return [w for w in search_terms(query) if not (skip and set(content_terms(w)) <= skip)]
 
 
 def _episode_fts(
@@ -2114,6 +2591,8 @@ def _episode_fts(
     query: str,
     tenant_id: str,
     limit: int,
+    *,
+    between: tuple[float, float] | None = None,
 ) -> list[RecallHit]:
     """Keyword search over episodes: FTS5 MATCH + bm25 on the content words.
 
@@ -2125,6 +2604,10 @@ def _episode_fts(
     match_q = _fts_match_query(query)
     if not match_q:
         return []
+    # *between*: only turns said in that period, with the margin of
+    # ``_in_period`` (a question's time words, part F).
+    period = "" if between is None else "AND e.created_at >= ? AND e.created_at < ?"
+    span = () if between is None else (between[0] - _PERIOD_MARGIN_S, between[1] + _PERIOD_MARGIN_S)
     try:
         rows = conn.execute(
             f"""
@@ -2135,13 +2618,16 @@ def _episode_fts(
             WHERE episodes_fts MATCH ?
               AND e.tenant_id = ?
               AND e.tier IN {_TIER_SQL}
+              {period}
             ORDER BY rank
             LIMIT ?
             """,
-            (match_q, tenant_id, limit),
+            (match_q, tenant_id, *span, limit),
         ).fetchall()
     except sqlite3.Error:
         logger.debug("[recall] episodes_fts MATCH failed -- word fallback", exc_info=True)
+        if between is not None:
+            return []
         return _episode_word_fallback(conn, query, tenant_id, limit)
     hits: list[RecallHit] = []
     for r in rows:
@@ -2166,9 +2652,9 @@ def _episode_word_fallback(
     conn: sqlite3.Connection, query: str, tenant_id: str, limit: int
 ) -> list[RecallHit]:
     """Whole-word matching for when the full-text index cannot be read."""
-    from kazma_core.memory.query_terms import mentions, search_terms
+    from kazma_core.memory.query_terms import mentions
 
-    words = search_terms(query)
+    words = _search_words(query)
     if not words:
         return []
     clauses = " OR ".join(
@@ -2345,8 +2831,8 @@ def _hydrate_beliefs(
     try:
         rows = conn.execute(
             f"""SELECT id, subject, predicate, object, predicate_type,
-                      confidence, structural_importance, valid_from,
-                      source_trust_weight, embedding, extraction_method
+                      confidence, structural_importance, valid_from, valid_until,
+                      source_trust_weight, embedding, extraction_method, metadata_json
                FROM beliefs
                WHERE {BELIEF_ACTIVE_SQL}
                  AND tenant_id = ? AND id IN ({placeholders})""",
@@ -2744,7 +3230,8 @@ def _dedup_gate(hits: list[RecallHit]) -> list[RecallHit]:
     return list(seen.values())
 
 
-def _episode_texts(conn: sqlite3.Connection, episode_id: str) -> tuple[str, dict[str, Any]]:
+def _episode_texts(conn: sqlite3.Connection, episode_id: str, *, compact: bool = False
+                   ) -> tuple[str, dict[str, Any]]:
     """An episode's (match text, display fields); empty when it is gone.
 
     Recall compares and de-duplicates by the first and shows the second
@@ -2760,7 +3247,7 @@ def _episode_texts(conn: sqlite3.Connection, episode_id: str) -> tuple[str, dict
     if not row:
         return "", {}
     sides = (row["user_text"], row["assistant_text"], row["summary_text"])
-    return match_text(*sides), _shown(*sides)
+    return match_text(*sides), _shown(*sides, compact=compact)
 
 
 # ── Formatting ────────────────────────────────────────────────────────────
@@ -2816,6 +3303,10 @@ def _dated_line(hit: RecallHit, shown: str) -> str:
         return f"[{meta['said_on']}] {shown}"
     if hit.kind != "belief":
         return shown
+    if meta.get("until"):
+        # An earlier value (part F): the months it held, and no "before
+        # that" -- the question asked about this one.
+        return f"[{meta.get('since') or '?'} to {meta['until']}] {shown}"
     if meta.get("since"):
         shown = f"[since {meta['since']}] {shown}"
     if meta.get("before"):
@@ -2827,9 +3318,9 @@ def format_recall_block(
     result: RecallResult,
     *,
     fence_source: str = "memory_v2_recall",
-    max_beliefs: int = 5,
-    max_episodes: int = 5,
-    max_summaries: int = _SUMMARY_LIMIT,
+    max_beliefs: int | None = None,
+    max_episodes: int | None = None,
+    max_summaries: int | None = None,
     max_tokens: int = 1500,
     explain: bool | None = None,
 ) -> str:
@@ -2870,6 +3361,10 @@ def format_recall_block(
             # A memory is kept whole and shown bounded: how much is left out,
             # and the tool that reads it (memory/limits.py).
             shown = f"{shown} {more_note(more, h.id, shown)}"
+        elif h.kind == "episode" and h.id:
+            # Its id, for memory_read (part F, framework audit F9); and the
+            # ids of the turns joined to it.
+            shown = f"{shown} {_ID_NOTE.format(id=', '.join([h.id, *((h.metadata or {}).get('joined') or [])]))}"
         shown = _dated_line(h, shown)
         tag = _reading_tag(h)
         if tag:
@@ -2896,6 +3391,11 @@ def format_recall_block(
     n_episodes = 0
     n_summaries = 0
 
+    # What recall returned (it bounds it: five of each, more for a question
+    # asking for every memory of a kind), unless the caller asks for less.
+    max_beliefs = len(result.beliefs) if max_beliefs is None else max_beliefs
+    max_episodes = len(result.episodes) if max_episodes is None else max_episodes
+    max_summaries = len(result.summaries) if max_summaries is None else max_summaries
     if result.beliefs:
         lines: list[str] = []
         for h in result.beliefs[:max_beliefs]:
@@ -2970,9 +3470,43 @@ def format_recall_block(
         "acting.\n"
         "- A memory that ends with \"not shown: memory_read(...)\" is shown "
         "in part; read it whole with memory_read before relying on what it "
-        "leaves out.\n\n"
+        "leaves out.\n"
+        "- A recalled conversation ends with its id: memory_read(id) reads it "
+        "whole. memory_list lists every memory about a subject or a name, or "
+        "from a time, a page at a time.\n"
     )
+    if result.listing:
+        # A count or a list (part F): what the block holds is not all there is.
+        rules += (
+            f"- This question asks for every memory of a kind: shown are the "
+            f"{n_beliefs + n_episodes} that matched best. Before counting or "
+            "listing, call memory_list for all of them.\n"
+        )
+    rules += "\n"
     return rules + (result.speakers_note or "") + format_untrusted_block(body, source=fence_source)
+
+
+#: The id after a recalled conversation (part F): what memory_read takes.
+_ID_NOTE = "(memory {id})"
+
+
+def recall_incomplete_note(result: RecallResult) -> str:
+    """Kazma's own note for a turn whose recall was incomplete or failed
+    (part F, framework audit F9): the supervisor read only "empty or not",
+    so a recall that could not search by meaning, or could not search at
+    all, looked like "nothing remembered". Empty when recall was whole. Put
+    OUTSIDE any fence by the caller (a registered turn note)."""
+    if not result.degraded:
+        return ""
+    what = ("could not search at all" if result.failed
+            else "could not search by meaning (keyword matches only)")
+    return (
+        "## Memory search was incomplete\n"
+        f"- This turn's memory search {what} ({result.degraded}). An empty or short memory block "
+        "does NOT mean nothing is remembered.\n"
+        "- If the answer depends on the past, say the memory search was incomplete, and try "
+        "memory_search again; never tell the user you have no memory of it.\n"
+    )
 
 
 def build_memory_explain_payload(

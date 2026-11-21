@@ -67,6 +67,9 @@ TURN_NOTE_KINDS: dict[str, tuple[str, ...]] = {
     ),
     # memory.recall.format_recall_block.
     "memory_recall": ("## Memory recall rules",),
+    # memory.recall.recall_incomplete_note: this turn's memory search could
+    # not search by meaning, or at all (part F).
+    "memory_incomplete": ("## Memory search was incomplete",),
     # memory.transcript_recall.format_transcript_block.
     "past_chats": ('<kazma:data source="chat_history"',),
     # memory.procedural.format_procedural_hints.

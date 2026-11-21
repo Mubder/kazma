@@ -118,7 +118,7 @@ SPACE = frozenset({
     "list_research_chunks", "list_research_papers", "list_runs", "list_scheduled",
     "memory_admin", "memory_delete_entity", "memory_forget_mentions", "memory_invalidate",
     "memory_link_entities", "memory_list_beliefs", "memory_list_entities",
-    "memory_merge_entities", "memory_purge_empty_entities", "memory_read", "memory_search",
+    "memory_merge_entities", "memory_purge_empty_entities", "memory_read", "memory_list", "memory_search",
     "memory_store",
     "ocr_document", "parse_document", "pdf_fill_form", "pdf_info", "pdf_merge",
     "pdf_redact", "pdf_split", "plan_research_queries", "python_exec", "read_document",

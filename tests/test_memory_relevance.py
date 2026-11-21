@@ -113,7 +113,7 @@ class _Store:
             name = "postgres"
             available = True
 
-            def search_episodes(self, query, *, tenant_id="default", limit=10):
+            def search_episodes(self, query, *, tenant_id="default", limit=10, strict=False):
                 terms = search_terms(query)[:8]
                 hits = [r for r in store.rows.values() if terms and mentions(r["user_text"], terms)]
                 hits.sort(key=lambda r: r["created_at"], reverse=True)
@@ -123,7 +123,7 @@ class _Store:
                 return [{k: v for k, v in store.rows[i].items() if k != "vec"}
                         for i in ids if i in store.rows]
 
-            def search_beliefs(self, query, *, tenant_id="default", limit=10):
+            def search_beliefs(self, query, *, tenant_id="default", limit=10, strict=False):
                 return []
 
             def fetch_beliefs(self, ids, *, tenant_id="default"):

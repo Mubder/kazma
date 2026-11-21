@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
@@ -342,11 +343,13 @@ class MemoryTab(VerticalScroll):
     def _run_graph_search(self) -> None:
         """Run a V2 recall search and fill results table.
 
-        V2 ``search`` (kazma_core.memory.recall) returns dicts with keys
+        ``search_with_status`` (kazma_core.memory.recall) returns dicts with keys
         ``id, content, text, score, source_layer, metadata``. The panel's
         DataTable has columns (Type, Label, Score, Content); we derive
         ``type`` from ``source_layer`` (``v2:<kind>:<source>``) and
-        ``label`` from the hit id so the column layout is preserved.
+        ``label`` from the hit id so the column layout is preserved, and
+        what kept the search from being whole, which the message says: an
+        empty table from a search that failed is not "no hits" (part F).
         """
         try:
             q = self.query_one("#mem-graph-search", Input).value.strip()
@@ -363,9 +366,9 @@ class MemoryTab(VerticalScroll):
                 pass
             return
         try:
-            from kazma_core.memory.recall import search
+            from kazma_core.memory.recall import search_with_status
 
-            hits = search(q, limit=20)
+            hits, degraded = search_with_status(q, limit=20)
         except Exception as exc:
             logger.debug("graph search failed: %s", exc)
             try:
@@ -376,10 +379,13 @@ class MemoryTab(VerticalScroll):
                 pass
             return
 
+        # A search that was not whole (no meaning search, or none at all)
+        # is said: its empty list is not "no hits" (part F, audit F9).
+        incomplete = f"  [bold $warning]Search incomplete ({escape(str(degraded))})[/]" if degraded else ""
         if not hits:
             try:
                 self.query_one("#mem-graph-msg", Static).update(
-                    f"[dim]No hits for[/] [bold]{q[:40]}[/]"
+                    f"[dim]No hits for[/] [bold]{escape(q[:40])}[/]{incomplete}"
                 )
             except Exception:
                 pass
@@ -397,7 +403,7 @@ class MemoryTab(VerticalScroll):
             table.add_row(etype, label, score_s, content)
         try:
             self.query_one("#mem-graph-msg", Static).update(
-                f"[bold $success]{len(hits)}[/] hit(s) for [bold]{q[:40]}[/]"
+                f"[bold $success]{len(hits)}[/] hit(s) for [bold]{escape(q[:40])}[/]{incomplete}"
             )
         except Exception:
             pass

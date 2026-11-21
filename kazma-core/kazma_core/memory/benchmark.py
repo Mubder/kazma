@@ -82,6 +82,8 @@ WRITES_PATH = Path(__file__).with_name("benchmark_data") / "writes.json"
 BENCH_TENANT = "bench"
 #: A fixed clock, so every run seeds the same created_at values.
 BASE_TIME = 1780000000.0
+#: The day a question is asked when the dataset names none (before v6).
+_ASKED_ON_DAY = 116
 
 
 def load_dataset(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
@@ -326,7 +328,16 @@ def run_benchmark(
     limit: int = 5,
     keep_results: bool = False,
 ) -> dict[str, Any]:
-    """Seed a private database, ask every question, return the scores."""
+    """Seed a private database, ask every question, return the scores.
+
+    Each question is asked on its own day (``now_day``, dataset v6: time
+    words are read against it) in UTC, and a follow-up with the user's
+    earlier messages (``context``), the way the supervisor asks it
+    (``question_shape.standalone_query``)."""
+    from datetime import UTC
+    from unittest import mock
+
+    from kazma_core.memory.question_shape import standalone_query
     from kazma_core.memory.recall import recall, trace_evidence
     from kazma_core.memory.schema_v2 import ensure_primary_schema
 
@@ -343,18 +354,29 @@ def run_benchmark(
             results, latencies = [], []
             for q in questions:
                 started = time.perf_counter()
-                with trace_evidence() as trace:
-                    res = recall(q["text"], conn=conn, tenant_id=BENCH_TENANT, limit=limit,
-                                 local_only=True)
+                query = standalone_query(q["text"], q.get("context"))
+                asked_on = BASE_TIME + float(q.get("now_day", _ASKED_ON_DAY)) * 86400
+                zone = mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC)
+                with trace_evidence() as trace, zone:
+                    res = recall(query, conn=conn, tenant_id=BENCH_TENANT, limit=limit,
+                                 local_only=True, now=asked_on)
                 latencies.append(time.perf_counter() - started)
-                # Facts, history, then weekly summaries: the order format_recall_block shows.
-                injected = (
-                    [h.id for h in res.beliefs[:limit]] + [h.id for h in res.episodes[:limit]]
-                    + [h.id for h in res.summaries]
-                )
-                scored = _score(q, refs, injected, covers)
+                # Facts, history, then weekly summaries: the order format_recall_block
+                # shows, all of what recall returned (it bounds them itself).
+                injected = [h.id for h in res.beliefs] + [h.id for h in res.episodes] + [h.id for h in res.summaries]
+                # A fact's line shows the value it replaced ("before that:
+                # Paris"): that fact is shown too, at the line's place.
+                shown_before = {h.id: {str(h.metadata["before_id"])} for h in res.beliefs
+                                if (h.metadata or {}).get("before_id")}
+                # A turn's line shows the follow-ups joined to it (part F).
+                joined = {h.id: set(h.metadata["joined"]) for h in res.episodes
+                          if (h.metadata or {}).get("joined")}
+                shown_with = {**covers, **shown_before, **joined}
+                scored = _score(q, refs, injected, shown_with)
                 if keep_results:
-                    scored["margin"] = _margin(q, refs, covers, trace)
+                    # A memory shown on another's line stands by that line's
+                    # margin (a joined follow-up, a replaced value).
+                    scored["margin"] = _margin(q, refs, shown_with, trace)
                 results.append(scored)
             return results, latencies
 
@@ -402,6 +424,9 @@ class RecordingEmbedder:
         self.seen: dict[str, list[float]] = {}
 
     def encode(self, text: str) -> list[float]:
+        if text in self.seen:
+            # A second run (a control's) asks again: the model is not.
+            return list(self.seen[text])
         vec = self.inner.encode(text)
         if vec:
             self.seen[text] = [float(x) for x in vec]
@@ -578,6 +603,40 @@ def _folded_question(text: str) -> str:
     return " ".join(re.findall(r"\w+", str(text or "").casefold()))
 
 
+def memory_fingerprint(dataset: dict[str, Any], *, as_of: int | None = None) -> str:
+    """SHA-256 of every memory of *dataset* -- each turn by its id
+    (``<session>#<n>``) with its text, each fact and summary whole -- that
+    it held at version *as_of* (every one when None). A session added in a
+    later version says so (``new_in``). Equal to the fingerprint of the
+    *as_of* dataset itself, it shows that no memory a sealed set written
+    for that version names moved or changed (part F, dataset v6)."""
+    rows: list[list[Any]] = []
+    for session in dataset.get("sessions", []):
+        if as_of is not None and int(session.get("new_in") or 0) > as_of:
+            continue
+        for i, turn in enumerate(session["turns"], 1):
+            rows.append([f"{session['id']}#{i}", session["day"], turn["user"], turn["assistant"]])
+    for fact in dataset.get("facts", []):
+        if as_of is None or int(fact.get("new_in") or 0) <= as_of:
+            rows.append([fact["id"], {k: v for k, v in fact.items() if k != "new_in"}])
+    for summary in dataset.get("summaries", []):
+        if as_of is None or int(summary.get("new_in") or 0) <= as_of:
+            rows.append([summary["id"], {k: v for k, v in summary.items() if k != "new_in"}])
+    rows.sort(key=lambda r: r[0])
+    return _sha256(json.dumps(rows, ensure_ascii=False, sort_keys=True))
+
+
+def _sealed_versions(dataset: dict[str, Any]) -> set[Any]:
+    """The dataset versions a sealed set may be written for: this one, and
+    every one since the version whose memories it still holds unchanged
+    (``ids_hold_since``, checked by ``tests/test_memory_benchmark.py``)."""
+    version = dataset.get("version")
+    held = dataset.get("ids_hold_since") or {}
+    if not isinstance(version, int) or not isinstance(held.get("version"), int):
+        return {version}
+    return {version, *range(held["version"], version)}
+
+
 def sealed_problems(sealed: dict[str, Any], dataset: dict[str, Any]) -> list[str]:
     """Why *sealed* is not the set the specification asks for (empty: it is).
 
@@ -591,7 +650,7 @@ def sealed_problems(sealed: dict[str, Any], dataset: dict[str, Any]) -> list[str
     for key in ("version", "dataset_version", "written_by", "written_on", "questions"):
         if not sealed.get(key):
             problems.append(f"no {key}")
-    if sealed.get("dataset_version") not in (None, dataset.get("version")):
+    if sealed.get("dataset_version") is not None and sealed.get("dataset_version") not in _sealed_versions(dataset):
         problems.append(f"written for dataset v{sealed.get('dataset_version')}, the dataset is "
                         f"v{dataset.get('version')}: check its ids, and have it rewritten if they moved")
     refs = {f"{s['id']}#{i}" for s in dataset["sessions"] for i in range(1, len(s["turns"]) + 1)}

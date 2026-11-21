@@ -1042,6 +1042,59 @@ def register_memory_tools(registry: Any) -> None:
 
     @registry.register(
         description=(
+            "List EVERY memory about a subject or a name, or from a time, a page at a time: the facts "
+            "and the conversations, newest first, each with its id (memory_read reads a conversation "
+            "whole). Use it to count or list ('how many times...', 'all my subscriptions'), when the "
+            "recalled memories are only the best few. about: the words every memory must hold (empty: "
+            "all of them). when: a time, as words ('last week', 'in August', 'الشهر الماضي') or ISO "
+            "('2026-08', '2026-08-01..2026-08-31'); empty: any time. offset: the next page's, as the "
+            "previous page names. Read-only."
+        ),
+        category="memory",
+    )
+    async def memory_list(about: str = "", when: str = "", offset: int = 0) -> str:
+        from kazma_core.safety.prompt_fence import fence_untrusted
+
+        # SQLite and the settings store (the zone): in a thread (AGENTS §35).
+        listing = await asyncio.to_thread(_memory_list_sync, about, when, offset)
+        if isinstance(listing, str):
+            return listing
+        head, body = listing
+        # Kazma's own line outside the fence; the memories inside it.
+        return head if not body else head + "\n" + fence_untrusted(body, source="memory_list")
+
+    def _memory_list_sync(about: str, when: str, offset: Any) -> tuple[str, str] | str:
+        """``(Kazma's line, the page)`` of ``memory_list.list_memories``, or
+        Kazma's own message saying why there is none."""
+        from kazma_core.memory.memory_list import list_memories
+        from kazma_core.safety.hitl import get_current_tenant_id
+        from kazma_core.spaces.scope import bound_asker
+
+        try:
+            start = max(0, int(offset or 0))
+        except (TypeError, ValueError):
+            return "Error: offset is a number of memories (0, or the offset the previous page names)."
+        try:
+            listing = list_memories(tenant_id=get_current_tenant_id(), about=str(about or ""),
+                                    when=str(when or ""), offset=start, asker=bound_asker())
+        except (sqlite3.Error, OSError):
+            logger.warning("[memory_list] the memory database could not be read", exc_info=True)
+            return "Error: memory could not be listed right now. This is NOT an empty memory."
+        if when and listing.period is None:
+            return (f"memory_list could not read the time {when!r}: give it as words ('last week', "
+                    "'in August') or ISO ('2026-08', '2026-08-01..2026-08-31').")
+        if not listing.total:
+            return "No memory holds every word of that" + (" in that time." if when else ".")
+        last = listing.offset + len(listing.lines)
+        head = f"Memories {listing.offset + 1}-{last} of {listing.total}."
+        if listing.next_offset is not None:
+            head += f" Next page: memory_list(about={about!r}, when={when!r}, offset={listing.next_offset})."
+        body = "\n".join(f"- [{line['date']}] {line['text']} ({line['kind']} {line['id']})"
+                         for line in listing.lines)
+        return head, body
+
+    @registry.register(
+        description=(
             "MEMORY ADMIN (read+write). Prefer this over SQL for all memory maintenance. "
             "action=list_beliefs|list_entities|invalidate|delete_entity|purge_empty_entities|"
             "merge|link|help. "

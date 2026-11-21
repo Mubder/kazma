@@ -97,27 +97,31 @@ def register_memory_routes(self: Any) -> None:
     def _memory_graph_search(q: str = "", limit: int = 20):
         """Search the V2 cognitive memory (repoints the legacy graph FTS search).
 
-        Backed by ``recall.search`` — hybrid FTS5 + dense vector + PPR over V2
-        beliefs and episodes. Returns the same ``{query, results[]}`` envelope
-        the legacy handler emitted so existing callers keep working. A plain
-        ``def``: the search is SQLite plus an embedding of the query, and it
-        ran on the event loop (AGENTS §35).
+        Backed by ``recall.search_with_status`` — hybrid FTS5 + dense vector
+        + PPR over V2 beliefs and episodes. Returns the same ``{query,
+        results[]}`` envelope the legacy handler emitted so existing callers
+        keep working, and ``degraded``: what kept the search from being whole
+        (None when it was), so an empty list from a search that failed is
+        never read as "no hits" (part F). A plain ``def``: the search is
+        SQLite plus an embedding of the query, and it ran on the event loop
+        (AGENTS §35).
         """
         if not (q or "").strip():
-            return {"results": [], "query": ""}
+            return {"results": [], "query": "", "degraded": None}
         from kazma_core.diagnostic_scope import read_only_diagnostic
-        from kazma_core.memory.recall import search
+        from kazma_core.memory.recall import search_with_status
 
         # The operator looking is not a recall: no access bump (Memory audit
         # M34 -- this GET wrote access counts, and kept what it showed "in use").
         with read_only_diagnostic("/api/memory/graph/search"):
-            hits = search(
+            hits, degraded = search_with_status(
                 q.strip(),
                 limit=max(1, min(int(limit), 50)),
                 tenant_id=_mem_tid(),
             )
         return {
             "query": q.strip(),
+            "degraded": degraded,
             "results": [
                 {
                     "id": h.get("id"),

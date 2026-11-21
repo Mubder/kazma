@@ -74,15 +74,21 @@ def _normalise(token: str) -> str:
     return t
 
 
-def content_terms(text: str) -> list[str]:
-    """The question's content words, folded and de-duplicated, in order."""
+def content_terms(text: str, *, digits: bool = False) -> list[str]:
+    """The question's content words, folded and de-duplicated, in order.
+
+    *digits*: keep a number of one digit too ("week 4", "room 7"): among
+    near-identical memories it is the word that tells them apart (recall's
+    evidence ranking, part F). Off for every other reader: a lone digit is
+    noise to a keyword index and a summary's grouping."""
     out: list[str] = []
     seen: set[str] = set()
     for raw in _TOKEN.findall(fold_for_search(text or "")):
         if raw in _EN_STOPWORDS or raw in _AR_STOPWORDS:
             continue
         term = _normalise(raw)
-        if len(term) < 2 or term in _EN_STOPWORDS or term in _AR_STOPWORDS or term in seen:
+        short = len(term) < 2 and not (digits and term.isdigit())
+        if short or term in _EN_STOPWORDS or term in _AR_STOPWORDS or term in seen:
             continue
         seen.add(term)
         out.append(term)
@@ -142,16 +148,18 @@ def coverage(
     *,
     doc_freq: Mapping[str, int] | None = None,
     docs: int = 0,
+    digits: bool = False,
 ) -> float:
     """The share of *question_terms* that *text* contains, weighted by rarity.
 
     With no *doc_freq* every term weighs the same. A rare word ("TP1352",
-    "passport") counts for more than a common one ("time").
+    "passport") counts for more than a common one ("time"). *digits*: the
+    text's one-digit numbers are words too (:func:`content_terms`).
     """
     terms = list(question_terms)
     if not terms:
         return 0.0
-    present = set(content_terms(text))
+    present = set(content_terms(text, digits=digits))
 
     def weight(term: str) -> float:
         if not doc_freq or docs <= 0:

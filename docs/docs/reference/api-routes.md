@@ -69,7 +69,7 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | GET | `/api/system/status` | Session | Memory health board + embedder/layer probes (`build_memory_health`) |
 | GET | `/api/memory/graph` | Session | Property graph JSON (`nodes`/`edges`); optional `?q=` filter |
 | GET | `/api/memory/graph/stats` | Session | Node/edge counts + backend path |
-| GET | `/api/memory/graph/search` | Session | FTS search over graph nodes (`?q=&limit=`) |
+| GET | `/api/memory/graph/search` | Session | Search of memory (`?q=&limit=`), backed by V2 recall; `degraded` names what kept it from being whole (null when it was) |
 | POST | `/api/memory/graph/clear` | Session | Bi-temporal invalidate of **active V2 beliefs for one tenant** (`?tenant=` defaults to `default`; no all-tenants mode). Tombstones the PG mirror, deletes Neo4j edges, writes a `graph_clear` audit row. UI confirms. |
 | * | `/api/system/memory/*` | Session | Backup / restore / maintenance of memory stores |
 

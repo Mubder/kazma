@@ -2783,6 +2783,8 @@ FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
         "memory_search": True,
         # One memory whole, a page at a time (2026-11-19): what a turn said.
         "memory_read": True,
+        # Every memory about some words or a period, a page at a time (part F).
+        "memory_list": True,
         "memory_list_beliefs": True,
         "memory_list_entities": True,
         # Its list actions return the same lists as the two tools above.

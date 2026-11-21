@@ -159,10 +159,10 @@ def test_postgres_primary_fuses_pgvector_dense(monkeypatch) -> None:
         name = "postgres"
         available = True
 
-        def search_episodes(self, query, *, tenant_id="default", limit=10):
+        def search_episodes(self, query, *, tenant_id="default", limit=10, strict=False):
             return [{"id": "e-sparse", "summary_text": "I live in Paris", "tier": "episodic"}]
 
-        def search_beliefs(self, query, *, tenant_id="default", limit=10):
+        def search_beliefs(self, query, *, tenant_id="default", limit=10, strict=False):
             return [
                 {
                     "id": "b-sparse",

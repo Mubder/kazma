@@ -121,17 +121,68 @@ related or not.
    ("before that: Paris (Jan 2026 to May 2026)"). Dates are in the time
    zone set for scheduled tasks. A value you asked Kazma to forget is never
    shown as "before that".
-6. Fence: `format_untrusted_block(..., source="memory_v2_recall")`.
+6. **The question's time** (since 2026-11-21). In a question about the past,
+   "yesterday", "last week", "last month", "two weeks ago", "in August",
+   "in 2025", "أمس", "الشهر الماضي", "قبل أسبوعين" and "في يوليو" are read as
+   a period, in the same zone, and are not counted as words a memory must
+   hold. A question about what was said then ("what did I tell you about
+   my race in August?") is answered only from what was said in that
+   period. A question about what was true then ("where did I live in
+   June?") is answered from the facts that held then, an earlier value
+   included, with the turns said then first. "At first", "originally",
+   "before we moved", "في البداية" and "قبل ما" show a fact's earlier values
+   right before the current one, each with the months it held. A question
+   about a day ahead ("what's on March 22?") is left as it is.
+7. **Follow-ups.** A short message that goes on from the one before it
+   ("And her sister?", "Yes, book it for Saturday", "ووين يشتغل؟") is
+   searched together with your message before it, with no model involved.
+   A stored turn that only goes on from the one before it is shown on that
+   turn's line ("-> then: ..."), never on a line of its own: stored as
+   typed, its meaning says nothing of what it answers.
+8. **What the chat already shows.** The chat's own turns that the model
+   reads in the conversation are not recalled into the block a second
+   time; older turns of the chat that no longer fit are.
+9. **Counting and listing.** A question that asks for every memory of a
+   kind ("how many long runs did I do?", "list all my subscriptions", "كم
+   مرة") gets up to 12 facts and 12 conversations, shown shorter, and a rule
+   telling the model these are only the best matches. The `memory_list`
+   tool (a read tool: no approval) lists every memory that holds some words
+   or comes from a period, newest first, 30 a page, each with its id: the
+   current facts (for a period, the values that held then) and the
+   conversations. It reads only the space it runs in, never a forgotten
+   memory, and its text reaches the model as data.
+10. **Ids.** Every recalled conversation ends with its id ("(memory
+    e_...)"), with the ids of any turns joined to it, so `memory_read` can
+    read it whole.
+11. **Numbers.** A one-digit number counts as a word when recall ranks
+    ("week 4" is not "week 14").
+12. **An incomplete search says so.** When recall could not search by
+    meaning, or could not search at all, the turn gets a note saying so and
+    that an empty block does not mean nothing is remembered. On
+    Postgres-primary a mirror search that fails is a failed recall, never
+    "nothing found". The TUI's memory search and
+    `GET /api/memory/graph/search` (its `degraded` field) say it too.
+13. Fence: `format_untrusted_block(..., source="memory_v2_recall")`.
+
+What did not help, measured on the benchmark's v6 `dense` category (thirty
+Arabic wedding turns, forty near-identical ride logs): reading the
+question's background from the whole store (the median, or a higher
+quantile) instead of its nearest memories, and weighing a question's rare
+words more. The background is one number per question, so it decides which
+memories clear the floor, never their order, and these questions were lost
+on order; no setting kept every earlier answer. The three Gulf Arabic
+paraphrases still missed need a reranker (decision 14 of the memory plan).
 
 When memory has nothing for a question, the **past-chats fallback** searches
 earlier chats; a chat must hold more than half of the question's content
 words.
 
 **Quality is measured.** `python scripts/memory_bench.py run` scores recall
-on a persona's life -- 1,120 chat turns and 69 facts inside unrelated chat,
-89 questions (single facts, paraphrases, things only the assistant said,
-updates, codes, Arabic, overviews, questions with no answer) -- and a
-second set of 40: written after the last tuning, and no threshold is swept
+on a persona's life -- 1,196 chat turns and 69 facts inside unrelated chat,
+127 questions (single facts, paraphrases, things only the assistant said,
+updates, codes, Arabic, overviews, questions with no answer, and since
+dataset v6 one topic of many turns, follow-ups, counts and lists, and
+periods) -- and a second set of 51: written after the last tuning, and no threshold is swept
 on them. They are a second check, not an unseen test: two decisions were
 taken by looking at them (the report below), and they are gated like every
 other score (renamed from "held out" on 2026-11-20, benchmark audit R8; a
@@ -885,6 +936,38 @@ the hub, never from its code (`memory/entity_protection.py`).
 | Hosted embed-only fleet | [#78](https://github.com/Mubder/kazma/issues/78) |
 
 Postgres dual-mirror and sparse ILIKE assist already exist as **optional** foundations. Tombstones propagate, and the 15-minute mirror sync pushes what changed (and, once a day, whatever the mirror is missing or holds stale; a row only the mirror holds is counted, never deleted).
+
+### Benchmark report (dataset v6, part F, 2026-11-21)
+
+Dataset v6 added 76 chat turns (thirty Arabic wedding turns, forty
+near-identical ride logs, three stored follow-ups) and four categories:
+`dense` (one topic of many turns), `follow_up`, `list` (a count or a list)
+and `temporal` (a period, what was true before). Every memory of v5 kept
+its id and text. Recall before part F against recall after it, on the same
+v6 dataset and the same recorded vectors (local path, tuning questions):
+
+| | Before part F | After part F |
+|---|---|---|
+| Questions | 127 | 127 |
+| Hit rate | 0.815 | 0.901 |
+| MRR | 0.698 | 0.764 |
+| Precision | 0.541 | 0.586 |
+| `dense` hit rate (14) | 0.71 | 0.79 |
+| `follow_up` hit rate (9) | 0.22 | 1.00 |
+| `list` hit rate (6) | 0.33 | 0.67 |
+| `temporal` hit rate (9), right order | 0.78, 0.50 | 0.89, 0.83 |
+| Abstention | 0.28 | 0.28 |
+
+Every category of v5 scores the same before and after part F on v6 (its
+lower precision against the v5 lock comes from the new memories, measured
+with the code before part F too). Two scores fell inside part F's own
+categories: `list` precision (0.668 to 0.634: a list shows more lines) and
+the second set's `follow_up` MRR (0.67 to 0.50, while its hit rate rose
+from 0.67 to 1.0: the message before a follow-up is searched with it, and
+its own memory can rank first). Still missed: three Gulf Arabic paraphrases
+in `dense`, the race result asked as "my running last week" (bge-m3 puts
+the two far apart), and two `list` questions (seven of nine long runs; a
+book named in Arabic asked for in English).
 
 ### Benchmark report (dataset v5, 2026-10-14)
 

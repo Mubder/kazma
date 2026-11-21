@@ -970,7 +970,7 @@ class Write:
         return (self, *self.also)
 
 
-_MEMORY_READERS = ("memory_search", "memory_read", "memory_list_entities", "memory_list_beliefs")
+_MEMORY_READERS = ("memory_search", "memory_read", "memory_list", "memory_list_entities", "memory_list_beliefs")
 _WORKSPACE_FILE = Write(("workspace",), ("file_read", "file_list"))
 _OUTPUT_ONLY = "the result is the tool output; nothing is saved"
 

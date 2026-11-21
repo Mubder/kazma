@@ -139,9 +139,19 @@ def test_the_list_check_sees_an_unnamed_flip_and_a_wrong_margin(report, near_edg
 
 def test_every_margin_agrees_with_its_hit(report):
     """The margin is the distance to the cut recall applied: positive exactly
-    when the hit holds (no question here is cut by the limit alone)."""
+    when the hit holds. Not for dataset v6's ``list`` questions: their
+    answers are cut by how many are shown (nine long runs; a list shows at
+    most six weekly summaries), which the margin does not count, and shown
+    as the siblings of the best fact, on its evidence, not their own. None
+    only for an answer that was never a candidate (v6's ``dense``
+    paraphrases, outside the nearest memories by meaning): a miss, far from
+    any edge."""
     for qid, r in _results(report).items():
-        assert r["margin"] is not None, qid
+        if r["category"] == "list":
+            continue
+        if r["margin"] is None:
+            assert not r["hit"], qid
+            continue
         assert (r["margin"] >= 0) == bool(r["hit"]), (qid, r["margin"], r["hit"])
 
 

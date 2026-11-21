@@ -2262,6 +2262,54 @@ four injected were noise.
   busy (or no thread) the turn's question and answer go to the durable queue
   as `post_turn_memory`, which the memory worker runs with retries. A queue
   that refuses too is a WARNING and a counted `enqueue_fail`.
+- **Part F: the question's time, follow-ups, lists, ids** (2026-11-21,
+  framework audit F9 and F2 step 3; dataset v6). No model on this path.
+  - *Time* (`memory/time_words.py`, `read_time`, EN/AR): in a question
+    about the past (a past verb) a period ("last week", "in August", "قبل
+    أسبوعين") is read in the operator's zone, and its words are never
+    content words (`recall._without_time_words`; every question-word reader
+    in recall goes through it or `_search_words`, a gate). What was SAID in
+    a period keeps only that period's turns and facts (`_turns_in_time`,
+    `_facts_in_time`); what was TRUE then keeps the facts that held then,
+    an earlier value included (`_belief_history`, `_held_in`). "At first",
+    "before we moved" (never "before work") show a fact's earlier values
+    before its current one, dated "[May 2026 to Oct 2026]".
+  - *Follow-ups* (`memory/question_shape.py`): the supervisor searches a
+    follow-up with the user's message before it (`standalone_query`); a
+    stored follow-up is joined to its turn's line (`_with_neighbours`:
+    nothing copied, so a forgotten turn leaves its neighbour's line; never
+    in a shared space). The chat's own turns the model reads are left out
+    (`turns_in_context`, `_not_in_context`).
+  - *Lists*: a request for every memory (`asks_for_all`) gets up to
+    `limits.LIST_LIMIT` of each, compact, twice the gap, and a rule naming
+    `memory_list` (`memory/memory_list.py`, read tier, fenced, the caller's
+    tenant, a forgotten memory never listed).
+  - *Ids*: every recalled conversation line ends "(memory e_...)", with the
+    ids joined to it. A one-digit number is a word in recall's coverage
+    (`content_terms(digits=True)`; off for every other reader).
+  - *An incomplete recall is said*: `recall_incomplete_note` (turn note
+    `memory_incomplete`); the Postgres-primary searches raise
+    (`search_state_episodes(strict=True)`), so a failed mirror is a failed
+    recall, never empty; every caller of `recall` / `search_with_status`
+    reads `degraded` or `failed` or is declared, and `search` (empty on any
+    failure) is for Kazma's own context only (gates in
+    `tests/test_memory_recall_part_f.py`).
+  - *Measured, not adopted*: the store's median (and 0.85-0.95 quantiles)
+    as the background, word rarity, a number weight. The background is one
+    number per question: it decides admission, never order, and no setting
+    kept every earlier answer. The dense Gulf paraphrases need a reranker
+    (decision 14).
+  - *Benchmark v6*: `dense`, `follow_up`, `list`, `temporal`; each part F
+    change taken out loses its category's answers
+    (`tests/test_memory_benchmark_part_f.py`; `memory_bench.py vectors`
+    records the raw follow-ups too, under a long recall deadline). The
+    dataset records `ids_hold_since` (`benchmark.memory_fingerprint` of v5's
+    own file): a sealed set written for v5 still holds. A memory shown on
+    another's line (a joined follow-up, a replaced value) stands by that
+    line's margin; a list question's margin describes no hit (siblings, the
+    summary limit) and the edge test leaves it out. A new dataset version's
+    pgvector floors start unverified, the local scores labelled `local`,
+    until `lock-pgvector` names a CI run.
 
 **H. Facts follow the order they were said in (W1, 2026-09-27).**
 - **`mutate_belief(now=...)` is when the fact was STATED** (valid time:

@@ -35,6 +35,26 @@ code; the real ones are fixed, each with a test that fails on the old code.
   ContextVar in Kazma to that).
 - The engine's setup script uses bash's own tests throughout.
 
+## Memory recall reads time, follow-ups and lists (2026-11-21)
+
+- A question about the past reads its time ("last week", "in August",
+  "قبل أسبوعين"): what you said then is answered from that period only, and
+  what was true then from the facts that held then. "At first" and "before
+  we moved" show a fact's earlier values before the current one.
+- A short follow-up ("And her sister?") is searched with your message
+  before it, and a stored follow-up ("Yes, book it for Saturday") is shown
+  with the turn it answers. The chat's own turns that the model already
+  reads are not recalled again.
+- "How many..." and "list all my..." get a longer list, and the new
+  read-only tool `memory_list` lists every memory about some words or from
+  a period, a page at a time, each with its id. Every recalled
+  conversation now carries its id for `memory_read`.
+- A memory search that could not search by meaning, or at all, says so to
+  the model, in the terminal app and in `GET /api/memory/graph/search`,
+  instead of looking like "nothing remembered".
+- The recall benchmark's dataset v6 measures all of it: on the same data,
+  hit rate 0.815 before and 0.901 after.
+
 ## Memory keeps all of its text; the Memory page reworked (2026-11-19)
 
 - A memory of a conversation keeps the whole turn: the question, the answer

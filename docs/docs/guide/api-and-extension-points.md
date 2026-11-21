@@ -129,7 +129,7 @@ bodies and credential-bearing request URLs are excluded from diagnostics.
 | `GET` | `/api/memory/graph` | HTTP 410; use `/api/memory/v2/graph`. |
 | `GET` | `/api/memory/graph/stats` | HTTP 410; use `/api/memory/v2/health`. |
 | `GET` | `/api/memory/graph/export` | HTTP 410; use the V2 graph surface. |
-| `GET` | `/api/memory/graph/search` | Compatibility search backed by V2 beliefs. |
+| `GET` | `/api/memory/graph/search` | Compatibility search backed by V2 recall; `degraded` says when the search was not whole. |
 | `POST` | `/api/memory/graph/clear` | Requires confirmation and tenant authorization; invalidates current beliefs while preserving history and episodes. |
 
 Operator diagnostics and public integration endpoints can intentionally have no

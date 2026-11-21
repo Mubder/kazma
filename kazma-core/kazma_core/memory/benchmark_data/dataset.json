@@ -1,5 +1,5 @@
 {
- "version": 5,
+ "version": 6,
  "seed": 20260926,
  "sessions": [
   {
@@ -552,6 +552,54 @@
      "assistant": "أنصحك برواية موسم الهجرة إلى الشمال للطيب صالح."
     }
    ]
+  },
+  {
+   "id": "p31",
+   "day": 96,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "Should I book the Bom Jesus funicular tour for when Noor's parents visit?",
+     "assistant": "Good idea: it is one of the oldest water-powered funiculars still running."
+    },
+    {
+     "user": "Yes, book it for Saturday at 10.",
+     "assistant": "Done, Saturday at 10:00."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "p32",
+   "day": 98,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "What would be a good present for Noor's sister Rana? She cooks a lot.",
+     "assistant": "A good cookbook: Ottolenghi's Simple, or Salt Fat Acid Heat by Samin Nosrat."
+    },
+    {
+     "user": "Get her the first one, and have it gift-wrapped.",
+     "assistant": "Ordered, gift-wrapped."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "a09",
+   "day": 102,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "أفكر أشتري لأبوي ساعة بمناسبة تقاعده، وش رايك؟",
+     "assistant": "فكرة حلوة، الساعة هدية تعيش معاه."
+    },
+    {
+     "user": "خلاص، اطلبها من محل الحجي، الذهبية.",
+     "assistant": "تم الطلب."
+    }
+   ],
+   "new_in": 6
   },
   {
    "id": "h01",
@@ -6980,6 +7028,846 @@
      "assistant": "Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter."
     }
    ]
+  },
+  {
+   "id": "w01",
+   "day": 20,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "حجزنا قاعة الراية لعرس نورة يوم ١٢ ديسمبر.",
+     "assistant": "تم: قاعة الراية، ١٢ ديسمبر."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w02",
+   "day": 22,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "العربون للقاعة ألف دينار ودفعناه اليوم.",
+     "assistant": "عربون القاعة ألف دينار، مدفوع."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w03",
+   "day": 24,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "المصورة اسمها هيا العتيبي وسعرها ٦٠٠ دينار.",
+     "assistant": "المصورة هيا العتيبي، ٦٠٠ دينار."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w04",
+   "day": 26,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "الكوشة بتكون ورد أبيض وأخضر من محل زهور الياسمين.",
+     "assistant": "كوشة بيضاء وخضراء من زهور الياسمين."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w05",
+   "day": 28,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "فستان العروس من مصممة لبنانية والتسليم بعد شهر.",
+     "assistant": "الفستان يوصل بعد شهر."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w06",
+   "day": 30,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "البوفيه من مطعم السرايا، مشاوي وأكل كويتي.",
+     "assistant": "البوفيه من السرايا."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w07",
+   "day": 32,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "عدد المعازيم تقريباً ثلاثمية وخمسين.",
+     "assistant": "حوالي ٣٥٠ معزوم."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w08",
+   "day": 34,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "بطاقات الدعوة بنطبعها في مطبعة الفجر، لون ذهبي.",
+     "assistant": "البطاقات ذهبية من مطبعة الفجر."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w09",
+   "day": 36,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "الفرقة اللي بتغني فرقة الأصيل، ساعتين.",
+     "assistant": "فرقة الأصيل لمدة ساعتين."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w10",
+   "day": 38,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "الكوافيرة هدى بتيي البيت الساعة ثلاث العصر.",
+     "assistant": "هدى تيي الساعة ثلاث."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w11",
+   "day": 40,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "شهر العسل في المالديف، أسبوع كامل.",
+     "assistant": "أسبوع في المالديف."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w12",
+   "day": 42,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "حجزنا تذاكر المالديف على طيران الإمارات.",
+     "assistant": "التذاكر على طيران الإمارات."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w13",
+   "day": 44,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "الكيكة خمس طوابق من حلويات لورين.",
+     "assistant": "كيكة خمس طوابق من لورين."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w14",
+   "day": 46,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "أم العريس تبي توزيعات عطور صغيرة للمعازيم.",
+     "assistant": "توزيعات عطور للمعازيم."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w15",
+   "day": 48,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "السيارة اللي بتزف العروس رولز رويس بيضا مأجرة.",
+     "assistant": "رولز رويس بيضاء بالإيجار."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w16",
+   "day": 50,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "الحنة قبل العرس بيومين في بيت الجدة.",
+     "assistant": "الحنة في بيت الجدة قبل العرس بيومين."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w17",
+   "day": 52,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "دفعنا للمصورة نص المبلغ مقدم.",
+     "assistant": "نص مبلغ المصورة مدفوع."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w18",
+   "day": 54,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "خاتم الزواج من مجوهرات الدهام، ألماس.",
+     "assistant": "خاتم ألماس من الدهام."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w19",
+   "day": 56,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "القاعة تقفل الساعة وحدة بالليل.",
+     "assistant": "القاعة لين الساعة وحدة."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w20",
+   "day": 58,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "البروفة الأخيرة للفستان يوم خمسة ديسمبر.",
+     "assistant": "بروفة الفستان خمسة ديسمبر."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w21",
+   "day": 60,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "منسقة العرس اسمها دانة وتاخذ عشرة بالمية.",
+     "assistant": "دانة المنسقة، عشرة بالمية."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w22",
+   "day": 62,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "طلبنا مئة كرسي زيادة للحديقة برا القاعة.",
+     "assistant": "مئة كرسي زيادة للحديقة."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w23",
+   "day": 64,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "الإضاءة بتكون شموع وثريات كريستال.",
+     "assistant": "شموع وثريات كريستال."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w24",
+   "day": 66,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "بنت خالتي ريم بتمسك استقبال المعازيم.",
+     "assistant": "ريم على الاستقبال."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w25",
+   "day": 68,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "العشا يتقدم الساعة عشر ونص.",
+     "assistant": "العشا عشر ونص."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w26",
+   "day": 70,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "حجزنا جناح في فندق الفورسيزنز ليلة العرس.",
+     "assistant": "جناح في الفورسيزنز ليلة العرس."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w27",
+   "day": 72,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "العريس بيلبس بشت أسود من خياط البغلي.",
+     "assistant": "بشت أسود من البغلي."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w28",
+   "day": 74,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "الفيديو بيكون درون مع المصورة بزيادة ميتين دينار.",
+     "assistant": "درون بزيادة ميتين دينار."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w29",
+   "day": 76,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "مواقف السيارات محجوزة مع خدمة فاليه.",
+     "assistant": "المواقف مع فاليه."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "w30",
+   "day": 78,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "الميزانية كلها عشرين ألف دينار وإلى الحين صرفنا اثنعش.",
+     "assistant": "صرفنا اثنعش ألف من عشرين."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c01",
+   "day": 32,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 1 bike ride: 32 km on Tuesday along the Gerês hills, average 26 km/h, felt tired.",
+     "assistant": "Logged week 1: 32 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c02",
+   "day": 34,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 2 bike ride: 39 km on Wednesday along the Braga ring road, average 23 km/h, felt fine.",
+     "assistant": "Logged week 2: 39 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c03",
+   "day": 36,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 3 bike ride: 46 km on Thursday along Ponte de Lima, average 28 km/h, felt slow.",
+     "assistant": "Logged week 3: 46 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c04",
+   "day": 38,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 4 bike ride: 53 km on Friday along the Ecovia do Rio Este, average 25 km/h, felt sore.",
+     "assistant": "Logged week 4: 53 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c05",
+   "day": 40,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 5 bike ride: 60 km on Saturday along Sameiro, average 22 km/h, felt light.",
+     "assistant": "Logged week 5: 60 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c06",
+   "day": 42,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 6 bike ride: 26 km on Sunday along the Cávado river path, average 27 km/h, felt strong.",
+     "assistant": "Logged week 6: 26 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c07",
+   "day": 44,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 7 bike ride: 33 km on Monday along the Gerês hills, average 24 km/h, felt tired.",
+     "assistant": "Logged week 7: 33 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c08",
+   "day": 46,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 8 bike ride: 40 km on Tuesday along the Braga ring road, average 21 km/h, felt fine.",
+     "assistant": "Logged week 8: 40 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c09",
+   "day": 48,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 9 bike ride: 47 km on Wednesday along Ponte de Lima, average 26 km/h, felt slow.",
+     "assistant": "Logged week 9: 47 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c10",
+   "day": 50,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 10 bike ride: 54 km on Thursday along the Ecovia do Rio Este, average 23 km/h, felt sore.",
+     "assistant": "Logged week 10: 54 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c11",
+   "day": 52,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 11 bike ride: 61 km on Friday along Sameiro, average 28 km/h, felt light.",
+     "assistant": "Logged week 11: 61 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c12",
+   "day": 54,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 12 bike ride: 27 km on Saturday along the Cávado river path, average 25 km/h, felt strong.",
+     "assistant": "Logged week 12: 27 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c13",
+   "day": 56,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 13 bike ride: 34 km on Sunday along the Gerês hills, average 22 km/h, felt tired.",
+     "assistant": "Logged week 13: 34 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c14",
+   "day": 58,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 14 bike ride: 41 km on Monday along the Braga ring road, average 27 km/h, felt fine.",
+     "assistant": "Logged week 14: 41 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c15",
+   "day": 60,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 15 bike ride: 48 km on Tuesday along Ponte de Lima, average 24 km/h, felt slow.",
+     "assistant": "Logged week 15: 48 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c16",
+   "day": 62,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 16 bike ride: 55 km on Wednesday along the Ecovia do Rio Este, average 21 km/h, felt sore.",
+     "assistant": "Logged week 16: 55 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c17",
+   "day": 64,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 17 bike ride: 62 km on Thursday along Sameiro, average 26 km/h, felt light.",
+     "assistant": "Logged week 17: 62 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c18",
+   "day": 66,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 18 bike ride: 28 km on Friday along the Cávado river path, average 23 km/h, felt strong.",
+     "assistant": "Logged week 18: 28 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c19",
+   "day": 68,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 19 bike ride: 35 km on Saturday along the Gerês hills, average 28 km/h, felt tired.",
+     "assistant": "Logged week 19: 35 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c20",
+   "day": 70,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 20 bike ride: 42 km on Sunday along the Braga ring road, average 25 km/h, felt fine.",
+     "assistant": "Logged week 20: 42 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c21",
+   "day": 72,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 21 bike ride: 49 km on Monday along Ponte de Lima, average 22 km/h, felt slow.",
+     "assistant": "Logged week 21: 49 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c22",
+   "day": 74,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 22 bike ride: 56 km on Tuesday along the Ecovia do Rio Este, average 27 km/h, felt sore.",
+     "assistant": "Logged week 22: 56 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c23",
+   "day": 76,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 23 bike ride: 63 km on Wednesday along Sameiro, average 24 km/h, felt light.",
+     "assistant": "Logged week 23: 63 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c24",
+   "day": 78,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 24 bike ride: 29 km on Thursday along the Cávado river path, average 21 km/h, felt strong.",
+     "assistant": "Logged week 24: 29 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c25",
+   "day": 80,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 25 bike ride: 36 km on Friday along the Gerês hills, average 26 km/h, felt tired.",
+     "assistant": "Logged week 25: 36 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c26",
+   "day": 82,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 26 bike ride: 43 km on Saturday along the Braga ring road, average 23 km/h, felt fine.",
+     "assistant": "Logged week 26: 43 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c27",
+   "day": 84,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 27 bike ride: 50 km on Sunday along Ponte de Lima, average 28 km/h, felt slow.",
+     "assistant": "Logged week 27: 50 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c28",
+   "day": 86,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 28 bike ride: 57 km on Monday along the Ecovia do Rio Este, average 25 km/h, felt sore.",
+     "assistant": "Logged week 28: 57 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c29",
+   "day": 88,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 29 bike ride: 64 km on Tuesday along Sameiro, average 22 km/h, felt light.",
+     "assistant": "Logged week 29: 64 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c30",
+   "day": 90,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 30 bike ride: 30 km on Wednesday along the Cávado river path, average 27 km/h, felt strong.",
+     "assistant": "Logged week 30: 30 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c31",
+   "day": 92,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 31 bike ride: 37 km on Thursday along the Gerês hills, average 24 km/h, felt tired.",
+     "assistant": "Logged week 31: 37 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c32",
+   "day": 94,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 32 bike ride: 44 km on Friday along the Braga ring road, average 21 km/h, felt fine.",
+     "assistant": "Logged week 32: 44 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c33",
+   "day": 96,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 33 bike ride: 51 km on Saturday along Ponte de Lima, average 26 km/h, felt slow.",
+     "assistant": "Logged week 33: 51 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c34",
+   "day": 98,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 34 bike ride: 58 km on Sunday along the Ecovia do Rio Este, average 23 km/h, felt sore.",
+     "assistant": "Logged week 34: 58 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c35",
+   "day": 100,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 35 bike ride: 65 km on Monday along Sameiro, average 28 km/h, felt light.",
+     "assistant": "Logged week 35: 65 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c36",
+   "day": 102,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 36 bike ride: 31 km on Tuesday along the Cávado river path, average 25 km/h, felt strong.",
+     "assistant": "Logged week 36: 31 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c37",
+   "day": 104,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 37 bike ride: 38 km on Wednesday along the Gerês hills, average 22 km/h, felt tired.",
+     "assistant": "Logged week 37: 38 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c38",
+   "day": 106,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 38 bike ride: 45 km on Thursday along the Braga ring road, average 27 km/h, felt fine.",
+     "assistant": "Logged week 38: 45 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c39",
+   "day": 108,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 39 bike ride: 52 km on Friday along Ponte de Lima, average 24 km/h, felt slow.",
+     "assistant": "Logged week 39: 52 km."
+    }
+   ],
+   "new_in": 6
+  },
+  {
+   "id": "c40",
+   "day": 110,
+   "kind": "dense",
+   "turns": [
+    {
+     "user": "Week 40 bike ride: 59 km on Saturday along the Ecovia do Rio Este, average 21 km/h, felt sore.",
+     "assistant": "Logged week 40: 59 km."
+    }
+   ],
+   "new_in": 6
   }
  ],
  "facts": [
@@ -9811,7 +10699,8 @@
    ],
    "below": [
     "x03"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q002",
@@ -9820,7 +10709,8 @@
    "gold": [
     "p01#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q003",
@@ -9831,7 +10721,8 @@
    ],
    "below": [
     "x02"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q004",
@@ -9840,7 +10731,8 @@
    "gold": [
     "p02#2|f08"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q005",
@@ -9851,7 +10743,8 @@
    ],
    "below": [
     "h05#1"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q006",
@@ -9860,7 +10753,8 @@
    "gold": [
     "p06#1|f11"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q007",
@@ -9872,7 +10766,8 @@
    "below": [
     "h04#1",
     "x04"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q008",
@@ -9881,7 +10776,8 @@
    "gold": [
     "p07#1|f14"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q009",
@@ -9890,7 +10786,8 @@
    "gold": [
     "p09#1|f17"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q010",
@@ -9899,7 +10796,8 @@
    "gold": [
     "p10#1|f18"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q011",
@@ -9911,7 +10809,8 @@
    "below": [
     "h08#1",
     "x08"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q012",
@@ -9920,7 +10819,8 @@
    "gold": [
     "p18#1|f22"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q013",
@@ -9929,7 +10829,8 @@
    "gold": [
     "p20#1|f23"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q014",
@@ -9938,7 +10839,8 @@
    "gold": [
     "p24#1|f27"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q015",
@@ -9947,7 +10849,8 @@
    "gold": [
     "p25#1|f29"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q016",
@@ -9956,7 +10859,8 @@
    "gold": [
     "p28#1|f31"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q017",
@@ -9965,7 +10869,8 @@
    "gold": [
     "p26#1|f30"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q018",
@@ -9974,7 +10879,8 @@
    "gold": [
     "p25#1|f28"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q101",
@@ -9983,7 +10889,8 @@
    "gold": [
     "p05#1|f10"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q102",
@@ -9992,7 +10899,8 @@
    "gold": [
     "p02#1|f06"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q103",
@@ -10001,7 +10909,8 @@
    "gold": [
     "p01#2|f05|f37"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q104",
@@ -10012,7 +10921,8 @@
    ],
    "below": [
     "p13#1"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q105",
@@ -10021,7 +10931,8 @@
    "gold": [
     "p12#1|f19"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q106",
@@ -10032,7 +10943,8 @@
    ],
    "below": [
     "p01#1"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q107",
@@ -10041,7 +10953,8 @@
    "gold": [
     "p18#1|f22"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q108",
@@ -10050,7 +10963,8 @@
    "gold": [
     "p20#1|f24"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q201",
@@ -10059,7 +10973,8 @@
    "gold": [
     "p04#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q202",
@@ -10068,7 +10983,8 @@
    "gold": [
     "p19#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q203",
@@ -10077,7 +10993,8 @@
    "gold": [
     "p11#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q204",
@@ -10086,7 +11003,8 @@
    "gold": [
     "p21#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q205",
@@ -10095,7 +11013,8 @@
    "gold": [
     "p03#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q206",
@@ -10104,7 +11023,8 @@
    "gold": [
     "p23#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q301",
@@ -10114,7 +11034,8 @@
     "p07#1|f14",
     "p08#1|f16"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q302",
@@ -10126,7 +11047,8 @@
    ],
    "below": [
     "p01#1"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q303",
@@ -10136,7 +11058,8 @@
     "p03#1|f09",
     "p23#1|f26"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q304",
@@ -10149,7 +11072,8 @@
    "below": [
     "h07#1",
     "x07"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q401",
@@ -10161,7 +11085,8 @@
    "below": [
     "p01#1",
     "x01"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q402",
@@ -10172,7 +11097,8 @@
    ],
    "below": [
     "p13#1"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q403",
@@ -10183,7 +11109,8 @@
    ],
    "below": [
     "p01#1"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q404",
@@ -10194,7 +11121,8 @@
    ],
    "below": [
     "p06#1"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q405",
@@ -10206,7 +11134,8 @@
    "below": [
     "p29#1",
     "f36"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q406",
@@ -10217,7 +11146,8 @@
    ],
    "below": [
     "a02#1"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q501",
@@ -10226,7 +11156,8 @@
    "gold": [
     "p22#1|f32"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q502",
@@ -10238,7 +11169,8 @@
    "below": [
     "h07#1",
     "x07"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q503",
@@ -10247,7 +11179,8 @@
    "gold": [
     "a05#1|g06"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q504",
@@ -10256,7 +11189,8 @@
    "gold": [
     "a05#1|g06"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q601",
@@ -10265,7 +11199,8 @@
    "gold": [
     "p17#1|f33|f34"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q602",
@@ -10274,7 +11209,8 @@
    "gold": [
     "p01#2|f05"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q603",
@@ -10283,7 +11219,8 @@
    "gold": [
     "p08#1|f16"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q701",
@@ -10292,7 +11229,8 @@
    "gold": [
     "a01#1|g01"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q702",
@@ -10301,7 +11239,8 @@
    "gold": [
     "a01#1|g02"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q703",
@@ -10310,7 +11249,8 @@
    "gold": [
     "a03#1|g04|p24#1|f27"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q704",
@@ -10319,7 +11259,8 @@
    "gold": [
     "a04#1|g05"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q705",
@@ -10328,7 +11269,8 @@
    "gold": [
     "a04#1|g05"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q706",
@@ -10337,7 +11279,8 @@
    "gold": [
     "a06#1|g07"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q707",
@@ -10346,7 +11289,8 @@
    "gold": [
     "a08#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q708",
@@ -10355,133 +11299,152 @@
    "gold": [
     "a03#1|g04"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q801",
    "text": "What is my brother-in-law's name?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q802",
    "text": "Which bank do I use?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q803",
    "text": "What's my favourite football team?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q804",
    "text": "Do I have any cats?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q805",
    "text": "What is my home Wi-Fi network called?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q806",
    "text": "Which university did I study at?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q807",
    "text": "What is Noor's favourite film?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q808",
    "text": "How tall am I?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q809",
    "text": "What's my shoe size?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q810",
    "text": "When is my wedding anniversary?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q811",
    "text": "What did my doctor say about my cholesterol?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q812",
    "text": "Which gym do I go to?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q813",
    "text": "What is my father's job?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q814",
    "text": "شنو اسم أختي؟",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q815",
    "text": "وين درست الجامعة؟",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q816",
    "text": "Catch me up on the kitchen renovation.",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q817",
    "text": "What did we decide about the solar panels?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q818",
    "text": "Where are we with the garden redesign?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q901",
@@ -10490,7 +11453,8 @@
    "gold": [
     "n01"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q902",
@@ -10499,7 +11463,8 @@
    "gold": [
     "n02"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q903",
@@ -10508,7 +11473,8 @@
    "gold": [
     "n03"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q904",
@@ -10517,7 +11483,8 @@
    "gold": [
     "n04"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q951",
@@ -10527,7 +11494,8 @@
     "sw4|p22#1|f32",
     "sw4|p23#1|f26"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q952",
@@ -10537,7 +11505,8 @@
     "sw2|p06#1|f11",
     "p27#1|f12b"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q953",
@@ -10549,7 +11518,8 @@
    "below": [
     "p29#1",
     "f36"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "q954",
@@ -10559,7 +11529,8 @@
     "sw2|p07#1|f14",
     "sw2|p08#1|f16"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q955",
@@ -10569,7 +11540,8 @@
     "sw1|p01#1|f01",
     "sw1|p01#2|f05"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q956",
@@ -10578,7 +11550,8 @@
    "gold": [
     "sw6|a04#1|g05"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q957",
@@ -10587,7 +11560,8 @@
    "gold": [
     "sr10|sr9|sr8|r10#1|r09#1|r08#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q960",
@@ -10596,7 +11570,8 @@
    "gold": [
     "sr10|r10#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q958",
@@ -10605,7 +11580,8 @@
    "gold": [
     "sr7|r07#1|sr6|r06#1|sr5|r05#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "q959",
@@ -10614,7 +11590,446 @@
    "gold": [
     "sr2|sr3|r02#1|r03#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1001",
+   "text": "منو اللي بتصور العرس وكم تاخذ؟",
+   "category": "dense",
+   "gold": [
+    "w03#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1002",
+   "text": "من وين أكل العرس؟",
+   "category": "dense",
+   "gold": [
+    "w06#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1003",
+   "text": "وين بنسافر بعد العرس؟",
+   "category": "dense",
+   "gold": [
+    "w11#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1004",
+   "text": "كم طابق الكيكة ومن وين؟",
+   "category": "dense",
+   "gold": [
+    "w13#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1005",
+   "text": "متى الحنة ووين؟",
+   "category": "dense",
+   "gold": [
+    "w16#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1006",
+   "text": "شنو اسم اللي تنظم العرس وكم نسبتها؟",
+   "category": "dense",
+   "gold": [
+    "w21#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1007",
+   "text": "وين بنبات ليلة العرس؟",
+   "category": "dense",
+   "gold": [
+    "w26#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1008",
+   "text": "كم صرفنا لحد الحين؟",
+   "category": "dense",
+   "gold": [
+    "w30#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1011",
+   "text": "How far did I cycle in week 4?",
+   "category": "dense",
+   "gold": [
+    "c04#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1012",
+   "text": "How far did I cycle in week 11?",
+   "category": "dense",
+   "gold": [
+    "c11#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1013",
+   "text": "How far did I cycle in week 17?",
+   "category": "dense",
+   "gold": [
+    "c17#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1014",
+   "text": "How far did I cycle in week 23?",
+   "category": "dense",
+   "gold": [
+    "c23#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1015",
+   "text": "How far did I cycle in week 30?",
+   "category": "dense",
+   "gold": [
+    "c30#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1016",
+   "text": "How far did I cycle in week 38?",
+   "category": "dense",
+   "gold": [
+    "c38#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1101",
+   "text": "And what does she teach?",
+   "category": "follow_up",
+   "gold": [
+    "p02#2|f08"
+   ],
+   "below": [],
+   "now_day": 116,
+   "context": [
+    "Who is my partner?"
+   ]
+  },
+  {
+   "id": "q1102",
+   "text": "Where is her practice?",
+   "category": "follow_up",
+   "gold": [
+    "p18#1|f22"
+   ],
+   "below": [],
+   "now_day": 116,
+   "context": [
+    "Who is my dentist?"
+   ]
+  },
+  {
+   "id": "q1103",
+   "text": "Did we end up selling it?",
+   "category": "follow_up",
+   "gold": [
+    "p30#1|f35"
+   ],
+   "below": [
+    "p29#1",
+    "f36"
+   ],
+   "now_day": 116,
+   "context": [
+    "What car do I drive?"
+   ]
+  },
+  {
+   "id": "q1104",
+   "text": "And when are her shots due?",
+   "category": "follow_up",
+   "gold": [
+    "p25#1|f29"
+   ],
+   "below": [],
+   "now_day": 116,
+   "context": [
+    "Which vet does Pixel see?"
+   ]
+  },
+  {
+   "id": "q1105",
+   "text": "ووين يشتغل؟",
+   "category": "follow_up",
+   "gold": [
+    "a01#1|g02"
+   ],
+   "below": [],
+   "now_day": 116,
+   "context": [
+    "شنو اسم أخوي؟"
+   ]
+  },
+  {
+   "id": "q1106",
+   "text": "ووين حاجزين؟",
+   "category": "follow_up",
+   "gold": [
+    "a04#1|g05"
+   ],
+   "below": [],
+   "now_day": 116,
+   "context": [
+    "متى رحلتنا لإسطنبول؟"
+   ]
+  },
+  {
+   "id": "q1107",
+   "text": "When is the funicular tour booked for?",
+   "category": "follow_up",
+   "gold": [
+    "p31#2"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1108",
+   "text": "Which cookbook did I pick for Rana?",
+   "category": "follow_up",
+   "gold": [
+    "p32#1",
+    "p32#2"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1109",
+   "text": "شنو الهدية اللي قررت أعطيها لأبوي ومن وين؟",
+   "category": "follow_up",
+   "gold": [
+    "a09#1",
+    "a09#2"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1201",
+   "text": "How many long runs did I complete for the half marathon? List them all.",
+   "category": "list",
+   "gold": [
+    "r00#1|sr0",
+    "r01#1|sr1",
+    "r02#1|sr2",
+    "r03#1|sr3",
+    "r05#1|sr5",
+    "r06#1|sr6",
+    "r07#1|sr7",
+    "r08#1|sr8",
+    "r09#1|sr9"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1202",
+   "text": "List every note I asked you to keep.",
+   "category": "list",
+   "gold": [
+    "n01",
+    "n02",
+    "n03",
+    "n04",
+    "z07",
+    "z08",
+    "z11"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1203",
+   "text": "What are all the books you've recommended to me?",
+   "category": "list",
+   "gold": [
+    "p19#1",
+    "a08#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1204",
+   "text": "List everything I've told you about Maya's activities.",
+   "category": "list",
+   "gold": [
+    "p28#1|f31",
+    "a06#1|g07"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1205",
+   "text": "كم مرة غيرت أيام النادي؟ عطني كل الأيام.",
+   "category": "list",
+   "gold": [
+    "p13#1|f20",
+    "p16#1|f21"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1206",
+   "text": "How many times did the Tagus retrofit deadline change? Give me every deadline.",
+   "category": "list",
+   "gold": [
+    "p06#1|f12a",
+    "p27#1|f12b"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1301",
+   "text": "Where did I live before we moved to Braga?",
+   "category": "temporal",
+   "gold": [
+    "f02|p01#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1302",
+   "text": "Which company did I work for before Norte Engenharia?",
+   "category": "temporal",
+   "gold": [
+    "f03|p01#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "q1303",
+   "text": "What were my gym days at first?",
+   "category": "temporal",
+   "gold": [
+    "f20|p13#1"
+   ],
+   "below": [
+    "p16#1"
+   ],
+   "now_day": 116
+  },
+  {
+   "id": "q1305",
+   "text": "متى كان موعد الدكتور قبل ما نغيره؟",
+   "category": "temporal",
+   "gold": [
+    "g03|a02#1"
+   ],
+   "below": [
+    "a07#1"
+   ],
+   "now_day": 116
+  },
+  {
+   "id": "q1306",
+   "text": "What did I tell you about Pixel in August?",
+   "category": "temporal",
+   "gold": [
+    "p25#1|f28|f29"
+   ],
+   "below": [
+    "p01#2"
+   ],
+   "now_day": 116
+  },
+  {
+   "id": "q1307",
+   "text": "وش قلت لك عن مايا في يوليو؟",
+   "category": "temporal",
+   "gold": [
+    "a06#1|g07"
+   ],
+   "below": [
+    "p07#1",
+    "p28#1"
+   ],
+   "now_day": 116
+  },
+  {
+   "id": "q1308",
+   "text": "Where was I living in June?",
+   "category": "temporal",
+   "gold": [
+    "f02|p01#1|p14#1"
+   ],
+   "below": [
+    "f25",
+    "p15#1"
+   ],
+   "now_day": 116
+  },
+  {
+   "id": "q1309",
+   "text": "What did I tell you about my running last week?",
+   "category": "temporal",
+   "gold": [
+    "r10#1|sr10"
+   ],
+   "below": [
+    "r00#1",
+    "r01#1",
+    "r02#1",
+    "r03#1"
+   ],
+   "now_day": 78
+  },
+  {
+   "id": "q1310",
+   "text": "When did we move to Braga?",
+   "category": "temporal",
+   "gold": [
+    "p15#1|p14#1|f25"
+   ],
+   "below": [],
+   "now_day": 116
   }
  ],
  "second": [
@@ -10625,7 +12040,8 @@
    "gold": [
     "p02#2|f07"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h002",
@@ -10636,7 +12052,8 @@
    ],
    "below": [
     "x03"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "h003",
@@ -10645,7 +12062,8 @@
    "gold": [
     "p12#1|f19|h08#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h004",
@@ -10657,7 +12075,8 @@
    "below": [
     "h04#1",
     "x04"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "h005",
@@ -10668,7 +12087,8 @@
    ],
    "below": [
     "x02"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "h006",
@@ -10677,7 +12097,8 @@
    "gold": [
     "p20#1|f24"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h007",
@@ -10686,7 +12107,8 @@
    "gold": [
     "p07#1|f14"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h008",
@@ -10695,7 +12117,8 @@
    "gold": [
     "p08#1|f16"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h009",
@@ -10704,7 +12127,8 @@
    "gold": [
     "p11#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h010",
@@ -10713,7 +12137,8 @@
    "gold": [
     "p19#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h011",
@@ -10722,7 +12147,8 @@
    "gold": [
     "p21#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h012",
@@ -10734,7 +12160,8 @@
    "below": [
     "p01#1",
     "x01"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "h013",
@@ -10745,7 +12172,8 @@
    ],
    "below": [
     "p01#1"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "h014",
@@ -10756,7 +12184,8 @@
    ],
    "below": [
     "p06#1"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "h015",
@@ -10768,7 +12197,8 @@
    "below": [
     "p29#1",
     "f36"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "h016",
@@ -10777,7 +12207,8 @@
    "gold": [
     "p22#1|f32"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h017",
@@ -10786,7 +12217,8 @@
    "gold": [
     "z11"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h018",
@@ -10795,7 +12227,8 @@
    "gold": [
     "n01"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h019",
@@ -10804,7 +12237,8 @@
    "gold": [
     "n03"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h020",
@@ -10813,7 +12247,8 @@
    "gold": [
     "p10#1|f18"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h021",
@@ -10825,7 +12260,8 @@
    "below": [
     "p01#1",
     "x01"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "h022",
@@ -10834,7 +12270,8 @@
    "gold": [
     "p10#1|f18"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h023",
@@ -10843,7 +12280,8 @@
    "gold": [
     "p05#1|f10"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h024",
@@ -10852,7 +12290,8 @@
    "gold": [
     "a01#1|g01"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h025",
@@ -10861,7 +12300,8 @@
    "gold": [
     "a01#1|g02"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h026",
@@ -10873,7 +12313,8 @@
    "below": [
     "h07#1",
     "x07"
-   ]
+   ],
+   "now_day": 116
   },
   {
    "id": "h027",
@@ -10882,7 +12323,8 @@
    "gold": [
     "a06#1|g07"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h028",
@@ -10891,7 +12333,8 @@
    "gold": [
     "a04#1|g05"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h029",
@@ -10900,7 +12343,8 @@
    "gold": [
     "a05#1|g06"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h030",
@@ -10909,63 +12353,72 @@
    "gold": [
     "a08#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h031",
    "text": "What is my sister's name?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h032",
    "text": "Which dentist does Noor see?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h033",
    "text": "What colour is my car?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h034",
    "text": "When is Maya's birthday?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h035",
    "text": "شنو اسم مدير أخوي فهد؟",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h036",
    "text": "What's my salary at the new job?",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h037",
    "text": "Catch me up on the bathroom remodel.",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h038",
    "text": "وش رقم سيارتي؟",
    "category": "abstain",
    "gold": [],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h039",
@@ -10974,7 +12427,8 @@
    "gold": [
     "sr10|r10#1"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
   },
   {
    "id": "h040",
@@ -10983,7 +12437,135 @@
    "gold": [
     "sw6|a04#1|g05"
    ],
-   "below": []
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "h041",
+   "text": "منو بيغني في الحفلة؟",
+   "category": "dense",
+   "gold": [
+    "w09#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "h042",
+   "text": "كم معزوم بيحضر؟",
+   "category": "dense",
+   "gold": [
+    "w07#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "h043",
+   "text": "وش لون الورد اللي بيزين مكان العروس؟",
+   "category": "dense",
+   "gold": [
+    "w04#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "h044",
+   "text": "How long was my ride in week 25?",
+   "category": "dense",
+   "gold": [
+    "c25#1"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "h045",
+   "text": "And what else does he do?",
+   "category": "follow_up",
+   "gold": [
+    "h08#1|x08"
+   ],
+   "below": [],
+   "now_day": 116,
+   "context": [
+    "Who teaches me guitar?"
+   ]
+  },
+  {
+   "id": "h046",
+   "text": "What does she like?",
+   "category": "follow_up",
+   "gold": [
+    "p20#1|f24"
+   ],
+   "below": [],
+   "now_day": 116,
+   "context": [
+    "When is my mother's birthday?"
+   ]
+  },
+  {
+   "id": "h047",
+   "text": "وأي يوم؟",
+   "category": "follow_up",
+   "gold": [
+    "a06#1|g07"
+   ],
+   "below": [],
+   "now_day": 116,
+   "context": [
+    "وش تحب مايا تسوي؟"
+   ]
+  },
+  {
+   "id": "h048",
+   "text": "List every flight number I've given you.",
+   "category": "list",
+   "gold": [
+    "p23#1|f26",
+    "h07#1|x07"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "h049",
+   "text": "عطني كل أرقام الملفات والعدادات اللي قلت لك عنها",
+   "category": "list",
+   "gold": [
+    "a05#1|g06",
+    "n04"
+   ],
+   "below": [],
+   "now_day": 116
+  },
+  {
+   "id": "h050",
+   "text": "Which electric car was I looking at in September?",
+   "category": "temporal",
+   "gold": [
+    "p29#1|f36"
+   ],
+   "below": [],
+   "now_day": 140
+  },
+  {
+   "id": "h051",
+   "text": "متى كان آخر موعد لمشروع الجسر قبل ما يتأجل؟",
+   "category": "temporal",
+   "gold": [
+    "f12a|p06#1"
+   ],
+   "below": [
+    "p27#1"
+   ],
+   "now_day": 116
   }
- ]
+ ],
+ "ids_hold_since": {
+  "version": 5,
+  "sha256": "a9ed825564294bb84a663a81525930d944214146ce7221d4c93364c9ce3be822"
+ }
 }

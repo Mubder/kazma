@@ -77,11 +77,11 @@ class StateBackend(Protocol):
     def count_beliefs(self, *, tenant_id: str = "default") -> int: ...
 
     def search_episodes(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10
+        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
     ) -> list[dict[str, Any]]: ...
 
     def search_beliefs(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10
+        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
     ) -> list[dict[str, Any]]: ...
 
 
@@ -124,12 +124,12 @@ class _NullStateBackend:
         return {}
 
     def search_episodes(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10
+        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
     ) -> list[dict[str, Any]]:
         return []
 
     def search_beliefs(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10
+        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
     ) -> list[dict[str, Any]]:
         return []
 
@@ -565,9 +565,10 @@ class PostgresStateBackend:
             conn.close()
 
     def search_episodes(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10
+        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
     ) -> list[dict[str, Any]]:
         """Keyword search over mirrored episode text (multi-replica read).
+        *strict*: a failure raises, never [] (recall's primary path).
 
         The question's content words only (``memory/query_terms.py``): ORing
         every token as a substring matched "is" and "my" everywhere, so this
@@ -635,13 +636,16 @@ class PostgresStateBackend:
             finally:
                 conn.close()
         except Exception:
+            if strict:
+                raise
             logger.debug("[state_backend] postgres episode search failed", exc_info=True)
             return []
 
     def search_beliefs(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10
+        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
     ) -> list[dict[str, Any]]:
-        """Keyword search over mirrored active beliefs (content words, whole words)."""
+        """Keyword search over mirrored active beliefs (content words, whole words).
+        *strict*: a failure raises, never [] (recall's primary path)."""
         from kazma_core.memory.query_terms import mentions, search_terms
 
         terms = search_terms(query)[:8]
@@ -698,6 +702,8 @@ class PostgresStateBackend:
             finally:
                 conn.close()
         except Exception:
+            if strict:
+                raise
             logger.debug("[state_backend] postgres belief search failed", exc_info=True)
             return []
 
@@ -1830,24 +1836,33 @@ def backfill_state_mirror(*, tenant_id: str = "default") -> dict[str, Any]:
 
 
 def search_state_episodes(
-    query: str, *, tenant_id: str = "default", limit: int = 10
+    query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
 ) -> list[dict[str, Any]]:
+    """The mirror's keyword matches. *strict*: a search that fails raises
+    (recall on the Postgres-primary path, where the mirror IS memory: a
+    failure read as "no matches" told the user nothing was remembered --
+    part F, framework audit F9); else [] (a top-up that may be skipped)."""
     try:
         return list(
             get_state_backend().search_episodes(
-                query, tenant_id=tenant_id, limit=limit
+                query, tenant_id=tenant_id, limit=limit, strict=strict
             )
         )
     except Exception:
+        if strict:
+            raise
         return []
 
 
 def search_state_beliefs(
-    query: str, *, tenant_id: str = "default", limit: int = 10
+    query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
 ) -> list[dict[str, Any]]:
+    """:func:`search_state_episodes` for the mirror's current facts."""
     try:
         return list(
-            get_state_backend().search_beliefs(query, tenant_id=tenant_id, limit=limit)
+            get_state_backend().search_beliefs(query, tenant_id=tenant_id, limit=limit, strict=strict)
         )
     except Exception:
+        if strict:
+            raise
         return []

@@ -139,6 +139,7 @@ TOOL_TIERS: dict[str, str] = {
     # Reads one memory whole, a page at a time (2026-11-19: memories keep
     # all of their text; lists show them bounded).
     "memory_read": "read",
+    "memory_list": "read",
     "sqlite_query": "read",
     "current_datetime": "read",
     # The reader of save_proposal's drafts. Read-tier on purpose: reading

@@ -9,6 +9,19 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 > This page is published at [kazma.ai/docs/recent-features/](https://kazma.ai/docs/recent-features/) ([Arabic](https://kazma.ai/ar/docs/recent-features/)).
 
+**New in 2026-11-21 — recall reads time, follow-ups and lists.** A question
+about the past reads its time ("last week", "in August", "قبل أسبوعين"):
+what you said then is answered from that period only, and what was true then
+from the facts that held then; "at first" and "before we moved" show a
+fact's earlier values before the current one. A short follow-up ("And her
+sister?") is searched with your message before it, and a stored "Yes, book
+it for Saturday" is shown with the turn it answers. "How many..." and "list
+all my..." get a longer list, and the read-only tool `memory_list` lists
+every memory about some words or from a period, a page at a time. Every
+recalled conversation carries its id for `memory_read`, and a memory search
+that could not search by meaning says so instead of looking like "nothing
+remembered" (see [Memory and RAG](memory-and-rag.md)).
+
 **New in 2026-11-21 — forget means gone.** A forgotten fact keeps nothing
 you could read: its subject and name go with its value (before, a forgotten
 "Sara was diagnosed with ..." still read "sara, diagnosed_with", and the

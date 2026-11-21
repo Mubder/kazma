@@ -43,10 +43,16 @@ __all__ = [
     "DEEP_PASS_QUESTION",
     "EMBED_TEXT_CHARS",
     "EPISODE_TEXT_MAX",
+    "FOLLOW_UP_EARLIER_CHARS",
     "KEYWORD_HIT_CHARS",
     "LEGACY_BRIDGE_CUT",
     "LEGACY_SUMMARY_CUT",
     "LEGACY_TEXT_CUT",
+    "LIST_LIMIT",
+    "LIST_PAGE",
+    "LIST_SHOW_ANSWER",
+    "LIST_SHOW_ONE",
+    "LIST_SHOW_QUESTION",
     "MATCH_TEXT_CHARS",
     "MEMORY_READ_PAGE",
     "MEMORY_SHOW_ANSWER",
@@ -112,6 +118,22 @@ KEYWORD_HIT_CHARS = 300
 RECALL_SHOW_QUESTION = 200
 RECALL_SHOW_ANSWER = 300
 RECALL_SHOW_ONE = 500
+
+#: A question that asks for every memory of a kind ("how many", "list them
+#: all", "كم مرة"; framework audit F9, part F): recall shows up to this many
+#: facts and turns, each in a shorter line, and says that ``memory_list``
+#: lists the rest.
+LIST_LIMIT = 12
+LIST_SHOW_QUESTION = 120
+LIST_SHOW_ANSWER = 160
+LIST_SHOW_ONE = 240
+#: ``memory_list``: memories a page.
+LIST_PAGE = 30
+
+#: A follow-up question is searched with the user's message before it
+#: (``question_shape.standalone_query``): at most this much of each earlier
+#: message, its end (where the question it went on from usually is).
+FOLLOW_UP_EARLIER_CHARS = 300
 
 #: ``memory_search`` and the Memory page's probe: at most this much of one
 #: memory, then how much more there is and how to read it.
