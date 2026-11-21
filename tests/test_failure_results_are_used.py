@@ -631,6 +631,9 @@ DECLARED: dict[tuple[str, str, str], str] = {
     ("kazma-gateway/kazma_gateway/agent_handler/graph.py", "create_graph_handler._handler_body",
      "gateway.GatewayManager.send"): _CHAT_REPLY,
     ("kazma-gateway/kazma_gateway/agent_handler/graph.py",
+     "create_graph_handler._handler_body_in_its_space", "gateway.GatewayManager.send"):
+        "the refusal of a chat of another space: " + _CHAT_REPLY,
+    ("kazma-gateway/kazma_gateway/agent_handler/graph.py",
      "create_graph_handler._handler_body._long_progress", "gateway.GatewayManager.send"):
         "a long task's progress line between steps: " + _CHAT_REPLY,
     ("kazma-gateway/kazma_gateway/agent_handler/hitl.py", "_deliver_resume",

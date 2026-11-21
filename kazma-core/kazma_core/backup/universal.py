@@ -556,9 +556,18 @@ def _zip_backup_dir(dest: Path) -> Path:
 
 
 def plain_copy_configured() -> bool:
-    """True when a plain copy of the backup is set to leave the machine: a
-    native provider's zip or rclone's folder (restic's copy is encrypted and
-    is not this). Asked by the Spaces switch-on check (S1-33, decision N10).
+    """True when a plain copy of the install's data is set to leave the
+    machine (restic's copy is encrypted and is not this):
+
+    * the universal backup's copy, while the offsite copy is on: a native
+      provider's zip or rclone's folder;
+    * the Postgres WAL archive's: every segment and weekly base backup goes
+      to the native provider (``wal_archive._push_offsite``) whatever
+      ``backups.offsite.enabled`` says, so a provider set is a plain copy.
+
+    The one answer to "is a plain copy configured": asked by the Spaces
+    switch-on check (S1-33, decision N10). Every path that sends a plain
+    copy also asks :func:`_plain_copy_refused` before anything leaves.
     Raises when the settings cannot be read: unknown is never "no"."""
     from kazma_core.config_store import get_config_store
 
@@ -566,7 +575,8 @@ def plain_copy_configured() -> bool:
     provider = str(store.get("backups.offsite.provider") or "").strip()
     remote = str(store.get("backups.offsite.rclone_remote") or "").strip()
     enabled = store.get("backups.offsite.enabled")
-    return bool(enabled) if enabled is not None else bool(provider or remote)
+    universal_copy = bool(enabled) if enabled is not None else bool(provider or remote)
+    return universal_copy or bool(provider)
 
 
 def _plain_copy_refused() -> str:

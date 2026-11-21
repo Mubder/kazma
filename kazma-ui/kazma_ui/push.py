@@ -21,6 +21,14 @@ Design (industry standard: RFC 8030 Web Push + VAPID auth):
 - Everything lazy-imports ``pywebpush``. Not installed / no keys ⇒ the
   feature is OFF and every entry point is a cheap no-op
   (same graceful-degradation contract as prometheus_client metrics).
+- **A finished answer goes to its own person only** (Spaces): every
+  subscription records the account that subscribed it (``_account``), and
+  on an install that enforces Spaces a turn is pushed only to the devices of
+  its thread's opener (the thread's record; a thread from before Spaces is
+  the owner's), and only while that person is still a member of the
+  thread's space (:func:`_recipient`). A subscription that names no account
+  gets nothing there. An install that does not enforce Spaces pushes to
+  every device, as before.
 """
 
 from __future__ import annotations
@@ -193,8 +201,13 @@ def _update_subs(change: Any) -> int:
     return count
 
 
-def subscribe(subscription: dict[str, Any]) -> dict[str, Any]:
+def subscribe(subscription: dict[str, Any], *, account: str | None = None) -> dict[str, Any]:
     """Persist a browser PushSubscription JSON. Idempotent per endpoint.
+
+    *account* is the account the browser is signed in as (None for a sign-in
+    Kazma has no account for); it decides whose finished answers the device
+    is sent once Spaces is enforced. A device that subscribes again under
+    another account is that account's from then on.
 
     Blocking (DNS and a settings write): call off the event loop.
     """
@@ -204,8 +217,9 @@ def subscribe(subscription: dict[str, Any]) -> dict[str, Any]:
     if refusal:
         return {"status": "error", "error": refusal}
     hid = _endpoint_hash(subscription)
-    record = dict(subscription)
+    record = {k: v for k, v in subscription.items() if not str(k).startswith("_")}
     record["_id"] = hid
+    record["_account"] = str(account or "")
     count = _update_subs(lambda subs: [s for s in subs if s.get("_id") != hid] + [record])
     return {"status": "ok", "count": count}
 
@@ -221,23 +235,58 @@ def list_subscriptions() -> list[dict[str, Any]]:
     return [s for s in _load_subs() if s.get("endpoint")]
 
 
-def _push_plan() -> tuple[tuple[str, str], list[dict[str, Any]]] | None:
-    """The keys and subscriptions a finished turn is pushed to, or None: the
-    owner switched the notifications off, no VAPID keys, or no device.
-    Settings-store reads: run off the event loop."""
+def _recipient(thread_id: str | None) -> str | None:
+    """The one account a finished turn of *thread_id* is pushed to on an
+    install that enforces Spaces, or None for nobody: the thread's opener
+    (its record; a thread with no record is from before Spaces and is the
+    owner's, N19), while still a member of the thread's space. A turn with
+    no thread is nobody's. Blocking (the thread record and the identity
+    store); an unreadable store answers nobody, never a guess."""
+    if not thread_id:
+        return None
+    import sqlite3
+
+    from kazma_core.spaces import identity, threads
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    try:
+        record = threads.record_of(str(thread_id))
+        opener = record.opener if record is not None else OWNER_ACCOUNT_ID
+        space = threads.thread_home(str(thread_id))
+        return opener if identity.is_member(opener, space) else None
+    except (sqlite3.Error, OSError, identity.IdentityUnavailable):
+        logger.warning("[Push] whose thread %s is cannot be read; nothing pushed",
+                       str(thread_id)[:12], exc_info=True)
+        return None
+
+
+def _push_plan(
+    thread_id: str | None = None,
+) -> tuple[tuple[str, str], list[dict[str, Any]]] | None:
+    """The keys and subscriptions a finished turn of *thread_id* is pushed
+    to, or None: the owner switched the notifications off, no VAPID keys, or
+    no device. On an install that enforces Spaces only the devices of the
+    turn's own person (:func:`_recipient`). Settings-store reads: run off
+    the event loop."""
     if not turn_complete_notifications_on():
+        return None
+    from kazma_core.spaces.scope import spaces_enforced
+
+    subs = list_subscriptions()
+    if spaces_enforced():
+        person = _recipient(thread_id)
+        subs = [s for s in subs if person and s.get("_account") == person]
+    if not subs:
         return None
     keys = ensure_vapid_keys()
     if not keys:
         return None
-    subs = list_subscriptions()
-    if not subs:
-        return None
     return keys, subs
 
 
-async def notify_push_turn_complete(summary: str) -> int:
-    """Fire-and-forget push to every subscription. Returns delivered count.
+async def notify_push_turn_complete(summary: str, *, thread_id: str | None = None) -> int:
+    """Fire-and-forget push of a finished turn of *thread_id* to the devices
+    that may see it (:func:`_push_plan`). Returns delivered count.
 
     Dead subscriptions (410 Gone) are pruned. Never raises.
     """
@@ -245,7 +294,7 @@ async def notify_push_turn_complete(summary: str) -> int:
         from pywebpush import webpush, WebPushException
     except Exception:
         return 0
-    plan = await asyncio.to_thread(_push_plan)
+    plan = await asyncio.to_thread(_push_plan, thread_id)
     if plan is None:
         return 0
     (pub, priv), subs = plan

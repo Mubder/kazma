@@ -133,7 +133,11 @@ def _load_config() -> dict[str, Any]:
         logger.warning("[slash] ConfigStore unavailable, using YAML only: %s", exc)
         return base
 
-    grouped = store.get_all()
+    # What /config shows is an echo of every setting: once Spaces is
+    # enforced, the install's settings and the bound space's only.
+    from kazma_core.settings_scope import echo_view
+
+    grouped = echo_view(store.get_all())
     overrides: dict[str, Any] = {}
     for settings in grouped.values():
         overrides.update(settings)

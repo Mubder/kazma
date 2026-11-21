@@ -855,7 +855,7 @@ def create_graph_handler(
             logger.debug("[agent-handler] delivery-target bind skipped", exc_info=True)
 
         try:
-            await _handler_body(msg, thread_id)
+            await _handler_body_in_its_space(msg, thread_id)
         finally:
             try:
                 from kazma_gateway.typing_keepalive import get_typing_keepalive
@@ -872,6 +872,39 @@ def create_graph_handler(
                     reset_current_delivery_target(_delivery_token)
                 except Exception:
                     pass
+
+    async def _handler_body_in_its_space(msg: IncomingMessage, thread_id: str) -> None:
+        """Run the message in the space a chat app works in
+        (``kazma_core.spaces.chat_apps``): nothing bound before Spaces; once
+        enforced, as the owner in the owner's space until each person links
+        their own chat app, and a chat of another space is refused with a
+        reply -- before anything of the chat is read or built."""
+        from kazma_core.spaces.chat_apps import ChatInAnotherSpace, chat_app_scope
+        from kazma_core.spaces.scope import bind_scope
+
+        try:
+            # The thread record store, on a first asking (off the loop).
+            bound = await asyncio.to_thread(chat_app_scope, thread_id)
+        except ChatInAnotherSpace:
+            logger.info("[agent-handler] a %s message reached a chat of another space; refused",
+                        msg.platform)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, msg.context_metadata),
+                text=language_lock.in_their_language(
+                    msg.text,
+                    "This chat belongs to another space. Chat apps work in the owner's space "
+                    "only for now: send /new to start a chat here.",
+                    "هذه المحادثة تخص مساحة أخرى. تعمل تطبيقات المحادثة حالياً في مساحة المالك "
+                    "فقط: أرسل /new لبدء محادثة هنا.",
+                ),
+                context_metadata=msg.context_metadata,
+            ))
+            return
+        if bound is None:
+            await _handler_body(msg, thread_id)
+            return
+        with bind_scope(bound.space_id, bound.asker):
+            await _handler_body(msg, thread_id)
 
     async def _handler_body(msg: IncomingMessage, thread_id: str) -> None:
         """Inner handler body (typing keepalive wraps this)."""

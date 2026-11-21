@@ -2358,11 +2358,13 @@ async def _try_x_command(
             )
             return True
 
-    from kazma_core.tenant_context import tenant_scope
+    from kazma_core.spaces.chat_apps import chat_app_work
 
-    # Gateway paths never install a tenant, and connector credentials plus
-    # provider keys are tenant-scoped vault rows (measured live: 0/4 without).
-    with tenant_scope("default"):
+    # Connector credentials and provider keys are tenant-scoped vault rows
+    # (measured live: 0/4 without a tenant). One rule for every chat-app
+    # command (kazma_core.spaces.chat_apps): the owner's tenant before
+    # Spaces; once enforced the scope the handler bound, never a default.
+    with chat_app_work():
         from kazma_core.x_api.stance import get_reply_config
 
         cfg = await asyncio.to_thread(get_reply_config)

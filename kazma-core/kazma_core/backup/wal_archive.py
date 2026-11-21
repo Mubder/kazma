@@ -271,9 +271,21 @@ def _push_offsite(archive_dir: Path, *, root: Path | None = None, provider: Any 
                  pushed: set[str] | None = None, tag: str = "") -> dict[str, Any]:
     """Upload the segments and base backups not yet offsite. Returns what it
     did. *tag* (the record's ``offsite_tag``) keeps one major's names apart
-    from another's."""
+    from another's.
+
+    The copy is plain (the provider stores the files as they are), so it
+    asks the one rule every plain copy asks first
+    (``universal._plain_copy_refused``, decision N10): once the install holds
+    several people's spaces nothing is sent; restic's encrypted copy is the
+    way off the machine then."""
     import asyncio
 
+    from kazma_core.backup.universal import _plain_copy_refused
+
+    refused = _plain_copy_refused()
+    if refused:
+        logger.warning("[backup] WAL archive offsite copy: %s", refused)
+        return {"ok": False, "refused": "plain_copy", "error": refused, "sent": 0}
     if provider is None:
         from kazma_core.backup.cloud_sync import get_sync_provider
 

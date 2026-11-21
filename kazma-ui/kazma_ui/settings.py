@@ -255,9 +255,17 @@ class SettingsRouterBuilder:
             ``UNBOUNDED_STORE_SCANS`` in tests/test_static_gates.py for why the
             cheap one is deliberately not treated the same way.
             """
-            data = await asyncio.to_thread(config_store.get_all)
+            # One view for every echo of every setting: once Spaces is
+            # enforced, settings only, and only the install's and the bound
+            # space's (kazma_core.settings_scope.echo_view).
+            data = await asyncio.to_thread(_every_setting_shown_here)
             _mask_sensitive_values(data)
             return data
+
+        def _every_setting_shown_here() -> dict[str, dict[str, Any]]:
+            from kazma_core.settings_scope import echo_view
+
+            return echo_view(config_store.get_all())
 
         @router.get("/api/settings/vault/status")
         def api_vault_status() -> dict[str, Any]:
@@ -297,7 +305,7 @@ class SettingsRouterBuilder:
         @router.post("/api/push/subscribe")
         async def api_push_subscribe(request: Request) -> dict[str, Any]:
             """Persist a browser PushSubscription JSON (P5)."""
-            from kazma_ui.push import push_available, subscribe
+            from kazma_ui.push import push_available
 
             # The VAPID key and the subscription store are settings reads and
             # writes (audit 2026-10-26 AUD-111).
@@ -310,7 +318,16 @@ class SettingsRouterBuilder:
             # AUD-103: the endpoint check resolves DNS and the save is a
             # settings transaction -- both off the event loop. A store that
             # refuses the write is a 500 (logged), never a reported success.
-            return await asyncio.to_thread(subscribe, body.get("subscription") or body)
+            # The device is the signed-in account's: once Spaces is enforced
+            # it hears of that person's finished answers only (kazma_ui.push).
+            return await asyncio.to_thread(_subscribe_as_caller, request, body)
+
+        def _subscribe_as_caller(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+            from kazma_ui import auth, space_binding
+            from kazma_ui.push import subscribe
+
+            account = space_binding.account_of(auth.get_request_principal(request))
+            return subscribe(body.get("subscription") or body, account=account)
 
         @router.post("/api/push/unsubscribe")
         async def api_push_unsubscribe(request: Request) -> dict[str, Any]:

@@ -14852,6 +14852,46 @@ an install with one account behaves as before.
     on the Memory page (`static/js/shared_memory_notice.js`, N35).
   - Gates: `tests/test_memory_speakers.py` (each rule with its control),
     `tests/e2e/test_shared_memory_notice.py` (by the sidebar, EN/AR).
+- **Each person's answers, settings and copies stay theirs (2026-11-21).**
+  Guards act only where Spaces is enforced, except where a line says always.
+  - **Web Push** (`kazma_ui/push.py`): every subscription records the
+    account that subscribed it (`_account`, always stamped, from the
+    request's sign-in). Once enforced a finished turn goes only to its
+    thread's opener's devices (`_recipient`: the thread's record, the
+    owner's for a thread from before Spaces), while they are still a member
+    of the thread's space; a turn with no thread, or a device with no
+    account, reaches nobody. `TurnBroker._push_terminal` hands its thread
+    over. Gate: `tests/test_push_per_person.py` (every device, whatever the
+    thread, as the control; nothing else reads the stored devices).
+  - **An echo of every setting** (`settings_scope.echo_view`,
+    `shown_in_echo`): Settings' `GET /api/settings`, `/config show` and
+    `/config export` (`slash_commands._load_config`) and `config_read` show
+    settings only -- never Kazma's own records (`settings_restore.classify`)
+    -- and a space's key only in that space (`tenant.<id>.` is `<id>`'s, an
+    unprefixed space key the owner's), a person's only to them; with no
+    space bound, the install's alone. `config_read` answers `not_here`.
+    Gate: `tests/test_settings_echo_per_space.py` (every product
+    `.get_all()` is an echo through `echo_view` or declared; the echo of
+    before as the control).
+  - **One answer to "is a plain copy configured"**
+    (`universal.plain_copy_configured`): the universal backup's copy while
+    it is on, or a native provider set at all -- the Postgres WAL archive's
+    segments and weekly base backups go to it whatever
+    `backups.offsite.enabled` says. Every path that sends a plain copy asks
+    `universal._plain_copy_refused` before anything leaves
+    (`wal_archive._push_offsite` too). Gate: `tests/test_plain_copies_refused.py`
+    (every upload to a provider and every rclone copy in product code asks;
+    the push without the refusal and the rule of before as controls).
+  - **A chat app works in the owner's space** (`spaces/chat_apps.py`):
+    until each person links their own chat app (stage 3), the gateway's
+    handler binds the owner's scope before it reads or builds anything of
+    the chat (`chat_app_scope`, `_handler_body_in_its_space`), and a chat
+    recorded in another space is refused with a reply. A chat-app command
+    reading the owner's accounts (`/x`) runs in the bound scope
+    (`chat_app_work`; before Spaces the owner's tenant, as it was). Gate:
+    `tests/test_chat_apps_once_enforced.py` (the real handler on four
+    platforms; no scope bound as the control; every tenant or scope the
+    gateway binds comes from this rule or is declared).
 
 ## UI Conventions (Web)
 

@@ -273,6 +273,32 @@ def register_system_tools(registry: Any) -> None:
                 ensure_ascii=False,
             )
 
+        # One rule for every echo of a setting: once Spaces is enforced,
+        # settings only, and only the install's and this space's
+        # (kazma_core.settings_scope.shown_in_echo). A key it refuses reads
+        # as not readable here -- never another space's value.
+        from kazma_core.settings_scope import shown_in_echo
+        from kazma_core.spaces.scope import current_scope
+
+        bound = current_scope()
+        if not shown_in_echo(
+            str(key).strip(),
+            space_id=bound.space_id if bound is not None else None,
+            asker=bound.asker if bound is not None else None,
+        ):
+            return _json.dumps(
+                {
+                    "key": key,
+                    "status": "not_here",
+                    "value": None,
+                    "message": (
+                        f"Key '{key}' is not a setting this space reads: it belongs to "
+                        "another space or person, or is Kazma's own record."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+
         store = get_config_store()
         _MISSING = object()
         val = store.get(key, _MISSING)

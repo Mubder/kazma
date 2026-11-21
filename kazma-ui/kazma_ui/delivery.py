@@ -412,17 +412,19 @@ class TurnBroker:
             data = stamped.get("data") or {}
             summary = str(data.get("content") or "").strip()
             if summary and not (isinstance(data, dict) and data.get("capacity")):
-                spawn_background(self._push_terminal(summary), name="delivery-push-terminal")
+                spawn_background(self._push_terminal(summary, thread_id), name="delivery-push-terminal")
 
         if cancelled:
             raise asyncio.CancelledError
         return stamped
 
-    async def _push_terminal(self, summary: str) -> None:
+    async def _push_terminal(self, summary: str, thread_id: str) -> None:
         try:
             from kazma_ui.push import notify_push_turn_complete
 
-            await notify_push_turn_complete(summary)
+            # The thread decides whose devices hear of it (Spaces: its
+            # opener's only, kazma_ui.push._recipient).
+            await notify_push_turn_complete(summary, thread_id=thread_id)
         except Exception:
             logger.debug("[Delivery] push notification failed", exc_info=True)
 

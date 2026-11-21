@@ -27,7 +27,19 @@ in, and a person's in no one's. And they write settings only
 its record of resets, sign-ins, grants, the Soul -- have their own writers,
 or the admin could add themselves to any space (S1-25).
 
-No I/O.
+**What an echo of every setting shows** (:func:`echo_view`,
+:func:`shown_in_echo`): Settings' ``GET /api/settings``, the chat apps'
+``/config show`` and ``/config export``, and the agent's ``config_read`` show
+settings only, and on an install that enforces Spaces only those of the
+install and of the space bound now: a space's key in its own space, a
+person's in their own account. Kazma's own records -- each chat's state, the
+journals, the Souls, sign-ins in progress, the identity store -- are never
+in such an echo once enforced; each is read through its own page, in its own
+space. ``tests/test_settings_echo_per_space.py`` holds every product read of
+every setting to it.
+
+No I/O, except :func:`echo_view` and :func:`shown_in_echo`, which read the
+bound scope (a ContextVar) only.
 """
 
 from __future__ import annotations
@@ -39,7 +51,9 @@ __all__ = [
     "INSTALL",
     "SCOPE_RULES",
     "SPACE",
+    "echo_view",
     "install_writer_refusal",
+    "shown_in_echo",
 ]
 
 INSTALL = "install"
@@ -122,7 +136,8 @@ SCOPE_RULES: tuple[_ScopeRule, ...] = (
     _ScopeRule("memory.", INSTALL, "memory settings and the memory sweeps' records"),
     _ScopeRule("models.", INSTALL, "model profiles, details, prices and per-task defaults"),
     _ScopeRule("notifications.", INSTALL, "which messages go where, the push key and the "
-              "browsers subscribed (the owner's, until each person's with S2-05)"),
+              "browsers subscribed (each records the account that subscribed it, and once "
+              "Spaces is enforced hears of that person's finished answers only)"),
     _ScopeRule("observability.", INSTALL, "the digest's and weekly report's runs"),
     _ScopeRule("pipelines.", INSTALL, "the shipped research pipelines"),
     _ScopeRule("platform.", INSTALL, "the older multi-user mode's users"),
@@ -166,6 +181,66 @@ def _scope_of_key(key: str) -> str | None:
         if _matches(rule.pattern, name) and (best is None or len(rule.pattern) > len(best.pattern)):
             best = rule
     return best.scope if best is not None else None
+
+
+def _space_of_key(key: str) -> str:
+    """The space a space-scoped *key* belongs to: ``<id>`` for a key under
+    ``tenant.<id>.``, the owner's space for every other (S1-17: the owner's
+    space keeps its keys as they are)."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    parts = str(key or "").split(".")
+    if len(parts) > 2 and parts[0] == "tenant":
+        return parts[1]
+    return OWNER_SPACE_ID
+
+
+def shown_in_echo(key: str, *, space_id: str | None, asker: str | None) -> bool:
+    """Whether an echo of every setting, read in *space_id* by *asker*, may
+    show *key*. Always, on an install that does not enforce Spaces. Once it
+    does: a setting only (``settings_restore.classify``: never Kazma's own
+    record), and of a space only in that space, of a person only to them;
+    with no space bound, the install's settings alone."""
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, spaces_enforced
+
+    if not spaces_enforced():
+        return True
+    if key.startswith(_IDENTITY_KEYS):
+        return False
+    from kazma_core.settings_restore import SETTING, classify
+
+    if classify(key) != SETTING:
+        return False
+    scope = _scope_of_key(key)
+    if scope == SPACE:
+        return space_id is not None and _space_of_key(key) == space_id
+    if scope == ACCOUNT:
+        # The ``account.`` settings are the owner's sign-in; every other
+        # person's is in the identity store.
+        return asker == OWNER_ACCOUNT_ID
+    return True
+
+
+def echo_view(grouped: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+    """*grouped* (``ConfigStore.get_all``'s ``{category: {key: value}}``) as
+    an echo of every setting may show it in the scope bound now
+    (:func:`shown_in_echo`). A category left with nothing is left out."""
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return grouped
+    bound = current_scope()
+    space_id = bound.space_id if bound is not None else None
+    asker = bound.asker if bound is not None else None
+    out: dict[str, dict[str, object]] = {}
+    for category, values in (grouped or {}).items():
+        if not isinstance(values, dict):
+            continue
+        kept = {k: v for k, v in values.items()
+                if shown_in_echo(str(k), space_id=space_id, asker=asker)}
+        if kept:
+            out[category] = kept
+    return out
 
 
 #: Kazma's own record of who is who, and the switch that turns Spaces on:
