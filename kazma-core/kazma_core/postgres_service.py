@@ -114,6 +114,11 @@ class Step:
     service: str = ""
     major: int = 0
     port: int = 0
+    #: For an action on a server's data folder (``set_port``,
+    #: ``point_data_dir``): that folder (empty: the package's own,
+    #: :func:`data_dir_for`). A data folder Kazma chose (``data_folder``)
+    #: is named here.
+    data_dir: str = ""
 
     def printable(self) -> str:
         return self.shown or " ".join(self.argv) or self.action
@@ -199,7 +204,7 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def port_step(p: Platform, major: int, port: int) -> Step:
+def port_step(p: Platform, major: int, port: int, data_dir: str = "") -> Step:
     """*major*'s server set to listen on *port* at its next start (it may be
     running or stopped: the setting is written on disk, never through a
     connection, so a server that cannot start on its old port can be moved).
@@ -214,35 +219,44 @@ def port_step(p: Platform, major: int, port: int) -> Step:
         conf = f"{data_dir_for(p, major)}/postgresql.auto.conf"
         script = f"sed -i '/^port[[:space:]]*=/d' {conf} && echo \"port = '{int(port)}'\" >> {conf}"
         return Step(title, ("sudo", "-u", "postgres", "sh", "-c", script), admin=True, major=major, port=int(port))
+    folder = data_dir or data_dir_for(p, major)
     return Step(title, action="set_port", major=major, port=int(port), admin=p.os != "macos",
-                shown=f"port = {int(port)} in postgresql.auto.conf ({data_dir_for(p, major)})")
+                shown=f"port = {int(port)} in postgresql.auto.conf ({folder})", data_dir=data_dir)
 
 
 def setup_plan(p: Platform, *, port: int = DEFAULT_PORT, superuser_password: str,
                throwaway_password: str, app_password: str, role_sql: str,
-               wal_archive_command: str | None = None, major: int = PG_MAJOR) -> list[Step]:
+               wal_archive_command: str | None = None, major: int = PG_MAJOR,
+               data_dir: str = "") -> list[Step]:
     """Every step for *p*, in order. Raises ValueError for a platform with no
     package manager Kazma knows (the CLI prints the manual steps instead).
 
     A *port* other than the default (``postgres_upgrade``: the new major
     beside the old one, on a spare port) is set before the server first
-    starts where the package would start it on its own default."""
+    starts where the package would start it on its own default.
+
+    *data_dir* (Windows only: the data folder Kazma chose, ``data_folder``)
+    is where the installer makes the cluster (its ``--datadir``) instead of
+    under Program Files, on Windows' own drive."""
     if p.manager is None:
         raise ValueError(f"no supported package manager on this {p.os} system")
+    if data_dir and p.os != "windows":
+        raise ValueError("a data folder is chosen on Windows only")
     service = service_name(p.os, major)
     steps: list[Step] = []
     other_port = port != DEFAULT_PORT
 
     # 1. Install Postgres as a service that starts at boot.
     if p.os == "windows":
+        datadir = f' --datadir "{data_dir}"' if data_dir else ""
         override = (f"--mode unattended --unattendedmodeui none --disable-components stackbuilder,pgAdmin "
-                    f"--servicename {service} --serverport {port} --superpassword {throwaway_password}")
+                    f"--servicename {service} --serverport {port}{datadir} --superpassword {throwaway_password}")
         steps.append(Step(
-            f"Install PostgreSQL {major} (a Windows service)",
+            f"Install PostgreSQL {major} (a Windows service)" + (f", its data in {data_dir}" if data_dir else ""),
             ("winget", "install", "--id", f"PostgreSQL.PostgreSQL.{major}", "--exact", "--silent",
              "--accept-package-agreements", "--accept-source-agreements", "--override", override),
             shown=(f"winget install --id PostgreSQL.PostgreSQL.{major} --exact --silent "
-                   f"--override \"... --servicename {service} --serverport {port} --superpassword ****\""),
+                   f"--override \"... --servicename {service} --serverport {port}{datadir} --superpassword ****\""),
             admin=True))
         steps.append(Step("Start it at boot", ("sc", "config", service, "start=", "auto"), admin=True))
         steps.append(Step("Restart it when it fails",
@@ -465,10 +479,11 @@ def start_service(os_name: str, service: str, port: int, *, run: Runner = subpro
     return wait_for_port(port, answers=answers, sleep=sleep, wait_s=wait_s)
 
 
-def set_port_on_disk(data_dir: str | Path, port: int) -> None:
-    """``port`` in the data folder's ``postgresql.auto.conf`` (where ``ALTER
-    SYSTEM`` writes, and which wins over ``postgresql.conf``). Read at the
-    server's next start; written whether it runs or not."""
+def set_setting_on_disk(data_dir: str | Path, name: str, quoted_value: str) -> None:
+    """*name* = *quoted_value* (already quoted as the file takes it) in the
+    data folder's ``postgresql.auto.conf`` (where ``ALTER SYSTEM`` writes, and
+    which wins over ``postgresql.conf``), replacing the line that set it.
+    Read at the server's next start; written whether it runs or not."""
     from kazma_core.atomic_files import atomic_write_text
 
     path = Path(data_dir) / "postgresql.auto.conf"
@@ -476,8 +491,14 @@ def set_port_on_disk(data_dir: str | Path, port: int) -> None:
         lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
         lines = ["# Do not edit this file manually!", "# It will be overwritten by the ALTER SYSTEM command."]
-    kept = [line for line in lines if line.split("=", 1)[0].strip().lower() != "port"]
-    atomic_write_text(path, "\n".join([*kept, f"port = '{int(port)}'"]) + "\n")
+    kept = [line for line in lines if line.split("=", 1)[0].strip().lower() != name.lower()]
+    atomic_write_text(path, "\n".join([*kept, f"{name} = {quoted_value}"]) + "\n")
+
+
+def set_port_on_disk(data_dir: str | Path, port: int) -> None:
+    """``port`` in the data folder's ``postgresql.auto.conf``
+    (:func:`set_setting_on_disk`)."""
+    set_setting_on_disk(data_dir, "port", f"'{int(port)}'")
 
 
 def wait_for_port(port: int, *, answers: Callable[[int], bool] | None = None,
@@ -529,6 +550,10 @@ class PostgresRecord:
     #: The server this one replaced (``postgres_upgrade``): stopped and kept,
     #: with its archive and base backups, for a restore to a time before.
     previous: dict[str, Any] = field(default_factory=dict)
+    #: The server's data folder. Empty: where its package puts it
+    #: (:func:`data_dir_for`); a data folder Kazma chose (``data_folder``)
+    #: is named here, and the service's command line points at it.
+    data_dir: str = ""
 
 
 def write_record(rec: PostgresRecord, path: Path | None = None) -> Path:
@@ -544,6 +569,48 @@ def write_record(rec: PostgresRecord, path: Path | None = None) -> Path:
 
 def bin_dir_for(p: Platform, major: int = PG_MAJOR) -> str:
     return _bin_dir(p, major)
+
+
+def _qc_value(text: str, key: str) -> str:
+    for line in text.splitlines():
+        name, sep, value = line.partition(":")
+        if sep and name.strip() == key:
+            return value.strip()
+    return ""
+
+
+def data_dir_in_command(command: str) -> str:
+    """The data folder a Windows service's command line names (``pg_ctl
+    runservice ... -D "<folder>"``), or ``""``."""
+    import re
+
+    found = re.search(r'(?:^|\s)-D\s+(?:"([^"]+)"|(\S+))', command or "")
+    return (found.group(1) or found.group(2) or "") if found else ""
+
+
+def with_data_dir(command: str, data_dir: str) -> str:
+    """*command* with its ``-D`` naming *data_dir* (quoted). A command
+    with no ``-D`` gets one before ``-w`` or at its end."""
+    import re
+
+    quoted = f'-D "{data_dir}"'
+    pattern = re.compile(r'(?:^|(?<=\s))-D\s+(?:"[^"]+"|\S+)')
+    if pattern.search(command or ""):
+        return pattern.sub(lambda _m: quoted, command, count=1)
+    return f"{command} {quoted}".strip()
+
+
+def service_config(service: str, *, run: Runner = subprocess.run) -> dict[str, str]:
+    """What Windows has for the service: ``command`` (its command line),
+    ``data_dir`` (the folder its ``-D`` names: where the database really is,
+    whatever a record says) and ``account`` (who it runs as). Empty values
+    when the service is not there or ``sc`` cannot answer."""
+    code, text = _out(run, ["sc", "qc", service])
+    if code != 0:
+        return {"command": "", "data_dir": "", "account": ""}
+    command = _qc_value(text, "BINARY_PATH_NAME")
+    return {"command": command, "data_dir": data_dir_in_command(command),
+            "account": _qc_value(text, "SERVICE_START_NAME")}
 
 
 def is_admin() -> bool:

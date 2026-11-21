@@ -9,6 +9,17 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 > This page is published at [kazma.ai/docs/recent-features/](https://kazma.ai/docs/recent-features/) ([Arabic](https://kazma.ai/ar/docs/recent-features/)).
 
+**New in 2026-11-21 — the database and the engine off Windows' own drive.**
+`kazma setup data-folder D:\Kazma` (or `kazma setup install --data-folder
+D:\Kazma`) keeps Kazma's database, its WAL archive and base backups, and its
+container engine's disk on another drive, so a reset of Windows keeps them.
+On an install that has them on C:, it moves them with Kazma held: the
+database copied and compared file by file, then run from the copy; the
+engine's disk moved by WSL and checked; a part that fails is put back as it
+was. After a reset, running `setup.cmd` attaches the kept database and
+engine disk again instead of starting empty (see
+[Postgres as an OS service](../ops/postgres-and-saas.md#data-folder)).
+
 **New in 2026-11-20 — a backup copy on another drive.** Settings → Backup →
 **A copy on another drive**: choose a folder on another drive, a USB disk or
 a network share (Browse lists this computer's folders; type a share's path),

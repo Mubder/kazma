@@ -40,6 +40,7 @@ import secrets
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -332,6 +333,13 @@ def run(args: list[str]) -> int:
     engine.add_argument("--move-from-desktop", action="store_true",
                         help="move Kazma's containers from Docker Desktop to it (Windows): Kazma held while idle, "
                              "the old containers stopped and kept")
+    folder = sub.add_parser("data-folder", help="where Kazma's database and engine keep their data (Windows): a "
+                                                "folder on another drive, which a reset of Windows keeps")
+    folder.add_argument("folder", nargs="?", help="the folder, e.g. D:\\Kazma (a drive alone, D:, means D:\\Kazma); "
+                                                  "none: show where each part is now")
+    folder.add_argument("-y", "--yes", action="store_true", help="do not ask before acting")
+    folder.add_argument("--check", action="store_true", help="report only; change nothing")
+    folder.add_argument("--dry-run", action="store_true", help="print the plan; run nothing")
     from kazma_cli.install import add_install_parser
     from kazma_cli.port_setup import add_port_parser
 
@@ -346,6 +354,8 @@ def run(args: list[str]) -> int:
         return _setup_system(options)
     if options.what == "engine":
         return _setup_engine(options)
+    if options.what == "data-folder":
+        return _setup_data_folder(options)
     if options.what == "install":
         from kazma_cli.install import install
 
@@ -804,6 +814,150 @@ def _move_after_checks(options, docker, hold, journal, steps_for, *, run, ask, o
     return 0 if em.move(docker, plan, journal, steps_for) else 1
 
 
+#: The pause ``kazma setup data-folder`` asks Kazma's guard for while its parts move.
+_DATA_FOLDER_REASON = "kazma setup data-folder: moving Kazma's database and engine"
+#: What a guard that leaves a moving part alone says in its ``guard_features``.
+DATA_FOLDER_GUARD_FEATURE = "data_folder_move"
+
+
+def _say_where_now(machine, folder) -> None:
+    """Where each part keeps its data now, and whether that is Windows' own drive."""
+    from pathlib import PureWindowsPath
+
+    from kazma_core import data_folder
+    from kazma_core import postgres_service as pgs
+    from kazma_core.backup import wal_archive
+    from kazma_core.docker_cli import KAZMA_DISTRO
+
+    system = machine.disk.system_drive.upper()
+    rec = pgs.read_record(machine.record_path).get("postgres") or {}
+
+    def line(label: str, where) -> None:
+        if not where:
+            _say(f"  {label:22}: not set up here")
+            return
+        drive = PureWindowsPath(str(where)).drive.upper()
+        _say(f"  {label:22}: {where}" + ("  (Windows' own drive: a reset wipes it)" if drive == system else ""))
+
+    _say("data folder             : " + (str(folder) if folder else "none chosen (each part where its package "
+                                                                         "puts it)"))
+    data = pgs.service_config(rec["service"], run=machine.run)["data_dir"] if rec.get("service") else ""
+    line("PostgreSQL's data", data or rec.get("data_dir") or "")
+    line("its WAL archive", rec.get("wal_archive_dir") or "")
+    line("its base backups", str(wal_archive._base_root(rec)) if rec else "")
+    found = machine.distro_location(KAZMA_DISTRO)
+    line("the engine's disk", str(found[0]) if found else "")
+    if folder is not None and data_folder.journal(machine.record_path).get("part"):
+        _say("  an earlier move did not finish: the next run puts it back first")
+
+
+def _setup_data_folder(options, *, run=subprocess.run, hold: _MoveHold | None = None, ask=input,
+                       machine=None, platform=None) -> int:
+    """``kazma setup data-folder [FOLDER]`` (Windows): choose the folder on
+    another drive where Kazma's database, its WAL archive and base backups,
+    and its container engine's disk live, and move there what is installed
+    elsewhere (:mod:`kazma_core.data_folder_move`). With no FOLDER: where each
+    part is now. Every refusal comes before anything changes."""
+    from kazma_core import data_folder
+    from kazma_core import data_folder_move as dfm
+    from kazma_core import postgres_service as pgs
+    from kazma_core.paths import data_dir
+
+    platform = platform or pgs.detect_platform()
+    if platform.os != "windows":
+        _say(data_folder.folder_problem("", disk=data_folder.Disk.this_machine(), os_name=platform.os) + ".")
+        return 2
+    machine = machine or dfm.Machine(run=run, say=_say)
+    chosen = data_folder.chosen(machine.record_path)
+    if not options.folder:
+        _say_where_now(machine, chosen)
+        return 0
+    folder = data_folder.normalized(options.folder)
+    hold = hold or _MoveHold(reason=_DATA_FOLDER_REASON, what="its database and engine")
+    if data_folder.journal(machine.record_path).get("part") and not (options.check or options.dry_run):
+        hold.adopt_leftover()
+        if dfm.recover(machine) == "failed":
+            _say("Nothing else was done. Fix what is said above, then run this again.")
+            if hold.held:
+                hold.resume()
+            return 1
+    root = _checkout_root()
+    plan = dfm.plan_move(folder, machine=machine, install_root=root, data_dir=data_dir(create=False))
+    refusals = list(plan.refusals)
+    url = ""
+    if plan.parts and not refusals:
+        refusal = hold.refusal()
+        if refusal:
+            refusals.append(refusal)
+        elif getattr(hold, "running", False) and hold.guard_lacks(DATA_FOLDER_GUARD_FEATURE):
+            refusals.append("Kazma's guard is older than this command and would not leave a moving part alone: "
+                            "restart it once (End, then Run, the KazmaAgent task in Task Scheduler), then run "
+                            "this again")
+        postgres = next((p for p in plan.parts if p.name == "postgres"), None)
+        if postgres is not None:
+            password = _existing_app_password(postgres.port)
+            if not password:
+                refusals.append(f"Kazma's address (.env) does not name kazma_app on 127.0.0.1:{postgres.port}, the "
+                                "server the record names: it could not be checked after the move")
+            else:
+                url = pgs.database_url(password, postgres.port)
+        if not pgs.is_admin():
+            refusals.append("moving a service's data needs an administrator terminal (Run as administrator)")
+    if refusals:
+        for line in refusals:
+            _say(f"Cannot use {folder}: {line}.")
+        _say("Nothing was done.")
+        return 2
+    _say(f"The data folder: {folder}")
+    for line in plan.already:
+        _say(f"  already there: {line}")
+    if plan.parts:
+        _say("The move:")
+        n = 0
+        if getattr(hold, "running", False):
+            n += 1
+            _say(f"  {n:2}. once no chat turn runs, stop Kazma through its guard and hold it while its data moves")
+        for part in plan.parts:
+            n += 1
+            _say(f"  {n:2}. {part.title} ({part.size / 2**30:.1f} GB):")
+            for what, src, dst in part.folders:
+                _say(f"        {what}: {src} -> {dst}")
+            _say("        stopped, copied and compared file by file, switched, started and checked; the old one "
+                 "is kept, unused" if part.name == "postgres" else
+                 "        stopped cleanly, hashed, moved by WSL (wsl --manage --move), hashed again, started")
+        _say(f"  {n + 1:2}. start Kazma again and see it ready")
+        _say("  A part that fails is put back as it was; the others still move.")
+    else:
+        _say("  Nothing installed here lives elsewhere: the choice is recorded, and setup puts each part there "
+             "when it installs it.")
+    if options.dry_run or options.check:
+        return 0
+    if not options.yes and _ask(ask, "Go ahead? [y/N] ").strip().lower() not in ("y", "yes"):
+        _say("Nothing was done.")
+        return 1
+    data_folder.record_choice(folder, machine.record_path)
+    _say(f"-> {folder} recorded as Kazma's data folder (a second run, a repair and a run after a reset keep it)")
+    if not plan.parts:
+        return 0
+    moved = dfm.move(plan, url, machine=machine, hold=hold)
+    up = True
+    if hold.held:
+        _say("-> Starting Kazma again")
+        result = hold.resume()
+        up = result == "up"
+        if not up:
+            _say(f"Kazma has not answered yet ({result}); its guard keeps at it: "
+                 "python scripts/service/kazma_guard.py --status")
+        elif url and not _kazma_signed_in(url):
+            up = False
+            _say("Kazma answers, but was not seen signed in to its database: kazma doctor.")
+    if moved and up:
+        _say(f"Done. Kazma's data is in {folder}: after a reset of Windows, setup.cmd finds it there again.")
+    elif not moved:
+        _say("Not everything moved (said above): what did not move is where it was. Run this again to try it.")
+    return 0 if moved and up else 1
+
+
 #: The pause ``--move-from-container`` asks Kazma's guard for while it copies.
 _MOVE_PAUSE_REASON = "kazma setup postgres: moving Kazma's database"
 #: How long the move waits for running chat turns before it gives up.
@@ -906,6 +1060,19 @@ class _MoveHold:
         except (OSError, ValueError):
             return False
         return bool(result[0]) or bool(getattr(result, "answered", False) and getattr(result, "needs_setup", ()))
+
+    def guard_lacks(self, feature: str) -> bool:
+        """Whether a guard runs (its heartbeat is fresh) that does not say
+        *feature* in its ``guard_features``: it predates it."""
+        if self.guard is None:
+            return False
+        try:
+            state = self.guard._read_state()
+        except (OSError, ValueError, AttributeError):
+            return False
+        beat = state.get("heartbeat") if isinstance(state, dict) else None
+        fresh = isinstance(beat, (int, float)) and 0 <= time.time() - beat < 120
+        return fresh and feature not in (state.get("guard_features") or [])
 
     def record_path(self) -> Path | None:
         """Where the guard reads which engine and containers Kazma uses."""
@@ -1051,10 +1218,11 @@ def _server_to_set_up(platform, rec: dict, port: int, *, run=subprocess.run) -> 
 
 
 def _write_setup_record(platform, service: str, major: int, port: int, archive_dir: Path, rec: dict,
-                        *, keep: bool) -> None:
+                        *, keep: bool, data_dir: str = "", base_dir: Path | None = None) -> None:
     """The record of the server set up. A repair (*keep*) keeps what the
     record says of its history: when it was set up, its base-backup folder
-    and offsite names, the server it replaced."""
+    and offsite names, the server it replaced. *data_dir* and *base_dir*: the
+    data folder's (``data_folder``), when the owner chose one."""
     import time
 
     from kazma_core import postgres_service as pgs
@@ -1062,14 +1230,15 @@ def _write_setup_record(platform, service: str, major: int, port: int, archive_d
 
     if keep:
         history = dict(installed_at=float(rec.get("installed_at") or time.time()),
-                       base_backup_dir=str(rec.get("base_backup_dir") or ""),
+                       base_backup_dir=str(base_dir or rec.get("base_backup_dir") or ""),
                        offsite_tag=str(rec.get("offsite_tag") or ""), previous=dict(rec.get("previous") or {}))
     else:
-        history = dict(installed_at=time.time(), base_backup_dir=str(wal_archive.default_base_dir(major)),
+        history = dict(installed_at=time.time(), base_backup_dir=str(base_dir or wal_archive.default_base_dir(major)),
                        offsite_tag=wal_archive.offsite_tag(major))
     pgs.write_record(pgs.PostgresRecord(
         os=platform.os, manager=platform.manager, service=service, port=port,
-        bin_dir=pgs.bin_dir_for(platform, major), major=major, wal_archive_dir=str(archive_dir), **history))
+        bin_dir=pgs.bin_dir_for(platform, major), major=major, wal_archive_dir=str(archive_dir),
+        data_dir=str(data_dir or (rec.get("data_dir") if keep else "") or ""), **history))
 
 
 def _without_install_steps(steps):
@@ -1095,6 +1264,173 @@ def _say_no_manager_or_older(platform, major: int) -> bool:
     return False
 
 
+def _reattach_steps(platform, major: int, port: int, *, data_dir: str, superuser_password: str,
+                    throwaway: str, app_password: str, archive_command: str):
+    """The steps that attach a database kept in the data folder to a freshly
+    installed service (after a reset of Windows: the service is gone, the data
+    is not). The installer makes its own cluster under Program Files (left
+    there, unused), the service is pointed at the kept one, and the settings
+    and the role are set again signing in with the kept database's own
+    superuser password (the installer's throwaway is not its password)."""
+    from kazma_core import postgres_service as pgs
+
+    service = pgs.service_name(platform.os, major)
+    common = dict(port=port, superuser_password=superuser_password, app_password=app_password,
+                  role_sql=_role_sql(), wal_archive_command=archive_command, major=major)
+    fresh = pgs.setup_plan(platform, throwaway_password=throwaway, **common)
+    first_wait = next(i for i, s in enumerate(fresh) if s.action == "wait")
+    point = pgs.Step(f"Point {service} at the database kept in {data_dir}", action="point_data_dir",
+                     service=service, major=major, port=port, data_dir=data_dir, admin=True,
+                     shown=f"{service}: -D \"{data_dir}\"; started")
+    repair = _without_install_steps(pgs.setup_plan(platform, throwaway_password=superuser_password, **common))
+    return [*fresh[:first_wait + 1], point, *repair]
+
+
+@dataclass
+class _Where:
+    """Where the server ``kazma setup postgres`` sets up keeps its data: in
+    the data folder the owner chose (``data_folder``) when it is a new one
+    (*placed*), or a database kept there from before a reset attached again
+    (*reattach*); else where its package puts it."""
+
+    layout: object = None
+    reattach: bool = False
+    placed: bool = False
+    data_dir: str = ""
+
+
+def _where_the_data_goes(platform, rec: dict, major: int, service, state, port: int, *, run=subprocess.run):
+    """(major, service, state, :class:`_Where`): a database kept in the data
+    folder is the major that runs (its ``PG_VERSION``), whatever the current
+    one is. An installed server stays where it is (``kazma setup
+    data-folder`` moves it)."""
+    from kazma_core import data_folder
+    from kazma_core import postgres_service as pgs
+
+    folder = data_folder.chosen() if platform.os == "windows" else None
+    if folder is None:
+        return major, service, state, _Where()
+    layout = data_folder.Layout(folder)
+    if state and state.get("installed"):
+        return major, service, state, _Where(layout)
+    kept = data_folder.kept_cluster_major(folder, prefer=int(rec.get("major") or 0) or None)
+    if kept is not None and kept != major:
+        major, service = kept, pgs.service_name(platform.os, kept)
+        state = pgs.service_state(platform.os, service, port, run=run)
+        if state and state.get("installed"):
+            return major, service, state, _Where(layout)
+    return major, service, state, _Where(layout, reattach=kept is not None, placed=True,
+                                         data_dir=str(layout.postgres_data(major)))
+
+
+def _archive_dir(platform, rec: dict, where: _Where, major: int, *, keep: bool) -> Path:
+    """The WAL archive's folder: the record's on a repair, the data folder's
+    for a server placed there, else the major's own default."""
+    from kazma_core.backup import wal_archive
+
+    if keep and rec.get("wal_archive_dir"):
+        return Path(rec["wal_archive_dir"])
+    if where.placed:
+        return where.layout.wal_archive(major)
+    return wal_archive.default_archive_dir(platform, major)
+
+
+def _where_said(where: _Where) -> str:
+    if where.reattach:
+        return f", the database kept in {where.data_dir} attached to it"
+    return f", its data in {where.data_dir}" if where.data_dir else ""
+
+
+def _record_server(platform, service: str, major: int, port: int, archive_dir: Path, rec: dict, where: _Where,
+                   *, keep: bool, installed: bool, run=subprocess.run) -> None:
+    """The record of the server set up, with where its data really is (an
+    installed Windows service: its own command line says)."""
+    from kazma_core import postgres_service as pgs
+
+    data_dir = where.data_dir
+    if not data_dir and installed and platform.os == "windows":
+        data_dir = pgs.service_config(service, run=run)["data_dir"]
+    _write_setup_record(platform, service, major, port, archive_dir, rec,
+                        keep=keep or (where.reattach and bool(rec)), data_dir=data_dir,
+                        base_dir=where.layout.base_backups(major) if where.placed else None)
+    if where.reattach:
+        _say(f"-> The database kept in {data_dir} is attached to the {service} service again. The "
+             "installer's own empty one is left under Program Files, unused.")
+
+
+def _where_refusal(where: _Where, major: int, stored_superuser: str, pass_file: Path) -> str | None:
+    """Why the data folder stops this run, before anything changes."""
+    if where.reattach and not stored_superuser:
+        return (f"A database is kept in {where.data_dir}, but this install does not know its superuser's password "
+                f"({pass_file} is missing): it cannot be signed in to. Put the password there, then run this "
+                "again. Nothing was done.")
+    if where.placed and not where.reattach and _holds_files(Path(where.data_dir)):
+        return (f"There are files in {where.data_dir}, and no database: nothing is installed over them. Empty "
+                "that folder or choose another data folder. Nothing was done.")
+    return None
+
+
+def _postgres_steps(platform, where: _Where, major: int, port: int, archive_dir: Path, *, superuser_password: str,
+                    throwaway: str, app_password: str, run=subprocess.run):
+    """The setup's steps: a new server (in the data folder when *where* says
+    so), or a kept database attached to a new service; the WAL archive's and
+    the data folder's folders made first."""
+    from kazma_core import data_folder
+    from kazma_core import postgres_service as pgs
+    from kazma_core.backup import wal_archive
+
+    archive_command = wal_archive.archive_command(platform, archive_dir)
+    if where.reattach:
+        steps = _reattach_steps(platform, major, port, data_dir=where.data_dir,
+                                superuser_password=superuser_password, throwaway=secrets.token_urlsafe(18),
+                                app_password=app_password, archive_command=archive_command)
+    else:
+        steps = pgs.setup_plan(platform, port=port, superuser_password=superuser_password,
+                               throwaway_password=throwaway, app_password=app_password, role_sql=_role_sql(),
+                               wal_archive_command=archive_command, major=major, data_dir=where.data_dir)
+    steps = wal_archive.prepare_steps(platform, archive_dir) + steps
+    if where.placed:
+        from kazma_core.data_folder_move import current_account
+
+        steps = data_folder.prepare_steps(where.layout, major, current_account(run)) + steps
+    return steps
+
+
+def _point_data_dir(step, platform, service: str, port: int, *, run=subprocess.run) -> tuple[bool, str]:
+    """The service stopped, pointed at the data folder *step* names (its
+    ``-D``), the folder given to the service's account, its archive_command
+    pointed at the data folder's WAL archive, and started."""
+    from kazma_core import data_folder
+    from kazma_core import data_folder_move as dfm
+    from kazma_core import postgres_service as pgs
+    from kazma_core.backup import wal_archive
+
+    machine = dfm.Machine(run=run, say=_say)
+    target = Path(step.data_dir)
+    config = pgs.service_config(service, run=run)
+    if not config["command"]:
+        return False, f"the {service} service is not there"
+    if not pgs.stop_service(platform.os, service, run=run):
+        return False, f"{service} did not stop"
+    grants = dfm._postgres_grants(machine, config["account"])
+    ok, why = dfm.secure_folder(target, grants["data"], run)
+    if not ok:
+        return False, why
+    folder = data_folder.chosen()
+    if folder is not None:
+        archive = data_folder.Layout(folder).wal_archive(step.major)
+        try:
+            pgs.set_setting_on_disk(target, "archive_command",
+                                    wal_archive._conf_string(wal_archive.archive_command(platform, archive)))
+        except OSError as exc:
+            return False, f"the kept database's archive_command could not be set: {exc}"
+    ok, why = dfm.set_service_command(machine, service, pgs.with_data_dir(config["command"], str(target)))
+    if not ok or not data_folder.same_folder(pgs.service_config(service, run=run)["data_dir"], target):
+        return False, f"the service could not be pointed at {target}: {why or 'its command line did not change'}"
+    ok = pgs.start_service(platform.os, service, port, run=run)
+    return ok, "" if ok else f"{service} did not answer on port {port} from {target}"
+
+
 def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = None) -> int:
     from kazma_core import postgres_service as pgs
 
@@ -1107,6 +1443,8 @@ def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = Non
     if _say_no_manager_or_older(platform, major):
         return 2
 
+    major, service, state, where = _where_the_data_goes(platform, rec, major, service, state, options.port,
+                                                         run=run)
     installed = bool(state and state.get("installed"))
     healthy = installed and all(state.get(k) for k in ("running", "at_boot", "restarts", "answers"))
     pass_file = _superuser_pass_file()
@@ -1120,15 +1458,14 @@ def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = Non
     hidden = [superuser_password, app_password, throwaway]
     container = options.move_from_container
 
-    from kazma_core.backup import wal_archive
-
     keep = installed and rec.get("service") == service
-    archive_dir = (Path(rec["wal_archive_dir"]) if keep and rec.get("wal_archive_dir")
-                   else wal_archive.default_archive_dir(platform, major))
-    steps = pgs.setup_plan(platform, port=options.port, superuser_password=superuser_password,
-                           throwaway_password=throwaway, app_password=app_password, role_sql=_role_sql(),
-                           wal_archive_command=wal_archive.archive_command(platform, archive_dir), major=major)
-    steps = wal_archive.prepare_steps(platform, archive_dir) + steps
+    refusal = _where_refusal(where, major, stored_superuser, pass_file)
+    if refusal:
+        _say(refusal)
+        return 2
+    archive_dir = _archive_dir(platform, rec, where, major, keep=keep)
+    steps = _postgres_steps(platform, where, major, options.port, archive_dir, superuser_password=superuser_password,
+                            throwaway=throwaway, app_password=app_password, run=run)
     if installed:
         steps = _without_install_steps(steps)
         if not pass_file.exists() and platform.os == "windows":
@@ -1158,7 +1495,10 @@ def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = Non
             return 2
 
     _print_postgres_plan(f"PostgreSQL {major} as a {platform.os} service ({service}) on "
-                         f"127.0.0.1:{options.port}", options, steps, installed=installed, hold=hold)
+                         f"127.0.0.1:{options.port}{_where_said(where)}", options, steps, installed=installed,
+                         hold=hold)
+    if keep:
+        _say_outside_data_folder(service, where.layout, major, run=run)
     if options.dry_run:
         return 0
     if platform.os == "windows" and any(s.admin or s.action == "restart" for s in steps) and not pgs.is_admin():
@@ -1208,13 +1548,35 @@ def _setup_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = Non
         for key in by_hand:
             _say(f"   {key} names the container and is stored in plain text: set it to the new server in "
                  "Settings -> Memory.")
-    _write_setup_record(platform, service, major, options.port, archive_dir, rec, keep=keep)
+    _record_server(platform, service, major, options.port, archive_dir, rec, where, keep=keep,
+                   installed=installed, run=run)
 
     if not container:
         _say("Done. Reload Kazma when it is idle to use the new database:")
         _say("  python scripts/service/kazma_guard.py --reload --when-idle")
         return 0
     return _finish_move(container, url, hold, no_env=options.no_env, run=run)
+
+
+def _holds_files(path: Path) -> bool:
+    try:
+        return path.is_dir() and any(path.iterdir())
+    except OSError:
+        return True
+
+
+def _say_outside_data_folder(service: str, layout, major: int, *, run=subprocess.run) -> None:
+    """A note when the service's data is not in the data folder the owner
+    chose (an install made before the choice): the command that moves it."""
+    from kazma_core import data_folder
+    from kazma_core import postgres_service as pgs
+
+    if layout is None:
+        return
+    now = pgs.service_config(service, run=run)["data_dir"]
+    if now and not data_folder.same_folder(now, layout.postgres_data(major)):
+        _say(f"  note: its data is in {now}, not in the data folder {layout.root}: "
+             f"kazma setup data-folder \"{layout.root}\" moves it there.")
 
 
 def _print_postgres_plan(head: str, options, steps, *, installed: bool, hold: _MoveHold | None) -> None:
@@ -1256,10 +1618,12 @@ def _do_setup_step(step, platform, service, port: int, hidden: list[str], *, run
         return ok, "" if ok else f"{svc} did not answer on port {at} within a minute"
     if step.action == "set_port":
         try:
-            pgs.set_port_on_disk(pgs.data_dir_for(platform, step.major), step.port)
+            pgs.set_port_on_disk(step.data_dir or pgs.data_dir_for(platform, step.major), step.port)
         except OSError as exc:
             return False, f"{type(exc).__name__}: {exc}"
         return True, ""
+    if step.action == "point_data_dir":
+        return _point_data_dir(step, platform, svc, at, run=run)
     ok, detail = _run_step(step, hidden, run=run)
     if not ok and _winget_source_missing(step, detail):
         # A fresh Windows answers every install 0x8A15000F until its package

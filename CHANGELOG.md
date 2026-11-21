@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## The database and the engine off Windows' own drive (2026-11-21)
+
+- `kazma setup data-folder D:\Kazma` (or `kazma setup install --data-folder
+  D:\Kazma`) keeps Kazma's database, its WAL archive and base backups, and
+  its container engine's disk on another drive: the 19 November reset of C:
+  lost the database, which setup had always put under Program Files. The
+  choice is recorded, so a second run, a repair and an upgrade keep it.
+- A folder that cannot hold them is refused before anything changes:
+  Windows' own drive, a removable, network, optical or `subst` drive, a
+  share, a folder inside Kazma's install or data folder, too little room.
+- On an install that has them on C:, it moves them with Kazma held through
+  its guard: the database service disabled while its data is copied and
+  compared file by file, then pointed at the copy and seen running from it
+  with Kazma signed in (the old folders kept); the engine's disk moved by
+  WSL and checked by its hash. A part that fails is put back as it was, and
+  a run that died is put back by the next one.
+- After a reset, `setup.cmd` attaches the kept database to the new service
+  and registers the kept engine disk in place, instead of starting empty.
+
 ## Memory keeps all of its text; the Memory page reworked (2026-11-19)
 
 - A memory of a conversation keeps the whole turn: the question, the answer
