@@ -97,6 +97,13 @@
   with Kazma signed in (the old folders kept); the engine's disk moved by
   WSL and checked by its hash. A part that fails is put back as it was, and
   a run that died is put back by the next one.
+- The engine's disk move waits for WSL to let go of the disk (the first
+  move on a real PC met it still in use, "ERROR_SHARING_VIOLATION", and was
+  put back), and shuts WSL down when nothing else runs in it.
+- A move holds Kazma while its guard is still starting it: run seconds after
+  a resume, the first move saw no Kazma answering yet and held nothing. The
+  same for the Postgres moves and upgrade, the engine's move from Docker
+  Desktop and `kazma migrate import`.
 - After a reset, `setup.cmd` attaches the kept database to the new service
   and registers the kept engine disk in place, instead of starting empty.
 

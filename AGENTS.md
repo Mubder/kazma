@@ -5846,6 +5846,29 @@ engine's disk in `%LOCALAPPDATA%\Kazma\engine`, while the install folder
   WSL 2.5+), hashed again, the task run, Docker must answer. Refused while
   Kazma runs under a guard without `data_folder_move` in `guard_features`
   (`_MoveHold.guard_lacks`).
+- **The engine's disk is free before it moves** (live, 2026-11-21: the
+  owner's move found the distro stopped, moved at once, and WSL refused
+  `ERROR_SHARING_VIOLATION`; it was put back). WSL keeps a terminated
+  distro's disk attached a while. `data_folder_move._release_disk` waits
+  (`DISK_FREE_WAIT_S`) until the `ext4.vhdx` opens with no sharing
+  (`Machine.disk_held`, `CreateFileW` share mode 0), then shuts WSL down
+  when no other distro runs (a line of `wsl -l -q --running` counts only
+  when it names a registered distro) -- never under one: the move is put
+  back and names it. Checked before the hash, again right before `--move`,
+  and before a put-back's move.
+- **Every move holds a Kazma its guard runs, not only one that answers**
+  (live, 2026-11-21: run seconds after `--resume`, the guard's child still
+  booting, the port alone said "not running" and nothing was paused).
+  `setup._kazma_to_hold`: the port answers, or a live guard (fresh
+  heartbeat) supervises this install and is not paused for something else
+  -- its pause holds a booting child and a backoff alike, as `kazma
+  update`'s `_ServerHold` always did. One rule for the database's move from
+  a container, the Postgres upgrade, the engine's move, the data-folder
+  move and `kazma migrate import`. Every product call of
+  `update._is_server_running` is declared with why it never decides "nothing
+  to hold" under a guard. Gate: `tests/test_move_hold_counts_a_starting_kazma.py`
+  (each move's hold with a booting child; the port-only rule as the
+  negative control; a planted port-only caller).
 - **The guard leaves a moving part alone** for `DATA_MOVE_HOLD_S` from the
   stage's start (`data_folder_move.GUARD_HOLD_S`, held equal): its database
   watch neither starts nor pages a moving database (state `moving`), its
@@ -5856,9 +5879,10 @@ engine's disk in `%LOCALAPPDATA%\Kazma\engine`, while the install folder
 - Gate: `tests/test_data_folder.py` (a fake Windows: its service, icacls,
   the service change, WSL's registration and the task; real folders. Each
   refusal; the choice not read, a run that knows no folder, no comparison,
-  no journal, no hash check, a fresh import over a kept disk and no move
-  journaled at the guard as negative controls), `tests/test_data_folder_drill.py`
-  (the drill's judging).
+  no journal, no hash check, a fresh import over a kept disk, no move
+  journaled at the guard, a move straight after the running check, a disk
+  checked once and a put-back that does not wait as negative controls),
+  `tests/test_data_folder_drill.py` (the drill's judging).
 - **Drilled** (`scripts/data_folder_drill.py`, 2026-11-21, `passed`;
   `docs/audits/evidence/data_folder_drill/`): on the drill VM with a second
   disk, Kazma installed with PostgreSQL on C:, `kazma setup data-folder

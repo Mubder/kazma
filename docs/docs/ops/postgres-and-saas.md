@@ -357,7 +357,15 @@ at the end):
    cleanly inside it and the distro is ended; its disk is hashed, moved by
    WSL itself (`wsl --manage kazma-engine --move`, WSL 2.5 or later) and
    hashed again where it landed; the task runs it again and Docker must
-   answer.
+   answer. WSL keeps a stopped distro's disk in use for a while, so the
+   move first waits for the disk to be free (up to a minute), then shuts WSL
+   down if nothing else runs in it. If another distro runs (Ubuntu, say),
+   WSL is not shut down under it: the engine is put back, and the command
+   names the distro to stop first.
+
+Kazma is held whenever its guard runs it, also when it is still starting
+(seconds after `kazma_guard.py --resume`, before it answers): the guard
+starts nothing until the move ends.
 
 Every stage is written to `kazma-data/setup_record.json` before it begins. A part that
 fails is put back as it was (the service on its old folder, started; the

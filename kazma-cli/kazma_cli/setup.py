@@ -966,6 +966,31 @@ _MOVE_IDLE_TIMEOUT_S = 900.0
 _SIGN_IN_WAIT_S = 120.0
 
 
+def _kazma_to_hold(guard: object | None, reason: str) -> bool:
+    """Whether a move must hold Kazma: its port answers, or a live guard
+    supervises this install -- so a Kazma runs or is about to: started and
+    still booting (its port quiet until it is up), or waiting out a backoff
+    before the next start.
+
+    Live, 2026-11-21: the data-folder move ran seconds after a ``--resume``,
+    while the guard's new child booted (its port opened a minute later); the
+    port alone said "not running", nothing was paused, and the database moved
+    with a Kazma starting on it. The guard's pause holds a booting child and
+    a backoff alike, as ``kazma update``'s hold (``update._ServerHold``)
+    always counted on. A guard paused for something else starts nothing:
+    then the port alone decides."""
+    from kazma_cli.update import _is_server_running, _resolve_server_port
+
+    if _is_server_running(_resolve_server_port()):
+        return True
+    if guard is None:
+        return False
+    try:
+        return str(guard.maintenance_preview(reason)) == "guard"
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 class _MoveHold:
     """Kazma stopped through its guard while its data is copied.
 
@@ -981,12 +1006,13 @@ class _MoveHold:
     """
 
     def __init__(self, reason: str = _MOVE_PAUSE_REASON, what: str = "its database") -> None:
-        from kazma_cli.update import _find_git_root, _is_server_running, _load_guard, _resolve_server_port
+        from kazma_cli.update import _find_git_root, _load_guard
 
         self.reason = reason
         self.what = what
         self.guard = _load_guard(_find_git_root() or _checkout_root())
-        self.running = _is_server_running(_resolve_server_port())
+        #: Kazma to hold: it answers, or a live guard runs it (:func:`_kazma_to_hold`).
+        self.running = _kazma_to_hold(self.guard, reason)
         self.held = False
 
     def refusal(self) -> str | None:

@@ -33,7 +33,12 @@ back, removed by the owner.
 **The engine** (:func:`_move_engine`): its ``KazmaEngine`` task disabled and
 ended, Docker stopped cleanly in the distro, the distro ended; its disk
 hashed, moved by WSL itself (``wsl --manage kazma-engine --move``), hashed
-again where it landed; the task enabled and run; Docker must answer.
+again where it landed; the task enabled and run; Docker must answer. Before
+the hash, right before the move and before a put-back's move, the disk must
+be free (:func:`_release_disk`): WSL keeps a terminated distro's disk
+attached a while (live, 2026-11-21: the move straight after the distro
+stopped failed ``ERROR_SHARING_VIOLATION``), so the move waits for it, and
+shuts WSL down when nothing else runs in it -- never under another distro.
 
 Every function blocks: off the loop.
 """
@@ -76,6 +81,11 @@ GUARD_HOLD_S = 2 * 3600.0
 ENGINE_WAIT_S = 180.0
 #: How long the database has to answer after its service starts.
 DATABASE_WAIT_S = 120.0
+#: How long the move waits for WSL to let go of the engine's disk after the
+#: distro ended, before it shuts WSL down (and again after that).
+DISK_FREE_WAIT_S = 60.0
+#: Windows' answers to a file another process has open.
+_SHARING_VIOLATION, _LOCK_VIOLATION = 32, 33
 #: The first WSL release with ``wsl --manage <distro> --move``.
 WSL_MOVE_MIN = (2, 5)
 #: The well-known accounts a Postgres service runs as, by SID.
@@ -102,6 +112,29 @@ def _distro_location(name: str) -> tuple[Path, str] | None:
     return wsl_distro_location(name)
 
 
+def _disk_held(path: Path) -> bool:
+    """Another process has *path* open: Windows will not open it with no
+    sharing (``CreateFileW``, share mode 0, then closed at once). False when
+    it opens, when it is not there, elsewhere than Windows, or for another
+    error (WSL's own move then says what it meets)."""
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel32.CreateFileW
+    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create.restype = wintypes.HANDLE
+    generic_read, open_existing, normal = 0x80000000, 3, 0x80
+    handle = create(str(path), generic_read, 0, None, open_existing, normal, None)
+    if handle is None or handle == ctypes.c_void_p(-1).value:
+        return ctypes.get_last_error() in (_SHARING_VIOLATION, _LOCK_VIOLATION)
+    kernel32.CloseHandle(wintypes.HANDLE(handle))
+    return False
+
+
 @dataclass
 class Machine:
     """What the move reads and runs (tests replace each piece)."""
@@ -112,6 +145,7 @@ class Machine:
     sign_in: Callable[[str], str | None] | None = None
     distro_location: Callable[[str], tuple[Path, str] | None] = _distro_location
     hasher: Callable[[Path], str] = _hash_file
+    disk_held: Callable[[Path], bool] = _disk_held
     sleep: Callable[[float], None] = time.sleep
     say: Callable[[str], None] = print
     record_path: Path | None = None
@@ -607,6 +641,55 @@ def _stop_engine(machine: Machine) -> bool:
     return False
 
 
+def _other_distros_running(machine: Machine) -> list[str]:
+    """The WSL distros running besides Kazma's. A line counts only when it
+    names a registered distro: WSL words "none running" as a line of its own.
+    With no registered list to check against, every running line counts (a
+    shutdown is never made on a list that could not be read)."""
+    from kazma_core.docker_cli import KAZMA_DISTRO
+
+    code, text = _wsl(machine, "-l", "-q", "--running", timeout=60)
+    running = [line.strip() for line in text.splitlines() if line.strip()] if code == 0 else []
+    code, text = _wsl(machine, "-l", "-q", timeout=60)
+    known = {line.strip() for line in text.splitlines() if line.strip()} if code == 0 else None
+    return [name for name in running if name != KAZMA_DISTRO and (known is None or name in known)]
+
+
+def _wait_disk_free(machine: Machine, disk: Path) -> bool:
+    """True once no process holds *disk*, within :data:`DISK_FREE_WAIT_S`."""
+    waited = 0.0
+    while machine.disk_held(disk):
+        if waited >= DISK_FREE_WAIT_S:
+            return False
+        machine.sleep(2.0)
+        waited += 2.0
+    return True
+
+
+def _release_disk(machine: Machine, disk: Path) -> tuple[bool, str]:
+    """The engine's *disk* free to move: ``(True, "")``, or ``(False, why)``.
+
+    WSL keeps a terminated distro's disk attached a while, so ``wsl
+    --manage --move`` straight after the distro stopped failed
+    ``ERROR_SHARING_VIOLATION`` (live, 2026-11-21). Waited for; when WSL
+    still holds it, WSL is shut down (which lets go of every disk) -- only
+    when no other distro runs in it, never under one."""
+    if _wait_disk_free(machine, disk):
+        return True, ""
+    others = _other_distros_running(machine)
+    if others:
+        names = ", ".join(others)
+        return False, (f"WSL still holds the engine's disk ({disk}), and WSL also runs {names}: it is not shut "
+                       f"down under it. Stop it (wsl --terminate {others[0]}) or run wsl --shutdown, then run "
+                       "this again.")
+    machine.say("   WSL still holds the engine's disk, and nothing else runs in WSL: shutting WSL down")
+    _wsl(machine, "--shutdown", timeout=120)
+    if _wait_disk_free(machine, disk):
+        return True, ""
+    return False, (f"The engine's disk ({disk}) is still in use by another program after WSL shut down: "
+                   "close what has it open, then run this again.")
+
+
 def _start_engine(machine: Machine) -> bool:
     """The task enabled and run again; True once Docker answers."""
     from kazma_core.container_engine_setup import TASK_NAME, _docker
@@ -642,12 +725,18 @@ def _move_engine(part: Part, *, folder: Path, machine: Machine) -> bool:
     if ok:
         ok, why = secure_folder(dst, [f"{_SYSTEM}:(OI)(CI)F", f"{_ADMINS}:(OI)(CI)F",
                                       *([f"{user}:(OI)(CI)F"] if user else [])], machine.run)
+    if ok:
+        ok, why = _release_disk(machine, src / part.vhd)
     if not ok:
         say(f"   {why}")
         return _put_back({**entry, "stage": "stopping"}, machine)
     say(f"-> Checking the engine's disk ({part.size / 2**30:.1f} GB): {src / part.vhd}")
     entry["hash"] = machine.hasher(src / part.vhd)
     df.write_journal({**entry, "stage": "moving"}, rp)
+    ok, why = _release_disk(machine, src / part.vhd)
+    if not ok:
+        say(f"   {why}")
+        return _put_back({**entry, "stage": "moving"}, machine)
     say(f"-> Moving it: wsl --manage {KAZMA_DISTRO} --move {dst}")
     code, text = _wsl(machine, "--manage", KAZMA_DISTRO, "--move", str(dst), timeout=4 * 3600)
     where = machine.distro_location(KAZMA_DISTRO)
@@ -678,7 +767,9 @@ def _put_engine_back(entry: dict[str, Any], machine: Machine) -> bool:
     if where is not None and not df.same_folder(where[0], src):
         say(f"-> Moving the engine's disk back to {src}")
         _stop_engine(machine)
-        code, text = _wsl(machine, "--manage", KAZMA_DISTRO, "--move", str(src), timeout=4 * 3600)
+        free, why = _release_disk(machine, where[0] / where[1])
+        code, text = (_wsl(machine, "--manage", KAZMA_DISTRO, "--move", str(src), timeout=4 * 3600) if free
+                      else (1, why))
         where = machine.distro_location(KAZMA_DISTRO)
         if code != 0 or where is None or not df.same_folder(where[0], src):
             say(f"   FAILED: {text.strip()[-300:] or f'exit {code}'}")

@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -170,6 +171,16 @@ class _Windows:
         self.move_corrupts = False
         self.move_fails = False
         self.imports: list[list[str]] = []
+        #: The machine's clock, moved by :meth:`sleep`.
+        self.clock = 0.0
+        #: How long WSL keeps a terminated distro's disk attached (live,
+        #: 2026-11-21: a move straight after the stop met it in use).
+        self.detach_after = 0.0
+        self.attached_until = 0.0
+        #: Other WSL distros, and whether each runs.
+        self.others: dict[str, bool] = {}
+        #: What WSL prints, as a line of its own, when no distro runs.
+        self.none_running_line = ""
 
     def command(self, data: Path | None) -> str:
         folder = data or self.tmp / "C" / "Program Files" / "PostgreSQL" / str(PG_MAJOR) / "data"
@@ -190,6 +201,15 @@ class _Windows:
 
     def location(self, name: str):
         return self.registry.get(name)
+
+    def sleep(self, seconds: float) -> None:
+        self.clock += seconds
+
+    def disk_held(self, path: Path) -> bool:
+        """WSL has the distro's disk open: the distro runs, or it ended less
+        than :attr:`detach_after` ago."""
+        owner = [n for n, (base, vhd) in self.registry.items() if base / vhd == Path(path)]
+        return bool(owner) and (self.distro_running or self.clock < self.attached_until)
 
     def _ok(self, argv, out: str = "", code: int = 0):
         return subprocess.CompletedProcess(argv, code, out, "")
@@ -266,16 +286,28 @@ class _Windows:
         if args == ["--version"]:
             return self._ok(argv, "WSL version: 2.6.1.0\n")
         if args[:2] == ["-l", "-q"]:
-            names = [n for n in self.registry if self.distro_running] if "--running" in args else list(self.registry)
-            return self._ok(argv, "\n".join(names))
+            if "--running" in args:
+                names = ([n for n in self.registry if self.distro_running]
+                         + [n for n, running in self.others.items() if running])
+                return self._ok(argv, "\n".join(names) or self.none_running_line)
+            return self._ok(argv, "\n".join([*self.registry, *self.others]))
         if args[:1] == ["--terminate"]:
             self.distro_running = False
+            self.attached_until = self.clock + self.detach_after
+            return self._ok(argv)
+        if args[:1] == ["--shutdown"]:
+            self.distro_running = False
+            self.others = dict.fromkeys(self.others, False)
+            self.attached_until = 0.0
             return self._ok(argv)
         if args[:1] == ["--manage"] and "--move" in args:
             if self.distro_running or self.move_fails:
                 return self._ok(argv, "The operation could not be completed", 1)
             name, dst = args[1], Path(args[args.index("--move") + 1])
             base, vhd = self.registry[name]
+            if self.disk_held(base / vhd):
+                return self._ok(argv, "The process cannot access the file because it is being used by another "
+                                      "process.\nError code: Wsl/Service/MoveDistro/ERROR_SHARING_VIOLATION", 1)
             dst.mkdir(parents=True, exist_ok=True)
             data = (base / vhd).read_bytes()
             (dst / vhd).write_bytes(data + (b"x" if self.move_corrupts else b""))
@@ -309,7 +341,7 @@ class _Windows:
 
 def _machine(win: _Windows, record_path: Path, said: list[str]) -> dfm.Machine:
     return dfm.Machine(run=win.run, disk=FIXED, answers=win.answers, sign_in=win.sign_in,
-                       distro_location=win.location, sleep=lambda s: None, say=said.append,
+                       distro_location=win.location, disk_held=win.disk_held, sleep=win.sleep, say=said.append,
                        record_path=record_path, user="*S-1-5-21-11-22-33-1001")
 
 
@@ -731,6 +763,128 @@ def test_an_old_wsl_refuses_the_engine_move(engine, monkeypatch):
     assert any("WSL 2.5" in r for r in refusals)
 
 
+# The engine's disk is free before it moves (live, 2026-11-21: the distro
+# ended, its disk still attached, and the move failed ERROR_SHARING_VIOLATION).
+
+
+def test_a_disk_wsl_still_holds_after_the_stop_is_waited_for(engine):
+    e = engine
+    e.win.detach_after = 10.0
+    assert dfm._move_engine(e.part, folder=e.folder, machine=e.machine), e.said
+    assert e.win.registry["kazma-engine"][0] == df.Layout(e.folder).engine
+    assert not e.win.ran("wsl.exe", "--shutdown")          # it let go within the wait: WSL left alone
+
+
+def test_control_moving_straight_after_the_running_check_meets_the_held_disk(engine, monkeypatch):
+    """The order the owner's move ran (2026-11-21): the distro was seen not
+    running and the move went at once, onto a disk WSL still held."""
+    e = engine
+    e.win.detach_after = 10.0
+    monkeypatch.setattr(dfm, "_release_disk", lambda machine, disk: (True, ""))
+    assert not dfm._move_engine(e.part, folder=e.folder, machine=e.machine)
+    assert any("ERROR_SHARING_VIOLATION" in line for line in e.said)
+    assert e.win.registry["kazma-engine"][0] == e.old and e.win.distro_running   # put back, as live
+
+
+def test_a_disk_held_past_the_wait_shuts_wsl_down_when_nothing_else_runs(engine):
+    e = engine
+    e.win.detach_after = 10 * dfm.DISK_FREE_WAIT_S
+    e.win.none_running_line = "There are no running distributions."   # a line, but no distro
+    assert dfm._move_engine(e.part, folder=e.folder, machine=e.machine), e.said
+    assert e.win.ran("wsl.exe", "--shutdown")
+    assert e.win.registry["kazma-engine"][0] == df.Layout(e.folder).engine and e.win.distro_running
+
+
+def test_wsl_is_never_shut_down_under_another_distro(engine):
+    e = engine
+    e.win.detach_after = 10 * dfm.DISK_FREE_WAIT_S
+    e.win.others["Ubuntu"] = True
+    assert not dfm._move_engine(e.part, folder=e.folder, machine=e.machine)
+    assert not e.win.ran("wsl.exe", "--shutdown") and e.win.others["Ubuntu"]
+    assert any("WSL also runs Ubuntu" in line for line in e.said)
+    assert e.win.registry["kazma-engine"][0] == e.old and (e.old / "ext4.vhdx").is_file()
+    assert e.win.task["enabled"] and e.win.distro_running and df.journal(e.machine.record_path) == {}
+
+
+def _attached_while_hashing(e) -> None:
+    """Something has the disk open again while it is hashed (it takes minutes
+    for a real disk): attached for ten seconds after the hash."""
+    hasher = e.machine.hasher
+
+    def hashing(path):
+        digest = hasher(path)
+        e.win.attached_until = e.win.clock + 10.0
+        return digest
+
+    e.machine.hasher = hashing
+
+
+def test_the_disk_is_checked_again_right_before_the_move(engine):
+    e = engine
+    _attached_while_hashing(e)
+    assert dfm._move_engine(e.part, folder=e.folder, machine=e.machine), e.said
+    assert e.win.registry["kazma-engine"][0] == df.Layout(e.folder).engine
+
+
+def test_control_checked_once_the_disk_attached_since_meets_the_move(engine, monkeypatch):
+    e = engine
+    _attached_while_hashing(e)
+    release, calls = dfm._release_disk, []
+
+    def first_only(machine, disk):
+        calls.append(disk)
+        return release(machine, disk) if len(calls) == 1 else (True, "")
+
+    monkeypatch.setattr(dfm, "_release_disk", first_only)
+    assert not dfm._move_engine(e.part, folder=e.folder, machine=e.machine)
+    assert any("ERROR_SHARING_VIOLATION" in line for line in e.said)
+
+
+def _first_start_fails(e, monkeypatch) -> None:
+    """Docker does not answer from the new place the first time; the
+    put-back stops the distro with WSL keeping its disk ten seconds."""
+    start, starts = dfm._start_engine, []
+
+    def first_fails(machine):
+        up = start(machine)
+        starts.append(up)
+        if len(starts) == 1:
+            e.win.detach_after = 10.0
+            return False
+        return up
+
+    monkeypatch.setattr(dfm, "_start_engine", first_fails)
+
+
+def test_a_put_back_waits_for_the_disk_too(engine, monkeypatch):
+    e = engine
+    _first_start_fails(e, monkeypatch)
+    assert not dfm._move_engine(e.part, folder=e.folder, machine=e.machine)
+    assert e.win.registry["kazma-engine"][0] == e.old and (e.old / "ext4.vhdx").is_file()
+    assert df.journal(e.machine.record_path) == {}
+
+
+def test_control_a_put_back_that_does_not_wait_leaves_the_disk_moved(engine, monkeypatch):
+    e = engine
+    _first_start_fails(e, monkeypatch)
+    release = dfm._release_disk
+    monkeypatch.setattr(dfm, "_release_disk", lambda machine, disk: (
+        release(machine, disk) if e.win.detach_after == 0 else (True, "")))
+    assert not dfm._move_engine(e.part, folder=e.folder, machine=e.machine)
+    assert e.win.registry["kazma-engine"][0] == df.Layout(e.folder).engine
+    assert df.journal(e.machine.record_path).get("part") == "engine"      # the next run tries again
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows' own sharing rules")
+def test_a_file_another_handle_has_open_is_held(tmp_path):
+    disk = tmp_path / "ext4.vhdx"
+    disk.write_bytes(b"x" * 1024)
+    assert not dfm._disk_held(disk)
+    with open(disk, "rb"):
+        assert dfm._disk_held(disk)
+    assert not dfm._disk_held(disk) and not dfm._disk_held(tmp_path / "missing.vhdx")
+
+
 # -- the engine set up after a reset ------------------------------------------------------------------------
 
 
@@ -952,6 +1106,46 @@ def test_the_move_is_refused_before_anything_changes(engine, monkeypatch, capsys
     assert want in out and "Nothing was done" in out
     assert events == [] and not e.win.ran("schtasks") and not e.win.ran("wsl.exe", "--manage")
     assert df.chosen(e.machine.record_path) is None
+
+
+def _move_seconds_after_a_resume(e, monkeypatch, *, port_only: bool) -> list[bool]:
+    """The data-folder command with its real hold, run while the guard's
+    child boots (live, 2026-11-21): a fresh heartbeat, nothing on the port.
+    Returns, for each time the guard was asked to hold, whether the engine
+    had been touched already."""
+    from kazma_cli import setup, update
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setattr(update, "_resolve_server_port", lambda: port)
+    monkeypatch.setattr(pgs, "is_admin", lambda: True)
+    if port_only:
+        monkeypatch.setattr(setup, "_kazma_to_hold",
+                            lambda guard, reason: update._is_server_running(update._resolve_server_port()))
+    now = time.time()
+    Path(os.environ["KAZMA_GUARD_STATE"]).write_text(json.dumps({
+        "heartbeat": now, "guard_pid": os.getpid(), "child_pid": os.getpid(), "child_spawned": now - 5,
+        "guard_features": ["pause_held", setup.DATA_FOLDER_GUARD_FEATURE]}), encoding="utf-8")
+    hold = setup._MoveHold(reason=setup._DATA_FOLDER_REASON, what="its database and engine")
+    touched: list[bool] = []
+    hold.guard.stop_for_maintenance = lambda reason, **kw: (touched.append(bool(e.win.ran("schtasks"))), "held")[1]
+    hold.guard.resume_after_maintenance = lambda reason, **kw: "up"
+    e.machine.say = print
+    assert _cli(e.machine, hold, folder=str(e.folder)) == 0
+    assert e.win.registry["kazma-engine"][0] == df.Layout(e.folder).engine
+    return touched
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the folder is a real Windows path")
+def test_a_move_seconds_after_a_resume_holds_the_starting_kazma_first(engine, monkeypatch):
+    assert _move_seconds_after_a_resume(engine, monkeypatch, port_only=False) == [False]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the folder is a real Windows path")
+def test_control_by_the_port_alone_the_engine_moves_with_nothing_held(engine, monkeypatch):
+    assert _move_seconds_after_a_resume(engine, monkeypatch, port_only=True) == []
+    assert engine.win.ran("schtasks", "/Change")
 
 
 def test_with_nothing_elsewhere_the_choice_is_recorded_and_nothing_held(tmp_path, monkeypatch, capsys):
