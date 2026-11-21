@@ -1,0 +1,98 @@
+{
+ "what": "The product measures every memory change is gated on: Kazma's benchmark in English and Arabic, the tokens the recall block adds to a turn, recall's time, the small store. Written by scripts/memory_product_measures.py; times are this PC's.",
+ "made_on": "2026-11-21",
+ "dataset_version": 8,
+ "questions": 183,
+ "benchmark": {
+  "en": {
+   "questions": 137,
+   "answered": 0.9565,
+   "mrr": 0.7715,
+   "precision": 0.4773,
+   "abstained": 0.0,
+   "unanswerable": 22
+  },
+  "ar": {
+   "questions": 46,
+   "answered": 0.9048,
+   "mrr": 0.6952,
+   "precision": 0.4275,
+   "abstained": 0.0,
+   "unanswerable": 4
+  }
+ },
+ "block_tokens": {
+  "store": {
+   "en": {
+    "n": 137,
+    "p50": 711,
+    "p95": 1035,
+    "max": 1341,
+    "none": 0.0
+   },
+   "ar": {
+    "n": 46,
+    "p50": 590,
+    "p95": 823,
+    "max": 1091,
+    "none": 0.0
+   },
+   "all": {
+    "n": 183,
+    "p50": 675,
+    "p95": 1030,
+    "max": 1341,
+    "none": 0.0
+   }
+  },
+  "scale": {
+   "en": {
+    "n": 137,
+    "p50": 736,
+    "p95": 1211,
+    "max": 1343,
+    "none": 0.0
+   },
+   "ar": {
+    "n": 46,
+    "p50": 598,
+    "p95": 848,
+    "max": 1085,
+    "none": 0.0217
+   },
+   "all": {
+    "n": 183,
+    "p50": 710,
+    "p95": 1111,
+    "max": 1343,
+    "none": 0.0055
+   }
+  }
+ },
+ "recall_ms": {
+  "p50": 95.9,
+  "p95": 102.9
+ },
+ "recall_ms_scale": {
+  "p50": 243.6,
+  "p95": 252.9
+ },
+ "small_store": {
+  "questions": 164,
+  "answered": 0.9638,
+  "precision": 0.6752,
+  "abstained": 0.0385,
+  "shown": 2.73
+ },
+ "embed_ms": {
+  "p50": 75.6,
+  "p95": 85.8
+ },
+ "first_token": {
+  "p50_s": 0.115,
+  "p95_s": 0.12,
+  "turns": 12,
+  "measured_by": "tests/e2e/test_first_token_latency.py (run with -s), 2026-11-22"
+ },
+ "times_measured_while": "a below-normal embedding job (LongMemEval's dev vectors) ran on the same PC"
+}

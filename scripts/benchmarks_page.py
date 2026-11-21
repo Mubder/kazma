@@ -31,6 +31,16 @@ MEMORY = ROOT / "tests" / "fixtures" / "memory_bench" / "thresholds.json"
 KNOWLEDGE = ROOT / "tests" / "fixtures" / "knowledge_bench" / "thresholds.json"
 FIDELITY = ROOT / "tests" / "fixtures" / "documents" / "fidelity_thresholds.json"
 LONGMEMEVAL = ROOT / "tests" / "fixtures" / "longmemeval"
+PRODUCT_MEASURES = ROOT / "tests" / "fixtures" / "memory_bench" / "product_measures.json"
+#: LongMemEval's histories in the dev runs, in the order the page shows them.
+_LME_CONDITIONS = {
+    "kazma": "Kazma's recall",
+    "kazma_whole": "The same conversations read whole",
+    "full": "The whole history",
+    "oracle": "Only the answering conversations (oracle)",
+    "bge_top10": "bge-m3's 10 nearest rounds (plain retrieval)",
+    "bm25_top10": "BM25's 10 best rounds (plain retrieval)",
+}
 
 _MEMORY_NAMES = {
     "fact": "A fact you told it",
@@ -425,8 +435,131 @@ def _longmemeval(folder: Path) -> list[str]:
             f"| From the right conversation | {_pct(o['en_answer_session'])} | {_pct(o['ar_answer_session'])} |",
             "",
         ]
+    lines += _longmemeval_dev(folder)
     lines += ["Reproduce: download LongMemEval into a folder of its own, then `python scripts/longmemeval_bench.py "
               "retrieve --data DIR` (and `answer`, `translate`, `parallel`; those call a model).", ""]
+    return lines
+
+
+def _longmemeval_dev(folder: Path) -> list[str]:
+    """The dev split's runs (the memory plan's W0): each history answered
+    twice by the same build (the answers that flip are the noise no change
+    may be accepted on), a second judge, the answers read by Claude, and the
+    reader's reasoning off, low and high."""
+    main = folder / "answers_dev.json"
+    if not main.is_file():
+        return []
+    a = json.loads(main.read_text(encoding="utf-8"))
+    noise_file = folder / "noise_dev.json"
+    noise = json.loads(noise_file.read_text(encoding="utf-8")) if noise_file.is_file() else {}
+    flips = (noise.get("conditions") or {})
+    agree = (a.get("judges_agree") or {})
+    o = a["overall"]
+    lines = [
+        "### The dev split, and how much a score moves on its own {#longmemeval-dev}",
+        "",
+        f"{a['sample']} questions to choose settings on (`tests/fixtures/longmemeval/split.json`); the other 300 "
+        "are never used to choose anything, and every look at them is logged. Reader "
+        f"{a['reader']} with its reasoning {a.get('reader_reasoning', 'off')}; judges {a['judge']} and "
+        f"{a.get('judge2') or '–'} (LongMemEval's prompts). The same build answered every question twice: an "
+        "answer that flips between the two runs is the noise, and no change is accepted on a difference smaller "
+        "than it.",
+        "",
+        "| History | Answered | Second run | Answers that flipped | Judges agree | Tokens a question |",
+        "|---|---|---|---|---|---|",
+    ]
+    tokens = o.get("prompt_tokens_mean") or {}
+    for key, name in _LME_CONDITIONS.items():
+        if key not in o:
+            continue
+        f = flips.get(key) or {}
+        lines.append(f"| {name} | {_pct(o[key])} | {_pct(f.get('b'))} | "
+                     f"{f.get('flips', '–')} | {_pct(agree.get(key))} | {tokens.get(key, 0):,} |")
+    cut = a.get("cut_at_limit") or {}
+    unasked = a.get("unanswered") or {}
+    if any(cut.values()) or any(unasked.values()):
+        lines += ["", f"Answers cut at the reader's limit: {sum(cut.values())}; questions the API refused: "
+                      f"{sum(unasked.values())} (scored wrong)."]
+    rows = []
+    for level in ("off", "low", "high"):
+        path = main if a.get("reader_reasoning") == level else folder / f"answers_dev_{level}.json"
+        if path.is_file():
+            r = json.loads(path.read_text(encoding="utf-8"))
+            ro = r["overall"]
+            rows.append(f"| {level} | " + " | ".join(_pct(ro.get(k)) for k in ("kazma", "kazma_whole", "full",
+                                                                              "oracle")) + " |")
+    if len(rows) > 1:
+        lines += ["", "The reader's hidden reasoning (DeepSeek's `reasoning_effort`; Kazma's chat runs at `low`):",
+                  "", "| Reasoning | Kazma's recall | Read whole | Whole history | Oracle |", "|---|---|---|---|---|",
+                  *rows]
+    read_file = folder / "model_read.json"
+    if read_file.is_file():
+        s = json.loads(read_file.read_text(encoding="utf-8"))["summary"]
+        lines += ["", f"**The judges, read beside**: {s['n']} answers read by Claude (labelled model-read until "
+                      f"the owner checks them), the {s['disagreements']} the two judges disagree on first. The "
+                      f"first judge gave the reading's verdict on {_pct(s['judge'])} of them, the second on "
+                      f"{_pct(s['judge2'])}; on the disagreements {_pct(s['judge_on_disagreements'])} and "
+                      f"{_pct(s['judge2_on_disagreements'])}."]
+    retrieval = folder / "retrieval_dev.json"
+    if retrieval.is_file():
+        ro = json.loads(retrieval.read_text(encoding="utf-8"))["overall"]
+        if "answer_in_block" in ro:
+            lines += ["", f"**Without a model** (the same 200): the answer's round shown "
+                          f"{_pct(ro.get('evidence_turn'))}, every answering conversation shown "
+                          f"{_pct(ro.get('every_answer_session'))}; an answer written word for word in the rounds shown "
+                          f"{_pct(ro.get('answer_in_shown'))}, and still in the block after its bounds "
+                          f"{_pct(ro.get('answer_in_block'))} (of {ro.get('worded')} questions whose answer is "
+                          f"words). Plain retrieval shows every answering conversation for "
+                          f"{_pct(ro.get('plain_bge_every_session'))} (bge-m3's 10 nearest rounds) and "
+                          f"{_pct(ro.get('plain_bm25_every_session'))} (BM25's 10)."]
+    return lines + [""]
+
+
+def _ordinary_turn(path: Path) -> list[str]:
+    """What memory costs an ordinary turn (the memory plan's product
+    measures): every memory change is gated on these before any outside
+    score counts."""
+    if not path.is_file():
+        return []
+    m = json.loads(path.read_text(encoding="utf-8"))
+    b, tok, scale = m["benchmark"], m["block_tokens"]["store"], m["block_tokens"].get("scale") or {}
+
+    def toks(row: dict) -> str:
+        return f"{row['p50']:,} / {row['p95']:,} / {row['max']:,}" if row else "–"
+
+    small = m.get("small_store") or {}
+    first = m.get("first_token") or {}
+    embed = m.get("embed_ms") or {}
+    lines = [
+        "## Memory in an ordinary turn {#memory-ordinary-turn}",
+        "",
+        "What memory adds to every turn, and what it gets right, in English and in Arabic: a change to memory "
+        "that raises an outside score while making one of these worse is not adopted. Measured on the retrieval "
+        f"benchmark's store (dataset version {m['dataset_version']}, {m['questions']} questions) with its recorded "
+        "vectors, by `scripts/memory_product_measures.py`.",
+        "",
+        f"| | English ({b['en']['questions']} questions) | Arabic ({b['ar']['questions']}) |",
+        "|---|---|---|",
+        f"| Answer shown (questions with one) | {_pct(b['en']['answered'])} | {_pct(b['ar']['answered'])} |",
+        f"| Precision of what is shown | {_pct(b['en']['precision'])} | {_pct(b['ar']['precision'])} |",
+        f"| Questions with no answer that show nothing | {_pct(b['en']['abstained'])} of "
+        f"{b['en']['unanswerable']} | {_pct(b['ar']['abstained'])} of {b['ar']['unanswerable']} |",
+        f"| Tokens the recall block adds (median / 95th / largest) | {toks(tok['en'])} | {toks(tok['ar'])} |",
+        f"| The same, the store four times as large | {toks(scale.get('en') or {})} | "
+        f"{toks(scale.get('ar') or {})} |",
+        "",
+        f"Recall took {m['recall_ms']['p50']} ms (median; {m['recall_ms']['p95']} ms at the 95th) on the store"
+        + (f", {m['recall_ms_scale']['p50']} ms at four times its size" if m.get("recall_ms_scale") else "")
+        + (f"; the embedding model {embed['p50']} ms a question" if embed else "")
+        + (f"; Kazma's own share of the time to the first token {first['p50_s']} s ({first['p95_s']} s at the "
+           "95th, `tests/e2e/test_first_token_latency.py`)" if first else "")
+        + ". Times are the development PC's. A new install's small store: "
+        f"{_pct(small.get('answered'))} answered, precision {_pct(small.get('precision'))}, "
+        f"{_pct(small.get('abstained'))} of the questions with no answer show nothing.",
+        "",
+        "What differs from a live turn: a private store, a fixed \"now\", recorded vectors.",
+        "",
+    ]
     return lines
 
 
@@ -539,7 +672,8 @@ def render() -> str:
         "public benchmark here, LongMemEval, carries its own baselines on the same reader.",
         "",
     ]
-    lines += _memory(memory) + _longmemeval(LONGMEMEVAL) + _knowledge(knowledge) + _fidelity(fidelity)
+    lines += (_memory(memory) + _ordinary_turn(PRODUCT_MEASURES) + _longmemeval(LONGMEMEVAL)
+              + _knowledge(knowledge) + _fidelity(fidelity))
     return "\n".join(lines).rstrip() + "\n"
 
 

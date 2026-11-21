@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Memory: what an ordinary turn costs, and memory in real use (2026-11-22)
+
+- The measures every memory change is held to before an outside score
+  counts (`scripts/memory_product_measures.py`, on the benchmarks page): the
+  benchmark in English and Arabic apart, the tokens the recall block adds to
+  a turn (a median of 675; a question memory holds no answer to still gets
+  a block), recall's time and Kazma's own share of the time to the first
+  token. A test holds the block's size to the record.
+- A real-use suite in the browser (`scripts/memory_real_use.py`): a private
+  Kazma with the real model, used through the sidebar in English and
+  Arabic: facts told, asked, asked in other words, changed, forgotten and
+  never said. Every step passed. It showed that a fact told once is often
+  kept twice, so forgetting it took two Forgets on the Memory page.
+
 ## Memory: v8's thresholds chosen again; the recall block's bounds measured (2026-11-21)
 
 - Recall's thresholds were chosen again on dataset v8, on half the

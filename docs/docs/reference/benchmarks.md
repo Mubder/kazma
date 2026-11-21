@@ -64,6 +64,22 @@ With Postgres and pgvector as the memory store: not yet measured on dataset vers
 
 Reproduce: `python scripts/memory_bench.py run` (add `--real` to use the real model), and `python -m pytest tests/test_memory_benchmark.py`.
 
+## Memory in an ordinary turn {#memory-ordinary-turn}
+
+What memory adds to every turn, and what it gets right, in English and in Arabic: a change to memory that raises an outside score while making one of these worse is not adopted. Measured on the retrieval benchmark's store (dataset version 8, 183 questions) with its recorded vectors, by `scripts/memory_product_measures.py`.
+
+| | English (137 questions) | Arabic (46) |
+|---|---|---|
+| Answer shown (questions with one) | 95.7 % | 90.5 % |
+| Precision of what is shown | 47.7 % | 42.8 % |
+| Questions with no answer that show nothing | 0.0 % of 22 | 0.0 % of 4 |
+| Tokens the recall block adds (median / 95th / largest) | 711 / 1,035 / 1,341 | 590 / 823 / 1,091 |
+| The same, the store four times as large | 736 / 1,211 / 1,343 | 598 / 848 / 1,085 |
+
+Recall took 95.9 ms (median; 102.9 ms at the 95th) on the store, 243.6 ms at four times its size; the embedding model 75.6 ms a question; Kazma's own share of the time to the first token 0.115 s (0.12 s at the 95th, `tests/e2e/test_first_token_latency.py`). Times are the development PC's. A new install's small store: 96.4 % answered, precision 67.5 %, 3.9 % of the questions with no answer show nothing.
+
+What differs from a live turn: a private store, a fixed "now", recorded vectors.
+
 ## Memory against a public benchmark: LongMemEval {#longmemeval}
 
 [LongMemEval](https://github.com/xiaowu0162/LongMemEval) (MIT) asks questions of a user's own chat history: about 48 conversations, the one or few that hold the answer among unrelated ones. Kazma is measured on a fixed sample of it (the question ids are in `tests/fixtures/longmemeval/sample.json`), each history written into a private memory the product's way, one memory per round, and the question asked through the real `recall()`. No facts are extracted (that would cost a model call per round).

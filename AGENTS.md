@@ -2329,6 +2329,40 @@ four injected were noise.
   Gate: `tests/test_longmemeval_harness.py` (a history without its evidence
   round finds nothing: the control; the page's refusal with its control; no
   dataset text in a result file).
+- **The product measures and the real-use suite** (2026-11-22, the memory
+  plan's W0 and section 2.1: every memory change is gated on these before
+  an outside score counts). `scripts/memory_product_measures.py`, on the
+  retrieval benchmark's store with its recorded vectors: Kazma's benchmark
+  in English and Arabic apart; the tokens the recall block adds to a turn
+  (`format_recall_block` as the supervisor adds it, counted by
+  `summarizer.estimate_tokens`), on the store and at four times its
+  unrelated chat; recall's time; the embedding model's time
+  (`--real-embedder`); the small store. Kept in
+  `tests/fixtures/memory_bench/product_measures.json` with Kazma's own share
+  of the first token (`tests/e2e/test_first_token_latency.py`), shown on the
+  benchmarks page. The block's tokens are deterministic and held to the
+  record (`tests/test_memory_product_measures.py`, a bigger block as the
+  control): a change to the block records its new numbers in the same
+  commit. Baseline: a median 675 tokens a turn (711 English, 590 Arabic),
+  1,030 at the 95th; no question without an answer shows nothing; recall
+  96 ms, the embedding 76 ms, Kazma's first-token share 0.115 s.
+  `scripts/memory_real_use.py` is the browser real-use suite, run by hand at
+  every stage (it needs DeepSeek and the embedding model): a private Kazma
+  from this checkout (`kazma serve`, the environment scrubbed of every Kazma
+  and credential variable, a temporary data folder), reached by the sidebar
+  in English and in Arabic: two facts told, asked in a new chat, asked in
+  other words, changed, forgotten on the Memory page (every memory its
+  search finds), and never said; each answer judged with LongMemEval's
+  prompts; the result (pass or fail, tokens, no reply text) in
+  `docs/audits/evidence/memory_real_use/`. Baseline: every step passed in
+  both languages. What it showed: a fact told once is often kept twice (the
+  turn, and the model's own `memory_store` note), and with one of the two
+  forgotten the fact was still answered (the first trial); a move made the
+  model call `memory_invalidate`, which asks for approval; the abstention
+  judge passed an Arabic reply that read "my sister" as Kazma's own. Gate:
+  `tests/test_memory_real_use.py` (every kind of step in both languages, a
+  suite missing one as the control; nothing of this machine's install in
+  the server's environment; no reply text in a kept result).
 - **Nothing on the hot path parses `kazma.yaml` (S4):**
   `config_loader.install_yaml_section` -- the install root's file, parsed
   once per file version (mtime + size). Gate: `tests/test_install_yaml.py`.

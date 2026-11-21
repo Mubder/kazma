@@ -1129,6 +1129,44 @@ Spend (deepseek-flash, 2026-11-21): the end-to-end run 800 calls,
 10,684,738 prompt and 36,646 completion tokens; the translation 392 calls,
 338,099 prompt and 420,616 completion tokens.
 
+### What memory costs an ordinary turn (2026-11-22)
+
+Before an outside score counts, a memory change is held to what it does to
+an ordinary turn (`scripts/memory_product_measures.py`, kept in
+`tests/fixtures/memory_bench/product_measures.json` and on the benchmarks
+page). On the retrieval benchmark's store, with its recorded vectors:
+
+| | English (137 questions) | Arabic (46) |
+|---|---|---|
+| Answer shown (questions with one) | 95.7 % | 90.5 % |
+| Precision of what is shown | 47.7 % | 42.8 % |
+| Questions with no answer that show nothing | 0 of 22 | 0 of 4 |
+| Tokens the recall block adds (median / 95th / largest) | 711 / 1,035 / 1,341 | 590 / 823 / 1,091 |
+| The same, the store four times as large | 736 / 1,211 / 1,343 | 598 / 848 / 1,085 |
+
+Recall took 96 ms (median) on the store and 244 ms at four times its size;
+the embedding model 76 ms a question; Kazma's own share of the time to the
+first token 0.115 s. The block's tokens are held to the record by a test: a
+change that makes the block bigger records its new numbers in the same
+commit.
+
+### Memory in real use, in the browser (2026-11-22)
+
+`scripts/memory_real_use.py` runs a private Kazma from the checkout (its
+own data folder, nothing of an install on the machine) with the real model
+and embedding model, and uses it through the browser, by the sidebar, in
+English and in Arabic: it tells two facts, asks for one in a new chat, asks
+for it in other words, changes it, forgets the other on the Memory page,
+and asks about something never said. A model judges each answer with
+LongMemEval's prompts. It is run by hand at every stage of the memory work;
+its results are in `docs/audits/evidence/memory_real_use/`.
+
+The first run passed every step in both languages, and showed three things
+to improve: a fact told once is often kept twice (the conversation, and a
+note the model writes itself), so forgetting it took two Forgets; telling
+Kazma about a move made the model ask to retire the old fact, which needs
+an approval; and an Arabic answer read "my sister" as Kazma's own.
+
 ### Benchmark report (dataset v8, the unrelated chat without repeats, 2026-11-21)
 
 Until v7 the "unrelated chat" around the persona was 300 conversations
