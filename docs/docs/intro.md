@@ -14,7 +14,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 **One operator per install.** Kazma is software you run for yourself: whoever
 runs an install has full control of it and answers for what its agent does.
 The safeguards protect the operator from the agent, not an install from its
-operator. What that means: [Who Kazma is for](https://github.com/Mubder/kazma/blob/main/docs/THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install).
+operator. What that means: [Who Kazma is for](https://github.com/Mubder/kazma/blob/main/docs/THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install-and-the-people-they-let-in).
 
 Dated updates are in [Release notes](guide/release-notes). For an upgrade, follow
 [Kazma Update](ops/kazma-update) and check the relevant smoke tests.

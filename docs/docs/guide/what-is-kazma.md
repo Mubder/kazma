@@ -214,7 +214,7 @@ quiet, then stops Kazma, installs the update and starts it again.
 - **A platform for many separate customers.** It is built for one trusted
   operator. Several users on one install is Partial: memory and chats are kept
   apart, but that is not audited end to end
-  ([Who Kazma is for](https://github.com/Mubder/kazma/blob/main/docs/THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install)).
+  ([Who Kazma is for](https://github.com/Mubder/kazma/blob/main/docs/THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install-and-the-people-they-let-in)).
 - **A sandbox for what you approve.** Approving a shell command gives it your
   machine's power. To run the agent's code in an isolated container, opt in to
   Docker or E2B.

@@ -16,7 +16,7 @@ the latest supported version when possible.
 
 Kazma is designed as a **single-operator trusted-host agent** by default: whoever
 runs an install has full control of it and answers for what its agent does
-([who Kazma is for](docs/THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install)).
+([who Kazma is for](docs/THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install-and-the-people-they-let-in)).
 
 | Profile | Ready when |
 |---------|------------|
