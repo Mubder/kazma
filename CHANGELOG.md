@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Memory: a small store leaves unrelated conversations out (2026-11-21)
+
+- In a new install's small memory, recall showed three to five unrelated
+  conversations as "possibly related" beside the answer: its sense of what
+  unrelated memories reach was the average of everything in the store. A
+  small store's conversations are now judged against the level a full store
+  measures (from the benchmark, for the default model). The quick recall
+  check passes 6 of 6 with the real model (it was 2 of 6).
+- A new small-store run asks every benchmark question of a store of its own
+  memories and a few unrelated ones: precision 0.620 to 0.694, every answer
+  shown 0.978 to 0.964 (two hard cases). The main benchmark is unchanged;
+  the speakers benchmark's precision rose. Both are locked.
+- The Postgres-primary path now answers part F's questions (time, lists,
+  follow-ups) as the local path does; CI's Postgres job is green again.
+
 ## Memory part H: running it (2026-11-21)
 
 - **What recall did, every turn.** One record per turn: which memories were

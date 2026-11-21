@@ -16,12 +16,13 @@ showed every memory whatever was asked passed every case; it now fails every
 one (``kazma-core/tests/test_memory_eval_golden.py``).
 
 Measured with the real embedder (bge-m3) on 2026-11-21: 2 of the 6 cases
-pass. The other four find their answer and also show 3 to 5 of the twenty
-unrelated turns, nearly all as "possibly related" (evidence 0.04 to 0.10;
-one at 0.12, strong): where the answer is a fact, the turns' own lane keeps
-its best unrelated turns. A finding about recall in a small store, left for
-a decision, not tuned away here. Without an embedder (CI) the cases pass on
-their words.
+passed. The other four found their answer and also showed 3 to 5 of the
+twenty unrelated turns as "possibly related": in a store this small, the
+turns' background (ranks 4-15) was the average of unrelated memories, so the
+nearest ones cleared the floor. Recall now judges a small store's turns
+against its mean plus the measured offset of a full store
+(``recall._question_background``): 6 of 6 pass with the real model. Without
+an embedder (CI) the cases pass on their words.
 
 It never touches the live memory database or the process-wide episode
 writer. Until 2026-09-26 it rebound ``paths.primary_memory_db`` to its temp

@@ -173,6 +173,23 @@ def _sealed(data: dict) -> list[str]:
     ]
 
 
+def _small(data: dict) -> list[str]:
+    """The small-store run (2026-11-21): each question in a store of its own
+    memories and a few unrelated ones, the size of a new install's memory."""
+    small = data.get("small") or {}
+    sc = small.get("scores") or {}
+    if not sc:
+        return []
+    return [
+        f"**In a small store** (a new install's size): each of {small.get('questions')} questions asked of a "
+        "store holding only its own conversations and facts, five unrelated conversations and ten other facts. "
+        f"Every answer shown in {_pct(sc.get('answered'))} of answerable questions, precision "
+        f"{_pct(sc.get('precision'))}, and questions it has no memory for answered with nothing in "
+        f"{_pct(sc.get('abstained'))} of cases (it still shows unrelated facts there).",
+        "",
+    ]
+
+
 def _memory(data: dict) -> list[str]:
     s = data["scores"]
     lines = [
@@ -208,6 +225,7 @@ def _memory(data: dict) -> list[str]:
         "",
         *_sealed(data),
         *_edges(data),
+        *_small(data),
     ]
     extraction = data.get("extraction") or {}
     ex = extraction.get("scores") or {}

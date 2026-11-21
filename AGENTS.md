@@ -3579,10 +3579,27 @@ memory framework audit's part H, findings F14 and F15; no model calls).
   (`eval_golden._distractors`), and passes only when the answer is shown
   and none of theirs is. Gate: `kazma-core/tests/test_memory_eval_golden.py`
   (a recall that shows everything fails every case; without the unrelated
-  memories it passed every one: the control). With the real embedder 2 of
-  6 pass (2026-11-21): where the answer is a fact, recall also shows 3 to 5
-  unrelated turns, nearly all "possibly related". A finding about small
-  stores, not tuned away; CI (no embedder) passes on words.
+  memories it passed every one: the control). With the real embedder it
+  passed 2 of 6 (recall showed 3 to 5 unrelated turns as "possibly
+  related"); 6 of 6 since the small-store background below.
+- **A small store judges its turns as a full store would** (2026-11-21,
+  `recall._question_background`). Below a full meaning pool
+  (`recall._DENSE_POOL`), ranks 4-15 are nearly the whole store, so the
+  background was the average of unrelated memories and the nearest unrelated
+  turns always cleared the floor; in small stores made from the benchmark no
+  unanswerable question came back empty. The turns' background is now at
+  least the store's own mean plus `recall._TAIL_OFFSET` (how far a full
+  store's background sits above a small store's mean, its 5th percentile,
+  bge-m3 only; `scripts/small_store_offsets.py`). Not for a list question,
+  not for facts (measured on facts it lowered the speakers benchmark's fact
+  hit rate, 0.936 to 0.871), not for another embedding model. The main
+  benchmark is unchanged (full pools); the speakers benchmark's precision
+  rose (0.577 to 0.608); the small-store run (`benchmark.run_small_store_benchmark`,
+  locked as `small`): every answer shown 0.978 -> 0.964 (two hard cases:
+  q1001, thirty near-identical wedding turns; h004, "boss" for "manager"),
+  precision 0.620 -> 0.694, unanswerable questions empty 0 -> 0.04 (the
+  facts lane still shows unrelated facts there: a follow-up). Gate:
+  `tests/test_memory_small_store.py` (the old background as the control).
 
 ### 16. Scheduled reminders and tasks (`kazma-core/kazma_core/cron/`)
 

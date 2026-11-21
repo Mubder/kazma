@@ -40,6 +40,8 @@ The second set was written after the settings were chosen, and no setting is cho
 
 One answer stands at the edge of what the recorded vectors can tell: "what is it that I do for a living?" (A question with noise around it) is shown by 0.0004 of evidence, and with the vectors moved inside their rounding it changes in 1 of 10 replays. Its hit counts in the table above; the lock names it (`lock --edge`) instead of moving a threshold for it.
 
+**In a small store** (a new install's size): each of 164 questions asked of a store holding only its own conversations and facts, five unrelated conversations and ten other facts. Every answer shown in 96.4 % of answerable questions, precision 69.4 %, and questions it has no memory for answered with nothing in 3.9 % of cases (it still shows unrelated facts there).
+
 ### Learning facts from a conversation {#memory-facts}
 
 Turns in English, Arabic and both, with the facts a person would expect remembered. **Quick pass**: Kazma's own rules, on every turn. **Model pass**: the model reading the turn afterwards (recorded replies). **Found**: the facts expected, kept with their whole value about the right person, whatever the model called them (a name that turns the fact around, such as "dislikes" or "former", does not count). **Same name**: of those, the share kept under a name on the list (a fact kept under two names is two facts to Kazma). **Right**: the facts kept that hold a value the turn gives, about the right person, and are not on the turn's list of what must not be kept; the name is scored apart. **Quiet**: turns with nothing to learn that taught nothing. **Rests on**: the turns behind the row; for the model pass, the askings (one asking is one model call for one turn).

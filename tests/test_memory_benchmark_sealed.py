@@ -247,6 +247,8 @@ def test_the_lock_keeps_every_look(tmp_path, monkeypatch):
     monkeypatch.setattr(script, "THRESHOLDS", locked)
     monkeypatch.setattr(benchmark, "gated_scores", lambda _r: dict(data["scores"]))
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
+    monkeypatch.setattr(benchmark, "run_small_store_benchmark", lambda *_a, **_kw: {
+        "overall": {"questions": data["small"]["questions"], **data["small"]["scores"]}})
     monkeypatch.setattr(benchmark, "edge_check", lambda *_a, **_kw: {
         "draws": benchmark.EDGE_DRAWS, "seed": benchmark.EDGE_SEED, "move": benchmark.EDGE_MOVE,
         "largest_move": 0.0, "flips": {}, "shown": {}})

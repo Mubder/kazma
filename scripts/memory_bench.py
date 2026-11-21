@@ -2121,6 +2121,8 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         problems += more
         speakers, more = _speakers_lock(old.get("speakers") or {}, fresh=speakers_new)
         problems += more
+        small, more = _small_lock(old.get("small") or {}, fresh=recall_new)
+        problems += more
     except (StaleRecordingError, KeyError) as exc:
         problems = [str(exc)]
     if problems:
@@ -2132,6 +2134,8 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         json.dumps({"dataset_version": version, "scores": scores, "targets": TARGETS,
                     "trades": trades, "edges": edge,
                     "extraction": extraction, "writes": writes, "speakers": speakers,
+                    # Each question in a small store of its own (2026-11-21).
+                    "small": small,
                     # The pgvector path's floors (tests/test_memory_benchmark_pg.py),
                     # locked from a named CI run by `lock-pgvector`; same dataset only.
                     # A new dataset version starts unverified (the job reports,
@@ -2148,7 +2152,7 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
     # write-scenario parts (it said "0 raised" over a write scenario that
     # began to pass).
     moved = [(k, old_scores.get(k), v) for k, v in sorted(scores.items()) if v > old_scores.get(k, -1.0)]
-    for part, new in (("extraction", extraction), ("writes", writes), ("speakers", speakers)):
+    for part, new in (("extraction", extraction), ("writes", writes), ("speakers", speakers), ("small", small)):
         was = (old.get(part) or {}).get("scores") or {}
         moved += [(f"{part} {k}", was.get(k), v) for k, v in sorted(new.get("scores", {}).items())
                   if v != was.get(k)]
@@ -2351,6 +2355,24 @@ def _speakers_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[st
         problems.append(f"speakers: {now['overall.misattributed']} line(s) now show another member's fact as "
                         "the asker's")
     return {"version": load_speakers()["version"], "scores": now}, problems
+
+
+def _small_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[str, Any], list[str]]:
+    """The small-store run's part of the lock (2026-11-21): each question in
+    a store of its own memories and a few unrelated ones
+    (``benchmark.run_small_store_benchmark``), the recall dataset's vectors.
+    A ratchet on the same dataset: no score falls; reset with the recall
+    dataset (``--rebaseline``)."""
+    from kazma_core.memory.benchmark import ReplayEmbedder, load_dataset, run_small_store_benchmark
+
+    replay = ReplayEmbedder(VECTORS)
+    a, b = _patched(replay, replay.model)
+    with a, b:
+        overall = run_small_store_benchmark()["overall"]
+    now = {k: float(overall[k]) for k in ("answered", "precision", "abstained")}
+    was = {} if fresh else (old.get("scores") or {})
+    problems = [f"small {k}: {now.get(k)} < {v}" for k, v in sorted(was.items()) if now.get(k, -1.0) < v]
+    return {"dataset_version": load_dataset()["version"], "questions": overall["questions"], "scores": now}, problems
 
 
 def _writes_lock(

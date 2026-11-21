@@ -1058,7 +1058,7 @@ def _pg_primary_episodes(
             )
         )
     ranked = _rank_by_evidence(
-        query, candidates, _question_background(sim for _e, sim in dense_pairs)
+        query, candidates, _question_background([sim for _e, sim in dense_pairs])
     )
     weight = _archived_weight()
     for hit in ranked:
@@ -1208,7 +1208,8 @@ def _pg_primary_beliefs(
         if bid in rows and _format_belief_text(rows[bid])
     ]
     ranked = _rank_by_evidence(
-        query, candidates, _question_background(sim for _b, sim in dense_pairs), kind="belief"
+        query, candidates, _question_background([sim for _b, sim in dense_pairs], kind="belief"),
+        kind="belief"
     )
     ranked = _primary_beliefs_as_local(ranked, rows, local, tenant_id, limit)
     sources = {
@@ -1620,7 +1621,7 @@ def _recall_beliefs(
         _belief_candidate(bid, row, sims.get(bid), bid in by_meaning) for bid, row in rows.items()
     ]
     ranked = _rank_by_evidence(
-        q, candidates, _question_background(sim for _bid, sim in dense), kind="belief"
+        q, candidates, _question_background([sim for _bid, sim in dense], kind="belief"), kind="belief"
     )
     ranked = _facts_in_time(ranked, rows, ask)
     if _LISTING.get():
@@ -2254,7 +2255,7 @@ class _Candidate:
     more: int = 0  # characters of an episode its display leaves out
 
 
-def _question_background(dense_scores: Iterable[float]) -> float:
+def _question_background(dense_scores: Iterable[float], *, kind: str = "episode") -> float:
     """What memories unrelated to the question reach for it by meaning.
 
     The mean of meaning ranks 4-15 (:data:`_BACKGROUND_RANKS`), blended with
@@ -2271,12 +2272,58 @@ def _question_background(dense_scores: Iterable[float]) -> float:
     every earlier answer (4 to 15 lost a question each), so the window
     stays. Weighing a question's rare words, or its numbers, more in the
     word coverage was measured too and moved nothing (2026-11-21).
+
+    **A store smaller than the meaning pool** (fewer than :data:`_DENSE_POOL`
+    comparable memories of the kind, 2026-11-21): there, ranks 4-15 are not
+    a tail but nearly the whole store, so the background is the average of
+    unrelated memories, and the nearest unrelated ones always clear the floor
+    as "possibly related" -- the quick recall check (twenty unrelated
+    memories a case) failed 4 of 6 with the real model, and in small stores
+    made from the benchmark no unanswerable question came back empty. The
+    background is then at least the store's own mean plus
+    :data:`_TAIL_OFFSET` (:func:`_tail_offset`): how far a full store's
+    background sits above a small store's mean, its 5th percentile, so only
+    what even a generous full-store judgement drops is dropped. Never for a
+    question asking for every memory (its answers are many), and only for
+    the model it was measured on.
     """
     ordered = sorted((float(x) for x in dense_scores), reverse=True)
     lo, hi = _BACKGROUND_RANKS
     window = ordered[lo:hi]
     missing = max(0, _BACKGROUND_MIN_SAMPLES - len(window))
-    return (sum(window) + _BACKGROUND_PRIOR * missing) / (len(window) + missing)
+    own = (sum(window) + _BACKGROUND_PRIOR * missing) / (len(window) + missing)
+    if ordered and len(ordered) < _DENSE_POOL and not _LISTING.get():
+        offset = _tail_offset(kind)
+        if offset is not None:
+            return max(own, sum(ordered) / len(ordered) + offset)
+    return own
+
+
+#: How far a full store's background sits above a small store's mean
+#: similarity, per kind: the 5th percentile over the benchmark's questions
+#: (dataset v7, bge-m3's recorded vectors, 2026-11-21; each question against
+#: five random 16-memory draws of the store, seed 7; turns: median 0.143, p5
+#: 0.093). The median judged small stores as strictly as a full store and lost
+#: 8 of 138 answers in the small-store run; the 5th percentile loses 2 (q1001,
+#: thirty near-identical wedding turns; h004, "boss" for "manager"), raises
+#: its precision 0.620 -> 0.694 and the speakers benchmark's 0.577 -> 0.608.
+#: Facts have no entry: their offset (p5 0.031) lowered the speakers
+#: benchmark's fact hit rate 0.936 -> 0.871, Arabic 0.889 -> 0.667, so the
+#: facts lane keeps its own window (unanswerable questions in a small store
+#: still show unrelated facts: 1 of 26 comes back empty).
+#: ``scripts/small_store_offsets.py`` measures the offsets again.
+_TAIL_OFFSET = {"episode": 0.093}
+
+
+def _tail_offset(kind: str) -> float | None:
+    """:data:`_TAIL_OFFSET` for *kind*; None for another embedding model
+    than the one it was measured on (its similarities are on another scale:
+    the store's own window then stands, as before)."""
+    from kazma_core.memory.embedder import DEFAULT_MODEL, get_embedding_model_name
+
+    if get_embedding_model_name() != DEFAULT_MODEL:
+        return None
+    return _TAIL_OFFSET.get(kind)
 
 
 def _evidence_rules(kind: str) -> tuple[float, float, float, float, float, float]:
@@ -2496,7 +2543,7 @@ def _rank_episodes_by_evidence(
         for eid in ids
         if (row := rows.get(eid)) is not None and not is_small_talk(row[1], row[2])
     ]
-    return _rank_by_evidence(query, candidates, _question_background(h.score for h in dense))
+    return _rank_by_evidence(query, candidates, _question_background([h.score for h in dense]))
 
 
 # ── Weekly topic summaries (plan C2b) ──────────────────────────────────────

@@ -1016,9 +1016,13 @@ While the first is open, a deep pass given up on does not page again.
 **The quick recall check** (Memory page; it was "Run golden eval") writes
 each case's memories among twenty unrelated ones and passes only when the
 answer shows and none of the unrelated ones does. Measured with the
-embedding model on 2026-11-21, 2 of its 6 cases pass: where the answer is a
-fact, recall also shows three to five unrelated conversations, marked
-"possibly related". It is a check that can fail, and today it does.
+embedding model on 2026-11-21 it passed 2 of its 6 cases: recall also showed
+three to five unrelated conversations, marked "possibly related". In a store
+that small, recall's sense of "what unrelated memories reach" was the
+average of everything, so the nearest unrelated conversations always looked
+related. A small store's conversations are now judged as a full store would
+judge them, and the check passes 6 of 6. The benchmark page has a
+small-store run of its own.
 
 **Search past a size.** Below 20,000 memories, search by meaning compares
 every memory exactly. Past it, a short code of each vector picks the

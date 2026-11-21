@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import sqlite3
 import statistics
 import tempfile
@@ -72,6 +73,7 @@ __all__ = [
     "WRITES_PATH",
     "run_benchmark",
     "run_extraction_benchmark",
+    "run_small_store_benchmark",
     "run_write_scenarios",
     "write_scores",
 ]
@@ -578,6 +580,89 @@ class _MovedEmbedder(ReplayEmbedder):
 
 def _all_results(report: dict[str, Any]) -> list[dict[str, Any]]:
     return list(report.get("results", [])) + list((report.get("second") or {}).get("results", []))
+
+
+# ── Small stores: a new install's memory (2026-11-21) ─────────────────────
+#
+# The benchmark's store holds about 1,300 memories, so every question's
+# meaning pool is full. A new install holds a few dozen, and there recall
+# judged unrelated memories as "possibly related" (the quick recall check
+# failed 4 of 6 with the real model). The small-store run asks each question
+# of a store holding only its own sessions and facts, a few unrelated
+# sessions and a few other facts -- the shape of that check, at the
+# benchmark's scale.
+
+#: Unrelated sessions and other facts added to each question's small store.
+SMALL_STORE_SESSIONS = 5
+SMALL_STORE_FACTS = 10
+
+
+def _small_store_dataset(dataset: dict[str, Any], question: dict[str, Any], *, rng: random.Random,
+                        sessions: int = SMALL_STORE_SESSIONS, facts: int = SMALL_STORE_FACTS,
+                        ) -> dict[str, Any] | None:
+    """A dataset of *question* alone and a small store: the sessions and
+    facts its gold and "below" entries name (a fact brings its session),
+    *sessions* random distractor sessions and *facts* other facts; no
+    summaries or roll-ups. None when an entry names a summary or a roll-up
+    (the run leaves those questions out)."""
+    by_session = {s["id"]: s for s in dataset["sessions"]}
+    by_fact = {f["id"]: f for f in dataset.get("facts", [])}
+    want_sessions: set[str] = set()
+    want_facts: set[str] = set()
+    for entry in list(question.get("gold") or []) + list(question.get("below") or []):
+        for ref in str(entry).split("|"):
+            if "#" in ref and ref.split("#")[0] in by_session:
+                want_sessions.add(ref.split("#")[0])
+            elif ref in by_fact:
+                want_facts.add(ref)
+                want_sessions.add(str(by_fact[ref]["session"]))
+            elif ref in by_session:
+                want_sessions.add(ref)
+            else:
+                return None
+    distractors = sorted(s["id"] for s in dataset["sessions"] if s["kind"] == "distractor")
+    want_sessions |= set(rng.sample(distractors, min(sessions, len(distractors))))
+    kept = [f for f in dataset.get("facts", []) if f["id"] in want_facts or f["session"] in want_sessions]
+    others = [f for f in dataset.get("facts", []) if f not in kept]
+    kept += rng.sample(others, min(facts, len(others)))
+    return {
+        **{k: v for k, v in dataset.items()
+           if k not in ("sessions", "facts", "summaries", "rollups", "questions", "second")},
+        "sessions": [by_session[s] for s in sorted(want_sessions) if s in by_session],
+        "facts": kept, "summaries": [], "rollups": [], "questions": [question], "second": [],
+    }
+
+
+def run_small_store_benchmark(dataset: dict[str, Any] | None = None, *,
+                              questions: list[str] | None = None) -> dict[str, Any]:
+    """Every question (both sets; *questions* to ask some) in its own small
+    store (:func:`_small_store_dataset`, the draw seeded by the question's id).
+    ``overall``: the share of answerable questions whose every answer was
+    shown (``answered``), their mean precision, the share of unanswerable
+    questions with nothing shown (``abstained``), and the mean number of
+    memories shown; ``results`` per question."""
+    data = dataset or load_dataset()
+    asked = [q for q in list(data["questions"]) + list(data.get("second") or [])
+             if questions is None or q["id"] in questions]
+    results: dict[str, dict[str, Any]] = {}
+    for q in asked:
+        sub = _small_store_dataset(data, q, rng=random.Random(q["id"]))
+        if sub is None:
+            continue
+        results[q["id"]] = _all_results(run_benchmark(sub, keep_results=True))[0]
+    answerable = [r for r in results.values() if r["category"] != "abstain"]
+    unanswerable = [r for r in results.values() if r["category"] == "abstain"]
+    precisions = [r["precision"] for r in answerable if r.get("precision") is not None]
+    return {
+        "overall": {
+            "questions": len(results),
+            "answered": round(sum(1 for r in answerable if r.get("hit")) / max(1, len(answerable)), 4),
+            "precision": round(sum(precisions) / max(1, len(precisions)), 4),
+            "abstained": round(sum(1 for r in unanswerable if r.get("hit")) / max(1, len(unanswerable)), 4),
+            "shown": round(sum(int(r.get("injected") or 0) for r in results.values()) / max(1, len(results)), 2),
+        },
+        "results": results,
+    }
 
 
 def edge_check(
@@ -1457,7 +1542,6 @@ def _expected_holds(expected: dict[str, Any], row: dict[str, Any]) -> bool:
 def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: dict[str, str],
                   llm_replies: dict[str, Any] | None = None, mode: str = "current") -> dict[str, Any]:
     import asyncio
-
     from datetime import UTC
 
     from kazma_core.memory.belief_extractor import (
