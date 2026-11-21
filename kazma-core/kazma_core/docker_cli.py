@@ -63,6 +63,7 @@ __all__ = [
     "kazma_engine_dir",
     "kazma_engine_disk_dir",
     "normalize_engine",
+    "wsl_distro_location",
 ]
 
 #: The setting that chooses Kazma's container engine.
@@ -231,11 +232,52 @@ def kazma_engine_dir() -> Path:
     return Path(base) / "Kazma" / "engine"
 
 
+def wsl_distro_location(name: str) -> tuple[Path, str] | None:
+    """Where WSL keeps the distro *name*'s disk: (its folder, the disk's file
+    name), from WSL's own registration (``HKCU\\...\\Lxss``: what ``wsl
+    --import`` and ``wsl --manage --move`` write). None when it is not
+    registered, or not on Windows."""
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+    except ImportError:
+        return None
+    root = r"Software\Microsoft\Windows\CurrentVersion\Lxss"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, root) as lxss:
+            index = 0
+            while True:
+                try:
+                    sub = winreg.EnumKey(lxss, index)
+                except OSError:
+                    return None
+                index += 1
+                with winreg.OpenKey(lxss, sub) as key:
+                    try:
+                        if str(winreg.QueryValueEx(key, "DistributionName")[0]) != name:
+                            continue
+                        base = str(winreg.QueryValueEx(key, "BasePath")[0])
+                    except OSError:
+                        continue
+                    try:
+                        vhd = str(winreg.QueryValueEx(key, "VhdFileName")[0]) or "ext4.vhdx"
+                    except OSError:
+                        vhd = "ext4.vhdx"
+                    if base.startswith("\\\\?\\"):
+                        base = base[4:]
+                    return Path(base), vhd
+    except OSError:
+        return None
+
+
 def kazma_engine_disk_dir() -> Path:
-    """The folder holding the ``kazma-engine`` distro's virtual disk
-    (``wsl --import`` puts its ``ext4.vhdx`` there): what fills as the
-    engine's images, containers and volumes grow."""
-    return kazma_engine_dir() / KAZMA_DISTRO
+    """The folder holding the ``kazma-engine`` distro's virtual disk: where
+    WSL has it registered (a data folder on another drive, ``data_folder``),
+    else where setup imports it (``wsl --import`` puts its ``ext4.vhdx``
+    there). What fills as the engine's images, containers and volumes grow."""
+    found = wsl_distro_location(KAZMA_DISTRO)
+    return found[0] if found is not None else kazma_engine_dir() / KAZMA_DISTRO
 
 
 def engine_installed(engine: str) -> bool:

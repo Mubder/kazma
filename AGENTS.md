@@ -5536,6 +5536,89 @@ off; the plain writer cannot replay on Windows),
 error and the move from a container, on a real Postgres; a row lost in the
 move as the negative control).
 
+**G3. The data folder: the database and the engine off Windows' own drive**
+(2026-11-21, `kazma_core/data_folder.py`, `kazma_core/data_folder_move.py`).
+The 19 Nov PC reset lost the database: setup put it in `C:\Program
+Files\PostgreSQL\18\data`, its WAL archive in `C:\ProgramData\Kazma` and the
+engine's disk in `%LOCALAPPDATA%\Kazma\engine`, while the install folder
+(`.env`, `.kazma`, the dumps) was on another drive. Windows only.
+- **One folder, chosen once, recorded** (`data_folder` in
+  `setup_record.json`; `kazma setup data-folder D:\Kazma` or `kazma setup
+  install --data-folder D:\Kazma`; a drive alone, `D:`, means `D:\Kazma`):
+  `postgres-<major>\data`, `postgres-<major>\wal_archive`,
+  `postgres-<major>\base`, `engine` (`data_folder.Layout`). Every later run,
+  a repair and an upgrade (`postgres_upgrade.Upgrade.new_data_dir`) read it.
+  Each folder is restricted before anything is in it, inherited rights
+  removed (`data_folder.prepare_steps`: a second drive's root lets every
+  signed-in user change files): SYSTEM and the administrators, the
+  service's account on the data, Kazma's account (by SID, `whoami /user`) on
+  the base backups and the archive.
+- **Refused before anything changes** (`data_folder.folder_problem`): not
+  Windows, not a full local path, a share or device path, characters the
+  archive command, the installer or a service's command line cannot take
+  (letters, digits, spaces, `. _ - ( )`), Windows' own drive, a drive that is
+  not fixed, a `subst` drive, inside Kazma's install or data folder, too
+  little free space (a new install: `FRESH_FREE_BYTES`; a move: what moves
+  plus `MOVE_MARGIN_BYTES`).
+- **A new cluster** is made there by the installer (`setup_plan(data_dir=)`:
+  `--datadir`), its archive and base backups beside it; the record keeps
+  `data_dir` (`PostgresRecord.data_dir`), and a step that writes the port
+  names the folder (`port_step(..., data_dir)`, `Step.data_dir`), never
+  Program Files.
+- **After a reset** (the service gone, the data kept: `data_folder.
+  kept_cluster_major`) setup attaches it (`setup._reattach_steps`): the
+  installer's own empty cluster under Program Files (left, unused), the
+  service pointed at the kept one (action `point_data_dir`: `-D` through
+  `Win32_Service.Change`, the folder given to the service's account, its
+  `archive_command` set on disk), then the settings and the role signing in
+  with the kept database's superuser password (refused when
+  `<install>/.kazma/postgres_superuser.pass` is lost). The engine's kept `ext4.vhdx` is
+  registered in place (`wsl --import-in-place`, the new account granted on
+  it: WSL attaches as this account, a new one after a reset). So after a
+  reset `setup.cmd` is all it takes.
+- **The move of an installed part** (`kazma setup data-folder FOLDER`,
+  `data_folder_move.move`; `kazma setup install --data-folder` adds it as a
+  step): Kazma held through its guard (`_MoveHold`), every stage journaled
+  first (`data_folder_move` in the record), a part that fails put back
+  (`_put_back`), a run that died put back by the next (`recover`), Kazma
+  started again and seen ready. The database: the service disabled (no
+  guard of any version can start it on half a copy) and stopped; the data,
+  archive and base backups copied and compared file by file (path, size,
+  SHA-256); the copy's `archive_command` and the service's `-D` pointed at
+  it; started, and it must answer, run from the copy (`postmaster.pid`
+  there) and let Kazma sign in; the record names the new folders last; the
+  old ones kept. The engine: its `KazmaEngine` task disabled (its 5-minute
+  trigger would start the distro), Docker stopped cleanly in it, the distro
+  ended, its disk hashed, moved by WSL (`wsl --manage kazma-engine --move`,
+  WSL 2.5+), hashed again, the task run, Docker must answer. Refused while
+  Kazma runs under a guard without `data_folder_move` in `guard_features`
+  (`_MoveHold.guard_lacks`).
+- **The guard leaves a moving part alone** for `DATA_MOVE_HOLD_S` from the
+  stage's start (`data_folder_move.GUARD_HOLD_S`, held equal): its database
+  watch neither starts nor pages a moving database (state `moving`), its
+  engine watch does not start a moving engine (`engine_moving`). The disk
+  watch reads the engine's disk where WSL has it registered
+  (`docker_cli.wsl_distro_location`, `HKCU\...\Lxss`; the root conftest
+  answers None for it in tests).
+- Gate: `tests/test_data_folder.py` (a fake Windows: its service, icacls,
+  the service change, WSL's registration and the task; real folders. Each
+  refusal; the choice not read, a run that knows no folder, no comparison,
+  no journal, no hash check, a fresh import over a kept disk and no move
+  journaled at the guard as negative controls), `tests/test_data_folder_drill.py`
+  (the drill's judging).
+- **Drilled** (`scripts/data_folder_drill.py`, 2026-11-21, `passed`;
+  `docs/audits/evidence/data_folder_drill/`): on the drill VM with a second
+  disk, Kazma installed with PostgreSQL on C:, `kazma setup data-folder
+  E:\Kazma` moved it in 30 s with Kazma held (the service ran from the copy,
+  a mark written before read back, a forced WAL switch archived into the
+  new archive), then PostgreSQL's own uninstaller removed it and `kazma setup
+  install` attached the kept database to the new service (the mark, a new
+  segment archived there). Its `fresh` mode (also `passed`): a first `kazma
+  setup install --data-folder E:\Kazma` on a clean VM, the installer's
+  `--datadir` under the restricted `postgres-18` folder, Kazma's data kept
+  and archived there. Not drilled: the engine's move (`wsl --manage --move`
+  across drives; it needs WSL on the VM).
+
 ### 21b. Every system dependency is installed by Kazma (`kazma_core/system_deps.py`)
 
 Resilience plan K2. `kazma setup system` (`kazma_cli.setup._setup_system`)
@@ -12698,6 +12781,14 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   a disk no Kazma container lives on. Gate:
   `tests/test_engine_named_where_kazma_waits.py` (22 of its 24 fail on the
   old code; the general step and the catalog are the controls).
+- **Its disk can live in the data folder** (2026-11-21, section 21 G3): with
+  a data folder chosen, setup imports the distro into `<folder>\engine`, a
+  disk kept there from before a reset is registered in place (`wsl
+  --import-in-place`), and `kazma setup data-folder` moves an installed one
+  (`wsl --manage kazma-engine --move`, hashed before and after, its task
+  disabled meanwhile). Where the disk is, is WSL's own registration
+  (`docker_cli.wsl_distro_location`), which `kazma_engine_disk_dir` and the
+  guard's disk watch read.
 - **The boot drill is a script** (`scripts/engine_boot_drill.py`, Stage 2's
   gate, run from the host). It reverts the drill VM to its clean checkpoint,
   copies one commit (`git archive`) and `uv`, runs `kazma setup install

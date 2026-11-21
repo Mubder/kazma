@@ -282,6 +282,24 @@ def _isolated_docker_config(request, tmp_path, monkeypatch):
         return machine()
 
     monkeypatch.setattr(docker_cli, "kazma_engine_dir", _engine_dir)
+    # Nor where WSL has this PC's distros registered (the kazma-engine disk's
+    # folder, read from HKCU\...\Lxss since the data folder, 2026-11-21). At
+    # the registry key, so every copy of docker_cli is held to it -- the
+    # guard loads its own by path. A test that needs a registered distro
+    # passes its own lookup.
+    try:
+        import winreg
+    except ImportError:
+        return
+    lxss = r"software\microsoft\windows\currentversion\lxss"
+    open_key = winreg.OpenKey
+
+    def _no_wsl_registration(key, sub_key, *args, **kwargs):
+        if str(sub_key).strip("\\").lower().startswith(lxss):
+            raise FileNotFoundError(2, "this machine's WSL registration is not read in tests")
+        return open_key(key, sub_key, *args, **kwargs)
+
+    monkeypatch.setattr(winreg, "OpenKey", _no_wsl_registration)
 
 
 @pytest.fixture(autouse=True)

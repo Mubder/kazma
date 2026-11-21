@@ -21,7 +21,7 @@ from kazma_cli.setup import _MoveHold, _say
 UPGRADE_PAUSE_REASON = "kazma setup postgres --upgrade: moving Kazma's database to a new PostgreSQL"
 
 
-def _new_record(up, archive_dir: Path) -> dict[str, Any]:
+def _new_record(up, archive_dir: Path, base_dir: Path | None = None) -> dict[str, Any]:
     from kazma_core import postgres_service as pgs
     from kazma_core.backup import wal_archive
 
@@ -30,11 +30,44 @@ def _new_record(up, archive_dir: Path) -> dict[str, Any]:
     rec = pgs.PostgresRecord(
         os=up.platform.os, manager=up.platform.manager or "", service=up.new_service, port=up.port,
         bin_dir=up.new_bin_dir, major=up.new_major, wal_archive_dir=str(archive_dir),
-        installed_at=time.time(), base_backup_dir=str(wal_archive.default_base_dir(up.new_major)),
-        offsite_tag=wal_archive.offsite_tag(up.new_major), previous=previous)
+        installed_at=time.time(), base_backup_dir=str(base_dir or wal_archive.default_base_dir(up.new_major)),
+        offsite_tag=wal_archive.offsite_tag(up.new_major), previous=previous, data_dir=up.new_data_dir)
     from dataclasses import asdict
 
     return asdict(rec)
+
+
+def _data_folder_layout(platform):
+    """The data folder the owner chose (``data_folder``, Windows): the new
+    major lives there too. None when there is none."""
+    from kazma_core import data_folder
+
+    folder = data_folder.chosen() if platform.os == "windows" else None
+    return data_folder.Layout(folder) if folder is not None else None
+
+
+def _new_folders(platform, layout, major: int) -> tuple[Path, Path | None]:
+    """The new major's WAL archive and base-backup folders: the data
+    folder's, else each major's own default."""
+    from kazma_core.backup import wal_archive
+
+    if layout is not None:
+        return layout.wal_archive(major), layout.base_backups(major)
+    return wal_archive.default_archive_dir(platform, major), None
+
+
+def _folder_steps(platform, layout, major: int, archive_dir: Path, *, run) -> list:
+    """The folders the new major's archive (and the data folder's) need,
+    made and restricted before it is installed."""
+    from kazma_core import data_folder
+    from kazma_core.backup import wal_archive
+
+    steps = wal_archive.prepare_steps(platform, archive_dir)
+    if layout is not None:
+        from kazma_core.data_folder_move import current_account
+
+        steps = data_folder.prepare_steps(layout, major, current_account(run)) + steps
+    return steps
 
 
 def _undo(up, journal_entry: dict[str, Any], hidden: list[str], *, run) -> bool:
@@ -65,9 +98,12 @@ def upgrade_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = No
         return _finish(entry, hold or _MoveHold(UPGRADE_PAUSE_REASON), run=run)
     if entry.get("old_record"):
         rec = entry["old_record"]           # the server Kazma used before this upgrade began
+    layout = _data_folder_layout(platform)
+    new_major = int(entry.get("to") or pgs.PG_MAJOR)
     try:
-        up = pgu.plan_upgrade(platform, rec, new_major=int(entry.get("to") or pgs.PG_MAJOR),
-                              temp_port=int(entry.get("temp_port") or 0) or None)
+        up = pgu.plan_upgrade(platform, rec, new_major=new_major,
+                              temp_port=int(entry.get("temp_port") or 0) or None,
+                              new_data_dir=str(layout.postgres_data(new_major)) if layout is not None else "")
     except ValueError as exc:
         _say(f"Nothing to upgrade: {exc}.")
         return 0 if "already runs" in str(exc) else 2
@@ -94,18 +130,18 @@ def upgrade_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = No
     new_state = pgs.service_state(platform.os, up.new_service, up.temp_port, run=run)
     new_installed = bool(new_state.get("installed")) and platform.os != "debian" or \
         (platform.os == "debian" and Path(f"/etc/postgresql/{up.new_major}/main").is_dir())
-    archive_dir = wal_archive.default_archive_dir(platform, up.new_major)
+    archive_dir, base_dir = _new_folders(platform, layout, up.new_major)
     install = pgs.setup_plan(platform, port=up.temp_port, superuser_password=superuser_password or
                              secrets.token_urlsafe(24),
                              throwaway_password=superuser_password if new_installed else secrets.token_urlsafe(18),
                              app_password=app_password, role_sql=_setup._role_sql(),
                              wal_archive_command=wal_archive.archive_command(platform, archive_dir),
-                             major=up.new_major)
-    install = wal_archive.prepare_steps(platform, archive_dir) + install
+                             major=up.new_major, data_dir=up.new_data_dir)
+    install = _folder_steps(platform, layout, up.new_major, archive_dir, run=run) + install
     if new_installed:
         # An earlier run installed it: put it on its spare port and start it
         # (an undone switch left it stopped); the settings and the role again.
-        install = [pgs.port_step(platform, up.new_major, up.temp_port),
+        install = [pgs.port_step(platform, up.new_major, up.temp_port, up.new_data_dir),
                    pgs.Step(f"Start PostgreSQL {up.new_major} on port {up.temp_port}", action="start",
                             service=up.new_service, major=up.new_major, port=up.temp_port, admin=True),
                    *_setup._without_install_steps(install)]
@@ -164,7 +200,7 @@ def upgrade_postgres(options, *, run=subprocess.run, hold: _MoveHold | None = No
         _say(f"The copy is not whole: Kazma was started again on PostgreSQL {up.old_major}, unchanged.")
         return 1
 
-    new_record = _new_record(up, archive_dir)
+    new_record = _new_record(up, archive_dir, base_dir)
     pgu.write_journal({**base, "stage": "switching", "new_record": new_record, "switching_since": time.time()})
     # The record names the server about to be on the port before any server
     # stops: the guard's database watch never starts the other one.

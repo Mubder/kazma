@@ -149,6 +149,10 @@ def add_install_parser(sub) -> None:
                          help="Windows, when a container part is chosen: kazma (default: Kazma's own engine, "
                               "starts with Windows, no sign-in needed) or desktop (Docker Desktop, waits for a "
                               "sign-in)")
+    install.add_argument("--data-folder", metavar="FOLDER",
+                         help="Windows: a folder on another drive (e.g. D:\\Kazma) for the database, its backups "
+                              "and the engine's disk, so a reset of Windows keeps them; parts installed elsewhere "
+                              "are moved there (kazma setup data-folder)")
 
 
 def _docker_choice(options, platform) -> str:
@@ -340,7 +344,8 @@ class PartState:
 
 #: Finders that stand in for Kazma's engine (tests), not for a system
 #: dependency's finder (``system_deps.check_all`` takes those).
-_NOT_SYSTEM_FINDERS = frozenset({"engine", "engine_action", "engine_preflight", "shutdown_service"})
+_NOT_SYSTEM_FINDERS = frozenset({"engine", "engine_action", "engine_preflight", "shutdown_service",
+                                 "data_folder_machine"})
 
 
 def _system_finders(machine: Machine) -> dict:
@@ -760,6 +765,53 @@ def _container_profile() -> tuple[bool, str]:
     return True, ""
 
 
+def _data_folder_move(folder: str, log) -> tuple[bool, str]:
+    from kazma_cli.setup import _setup_data_folder
+
+    code = _setup_data_folder(argparse.Namespace(folder=folder, yes=True, check=False, dry_run=False))
+    log(f"kazma setup data-folder ended with {code}")
+    return code == 0, "" if code == 0 else f"kazma setup data-folder ended with {code} (see above)"
+
+
+def _data_folder_plan(options, machine: Machine, platform):
+    """The data folder ``--data-folder`` names: (folder, refusals, whether
+    parts installed elsewhere move). Reads only."""
+    from kazma_core import data_folder
+    from kazma_core import data_folder_move as dfm
+    from kazma_core.paths import data_dir
+
+    folder = data_folder.normalized(options.data_folder)
+    move_machine = machine.finders.get("data_folder_machine") or dfm.Machine(run=machine.run,
+                                                                             record_path=machine.record_path)
+    plan = dfm.plan_move(folder, machine=move_machine, os_name=platform.os, install_root=machine.root,
+                         data_dir=data_dir(create=False))
+    return folder, list(plan.refusals), bool(plan.parts)
+
+
+def _data_folder_choice(options, machine: Machine, platform, pre, say):
+    """``--data-folder``: (the folder, the step that moves what lives
+    elsewhere, or None). ``(None, None)`` with no option; ``("", None)`` when
+    it is refused (said, with every problem found, before anything is done)."""
+    if not getattr(options, "data_folder", None):
+        return None, None
+    folder, refusals, move_parts = _data_folder_plan(options, machine, platform)
+    if refusals:
+        pre.problems += [f"the data folder {folder} cannot be used: {refusal}" for refusal in refusals]
+        say("Problems found before anything was done:", "warn")
+        for problem in pre.problems:
+            say(f"  !! {problem}", "warn")
+        say("Nothing was done.")
+        return "", None
+    say(f"The data folder: {folder} (the database, its backups and the engine's disk)")
+    if not move_parts:
+        return folder, None
+    from kazma_core.postgres_service import Step
+
+    return folder, PlannedStep("data_folder", Step(
+        f"move the database and the engine's disk installed elsewhere into {folder}",
+        action="data_folder_move", admin=True, data_dir=folder, shown=f'kazma setup data-folder "{folder}" -y'))
+
+
 def _postgres(log) -> tuple[bool, str]:
     from kazma_cli.setup import _setup_postgres
 
@@ -827,6 +879,8 @@ def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tu
         return run_action(step.action, run=machine.run, log=log)
     if step.action == "postgres":
         return _postgres(log)
+    if step.action == "data_folder_move":
+        return _data_folder_move(step.data_dir, log)
     if step.action == "container_profile":
         return _container_profile()
     if step.action.startswith("service_"):
@@ -1168,9 +1222,14 @@ def install(options, machine: Machine | None = None) -> int:
     found, here_anyway, left_out, states = _check_every_part(mode, parts, machine, platform,
                                                              _docker_choice(options, platform), show)
     pre = _preflight(parts, found, machine, platform, mode, options, say)
+    folder, move_step = _data_folder_choice(options, machine, platform, pre, say)
+    if folder == "":
+        return 2
     todo = [p for p in parts if found[p.id].ok is False and p.id not in pre.blocked]
     plan = build_plan(todo, found, states, machine, platform, pre.readiness,
                       _docker_choice(options, platform)) if todo else []
+    if move_step is not None:
+        plan.append(move_step)
     admin_short = (platform.os == "windows" and any(item.step.admin for item in plan)
                    and not (machine.is_admin or pgs.is_admin)())
     if admin_short and not options.packages_only:
@@ -1208,6 +1267,11 @@ def install(options, machine: Machine | None = None) -> int:
         if stop == EXIT_NOTHING_DONE:
             _record(mode, [p.id for p in parts], found, machine.record_path, without)
         return stop
+    if folder is not None and not options.packages_only:
+        from kazma_core import data_folder
+
+        data_folder.record_choice(folder, machine.record_path)
+        say(f"-> {folder} recorded as Kazma's data folder")
     if options.packages_only:
         plan = [item for item in plan if item.step.title.startswith("install Kazma's packages")]
     elif _keep_port(port, env_path, found, machine, say, reload_now=False) and not any(

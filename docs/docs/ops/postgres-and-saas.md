@@ -305,6 +305,84 @@ memory mirror keeps its own address (`memory.backends.state.url`, and
 container at the new server, while Kazma is stopped. One stored in plain text
 instead of the vault is named, for you to change in Settings.
 
+### Keeping the database off Windows' own drive {#data-folder}
+
+On Windows, `kazma setup postgres` puts the database in `C:\Program
+Files\PostgreSQL\18\data` and its WAL archive in `C:\ProgramData\Kazma`, and
+Kazma's container engine keeps its disk in `%LOCALAPPDATA%\Kazma\engine`. A
+reset of Windows wipes all three, even when Kazma itself is installed on
+another drive: on 19 November 2026 the database came back only from the
+6-hourly dumps. Choose a folder on another drive instead:
+
+```bash
+kazma setup data-folder D:\Kazma
+```
+
+(`D:` alone means `D:\Kazma`; `kazma setup install --data-folder D:\Kazma`
+does the same as part of an install.) Each part then lives in it:
+
+| Folder | What |
+|---|---|
+| `D:\Kazma\postgres-18\data` | the database's data folder |
+| `D:\Kazma\postgres-18\wal_archive` | its WAL archive |
+| `D:\Kazma\postgres-18\base` | its base backups |
+| `D:\Kazma\engine` | the container engine's disk (`ext4.vhdx`) |
+
+Each folder is made readable only by SYSTEM, the administrators and the
+accounts that need it (the database service on its data, your account on
+the backups): a second drive's root otherwise lets every signed-in user
+change files.
+
+**What it refuses, before anything changes:** a folder on Windows' own drive
+(C:), a removable, network or optical drive, a `subst` drive, a share
+(`\\server\share`), a folder inside Kazma's install or data folder, a name
+with characters other than letters, digits, spaces and `. _ - ( )`, and a
+drive without the room (what moves, with 2 GB to spare; 20 GB for a new
+install).
+
+**What it does with what is already installed** (an administrator terminal;
+Kazma is stopped through its guard once no chat turn runs, and started again
+at the end):
+
+1. The database: its service is set to Disabled and stopped (nothing can
+   start it on half a copy), then its data folder, WAL archive and base
+   backups are copied into the data folder and compared file by file (path,
+   size, SHA-256). The copy's `archive_command` is pointed at the new
+   archive, the service's command line at the copy, and the service is set
+   to start at boot again and started. It must answer, run from the copy and
+   let Kazma sign in; only then does `kazma-data/setup_record.json` name the
+   new folders. The old folders are kept, unused: delete them once you are
+   sure.
+2. The engine: its `KazmaEngine` task is disabled, Docker is stopped
+   cleanly inside it and the distro is ended; its disk is hashed, moved by
+   WSL itself (`wsl --manage kazma-engine --move`, WSL 2.5 or later) and
+   hashed again where it landed; the task runs it again and Docker must
+   answer.
+
+Every stage is written to `kazma-data/setup_record.json` before it begins. A part that
+fails is put back as it was (the service on its old folder, started; the
+disk moved back), and the others still move; a run that died half way is put
+back by the next run before anything else. Kazma's guard leaves a part that
+is moving alone (it neither starts nor pages the database service), so run
+it under a guard that knows this: the command says when the running guard
+is older and must be restarted once.
+
+**After a reset of Windows**, run `setup.cmd` from the install folder as on a
+new machine. The choice is in `kazma-data/setup_record.json`, which the reset
+kept: setup installs PostgreSQL, points the new service at the database kept
+in `D:\Kazma\postgres-18\data` (signing in with the superuser password kept
+in `<install>/.kazma/postgres_superuser.pass`), and registers the kept engine disk in
+place (`wsl --import-in-place`), with every image, container and volume in
+it, instead of starting either one empty. The installer's own empty database
+is left under Program Files, unused.
+
+Drilled on a Windows VM with a second disk (`scripts/data_folder_drill.py`,
+21 November 2026): Kazma's database moved off C: in 30 seconds with its data
+and its archive working, then PostgreSQL removed with its own uninstaller
+and set up again, the kept database attached; and a first install with the
+folder chosen beforehand, its new database made on the second drive. The
+engine's move is held by tests on a fake machine, not yet drilled.
+
 **Disks that ask for a password at boot.** A Mac with FileVault on, a Windows
 PC whose BitLocker asks for a PIN, and a Linux disk encrypted with LUKS that
 does not unlock by TPM all stop before the OS starts, so nothing starts until

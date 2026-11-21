@@ -1,0 +1,41 @@
+{
+ "meta": {
+  "kind": "fresh",
+  "commit": "090e2d0f034f85d8560057c836a01ad17f43110c",
+  "finished": "2026-11-21 02:42 UTC"
+ },
+ "evidence": {
+  "commit": "090e2d0f034f85d8560057c836a01ad17f43110c",
+  "folder": "E:\\Kazma",
+  "install": {
+   "exit": 0,
+   "seconds": 175,
+   "tail": "OI)(CI)F\n   3. Make PostgreSQL 18's folder in it\n      C:\\kazma-drill\\.venv\\Scripts\\python.exe -c import os, sys; os.makedirs(sys.argv[1], exist_ok=True) E:\\Kazma\\postgres-18\n   4.   (continued)\n      icacls E:\\Kazma\\postgres-18 /inheritance:r /grant *S-1-5-18:(OI)(CI)F /grant *S-1-5-32-544:(OI)(CI)F\n   5. Make its base backups' folder\n      C:\\kazma-drill\\.venv\\Scripts\\python.exe -c import os, sys; os.makedirs(sys.argv[1], exist_ok=True) E:\\Kazma\\postgres-18\\base\n   6.   (continued)\n      icacls E:\\Kazma\\postgres-18\\base /inheritance:r /grant *S-1-5-18:(OI)(CI)F /grant *S-1-5-32-544:(OI)(CI)F /grant *S-1-5-21-72180980-3124886227-323398886-1001:(OI)(CI)F\n   7. Create the WAL archive folder\n      C:\\kazma-drill\\.venv\\Scripts\\python.exe -c import os, sys; os.makedirs(sys.argv[1], exist_ok=True) E:\\Kazma\\postgres-18\\wal_archive\n   8.   (continued)\n      icacls E:\\Kazma\\postgres-18\\wal_archive /inheritance:r /grant *S-1-5-20:(OI)(CI)M /grant KazmaDrill_1:(OI)(CI)M /grant *S-1-5-32-544:(OI)(CI)F\n   9. Install PostgreSQL 18 (a Windows service), its data in E:\\Kazma\\postgres-18\\data\n      winget install --id PostgreSQL.PostgreSQL.18 --exact --silent --override \"... --servicename postgresql-x64-18 --serverport 5432 --datadir \"E:\\Kazma\\postgres-18\\data\" --superpassword ****\"\n  10. Start it at boot\n      sc config postgresql-x64-18 start= auto\n  11. Restart it when it fails\n      sc failure postgresql-x64-18 reset= 86400 actions= restart/5000/restart/30000/restart/60000\n  12. Wait for it to answer\n      wait\n  13. Set the superuser's password, this machine only, Kazma's database\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d postgres < (password, settings)\n  14. Restart it to apply the settings\n      restart\n  15. Wait for it to answer\n      wait\n  16. Create the kazma_app role (not a superuser)\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d kazma < kazma_app_role.sql\n  17. Give kazma_app its password\n      C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe -h 127.0.0.1 -U postgres -w -v ON_ERROR_STOP=1 -X -q -p 5432 -d kazma < (password)\n  then: write KAZMA_DATABASE_URL into .env (not shown), and sign in once as Kazma will\n-> Make the data folder (this account, SYSTEM and the administrators only)\n-> icacls E:\\Kazma /inheritance:r /grant *S-1-5-18:(OI)(CI)F /grant *S-1-5-32-544:(OI)(CI)F /grant *S-1-5-21-72180980-3124886227-323398886-1001:(OI)(CI)F\n-> Make PostgreSQL 18's folder in it\n-> icacls E:\\Kazma\\postgres-18 /inheritance:r /grant *S-1-5-18:(OI)(CI)F /grant *S-1-5-32-544:(OI)(CI)F\n-> Make its base backups' folder\n-> icacls E:\\Kazma\\postgres-18\\base /inheritance:r /grant *S-1-5-18:(OI)(CI)F /grant *S-1-5-32-544:(OI)(CI)F /grant *S-1-5-21-72180980-3124886227-323398886-1001:(OI)(CI)F\n-> Create the WAL archive folder\n-> icacls E:\\Kazma\\postgres-18\\wal_archive /inheritance:r /grant *S-1-5-20:(OI)(CI)M /grant KazmaDrill_1:(OI)(CI)M /grant *S-1-5-32-544:(OI)(CI)F\n-> Install PostgreSQL 18 (a Windows service), its data in E:\\Kazma\\postgres-18\\data\n-> Start it at boot\n-> Restart it when it fails\n-> Wait for it to answer\n-> Set the superuser's password, this machine only, Kazma's database\n-> Restart it to apply the settings\n-> Wait for it to answer\n-> Create the kazma_app role (not a superuser)\n-> Give kazma_app its password\n-> KAZMA_DATABASE_URL written to C:\\kazma-drill\\.env (this account only)\n-> Kazma signs in as kazma_app (not a superuser).\nDone. Reload Kazma when it is idle to use the new database:\n  python scripts/service/kazma_guard.py --reload --when-idle\n-> install Kazma as a service (its guard starts at boot)\n-> start it now\n-> stop Kazma cleanly when Windows shuts down (the KazmaEngineShutdown service)\nDone: 2 parts of Custom in place.\nWaiting for Kazma to answer at http://127.0.0.1:9090 (its first start loads its models) ...\nKazma is running: http://127.0.0.1:9090 (its setup guide connects the AI model)\n"
+  },
+  "seeded": "16745f4c2fe22d10",
+  "after_install": {
+   "archived": 0,
+   "data_dir": "E:\\Kazma\\postgres-18\\data",
+   "pid_in_folder": true,
+   "service": true
+  },
+  "after_switch": {
+   "archived": 1,
+   "data_dir": "E:\\Kazma\\postgres-18\\data",
+   "pid_in_folder": true,
+   "service": true
+  },
+  "mark": "16745f4c2fe22d10"
+ },
+ "verdict": {
+  "verdict": "passed",
+  "checks": {
+   "install_exit_0": true,
+   "service_runs_from_the_folder": true,
+   "it_runs_there": true,
+   "the_data_is_kept": true,
+   "a_new_segment_is_archived_there": true
+  },
+  "notes": []
+ }
+}

@@ -93,6 +93,9 @@ class Upgrade:
     new_major: int
     port: int
     temp_port: int
+    #: The new server's data folder when the owner chose a data folder
+    #: (``data_folder``); empty: where its package puts it.
+    new_data_dir: str = ""
 
     @property
     def old_major(self) -> int:
@@ -112,7 +115,7 @@ class Upgrade:
 
 
 def plan_upgrade(platform: Platform, old: dict[str, Any], *, new_major: int = PG_MAJOR,
-                 temp_port: int | None = None) -> Upgrade:
+                 temp_port: int | None = None, new_data_dir: str = "") -> Upgrade:
     """The move from the server *old* (the record) to *new_major*. Raises
     ValueError when there is nothing to move or no way to."""
     if not old.get("service"):
@@ -125,7 +128,7 @@ def plan_upgrade(platform: Platform, old: dict[str, Any], *, new_major: int = PG
     if platform.os == "debian" and major and service_name("debian", major) != old.get("service"):
         raise ValueError(f"the record names {old.get('service')}, not Debian's postgresql service")
     port = int(old.get("port") or 5432)
-    return Upgrade(platform, dict(old), new_major, port, temp_port or _free_port())
+    return Upgrade(platform, dict(old), new_major, port, temp_port or _free_port(), new_data_dir)
 
 
 def _free_port(first: int = TEMP_PORT_FIRST, *, answers: Callable[[int], bool] | None = None) -> int:
@@ -181,7 +184,7 @@ def switch_steps(up: Upgrade) -> list[Step]:
     """The new server onto the old port, the old one stopped and kept."""
     p = up.platform
     return [
-        port_step(p, up.new_major, up.port),
+        port_step(p, up.new_major, up.port, up.new_data_dir),
         Step(f"Stop PostgreSQL {up.new_major} (it moves to port {up.port})", action="stop",
              service=up.new_service, major=up.new_major, admin=True),
         Step(f"Stop PostgreSQL {up.old_major} (Kazma's database until now)", action="stop",
@@ -200,7 +203,7 @@ def undo_steps(up: Upgrade) -> list[Step]:
         Step(f"Stop PostgreSQL {up.new_major}", action="stop", service=up.new_service, major=up.new_major,
              admin=True),
         *_not_at_boot(p, up.new_service, up.new_major),
-        port_step(p, up.new_major, up.temp_port),
+        port_step(p, up.new_major, up.temp_port, up.new_data_dir),
         *_at_boot(p, up.old_service, up.old_major),
         Step(f"Start PostgreSQL {up.old_major} on port {up.port}", action="start",
              service=up.old_service, major=up.old_major, port=up.port, admin=True),

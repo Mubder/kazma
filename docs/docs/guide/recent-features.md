@@ -22,6 +22,17 @@ backup forgets it again; one forget that cannot be applied no longer holds
 the others back, and memory health says when one is waiting (see
 [Memory and RAG](memory-and-rag.md)).
 
+**New in 2026-11-21 — the database and the engine off Windows' own drive.**
+`kazma setup data-folder D:\Kazma` (or `kazma setup install --data-folder
+D:\Kazma`) keeps Kazma's database, its WAL archive and base backups, and its
+container engine's disk on another drive, so a reset of Windows keeps them.
+On an install that has them on C:, it moves them with Kazma held: the
+database copied and compared file by file, then run from the copy; the
+engine's disk moved by WSL and checked; a part that fails is put back as it
+was. After a reset, running `setup.cmd` attaches the kept database and
+engine disk again instead of starting empty (see
+[Postgres as an OS service](../ops/postgres-and-saas.md#data-folder)).
+
 **New in 2026-11-20 — a Windows restart stops Kazma first.** When Windows
 shuts down or restarts (by you or by Windows Update), the `KazmaEngineShutdown`
 service now tells Kazma to stop before anything else: Kazma finishes its own

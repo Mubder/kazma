@@ -529,6 +529,38 @@ WSL_FEATURES = ("VirtualMachinePlatform", "Microsoft-Windows-Subsystem-Linux")
 _NO_VM_SERVICE = "HCS_E_SERVICE_NOT_AVAILABLE"
 
 
+def _distro_dir() -> tuple[Path, bool]:
+    """Where the distro's disk goes, and whether the owner chose the place:
+    the data folder's ``engine`` folder (``data_folder``: off Windows' own
+    drive, so a reset keeps it), else ``%LOCALAPPDATA%\\Kazma\\engine``."""
+    from kazma_core import data_folder
+
+    folder = data_folder.chosen()
+    if folder is not None:
+        return data_folder.Layout(folder).engine, True
+    return _engine_dir() / DISTRO, False
+
+
+def _secure_distro_dir(target: Path, run: Runner, *, kept: Path | None = None) -> tuple[bool, str]:
+    """The disk's folder restricted to this account, SYSTEM and the
+    administrators (a second drive's root lets every signed-in user change
+    files), and a kept disk given to this account: after a reset of Windows
+    the account is a new one, and WSL, which attaches the disk as this
+    account, would be refused."""
+    from kazma_core.data_folder_move import current_account, secure_folder
+
+    user = current_account(run)
+    ok, why = secure_folder(target, ["*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F",
+                                     *([f"{user}:(OI)(CI)F"] if user else [])], run)
+    if not ok:
+        return False, why
+    if kept is not None and user:
+        code, text = _out(run, ["icacls", str(kept), "/grant", f"{user}:F"])
+        if code != 0:
+            return False, f"icacls refused {kept}: {text.strip()[-300:]}"
+    return True, ""
+
+
 def _features_pending(run: Runner) -> bool:
     """Whether a feature WSL needs waits for Windows to restart (state
     ``EnablePending``, read as the enum's name: the same in every language)."""
@@ -554,13 +586,33 @@ def _action_distro(run: Runner, log: Callable[[str], None], opener: Any) -> tupl
     if _features_pending(run):
         log("WSL's features wait for Windows to restart")
         return True, RESTART
+    target, chosen = _distro_dir()
+    kept = target / "ext4.vhdx"
+    if kept.is_file():
+        # A disk kept in the data folder from before (a reset of Windows
+        # wiped the registration, not the disk): registered where it is, with
+        # every image, container and volume in it. A fresh import over it
+        # would start Kazma's containers empty.
+        ok, why = _secure_distro_dir(target, run, kept=kept)
+        if not ok:
+            return False, why
+        code, text = _out(run, ["wsl.exe", "--import-in-place", DISTRO, str(kept)], timeout=900, env=_wsl_env())
+        if code == 0:
+            return True, f"registered the kept disk {kept}: its images, containers and volumes are back"
+        if _NO_VM_SERVICE in text:
+            log("WSL's virtual machine service is not running yet: Windows must restart")
+            return True, RESTART
+        return False, f"wsl --import-in-place of the kept disk {kept} failed: {text.strip()[-300:]}"
     image = _fetch(DOWNLOADS["ubuntu"], _engine_dir() / "downloads", opener=opener)
-    target = _engine_dir() / DISTRO
+    if chosen:
+        ok, why = _secure_distro_dir(target, run)
+        if not ok:
+            return False, why
     target.mkdir(parents=True, exist_ok=True)
     code, text = _out(run, ["wsl.exe", "--import", DISTRO, str(target), str(image), "--version", "2"],
                       timeout=900, env=_wsl_env())
     if code == 0:
-        return True, "created"
+        return True, "created" + (f" in {target}" if chosen else "")
     if _NO_VM_SERVICE in text:
         log("WSL's virtual machine service is not running yet: Windows must restart")
         return True, RESTART

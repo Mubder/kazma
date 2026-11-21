@@ -277,9 +277,12 @@ GUARD_ACK_S = 20.0
 #   pager_test -- answers Settings -> Alerts' "Send a test page" (state
 #                 ``pager_test``; see PagerTest) and records each page's outcome
 #                 (state ``pager``).
+#   data_folder_move -- leaves a part ``kazma setup data-folder`` is moving
+#                 alone (its journal in the setup record): the database
+#                 service is not started or paged, the engine not started.
 GUARD_FEATURES = ("pause_held", "document_broker", "dependencies", "boot_wait",
                   "database_hold", "disk_watch", "outside_watch", "database_service", "power_watch",
-                  "pager_test")
+                  "pager_test", "data_folder_move")
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -3488,6 +3491,12 @@ class Dependencies:
         if now < self._next_check:
             return
         self._next_check = now + DEPS_CHECK_EVERY_S
+        if _data_folder_moving(_setup_record_data(), "engine"):
+            # kazma setup data-folder is moving the engine's disk: starting
+            # the distro now would hold the disk it moves.
+            self._down_since = None
+            self._set("engine_moving", "kazma setup data-folder is moving the engine's disk")
+            return
         self.apply_engine()
         self.containers = self.recorded_containers()
         broker = getattr(self.guard, "broker", None)
@@ -3846,14 +3855,37 @@ DBSVC_SETTLE_S = 120.0
 #: from the new one. Bounded, so a run that died there is not waited for
 #: (``postgres_upgrade.SWITCH_HOLD_S``, held equal by a test).
 DBSVC_UPGRADE_HOLD_S = 15 * 60.0
+#: While ``kazma setup data-folder`` moves a part (its journal in the setup
+#: record names the part and a stage it is out of service in), the guard
+#: leaves that part alone: the database service is not started on half a
+#: copy nor paged as down, the engine's distro is not started while its disk
+#: moves. Bounded from the stage's start, so a run that died is not waited for
+#: (``data_folder_move.GUARD_HOLD_S``, held equal by a test).
+DATA_MOVE_HOLD_S = 2 * 3600.0
+DATA_MOVE_STAGES = ("stopping", "copying", "switching", "starting", "moving")
 
 
-def _setup_record() -> dict:
+def _data_folder_moving(data: dict, part: str) -> bool:
+    """Whether the setup record's data-folder journal says *part* is out of
+    service for a move now."""
+    entry = data.get("data_folder_move") if isinstance(data, dict) else None
+    if not isinstance(entry, dict) or entry.get("part") != part or entry.get("stage") not in DATA_MOVE_STAGES:
+        return False
+    since = entry.get("since")
+    return isinstance(since, (int, float)) and 0 <= time.time() - since < DATA_MOVE_HOLD_S
+
+
+def _setup_record_data() -> dict:
     try:
         data = json.loads((_data_dir_guess() / "setup_record.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    rec = data.get("postgres") if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def _setup_record() -> dict:
+    data = _setup_record_data()
+    rec = data.get("postgres")
     if not isinstance(rec, dict):
         return {}
     upgrade = data.get("postgres_upgrade")
@@ -3861,6 +3893,8 @@ def _setup_record() -> dict:
         since = upgrade.get("switching_since")
         if isinstance(since, (int, float)) and 0 <= time.time() - since < DBSVC_UPGRADE_HOLD_S:
             return {**rec, "upgrading": True}
+    if _data_folder_moving(data, "postgres"):
+        return {**rec, "moving": True}
     return rec
 
 
@@ -3952,11 +3986,12 @@ class DatabaseServiceWatch:
                 self._write()
             return
         self.service = service
-        if rec.get("upgrading"):
-            # Servers switching on purpose: not an outage, and not the
-            # watch's to start (an outage, if any, is counted after).
+        if rec.get("upgrading") or rec.get("moving"):
+            # Servers switching on purpose, or the data moving to the data
+            # folder: not an outage, and not the watch's to start (an outage,
+            # if any, is counted after).
             self._down_since, self._started_this_outage = None, False
-            self._set("upgrading")
+            self._set("upgrading" if rec.get("upgrading") else "moving")
             return
         running = self._running(os_name, service)
         answers = self._answers(int(rec.get("port") or 5432))
