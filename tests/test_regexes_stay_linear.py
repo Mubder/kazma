@@ -172,11 +172,21 @@ def _grows_faster_than_linear(fn, make, small: int, factor: int = 2) -> bool:
     of 2 gave 4-fold against 3, and a loaded Linux runner measured under it,
     2026-11-15). The exponential one keeps 2: four times its input would take
     minutes.
+
+    The answer is the majority of three measurements (two that agree end it):
+    a linear function at a size that runs in microseconds read as growing once
+    on a busy CI runner (2026-11-21), and one noisy measurement must decide
+    neither way. A function that does grow faster reads so every time.
     """
     fn(make(small))  # warm
-    t1 = min(_timed(fn, make(small)) for _ in range(3))
-    t2 = min(_timed(fn, make(factor * small)) for _ in range(3))
-    return t2 > 1.5 * factor * t1
+
+    def once() -> bool:
+        t1 = min(_timed(fn, make(small)) for _ in range(3))
+        t2 = min(_timed(fn, make(factor * small)) for _ in range(3))
+        return t2 > 1.5 * factor * t1
+
+    first, second = once(), once()
+    return first if first == second else once()
 
 
 def test_control_a_token_shape_without_its_run_start_grows_faster_than_the_input():

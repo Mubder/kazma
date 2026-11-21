@@ -210,11 +210,19 @@ def _same(old, new, op: str, inputs) -> None:
 
 
 def _grows_faster_than_linear(fn, make, small: int, factor: int = 4) -> bool:
-    """True when ``factor`` times the input takes more than 1.5 x ``factor`` times as long."""
+    """True when ``factor`` times the input takes more than 1.5 x ``factor`` times as long.
+
+    The majority of three measurements (two that agree end it): one noisy
+    measurement on a busy machine must decide neither way (2026-11-21)."""
     fn(make(small))
-    t1 = min(_timed(fn, make(small)) for _ in range(3))
-    t2 = min(_timed(fn, make(factor * small)) for _ in range(3))
-    return t2 > 1.5 * factor * t1
+
+    def once() -> bool:
+        t1 = min(_timed(fn, make(small)) for _ in range(3))
+        t2 = min(_timed(fn, make(factor * small)) for _ in range(3))
+        return t2 > 1.5 * factor * t1
+
+    first, second = once(), once()
+    return first if first == second else once()
 
 
 SPACE = " \t\n"

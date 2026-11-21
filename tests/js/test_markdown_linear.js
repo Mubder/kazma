@@ -134,9 +134,17 @@ test("negative control: the old patterns grow faster than their input", () => {
     fn(make(n));
     // The fastest of five runs each way: a single slow run on a busy machine
     // must not read as growth (it did, at 30,000 characters, 2026-11-20).
-    const small = Math.min(...[0, 1, 2, 3, 4].map(() => timed(() => fn(make(n)))));
-    const large = Math.min(...[0, 1, 2, 3, 4].map(() => timed(() => fn(make(4 * n)))));
-    return large > 6 * small;
+    const once = () => {
+      const small = Math.min(...[0, 1, 2, 3, 4].map(() => timed(() => fn(make(n)))));
+      const large = Math.min(...[0, 1, 2, 3, 4].map(() => timed(() => fn(make(4 * n)))));
+      return large > 6 * small;
+    };
+    // The majority of three measurements (two that agree end it): this
+    // control failed once on a loaded machine (2026-11-21), and one noisy
+    // measurement must decide neither way.
+    const first = once();
+    const second = once();
+    return first === second ? first : once();
   };
   assert.ok(grows(oldLink, (n) => "[".repeat(n), 3000));
   assert.ok(grows(oldImage, (n) => "![".repeat(n), 1500));
