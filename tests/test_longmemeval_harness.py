@@ -424,3 +424,57 @@ def test_a_refused_call_is_asked_again_never_kept_as_wrong(lme):
     # Another prompt is another question: asked afresh.
     lme.answer_entry(entry, item, "another prompt", reader=_Scripted(["June"]), judge=_Scripted(["no"]))
     assert entry["hypothesis"] == "June" and entry["verdict"] == "no"
+
+
+def test_the_plain_baselines_are_also_measured_at_kazmas_size(lme):
+    """Ten rounds always show ten (main session, 22 Nov): each baseline is
+    also cut to Kazma's own size -- the rounds that fit its block's token
+    budget, and as many rounds as Kazma showed -- with the tokens shown.
+    Control: at Kazma's count of none, a baseline shows nothing."""
+    item = _item("q6", "single-session-user", "Which degree did I graduate with?",
+                 "I graduated with a degree in Business Administration last year.",
+                 ["How do I boil an egg? " * 40, "Recommend a film about space. " * 40,
+                  "What is the capital of Peru? " * 40])
+    rows = lme.history_rows(item)
+    one = lme.shown_tokens(lme.read_whole(rows[:1]))
+    scores = lme.plain_scores(item, rows, _WordVectors(), budgets={"p50": one}, same_count=2)
+    for how in ("bge", "bm25"):
+        assert scores[f"plain_{how}_shown"] == len(rows) and scores[f"plain_{how}_tokens"] > one
+        assert scores[f"plain_{how}_p50_shown"] == 1 and scores[f"plain_{how}_p50_evidence"]
+        assert scores[f"plain_{how}_p50_tokens"] <= one
+        assert scores[f"plain_{how}_same_shown"] == 2
+    none = lme.plain_scores(item, rows, _WordVectors(), same_count=0)
+    assert none["plain_bm25_same_shown"] == 0 and none["plain_bm25_same_tokens"] == 0
+    assert not none["plain_bm25_same_evidence"]
+    # A budget below one round still shows the best round, as a block would.
+    assert len(lme.within_budget(rows, 1)) == 1
+    assert lme.size_budgets([{"block_tokens": n} for n in (0, 10, 20, 30, 1000)]) == {"p50": 20, "p95": 1000}
+
+
+def test_the_sizes_and_the_no_answer_side_are_summarised(lme):
+    def row(qid: str, abstention: bool, shown: int, tokens: int, plain_tokens: int) -> dict:
+        return {"id": qid, "type": "multi-session", "abstention": abstention, "shown": shown, "precision": 1.0,
+                "evidence_turn": not abstention, "answer_session": True, "every_answer_session": True,
+                "block_tokens": tokens, "latency_ms": 1.0, "plain_bge_evidence": True,
+                "plain_bge_every_session": True, "plain_bge_shown": 10, "plain_bge_tokens": plain_tokens,
+                "plain_bge_same_evidence": True, "plain_bge_same_every_session": True,
+                "plain_bge_same_shown": shown, "plain_bge_same_tokens": tokens}
+
+    rows = [row("a", False, 3, 600, 3000), row("b", False, 4, 700, 3200), row("c_abs", True, 0, 0, 2900)]
+    overall = lme.summarise(rows)["overall"]
+    assert overall["plain_bge_same_evidence"] == 1.0
+    assert overall["sizes"]["kazma"]["tokens_p50"] == 600 and overall["sizes"]["plain_bge"]["shown_mean"] == 10
+    assert overall["abstention_sizes"]["kazma"]["nothing"] == 1.0
+    assert overall["abstention_sizes"]["plain_bge"]["nothing"] == 0.0
+
+
+def test_a_result_file_keeps_each_row_on_one_line(lme):
+    row = {"id": "a", "shown": 3, "plain_bge_evidence": True, "plain_bge_every_session": False,
+           "plain_bge_shown": 10, "plain_bge_tokens": 5000, "plain_bge_same_evidence": True,
+           "plain_bge_same_every_session": True, "plain_bge_same_shown": 3, "plain_bge_same_tokens": 900}
+    compact = lme.compact_row(row)
+    assert compact == {"id": "a", "shown": 3, "plain": {"bge_10": [True, False, 10, 5000],
+                                                        "bge_same": [True, True, 3, 900]}}
+    text = lme.dump_result({"what": "x", "overall": {"n": 2}, "results": [compact, compact]})
+    assert json.loads(text)["results"] == [compact, compact]
+    assert text.count("\n") < 12  # one line a row, not one a value

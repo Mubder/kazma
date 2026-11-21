@@ -460,25 +460,64 @@ def _longmemeval_dev(folder: Path) -> list[str]:
     ]
     if retrieval.is_file():
         ro = json.loads(retrieval.read_text(encoding="utf-8"))["overall"]
+        sizes = ro.get("sizes") or {}
         lines += [
-            "**Finding it, against plain retrieval** (no model): Kazma's recall beside the rounds nearest the "
-            "question by bge-m3 alone (the same vectors, no background, no word coverage, no gap) and by BM25, ten "
-            "of each.",
+            "**Finding it, against plain retrieval, at the same size** (no model): Kazma's recall beside the "
+            "rounds nearest the question by bge-m3 alone (the same vectors, with none of recall's background, word "
+            "coverage or gap) and by BM25, each read whole: as many as fit Kazma's own block (its median and "
+            "95th-percentile tokens), as many rounds as Kazma showed for the question, and ten. Tokens are counted "
+            "as the product measures count the block.",
             "",
-            "| | Kazma's recall | bge-m3's 10 nearest rounds | BM25's 10 best rounds |",
-            "|---|---|---|---|",
-            f"| The answer's round shown | {_pct(ro.get('evidence_turn'))} | {_pct(ro.get('plain_bge_evidence'))} | "
-            f"{_pct(ro.get('plain_bm25_evidence'))} |",
-            f"| Every answering conversation shown | {_pct(ro.get('every_answer_session'))} | "
-            f"{_pct(ro.get('plain_bge_every_session'))} | {_pct(ro.get('plain_bm25_every_session'))} |",
-            f"| Memories shown (mean) | {ro.get('shown_mean')} | 10 | 10 |",
+            "| Method | Memories shown | Tokens (median / 95th) | The answer's round shown | Every answering "
+            "conversation shown |",
+            "|---|---|---|---|---|",
+        ]
+
+        def size_row(name: str, key: str, found: str) -> None:
+            s = sizes.get(key)
+            if not s or f"{found}_evidence" not in ro and found != "kazma":
+                return
+            ev = ro.get("evidence_turn") if found == "kazma" else ro.get(f"{found}_evidence")
+            every = ro.get("every_answer_session") if found == "kazma" else ro.get(f"{found}_every_session")
+            lines.append(f"| {name} | {s['shown_mean']} | {s['tokens_p50']:,} / {s['tokens_p95']:,} | {_pct(ev)} | "
+                         f"{_pct(every)} |")
+
+        k_size, ten_size = sizes.get("kazma") or {}, sizes.get("plain_bge") or {}
+        if k_size and ten_size and "plain_bge_p50_evidence" in ro:
+            lines[-2:-2] = [
+                f"At Kazma's own block size, bge-m3's nearest rounds show the answer's round for "
+                f"{_pct(ro['plain_bge_p50_evidence'])} and every answering conversation for "
+                f"{_pct(ro['plain_bge_p50_every_session'])}, against Kazma's {_pct(ro['evidence_turn'])} and "
+                f"{_pct(ro['every_answer_session'])}; with as many rounds as Kazma showed, "
+                f"{_pct(ro['plain_bge_same_evidence'])} and {_pct(ro['plain_bge_same_every_session'])}. Ten rounds "
+                f"find more ({_pct(ro['plain_bge_evidence'])} and {_pct(ro['plain_bge_every_session'])}) with "
+                f"{ten_size['tokens_p50'] / max(1, k_size['tokens_p50']):.1f} times Kazma's tokens.",
+                "",
+            ]
+        size_row("Kazma's recall", "kazma", "kazma")
+        for how, label in (("bge", "bge-m3"), ("bm25", "BM25")):
+            size_row(f"{label}, within Kazma's median block", f"plain_{how}_p50", f"plain_{how}_p50")
+            size_row(f"{label}, within Kazma's 95th-percentile block", f"plain_{how}_p95", f"plain_{how}_p95")
+            size_row(f"{label}, as many rounds as Kazma showed", f"plain_{how}_same", f"plain_{how}_same")
+            size_row(f"{label}, ten rounds", f"plain_{how}", f"plain_{how}")
+        quiet = (ro.get("abstention_sizes") or {})
+        k, ten = quiet.get("kazma"), quiet.get("plain_bge")
+        lines += [
             "",
             f"Of the {ro.get('worded')} answerable questions whose answer is a word or a phrase, its text is in the "
             f"rounds Kazma shows for {_pct(ro.get('answer_in_shown'))}, and still in the block after the block's "
-            f"bounds for {_pct(ro.get('answer_in_block'))}. Questions with no answer that show nothing: "
-            f"{_pct(ro.get('abstention_quiet'))}.",
-            "",
+            f"bounds for {_pct(ro.get('answer_in_block'))}.",
         ]
+        if k and ten:
+            lines += [
+                "",
+                f"**The {ro.get('abstention_n', '')} questions with no answer**: Kazma shows nothing for "
+                f"{_pct(k['nothing'])} of them; it shows "
+                f"{k['shown_mean']} memories ({k['tokens_p50']:,} tokens, median), ten rounds show ten "
+                f"({ten['tokens_p50']:,}). Kazma showed nothing for {_pct(sizes.get('kazma', {}).get('nothing'))} "
+                "of all the questions.",
+            ]
+        lines.append("")
     if not main.is_file():
         return lines
     a = json.loads(main.read_text(encoding="utf-8"))

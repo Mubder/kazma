@@ -291,7 +291,12 @@ the benchmarks page regenerated.
    "شنو تشتغل أختي؟" after the fact was forgotten was answered "I don't have a
    sister, I'm Kazma". LongMemEval's abstention judge passed it (it said no
    answer); the reply misread the question.
-4. **Recall finds less than plain retrieval.** On the 200 dev questions,
-   Kazma's recall shows every answering conversation for 82.0 %, bge-m3's 10
-   nearest rounds for 91.8 % (`tests/fixtures/longmemeval/retrieval_dev.json`).
-   Kazma shows 4.5 memories to their 10. Input to W3 + W2 and W4.
+4. **Recall finds more than plain retrieval at its size, less than ten
+   whole rounds.** On the 200 dev questions Kazma shows every answering
+   conversation for 82.0 % (4.5 memories, 1,080 tokens median); bge-m3's
+   nearest rounds that fit the same block, 42.3 %; as many rounds as Kazma
+   showed, 77.3 % (2,310 tokens); ten rounds, 91.8 % (5,148 tokens). On the
+   six questions with no answer Kazma shows 4.7 memories, never nothing
+   (`tests/fixtures/longmemeval/retrieval_dev.json`). Input to W1a (more of
+   the right conversations inside the budget), W3 + W2 (saying nothing) and
+   W4.

@@ -123,15 +123,25 @@ The reader was sent about 1,017 tokens a question from Kazma's recall, 2,214 wit
 
 200 questions to choose settings on (`tests/fixtures/longmemeval/split.json`: the sample above and 100 more); the other 300 are never used to choose anything, and every look at them is logged.
 
-**Finding it, against plain retrieval** (no model): Kazma's recall beside the rounds nearest the question by bge-m3 alone (the same vectors, no background, no word coverage, no gap) and by BM25, ten of each.
+**Finding it, against plain retrieval, at the same size** (no model): Kazma's recall beside the rounds nearest the question by bge-m3 alone (the same vectors, with none of recall's background, word coverage or gap) and by BM25, each read whole: as many as fit Kazma's own block (its median and 95th-percentile tokens), as many rounds as Kazma showed for the question, and ten. Tokens are counted as the product measures count the block.
 
-| | Kazma's recall | bge-m3's 10 nearest rounds | BM25's 10 best rounds |
-|---|---|---|---|
-| The answer's round shown | 90.2 % | 94.8 % | 89.2 % |
-| Every answering conversation shown | 82.0 % | 91.8 % | 83.5 % |
-| Memories shown (mean) | 4.47 | 10 | 10 |
+At Kazma's own block size, bge-m3's nearest rounds show the answer's round for 70.1 % and every answering conversation for 42.3 %, against Kazma's 90.2 % and 82.0 %; with as many rounds as Kazma showed, 89.7 % and 77.3 %. Ten rounds find more (94.8 % and 91.8 %) with 4.8 times Kazma's tokens.
 
-Of the 129 answerable questions whose answer is a word or a phrase, its text is in the rounds Kazma shows for 45.0 %, and still in the block after the block's bounds for 30.2 %. Questions with no answer that show nothing: 0.0 %.
+| Method | Memories shown | Tokens (median / 95th) | The answer's round shown | Every answering conversation shown |
+|---|---|---|---|---|
+| Kazma's recall | 4.47 | 1,080 / 1,317 | 90.2 % | 82.0 % |
+| bge-m3, within Kazma's median block | 1.77 | 797 / 1,056 | 70.1 % | 42.3 % |
+| bge-m3, within Kazma's 95th-percentile block | 2.25 | 1,053 / 1,296 | 77.3 % | 51.5 % |
+| bge-m3, as many rounds as Kazma showed | 4.47 | 2,310 / 5,009 | 89.7 % | 77.3 % |
+| bge-m3, ten rounds | 10.0 | 5,148 / 7,118 | 94.8 % | 91.8 % |
+| BM25, within Kazma's median block | 1.59 | 745 / 1,041 | 62.4 % | 36.1 % |
+| BM25, within Kazma's 95th-percentile block | 2.08 | 1,054 / 1,292 | 65.5 % | 47.9 % |
+| BM25, as many rounds as Kazma showed | 4.47 | 2,473 / 5,475 | 80.9 % | 71.7 % |
+| BM25, ten rounds | 10.0 | 5,599 / 7,414 | 89.2 % | 83.5 % |
+
+Of the 129 answerable questions whose answer is a word or a phrase, its text is in the rounds Kazma shows for 45.0 %, and still in the block after the block's bounds for 30.2 %.
+
+**The 6 questions with no answer**: Kazma shows nothing for 0.0 % of them; it shows 4.67 memories (982 tokens, median), ten rounds show ten (4,825). Kazma showed nothing for 1.0 % of all the questions.
 
 Reproduce: download LongMemEval into a folder of its own, then `python scripts/longmemeval_bench.py retrieve --data DIR` (and `answer`, `translate`, `parallel`; those call a model).
 

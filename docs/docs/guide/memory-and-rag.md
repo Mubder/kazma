@@ -1129,22 +1129,25 @@ Spend (deepseek-flash, 2026-11-21): the end-to-end run 800 calls,
 10,684,738 prompt and 36,646 completion tokens; the translation 392 calls,
 338,099 prompt and 420,616 completion tokens.
 
-**On the dev split, beside plain retrieval** (200 questions, 22 Nov, no
-model): what Kazma's recall shows, against the rounds nearest the question
-by bge-m3 alone (the same vectors, with none of recall's background, word
-coverage or gap) and by BM25, ten of each.
+**On the dev split, beside plain retrieval at the same size** (200
+questions, 22 Nov, no model): what Kazma's recall shows, against the rounds
+nearest the question by bge-m3 alone (the same vectors, with none of
+recall's background, word coverage or gap), read whole, at Kazma's own size
+and at ten. Tokens are counted as the product measures count the block.
 
-| | Kazma's recall | bge-m3's 10 nearest | BM25's 10 best |
-|---|---|---|---|
-| The answer's round shown | 90.2 % | 94.8 % | 89.2 % |
-| Every answering conversation shown | 82.0 % | 91.8 % | 83.5 % |
-| Memories shown (mean) | 4.5 | 10 | 10 |
+| Method | Memories | Tokens (median) | The answer's round shown | Every answering conversation |
+|---|---|---|---|---|
+| Kazma's recall | 4.5 | 1,080 | 90.2 % | 82.0 % |
+| bge-m3, within Kazma's median block | 1.8 | 797 | 70.1 % | 42.3 % |
+| bge-m3, as many rounds as Kazma | 4.5 | 2,310 | 89.7 % | 77.3 % |
+| bge-m3, ten rounds | 10 | 5,148 | 94.8 % | 91.8 % |
 
-Kazma shows fewer memories on purpose (precision 0.83), and finds less:
-questions across several conversations and questions about time lose
-answering conversations that plain retrieval keeps. For the questions whose
-answer is a word or a phrase, the answer is in the rounds shown for 45 %,
-and in the block after its bounds for 30 %.
+At the same size Kazma finds more; ten whole rounds find more than Kazma,
+at almost five times its tokens (BM25 finds less than bge-m3 at every size;
+the benchmarks page has both). On the six questions with no answer Kazma
+still shows 4.7 memories: it does not yet say nothing. For the questions
+whose answer is a word or a phrase, the answer is in the rounds shown for
+45 %, and in the block after its bounds for 30 %.
 
 The end-to-end harness now reads at the reasoning Kazma's chat runs (low),
 judges every dev answer twice (deepseek-flash and deepseek-v4-pro), answers

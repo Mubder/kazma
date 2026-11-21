@@ -2,9 +2,11 @@
 
 ## LongMemEval: plain retrieval beside Kazma's, and a harness that checks itself (2026-11-22)
 
-- On the 200 dev questions Kazma's recall shows every conversation holding
-  the answer for 82 %, against 92 % for the ten rounds nearest the question
-  by meaning alone (it shows four or five memories, they show ten).
+- On the 200 dev questions, at the same size, Kazma's recall finds more than
+  plain retrieval: every conversation holding the answer for 82 %, against
+  42 % for the rounds nearest the question by meaning alone that fit its
+  block, and 77 % for as many rounds as it shows. Ten whole rounds find
+  92 %, at almost five times the tokens.
 - The end-to-end harness reads at the reasoning Kazma's chat runs, judges
   every answer twice, counts the answers that flip between two runs of the
   same build, and asks again a call the API refused instead of keeping it

@@ -384,10 +384,69 @@ def ask(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
         "answer_in_shown": in_shown if words else None,
         "answer_in_block": holds_answer(block, words) if words else None,
         "block_chars": len(block),
+        "block_tokens": shown_tokens(block),
         "degraded": bool(result.degraded),
         "latency_ms": round(latency * 1000, 1),
         "memories": len(rows),
     }
+
+
+_PLAIN_FOUND = re.compile(r"plain_(?:bge|bm25)(?:_(?:p50|p95|same))?_(?:evidence|every_session)")
+
+
+def shown_sizes(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    """Per method, the memories it shows and their tokens (median and 95th
+    percentile), and the share of questions it shows nothing for."""
+    def pct(values: list[int], share: float) -> int:
+        ordered = sorted(values)
+        return ordered[min(len(ordered) - 1, round(share * (len(ordered) - 1)))]
+
+    methods = {"kazma": ("shown", "block_tokens")}
+    for how in ("bge", "bm25"):
+        for suffix in ("", "_p50", "_p95", "_same"):
+            prefix = f"plain_{how}{suffix}"
+            if all(f"{prefix}_tokens" in r for r in rows):
+                methods[prefix] = (f"{prefix}_shown", f"{prefix}_tokens")
+    out: dict[str, dict[str, float]] = {}
+    for name, (count, tokens) in methods.items():
+        if not all(count in r and tokens in r for r in rows):
+            continue
+        out[name] = {"shown_mean": round(statistics.fmean(r[count] for r in rows), 2),
+                     "tokens_p50": pct([int(r[tokens]) for r in rows], 0.5),
+                     "tokens_p95": pct([int(r[tokens]) for r in rows], 0.95),
+                     "nothing": round(sum(1 for r in rows if r[count] == 0) / len(rows), 4)}
+    return out
+
+
+def dump_result(obj: dict[str, Any]) -> str:
+    """A result file's text: indented, its ``results`` one compact row a line
+    (200 rows of every measure stay well under the size a result file may
+    have)."""
+    rows = obj.get("results")
+    if rows is None:
+        return json.dumps(obj, indent=1) + "\n"
+    head = json.dumps({**{k: v for k, v in obj.items() if k != "results"}, "results": []}, indent=1)
+    body = ",\n  ".join(json.dumps(r, separators=(",", ":")) for r in rows)
+    return head[: head.rindex('"results": []')] + '"results": [\n  ' + body + "\n ]\n}\n"
+
+
+#: The order of a compact row's plain-baseline measures (``compact_row``).
+PLAIN_FIELDS = ("evidence", "every_session", "shown", "tokens")
+
+
+def compact_row(row: dict[str, Any]) -> dict[str, Any]:
+    """*row* as the result file keeps it: each plain baseline's measures in
+    one list per variant (``PLAIN_FIELDS``), so 200 rows stay small."""
+    out = {k: v for k, v in row.items() if not k.startswith("plain_")}
+    plain: dict[str, list[Any]] = {}
+    for how in ("bge", "bm25"):
+        for suffix in ("", "_p50", "_p95", "_same"):
+            prefix = f"plain_{how}{suffix}"
+            if f"{prefix}_evidence" in row:
+                plain[f"{how}{suffix or '_10'}"] = [row.get(f"{prefix}_{field}") for field in PLAIN_FIELDS]
+    if plain:
+        out["plain"] = plain
+    return out
 
 
 def summarise(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -407,8 +466,7 @@ def summarise(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "every_answer_session": round(sum(r["every_answer_session"] for r in answerable) / len(answerable), 4),
                 "precision": round(statistics.fmean(precisions), 4) if precisions else 0.0,
             })
-            for key in ("plain_bge_evidence", "plain_bge_every_session", "plain_bm25_evidence",
-                        "plain_bm25_every_session"):
+            for key in sorted({k for r in answerable for k in r if _PLAIN_FOUND.fullmatch(k)}):
                 if all(key in r for r in answerable):
                     out[key] = round(sum(r[key] for r in answerable) / len(answerable), 4)
             worded = [r for r in answerable if r.get("answer_in_block") is not None]
@@ -427,6 +485,13 @@ def summarise(results: list[dict[str, Any]]) -> dict[str, Any]:
         chars = sorted(r["block_chars"] for r in rows if "block_chars" in r)
         if chars:
             out["block_chars_p50"] = chars[len(chars) // 2]
+        if rows and all("block_tokens" in r for r in rows):
+            out["sizes"] = shown_sizes(rows)
+            if quiet:
+                # What each method shows a question memory holds no answer
+                # to: Kazma may show nothing; ten rounds always show ten.
+                out["abstention_sizes"] = shown_sizes(quiet)
+                out["abstention_n"] = len(quiet)
         return out
 
     types = sorted({r["type"] for r in results})
@@ -506,16 +571,62 @@ def read_whole(entries: list[dict[str, Any]]) -> str:
         f"Assistant: {r['assistant_text']}" for r in shown)
 
 
-def plain_scores(item: dict[str, Any], rows: list[dict[str, Any]], embedder: Any) -> dict[str, Any]:
+def shown_tokens(text: str) -> int:
+    """Tokens of what a method shows the model, counted as the product
+    measures count the recall block (``summarizer.estimate_tokens``)."""
+    from kazma_core.summarizer import estimate_tokens
+
+    return estimate_tokens([{"role": "system", "content": text}]) if text else 0
+
+
+def within_budget(ranked: list[dict[str, Any]], budget: int) -> list[dict[str, Any]]:
+    """The best rounds of *ranked*, read whole, while their tokens fit
+    *budget*; the first round always (a block shows at least one memory)."""
+    out: list[dict[str, Any]] = []
+    used = 0
+    for entry in ranked:
+        cost = shown_tokens(read_whole([entry]))
+        if out and used + cost > budget:
+            break
+        out.append(entry)
+        used += cost
+    return out
+
+
+def size_budgets(results: list[dict[str, Any]]) -> dict[str, int]:
+    """Kazma's own size: its block's median and 95th-percentile tokens over
+    every question asked."""
+    sizes = sorted(int(r.get("block_tokens") or 0) for r in results)
+    if not sizes:
+        return {}
+    return {"p50": sizes[len(sizes) // 2], "p95": sizes[min(len(sizes) - 1, round(0.95 * (len(sizes) - 1)))]}
+
+
+def plain_scores(item: dict[str, Any], rows: list[dict[str, Any]], embedder: Any, *,
+                 budgets: dict[str, int] | None = None, same_count: int | None = None) -> dict[str, Any]:
     """Each baseline's retrieval measures for *item*: the evidence round among
-    its rounds, and every answer session among them."""
+    its rounds, every answer session among them, how many rounds and tokens it
+    shows; at ten rounds, and at Kazma's own size (the memory plan's W0): the
+    rounds that fit each token budget of *budgets* (Kazma's median and 95th
+    block), and as many rounds as Kazma showed for this question
+    (*same_count*; none when Kazma showed none)."""
     answer_sessions = {str(s) for s in item.get("answer_session_ids") or []}
     out: dict[str, Any] = {}
+
+    def measure(prefix: str, shown: list[dict[str, Any]]) -> None:
+        sessions = {e["session"] for e in shown}
+        out[f"{prefix}_evidence"] = any(e["evidence"] for e in shown)
+        out[f"{prefix}_every_session"] = bool(answer_sessions) and answer_sessions <= sessions
+        out[f"{prefix}_shown"] = len(shown)
+        out[f"{prefix}_tokens"] = shown_tokens(read_whole(shown)) if shown else 0
+
     for how in ("bge", "bm25"):
-        top = plain_top(str(item["question"]), rows, how, embedder=embedder)
-        sessions = {e["session"] for e in top}
-        out[f"plain_{how}_evidence"] = any(e["evidence"] for e in top)
-        out[f"plain_{how}_every_session"] = bool(answer_sessions) and answer_sessions <= sessions
+        ranked = plain_top(str(item["question"]), rows, how, embedder=embedder, k=len(rows))
+        measure(f"plain_{how}", ranked[:PLAIN_K])
+        for name, budget in (budgets or {}).items():
+            measure(f"plain_{how}_{name}", within_budget(ranked, budget))
+        if same_count is not None:
+            measure(f"plain_{how}_same", ranked[:same_count])
     return out
 
 
@@ -1263,18 +1374,24 @@ def _cmd_retrieve(data: Path, limit: int | None, split: str = "sample", look: st
     with mock.patch("kazma_core.memory.embedder.get_embedder", lambda: cached), \
             mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0):
         for n, item in enumerate(items, 1):
-            rows = histories[str(item["question_id"])]
-            results.append({**ask(item, rows), **plain_scores(item, rows, cached)})
+            results.append(ask(item, histories[str(item["question_id"])]))
             if n % 10 == 0:
                 print(f"  asked {n} of {len(items)}", flush=True)
+        # The plain baselines at Kazma's own size: its block's median and
+        # 95th-percentile tokens over every question of the split.
+        budgets = size_budgets(results)
+        for item, row in zip(items, results, strict=True):
+            row.update(plain_scores(item, histories[str(item["question_id"])], cached, budgets=budgets,
+                                    same_count=int(row["shown"])))
     summary = summarise(results)
-    result_path(RETRIEVAL, split).write_text(json.dumps({
+    summary["overall"]["budgets"] = budgets
+    result_path(RETRIEVAL, split).write_text(dump_result({
         "source": SOURCE, "split": split, "sample": len(items), "embedding_model": model, "limit": LIMIT,
         "made_on": datetime.now(UTC).date().isoformat(),
         "what": "Each question's own history in a private store, one memory per round, dated; recall() as a "
                 "chat turn calls it. No facts extracted, no summaries. Scores only.",
-        **summary, "results": results,
-    }, indent=1) + "\n", encoding="utf-8", newline="\n")
+        "plain_fields": list(PLAIN_FIELDS), **summary, "results": [compact_row(r) for r in results],
+    }), encoding="utf-8", newline="\n")
     print(json.dumps(summary["overall"], indent=1))
     for t, row in summary["types"].items():
         print(f"  {t:<26} {row}")
