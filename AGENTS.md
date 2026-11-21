@@ -2305,10 +2305,18 @@ four injected were noise.
   `plain_top`: bge-m3's 10 nearest rounds by plain cosine and BM25's 10,
   each also a reader condition, read whole)
   (each history written as the product writes a turn, one memory per round,
-  dated; the real `recall()`; no model call), `answer` (one reader, four
+  dated; the real `recall()`; no model call), `answer` (one reader, the
   histories: Kazma's recall block, the same rounds read whole, the whole
-  history cut from its oldest to fit, the oracle; LongMemEval's own judge
-  prompts), `translate` and `parallel` (40 questions' 84 answer
+  history, the oracle and the two plain baselines; LongMemEval's own judge
+  prompts; the reader at the reasoning Kazma's chat runs, `--reasoning
+  low` by default, with room for it, an answer cut at its limit counted;
+  `--judge2` a second judge on every answer, its agreement in the result;
+  `--run` a run's own cache and result file; `--conditions`; a call the API
+  refuses is asked again on the next run, never kept as an answer or a
+  verdict, `answer_entry`), `noise` (two runs of one build: the answers that
+  flip, `noise_dev.json`), `reading-sheet` and `model-read` (the answers
+  read beside the judges, their disagreements first, labelled model-read:
+  `model_read.json`), `translate` and `parallel` (40 questions' 84 answer
   conversations in Gulf Arabic and MSA, one store, each question asked in
   its language). The data lives in a folder outside the repository (`--data`,
   checked by its SHA-256), read as untrusted and never committed; the
@@ -2318,7 +2326,11 @@ four injected were noise.
   answered 0.47 from the block, 0.77 read whole, 0.72 from the history cut
   to fit (440,000 characters; since 22 Nov `FULL_MAX_CHARS` is None, the
   reader's window holds the longest history, and the page names a cut run
-  "History cut to fit"), 0.94 oracle; Arabic 87.5 % against English 85.0 %. Most missed answers were
+  "History cut to fit"), 0.94 oracle; Arabic 87.5 % against English 85.0 %. On dev (22 Nov) Kazma's
+  recall shows the answer's round for 90.2 % and every answering
+  conversation for 82.0 %, against plain retrieval's 94.8 % and 91.8 %
+  (bge-m3's 10 nearest rounds) and 89.2 % and 83.5 % (BM25's 10); Kazma
+  shows 4.5 memories, they show 10. Most missed answers were
   shown but cut by the block's per-memory bounds (`limits.RECALL_SHOW_*`).
   The bounds measured (`scripts/recall_block_bounds.py`, evidence in
   `docs/audits/evidence/recall_block_bounds/`; a proposal, not built):

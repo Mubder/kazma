@@ -72,6 +72,10 @@ PARALLEL = FIXTURES / "parallel.json"
 #: never used to choose anything, every look at it logged in LOOKS.
 SPLIT = FIXTURES / "split.json"
 LOOKS = FIXTURES / "report_looks.json"
+#: Answers read by a model (Claude) beside the two judges' verdicts: ids,
+#: verdicts and the reading's label only, never the text read.
+MODEL_READ = FIXTURES / "model_read.json"
+MODEL_READ_SIZE = 50
 DEV_SIZE = 200
 SPLITS = ("sample", "dev", "report")
 #: The parallel set: the first answerable questions of the sample (no
@@ -269,7 +273,9 @@ class CachedEmbedder:
             if at // batch % 20 == 0:
                 print(f"  embedded {min(at + batch, len(todo))} of {len(todo)}", flush=True)
                 self.save()
-        self.save()
+        # Nothing new, nothing written: other runs may be reading the file.
+        if todo:
+            self.save()
         return len(todo)
 
     def save(self) -> None:
@@ -631,20 +637,32 @@ def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str
             {"shown": len(result.episodes), "facts": len(result.beliefs)})
 
 
-class Chat:
-    """One model on DeepSeek's (OpenAI-shaped) API, temperature 0, hidden
-    reasoning off; tokens counted per call."""
+#: Reasoning a reader may be asked for: ``off``, or an effort DeepSeek's API
+#: takes (``reasoning_effort``), as Kazma sends its chat's own level
+#: (``agent/chat_reasoning.py``; the product ships ``low``).
+READER_REASONING = ("off", "low", "high")
 
-    def __init__(self, *, model: str, base_url: str, key: str) -> None:
+
+class Chat:
+    """One model on DeepSeek's (OpenAI-shaped) API, temperature 0; hidden
+    reasoning off, or at an effort Kazma's chat may send; tokens counted per
+    call."""
+
+    def __init__(self, *, model: str, base_url: str, key: str, reasoning: str = "off") -> None:
         import httpx
 
+        if reasoning not in READER_REASONING:
+            raise ValueError(f"reasoning {reasoning!r}: one of {READER_REASONING}")
         self.model, self.base_url, self.key = model, base_url.rstrip("/"), key
         self.client = httpx.Client(follow_redirects=False, trust_env=False, timeout=600)
-        self.thinking_off = True
+        self.reasoning = reasoning
+        self.thinking_off = reasoning == "off"
 
     def ask(self, prompt: str, *, max_tokens: int) -> tuple[str, dict[str, int]]:
         body: dict[str, Any] = {"model": self.model, "temperature": 0, "max_tokens": max_tokens,
                                 "messages": [{"role": "user", "content": prompt}]}
+        if self.reasoning != "off":
+            body["reasoning_effort"] = self.reasoning
         for attempt in range(5):
             if self.thinking_off:
                 body["thinking"] = {"type": "disabled"}
@@ -660,14 +678,52 @@ class Chat:
             if reply.status_code >= 400:
                 return "", {"error": reply.status_code}
             data = reply.json()
-            usage = {k: int(v) for k, v in (data.get("usage") or {}).items() if isinstance(v, int)}
-            return str(data["choices"][0]["message"].get("content") or "").strip(), usage
+            raw = data.get("usage") or {}
+            usage = {k: int(v) for k, v in raw.items() if isinstance(v, int)}
+            details = raw.get("completion_tokens_details") or {}
+            if isinstance(details.get("reasoning_tokens"), int):
+                usage["reasoning_tokens"] = int(details["reasoning_tokens"])
+            choice = data["choices"][0]
+            # An answer cut at max_tokens (hidden reasoning counts against it)
+            # is said, never taken for the reader's whole answer.
+            if choice.get("finish_reason") == "length":
+                usage["cut_at_limit"] = 1
+            return str(choice["message"].get("content") or "").strip(), usage
         return "", {"error": 0}
 
 
+def answer_entry(entry: dict[str, Any], item: dict[str, Any], prompt: str, *, reader: Any, judge: Any,
+                 second: Any = None, reader_tokens: int = 800) -> None:
+    """Answer *prompt* into its cache *entry* and judge the answer, asking
+    only what the entry lacks. A reply answers the prompt it was asked: one
+    made from another prompt (a cut history, another block) is asked again.
+    A call the API refused (no balance, a rate limit past its retries) is
+    asked again on the next run, never kept as an answer or a verdict."""
+    digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:24]
+    if entry.get("prompt_sha") != digest:
+        entry.clear()
+        entry["prompt_sha"] = digest
+    if "hypothesis" not in entry:
+        text, usage = reader.ask(prompt, max_tokens=reader_tokens)
+        if "error" in usage:
+            entry["reader_error"] = usage["error"]
+            return
+        entry.update({"hypothesis": text, "reader_usage": usage})
+        entry.pop("reader_error", None)
+    if "verdict" not in entry and entry["hypothesis"]:
+        verdict, usage = judge.ask(judge_prompt(item, entry["hypothesis"]), max_tokens=10)
+        if "error" not in usage:
+            entry.update({"verdict": verdict, "judge_usage": usage})
+    if second is not None and "verdict2" not in entry and entry["hypothesis"]:
+        verdict, usage = second.ask(judge_prompt(item, entry["hypothesis"]), max_tokens=10)
+        if "error" not in usage:
+            entry.update({"verdict2": verdict, "judge2_usage": usage})
+
+
 def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, workers: int,
-                split: str = "sample", look: str | None = None) -> int:
-    log_look(split, look, f"answer --model {model}")
+                split: str = "sample", look: str | None = None, reasoning: str = "low",
+                judge2: str | None = None, run: str = "", conditions: tuple[str, ...] = CONDITIONS) -> int:
+    log_look(split, look, f"answer --model {model} --reasoning {reasoning}" + (f" --run {run}" if run else ""))
     _private_data_folder()
     _limit_cpu_threads()
     key = os.environ.get("DEEPSEEK_API_KEY", "")
@@ -681,7 +737,11 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
 
     by_id = {str(x["question_id"]): x for x in load(data)}
     items = [by_id[q] for q in question_ids(split)[: limit or None]]
-    cache_path = data / "cache" / f"answers-{model}.json"
+    # One cache a reader, reasoning level and run label: a second run (the
+    # noise run) asks every question again.
+    # Reasoning off with no label keeps the first runs' file (21 Nov).
+    stem = f"answers-{model}" if reasoning == "off" else f"answers-{model}-{reasoning}"
+    cache_path = data / "cache" / f"{stem}{'-' + run if run else ''}.json"
     cache: dict[str, Any] = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else {}
     embedder = CachedEmbedder(get_embedder(), data / "cache" / "kazma_vectors.npz", get_embedding_model_name())
     histories: dict[str, dict[str, Any]] = {}
@@ -697,28 +757,21 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
                      or "(no memories)" for how in ("bge", "bm25")}
             histories[qid] = {"kazma": block, "kazma_whole": whole, "full": full, "oracle": oracle, **plain,
                               "dropped": dropped, **shown}
-    chat = Chat(model=model, base_url=base_url, key=key)
+    reader = Chat(model=model, base_url=base_url, key=key, reasoning=reasoning)
+    judge = Chat(model=model, base_url=base_url, key=key)
+    second = Chat(model=judge2, base_url=base_url, key=key) if judge2 else None
+    # Hidden reasoning counts against max_tokens: room for it beside the answer.
+    reader_tokens = 800 if reasoning == "off" else 4000
 
-    def run(qid: str, condition: str) -> None:
+    def ask_one(qid: str, condition: str) -> None:
         item = by_id[qid]
         prompt = READER.format(histories[qid][condition], item["question_date"], item["question"])
-        # A reply answers the prompt it was asked: one made from another
-        # prompt (a cut history, another block) is asked again.
-        digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:24]
-        entry = cache.setdefault(qid, {}).setdefault(condition, {})
-        if entry.get("prompt_sha") != digest:
-            entry.clear()
-            entry["prompt_sha"] = digest
-        if "hypothesis" not in entry:
-            text, usage = chat.ask(prompt, max_tokens=800)
-            entry.update({"hypothesis": text, "reader_usage": usage})
-        if "verdict" not in entry and entry["hypothesis"]:
-            verdict, usage = chat.ask(judge_prompt(item, entry["hypothesis"]), max_tokens=10)
-            entry.update({"verdict": verdict, "judge_usage": usage})
+        answer_entry(cache.setdefault(qid, {}).setdefault(condition, {}), item, prompt,
+                     reader=reader, judge=judge, second=second, reader_tokens=reader_tokens)
 
-    jobs = [(str(i["question_id"]), c) for i in items for c in CONDITIONS]
+    jobs = [(str(i["question_id"]), c) for i in items for c in conditions]
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for n, _ in enumerate(pool.map(lambda job: run(*job), jobs), 1):
+        for n, _ in enumerate(pool.map(lambda job: ask_one(*job), jobs), 1):
             if n % 15 == 0:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
@@ -729,23 +782,41 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
         qid = str(item["question_id"])
         row: dict[str, Any] = {"id": qid, "type": str(item["question_type"]), "abstention": is_abstention(item),
                                "kazma_shown": histories[qid]["shown"], "full_sessions_dropped": histories[qid]["dropped"]}
-        for c in CONDITIONS:
+        for c in conditions:
             entry = cache[qid][c]
             row[c] = str(entry.get("verdict", "")).strip().lower().startswith("yes")
             row[f"{c}_prompt_tokens"] = int((entry.get("reader_usage") or {}).get("prompt_tokens", 0))
+            if "hypothesis" not in entry or (entry["hypothesis"] and "verdict" not in entry):
+                row[f"{c}_unasked"] = True
+            elif (entry.get("reader_usage") or {}).get("cut_at_limit"):
+                row[f"{c}_cut"] = True
+            if second is not None:
+                row[f"{c}_judge2"] = str(entry.get("verdict2", "")).strip().lower().startswith("yes")
         results.append(row)
-    summary = summarise_answers(results)
-    usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0}
+    summary = summarise_answers(results, conditions)
+    usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0,
+             "reasoning_tokens": 0}
     for qid in (str(i["question_id"]) for i in items):
-        for c in CONDITIONS:
-            for part in ("reader_usage", "judge_usage"):
+        for c in conditions:
+            for part in ("reader_usage", "judge_usage", "judge2_usage"):
                 u = cache[qid][c].get(part) or {}
                 if u:
                     usage["calls"] += 1
-                    for k in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens"):
+                    for k in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens", "reasoning_tokens"):
                         usage[k] += int(u.get(k, 0))
-    result_path(ANSWERS, split).write_text(json.dumps({
-        "source": SOURCE, "split": split, "sample": len(items), "reader": model, "judge": model, "provider": base_url.split("//")[-1],
+    if second is not None:
+        summary["judges_agree"] = judges_agree(results)
+    # Answers the reader never gave (a refused call) or gave cut at its limit:
+    # a score with any of these is not the reader's.
+    summary["unanswered"] = {c: sum(1 for r in results if r.get(f"{c}_unasked")) for c in conditions}
+    summary["cut_at_limit"] = {c: sum(1 for r in results if r.get(f"{c}_cut")) for c in conditions}
+    out = result_path(ANSWERS, split)
+    if run:
+        out = out.with_name(f"{out.stem}_{run}{out.suffix}")
+    out.write_text(json.dumps({
+        "source": SOURCE, "split": split, "run": run, "sample": len(items), "reader": model,
+        "reader_reasoning": reasoning, "judge": model, "judge2": judge2, "conditions": list(conditions),
+        "provider": base_url.split("//")[-1],
         "made_on": datetime.now(UTC).date().isoformat(), "limit": LIMIT, "full_max_chars": FULL_MAX_CHARS,
         "what": "One reader answers each question from Kazma's recall block, from the same recalled rounds read "
                 "whole, from the whole history (uncut unless full_max_chars says) and from the answer sessions "
@@ -760,18 +831,143 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
     return 0
 
 
-def summarise_answers(results: list[dict[str, Any]]) -> dict[str, Any]:
+def judges_agree(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """How often the second judge gives the first judge's verdict, per
+    condition and overall (the memory plan's W0: the judge is checked)."""
+    out: dict[str, Any] = {}
+    pairs_all = 0
+    same_all = 0
+    for c in CONDITIONS:
+        pairs = [(r[c], r[f"{c}_judge2"]) for r in results if f"{c}_judge2" in r]
+        if pairs:
+            same = sum(1 for a, b in pairs if a == b)
+            out[c] = round(same / len(pairs), 4)
+            pairs_all += len(pairs)
+            same_all += same
+    if pairs_all:
+        out["overall"] = round(same_all / pairs_all, 4)
+        out["n"] = pairs_all
+    return out
+
+
+def noise(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Two runs of the same build on the same questions: per condition, the
+    answers whose verdict flipped, and each run's score (the memory plan's
+    W0: no change is accepted on a difference smaller than this)."""
+    rows_a = {r["id"]: r for r in a["results"]}
+    rows_b = {r["id"]: r for r in b["results"]}
+    common = sorted(set(rows_a) & set(rows_b))
+    out: dict[str, Any] = {"questions": len(common), "conditions": {}}
+    for c in CONDITIONS:
+        if not all(c in rows_a[q] and c in rows_b[q] for q in common):
+            continue
+        flipped = [q for q in common if rows_a[q][c] != rows_b[q][c]]
+        out["conditions"][c] = {
+            "flips": len(flipped), "flipped": flipped,
+            "a": round(sum(rows_a[q][c] for q in common) / len(common), 4) if common else 0.0,
+            "b": round(sum(rows_b[q][c] for q in common) / len(common), 4) if common else 0.0,
+        }
+    return out
+
+
+def pick_model_read(results: list[dict[str, Any]], size: int = MODEL_READ_SIZE) -> list[dict[str, str]]:
+    """The answers read beside the judges: every answer the two judges
+    disagree on first, then a fixed draw of the rest (by a hash of the id
+    and the history, so a re-run picks the same)."""
+    disagree: list[dict[str, str]] = []
+    agree: list[dict[str, str]] = []
+    for r in results:
+        for c in CONDITIONS:
+            if f"{c}_judge2" not in r:
+                continue
+            pair = {"id": str(r["id"]), "condition": c}
+            (disagree if r[c] != r[f"{c}_judge2"] else agree).append(pair)
+
+    def order(pair: dict[str, str]) -> str:
+        return hashlib.sha256(f"{SAMPLE_SEED}|read|{pair['id']}|{pair['condition']}".encode()).hexdigest()
+
+    picked = sorted(disagree, key=order)[:size]
+    return picked + sorted(agree, key=order)[: size - len(picked)]
+
+
+def model_read_summary(labels: list[dict[str, Any]]) -> dict[str, Any]:
+    """How often each judge gives the reading's verdict, over the answers read
+    and over those the judges disagree on."""
+    def share(rows: list[dict[str, Any]], judge: str) -> float:
+        return round(sum(1 for r in rows if r[judge] == r["read"]) / len(rows), 4) if rows else 0.0
+
+    split = [r for r in labels if r["judge"] != r["judge2"]]
+    return {"n": len(labels), "judge": share(labels, "judge"), "judge2": share(labels, "judge2"),
+            "disagreements": len(split), "judge_on_disagreements": share(split, "judge"),
+            "judge2_on_disagreements": share(split, "judge2")}
+
+
+def _cmd_reading_sheet(data: Path, answers: Path, cache: Path, out: Path) -> int:
+    """A sheet to read the picked answers from: the question, LongMemEval's
+    answer and the reader's, outside the repository (it holds the dataset's
+    text); the labels go into ``MODEL_READ`` by id."""
+    if REPO in out.resolve().parents:
+        print("the reading sheet holds the dataset's text: write it outside the repository", file=sys.stderr)
+        return 2
+    run = json.loads(answers.read_text(encoding="utf-8"))
+    store = json.loads(cache.read_text(encoding="utf-8"))
+    by_id = {str(x["question_id"]): x for x in load(data)}
+    rows = {r["id"]: r for r in run["results"]}
+    lines = [f"# Reading sheet: {answers.name}", ""]
+    for n, pair in enumerate(pick_model_read(run["results"]), 1):
+        item, row = by_id[pair["id"]], rows[pair["id"]]
+        c = pair["condition"]
+        lines += [f"## {n}. {pair['id']} / {c} ({item['question_type']})",
+                  f"judge: {'yes' if row[c] else 'no'}   judge2: {'yes' if row[f'{c}_judge2'] else 'no'}",
+                  f"question ({item['question_date']}): {item['question']}",
+                  f"gold: {item['answer']}",
+                  f"reader: {store[pair['id']][c].get('hypothesis', '')}", ""]
+    out.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    print(f"wrote {out}")
+    return 0
+
+
+def _cmd_model_read(answers: Path, labels: Path) -> int:
+    """Keep the reading's labels beside the judges' verdicts in
+    ``MODEL_READ``: ids, verdicts and labels only. *labels* is a local file
+    (outside the repository) mapping ``"<id>|<condition>"`` to the reading's
+    verdict, true or false."""
+    run = json.loads(answers.read_text(encoding="utf-8"))
+    read = json.loads(labels.read_text(encoding="utf-8"))
+    rows = {r["id"]: r for r in run["results"]}
+    out = []
+    for pair in pick_model_read(run["results"]):
+        key = f"{pair['id']}|{pair['condition']}"
+        if key not in read:
+            print(f"no label for {key}", file=sys.stderr)
+            return 2
+        row = rows[pair["id"]]
+        c = pair["condition"]
+        out.append({**pair, "judge": bool(row[c]), "judge2": bool(row[f"{c}_judge2"]), "read": bool(read[key])})
+    MODEL_READ.write_text(json.dumps({
+        "answers": answers.name, "judge": run["judge"], "judge2": run["judge2"],
+        "read_by": "Claude (a model), labelled model-read until the owner has checked them by hand",
+        "what": "The answers read beside the two judges: every answer the judges disagree on first, then a fixed "
+                "draw. Ids, verdicts and the reading's label only.",
+        "summary": model_read_summary(out), "labels": out,
+    }, indent=1) + "\n", encoding="utf-8", newline="\n")
+    print(json.dumps(model_read_summary(out), indent=1))
+    return 0
+
+
+def summarise_answers(results: list[dict[str, Any]],
+                      conditions: tuple[str, ...] = CONDITIONS) -> dict[str, Any]:
     """Accuracy per history and question type (LongMemEval's own measure:
     the share the judge called correct), and Kazma's prompt beside the
     whole history's (tokens the reader was sent)."""
     def part(rows: list[dict[str, Any]]) -> dict[str, Any]:
         out: dict[str, Any] = {"n": len(rows)}
-        for c in CONDITIONS:
+        for c in conditions:
             out[c] = round(sum(1 for r in rows if r[c]) / len(rows), 4) if rows else 0.0
         return out
 
     tokens = {c: round(statistics.fmean(r[f"{c}_prompt_tokens"] for r in results)) if results else 0
-              for c in CONDITIONS}
+              for c in conditions}
     return {"overall": {**part(results), "prompt_tokens_mean": tokens},
             "types": {t: part([r for r in results if r["type"] == t])
                       for t in sorted({r["type"] for r in results})}}
@@ -1002,6 +1198,15 @@ def _cmd_sample(data: Path) -> int:
     return 0
 
 
+def _cmd_noise(first: Path, second: Path, out: Path) -> int:
+    report = noise(json.loads(first.read_text(encoding="utf-8")), json.loads(second.read_text(encoding="utf-8")))
+    report["runs"] = [first.name, second.name]
+    out.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8", newline="\n")
+    for c, row in report["conditions"].items():
+        print(f"  {c:<12} flips {row['flips']:>3} of {report['questions']}  ({row['a']} / {row['b']})")
+    return 0
+
+
 def _cmd_split(data: Path) -> int:
     items = load(data)
     halves = draw_split(items, question_ids("sample"))
@@ -1079,6 +1284,18 @@ def _cmd_retrieve(data: Path, limit: int | None, split: str = "sample", look: st
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
+    noise_p = sub.add_parser("noise", help="compare two runs of the same build: the answers that flip")
+    noise_p.add_argument("first", type=Path)
+    noise_p.add_argument("second", type=Path)
+    noise_p.add_argument("--out", type=Path, default=FIXTURES / "noise_dev.json")
+    sheet = sub.add_parser("reading-sheet", help="the answers to read beside the judges, outside the repository")
+    sheet.add_argument("--data", required=True, type=Path)
+    sheet.add_argument("--answers", required=True, type=Path, help="a result file with a second judge")
+    sheet.add_argument("--cache", required=True, type=Path, help="that run's answer cache")
+    sheet.add_argument("--out", required=True, type=Path)
+    read_p = sub.add_parser("model-read", help="keep the reading's labels beside the judges' verdicts")
+    read_p.add_argument("--answers", required=True, type=Path)
+    read_p.add_argument("--labels", required=True, type=Path, help="a local file: {\"id|condition\": true}")
     for name in ("sample", "split", "retrieve", "answer", "translate", "parallel"):
         s = sub.add_parser(name)
         s.add_argument("--data", required=True, type=Path, help="the folder LongMemEval was downloaded into")
@@ -1086,18 +1303,33 @@ def main(argv: list[str] | None = None) -> int:
             s.add_argument("--limit", type=int, default=None, help="ask only the first N of the split")
             s.add_argument("--split", choices=SPLITS, default="sample")
             s.add_argument("--look", default=None, help="why the report split is looked at (logged)")
+        if name == "answer":
+            s.add_argument("--reasoning", choices=READER_REASONING, default="low",
+                           help="the reader's hidden reasoning (the product ships low)")
+            s.add_argument("--judge2", default=None, help="a second judge model (agreement is reported)")
+            s.add_argument("--run", default="", help="a run label: its own cache and result file (the noise run)")
+            s.add_argument("--conditions", default=",".join(CONDITIONS),
+                           help="the histories to answer from, comma-separated")
         if name in ("answer", "translate"):
             s.add_argument("--model", default="deepseek-flash")
             s.add_argument("--base-url", default="https://api.deepseek.com")
             s.add_argument("--workers", type=int, default=4)
     args = p.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if args.cmd == "noise":
+        return _cmd_noise(args.first, args.second, args.out)
+    if args.cmd == "reading-sheet":
+        return _cmd_reading_sheet(args.data, args.answers, args.cache, args.out)
+    if args.cmd == "model-read":
+        return _cmd_model_read(args.answers, args.labels)
     if args.cmd == "sample":
         return _cmd_sample(args.data)
     if args.cmd == "split":
         return _cmd_split(args.data)
     if args.cmd == "answer":
-        return _cmd_answer(args.data, args.limit, args.model, args.base_url, args.workers, args.split, args.look)
+        return _cmd_answer(args.data, args.limit, args.model, args.base_url, args.workers, args.split, args.look,
+                           args.reasoning, args.judge2, args.run,
+                           tuple(c for c in args.conditions.split(",") if c in CONDITIONS))
     if args.cmd == "translate":
         return _cmd_translate(args.data, args.model, args.base_url, args.workers)
     if args.cmd == "parallel":

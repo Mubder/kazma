@@ -284,3 +284,143 @@ def test_the_parallel_set_leaves_out_abstention_and_preference(lme):
     oracle = {q: {"question_type": t} for q, t in (("a", "multi-session"), ("b_abs", "multi-session"),
                                                     ("c", "single-session-preference"), ("d", "temporal-reasoning"))}
     assert lme.parallel_ids(["a", "b_abs", "c", "d"], oracle) == ["a", "d"]
+
+
+# ── The instrument checked (the memory plan's W0) ───────────────────────────
+
+
+def _chat(lme, reasoning: str, answer: dict):
+    import httpx
+
+    sent: list[dict] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json=answer)
+
+    chat = lme.Chat(model="m", base_url="https://api.example", key="k", reasoning=reasoning)
+    chat.client = httpx.Client(transport=httpx.MockTransport(reply))
+    return chat, sent
+
+
+_ANSWER = {"choices": [{"message": {"content": "In May."}, "finish_reason": "stop"}],
+           "usage": {"prompt_tokens": 10, "completion_tokens": 40,
+                     "completion_tokens_details": {"reasoning_tokens": 30}}}
+
+
+def test_the_reader_reasons_at_the_shipped_level(lme):
+    chat, sent = _chat(lme, "low", _ANSWER)
+    text, usage = chat.ask("q", max_tokens=4000)
+    assert text == "In May." and usage["reasoning_tokens"] == 30
+    assert sent[0]["reasoning_effort"] == "low" and "thinking" not in sent[0]
+    # Control: the judge asks with reasoning off, as before.
+    chat, sent = _chat(lme, "off", _ANSWER)
+    chat.ask("q", max_tokens=10)
+    assert sent[0]["thinking"] == {"type": "disabled"} and "reasoning_effort" not in sent[0]
+    with pytest.raises(ValueError):
+        lme.Chat(model="m", base_url="https://api.example", key="k", reasoning="max")
+
+
+def test_an_answer_cut_at_its_limit_is_said(lme):
+    cut = {**_ANSWER, "choices": [{"message": {"content": ""}, "finish_reason": "length"}]}
+    chat, _ = _chat(lme, "low", cut)
+    _text, usage = chat.ask("q", max_tokens=4000)
+    assert usage["cut_at_limit"] == 1
+
+
+def _row(qid: str, verdicts: dict[str, bool], second: dict[str, bool] | None = None) -> dict:
+    row = {"id": qid, "type": "multi-session"}
+    for c, v in verdicts.items():
+        row[c] = v
+        if second is not None:
+            row[f"{c}_judge2"] = second[c]
+    return row
+
+
+def test_the_second_judge_is_compared_with_the_first(lme):
+    rows = [_row("a", {"kazma": True, "full": False}, {"kazma": True, "full": True}),
+            _row("b", {"kazma": False, "full": False}, {"kazma": False, "full": False})]
+    agree = lme.judges_agree(rows)
+    assert agree["kazma"] == 1.0 and agree["full"] == 0.5 and agree["overall"] == 0.75 and agree["n"] == 4
+    # Control: with no second judge there is nothing to compare.
+    assert lme.judges_agree([_row("a", {"kazma": True})]) == {}
+
+
+def test_the_noise_run_counts_the_answers_that_flip(lme):
+    a = {"results": [_row("a", {"kazma": True}), _row("b", {"kazma": False}), _row("c", {"kazma": True})]}
+    b = {"results": [_row("a", {"kazma": True}), _row("b", {"kazma": True}), _row("c", {"kazma": False})]}
+    report = lme.noise(a, b)
+    assert report["questions"] == 3
+    assert report["conditions"]["kazma"]["flips"] == 2
+    assert report["conditions"]["kazma"]["flipped"] == ["b", "c"]
+    # Control: a run compared with itself flips nothing.
+    assert lme.noise(a, a)["conditions"]["kazma"]["flips"] == 0
+
+
+def test_the_answers_read_by_hand_start_with_the_judges_disagreements(lme):
+    rows = [_row(f"q{n}", {"kazma": True, "full": n % 7 != 0}, {"kazma": True, "full": True}) for n in range(40)]
+    picked = lme.pick_model_read(rows, size=10)
+    split = [p for p in picked if p["condition"] == "full" and int(p["id"][1:]) % 7 == 0]
+    assert len(picked) == 10 and len(split) == 6  # every disagreement (q0, q7, ..., q35), then the rest
+    assert picked == lme.pick_model_read(rows, size=10)  # the same pick on every run
+    labels = [{"judge": True, "judge2": False, "read": False}, {"judge": True, "judge2": True, "read": True}]
+    summary = lme.model_read_summary(labels)
+    assert summary["judge"] == 0.5 and summary["judge2"] == 1.0 and summary["judge2_on_disagreements"] == 1.0
+
+
+def test_the_reading_sheet_stays_outside_the_repository(lme, tmp_path):
+    assert lme._cmd_reading_sheet(tmp_path, tmp_path / "a.json", tmp_path / "c.json",
+                                  REPO / "tests" / "fixtures" / "longmemeval" / "sheet.md") == 2
+    assert not (REPO / "tests" / "fixtures" / "longmemeval" / "sheet.md").exists()
+
+
+def test_a_cache_with_nothing_new_is_not_rewritten(lme, tmp_path):
+    """Several runs read the vector cache at once: a run that embeds nothing
+    leaves the file alone (rewritten under a reader, Windows refuses the
+    replace)."""
+    pytest.importorskip("numpy")
+
+    class _Words:
+        dim = 3
+
+        def encode_batch(self, texts):
+            return [[1.0, float(len(t)), 0.0] for t in texts]
+
+    path = tmp_path / "vectors.npz"
+    first = lme.CachedEmbedder(_Words(), path, "m")
+    assert first.fill(["a", "bb"]) == 2 and path.is_file()
+    stamp = path.stat().st_mtime_ns
+    again = lme.CachedEmbedder(_Words(), path, "m")
+    assert again.fill(["a", "bb"]) == 0
+    assert path.stat().st_mtime_ns == stamp
+
+
+class _Scripted:
+    """A model that answers from a list: text, or a refusal (HTTP 402)."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.asked = 0
+
+    def ask(self, prompt, *, max_tokens):
+        self.asked += 1
+        reply = self.replies.pop(0)
+        return ("", {"error": reply}) if isinstance(reply, int) else (reply, {"prompt_tokens": 1})
+
+
+def test_a_refused_call_is_asked_again_never_kept_as_wrong(lme):
+    """The account ran out of balance mid-run (22 Nov, HTTP 402): a refused
+    reader or judge call is asked again on the next run. Kept, a refused
+    judge call read as "no" for good."""
+    item = {"question_id": "q", "question_type": "single-session-user", "question": "?", "answer": "May"}
+    entry: dict = {}
+    reader, judge = _Scripted([402, "In May."]), _Scripted([402, "yes"])
+    lme.answer_entry(entry, item, "prompt", reader=reader, judge=judge)
+    assert "hypothesis" not in entry and entry["reader_error"] == 402 and judge.asked == 0
+    lme.answer_entry(entry, item, "prompt", reader=reader, judge=judge)
+    assert entry["hypothesis"] == "In May." and "verdict" not in entry
+    lme.answer_entry(entry, item, "prompt", reader=reader, judge=judge)
+    assert entry["verdict"] == "yes" and reader.asked == 2 and judge.asked == 2
+    # Another prompt is another question: asked afresh.
+    lme.answer_entry(entry, item, "another prompt", reader=_Scripted(["June"]), judge=_Scripted(["no"]))
+    assert entry["hypothesis"] == "June" and entry["verdict"] == "no"

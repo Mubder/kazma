@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## LongMemEval: plain retrieval beside Kazma's, and a harness that checks itself (2026-11-22)
+
+- On the 200 dev questions Kazma's recall shows every conversation holding
+  the answer for 82 %, against 92 % for the ten rounds nearest the question
+  by meaning alone (it shows four or five memories, they show ten).
+- The end-to-end harness reads at the reasoning Kazma's chat runs, judges
+  every answer twice, counts the answers that flip between two runs of the
+  same build, and asks again a call the API refused instead of keeping it
+  as a wrong answer.
+
 ## Memory: what an ordinary turn costs, and memory in real use (2026-11-22)
 
 - The measures every memory change is held to before an outside score

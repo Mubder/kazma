@@ -1129,6 +1129,29 @@ Spend (deepseek-flash, 2026-11-21): the end-to-end run 800 calls,
 10,684,738 prompt and 36,646 completion tokens; the translation 392 calls,
 338,099 prompt and 420,616 completion tokens.
 
+**On the dev split, beside plain retrieval** (200 questions, 22 Nov, no
+model): what Kazma's recall shows, against the rounds nearest the question
+by bge-m3 alone (the same vectors, with none of recall's background, word
+coverage or gap) and by BM25, ten of each.
+
+| | Kazma's recall | bge-m3's 10 nearest | BM25's 10 best |
+|---|---|---|---|
+| The answer's round shown | 90.2 % | 94.8 % | 89.2 % |
+| Every answering conversation shown | 82.0 % | 91.8 % | 83.5 % |
+| Memories shown (mean) | 4.5 | 10 | 10 |
+
+Kazma shows fewer memories on purpose (precision 0.83), and finds less:
+questions across several conversations and questions about time lose
+answering conversations that plain retrieval keeps. For the questions whose
+answer is a word or a phrase, the answer is in the rounds shown for 45 %,
+and in the block after its bounds for 30 %.
+
+The end-to-end harness now reads at the reasoning Kazma's chat runs (low),
+judges every dev answer twice (deepseek-flash and deepseek-v4-pro), answers
+every question twice to count the answers that flip on their own, and asks
+again any call the API refused (the account's balance ran out during the
+first dev runs; a refused judge call had been kept as a "no").
+
 ### What memory costs an ordinary turn (2026-11-22)
 
 Before an outside score counts, a memory change is held to what it does to

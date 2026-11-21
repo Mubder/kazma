@@ -119,6 +119,20 @@ The reader was sent about 1,017 tokens a question from Kazma's recall, 2,214 wit
 | Answer shown | 85.0 % | 87.5 % |
 | From the right conversation | 97.5 % | 97.5 % |
 
+### The dev split {#longmemeval-dev}
+
+200 questions to choose settings on (`tests/fixtures/longmemeval/split.json`: the sample above and 100 more); the other 300 are never used to choose anything, and every look at them is logged.
+
+**Finding it, against plain retrieval** (no model): Kazma's recall beside the rounds nearest the question by bge-m3 alone (the same vectors, no background, no word coverage, no gap) and by BM25, ten of each.
+
+| | Kazma's recall | bge-m3's 10 nearest rounds | BM25's 10 best rounds |
+|---|---|---|---|
+| The answer's round shown | 90.2 % | 94.8 % | 89.2 % |
+| Every answering conversation shown | 82.0 % | 91.8 % | 83.5 % |
+| Memories shown (mean) | 4.47 | 10 | 10 |
+
+Of the 129 answerable questions whose answer is a word or a phrase, its text is in the rounds Kazma shows for 45.0 %, and still in the block after the block's bounds for 30.2 %. Questions with no answer that show nothing: 0.0 %.
+
 Reproduce: download LongMemEval into a folder of its own, then `python scripts/longmemeval_bench.py retrieve --data DIR` (and `answer`, `translate`, `parallel`; those call a model).
 
 ## Knowledge Library: does search find the right page? {#knowledge}

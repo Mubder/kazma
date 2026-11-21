@@ -442,28 +442,56 @@ def _longmemeval(folder: Path) -> list[str]:
 
 
 def _longmemeval_dev(folder: Path) -> list[str]:
-    """The dev split's runs (the memory plan's W0): each history answered
-    twice by the same build (the answers that flip are the noise no change
-    may be accepted on), a second judge, the answers read by Claude, and the
-    reader's reasoning off, low and high."""
+    """The dev split (the memory plan's W0): what recall finds beside the
+    plain retrieval baselines, and the end-to-end runs -- each history
+    answered twice by the same build (the answers that flip are the noise no
+    change may be accepted on), a second judge, the answers read by Claude,
+    and the reader's reasoning off, low and high."""
     main = folder / "answers_dev.json"
-    if not main.is_file():
+    retrieval = folder / "retrieval_dev.json"
+    if not main.is_file() and not retrieval.is_file():
         return []
+    lines = [
+        "### The dev split {#longmemeval-dev}",
+        "",
+        "200 questions to choose settings on (`tests/fixtures/longmemeval/split.json`: the sample above and 100 "
+        "more); the other 300 are never used to choose anything, and every look at them is logged.",
+        "",
+    ]
+    if retrieval.is_file():
+        ro = json.loads(retrieval.read_text(encoding="utf-8"))["overall"]
+        lines += [
+            "**Finding it, against plain retrieval** (no model): Kazma's recall beside the rounds nearest the "
+            "question by bge-m3 alone (the same vectors, no background, no word coverage, no gap) and by BM25, ten "
+            "of each.",
+            "",
+            "| | Kazma's recall | bge-m3's 10 nearest rounds | BM25's 10 best rounds |",
+            "|---|---|---|---|",
+            f"| The answer's round shown | {_pct(ro.get('evidence_turn'))} | {_pct(ro.get('plain_bge_evidence'))} | "
+            f"{_pct(ro.get('plain_bm25_evidence'))} |",
+            f"| Every answering conversation shown | {_pct(ro.get('every_answer_session'))} | "
+            f"{_pct(ro.get('plain_bge_every_session'))} | {_pct(ro.get('plain_bm25_every_session'))} |",
+            f"| Memories shown (mean) | {ro.get('shown_mean')} | 10 | 10 |",
+            "",
+            f"Of the {ro.get('worded')} answerable questions whose answer is a word or a phrase, its text is in the "
+            f"rounds Kazma shows for {_pct(ro.get('answer_in_shown'))}, and still in the block after the block's "
+            f"bounds for {_pct(ro.get('answer_in_block'))}. Questions with no answer that show nothing: "
+            f"{_pct(ro.get('abstention_quiet'))}.",
+            "",
+        ]
+    if not main.is_file():
+        return lines
     a = json.loads(main.read_text(encoding="utf-8"))
     noise_file = folder / "noise_dev.json"
     noise = json.loads(noise_file.read_text(encoding="utf-8")) if noise_file.is_file() else {}
     flips = (noise.get("conditions") or {})
     agree = (a.get("judges_agree") or {})
     o = a["overall"]
-    lines = [
-        "### The dev split, and how much a score moves on its own {#longmemeval-dev}",
-        "",
-        f"{a['sample']} questions to choose settings on (`tests/fixtures/longmemeval/split.json`); the other 300 "
-        "are never used to choose anything, and every look at them is logged. Reader "
-        f"{a['reader']} with its reasoning {a.get('reader_reasoning', 'off')}; judges {a['judge']} and "
-        f"{a.get('judge2') or '–'} (LongMemEval's prompts). The same build answered every question twice: an "
-        "answer that flips between the two runs is the noise, and no change is accepted on a difference smaller "
-        "than it.",
+    lines += [
+        f"**Answering from it**: reader {a['reader']} with its reasoning {a.get('reader_reasoning', 'off')}; "
+        f"judges {a['judge']} and {a.get('judge2') or '–'} (LongMemEval's prompts). The same build answered "
+        "every question twice: an answer that flips between the two runs is the noise, and no change is accepted "
+        "on a difference smaller than it.",
         "",
         "| History | Answered | Second run | Answers that flipped | Judges agree | Tokens a question |",
         "|---|---|---|---|---|---|",
@@ -478,8 +506,8 @@ def _longmemeval_dev(folder: Path) -> list[str]:
     cut = a.get("cut_at_limit") or {}
     unasked = a.get("unanswered") or {}
     if any(cut.values()) or any(unasked.values()):
-        lines += ["", f"Answers cut at the reader's limit: {sum(cut.values())}; questions the API refused: "
-                      f"{sum(unasked.values())} (scored wrong)."]
+        lines += ["", f"Answers cut at the reader's limit: {sum(cut.values())}; answers or verdicts the API "
+                      f"refused: {sum(unasked.values())} (scored wrong)."]
     rows = []
     for level in ("off", "low", "high"):
         path = main if a.get("reader_reasoning") == level else folder / f"answers_dev_{level}.json"
@@ -500,18 +528,6 @@ def _longmemeval_dev(folder: Path) -> list[str]:
                       f"first judge gave the reading's verdict on {_pct(s['judge'])} of them, the second on "
                       f"{_pct(s['judge2'])}; on the disagreements {_pct(s['judge_on_disagreements'])} and "
                       f"{_pct(s['judge2_on_disagreements'])}."]
-    retrieval = folder / "retrieval_dev.json"
-    if retrieval.is_file():
-        ro = json.loads(retrieval.read_text(encoding="utf-8"))["overall"]
-        if "answer_in_block" in ro:
-            lines += ["", f"**Without a model** (the same 200): the answer's round shown "
-                          f"{_pct(ro.get('evidence_turn'))}, every answering conversation shown "
-                          f"{_pct(ro.get('every_answer_session'))}; an answer written word for word in the rounds shown "
-                          f"{_pct(ro.get('answer_in_shown'))}, and still in the block after its bounds "
-                          f"{_pct(ro.get('answer_in_block'))} (of {ro.get('worded')} questions whose answer is "
-                          f"words). Plain retrieval shows every answering conversation for "
-                          f"{_pct(ro.get('plain_bge_every_session'))} (bge-m3's 10 nearest rounds) and "
-                          f"{_pct(ro.get('plain_bm25_every_session'))} (BM25's 10)."]
     return lines + [""]
 
 
