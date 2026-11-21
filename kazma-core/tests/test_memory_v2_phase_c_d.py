@@ -40,24 +40,12 @@ def mem_db(tmp_path, monkeypatch):
     conn.close()
 
 
-def test_procedural_match_and_fence(mem_db):
-    from kazma_core.memory.procedural import (
-        format_procedural_hints,
-        match_procedural_dags,
-        record_procedural_outcome,
-    )
+def test_procedural_outcomes_are_tallied(mem_db):
+    """The tallies stay, for memory health; nothing puts them into a turn
+    since 2026-11 (decision 13, ``tests/test_tool_tallies_not_injected.py``)."""
+    from kazma_core.memory.procedural import record_procedural_outcome
 
-    record_procedural_outcome(
-        mem_db,
-        name="file_edit_flow",
-        description="Edit a file with read then write tools",
-        preconditions={"intent": "edit_file"},
-        dag_steps=[{"tool": "file_read"}, {"tool": "file_write"}],
-        postconditions={"file_changed": True},
-        success=True,
-    )
-    # Raise confidence with more successes
-    for _ in range(3):
+    for _ in range(4):
         record_procedural_outcome(
             mem_db,
             name="file_edit_flow",
@@ -67,11 +55,16 @@ def test_procedural_match_and_fence(mem_db):
             postconditions={"file_changed": True},
             success=True,
         )
+    row = mem_db.execute(
+        "SELECT total_trials, success_count, confidence_score FROM procedural_dags WHERE name='file_edit_flow'"
+    ).fetchone()
+    assert int(row["total_trials"]) == 4 and int(row["success_count"]) == 4
+    assert float(row["confidence_score"]) == pytest.approx(5 / 6)
+    # The Memory page's tally browser still searches them.
+    from kazma_core.memory.procedural import match_procedural_dags
+
     dags = match_procedural_dags(mem_db, "please edit this file for me", limit=3)
-    assert dags, "expected procedural match on edit_file skill"
-    block = format_procedural_hints(dags)
-    assert block
-    assert "kazma:data" in block or "untrusted" in block.lower() or "Procedural" in block
+    assert dags and dags[0]["name"] == "file_edit_flow"
 
 
 def test_procedural_quarantine(mem_db):

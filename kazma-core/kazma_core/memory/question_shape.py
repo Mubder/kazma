@@ -29,7 +29,7 @@ from typing import Any
 
 from kazma_core.memory.limits import FOLLOW_UP_EARLIER_CHARS
 
-__all__ = ["asks_for_all", "earlier_user_texts", "is_follow_up", "standalone_query", "turns_in_context"]
+__all__ = ["asks_for_all", "asks_what_was_said", "earlier_user_texts", "is_follow_up", "standalone_query", "turns_in_context"]
 
 #: A message that opens on one of these goes on from the one before it.
 _OPENERS_EN = re.compile(
@@ -128,6 +128,42 @@ def asks_for_all(question: str | None) -> bool:
     if not said:
         return False
     return bool(_ALL_EN.search(said) or _ALL_AR.search(fold_for_search(said).lower()))
+
+
+#: Words that only say "what did we talk about": a question about a period
+#: made of nothing else asks what the period was about (part G). Read through
+#: ``content_terms``, so the forms compare as recall's words do.
+_TALK_WORDS = (
+    "talk talked talking discuss discussed discussing say said tell told mention mentioned "
+    "chat chatted chatting speak spoke cover covered happen happened happening go went going "
+    "on back about over everything anything stuff thing things catch up recap summary summarize "
+    "summarise do did done "
+    "تكلمنا تكلمت اتكلمنا سولفنا سولفت قلنا قلت قلتلك حكينا حكيت ناقشنا ذكرنا ذكرت عنه عنها "
+    "شي شيء اشياء كل صار سوينا سويت لخص لخصلي"
+)
+
+
+def asks_what_was_said(question: str | None, time_words: frozenset[str] | set[str] = frozenset()) -> bool:
+    """Whether *question* names nothing but talk and its time: "What did we
+    talk about back in June?", "شنو تكلمنا عنه في يونيو؟". Every content word
+    of it, besides *time_words* (``TimeAsk.words``), says only that something
+    was said. "What did I tell you about Pixel in August?" names Pixel."""
+    from kazma_core.memory.query_terms import content_terms
+
+    terms = [t for t in content_terms(str(question or "")) if t not in time_words]
+    return not terms or all(t in _talk_terms() for t in terms)
+
+
+def _talk_terms() -> frozenset[str]:
+    global _TALK_TERMS
+    if _TALK_TERMS is None:
+        from kazma_core.memory.query_terms import content_terms
+
+        _TALK_TERMS = frozenset(content_terms(_TALK_WORDS))
+    return _TALK_TERMS
+
+
+_TALK_TERMS: frozenset[str] | None = None
 
 
 def _role_and_text(message: Any) -> tuple[str, str]:

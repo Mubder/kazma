@@ -12,7 +12,7 @@ The datasets are Kazma's own, built for these questions in English, Arabic and b
 
 ## Memory: does it find what you told it? {#memory}
 
-Dataset version 6: a private memory seeded the product's way (turns, facts, weekly summaries), then asked questions through the real `recall()`, with the meaning-search model's recorded vectors. **Hit rate**: the answer is among what Kazma shows the model. **MRR**: how high it ranks (1 = first). **Precision**: how much of what is shown is about the question.
+Dataset version 7: a private memory seeded the product's way (turns, facts, weekly summaries), then asked questions through the real `recall()`, with the meaning-search model's recorded vectors. **Hit rate**: the answer is among what Kazma shows the model. **MRR**: how high it ranks (1 = first). **Precision**: how much of what is shown is about the question.
 
 | Question | Hit rate | MRR | Precision |
 |---|---|---|---|
@@ -23,15 +23,16 @@ Dataset version 6: a private memory seeded the product's way (turns, facts, week
 | Asked in other words | 100.0 % | 0.94 | 58.8 % |
 | Asked with the exact words | 100.0 % | 1.00 | 93.8 % |
 | Something Kazma itself said | 100.0 % | 0.62 | 63.2 % |
-| Catch-me-up questions | 90.0 % | 0.67 | 55.5 % |
+| Catch-me-up questions | 90.0 % | 0.68 | 55.5 % |
 | Asked in Arabic | 100.0 % | 0.79 | 59.4 % |
 | A question with noise around it | 100.0 % | 1.00 | 61.1 % |
 | One topic over many turns | 78.6 % | 0.38 | 28.5 % |
 | A follow-up to the message before | 100.0 % | 0.69 | 65.9 % |
-| How many, or list them all | 66.7 % | 0.81 | 63.4 % |
+| How many, or list them all | 83.3 % | 0.81 | 63.4 % |
 | A time, or what was true before | 88.9 % | 0.78 | 55.6 % |
-| **All questions** | **90.1 %** | **0.76** | **58.6 %** |
-| **Second set** (see below) | **85.3 %** | **0.78** | **62.3 %** |
+| A month, or a project over many weeks | 100.0 % | 0.47 | 43.8 % |
+| **All questions** | **91.8 %** | **0.75** | **58.1 %** |
+| **Second set** (see below) | **86.2 %** | **0.77** | **62.1 %** |
 
 Questions it has no memory for are answered with nothing in 27.8 % of cases (0.0 % in the second set); the goal is 60.0 %: the weakest number on this page.
 
@@ -55,7 +56,7 @@ Turns in English, Arabic and both, with the facts a person would expect remember
 The model pass is deepseek-flash's replies, recorded on 2026-11-20, 5 askings a turn. Asked again, a model answers a little differently, so the lock keeps each score's spread: two standard errors over the askings, at most 7.5 points for the scores in this table.
 On the ten turns that give it the turn's day, the turn before and the facts held, the model pass gives a fact's start right 90.0 % in English, 100.0 % in Arabic; names the held fact it replaces 100.0 % in English, 100.0 % in Arabic; reads that a fact ended 100.0 % in English, 100.0 % in Arabic.
 
-With Postgres and pgvector as the memory store: not yet measured on dataset version 6. CI's pgvector job measures it on every run, with pgvector's own search and with every row compared, and its numbers are printed here once they are locked from a named run.
+With Postgres and pgvector as the memory store: not yet measured on dataset version 7. CI's pgvector job measures it on every run, with pgvector's own search and with every row compared, and its numbers are printed here once they are locked from a named run.
 
 Reproduce: `python scripts/memory_bench.py run` (add `--real` to use the real model), and `python -m pytest tests/test_memory_benchmark.py`.
 

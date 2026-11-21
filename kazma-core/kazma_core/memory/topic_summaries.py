@@ -624,6 +624,9 @@ def _retire_older(conn: sqlite3.Connection, tenant_id: str, period_key: str) -> 
         "WHERE id = ?",
         [(now, sid) for sid in old],
     )
+    from kazma_core.memory.topic_rollups import empty_rollups_of
+
+    empty_rollups_of(conn, old)  # written from what was retired
     conn.commit()
     return len(old)
 
@@ -759,12 +762,15 @@ def _finish_period(
 
 
 def _retire(conn: sqlite3.Connection, summary_id: str) -> None:
+    from kazma_core.memory.topic_rollups import empty_rollups_of
+
     conn.execute(
         "UPDATE memory_summaries SET status = 'retired', title = '', summary_text = '', "
         "embedding = NULL, embedding_model_version = NULL, queued_at = NULL, updated_at = ? "
         "WHERE id = ? AND status = 'rebuild'",
         (time.time(), summary_id),
     )
+    empty_rollups_of(conn, [summary_id])
     conn.commit()
 
 
@@ -857,12 +863,14 @@ async def rebuild_summary(summary_id: str, *, chat: ChatFn | None = None, model:
         if conn is None:
             return None, None, []
         row = conn.execute(
-            "SELECT id, tenant_id, period_key, period_start, period_end, status "
+            "SELECT id, tenant_id, period_key, period_start, period_end, status, level "
             "FROM memory_summaries WHERE id = ?",
             (summary_id,),
         ).fetchone()
         if row is None or row["status"] != "rebuild":
             return conn, None, []
+        if (row["level"] or "week") != "week":
+            return conn, row, []  # a roll-up: written from its weekly summaries
         ids = [r[0] for r in conn.execute(
             "SELECT episode_id FROM memory_summary_sources WHERE summary_id = ?", (summary_id,))]
         return conn, row, _load_turns(conn, row["tenant_id"], ids=ids)
@@ -873,6 +881,10 @@ async def rebuild_summary(summary_id: str, *, chat: ChatFn | None = None, model:
     try:
         if row is None:
             return True  # forgotten, retired or written again meanwhile
+        if (row["level"] or "week") != "week":
+            from kazma_core.memory.topic_rollups import rebuild_rollup
+
+            return await rebuild_rollup(conn, row, chat=chat, model=model)
         if len(turns) < cfg["min_turns"]:
             await asyncio.to_thread(_retire, conn, summary_id)
             return True
@@ -907,7 +919,7 @@ def queue_due_work(*, now: float | None = None) -> dict[str, int]:
     embedding-model switch left behind. Cheap when there is nothing to do."""
     from kazma_core.memory.task_queue import enqueue_task
 
-    out = {"weeks": 0, "rebuilds": 0, "reembedded": 0}
+    out = {"weeks": 0, "rebuilds": 0, "rollups": 0, "reembedded": 0}
     cfg = _config()
     if not cfg["enabled"]:
         return out
@@ -944,6 +956,10 @@ def queue_due_work(*, now: float | None = None) -> dict[str, int]:
             conn.commit()
             if enqueue_task("topic_summary_rebuild", {"summary_id": sid}):
                 out["rebuilds"] += 1
+        from kazma_core.memory.topic_rollups import plan_rollups
+
+        planned = plan_rollups(conn, now=now)
+        out["rollups"] = planned["months"] + planned["projects"]
         out["reembedded"] = _reembed(conn)
         return out
     finally:
@@ -1054,7 +1070,11 @@ def on_turns_forgotten(
         "WHERE id = ?",
         [(now, sid) for sid in touched],
     )
-    return touched
+    # A roll-up holds the turns as sources too, so it is among *touched*;
+    # one built from an emptied weekly summary is emptied as well.
+    from kazma_core.memory.topic_rollups import empty_rollups_of
+
+    return list(dict.fromkeys([*touched, *empty_rollups_of(conn, touched)]))
 
 
 def forget_summary(
@@ -1100,9 +1120,12 @@ def forget_summary(
             "metadata_json = ? WHERE id = ? AND (? IS NULL OR tenant_id = ?)",
             (now, json.dumps(meta), summary_id, only, only),
         )
+        from kazma_core.memory.topic_rollups import empty_rollups_of
+
+        emptied = empty_rollups_of(conn, [summary_id])  # a roll-up written from it
         forget_journal.mark_applied(conn, seq)
         conn.commit()
-        return {"ok": True, "summary_id": summary_id}
+        return {"ok": True, "summary_id": summary_id, **({"rollups_emptied": emptied} if emptied else {})}
     finally:
         if own:
             conn.close()
@@ -1128,7 +1151,7 @@ def list_summaries(
     where, params = _summary_filter(tenant_id, include_hidden)
     rows = conn.execute(
         "SELECT id, tenant_id, period_key, period_start, period_end, title, summary_text, status, "
-        "turn_count, chat_count, first_turn_at, last_turn_at, created_at, updated_at "
+        "turn_count, chat_count, first_turn_at, last_turn_at, created_at, updated_at, level "
         f"FROM memory_summaries WHERE {where} "
         "ORDER BY period_start DESC, turn_count DESC LIMIT ? OFFSET ?",
         (*params, max(1, min(int(limit), 500)), max(0, int(offset))),
@@ -1151,6 +1174,9 @@ def summary_health(conn: sqlite3.Connection, *, tenant_id: str | None = None) ->
         f"SELECT status, COUNT(*) FROM memory_summaries{scope} GROUP BY status", params).fetchall())
     weeks = dict(conn.execute(
         f"SELECT status, COUNT(*) FROM memory_summary_periods{scope} GROUP BY status", params).fetchall())
+    rollups = dict(conn.execute(
+        f"SELECT level, COUNT(*) FROM memory_summaries{scope}{' AND' if scope else ' WHERE'} "
+        "status = 'active' AND level != 'week' GROUP BY level", params).fetchall())
     return {
         "active": int(by_status.get("active", 0)),
         "rebuilding": int(by_status.get("rebuild", 0)),
@@ -1159,4 +1185,6 @@ def summary_health(conn: sqlite3.Connection, *, tenant_id: str | None = None) ->
         "weeks_done": int(weeks.get("done", 0)),
         "weeks_queued": int(weeks.get("queued", 0)),
         "weeks_failed": int(weeks.get("failed", 0)),
+        "months_active": int(rollups.get("month", 0)),
+        "projects_active": int(rollups.get("project", 0)),
     }

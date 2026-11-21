@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Memory part G: consolidation (2026-11-21)
+
+- **Lessons on a signal.** A finished turn teaches only when it carries
+  one, read from the turn with no model call: a correction of the previous
+  answer, a tool that failed and a later call that worked, or the user's
+  feedback about how Kazma works ("from now on...", "too long", "المرة
+  الجاية...", "اختصر ردودك"), in English and Arabic alike. A routine turn
+  costs no model call (it cost one on every turn). The refiner sees the
+  lessons the space holds and answers NOTHING, SAME, REPLACE or NEW; a lesson
+  that says the same as one held is merged into it, and its history names
+  every turn it came from, so forgetting any of them takes it back. Twelve
+  routine turns no longer push a correction out of the twelve lessons.
+- **Roll-ups above the weeks.** Once a month has ended Kazma writes a
+  roll-up of it, and of a topic that ran three weeks or more, from the
+  weekly summaries, in the background (one model call each). Each names the
+  weekly summaries and turns it came from; forgetting a turn or a weekly
+  summary empties every roll-up built from it, and it is written again
+  without it (a compare-and-set, as the weekly store). A month's roll-up
+  answers only a question about its month; "What did we talk about back in
+  June?" is answered by June's.
+- **Suggested lines for About me.** The Memory page offers lines made from
+  facts you told Kazma yourself, in the language you said them in; Add puts
+  one at the end of About me, Dismiss keeps it from coming back. Nothing is
+  added without your Add; in a shared space each member gets lines from
+  their own facts, for their own About me.
+- **No tool tallies in the turn.** The procedural store's counts of tool
+  uses are no longer read before every reply (the read had failed on every
+  turn since it was written, and a tally is not a procedure). The Memory
+  page still shows them.
+- Retrieval benchmark dataset v7: the `rollup` category (hit rate 1.00);
+  every v6 question scores the same or better. See the Memory and RAG
+  guide's benchmark report.
+
 ## The database and the engine off Windows' own drive (2026-11-21)
 
 - `kazma setup data-folder D:\Kazma` (or `kazma setup install --data-folder

@@ -74,14 +74,46 @@ def test_forgetting_a_turn_takes_back_its_lesson(soul):
 
 
 def test_a_lesson_another_turn_also_taught_stays(soul):
-    """Taught twice, it is in the Soul twice: one copy goes, the other turn's stays."""
+    """Taught twice, it is in the Soul once (merged, decision 12) with two
+    sources: forgetting one turn leaves the lesson the other taught."""
     _teach(FIRST, "chat-a", 2)
     _teach(FIRST, "chat-b", 5)
-    assert _lessons() == [FIRST, FIRST]
-    assert si.forget_lessons_from(["chat-a"], 2) == 1
+    assert _lessons() == [FIRST]
+    assert si.forget_lessons_from(["chat-a"], 2) == 0
     assert _lessons() == [FIRST]
     assert si.forget_lessons_from(["chat-b"], 5) == 1
     assert _lessons() == []
+
+
+MERGED = "Answer travel questions with the local currency and the euro next to every price."
+
+
+def test_a_merged_lesson_goes_with_any_turn_it_came_from(soul):
+    """A lesson rewritten to include an earlier one (the refiner's REPLACE)
+    names both turns: forgetting the earlier turn takes the merged lesson
+    back too, its words being partly that turn's."""
+    _teach(FIRST, "chat-a", 2)
+    assert si.apply_agent_mutation("supervisor", MERGED, source={"chat": "chat-b", "turn": 5}, replaces=FIRST)
+    assert _lessons() == [MERGED]
+    history = si._load_agent_evolution()["agents"]["supervisor"]["history"]
+    assert history[-1]["also_from"] == [{"chat": "chat-a", "turn": 2}]
+    assert si.forget_lessons_from(["chat-a"], 2) == 1
+    assert _lessons() == []
+
+
+def test_control_without_also_from_the_merged_lesson_outlives_the_turn(soul, monkeypatch):
+    """Negative control: a merged entry with no ``also_from`` keeps the
+    forgotten turn's words in every prompt."""
+    _teach(FIRST, "chat-a", 2)
+    assert si.apply_agent_mutation("supervisor", MERGED, source={"chat": "chat-b", "turn": 5}, replaces=FIRST)
+    from kazma_core.config_store import get_config_store
+
+    doc = si._load_agent_evolution()
+    for h in doc["agents"]["supervisor"]["history"]:
+        h.pop("also_from", None)
+    get_config_store().set(si._AGENT_EVO_KEY, doc)
+    assert si.forget_lessons_from(["chat-a"], 2) == 0
+    assert _lessons() == [MERGED]
 
 
 def test_forgetting_a_chat_takes_back_every_lesson_it_taught(soul):

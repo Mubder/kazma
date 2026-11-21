@@ -47,6 +47,7 @@ _MEMORY_NAMES = {
     "follow_up": "A follow-up to the message before",
     "list": "How many, or list them all",
     "temporal": "A time, or what was true before",
+    "rollup": "A month, or a project over many weeks",
 }
 _KNOWLEDGE_NAMES = {
     "exact": "The exact words of the page",

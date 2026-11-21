@@ -175,16 +175,31 @@ MEMORY_TABLES: tuple[MemoryStore, ...] = (
         export="about_me", bound="one row per member per shared space, 2,000 characters",
     ),
     MemoryStore(
+        "memory_profile_suggestions", "state", "no_turn_text", "ids_only",
+        forget="nothing to forget: a fact's id and whether the user added or dismissed the "
+               "About-me line Kazma suggested from it (profile_suggestions); the value is never stored",
+        export="", excluded="the user's answers to suggested About-me lines: fact ids only, and what was "
+                            "added is in About me",
+        bound="one row per suggested fact the user answered",
+    ),
+    MemoryStore(
         "memory_summaries", "state", "forget", "derived_text",
-        forget="topic_summaries.on_turns_forgotten: emptied, written again without the turn",
+        forget="topic_summaries.on_turns_forgotten: emptied, written again without the turn; a month or "
+               "project roll-up (level) also through its parts (topic_rollups.empty_rollups_of)",
         export="weekly_summaries", retention="kept; a forgotten summary stays a tombstone",
-        bound="one per topic per week",
+        bound="one per topic per week; one per month; one per project",
     ),
     MemoryStore(
         "memory_summary_periods", "state", "no_turn_text", "ids_only",
         forget="nothing to forget: a week's status and counts",
         export="", excluded="the summary pipeline's per-week bookkeeping",
         bound="one row per tenant per week",
+    ),
+    MemoryStore(
+        "memory_summary_parts", "state", "no_turn_text", "ids_only",
+        forget="nothing to forget: roll-up and weekly summary ids (topic_rollups.empty_rollups_of empties "
+               "a roll-up whose weekly summary is forgotten, retired or emptied)",
+        export="weekly_summaries", bound="one row per weekly summary a month or project roll-up stands on",
     ),
     MemoryStore(
         "memory_summary_sources", "state", "no_turn_text", "ids_only",

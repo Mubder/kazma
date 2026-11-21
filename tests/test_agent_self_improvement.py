@@ -65,13 +65,16 @@ async def test_analyze_chat_turn_mutates(evo_dir: Path) -> None:
         ),
         patch(
             "kazma_core.model_registry.get_model_registry",
-            return_value=_FakeRegistry(_CapturingProvider()),
+            return_value=_FakeRegistry(_CapturingProvider("NEW: Prefer concise summaries.")),
         ),
     ):
+        from kazma_core.skills.lesson_signal import LessonSignal
+
         r = await si.analyze_and_apply_chat_turn(
-            user_message="List my open PRs on the monorepo",
+            user_message="From now on list my open PRs as a table",
             success=True,
             output_snippet="Here are three PRs…",
+            signal=LessonSignal("feedback", "From now on list my open PRs as a table"),
         )
     assert r.get("action") == "mutate"
     assert r.get("applied") is True
@@ -235,19 +238,18 @@ def test_corrupt_legacy_json_does_not_crash(evo_dir: Path) -> None:
 class _CapturingProvider:
     """Fake LLM provider that captures the user-message content handed to it."""
 
-    def __init__(self) -> None:
+    def __init__(self, reply: str = "Prefer concise summaries.") -> None:
         self.captured_user_prompt: str | None = None
+        self.reply = reply
 
     async def chat(self, messages):
         for m in messages:
             if m.get("role") == "user":
                 self.captured_user_prompt = m.get("content", "")
         # Return a benign delta so the output-side guard doesn't short-circuit.
+        from types import SimpleNamespace
 
-        class _Resp:
-            content = "Prefer concise summaries."
-
-        return _Resp()
+        return SimpleNamespace(content=self.reply)
 
 
 class _FakeRegistry:

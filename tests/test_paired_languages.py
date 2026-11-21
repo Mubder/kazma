@@ -320,9 +320,55 @@ def _asks_for_all(text: str) -> bool:
     return asks_for_all(text)
 
 
+def _asks_what_was_said(text: str) -> bool:
+    """A question naming nothing but talk and its time (part G)."""
+    from datetime import UTC, datetime
+
+    from kazma_core.memory.question_shape import asks_what_was_said
+    from kazma_core.memory.time_words import read_time
+
+    ask = read_time(text, now=datetime(2026, 9, 25, 12, tzinfo=UTC).timestamp(), zone=UTC)
+    return asks_what_was_said(text, ask.words if ask else frozenset())
+
+
+def _about_me_line(text: str) -> tuple[bool, bool]:
+    """A suggested About-me line (part G) is in the language the user said
+    the fact in, and a value About me already holds is seen there (the
+    Arabic comma read as a comma)."""
+    from kazma_core.memory import profile_suggestions as ps
+
+    lang = "ar" if ps._is_arabic(text) else "en"
+    value = "بورتو" if lang == "ar" else "Porto"
+    line = ps._line_for("lives_in", value, lang) or ""
+    return (detect_user_language(line) == detect_user_language(text), ps._says_it_already(text, value))
+
+
+def _lesson_signal(text: str) -> str | None:
+    """What a turn teaches from (decision 12): a correction of the previous
+    answer, or the user's feedback; None for a routine turn."""
+    from kazma_core.skills.lesson_signal import read_signal
+
+    found = read_signal([
+        {"role": "user", "content": "Find the config file."},
+        {"role": "assistant", "content": "Here is config.yaml from the project folder."},
+        {"role": "user", "content": text},
+        {"role": "assistant", "content": "Done."},
+    ])
+    return found.kind if found else None
+
+
 M = "kazma-core/kazma_core/"
 
 PAIRS: list[Pair] = [
+    Pair("lesson_correction", (M + "skills/lesson_signal.py",),
+         "No, I meant the config in the other folder.", "لا، قصدي الملف اللي في المجلد الثاني.",
+         _lesson_signal, "correction"),
+    Pair("lesson_feedback", (M + "skills/lesson_signal.py",),
+         "From now on keep your answers short.", "من الحين اختصر ردودك.", _lesson_signal, "feedback"),
+    Pair("lesson_routine", (M + "skills/lesson_signal.py",),
+         "What is the weather tomorrow?", "كيف الجو بكرة؟", _lesson_signal, None),
+    Pair("lesson_thanks", (M + "skills/lesson_signal.py",),
+         "Thanks a lot!", "شكرا جزيلا!", _lesson_signal, None),
     Pair("time_said_last_month", (M + "memory/time_words.py",),
          "What did I tell you last month?", "شنو قلت لك الشهر الماضي؟", _time_asked,
          ("2026-08-01", "2026-09-01", True, False)),
@@ -338,6 +384,13 @@ PAIRS: list[Pair] = [
          "Where does my sister work?", "وين تشتغل أختي؟", _follow_up, False),
     Pair("asks_for_all", (M + "memory/question_shape.py",),
          "How many times did I go to the gym?", "كم مرة رحت النادي؟", _asks_for_all, True),
+    Pair("about_me_line", (M + "memory/profile_suggestions.py",),
+         "I live in Porto, near the river.", "أسكن في بورتو، قرب النهر.", _about_me_line, (True, True)),
+    Pair("asks_what_was_said", (M + "memory/question_shape.py",),
+         "What did we talk about back in June?", "شنو تكلمنا عنه في يونيو؟", _asks_what_was_said, True),
+    Pair("names_a_topic", (M + "memory/question_shape.py",),
+         "What did I tell you about Pixel in August?", "وش قلت لك عن بكسل في أغسطس؟",
+         _asks_what_was_said, False),
     Pair("language_lock", (M + "language_lock.py",),
          "Please summarise the meeting notes for me.", "لخص لي ملاحظات الاجتماع لو سمحت.", _lock, True),
     Pair("fixed_reply", (M + "language_lock.py", M + "agent/graph_supervisor.py",

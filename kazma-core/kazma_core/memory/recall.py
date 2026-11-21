@@ -2430,14 +2430,16 @@ def _summary_background(sims: Iterable[float]) -> float:
 
 
 def _summary_display(row: Any) -> str:
-    """What the model is shown of a summary: its week, title and text, bounded."""
-    from datetime import datetime
+    """What the model is shown of a summary: its stretch of time (a week, a
+    month or a project's months: ``topic_rollups.rollup_label``), title and
+    text, bounded."""
+    from kazma_core.memory.topic_rollups import rollup_label
 
-    week = datetime.fromtimestamp(float(row["period_start"] or 0)).strftime("%b %d, %Y")
+    when = rollup_label(str(row["level"] or "week"), row["period_start"], row["period_end"])
     text = " ".join(str(row["summary_text"] or "").split())
     if len(text) > _SUMMARY_SHOW_CHARS:
         text = text[: _SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
-    return f"Week of {week} -- {row['title']}: {text}"
+    return f"{when} -- {row['title']}: {text}"
 
 
 def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> list[RecallHit]:
@@ -2452,7 +2454,7 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
         return []
     try:
         rows = conn.execute(
-            "SELECT id, period_start, title, summary_text, embedding, embedding_model_version "
+            "SELECT id, period_start, period_end, level, title, summary_text, embedding, embedding_model_version "
             "FROM memory_summaries WHERE tenant_id = ? AND status = 'active'",
             (tenant_id or "default",),
         ).fetchall()
@@ -2462,21 +2464,40 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
         return []
     from kazma_core.memory.embedder import get_embedding_model_name
 
+    ask = _ASK.get()
+    level = {str(row["id"]): str(row["level"] or "week") for row in rows}
+    span = {str(row["id"]): (float(row["period_start"] or 0), float(row["period_end"] or 0)) for row in rows}
+    if ask is not None and ask.period and ask.said:
+        months = _months_said_in(query, ask, rows, level, span)
+        if months:
+            return months
     qvec = _encode_query(query)
     sims = _cosines(qvec, rows, get_embedding_model_name()) if qvec else {}
+    # The background is the weekly summaries': a roll-up restates its weeks,
+    # and counted in the median it would count a topic twice.
+    weekly = [v for k, v in sims.items() if level.get(k) == "week"]
     candidates = [
         _Candidate(
             id=str(row["id"]),
             text=f"{row['title']} {row['summary_text']}",
-            created_at=float(row["period_start"] or 0),
+            # Its newest day: a project roll-up runs to its last week.
+            created_at=float(row["period_end"] or row["period_start"] or 0),
             similarity=sims.get(str(row["id"])),
             by_meaning=str(row["id"]) in sims,
             content=str(row["title"] or ""),
             display=_summary_display(row),
         )
         for row in rows
+        # A month's roll-up says what the month was about: it answers a
+        # question about that month, never a topic. As a topic it holds
+        # every topic of its month, and matched every question a little: on
+        # the benchmark "Where do I live?" was shown May's (part G).
+        if level[str(row["id"])] != "month" or _overlaps(span[str(row["id"])], ask)
     ]
-    hits = _rank_by_evidence(query, candidates, _summary_background(sims.values()), kind="summary")
+    hits = _rank_by_evidence(query, candidates, _summary_background(weekly or sims.values()), kind="summary")
+    for hit in hits:
+        hit.metadata["level"] = level.get(hit.id, "week")  # a month or project roll-up (part G)
+    hits = _summaries_in_time(hits, ask, span)
     if _LISTING.get():
         # Every memory of a kind (part F): more weeks, each shorter.
         for hit in hits[:_LIST_SUMMARY_LIMIT]:
@@ -2485,6 +2506,76 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
                 hit.metadata["display"] = text[: _LIST_SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
         return hits[:_LIST_SUMMARY_LIMIT]
     return hits[:_SUMMARY_LIMIT]
+
+
+def _overlaps(stretch: tuple[float, float], ask: Any) -> bool:
+    """Whether a summary's stretch of time overlaps the question's period."""
+    return bool(ask is not None and ask.period
+                and stretch[0] < float(ask.end) and stretch[1] > float(ask.start))
+
+
+def _months_said_in(
+    query: str, ask: Any, rows: list[Any], level: dict[str, str], span: dict[str, tuple[float, float]],
+) -> list[RecallHit]:
+    """A question that asks only what was said in a period ("What did we
+    talk about back in June?", "شنو تكلمنا عنه في يونيو؟",
+    ``question_shape.asks_what_was_said``) is answered by that period's
+    month roll-ups, the month holding most of it first; [] when it names
+    something else, or no month of it is written yet (the weeks are then
+    ranked as for any question).
+
+    By meaning it was missed: the question names no topic, so nothing stands
+    out from the background (June's roll-up measured 0.08 against a floor of
+    0.21). The benchmark's trace records each month by the share of the
+    period it holds, against a cut of nothing (the edge rule)."""
+    from kazma_core.memory.question_shape import asks_what_was_said
+
+    if not asks_what_was_said(query, ask.words):
+        return []
+    whole = max(float(ask.end) - float(ask.start), 1.0)
+    share = {
+        rid: (min(stretch[1], float(ask.end)) - max(stretch[0], float(ask.start))) / whole
+        for rid, stretch in span.items()
+        if level.get(rid) == "month" and _overlaps(stretch, ask)
+    }
+    if not share:
+        return []
+    trace = _EVIDENCE_TRACE.get()
+    if trace is not None:
+        trace.append({"kind": "summary", "cut": 0.0, "evidence": dict(share)})
+    by_id = {str(row["id"]): row for row in rows}
+    ordered = sorted(share, key=lambda rid: (-share[rid], span[rid][0]))
+    return [
+        RecallHit(
+            id=rid,
+            content=str(by_id[rid]["title"] or ""),
+            score=round(share[rid], 4),
+            kind="summary",
+            source="period",
+            metadata={
+                "evidence": round(share[rid], 4),
+                "strength": "strong",
+                "at": span[rid][1],
+                "level": "month",
+                "display": _summary_display(by_id[rid]),
+            },
+        )
+        for rid in ordered[:_SUMMARY_LIMIT]
+    ]
+
+
+def _summaries_in_time(hits: list[RecallHit], ask: Any, span: dict[str, tuple[float, float]]) -> list[RecallHit]:
+    """*hits* ordered by the question's time, as :func:`_turns_in_time`
+    orders turns (part G): a question about what was SAID in a period keeps
+    the summaries whose stretch of time overlaps it -- a month's roll-up of
+    that month, its weeks, a project running through it -- and a question
+    about what was true then shows them first. No period: as ranked."""
+    if ask is None or not ask.period or not hits:
+        return hits
+    inside = [h for h in hits if _overlaps(span.get(h.id, (0.0, 0.0)), ask)]
+    if ask.said:
+        return inside
+    return inside + [h for h in hits if h not in inside]
 
 
 def _local_summaries(query: str, tenant_id: str) -> list[RecallHit]:
@@ -3437,7 +3528,9 @@ def format_recall_block(
             # afterwards (plan C2): the gist, after the turns themselves -- on
             # the benchmark, summaries above the history pushed answering
             # turns down (MRR 0.875 -> 0.868) and added nothing there.
-            header = "## Weekly Summaries\n"
+            # A month or project roll-up among them (part G): "Summaries".
+            weekly = all(h.metadata.get("level", "week") == "week" for h in result.summaries[:max_summaries])
+            header = "## Weekly Summaries\n" if weekly else "## Summaries\n"
             parts.append(header + "\n".join(lines))
 
     if not parts:

@@ -42,6 +42,7 @@ __all__ = [
     "DEEP_PASS_PREVIOUS_QUESTION",
     "DEEP_PASS_QUESTION",
     "EMBED_TEXT_CHARS",
+    "ROLLUP_PART_CHARS",
     "EPISODE_TEXT_MAX",
     "FOLLOW_UP_EARLIER_CHARS",
     "KEYWORD_HIT_CHARS",
@@ -163,6 +164,12 @@ DEEP_PASS_PREVIOUS_ANSWER = 400
 #: second layer): at most this many, each value cut to this length.
 DEEP_PASS_HELD_FACTS = 30
 DEEP_PASS_HELD_VALUE = 200
+
+#: A month's or a project's roll-up is written by one model call from its
+#: weekly summaries (part G, ``topic_rollups``): each is shown to the model
+#: cut to this many characters. Model input, bounded; the weekly summary
+#: itself is kept whole.
+ROLLUP_PART_CHARS = 1200
 
 
 def episode_text(text: str | None, *, field: str = "text") -> str:

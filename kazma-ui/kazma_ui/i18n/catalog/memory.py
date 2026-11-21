@@ -496,6 +496,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تحديث التغييرات",
         "en": "Refresh changes",
     },
+    "memory.mc.suggested_for_about_me": {
+        "ar": "مقترح لـ«عني»",
+        "en": "Suggested for About me",
+    },
+    "memory.mc.suggested_hint": {
+        "ar": "أسطر يقترحها Kazma من معلومات قلتها بنفسك. لا يُضاف شيء إلى «عني» إلا إذا ضغطت «أضف»، ويمكنك تعديل «عني» في الإعدادات ← الذاكرة.",
+        "en": "Lines Kazma suggests from facts you said yourself. Nothing joins About me unless you press Add; you can edit About me in Settings → Memory.",
+    },
+    "memory.mc.refresh_suggestions": {
+        "ar": "تحديث الاقتراحات",
+        "en": "Refresh suggestions",
+    },
     "memory.mc.legend_you": {
         "ar": "أنت",
         "en": "You",
@@ -1557,6 +1569,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أسبوع {date}",
         "en": "Week of {date}",
     },
+    "memory.console.month_of": {
+        "ar": "شهر {month}",
+        "en": "Month of {month}",
+    },
+    "memory.console.project_span": {
+        "ar": "على مدى عدة أسابيع، من {from} إلى {to}",
+        "en": "Over several weeks, {from} to {to}",
+    },
     "memory.console.forget_summary_title": {
         "ar": "نسيان هذا الملخص؟",
         "en": "Forget this summary?",
@@ -1669,6 +1689,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أُزيلت، ولن يحفظها Kazma مرة أخرى",
         "en": "Removed. Kazma will not file it again",
     },
+    "memory.console.no_suggestions": {
+        "ar": "لا يوجد ما يُقترح لـ«عني» الآن.",
+        "en": "Nothing to suggest for About me right now.",
+    },
+    "memory.console.suggestions_load_failed": {
+        "ar": "تعذّر تحميل الاقتراحات",
+        "en": "Suggestions load failed",
+    },
+    "memory.console.suggestion_add": {
+        "ar": "أضف إلى «عني»",
+        "en": "Add to About me",
+    },
+    "memory.console.suggestion_dismiss": {
+        "ar": "تجاهل",
+        "en": "Dismiss",
+    },
+    "memory.console.suggestion_added": {
+        "ar": "أُضيف إلى «عني»",
+        "en": "Added to About me",
+    },
+    "memory.console.suggestion_dismissed": {
+        "ar": "تم التجاهل. لن يقترحه Kazma مرة أخرى",
+        "en": "Dismissed. Kazma will not suggest it again",
+    },
+    "memory.console.suggestion_failed": {
+        "ar": "تعذّر ذلك",
+        "en": "That could not be done",
+    },
     "memory.console.no_changes": {
         "ar": "لم يتغيّر شيء في المعلومات التي أخبرت بها Kazma، ولا شيء ينتظر ردّك.",
         "en": "Nothing has changed in the facts you told Kazma, and nothing is waiting for your answer.",
@@ -1676,6 +1724,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "memory.console.changes_load_failed": {
         "ar": "فشل تحميل التغييرات",
         "en": "Changes load failed",
+    },
+    "memory.err.about_too_long": {
+        "ar": "سيتجاوز «عني» حدّه: اختصره في الإعدادات أولاً",
+        "en": "About me would pass its limit: shorten it in Settings first",
+    },
+    "memory.err.no_account": {
+        "ar": "سجّل الدخول لتضيف إلى «عني» الخاص بك",
+        "en": "Sign in to add to your own About me",
     },
     "memory.err.not_yours": {
         "ar": "هذا لعضو آخر؛ لا ينساه إلا هو أو مالك المساحة",

@@ -846,6 +846,15 @@ QUESTIONS: list[tuple[str, str, str, list[str], list[str]]] = [
     ("q1309", "What did I tell you about my running last week?", "temporal", ["r10#1|sr10"],
      ["r00#1", "r01#1", "r02#1", "r03#1"]),
     ("q1310", "When did we move to Braga?", "temporal", ["p15#1|p14#1|f25"], []),
+    # v7 (part G): a stretch of time longer than a week. The project's start
+    # and its end, which one roll-up holds (or both their weeks); a month's
+    # talk, which its roll-up holds. Written before recall read roll-ups.
+    ("q1401", "How did my half marathon training go, from the first week to race day?", "rollup",
+     ["sr0|r00#1", "sr10|r10#1"], []),
+    ("q1402", "كيف مشى تدريبي لنصف الماراثون من أول أسبوع لين يوم السباق؟", "rollup",
+     ["sr0|r00#1", "sr10|r10#1"], []),
+    ("q1403", "What did we talk about back in June?", "rollup", ["rm_2026-06"], []),
+    ("q1404", "شنو تكلمنا عنه في يونيو؟", "rollup", ["rm_2026-06"], []),
 ]
 
 
@@ -915,6 +924,10 @@ SECOND_SET: list[tuple[str, str, str, list[str], list[str]]] = [
     ("h049", "عطني كل أرقام الملفات والعدادات اللي قلت لك عنها", "list", ["a05#1|g06", "n04"], []),
     ("h050", "Which electric car was I looking at in September?", "temporal", ["p29#1|f36"], []),
     ("h051", "متى كان آخر موعد لمشروع الجسر قبل ما يتأجل؟", "temporal", ["f12a|p06#1"], ["p27#1"]),
+    # v7 (part G): a stretch longer than a week, written before recall read
+    # roll-ups; no value is chosen by looking at it.
+    ("h052", "Give me the big picture of my half marathon preparation.", "rollup",
+     ["sr0|r00#1", "sr10|r10#1"], []),
 ]
 
 #: What a question needs besides its text (v6): ``now_day``, the benchmark day
@@ -945,16 +958,20 @@ def _questions(rows, refs, fact_ids, summary_ids) -> list[dict[str, Any]]:
             if ref not in refs and ref not in fact_ids and ref not in summary_ids:
                 raise ValueError(f"{qid}: unknown memory {ref}")
         extras = QUESTION_EXTRAS.get(qid, {})
+        added = 6 if cat in _V6_CATEGORIES else 7 if cat in _V7_CATEGORIES else None
         out.append({"id": qid, "text": text, "category": cat, "gold": gold, "below": below,
                     "now_day": int(extras.get("now_day", ASKED_ON_DAY)),
                     **({"context": list(extras["context"])} if extras.get("context") else {}),
-                    **({"new_in": 6} if cat in _V6_CATEGORIES else {})})
+                    **({"new_in": added} if added else {})})
     return out
 
 
 #: The categories dataset v6 added (part F): their questions say ``new_in``,
 #: so ``benchmark.dataset_as_of(data, 5)`` gives v5's questions back.
 _V6_CATEGORIES = frozenset({"dense", "follow_up", "list", "temporal"})
+#: The category dataset v7 added (part G): a stretch of time longer than a
+#: week, answered by a month or project roll-up.
+_V7_CATEGORIES = frozenset({"rollup"})
 
 
 def build() -> dict[str, Any]:
@@ -1000,6 +1017,11 @@ def build() -> dict[str, Any]:
     summary_ids = {s["id"] for s in summaries}
     if len(summary_ids) != len(summaries) or summary_ids & (fact_ids | refs):
         raise ValueError("duplicate summary id")
+    rollups = _rollups(summaries)
+    rollup_ids = {r["id"] for r in rollups}
+    if rollup_ids & (summary_ids | fact_ids | refs):
+        raise ValueError("duplicate roll-up id")
+    summary_ids = summary_ids | rollup_ids
     questions = _questions(QUESTIONS, refs, fact_ids, summary_ids)
     second = _questions(SECOND_SET, refs, fact_ids, summary_ids)
     if {q["id"] for q in questions} & {q["id"] for q in second} or {q["text"] for q in questions} & {
@@ -1008,14 +1030,173 @@ def build() -> dict[str, Any]:
     unknown = set(QUESTION_EXTRAS) - {q["id"] for q in questions + second}
     if unknown:
         raise ValueError(f"extras for questions that do not exist: {sorted(unknown)}")
-    data = {"version": 6, "seed": SEED, "sessions": sessions, "facts": facts,
-            "summaries": summaries, "questions": questions, "second": second}
+    data = {"version": 7, "seed": SEED, "sessions": sessions, "facts": facts,
+            "summaries": summaries, "rollups": rollups, "questions": questions, "second": second}
     held = memory_fingerprint(data, as_of=IDS_HOLD_SINCE)
     if held != IDS_HOLD_SINCE_SHA256:
         raise ValueError(f"a memory of dataset v{IDS_HOLD_SINCE} moved or changed (fingerprint {held}): "
                          "a sealed set written for it no longer holds; set IDS_HOLD_SINCE to this version")
     data["ids_hold_since"] = {"version": IDS_HOLD_SINCE, "sha256": IDS_HOLD_SINCE_SHA256}
     return data
+
+
+# ── Dataset v7: roll-ups above the weekly summaries (part G) ─────────────
+#
+# The month and project roll-ups the product plans for these weekly summaries
+# (``topic_rollups.plan_rollups`` on the seeded store, asked on day 116:
+# September has not ended; ``tests/test_memory_benchmark_rollups.py`` holds
+# them equal), with texts written for the dataset in the shape the roll-up
+# prompt asks for, by the session that built part G -- not recorded from a
+# deployed model (no model key in the checkout that built it), as the weekly
+# summaries were written for the dataset.
+
+#: Projects: the weekly summaries the planner groups, by name.
+ROLLUP_PROJECTS: dict[str, list[str]] = {
+    "rp_training": [f"sr{i}" for i in range(11)],
+    "rp_code": [f"dw{w:02d}code" for w in range(17)],
+    "rp_food": [f"dw{w:02d}food" for w in range(16)],
+    "rp_general": [f"dw{w:02d}general" for w in range(17) if w != 5],
+    "rp_tools": [f"dw{w:02d}tools" for w in (0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 12, 14, 15)],
+    "rp_traps": [f"dw{w:02d}traps" for w in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15)],
+    "rp_travel": [f"dw{w:02d}travel" for w in (0, 1, 2, 3, 4, 5, 6, 8, 9, 11, 12, 14, 15)],
+    "rp_writing": [f"dw{w:02d}writing" for w in (0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 13, 14, 15)],
+    "rp_arabic": [f"dw{w:02d}arabic" for w in (1, 4, 7, 8, 9, 11, 12, 13, 14)],
+}
+#: Months that had ended (and a day's grace) on the asking day.
+ROLLUP_MONTHS = ("2026-05", "2026-06", "2026-07", "2026-08")
+
+ROLLUP_TEXTS: dict[str, tuple[str, str]] = {
+    "rm_2026-05": (
+        "May 2026: getting to know Sami, and everyday questions",
+        "Late May 2026, the first week. Sami introduced himself: he lives in Porto, works as a structural "
+        "engineer at Aurelia Bridges, has a greyhound called Pixel, is allergic to shellfish, and his partner "
+        "Noor teaches chemistry. Kazma drew up a 12-week plan for the Lisbon half marathon on March 22 and "
+        "suggested Cantinho do Avillez for Noor's birthday dinner. Alongside came everyday questions: "
+        "programming (big O notation, squashing git commits), cooking (garam masala, a quick vegetarian "
+        "dinner), general knowledge (why cats purr, Hamlet), travel (Rome airport, packing for a ski trip), "
+        "writing (proofreading, a haiku about rain) and tool runs (files, unit tests, the staging server).",
+    ),
+    "rm_2026-06": (
+        "June 2026: passport, the Tagus retrofit, Maya's school, training begins",
+        "June 2026. Sami's passport expires on 14 March 2031 and a reminder is set for September 2030. He "
+        "leads the Tagus footbridge retrofit under Ines Carvalho, and Maya started at Escola Azul (they leave "
+        "home by 8:10). Half marathon training began: easy 5 km runs, a 10 km long run, a tight left calf "
+        "after 12 km that had recovered by the 13 km run at 5:40 per km. The family planned a December trip "
+        "to Istanbul with a hotel near Taksim Square. Every week also brought everyday questions: "
+        "programming (SQL joins, race conditions, React rendering twice), cooking (risotto, boiled eggs), "
+        "general knowledge, travel ideas (Seville, Iceland), writing help, tool runs, and Arabic questions "
+        "(a chocolate cake, memorising the Quran).",
+    ),
+    "rm_2026-07": (
+        "July 2026: training builds to 18 km, then the taper",
+        "July 2026. Half marathon training built up: one long run missed for the Tagus retrofit, then 14 km "
+        "with intervals, 16 km feeling strong, the longest run yet at 18 km and 5:35 per km, and a taper "
+        "week with a goal of under two hours that Kazma judged realistic. Everyday questions went on: "
+        "programming (async and await, reading CSV files with pandas, reversing a list), cooking (sourdough "
+        "starter, a French omelette, reheating pizza), general knowledge (photosynthesis, compound "
+        "interest), travel (Tokyo for a colleague, Prague), writing help, tool runs, and Arabic questions "
+        "about AI and the distance from Kuwait to Riyadh.",
+    ),
+    "rm_2026-08": (
+        "August 2026: the Lisbon trip booked and the half marathon finished",
+        "August 2026. The Lisbon half marathon trip was booked (hotel reference ZX4-91Q, flight TP1352 at "
+        "07:15) and Sami's ThinkPad battery was fixed with an 80 percent charge threshold. After a last "
+        "8 km long run and a sports massage, Sami finished the Lisbon half marathon in 1:56:40, under his "
+        "two-hour goal. Everyday questions went on: programming, cooking (risotto, garam masala, keeping "
+        "avocados), general knowledge (Canberra, vaccines), travel (Seville, Rome), writing, tool runs, and "
+        "Arabic questions about sleep and a small business idea.",
+    ),
+    "rp_training": (
+        "Half marathon training, from week one to the finish",
+        "Half marathon training, June to August 2026. Sami followed Kazma's 12-week plan for the Lisbon half "
+        "marathon: easy 5 km runs and an 8 km long run at first, then 10 km, then 12 km with a tight left "
+        "calf that recovered a week later (13 km at 5:40 per km). He missed one long run for the Tagus "
+        "retrofit, then built to 14 km with intervals, 16 km and his longest run, 18 km at 5:35 per km. "
+        "After a taper week and a last 8 km run with a sports massage, he finished the Lisbon half marathon "
+        "in 1:56:40, under his two-hour goal, on his first attempt.",
+    ),
+    "rp_code": (
+        "Programming questions across the weeks",
+        "Programming questions, week after week from late May to September 2026; the same handful came "
+        "back: big O notation (how running time grows with input size), squashing the last three git "
+        "commits (git rebase -i HEAD~3), processes and threads, SQL joins between orders and customers, race "
+        "conditions, React rendering twice in StrictMode, async and await, centring a div with flexbox, "
+        "reading a CSV file with pandas, reversing a list in Python and dependency injection.",
+    ),
+    "rp_food": (
+        "Cooking questions across the weeks",
+        "Cooking questions from late May to September 2026, many repeated: the spices in garam masala, a "
+        "quick vegetarian dinner (chickpea curry with spinach), boiling an egg for a runny yolk (about six "
+        "minutes), mushroom risotto, a French omelette, a sourdough starter, reheating pizza in a hot pan and "
+        "keeping avocados from browning.",
+    ),
+    "rp_general": (
+        "General knowledge questions across the weeks",
+        "General knowledge questions over the weeks: why cats purr, Hamlet in two lines, the distance to the "
+        "Moon (about 384,400 km), why the sky is blue, photosynthesis, how vaccines work, what causes the "
+        "seasons, compound interest, the capital of Australia (Canberra) and who painted the Girl with a "
+        "Pearl Earring (Vermeer).",
+    ),
+    "rp_tools": (
+        "Tool runs across the weeks",
+        "Tool runs, week after week: listing the downloads folder (12 files, the newest invoice_0917.pdf), "
+        "running the unit tests (42 passed), checking the disk space (118 GB free of 476 GB), pinging the "
+        "staging server (23 ms) and showing the git status (on main, clean).",
+    ),
+    "rp_traps": (
+        "Miscellaneous questions across the weeks",
+        "Miscellaneous questions over the weeks whose answers did not fit them: cooking rice without a lid, "
+        "why football fans shout, the layout of a Roman villa, a template for meeting minutes, running the "
+        "numbers on a plan, octopuses, and vague questions such as how to stop it doing that again.",
+    ),
+    "rp_travel": (
+        "Travel questions across the weeks",
+        "Travel questions over the weeks: from Rome airport to the centre (the Leonardo Express, 32 "
+        "minutes), packing for a ski trip, a weekend in Seville (the Alcazar, the cathedral, Triana and "
+        "flamenco), the best time to visit Iceland, what a colleague should see in Tokyo, and whether Prague "
+        "is expensive.",
+    ),
+    "rp_writing": (
+        "Writing help across the weeks",
+        "Writing help over the weeks: proofreading \"their going to the park tomorow\", a haiku about rain, a "
+        "slogan for a bakery (Rise and shine, fresh every morning), a blog post title about remote work (Home "
+        "Is Where the Standup Is) and making an email asking for a report more polite.",
+    ),
+    "rp_arabic": (
+        "أسئلة متفرقة بالعربي على مدى الأسابيع",
+        "أسئلة متفرقة بالعربي على مدى الأسابيع: طريقة كيكة الشوكولاتة، أحسن طريقة لحفظ القرآن (التكرار "
+        "اليومي والمراجعة المنتظمة)، المسافة بين الكويت والرياض (تقريبا ستمية كيلو بالسيارة)، أفضل وقت لزيارة "
+        "الأندلس (الربيع)، شرح الذكاء الاصطناعي باختصار، تحسين النوم، فكرة مشروع صغير، وتعلم البرمجة.",
+    ),
+}
+
+
+def _rollups(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Dataset v7's roll-ups (``new_in`` 7): each with its level, the weekly
+    summaries it was written from (``parts``) and its text. A month's parts
+    are the weekly summaries whose Monday is in it (UTC: every summary day
+    is days from a month's edge, so the grouping holds in any time zone)."""
+    from datetime import UTC, datetime
+
+    from kazma_core.memory.benchmark import BASE_TIME
+
+    by_id = {s["id"]: s for s in summaries}
+    out: list[dict[str, Any]] = []
+    for month in ROLLUP_MONTHS:
+        parts = sorted(s["id"] for s in summaries
+                       if datetime.fromtimestamp(BASE_TIME + s["day"] * 86400, UTC).strftime("%Y-%m") == month)
+        out.append({"id": f"rm_{month}", "level": "month", "key": month, "parts": parts})
+    for rid, parts in ROLLUP_PROJECTS.items():
+        missing = [p for p in parts if p not in by_id]
+        if missing:
+            raise ValueError(f"{rid}: unknown weekly summaries {missing}")
+        out.append({"id": rid, "level": "project", "key": f"project:{rid}", "parts": sorted(parts)})
+    for rollup in out:
+        rollup["title"], rollup["text"] = ROLLUP_TEXTS[rollup["id"]]
+        rollup["new_in"] = 7
+    if {r["id"] for r in out} != set(ROLLUP_TEXTS):
+        raise ValueError("a roll-up text with no roll-up, or the other way round")
+    return out
 
 
 #: Sessions dataset v6 added beside its ``dense`` ones (``new_in``): a

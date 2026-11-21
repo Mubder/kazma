@@ -221,6 +221,16 @@ REQUESTS: dict[tuple[str, str], list[tuple[str, Any]]] = {
     # Spaces S1-11 (N31): copies the caller's own personal-space text into a
     # shared space; in a personal space it refuses (not_shared), touching none.
     ("POST", "/api/memory/v2/profile/copy-personal"): [("/api/memory/v2/profile/copy-personal", {})],
+    # Decision 10: lines suggested for About me from the caller's own facts;
+    # beta's fact the user stated (beta9_home) is never offered to alpha,
+    # added to alpha's About me or dismissed for alpha.
+    ("GET", "/api/memory/v2/profile/suggestions"): [("/api/memory/v2/profile/suggestions", None)],
+    ("POST", "/api/memory/v2/profile/suggestions/{belief_id}/add"): [
+        ("/api/memory/v2/profile/suggestions/beta9_home/add", None),
+    ],
+    ("POST", "/api/memory/v2/profile/suggestions/{belief_id}/dismiss"): [
+        ("/api/memory/v2/profile/suggestions/beta9_home/dismiss", None),
+    ],
     # The audit's F1: what changed in the user's facts (memory/changes.py).
     ("GET", "/api/memory/v2/changes"): [
         ("/api/memory/v2/changes", None),
@@ -323,6 +333,8 @@ def _seed(root: Path) -> None:
         ("beta9_note1", "beta", "beta9_bob", "noted", "set", "BETA9 a note", now, None, None),
         ("beta9_note2", "beta", "beta9_bob", "noted", "set", "BETA9 a note", now - 60, None, None),
         ("beta9_old", "beta", "beta9_bob", "likes", "set", "BETA9 tea", now - 600, now - 60, now - 60),
+        # The user's own fact in beta (a suggested About-me line, decision 10).
+        ("beta9_home", "beta", "user", "prefers", "set", "BETA9 green tea", now, None, None),
     ]
     c.executemany(
         "INSERT INTO beliefs (id, tenant_id, subject, predicate, predicate_type, object, "
@@ -933,7 +945,7 @@ def test_the_installs_own_view_is_unchanged(memory_client):
     get = lambda path: memory_client.client.get(path).json()  # noqa: E731
 
     health = get("/api/memory/v2/health")
-    assert health["beliefs"]["active"] == 6
+    assert health["beliefs"]["active"] == 7  # beta9_home: the user's own fact (decision 10)
     assert health["episodes"]["episodic"] == 4
     assert health["queue"]["failed"] == 1
     assert get("/api/memory/v2/episodes")["total"] == 4

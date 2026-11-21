@@ -2626,6 +2626,52 @@ def copy_about_me_from_personal() -> dict[str, Any]:
     return copy_from_personal(_memory_tenant_id(), bound_asker())
 
 
+@router.get("/api/memory/v2/profile/suggestions")
+def about_me_suggestions() -> dict[str, Any]:
+    """Lines Kazma offers for the caller's About me, made from facts the
+    caller stated themself (the memory framework audit's F13, decision 10).
+    None joins About me without the caller's yes; in a shared space they are
+    made from the caller's own facts and go into the caller's own text."""
+    from kazma_core.memory.profile_suggestions import list_suggestions
+    from kazma_core.spaces.scope import bound_asker
+
+    conn = _conn()
+    try:
+        return {"ok": True, "suggestions": list_suggestions(conn, tenant_id=_memory_tenant_id(),
+                                                            account=bound_asker())}
+    finally:
+        conn.close()
+
+
+@router.post("/api/memory/v2/profile/suggestions/{belief_id}/add")
+def add_about_me_suggestion(belief_id: str) -> dict[str, Any]:
+    """The caller's yes: the suggested line joins the end of their About me.
+    Refused with a code the page words (``not_found``, ``about_too_long``,
+    ``no_account``)."""
+    from kazma_core.memory.profile_suggestions import add_suggestion
+    from kazma_core.spaces.scope import bound_asker
+
+    conn = _conn()
+    try:
+        return add_suggestion(conn, tenant_id=_memory_tenant_id(), account=bound_asker(), belief_id=belief_id)
+    finally:
+        conn.close()
+
+
+@router.post("/api/memory/v2/profile/suggestions/{belief_id}/dismiss")
+def dismiss_about_me_suggestion(belief_id: str) -> dict[str, Any]:
+    """The caller's no: the line is not offered again for that fact."""
+    from kazma_core.memory.profile_suggestions import dismiss_suggestion
+    from kazma_core.spaces.scope import bound_asker
+
+    conn = _conn()
+    try:
+        return dismiss_suggestion(conn, tenant_id=_memory_tenant_id(), account=bound_asker(),
+                                  belief_id=belief_id)
+    finally:
+        conn.close()
+
+
 # ── What changed in the user's facts (the audit's F1, memory/changes.py) ──
 #
 # Updates the user can undo, and corrections waiting for the user's answer.
@@ -2752,6 +2798,10 @@ def _exported_summary(row: dict[str, Any], conn: sqlite3.Connection) -> dict[str
         "SELECT episode_id FROM memory_summary_sources WHERE summary_id = ? ORDER BY episode_id",
         (row["id"],),
     )]
+    if row.get("level", "week") != "week":
+        # A month or project roll-up: the weekly summaries it was written from.
+        row["parts"] = [r[0] for r in conn.execute(
+            "SELECT part_id FROM memory_summary_parts WHERE rollup_id = ? ORDER BY part_id", (row["id"],))]
     return row
 
 
@@ -2792,7 +2842,7 @@ _EXPORT_QUERIES: dict[str, tuple[tuple[str, str, Any], ...]] = {
     "weekly_summaries": ((
         "state",
         "SELECT tenant_id, id, period_key, title, summary_text, status, turn_count, chat_count, "
-        "first_turn_at, last_turn_at, created_at, updated_at FROM memory_summaries WHERE {scope} "
+        "first_turn_at, last_turn_at, created_at, updated_at, level FROM memory_summaries WHERE {scope} "
         "ORDER BY period_start",
         _exported_summary,
     ),),

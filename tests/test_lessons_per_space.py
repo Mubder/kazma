@@ -46,7 +46,7 @@ LESSON_OWNER = "The owner reads answers in Arabic first."
 
 class _Refiner:
     def __init__(self) -> None:
-        self.answer = LESSON_A
+        self.answer = f"NEW: {LESSON_A}"
         self.calls = 0
         self.prompts: list[str] = []
 
@@ -109,7 +109,11 @@ class _Graph:
         return self.snap
 
 
-def _close(space: str, question: str = "how should the weekly report look?") -> str:
+#: A turn that carries a signal (feedback): only such a turn teaches (decision 12).
+QUESTION = "From now on keep the weekly report to three short bullets."
+
+
+def _close(space: str, question: str = QUESTION) -> str:
     """``close_turn`` as every transport runs it for a finished turn of
     *space*, then the lesson task it started. Returns the chat's id."""
     from kazma_core.background import background_tasks
@@ -152,17 +156,17 @@ def test_without_spaces_there_is_one_soul_whatever_the_turns_tenant(env) -> None
 
 
 def _scopes_the_refiner_ran_in(env) -> list[object]:
-    """What the refiner's own memory search ran as, each time it asked."""
+    """What the lesson task ran as, each time it asked for the refiner."""
     seen: list[object] = []
 
-    def search(*_a, **_k):
+    def refiner():
         try:
             seen.append(scope.require_scope())
         except scope.NoSpaceBound:
             seen.append("refused")
-        return []
+        return env.refiner
 
-    env.mp.setattr("kazma_core.memory.recall.search", search)
+    env.mp.setattr(si, "_llm_for_delta", refiner)
     return seen
 
 
@@ -183,44 +187,55 @@ def test_control_a_lesson_task_bound_by_its_tenant_alone_is_refused(env) -> None
 
     seen = _scopes_the_refiner_ran_in(env)
 
-    async def as_it_was(question, answer, *, session, turn, tenant_id, asker=None):
+    async def as_it_was(question, answer, *, session, turn, tenant_id, asker=None, signal=None, previous=""):
         with tenant_scope(tenant_id):
             return await si.analyze_and_apply_chat_turn(
                 user_message=question, success=True, output_snippet=answer[:600],
-                source={"chat": session, "turn": turn}, space=tenant_id)
+                source={"chat": session, "turn": turn}, space=tenant_id, signal=signal)
 
     env.mp.setattr(si, "_learn_from_turn", as_it_was)
     _close(A)
     assert "refused" in seen
 
 
-def test_the_refiner_recalls_the_memory_of_the_turns_own_space(env, memory_db) -> None:
-    """A real recall, not a stub: the lesson task of a turn of A asks memory
-    as A, and the refiner is shown A's memory and never B's."""
-    env.mp.setattr(_recall, "search", _REAL_SEARCH)
-    for space, word in ((A, "alphaword"), (B, "betaword")):
-        _remembered(space, f"plant-{space}", 1, f"zebra quokka pipeline supervisor {word}")
-    _close(A, question="zebra quokka")
+ALPHA_EARLIER = "Alpha wants tables sorted by date."
+
+
+def test_the_refiner_is_shown_its_own_spaces_lessons_and_no_memory(env) -> None:
+    """The chat refiner (decision 12) is shown the turn and the lessons its
+    own space holds, to merge into: never another space's lessons, and no
+    memory search at all (the old refiner searched memory for "past
+    patterns", which S1-10 had to bind to the turn's space)."""
+    searched: list[object] = []
+    env.mp.setattr("kazma_core.memory.recall.search", lambda *a, **k: searched.append(a) or [])
+    assert si.apply_agent_mutation("supervisor", ALPHA_EARLIER, space=A)
+    assert si.apply_agent_mutation("supervisor", LESSON_B, space=B)
+    assert si.apply_agent_mutation("supervisor", LESSON_OWNER, space=OWNER_SPACE_ID)
+    _close(A)
     [prompt] = env.refiner.prompts
-    assert "alphaword" in prompt and "betaword" not in prompt
+    assert ALPHA_EARLIER in prompt
+    assert LESSON_B not in prompt and LESSON_OWNER not in prompt
+    assert searched == []
 
 
-def test_control_a_lesson_task_with_nothing_bound_shows_the_refiner_no_memory(env, memory_db) -> None:
-    """The task as it ran before S1-10 bound it: in the context close_turn
-    left, nothing bound. The search is refused, quietly (DEBUG), and the
-    refiner sees no memory at all."""
-    env.mp.setattr(_recall, "search", _REAL_SEARCH)
-    _remembered(A, "plant-a", 1, "zebra quokka pipeline supervisor alphaword")
+def test_control_lessons_read_for_the_bound_space_show_none_of_the_turns(env) -> None:
+    """Control: a refiner that read the lessons of whatever space the task is
+    bound to -- nothing, in the task as S1-10 first found it -- is shown none
+    of the turn's own space's lessons to merge into."""
+    assert si.apply_agent_mutation("supervisor", ALPHA_EARLIER, space=A)
 
-    async def as_it_was(question, answer, *, session, turn, tenant_id, asker=None):
+    real = si._held_lessons
+    env.mp.setattr(si, "_held_lessons", lambda agent_id, space: real(agent_id, None))
+
+    async def as_it_was(question, answer, *, session, turn, tenant_id, asker=None, signal=None, previous=""):
         return await si.analyze_and_apply_chat_turn(
             user_message=question, success=True, output_snippet=answer[:600],
-            source={"chat": session, "turn": turn}, space=tenant_id)
+            source={"chat": session, "turn": turn}, space=tenant_id, signal=signal)
 
     env.mp.setattr(si, "_learn_from_turn", as_it_was)
-    _close(A, question="zebra quokka")
+    _close(A)
     [prompt] = env.refiner.prompts
-    assert "alphaword" not in prompt
+    assert ALPHA_EARLIER not in prompt
 
 
 def test_the_account_a_spaces_own_work_acts_for(env) -> None:

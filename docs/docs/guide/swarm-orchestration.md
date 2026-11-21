@@ -705,10 +705,12 @@ flowchart LR
 
 ### 11.2b How it works (chat)
 
-1. When a chat turn finishes (not paused), `close_turn` hands its terminal state to `learn_from_finished_turn`, which runs in the background. Every transport closes its turns there.
-2. A turn teaches only what memory would keep. A turn that failed (`turn_failed`) teaches nothing, and neither does a turn or chat the forget ledger keeps out of memory ("Don't remember this chat"). When the Meta-Refiner cannot answer, nothing is written.
-3. The lesson is stored under agent id `supervisor` in ConfigStore, with the chat and turn it came from in its history entry. The cap keeps the newest whole lessons (12 blocks, 8000 characters). A lesson longer than 1000 characters is refused, never cut.
-4. Next turn: `agent_runner`, `sse_chat/`, and gateway `graph.py` inject the Soul block as a **fenced** system message (no graph rebuild required).
+1. When a chat turn finishes (not paused), `close_turn` hands its terminal state to `learn_from_finished_turn`. Every transport closes its turns there.
+2. A turn teaches only on a signal, read from the turn with no model call (`skills/lesson_signal.py`): the user **corrected** the previous answer, a tool **failed and a later call of the turn worked**, or the user gave **feedback** about how Kazma should work ("from now on...", "too long", "المرة الجاية..."). English and Arabic are read alike, from the user's own words. A routine turn teaches nothing and costs no model call (it used to cost one on every turn).
+3. A turn teaches only what memory would keep. A turn that failed (`turn_failed`) teaches nothing, and neither does a turn or chat the forget ledger keeps out of memory ("Don't remember this chat"). When the Meta-Refiner cannot answer, nothing is written.
+4. The refiner sees the turn and the lessons already held, each in a data fence, and answers one line: `NOTHING`, `SAME n` (lesson n already says it), `REPLACE n: ...` (lesson n rewritten to include this) or `NEW: ...`. A lesson that says the same as one held is merged into it rather than added beside it, so twelve routine turns no longer push a real correction out of the twelve places.
+5. The lesson is stored under agent id `supervisor` in ConfigStore, with the chat and turn it came from in its history entry; a merged lesson also names the turns of the lessons it merged, and forgetting any of them takes it back. The cap keeps the newest whole lessons (12 blocks, 8000 characters). A lesson longer than 1000 characters is refused, never cut.
+6. Next turn: the supervisor adds the Soul block as a **fenced** system message, one current copy a call (no graph rebuild required).
 
 ### 11.3 Status tracking
 

@@ -1361,43 +1361,11 @@ async def supervisor_node(
                         "[Supervisor] memory explain payload skipped",
                         exc_info=True,
                     )
-                # Phase C: procedural skill hints (fenced, untrusted)
-                try:
-                    import sqlite3
-
-                    from kazma_core.memory.procedural import (
-                        format_procedural_hints,
-                        match_procedural_dags,
-                    )
-                    from kazma_core.memory.schema_v2 import ensure_primary_schema
-                    from kazma_core.paths import primary_memory_db
-
-                    def _fetch_procedural_dags() -> list[Any]:
-                        # to_thread: sync SQLite + DAG matching must stay off
-                        # the event loop (same rule as recall() above).
-                        pconn = sqlite3.connect(
-                            primary_memory_db(), check_same_thread=False
-                        )
-                        try:
-                            ensure_primary_schema(pconn)
-                            return list(match_procedural_dags(
-                                pconn,
-                                last_user_content,
-                                tenant_id=space_of_state(state),
-                                limit=3,
-                            ))
-                        finally:
-                            pconn.close()
-
-                    dags = await asyncio.to_thread(_fetch_procedural_dags)
-                    if dags:
-                        hint = format_procedural_hints(dags)
-                        if hint:
-                            messages.insert(1, {"role": "system", "content": hint})
-                except Exception:
-                    logger.debug(
-                        "[Supervisor] procedural inject skipped", exc_info=True
-                    )
+                # The procedural store's tool tallies ("file_read (C=0.99,
+                # n=812)") are no longer added here (2026-11, the memory
+                # framework audit's F13, decision 13): a tally is not a
+                # procedure, and it cost tokens on every call. They stay for
+                # memory health (memory/procedural.py).
             except Exception:
                 logger.warning(
                     "[Supervisor] V2 recall failed — skipping memory injection",
