@@ -62,6 +62,7 @@ holding the answer). The oracle is the ceiling for that reader.
 | English and Arabic parallel set | answer shown, both languages | 85.0 / 87.5 % (40 q) | ≥ 95 % in each, within 2 points of each other |
 | MemoryAgentBench, selective forgetting | accuracy | not measured (best published 32.5) | lead |
 | GroupMemBench (shared memory, Spaces) | accuracy | not measured (best published 46.0) | lead |
+| LoCoMo (published, original and audited answers) | answers right | not measured | above the whole-history baseline on the same reader |
 | Poisoning (MINJA-style injection, AgentPoison-style) | attacks that succeed | not measured (98 % against others) | ≤ 5 % |
 | Recall speed (this PC) | p95 per recall | 26 ms median (LongMemEval) | ≤ 1 s with a reranker |
 
@@ -191,7 +192,8 @@ guidance, measured on the extraction benchmark (recording needs DeepSeek).
   GroupMemBench for shared spaces.
 * Poisoning: MINJA-style injection and AgentPoison-style retrieval attacks
   run against Kazma's trust ladder and fences; the success rate published.
-* LoCoMo, privately (licence CC BY-NC 4.0; see the decisions below).
+* LoCoMo (licence CC BY-NC 4.0, accepted by the owner; see section 5),
+  scored against its original answers and the audited ones.
 * Every number on the benchmarks page, generated from its result file, with
   the reader named and the baselines beside it.
 
@@ -209,13 +211,28 @@ One builder on recall at a time (the files overlap): the memory session.
 Each stage ends with the full suite, the browser tests near it, a push and a
 deploy, and the benchmarks page regenerated.
 
-## 5. Decisions for the owner
+## 5. Decisions (the owner, 21 Nov)
 
-1. **LoCoMo** is CC BY-NC 4.0 (non-commercial). Measure it privately and
-   publish nothing from it, or accept the non-commercial term and publish.
-   Default until decided: private only.
-2. **A second reader**: scores depend on the reader. A column with a stronger
-   model (DeepSeek's larger one) costs more per run; deepseek-flash stays the
-   main column either way.
-3. **Latency**: a reranker adds time to every recall. The budget proposed is
-   ≤ 1 s p95 on this PC; anything slower is not adopted.
+1. **LoCoMo: published.** The owner accepted its licence (CC BY-NC 4.0,
+   non-commercial, attribution). Downloaded 21 Nov to the benchmark data
+   folder outside the repository: `locomo10.json` from
+   `snap-research/locomo` at commit `3eb6f2c585f5` (SHA-256
+   `79fa87e90f04...`), and the published audit of its answers
+   (`dial481/locomo-audit` at `9493fb4b4af4`, same licence), which found
+   6.4 % of the answers wrong. Kazma's LoCoMo score is reported against both
+   the original answers and the audit's corrections, with the attribution
+   the licence asks for, and no LoCoMo text in the repository (question ids
+   and results only, as for LongMemEval). LoCoMo's own known weakness is said
+   beside the score: sending the whole conversation to the model beats most
+   memory systems on it, so the whole-history column matters most there.
+2. **A second reader: deepseek-v4-pro, where it fits.** It is a second
+   column beside deepseek-v4-flash on the report split and the outside
+   benchmarks, after one call confirms the account serves it and its window
+   holds the whole-history baseline (about 96,000 tokens a LongMemEval-S
+   question). deepseek-v4-flash stays the main column and the dev reader
+   (nothing is tuned on pro). Spend reported with each run.
+3. **Latency (decided by Claude, the owner left it):** the reranker may add
+   at most 1 s p95 to a recall on this PC, measured on LongMemEval-S stores;
+   between the two rerankers, the faster one is taken when its scores are
+   within 1 point of the larger one's. A recall past its deadline answers
+   with today's ranking and says it is degraded, as it does now.
