@@ -423,7 +423,7 @@ def _vault_rows(space: str) -> list[tuple[str, str | None]]:
         params += [len(prefix), prefix]
     with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
         return [(str(name), tenant) for name, tenant in conn.execute(
-            f"SELECT name, tenant_id FROM secrets WHERE tenant_id = ? OR {named}",  # nosec B608: placeholders only
+            f"SELECT name, tenant_id FROM secrets WHERE tenant_id = ? OR {named}",  # nosec B608 - only ? placeholders are joined into the statement
             params)]
 
 

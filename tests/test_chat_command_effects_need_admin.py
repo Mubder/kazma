@@ -68,7 +68,7 @@ LOCAL_CALLS = frozenset({
     "_build_target_id", "TelegramAdapter.build_model_keyboard", "count_noun", "_slugify_library_id",
     "_find_worker_prompt_split", "parse_tweet_url", "safe_repo_dir_name", "tool_child_env", "clone_auth_env",
     "render_instruction", "store_errors", "_unresolved", "resolve", "_kb_acquisition_status", "_extract_swarm_task",
-    "_sender_is_gateway_admin", "changes_global_config", "tenant_scope", "type", "format_ref",
+    "_sender_is_gateway_admin", "changes_global_config", "tenant_scope", "chat_app_work", "type", "format_ref",
     "TelegramAdapter.build_provider_keyboard", "_normalize_slash_text",
 })
 _BUILTINS = frozenset({"len", "str", "int", "isinstance", "getattr", "dict", "max", "min", "sum", "enumerate", "next",

@@ -1497,7 +1497,7 @@ class SecretVault:
             erased = False
             try:
                 cur = self._conn.execute(
-                    f"DELETE FROM secrets WHERE tenant_id = ? OR {named}", params,  # nosec B608: placeholders only
+                    f"DELETE FROM secrets WHERE tenant_id = ? OR {named}", params,  # nosec B608 - only ? placeholders are joined into the statement
                 )
                 self._conn.execute("DELETE FROM space_keys WHERE space_id = ?", (space_id,))
                 self._conn.execute("COMMIT")

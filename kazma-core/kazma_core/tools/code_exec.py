@@ -227,6 +227,17 @@ def _production_or_multi_user() -> bool:
         return True
 
 
+def _outside_the_owners_space() -> bool:
+    """True once Spaces is enforced for work outside the owner's space, work
+    bound to no space included. Reads ContextVars only."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    bound = current_scope()
+    return bound is None or bound.space_id != OWNER_SPACE_ID
+
+
 def local_exec_forbidden() -> bool:
     """True when host-local python_exec fallback is banned.
 
@@ -243,12 +254,8 @@ def local_exec_forbidden() -> bool:
     # switch says, since a computed path there reaches the vault and every
     # other space's files; work bound to no space, nothing. (Readiness, with
     # nothing bound, then asks for a container backend.)
-    from kazma_core.spaces.scope import OWNER_SPACE_ID, current_scope, spaces_enforced
-
-    if spaces_enforced():
-        bound = current_scope()
-        if bound is None or bound.space_id != OWNER_SPACE_ID:
-            return True
+    if _outside_the_owners_space():
+        return True
     # A sandboxed space's code never runs on the machine itself (Spaces
     # S1-19, plan 4.8): a container or nothing, whatever the lab switch says.
     # A space whose kind cannot be read counts as sandboxed.
