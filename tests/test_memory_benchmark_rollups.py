@@ -7,11 +7,12 @@ audit's F13, part G).
   dataset that lists roll-ups the product would not make measures nothing.
 * The ``rollup`` category: a project's whole story, a month's talk, in
   English and Arabic. Negative control: the same questions on the store
-  without roll-ups (dataset v6's memories) miss the month.
+  without roll-ups miss the month.
 * A month's roll-up answers a question about its month, never a topic:
   "Where do I live?" is shown no month. Negative control: the month ranked
-  as a topic, as first written, is shown for it (and for five more v6
-  questions it does not answer). And "What did we talk about back in June?"
+  as a topic, as first written, is shown for an unrelated question (on v7
+  for all five asked; on v8, whose months the product's own roll-up call
+  wrote, for one). And "What did we talk about back in June?"
   names no topic, so it is answered by June's roll-up by the period it
   holds: ranked by meaning, as first written, June measured 0.08 against
   the floor of 0.21 and the question missed.
@@ -49,8 +50,9 @@ def test_the_datasets_roll_ups_are_the_ones_the_planner_makes(replay, tmp_path, 
     from kazma_core.memory.schema_v2 import ensure_primary_schema
 
     data = benchmark.load_dataset()
-    assert data["version"] == 7
-    without = benchmark.dataset_as_of(data, 6)
+    assert data["version"] == 8
+    # The store the planner sees: every memory but the roll-ups it plans.
+    without = {**data, "rollups": []}
     conn = sqlite3.connect(str(tmp_path / "bench.db"))
     conn.row_factory = sqlite3.Row
     ensure_primary_schema(conn)
@@ -86,7 +88,7 @@ def test_v6_replays_without_roll_ups():
     v6 = benchmark.dataset_as_of(data, 6)
     assert v6["rollups"] == []
     assert not [q for q in v6["questions"] + v6["second"] if q["category"] == "rollup"]
-    assert {r["new_in"] for r in data["rollups"]} == {7}
+    assert {r["new_in"] for r in data["rollups"]} <= {7, 8}
 
 
 def _rollup_scores(data):
@@ -99,7 +101,7 @@ def _rollup_scores(data):
 def with_and_without(replay):
     data = benchmark.load_dataset()
     rollup_questions = [q for q in data["questions"] if q["category"] == "rollup"]
-    without = {**benchmark.dataset_as_of(data, 6), "questions": rollup_questions, "second": []}
+    without = {**data, "rollups": [], "questions": rollup_questions, "second": []}
     return (_rollup_scores({**data, "questions": rollup_questions, "second": []}),
             _rollup_scores(without))
 
@@ -110,8 +112,8 @@ def test_the_rollup_questions_are_answered_with_roll_ups(with_and_without):
 
 
 def test_control_without_roll_ups_the_months_talk_is_missed(with_and_without):
-    """Negative control: on the store without roll-ups (v6's memories) no
-    memory holds what a month was about."""
+    """Negative control: on the store without roll-ups no memory holds what
+    a month was about."""
     _, without = with_and_without
     assert without["q1403"] is False and without["q1404"] is False
 
@@ -164,7 +166,11 @@ def test_a_month_is_shown_only_for_a_question_about_it(replay):
 
 def test_control_a_month_ranked_as_a_topic_is_shown_for_where_do_i_live(replay):
     shown = _summaries_shown(_UNRELATED, months_as_topics=True)
-    assert all(any(s.startswith("rm_") for s in shown[qid]) for qid in _UNRELATED), shown
+    # On v7 a month was shown for all five; on v8 (the pool's months written
+    # by the product's own roll-up call, 2026-11-21) June's is shown for the
+    # Tagus deadline (q404): one is enough to show the rule is what keeps
+    # them out.
+    assert any(any(s.startswith("rm_") for s in shown[qid]) for qid in _UNRELATED), shown
 
 
 def test_a_question_about_a_months_talk_is_answered_by_its_roll_up(replay):

@@ -2253,6 +2253,31 @@ four injected were noise.
   (the lock's count is the replay's; a typed count fails) and
   `tests/test_benchmarks_page.py` (a lock without the count refuses the
   page, a changed count changes it).
+- **The unrelated chat says each turn once; four times the pool is
+  measured too** (2026-11-21, benchmark audit R9, dataset v8). v7's pool
+  was 1,060 turns of 74 messages, about fourteen copies each, and the
+  thresholds were chosen on it. v8's pool is the 74 hand-written turns and
+  turns a model wrote for it (`tests/fixtures/memory_bench/pool_turns.json`,
+  `scripts/memory_pool_generate.py`: nothing about the person asking, no
+  persona name), each once, 300 sessions (`kind: pool`); the scale pool
+  (`scale` in the dataset: 900 more sessions and their weekly summaries)
+  makes `benchmark.run_scale_benchmark`, locked as `scale`
+  (`benchmark.SCALE_SCORES`, `memory_bench._scale_lock`). The roll-ups of
+  the new pool are the planner's groups with the product's own texts
+  (`ROLLUP_PROJECTS_V8`, `ROLLUP_TEXTS_V8`, written by
+  `topic_rollups.rebuild_rollup`). **v5 to v7 replay exactly**: a retired
+  item keeps its place in the file with `retired_in`;
+  `benchmark.load_dataset` returns today's view and keeps the whole lists
+  under `history`, which `dataset_as_of` and `memory_fingerprint(as_of=)`
+  read. `memory_bench.py vectors` reuses the file's vectors for texts it
+  holds (`--fresh` embeds all). Measured: precision 0.581 -> 0.487 and no
+  unanswerable question empty (0.278 before): unrelated turns of the
+  question's topic clear the floor once nothing is a copy. Not re-tuned
+  (the owner's call); the scale run holds within 0.02 of hit rate and MRR,
+  precision 0.05 lower. Gate: `tests/test_memory_benchmark_pool.py` (every
+  turn once, v7's pool failing the same check as the control; v7's
+  fingerprint; nothing about the person, a planted turn as control; the
+  scale lock).
 - **Nothing on the hot path parses `kazma.yaml` (S4):**
   `config_loader.install_yaml_section` -- the install root's file, parsed
   once per file version (mtime + size). Gate: `tests/test_install_yaml.py`.
@@ -3156,8 +3181,8 @@ an answer ("User prefers dark mode").
   tombstone or whose turn the forget ledger names (`recall._locally_forgotten`),
   whoever wrote it. Measured on the retrieval benchmark with the mirror as
   primary and the local vector index on the same vectors (the
-  Postgres-primary keyword path, not pgvector): hit rate and MRR equal to
-  local, precision 0.0003 lower (2026-11-21, dataset v7; `PRIMARY_DELTA`).
+  Postgres-primary keyword path, not pgvector): hit rate, MRR and precision
+  equal to local (2026-11-21, dataset v8; `PRIMARY_DELTA`).
   The pgvector path is the other measurement (§15G, "pgvector in CI"). Gate:
   `tests/test_memory_pg_primary.py` (real Postgres: a forget with the mirror
   write failing, left out of recall, repaired by one pass; each with its

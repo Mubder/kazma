@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Memory benchmark: unrelated chat without repeats, and four times as much (2026-11-21)
+
+- Dataset v8 (the benchmark audit's R9): the unrelated chat around the
+  benchmark's persona says each turn once. v7's 1,060 turns were 74
+  messages repeated about fourteen times, and recall's thresholds were chosen on
+  those copies. The new turns were written by a model for the pool and
+  checked to say nothing about the person asking (346 DeepSeek calls).
+- What it shows: answers are found as before (hit rate 0.918 to 0.901), but
+  more unrelated conversations come with them (precision 0.581 to 0.487),
+  and no unanswerable question comes back empty (0.278 before). Not
+  re-tuned here.
+- A new scale run asks the same questions with four times the unrelated
+  chat (4,774 memories): hit rate and MRR hold within 0.02, precision is
+  0.05 lower. It is locked with the rest.
+- v5 to v7 still replay exactly from the same file. The published memory
+  scores were reset with the new dataset version.
+- The versions a sealed question set may name are bounded (SonarCloud's
+  last critical issue).
+
 ## Memory: a small store leaves unrelated conversations out (2026-11-21)
 
 - In a new install's small memory, recall showed three to five unrelated

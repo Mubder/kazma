@@ -68,7 +68,8 @@ def _compare(scores: dict[str, float], floor: dict[str, float]) -> tuple[list[st
 def test_the_dataset_is_what_the_builder_builds():
     """Nobody edits the JSON by hand: the builder is the source."""
     built = _build_script().build()
-    assert benchmark.load_dataset() == json.loads(json.dumps(built, ensure_ascii=False))
+    raw = json.loads(benchmark.DATASET_PATH.read_text(encoding="utf-8"))
+    assert raw == json.loads(json.dumps(built, ensure_ascii=False))
     cats: dict[str, int] = {}
     for q in built["questions"]:
         cats[q["category"]] = cats.get(q["category"], 0) + 1
@@ -121,16 +122,19 @@ def _locked_parts() -> dict:
     """The parts of the lock beside the recall scores, as committed."""
     locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
     return {"extraction": locked["extraction"], "writes": locked["writes"], "speakers": locked["speakers"],
-            "small": locked["small"]}
+            "small": locked["small"], "scale": locked["scale"]}
 
 
-def _no_benchmark_runs(monkeypatch) -> None:
+def _no_benchmark_runs(monkeypatch, script) -> None:
     """The lock's recall runs answered without running: the main run empty
-    (``gated_scores`` is stubbed beside it), the small-store run as locked."""
-    small = json.loads(THRESHOLDS.read_text(encoding="utf-8"))["small"]
+    (``gated_scores`` is stubbed beside it), the small-store and scale runs
+    as locked."""
+    locked = json.loads(THRESHOLDS.read_text(encoding="utf-8"))
+    small = locked["small"]
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
     monkeypatch.setattr(benchmark, "run_small_store_benchmark",
                         lambda *_a, **_kw: {"overall": {"questions": small["questions"], **small["scores"]}})
+    monkeypatch.setattr(script, "_scale_lock", lambda _old, fresh=False: (locked["scale"], []))
 
 
 def test_the_lock_never_lowers_the_ratchet(tmp_path, monkeypatch):
@@ -141,7 +145,7 @@ def test_the_lock_never_lowers_the_ratchet(tmp_path, monkeypatch):
     monkeypatch.setattr(script, "THRESHOLDS", locked)
     scores = {"single.hit_rate": 0.9, "abstain.hit_rate": 0.5}
     monkeypatch.setattr(benchmark, "gated_scores", lambda _report: dict(scores))
-    _no_benchmark_runs(monkeypatch)
+    _no_benchmark_runs(monkeypatch, script)
     monkeypatch.setattr(benchmark, "edge_check", lambda *_a, **_kw: dict(NO_EDGE))
     parts = _locked_parts()
 
@@ -263,7 +267,7 @@ def test_a_trade_inside_the_rule_is_recorded(tmp_path, monkeypatch):
     monkeypatch.setattr(script, "THRESHOLDS", locked)
     monkeypatch.setattr(benchmark, "gated_scores",
                         lambda _r: {"single.mrr": 0.9, "noise.precision": 0.67, "abstain.hit_rate": 0.4})
-    _no_benchmark_runs(monkeypatch)
+    _no_benchmark_runs(monkeypatch, script)
     monkeypatch.setattr(benchmark, "edge_check", lambda *_a, **_kw: dict(NO_EDGE))
     locked.write_text(json.dumps({"dataset_version": version, "scores": {
         "single.mrr": 0.8, "noise.precision": 0.7, "abstain.hit_rate": 0.4},
@@ -682,7 +686,7 @@ def test_a_new_extraction_dataset_is_rebaselined(tmp_path, monkeypatch):
     version = benchmark.load_dataset()["version"]
     monkeypatch.setattr(script, "THRESHOLDS", locked)
     monkeypatch.setattr(benchmark, "gated_scores", lambda _r: {"single.hit_rate": 0.9})
-    _no_benchmark_runs(monkeypatch)
+    _no_benchmark_runs(monkeypatch, script)
     monkeypatch.setattr(benchmark, "edge_check", lambda *_a, **_kw: dict(NO_EDGE))
     older = {**_locked_extraction(), "version": 1}
     locked.write_text(json.dumps({"dataset_version": version, "scores": {"single.hit_rate": 0.9},

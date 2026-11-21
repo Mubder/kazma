@@ -190,6 +190,25 @@ def _small(data: dict) -> list[str]:
     ]
 
 
+def _scale(data: dict) -> list[str]:
+    """The scale run (dataset v8, the benchmark audit's R9): the questions on
+    a store of several times the unrelated chat."""
+    scale = data.get("scale") or {}
+    sc = scale.get("scores") or {}
+    s = data.get("scores") or {}
+    if not sc:
+        return []
+    return [
+        f"**As memory grows**: the same questions on a store whose unrelated chat is {scale.get('factor')} times "
+        f"as large ({int(scale.get('memories') or 0):,} memories, every conversation different): hit rate "
+        f"{_pct(sc.get('overall.hit_rate'))} (against {_pct(s.get('overall.hit_rate'))}), MRR "
+        f"{_num(sc.get('overall.mrr'))} ({_num(s.get('overall.mrr'))}), precision {_pct(sc.get('overall.precision'))} "
+        f"({_pct(s.get('overall.precision'))}); questions it has no memory for answered with nothing in "
+        f"{_pct(sc.get('abstain.hit_rate'))} of cases ({_pct(s.get('abstain.hit_rate'))}).",
+        "",
+    ]
+
+
 def _memory(data: dict) -> list[str]:
     s = data["scores"]
     lines = [
@@ -226,6 +245,7 @@ def _memory(data: dict) -> list[str]:
         *_sealed(data),
         *_edges(data),
         *_small(data),
+        *_scale(data),
     ]
     extraction = data.get("extraction") or {}
     ex = extraction.get("scores") or {}

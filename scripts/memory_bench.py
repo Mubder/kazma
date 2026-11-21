@@ -678,6 +678,155 @@ def _distractor_summaries(sessions: list[dict[str, Any]]) -> list[dict[str, Any]
     return out
 
 
+# ── Dataset v8: the unrelated chat without repeats (benchmark audit R9) ──
+#
+# v7's pool drew 300 sessions with repeats from the 74 turns above: its 1,060
+# turns were 181 different ones, about six copies each, so recall's
+# background (a question's meaning ranks 4 to 15) was made of copies, and the
+# thresholds were swept on it. From v8 the pool's sessions take their turns
+# without replacement: the hand-written turns above, each once, and turns a
+# model wrote for it (``scripts/memory_pool_generate.py``), each once. The
+# scale run (``benchmark.run_scale_benchmark``) adds ``SCALE_FACTOR - 1``
+# more pools of the same kind, so the report can say whether the scores hold
+# as memory grows. v7's pool stays in the file (``retired_in`` 8): v5 to v7
+# replay exactly.
+
+#: The version that replaced the pool.
+POOL_VERSION = 8
+#: The generated turns (``scripts/memory_pool_generate.py``).
+POOL_TURNS = REPO / "tests" / "fixtures" / "memory_bench" / "pool_turns.json"
+#: Sessions of unrelated chat, as v7 had; the scale run's store holds
+#: ``SCALE_FACTOR`` times as many.
+POOL_SESSIONS = 300
+SCALE_FACTOR = 4
+
+#: The traps' own answers (v7 answered them with another question's answer).
+_TRAP_ANSWERS = {
+    "Tell me about the layout of a typical Roman villa.":
+        "Rooms were set around an atrium open to the sky, with a colonnaded garden, the peristyle, behind it.",
+    "Is it possible to cook rice without a lid?":
+        "Yes: boil it in plenty of water like pasta and drain it once it is tender.",
+    "What happened throughout the Renaissance in Florence?":
+        "Banking wealth and Medici patronage made it the centre of a revival of art and learning: "
+        "Brunelleschi's dome, Botticelli, Leonardo and Michelangelo.",
+    "Why do fans shout during football matches?":
+        "To lift their team, unsettle the other side and share the excitement with the crowd.",
+    "I have my doubts about this marketing plan.":
+        "Tell me which part worries you, the audience, the budget or the channels, and we can test it.",
+    "Write about something you find fascinating about octopuses.":
+        "An octopus has three hearts and blue blood, and most of its neurons are in its arms.",
+    "What is the best way to do it and how is it done in the end?":
+        "That depends on the task: tell me what you are trying to do and I will walk you through it.",
+    "Is it the case that it is what it is?":
+        "Sometimes, yes: some things cannot be changed, only accepted.",
+    "How do you make it so that it does not do that again?":
+        "Find what triggers it first; once the cause is known it can usually be prevented.",
+    "What does it mean when they say it runs out of steam?":
+        "That something loses its energy or momentum and slows down.",
+    "Can you run the numbers on this and see if it works out?":
+        "Send me the figures and I will check whether they add up.",
+    "Is there a document template for meeting minutes?":
+        "Yes: date, attendees, agenda items, decisions, and action points with owners and due dates.",
+    "What travel adapters work in the United Kingdom?":
+        "The UK uses type G plugs, three rectangular pins, at 230 volts.",
+}
+
+#: The weekly summaries' titles, by the pool turn's group (filler has none).
+_POOL_TITLES = {
+    **{k: v for k, v in _SUMMARY_TITLES.items()},
+    "health": "Health and fitness questions",
+    "money": "Money questions",
+    "home": "Home and garden questions",
+    "hobbies": "Hobbies and sport",
+    "learning": "Learning and study",
+    "tech": "Devices and software",
+}
+
+
+def _pool_key(text: str) -> str:
+    """A turn's user text for comparing: casefolded, letters and digits."""
+    import unicodedata
+
+    folded = unicodedata.normalize("NFKC", text).casefold()
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in folded).split())
+
+
+def _hand_written_pool() -> list[dict[str, str]]:
+    if set(_TRAP_ANSWERS) != set(_TRAPS):
+        raise ValueError("a trap with no answer, or an answer with no trap")
+    out = [{"user": q, "assistant": _TRAP_ANSWERS[q], "group": "traps"} for q in _TRAPS]
+    out += [{"user": q, "assistant": a, "group": "arabic"} for q, a in _AR_DISTRACTORS]
+    out += [{"user": q, "assistant": a, "group": name} for name, pairs in _TOPICS.items() for q, a in pairs]
+    return out
+
+
+def _generated_pool(taken: set[str]) -> list[dict[str, str]]:
+    """The generated turns no other memory or question of the dataset
+    already says, each once, in the file's order."""
+    record = json.loads(POOL_TURNS.read_text(encoding="utf-8"))
+    out = []
+    for t in record["turns"]:
+        key = _pool_key(t["user"])
+        if not key or key in taken:
+            continue
+        taken.add(key)
+        out.append({"user": t["user"], "assistant": t["assistant"], "group": t["group"]})
+    return out
+
+
+def _pool_sessions(rng: random.Random) -> tuple[list[tuple[str, int, list[dict[str, str]]]],
+                                                list[tuple[str, int, list[dict[str, str]]]]]:
+    """The pool's sessions and the scale run's: 2 to 5 turns a session, on a
+    day of the first 116, every turn taken once. The pool holds every
+    hand-written turn; the rest of both is the generated turns, shuffled."""
+    hand = _hand_written_pool()
+    taken = {_pool_key(t["user"]) for t in hand}
+    taken |= {_pool_key(u) for _sid, _day, turns in PERSONA + HARD_NEGATIVES + _dense_sessions() for u, _a in turns}
+    taken |= {_pool_key(q[1]) for q in QUESTIONS + SECOND_SET}
+    generated = _generated_pool(taken)
+    rng.shuffle(generated)
+
+    def sessions(turns: list[dict[str, str]], sizes: list[int], prefix: str):
+        out, at = [], 0
+        for n, size in enumerate(sizes, 1):
+            out.append((f"{prefix}{n:03d}", rng.randint(0, 115), turns[at:at + size]))
+            at += size
+        return out
+
+    sizes = [rng.randint(2, 5) for _ in range(POOL_SESSIONS)]
+    mine = sum(sizes) - len(hand)
+    scale_sizes = [rng.randint(2, 5) for _ in range(POOL_SESSIONS * (SCALE_FACTOR - 1))]
+    if mine + sum(scale_sizes) > len(generated):
+        raise ValueError(f"the pool needs {mine + sum(scale_sizes)} generated turns, {POOL_TURNS.name} "
+                         f"holds {len(generated)} new ones: run scripts/memory_pool_generate.py --rounds 3")
+    pool = hand + generated[:mine]
+    rng.shuffle(pool)
+    return sessions(pool, sizes, "u"), sessions(generated[mine:mine + sum(scale_sizes)], scale_sizes, "z")
+
+
+def _pool_summaries(sessions: list[dict[str, Any]], prefix: str) -> list[dict[str, Any]]:
+    """A weekly summary per group of the pool's chat, as v7's distractors
+    had: the week's turns of a group (four or more), up to six of its
+    questions with their answers."""
+    weeks: dict[tuple[int, str], list[tuple[str, str, str]]] = {}
+    for s in sessions:
+        for i, t in enumerate(s["turns"], 1):
+            if t.get("group") in _POOL_TITLES:
+                weeks.setdefault((s["day"] // 7, t["group"]), []).append((t["user"], t["assistant"], f"{s['id']}#{i}"))
+    out: list[dict[str, Any]] = []
+    for (week, group), turns in sorted(weeks.items()):
+        if len(turns) < 4:
+            continue
+        pairs = [(q, a) for q, a, _ref in turns][:6]
+        if group == "arabic":
+            text = "سأل المستخدم: " + "؛ ".join(f"{q} ({a})" for q, a in pairs)
+        else:
+            text = "The user asked: " + "; ".join(f"{q.rstrip('?.')} ({a.rstrip('.')})" for q, a in pairs) + "."
+        out.append({"id": f"{prefix}{week:02d}{group}", "day": week * 7, "title": _POOL_TITLES[group],
+                    "text": text, "sources": [ref for _q, _a, ref in turns]})
+    return out
+
+
 # ── Questions: (id, text, category, gold, refs that must rank below the answer) ──
 # A ref is a turn, "<session>#<turn index>" (1-based), or a fact id. Each gold
 # entry is one piece of the answer; "a|b" means either memory gives it -- the
@@ -978,15 +1127,25 @@ def build() -> dict[str, Any]:
     from kazma_core.memory.benchmark import memory_fingerprint
 
     rng = random.Random(SEED)
+    # v7's pool first (the seed's order), kept for the versions before v8.
+    v7_pool = _distractor_sessions(rng)
+    pool, scale = _pool_sessions(rng)
     sessions = [
         {"id": sid, "day": day, "kind": kind, "turns": [{"user": u, "assistant": a} for u, a in turns],
-         **({"new_in": 6} if kind == "dense" or sid in _NEW_IN_V6 else {})}
+         **({"new_in": 6} if kind == "dense" or sid in _NEW_IN_V6 else {}),
+         **({"retired_in": POOL_VERSION} if kind == "distractor" else {})}
         for kind, group in (("persona", PERSONA), ("hard_negative", HARD_NEGATIVES),
-                            ("distractor", _distractor_sessions(rng)), ("dense", _dense_sessions()))
+                            ("distractor", v7_pool))
         for sid, day, turns in group
     ]
-    refs = {f"{s['id']}#{i}" for s in sessions for i in range(1, len(s["turns"]) + 1)}
-    days = {s["id"]: s["day"] for s in sessions}
+    sessions += [{"id": sid, "day": day, "kind": "pool", "turns": turns, "new_in": POOL_VERSION}
+                 for sid, day, turns in pool]
+    sessions += [{"id": sid, "day": day, "kind": "dense", "turns": [{"user": u, "assistant": a} for u, a in turns],
+                  "new_in": 6} for sid, day, turns in _dense_sessions()]
+    scale_sessions = [{"id": sid, "day": day, "kind": "scale", "turns": turns} for sid, day, turns in scale]
+    current = [s for s in sessions if not s.get("retired_in")]
+    refs = {f"{s['id']}#{i}" for s in current for i in range(1, len(s["turns"]) + 1)}
+    days = {s["id"]: s["day"] for s in current}
     facts = []
     for fid, source, subject, predicate, obj, ptype, method, importance in FACTS:
         if source.startswith("@"):
@@ -1013,13 +1172,23 @@ def build() -> dict[str, Any]:
             if ref not in refs:
                 raise ValueError(f"{sid}: unknown source turn {ref}")
         summaries.append({"id": sid, "day": day, "title": title, "text": text, "sources": sources})
-    summaries.extend(_distractor_summaries(sessions))
-    summary_ids = {s["id"] for s in summaries}
-    if len(summary_ids) != len(summaries) or summary_ids & (fact_ids | refs):
+    v7_summaries = summaries + _distractor_summaries(sessions)
+    pool_summaries = [{**x, "new_in": POOL_VERSION} for x in _pool_summaries(
+        [x for x in current if x["kind"] == "pool"], "pw")]
+    # v7's weekly summaries of its pool, and its roll-ups of them, retire with it.
+    v7_rollups = _rollups(v7_summaries, ROLLUP_PROJECTS, ROLLUP_TEXTS, 7)
+    retired_rollups = {r["id"] for r in v7_rollups if any(p.startswith("dw") for p in r["parts"])}
+    summaries = [x if not x["id"].startswith("dw") else {**x, "retired_in": POOL_VERSION} for x in v7_summaries]
+    summaries += pool_summaries
+    current_summaries = [x for x in summaries if not x.get("retired_in")]
+    summary_ids = {x["id"] for x in current_summaries}
+    if len(summary_ids) != len(current_summaries) or summary_ids & (fact_ids | refs):
         raise ValueError("duplicate summary id")
-    rollups = _rollups(summaries)
-    rollup_ids = {r["id"] for r in rollups}
-    if rollup_ids & (summary_ids | fact_ids | refs):
+    rollups = [r if r["id"] not in retired_rollups else {**r, "retired_in": POOL_VERSION} for r in v7_rollups]
+    rollups += _rollups(current_summaries, ROLLUP_PROJECTS_V8, ROLLUP_TEXTS_V8, POOL_VERSION, months_from=POOL_VERSION)
+    current_rollups = [r for r in rollups if not r.get("retired_in")]
+    rollup_ids = {r["id"] for r in current_rollups}
+    if len(rollup_ids) != len(current_rollups) or rollup_ids & (summary_ids | fact_ids | refs):
         raise ValueError("duplicate roll-up id")
     summary_ids = summary_ids | rollup_ids
     questions = _questions(QUESTIONS, refs, fact_ids, summary_ids)
@@ -1030,8 +1199,15 @@ def build() -> dict[str, Any]:
     unknown = set(QUESTION_EXTRAS) - {q["id"] for q in questions + second}
     if unknown:
         raise ValueError(f"extras for questions that do not exist: {sorted(unknown)}")
-    data = {"version": 7, "seed": SEED, "sessions": sessions, "facts": facts,
-            "summaries": summaries, "rollups": rollups, "questions": questions, "second": second}
+    pool_turns = [t for x in current + scale_sessions if x["kind"] in ("pool", "scale") for t in x["turns"]]
+    others = {_pool_key(t["user"]) for x in current if x["kind"] not in ("pool", "scale") for t in x["turns"]}
+    keys = [_pool_key(t["user"]) for t in pool_turns]
+    if len(set(keys)) != len(keys) or set(keys) & others:
+        raise ValueError("a turn of the pool is said twice")
+    data = {"version": POOL_VERSION, "seed": SEED, "sessions": sessions, "facts": facts,
+            "summaries": summaries, "rollups": rollups, "questions": questions, "second": second,
+            "scale": {"factor": SCALE_FACTOR, "new_in": POOL_VERSION, "sessions": scale_sessions,
+                      "summaries": _pool_summaries(scale_sessions, "zw")}}
     held = memory_fingerprint(data, as_of=IDS_HOLD_SINCE)
     if held != IDS_HOLD_SINCE_SHA256:
         raise ValueError(f"a memory of dataset v{IDS_HOLD_SINCE} moved or changed (fingerprint {held}): "
@@ -1171,32 +1347,336 @@ ROLLUP_TEXTS: dict[str, tuple[str, str]] = {
 }
 
 
-def _rollups(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Dataset v7's roll-ups (``new_in`` 7): each with its level, the weekly
-    summaries it was written from (``parts``) and its text. A month's parts
-    are the weekly summaries whose Monday is in it (UTC: every summary day
-    is days from a month's edge, so the grouping holds in any time zone)."""
+def _rollups(summaries: list[dict[str, Any]], projects: dict[str, list[str]],
+             texts: dict[str, tuple[str, str]], new_in: int, *, months_from: int | None = None) -> list[dict[str, Any]]:
+    """Roll-ups (``new_in``): each with its level, the weekly summaries it
+    was written from (``parts``) and its text. A month's parts are the
+    weekly summaries whose Monday is in it (UTC: every summary day is days
+    from a month's edge, so the grouping holds in any time zone). v7's are
+    the months and ``ROLLUP_PROJECTS``; v8 wrote the months again over its
+    pool's summaries (*months_from*) and ``ROLLUP_PROJECTS_V8``."""
     from datetime import UTC, datetime
 
     from kazma_core.memory.benchmark import BASE_TIME
 
     by_id = {s["id"]: s for s in summaries}
     out: list[dict[str, Any]] = []
-    for month in ROLLUP_MONTHS:
-        parts = sorted(s["id"] for s in summaries
-                       if datetime.fromtimestamp(BASE_TIME + s["day"] * 86400, UTC).strftime("%Y-%m") == month)
-        out.append({"id": f"rm_{month}", "level": "month", "key": month, "parts": parts})
-    for rid, parts in ROLLUP_PROJECTS.items():
+    if months_from in (None, new_in):
+        for month in ROLLUP_MONTHS:
+            parts = sorted(s["id"] for s in summaries
+                           if datetime.fromtimestamp(BASE_TIME + s["day"] * 86400, UTC).strftime("%Y-%m") == month)
+            out.append({"id": f"rm_{month}", "level": "month", "key": month, "parts": parts})
+    for rid, parts in projects.items():
         missing = [p for p in parts if p not in by_id]
         if missing:
             raise ValueError(f"{rid}: unknown weekly summaries {missing}")
         out.append({"id": rid, "level": "project", "key": f"project:{rid}", "parts": sorted(parts)})
     for rollup in out:
-        rollup["title"], rollup["text"] = ROLLUP_TEXTS[rollup["id"]]
-        rollup["new_in"] = 7
-    if {r["id"] for r in out} != set(ROLLUP_TEXTS):
+        rollup["title"], rollup["text"] = texts[rollup["id"]]
+        rollup["new_in"] = new_in
+    if {r["id"] for r in out} != set(texts):
         raise ValueError("a roll-up text with no roll-up, or the other way round")
     return out
+
+
+#: v8's roll-ups beside the ones v7 wrote of the persona's own summaries:
+#: the planner's groups of the new pool's weekly summaries
+#: (``tests/test_memory_benchmark_rollups.py`` holds them equal), and the
+#: titles and texts the product wrote for them (``topic_rollups.rebuild_rollup``
+#: with deepseek-flash, temperature 0, 2026-11-21: 18 calls, 34,892 prompt and
+#: 5,102 completion tokens). v7's month texts were written by hand.
+ROLLUP_PROJECTS_V8: dict[str, list[str]] = {
+    "rp_pw00arabic": ["pw00arabic", "pw06arabic", "pw09arabic"],
+    "rp_pw00food": ["pw00food", "pw01food", "pw03food", "pw04food", "pw06food", "pw07food", "pw09food", "pw10food", "pw14food", "pw15food"],
+    "rp_pw00money": ["pw00money", "pw01money", "pw15money"],
+    "rp_pw00tech": ["pw00tech", "pw04tech", "pw05tech", "pw14tech", "pw15tech"],
+    "rp_pw01code": ["pw01code", "pw05code", "pw07code"],
+    "rp_pw01learning": ["pw01learning", "pw02learning", "pw10learning", "pw13learning"],
+    "rp_pw01tools": ["pw01tools", "pw05tools", "pw10tools"],
+    "rp_pw01travel": ["pw01travel", "pw03travel", "pw06travel", "pw08travel", "pw10travel", "pw11travel"],
+    "rp_pw02tech": ["pw02tech", "pw07tech", "pw08tech"],
+    "rp_pw03code": ["pw03code", "pw08code", "pw13code"],
+    "rp_pw03home": ["pw03home", "pw04home", "pw06home", "pw08home", "pw10home", "pw13home", "pw14home"],
+    "rp_pw03writing": ["pw03writing", "pw04writing", "pw13writing"],
+    "rp_pw05arabic": ["pw05arabic", "pw07arabic", "pw11arabic"],
+    "rp_pw06health": ["pw06health", "pw08health", "pw15health", "pw16health"],
+}
+ROLLUP_TEXTS_V8: dict[str, tuple[str, str]] = {
+    "rm_2026-05": (
+        "Sami's questions and half marathon plan",
+        "Sami from Porto, a structural engineer at Aurelia Bridges, introduced himself: he has a four-"
+        "year-old greyhound named Pixel, is allergic to shellfish, and his partner Noor teaches chemistry"
+        " at a secondary school. Kazma made a 12-week plan for the Lisbon half marathon on March 22 "
+        "(three easy runs a week, a Sunday long run growing from 8 to 18 km, a two-week taper) and "
+        "suggested Cantinho do Avillez for Noor's birthday dinner, with seafood for her and a meat menu "
+        "for him. Booking the dinner was left open. Across the week of May 28 he also asked many short "
+        "factual questions on cooking (avocados, bread mold, vegetable stock, knives, chickpeas, onions),"
+        " health and fitness (sleep, eye strain, flu vaccine, colds, REM), money (Section 179, emergency "
+        "funds, diversification, real interest, budgeting, interest on 3,000 at 18%), devices and "
+        "software, tool runs (build logs, DNS checks, git file history), travel, writing help, general "
+        "knowledge, Arabic-language questions, and programming (regex, Rust borrow rules, SQL joins, list"
+        " comprehensions, String vs &str).",
+    ),
+    "rm_2026-06": (
+        "Sami: half marathon, Tagus retrofit, family and Q&A",
+        "Kazma's June 2026 summaries cover Sami's ongoing projects and a wide stream of one-off "
+        "questions. Personal threads: Sami is training for the Lisbon half marathon on a 12-week plan "
+        "(week one: three easy 5 km runs plus an 8 km Sunday long run; first check-in: a 10 km easy long "
+        "run, knees fine, advised to add 1–2 km weekly and keep runs conversational). His passport "
+        "expires 14 March 2031, with a renewal reminder set for September 2030. At work he leads the "
+        "Tagus footbridge retrofit, due end of June, under manager Ines Carvalho, who likes detailed "
+        "status reports; Kazma offered a milestone plan. His seven-year-old daughter Maya started at "
+        "Escola Azul: school starts 8:40, leave home by 8:10, 7:30 alarm. The rest is assorted Q&A in "
+        "Arabic and English across programming (Git, mocking, heaps, Dijkstra, pandas, Rust borrowing), "
+        "cooking, home and garden, money, travel, learning, devices, writing, and general knowledge. "
+        "Nothing was decided beyond the training advice and the passport reminder; the retrofit milestone"
+        " plan was offered but not confirmed as accepted.",
+    ),
+    "rm_2026-07": (
+        "Kazma weekly summaries: July 2026 questions and training",
+        "Across July 2026 the user asked Kazma a wide mix of short questions, mostly in Arabic and "
+        "English, with no single project. Weeks of Jul 02, 09 and 16 each covered scattered Arabic "
+        "questions (study procrastination, GitHub Pages, eclipses, Gulf climate, Ramadan games, basil in "
+        "pots, Quran memorization), programming (Python list reversal, CSS grid sticky footer, useMemo vs"
+        " useCallback, Docker volumes, microtasks, Rust references, keyset pagination, Go channels), "
+        "cooking (smoking woods, knife pinch grip, sourdough starter, garam masala, French press), "
+        "general knowledge (capitals starting with K, tides, seasons, Kurosawa, GDP), devices/software, "
+        "health and fitness, hobbies and sport, home and garden, travel, and writing help. Tool-run "
+        "questions covered pytest coverage, git commit counts, ls, and macOS CPU load. The only ongoing "
+        "thread is Sami's half marathon training: he skipped the long run in the week of Jul 02 due to "
+        "work on the Tagus retrofit, and Kazma said one missed week is fine and not to make up the "
+        "distance; by the week of Jul 09 he was back with a 14 km long run plus one interval session, "
+        "with Kazma advising intervals stay once a week. Nothing was decided beyond that advice; no open "
+        "requests are recorded.",
+    ),
+    "rm_2026-08": (
+        "Sami's August 2026: Lisbon half marathon and varied questions",
+        "Across August 2026 Sami used Kazma mostly for short factual questions in Arabic and English, "
+        "plus a few personal threads. Recurring topics: cooking (high-protein breakfasts, carbonara, "
+        "spatchcocking), general knowledge (Citizen Kane, Stoicism vs existentialism, Art Deco, classical"
+        " music periods), hobbies and sport (tennis tiebreaks, basketball, fishing, photography stops), "
+        "home and garden (laundry, decluttering, moving in rain, storing clothes), learning and study "
+        "(syllabi, sleep and memory, filler words), travel (passports, rental cars, Heathrow transfers, "
+        "altitude sickness), and programming (promise chaining, SQL, git squash, setuid/setgid, mocking "
+        "databases). Personal threads: Sami trained for and finished the Lisbon half marathon in 1:56:40 "
+        "(week of Aug 13), under his two-hour goal on his first attempt; the week before he did an 8 km "
+        "easy last long run and booked a sports massage for Thursday. Lisbon bookings: hotel reference "
+        "ZX4-91Q and flight TP1352 on March 20 at 07:15, with advice to reach the airport by 05:45. He "
+        "also fixed fast battery drain on a ThinkPad X1 Carbon via an 80 percent charge threshold in "
+        "Lenovo Vantage and Better Battery mode. Open: nothing was left explicitly pending; the Lisbon "
+        "trip logistics and laptop battery settings were the only follow-ups mentioned.",
+    ),
+    "rp_pw00arabic": (
+        "أسئلة متفرقة من المستخدم عبر أسابيع",
+        "المستخدم طرح أسئلة متفرقة ومتنوعة على مدى ثلاثة أسابيع، دون مشروع أو هدف موحّد يجمعها. في أسبوع "
+        "28 مايو 2026 سأل عن نصائح للنوم الصحي، ومدة وصول ضوء الشمس للأرض، وتقليل ملح المرق، ومعنى التسلل"
+        " في كرة القدم، وسبب التعب السريع في الجو الحار، وهل القهوة تنشّف الجسم. في أسبوع 9 يوليو 2026 "
+        "سأل عن دعاء قصير للإفطار، وكمية الماء اليومية، وصياغة رسالة شكر للمدير، وسبب صوت صفير عند "
+        "التسريع في السيارة، وألعاب رمضان القديمة عند الخليجيين، وكيف تتنفس الأسماك. في أسبوع 30 يوليو "
+        "2026 سأل عن سبب زيادة زيارة الأهل في رمضان، والفرق بين المرق واليخنة، ومدة الشوط في المباراة، "
+        "والمسافة بين الكويت والرياض، وكيفية حماية كلمة المرور في قاعدة البيانات، وأسماء ثلاث صحاري "
+        "كبيرة. كل الأسئلة تمت الإجابة عليها في وقتها، ولم يُذكر أي قرار أو طلب متابعة أو أمر معلّق. لا "
+        "توجد معلومات عن تفضيلات المستخدم أو أهدافه أبعد من هذه الاستفسارات.",
+    ),
+    "rp_pw00food": (
+        "Cooking questions over ten weeks",
+        "From late May to mid-September 2026 the user asked Kazma a steady stream of practical cooking "
+        "questions, roughly one batch per week. Topics covered food safety (avocado browning, mold on "
+        "bread, reheating leftovers to 165°F, storing stew and canned beans, spotting unsafe leftovers), "
+        "techniques (knife guide and sharpening checklist, chopping onions, French omelette, "
+        "spatchcocking chicken, tempering chocolate, flaky pie crust, croissant chilling, mushroom "
+        "risotto), and ingredient questions (cinnamon vs cassia, garam masala, umami, pesto vs tomato "
+        "sauce, ramen vs udon, lasagne vs lasagna, tiramisu ingredients). The user also asked for quick "
+        "meal ideas: no-oven dinners, five-minute breakfasts, high-protein breakfasts, vegan chickpea "
+        "dishes, vegan Caesar dressing and vegan pizza cheese, plus meals that reheat well. Other "
+        "requests included a sourdough starter, vegetable stock, egg boiling times, French press coffee "
+        "troubleshooting, and a short poem about a simmering stew. No decisions or plans were recorded; "
+        "the user simply wanted short, direct answers. Nothing was left explicitly open, though the "
+        "pattern suggests ongoing interest in quick weeknight meals, vegan substitutions, and food-safety"
+        " rules.",
+    ),
+    "rp_pw00money": (
+        "Personal finance Q&A across three weeks",
+        "The user asked a series of standalone personal-finance and small-business questions across three"
+        " weeks, with no stated goals, decisions, or follow-ups recorded. Week of May 28, 2026: Section "
+        "179 deduction (full deduction of eligible equipment/software in year placed in service, up to an"
+        " annual limit); emergency fund target (three to six months of essential expenses in a liquid "
+        "account); meaning of diversification; real interest rate with 5% nominal and 2% inflation (about"
+        " 3%); tracking a budget without spreadsheets (app syncing bank accounts, or notebook with weekly"
+        " check-ins); interest on 3,000 at 18% APR for a year (about $540, roughly $45/month). Week of "
+        "Jun 04, 2026: break-even formula in units (fixed costs divided by contribution margin per unit);"
+        " budget vs. spending plan (largely the same); short budget setup checklist; CD vs. savings "
+        "account for parking cash; example of a regressive tax (sales tax on basic groceries); whether 6%"
+        " is a good mortgage rate (generally moderate by recent standards). Week of Sep 10, 2026: "
+        "50/30/20 rule; cash vs. accrual accounting; working capital (current assets minus current "
+        "liabilities); real interest rate in an inflation context; assessment of the 70/20/10 rule. "
+        "Nothing was decided or acted on, and no open items were recorded. The user's preferences or "
+        "goals beyond asking these questions are not stated in the summaries.",
+    ),
+    "rp_pw00tech": (
+        "Devices and software Q&A over five weeks",
+        "A recurring thread of short, practical tech questions across five weeks (May 28–Sep 10, 2026), "
+        "mostly one-off how-tos rather than a single project. Topics: networking (modem vs router, mesh "
+        "vs traditional routers, Wi-Fi 6 vs 6E, router firmware update steps), video calls (free "
+        "participant limits, screen sharing on Zoom, pre-call checklist, webinar vs meeting, "
+        "Zoom/Teams/Meet comparison), spreadsheets (COUNTIF for text, TRIM, TEXT for month name, VLOOKUP "
+        "vs INDEX MATCH, checking an AVERAGE formula), hardware (USB keyboard through a dock, printer "
+        "setup checklist, keyboard cleaning, flatbed vs sheet-fed scanners, thermal throttling), and "
+        "software/security (Outlook vs Thunderbird spam handling, credential stuffing, chatbot uses and "
+        "deployment risks). Also a few short writing checks (sentence clarity, a grammar fix, adding a "
+        "time zone). No decisions, plans, or stated goals were recorded; each question was answered and "
+        "closed. Nothing is explicitly left open, though the user's pattern suggests continued ad-hoc "
+        "tech questions.",
+    ),
+    "rp_pw01code": (
+        "Recurring programming Q&A across three weeks",
+        "A series of standalone programming questions spanning three weeks (Jun 04, Jul 02, Jul 16, "
+        "2026), covering Python, C, Rust, Docker, CSS/React, Go, and databases. No project, goal, or "
+        "preference was stated by the user beyond asking for quick answers. Week of Jun 04: mocking a "
+        "database call in Python (patch the query function, not the driver, via unittest.mock.patch), "
+        "min-heap vs max-heap, a Valgrind command for C (--leak-check=full --show-leak-kinds=all, "
+        "optionally --track-origins=yes), confirming Dijkstra fails on negative edge weights (use "
+        "Bellman-Ford), Rust slices as borrowed views, and reading CSV into pandas. Week of Jul 02: "
+        "reversing a Python list, sticky footer with CSS grid (grid-template-rows: auto 1fr auto), "
+        "useMemo vs useCallback, and Docker volumes for persistent data. Week of Jul 16: grid-template "
+        "shorthand, why not to over-mock, a checklist for diagnosing a slow web endpoint, docker image "
+        "prune (with -a), keyset pagination over large OFFSET, and ranging over a Go channel. Nothing was"
+        " decided, built, or left open; each question was answered in isolation.",
+    ),
+    "rp_pw01learning": (
+        "Learning and study questions across four weeks",
+        "Over four weeks (Jun 4, Jun 11, Aug 6, Aug 27, 2026), the user asked a series of short, "
+        "unrelated learning-and-study questions and received brief answers. Topics included meeting "
+        "efficiency, afternoon slumps, slide counts for a 20-minute talk, accreditation for online "
+        "courses, Spanish irregular verbs and rolling Rs, phonemic awareness activities, outline logic "
+        "for pricing/costs notes, urgent vs. important, Duolingo vs. a tutor, kinematics formulas, the "
+        "rule of three in speeches, syllabus contents, sleep and learning, reducing \"um,\" certificate vs."
+        " certification, and an opening line for a recycling talk. No decisions were made, no ongoing "
+        "project or stated goal was recorded, and nothing was left open; each exchange was a standalone "
+        "question answered in passing. The only recurring thread is language learning (Spanish practice, "
+        "apps vs. tutors) and presentation/speaking skills (slides, filler words, openings, rule of "
+        "three), but the summaries show no plan or commitment attached to either.",
+    ),
+    "rp_pw01tools": (
+        "Recurring dev/ops Q&A: tests, CPU, backups, files",
+        "Over three weeks (Jun 04, Jul 02, Aug 06, 2026) the user asked a series of short, unrelated "
+        "technical questions; no project or goal was stated and no decisions were made. Topics: checking "
+        "an npm test command with --watch (valid); what high CPU usage means; whether cloud sync counts "
+        "as backup (no, unless versioning or an isolated copy exists); why sync conflicts happen; a one-"
+        "line pytest coverage command (pytest --cov=yourpackage tests/); counting commits on a branch "
+        "(git rev-list --count HEAD); listing all files on Linux (ls -a); checking CPU load on macOS "
+        "(Activity Monitor or top -o cpu); monitoring CPU on a Linux server (top/htop, vmstat 1); listing"
+        " the downloads folder (12 files, newest invoice_0917.pdf); the difference between RPO and RTO; "
+        "and finding a file by name (file manager search, find, or dir /s). The user's expressed wants "
+        "were only for concise commands and plain explanations. Nothing is left open; each question was "
+        "answered. No preferences, constraints, or follow-up tasks were recorded.",
+    ),
+    "rp_pw01travel": (
+        "Travel questions across six weeks",
+        "The user asked a steady stream of practical travel questions over six weeks (Jun 4–Aug 13, "
+        "2026), with no stated trip plan or decisions recorded. Topics covered: best time to visit "
+        "Iceland; travel insurance coverage and whether it's worth it for cheap domestic trips; bay vs. "
+        "gulf; currencies in Budapest, Lebanon (US dollars widely accepted) and Japan visa rules; "
+        "downhill vs. cross-country skiing; six-month passport validity; Levant foods; whether Petra "
+        "needs two days; lost-passport steps and checklists; Caribbean vs. Mediterranean beaches; cheap "
+        "intercity bus tickets; hostels near train stations; IDP in Italy; a Jordan–Lebanon trip idea; "
+        "Muscat vs. Manama without a car; Prague costs; a Seville weekend itinerary; Riyadh July heat; "
+        "passport colors; Eurail Global Pass in Italy and Switzerland; why some beaches are clearer; "
+        "sleep timing on a New York–Tokyo flight; Beirut autumn climate; CDW vs. liability insurance; "
+        "Denver to Moab scenic route; a road-trip packing checklist; the Glacier Express; why peanut "
+        "butter counts as a liquid at security; and mosque dress expectations in the Gulf. Nothing was "
+        "decided or acted on, and no preferences beyond the questions themselves were stated. Open items:"
+        " none recorded.",
+    ),
+    "rp_pw02tech": (
+        "Recurring Q&A on devices, security, and software",
+        "Over three weeks (Jun 11, Jul 16, Jul 23, 2026), the user asked a series of short, unrelated "
+        "practical questions under the theme \"Devices and software.\" Topics covered: context length in "
+        "models; whether a 15-inch laptop fits a backpack; backup/recovery codes and why to store them "
+        "offline; not reusing passwords; laptop keyboard parts; the Fn key; Wi-Fi channel bandwidth; "
+        "power bank mAh vs. real charge; authenticator apps; passphrase vs. complex password; estimating "
+        "cloud storage cost; combining name columns in a spreadsheet; risks of deploying AI assistants; "
+        "and a two-line meeting invite for a 30-minute budget review video call. Each was answered "
+        "briefly; no ongoing project, decision, or stated goal emerged. The user gave no explicit "
+        "preferences or follow-ups. Nothing is left open beyond the general pattern of asking quick how-"
+        "to and security questions, which may continue.",
+    ),
+    "rp_pw03code": (
+        "Recurring programming Q&A across three weeks",
+        "A running series of programming questions spanning three weeks, with no stated overall goal "
+        "beyond getting answers. Week of Jun 18, 2026: git rebase --continue after staging resolved "
+        "files; flexbox vs grid; mocking an HTTP client to return 404 once then 200 via side_effect; "
+        "Dijkstra's algorithm; optional regex groups; optimistic vs pessimistic concurrency control. Week"
+        " of Jul 23, 2026: debugging a Node app whose memory climbs until it crashes (heap snapshots and "
+        "diffing suggested); optimistic concurrency control again; reading CSV with pandas; a short "
+        "JUnit/Mockito test; rebasing a branch onto main to avoid merge commits; React StrictMode double "
+        "rendering in development. Week of Aug 27, 2026: heap growth with no leak reported "
+        "(fragmentation, allocator arenas, native memory; check OS-level RSS); squashing the last three "
+        "commits with interactive rebase; setuid vs setgid; list.sort() returning None; whether mocking "
+        "the database is a good idea (real test DB or containers preferred); listing file permissions "
+        "readably. No decisions, commitments, or explicit user preferences were recorded. Open threads "
+        "implied by the questions: the Node memory growth issue and the unexplained heap growth were "
+        "never reported resolved.",
+    ),
+    "rp_pw03home": (
+        "Home and garden Q&A over several weeks",
+        "Over seven weekly summaries (Jun 18 to Sep 3, 2026) the user asked a steady stream of home and "
+        "garden questions, mostly quick how-tos and comparisons. Topics: laundry (front- vs top-load "
+        "washers, care symbols, hand-washing a delicate sweater, washing jeans inside out, cold water for"
+        " dark jeans, vinegar as a fabric softener and its safety in the machine); decluttering (four-box"
+        " method, handling paperwork once, preventing clutter from returning, sentimental items); "
+        "cleaning (vinegar vs bleach for shower mold, lemon juice etching granite); moving (renting a "
+        "truck vs movers, moving in the rain); small-room color palettes and warming a gray room; coffee "
+        "table clearance and sanding grit before painting trim; storing seasonal clothing; raising "
+        "humidity for tropical plants; and smart home/energy topics (securing a smart home network, "
+        "reducing network congestion, Matter's protocol and cross-platform support, smart plug vs smart "
+        "switch, phantom loads, cheap energy savings). One request to dim the living room lights to 30 "
+        "percent could not be done directly; Kazma gave the dimmer command syntax instead. No decisions "
+        "or commitments were recorded, and no explicit goals were stated beyond getting answers. Nothing "
+        "is noted as still open.",
+    ),
+    "rp_pw03writing": (
+        "Recurring writing help requests across three weeks",
+        "The user repeatedly asked Kazma for short writing and language help across three weeks: June 18,"
+        " June 25, and August 27, 2026. Requests covered formal apologies, a lighthouse poem, "
+        "pronunciation of 'croissant', chronological vs. functional CVs, tense consistency, and couplet "
+        "definitions (June 18); a complaint-letter opening, a one-paragraph rivals-sharing-a-lantern "
+        "scene, softening a demand, and a quick study summary (June 25); and a polite email rewrite, a "
+        "brief barter-society explanation, why brands drop taglines, a noir greenhouse opening line, "
+        "flagging exaggeration in a summary, and a bike-lane headline (August 27). Kazma supplied the "
+        "requested text or explanation each time. No decisions, commitments, or follow-up tasks were "
+        "recorded, and the user stated no explicit preferences or goals beyond wanting concise, usable "
+        "writing help. Nothing is noted as still open.",
+    ),
+    "rp_pw05arabic": (
+        "أسئلة متفرقة عن الدراسة والحياة اليومية",
+        "المستخدم طرح أسئلة متفرقة ومتنوعة على مدى عدة أسابيع، دون خيط موضوعي واحد يجمعها. في أسبوع ٢ "
+        "يوليو ٢٠٢٦ سأل عن منع التسويف وقت المذاكرة، ونشر موقع على GitHub Pages، وتفسير الكسوف والخسوف، "
+        "والفرق بين الدراسة الجماعية والفردية، وأسئلة تدريبية للامتحانات، وملخص عن مناخ الخليج. في أسبوع "
+        "١٦ يوليو ٢٠٢٦ سأل عن استهلاك التطبيقات للبيانات، وفكرة مشروع صغير (توصيل وجبات صحية في الحي)، "
+        "وأنواع الجموع في العربية، والحفاظ على السيارة في الحر، وزراعة الريحان في أصيص، وطريقة حفظ "
+        "القرآن. في أسبوع ١٣ أغسطس ٢٠٢٦ سأل عن التعامل مع مادة صعبة، وتجنب شد العضلات بعد الرياضة، وإطالة"
+        " عمر بطارية الجوال، ومراجعة ليلة الامتحان، وكتابة رسالة نصية قصيرة وواضحة، وأفضل وقت لمشاهدة "
+        "زخات الشهب. تلقى إجابات مباشرة ونصائح عملية في كل مرة. لا توجد قرارات أو خطط متابعة صريحة، ولا "
+        "يظهر طلب متكرر محدد. يبقى مفتوحاً ما إذا كان المستخدم يريد متابعة أي من هذه المواضيع (كالمشروع "
+        "الصغير أو حفظ القرآن أو الدراسة).",
+    ),
+    "rp_pw06health": (
+        "Recurring health and fitness Q&A over four weeks",
+        "Over four weeks (Jul 9, Jul 23, Sep 10, Sep 17, 2026), the user asked a series of short health "
+        "and fitness questions and requested a few short scripts. Topics included sleep (caffeine vs. "
+        "alcohol effects), breathing and calming techniques (a breathing-exercise script, a physiological"
+        " sigh, and a guided breathing script for anxiety), hydration (cold vs. warm water absorption, "
+        "water needs for children and older adults in heat, high-water foods), first aid (recovery "
+        "position, treating a minor cut, tick removal), exercise form and training (deadlift form, "
+        "stretching and injury prevention, a 10K warm-up, free weights vs. machines, running vs. cycling "
+        "for aerobic fitness), supplements (calcium interactions), and general health (flu season in "
+        "winter, fiber's role in digestion, sauna safety, the 20-20-20 rule, screen position and "
+        "posture). Kazma answered each with brief explanations or scripts. No decisions, plans, or "
+        "follow-ups were recorded, and the user stated no explicit goals beyond getting these answers. "
+        "Nothing is noted as still open.",
+    ),
+}
 
 
 #: Sessions dataset v6 added beside its ``dense`` ones (``new_in``): a
@@ -1835,17 +2315,19 @@ def build_writes() -> dict[str, Any]:
 
 
 def _cmd_build() -> int:
-    from kazma_core.memory.benchmark import load_dataset
-
     data = build()
     EXTRACTION.write_text(json.dumps(build_extraction(), ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     WRITES.write_text(json.dumps(build_writes(), ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    before = load_dataset() if DATASET.is_file() else None
+    before = json.loads(DATASET.read_text(encoding="utf-8")) if DATASET.is_file() else None
     DATASET.parent.mkdir(parents=True, exist_ok=True)
     DATASET.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    turns = sum(len(s["turns"]) for s in data["sessions"])
-    print(f"{DATASET}: {len(data['sessions'])} sessions, {turns} turns, "
-          f"{len(data['questions'])} questions")
+    from kazma_core.memory.benchmark import current_dataset
+
+    now = current_dataset(json.loads(json.dumps(data)))
+    turns = sum(len(s["turns"]) for s in now["sessions"])
+    scale = data.get("scale") or {}
+    print(f"{DATASET}: {len(now['sessions'])} sessions, {turns} turns, {len(data['questions'])} questions; "
+          f"the scale pool {len(scale.get('sessions') or [])} sessions more")
     if before != json.loads(json.dumps(data, ensure_ascii=False)):
         # The recorded vectors answer exactly the old texts: CI cannot replay
         # a text it was never given.
@@ -1884,8 +2366,34 @@ def _follow_ups_only(dataset: dict[str, Any]) -> dict[str, Any]:
             "second": [q for q in dataset.get("second") or [] if q.get("context")]}
 
 
-def _cmd_vectors() -> int:
-    from kazma_core.memory.benchmark import RecordingEmbedder, load_dataset, run_benchmark
+class _Reused:
+    """The file's own vector for a text it holds (the same model's answer,
+    already rounded), else the model's: a dataset that gained a few texts is
+    recorded again without embedding the rest again (``vectors --fresh``
+    embeds every text)."""
+
+    def __init__(self, real: Any, held: Any) -> None:
+        self.real, self.held = real, held
+        self.dim = getattr(real, "dim", None)
+        self.asked = 0
+
+    def encode(self, text: str) -> list[float]:
+        try:
+            return self.held.encode(text)
+        except KeyError:
+            self.asked += 1
+            return self.real.encode(text)
+
+
+def _cmd_vectors(fresh: bool = False) -> int:
+    from kazma_core.memory.benchmark import (
+        RecordingEmbedder,
+        ReplayEmbedder,
+        dataset_as_of,
+        load_dataset,
+        run_benchmark,
+        run_scale_benchmark,
+    )
     from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
 
     _limit_cpu_threads()
@@ -1894,7 +2402,9 @@ def _cmd_vectors() -> int:
         print("no embedder is configured: install the rag extra (bge-m3)", file=sys.stderr)
         return 2
     model = get_embedding_model_name()
-    recorder = RecordingEmbedder(real)
+    held = ReplayEmbedder(VECTORS) if VECTORS.is_file() and not fresh else None
+    source = _Reused(real, held) if held is not None and held.model == model else real
+    recorder = RecordingEmbedder(source)
     a, b = _patched(recorder, model)
     # A recording never holds a degraded run: on a busy machine a question's
     # embedding can outlast recall's 5 s deadline, and the run then records
@@ -1907,9 +2417,15 @@ def _cmd_vectors() -> int:
         raw = mock.patch("kazma_core.memory.question_shape.standalone_query", lambda q, _earlier: q)
         with raw:
             run_benchmark(_follow_ups_only(load_dataset()))
+        # The versions before v8 replay on the same file: v7's pool, its
+        # weekly summaries and roll-ups (dataset_as_of). And the scale run.
+        run_benchmark(dataset_as_of(load_dataset(), POOL_VERSION - 1))
+        if load_dataset().get("scale"):
+            run_scale_benchmark()
     VECTORS.parent.mkdir(parents=True, exist_ok=True)
     n = recorder.save(VECTORS, model=model)
-    print(f"{VECTORS}: {n} vectors from {model}")
+    asked = f", {source.asked} embedded now" if isinstance(source, _Reused) else ""
+    print(f"{VECTORS}: {n} vectors from {model}{asked}")
     print(json.dumps(report["overall"], indent=1))
     return 0
 
@@ -2123,6 +2639,8 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         problems += more
         small, more = _small_lock(old.get("small") or {}, fresh=recall_new)
         problems += more
+        scale, more = _scale_lock(old.get("scale") or {}, fresh=recall_new)
+        problems += more
     except (StaleRecordingError, KeyError) as exc:
         problems = [str(exc)]
     if problems:
@@ -2136,6 +2654,8 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
                     "extraction": extraction, "writes": writes, "speakers": speakers,
                     # Each question in a small store of its own (2026-11-21).
                     "small": small,
+                    # The questions on a store of four times the pool (R9, v8).
+                    **({"scale": scale} if scale else {}),
                     # The pgvector path's floors (tests/test_memory_benchmark_pg.py),
                     # locked from a named CI run by `lock-pgvector`; same dataset only.
                     # A new dataset version starts unverified (the job reports,
@@ -2152,7 +2672,8 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
     # write-scenario parts (it said "0 raised" over a write scenario that
     # began to pass).
     moved = [(k, old_scores.get(k), v) for k, v in sorted(scores.items()) if v > old_scores.get(k, -1.0)]
-    for part, new in (("extraction", extraction), ("writes", writes), ("speakers", speakers), ("small", small)):
+    for part, new in (("extraction", extraction), ("writes", writes), ("speakers", speakers), ("small", small),
+                      ("scale", scale)):
         was = (old.get(part) or {}).get("scores") or {}
         moved += [(f"{part} {k}", was.get(k), v) for k, v in sorted(new.get("scores", {}).items())
                   if v != was.get(k)]
@@ -2373,6 +2894,28 @@ def _small_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[str, 
     was = {} if fresh else (old.get("scores") or {})
     problems = [f"small {k}: {now.get(k)} < {v}" for k, v in sorted(was.items()) if now.get(k, -1.0) < v]
     return {"dataset_version": load_dataset()["version"], "questions": overall["questions"], "scores": now}, problems
+
+
+def _scale_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[str, Any], list[str]]:
+    """The scale run's part of the lock (the benchmark audit's R9, dataset
+    v8): every question on a store whose unrelated chat is ``scale.factor``
+    times the pool (``benchmark.run_scale_benchmark``), the recall
+    dataset's vectors. A ratchet on the same dataset; reset with the recall
+    dataset (``--rebaseline``). Empty for a dataset with no scale pool."""
+    from kazma_core.memory.benchmark import ReplayEmbedder, load_dataset, run_scale_benchmark, scale_scores
+
+    data = load_dataset()
+    if not data.get("scale"):
+        return {}, []
+    replay = ReplayEmbedder(VECTORS)
+    a, b = _patched(replay, replay.model)
+    with a, b:
+        report = run_scale_benchmark(data)
+    now = scale_scores(report)
+    was = {} if fresh else (old.get("scores") or {})
+    problems = [f"scale {k}: {now.get(k)} < {v}" for k, v in sorted(was.items()) if now.get(k, -1.0) < v]
+    return {"dataset_version": data["version"], "factor": report["factor"], "memories": report["memories"],
+            "scores": now}, problems
 
 
 def _writes_lock(
@@ -2617,7 +3160,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("build")
-    sub.add_parser("vectors")
+    vec = sub.add_parser("vectors")
+    vec.add_argument("--fresh", action="store_true", help="embed every text again, not only the new ones")
     lock = sub.add_parser("lock")
     lock.add_argument("--rebaseline", action="store_true",
                       help="a new dataset version: its first scores become the ratchet")
@@ -2649,7 +3193,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "build":
         return _cmd_build()
     if args.cmd == "vectors":
-        return _cmd_vectors()
+        return _cmd_vectors(fresh=args.fresh)
     if args.cmd == "lock":
         return _cmd_lock(args.rebaseline, args.trade, args.new_recording,
                          [tuple(e) for e in args.edge] if args.edge else None, args.prompt_changed)

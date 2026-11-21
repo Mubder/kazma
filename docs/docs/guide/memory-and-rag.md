@@ -178,7 +178,8 @@ earlier chats; a chat must hold more than half of the question's content
 words.
 
 **Quality is measured.** `python scripts/memory_bench.py run` scores recall
-on a persona's life -- 1,196 chat turns and 69 facts inside unrelated chat,
+on a persona's life -- 1,187 chat turns and 69 facts inside unrelated chat
+that says each of its turns once (dataset v8),
 127 questions (single facts, paraphrases, things only the assistant said,
 updates, codes, Arabic, overviews, questions with no answer, and since
 dataset v6 one topic of many turns, follow-ups, counts and lists, and
@@ -1048,6 +1049,45 @@ in Postgres and Neo4j keep cursors of their own.
 | Hosted embed-only fleet | [#78](https://github.com/Mubder/kazma/issues/78) |
 
 Postgres dual-mirror and sparse ILIKE assist already exist as **optional** foundations. Tombstones propagate, and the 15-minute mirror sync pushes what changed (and, once a day, whatever the mirror is missing or holds stale; a row only the mirror holds is counted, never deleted).
+
+### Benchmark report (dataset v8, the unrelated chat without repeats, 2026-11-21)
+
+Until v7 the "unrelated chat" around the persona was 300 conversations
+drawn with repeats from 74 hand-written turns: 1,060 turns, each said about
+fourteen times (the benchmark audit's F10). Recall
+judges a memory against the question's background, the meaning ranks 4 to
+15, and on that pool those ranks were copies; its thresholds were chosen
+there. Dataset v8 says each turn once: the 74 hand-written turns and 977
+turns a model wrote for the pool (`scripts/memory_pool_generate.py`,
+deepseek-flash: questions and requests about the world in English and Gulf
+Arabic, none saying anything about the person asking, 346 calls, 61,020
+prompt and 244,633 completion tokens), 300 conversations, 1,051 turns. Its
+weekly summaries follow, and so do the month and project roll-ups the
+planner makes from them, written by the product's own roll-up call (18
+calls). v7's pool stays in the dataset file for the versions before it, so
+v5 to v7 replay exactly.
+
+| | v7 (pool of copies) | v8 (each turn once) | v8 at four times the pool |
+|---|---|---|---|
+| Hit rate | 0.918 | 0.901 | 0.897 |
+| MRR | 0.754 | 0.749 | 0.736 |
+| Precision | 0.581 | 0.487 | 0.438 |
+| Questions with no answer shown nothing | 0.278 | 0.000 | 0.056 |
+| Second set hit rate, MRR, precision | 0.863, 0.772, 0.621 | 0.863, 0.757, 0.404 | 0.842, 0.731, 0.360 |
+
+Answers are found as before; what changed is what comes with them. On a
+pool of different conversations, the unrelated turns that share a
+question's topic clear the floor ("Why do cats purr?" for "Do I have any
+cats?", the week's money questions for "Which bank do I use?"), where v7's
+copies had filled the background ranks and kept them out. No unanswerable
+tuning question comes back empty. The thresholds were chosen on the copies;
+choosing them again on v8 is a decision for later, not made here. The
+scale run (`benchmark.run_scale_benchmark`, 4,774 memories, the scale
+pool's 900 conversations said once as well) shows the scores hold as the
+unrelated chat grows four times: hit rate and MRR within 0.02, precision
+0.05 lower. Its scores have a ratchet of their own (`scale` in the lock).
+q601 stays on the edge list (its fact clears the floor by 0.0004, as on
+v7).
 
 ### Benchmark report (dataset v7, part G, 2026-11-21)
 

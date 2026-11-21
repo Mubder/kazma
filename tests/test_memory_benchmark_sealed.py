@@ -249,8 +249,41 @@ def test_the_lock_keeps_every_look(tmp_path, monkeypatch):
     monkeypatch.setattr(benchmark, "run_benchmark", lambda **_kw: {})
     monkeypatch.setattr(benchmark, "run_small_store_benchmark", lambda *_a, **_kw: {
         "overall": {"questions": data["small"]["questions"], **data["small"]["scores"]}})
+    monkeypatch.setattr(script, "_scale_lock", lambda _old, fresh=False: (data["scale"], []))
     monkeypatch.setattr(benchmark, "edge_check", lambda *_a, **_kw: {
         "draws": benchmark.EDGE_DRAWS, "seed": benchmark.EDGE_SEED, "move": benchmark.EDGE_MOVE,
         "largest_move": 0.0, "flips": {}, "shown": {}})
     assert script._cmd_lock(rebaseline=False) == 0
     assert json.loads(locked.read_text(encoding="utf-8"))["sealed"] == data["sealed"]
+
+
+# ── which dataset versions a sealed set may be written for (SonarCloud S6680) ──
+
+
+def _unbounded_sealed_versions(dataset):
+    """The rule before the bound: a range from two numbers of the file."""
+    version = dataset.get("version")
+    held = dataset.get("ids_hold_since") or {}
+    if not isinstance(version, int) or not isinstance(held.get("version"), int):
+        return {version}
+    return {version, *range(held["version"], version)}
+
+
+def test_the_versions_a_sealed_set_may_name_are_bounded():
+    assert benchmark._sealed_versions({"version": 8, "ids_hold_since": {"version": 5}}) == {5, 6, 7, 8}
+    assert benchmark._sealed_versions({"version": 8}) == {8}
+    # A wrong file: held above the version, far below it, not a number.
+    for held in (9, -10**9, 8 - benchmark._SEALED_VERSION_SPAN - 1, True, "5", None):
+        assert benchmark._sealed_versions({"version": 8, "ids_hold_since": {"version": held}}) == {8}
+    assert benchmark._sealed_versions({"version": True, "ids_hold_since": {"version": 0}}) == {True}
+    # The widest span allowed is still answered.
+    span = benchmark._SEALED_VERSION_SPAN
+    assert len(benchmark._sealed_versions({"version": span, "ids_hold_since": {"version": 0}})) == span + 1
+
+
+def test_control_unbounded_a_wrong_file_builds_a_huge_range():
+    # A version a hundred thousand past the held one: the old rule builds a
+    # set of every number between (a file could name 10**12).
+    wrong = {"version": 10**5, "ids_hold_since": {"version": 0}}
+    assert len(_unbounded_sealed_versions(wrong)) == 10**5 + 1
+    assert benchmark._sealed_versions(wrong) == {10**5}

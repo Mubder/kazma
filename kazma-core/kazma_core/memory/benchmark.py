@@ -68,12 +68,15 @@ __all__ = [
     "extraction_rests_on",
     "extraction_scores",
     "gated_scores",
+    "current_dataset",
     "load_dataset",
     "record_llm_extraction",
     "WRITES_PATH",
     "run_benchmark",
     "run_extraction_benchmark",
+    "run_scale_benchmark",
     "run_small_store_benchmark",
+    "scale_scores",
     "run_write_scenarios",
     "write_scores",
 ]
@@ -88,8 +91,25 @@ BASE_TIME = 1780000000.0
 _ASKED_ON_DAY = 116
 
 
+#: The parts of the dataset that hold memories and questions.
+_DATASET_PARTS = ("sessions", "facts", "summaries", "rollups", "questions", "second")
+
+
 def load_dataset(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
-    return json.loads(Path(path or DATASET_PATH).read_text(encoding="utf-8"))
+    """The dataset as its version holds it. A file may also keep what a
+    later version retired (``retired_in``, dataset v8: the unrelated pool
+    with repeats); that is left out here and kept under ``history`` for
+    :func:`dataset_as_of`, so an older version replays exactly."""
+    return current_dataset(json.loads(Path(path or DATASET_PATH).read_text(encoding="utf-8")))
+
+
+def current_dataset(data: dict[str, Any]) -> dict[str, Any]:
+    """*data* without what a version retired, the whole lists under
+    ``history`` (see :func:`load_dataset`)."""
+    if "history" in data or not any(x.get("retired_in") for part in _DATASET_PARTS for x in data.get(part) or []):
+        return data
+    return {**data, "history": {part: list(data.get(part) or []) for part in _DATASET_PARTS},
+            **{part: [x for x in data.get(part) or [] if not x.get("retired_in")] for part in _DATASET_PARTS}}
 
 
 def _seed(conn: sqlite3.Connection, dataset: dict[str, Any]) -> dict[str, str]:
@@ -620,7 +640,8 @@ def _small_store_dataset(dataset: dict[str, Any], question: dict[str, Any], *, r
                 want_sessions.add(ref)
             else:
                 return None
-    distractors = sorted(s["id"] for s in dataset["sessions"] if s["kind"] == "distractor")
+    # The unrelated chat: v7's pool ("distractor"), v8's pool without repeats.
+    distractors = sorted(s["id"] for s in dataset["sessions"] if s["kind"] in ("distractor", "pool"))
     want_sessions |= set(rng.sample(distractors, min(sessions, len(distractors))))
     kept = [f for f in dataset.get("facts", []) if f["id"] in want_facts or f["session"] in want_sessions]
     others = [f for f in dataset.get("facts", []) if f not in kept]
@@ -663,6 +684,46 @@ def run_small_store_benchmark(dataset: dict[str, Any] | None = None, *,
         },
         "results": results,
     }
+
+
+#: The scores the scale run's ratchet holds (``thresholds.json`` ``scale``):
+#: overall and unanswerable, both sets. Per category the run is printed, not
+#: gated: a category is a few questions, and the run asks whether the whole
+#: holds as memory grows.
+SCALE_SCORES = ("overall.hit_rate", "overall.mrr", "overall.precision", "abstain.hit_rate",
+                "second.overall.hit_rate", "second.overall.mrr", "second.overall.precision",
+                "second.abstain.hit_rate")
+
+
+def _scaled_dataset(dataset: dict[str, Any]) -> dict[str, Any] | None:
+    """*dataset* with its scale pool's sessions and weekly summaries added
+    (``scale``, dataset v8); None when it holds none."""
+    scale = dataset.get("scale")
+    if not scale:
+        return None
+    return {**dataset, "sessions": list(dataset["sessions"]) + list(scale["sessions"]),
+            "summaries": list(dataset.get("summaries") or []) + list(scale.get("summaries") or [])}
+
+
+def run_scale_benchmark(dataset: dict[str, Any] | None = None, *, keep_results: bool = False) -> dict[str, Any]:
+    """Every question on a store whose unrelated chat is ``scale.factor``
+    times the pool (dataset v8, the benchmark audit's R9): the dataset's own
+    memories and the scale pool's sessions and weekly summaries, every turn
+    of them said once. Whether the scores hold as memory grows. The report
+    is :func:`run_benchmark`'s, with ``factor`` beside ``memories``."""
+    data = dataset or load_dataset()
+    scaled = _scaled_dataset(data)
+    if scaled is None:
+        raise ValueError(f"dataset v{data.get('version')} holds no scale pool")
+    report = run_benchmark(scaled, keep_results=keep_results)
+    report["factor"] = data["scale"]["factor"]
+    return report
+
+
+def scale_scores(report: dict[str, Any]) -> dict[str, float]:
+    """:data:`SCALE_SCORES` of a :func:`run_scale_benchmark` report."""
+    gated = gated_scores(report)
+    return {k: gated[k] for k in SCALE_SCORES if k in gated}
 
 
 def edge_check(
@@ -742,45 +803,61 @@ def memory_fingerprint(dataset: dict[str, Any], *, as_of: int | None = None) -> 
     later version says so (``new_in``). Equal to the fingerprint of the
     *as_of* dataset itself, it shows that no memory a sealed set written
     for that version names moved or changed (part F, dataset v6)."""
+    if as_of is not None:
+        dataset = dataset_as_of(dataset, as_of)
+    marks = ("new_in", "retired_in")
     rows: list[list[Any]] = []
     for session in dataset.get("sessions", []):
-        if as_of is not None and int(session.get("new_in") or 0) > as_of:
-            continue
         for i, turn in enumerate(session["turns"], 1):
             rows.append([f"{session['id']}#{i}", session["day"], turn["user"], turn["assistant"]])
     for fact in dataset.get("facts", []):
-        if as_of is None or int(fact.get("new_in") or 0) <= as_of:
-            rows.append([fact["id"], {k: v for k, v in fact.items() if k != "new_in"}])
+        rows.append([fact["id"], {k: v for k, v in fact.items() if k not in marks}])
     for summary in dataset.get("summaries", []) + dataset.get("rollups", []):
-        if as_of is None or int(summary.get("new_in") or 0) <= as_of:
-            rows.append([summary["id"], {k: v for k, v in summary.items() if k != "new_in"}])
+        rows.append([summary["id"], {k: v for k, v in summary.items() if k not in marks}])
     rows.sort(key=lambda r: r[0])
     return _sha256(json.dumps(rows, ensure_ascii=False, sort_keys=True))
 
 
 def dataset_as_of(dataset: dict[str, Any], version: int) -> dict[str, Any]:
     """*dataset* as version *version* held it: every session, fact,
-    summary and question added after it (``new_in``) left out. Dataset v6
-    only added (``ids_hold_since``), so ``dataset_as_of(load_dataset(), 5)``
-    is v5's memories and questions: what a study measured on v5 replays on
-    (``docs/audits/evidence/spaces_r3/study.py``)."""
+    summary and question added after it (``new_in``) left out, and what a
+    later version retired (``retired_in``, kept under ``history``) back in
+    its place. So ``dataset_as_of(load_dataset(), 5)`` is v5's memories and
+    questions in v5's order: what a study measured on v5 replays on
+    (``docs/audits/evidence/spaces_r3/study.py``). The scale run's sessions
+    (``scale``, v8) are left out before the version that added them."""
     def kept(item: dict[str, Any]) -> bool:
-        return int(item.get("new_in") or 0) <= version
+        retired = item.get("retired_in")
+        return int(item.get("new_in") or 0) <= version and (retired is None or int(retired) > version)
 
-    return {**dataset, "version": version,
-            **{part: [x for x in dataset.get(part) or [] if kept(x)]
-               for part in ("sessions", "facts", "summaries", "rollups", "questions", "second")}}
+    whole = dataset.get("history") or dataset
+    view = {**dataset, "version": version,
+            **{part: [x for x in whole.get(part) or [] if kept(x)] for part in _DATASET_PARTS}}
+    scale = dataset.get("scale")
+    if scale and int(scale.get("new_in") or 0) > version:
+        view.pop("scale")
+    return view
+
+
+#: How many versions back ``ids_hold_since`` may reach: more is a wrong file.
+_SEALED_VERSION_SPAN = 20
 
 
 def _sealed_versions(dataset: dict[str, Any]) -> set[Any]:
     """The dataset versions a sealed set may be written for: this one, and
     every one since the version whose memories it still holds unchanged
-    (``ids_hold_since``, checked by ``tests/test_memory_benchmark.py``)."""
+    (``ids_hold_since``, checked by ``tests/test_memory_benchmark.py``).
+
+    Both numbers come from the dataset file: a held version above this one,
+    or more than :data:`_SEALED_VERSION_SPAN` below it, is a wrong file, and
+    only this version is answered (SonarCloud S6680: a range built from
+    unchecked file values)."""
     version = dataset.get("version")
-    held = dataset.get("ids_hold_since") or {}
-    if not isinstance(version, int) or not isinstance(held.get("version"), int):
+    held = (dataset.get("ids_hold_since") or {}).get("version")
+    if (not isinstance(version, int) or isinstance(version, bool) or not isinstance(held, int)
+            or isinstance(held, bool) or not 0 <= version - held <= _SEALED_VERSION_SPAN):
         return {version}
-    return {version, *range(held["version"], version)}
+    return {version, *range(held, version)}
 
 
 def sealed_problems(sealed: dict[str, Any], dataset: dict[str, Any]) -> list[str]:
