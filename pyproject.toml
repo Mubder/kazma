@@ -213,6 +213,7 @@ index = [
 # E2B Firecracker sandboxes (untrusted python_exec)
 sandbox = [
     "e2b-code-interpreter>=2.11.9",
+    "wcmatch>=11.2",  # security floor (see the base list): e2b brings it (ReDoS on multi-star patterns)
 ]
 # Temporal durable swarm steps (crash-resume long work)
 durable = [

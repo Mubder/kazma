@@ -1,6 +1,6 @@
 {
- "recorded": "2026-11-13",
- "source": "OSV, for the versions installed in C:\\Users\\balfa\\kazma\\.venv\\Scripts\\python.exe, G:\\GitHubRepos\\kazma\\.venv\\Scripts\\python.exe (added to the earlier recordings)",
+ "recorded": "2026-11-21",
+ "source": "OSV, for the versions installed in C:\\Users\\bAlfaris\\kazma\\.venv\\Scripts\\python.exe, G:\\GitHubRepos\\kazma\\.venv\\Scripts\\python.exe (added to the earlier recordings)",
  "advisories": [
   {
    "package": "accelerate",
@@ -391,6 +391,12 @@
    "version": "2.9.2",
    "vuln_id": "GHSA-mmhr-3c5m-f64f",
    "fixed_version": "4.0.0"
+  },
+  {
+   "package": "wcmatch",
+   "version": "11.0.1",
+   "vuln_id": "GHSA-53pm-wgxf-c6qf",
+   "fixed_version": "11.2"
   }
  ]
 }
