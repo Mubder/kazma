@@ -263,6 +263,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
     "scripts/verify_docx_rtl.py": "renders built-in RTL samples",
     "scripts/smoke_topic_shift_p0.py": "pure intent-policy smoke; no server, no settings",
     "scripts/memory_bench.py": "builds and scores the retrieval benchmark on a temp database",
+    "scripts/longmemeval_bench.py": (
+        "measures recall on LongMemEval in private temp databases and a temp data folder; "
+        "it reads no install"
+    ),
     "scripts/small_store_offsets.py": "reads the benchmark's recorded vectors only; no store, no setting",
     "scripts/knowledge_bench.py": (
         "builds and scores the Knowledge retrieval benchmark on a private store under a "

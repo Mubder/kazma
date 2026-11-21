@@ -8,7 +8,7 @@ title: Benchmarks
 
 How well Kazma remembers, finds and reads, measured on versioned datasets kept in its repository and held by its tests: a change that makes a number worse fails the build. This page is written from those results (`scripts/benchmarks_page.py`), so it says what the code does today. Every dataset, script and result file is in the repository; the commands under each table reproduce it.
 
-The datasets are Kazma's own, built for these questions in English, Arabic and both; the memory and Knowledge datasets each keep a second set of questions apart from tuning. They are not a public leaderboard's: compare runs of Kazma with each other, not with numbers measured elsewhere.
+The datasets are Kazma's own, built for these questions in English, Arabic and both; the memory and Knowledge datasets each keep a second set of questions apart from tuning. They are not a public leaderboard's: compare runs of Kazma with each other, not with numbers measured elsewhere. The one public benchmark here, LongMemEval, carries its own baselines on the same reader.
 
 ## Memory: does it find what you told it? {#memory}
 
@@ -63,6 +63,47 @@ On the ten turns that give it the turn's day, the turn before and the facts held
 With Postgres and pgvector as the memory store: not yet measured on dataset version 8. CI's pgvector job measures it on every run, with pgvector's own search and with every row compared, and its numbers are printed here once they are locked from a named run.
 
 Reproduce: `python scripts/memory_bench.py run` (add `--real` to use the real model), and `python -m pytest tests/test_memory_benchmark.py`.
+
+## Memory against a public benchmark: LongMemEval {#longmemeval}
+
+[LongMemEval](https://github.com/xiaowu0162/LongMemEval) (MIT) asks questions of a user's own chat history: about 48 conversations, the one or few that hold the answer among unrelated ones. Kazma is measured on a fixed sample of it (the question ids are in `tests/fixtures/longmemeval/sample.json`), each history written into a private memory the product's way, one memory per round, and the question asked through the real `recall()`. No facts are extracted (that would cost a model call per round).
+
+**Finding it** (100 questions, BAAI/bge-m3, no model call): the answer is in what Kazma shows the model.
+
+| Question | Questions | Answer shown | From the right conversation | Precision |
+|---|---|---|---|---|
+| Something the user said | 14 | 100.0 % | 100.0 % | 87.7 % |
+| Something Kazma said | 11 | 81.8 % | 100.0 % | 95.5 % |
+| A preference to apply | 6 | 100.0 % | 100.0 % | 54.4 % |
+| A fact that changed | 16 | 93.3 % | 100.0 % | 92.4 % |
+| When something happened | 26 | 92.0 % | 96.0 % | 77.3 % |
+| Across several conversations | 27 | 87.5 % | 95.8 % | 83.9 % |
+| **All questions** | **100** | **91.5 %** | **97.9 %** | **83.6 %** |
+
+Recall took 26.0 ms (median) on these stores.
+
+**Answering from it** (100 questions; reader and judge deepseek-flash, LongMemEval's own judge prompts): the share of answers the judge called correct, from Kazma's recall as the model is shown it, from the same recalled conversations read whole (what the model gets when it opens them with `memory_read`, which this one-shot reader cannot call), from the whole history (the full-context baseline) and from the conversations holding the answer alone (the oracle).
+
+| Question | Kazma's recall | Read whole | Whole history | Oracle |
+|---|---|---|---|---|
+| Something the user said | 64.3 % | 100.0 % | 92.9 % | 100.0 % |
+| Something Kazma said | 45.5 % | 90.9 % | 90.9 % | 100.0 % |
+| A preference to apply | 83.3 % | 100.0 % | 66.7 % | 100.0 % |
+| A fact that changed | 37.5 % | 81.2 % | 87.5 % | 93.8 % |
+| When something happened | 53.8 % | 84.6 % | 57.7 % | 96.2 % |
+| Across several conversations | 29.6 % | 44.4 % | 59.3 % | 85.2 % |
+| **All questions** | **47.0 %** | **77.0 %** | **72.0 %** | **94.0 %** |
+
+The reader was sent about 1,017 tokens a question from Kazma's recall, 2,214 with its conversations read whole, 96,356 for the whole history (its oldest conversations cut to fit the reader's window) and 6,306 for the oracle. Scores from different readers are not comparable: compare the columns with each other.
+
+**The same memories in English and Arabic**: 40 of the sample's questions and the 84 conversations holding their answers, in one memory, in English and translated into Arabic (the user's messages in Gulf Arabic, the replies in Modern Standard Arabic; translated by a model, kept outside the repository). Each question is asked in its language.
+
+| | English | Arabic |
+|---|---|---|
+| Answer shown | 85.0 % | 87.5 % |
+| From the right conversation | 97.5 % | 97.5 % |
+
+Reproduce: download LongMemEval into a folder of its own, then `python scripts/longmemeval_bench.py retrieve --data DIR` (and `answer`, `translate`, `parallel`; those call a model).
 
 ## Knowledge Library: does search find the right page? {#knowledge}
 

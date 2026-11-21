@@ -2278,6 +2278,27 @@ four injected were noise.
   turn once, v7's pool failing the same check as the control; v7's
   fingerprint; nothing about the person, a planted turn as control; the
   scale lock).
+- **LongMemEval, measured against the world** (2026-11-21, the memory
+  framework audit's part E, decision 7). `scripts/longmemeval_bench.py`:
+  `sample` (100 of the 500 questions, stratified, ids in
+  `tests/fixtures/longmemeval/sample.json`, seeded by hash), `retrieve`
+  (each history written as the product writes a turn, one memory per round,
+  dated; the real `recall()`; no model call), `answer` (one reader, four
+  histories: Kazma's recall block, the same rounds read whole, the whole
+  history cut from its oldest to fit, the oracle; LongMemEval's own judge
+  prompts), `translate` and `parallel` (40 questions' 84 answer
+  conversations in Gulf Arabic and MSA, one store, each question asked in
+  its language). The data lives in a folder outside the repository (`--data`,
+  checked by its SHA-256), read as untrusted and never committed; the
+  result files (`retrieval.json`, `answers.json`, `parallel.json`) hold ids
+  and scores only, and the benchmarks page prints them, refusing an
+  end-to-end run without its two baselines. Measured: answer shown 91.5 %;
+  answered 0.47 from the block, 0.77 read whole, 0.72 from the whole history,
+  0.94 oracle; Arabic 87.5 % against English 85.0 %. Most missed answers were
+  shown but cut by the block's per-memory bounds (`limits.RECALL_SHOW_*`).
+  Gate: `tests/test_longmemeval_harness.py` (a history without its evidence
+  round finds nothing: the control; the page's refusal with its control; no
+  dataset text in a result file).
 - **Nothing on the hot path parses `kazma.yaml` (S4):**
   `config_loader.install_yaml_section` -- the install root's file, parsed
   once per file version (mtime + size). Gate: `tests/test_install_yaml.py`.

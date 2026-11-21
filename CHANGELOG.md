@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Memory against a public benchmark: LongMemEval, in English and Arabic (2026-11-21)
+
+- Kazma's memory measured on 100 LongMemEval questions, through its own
+  write path and `recall()`. The conversation holding the answer is found
+  for 98 % of questions, the exact round for 91.5 %, in 26 ms.
+- Answering with the same model: 0.47 from the recall block as shown,
+  0.77 when the recalled conversations are read whole, against 0.72 from
+  the whole history (96,000 tokens a question) and 0.94 with only the right
+  conversations. The block shows each memory cut short; most missed answers
+  were found but cut.
+- The first English and Arabic memory set: 40 questions and their
+  conversations translated into Gulf Arabic. Arabic is found as often as
+  English (87.5 % and 85 %).
+- The benchmarks page has a LongMemEval section. Nothing of the dataset is
+  in the repository.
+
 ## Memory benchmark: unrelated chat without repeats, and four times as much (2026-11-21)
 
 - Dataset v8 (the benchmark audit's R9): the unrelated chat around the

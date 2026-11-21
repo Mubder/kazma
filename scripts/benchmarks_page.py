@@ -30,6 +30,7 @@ PAGE = ROOT / "docs" / "docs" / "reference" / "benchmarks.md"
 MEMORY = ROOT / "tests" / "fixtures" / "memory_bench" / "thresholds.json"
 KNOWLEDGE = ROOT / "tests" / "fixtures" / "knowledge_bench" / "thresholds.json"
 FIDELITY = ROOT / "tests" / "fixtures" / "documents" / "fidelity_thresholds.json"
+LONGMEMEVAL = ROOT / "tests" / "fixtures" / "longmemeval"
 
 _MEMORY_NAMES = {
     "fact": "A fact you told it",
@@ -322,6 +323,107 @@ def _memory(data: dict) -> list[str]:
     return lines
 
 
+_LME_TYPES = {
+    "single-session-user": "Something the user said",
+    "single-session-assistant": "Something Kazma said",
+    "single-session-preference": "A preference to apply",
+    "knowledge-update": "A fact that changed",
+    "temporal-reasoning": "When something happened",
+    "multi-session": "Across several conversations",
+}
+
+
+def _longmemeval(folder: Path) -> list[str]:
+    """LongMemEval (the memory framework audit's part E): retrieval, end to
+    end with its two baselines, and the parallel English and Arabic set.
+    An end-to-end run without both baselines is refused: a score with no
+    full-context and oracle run on the same reader proves nothing."""
+    retrieval = folder / "retrieval.json"
+    answers = folder / "answers.json"
+    parallel = folder / "parallel.json"
+    if not any(p.is_file() for p in (retrieval, answers, parallel)):
+        return []
+    lines = [
+        "## Memory against a public benchmark: LongMemEval {#longmemeval}",
+        "",
+        "[LongMemEval](https://github.com/xiaowu0162/LongMemEval) (MIT) asks questions of a user's own chat "
+        "history: about 48 conversations, the one or few that hold the answer among unrelated ones. Kazma is "
+        "measured on a fixed sample of it (the question ids are in `tests/fixtures/longmemeval/sample.json`), "
+        "each history written into a private memory the product's way, one memory per round, and the question "
+        "asked through the real `recall()`. No facts are extracted (that would cost a model call per round).",
+        "",
+    ]
+    if retrieval.is_file():
+        r = json.loads(retrieval.read_text(encoding="utf-8"))
+        o = r["overall"]
+        lines += [
+            f"**Finding it** ({r['sample']} questions, {r['embedding_model']}, no model call): the answer is in "
+            "what Kazma shows the model.",
+            "",
+            "| Question | Questions | Answer shown | From the right conversation | Precision |",
+            "|---|---|---|---|---|",
+        ]
+        for key, name in _LME_TYPES.items():
+            row = (r.get("types") or {}).get(key)
+            if row and "evidence_turn" in row:
+                lines.append(f"| {name} | {row['n']} | {_pct(row['evidence_turn'])} | {_pct(row['answer_session'])} | "
+                             f"{_pct(row['precision'])} |")
+        lines.append(f"| **All questions** | **{o['n']}** | **{_pct(o['evidence_turn'])}** | "
+                     f"**{_pct(o['answer_session'])}** | **{_pct(o['precision'])}** |")
+        lines += ["", f"Recall took {o.get('latency_p50_ms')} ms (median) on these stores.", ""]
+    if answers.is_file():
+        a = json.loads(answers.read_text(encoding="utf-8"))
+        o = a["overall"]
+        if not all(k in o for k in ("kazma", "full", "oracle")):
+            raise SystemExit(f"{answers}: an end-to-end run without its full-context and oracle baselines "
+                             "proves nothing; run them on the same reader")
+        tokens = o.get("prompt_tokens_mean") or {}
+        lines += [
+            f"**Answering from it** ({a['sample']} questions; reader and judge {a['reader']}, LongMemEval's own "
+            "judge prompts): the share of answers the judge called correct, from Kazma's recall as the model is "
+            "shown it, from the same recalled conversations read whole (what the model gets when it opens them "
+            "with `memory_read`, which this one-shot reader cannot call), from the whole history (the "
+            "full-context baseline) and from the conversations holding the answer alone (the oracle).",
+            "",
+            "| Question | Kazma's recall | Read whole | Whole history | Oracle |",
+            "|---|---|---|---|---|",
+        ]
+        for key, name in _LME_TYPES.items():
+            row = (a.get("types") or {}).get(key)
+            if row:
+                lines.append(f"| {name} | {_pct(row['kazma'])} | {_pct(row.get('kazma_whole'))} | "
+                             f"{_pct(row['full'])} | {_pct(row['oracle'])} |")
+        lines.append(f"| **All questions** | **{_pct(o['kazma'])}** | **{_pct(o.get('kazma_whole'))}** | "
+                     f"**{_pct(o['full'])}** | **{_pct(o['oracle'])}** |")
+        lines += [
+            "",
+            f"The reader was sent about {tokens.get('kazma', 0):,} tokens a question from Kazma's recall, "
+            f"{tokens.get('kazma_whole', 0):,} with its conversations read whole, "
+            f"{tokens.get('full', 0):,} for the whole history (its oldest conversations cut to fit the reader's "
+            f"window) and {tokens.get('oracle', 0):,} for the oracle. Scores from different readers are not "
+            "comparable: compare the columns with each other.",
+            "",
+        ]
+    if parallel.is_file():
+        p = json.loads(parallel.read_text(encoding="utf-8"))
+        o = p["overall"]
+        lines += [
+            f"**The same memories in English and Arabic**: {p['questions']} of the sample's questions and the "
+            f"{p['sessions']} conversations holding their answers, in one memory, in English and translated into "
+            "Arabic (the user's messages in Gulf Arabic, the replies in Modern Standard Arabic; translated by a "
+            "model, kept outside the repository). Each question is asked in its language.",
+            "",
+            "| | English | Arabic |",
+            "|---|---|---|",
+            f"| Answer shown | {_pct(o['en_evidence_turn'])} | {_pct(o['ar_evidence_turn'])} |",
+            f"| From the right conversation | {_pct(o['en_answer_session'])} | {_pct(o['ar_answer_session'])} |",
+            "",
+        ]
+    lines += ["Reproduce: download LongMemEval into a folder of its own, then `python scripts/longmemeval_bench.py "
+              "retrieve --data DIR` (and `answer`, `translate`, `parallel`; those call a model).", ""]
+    return lines
+
+
 def _knowledge(data: dict) -> list[str]:
     s = data["scores"]
     lines = [
@@ -427,10 +529,11 @@ def render() -> str:
         "",
         "The datasets are Kazma's own, built for these questions in English, Arabic and both; the memory and "
         "Knowledge datasets each keep a second set of questions apart from tuning. They are not a public "
-        "leaderboard's: compare runs of Kazma with each other, not with numbers measured elsewhere.",
+        "leaderboard's: compare runs of Kazma with each other, not with numbers measured elsewhere. The one "
+        "public benchmark here, LongMemEval, carries its own baselines on the same reader.",
         "",
     ]
-    lines += _memory(memory) + _knowledge(knowledge) + _fidelity(fidelity)
+    lines += _memory(memory) + _longmemeval(LONGMEMEVAL) + _knowledge(knowledge) + _fidelity(fidelity)
     return "\n".join(lines).rstrip() + "\n"
 
 

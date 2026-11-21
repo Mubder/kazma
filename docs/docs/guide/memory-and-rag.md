@@ -1050,6 +1050,54 @@ in Postgres and Neo4j keep cursors of their own.
 
 Postgres dual-mirror and sparse ILIKE assist already exist as **optional** foundations. Tombstones propagate, and the 15-minute mirror sync pushes what changed (and, once a day, whatever the mirror is missing or holds stale; a row only the mirror holds is counted, never deleted).
 
+### Against a public benchmark: LongMemEval (2026-11-21)
+
+[LongMemEval](https://github.com/xiaowu0162/LongMemEval) (MIT) asks
+questions of a user's own chat history: about 48 conversations, the one or
+few holding the answer among unrelated ones. Kazma is measured on a fixed,
+stratified sample of 100 of its 500 questions
+(`tests/fixtures/longmemeval/sample.json`; `scripts/longmemeval_bench.py`).
+Each history is written into a private memory the product's way, one memory
+per round (the user's message and the reply), dated, and the question is
+asked through the real `recall()`. No facts are extracted (a model call per
+round). The data is downloaded into a folder outside the repository and
+never committed; the result files hold question ids and scores only.
+
+**Finding it** (no model call): the round holding the answer is among the
+memories shown for 91.5 % of the answerable questions, a memory from the
+right conversation for 97.9 %, every answering conversation for 83.0 %;
+precision 0.84; recall took 26 ms (median). None of the six questions with
+no answer came back empty.
+
+**Answering from it** (deepseek-flash as reader and judge, LongMemEval's own
+prompts; the share the judge called correct):
+
+| | Kazma's recall | Read whole | Whole history | Oracle |
+|---|---|---|---|---|
+| All questions | 0.47 | 0.77 | 0.72 | 0.94 |
+| Tokens sent a question | 1,017 | 2,214 | 96,356 | 6,306 |
+
+"Kazma's recall" is the block as a chat turn's model is shown it. It shows
+each memory with 200 characters of the question and 300 of the reply, and
+points the model at `memory_read` for the rest; a one-shot reader cannot call it.
+For 44 of the 51 answerable questions it missed, the round holding the
+answer was shown, cut. "Read whole" gives the same recalled rounds whole,
+as `memory_read` would: above the whole history, at a fortieth of its
+tokens. The whole history was cut from its oldest conversations to fit the
+reader's window. Run with an agent that calls `memory_read` itself is the
+next measurement.
+
+**In English and in Arabic**: 40 of the sample's questions and the 84
+conversations holding their answers, in one memory, in English and
+translated into Arabic (the user's messages in Gulf Arabic, the replies in
+Modern Standard Arabic, by deepseek-flash; kept with the data). The round
+holding the answer is shown for 85.0 % in English and 87.5 % in Arabic, a
+memory from the right conversation for 97.5 % in both.
+
+Spend (deepseek-flash, 2026-11-21): the end-to-end run 800 calls,
+10,684,738 prompt and 36,646 completion tokens; the translation 392 calls,
+338,099 prompt and 420,616 completion tokens.
+
 ### Benchmark report (dataset v8, the unrelated chat without repeats, 2026-11-21)
 
 Until v7 the "unrelated chat" around the persona was 300 conversations
