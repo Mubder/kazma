@@ -1903,8 +1903,15 @@ four injected were noise.
   every memory of the tenant that holds it: Kazma's own later answers quoting
   it kept it, and a new chat recalled one. A plain word is never swept.
   **"Forget everything that mentions X"** is `memory_forget_mentions(text)`
-  (`forget.forget_mentions`, danger tier, 4+ characters): every memory and
-  current fact of the tenant holding the text, any case. `memory_search`
+  (`forget.forget_mentions`, danger tier, 4+ characters): everything of the
+  tenant holding the text -- memories, facts current, ended or archived (in
+  their subject, predicate or value), weekly summaries, entities it names
+  with their merges and groupings, changes, legacy rows, queued turns --
+  matched by `memory/mention_match.py` (both sides folded as search folds:
+  case, Arabic letter forms and marks; an id also by its slug; Kazma's own
+  names for the person and itself never a mention). "About me" is searched
+  and named (`about_me_holds_it`), never edited. Journaled (kind
+  `mentions`: ids only, an entity's id hashed). `memory_search`
   ranks the best few matches, so forgetting its hits one by one left 5 of 7
   (live). It also removes every self-improvement lesson holding the text
   (`self_improvement.forget_text`, the Soul and its history: a lesson quoted
@@ -2721,12 +2728,20 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   Every product site that inserts an episode is declared in
   `tests/test_memory_forget.py`, and the live writers must ask the ledger.
 - The facts a forgotten turn produced (`source_session`/`source_turn`) are
-  invalidated and lose their value, their vector and every metadata field
-  but where they came from (`object = ''`, `embedding = NULL`; an operator
-  edit's `previous` goes with it); a forget cut short (`invalidate_belief`
-  commits as it goes) is finished by asking again. The Postgres mirror gets
-  the tombstones; the remote vector index loses the turn's AND its facts'
-  vectors.
+  invalidated and lose their subject, predicate, value, vector and every
+  metadata field but where they came from (`forget._EMPTIED_FACT_COLUMNS`,
+  `embedding = NULL`; an operator edit's `previous` goes with it; archived
+  copies alike, `_scrub_archived_rows`). Subject and predicate were kept
+  until 2026-11-21 (the memory framework audit's F5, part D: a forgotten
+  "Sara was diagnosed with ..." read `sara` / `diagnosed_with` and the index
+  answered "diagnosed"); `forget.finish_old_tombstones` empties older ones on
+  the convergence pass. A forget cut short (`invalidate_belief` commits as
+  it goes) is finished by asking again. The Postgres mirror gets the
+  tombstones; the remote vector index loses the turn's AND its facts'
+  vectors. Gate: `tests/test_forget_means_gone.py` (the word planted in a
+  fact's subject, predicate and value; every kind of forget; restores;
+  Arabic in two spellings; today's scrub, a case-only fold, an entry
+  without ids or keys, and the old journal loop as negative controls).
 - **Every copy is on one list** (`memory/memory_stores.py`, Memory audit
   M01, 2026-10-13): each table of `memory_state.db` and `memory_ops.db`,
   and each store outside them, with what Forget does there, its export
@@ -2743,8 +2758,9 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   `ensure_ops_schema`. A tool record keeps argument NAMES, never values
   (`procedural.strip_argument_values` rewrites older ones). What Forget
   cannot reach is the erasure horizon (`ERASURE_HORIZON`: backups, restic,
-  exports, the pre-rebuild copy, freed SQLite pages), said in the Forget
-  dialog and the guide. Gates: `tests/test_memory_store_registry.py` (one
+  exports, the pre-rebuild copy, freed SQLite pages, the Postgres dumps and
+  WAL archive, Neo4j's transaction logs, migration bundles, the backup
+  folder copy), said in the Forget dialog and the guide. Gates: `tests/test_memory_store_registry.py` (one
   word planted through every writer, forget, every column of every table of
   both databases read for it -- the forget of the day before and the
   missing purge as negative controls; every table declared, a planted one
@@ -2754,14 +2770,22 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   M08/M10, 2026-10-13; `memory/forget_journal.py`). Every forget, keep-out,
   "remember again" and summary forget is appended to the forget journal
   (`<data dir>/memory_forget_journal.db`, its own file) BEFORE it changes
-  anything; the memory database records what it applied
+  anything -- a forget by text (`mentions`) and a turn kept out
+  (`keep_turn_out`, a `turn` entry naming no memory) too since 2026-11-21 --
+  and an entry of a chat records the chat's keys (`keys_detail`; a replay
+  reads them with `entry_keys`: a chat forgotten and then deleted came back
+  under its other key, since the store no longer named it); the memory
+  database records what it applied
   (`memory_forget_applied`, inside it, so a restored older copy lacks the
   marks of later forgets). `forget_episode` runs EVERY step every time (the
   "already" path finished the facts only; summaries stayed active) and
   marks its entry applied only after the last one. The maintenance entry
   "forget convergence" (first of the memory sweeps, and at boot) applies
-  pending entries in order, stopping at a failure (a keep-out then
-  "remember" must keep their order), enforces the ledger on stored rows
+  pending entries in order; one that fails stays pending with every later
+  entry of the same chat (a keep-out then "remember" must keep their order),
+  and other chats' entries go on (it stopped at the first failure); memory
+  health's "Forgets applied" check (`forget_journal.health`) warns when one
+  fails or waits past a pass. It enforces the ledger on stored rows
   (`forget.enforce_ledger`: a forgotten turn's copy, a row written into a
   kept-out chat after the keep-out, a chat's past forgotten in the last day,
   an active summary from a forgotten turn) and retries remote deletes that

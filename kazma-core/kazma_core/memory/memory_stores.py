@@ -81,8 +81,10 @@ MEMORY_TABLES: tuple[MemoryStore, ...] = (
     ),
     MemoryStore(
         "beliefs", "state", "forget", "fact_text",
-        forget="forget._forget_fact_rows: no longer current, value, vector and every metadata "
-               "field but provenance emptied; the remote vector deleted (forget._after_facts)",
+        forget="forget._forget_fact_rows: no longer current; subject, predicate, value, vector and "
+               "every metadata field but provenance emptied (subject and predicate since 2026-11-21; "
+               "forget.finish_old_tombstones empties older ones); the remote vector deleted "
+               "(forget._after_facts)",
         export="facts", retention="kept as history; superseded facts archived after 180 days",
         bound="facts per subject; history rows per functional (subject, predicate)",
     ),
@@ -95,14 +97,15 @@ MEMORY_TABLES: tuple[MemoryStore, ...] = (
     ),
     MemoryStore(
         "beliefs_archive", "state", "forget", "fact_text",
-        forget="forget._forget_archived_facts: the archived JSON keeps no value, vector or metadata "
-               "but provenance",
+        forget="forget._scrub_archived_rows: the archived JSON keeps no subject, predicate, value, "
+               "vector or metadata but provenance",
         export="archived_facts", retention="kept",
         bound="facts superseded more than 180 days ago, and the operator's archive of invalidated facts",
     ),
     MemoryStore(
         "entities", "state", "forget", "names_only",
-        forget="an entity goes with its last fact (entity_retire); a name another fact still uses stays",
+        forget="an entity goes with its last fact (entity_retire); a name another fact still uses "
+               "stays; forget_mentions removes one its text names, with its merges and groupings",
         export="entities", bound="one row per subject or object name",
     ),
     MemoryStore(
@@ -239,8 +242,9 @@ MEMORY_TABLES: tuple[MemoryStore, ...] = (
     # ── memory_forget_journal.db (memory/forget_journal.py) ────────────────
     MemoryStore(
         "forget_journal", "journal", "no_turn_text", "ids_only",
-        forget="the journal itself: each forget, keep-out and summary forget, in order -- chat keys, "
-               "turn numbers, question hashes and ids, never text",
+        forget="the journal itself: each forget, keep-out, forget by text and summary forget, in "
+               "order -- chat keys, turn numbers, question hashes and ids (an entity's id hashed), "
+               "never text",
         export="", excluded="the forget journal; the export's 'forgotten' section shows the ledger",
         retention="append-only", bound="one row per forget the user makes",
     ),
@@ -304,8 +308,9 @@ EXTERNAL_STORES: tuple[MemoryStore, ...] = (
     MemoryStore(
         "self-improvement lessons (settings self_improvement.agent_evolution)", "external", "forget",
         "derived_text",
-        forget="forget_mentions removes every lesson holding the text, from the Soul and its history "
-               "(self_improvement.forget_text); since 2026-10-19 a lesson no longer quotes the task; "
+        forget="forget_mentions removes every lesson holding the text, folded as every forget by text "
+               "is, from the Soul and its history (self_improvement.forget_text); since 2026-10-19 a "
+               "lesson no longer quotes the task; "
                "since 2026-11 forgetting a turn or a chat takes back the lessons it taught "
                "(self_improvement.forget_lessons_from, by the source each lesson records)",
         export="", excluded="the agent's own guidance, not the user's memory",
@@ -369,6 +374,13 @@ ERASURE_HORIZON: tuple[tuple[str, str], ...] = (
     ("space SQLite freed in the memory databases and their write-ahead logs", "until SQLite reuses it"),
     ("approval records (hitl_gates.db): a decided card's tool arguments, which can quote a memory",
      "90 days after the decision"),
+    ("Kazma's Postgres dumps (backups/pg), which hold the memory mirror's tables when memory has a "
+     "Postgres copy", "3 kept, one every 6 hours"),
+    ("Postgres's archived write-ahead log and base backups, and their offsite copies",
+     "until the base backup before them is pruned (two weekly base backups kept)"),
+    ("Neo4j's own transaction logs, when Neo4j holds the memory graph", "as Neo4j keeps them (2 days by default)"),
+    ("migration bundles (kazma migrate export)", "until the operator deletes them"),
+    ("the backup copy in a folder the owner chose (Settings, Backup)", "the newest copies of each kind kept there"),
 )
 
 #: Tables SQLite keeps for itself.

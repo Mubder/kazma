@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 import threading
 import time
 from typing import Any
@@ -194,6 +195,40 @@ def _graph_keys_detail(keys: dict[str, Any] | None) -> str:
     open_ = max(0, int(keys.get("keyless") or 0) - elsewhere)
     return (f" {count_noun(open_, 'node')} still to give a key; until then nodes are found by name, "
             f"which is slower.{left}")
+
+
+#: A forget the memory database has not applied after this long is shown:
+#: the maintenance pass that applies them runs every 15 minutes.
+_FORGET_PENDING_WARN_S = 1800.0
+#: A remote vector a forget could not delete, waiting longer than this.
+_REMOTE_DELETE_WARN_S = 3600.0
+
+
+def _forget_journal_component() -> dict[str, Any]:
+    """Whether every forget reached the memory database and the remote
+    vector index (``forget_journal.health``). One that failed, or waited past
+    a pass, said nothing until 2026-11-21 (the memory framework audit's F11)."""
+    from kazma_core.memory import forget_journal
+
+    fix = ("Kazma tries again every 15 minutes; if this stays, the reason is in kazma.log under "
+           "[forget_journal] or [forget].")
+    try:
+        fj = forget_journal.health()
+    except (sqlite3.Error, OSError) as exc:
+        return _comp("forget_journal", "Forgets applied", ok=False, status="warn",
+                     detail=_failed("The forget journal could not be read", exc), fix=fix)
+    parts: list[str] = []
+    if fj["failing"] or (fj["oldest_pending_s"] or 0) > _FORGET_PENDING_WARN_S:
+        parts.append(f"{fj['pending']} forget(s) not applied to the memory database yet")
+        if fj["failing"]:
+            parts.append(f"the last attempt failed ({fj['failing'][0]['error']})")
+    if (fj["oldest_remote_delete_s"] or 0) > _REMOTE_DELETE_WARN_S:
+        parts.append(f"{fj['remote_deletes_waiting']} vector(s) still to delete from the remote index")
+    if parts:
+        return _comp("forget_journal", "Forgets applied", ok=False, status="warn",
+                     detail="; ".join(parts) + ".", meta=fj, fix=fix)
+    return _comp("forget_journal", "Forgets applied", ok=True, status="ok",
+                 detail=f"Every forget applied ({fj['entries']} in the journal).", meta=fj)
 
 
 def _findability_component(fnd: dict[str, Any]) -> dict[str, Any]:
@@ -896,6 +931,9 @@ def build_memory_health() -> dict[str, Any]:
             detail=_failed("Checkpoint probe failed", exc),
             fix="Reload Kazma when idle; if it stays, the reason is in kazma.log.",
         ))
+
+    # ── Forgets waiting (the memory framework audit's F11) ────────────
+    components.append(_forget_journal_component())
 
     # ── Overall rollup ────────────────────────────────────────────────
     # Core path: embedder + V2 cognitive engine + store config. The V2 store

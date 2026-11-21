@@ -65,7 +65,6 @@ __all__ = [
     "dismiss",
     "forget_chat",
     "forget_facts",
-    "forget_mentioning",
     "forget_turn",
     "format_changes_note",
     "list_changes",
@@ -551,17 +550,6 @@ def forget_facts(conn: sqlite3.Connection, fact_ids: list[str]) -> int:
     return conn.execute(
         f"DELETE FROM memory_changes WHERE old_belief_id IN ({marks}) OR new_belief_id IN ({marks})",  # nosec B608 - placeholders only
         (*fact_ids, *fact_ids),
-    ).rowcount
-
-
-def forget_mentioning(conn: sqlite3.Connection, *, tenant_id: str, pattern: str) -> int:
-    """``forget.forget_mentions`` takes every change of the tenant whose old
-    or new value holds the text: *pattern* is its LIKE pattern (escape
-    ``!``). Caller's transaction."""
-    return conn.execute(
-        "DELETE FROM memory_changes WHERE tenant_id = ? AND (old_value LIKE ? ESCAPE '!' "
-        "OR new_value LIKE ? ESCAPE '!')",
-        (tenant_id,pattern, pattern),
     ).rowcount
 
 

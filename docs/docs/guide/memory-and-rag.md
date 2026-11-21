@@ -484,16 +484,36 @@ A fork starts a new chat and leaves the original's memory as it is.
 
 **What Forget cannot reach.** Copies made before you forgot keep it until
 they are replaced: the memory backups (ten, one every six hours), Kazma's
-full backups (seven), the offsite backups (up to twelve monthly), the
-memory export written every six hours, the copy kept before an embedding
-rebuild, the copies the operator's repair scripts keep before they change the
-database (`memory_state.db.pre_entity_key`, `memory_state.db.pre_relabel`,
-`memory_state.db.pre_reopen`, until removed; a migration never carries
-them), and space the database has
-freed but not yet reused. Kazma's lessons for itself are reached only by
-"forget everything that mentions ..."; lessons written before 2026-10-19
-could quote the message they came from. The
-Forget dialog says so too.
+full backups (seven), the offsite backups (up to twelve monthly), the backup
+copy in a folder you chose (Settings, Backup: the newest copies kept there),
+the memory export written every six hours, Kazma's Postgres dumps (three,
+which hold the memory mirror's tables when memory has a Postgres copy),
+Postgres's archived write-ahead log and base backups and their offsite
+copies, Neo4j's own transaction logs when Neo4j holds the memory graph (two
+days by default), migration bundles until you delete them, the copy kept
+before an embedding rebuild, the copies the operator's repair scripts keep
+before they change the database (`memory_state.db.pre_entity_key`,
+`memory_state.db.pre_relabel`, `memory_state.db.pre_reopen`, until removed; a
+migration never carries them), and space the database has freed but not yet
+reused. Restoring a memory backup (the Memory page's Restore) does not bring
+a forget back: every forget is journaled in a file of its own and applied
+again to the restored copy. A restore of the whole data folder from an older
+full backup takes that journal back to its time too. The Forget dialog says
+so too.
+
+**A forgotten fact keeps nothing you could read.** Its subject, its name and
+its value are emptied together (since 2026-11-21; before then the subject and
+name stayed, and a forgotten "Sara was diagnosed with ..." still read
+"sara, diagnosed_with"). What stays is an id, when, and the chat and turn it
+came from.
+
+**"Forget everything that mentions ..."** reads every place memory keeps
+text: conversations, facts (current, ended or archived), weekly summaries,
+entities and their groupings, changes waiting for you, work still queued and
+Kazma's lessons for itself. It matches in any case and folds Arabic spelling
+the way search does (ة and ه, أ and ا, with or without vowel marks). "About
+me" is your own text: Kazma tells you when it holds the words and never
+edits it. Forgetting a turn or a chat also takes back the lessons it taught.
 
 ## Bring your history {#bring-your-history}
 

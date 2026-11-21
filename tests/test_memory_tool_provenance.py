@@ -102,8 +102,11 @@ def test_forgetting_the_chat_forgets_what_the_agent_stored_in_it(mem):
     assert out["ok"] and out["forgotten"] >= 1 and out["facts_forgotten"] >= 1
     note = mem.db.execute("SELECT tier, user_text FROM episodes WHERE session_id = 'memory_store'").fetchone()
     assert (note["tier"], note["user_text"]) == ("forgotten", "")
-    fact = mem.db.execute("SELECT object, invalidated_at FROM beliefs WHERE predicate = 'noted'").fetchone()
-    assert fact["object"] == "" and fact["invalidated_at"] is not None
+    # Found by its source: a forgotten fact names no predicate any more
+    # (the memory framework audit's F5, 2026-11-21).
+    fact = mem.db.execute("SELECT predicate, object, invalidated_at FROM beliefs WHERE source_session = ?",
+                          (THREAD,)).fetchone()
+    assert (fact["predicate"], fact["object"]) == ("", "") and fact["invalidated_at"] is not None
 
 
 def test_a_note_stored_outside_any_chat_is_not_the_chats(mem):
@@ -128,9 +131,9 @@ def test_forgetting_a_turn_forgets_the_notes_of_that_turn_only(mem):
         "SELECT id, user_text, tier FROM episodes WHERE session_id = 'memory_store'")}
     assert rows.get("note from turn one") not in (None, "forgotten")
     assert "note from turn two" not in rows  # emptied with its turn
-    facts = {r["source_turn"]: r["object"] for r in mem.db.execute(
-        "SELECT source_turn, object FROM beliefs WHERE predicate = 'noted'")}
-    assert facts[1] == "note from turn one" and facts[2] == ""
+    facts = {r["source_turn"]: (r["predicate"], r["object"]) for r in mem.db.execute(
+        "SELECT source_turn, predicate, object FROM beliefs WHERE source_session = ?", (THREAD,))}
+    assert facts[1] == ("noted", "note from turn one") and facts[2] == ("", "")
 
 
 def test_a_chat_kept_out_of_memory_stores_nothing_through_the_tools(mem):

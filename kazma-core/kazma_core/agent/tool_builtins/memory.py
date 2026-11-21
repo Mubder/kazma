@@ -410,8 +410,12 @@ def register_memory_tools(registry: Any) -> None:
         except (sqlite3.Error, OSError) as exc:
             logger.warning("[memory_forget_mentions] failed: %s", exc, exc_info=True)
             return f"Error: memory_forget_mentions failed — {exc}"
+        about_me = ("'About me' holds it: that is the user's own text, which Kazma never edits; "
+                    "they change it in Settings, Memory, About me.") if result.get("about_me_holds_it") else ""
         if result.get("error") == "nothing_holds_it":
-            raise RefusedBeforeEffect(f"Error: no memory or current fact holds {needle!r}")
+            raise RefusedBeforeEffect(f"Error: no memory or fact holds {needle!r}." + (f" {about_me}" if about_me else ""))
+        if about_me:
+            result["about_me_note"] = about_me
         result["this_turn_kept_out"] = _keep_this_turn_out()
         return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -1185,12 +1189,14 @@ def register_memory_tools(registry: Any) -> None:
         return await asyncio.to_thread(_mem_invalidate, belief_id, bool(forget_source_turn))
     @registry.register(
         description=(
-            "WRITE: Forget EVERY memory of a conversation and every current fact that "
-            "contains this exact text (any case, at least 4 characters). Use when the user "
-            "asks to forget everything that mentions something (a codeword, a number, a "
-            "name): memory_search shows only the best few matches, so forgetting its hits "
-            "one by one leaves the rest. Each memory is forgotten as the Memory page's "
-            "Forget does. Returns the ids forgotten."
+            "WRITE: Forget EVERY memory of a conversation, every fact (current, ended or "
+            "archived), weekly summary, entity and lesson that contains this text (any case, "
+            "Arabic spelling folded, at least 4 characters). Use when the user asks to forget "
+            "everything that mentions something (a codeword, a number, a name): memory_search "
+            "shows only the best few matches, so forgetting its hits one by one leaves the "
+            "rest. Each memory is forgotten as the Memory page's Forget does. 'About me' is "
+            "the user's own text: it is never changed, and the answer says when it holds the "
+            "text. Returns the ids forgotten."
         ),
         category="memory",
     )

@@ -9,6 +9,19 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 > This page is published at [kazma.ai/docs/recent-features/](https://kazma.ai/docs/recent-features/) ([Arabic](https://kazma.ai/ar/docs/recent-features/)).
 
+**New in 2026-11-21 — forget means gone.** A forgotten fact keeps nothing
+you could read: its subject and name go with its value (before, a forgotten
+"Sara was diagnosed with ..." still read "sara, diagnosed_with", and the
+search index still answered "diagnosed"; older ones are emptied on their
+own). **"Forget everything that mentions ..."** now reaches ended and archived
+facts, weekly summaries, the entities it names, changes and queued work, in
+any case and in either Arabic spelling (ة or ه, with or without أ or vowel
+marks), and says when your "About me" holds the words (Kazma never edits it).
+Every forget, a kept-out turn included, is journaled, so restoring a memory
+backup forgets it again; one forget that cannot be applied no longer holds
+the others back, and memory health says when one is waiting (see
+[Memory and RAG](memory-and-rag.md)).
+
 **New in 2026-11-20 — a backup copy on another drive.** Settings → Backup →
 **A copy on another drive**: choose a folder on another drive, a USB disk or
 a network share (Browse lists this computer's folders; type a share's path),

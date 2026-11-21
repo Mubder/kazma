@@ -28,6 +28,7 @@ done; a remote delete that fails waits in :func:`retry_remote_deletes`.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
@@ -40,6 +41,9 @@ __all__ = [
     "Entry",
     "append",
     "apply_pending",
+    "entry_keys",
+    "health",
+    "keys_detail",
     "journaled_seqs",
     "mark_applied",
     "pending",
@@ -51,7 +55,15 @@ __all__ = [
 
 #: ``entry``: every fact filed under a member's entry in a shared space
 #: (Spaces S1-11, N36); the entry's id is the ``session_key``.
-KINDS = ("turn", "chat", "keep_out", "remember", "summary", "rewind", "entry")
+#: ``mentions``: "forget everything that mentions X" (the memory framework
+#: audit's F5, part D): the ids it forgot, never the text (``detail``).
+KINDS = ("turn", "chat", "keep_out", "remember", "summary", "rewind", "entry", "mentions")
+
+#: The kinds whose ``detail`` records the chat's keys when it was forgotten
+#: (``{"keys": [...]}``): a chat deleted since has no copy in the chat store
+#: to name its other key, and a restore brought the memory back under it
+#: (the memory framework audit's F11).
+_KEYED_KINDS = ("turn", "chat", "keep_out", "remember")
 
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS forget_journal (
@@ -131,6 +143,30 @@ def append(
         conn.close()
 
 
+def keys_detail(keys: list[str]) -> str:
+    """The ``detail`` of an entry of :data:`_KEYED_KINDS`: the chat's keys."""
+    return json.dumps({"keys": [k for k in dict.fromkeys(keys) if k]})
+
+
+def entry_keys(e: Entry) -> list[str]:
+    """Every key the entry's chat is stored under: those recorded when it was
+    forgotten (:func:`keys_detail`), those the chat store knows now, and the
+    entry's own. [] for an entry that names no chat."""
+    if not e.session_key:
+        return []
+    recorded: list[str] = []
+    if e.kind in _KEYED_KINDS and e.detail:
+        try:
+            data = json.loads(e.detail)
+        except (TypeError, ValueError):
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("keys"), list):
+            recorded = [str(k) for k in data["keys"] if k]
+    from kazma_core.memory.forget import chat_keys
+
+    return list(dict.fromkeys([*recorded, *chat_keys(e.session_key), e.session_key]))
+
+
 def _entries(*, kinds: tuple[str, ...] = KINDS, since: float = 0.0) -> list[Entry]:
     conn = _connect()
     try:
@@ -192,12 +228,15 @@ def _apply(conn: sqlite3.Connection, e: Entry) -> None:
     elif e.kind == "rewind":
         forget.replay_rewind(conn, e)
     elif e.kind == "chat":
-        out = forget.forget_chat(e.session_key, tenant_id=e.tenant_id, conn=conn, journal=False)
+        out = forget.forget_chat(e.session_key, tenant_id=e.tenant_id, conn=conn, journal=False,
+                                 keys=entry_keys(e))
         if not out.get("ok") and out.get("error") != "chat required":
             raise RuntimeError(f"forget of chat {e.session_key} failed: {out}")
     elif e.kind in ("keep_out", "remember"):
         forget.set_chat_remembered(e.session_key, e.kind == "remember", tenant_id=e.tenant_id,
-                                   conn=conn, journal=False)
+                                   conn=conn, journal=False, keys=entry_keys(e))
+    elif e.kind == "mentions":
+        forget.replay_mentions(conn, e)
     elif e.kind == "entry":
         out = forget.forget_entry(e.session_key, tenant_id=e.tenant_id, conn=conn, journal=False)
         if not out.get("ok"):
@@ -210,33 +249,57 @@ def _apply(conn: sqlite3.Connection, e: Entry) -> None:
             raise RuntimeError(f"forget of summary {e.summary_id} failed: {out}")
 
 
+#: This process's last failure of each entry still pending: its sequence
+#: number -> (the exception's class, when). Memory health reads it; the class
+#: only, never the message (it can quote a row).
+_FAILURES: dict[int, tuple[str, float]] = {}
+
+
 def apply_pending(conn: sqlite3.Connection | None = None, *, limit: int = 200) -> dict[str, Any]:
-    """Apply, in order, the entries the memory database has not; stop at the
-    first that fails (order matters: a keep-out and the "remember" after it).
+    """Apply, in order, the entries the memory database has not.
+
+    An entry that fails stays pending, and so does every later entry of the
+    same chat (order matters there: a keep-out and the "remember" after it);
+    the entries of other chats are applied (the memory framework audit's F11:
+    one failing entry held every forget behind it, and nothing said so). At
+    most *limit* entries are tried a pass; what is left is in
+    :func:`health`.
     """
     from kazma_core.memory.forget import _open
 
     own = conn is None
     conn = conn or _open()
     applied = 0
+    failed: list[int] = []
+    waiting: set[str] = set()
     try:
         todo = pending(conn)
-        for e in todo[:limit]:
+        tried = 0
+        for e in todo:
+            if tried >= limit:
+                break
+            keys = set(entry_keys(e))
+            if keys & waiting:
+                continue
+            tried += 1
             try:
                 _apply(conn, e)
                 mark_applied(conn, e.seq)
                 conn.commit()
                 applied += 1
-            except Exception:
+                _FAILURES.pop(e.seq, None)
+            except Exception as exc:
                 if conn.in_transaction:
                     conn.rollback()
                 logger.warning("[forget_journal] entry %d (%s) not applied yet; retried next pass",
                                e.seq, e.kind, exc_info=True)
-                break
+                _FAILURES[e.seq] = (type(exc).__name__, time.time())
+                failed.append(e.seq)
+                waiting |= keys
         left = len(todo) - applied
         if applied:
             logger.info("[forget_journal] applied %d forget(s); %d pending", applied, left)
-        return {"applied": applied, "pending": left}
+        return {"applied": applied, "pending": left, "failed": failed}
     finally:
         if own:
             conn.close()
@@ -302,6 +365,57 @@ def state() -> dict[str, Any]:
         }
     finally:
         conn.close()
+
+
+def health(memory_db: str | None = None) -> dict[str, Any]:
+    """For memory health: the forgets the memory database has not applied
+    (how many, how old the oldest), the ones that failed in this process, and
+    the remote deletes waiting. Read-only on both files. Raises when the
+    journal or the memory database cannot be read."""
+    import os
+
+    from kazma_core.paths import memory_forget_journal_db, primary_memory_db
+
+    path = memory_forget_journal_db()
+    out: dict[str, Any] = {"entries": 0, "pending": 0, "oldest_pending_s": None, "failing": [],
+                           "remote_deletes_waiting": 0, "oldest_remote_delete_s": None}
+    if not os.path.exists(path):
+        return out
+    now = time.time()
+    jconn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        rows = jconn.execute("SELECT seq, at, kind FROM forget_journal ORDER BY seq").fetchall()
+        remote = jconn.execute("SELECT COUNT(*), MIN(added_at) FROM forget_remote_pending").fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc):
+            return out
+        raise
+    finally:
+        jconn.close()
+    out["entries"] = len(rows)
+    out["remote_deletes_waiting"] = int(remote[0] or 0)
+    if remote[1] is not None:
+        out["oldest_remote_delete_s"] = round(now - float(remote[1]), 1)
+    mpath = memory_db or str(primary_memory_db())
+    applied: set[int] = set()
+    if os.path.exists(mpath):
+        mconn = sqlite3.connect(f"file:{mpath}?mode=ro", uri=True)
+        try:
+            applied = {int(r[0]) for r in mconn.execute("SELECT seq FROM memory_forget_applied")}
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+        finally:
+            mconn.close()
+    waiting = [(int(seq), float(at), str(kind)) for seq, at, kind in rows if int(seq) not in applied]
+    out["pending"] = len(waiting)
+    if waiting:
+        out["oldest_pending_s"] = round(now - min(at for _s, at, _k in waiting), 1)
+    out["failing"] = [
+        {"seq": seq, "kind": kind, "error": _FAILURES[seq][0], "at": _FAILURES[seq][1]}
+        for seq, _at, kind in waiting if seq in _FAILURES
+    ]
+    return out
 
 
 def recent_chat_forgets(*, within_s: float = 86400.0) -> list[Entry]:

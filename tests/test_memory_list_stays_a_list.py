@@ -185,6 +185,11 @@ def test_negative_control_without_the_forgotten_check_a_blank_fact_comes_back(me
     from kazma_core.memory import list_reopen
 
     gone = _closed_then_forgotten(mem, monkeypatch)
+    # A tombstone as a forget left it before 2026-11-21 (subject and
+    # predicate kept): since then a forgotten fact names nothing a lookup by
+    # subject could find, and only an older one can reach the check.
+    mem.db.execute("UPDATE beliefs SET subject = 'user', predicate = 'noted' WHERE id = ?", (gone,))
+    mem.db.commit()
     monkeypatch.setattr(list_reopen, "_NOT_FORGOTTEN_SQL", "1")
     groups = find_closed_entries(mem.db)
     assert gone in groups[0]["closed"]

@@ -52,12 +52,14 @@ __all__ = [
     "forget_belief_source",
     "forget_chat",
     "forget_episode",
+    "finish_old_tombstones",
     "forget_mentions",
     "keep_turn_out",
     "forgotten_in_chat",
     "forgotten_turns",
     "question_sha",
     "refuses_write",
+    "replay_mentions",
     "retire_copy",
     "set_chat_remembered",
 ]
@@ -215,22 +217,25 @@ def chat_remembered(key: str, *, tenant_id: str, conn: sqlite3.Connection | None
 
 def set_chat_remembered(
     key: str, remembered: bool, *, tenant_id: str, conn: sqlite3.Connection | None = None,
-    journal: bool = True,
+    journal: bool = True, keys: list[str] | None = None,
 ) -> dict[str, Any]:
     """Keep the chat *key* out of memory from now on, or let it back in.
 
     Letting it back in affects new turns only: turns forgotten one by one stay
     forgotten, and nothing is written for the turns in between (turn reconcile
     writes them, like any turn memory missed). Journaled (``forget_journal``):
-    a restored memory database gets the same answer.
+    a restored memory database gets the same answer. *keys*: the chat's keys
+    a journal entry recorded (its replay: a chat deleted since has no copy to
+    name them).
     """
-    keys = chat_keys(key)
+    keys = list(dict.fromkeys([*(keys or []), *chat_keys(key)]))
     if not keys:
         return {"ok": False, "error": "chat required"}
     tid = tenant_id or "default"
     from kazma_core.memory import forget_journal
 
-    seq = (forget_journal.append("remember" if remembered else "keep_out", tenant_id=tid, session_key=key)
+    seq = (forget_journal.append("remember" if remembered else "keep_out", tenant_id=tid, session_key=key,
+                                 detail=forget_journal.keys_detail(keys))
            if journal else None)
     own = conn is None
     conn = conn or _open()
@@ -313,7 +318,8 @@ def forget_episode(
             from kazma_core.memory import forget_journal
 
             seq = forget_journal.append("turn", tenant_id=owner, session_key=session, turn_number=turn,
-                                        question_sha=sha, episode_id=eid)
+                                        question_sha=sha, episode_id=eid,
+                                        detail=forget_journal.keys_detail(keys or [session]))
         out = _forget_turn(conn, eid=eid, owner=owner, keys=keys, turn=turn, sha=sha, by=by,
                            purge_index=purge_index, seq=seq)
         if already:
@@ -462,7 +468,9 @@ def _forgotten_of_turn(conn: sqlite3.Connection, *, owner: str, keys: list[str],
 def replay_turn(conn: sqlite3.Connection, entry: Any) -> None:
     """Apply a journaled forget of one turn to *conn* (a restored copy may
     hold the turn, its ledger rows, or neither). Raises when a step fails."""
-    keys = chat_keys(entry.session_key) or ([entry.session_key] if entry.session_key else [])
+    from kazma_core.memory import forget_journal
+
+    keys = forget_journal.entry_keys(entry)
     owner = entry.tenant_id or "default"
     turn = int(entry.turn_number or 0)
     if keys and turn > 0 and entry.question_sha:
@@ -681,6 +689,13 @@ _FACT_PROVENANCE = ("source", "chat", "chat_turn", "forgotten")
 #: What a redacted audit field says instead of the value.
 REDACTED = "[redacted: forgotten]"
 
+#: A forgotten fact's columns that say what it was: emptied together. Its id,
+#: tenant, source (``source_session`` / ``source_turn``) and times stay. The
+#: subject and predicate were kept until 2026-11-21, so a forgotten "Sara was
+#: diagnosed with celiac disease" still read ``sara`` / ``diagnosed_with`` and
+#: the search index answered "diagnosed" (the memory framework audit's F5).
+_EMPTIED_FACT_COLUMNS = ("subject", "predicate", "object")
+
 
 def _provenance_only(meta: Any, *, now: float) -> dict[str, Any]:
     kept = {k: meta[k] for k in _FACT_PROVENANCE if isinstance(meta, dict) and k in meta}
@@ -703,8 +718,9 @@ def _forget_fact_rows(conn: sqlite3.Connection, rows: list[Any], *, now: float) 
         except (TypeError, ValueError):
             meta = {}
         kept = _provenance_only(meta, now=now)
+        empty = " AND ".join(f"{c} = ''" for c in _EMPTIED_FACT_COLUMNS)
         done = conn.execute(
-            "SELECT 1 FROM beliefs WHERE id = ? AND object = '' AND embedding IS NULL "
+            f"SELECT 1 FROM beliefs WHERE id = ? AND {empty} AND embedding IS NULL "  # nosec B608 - constants only
             "AND metadata_json = ?",
             (r["id"], json.dumps(kept)),
         ).fetchone()
@@ -712,8 +728,9 @@ def _forget_fact_rows(conn: sqlite3.Connection, rows: list[Any], *, now: float) 
             continue
         if r["invalidated_at"] is None and r["valid_until"] is None:
             invalidate_belief(r["id"], conn=conn, now=now, tenant_id=tenant_id)
+        blank = ", ".join(f"{c} = ''" for c in _EMPTIED_FACT_COLUMNS)
         conn.execute(
-            "UPDATE beliefs SET object = '', embedding = NULL, metadata_json = ? WHERE id = ?",
+            f"UPDATE beliefs SET {blank}, embedding = NULL, metadata_json = ? WHERE id = ?",  # nosec B608 - constants only
             (json.dumps(kept), r["id"]),
         )
         changed.append(str(r["id"]))
@@ -749,19 +766,27 @@ def _forget_archived_facts(
     if before is not None:
         sql += " AND CAST(json_extract(original_belief_json, '$.ingested_at') AS REAL) <= ?"
         params.append(before)
+    return _scrub_archived_rows(conn, conn.execute(sql, params).fetchall(), now=now)
+
+
+def _scrub_archived_rows(conn: sqlite3.Connection, rows: list[Any], *, now: float) -> list[str]:
+    """Each ``(id, original_belief_json)`` row keeps no subject, predicate,
+    value, vector or metadata but provenance. Returns the ids it changed."""
     changed: list[str] = []
-    for r in conn.execute(sql, params).fetchall():
+    for r in rows:
         try:
             original = json.loads(r[1])
         except (TypeError, ValueError):
+            continue
+        if not isinstance(original, dict):
             continue
         meta = original.get("metadata_json")
         try:
             meta = json.loads(meta) if isinstance(meta, str) else meta
         except (TypeError, ValueError):
             meta = {}
-        scrubbed = {k: v for k, v in original.items() if k not in ("object", "embedding", "metadata_json")}
-        scrubbed["object"] = ""
+        scrubbed = {k: v for k, v in original.items() if k not in ("embedding", "metadata_json")}
+        scrubbed.update({c: "" for c in _EMPTIED_FACT_COLUMNS})
         scrubbed["metadata_json"] = json.dumps(_provenance_only(meta, now=now))
         blob = json.dumps(scrubbed, ensure_ascii=False, default=str)
         if blob != r[1]:
@@ -1136,11 +1161,13 @@ def inherit_ledger(source_key: str, new_key: str) -> dict[str, Any]:
         for tenant, turn, sha in rows:
             tid, turn, sha = str(tenant or "default"), int(turn or 0), str(sha or "")
             if turn == 0 and not sha:
-                seq = forget_journal.append("keep_out", tenant_id=tid, session_key=new_key)
+                seq = forget_journal.append("keep_out", tenant_id=tid, session_key=new_key,
+                                            detail=forget_journal.keys_detail(targets))
                 whole += 1
             else:
                 seq = forget_journal.append("turn", tenant_id=tid, session_key=new_key,
-                                            turn_number=turn, question_sha=sha)
+                                            turn_number=turn, question_sha=sha,
+                                            detail=forget_journal.keys_detail(targets))
                 turns += 1
             conn.executemany(
                 "INSERT OR IGNORE INTO memory_forgotten "
@@ -1162,11 +1189,21 @@ def keep_turn_out(session_key: str, turn: int, question: str, *, tenant_id: str)
     For the turn in which the user asks to forget something: written after
     the forget, "Forget every memory that mentions BLUE-HERON-42" became a
     memory holding the codeword (live 2026-10-19). False when there is no
-    chat turn to name."""
+    chat turn to name.
+
+    Journaled (a ``turn`` entry with no memory named): a restore of a memory
+    database from before keeps the turn out too. Until 2026-11-21 it wrote
+    the ledger alone, which the restored copy lacked (the memory framework
+    audit's F11)."""
     sha = question_sha(question)
     if not session_key or int(turn or 0) <= 0 or not sha:
         return False
+    from kazma_core.memory import forget_journal
+
     keys = chat_keys(session_key) or [session_key]
+    owner = tenant_id or "default"
+    seq = forget_journal.append("turn", tenant_id=owner, session_key=session_key, turn_number=int(turn),
+                                question_sha=sha, detail=forget_journal.keys_detail(keys))
     conn = _open()
     try:
         with conn:
@@ -1174,63 +1211,375 @@ def keep_turn_out(session_key: str, turn: int, question: str, *, tenant_id: str)
                 "INSERT OR IGNORE INTO memory_forgotten "
                 "(tenant_id, session_key, turn_number, question_sha, episode_id, forgotten_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                [(tenant_id or "default", k, int(turn), sha, "", time.time()) for k in keys],
+                [(owner, k, int(turn), sha, "", time.time()) for k in keys],
             )
+            forget_journal.mark_applied(conn, seq)
     finally:
         conn.close()
     return True
 
 
 def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
-    """Forget every memory and current fact of the tenant that holds *text*
-    (any case): the user's "forget everything that mentions X".
+    """Forget everything of the tenant's memory that mentions *text*: the
+    user's "forget everything that mentions X".
 
     The agent could only forget what ``memory_search`` showed it, and search
     ranks the few best matches: asked to forget every memory mentioning a
     codeword, it forgot the 2 of 7 it was shown and reported the job done
     (live 2026-10-19), and the next new chat answered with the codeword.
-    Each memory goes through :func:`forget_episode` (``by="user"``), each fact
-    through ``hygiene.invalidate_belief``, and every change or waiting
-    correction holding the text is deleted (``changes.forget_mentioning``).
+
+    Since 2026-11-21 (the memory framework audit's F5, part D) it reads every
+    place memory keeps text, case and Arabic spelling folded on both sides
+    (:mod:`kazma_core.memory.mention_match`): the memories (each forgotten as
+    the Memory page's Forget does, :func:`forget_episode`), every fact holding
+    it in its subject, predicate or value -- current, ended or archived --
+    (emptied as a forgotten turn's facts are), the weekly summaries, the
+    entities named by it, their merges and groupings, every change or waiting
+    correction, the legacy tables, a queued turn and Kazma's lessons. It
+    compared the value of current facts with SQLite's ``LIKE`` and left an
+    ended fact's value in its row. "About me" is the user's own text: it is
+    searched and named in the answer (``about_me_holds_it``), never edited.
+
+    Journaled first (kind ``mentions``): the ids it forgets, never the text,
+    so a restore of an older memory database forgets them again.
     """
-    needle = (text or "").strip()
-    if len(needle) < MENTION_MIN_CHARS:
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.mention_match import Needle
+
+    needle = Needle.of(text)
+    if len(needle.text) < MENTION_MIN_CHARS or not needle.folded:
         return {"ok": False, "error": "text_too_short", "min_chars": MENTION_MIN_CHARS}
     caller = tenant_id or "default"
-    from kazma_core.db.sql_patterns import like_literal
-
     conn = _open()
     try:
-        episodes = _episodes_holding(conn, needle, tenant_id=caller)
-        pattern = f"%{like_literal(needle)}%"
-        facts = [str(r["id"]) for r in conn.execute(
-            "SELECT id FROM beliefs WHERE COALESCE(tenant_id, 'default') = ? "
-            "AND valid_until IS NULL AND invalidated_at IS NULL AND object LIKE ? ESCAPE '!'",
-            (caller, pattern),
-        ).fetchall()]
-        # Every change or waiting correction that holds it (memory/changes.py).
-        from kazma_core.memory import changes
+        found = _mentions_found(conn, needle, tenant=caller)
+    finally:
+        conn.close()
+    found["queue"] = _queued_mentions(needle, tenant=caller)
+    from kazma_core.skills.self_improvement import forget_text
 
-        changes_forgotten = changes.forget_mentioning(conn, tenant_id=caller, pattern=pattern)
+    lessons = forget_text(needle.text, tenant_id=caller)
+    about_me = found.pop("about_me")
+    protected = found.pop("protected_entities")
+    if not any(found.values()):
+        out: dict[str, Any] = {"ok": False, "error": "nothing_holds_it", "lessons_removed": lessons}
+        if lessons:
+            out = {"ok": True, "lessons_removed": lessons}
+        out["about_me_holds_it"] = about_me
+        return out
+    seq = forget_journal.append("mentions", tenant_id=caller, detail=json.dumps(_journal_detail(found, caller)))
+    memory_results = [forget_episode(eid, tenant_id=caller, by="user") for eid in found["episodes"]]
+    conn = _open()
+    try:
+        applied = _apply_mentions(conn, tenant=caller, found=found)
+        forget_journal.mark_applied(conn, seq)
         conn.commit()
     finally:
         conn.close()
-    from kazma_core.skills.self_improvement import forget_text
-
-    lessons = forget_text(needle, tenant_id=caller)
-    if not episodes and not facts and not lessons and not changes_forgotten:
-        return {"ok": False, "error": "nothing_holds_it"}
-    from kazma_core.memory.hygiene import invalidate_belief
-
-    fact_results = [invalidate_belief(bid, remove_graph=True, tenant_id=caller) for bid in facts]
-    memory_results = [forget_episode(eid, tenant_id=caller, by="user") for eid in episodes]
-    logger.info("[forget] mentions: %d memor%s and %d fact(s) forgotten for tenant %s",
-                len(episodes), "y" if len(episodes) == 1 else "ies", len(facts), caller)
+    logger.info("[forget] mentions: %d memor%s, %d fact(s), %d summar%s and %d entit%s forgotten for "
+                "tenant %s", len(found["episodes"]), "y" if len(found["episodes"]) == 1 else "ies",
+                len(found["facts"]) + len(found["archived"]), len(found["summaries"]),
+                "y" if len(found["summaries"]) == 1 else "ies", len(found["entities"]),
+                "y" if len(found["entities"]) == 1 else "ies", caller)
     return {
-        "ok": all(r.get("ok", True) for r in [*fact_results, *memory_results]),
-        "memories_forgotten": episodes, "facts_invalidated": facts, "lessons_removed": lessons,
-        "changes_forgotten": changes_forgotten,
+        "ok": all(r.get("ok", True) for r in memory_results),
+        "memories_forgotten": found["episodes"],
+        "facts_invalidated": found["facts"],
+        "archived_facts_forgotten": found["archived"],
+        "summaries_forgotten": found["summaries"],
+        "entities_removed": found["entities"],
+        "protected_entities_kept": protected,
+        "lessons_removed": lessons,
+        "changes_forgotten": len(found["changes"]),
+        "remote_pending": not applied["remote_deleted"],
+        "about_me_holds_it": about_me,
     }
+
+
+def _mentions_found(conn: sqlite3.Connection, needle: Any, *, tenant: str) -> dict[str, Any]:
+    """Where the tenant's memory holds *needle*: ids, read only."""
+    from kazma_core.memory.entity_protection import protection
+    from kazma_core.memory.mention_match import register
+
+    register(conn, needle)
+
+    def ids(sql: str, params: tuple[Any, ...] = ()) -> list[str]:
+        try:
+            return [str(r[0]) for r in conn.execute(sql, (tenant, *params)).fetchall()]
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc) or "no such column" in str(exc):
+                return []  # a database older than the table
+            raise
+
+    tombstoned = " AND ".join(f"{c} = ''" for c in _EMPTIED_FACT_COLUMNS)
+    found: dict[str, Any] = {
+        "episodes": ids(
+            "SELECT id FROM episodes WHERE COALESCE(tenant_id, 'default') = ? AND tier != ? "
+            "AND (kazma_mentions(user_text) OR kazma_mentions(assistant_text) "
+            "OR kazma_mentions(summary_text))", (FORGOTTEN_TIER,)),
+        "facts": ids(
+            f"SELECT id FROM beliefs WHERE COALESCE(tenant_id, 'default') = ? AND NOT ({tombstoned}) "  # nosec B608 - constants only
+            "AND (kazma_mentions(object) OR kazma_mentions_id(object) OR kazma_mentions_id(predicate) "
+            "OR kazma_mentions_name(subject))"),
+        "archived": ids(
+            "SELECT id FROM beliefs_archive WHERE COALESCE(tenant_id, 'default') = ? "
+            "AND json_valid(original_belief_json) "
+            "AND (kazma_mentions(json_extract(original_belief_json, '$.object')) "
+            "OR kazma_mentions_id(json_extract(original_belief_json, '$.object')) "
+            "OR kazma_mentions_id(json_extract(original_belief_json, '$.predicate')) "
+            "OR kazma_mentions_name(json_extract(original_belief_json, '$.subject')))"),
+        "summaries": ids(
+            "SELECT id FROM memory_summaries WHERE COALESCE(tenant_id, 'default') = ? AND status != 'forgotten' "
+            "AND (kazma_mentions(title) OR kazma_mentions(summary_text))"),
+        "changes": ids(
+            "SELECT id FROM memory_changes WHERE COALESCE(tenant_id, 'default') = ? "
+            "AND (kazma_mentions(old_value) OR kazma_mentions(new_value) "
+            "OR kazma_mentions_name(subject) OR kazma_mentions_id(predicate))"),
+        "groupings": ids(
+            "SELECT id FROM graph_associations WHERE COALESCE(tenant_id, 'default') = ? "
+            "AND (kazma_mentions_name(group_root) OR kazma_mentions_name(member) OR kazma_mentions(label))"),
+        "legacy_episodes": ids(
+            "SELECT id FROM episodes_archive WHERE COALESCE(tenant_id, 'default') = ? "
+            "AND (kazma_mentions(user_text) OR kazma_mentions(assistant_text) "
+            "OR kazma_mentions(summary_text))"),
+    }
+    named = ids(
+        "SELECT id FROM entities WHERE COALESCE(tenant_id, 'default') = ? "
+        "AND (kazma_mentions_name(id) OR kazma_mentions(name) OR kazma_mentions(aliases_json) "
+        "OR kazma_mentions_id(metadata_json))")
+    found["entities"] = [e for e in named if protection(conn, e, tenant_id=tenant) is None]
+    found["protected_entities"] = [e for e in named if e not in found["entities"]]
+    # The legacy entity archive has no tenant: the owner's, from before Spaces.
+    found["legacy_entities"] = [] if narrowed_to(tenant) is not None and not _owners_tenant(tenant) else [
+        str(r[0]) for r in _rows_or_none(
+            conn, "SELECT id FROM entities_archive WHERE kazma_mentions(name) OR kazma_mentions(aliases_json) "
+                  "OR kazma_mentions(metadata_json)")
+    ]
+    found["about_me"] = bool(ids(
+        "SELECT tenant_id FROM memory_profile WHERE tenant_id = ? AND kazma_mentions(about)")) or bool(ids(
+        "SELECT account FROM memory_member_profile WHERE tenant_id = ? AND kazma_mentions(about)"))
+    return found
+
+
+def _owners_tenant(tenant: str) -> bool:
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    return tenant == OWNER_SPACE_ID
+
+
+def _rows_or_none(conn: sqlite3.Connection, sql: str) -> list[Any]:
+    try:
+        return conn.execute(sql).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc) or "no such column" in str(exc):
+            return []
+        raise
+
+
+def _queued_mentions(needle: Any, *, tenant: str) -> list[str]:
+    """The tenant's queued turns (``post_turn_memory``) whose text holds *needle*."""
+    import os
+
+    from kazma_core.memory.mention_match import register
+    from kazma_core.paths import memory_ops_db
+
+    path = str(memory_ops_db())
+    if not os.path.exists(path):
+        return []
+    ops = sqlite3.connect(path, check_same_thread=False, timeout=30)
+    try:
+        register(ops, needle)
+        kinds = ",".join("?" for _ in _TURN_TEXT_TASKS)
+        return [str(r[0]) for r in ops.execute(
+            f"SELECT id FROM memory_task_queue WHERE task_type IN ({kinds}) AND json_valid(payload_json) "  # nosec B608 - placeholders only
+            "AND COALESCE(json_extract(payload_json, '$.tenant_id'), 'default') = ? "
+            "AND (kazma_mentions(json_extract(payload_json, '$.user_text')) "
+            "OR kazma_mentions(json_extract(payload_json, '$.assistant_text')))",
+            (*_TURN_TEXT_TASKS, tenant),
+        ).fetchall()]
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc):
+            return []
+        raise
+    finally:
+        ops.close()
+
+
+def _entity_sha(tenant: str, entity_id: str) -> str:
+    """An entity's id, hashed for the journal: an id is its name made a slug,
+    and the journal never holds the text it forgot."""
+    return hashlib.sha256(f"{tenant}\x1f{entity_id}".encode()).hexdigest()[:32]
+
+
+def _journal_detail(found: dict[str, Any], tenant: str) -> dict[str, Any]:
+    detail = {k: list(v) for k, v in found.items() if k != "entities"}
+    detail["entities"] = [_entity_sha(tenant, e) for e in found["entities"]]
+    return detail
+
+
+def _apply_mentions(conn: sqlite3.Connection, *, tenant: str, found: dict[str, Any]) -> dict[str, Any]:
+    """Forget, by id, what :func:`_mentions_found` found (its memories aside:
+    the caller forgets each). Every step is re-runnable: the journal's replay
+    runs it again on a restored copy."""
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    now = time.time()
+
+    def marks(ids: list[str]) -> str:
+        return ",".join("?" for _ in ids)
+
+    facts = list(found.get("facts") or [])
+    rows = conn.execute(
+        f"SELECT id, tenant_id, invalidated_at, valid_until, metadata_json FROM beliefs "  # nosec B608 - placeholders only
+        f"WHERE COALESCE(tenant_id, 'default') = ? AND id IN ({marks(facts)})", (tenant, *facts),
+    ).fetchall() if facts else []
+    changed = _forget_fact_rows(conn, rows, now=now)
+    archived = list(found.get("archived") or [])
+    if archived:
+        _scrub_archived_rows(conn, conn.execute(
+            f"SELECT id, original_belief_json FROM beliefs_archive WHERE COALESCE(tenant_id, 'default') = ? "  # nosec B608 - placeholders only
+            f"AND id IN ({marks(archived)})", (tenant, *archived)).fetchall(), now=now)
+    for sid in found.get("summaries") or []:
+        forget_summary(str(sid), tenant_id=tenant, conn=conn, by="user", journal=False)
+    changes_ids = list(found.get("changes") or [])
+    if changes_ids:
+        conn.execute(f"DELETE FROM memory_changes WHERE COALESCE(tenant_id, 'default') = ? "  # nosec B608 - placeholders only
+                     f"AND id IN ({marks(changes_ids)})", (tenant, *changes_ids))
+    groupings = list(found.get("groupings") or [])
+    if groupings:
+        conn.execute(f"DELETE FROM graph_associations WHERE COALESCE(tenant_id, 'default') = ? "  # nosec B608 - placeholders only
+                     f"AND id IN ({marks(groupings)})", (tenant, *groupings))
+    for eid in found.get("entities") or []:
+        _remove_entity(conn, tenant, str(eid))
+    _scrub_legacy_ids(conn, list(found.get("legacy_episodes") or []), list(found.get("legacy_entities") or []))
+    purge_search_index(conn)
+    conn.commit()
+    _remirror_facts(conn, changed)
+    remote = [_delete_remote_vector(conn, bid, tenant) for bid in facts]
+    _scrub_ops_ids(facts, list(found.get("queue") or []))
+    return {"facts": changed, "remote_deleted": all(remote)}
+
+
+def _remove_entity(conn: sqlite3.Connection, tenant: str, entity_id: str) -> None:
+    """An entity named by what is forgotten: its merges, groupings and row."""
+    for sql in (
+        "DELETE FROM entity_merges WHERE tenant_id = ? AND (source_entity_id = ? OR target_entity_id = ?)",
+        "DELETE FROM entity_merges_archive WHERE tenant_id = ? AND (source_entity_id = ? OR target_entity_id = ?)",
+        "DELETE FROM graph_associations WHERE tenant_id = ? AND (group_root = ? OR member = ?)",
+    ):
+        try:
+            conn.execute(sql, (tenant, entity_id, entity_id))
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+    conn.execute("DELETE FROM entities WHERE tenant_id = ? AND id = ?", (tenant, entity_id))
+
+
+def _scrub_legacy_ids(conn: sqlite3.Connection, episode_ids: list[str], entity_ids: list[str]) -> None:
+    """The legacy tables' rows that hold what is forgotten (by id)."""
+    episode_cols = _table_columns(conn, "episodes_archive")
+    blank = [c for c in ("user_text", "assistant_text", "summary_text") if c in episode_cols]
+    if episode_ids and blank:
+        sets = ", ".join([f"{c} = ''" for c in blank] + (["embedding = NULL"] if "embedding" in episode_cols else []))
+        conn.execute(f"UPDATE episodes_archive SET {sets} WHERE id IN ({','.join('?' for _ in episode_ids)})",  # nosec B608 - constants only
+                     episode_ids)
+    entity_cols = _table_columns(conn, "entities_archive")
+    clear = [f"{c} = " + ("'{}'" if c == "metadata_json" else "'[]'" if c == "aliases_json" else "''")
+             for c in ("name", "metadata_json", "aliases_json") if c in entity_cols]
+    if entity_ids and clear:
+        conn.execute(f"UPDATE entities_archive SET {', '.join(clear)} "  # nosec B608 - constants only
+                     f"WHERE id IN ({','.join('?' for _ in entity_ids)})", entity_ids)
+
+
+def _scrub_ops_ids(fact_ids: list[str], queue_ids: list[str]) -> None:
+    """The operations database: the audit log loses the facts' values, and
+    each queued turn holding what is forgotten loses its text."""
+    import os
+
+    from kazma_core.paths import memory_ops_db
+
+    path = str(memory_ops_db())
+    if not os.path.exists(path):
+        return
+    ops = sqlite3.connect(path, check_same_thread=False, timeout=30)
+    try:
+        _redact_audit(ops, fact_ids)
+        for qid in queue_ids:
+            row = ops.execute("SELECT payload_json FROM memory_task_queue WHERE id = ?", (qid,)).fetchone()
+            if row is None:
+                continue
+            try:
+                payload = json.loads(row[0] or "{}")
+            except (TypeError, ValueError):
+                continue
+            if isinstance(payload, dict) and (payload.get("user_text") or payload.get("assistant_text")):
+                payload.update(user_text="", assistant_text="", forgotten=True)
+                ops.execute("UPDATE memory_task_queue SET payload_json = ? WHERE id = ?", (json.dumps(payload), qid))
+        ops.commit()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+    finally:
+        ops.close()
+
+
+def replay_mentions(conn: sqlite3.Connection, entry: Any) -> None:
+    """Apply a journaled "forget everything that mentions" to *conn* (a
+    restored copy may hold any of it, or none). The entry names ids; an
+    entity is found by its hashed id. Raises when a step fails. A journal
+    entry always names its tenant (``forget_journal.append``)."""
+    tenant = entry.tenant_id
+    try:
+        detail = json.loads(entry.detail or "{}")
+    except (TypeError, ValueError):
+        detail = {}
+    if not isinstance(detail, dict):
+        detail = {}
+    found = {k: [str(x) for x in (v or [])] for k, v in detail.items() if isinstance(v, list)}
+    for eid in found.get("episodes") or []:
+        row = conn.execute("SELECT tier FROM episodes WHERE id = ? AND COALESCE(tenant_id, 'default') = ?",
+                           (eid, tenant)).fetchone()
+        if row is not None and row[0] != FORGOTTEN_TIER:
+            forget_episode(eid, tenant_id=tenant, conn=conn, journal=False, by="journal")
+    wanted = set(found.get("entities") or [])
+    found["entities"] = [
+        str(r[0]) for r in conn.execute(
+            "SELECT id FROM entities WHERE COALESCE(tenant_id, 'default') = ?", (tenant,)).fetchall()
+        if _entity_sha(tenant, str(r[0])) in wanted
+    ] if wanted else []
+    _apply_mentions(conn, tenant=tenant, found=found)
+
+
+def finish_old_tombstones(conn: sqlite3.Connection, *, limit: int = 500) -> int:
+    """Facts forgotten before 2026-11-21 kept their subject and predicate
+    (the memory framework audit's F5): empty them, archived copies too. A
+    maintenance step (``converge``); with none left, two SELECTs."""
+    rows = conn.execute(
+        "SELECT id FROM beliefs WHERE object = '' AND (subject != '' OR predicate != '') "
+        "AND json_valid(metadata_json) AND json_extract(metadata_json, '$.forgotten') IS NOT NULL LIMIT ?",
+        (int(limit),),
+    ).fetchall()
+    ids = [str(r[0]) for r in rows]
+    if ids:
+        marks = ",".join("?" for _ in ids)
+        conn.execute(f"UPDATE beliefs SET subject = '', predicate = '' WHERE id IN ({marks})", ids)  # nosec B608 - placeholders only
+    archived = _rows_or_none(
+        conn,
+        "SELECT id, original_belief_json FROM beliefs_archive WHERE json_valid(original_belief_json) "
+        "AND json_extract(original_belief_json, '$.object') = '' "
+        "AND (json_extract(original_belief_json, '$.subject') != '' "
+        "OR json_extract(original_belief_json, '$.predicate') != '') "
+        "AND instr(COALESCE(json_extract(original_belief_json, '$.metadata_json'), ''), '\"forgotten\"') > 0 "
+        f"LIMIT {int(limit)}",
+    )
+    scrubbed = _scrub_archived_rows(conn, archived, now=time.time()) if archived else []
+    if not ids and not scrubbed:
+        return 0
+    purge_search_index(conn)
+    conn.commit()
+    _remirror_facts(conn, ids)
+    logger.info("[forget] %d older forgotten fact(s) lost their subject and predicate", len(ids) + len(scrubbed))
+    return len(ids) + len(scrubbed)
 
 
 def forget_entry(entry_id: str, *, tenant_id: str, conn: sqlite3.Connection | None = None,
@@ -1355,17 +1704,20 @@ def _episodes_holding(conn: sqlite3.Connection, value: str, *, tenant_id: str) -
 
 def forget_chat(
     key: str, *, tenant_id: str, conn: sqlite3.Connection | None = None, journal: bool = True,
+    keys: list[str] | None = None,
 ) -> dict[str, Any]:
     """Forget every memory the chat *key* left, under either of its keys.
-    Journaled as one entry (``forget_journal``)."""
-    keys = chat_keys(key)
+    Journaled as one entry (``forget_journal``), with the chat's keys: *keys*
+    is what a replay recorded (a chat deleted since names only *key*)."""
+    keys = list(dict.fromkeys([*(keys or []), *chat_keys(key)]))
     if not keys:
         return {"ok": False, "error": "chat required"}
     seq = None
     if journal:
         from kazma_core.memory import forget_journal
 
-        seq = forget_journal.append("chat", tenant_id=tenant_id or "default", session_key=key)
+        seq = forget_journal.append("chat", tenant_id=tenant_id or "default", session_key=key,
+                                    detail=forget_journal.keys_detail(keys))
     own = conn is None
     conn = conn or _open()
     try:
@@ -1631,7 +1983,7 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
     ).fetchall():
         targets.setdefault(str(eid), str(tenant or "default"))
     for entry in forget_journal.recent_chat_forgets():
-        keys = chat_keys(entry.session_key) or [entry.session_key]
+        keys = forget_journal.entry_keys(entry)
         marks = ",".join("?" for _ in keys)
         for (eid,) in conn.execute(
             f"SELECT id FROM episodes WHERE tenant_id = ? AND session_id IN ({marks}) AND tier != ? "
@@ -1681,8 +2033,9 @@ def converge(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
     try:
         journal = forget_journal.apply_pending(conn)
         ledger = enforce_ledger(conn)
+        tombstones = finish_old_tombstones(conn)
         remote = forget_journal.retry_remote_deletes(conn)
-        return {"journal": journal, "ledger": ledger, "remote": remote}
+        return {"journal": journal, "ledger": ledger, "tombstones": tombstones, "remote": remote}
     finally:
         if own:
             conn.close()

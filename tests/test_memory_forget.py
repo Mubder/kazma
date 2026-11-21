@@ -145,17 +145,19 @@ def test_the_facts_a_forgotten_turn_produced_lose_their_value(mem):
 
     _chat(mem)
     eid = _live_turn()
-    mutate_belief(mem.db, "user", "works_at", "acme", predicate_type="functional",
-                  source_session="th1", source_turn=1, extraction_method="user_explicit")
-    mutate_belief(mem.db, "user", "favourite_colour", "teal", predicate_type="functional",
-                  source_session="th1", source_turn=2, extraction_method="user_explicit")
+    work = mutate_belief(mem.db, "user", "works_at", "acme", predicate_type="functional",
+                         source_session="th1", source_turn=1, extraction_method="user_explicit")["belief_id"]
+    colour = mutate_belief(mem.db, "user", "favourite_colour", "teal", predicate_type="functional",
+                           source_session="th1", source_turn=2, extraction_method="user_explicit")["belief_id"]
 
     assert forget.forget_episode(eid, tenant_id="default")["facts_forgotten"] == 1
     facts = {r[0]: r for r in mem.db.execute(
-        "SELECT predicate, object, invalidated_at, metadata_json FROM beliefs")}
-    assert facts["works_at"][1] == "" and facts["works_at"][2] is not None
-    assert "forgotten" in json.loads(facts["works_at"][3])
-    assert facts["favourite_colour"][1] == "teal" and facts["favourite_colour"][2] is None
+        "SELECT id, subject, predicate, object, invalidated_at, metadata_json FROM beliefs")}
+    # Nothing readable is kept: subject and predicate go with the value
+    # (the memory framework audit's F5, 2026-11-21).
+    assert facts[work][1:4] == ("", "", "") and facts[work][4] is not None
+    assert "forgotten" in json.loads(facts[work][5])
+    assert facts[colour][1:4] == ("user", "favourite_colour", "teal") and facts[colour][4] is None
 
 
 def test_forgetting_again_finishes_a_forget_cut_short(mem):
@@ -166,12 +168,13 @@ def test_forgetting_again_finishes_a_forget_cut_short(mem):
     _chat(mem)
     eid = _live_turn()
     forget.forget_episode(eid, tenant_id="default")
-    mutate_belief(mem.db, "user", "employer_city", "lisbon", predicate_type="functional",
-                  source_session="th1", source_turn=1, extraction_method="llm_inferred")
+    late = mutate_belief(mem.db, "user", "employer_city", "lisbon", predicate_type="functional",
+                         source_session="th1", source_turn=1, extraction_method="llm_inferred")["belief_id"]
 
     again = forget.forget_episode(eid, tenant_id="default")
     assert again["already"] and again["facts_forgotten"] == 1
-    assert mem.db.execute("SELECT object FROM beliefs WHERE predicate = 'employer_city'").fetchone()[0] == ""
+    row = mem.db.execute("SELECT subject, predicate, object FROM beliefs WHERE id = ?", (late,)).fetchone()
+    assert tuple(row) == ("", "", "")
 
 
 # ── The paths that rebuild memory ─────────────────────────────────────────

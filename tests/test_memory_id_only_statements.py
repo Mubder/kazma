@@ -79,7 +79,12 @@ DECLARED: dict[tuple[str, str], tuple[int, str]] = {
         (1, "after the commit: whether the memory this writer wrote was forgotten meanwhile"),
     (f"{_MEMORY}entity_repair.py", "repair_collapsed"): (1, _OPERATOR),
     (f"{_MEMORY}forget.py", "_after_facts"): (1, _FORGET_OWN),
-    (f"{_MEMORY}forget.py", "_forget_archived_facts"): (1, _FORGET_OWN),
+    (f"{_MEMORY}forget.py", "_scrub_archived_rows"):
+        (1, "rewrites the archived rows its caller chose by tenant (a forgotten turn's, a "
+            "forget-by-text's) or found forgotten (an older tombstone, Kazma's own sweep)"),
+    (f"{_MEMORY}forget.py", "finish_old_tombstones"):
+        (1, "Kazma's own sweep: the facts already forgotten, chosen by being tombstones in any "
+            "tenant; it only empties what they still name (part D)"),
     (f"{_MEMORY}forget.py", "_forget_fact_rows"): (2, _FORGET_OWN),
     (f"{_MEMORY}forget.py", "_forget_turn"): (1, _FORGET_OWN),
     (f"{_MEMORY}forget.py", "_memory_texts"): (1, _FORGET_OWN),

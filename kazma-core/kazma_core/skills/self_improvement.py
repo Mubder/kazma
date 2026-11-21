@@ -831,19 +831,22 @@ def forget_text(text: str, tenant_id: str | None = None) -> int:
     forget_mentions``): a lesson quoted the user's message and its own
     example ("as done here with BLUE-HERON-42"), and the codeword reached
     every later prompt after every memory of it was forgotten (live
-    2026-10-19).
+    2026-10-19). Case and Arabic spelling are folded on both sides, as every
+    forget by text does (``memory.mention_match``).
     """
-    needle = (text or "").strip().casefold()
-    if not needle:
+    from kazma_core.memory.mention_match import Needle
+
+    needle = Needle.of(text)
+    if not needle.folded:
         return 0
 
     def strip(data: dict[str, Any]) -> int:
         here = 0
         for entry in (data.get("agents") or {}).values():
             base, lessons = _lessons(str(entry.get("soul") or ""))
-            kept = [b for b in lessons if needle not in b.casefold()]
+            kept = [b for b in lessons if not needle.in_text(b)]
             hist = list(entry.get("history") or [])
-            kept_hist = [h for h in hist if needle not in str(h.get("delta") or "").casefold()]
+            kept_hist = [h for h in hist if not needle.in_text(str(h.get("delta") or ""))]
             if len(kept) == len(lessons) and len(kept_hist) == len(hist):
                 continue
             here += (len(lessons) - len(kept)) + (len(hist) - len(kept_hist))

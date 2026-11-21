@@ -30,6 +30,10 @@ DECLARED = {
         "a member's own entry in a shared space after every fact filed under it was "
         "forgotten (Spaces S1-11, N36): the forget is the member's decision, journaled "
         "first, and the entry holds nothing any more",
+    ("kazma-core/kazma_core/memory/forget.py", "_remove_entity"):
+        "an entity the user's \"forget everything that mentions ...\" names (part D): the "
+        "user's decision, journaled first (its id hashed); its facts were forgotten with it, "
+        "and Kazma's own names for the person are never removed",
     ("kazma-core/kazma_core/memory/macro_sleep.py", "run_macro_sleep"):
         "superseded beliefs past the archive age: copied into beliefs_archive first",
     ("kazma-ui/kazma_ui/memory_api.py", "_archive_invalidated_sync"):
