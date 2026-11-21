@@ -18,6 +18,7 @@ committed: the repository holds this script, the sample's question ids
 scores only (``tests/fixtures/longmemeval/*.json``).
 
     python scripts/longmemeval_bench.py sample --data DIR    # the sample's ids
+    python scripts/longmemeval_bench.py split --data DIR     # dev 200 / report 300
     python scripts/longmemeval_bench.py retrieve --data DIR  # recall on each history: is the evidence shown?
     DEEPSEEK_API_KEY=... python scripts/longmemeval_bench.py answer --data DIR
         # end to end: one reader answers from Kazma's recall, from the whole
@@ -65,6 +66,13 @@ SAMPLE = FIXTURES / "sample.json"
 RETRIEVAL = FIXTURES / "retrieval.json"
 ANSWERS = FIXTURES / "answers.json"
 PARALLEL = FIXTURES / "parallel.json"
+#: The dev and report splits (the memory plan's W0, 2026-11-22): dev is the
+#: sample and 100 more questions, used to choose; report is the other 300,
+#: never used to choose anything, every look at it logged in LOOKS.
+SPLIT = FIXTURES / "split.json"
+LOOKS = FIXTURES / "report_looks.json"
+DEV_SIZE = 200
+SPLITS = ("sample", "dev", "report")
 #: The parallel set: the first answerable questions of the sample (no
 #: preference questions: their answer is a style, not a memory).
 PARALLEL_SIZE = 40
@@ -135,6 +143,56 @@ def draw_sample(items: list[dict[str, Any]], size: int = SAMPLE_SIZE) -> list[st
     for k, ids in sorted(groups.items()):
         out += sorted(ids, key=rank)[: taken[k]]
     return sorted(out, key=rank)
+
+
+def draw_split(items: list[dict[str, Any]], sample: list[str], size: int = DEV_SIZE) -> dict[str, list[str]]:
+    """Dev: the sample and ``size - len(sample)`` more answerable questions,
+    drawn as the sample was (each type in proportion, ordered by the seed's
+    hash); report: every other question. The abstention questions the sample
+    did not take stay in report, so its "no answer" measure has its n (24)."""
+    taken = set(sample)
+    rest = [i for i in items if str(i["question_id"]) not in taken and not is_abstention(i)]
+    dev = list(sample) + draw_sample(rest, size - len(sample))
+    chosen = set(dev)
+    report = [str(i["question_id"]) for i in items if str(i["question_id"]) not in chosen]
+    return {"dev": dev,
+            "report": sorted(report, key=lambda q: hashlib.sha256(f"{SAMPLE_SEED}:{q}".encode()).hexdigest())}
+
+
+def question_ids(split: str) -> list[str]:
+    """The question ids of *split* (``sample``, ``dev`` or ``report``)."""
+    if split == "sample":
+        return list(json.loads(SAMPLE.read_text(encoding="utf-8"))["ids"])
+    if split not in SPLITS:
+        raise SystemExit(f"unknown split {split!r}: one of {', '.join(SPLITS)}")
+    return list(json.loads(SPLIT.read_text(encoding="utf-8"))[split])
+
+
+def result_path(base: Path, split: str) -> Path:
+    """Where a run on *split* writes: the sample's file as before, else
+    ``<name>_<split>.json`` beside it."""
+    return base if split == "sample" else base.with_name(f"{base.stem}_{split}{base.suffix}")
+
+
+def log_look(split: str, reason: str | None, command: str) -> None:
+    """A run on the report split is logged before it runs (date, reason,
+    commit, command): the report split chooses nothing, and every look at it
+    is on record. Refused without a reason."""
+    if split != "report":
+        return
+    if not (reason or "").strip():
+        raise SystemExit("the report split is looked at only with --look \"why\" (it is logged)")
+    import subprocess
+
+    try:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL, timeout=30, check=False).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        commit = ""
+    held = json.loads(LOOKS.read_text(encoding="utf-8")) if LOOKS.is_file() else {"looks": []}
+    held["looks"].append({"date": datetime.now(UTC).date().isoformat(), "reason": reason.strip(),
+                          "commit": commit, "command": command})
+    LOOKS.write_text(json.dumps(held, indent=1) + "\n", encoding="utf-8", newline="\n")
 
 
 # ── A history as Kazma's memories ───────────────────────────────────────────
@@ -484,7 +542,9 @@ class Chat:
         return "", {"error": 0}
 
 
-def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, workers: int) -> int:
+def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, workers: int,
+                split: str = "sample", look: str | None = None) -> int:
+    log_look(split, look, f"answer --model {model}")
     _private_data_folder()
     _limit_cpu_threads()
     key = os.environ.get("DEEPSEEK_API_KEY", "")
@@ -496,9 +556,8 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
 
     from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
 
-    sample = json.loads(SAMPLE.read_text(encoding="utf-8"))
     by_id = {str(x["question_id"]): x for x in load(data)}
-    items = [by_id[q] for q in sample["ids"][: limit or None]]
+    items = [by_id[q] for q in question_ids(split)[: limit or None]]
     cache_path = data / "cache" / f"answers-{model}.json"
     cache: dict[str, Any] = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else {}
     embedder = CachedEmbedder(get_embedder(), data / "cache" / "kazma_vectors.npz", get_embedding_model_name())
@@ -553,8 +612,8 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
                     usage["calls"] += 1
                     for k in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens"):
                         usage[k] += int(u.get(k, 0))
-    ANSWERS.write_text(json.dumps({
-        "source": SOURCE, "sample": len(items), "reader": model, "judge": model, "provider": base_url.split("//")[-1],
+    result_path(ANSWERS, split).write_text(json.dumps({
+        "source": SOURCE, "split": split, "sample": len(items), "reader": model, "judge": model, "provider": base_url.split("//")[-1],
         "made_on": datetime.now(UTC).date().isoformat(), "limit": LIMIT, "full_max_chars": FULL_MAX_CHARS,
         "what": "One reader answers each question from Kazma's recall block, from the same recalled rounds read "
                 "whole, from the whole history (oldest sessions cut to fit) and from the answer sessions alone; "
@@ -810,6 +869,28 @@ def _cmd_sample(data: Path) -> int:
     return 0
 
 
+def _cmd_split(data: Path) -> int:
+    items = load(data)
+    halves = draw_split(items, question_ids("sample"))
+    by_id = {str(x["question_id"]): x for x in items}
+
+    def counts(ids: list[str]) -> dict[str, Any]:
+        types: dict[str, int] = {}
+        for qid in ids:
+            types[by_id[qid]["question_type"]] = types.get(by_id[qid]["question_type"], 0) + 1
+        return {"size": len(ids), "types": dict(sorted(types.items())),
+                "abstention": sum(1 for q in ids if is_abstention(by_id[q]))}
+
+    SPLIT.write_text(json.dumps({
+        "source": SOURCE, "seed": SAMPLE_SEED,
+        "what": "dev: the sample and 100 more answerable questions, drawn as the sample was; used to choose. "
+                "report: the other 300, never used to choose anything; every look is logged in report_looks.json.",
+        "dev_counts": counts(halves["dev"]), "report_counts": counts(halves["report"]), **halves,
+    }, indent=1) + "\n", encoding="utf-8", newline="\n")
+    print(f"{SPLIT}: dev {counts(halves['dev'])}; report {counts(halves['report'])}")
+    return 0
+
+
 def _limit_cpu_threads() -> None:
     """Leave most of the CPU to the live install on the same machine
     (``scripts/memory_bench.py``'s rule: at most four threads)."""
@@ -820,14 +901,14 @@ def _limit_cpu_threads() -> None:
     torch.set_num_threads(max(1, min(4, (os.cpu_count() or 2) // 4)))
 
 
-def _cmd_retrieve(data: Path, limit: int | None) -> int:
+def _cmd_retrieve(data: Path, limit: int | None, split: str = "sample", look: str | None = None) -> int:
+    log_look(split, look, "retrieve")
     _private_data_folder()
     _limit_cpu_threads()
     from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
 
-    sample = json.loads(SAMPLE.read_text(encoding="utf-8"))
     by_id = {str(x["question_id"]): x for x in load(data)}
-    items = [by_id[q] for q in sample["ids"][: limit or None]]
+    items = [by_id[q] for q in question_ids(split)[: limit or None]]
     real = get_embedder()
     if real is None:
         print("no embedder is configured: install the rag extra (bge-m3)", file=sys.stderr)
@@ -848,8 +929,8 @@ def _cmd_retrieve(data: Path, limit: int | None) -> int:
             if n % 10 == 0:
                 print(f"  asked {n} of {len(items)}", flush=True)
     summary = summarise(results)
-    RETRIEVAL.write_text(json.dumps({
-        "source": SOURCE, "sample": len(items), "embedding_model": model, "limit": LIMIT,
+    result_path(RETRIEVAL, split).write_text(json.dumps({
+        "source": SOURCE, "split": split, "sample": len(items), "embedding_model": model, "limit": LIMIT,
         "made_on": datetime.now(UTC).date().isoformat(),
         "what": "Each question's own history in a private store, one memory per round, dated; recall() as a "
                 "chat turn calls it. No facts extracted, no summaries. Scores only.",
@@ -864,11 +945,13 @@ def _cmd_retrieve(data: Path, limit: int | None) -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("sample", "retrieve", "answer", "translate", "parallel"):
+    for name in ("sample", "split", "retrieve", "answer", "translate", "parallel"):
         s = sub.add_parser(name)
         s.add_argument("--data", required=True, type=Path, help="the folder LongMemEval was downloaded into")
         if name in ("retrieve", "answer"):
-            s.add_argument("--limit", type=int, default=None, help="ask only the first N of the sample")
+            s.add_argument("--limit", type=int, default=None, help="ask only the first N of the split")
+            s.add_argument("--split", choices=SPLITS, default="sample")
+            s.add_argument("--look", default=None, help="why the report split is looked at (logged)")
         if name in ("answer", "translate"):
             s.add_argument("--model", default="deepseek-flash")
             s.add_argument("--base-url", default="https://api.deepseek.com")
@@ -877,13 +960,15 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if args.cmd == "sample":
         return _cmd_sample(args.data)
+    if args.cmd == "split":
+        return _cmd_split(args.data)
     if args.cmd == "answer":
-        return _cmd_answer(args.data, args.limit, args.model, args.base_url, args.workers)
+        return _cmd_answer(args.data, args.limit, args.model, args.base_url, args.workers, args.split, args.look)
     if args.cmd == "translate":
         return _cmd_translate(args.data, args.model, args.base_url, args.workers)
     if args.cmd == "parallel":
         return _cmd_parallel(args.data)
-    return _cmd_retrieve(args.data, args.limit)
+    return _cmd_retrieve(args.data, args.limit, args.split, args.look)
 
 
 if __name__ == "__main__":

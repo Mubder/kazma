@@ -2294,7 +2294,11 @@ four injected were noise.
 - **LongMemEval, measured against the world** (2026-11-21, the memory
   framework audit's part E, decision 7). `scripts/longmemeval_bench.py`:
   `sample` (100 of the 500 questions, stratified, ids in
-  `tests/fixtures/longmemeval/sample.json`, seeded by hash), `retrieve`
+  `tests/fixtures/longmemeval/sample.json`, seeded by hash), `split` (the
+  memory plan's W0: dev 200, the sample and 100 more answerable questions,
+  used to choose; report 300, never used to choose, a run on it needs
+  `--look "why"` and is logged in `tests/fixtures/longmemeval/report_looks.json`;
+  `tests/fixtures/longmemeval/split.json`), `retrieve`
   (each history written as the product writes a turn, one memory per round,
   dated; the real `recall()`; no model call), `answer` (one reader, four
   histories: Kazma's recall block, the same rounds read whole, the whole

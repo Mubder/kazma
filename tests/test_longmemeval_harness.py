@@ -71,6 +71,45 @@ def test_the_sample_is_stratified_and_the_same_everywhere(lme):
     assert sum(q.endswith("_abs") for q in ids) == 2
 
 
+def test_the_committed_split_holds_the_sample_and_keeps_report_apart(lme):
+    """Dev is the sample and 100 more; report is the other 300, disjoint,
+    with the abstention questions the sample did not take (the memory plan's
+    W0: report is never used to choose anything)."""
+    split = json.loads((REPO / "tests" / "fixtures" / "longmemeval" / "split.json").read_text(encoding="utf-8"))
+    sample = lme.question_ids("sample")
+    dev, report = split["dev"], split["report"]
+    assert len(dev) == len(set(dev)) == 200 and len(report) == len(set(report)) == 300
+    assert dev[: len(sample)] == sample and not set(dev) & set(report)
+    assert split["dev_counts"]["abstention"] == 6 and split["report_counts"]["abstention"] == 24
+
+
+def test_the_split_draws_dev_from_answerable_questions_only(lme):
+    items = [{"question_id": f"{t[:2]}{i}{'_abs' if i % 10 == 0 else ''}", "question_type": t}
+             for t, n in (("multi-session", 60), ("temporal-reasoning", 30), ("knowledge-update", 10))
+             for i in range(n)]
+    sample = lme.draw_sample(items, size=20)
+    halves = lme.draw_split(items, sample, size=40)
+    assert halves == lme.draw_split(list(reversed(items)), sample, size=40)
+    assert len(halves["dev"]) == 40 and len(halves["report"]) == 60
+    added = halves["dev"][20:]
+    assert not any(q.endswith("_abs") for q in added)
+    assert sum(q.endswith("_abs") for q in halves["report"]) == 10 - sum(q.endswith("_abs") for q in sample)
+
+
+def test_a_report_run_is_refused_without_a_reason_and_logged_with_one(lme, monkeypatch, tmp_path):
+    looks = tmp_path / "report_looks.json"
+    monkeypatch.setattr(lme, "LOOKS", looks)
+    with pytest.raises(SystemExit):
+        lme.log_look("report", "  ", "retrieve")
+    assert not looks.exists()
+    lme.log_look("dev", None, "retrieve")  # dev is not logged
+    assert not looks.exists()
+    lme.log_look("report", "W9: the published number", "answer --model deepseek-flash")
+    logged = json.loads(looks.read_text(encoding="utf-8"))["looks"]
+    assert [(e["reason"], e["command"]) for e in logged] == [("W9: the published number",
+                                                              "answer --model deepseek-flash")]
+
+
 def test_a_question_finds_its_evidence_among_unrelated_rounds(lme, monkeypatch, tmp_path):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)

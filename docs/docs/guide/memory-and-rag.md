@@ -1059,6 +1059,11 @@ questions of a user's own chat history: about 48 conversations, the one or
 few holding the answer among unrelated ones. Kazma is measured on a fixed,
 stratified sample of 100 of its 500 questions
 (`tests/fixtures/longmemeval/sample.json`; `scripts/longmemeval_bench.py`).
+From 22 Nov the questions are split in two
+(`tests/fixtures/longmemeval/split.json`): 200 to choose settings on (the
+sample and 100 more), and 300 to report on, never used to choose anything;
+every look at those 300 is logged with its reason
+(`tests/fixtures/longmemeval/report_looks.json`).
 Each history is written into a private memory the product's way, one memory
 per round (the user's message and the reply), dated, and the question is
 asked through the real `recall()`. No facts are extracted (a model call per
