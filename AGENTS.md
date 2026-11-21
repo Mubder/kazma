@@ -5580,9 +5580,18 @@ engine's disk in `%LOCALAPPDATA%\Kazma\engine`, while the install folder
   the service change, WSL's registration and the task; real folders. Each
   refusal; the choice not read, a run that knows no folder, no comparison,
   no journal, no hash check, a fresh import over a kept disk and no move
-  journaled at the guard as negative controls). Not drilled on a VM yet:
-  `wsl --manage --move` across drives and the EDB installer's `--datadir`
-  on another drive are the parts a fake cannot prove.
+  journaled at the guard as negative controls), `tests/test_data_folder_drill.py`
+  (the drill's judging).
+- **Drilled** (`scripts/data_folder_drill.py`, 2026-11-21, `passed`;
+  `docs/audits/evidence/data_folder_drill/`): on the drill VM with a second
+  disk, Kazma installed with PostgreSQL on C:, `kazma setup data-folder
+  E:\Kazma` moved it in 30 s with Kazma held (the service ran from the copy,
+  a mark written before read back, a forced WAL switch archived into the
+  new archive), then PostgreSQL's own uninstaller removed it and `kazma setup
+  install` attached the kept database to the new service (the mark, a new
+  segment archived there). Not drilled: the engine's move (`wsl --manage
+  --move` across drives) and the installer's `--datadir` on a fresh machine
+  with the folder chosen first.
 
 ### 21b. Every system dependency is installed by Kazma (`kazma_core/system_deps.py`)
 

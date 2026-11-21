@@ -70,3 +70,28 @@ def test_a_reinstall_that_started_empty_is_moved_only(over, failed):
 def test_a_folder_that_only_shares_a_prefix_is_not_the_folder():
     assert not drill._under("E:\\Kazma2\\postgres-18\\data", FOLDER)
     assert drill._under(DATA, FOLDER)
+
+
+def _fresh(**over) -> dict:
+    ev = {"install": {"exit": 0},
+          "after_install": {"data_dir": DATA, "pid_in_folder": True, "archived": 1},
+          "after_switch": {"data_dir": DATA, "pid_in_folder": True, "archived": 2},
+          "mark": "abc"}
+    ev.update(over)
+    return ev
+
+
+def test_a_first_install_into_the_folder_passes():
+    assert drill.judge_fresh(FOLDER, "abc", _fresh()).verdict == "passed"
+
+
+@pytest.mark.parametrize("over, failed", [
+    ({"install": {"exit": 1}}, "install_exit_0"),
+    ({"after_install": {"data_dir": "C:\\Program Files\\PostgreSQL\\18\\data", "pid_in_folder": False,
+                        "archived": 1}}, "service_runs_from_the_folder"),
+    ({"mark": None}, "the_data_is_kept"),
+    ({"after_switch": {"archived": 1}}, "a_new_segment_is_archived_there"),
+])
+def test_a_first_install_under_program_files_fails(over, failed):
+    verdict = drill.judge_fresh(FOLDER, "abc", _fresh(**over))
+    assert verdict.verdict == "failed" and failed in verdict.notes

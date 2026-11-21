@@ -20,9 +20,10 @@ Run from the host PC against the Hyper-V VM (``KazmaVMs``, by SSH as
 4. ``kazma setup data-folder <X>:\\Kazma -y``; read the service's ``-D``, the
    mark, ``postmaster.pid`` in the new folder, and a WAL segment archived into
    the new archive after ``pg_switch_wal()``;
-5. hold Kazma, remove PostgreSQL (``winget uninstall``: the service and the
-   programs go, the data on the second drive stays), run ``kazma setup
-   install`` again; read the service's ``-D`` and the mark once more;
+5. hold Kazma, remove PostgreSQL with its own uninstaller, unattended (the
+   service and the programs go, the data on the second drive stays), run
+   ``kazma setup install`` again; read the service's ``-D``, the mark and a
+   new archived segment once more;
 6. detach and delete the second disk, whatever happened.
 
 Kazma's container engine is not drilled here: it needs WSL and a restart on
@@ -58,7 +59,9 @@ import restart_drill as restart  # noqa: E402  (the Custom install with PostgreS
 
 #: Where this PC keeps the drill's second disk while it runs.
 DISK_DIR = Path(r"G:\Tools\kazma-drill-disks")
-DISK_BYTES = 20 * 2**30
+#: Dynamic: it takes on this PC only what the VM writes. Above the room a
+#: first install asks for in the folder (data_folder.FRESH_FREE_BYTES).
+DISK_BYTES = 40 * 2**30
 MOVE_TIMEOUT_S = 1800.0
 
 #: Read from the install folder, so the install's .env is the one loaded.
@@ -234,8 +237,25 @@ def judge(folder: str, seeded: str, ev: dict[str, Any]) -> Verdict:
     return Verdict(verdict, checks, notes)
 
 
+def judge_fresh(folder: str, seeded: str, ev: dict[str, Any]) -> Verdict:
+    """``passed`` when a first install with the folder chosen beforehand put
+    the database there (the installer's ``--datadir``), it runs from it,
+    keeps what Kazma writes and archives into the folder's archive."""
+    after = ev.get("after_install") or {}
+    checks = {
+        "install_exit_0": (ev.get("install") or {}).get("exit") == 0,
+        "service_runs_from_the_folder": _under(str(after.get("data_dir") or ""), folder),
+        "it_runs_there": bool(after.get("pid_in_folder")),
+        "the_data_is_kept": ev.get("mark") == seeded,
+        "a_new_segment_is_archived_there": _archived(after, ev.get("after_switch") or {}),
+    }
+    notes = [name for name, ok in checks.items() if not ok]
+    return Verdict("passed" if not notes else "failed", checks, notes)
+
+
 def render_report(*, verdict: Verdict, meta: dict[str, Any], evidence_name: str) -> str:
-    lines = [f"# Data-folder drill: {verdict.verdict}", "",
+    kind = f" ({meta['kind']})" if meta.get("kind") else ""
+    lines = [f"# Data-folder drill{kind}: {verdict.verdict}", "",
              f"Commit {meta.get('commit', '')[:10]}, finished {meta.get('finished')}. Evidence: `{evidence_name}`.",
              "", "| Check | |", "|---|---|"]
     lines += [f"| {name.replace('_', ' ')} | {'yes' if ok else '**no**'} |" for name, ok in verdict.checks.items()]
@@ -268,7 +288,7 @@ def run(args: argparse.Namespace) -> int:
             evidence["after_move_switch"] = state(vm, work, folder)
             evidence["mark_after_move"] = mark(vm)
             evidence["pause"] = guard(vm, "--pause", "--stop")
-            boot._say("Removing PostgreSQL as a reset of Windows does (winget uninstall); its data stays on "
+            boot._say("Removing PostgreSQL as a reset of Windows does (its uninstaller); its data stays on "
                       f"{letter}:")
             # The EDB uninstaller itself, unattended: it removes the service
             # and the programs and leaves a data folder it did not make.
@@ -289,11 +309,47 @@ def run(args: argparse.Namespace) -> int:
         finally:
             if disk is not None:
                 detach_disk(vm, disk)
-    verdict = judge(evidence["folder"], seeded, evidence)
-    meta = {"commit": evidence["commit"], "finished": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")}
+    return _report(args, stamp, "move", judge(evidence["folder"], seeded, evidence), evidence)
+
+
+def fresh(args: argparse.Namespace) -> int:
+    """A first install with the folder chosen beforehand: ``kazma setup
+    install --data-folder <X>:\\Kazma`` on a clean VM."""
+    vm = boot.Vm()
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%MZ")
+    evidence: dict[str, Any] = {}
+    disk: Path | None = None
+    with tempfile.TemporaryDirectory(prefix="kazma-data-folder-drill-") as tmp:
+        work = Path(tmp)
+        try:
+            commit = boot.prepare(vm, args.ref, work)
+            disk, letter = attach_disk(vm, stamp)
+            folder = f"{letter}:\\Kazma"
+            evidence.update(commit=commit, folder=folder)
+            evidence["install"] = run_detached(
+                vm, work, "data-folder-fresh-install",
+                ".venv\\Scripts\\python.exe -m kazma_cli setup install --mode custom --with postgres "
+                + " ".join(f"--without {p}" for p in restart.WITHOUT)
+                + f" --data-folder {folder} -y --no-browser", restart.INSTALL_TIMEOUT_S)
+            restart.wait_ready(vm)
+            seeded = secrets.token_hex(8)
+            evidence["seeded"] = mark(vm, seeded)
+            evidence["after_install"] = state(vm, work, folder)
+            switch_wal(vm)
+            evidence["after_switch"] = state(vm, work, folder)
+            evidence["mark"] = mark(vm)
+        finally:
+            if disk is not None:
+                detach_disk(vm, disk)
+    return _report(args, stamp, "fresh", judge_fresh(evidence["folder"], seeded, evidence), evidence)
+
+
+def _report(args: argparse.Namespace, stamp: str, kind: str, verdict: Verdict, evidence: dict[str, Any]) -> int:
+    meta = {"kind": kind, "commit": evidence["commit"],
+            "finished": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")}
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    name = f"data_folder_drill_{stamp}.json"
+    name = f"data_folder_drill_{kind}_{stamp}.json"
     (out / name).write_text(json.dumps({"meta": meta, "evidence": evidence, "verdict": verdict.__dict__},
                                        indent=1), encoding="utf-8", newline="\n")
     report = out / name.replace(".json", ".md")
@@ -308,7 +364,11 @@ def main(argv: list[str] | None = None) -> int:
     go = sub.add_parser("run", help="revert, install, move, remove PostgreSQL, reinstall, judge")
     go.add_argument("--ref", default="HEAD")
     go.add_argument("--out", default=str(ROOT / "docs" / "audits" / "evidence" / "data_folder_drill"))
-    return run(parser.parse_args(argv))
+    first = sub.add_parser("fresh", help="revert, a first install with --data-folder, judge")
+    first.add_argument("--ref", default="HEAD")
+    first.add_argument("--out", default=str(ROOT / "docs" / "audits" / "evidence" / "data_folder_drill"))
+    args = parser.parse_args(argv)
+    return fresh(args) if args.command == "fresh" else run(args)
 
 
 if __name__ == "__main__":
