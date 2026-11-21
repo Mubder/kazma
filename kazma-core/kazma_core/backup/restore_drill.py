@@ -349,6 +349,20 @@ def _check_vault_opens(backup: Path, res: DrillResult) -> None:
             else f"the backup's key opens NOTHING -- {rows} stored secret(s) "
                  "are unrecoverable from this backup",
         )
+        # A space's secrets are sealed with its own key, kept in the same
+        # file (Spaces S1-26). The sample above can hit the install's rows
+        # only, so every row that names a space key is judged here: one
+        # whose key is gone or does not unwrap is lost with this backup.
+        keys = vault.key_report()
+        sealed = sum(keys["sealed"].values())
+        if sealed or keys["broken"]:
+            res.add(
+                "vault:space_keys", keys["broken"] == 0,
+                f"{sealed} secret(s) sealed with a space's key open "
+                f"({len(keys['keys'])} space key(s))" if keys["broken"] == 0
+                else f"{keys['broken']} secret(s) name a space key this backup "
+                     "does not hold or cannot unwrap: unrecoverable from this backup",
+            )
     except Exception as exc:  # noqa: BLE001
         res.add("vault:decrypt", False, f"vault will not open: {exc}")
     finally:

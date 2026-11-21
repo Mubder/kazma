@@ -30,6 +30,10 @@ membership on every request and socket, the operator included; every store
 keeps a space's rows apart, and one space is tested against another for
 every route and tool. It is **not a boundary against the operator**, who
 can read the disk, the databases and the backups, where every space is.
+A space's secrets (its mail, calendar, X and GitHub sign-ins) are sealed
+with a key of its own, so one space's secret does not open with another's
+key; the operator's vault key wraps every space's key, so this too keeps
+nothing from the operator.
 Encrypting a space so that only its members can open it is planned, not
 built. A person's export of their own space is sealed with a password they
 choose; once a second person exists, the only copy of a backup that leaves

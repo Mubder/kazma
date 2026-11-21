@@ -110,6 +110,7 @@ NOT_RUNS: dict[str, str] = {
     "outbox": "the chat outbox's replies (kazma_gateway.chat_outbox): retried, and alerted when they "
               "cannot be delivered, by the outbox itself (chat.reply_undeliverable)",
     "knowledge_vector_status": "the Knowledge vector sweep's coverage record",
+    "space_keys": "a space's wrapped keys in the vault (its state is active or retired: a key, not work)",
     "llm_calls": "the model-call ledger (one row per finished call)",
     "run_incidents": "the run supervisor's own incidents about runs (a record, not work)",
     "memory_changes": "changes to facts the user stated, which the user decides on the Memory page "
