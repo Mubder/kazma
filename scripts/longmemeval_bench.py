@@ -51,6 +51,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import statistics
 import sys
@@ -312,12 +313,31 @@ def _seed_history(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> dict[
     return back
 
 
+def _words(text: Any) -> str:
+    return " ".join(re.findall(r"\w+", str(text).casefold()))
+
+
+def answer_words(item: dict[str, Any]) -> str:
+    """*item*'s answer as words, for the free proxy "the answer's text is in
+    the block": a word or a phrase only (a bare number, a count, is written
+    in most rounds and proves nothing), none for an abstention question."""
+    words = _words(item.get("answer", ""))
+    return words if words and not is_abstention(item) and re.search(r"[^\W\d_]", words) else ""
+
+
+def holds_answer(text: str, words: str) -> bool:
+    """Whether *text* holds *words* (``answer_words``) whole, as words."""
+    return bool(words) and f" {words} " in f" {_words(text)} "
+
+
 def ask(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     """*item*'s question through ``recall()`` on a private database holding
-    its history: what was shown, and whether it holds the evidence."""
+    its history: what was shown, whether it holds the evidence, and the free
+    proxies (the memory plan's W0): every answer session shown, and the
+    answer's text in the shown rounds and in the block the model is shown."""
     from unittest import mock
 
-    from kazma_core.memory.recall import recall
+    from kazma_core.memory.recall import format_recall_block, recall
     from kazma_core.memory.schema_v2 import ensure_primary_schema
 
     fd, path = tempfile.mkstemp(prefix="kazma-lme-", suffix=".db")
@@ -331,7 +351,8 @@ def ask(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
         with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
             result = recall(str(item["question"]), conn=conn, tenant_id=TENANT, limit=LIMIT,
                             local_only=True, now=parse_date(item["question_date"]))
-        latency = time.perf_counter() - started
+            latency = time.perf_counter() - started
+            block = format_recall_block(result, explain=False) if not result.empty else ""
     finally:
         conn.close()
         for suffix in ("", "-wal", "-shm"):
@@ -342,6 +363,8 @@ def ask(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     shown = [back[h.id] for h in result.episodes if h.id in back]
     answer_sessions = {str(s) for s in item.get("answer_session_ids") or []}
     shown_sessions = {e["session"] for e in shown}
+    words = answer_words(item)
+    in_shown = holds_answer(" ".join(f"{e['row']['user_text']} {e['row']['assistant_text']}" for e in shown), words)
     return {
         "id": str(item["question_id"]),
         "type": str(item["question_type"]),
@@ -352,6 +375,9 @@ def ask(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
         "answer_session": bool(shown_sessions & answer_sessions),
         "every_answer_session": bool(answer_sessions) and answer_sessions <= shown_sessions,
         "precision": round(sum(1 for e in shown if e["session"] in answer_sessions) / len(shown), 4) if shown else None,
+        "answer_in_shown": in_shown if words else None,
+        "answer_in_block": holds_answer(block, words) if words else None,
+        "block_chars": len(block),
         "degraded": bool(result.degraded),
         "latency_ms": round(latency * 1000, 1),
         "memories": len(rows),
@@ -375,9 +401,22 @@ def summarise(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "every_answer_session": round(sum(r["every_answer_session"] for r in answerable) / len(answerable), 4),
                 "precision": round(statistics.fmean(precisions), 4) if precisions else 0.0,
             })
+            worded = [r for r in answerable if r.get("answer_in_block") is not None]
+            if worded:
+                # The free proxies: of the questions whose answer is a word or
+                # a phrase, how often its text is in the rounds shown and in
+                # the block itself (the difference is what the block cut).
+                out.update({
+                    "worded": len(worded),
+                    "answer_in_shown": round(sum(r["answer_in_shown"] for r in worded) / len(worded), 4),
+                    "answer_in_block": round(sum(r["answer_in_block"] for r in worded) / len(worded), 4),
+                })
         if quiet:
             out["abstention_quiet"] = round(sum(1 for r in quiet if r["shown"] == 0) / len(quiet), 4)
         out["shown_mean"] = round(statistics.fmean(r["shown"] for r in rows), 2) if rows else 0.0
+        chars = sorted(r["block_chars"] for r in rows if "block_chars" in r)
+        if chars:
+            out["block_chars_p50"] = chars[len(chars) // 2]
         return out
 
     types = sorted({r["type"] for r in results})

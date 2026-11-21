@@ -2298,7 +2298,10 @@ four injected were noise.
   memory plan's W0: dev 200, the sample and 100 more answerable questions,
   used to choose; report 300, never used to choose, a run on it needs
   `--look "why"` and is logged in `tests/fixtures/longmemeval/report_looks.json`;
-  `tests/fixtures/longmemeval/split.json`), `retrieve`
+  `tests/fixtures/longmemeval/split.json`), `retrieve` (with the free
+  proxies, no model: every answer session shown, and an answer that is a
+  word or a phrase found in the rounds shown, `answer_in_shown`, and in the
+  block itself, `answer_in_block`)
   (each history written as the product writes a turn, one memory per round,
   dated; the real `recall()`; no model call), `answer` (one reader, four
   histories: Kazma's recall block, the same rounds read whole, the whole
