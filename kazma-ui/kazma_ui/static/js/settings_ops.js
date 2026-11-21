@@ -1695,7 +1695,7 @@
         },
 
         backupFolderProblemText(code, where) {
-            const known = ['empty', 'relative', 'inside_data', 'missing', 'cannot_create', 'network', 'unreadable', 'no_folder'];
+            const known = ['empty', 'device', 'relative', 'inside_data', 'missing', 'cannot_create', 'network', 'unreadable', 'no_folder'];
             if (known.indexOf(code) < 0) return _t('settings.bkf.problem_other', '', { code: code });
             if (code === 'missing' && where === 'browse') return _t('settings.bkf.problem_browse_missing');
             return _t('settings.bkf.problem_' + code);

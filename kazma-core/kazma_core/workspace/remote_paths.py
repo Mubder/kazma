@@ -26,7 +26,47 @@ from __future__ import annotations
 import os
 from pathlib import PureWindowsPath
 
-__all__ = ["remote_path_reason"]
+__all__ = ["device_path_reason", "remote_path_reason"]
+
+
+def _flat_text(path: str | os.PathLike[str] | None) -> str | None:
+    """*path* as text, stripped of whitespace and one pair of quotes, with
+    every ``/`` read as ``\\``; None for what is not a path."""
+    if path is None:
+        return None
+    try:
+        text = os.fspath(path)
+    except TypeError:
+        return None
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", "replace")
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        text = text[1:-1].strip()
+    return text.replace("/", "\\")
+
+
+def device_path_reason(path: str | os.PathLike[str] | None) -> str | None:
+    """Why *path* is refused as a device-namespace path, or None.
+
+    The narrower rule, for the one place a network share is the feature (the
+    backup folder the owner chooses, ``backup.folder_copy``): ``\\\\.\\``
+    (a named pipe, a raw disk, a device), ``\\\\?\\`` (a local long path or
+    ``\\\\?\\UNC\\``: Kazma names a share in its plain form) and the NT object
+    prefix ``\\??\\`` are refused; ``\\\\server\\share`` is not. Reads the
+    text only: no filesystem or network call is made.
+    """
+    flat = _flat_text(path)
+    if not flat:
+        return None
+    if flat.startswith("\\??\\") or (
+        flat.startswith("\\\\") and len(flat) >= 3 and flat[2] in ".?" and (len(flat) == 3 or flat[3] == "\\")
+    ):
+        return (
+            f"'{flat}' is a device path (\\\\.\\, \\\\?\\ or \\??\\). Name a folder "
+            "by its drive letter, or a network share as \\\\server\\share."
+        )
+    return None
 
 
 def remote_path_reason(path: str | os.PathLike[str] | None) -> str | None:

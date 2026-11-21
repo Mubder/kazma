@@ -45,7 +45,7 @@ kazma_key_fingerprints() {
 kazma_trust_docker_key() {
   local keyrings="$1" key="$1/docker.asc" tmp
   install -m 0755 -d "$keyrings"
-  if [ -f "$key" ] && [ "$(kazma_key_fingerprints "$key")" = "$DOCKER_KEY_FINGERPRINT" ]; then
+  if [[ -f "$key" ]] && [[ "$(kazma_key_fingerprints "$key")" = "$DOCKER_KEY_FINGERPRINT" ]]; then
     return 0
   fi
   tmp="$(mktemp)"
@@ -54,7 +54,7 @@ kazma_trust_docker_key() {
     echo "KAZMA_ENGINE_ERROR Docker's signing key could not be downloaded" >&2
     return 1
   fi
-  if [ "$(kazma_key_fingerprints "$tmp")" != "$DOCKER_KEY_FINGERPRINT" ]; then
+  if [[ "$(kazma_key_fingerprints "$tmp")" != "$DOCKER_KEY_FINGERPRINT" ]]; then
     rm -f "$tmp" "$key"
     echo "KAZMA_ENGINE_ERROR Docker's signing key is not the one Docker publishes" \
       "($DOCKER_KEY_FINGERPRINT): not trusted" >&2
@@ -76,12 +76,12 @@ kazma_trust_docker_key() {
 # them nothing is changed.
 kazma_https_sources() {
   local apt_dir="$1" ca="${2:-/etc/ssl/certs/ca-certificates.crt}" f
-  if [ ! -s "$ca" ]; then
+  if [[ ! -s "$ca" ]]; then
     echo "no CA certificates in the distro: apt's sources are left as they are" >&2
     return 0
   fi
   for f in "$apt_dir/sources.list" "$apt_dir"/sources.list.d/*.list "$apt_dir"/sources.list.d/*.sources; do
-    [ -f "$f" ] || continue
+    [[ -f "$f" ]] || continue
     sed -i -E '/^[[:space:]]*(URIs:|deb[[:space:]]|deb-src[[:space:]])/ s#http://#https://#g' "$f"
   done
 }
@@ -109,12 +109,12 @@ tls=/etc/docker/tls
 client=/root/kazma-engine-client
 install -d -m 700 "$ca" "$client"
 install -d -m 755 "$tls"
-if [ ! -f "$ca/ca-key.pem" ]; then
+if [[ ! -f "$ca/ca-key.pem" ]]; then
   openssl genrsa -out "$ca/ca-key.pem" 4096 2>/dev/null
   openssl req -x509 -new -key "$ca/ca-key.pem" -sha256 -days 3650 \
     -subj "/CN=Kazma container engine CA" -out "$ca/ca.pem"
 fi
-if [ ! -f "$tls/server-cert.pem" ]; then
+if [[ ! -f "$tls/server-cert.pem" ]]; then
   openssl genrsa -out "$tls/server-key.pem" 4096 2>/dev/null
   openssl req -new -key "$tls/server-key.pem" -subj "/CN=127.0.0.1" -out /tmp/server.csr
   printf 'subjectAltName=IP:127.0.0.1,DNS:localhost\nextendedKeyUsage=serverAuth\n' > /tmp/server.ext
@@ -124,7 +124,7 @@ if [ ! -f "$tls/server-cert.pem" ]; then
 fi
 cp "$ca/ca.pem" "$tls/ca.pem"
 chmod 600 "$tls/server-key.pem"
-if [ ! -f "$client/cert.pem" ]; then
+if [[ ! -f "$client/cert.pem" ]]; then
   openssl genrsa -out "$client/key.pem" 4096 2>/dev/null
   openssl req -new -key "$client/key.pem" -subj "/CN=kazma-engine-client" -out /tmp/client.csr
   printf 'extendedKeyUsage=clientAuth\n' > /tmp/client.ext

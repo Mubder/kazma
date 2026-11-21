@@ -38,8 +38,9 @@ import threading
 import time
 import weakref
 from collections import OrderedDict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from kazma_core.memory.episode_text import display_parts, is_small_talk, match_text, more_note
@@ -246,7 +247,7 @@ def recall(
     memo: dict[str, Any] = {"vectors": {}, "deadline": time.monotonic() + _recall_deadline_s(),
                             "degraded": None}
     token = _QUERY_MEMO.set(memo)
-    names = _ENTRY_NAMES.set(people.ranking_names() if people.shared else {})
+    names = _ENTRY_NAMES.set(people.ranking_names() if people.shared else None)
     keeps = _BELIEF_KEEP.set(_whose_facts(people, asker, query) if people.shared else None)
     try:
         result = _recall(query, conn=conn, vector_engine=vector_engine, tenant_id=tenant_id, limit=limit,
@@ -409,9 +410,21 @@ def _whose_facts(people: Any, asker: str | None, query: str) -> Any:
 
 
 #: A member's entry -> the name recall ranks it by (``speakers.Room
-#: .ranking_names``), for this recall only.
-_ENTRY_NAMES: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar(
-    "kazma_recall_entry_names", default={})
+#: .ranking_names``), for this recall only. Read through :func:`_entry_names`.
+#: The default is None, never ``{}``: a ContextVar's default is ONE object every
+#: context shares, so a name written into a default dict outside a recall
+#: would be read by every later recall (SonarCloud S8508, 2026-11-21; gate:
+#: ``tests/test_context_var_defaults_immutable.py``).
+_ENTRY_NAMES: contextvars.ContextVar[Mapping[str, str] | None] = contextvars.ContextVar(
+    "kazma_recall_entry_names", default=None)
+_NO_ENTRY_NAMES: Mapping[str, str] = MappingProxyType({})
+
+
+def _entry_names() -> Mapping[str, str]:
+    """This recall's entry names; outside a recall an empty mapping that
+    cannot be written."""
+    names = _ENTRY_NAMES.get()
+    return _NO_ENTRY_NAMES if names is None else names
 
 
 def _authors(conn: sqlite3.Connection | None, ids: list[str], tenant_id: str) -> dict[str, str]:
@@ -1514,7 +1527,7 @@ def _format_belief_text(row: Any) -> str:
     read as words; the object is the fact's own text and is left as stored
     (a file path or a code keeps its underscores).
     """
-    names = _ENTRY_NAMES.get()
+    names = _entry_names()
     sub = str(_field(row, "subject") or "")
     obj = _field(row, "object") or ""
     # In a shared space a member's entry is ranked by the member's name

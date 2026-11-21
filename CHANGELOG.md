@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## SonarCloud: the blocker and high findings (2026-11-21)
+
+Each of SonarCloud's 20 open blocker and high findings was read against the
+code; the real ones are fixed, each with a test that fails on the old code.
+
+- Settings → Backup's folder: a device path (a named pipe, a raw disk,
+  `\\?\` and `\\.\` forms) is refused before Kazma opens it, by the Test and
+  the save alike; a network share still works. A second name of Kazma's
+  data folder (a loopback share, `\\?\C:\...`) is now seen as the data
+  folder, and "another disk" is judged by the disk itself, not its letter.
+  The save refuses every reason the Test gives.
+- Recall's member names have a default no code can change: a name written
+  outside a recall can never reach another one (a check now holds every
+  ContextVar in Kazma to that).
+- The engine's setup script uses bash's own tests throughout.
+
 ## Memory keeps all of its text; the Memory page reworked (2026-11-19)
 
 - A memory of a conversation keeps the whole turn: the question, the answer

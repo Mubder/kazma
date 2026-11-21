@@ -441,19 +441,25 @@ def _folder_keep(value: Any) -> int:
 
 
 def _folder_path(value: Any) -> str:
-    """``backups.folder.path``: empty (no folder), or an absolute folder that
-    is not inside Kazma's data folder (``folder_copy.path_problem``)."""
+    """``backups.folder.path``: empty (no folder), or a folder
+    ``folder_copy.path_problem`` finds nothing wrong with. Every code it
+    answers refuses the save: a code without its own sentence here is refused
+    with the code (2026-11-21: the save named two codes and kept a path the
+    Test refused with any other)."""
     from kazma_core.backup.folder_copy import PATH_KEY, path_problem
 
     text = str(value or "").strip()
     if not text:
         return ""
     problem = path_problem(text)
-    if problem == "relative":
-        raise SettingRejected(f"{PATH_KEY} must be a full path (a drive or a share), not a relative one")
-    if problem == "inside_data":
-        raise SettingRejected(f"{PATH_KEY} must not be inside Kazma's data folder: it would not survive that disk")
-    return text
+    if problem is None:
+        return text
+    reasons = {
+        "relative": "must be a full path (a drive or a share), not a relative one",
+        "device": "must be a folder (a drive letter or \\\\server\\share), not a device path",
+        "inside_data": "must not be inside Kazma's data folder: it would not survive that disk",
+    }
+    raise SettingRejected(f"{PATH_KEY} {reasons.get(problem, f'cannot be used ({problem})')}")
 
 
 def shipped_values() -> dict[str, Any]:
