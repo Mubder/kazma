@@ -1,5 +1,5 @@
 {
- "version": 6,
+ "version": 7,
  "seed": 20260926,
  "sessions": [
   {
@@ -10689,6 +10689,371 @@
    ]
   }
  ],
+ "rollups": [
+  {
+   "id": "rm_2026-05",
+   "level": "month",
+   "key": "2026-05",
+   "parts": [
+    "dw00code",
+    "dw00food",
+    "dw00general",
+    "dw00tools",
+    "dw00traps",
+    "dw00travel",
+    "dw00writing",
+    "sw1"
+   ],
+   "title": "May 2026: getting to know Sami, and everyday questions",
+   "text": "Late May 2026, the first week. Sami introduced himself: he lives in Porto, works as a structural engineer at Aurelia Bridges, has a greyhound called Pixel, is allergic to shellfish, and his partner Noor teaches chemistry. Kazma drew up a 12-week plan for the Lisbon half marathon on March 22 and suggested Cantinho do Avillez for Noor's birthday dinner. Alongside came everyday questions: programming (big O notation, squashing git commits), cooking (garam masala, a quick vegetarian dinner), general knowledge (why cats purr, Hamlet), travel (Rome airport, packing for a ski trip), writing (proofreading, a haiku about rain) and tool runs (files, unit tests, the staging server).",
+   "new_in": 7
+  },
+  {
+   "id": "rm_2026-06",
+   "level": "month",
+   "key": "2026-06",
+   "parts": [
+    "dw01arabic",
+    "dw01code",
+    "dw01food",
+    "dw01general",
+    "dw01tools",
+    "dw01traps",
+    "dw01travel",
+    "dw01writing",
+    "dw02code",
+    "dw02food",
+    "dw02general",
+    "dw02tools",
+    "dw02traps",
+    "dw02travel",
+    "dw02writing",
+    "dw03code",
+    "dw03food",
+    "dw03general",
+    "dw03tools",
+    "dw03traps",
+    "dw03travel",
+    "dw03writing",
+    "dw04arabic",
+    "dw04code",
+    "dw04food",
+    "dw04general",
+    "dw04traps",
+    "dw04travel",
+    "dw04writing",
+    "sr0",
+    "sr1",
+    "sr2",
+    "sr3",
+    "sw2",
+    "sw6"
+   ],
+   "title": "June 2026: passport, the Tagus retrofit, Maya's school, training begins",
+   "text": "June 2026. Sami's passport expires on 14 March 2031 and a reminder is set for September 2030. He leads the Tagus footbridge retrofit under Ines Carvalho, and Maya started at Escola Azul (they leave home by 8:10). Half marathon training began: easy 5 km runs, a 10 km long run, a tight left calf after 12 km that had recovered by the 13 km run at 5:40 per km. The family planned a December trip to Istanbul with a hotel near Taksim Square. Every week also brought everyday questions: programming (SQL joins, race conditions, React rendering twice), cooking (risotto, boiled eggs), general knowledge, travel ideas (Seville, Iceland), writing help, tool runs, and Arabic questions (a chocolate cake, memorising the Quran).",
+   "new_in": 7
+  },
+  {
+   "id": "rm_2026-07",
+   "level": "month",
+   "key": "2026-07",
+   "parts": [
+    "dw05code",
+    "dw05food",
+    "dw05tools",
+    "dw05traps",
+    "dw05travel",
+    "dw05writing",
+    "dw06code",
+    "dw06food",
+    "dw06general",
+    "dw06tools",
+    "dw06travel",
+    "dw07arabic",
+    "dw07code",
+    "dw07food",
+    "dw07general",
+    "dw07tools",
+    "dw07traps",
+    "dw07writing",
+    "dw08arabic",
+    "dw08code",
+    "dw08food",
+    "dw08general",
+    "dw08tools",
+    "dw08traps",
+    "dw08travel",
+    "dw08writing",
+    "dw09arabic",
+    "dw09code",
+    "dw09food",
+    "dw09general",
+    "dw09tools",
+    "dw09traps",
+    "dw09travel",
+    "dw09writing",
+    "sr4",
+    "sr5",
+    "sr6",
+    "sr7",
+    "sr8"
+   ],
+   "title": "July 2026: training builds to 18 km, then the taper",
+   "text": "July 2026. Half marathon training built up: one long run missed for the Tagus retrofit, then 14 km with intervals, 16 km feeling strong, the longest run yet at 18 km and 5:35 per km, and a taper week with a goal of under two hours that Kazma judged realistic. Everyday questions went on: programming (async and await, reading CSV files with pandas, reversing a list), cooking (sourdough starter, a French omelette, reheating pizza), general knowledge (photosynthesis, compound interest), travel (Tokyo for a colleague, Prague), writing help, tool runs, and Arabic questions about AI and the distance from Kuwait to Riyadh.",
+   "new_in": 7
+  },
+  {
+   "id": "rm_2026-08",
+   "level": "month",
+   "key": "2026-08",
+   "parts": [
+    "dw10code",
+    "dw10food",
+    "dw10general",
+    "dw10tools",
+    "dw10traps",
+    "dw11arabic",
+    "dw11code",
+    "dw11food",
+    "dw11general",
+    "dw11traps",
+    "dw11travel",
+    "dw11writing",
+    "dw12arabic",
+    "dw12code",
+    "dw12food",
+    "dw12general",
+    "dw12tools",
+    "dw12traps",
+    "dw12travel",
+    "dw13arabic",
+    "dw13code",
+    "dw13food",
+    "dw13general",
+    "dw13traps",
+    "dw13writing",
+    "sr10",
+    "sr9",
+    "sw4"
+   ],
+   "title": "August 2026: the Lisbon trip booked and the half marathon finished",
+   "text": "August 2026. The Lisbon half marathon trip was booked (hotel reference ZX4-91Q, flight TP1352 at 07:15) and Sami's ThinkPad battery was fixed with an 80 percent charge threshold. After a last 8 km long run and a sports massage, Sami finished the Lisbon half marathon in 1:56:40, under his two-hour goal. Everyday questions went on: programming, cooking (risotto, garam masala, keeping avocados), general knowledge (Canberra, vaccines), travel (Seville, Rome), writing, tool runs, and Arabic questions about sleep and a small business idea.",
+   "new_in": 7
+  },
+  {
+   "id": "rp_training",
+   "level": "project",
+   "key": "project:rp_training",
+   "parts": [
+    "sr0",
+    "sr1",
+    "sr10",
+    "sr2",
+    "sr3",
+    "sr4",
+    "sr5",
+    "sr6",
+    "sr7",
+    "sr8",
+    "sr9"
+   ],
+   "title": "Half marathon training, from week one to the finish",
+   "text": "Half marathon training, June to August 2026. Sami followed Kazma's 12-week plan for the Lisbon half marathon: easy 5 km runs and an 8 km long run at first, then 10 km, then 12 km with a tight left calf that recovered a week later (13 km at 5:40 per km). He missed one long run for the Tagus retrofit, then built to 14 km with intervals, 16 km and his longest run, 18 km at 5:35 per km. After a taper week and a last 8 km run with a sports massage, he finished the Lisbon half marathon in 1:56:40, under his two-hour goal, on his first attempt.",
+   "new_in": 7
+  },
+  {
+   "id": "rp_code",
+   "level": "project",
+   "key": "project:rp_code",
+   "parts": [
+    "dw00code",
+    "dw01code",
+    "dw02code",
+    "dw03code",
+    "dw04code",
+    "dw05code",
+    "dw06code",
+    "dw07code",
+    "dw08code",
+    "dw09code",
+    "dw10code",
+    "dw11code",
+    "dw12code",
+    "dw13code",
+    "dw14code",
+    "dw15code",
+    "dw16code"
+   ],
+   "title": "Programming questions across the weeks",
+   "text": "Programming questions, week after week from late May to September 2026; the same handful came back: big O notation (how running time grows with input size), squashing the last three git commits (git rebase -i HEAD~3), processes and threads, SQL joins between orders and customers, race conditions, React rendering twice in StrictMode, async and await, centring a div with flexbox, reading a CSV file with pandas, reversing a list in Python and dependency injection.",
+   "new_in": 7
+  },
+  {
+   "id": "rp_food",
+   "level": "project",
+   "key": "project:rp_food",
+   "parts": [
+    "dw00food",
+    "dw01food",
+    "dw02food",
+    "dw03food",
+    "dw04food",
+    "dw05food",
+    "dw06food",
+    "dw07food",
+    "dw08food",
+    "dw09food",
+    "dw10food",
+    "dw11food",
+    "dw12food",
+    "dw13food",
+    "dw14food",
+    "dw15food"
+   ],
+   "title": "Cooking questions across the weeks",
+   "text": "Cooking questions from late May to September 2026, many repeated: the spices in garam masala, a quick vegetarian dinner (chickpea curry with spinach), boiling an egg for a runny yolk (about six minutes), mushroom risotto, a French omelette, a sourdough starter, reheating pizza in a hot pan and keeping avocados from browning.",
+   "new_in": 7
+  },
+  {
+   "id": "rp_general",
+   "level": "project",
+   "key": "project:rp_general",
+   "parts": [
+    "dw00general",
+    "dw01general",
+    "dw02general",
+    "dw03general",
+    "dw04general",
+    "dw06general",
+    "dw07general",
+    "dw08general",
+    "dw09general",
+    "dw10general",
+    "dw11general",
+    "dw12general",
+    "dw13general",
+    "dw14general",
+    "dw15general",
+    "dw16general"
+   ],
+   "title": "General knowledge questions across the weeks",
+   "text": "General knowledge questions over the weeks: why cats purr, Hamlet in two lines, the distance to the Moon (about 384,400 km), why the sky is blue, photosynthesis, how vaccines work, what causes the seasons, compound interest, the capital of Australia (Canberra) and who painted the Girl with a Pearl Earring (Vermeer).",
+   "new_in": 7
+  },
+  {
+   "id": "rp_tools",
+   "level": "project",
+   "key": "project:rp_tools",
+   "parts": [
+    "dw00tools",
+    "dw01tools",
+    "dw02tools",
+    "dw03tools",
+    "dw05tools",
+    "dw06tools",
+    "dw07tools",
+    "dw08tools",
+    "dw09tools",
+    "dw10tools",
+    "dw12tools",
+    "dw14tools",
+    "dw15tools"
+   ],
+   "title": "Tool runs across the weeks",
+   "text": "Tool runs, week after week: listing the downloads folder (12 files, the newest invoice_0917.pdf), running the unit tests (42 passed), checking the disk space (118 GB free of 476 GB), pinging the staging server (23 ms) and showing the git status (on main, clean).",
+   "new_in": 7
+  },
+  {
+   "id": "rp_traps",
+   "level": "project",
+   "key": "project:rp_traps",
+   "parts": [
+    "dw00traps",
+    "dw01traps",
+    "dw02traps",
+    "dw03traps",
+    "dw04traps",
+    "dw05traps",
+    "dw07traps",
+    "dw08traps",
+    "dw09traps",
+    "dw10traps",
+    "dw11traps",
+    "dw12traps",
+    "dw13traps",
+    "dw14traps",
+    "dw15traps"
+   ],
+   "title": "Miscellaneous questions across the weeks",
+   "text": "Miscellaneous questions over the weeks whose answers did not fit them: cooking rice without a lid, why football fans shout, the layout of a Roman villa, a template for meeting minutes, running the numbers on a plan, octopuses, and vague questions such as how to stop it doing that again.",
+   "new_in": 7
+  },
+  {
+   "id": "rp_travel",
+   "level": "project",
+   "key": "project:rp_travel",
+   "parts": [
+    "dw00travel",
+    "dw01travel",
+    "dw02travel",
+    "dw03travel",
+    "dw04travel",
+    "dw05travel",
+    "dw06travel",
+    "dw08travel",
+    "dw09travel",
+    "dw11travel",
+    "dw12travel",
+    "dw14travel",
+    "dw15travel"
+   ],
+   "title": "Travel questions across the weeks",
+   "text": "Travel questions over the weeks: from Rome airport to the centre (the Leonardo Express, 32 minutes), packing for a ski trip, a weekend in Seville (the Alcazar, the cathedral, Triana and flamenco), the best time to visit Iceland, what a colleague should see in Tokyo, and whether Prague is expensive.",
+   "new_in": 7
+  },
+  {
+   "id": "rp_writing",
+   "level": "project",
+   "key": "project:rp_writing",
+   "parts": [
+    "dw00writing",
+    "dw01writing",
+    "dw02writing",
+    "dw03writing",
+    "dw04writing",
+    "dw05writing",
+    "dw07writing",
+    "dw08writing",
+    "dw09writing",
+    "dw11writing",
+    "dw13writing",
+    "dw14writing",
+    "dw15writing"
+   ],
+   "title": "Writing help across the weeks",
+   "text": "Writing help over the weeks: proofreading \"their going to the park tomorow\", a haiku about rain, a slogan for a bakery (Rise and shine, fresh every morning), a blog post title about remote work (Home Is Where the Standup Is) and making an email asking for a report more polite.",
+   "new_in": 7
+  },
+  {
+   "id": "rp_arabic",
+   "level": "project",
+   "key": "project:rp_arabic",
+   "parts": [
+    "dw01arabic",
+    "dw04arabic",
+    "dw07arabic",
+    "dw08arabic",
+    "dw09arabic",
+    "dw11arabic",
+    "dw12arabic",
+    "dw13arabic",
+    "dw14arabic"
+   ],
+   "title": "أسئلة متفرقة بالعربي على مدى الأسابيع",
+   "text": "أسئلة متفرقة بالعربي على مدى الأسابيع: طريقة كيكة الشوكولاتة، أحسن طريقة لحفظ القرآن (التكرار اليومي والمراجعة المنتظمة)، المسافة بين الكويت والرياض (تقريبا ستمية كيلو بالسيارة)، أفضل وقت لزيارة الأندلس (الربيع)، شرح الذكاء الاصطناعي باختصار، تحسين النوم، فكرة مشروع صغير، وتعلم البرمجة.",
+   "new_in": 7
+  }
+ ],
  "questions": [
   {
    "id": "q001",
@@ -12068,6 +12433,52 @@
    "below": [],
    "now_day": 116,
    "new_in": 6
+  },
+  {
+   "id": "q1401",
+   "text": "How did my half marathon training go, from the first week to race day?",
+   "category": "rollup",
+   "gold": [
+    "sr0|r00#1",
+    "sr10|r10#1"
+   ],
+   "below": [],
+   "now_day": 116,
+   "new_in": 7
+  },
+  {
+   "id": "q1402",
+   "text": "كيف مشى تدريبي لنصف الماراثون من أول أسبوع لين يوم السباق؟",
+   "category": "rollup",
+   "gold": [
+    "sr0|r00#1",
+    "sr10|r10#1"
+   ],
+   "below": [],
+   "now_day": 116,
+   "new_in": 7
+  },
+  {
+   "id": "q1403",
+   "text": "What did we talk about back in June?",
+   "category": "rollup",
+   "gold": [
+    "rm_2026-06"
+   ],
+   "below": [],
+   "now_day": 116,
+   "new_in": 7
+  },
+  {
+   "id": "q1404",
+   "text": "شنو تكلمنا عنه في يونيو؟",
+   "category": "rollup",
+   "gold": [
+    "rm_2026-06"
+   ],
+   "below": [],
+   "now_day": 116,
+   "new_in": 7
   }
  ],
  "second": [
@@ -12611,6 +13022,18 @@
    ],
    "now_day": 116,
    "new_in": 6
+  },
+  {
+   "id": "h052",
+   "text": "Give me the big picture of my half marathon preparation.",
+   "category": "rollup",
+   "gold": [
+    "sr0|r00#1",
+    "sr10|r10#1"
+   ],
+   "below": [],
+   "now_day": 116,
+   "new_in": 7
   }
  ],
  "ids_hold_since": {

@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from kazma_core.turn_notes import TURN_NOTE_KINDS, note_kind, strip_turn_notes
+from kazma_core.turn_notes import RETIRED_TURN_NOTE_KINDS, TURN_NOTE_KINDS, note_kind, strip_turn_notes
 
 REPO = Path(__file__).resolve().parents[1]
 CORE = REPO / "kazma-core" / "kazma_core"
@@ -48,7 +48,6 @@ def _built_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
     from kazma_core.ide.env_context import _build_env_context_sync
     from kazma_core.language_lock import language_lock_message
     from kazma_core.memory.changes import format_changes_note
-    from kazma_core.memory.procedural import format_procedural_hints
     from kazma_core.memory.recall import RecallHit, RecallResult, format_recall_block, recall_incomplete_note
     from kazma_core.memory.transcript_recall import format_transcript_block
     from kazma_core.safety.prompt_fence import format_untrusted_block
@@ -73,10 +72,6 @@ def _built_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
         "past_chats": format_transcript_block([{
             "title": "Release planning", "created_at": "2026-09-20",
             "matched": ["release"], "snippet": "Releases go out on Fridays.",
-        }]),
-        "procedural_hints": format_procedural_hints([{
-            "name": "release", "confidence": 0.8, "total_trials": 3,
-            "description": "tag and push", "steps": ["git tag"],
         }]),
         "memory_changes": format_changes_note([{
             "id": "mc_0123456789abcdef0123", "kind": "update", "predicate": "lives_in",
@@ -156,6 +151,49 @@ def test_every_kind_is_how_its_producer_begins_its_note(tmp_path, monkeypatch) -
         "a kind with no producer checked here (or a producer with no kind)"
     )
     assert not _dead_prefixes(built, _product_openings())
+
+
+def _retired_writers(paths: list[Path]) -> list[str]:
+    """Product literals that would begin a note of a retired kind: the
+    opening itself, or (a fenced note) the fence's source name."""
+    import re
+
+    needles: list[str] = []
+    for prefixes in RETIRED_TURN_NOTE_KINDS.values():
+        for p in prefixes:
+            needles.append(p)
+            m = re.match(r'<kazma:data source="([^"]+)"', p)
+            if m:
+                needles.append(m.group(1))
+    found: list[str] = []
+    for path in paths:
+        if path.name == "turn_notes.py":
+            continue
+        for lit in _literal_openings(path):
+            if any(n == lit or (n.startswith("<") and n in lit) for n in needles):
+                found.append(f"{path.name}: {lit[:60]!r}")
+    return found
+
+
+def _product_paths() -> list[Path]:
+    return [path for pkg in ("kazma-core/kazma_core", "kazma-gateway/kazma_gateway", "kazma-ui/kazma_ui")
+            for path in (REPO / pkg).rglob("*.py") if "tests" not in path.parts]
+
+
+def test_nothing_writes_a_retired_kind() -> None:
+    """A retired kind is kept only so an older checkpoint's copy is stripped
+    (the procedural tool tallies, decision 13): no product code may write one
+    again."""
+    assert not set(RETIRED_TURN_NOTE_KINDS) & set(TURN_NOTE_KINDS)
+    assert not _retired_writers(_product_paths())
+
+
+def test_a_planted_writer_of_a_retired_kind_is_caught(tmp_path) -> None:
+    """Negative control: the old injection's call, planted."""
+    planted = tmp_path / "planted_tally_note.py"
+    planted.write_text('NOTE = format_untrusted_block(body, source="memory_v2_procedural")\n',
+                       encoding="utf-8")
+    assert _retired_writers([planted])
 
 
 def test_a_prefix_nothing_writes_is_caught(tmp_path, monkeypatch) -> None:

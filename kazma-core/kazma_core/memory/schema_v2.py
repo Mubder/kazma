@@ -278,6 +278,19 @@ CREATE TABLE IF NOT EXISTS memory_member_profile (
   PRIMARY KEY (tenant_id, account)
 );
 
+-- The user's answers to the About-me lines Kazma suggests from facts they
+-- stated (memory/profile_suggestions.py, the memory framework audit's F13,
+-- decision 10): added or dismissed, kept by the fact's id -- no value is
+-- stored. account is '' in a personal space, the member in a shared one.
+CREATE TABLE IF NOT EXISTS memory_profile_suggestions (
+  tenant_id   TEXT NOT NULL DEFAULT 'default',
+  account     TEXT NOT NULL DEFAULT '',
+  belief_id   TEXT NOT NULL,
+  decision    TEXT NOT NULL,
+  decided_at  REAL NOT NULL,
+  PRIMARY KEY (tenant_id, account, belief_id)
+);
+
 -- Weekly topic summaries (plan C2, topic_summaries.py): what one week of
 -- conversations said about one topic, written by the model from those turns.
 -- Derived memory: memory_summary_sources names the turns, and forgetting one
@@ -302,10 +315,24 @@ CREATE TABLE IF NOT EXISTS memory_summaries (
   queued_at               REAL,
   embedding               BLOB,
   embedding_model_version TEXT,
-  metadata_json           TEXT DEFAULT '{}'
+  metadata_json           TEXT DEFAULT '{}',
+  -- week | month | project: a roll-up above the weekly summaries
+  -- (topic_rollups.py, the memory framework audit's F13).
+  level                   TEXT NOT NULL DEFAULT 'week'
 );
 CREATE INDEX IF NOT EXISTS idx_memory_summaries_tenant
   ON memory_summaries(tenant_id, status, period_start);
+
+-- The weekly summaries a month or project roll-up was written from
+-- (topic_rollups.py): forgetting, retiring or emptying one empties the
+-- roll-up until it is written again without it.
+CREATE TABLE IF NOT EXISTS memory_summary_parts (
+  rollup_id   TEXT NOT NULL,
+  part_id     TEXT NOT NULL,
+  PRIMARY KEY (rollup_id, part_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_summary_parts_part
+  ON memory_summary_parts(part_id);
 
 CREATE TABLE IF NOT EXISTS memory_summary_sources (
   summary_id  TEXT NOT NULL,
@@ -499,6 +526,8 @@ def ensure_primary_schema(conn: Any) -> None:
     # The user's other list entries an update closed with the replaced fact
     # (a JSON list of ids): an undo reopens them all (memory/changes.py).
     add_missing_columns(conn, "memory_changes", (("also_closed", "TEXT NOT NULL DEFAULT '[]'"),))
+    # A summary's level: week, or a month or project roll-up (topic_rollups).
+    add_missing_columns(conn, "memory_summaries", (("level", "TEXT NOT NULL DEFAULT 'week'"),))
     add_missing_columns(
         conn,
         "beliefs",

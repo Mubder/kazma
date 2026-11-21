@@ -600,6 +600,16 @@ it. Clear the text to remove it. On an install with several users, only an
 administrator can change it: Kazma takes it into account for everyone who
 uses that tenant.
 
+**Suggested lines.** The Memory page's card "Suggested for About me" offers
+lines made from facts you told Kazma yourself -- "I live in Porto.", "أسكن في
+الكويت." -- in the language you said them in. Nothing is added to About me
+until you press **Add to About me**; **Dismiss** keeps a line from coming
+back. Kazma never suggests what it only read into a conversation, what a tool
+said, or what someone else said about you, and never a line already in About
+me. In a shared space each member is offered lines from their own facts, for
+their own About me. Kazma keeps only which fact you answered and how, never
+its value.
+
 ## Changes to what you told Kazma {#changes-to-what-you-told-kazma}
 
 A fact you told Kazma yourself ("I live in Paris") changes only in ways you
@@ -763,6 +773,40 @@ left open.
 - Summaries are included in the memory export. They are kept in the memory
   database on this install and rebuilt from the conversations; they are not
   copied to the Postgres memory mirror.
+
+### Months and projects {#months-and-projects}
+
+Above the weeks, Kazma writes two kinds of roll-up from the weekly summaries:
+
+- **A month**: once a month has ended (a day later) and its weeks are
+  written, one roll-up of what that month was about, when it has at least
+  two weekly summaries. A week belongs to the month its Monday is in.
+- **A project**: when weekly summaries of three or more weeks are one topic
+  (a training plan, a product you are building), one roll-up of the whole
+  story. "One topic" is measured on the summaries' meaning, against your own
+  memories (on the retrieval benchmark, eleven weeks of half marathon
+  training came out as one project, and each kind of everyday question as
+  another).
+
+Each roll-up names the weekly summaries it was written from and the
+conversation turns they stand for. Forget a turn, or a weekly summary, and
+every roll-up built from it is emptied at once and written again without it
+(or dropped when too little is left); forget the roll-up itself and it is
+never written again. Writing one is one model call, in the background, at
+most six a pass. Recall shows a roll-up labelled with its month or its span
+("October 2026", "Project, Sep 2026 to Nov 2026"):
+
+- A project roll-up is ranked like a weekly summary, by what the question is
+  about ("How did my half marathon training go?").
+- A month's roll-up answers only a question about that month. It holds every
+  topic of its month, so as a topic it matched every question a little (on
+  the benchmark, "Where do I live?" was shown May's).
+- A question that asks only what was said in a period ("What did we talk
+  about back in June?", "شنو تكلمنا عنه في يونيو؟") is answered by that
+  period's month roll-up. It names no topic, so by meaning nothing stood out
+  for it.
+
+They are listed, and can be forgotten, in the Memory page's summaries list.
 
 ## Memory admin UI (`/memory`)
 
@@ -936,6 +980,32 @@ the hub, never from its code (`memory/entity_protection.py`).
 | Hosted embed-only fleet | [#78](https://github.com/Mubder/kazma/issues/78) |
 
 Postgres dual-mirror and sparse ILIKE assist already exist as **optional** foundations. Tombstones propagate, and the 15-minute mirror sync pushes what changed (and, once a day, whatever the mirror is missing or holds stale; a row only the mirror holds is counted, never deleted).
+
+### Benchmark report (dataset v7, part G, 2026-11-21)
+
+Dataset v7 adds the roll-ups the planner makes from the benchmark's weekly
+summaries (four months and nine projects; their texts are written in the
+shape the model writes, and their vectors recorded with bge-m3; every v6
+vector is unchanged byte for byte) and the `rollup` category: a project's
+whole story and a month's talk, in English and Arabic (four tuning
+questions, one in the second set).
+
+| | v6 lock (127 questions) | v7 (131 questions) |
+|---|---|---|
+| Hit rate | 0.901 | 0.918 |
+| MRR | 0.764 | 0.754 |
+| Precision | 0.586 | 0.581 |
+| `rollup` hit rate, MRR, precision | -- | 1.00, 0.47, 0.44 |
+| Second set hit rate, MRR, precision | 0.853, 0.782, 0.623 | 0.863, 0.772, 0.621 |
+
+Every v6 question scores the same on the v7 store as on v6, except three
+that improved (a list question now found, a catch-me-up question's answer
+ranked higher, another's precision up). The lower overall MRR and precision
+are the new category's: a summary is shown after the conversations and
+facts, so a roll-up that answers ranks below them. Negative controls: on the
+store without roll-ups the two month questions miss; with months ranked as
+topics, May's roll-up is shown for "Where do I live?" and months for four
+more questions they do not answer.
 
 ### Benchmark report (dataset v6, part F, 2026-11-21)
 

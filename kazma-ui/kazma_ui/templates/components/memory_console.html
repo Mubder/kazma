@@ -618,6 +618,17 @@
         <p class="mem-card-hint">{{ t('memory.mc.changes_hint') }}</p>
         <div id="v2-changes-list" class="mem-muted" style="font-size:0.8rem;max-height:320px;overflow-y:auto;">{{ t('common.loading') }}</div>
       </div>
+      <!-- Lines Kazma suggests for About me from facts the user stated
+           (decision 10, kazma_core/memory/profile_suggestions.py): nothing
+           joins About me without the user's yes. -->
+      <div class="card" id="v2-suggestions-card">
+        <div class="mem-card-head">
+          <h3 class="mem-card-title">{{ t('memory.mc.suggested_for_about_me') }}</h3>
+          <button id="v2-suggestions-refresh" type="button" class="btn btn-ghost btn-xs" aria-label="{{ t('memory.mc.refresh_suggestions') }}" title="{{ t('memory.mc.refresh_suggestions') }}"><span class="ki" data-icon="refresh" aria-hidden="true"></span></button>
+        </div>
+        <p class="mem-card-hint">{{ t('memory.mc.suggested_hint') }}</p>
+        <div id="v2-suggestions-list" class="mem-muted" style="font-size:0.8rem;max-height:320px;overflow-y:auto;">{{ t('common.loading') }}</div>
+      </div>
     </div>
   </section>
 

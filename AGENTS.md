@@ -1117,6 +1117,30 @@ out, a refiner that could not answer (no template line), or a lesson longer
 than `_MAX_DELTA_CHARS` (refused, never cut). The cap keeps whole lessons
 (`_lessons` / `_render`). Gate: `tests/test_lessons_only_from_kept_turns.py`.
 
+**A3. A turn teaches only on a signal, and a lesson is merged** (2026-11,
+the memory framework audit's F13, decision 12). Every finished turn used to
+cost one more model call, and the Soul's twelve slots let twelve routine
+turns push out a real correction. `learn_from_finished_turn` now reads the
+turn first, with no model call (`skills/lesson_signal.read_signal`): a
+**correction** of the previous answer, a **recovered failure** (a tool that
+failed, then a later call of the same turn that worked, read from the
+state's `tool_results`) or the user's **feedback** ("from now on...", "too
+long", "المرة الجاية...", "اختصر ردودك"), from the user's own words
+(`memory.own_words`, quoted spans out), English and Arabic read alike (the
+Arabic phrases folded as the text is); no signal, no refiner. The chat
+refiner (`analyze_and_apply_chat_turn`, `_refiner_prompt`) is shown the
+turn and the lessons the space's Soul holds, each in a data fence, and
+answers one line: NOTHING, SAME n, REPLACE n or NEW (`_read_refiner_reply`;
+anything else teaches nothing). A lesson is merged: it takes the place of
+the one it replaces and of any that says the same (`_same_lesson`: folded
+equal, or content words overlapping 80 %), and its history entry names
+where those came from (`also_from`), so forgetting any of those turns takes
+the merged lesson back (`forget_lessons_from`). The refiner searches no
+memory any more. A swarm worker's refiner may answer NOTHING too. Gates:
+`tests/test_lessons_on_a_signal.py` (twelve routine turns keep a
+correction; the old rule, a lesson from every turn, loses it to the twelve
+slots: the control), `tests/test_paired_languages.py` (the signal pairs).
+
 **B. Every injected Soul delta MUST go through the prompt fence.**
 - `kazma_core/safety/prompt_fence.py` provides `is_override_delta()` (rejects
   injection markers like "ignore prior instructions") and
@@ -2895,6 +2919,24 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   Changing it is admin-only under RBAC (`platform_rbac.role_allows`, Memory
   audit M11): it is guidance for every user of the tenant, like the
   personality. `tests/test_memory_about_me.py`, `tests/test_memory_tools_fenced.py`.
+- **Kazma suggests About-me lines; the user decides** (2026-11, the memory
+  framework audit's F13, decision 10; `memory/profile_suggestions.py`). A
+  line ("I live in Porto.", "أسكن في الكويت.") is made only from a current
+  fact the user stated themself (`provenance.USER_SOURCES`), never from
+  Kazma's reading of a turn, a tool's fact or another member's words; in a
+  shared space only from the asker's own entry, into the asker's own About
+  me. It is written in the language the user said it in (the fact's turn,
+  else the value's script), from a short table (`_LINES`). Nothing joins
+  About me without the user's Add (`add_suggestion`: the line at the end,
+  refused past the limit, never cut); Dismiss keeps it from coming back; a
+  line already there is not offered. A decision is kept by the fact's id in
+  `memory_profile_suggestions` (no value stored, so a forgotten fact leaves
+  nothing to read). Routes: `GET /api/memory/v2/profile/suggestions`,
+  `POST .../{belief_id}/add`, `.../dismiss`; the Memory page's card
+  "Suggested for About me" (EN/AR). No model call. Gates:
+  `tests/test_about_me_suggestions.py` (a suggester taking every source as
+  the control), `tests/e2e/test_about_me_suggestions_browser.py` (by the
+  sidebar, EN/AR).
 - **Deleting a chat keeps its memories (S3, the owner's rule)** unless the
   dialog's "Also forget what Kazma learned from this chat" is ticked: then
   the page asks `PUT .../chats/{id}/memory {remember: false, forget_past:
@@ -3001,6 +3043,52 @@ queued by the maintenance sweep with at most two weeks in flight.
   rows never are (`tests/test_memory_summary_recall.py`).
 - Gate: `tests/test_memory_topic_summaries.py` (grouping identical to
   scipy's average linkage; each rule with a negative control).
+- **Roll-ups above the weeks: a month, a project** (2026-11, the memory
+  framework audit's F13, part G; `memory/topic_rollups.py`). A roll-up is a
+  row of `memory_summaries` with its `level` (`week`, `month`, `project`),
+  so recall, the page's list, Forget, the export and the space walk treat it
+  as any summary. A month: its weekly summaries (a week is the month of its
+  Monday), once the month has ended (a day's grace) and settled, at least
+  `MIN_PARTS`. A project: weekly summaries that are one topic over at least
+  `PROJECT_MIN_WEEKS` weeks, by average linkage at the tenant's own bar (the
+  90th percentile of its summaries' pairs, never below `PROJECT_BAR_FLOOR`;
+  measured on the benchmark: the training topic's 11 weeks are one group
+  from 0.60 to 0.70). It names its sources twice: the weekly summaries in
+  `memory_summary_parts` and their turns in `memory_summary_sources`. So a
+  turn forgotten empties it (`on_turns_forgotten`, through the turns), and
+  a weekly summary forgotten, retired or emptied empties it
+  (`empty_rollups_of`, from `forget_summary`, `_retire`, `_retire_older`).
+  The sweep (`queue_due_work` -> `plan_rollups`, at most six a pass) marks it
+  `rebuild` with its parts; the queue's `topic_summary_rebuild` task writes
+  it (`rebuild_summary` -> `rebuild_rollup`: one model call, the weekly
+  summaries fenced), waiting while a part waits itself, retired below the
+  minimum or when the model skips it. The store is a compare-and-set: every
+  part still active and unchanged since it was read, the roll-up still
+  waiting. A forgotten roll-up is a tombstone its month or project never
+  writes again. Recall shows it under its own label (`rollup_label`:
+  "October 2026", "Project, Sep 2026 to Nov 2026") and the block's header
+  becomes "## Summaries"; a question about what was said in a period keeps
+  the summaries of that period (`_summaries_in_time`, as part F keeps turns).
+  A project is ranked as a weekly summary is, by its newest day
+  (`period_end`), against the weekly summaries' background (a roll-up
+  restates its weeks). A month's roll-up is a candidate only for a question
+  whose period it overlaps (`_overlaps`): as a topic it held every topic of
+  its month and was shown for "Where do I live?". A question that names
+  nothing but talk and its time (`question_shape.asks_what_was_said`:
+  "What did we talk about back in June?", "شنو تكلمنا عنه في يونيو؟") is
+  answered by the period's month roll-ups by the share of it each holds
+  (`_months_said_in`; by meaning June measured 0.08 against the floor of
+  0.21), recorded in the benchmark's trace against a cut of nothing.
+  Gates: `tests/test_memory_rollups.py` (a forget empties a roll-up built
+  from it: through a turn and through a weekly summary; a roll-up that names
+  no source, and a store without the re-read, as controls),
+  `tests/test_memory_benchmark_rollups.py` (the dataset's roll-ups are the
+  ones the planner makes; the `rollup` category with and without them;
+  months ranked as topics, and the month questions by meaning alone, as
+  negative controls). Dataset v7 (the `rollup` category, every v6 vector
+  unchanged) was locked with `--rebaseline`: every v6 question scores the
+  same or better on the v7 store; overall MRR and precision are lower only
+  by the new category's (a summary is shown after the turns and facts).
 
 **K. The Postgres memory mirror stays whole (2026-09-27, `memory/state_backend.py`).**
 Found on live that day: 116 turns still "working" in the mirror (the
@@ -10497,6 +10585,18 @@ clarify-only lock, a notice to repeat verbatim).
   literal in the producing module), fails on a registered opening nothing
   writes, and fails on a kind with no producer -- each with a negative
   control. A note that must persist must not begin with a registered opening.
+- **A retired kind is still stripped, and nothing writes it**
+  (`turn_notes.RETIRED_TURN_NOTE_KINDS`). The procedural store's tool
+  tallies ("file_read (C=0.99, n=812)") are no longer added before a reply
+  (2026-11, the memory framework audit's F13, decision 13): a tally is not a
+  procedure. Reading the code for the change showed the injection had never
+  worked: it read rows by column name on a connection with no row factory,
+  raised `TypeError` and was skipped at DEBUG, every turn, after opening the
+  memory database. The tallies stay for health and the Memory page's tally
+  browser (`match_procedural_dags`). Gates:
+  `tests/test_tool_tallies_not_injected.py` (no read of the store in a real
+  turn; the old block as the control), `tests/test_turn_notes.py`
+  (`test_nothing_writes_a_retired_kind`, a planted writer as the control).
 - **Approval scope facts belong to their tool batch** (2026-10-09).
   `APPROVAL SCOPE (runtime decision facts):` is registered as `approval_scope`.
   Fresh user turns strip that instruction while retaining assistant/tool

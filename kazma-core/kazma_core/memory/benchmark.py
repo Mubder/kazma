@@ -145,6 +145,7 @@ def _seed(conn: sqlite3.Connection, dataset: dict[str, Any]) -> dict[str, str]:
             raise RuntimeError(f"fact {fact['id']} was not stored: {result}")
         refs[fact["id"]] = str(result["belief_id"])
     _seed_summaries(conn, dataset, refs)
+    _seed_rollups(conn, dataset, refs)
     return refs
 
 
@@ -175,17 +176,61 @@ def _seed_summaries(conn: sqlite3.Connection, dataset: dict[str, Any], refs: dic
     conn.commit()
 
 
+def _seed_rollups(conn: sqlite3.Connection, dataset: dict[str, Any], refs: dict[str, str]) -> None:
+    """Write the month and project roll-ups (dataset v7, part G) as
+    ``topic_rollups`` stores them: the text embedded, the weekly summaries
+    they were written from as parts, those summaries' turns as sources."""
+    from datetime import UTC, datetime
+
+    from kazma_core.memory.embedder import encode_text_to_blob, get_embedding_model_name
+
+    model = get_embedding_model_name()
+    by_id = {s["id"]: s for s in dataset.get("summaries", [])}
+    for r in dataset.get("rollups", []):
+        if r["level"] == "month":
+            # A month's own bounds (UTC, the zone the questions are read in).
+            year, month = (int(x) for x in r["key"].split("-"))
+            start = datetime(year, month, 1, tzinfo=UTC).timestamp()
+            end = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=UTC).timestamp()
+        else:
+            days = [by_id[p]["day"] for p in r["parts"]]
+            start, end = BASE_TIME + min(days) * 86400, BASE_TIME + (max(days) + 7) * 86400
+        blob = encode_text_to_blob(f"{r['title']}\n{r['text']}")
+        row_id = f"bench-{r['id']}"
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, level, "
+            "title, summary_text, status, turn_count, chat_count, created_at, updated_at, "
+            "embedding, embedding_model_version) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', 0, 1, ?, ?, ?, ?)",
+            (row_id, BENCH_TENANT, r["key"], start, end, r["level"], r["title"], r["text"],
+             end + 86400, end + 86400, blob, model if blob else None),
+        )
+        conn.executemany("INSERT INTO memory_summary_parts (rollup_id, part_id) VALUES (?, ?)",
+                         [(row_id, refs[p]) for p in r["parts"]])
+        conn.execute(
+            "INSERT OR IGNORE INTO memory_summary_sources (summary_id, episode_id) "
+            f"SELECT ?, episode_id FROM memory_summary_sources WHERE summary_id IN "
+            f"({','.join('?' for _ in r['parts'])})",
+            (row_id, *[refs[p] for p in r["parts"]]),
+        )
+        refs[r["id"]] = row_id
+    conn.commit()
+
+
 def _covers(dataset: dict[str, Any], refs: dict[str, str]) -> dict[str, set[str]]:
     """Summary row id -> the memories it stands for: its turns, and the facts
-    extracted from them."""
+    extracted from them; a roll-up (v7) what its weekly summaries stand for."""
     by_turn: dict[str, set[str]] = {}
     for f in dataset.get("facts", []):
         if f["session"]:
             by_turn.setdefault(f"{f['session']}#{f['turn']}", set()).add(refs[f["id"]])
-    return {
+    covers = {
         refs[s["id"]]: {refs[t] for t in s["sources"]} | set().union(*(by_turn.get(t, set()) for t in s["sources"]))
         for s in dataset.get("summaries", [])
     }
+    for r in dataset.get("rollups", []):
+        covers[refs[r["id"]]] = set().union(*(covers[refs[p]] for p in r["parts"]))
+    return covers
 
 
 def _score(
@@ -200,8 +245,10 @@ def _score(
     answers too: the model reads the answer in it.
     """
     covers = covers or {}
-    pieces = [[refs[a] for a in piece.split("|")] for piece in question["gold"]]
-    below = [refs[r] for r in question.get("below", [])]
+    # A memory this store was not seeded with (a roll-up, asked of a store
+    # without roll-ups: the control of dataset v7) is never shown: a miss.
+    pieces = [[refs.get(a, a) for a in piece.split("|")] for piece in question["gold"]]
+    below = [refs.get(r, r) for r in question.get("below", [])]
     rank: dict[str, int] = {}
     for i, item in enumerate(injected, 1):
         rank.setdefault(item, i)
@@ -252,7 +299,7 @@ def _margin(
         for mid, ev in row["evidence"].items():
             d = ev - row["cut"]
             dist[mid] = max(d, dist.get(mid, d))
-    pieces = [{refs[a] for a in piece.split("|")} for piece in question["gold"]]
+    pieces = [{refs.get(a, a) for a in piece.split("|")} for piece in question["gold"]]
     if not pieces:
         return round(-max(dist.values()), 4) if dist else None
     margins = []
@@ -619,7 +666,7 @@ def memory_fingerprint(dataset: dict[str, Any], *, as_of: int | None = None) -> 
     for fact in dataset.get("facts", []):
         if as_of is None or int(fact.get("new_in") or 0) <= as_of:
             rows.append([fact["id"], {k: v for k, v in fact.items() if k != "new_in"}])
-    for summary in dataset.get("summaries", []):
+    for summary in dataset.get("summaries", []) + dataset.get("rollups", []):
         if as_of is None or int(summary.get("new_in") or 0) <= as_of:
             rows.append([summary["id"], {k: v for k, v in summary.items() if k != "new_in"}])
     rows.sort(key=lambda r: r[0])
@@ -637,7 +684,7 @@ def dataset_as_of(dataset: dict[str, Any], version: int) -> dict[str, Any]:
 
     return {**dataset, "version": version,
             **{part: [x for x in dataset.get(part) or [] if kept(x)]
-               for part in ("sessions", "facts", "summaries", "questions", "second")}}
+               for part in ("sessions", "facts", "summaries", "rollups", "questions", "second")}}
 
 
 def _sealed_versions(dataset: dict[str, Any]) -> set[Any]:
@@ -669,6 +716,7 @@ def sealed_problems(sealed: dict[str, Any], dataset: dict[str, Any]) -> list[str
                         f"v{dataset.get('version')}: check its ids, and have it rewritten if they moved")
     refs = {f"{s['id']}#{i}" for s in dataset["sessions"] for i in range(1, len(s["turns"]) + 1)}
     refs |= {f["id"] for f in dataset.get("facts", [])} | {s["id"] for s in dataset.get("summaries", [])}
+    refs |= {r["id"] for r in dataset.get("rollups", [])}
     # The second set under either key: "heldout" until the rename reached the
     # dataset everywhere (2026-11-20).
     second = dataset.get("second") or dataset.get("heldout") or []

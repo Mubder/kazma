@@ -1,5 +1,58 @@
 # CHANGELOG
 
+## Spaces S1-33: the check before a second person is added (2026-11-21)
+
+- **Eight preconditions, one table** (`kazma_core/spaces/preconditions.py`):
+  work with no space is refused, one value per secret, a daily limit per
+  person, features per person, copies that leave the machine are encrypted,
+  the deploy check signs in with an owner API token, a key per space, and
+  nothing left of the older multi-user mode. One that cannot be checked
+  counts as missing.
+- **A second account is refused while one is missing**, by name (409
+  `preconditions_missing`), and the Spaces switch has one writer
+  (`preconditions.switch_on`), which asks the same checks first.
+- **`kazma spaces migrate`**: `--check` and `--dry-run` change nothing; the
+  move asks first, copies the vault, settles secrets held in copies that
+  disagree, makes the owner's deploy token, and can run twice with no second
+  effect; `--switch-on` is refused while anything is missing. Spaces stays
+  off in this build: S1-02's fallbacks, S2-02 and S2-11 are still missing.
+- With Spaces enforced, a tool's tenant with nothing bound is no longer the
+  owner's space (`safety.hitl.get_current_tenant_id`). The deploy check signs
+  in with `<install>/.kazma/owner_api.token` when there is one.
+
+## Memory part G: consolidation (2026-11-21)
+
+- **Lessons on a signal.** A finished turn teaches only when it carries
+  one, read from the turn with no model call: a correction of the previous
+  answer, a tool that failed and a later call that worked, or the user's
+  feedback about how Kazma works ("from now on...", "too long", "المرة
+  الجاية...", "اختصر ردودك"), in English and Arabic alike. A routine turn
+  costs no model call (it cost one on every turn). The refiner sees the
+  lessons the space holds and answers NOTHING, SAME, REPLACE or NEW; a lesson
+  that says the same as one held is merged into it, and its history names
+  every turn it came from, so forgetting any of them takes it back. Twelve
+  routine turns no longer push a correction out of the twelve lessons.
+- **Roll-ups above the weeks.** Once a month has ended Kazma writes a
+  roll-up of it, and of a topic that ran three weeks or more, from the
+  weekly summaries, in the background (one model call each). Each names the
+  weekly summaries and turns it came from; forgetting a turn or a weekly
+  summary empties every roll-up built from it, and it is written again
+  without it (a compare-and-set, as the weekly store). A month's roll-up
+  answers only a question about its month; "What did we talk about back in
+  June?" is answered by June's.
+- **Suggested lines for About me.** The Memory page offers lines made from
+  facts you told Kazma yourself, in the language you said them in; Add puts
+  one at the end of About me, Dismiss keeps it from coming back. Nothing is
+  added without your Add; in a shared space each member gets lines from
+  their own facts, for their own About me.
+- **No tool tallies in the turn.** The procedural store's counts of tool
+  uses are no longer read before every reply (the read had failed on every
+  turn since it was written, and a tally is not a procedure). The Memory
+  page still shows them.
+- Retrieval benchmark dataset v7: the `rollup` category (hit rate 1.00);
+  every v6 question scores the same or better. See the Memory and RAG
+  guide's benchmark report.
+
 ## The database and the engine off Windows' own drive (2026-11-21)
 
 - `kazma setup data-folder D:\Kazma` (or `kazma setup install --data-folder

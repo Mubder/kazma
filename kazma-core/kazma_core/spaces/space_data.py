@@ -118,6 +118,7 @@ TABLE_RULES: dict[tuple[str, str], TableRule] = {
     # follow the rows they were made from.
     ("*", "memory_task_queue"): _json("payload_json", "$.tenant_id"),
     ("*", "memory_summary_sources"): _ids("summary_id", "summaries"),
+    ("*", "memory_summary_parts"): _ids("rollup_id", "summaries"),
     # The copies' queues hold ids only; the sync needs what the erase's own
     # deletes queue to take the space's rows out of the graph copy.
     ("*", "memory_mirror_outbox"): _keep("ids only: what the Postgres copy is sent next"),

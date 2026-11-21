@@ -440,7 +440,7 @@ def test_a_week_that_never_finishes_is_given_up(mem):
 def test_nothing_is_queued_when_summaries_are_off(mem, monkeypatch):
     _week(mem)
     monkeypatch.setattr(ts, "_config", lambda: {"enabled": False, "min_turns": 4, "max_per_week": 24})
-    assert ts.queue_due_work() == {"weeks": 0, "rebuilds": 0, "reembedded": 0}
+    assert ts.queue_due_work() == {"weeks": 0, "rebuilds": 0, "rollups": 0, "reembedded": 0}
     assert mem.queued == []
 
 

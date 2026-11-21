@@ -32,7 +32,7 @@ LESSON = "Cite the tool result that answers the question."
 
 
 class _Refiner:
-    def __init__(self, answer: str = LESSON) -> None:
+    def __init__(self, answer: str = f"NEW: {LESSON}") -> None:
         self.answer = answer
         self.calls = 0
 
@@ -71,8 +71,13 @@ class _Graph:
         return self.snap
 
 
+#: Every question here carries a signal (feedback): a turn teaches only on
+#: one (decision 12), and these tests are about the turns that would.
+_SIGNAL = "From now on, "
+
+
 def _finished(thread: str, question: str, answer: str, **extra) -> dict:
-    messages = [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
+    messages = [{"role": "user", "content": _SIGNAL + question}, {"role": "assistant", "content": answer}]
     return {"messages": messages,
             "_post_turn_memory": {"session_id": thread, "turn": 1, "tenant_id": "default"},
             **extra}
@@ -127,12 +132,13 @@ def test_a_turn_kept_out_of_memory_teaches_nothing(env):
     """The turn in which the user asks to forget something is kept out."""
     thread = _thread()
     question = "forget everything that mentions PEBBLE-9"
-    forget.keep_turn_out(thread, 1, question, tenant_id="default")
+    forget.keep_turn_out(thread, 1, _SIGNAL + question, tenant_id="default")
     _close(_finished(thread, question, "Done: 3 memories forgotten."), thread)
     assert _lessons() == [] and env.refiner.calls == 0
 
 
-@pytest.mark.parametrize("answer", ["", "   ", "x" * 1500, "Task successfully completed (100% rate)."])
+@pytest.mark.parametrize("answer", ["", "   ", "NEW: " + "x" * 1500, "NEW: Task successfully completed (100% rate).",
+                                    "NOTHING", "Keep answers short."])
 def test_no_lesson_when_the_refiner_answers_none_that_fits(env, answer):
     env.refiner.answer = answer
     thread = _thread()
@@ -158,8 +164,11 @@ def test_the_transports_rule_would_have_taught(env):
     forget.set_chat_remembered(thread, False, tenant_id="default")
     reply = "⚠️ The model provider did not answer."
     old_success = bool(reply.strip())  # the gateway's rule
+    from kazma_core.skills.lesson_signal import LessonSignal
+
     asyncio.run(si.analyze_and_apply_chat_turn(user_message="summarize my inbox",
-                                               success=old_success, output_snippet=reply))
+                                               success=old_success, output_snippet=reply,
+                                               signal=LessonSignal("feedback", "summarize my inbox")))
     assert _lessons() == [LESSON]
 
 
@@ -182,12 +191,18 @@ def _old_cap(base_prompt: str, new_delta: str) -> str:
     return soul + "".join(existing + [delta])
 
 
+#: Fourteen lessons that say different things (two that say the same are
+#: merged into one, decision 12).
+_TOPICS = ("tables", "dates", "currency", "sources", "bullets", "arabic", "headings", "emoji",
+           "units", "names", "links", "quotes", "summaries", "greetings")
+
+
 def test_the_cap_keeps_whole_lessons_and_their_spacing():
     soul = "You are Kazma."
     for n in range(14):
-        soul = si._cap_evolution_prompt(soul, f"[SelfImprovement] Lesson {n}.")
+        soul = si._cap_evolution_prompt(soul, f"[SelfImprovement] Lesson about {_TOPICS[n]}.")
     _, lessons = si._lessons(soul)
-    assert lessons == [f"Lesson {n}." for n in range(2, 14)]  # the newest twelve, whole
+    assert lessons == [f"Lesson about {_TOPICS[n]}." for n in range(2, 14)]  # the newest twelve, whole
     assert "\n\n\n" not in soul  # one separator, however many rewrites
     long = "[SelfImprovement] " + "word " * 300
     assert si._cap_evolution_prompt(soul, long) == soul  # refused, never cut

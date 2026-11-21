@@ -14,6 +14,12 @@ from kazma_core.skills.self_improvement import (
 )
 
 
+#: Lessons that say different things: two that say the same are merged
+#: (decision 12), so "rule 1" and "rule 2" are one lesson now.
+_WORDS = ("tables", "dates", "currency", "sources", "bullets", "arabic", "headings", "emoji",
+          "units", "names", "links", "quotes", "summaries", "greetings", "numbers", "colours", "files")
+
+
 class TestCapEvolutionPrompt:
     """Verify the self-improvement prompt cannot grow without bound."""
 
@@ -28,14 +34,14 @@ class TestCapEvolutionPrompt:
         base = "Soul."
         out = base
         for i in range(3):
-            out = _cap_evolution_prompt(out, f"\n\n[SelfImprovement] rule {i}")
+            out = _cap_evolution_prompt(out, f"\n\n[SelfImprovement] rule about {_WORDS[i]}")
         assert out.count("[SelfImprovement]") == 3
 
     def test_blocks_capped_at_max(self) -> None:
         base = "Soul."
         out = base
         for i in range(_MAX_EVOLUTION_BLOCKS + 5):
-            out = _cap_evolution_prompt(out, f"\n\n[SelfImprovement] rule {i}")
+            out = _cap_evolution_prompt(out, f"\n\n[SelfImprovement] rule about {_WORDS[i]}")
         # Only the most recent _MAX_EVOLUTION_BLOCKS blocks are kept.
         assert out.count("[SelfImprovement]") == _MAX_EVOLUTION_BLOCKS
 

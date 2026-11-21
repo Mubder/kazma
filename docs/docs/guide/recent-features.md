@@ -16,6 +16,20 @@ whether each does, changing nothing; while one is missing, adding a second
 person is refused and the refusal names it (see the
 [CLI reference](cli-reference.md#kazma-spaces)).
 
+**New in 2026-11-21 — memory consolidates.** Kazma learns a lesson only
+when a turn carries one: you corrected its answer, a tool failed and a later
+try worked, or you said how it should work ("from now on...", "اختصر
+ردودك"). Before, every turn cost one more model call, and twelve routine
+turns could push a real correction out of its twelve lessons. A lesson that
+says the same as one it has is merged into it, and the refiner may answer
+that there is nothing to learn. Above the weekly summaries, Kazma writes a
+roll-up of each month and of each project that ran for three weeks or more;
+each names what it was written from, and a forget empties every roll-up
+built from what you forgot. The Memory page suggests lines for "About me"
+from facts you told it yourself; nothing is added until you press Add. The
+tool tallies ("file_read, 812 uses") are no longer added to every turn (see
+[Memory and RAG](memory-and-rag.md#months-and-projects)).
+
 **New in 2026-11-21 — recall reads time, follow-ups and lists.** A question
 about the past reads its time ("last week", "in August", "قبل أسبوعين"):
 what you said then is answered from that period only, and what was true then

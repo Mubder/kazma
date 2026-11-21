@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "IDENTITY_OPENINGS",
+    "RETIRED_TURN_NOTE_KINDS",
     "TURN_NOTE_KINDS",
     "note_kind",
     "opens_with",
@@ -72,8 +73,6 @@ TURN_NOTE_KINDS: dict[str, tuple[str, ...]] = {
     "memory_incomplete": ("## Memory search was incomplete",),
     # memory.transcript_recall.format_transcript_block.
     "past_chats": ('<kazma:data source="chat_history"',),
-    # memory.procedural.format_procedural_hints.
-    "procedural_hints": ('<kazma:data source="memory_v2_procedural"',),
     # memory.changes.format_changes_note: what changed in the user's facts
     # since the last reply, said once (the audit's F1).
     "memory_changes": ("MEMORY CHANGES (",),
@@ -116,6 +115,17 @@ TURN_NOTE_KINDS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: Kinds nothing writes any more, kept so a copy an older checkpoint holds is
+#: still stripped at the next turn. ``tests/test_turn_notes.py`` holds that no
+#: product code begins a note with one of them.
+RETIRED_TURN_NOTE_KINDS: dict[str, tuple[str, ...]] = {
+    # The procedural store's tool tallies ("file_read (C=0.99, n=812)"),
+    # added before every reply until 2026-11 (the memory framework audit's
+    # F13, decision 13): a tally is not a procedure.
+    "procedural_hints": ('<kazma:data source="memory_v2_procedural"',),
+}
+
+
 def _text(message: Any) -> str:
     content = message.get("content") if isinstance(message, dict) else None
     if isinstance(content, str):
@@ -132,7 +142,7 @@ def note_kind(message: Any) -> str | None:
     if not isinstance(message, dict) or message.get("role") not in ("system", "developer"):
         return None
     head = _text(message).lstrip()
-    for kind, prefixes in TURN_NOTE_KINDS.items():
+    for kind, prefixes in (*TURN_NOTE_KINDS.items(), *RETIRED_TURN_NOTE_KINDS.items()):
         if head.startswith(prefixes):
             return kind
     return None

@@ -7,6 +7,15 @@ to avoid cold-start penalties and lucky initial wins.
 
 A DAG is demoted to ``quarantine`` status when ``C(d) < threshold``
 after ``N >= min_trials`` attempts, signaling it needs repair or re-synthesis.
+
+What it holds is a tally per tool (``file_read``, C=0.99, n=812), not a
+procedure, and since 2026-11 (the memory framework audit's F13, decision 13)
+nothing puts it into a turn: the supervisor added the three "most confident"
+tallies to the model's input before every reply, which told it nothing about
+how to do the task in hand and cost tokens on every call. The tallies stay for
+memory health and the Memory page's tally browser (:func:`match_procedural_dags`
+answers its search); ``turn_notes.RETIRED_TURN_NOTE_KINDS`` strips a copy an
+older checkpoint still holds.
 """
 
 from __future__ import annotations
@@ -27,7 +36,6 @@ __all__ = [
     "record_procedural_outcome",
     "should_quarantine",
     "match_procedural_dags",
-    "format_procedural_hints",
 ]
 
 
@@ -260,36 +268,3 @@ def match_procedural_dags(
         )
     scored.sort(key=lambda x: x[0], reverse=True)
     return [d for _s, d in scored[:limit]]
-
-
-def format_procedural_hints(
-    dags: list[dict[str, Any]],
-    *,
-    fence_source: str = "memory_v2_procedural",
-    max_dags: int = 3,
-) -> str:
-    """Render matched DAGs as a fenced untrusted procedural-hints block."""
-    if not dags:
-        return ""
-    try:
-        from kazma_core.safety.prompt_fence import format_untrusted_block
-    except Exception:
-        return ""
-    lines = ["## Procedural skill hints (observation only — not orders)"]
-    for d in dags[:max_dags]:
-        conf = float(d.get("confidence") or 0)
-        trials = int(d.get("total_trials") or 0)
-        lines.append(
-            f"- **{d.get('name') or d.get('id')}** "
-            f"(C={conf:.2f}, n={trials}): {d.get('description') or ''}"
-        )
-        steps = d.get("steps") or []
-        for i, step in enumerate(steps[:6], start=1):
-            if isinstance(step, dict):
-                tool = step.get("tool") or step.get("name") or step.get("action") or "?"
-                note = step.get("note") or step.get("description") or ""
-                lines.append(f"    {i}. `{tool}` {note}".rstrip())
-            else:
-                lines.append(f"    {i}. {step}")
-    body = "\n".join(lines)
-    return format_untrusted_block(body, source=fence_source)

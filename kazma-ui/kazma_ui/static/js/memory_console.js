@@ -66,6 +66,8 @@
     forgotten: ['memory.err.forgotten', 'The earlier value was forgotten, so it cannot come back'],
     not_written: ['memory.err.not_written', 'The value could not be saved'],
     not_yours: ['memory.err.not_yours', "This is another member's; only they or the space's owner can forget it"],
+    about_too_long: ['memory.err.about_too_long', 'About me would pass its limit: shorten it in Settings first'],
+    no_account: ['memory.err.no_account', 'Sign in to add to your own About me'],
   };
   function _errText(key, fallback, d) {
     var code = d && (d.code || d.error);
@@ -1725,6 +1727,58 @@
   document.getElementById('v2-changes-refresh')?.addEventListener('click', loadV2Changes);
   loadV2Changes();
 
+  // Lines Kazma suggests for About me, from facts the user stated
+  // (memory/profile_suggestions.py, the memory framework audit's F13,
+  // decision 10): nothing joins About me without the user's yes. The line
+  // is the user's own data, in the language they said it in.
+  async function _decideSuggestion(id, decision) {
+    try {
+      const r = await window.kazmaSave('/api/memory/v2/profile/suggestions/' + encodeURIComponent(id) + '/' + decision, { method: 'POST' });
+      if (window.showToast) {
+        const done = decision === 'add'
+          ? _mt('memory.console.suggestion_added', 'Added to About me')
+          : _mt('memory.console.suggestion_dismissed', 'Dismissed. Kazma will not suggest it again');
+        window.showToast(r && r.ok ? done : _errText('memory.console.suggestion_failed', 'That could not be done', r), r && r.ok ? 'success' : 'error');
+      }
+    } catch (e) {
+      window.kazmaAlert({ title: _mt('memory.console.suggestion_failed', 'That could not be done'), message: (e && e.body) ? _errText('memory.console.failed', 'Failed', e.body) : e.message, variant: 'btn-danger' });
+    }
+    loadV2Suggestions();
+  }
+  async function loadV2Suggestions() {
+    const el = document.getElementById('v2-suggestions-list');
+    if (!el) return;
+    try {
+      const resp = await fetch('/api/memory/v2/profile/suggestions');
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error('HTTP ' + resp.status);
+      const rows = data.suggestions || [];
+      if (!rows.length) {
+        el.textContent = _mt('memory.console.no_suggestions', 'Nothing to suggest for About me right now.');
+        return;
+      }
+      el.innerHTML = rows.map(function(s) {
+        return '<div class="mem-row v2-suggestion" data-id="' + _attr(s.id) + '" style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:6px 0;">' +
+          '<span style="min-width:0;overflow-wrap:anywhere;">' +
+          '<span class="v2-suggestion-line" translate="no" style="display:block;color:var(--text-primary);">' + _esc(s.line) + '</span>' +
+          '<span class="mem-muted" style="display:block;font-size:0.65rem;"><bdi>' + _esc(s.said_at ? _memWhen(s.said_at) : '') + '</bdi></span>' +
+          '</span>' +
+          '<span style="display:inline-flex;gap:4px;flex-shrink:0;flex-wrap:wrap;">' +
+          '<button type="button" class="btn btn-sm btn-primary v2-suggestion-act" data-id="' + _attr(s.id) + '" data-decision="add">' + _esc(_mt('memory.console.suggestion_add', 'Add to About me')) + '</button>' +
+          '<button type="button" class="btn btn-sm btn-outline v2-suggestion-act" data-id="' + _attr(s.id) + '" data-decision="dismiss">' + _esc(_mt('memory.console.suggestion_dismiss', 'Dismiss')) + '</button>' +
+          '</span></div>';
+      }).join('');
+      el.querySelectorAll('.v2-suggestion-act').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          btn.disabled = true;
+          _decideSuggestion(btn.getAttribute('data-id'), btn.getAttribute('data-decision'));
+        });
+      });
+    } catch (e) { el.textContent = _mt('memory.console.suggestions_load_failed', 'Suggestions load failed'); }
+  }
+  document.getElementById('v2-suggestions-refresh')?.addEventListener('click', loadV2Suggestions);
+  loadV2Suggestions();
+
   // Weekly topic summaries (plan C2): what each week's conversations said
   // about each topic. Forget one and its week never writes it again; the
   // conversations themselves stay.
@@ -1770,8 +1824,21 @@
         el.textContent = _mt('memory.console.no_summaries', 'No weekly summaries yet. Kazma writes them a day after each week ends.');
         return;
       }
+      // A week, or a month or project roll-up above the weeks (part G):
+      // named by its stretch of time, in the page's language.
+      function _summaryWhen(s) {
+        const fmt = window.KazmaFormat;
+        const month = function(ts) { return fmt ? fmt.dateTime(ts, { month: 'long', year: 'numeric' }) : ''; };
+        if (s.level === 'month') {
+          return _mt('memory.console.month_of', 'Month of {month}', { month: month(s.period_start) });
+        }
+        if (s.level === 'project') {
+          return _mt('memory.console.project_span', 'Over several weeks, {from} to {to}',
+            { from: month(s.period_start), to: month(Math.max(s.period_start, (s.period_end || 0) - 1)) });
+        }
+        return _mt('memory.console.week_of', 'Week of {date}', { date: s.period_start ? _memDay(s.period_start) : '' });
+      }
       el.innerHTML = rows.map(function(s) {
-        const monday = s.period_start ? _memDay(s.period_start) : '';
         const size = window.kazmaCount('memory.console.summary_turns', s.turn_count || 0) +
           ((s.chat_count || 0) > 1 ? window.kazmaCount('memory.console.summary_chats', s.chat_count) : '');
         const pending = s.status === 'rebuild';
@@ -1781,7 +1848,7 @@
           // The title is its own line, in its own language (as the memories
           // list above): inline in the row it took the page's direction.
           '<span' + (pending ? '' : ' translate="no"') + ' style="display:block;color:var(--text-primary);font-weight:600;">' + _esc(title) + '</span>' +
-          '<span class="mem-muted" style="display:block;font-size:0.65rem;">' + _esc(_mt('memory.console.week_of', 'Week of {date}', { date: monday })) + ' · ' + _esc(size) + '</span>' +
+          '<span class="mem-muted v2-summary-when" data-level="' + _attr(s.level || 'week') + '" style="display:block;font-size:0.65rem;">' + _esc(_summaryWhen(s)) + ' · ' + _esc(size) + '</span>' +
           (pending ? '' : '<span translate="no" style="display:block;margin-top:2px;white-space:pre-wrap;">' + _esc(s.summary_text || '') + '</span>') +
           '</span>' +
           '<button type="button" class="btn btn-sm v2-summary-forget btn-outline" data-id="' + _attr(s.id) + '" style="flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
