@@ -53,6 +53,7 @@ kazma
 ├── observer ...           # Kazma Watch, the outside observer (setup, pair, status, unpair)
 ├── maintenance ...        # an update window: begin, end
 ├── uninstall              # take Kazma off this computer (data kept unless asked)
+├── spaces migrate ...     # several people on one Kazma: what must hold first (--check)
 ├── report <what happened> # send a problem report (you see it first)
 ├── import <export>        # bring a ChatGPT or Claude export into memory
 └── --help | -h | help     # print command list
@@ -374,6 +375,19 @@ kazma uninstall --dry-run
 kazma uninstall
 kazma uninstall --remove-data
 ```
+
+### 2.19 `kazma spaces` {#kazma-spaces}
+
+Several people on one Kazma ([Spaces](spaces.md)) is not switched on in any
+release yet. This command says what must hold before a second person is
+added, and makes the parts of the move Kazma can make itself.
+
+| Command | What it does |
+|---|---|
+| `kazma spaces migrate --check` | Lists each precondition as holding or missing, with what closes it. Changes nothing. Exit 0 when everything holds, 1 otherwise. |
+| `kazma spaces migrate --dry-run` | Lists what the move would change. Changes nothing. |
+| `kazma spaces migrate [--yes]` | Shows the changes and asks, then makes them: a secret held in copies that disagree gets its newest copy's value (no copy is deleted), every space gets its key, and the owner's API token for the deploy check is made and kept in Kazma's home, readable by you only. The vault is copied first; a second run changes nothing. It does not turn Spaces on. |
+| `kazma spaces migrate --switch-on` | The same, then turns Spaces on, only when every precondition holds. Otherwise it says which do not. |
 
 ---
 

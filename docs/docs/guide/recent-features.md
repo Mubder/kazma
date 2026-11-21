@@ -9,6 +9,13 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 > This page is published at [kazma.ai/docs/recent-features/](https://kazma.ai/docs/recent-features/) ([Arabic](https://kazma.ai/ar/docs/recent-features/)).
 
+**New in 2026-11-21 — a check before a second person is added.** Several
+people on one Kazma ([Spaces](spaces.md)) is still not switched on in any
+release. `kazma spaces migrate --check` now lists what must hold first and
+whether each does, changing nothing; while one is missing, adding a second
+person is refused and the refusal names it (see the
+[CLI reference](cli-reference.md#kazma-spaces)).
+
 **New in 2026-11-21 — recall reads time, follow-ups and lists.** A question
 about the past reads its time ("last week", "in August", "قبل أسبوعين"):
 what you said then is answered from that period only, and what was true then

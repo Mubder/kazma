@@ -44,6 +44,7 @@ __all__ = [
     "OWNER_SPACE_ID",
     "NoSpaceBound",
     "Scope",
+    "as_if_enforced",
     "bind_scope",
     "bound_asker",
     "current_scope",
@@ -129,7 +130,28 @@ def spaces_enforced() -> bool:
     Read from memory. ``identity.prime_enforcement`` sets it at start and
     whenever the stored switch changes; no settings read happens here.
     """
-    return _enforced
+    return _enforced or _as_if_enforced.get()
+
+
+#: True only inside :func:`as_if_enforced`.
+_as_if_enforced: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "kazma_as_if_enforced", default=False
+)
+
+
+@contextmanager
+def as_if_enforced() -> Iterator[None]:
+    """This context answers as an install that enforces Spaces does.
+
+    For the switch-on check alone (``spaces.preconditions``, S1-33): it asks
+    the code what it would do once enforced, before the switch is stored. It
+    can only make a context stricter, never looser, and reaches no other
+    task or thread (a new thread starts with it off)."""
+    token = _as_if_enforced.set(True)
+    try:
+        yield
+    finally:
+        _as_if_enforced.reset(token)
 
 
 def set_enforced(value: bool) -> None:
@@ -228,7 +250,7 @@ def space_of_state(state: object) -> str:
     """
     getter = getattr(state, "get", None)
     tenant = str((getter("tenant_id") if getter else "") or "").strip()
-    if not _enforced:
+    if not spaces_enforced():
         return tenant or OWNER_SPACE_ID
     scope = _scope.get()
     if scope is not None:
@@ -276,7 +298,7 @@ def require_scope() -> Scope:
     if _install_work.get():
         raise _refuse("a space was asked for")
     tenant = (tenant_context.get_current_tenant_id() or "").strip()
-    if _enforced:
+    if spaces_enforced():
         if tenant:
             raise NoSpaceBound(
                 f"space {tenant!r} is bound with no asker: the entry point "

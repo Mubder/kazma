@@ -555,6 +555,20 @@ def _zip_backup_dir(dest: Path) -> Path:
                 pass
 
 
+def plain_copy_configured() -> bool:
+    """True when a plain copy of the backup is set to leave the machine: a
+    native provider's zip or rclone's folder (restic's copy is encrypted and
+    is not this). Asked by the Spaces switch-on check (S1-33, decision N10).
+    Raises when the settings cannot be read: unknown is never "no"."""
+    from kazma_core.config_store import get_config_store
+
+    store = get_config_store()
+    provider = str(store.get("backups.offsite.provider") or "").strip()
+    remote = str(store.get("backups.offsite.rclone_remote") or "").strip()
+    enabled = store.get("backups.offsite.enabled")
+    return bool(enabled) if enabled is not None else bool(provider or remote)
+
+
 def _plain_copy_refused() -> str:
     """Why a plain copy of the backup may not leave the machine, or "".
 

@@ -205,20 +205,45 @@ def env_value(path: Path, key: str) -> str:
     return value
 
 
+def owner_token(live: Path) -> str:
+    """The owner's API token for the deploy check (``kazma spaces migrate``
+    makes it: ``<install>/.kazma/owner_api.token``), or "" when there is
+    none."""
+    try:
+        return (live / ".kazma" / "owner_api.token").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 class Server:
-    """The live server's HTTP API, signed in with the install's secret."""
+    """The live server's HTTP API, signed in as the owner: with the owner's
+    API token when the install has one (Spaces decision N15), else with the
+    install's shared secret. A token the server no longer takes (expired,
+    revoked) falls back to the secret for the rest of the run."""
 
     def __init__(self, live: Path, base: str | None = None) -> None:
         self.base = base or live_base(live)
         self.secret = env_value(live / ".env", "KAZMA_SECRET")
+        self.token = owner_token(live)
 
-    def request(self, method: str, path: str, body: dict | None = None, timeout: float = 30.0):
+    def _open(self, method: str, path: str, body: dict | None, timeout: float):
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, method=method)
         req.add_header("Content-Type", "application/json")
-        if self.secret:
+        if self.token:
+            req.add_header("Authorization", f"Bearer {self.token}")
+        elif self.secret:
             req.add_header("X-Kazma-Secret", self.secret)
         return urllib.request.urlopen(req, timeout=timeout)  # noqa: S310 -- loopback, fixed scheme
+
+    def request(self, method: str, path: str, body: dict | None = None, timeout: float = 30.0):
+        try:
+            return self._open(method, path, body, timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 401 or not (self.token and self.secret):
+                raise
+            self.token = ""
+            return self._open(method, path, body, timeout)
 
     def json(self, method: str, path: str, body: dict | None = None, timeout: float = 30.0) -> tuple[int, dict]:
         try:

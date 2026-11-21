@@ -125,6 +125,54 @@ def _effective_tool_timeout() -> float:
     return _configured_tool_timeout()
 
 
+def stored_api_tokens(store: Any) -> list[dict[str, Any]]:
+    """The API tokens *store* holds (metadata only; the raw token is never
+    stored)."""
+    tokens = store.get("account.tokens", [])
+    # ConfigStore json.dumps on write; older code double-encoded with
+    # json.dumps before set(), so peel nested JSON strings.
+    for _ in range(3):
+        if isinstance(tokens, str):
+            try:
+                tokens = json.loads(tokens)
+            except (json.JSONDecodeError, TypeError):
+                tokens = []
+                break
+        else:
+            break
+    if not isinstance(tokens, list):
+        return []
+    return [t for t in tokens if isinstance(t, dict)]
+
+
+def create_api_token_in(store: Any, name: str, role: str = "operator") -> dict[str, Any]:
+    """Make an API token in *store* (``SettingsManager.create_api_token``;
+    the Spaces move makes the owner's deploy token with it, S1-33). Returns
+    the raw token once; only its hash is kept."""
+    import hashlib
+
+    from kazma_core.security.platform_rbac import ROLE_RANK
+
+    role = (role or "operator").strip().lower()
+    if role not in ROLE_RANK:
+        raise ValueError(f"Invalid role {role!r}; use viewer, operator or admin")
+    token = f"kazma_{secrets.token_hex(32)}"
+    token_entry = {
+        "id": secrets.token_hex(8),
+        "name": (name or "unnamed").strip() or "unnamed",
+        "role": role,
+        "token_prefix": token[:16],
+        "token_hash": hashlib.sha256(token.encode()).hexdigest(),
+        "created_at": datetime.now(UTC).isoformat(),
+        "expires_days": 90,
+    }
+    tokens = stored_api_tokens(store)
+    tokens.append(token_entry)
+    # Pass a list — ConfigStore already json.dumps; do NOT double-encode.
+    store.set("account.tokens", tokens, category="account")
+    return {"status": "ok", "token": token, "id": token_entry["id"], "role": role}
+
+
 class SettingsManager:
     """Comprehensive settings manager wrapping ConfigStore."""
 
@@ -971,21 +1019,7 @@ class SettingsManager:
 
     def get_api_tokens(self) -> list[dict[str, Any]]:
         """List API tokens (metadata only; raw secret is never stored)."""
-        tokens = self._cs.get("account.tokens", [])
-        # ConfigStore json.dumps on write; older code double-encoded with
-        # json.dumps before set(), so peel nested JSON strings.
-        for _ in range(3):
-            if isinstance(tokens, str):
-                try:
-                    tokens = json.loads(tokens)
-                except (json.JSONDecodeError, TypeError):
-                    tokens = []
-                    break
-            else:
-                break
-        if not isinstance(tokens, list):
-            return []
-        return [t for t in tokens if isinstance(t, dict)]
+        return stored_api_tokens(self._cs)
 
     def create_api_token(self, name: str, role: str = "operator") -> dict[str, Any]:
         """Generate a new API token with the role it acts with.
@@ -995,28 +1029,7 @@ class SettingsManager:
         handed to another program or agent is an operator unless the owner
         chose otherwise when making it. ``ValueError`` for any other role.
         """
-        from kazma_core.security.platform_rbac import ROLE_RANK
-
-        role = (role or "operator").strip().lower()
-        if role not in ROLE_RANK:
-            raise ValueError(f"Invalid role {role!r}; use viewer, operator or admin")
-        token = f"kazma_{secrets.token_hex(32)}"
-        import hashlib
-        token_hash = hashlib.sha256(token.encode()).hexdigest()
-        token_entry = {
-            "id": secrets.token_hex(8),
-            "name": (name or "unnamed").strip() or "unnamed",
-            "role": role,
-            "token_prefix": token[:16],
-            "token_hash": token_hash,
-            "created_at": datetime.now(UTC).isoformat(),
-            "expires_days": 90,
-        }
-        tokens = self.get_api_tokens()
-        tokens.append(token_entry)
-        # Pass a list — ConfigStore already json.dumps; do NOT double-encode.
-        self._cs.set("account.tokens", tokens, category="account")
-        return {"status": "ok", "token": token, "id": token_entry["id"], "role": role}
+        return create_api_token_in(self._cs, name, role)
 
     def revoke_api_token(self, token_id: str) -> bool:
         """Revoke an API token by id. Returns True if a token was removed."""

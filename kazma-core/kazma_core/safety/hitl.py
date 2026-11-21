@@ -117,13 +117,21 @@ def reset_current_tenant_id(token: contextvars.Token[str | None]) -> None:
 
 
 def get_current_tenant_id() -> str:
-    """Get the active tenant_id for the current context (default 'default').
+    """The space this work is in: the bound tenant, else the bound scope's.
 
-    The floor is applied here, on read. ``tenant_context`` stores ``None`` for
-    "no tenant installed", which is what the vault's scoped resolver needs to
-    tell an explicit 'default' tenant from an absent one.
+    With nothing bound: the owner's space while Spaces is not enforced (one
+    operator, as before), and ``NoSpaceBound`` once it is (S1-33: a memory
+    tool with nothing bound acted in the owner's space). ``tenant_context``
+    itself stores ``None`` for "no tenant installed", which is what the
+    vault's scoped resolver needs to tell an explicit 'default' tenant from
+    an absent one.
     """
-    return _tenant_context.get_current_tenant_id() or "default"
+    bound = _tenant_context.get_current_tenant_id()
+    if bound:
+        return bound
+    from kazma_core.spaces.scope import require_space_id
+
+    return require_space_id()
 
 
 # ── Default tool tiers ────────────────────────────────────────────────

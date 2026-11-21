@@ -44,7 +44,10 @@ _UNAVAILABLE = {"ok": False, "error": "identity_unavailable",
 
 
 def _refused(exc: people.PeopleRefused) -> JSONResponse:
-    return JSONResponse({"ok": False, "error": exc.code, "message": str(exc)}, status_code=exc.status)
+    body: dict[str, Any] = {"ok": False, "error": exc.code, "message": str(exc)}
+    if exc.missing:
+        body["missing"] = exc.missing
+    return JSONResponse(body, status_code=exc.status)
 
 
 def _unavailable() -> JSONResponse:

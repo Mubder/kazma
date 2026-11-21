@@ -602,13 +602,17 @@ class SecretVault:
             if sealing_space(row["name"], row["tenant_id"]) == space
         ]
 
-    def _reseal(self, space: str, rows: list[Any], key_id: str | None) -> int:
+    def _reseal(self, space: str, rows: list[Any], key_id: str | None, *,
+                value: str | None = None) -> int:
         """Write each of *rows* again under *key_id* (None: the install's
         vault key), reading every value back before it is written (plan R4).
-        Caller holds the lock and an open transaction."""
+        With *value*, that value is written in place of the row's own
+        (:meth:`settle_copies`). Caller holds the lock and an open
+        transaction."""
         moved = 0
+        given = value
         for row in rows:
-            value = self._open_row(row)
+            value = self._open_row(row) if given is None else given
             if key_id is None:
                 ct, nonce = self._encrypt(value)
             else:
@@ -1206,6 +1210,122 @@ class SecretVault:
                 len(found), ", ".join(d["name"] for d in found),
             )
         return len(found)
+
+    # ── One owner, one value (Spaces S1-33) ─────────────────────────────
+
+    def _copy_groups(self) -> dict[tuple[str, str], list[Any]]:
+        """Every row, grouped by (name, whose it is once Spaces is enforced):
+        ``"install"``, or the space -- the one its name carries, else its
+        row's tenant, and a row with no tenant is the owner's space's (N19).
+        Caller holds the lock."""
+        groups: dict[tuple[str, str], list[Any]] = {}
+        for row in self._conn.execute(
+            "SELECT id, rowid AS n, name, tenant_id, updated_at, key_id, encrypted_value, nonce "
+            "FROM secrets ORDER BY rowid"
+        ).fetchall():
+            kind, named = secret_scope(row["name"])
+            whose = "install" if kind == "install" else (named or row["tenant_id"] or _owner_space())
+            groups.setdefault((row["name"], whose), []).append(row)
+        return groups
+
+    @staticmethod
+    def _winning_copy(name: str, whose: str, rows: list[Any]) -> Any:
+        """The copy the others take: the newest, or the global one for the
+        install's names whose rule says so (as ``consolidate_install_scoped``)."""
+        pool = rows
+        if whose == "install" and _install_scope_rule(name) == "global":
+            pool = [r for r in rows if r["tenant_id"] is None] or rows
+        return max(pool, key=lambda r: (r["updated_at"] or "", r["n"]))
+
+    def _digests(self, rows: list[Any]) -> list[str | None]:
+        """One digest per row (None: the row does not open). Never a value."""
+        import hashlib
+
+        from cryptography.exceptions import InvalidTag
+
+        out: list[str | None] = []
+        for row in rows:
+            try:
+                out.append(hashlib.sha256(self._open_row(row).encode()).hexdigest())
+            except (InvalidTag, ValueError):  # a row that does not open is the answer
+                out.append(None)
+        return out
+
+    def copies_that_disagree(self) -> list[dict[str, Any]]:
+        """Secrets one owner holds in more than one row with different
+        values, as Spaces reads ownership: the install's names across every
+        scope, and each space's names across its rows -- a row with no
+        tenant and a row under ``default`` are both the owner's space's.
+
+        :meth:`find_divergent_duplicates` stops looking at a space's names
+        once Spaces is enforced (the same name in two spaces is two
+        secrets); this one keeps looking inside each space, which is where
+        the owner's two GitHub tokens are. One entry per name: whose it is,
+        each copy's tenant and date, which copy would win
+        (:meth:`settle_copies`) and how many do not open. **Never a value.**
+        """
+        with self._lock:
+            groups = self._copy_groups()
+            out: list[dict[str, Any]] = []
+            for (name, whose), rows in sorted(groups.items()):
+                if len(rows) < 2:
+                    continue
+                digests = self._digests(rows)
+                if len(set(digests)) < 2:
+                    continue
+                winner = self._winning_copy(name, whose, rows)
+                out.append({
+                    "name": name,
+                    "whose": whose,
+                    "copies": [{"tenant_id": r["tenant_id"], "updated_at": r["updated_at"]} for r in rows],
+                    "wins": {"tenant_id": winner["tenant_id"], "updated_at": winner["updated_at"]},
+                    "unreadable": sum(1 for d in digests if d is None),
+                })
+        return out
+
+    def settle_copies(self) -> list[str]:
+        """Give every copy :meth:`copies_that_disagree` names its winning
+        copy's value: one transaction, every value read back before it is
+        written, each row kept under the key it had. No row is deleted. A
+        name whose winning copy does not open is left as it is and not
+        returned. A second run changes nothing. Returns the names settled."""
+        from cryptography.exceptions import InvalidTag
+
+        refuse_write("vault", "settle copies")
+        settled: list[str] = []
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            done = False
+            try:
+                now = datetime.now(UTC).isoformat()
+                for (name, whose), rows in sorted(self._copy_groups().items()):
+                    if len(rows) < 2 or len(set(self._digests(rows))) < 2:
+                        continue
+                    winner = self._winning_copy(name, whose, rows)
+                    try:
+                        value = self._open_row(winner)
+                    except (InvalidTag, ValueError):  # nothing to copy from
+                        logger.warning(
+                            "[Vault] '%s': the newest copy does not open with this "
+                            "KAZMA_VAULT_KEY -- its copies are left as they are", name)
+                        continue
+                    for row in rows:
+                        if row["id"] == winner["id"]:
+                            continue
+                        space = sealing_space(name, row["tenant_id"]) or ""
+                        self._reseal(space, [row], row["key_id"], value=value)
+                        self._conn.execute(
+                            "UPDATE secrets SET updated_at = ? WHERE id = ?", (now, row["id"]))
+                    settled.append(name)
+                self._conn.execute("COMMIT")
+                done = True
+            finally:
+                if not done:
+                    self._conn.execute("ROLLBACK")
+        if settled:
+            logger.info("[Vault] %d secret(s) held in copies that disagreed now hold "
+                        "one value each: %s", len(settled), ", ".join(settled))
+        return settled
 
     def list_secrets(self, tenant_id: str | None = None) -> list[dict[str, Any]]:
         """List all secrets (names + categories, NOT values)."""

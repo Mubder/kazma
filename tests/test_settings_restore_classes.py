@@ -47,6 +47,8 @@ _SKIP_FILES = frozenset({
 #: ``path::function`` of a write whose key the scan cannot read -> the key
 #: patterns it writes (each must be named by a rule), or why there are none.
 DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
+    # The one writer of the Spaces switch (S1-33), by its constant.
+    "kazma-core/kazma_core/spaces/preconditions.py::switch_on": ("identity.enforced",),
     # ``mutate(name, ...)`` writes acquisition.<name> and its revision; the
     # names are read from its callers by test_every_durable_state_name_is_declared.
     "kazma-core/kazma_core/web_acquire/durable_state.py::mutate": (

@@ -2785,6 +2785,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.space_data_err.identity_unavailable": {"en": "Accounts cannot be read right now. Try again.", "ar": "تتعذّر قراءة الحسابات الآن. حاول مجددًا."},
     "settings.people_err.failed": {"en": "That did not work. Try again.", "ar": "لم ينجح ذلك. حاول مجددًا."},
     "settings.people_err.spaces_off": {"en": "People are added once Spaces is on for this install.", "ar": "يُضاف الأشخاص بعد تشغيل المساحات في هذا التثبيت."},
+    "settings.people_err.preconditions_missing": {"en": "Not yet: some things must be in place before another person is added. On this computer, run \"kazma spaces migrate --check\" to see them.", "ar": "ليس بعد: يجب استيفاء بعض الأمور قبل إضافة شخص آخر. على هذا الحاسوب، شغّل «kazma spaces migrate --check» لعرضها."},
     "settings.people_err.bad_name": {"en": "A name is 1 to 64 characters.", "ar": "الاسم من حرف واحد إلى 64 حرفًا."},
     "settings.people_err.weak_password": {"en": "A password is at least 8 characters.", "ar": "كلمة المرور 8 أحرف على الأقل."},
     "settings.people_err.name_taken": {"en": "Someone already has that name.", "ar": "هذا الاسم مستخدم لشخص آخر."},

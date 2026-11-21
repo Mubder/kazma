@@ -323,6 +323,20 @@ def pytest_configure(config):
 # connection left the whole run "away" (every later pool refused at once),
 # and its prober signs in to the real database address. Each test starts
 # with the database answering and a prober that reaches nothing.
+# A second account is made only while its preconditions hold
+# (kazma_core.spaces.preconditions, Spaces S1-33), and a test's install
+# holds few of them: no owner API token, the stage-2 items not built. The
+# tests of everything else make people on an install taken as ready; a test
+# of the preconditions themselves is marked ``real_preconditions``.
+@_pytest.fixture(autouse=True)
+def _second_account_preconditions_hold(request, monkeypatch):
+    if request.node.get_closest_marker("real_preconditions") is None:
+        from kazma_core.spaces import preconditions
+
+        monkeypatch.setattr(preconditions, "missing", lambda **_kw: [])
+    yield
+
+
 @_pytest.fixture(autouse=True)
 def _reset_database_availability(monkeypatch):
     from kazma_core.db import availability

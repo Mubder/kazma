@@ -120,6 +120,11 @@ def main() -> None:
 
         sys.exit(_run_observer(sys.argv[2:]))
 
+    elif cmd == "spaces":
+        from kazma_cli.spaces import run as _run_spaces
+
+        sys.exit(_run_spaces(sys.argv[2:]))
+
     elif cmd == "setup":
         from kazma_cli.setup import run as _run_setup
 
@@ -209,6 +214,7 @@ def main() -> None:
         print("  doctor     Check provider/model resolution (which model, where, will it work)")
         print("  acquisition  Inspect cached crawler errors, usage and credits")
         print("  observer   Kazma Watch, the outside observer (setup, pair, status, unpair)")
+        print("  spaces     Several people on one Kazma (spaces migrate --check: what is missing)")
         print("  setup      Set up what Kazma runs on (setup postgres: PostgreSQL as an OS service)")
         print("  restore    Restore the database to a point in time (restore postgres --to TIME)")
         print("  maintenance  An update window: begin (pause the guard when idle), end (resume and check)")

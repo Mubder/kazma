@@ -13542,8 +13542,9 @@ with a test that fails on the old code and a gate for its class:
 
 Several people on one Kazma (`docs/plans/SPACES_PLAN.md`; its "State of the
 items" table says what is done). A space's id is the stores' `tenant_id`.
-Stage 1's foundation is in; Spaces is NOT enforced and nothing in the
-product can turn it on, so an install with one account behaves as before.
+Stage 1's foundation is in; Spaces is NOT enforced, and the one switch
+that turns it on (S1-33, below) is refused until its preconditions hold, so
+an install with one account behaves as before.
 
 - **The scope is space and asker, bound together** (`spaces/scope.py`):
   `bind_scope(space_id, asker)` binds both and the tenant ContextVar;
@@ -14441,6 +14442,43 @@ product can turn it on, so an install with one account behaves as before.
     `tests/test_backup_restore_spaces.py` (a real backup and a real
     migration: each space reads its secret back, sealed; a restored vault
     without its keys as the control).
+- **Before a second person is let in (S1-33, 2026-11-21).** Spaces is still
+  not on anywhere; this is the check and the refusal.
+  - `kazma_core/spaces/preconditions.py` is the one table (`PRECONDITIONS`):
+    work with no space is refused (`PROBES`, each called with nothing bound
+    under `scope.as_if_enforced`, plus `TENANT_FALLBACKS_LEFT`, held equal
+    to the S1-02 ratchet's baseline), one value per secret
+    (`SecretVault.copies_that_disagree`), a daily limit per person and
+    features per person (missing until the modules `_BUILT_BY` names exist:
+    S2-02, S2-11), no plain copy of the
+    backup leaving the machine (`universal.plain_copy_configured`, N10), the
+    owner's API token for the deploy check (N15), a key per space
+    (`space_keys.report`), and for the switch alone no account left by the
+    older multi-user mode. A check that cannot be made is missing. A new
+    precondition is a row there and a break in the gate's `BREAKS`.
+  - **Who asks**: `people.create_person` for every new account (409
+    `preconditions_missing`, each one named) and `preconditions.switch_on`,
+    the only product code that writes `identity.ENFORCED_KEY`. A new writer
+    of an account or of the switch fails the source gates.
+  - **A function that answers "which space"** refuses with nothing bound
+    once enforced and is added to `PROBES`. `safety.hitl.get_current_tenant_id`
+    asks `require_space_id` (it answered `default`).
+  - **The command** is `kazma spaces migrate`: `--check` and `--dry-run`
+    run inside `read_only_diagnostic`; the move (`preconditions.apply`)
+    copies the vault first, records each step in `system.spaces.migrate`,
+    settles copies (`SecretVault.settle_copies`: the newest copy's value, no
+    row deleted, each row kept under its key), keys and seals spaces, and
+    makes the owner's token (`<install>/.kazma/owner_api.token`, one of
+    Kazma's secret files; `scripts/deploy_live.py` signs in with it and
+    falls back to the shared secret). `--switch-on` is refused while
+    anything is missing. **Never run the move or the switch on the live
+    install without the owner's word.**
+  - **Tests take the preconditions as met** (the root conftest's
+    `_second_account_preconditions_hold`); a test of them is marked
+    `real_preconditions`.
+  - Gate: `tests/test_second_account_preconditions.py` (each precondition
+    missing alone; the switch stored by hand, an account made with no check
+    and the old fallback as controls; planted writers for the source gates).
 - **Count, export and erase one space (S1-27, 2026-11-20).** Only once
   Spaces is enforced (409 `spaces_off`); never the owner's personal space
   (`owners_space`); not yet on Postgres or with memory's Postgres copy

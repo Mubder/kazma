@@ -23,7 +23,8 @@ its data is erased (S1-27).
 
 Only once Spaces is enforced: before that, a second account changes how the
 whole install behaves, and the switch that turns Spaces on checks its
-preconditions first (S1-33). The older multi-user mode keeps its own user
+preconditions first (``spaces.preconditions``, S1-33). A new account asks
+them again, and a missing one refuses it by name. The older multi-user mode keeps its own user
 list (``security.platform_rbac``) until then.
 
 Every function here reads or writes the settings store: call it off the
@@ -69,10 +70,14 @@ _PASSWORD_MIN = 8
 class PeopleRefused(ValueError):
     """A change to the people that is refused; nothing was changed."""
 
-    def __init__(self, code: str, status: int, message: str) -> None:
+    def __init__(self, code: str, status: int, message: str, *,
+                 missing: list[dict[str, Any]] | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.status = status
+        #: For ``preconditions_missing``: each precondition that does not
+        #: hold (id, title, detail, fix).
+        self.missing = list(missing or [])
 
 
 def _now() -> str:
@@ -84,6 +89,22 @@ def _require_enforced() -> None:
         raise PeopleRefused(
             "spaces_off", 409,
             "People are added once Spaces is on for this install.",
+        )
+
+
+def _require_preconditions() -> None:
+    """A new account is made only while every precondition of a second
+    account holds (S1-33): asked again each time, since a setting changed
+    after the switch (a plain copy of the backup, a secret held twice) is
+    somebody's data the day a person is added."""
+    from kazma_core.spaces import preconditions
+
+    left = preconditions.missing()
+    if left:
+        raise PeopleRefused(
+            "preconditions_missing", 409,
+            "Not yet: " + "; ".join(f"{f.title}: {f.detail}" for f in left),
+            missing=[f.as_dict() for f in left],
         )
 
 
@@ -240,6 +261,7 @@ def create_person(name: str, password: str, *, by: str) -> dict[str, Any]:
     and its personal space. Recorded. Returns the person as
     :func:`list_people` lists them."""
     _require_enforced()
+    _require_preconditions()
     name = _checked_name(name)
     password_hash = _password_hash(_checked_password(password))
     account_id = f"p{secrets.token_hex(6)}"

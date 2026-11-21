@@ -308,12 +308,13 @@ def test_a_registry_of_the_wrong_type_is_unreadable() -> None:
         identity.read_registry()
 
 
-# ── Spaces is not enforced, and nothing in the product turns it on ───────
+# ── Spaces is not enforced, and one checked switch turns it on ───────────
 
 
 def test_spaces_is_not_enforced_and_no_product_code_writes_the_switch() -> None:
-    """Until every part of stage 1 keeps spaces apart (plan S1-33) nothing
-    may turn Spaces on: no product code writes the switch."""
+    """Spaces is off, and one function writes the switch:
+    ``preconditions.switch_on`` (plan S1-33), which checks its preconditions
+    first (``tests/test_second_account_preconditions.py``)."""
     assert identity.enforcement_enabled() is False
     writers: list[str] = []
     for package in ("kazma-core", "kazma-ui", "kazma-gateway", "kazma-cli", "kazma-tui",
@@ -329,5 +330,6 @@ def test_spaces_is_not_enforced_and_no_product_code_writes_the_switch() -> None:
                         and node.func.attr in ("set", "batch_set", "atomic_update",
                                                "set_if_absent")
                         and "ENFORCED_KEY" in ast.unparse(node)):
-                    writers.append(f"{path.relative_to(REPO)}:{node.lineno}")
-    assert not writers, f"the Spaces switch is written by: {writers}"
+                    writers.append(path.relative_to(REPO).as_posix())
+    assert writers == ["kazma-core/kazma_core/spaces/preconditions.py"], (
+        f"the Spaces switch is written by: {writers}")

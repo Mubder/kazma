@@ -21,11 +21,22 @@ account, and everything works exactly as it always has. What is built is
 the foundation: every part of Kazma keeps a space's data apart once Spaces
 is on, and each part has a test that runs one space against another.
 
-Before a second account can be switched on, these must pass first: limits
-on what each person may spend each day, the features each person may use,
-the copy of the backup that leaves the machine being encrypted, and a
-reconciliation of secrets an older build stored twice. The plan, with
-every step and its state, is `docs/plans/SPACES_PLAN.md`.
+Before a second account can be switched on, these must hold: work that
+names no space is refused everywhere, every secret has one value, each
+person has a daily spending limit and a list of features they may use, no
+plain copy of the backup leaves the machine, the deploy check signs in with
+the owner's own API token, and every space has its key. Kazma checks them
+itself:
+
+```bash
+kazma spaces migrate --check
+```
+
+It changes nothing and lists each one as holding or missing, with what
+closes it. While one is missing, adding a second person is refused and the
+refusal names it. Today the daily limits and the per-person features are
+not built yet, so the list is never empty. The plan, with every step and
+its state, is `docs/plans/SPACES_PLAN.md`.
 
 This page describes what Spaces does once it is on.
 

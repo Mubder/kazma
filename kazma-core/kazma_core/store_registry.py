@@ -370,6 +370,7 @@ DYNAMIC_NAME_SITES: dict[str, str] = {
     "kazma-core/kazma_core/paths.py": "chat_sessions_spool.db",
     "kazma-core/kazma_core/memory/backup.py": "backup copies (backups dir)",
     "kazma-core/kazma_core/migration/vault_pairing.py": "vault backup before a key reset",
+    "kazma-core/kazma_core/spaces/preconditions.py": "vault backup before the Spaces move",
 }
 
 @dataclass(frozen=True)
@@ -1142,7 +1143,8 @@ def _under(path: Path, root: Path) -> bool:
 
 #: Secret files refused by name wherever they are.
 SECRET_FILE_NAMES: frozenset[str] = frozenset(
-    {"restic.pass", "document_broker.token", "meta.env", "observer.key", "postgres_superuser.pass"}
+    {"restic.pass", "document_broker.token", "meta.env", "observer.key", "postgres_superuser.pass",
+     "owner_api.token"}
 )
 
 #: An env file with one of these endings is a template (``.env.example``),
