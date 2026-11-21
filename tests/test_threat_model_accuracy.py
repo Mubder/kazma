@@ -296,6 +296,24 @@ def _spaces_pages() -> dict[str, str]:
             "safety design": _SAFETY.read_text(encoding="utf-8")}
 
 
+def test_the_pages_say_what_a_space_key_does_and_the_vault_does_it():
+    """S1-26: a space's secrets are sealed with its own key, wrapped by the
+    install's -- so not against the operator -- and the owner's space keeps
+    the vault key (N22)."""
+    pages = _spaces_pages()
+    for name, text in pages.items():
+        flat = " ".join(text.split())
+        assert "sealed with a key of its own" in flat, name
+    assert "wraps every space's" in " ".join(pages["threat model"].split())
+    assert "wraps every space's" in " ".join(pages["guide"].split())
+    from kazma_core.security.vault import sealing_space
+
+    assert sealing_space("space:s1:email.gmail.refresh_token", None) == "s1"
+    assert sealing_space("bank", "s1") == "s1"
+    assert sealing_space("email.gmail.refresh_token", None) is None  # the owner's
+    assert sealing_space("cfg:providers.list.openai.api_key", "s1") is None  # the install's
+
+
 def test_every_spaces_page_says_it_is_not_on_and_keeps_nothing_from_the_operator():
     for name, text in _spaces_pages().items():
         low = " ".join(text.lower().split())

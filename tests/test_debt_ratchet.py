@@ -113,7 +113,10 @@ STRUCTURAL_BASELINE = {
     # ThreadInAnotherSpace, store_registry.space_rule / content_columns, and
     # route_scopes.compile_rules / deciding_rule / unclassed / sample_requests.
     # Lower it as each gains a caller.
-    "module_local_public_symbols": 520,
+    # 521 since 2026-11-21 (S1-26): vault.SpaceKeyMissing, what a sealed row
+    # whose space key is lost raises. Its callers catch it as the ValueError
+    # it is; the switch-on check (S1-33) names it.
+    "module_local_public_symbols": 521,
     "patched_value_imports": 71,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

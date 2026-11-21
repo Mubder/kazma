@@ -412,6 +412,21 @@ def _vault_rows(space: str) -> list[tuple[str, str | None]]:
             (space, len(first), first, len(second), second))]
 
 
+def _vault_keys(space: str) -> int:
+    """How many keys the vault holds for the space (S1-26): they go with it."""
+    from kazma_core import paths
+
+    path = Path(paths.vault_db_path())
+    if not path.is_file():
+        return 0
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
+        try:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM space_keys WHERE space_id = ?", (space,)).fetchone()[0])
+        except sqlite3.OperationalError:  # a vault file from before the table
+            return 0
+
+
 def _workspace_rows(space: str) -> list[dict[str, Any]]:
     """The space's own workspaces (S1-34: a host space's), from the
     ``workspaces`` table of ``settings.db``."""
@@ -679,7 +694,7 @@ def _erase_secrets(space: str) -> int:
     from kazma_core.security.vault import get_vault
 
     rows = _vault_rows(space)
-    if not rows:
+    if not rows and not _vault_keys(space):
         return 0
     vault = get_vault()
     if vault is None:
@@ -697,7 +712,7 @@ def erase_space(space: str, *, by: str) -> dict[str, Any]:
         raise SpaceDataRefused(
             "personal_space_lives", 409,
             "A personal space is erased once its person is deleted (People).")
-    if _vault_rows(space):
+    if _vault_rows(space) or _vault_keys(space):
         from kazma_core.security.vault import get_vault
 
         if get_vault() is None:  # refused before anything is changed

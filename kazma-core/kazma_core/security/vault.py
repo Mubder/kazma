@@ -42,6 +42,7 @@ from kazma_core.tenant_context import get_current_tenant_id
 __all__ = [
     "INSTALL_SCOPED_SECRETS",
     "SecretVault",
+    "SpaceKeyMissing",
     "VaultScopeError",
     "consolidate_install_scoped_secrets",
     "get_vault",
@@ -51,6 +52,7 @@ __all__ = [
     "reset_vault",
     "retrieve_scoped",
     "retrieve_with_tenant_ladder",
+    "sealing_space",
     "secret_scope",
 ]
 
@@ -210,6 +212,12 @@ class VaultScopeError(PermissionError):
     """A write named a secret of another space than the one the work is in."""
 
 
+class SpaceKeyMissing(ValueError):
+    """A sealed row names a space key that is gone, does not unwrap with this
+    install's vault key, or is another space's than the row's. The row is
+    refused: never opened with another key (Spaces S1-26)."""
+
+
 def secret_scope(name: str) -> tuple[str, str | None]:
     """Whose secret *name* is once Spaces is enforced: ``("install", None)``,
     or ``("space", <id>)`` when the name itself carries its space, or
@@ -302,7 +310,56 @@ CREATE TABLE IF NOT EXISTS vault_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS space_keys (
+    key_id TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL,
+    wrapped BLOB NOT NULL,
+    nonce BLOB NOT NULL,
+    wrap TEXT NOT NULL,
+    state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    retired_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_space_keys_active ON space_keys(space_id) WHERE state = 'active';
 """
+
+# ── A key per space (Spaces S1-26) ─────────────────────────────────────────
+#
+# A space other than the owner's has a key of its own, kept in ``space_keys``
+# beside the rows it seals: the salt, the wrapped keys and the sealed rows are
+# one file, so a backup, a migration bundle and a restore always carry them
+# from the same moment. The key is 32 random bytes, wrapped (AES-256-GCM)
+# under a key derived from the install's vault key for wrapping alone, with
+# its space and its id as associated data: a wrapped key copied onto another
+# space's row does not unwrap. A sealed row names its key (``secrets.key_id``;
+# NULL is the install's vault key, every row written before S1-26 and every
+# row of the install and of the owner's space, decision N22), and a read
+# always follows that id. ``wrap`` says how a key is wrapped, so a later
+# version can wrap it with something only the space's members hold.
+
+#: How a space key is wrapped today (the ``wrap`` column).
+_WRAP_SCHEME = "vault-key/hkdf-sha256/aes-256-gcm/v1"
+_WRAP_INFO = b"kazma/space-key-wrap/v1"
+_KEY_AAD = "kazma-space-key/v1"
+_ROW_AAD = "kazma-vault-row/v1"
+
+
+def _aad(*parts: str) -> bytes:
+    """Associated data: the parts, NUL-separated (no id or name holds NUL)."""
+    return "\x00".join(parts).encode("utf-8")
+
+
+def sealing_space(name: str, tenant_id: str | None) -> str | None:
+    """The space whose key seals the row (*name*, *tenant_id*), or None for
+    the install's vault key: the install's secrets, and the owner's space's
+    (its secrets are not sealed again until stage 4, decision N22)."""
+    kind, named = secret_scope(name)
+    if kind == "install":
+        return None
+    space = named if named is not None else (tenant_id or _owner_space())
+    if not space or space == _owner_space():
+        return None
+    return space
 
 
 class SecretVault:
@@ -329,7 +386,12 @@ class SecretVault:
         self._db_path = str(Path(db_path).resolve())
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
-        self._lock = threading.Lock()
+        # Re-entrant: opening a sealed row unwraps its space key under the
+        # same lock the caller already holds.
+        self._lock = threading.RLock()
+        # Unwrapped space keys by key id: (space, key). Dropped at close().
+        self._space_keys: dict[str, tuple[str, bytes]] = {}
+        self._wrapping_key_bytes: bytes | None = None
         # Names already reported by _note_scoped_miss: once per name per process.
         self._scoped_miss_warned: set[str] = set()
         self._conn = sqlite3.connect(
@@ -338,6 +400,12 @@ class SecretVault:
         self._conn.row_factory = sqlite3.Row
         apply_sqlite_pragmas(self._conn)
         self._conn.executescript(_SCHEMA)
+        from kazma_core.db.sqlite_columns import add_missing_columns
+
+        # The key a row is sealed with: NULL is the install's vault key.
+        add_missing_columns(self._conn, "secrets", [("key_id", "TEXT")])
+        # A deleted secret or key leaves no bytes in the file's freed pages.
+        self._conn.execute("PRAGMA secure_delete = ON")
 
         # Derive the encryption key from KAZMA_VAULT_KEY.
         raw_key = os.environ.get("KAZMA_VAULT_KEY", "").encode("utf-8")
@@ -384,6 +452,277 @@ class SecretVault:
         aesgcm = self._AESGCM(self._key)
         pt = aesgcm.decrypt(nonce, ciphertext, None)
         return pt.decode("utf-8")
+
+    # ── Space keys (S1-26) ──────────────────────────────────────────────
+
+    def _wrapping_key(self) -> bytes:
+        """The key space keys are wrapped with: derived from the vault's key
+        for this one use, never the key that seals the install's rows."""
+        if self._wrapping_key_bytes is None:
+            from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+            self._wrapping_key_bytes = HKDF(
+                algorithm=self._hashes.SHA256(), length=_KEY_BYTES, salt=None, info=_WRAP_INFO,
+            ).derive(self._key)
+        return self._wrapping_key_bytes
+
+    def _wrap_space_key(self, space: str, key_id: str, key: bytes) -> tuple[bytes, bytes]:
+        nonce = _secrets.token_bytes(_NONCE_BYTES)
+        wrapped = self._AESGCM(self._wrapping_key()).encrypt(nonce, key, _aad(_KEY_AAD, space, key_id))
+        return wrapped, nonce
+
+    def _space_key(self, key_id: str) -> tuple[str, bytes]:
+        """``(space, key)`` of *key_id*, unwrapped; :class:`SpaceKeyMissing`
+        when it is gone or does not unwrap with this install's vault key."""
+        from cryptography.exceptions import InvalidTag
+
+        with self._lock:
+            held = self._space_keys.get(key_id)
+            if held is not None:
+                return held
+            row = self._conn.execute(
+                "SELECT space_id, wrapped, nonce, wrap FROM space_keys WHERE key_id = ?", (key_id,),
+            ).fetchone()
+            if row is None:
+                raise SpaceKeyMissing(f"the space key {key_id} is not in this vault")
+            if row["wrap"] != _WRAP_SCHEME:
+                raise SpaceKeyMissing(f"the space key {key_id} is wrapped in a way this build does not know")
+            try:
+                key = self._AESGCM(self._wrapping_key()).decrypt(
+                    row["nonce"], row["wrapped"], _aad(_KEY_AAD, row["space_id"], key_id),
+                )
+            except InvalidTag:
+                raise SpaceKeyMissing(
+                    f"the space key {key_id} does not unwrap with this install's vault key"
+                ) from None
+            self._space_keys[key_id] = (row["space_id"], key)
+            return self._space_keys[key_id]
+
+    def _active_key_id(self, space: str, *, make: bool) -> str | None:
+        """The id of *space*'s active key; made when *make* and it has none
+        (inside the caller's transaction when one is open, so a first sealed
+        row and its key are written together). Caller holds the lock."""
+        from kazma_core.spaces.scope import valid_space_id
+
+        if not valid_space_id(space) or space == _owner_space():
+            raise ValueError(f"not a space that has a key of its own: {space!r}")
+        select = "SELECT key_id FROM space_keys WHERE space_id = ? AND state = 'active'"
+        row = self._conn.execute(select, (space,)).fetchone()
+        if row is not None or not make:
+            return row["key_id"] if row is not None else None
+        key_id = "k" + _secrets.token_hex(8)
+        key = _secrets.token_bytes(_KEY_BYTES)
+        wrapped, nonce = self._wrap_space_key(space, key_id, key)
+        # Another process may make the space's key at the same moment: one
+        # active key per space is the index's rule, and the loser reads the
+        # winner's.
+        self._conn.execute(
+            "INSERT OR IGNORE INTO space_keys (key_id, space_id, wrapped, nonce, wrap, state, created_at) "
+            "VALUES (?, ?, ?, ?, ?, 'active', ?)",
+            (key_id, space, wrapped, nonce, _WRAP_SCHEME, datetime.now(UTC).isoformat()),
+        )
+        made = self._conn.execute(select, (space,)).fetchone()["key_id"]
+        if made == key_id:
+            logger.info("[Vault] Made the key %s of space %s", key_id, space)
+        return made
+
+    def ensure_space_key(self, space: str) -> str:
+        """The id of *space*'s active key, made if it has none. Never the
+        owner's space (N22)."""
+        refuse_write("vault", f"{_SPACE_NAME_PREFIX}{space}:")
+        with self._lock:
+            return str(self._active_key_id(space, make=True))
+
+    def space_key_ids(self, space: str) -> list[dict[str, Any]]:
+        """The keys of *space*: id, state, when made. Never a key."""
+        with self._lock:
+            return [
+                {"key_id": r["key_id"], "state": r["state"], "created_at": r["created_at"]}
+                for r in self._conn.execute(
+                    "SELECT key_id, state, created_at FROM space_keys WHERE space_id = ? ORDER BY created_at, key_id",
+                    (space,),
+                )
+            ]
+
+    def _seal_with(self, space: str, key_id: str, name: str, value: str) -> tuple[bytes, bytes]:
+        """*value* sealed with the space key *key_id*, bound to its space,
+        its key and its name. Returns (ciphertext, nonce)."""
+        held_space, key = self._space_key(key_id)
+        if held_space != space:
+            raise SpaceKeyMissing(f"the space key {key_id} is another space's")
+        nonce = _secrets.token_bytes(_NONCE_BYTES)
+        ct = self._AESGCM(key).encrypt(nonce, value.encode("utf-8"), _aad(_ROW_AAD, space, key_id, name))
+        return ct, nonce
+
+    def _seal(self, name: str, value: str, tenant_id: str | None) -> tuple[bytes, bytes, str | None]:
+        """The row (*name*, *tenant_id*) sealed: (ciphertext, nonce, key id).
+
+        With the install's vault key (key id None) for the install's and the
+        owner's space's secrets, and for every row while Spaces is not
+        enforced -- an install with one account writes exactly what it wrote
+        before S1-26. Once enforced, another space's secret is sealed with
+        that space's key. Caller holds the lock.
+        """
+        space = sealing_space(name, tenant_id) if _enforced() else None
+        if space is None:
+            ct, nonce = self._encrypt(value)
+            return ct, nonce, None
+        key_id = str(self._active_key_id(space, make=True))
+        ct, nonce = self._seal_with(space, key_id, name, value)
+        return ct, nonce, key_id
+
+    def _open(self, name: str, tenant_id: str | None, key_id: str | None,
+              ciphertext: bytes, nonce: bytes) -> str:
+        """The value of one row. A row with no key id opens with the install's
+        vault key, as every row did; one that names a key opens with that key
+        only, and only when the key is the row's own space's."""
+        if not key_id:
+            return self._decrypt(ciphertext, nonce)
+        from cryptography.exceptions import InvalidTag
+
+        space, key = self._space_key(key_id)
+        if space != sealing_space(name, tenant_id):
+            raise SpaceKeyMissing(f"the row {name!r} names the key of another space")
+        try:
+            pt = self._AESGCM(key).decrypt(nonce, ciphertext, _aad(_ROW_AAD, space, key_id, name))
+        except InvalidTag:
+            raise SpaceKeyMissing(f"the row {name!r} does not open with the key it names") from None
+        return pt.decode("utf-8")
+
+    def _open_row(self, row: Any) -> str:
+        return self._open(row["name"], row["tenant_id"], row["key_id"], row["encrypted_value"], row["nonce"])
+
+    def _space_rows(self, space: str) -> list[Any]:
+        """Every row of *space* (by its id or by a name that carries it).
+        Caller holds the lock."""
+        return [
+            row for row in self._conn.execute(
+                "SELECT id, name, tenant_id, key_id, encrypted_value, nonce FROM secrets ORDER BY rowid"
+            ).fetchall()
+            if sealing_space(row["name"], row["tenant_id"]) == space
+        ]
+
+    def _reseal(self, space: str, rows: list[Any], key_id: str | None) -> int:
+        """Write each of *rows* again under *key_id* (None: the install's
+        vault key), reading every value back before it is written (plan R4).
+        Caller holds the lock and an open transaction."""
+        moved = 0
+        for row in rows:
+            value = self._open_row(row)
+            if key_id is None:
+                ct, nonce = self._encrypt(value)
+            else:
+                ct, nonce = self._seal_with(space, key_id, row["name"], value)
+            if self._open(row["name"], row["tenant_id"], key_id, ct, nonce) != value:
+                raise SpaceKeyMissing(f"the row {row['name']!r} did not read back after sealing")
+            self._conn.execute(
+                "UPDATE secrets SET encrypted_value = ?, nonce = ?, key_id = ? WHERE id = ?",
+                (ct, nonce, key_id, row["id"]),
+            )
+            moved += 1
+        return moved
+
+    def _in_one_step(self, space: str, work: Any) -> Any:
+        """Run *work* for *space* as one transaction: all of it or none."""
+        refuse_write("vault", f"{_SPACE_NAME_PREFIX}{space}:")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            done = False
+            try:
+                result = work()
+                self._conn.execute("COMMIT")
+                done = True
+            finally:
+                if not done:
+                    self._conn.execute("ROLLBACK")
+                    self._space_keys.clear()  # a key made in the step is gone
+            return result
+
+    def seal_space(self, space: str) -> int:
+        """Seal with *space*'s key every row of it still under the install's
+        vault key (rows written before the space had a key). One transaction,
+        every value read back; a second run moves nothing. Returns the rows
+        moved. :meth:`unseal_space` is its inverse."""
+        def _work() -> int:
+            key_id = str(self._active_key_id(space, make=True))
+            return self._reseal(space, [r for r in self._space_rows(space) if not r["key_id"]], key_id)
+
+        moved = self._in_one_step(space, _work)
+        if moved:
+            logger.info("[Vault] Sealed %d secret(s) of space %s with its key", moved, space)
+        return moved
+
+    def unseal_space(self, space: str) -> int:
+        """Put every sealed row of *space* back under the install's vault
+        key (the inverse of :meth:`seal_space`; its keys stay). Returns the
+        rows moved."""
+        def _work() -> int:
+            self._active_key_id(space, make=False)  # refuses the owner's and a bad id
+            return self._reseal(space, [r for r in self._space_rows(space) if r["key_id"]], None)
+
+        moved = self._in_one_step(space, _work)
+        if moved:
+            logger.info("[Vault] %d secret(s) of space %s are back under the install's vault key", moved, space)
+        return moved
+
+    def rotate_space_key(self, space: str) -> str:
+        """Give *space* a new key: the old one is retired, every sealed row
+        is sealed again with the new one (read back first), and a retired key
+        no row names any more is deleted. One transaction. Returns the new
+        key's id."""
+        def _work() -> str:
+            rows = [r for r in self._space_rows(space) if r["key_id"]]
+            old = self._active_key_id(space, make=False)
+            if old is not None:
+                self._conn.execute(
+                    "UPDATE space_keys SET state = 'retired', retired_at = ? WHERE key_id = ?",
+                    (datetime.now(UTC).isoformat(), old),
+                )
+            new = str(self._active_key_id(space, make=True))
+            self._reseal(space, rows, new)
+            self._conn.execute(
+                "DELETE FROM space_keys WHERE space_id = ? AND state = 'retired' AND key_id NOT IN "
+                "(SELECT key_id FROM secrets WHERE key_id IS NOT NULL)",
+                (space,),
+            )
+            return new
+
+        new = self._in_one_step(space, _work)
+        with self._lock:
+            self._space_keys.clear()
+        logger.info("[Vault] Space %s has the new key %s", space, new)
+        return new
+
+    def key_report(self) -> dict[str, Any]:
+        """What the space keys and the rows that name them look like, with
+        no value and no key: ``keys`` (space -> its active key's id),
+        ``sealed`` and ``unsealed`` (space -> rows under its key / still
+        under the install's vault key) and ``broken`` (rows naming a key
+        that is gone, does not unwrap or is another space's: lost)."""
+        with self._lock:
+            keys = {
+                r["space_id"]: r["key_id"] for r in self._conn.execute(
+                    "SELECT space_id, key_id FROM space_keys WHERE state = 'active'")
+            }
+            rows = self._conn.execute(
+                "SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets ORDER BY rowid"
+            ).fetchall()
+            sealed: dict[str, int] = {}
+            unsealed: dict[str, int] = {}
+            broken = 0
+            for row in rows:
+                space = sealing_space(row["name"], row["tenant_id"])
+                if not row["key_id"]:
+                    if space is not None:
+                        unsealed[space] = unsealed.get(space, 0) + 1
+                    continue
+                try:
+                    self._open_row(row)
+                except SpaceKeyMissing:
+                    broken += 1
+                    continue
+                sealed[str(space)] = sealed.get(str(space), 0) + 1
+        return {"keys": keys, "sealed": sealed, "unsealed": unsealed, "broken": broken}
 
     # ── Tenant resolution ───────────────────────────────────────────────
 
@@ -435,7 +774,6 @@ class SecretVault:
             return self._write_install_scoped(name, value, category, metadata)[1]
         else:
             tid = self._tenant_filter(tenant_id)
-        ct, nonce = self._encrypt(value)
         now = datetime.now(UTC).isoformat()
         sid = _secrets.token_hex(16)
         meta = json.dumps(metadata or {})
@@ -449,14 +787,18 @@ class SecretVault:
                     "DELETE FROM secrets WHERE name = ? AND COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')",
                     (name, tid),
                 )
+                # Sealed inside the step: a space's first sealed row and its
+                # key are written together (S1-26).
+                ct, nonce, key_id = self._seal(name, value, tid)
                 self._conn.execute(
-                    """INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, tenant_id, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (sid, name, ct, nonce, category, meta, tid, now, now),
+                    """INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, tenant_id, created_at, updated_at, key_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (sid, name, ct, nonce, category, meta, tid, now, now, key_id),
                 )
                 self._conn.execute("COMMIT")
             except Exception:
                 self._conn.execute("ROLLBACK")
+                self._space_keys.clear()  # a key made in the step is gone
                 raise
         logger.info("[Vault] Stored secret '%s' (category=%s, tenant=%s)", name, category, tid or "global")
         return sid
@@ -530,7 +872,7 @@ class SecretVault:
         meta = json.dumps(metadata or {})
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, tenant_id, encrypted_value, nonce FROM secrets "
+                "SELECT id, name, tenant_id, key_id, encrypted_value, nonce FROM secrets "
                 "WHERE name = ? ORDER BY rowid DESC",
                 (name,),
             ).fetchall()
@@ -541,9 +883,7 @@ class SecretVault:
                     continue
                 ids[row["tenant_id"]] = row["id"]
                 try:
-                    newest[row["tenant_id"]] = self._decrypt(
-                        row["encrypted_value"], row["nonce"],
-                    )
+                    newest[row["tenant_id"]] = self._open_row(row)
                 except (InvalidTag, ValueError):
                     newest[row["tenant_id"]] = None  # unreadable: rewrite it
             scopes = [None, *sorted(t for t in newest if t is not None)]
@@ -555,7 +895,7 @@ class SecretVault:
             committed = False
             try:
                 for scope in stale:
-                    ct, nonce = self._encrypt(value)
+                    ct, nonce, key_id = self._seal(name, value, scope)
                     ids[scope] = _secrets.token_hex(16)
                     self._conn.execute(
                         "DELETE FROM secrets WHERE name = ? AND "
@@ -563,15 +903,16 @@ class SecretVault:
                         (name, scope),
                     )
                     self._conn.execute(
-                        """INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, tenant_id, created_at, updated_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (ids[scope], name, ct, nonce, category, meta, scope, now, now),
+                        """INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, tenant_id, created_at, updated_at, key_id)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (ids[scope], name, ct, nonce, category, meta, scope, now, now, key_id),
                     )
                 self._conn.execute("COMMIT")
                 committed = True
             finally:
                 if not committed:
                     self._conn.execute("ROLLBACK")
+                    self._space_keys.clear()  # a key made in the step is gone
         logger.info(
             "[Vault] Stored secret '%s' at install scope (%d row(s) written: %s)",
             name, len(stale), ", ".join(s or "global" for s in stale),
@@ -599,7 +940,7 @@ class SecretVault:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT rowid, name, tenant_id, category, updated_at, "
-                "encrypted_value, nonce FROM secrets"
+                "key_id, encrypted_value, nonce FROM secrets"
             ).fetchall()
         by_name: dict[str, list[Any]] = {}
         for row in rows:
@@ -614,7 +955,7 @@ class SecretVault:
                 pool = [r for r in group if r["tenant_id"] is None] or group
             latest = max(pool, key=lambda r: (r["updated_at"] or "", r["rowid"]))
             try:
-                value = self._decrypt(latest["encrypted_value"], latest["nonce"])
+                value = self._open_row(latest)
             except (InvalidTag, ValueError):
                 logger.warning(
                     "[Vault] '%s': the winning copy does not decrypt with this "
@@ -674,13 +1015,13 @@ class SecretVault:
             # widening this lookup.
             for query_tid in ([tid] if tid else []) + [None]:
                 row = self._conn.execute(
-                    """SELECT encrypted_value, nonce FROM secrets
+                    """SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets
                        WHERE name = ? AND COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')
                        ORDER BY rowid DESC LIMIT 1""",
                     (name, query_tid),
                 ).fetchone()
                 if row:
-                    return self._decrypt(row["encrypted_value"], row["nonce"])
+                    return self._open_row(row)
             self._note_scoped_miss(name, tid)
         return None
 
@@ -708,13 +1049,13 @@ class SecretVault:
         with self._lock:
             for query_tid in scopes:
                 row = self._conn.execute(
-                    """SELECT encrypted_value, nonce FROM secrets
+                    """SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets
                        WHERE name = ? AND COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')
                        ORDER BY rowid DESC LIMIT 1""",
                     (name, query_tid),
                 ).fetchone()
                 if row:
-                    return self._decrypt(row["encrypted_value"], row["nonce"])
+                    return self._open_row(row)
         return None
 
     def _note_scoped_miss(self, name: str, tid: str | None) -> None:
@@ -771,14 +1112,14 @@ class SecretVault:
         """
         with self._lock:
             rows = self._conn.execute(
-                """SELECT tenant_id, updated_at, encrypted_value, nonce
+                """SELECT name, tenant_id, updated_at, key_id, encrypted_value, nonce
                    FROM secrets WHERE name = ? ORDER BY rowid DESC""",
                 (name,),
             ).fetchall()
         out: list[dict[str, Any]] = []
         for r in rows:
             try:
-                self._decrypt(r["encrypted_value"], r["nonce"])
+                self._open_row(r)
                 decrypts = True
             except Exception:  # noqa: BLE001 — a failure IS the answer here
                 decrypts = False
@@ -811,15 +1152,13 @@ class SecretVault:
 
         # Each scope's newest row, decrypted here: once Spaces is enforced
         # ``retrieve`` answers by the caller's space, not by the row asked.
-        by_name: dict[str, dict[str | None, tuple[Any, Any, Any]]] = defaultdict(dict)
+        by_name: dict[str, dict[str | None, tuple[Any, Any]]] = defaultdict(dict)
         with self._lock:
             for row in self._conn.execute(
-                "SELECT name, tenant_id, updated_at, encrypted_value, nonce "
+                "SELECT name, tenant_id, updated_at, key_id, encrypted_value, nonce "
                 "FROM secrets ORDER BY rowid DESC"
             ).fetchall():
-                by_name[row["name"]].setdefault(
-                    row["tenant_id"], (row["updated_at"], row["encrypted_value"], row["nonce"])
-                )
+                by_name[row["name"]].setdefault(row["tenant_id"], (row["updated_at"], row))
         enforced = _enforced()
 
         out: list[dict[str, Any]] = []
@@ -830,11 +1169,11 @@ class SecretVault:
             # once enforced only the install's names can disagree.
             if enforced and secret_scope(name)[0] != "install":
                 continue
-            entries = [(tid, updated) for tid, (updated, _ct, _nonce) in scopes.items()]
+            entries = [(tid, updated) for tid, (updated, _row) in scopes.items()]
             seen: dict[str, str] = {}
-            for tid, (_updated, ct, nonce) in scopes.items():
+            for tid, (_updated, held) in scopes.items():
                 try:
-                    value = self._decrypt(ct, nonce)
+                    value = self._open_row(held)
                 except Exception:  # pragma: no cover - unreadable row
                     value = None
                 seen[str(tid)] = hashlib.sha256((value or "").encode()).hexdigest()
@@ -935,13 +1274,13 @@ class SecretVault:
 
         with self._lock:
             rows = self._conn.execute(
-                "SELECT name, encrypted_value, nonce FROM secrets ORDER BY name LIMIT ?",
+                "SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets ORDER BY name LIMIT ?",
                 (int(limit),),
             ).fetchall()
         out: list[tuple[str, bool]] = []
         for r in rows:
             try:
-                self._decrypt(r["encrypted_value"], r["nonce"])
+                self._open_row(r)
                 out.append((r["name"], True))
             except (InvalidTag, ValueError):  # the wrong key: that is the answer
                 out.append((r["name"], False))
@@ -1006,10 +1345,29 @@ class SecretVault:
         refuse_write("vault", f"{_SPACE_NAME_PREFIX}{space_id}:")
         prefixes = (f"{_SPACE_NAME_PREFIX}{space_id}:", f"cfg:tenant.{space_id}.")
         with self._lock:
-            cur = self._conn.execute(
-                "DELETE FROM secrets WHERE tenant_id = ? OR substr(name, 1, ?) = ? OR substr(name, 1, ?) = ?",
-                (space_id, len(prefixes[0]), prefixes[0], len(prefixes[1]), prefixes[1]),
-            )
+            # The rows and the keys that seal them go in one step: with its
+            # key gone, a sealed copy left anywhere in this file opens with
+            # nothing, the vault key included (S1-26).
+            self._conn.execute("BEGIN IMMEDIATE")
+            erased = False
+            try:
+                cur = self._conn.execute(
+                    "DELETE FROM secrets WHERE tenant_id = ? OR substr(name, 1, ?) = ? OR substr(name, 1, ?) = ?",
+                    (space_id, len(prefixes[0]), prefixes[0], len(prefixes[1]), prefixes[1]),
+                )
+                self._conn.execute("DELETE FROM space_keys WHERE space_id = ?", (space_id,))
+                self._conn.execute("COMMIT")
+                erased = True
+            finally:
+                if not erased:
+                    self._conn.execute("ROLLBACK")
+            self._space_keys.clear()
+            try:
+                # The deleted pages were zeroed (secure_delete); the log that
+                # still holds their old bytes is emptied.
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+            except sqlite3.Error:
+                logger.warning("[Vault] the write-ahead log could not be emptied after an erase", exc_info=True)
         if cur.rowcount > 0:
             logger.info("[Vault] Erased the secrets of space %s (%d row(s))", space_id, cur.rowcount)
         return cur.rowcount
@@ -1032,6 +1390,7 @@ class SecretVault:
                     # has no recoverable failure mode.
                     logger.debug("[Vault] close() failed", exc_info=True)
                 self._conn = None
+            self._space_keys.clear()
 
 
 class _SpaceVault:

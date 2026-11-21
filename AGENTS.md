@@ -14298,6 +14298,54 @@ product can turn it on, so an install with one account behaves as before.
   - Gates: `tests/test_admin_cannot_open_a_space.py` (a role check alone
     and an untouched record as controls), `tests/e2e/test_people_page_browser.py`
     (EN and AR, by the sidebar; no tab without Spaces as the control).
+- **A key per space; a space's secrets sealed with it (S1-26, 2026-11-21).**
+  Sealing happens only where Spaces is enforced; an install with one account
+  writes the rows it always wrote (no key, no sealed row, the same
+  encryption).
+  - **The keys live in the vault's file**, table `space_keys` (not the
+    identity store, whose registry no longer holds the empty field): the
+    salt, the wrapped keys and the rows they seal are one file, so a backup,
+    a migration bundle and a restore carry them from one moment, and a
+    Postgres restore of another date cannot part a space's key from its
+    rows. A key is 32 random bytes named by a random id, wrapped with
+    AES-256-GCM under a key derived (HKDF) from the vault's for wrapping
+    alone, bound to its space and id; the `wrap` column says how, for the
+    version where members hold it.
+  - **Made when the space is made**: `identity.update_registry` keys every
+    space a change added (`identity._key_new_spaces` ->
+    `space_keys.ensure_keys`), best effort; a space without one gets it in
+    the same transaction as its first sealed secret. **The owner's space has
+    none** (decision N22: its secrets are not sealed again until stage 4).
+  - **Which rows**: `security.vault.sealing_space` -- another space's
+    secrets (a name that carries the space, or the row's tenant); the
+    install's and the owner's keep the vault key. A sealed row names its
+    key (the `key_id` column; NULL is the vault key) and **a read follows
+    the id the row names**, enforced or not; a row whose key is gone, does
+    not unwrap or is another space's raises `SpaceKeyMissing`, never opens
+    with another key. In `vault.py` only `_open` opens a row and only
+    `_seal` / `_reseal` seal one; a new statement that inserts a secret
+    names `key_id`, one that selects a sealed value selects it too.
+  - **Moves are explicit, checked and reversible**: `SecretVault.seal_space`
+    (rows written before the space had a key), `unseal_space` (its inverse),
+    `rotate_space_key` -- one transaction each, every value read back before
+    it is written. Never on a read. `space_keys.report` is what the
+    switch-on check (S1-33) reads.
+  - **Erase** takes the space's keys with its rows
+    (`SecretVault.erase_space`); the vault's connection zeroes deleted data
+    (`secure_delete`) and the erase empties the write-ahead log. The restore
+    drill's `vault:space_keys` check fails a backup whose sealed rows name a
+    key it does not hold. The export is unchanged (N10's password seal;
+    secret names only, never a key).
+  - What it does not do: the vault key wraps every space's key, so this
+    keeps one space's secret from another's key, not from the person who
+    runs the machine. Rotating the install's vault key is stage 4.
+  - Gates: `tests/test_space_keys.py` (the single vault key opening both, a
+    space made with no key, a read by the newest key, an unbound wrap, a
+    build that seals without enforcement, a row-by-row move, the erase and
+    the drill of before as controls; two source gates with planted shapes),
+    `tests/test_backup_restore_spaces.py` (a real backup and a real
+    migration: each space reads its secret back, sealed; a restored vault
+    without its keys as the control).
 - **Count, export and erase one space (S1-27, 2026-11-20).** Only once
   Spaces is enforced (409 `spaces_off`); never the owner's personal space
   (`owners_space`); not yet on Postgres or with memory's Postgres copy

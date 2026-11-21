@@ -21,8 +21,14 @@ enforced it holds no other space's settings or Soul, and a restore of an
 older file never writes one. And a backup that holds several people's
 spaces never leaves the machine as a plain copy (decision N10).
 
+Each space's secret is sealed with the space's own key (S1-26), and the
+keys travel inside the vault's file: after the backup's restore and after
+the migration, each space reads its own secret back, sealed, and the keys
+unwrap with the vault key that travelled with them.
+
 Controls: a restore without the identity store loses the spaces (their
-counts and exports refuse, their chats are nobody's); the Settings file and
+counts and exports refuse, their chats are nobody's); a restored vault
+without its space keys opens neither space's secret; the Settings file and
 restore of before S1-28 carry another space's keys.
 """
 
@@ -75,6 +81,16 @@ for space in args["spaces"]:
         out["exports"][space] = exc.code
 for thread in args["threads"]:
     out["homes"][thread] = threads.thread_home(thread)
+if args.get("words"):
+    from kazma_core.security.vault import get_vault
+    vault = get_vault()
+    out["keys"] = vault.key_report()
+    out["secrets"] = {}
+    for space, word in args["words"].items():
+        try:
+            out["secrets"][space] = vault.for_space(space).retrieve("space:" + space + ":" + word)
+        except ValueError as exc:
+            out["secrets"][space] = type(exc).__name__
 print("JUDGED" + json.dumps(out))
 """
 
@@ -92,10 +108,11 @@ def _child_env(data_dir: Path) -> dict[str, str]:
     return env
 
 
-def _judge(data_dir: Path, scratch: Path, *, threads: list[str], vault: Path | None) -> dict[str, Any]:
+def _judge(data_dir: Path, scratch: Path, *, threads: list[str], vault: Path | None,
+           words: dict[str, str] | None = None) -> dict[str, Any]:
     scratch.mkdir(parents=True, exist_ok=True)
     args = {"spaces": [A, B], "threads": threads, "scratch": str(scratch),
-            "vault": str(vault) if vault else ""}
+            "vault": str(vault) if vault else "", "words": words or {}}
     done = subprocess.run([sys.executable, "-c", _JUDGE, json.dumps(args)], env=_child_env(data_dir),
                           capture_output=True, text=True, encoding="utf-8", errors="replace",
                           timeout=300, check=False, stdin=subprocess.DEVNULL)
@@ -205,12 +222,25 @@ def _universal_backup(tmp_path: Path, monkeypatch) -> Path:
     return next(p for p in base.iterdir() if (p / "manifest.json").is_file())
 
 
-def _restored_from(backup: Path, tmp_path: Path, *, drop_identity: bool = False) -> Path:
+def _sealed_and_read_back(judged: dict[str, Any], world) -> None:
+    """Each space reads its own secret from the restored vault, sealed with
+    its own key (S1-26)."""
+    assert judged["secrets"] == world["words"], judged["secrets"]
+    assert judged["keys"]["sealed"] == {A: 1, B: 1} and judged["keys"]["broken"] == 0, judged["keys"]
+    assert set(judged["keys"]["keys"]) == {A, B} and judged["keys"]["unsealed"] == {}
+
+
+def _restored_from(backup: Path, tmp_path: Path, *, drop_identity: bool = False,
+                   drop_space_keys: bool = False) -> Path:
     from kazma_core.backup import restore as restore_mod
 
     data = tmp_path / "restored" / "kazma-data"
     data.mkdir(parents=True)
     restore_mod._flatten_into_data_dir(backup, data)
+    if drop_space_keys:
+        with closing(sqlite3.connect(_vault_in(data))) as conn:
+            conn.execute("DELETE FROM space_keys")
+            conn.commit()
     if drop_identity:
         with closing(sqlite3.connect(data / "settings.db")) as conn:
             conn.execute("DELETE FROM settings WHERE key LIKE 'identity.%'")
@@ -226,9 +256,20 @@ def test_a_universal_backup_restores_both_spaces_apart(world, tmp_path, monkeypa
     before = _before(world)
     backup = _universal_backup(tmp_path, monkeypatch)
     data = _restored_from(backup, tmp_path)
-    judged = _judge(data, tmp_path / "judge", vault=_vault_in(data),
+    judged = _judge(data, tmp_path / "judge", vault=_vault_in(data), words=world["words"],
                     threads=before["threads"][A] + before["threads"][B])
     _assert_apart(judged, before, world, with_secrets=True)
+    _sealed_and_read_back(judged, world)
+
+
+def test_control_a_restored_vault_without_its_space_keys_opens_neither(world, tmp_path, monkeypatch) -> None:
+    backup = _universal_backup(tmp_path, monkeypatch)
+    data = _restored_from(backup, tmp_path, drop_space_keys=True)
+    judged = _judge(data, tmp_path / "judge", vault=_vault_in(data), words=world["words"], threads=[])
+    assert judged["secrets"] == {A: "SpaceKeyMissing", B: "SpaceKeyMissing"}
+    assert judged["keys"]["broken"] == 2
+    with pytest.raises(AssertionError):
+        _sealed_and_read_back(judged, world)
 
 
 def test_control_a_restore_without_the_identity_store_loses_the_spaces(world, tmp_path, monkeypatch) -> None:
@@ -270,11 +311,15 @@ def test_a_migration_carries_the_identity_store_and_keeps_spaces_apart(world, tm
                           stdin=subprocess.DEVNULL)
     line = next((ln for ln in done.stdout.splitlines() if ln.startswith("IMPORTED")), "")
     assert line and json.loads(line[len("IMPORTED"):])["ok"], (done.stdout[-3000:], done.stderr[-3000:])
-    # The bundle carries the install's vault.db, not this test's own vault:
-    # the secrets are checked through the universal backup above.
-    judged = _judge(target, tmp_path / "judge", vault=None,
+    # The bundle carries the vault's file with the key that opens it
+    # (invariant A), and the space keys are inside the file: each space
+    # reads its own secret on the target, sealed with its own key.
+    with zipfile.ZipFile(bundle) as zipped:
+        assert "data/vault.db" in zipped.namelist()
+    judged = _judge(target, tmp_path / "judge", vault=target / "vault.db", words=world["words"],
                     threads=before["threads"][A] + before["threads"][B])
     _assert_apart(judged, before, world, with_secrets=False)
+    _sealed_and_read_back(judged, world)
 
 
 # ── the Settings file is the admin's ────────────────────────────────────

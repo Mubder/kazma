@@ -112,6 +112,11 @@ of who is in which, so a restore puts every chat back in its space.
   the person who runs the machine.** They can read the disk, the databases
   and the backups, and every space is in them. Encrypting a space so that
   only its members can open it is planned, not built.
+- **A space's secrets are sealed with a key of its own, and that key is
+  wrapped by the install's.** Its mail, calendar, X and GitHub sign-ins do
+  not open with another space's key, and erasing a space removes its key.
+  The person who runs the machine holds the key that wraps every space's,
+  so this keeps spaces apart from each other, not from them.
 - **It has not been reviewed independently yet.**
 - **Chat apps belong to the admin until a later stage.** Telegram, Discord,
   Slack and WhatsApp answer the admin's own accounts; other people use the

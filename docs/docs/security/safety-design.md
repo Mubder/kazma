@@ -155,7 +155,9 @@ Around the fence:
 - **Secrets live in the vault.** Settings, provider rows, MCP servers and
   backups hold pointers; every page and API masks secrets by name and by
   value (a password inside a URL); secrets reach other programs on stdin,
-  never on a command line; offsite backups leave secret files out.
+  never on a command line; offsite backups leave secret files out. With
+  Spaces on, each space's secrets are sealed with a key of its own, which
+  the install's vault key wraps.
 - **Logs hold no secrets.** Kazma's log writer masks a password inside an
   address in every line and traceback, whatever wrote it; the update log and
   `kazma doctor` do the same; a web session is named in logs and audit

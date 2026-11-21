@@ -15,8 +15,10 @@ What it holds:
   shared space), who made it.
 * ``memberships`` -- account, space, role in the space (``owner`` or
   ``member``).
-* ``links``, ``space_keys``, ``policies`` -- kept empty here; stages 2 and 3
-  and item S1-26 fill them.
+* ``links``, ``policies`` -- kept empty here; stages 2 and 3 fill them.
+  (A space's key is not here: it lives in the vault's own file, beside the
+  secrets it seals -- ``kazma_core.spaces.space_keys``, S1-26. A registry
+  written before then held an empty ``space_keys`` field, dropped on read.)
 * ``events`` -- the record of what was done to accounts (Spaces S1-25:
   created, a password reset, deleted), hash-chained and append-only:
   :func:`update_registry` refuses a change that edits or drops an earlier
@@ -177,7 +179,6 @@ def _empty_registry() -> dict[str, Any]:
             {"account": OWNER_ACCOUNT_ID, "space": OWNER_SPACE_ID, "role": "owner"}
         ],
         "links": [],
-        "space_keys": {},
         "policies": {},
         "events": [],
         "events_seen": {},
@@ -196,7 +197,10 @@ def _normalized(raw: Any) -> dict[str, Any]:
         )
     reg = copy.deepcopy(raw)
     base = _empty_registry()
-    for table in ("accounts", "spaces", "space_keys", "policies", "events_seen"):
+    # Before S1-26 the document held an empty ``space_keys`` field; the keys
+    # live in the vault's file, never here.
+    reg.pop("space_keys", None)
+    for table in ("accounts", "spaces", "policies", "events_seen"):
         if not isinstance(reg.get(table), dict):
             reg[table] = {}
     for table in ("memberships", "links", "events"):
@@ -271,9 +275,11 @@ def update_registry(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         ) from exc
     refused: list[IdentityError] = []
     written: list[dict[str, Any]] = []
+    spaces_before: list[set[str]] = []
 
     def _updater(current: Any) -> Any:
         reg = _normalized(current)
+        spaces_before[:] = [set(reg["spaces"])]
         if not reg["moved_platform_users"]:
             for account_id, account_ in _legacy_accounts(legacy).items():
                 reg["accounts"].setdefault(account_id, account_)
@@ -297,6 +303,8 @@ def update_registry(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
     store.atomic_update(REGISTRY_KEY, _updater, category="auth")
     if refused:
         raise refused[0]
+    if written and spaces_before:
+        _key_new_spaces(set(written[-1]["spaces"]) - spaces_before[0])
     if legacy:
         # The list's users are in the registry now; the old key goes. A crash
         # between the two leaves the key behind, read by nothing: the
@@ -310,6 +318,17 @@ def update_registry(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
                 exc_info=True,
             )
     return copy.deepcopy(written[-1]) if written else read_registry()
+
+
+def _key_new_spaces(new: set[str]) -> None:
+    """A space's key is made when the space is made (S1-26): the one place,
+    whoever made the space. Best effort -- the space stands either way, and
+    the vault makes a missing key with the space's first sealed secret."""
+    if not new:
+        return
+    from kazma_core.spaces import space_keys
+
+    space_keys.ensure_keys(sorted(new))
 
 
 def _check(reg: dict[str, Any]) -> None:
