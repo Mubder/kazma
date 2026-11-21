@@ -1,0 +1,553 @@
+{
+ "version": 1,
+ "based_on": "docs/audits/evidence/spaces_r3/speakers.json version 1",
+ "note": "A second held-out set, written for the stage-1 review by an agent that had not read the speakers module, from speakers.json only; never used to choose a rule or threshold. Not scored. Gulf and MSA Arabic with first person as prefix and suffix, English and mixed, with traps (a word that only looks first person, plural نا, a relative who is not a member, an English 'I' asking about someone else).",
+ "questions": [
+  {
+   "id": "j01",
+   "by": "sara",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "prefix",
+   "text": "أفضّل أي لون؟ نسيت والله",
+   "gold": [
+    "k10|s06#1"
+   ],
+   "why": "prefix أ in أفضّل, no pronoun; Sara's maroon, not Layla's teal"
+  },
+  {
+   "id": "j02",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "suffix",
+   "text": "وين كان سكني قبل لا أنتقل؟",
+   "gold": [
+    "k03|s02#1"
+   ],
+   "why": "possessive ي in سكني plus prefix أنتقل; the home before the move (Doha), not Lusail"
+  },
+  {
+   "id": "j03",
+   "by": "layla",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "suffix",
+   "text": "شنو كانت سيارتي اللي بعتها؟",
+   "gold": [
+    "k19|a03#1"
+   ],
+   "why": "سيارتي and past suffix ت in بعتها; the sold Mazda, not the Tesla"
+  },
+  {
+   "id": "j04",
+   "by": "sara",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "prefix",
+   "text": "أي يوم أداوم فيه من البيت؟",
+   "gold": [
+    "k23|a07#1"
+   ],
+   "why": "Kuwaiti أداوم with prefix أ; Sara's Sunday, not Omar's Tuesday"
+  },
+  {
+   "id": "j05",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "suffix",
+   "text": "شسم الجيم حقي؟",
+   "gold": [
+    "k28|m02#1"
+   ],
+   "why": "Gulf possessive حقي and الجيم written in Arabic letters; Omar's Oxygen"
+  },
+  {
+   "id": "j06",
+   "by": "layla",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "prefix",
+   "text": "وش الأكلة اللي أموت عليها؟",
+   "gold": [
+    "k22|a06#1"
+   ],
+   "why": "idiom أموت عليها (I love it), prefix أ; Layla's lentil soup"
+  },
+  {
+   "id": "j07",
+   "by": "sara",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "suffix",
+   "text": "أمس شنو قلت لك عن مكان شغلي؟",
+   "gold": [
+    "k02|s01#1"
+   ],
+   "why": "trap: أمس starts with alef but is not first person; the marks are قلت and شغلي; Gulf Bank"
+  },
+  {
+   "id": "j08",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "prefix",
+   "text": "شنو المشروب الصباحي اللي أطلبه دايم؟",
+   "gold": [
+    "k11|s07#1"
+   ],
+   "why": "trap: الصباحي ends in ي but is an adjective; first person is أطلبه; black tea"
+  },
+  {
+   "id": "j09",
+   "by": "layla",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "prefix",
+   "text": "الكمبيوتر المحمول اللي أشتغل عليه شنو نوعه؟",
+   "gold": [
+    "k29|m03#1"
+   ],
+   "why": "أشتغل here means the laptop I work on, not the employer; MacBook Air"
+  },
+  {
+   "id": "j10",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "prefix",
+   "text": "شركة القطارات اللي أداوم فيها شسمها؟",
+   "gold": [
+    "k04|s02#1"
+   ],
+   "why": "prefix أداوم; Qatar Rail named only by its kind"
+  },
+  {
+   "id": "j11",
+   "by": "sara",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "suffix",
+   "text": "كم مرة قلت لك إني ما آكل فول سوداني؟",
+   "gold": [
+    "k07|s04#1"
+   ],
+   "why": "suffix in إني and قلت, prefix آكل (hamza with madda); peanut allergy without the word allergy"
+  },
+  {
+   "id": "j12",
+   "by": "sara",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self_none",
+   "first_person": "suffix",
+   "text": "شنو رقم الخزانة مالتي؟",
+   "gold": [],
+   "why": "feminine Gulf مالتي; Sara never gave a locker, Omar's 214 and Layla's 88 must not answer"
+  },
+  {
+   "id": "j13",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self_none",
+   "first_person": "prefix",
+   "text": "أي لابتوب أستخدم؟",
+   "gold": [],
+   "why": "prefix أستخدم; Omar never named a laptop, Sara's and Layla's must not answer"
+  },
+  {
+   "id": "j14",
+   "by": "layla",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self_none",
+   "first_person": "suffix",
+   "text": "عندي حساسية من شي؟",
+   "gold": [],
+   "why": "عندي; Layla stated no allergy, the others' allergies must not answer"
+  },
+  {
+   "id": "j15",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "self_none",
+   "first_person": "suffix",
+   "text": "مرتي وين تشتغل؟",
+   "gold": [],
+   "why": "trap: مرتي is my wife, a person who is not a member; no member's employer answers"
+  },
+  {
+   "id": "j16",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "other",
+   "first_person": "none",
+   "text": "سارة شنو سيارتها؟",
+   "gold": [
+    "k17|a01#1"
+   ],
+   "why": "third-person suffix ها about Sara; the Camry"
+  },
+  {
+   "id": "j17",
+   "by": "layla",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "other",
+   "first_person": "none",
+   "text": "عمر عنده حساسية من شنو؟",
+   "gold": [
+    "k08|s04#2"
+   ],
+   "why": "عنده (his), about Omar; shellfish"
+  },
+  {
+   "id": "j18",
+   "by": "sara",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "other",
+   "first_person": "none",
+   "text": "ليلى وش تشرب الصبح؟",
+   "gold": [
+    "k12|s08#1"
+   ],
+   "why": "third person تشرب about Layla; espresso, not Omar's tea"
+  },
+  {
+   "id": "j19",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "other",
+   "first_person": "none",
+   "text": "ليلى وين ساكنة؟",
+   "gold": [
+    "k05|s03#1"
+   ],
+   "why": "feminine participle ساكنة about Layla; Muscat"
+  },
+  {
+   "id": "j20",
+   "by": "layla",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "other",
+   "first_person": "none",
+   "text": "ساره وين تشتغل؟",
+   "gold": [
+    "k02|s01#1"
+   ],
+   "why": "alias spelling ساره with ه; Gulf Bank"
+  },
+  {
+   "id": "j21",
+   "by": "sara",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "shared",
+   "first_person": "suffix",
+   "text": "متى طلعتنا لصلالة؟",
+   "gold": [
+    "k15|s11#1"
+   ],
+   "why": "plural suffix نا (our trip), not first person singular; Salalah date"
+  },
+  {
+   "id": "j22",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "shared",
+   "first_person": "none",
+   "text": "منو فينا عنده حساسية؟",
+   "gold": [
+    "k07|s04#1",
+    "k08|s04#2"
+   ],
+   "why": "who among us: both allergies"
+  },
+  {
+   "id": "j23",
+   "by": "layla",
+   "lang": "ar",
+   "dialect": "gulf",
+   "category": "shared",
+   "first_person": "none",
+   "text": "منو فينا يشتغل من البيت يوم الأحد؟",
+   "gold": [
+    "k23|a07#1"
+   ],
+   "why": "names the day, so only Sara's fact"
+  },
+  {
+   "id": "j24",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "msa",
+   "category": "self",
+   "first_person": "prefix",
+   "text": "ما المشروب الذي أفضّله صباحاً؟",
+   "gold": [
+    "k11|s07#1"
+   ],
+   "why": "MSA prefix أفضّله; black tea"
+  },
+  {
+   "id": "j25",
+   "by": "layla",
+   "lang": "ar",
+   "dialect": "msa",
+   "category": "self",
+   "first_person": "prefix",
+   "text": "أين أعمل؟",
+   "gold": [
+    "k06|s03#1"
+   ],
+   "why": "two words, prefix أعمل; Oman Air"
+  },
+  {
+   "id": "j26",
+   "by": "sara",
+   "lang": "ar",
+   "dialect": "msa",
+   "category": "self",
+   "first_person": "prefix",
+   "text": "ما نوع السيارة التي أملكها؟",
+   "gold": [
+    "k17|a01#1"
+   ],
+   "why": "prefix أملكها; the Camry"
+  },
+  {
+   "id": "j27",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "msa",
+   "category": "self",
+   "first_person": "suffix",
+   "text": "متى يوافق تاريخ ميلادي؟",
+   "gold": [
+    "k14|s10#1"
+   ],
+   "why": "suffix ميلادي; the fact was stated by Sara about Omar"
+  },
+  {
+   "id": "j28",
+   "by": "layla",
+   "lang": "ar",
+   "dialect": "msa",
+   "category": "self_none",
+   "first_person": "prefix",
+   "text": "ما الأطعمة التي أتحسس منها؟",
+   "gold": [],
+   "why": "prefix أتحسس; Layla has no allergy fact"
+  },
+  {
+   "id": "j29",
+   "by": "omar",
+   "lang": "ar",
+   "dialect": "msa",
+   "category": "other",
+   "first_person": "none",
+   "text": "أين تعمل سارة؟",
+   "gold": [
+    "k02|s01#1"
+   ],
+   "why": "third person تعمل; Gulf Bank"
+  },
+  {
+   "id": "j30",
+   "by": "sara",
+   "lang": "ar",
+   "dialect": "msa",
+   "category": "shared",
+   "first_person": "suffix",
+   "text": "متى موعد رحلتنا إلى صلالة؟",
+   "gold": [
+    "k15|s11#1"
+   ],
+   "why": "MSA plural suffix نا"
+  },
+  {
+   "id": "j31",
+   "by": "layla",
+   "lang": "ar",
+   "dialect": "msa",
+   "category": "self",
+   "first_person": "suffix",
+   "text": "ما رقم خزانتي؟",
+   "gold": [
+    "k32|m06#1"
+   ],
+   "why": "suffix خزانتي; 88, not Omar's 214"
+  },
+  {
+   "id": "j32",
+   "by": "sara",
+   "lang": "en",
+   "dialect": "-",
+   "category": "self",
+   "first_person": "english",
+   "text": "which gym am I signed up with?",
+   "gold": [
+    "k27|m01#1"
+   ],
+   "why": "Platinum Fitness"
+  },
+  {
+   "id": "j33",
+   "by": "layla",
+   "lang": "en",
+   "dialect": "-",
+   "category": "self",
+   "first_person": "english",
+   "text": "what car do I drive now that I sold the old one?",
+   "gold": [
+    "k25|a09#1"
+   ],
+   "why": "the Tesla, not the Mazda"
+  },
+  {
+   "id": "j34",
+   "by": "omar",
+   "lang": "en",
+   "dialect": "-",
+   "category": "self",
+   "first_person": "english",
+   "text": "remind me, what food do I like best?",
+   "gold": [
+    "k21|a05#1"
+   ],
+   "why": "mashawi"
+  },
+  {
+   "id": "j35",
+   "by": "omar",
+   "lang": "en",
+   "dialect": "-",
+   "category": "self_none",
+   "first_person": "english",
+   "text": "which laptop did I tell you I use?",
+   "gold": [],
+   "why": "Omar named no laptop"
+  },
+  {
+   "id": "j36",
+   "by": "layla",
+   "lang": "en",
+   "dialect": "-",
+   "category": "other",
+   "first_person": "none",
+   "text": "What's Omar's locker number?",
+   "gold": [
+    "k31|m05#1"
+   ],
+   "why": "214"
+  },
+  {
+   "id": "j37",
+   "by": "sara",
+   "lang": "en",
+   "dialect": "-",
+   "category": "other",
+   "first_person": "english",
+   "text": "I'm asking for Omar: what is he allergic to?",
+   "gold": [
+    "k08|s04#2"
+   ],
+   "why": "trap: I'm is the asker but the question is about Omar; shellfish, not Sara's peanuts"
+  },
+  {
+   "id": "j38",
+   "by": "layla",
+   "lang": "en",
+   "dialect": "-",
+   "category": "shared",
+   "first_person": "none",
+   "text": "which of us works from home on Tuesday?",
+   "gold": [
+    "k24|a08#1"
+   ],
+   "why": "Omar's Tuesday"
+  },
+  {
+   "id": "j39",
+   "by": "sara",
+   "lang": "mixed",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "suffix",
+   "text": "شنو الـ favorite color مالي؟",
+   "gold": [
+    "k10|s06#1"
+   ],
+   "why": "Gulf مالي around an English noun; maroon"
+  },
+  {
+   "id": "j40",
+   "by": "omar",
+   "lang": "mixed",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "prefix",
+   "text": "وين أسكن now بعد الـ move؟",
+   "gold": [
+    "k13|s09#1"
+   ],
+   "why": "prefix أسكن, English time words; Lusail"
+  },
+  {
+   "id": "j41",
+   "by": "layla",
+   "lang": "mixed",
+   "dialect": "gulf",
+   "category": "self_none",
+   "first_person": "prefix",
+   "text": "الـ gym اللي أروح له شنو اسمه؟",
+   "gold": [],
+   "why": "prefix أروح; Layla named no gym"
+  },
+  {
+   "id": "j42",
+   "by": "sara",
+   "lang": "mixed",
+   "dialect": "gulf",
+   "category": "other",
+   "first_person": "none",
+   "text": "Omar وين يداوم؟",
+   "gold": [
+    "k04|s02#1"
+   ],
+   "why": "English name, Arabic third-person verb; Qatar Rail"
+  },
+  {
+   "id": "j43",
+   "by": "layla",
+   "lang": "mixed",
+   "dialect": "gulf",
+   "category": "self",
+   "first_person": "english",
+   "text": "my birthday متى؟",
+   "gold": [
+    "k26|a10#1"
+   ],
+   "why": "English possessive, Arabic question word; stated by Omar about Layla"
+  }
+ ]
+}
