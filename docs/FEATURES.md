@@ -2,7 +2,7 @@
 
 Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
-not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, the additions of **2026-11-14** that day, and those of **2026-11-17** that day. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
+not what is planned. The changes below were checked again on **2026-10-12**, the document lines on **2026-10-15** and **2026-10-21**, the additions of **2026-11-14** that day, those of **2026-11-17** that day, and those of **2026-11-21** that day. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
 
 **Status words.** **Shipped**: works out of the box or one setting away.
 **Opt-in**: works once you install or configure the named extra.
@@ -71,6 +71,7 @@ Every line below describes that setup.
 | Feature | Status | Where |
 |---|---|---|
 | Remembers conversations and the facts in them, across chats, with when each fact became true | Shipped | [Memory](docs/guide/memory-and-rag.md) |
+| Recall shows the day each memory was said, when each fact began and the value it replaced; a fact you say has ended is ended (asked first when only the model read it), and every change to what you told Kazma can be undone | Shipped | Memory page → Changes to what you told Kazma, [Memory](docs/guide/memory-and-rag.md) |
 | Recall by evidence: a memory is used only when it matches the question well enough — nothing when nothing does | Shipped | `memory/recall.py` |
 | Every answer shows which memories it used | Shipped | chat activity: "Memory used" |
 | "About me": a short text you write, read at the start of every reply | Shipped | Settings → Memory |
@@ -157,6 +158,7 @@ Every line below describes that setup.
 | When an update leaves Docker stopped, the supervisor starts it again (Kazma's own engine or Docker Desktop) and then the stopped containers Kazma uses (never another project's) | Shipped | `kazma_guard.py --status`, [Document processing](docs/ops/document-processing.md) |
 | One status card per restart: how long Kazma was down and whether each chat app connected (start and stop messages are optional) | Shipped | Settings → Alerts → Server status messages |
 | Backups of everything every 6 hours, snapshotted locally and offsite (restic), checked daily, with a weekly restore rehearsal of the database; a zip copy to a cloud provider that keeps only the newest N copies | Shipped | [Disaster recovery](docs/ops/disaster-recovery.md) |
+| A copy of every backup in a folder you choose (another drive, a USB disk or a network share), encrypted with the backup passphrase; a disk that is not plugged in never fails a backup | Shipped | Settings → Backup → A copy on another drive, [Disaster recovery](docs/ops/disaster-recovery.md) |
 | Move an install to another machine or OS in one bundle | Shipped | `kazma migrate` |
 | Back up your settings to a file and restore them: you see what will change first, the keys you have are never replaced, a lost key comes back from the vault without typing it, and the restore can be undone | Shipped | Settings → System, [Configuration](docs/guide/configuration.md#settings-backup) |
 | Health checks that make a real round trip; alerts to Telegram, Discord or Slack; a daily digest and a weekly resilience report | Shipped | `/health/deep` |
