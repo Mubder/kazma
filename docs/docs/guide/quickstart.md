@@ -214,9 +214,11 @@ The system programs come from the OS's package manager:
 
 Docker Desktop starts only when someone signs in, so after an unattended
 restart (a Windows update, a power cut) its containers wait; Kazma's engine
-does not. When Windows shuts down or restarts, the `KazmaEngineShutdown` service stops the engine's
-containers cleanly first (each gets its own stop time, up to two minutes in all), so nothing they just
-wrote is lost. Express installs it on Windows and Linux (private search and the memory graph run on
+does not. When Windows shuts down or restarts, the `KazmaEngineShutdown` service first tells Kazma
+to stop (it finishes its own shutdown and records that it stopped, before Windows stops the database
+it writes to), then stops the engine's containers cleanly (each gets its own stop time, up to two
+minutes in all), so nothing they just wrote is lost. The service is installed with Kazma's own
+service on every Windows install, engine or not. Express installs it on Windows and Linux (private search and the memory graph run on
 it); on macOS Express installs no container part, and an install with no container part (a Custom
 one without them, or a computer that cannot run containers) installs no engine. On
 Windows `kazma setup engine` installs, repairs or checks it on its own

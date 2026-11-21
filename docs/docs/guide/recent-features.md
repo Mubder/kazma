@@ -22,6 +22,16 @@ backup forgets it again; one forget that cannot be applied no longer holds
 the others back, and memory health says when one is waiting (see
 [Memory and RAG](memory-and-rag.md)).
 
+**New in 2026-11-20 — a Windows restart stops Kazma first.** When Windows
+shuts down or restarts (by you or by Windows Update), the `KazmaEngineShutdown`
+service now tells Kazma to stop before anything else: Kazma finishes its own
+shutdown and records that it stopped while its database is still running,
+then the container engine stops cleanly. Before, Task Scheduler ended Kazma's
+guard at the start of the shutdown and the server was cut off at the very end,
+so the next start card said "the last run did not shut down cleanly". The
+service is installed with Kazma's own service (`kazma setup install`, in an
+administrator terminal; see [Quick start](quickstart.md)).
+
 **New in 2026-11-20 — a backup copy on another drive.** Settings → Backup →
 **A copy on another drive**: choose a folder on another drive, a USB disk or
 a network share (Browse lists this computer's folders; type a share's path),
