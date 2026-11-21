@@ -388,7 +388,8 @@ def _settings_keys(space: str, threads: list[str]) -> list[str]:
             elif key.startswith(_CHAT_STATE_PREFIXES) and wanted and any(
                     part in wanted for part in key.split(".")):
                 keys.append(key)
-            elif key.startswith(_SPACE_RECORDING_PREFIXES) and isinstance(value, dict)                     and str(value.get("space") or "") == space:
+            elif (key.startswith(_SPACE_RECORDING_PREFIXES) and isinstance(value, dict)
+                  and str(value.get("space") or "") == space):
                 keys.append(key)
     return sorted(keys)
 

@@ -100,6 +100,27 @@ async def test_a_chat_of_another_space_is_refused_with_a_reply(enforced, monkeyp
     assert len(sent) == 1 and "another space" in sent[0]
 
 
+@pytest.mark.parametrize(("text", "said"), [("hello there", "cannot read this chat's record"),
+                                            ("مرحبا كيف الحال", "لا يستطيع Kazma قراءة سجل")])
+async def test_a_record_that_cannot_be_read_is_said_for_what_it_is(enforced, monkeypatch,
+                                                                    text, said) -> None:
+    """The record store failing is refused, and said as a failure to read --
+    never "this chat belongs to another space" over a chat that may be the
+    sender's own. Control: the chat of another space keeps its own words."""
+    import sqlite3
+
+    def _broken(thread_id):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(threads, "record_of", _broken)
+    graph = _Graph()
+    manager = await _run("telegram", graph, text)
+    assert graph.scopes == []  # the graph never ran
+    sent = [call.args[0].text for call in manager.send.await_args_list]
+    assert len(sent) == 1 and said in sent[0], sent
+    assert "another space" not in sent[0] and "مساحة أخرى" not in sent[0]
+
+
 async def test_not_enforced_the_turn_runs_as_before(monkeypatch) -> None:
     monkeypatch.setenv("KAZMA_SELF_IMPROVEMENT", "0")
     graph = _Graph()

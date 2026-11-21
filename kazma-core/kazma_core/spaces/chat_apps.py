@@ -37,13 +37,18 @@ from kazma_core.spaces.scope import (
 )
 from kazma_core.spaces.threads import ThreadInAnotherSpace
 
-__all__ = ["ChatInAnotherSpace", "chat_app_scope", "chat_app_work"]
+__all__ = ["ChatInAnotherSpace", "ChatRecordUnreadable", "chat_app_scope", "chat_app_work"]
 
 logger = logging.getLogger(__name__)
 
 
 class ChatInAnotherSpace(ThreadInAnotherSpace):
     """A chat app's message reached a chat that belongs to another space."""
+
+
+class ChatRecordUnreadable(ChatInAnotherSpace):
+    """Whose a chat app's chat is cannot be read right now: refused like a
+    chat of another space, and said for what it is (a retry may work)."""
 
 
 def chat_app_scope(thread_id: str) -> Scope | None:
@@ -62,7 +67,7 @@ def chat_app_scope(thread_id: str) -> Scope | None:
     except (sqlite3.Error, OSError) as exc:
         logger.warning("[spaces] the chat %s's record cannot be read (%s); the message is refused",
                        str(thread_id)[:12], type(exc).__name__)
-        raise ChatInAnotherSpace("The chat's record cannot be read right now.") from None
+        raise ChatRecordUnreadable("The chat's record cannot be read right now.") from None
     if record is not None and record.space_id != OWNER_SPACE_ID:
         raise ChatInAnotherSpace(
             "This chat belongs to another space; chat apps work in the owner's space only."

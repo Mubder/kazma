@@ -879,24 +879,43 @@ def create_graph_handler(
         enforced, as the owner in the owner's space until each person links
         their own chat app, and a chat of another space is refused with a
         reply -- before anything of the chat is read or built."""
-        from kazma_core.spaces.chat_apps import ChatInAnotherSpace, chat_app_scope
+        from kazma_core.spaces.chat_apps import (
+            ChatInAnotherSpace,
+            ChatRecordUnreadable,
+            chat_app_scope,
+        )
         from kazma_core.spaces.scope import bind_scope
 
         try:
             # The thread record store, on a first asking (off the loop).
             bound = await asyncio.to_thread(chat_app_scope, thread_id)
-        except ChatInAnotherSpace:
-            logger.info("[agent-handler] a %s message reached a chat of another space; refused",
-                        msg.platform)
-            await manager.send(OutboundMessage(
-                target_id=_build_target_id(msg.platform, msg.context_metadata),
-                text=language_lock.in_their_language(
+        except ChatInAnotherSpace as exc:
+            unreadable = isinstance(exc, ChatRecordUnreadable)
+            logger.info("[agent-handler] a %s message refused: %s", msg.platform,
+                        "the chat's record cannot be read" if unreadable
+                        else "it reached a chat of another space")
+            if unreadable:
+                # Said for what it is: the record store failed, and a retry
+                # may work. Never "another space" over a chat that may be
+                # this sender's own.
+                reply = language_lock.in_their_language(
+                    msg.text,
+                    "Kazma cannot read this chat's record right now, so the message was not "
+                    "run. Send it again in a moment.",
+                    "لا يستطيع Kazma قراءة سجل هذه المحادثة الآن، فلم تُنفَّذ الرسالة. "
+                    "أرسلها مرة أخرى بعد قليل.",
+                )
+            else:
+                reply = language_lock.in_their_language(
                     msg.text,
                     "This chat belongs to another space. Chat apps work in the owner's space "
                     "only for now: send /new to start a chat here.",
                     "هذه المحادثة تخص مساحة أخرى. تعمل تطبيقات المحادثة حالياً في مساحة المالك "
                     "فقط: أرسل /new لبدء محادثة هنا.",
-                ),
+                )
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, msg.context_metadata),
+                text=reply,
                 context_metadata=msg.context_metadata,
             ))
             return
