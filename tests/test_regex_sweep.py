@@ -31,6 +31,11 @@ growth, not by a time at one size.
 The patterns run in a child process, one at a time; a pattern that does not
 finish within :data:`PATTERN_TIMEOUT_S` is named (the child is stopped and
 started again after it), so an exponential pattern cannot hang the suite.
+The child's own start (Python, this module, the scan of every product file)
+is not a pattern's time: it says it is ready first, and only then does a
+pattern's clock run. Counted against the first pattern, a busy CI runner's
+start named ``release_signature.py:58``, a linear pattern, as hung
+(2026-11-21, two CI runs in four).
 """
 
 from __future__ import annotations
@@ -354,9 +359,17 @@ def measure(literal: Literal) -> dict | None:
 
 # ── the child, and the watchdog around it ─────────────────────────────────
 
+#: A test's way to make the child's start slow (seconds), as a loaded runner's is.
+STARTUP_DELAY_VAR = "KAZMA_TEST_SWEEP_STARTUP_DELAY"
+
+
 def _child(packages: list[str], start: int) -> None:
     root = Path(os.getcwd())
     literals = regex_literals(product_files(tuple(packages), root), root)
+    delay = float(os.environ.get(STARTUP_DELAY_VAR) or 0)
+    if delay:
+        time.sleep(delay)
+    print(json.dumps({"ready": len(literals)}), flush=True)
     for index in range(start, len(literals)):
         print(json.dumps({"begin": index}), flush=True)
         print(json.dumps({"done": index, "slow": measure(literals[index])}), flush=True)
@@ -364,8 +377,14 @@ def _child(packages: list[str], start: int) -> None:
 
 
 def sweep(packages: tuple[str, ...] = PACKAGES, root: Path = REPO, pattern_timeout: float = PATTERN_TIMEOUT_S,
-          overall_timeout: float = 240.0) -> tuple[list[Literal], dict[int, dict], list[int]]:
-    """Run every literal of *packages* in a child process: (literals, slow ones, hung ones)."""
+          overall_timeout: float = 240.0, *, startup_is_a_pattern: bool = False,
+          ) -> tuple[list[Literal], dict[int, dict], list[int]]:
+    """Run every literal of *packages* in a child process: (literals, slow ones, hung ones).
+
+    The child's start waits within *overall_timeout* only; a pattern's clock
+    starts when the child is ready. *startup_is_a_pattern* is the reading
+    before 2026-11-21 (the start counted against the first pattern), kept as
+    the negative control."""
     literals = regex_literals(product_files(packages, root), root)
     slow: dict[int, dict] = {}
     hung: list[int] = []
@@ -388,13 +407,17 @@ def sweep(packages: tuple[str, ...] = PACKAGES, root: Path = REPO, pattern_timeo
         threading.Thread(target=pump, daemon=True).start()
         current = start
         finished = False
+        ready = startup_is_a_pattern
         while True:
-            wait = min(pattern_timeout, max(0.0, deadline - time.monotonic()))
+            left = max(0.0, deadline - time.monotonic())
+            wait = min(pattern_timeout, left) if ready else left
             try:
                 raw = lines.get(timeout=wait)
             except queue.Empty:
                 proc.kill()
                 proc.wait(timeout=10)
+                if not ready:
+                    raise TimeoutError("the sweep's child did not start in time") from None
                 if time.monotonic() >= deadline:
                     raise TimeoutError(f"the sweep ran out of time on {literals[current].where} "
                                        f"{literals[current].pattern!r}") from None
@@ -409,7 +432,9 @@ def sweep(packages: tuple[str, ...] = PACKAGES, root: Path = REPO, pattern_timeo
                 start = len(literals)
                 break
             record = json.loads(raw)
-            if "begin" in record:
+            if "ready" in record:
+                ready = True
+            elif "begin" in record:
                 current = record["begin"]
             elif "done" in record:
                 if record["slow"]:
@@ -467,6 +492,36 @@ def test_control_a_planted_quadratic_pattern_fails(tmp_path: Path):
     assert flagged == {r"[ \t]+\n", r"<[^>]+>", r"\s*->\s*(\S+)\s*$"}, (flagged, slow)
     assert not hung
     assert len(_report(literals, slow, hung)) == 3
+
+
+def _plant_linear(tmp_path: Path) -> None:
+    package = tmp_path / "kazma-planted" / "kazma_planted"
+    package.mkdir(parents=True)
+    (package / "planted.py").write_text(
+        "import re\n"
+        "FIRST = re.compile(r'https://example\\.com/[a-z]+')\n"
+        "SECOND = re.compile(r'b+')\n",
+        encoding="utf-8",
+    )
+
+
+def test_a_slow_child_start_is_no_patterns_time(tmp_path: Path, monkeypatch):
+    # A loaded CI runner's start took longer than a pattern's allowance, and the
+    # first pattern -- linear -- was named as hung (2026-11-21).
+    _plant_linear(tmp_path)
+    monkeypatch.setenv(STARTUP_DELAY_VAR, "2.5")
+    literals, slow, hung = sweep(("kazma-planted/kazma_planted",), tmp_path, pattern_timeout=1.5)
+    assert len(literals) == 2 and not slow and not hung, (slow, hung)
+    assert not _report(literals, slow, hung)
+
+
+def test_control_the_start_counted_against_the_first_pattern_names_it(tmp_path: Path, monkeypatch):
+    _plant_linear(tmp_path)
+    monkeypatch.setenv(STARTUP_DELAY_VAR, "2.5")
+    literals, slow, hung = sweep(("kazma-planted/kazma_planted",), tmp_path, pattern_timeout=1.5,
+                                 startup_is_a_pattern=True)
+    # Every start after a "hung" pattern is counted again: both linear patterns are named.
+    assert [literals[i].pattern for i in hung] == [r"https://example\.com/[a-z]+", "b+"]
 
 
 def test_control_a_pattern_that_never_finishes_is_named(tmp_path: Path):
