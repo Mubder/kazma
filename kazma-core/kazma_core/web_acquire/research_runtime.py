@@ -16,8 +16,23 @@ _DEADLINE_SECONDS = 1800
 
 @asynccontextmanager
 async def _frozen(root_resolver):
+    from kazma_core.spaces.features import work_refusal
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_core.spaces.scope import bound_asker
     from kazma_core.web_acquire.crawl_jobs import call
 
+    # Research's admission (Spaces S2-11): every research run -- the tool,
+    # the intent engine, the composer, a chat command, the page and a
+    # resume -- passes here, before a session row or a plan. A person
+    # without Research starts none.
+    try:
+        refused = await call(work_refusal, "research", bound_asker())
+    except IdentityUnavailable as exc:
+        raise AcquisitionError(FetchErrorCode.UNAVAILABLE,
+                               "Accounts cannot be read right now; no research was started.",
+                               transient=True) from exc
+    if refused:
+        raise AcquisitionError(FetchErrorCode.POLICY, refused)
     try:
         policy = acquisition_policy()
     except AcquisitionPolicyError as exc:

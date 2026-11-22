@@ -927,15 +927,7 @@ class KazmaAppBuilder:
 
             return feature_here(feature)
 
-        def _features_off_here() -> str:
-            # The features the page's person does not have, for the page's
-            # own menus (the command palette, the shortcuts).
-            from kazma_core.spaces.features import features_off_here
-
-            return " ".join(features_off_here())
-
         self.templates.env.globals["feature_here"] = _feature_here
-        self.templates.env.globals["features_off_here"] = _features_off_here
 
         # NOTE: no browser WS token is injected anymore. The per-session WS
         # token was embedded as a <meta> tag + ?token= query param, which

@@ -354,6 +354,8 @@ class DocumentWorker:
             pass
 
     async def _process_claimed(self, job: DocumentJobRecord, owner: str) -> None:
+        from kazma_core.spaces.features import work_refusal
+
         current = job
         while current.state in _PROCESSING_STATES:
             cancellation = threading.Event()
@@ -366,14 +368,14 @@ class DocumentWorker:
             stage_label = current.state.value
             stage_started = time.monotonic()
             try:
-                # The person this job is for no longer has Documents (Spaces
-                # S2-11): the check made again when the work runs. The job
-                # fails and can be retried once the feature is on again.
-                if await asyncio.to_thread(_documents_off_for, current.actor_id):
-                    raise PermanentDocumentError(
-                        "feature_off",
-                        "Documents is off for the person this job is for (Settings → People)",
-                    )
+                # Documents' admission, made again at every stage (Spaces
+                # S2-11): the person this job is for no longer has Documents.
+                # The job fails and can be retried once the feature is on
+                # again; an identity store that cannot be read is an outage,
+                # retried (``_classify_failure``).
+                refused = await asyncio.to_thread(work_refusal, "documents", current.actor_id)
+                if refused:
+                    raise PermanentDocumentError("feature_off", refused)
                 handler = self._handlers.get(current.state)
                 if handler is None:
                     raise PermanentDocumentError(
@@ -586,15 +588,9 @@ class DocumentWorker:
         )
 
 
-def _documents_off_for(actor_id: str) -> bool:
-    """Whether Documents is off for the person a job is for (Spaces S2-11);
-    False while Spaces is not enforced. Blocking (the identity store)."""
-    from kazma_core.spaces.features import work_refusal
-
-    return work_refusal("documents", actor_id) is not None
-
-
 def _classify_failure(failure: Exception) -> tuple[str, str, bool]:
+    from kazma_core.spaces.identity import IdentityUnavailable
+
     if isinstance(failure, DocumentProcessingError):
         return failure.code, failure.safe_message, failure.transient
     if isinstance(failure, DocumentParseError):
@@ -603,6 +599,14 @@ def _classify_failure(failure: Exception) -> tuple[str, str, bool]:
         return "parser_timeout", "Document parser exceeded its time limit", True
     if storage_full(failure):
         return "storage_full", "Document storage is full", True
+    if isinstance(failure, IdentityUnavailable):
+        # Whose job it is could not be read (Spaces S2-11's check): an
+        # outage, retried as one -- not a crash that spends the job's tries.
+        return (
+            "metadata_unavailable",
+            "Accounts could not be read right now (identity store unavailable)",
+            True,
+        )
     if isinstance(failure, infrastructure_errors()) and not isinstance(failure, OSError):
         return (
             "metadata_unavailable",

@@ -266,15 +266,18 @@ def _as(matrix: Matrix, who: str, method: str, path: str) -> tuple[int, dict[str
         patch.setattr(auth, "get_request_principal", lambda request: principal)
         with TestClient(_app(reached)) as client:
             answer = client.request(method, path, headers={space_binding.SPACE_HEADER: space})
-    body = answer.json() if answer.headers.get("content-type", "").startswith("application/json") else {}
+    if answer.headers.get("content-type", "").startswith("application/json"):
+        body = answer.json()
+    else:  # a page: the refusal is a page in the person's language (the S2-11 review)
+        body = {"code": "feature_off"} if 'id="feature-off"' in answer.text else {}
     return answer.status_code, body, reached
 
 
 def _x_routes(routes: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    from kazma_ui.route_scopes import feature_of_route
+    from kazma_ui.route_scopes import _feature_of_route
 
     return [(m, p.replace("{", "").replace("}", "")) for m, p in routes
-            if m not in ("WEBSOCKET", "HEAD") and feature_of_route(p, m) == "x_studio"]
+            if m not in ("WEBSOCKET", "HEAD") and _feature_of_route(p, m) == "x_studio"]
 
 
 def test_every_x_route_refuses_g_and_reaches_y(y_and_g, routes) -> None:
@@ -322,7 +325,7 @@ def test_no_x_tool_is_offered_or_callable_for_g_in_chat(y_and_g) -> None:
     assert set(X_TOOLS) <= _offered(y_and_g, y_and_g.as_a())
     for name in X_TOOLS:
         answer, entered = _call(y_and_g, y_and_g.as_b(), name)
-        assert entered == [] and answer.get("refused") and "x_studio" in str(answer["content"]), (name, answer)
+        assert entered == [] and answer.get("refused") and "X Studio" in str(answer["content"]), (name, answer)
     _answer, entered = _call(y_and_g, y_and_g.as_a(), "x_status")
     assert entered == ["x_status"]
 
@@ -384,8 +387,8 @@ def test_no_x_tool_is_offered_or_run_for_g_in_a_swarm_worker(y_and_g, monkeypatc
 def test_the_x_command_refuses_g(y_and_g) -> None:
     with y_and_g.as_b():
         refused = features.command_refusal("/x status")
-        assert refused and "x_studio" in refused
-        assert "الميزة" in features.command_refusal("/x status", "ar")
+        assert refused and "X Studio" in refused
+        assert "استوديو X" in features.command_refusal("/x status", "ar")
         assert features.command_refusal("/memory") is None  # always on
         assert features.command_refusal("/research deep tides") is None  # N18's own
     with y_and_g.as_a():
@@ -393,10 +396,12 @@ def test_the_x_command_refuses_g(y_and_g) -> None:
 
 
 def test_x_background_work_skips_g(y_and_g) -> None:
+    """X's background work waits for G (``FeatureOff``), never treated as a
+    post of no space (the S2-11 review)."""
     from kazma_core.x_api.ownership import x_work_scope
 
     assert callable(x_work_scope(Matrix.SPACE_A))
-    with pytest.raises(scope.NoSpaceBound, match="X Studio is off"):
+    with pytest.raises(features.FeatureOff, match="X Studio is off"):
         x_work_scope(Matrix.SPACE_B)
 
 
@@ -405,7 +410,7 @@ def test_control_a_grant_that_only_hides_the_menu_entry(y_and_g, routes, monkeyp
     X route and X tool go through."""
     from kazma_ui import route_scopes
 
-    monkeypatch.setattr(route_scopes, "feature_of_route", lambda path, method="GET": None)
+    monkeypatch.setattr(route_scopes, "_feature_of_route", lambda path, method="GET": None)
     monkeypatch.setattr(features, "tool_refusal", lambda name, grants=None: None)
     assert _as(y_and_g, "b", "GET", "/chat")[1] == {"feature_here": False}  # hidden ...
     status, _body, reached = _as(y_and_g, "b", "GET", "/api/x/status")
@@ -486,14 +491,6 @@ def test_a_swarm_task_of_a_person_without_swarm_runs_no_worker(y_and_g) -> None:
     people.set_features(y_and_g.account_b, {"swarm": True}, by=OWNER_ACCOUNT_ID)
     assert callable(_worker_scope(Matrix.SPACE_B, y_and_g.account_b))
 
-
-def test_a_document_job_of_a_person_without_documents_stops(y_and_g) -> None:
-    from kazma_core.documents.worker import _documents_off_for
-
-    assert not _documents_off_for(y_and_g.account_b)  # N18: on
-    people.set_features(y_and_g.account_b, {"documents": False}, by=OWNER_ACCOUNT_ID)
-    assert _documents_off_for(y_and_g.account_b)
-    assert not _documents_off_for("operator")  # a record from before Spaces: the space's rules
 
 
 def test_a_crawl_of_a_person_without_knowledge_waits(y_and_g, monkeypatch) -> None:

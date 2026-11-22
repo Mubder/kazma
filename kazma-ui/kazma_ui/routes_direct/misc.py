@@ -452,7 +452,7 @@ def register_misc_routes(self: Any) -> None:
             try:
                 binding = await asyncio.to_thread(space_binding.space_for_socket, principal, websocket)
             except space_binding.SpaceRefused as refused:
-                await websocket.close(code=4003, reason=refused.code)
+                await websocket.close(code=refused.close_code, reason=refused.code)
                 return
             shown = binding.space_id
         store = get_trace_store()

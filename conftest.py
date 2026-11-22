@@ -352,7 +352,9 @@ def _people_hold_every_feature(request, monkeypatch):
 
         def every(registry, account_id):
             held = real(registry, account_id)
-            if held.admin:
+            # Only a real account holds features, as in production: an asker
+            # that is no account of the install gets nothing.
+            if held.admin or str(account_id or "") not in (registry.get("accounts") or {}):
                 return held
             return features.Grants(held.account, frozenset(features.FEATURES))
 

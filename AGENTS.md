@@ -15064,21 +15064,40 @@ an install with one account behaves as before.
     event of the identity record each time. A grant never passes S1-20's
     group rule.
   - Refused at every part: the tenant middleware answers a feature's route
-    403 `feature_off` (`route_scopes.feature_of_route`, one thread with the
-    host check, `auth._rules_here`) and remembers the page's grants for the
-    sidebar (`feature_here`); the command palette and shortcuts offer only
-    what the sidebar shows (`search_pages.pageOffered`); tools at the offer
-    and the call through `spaces.tools.tool_refusal` (host groups and
-    features together: `offered_here`, the registry, the MCP branch, the
-    environment note); chat commands (`features.command_refusal`, the web
-    chat and the gateway); background work when it runs (`work_refusal`:
-    a scheduled job's fire `feature_off`, a swarm worker, X work through
-    `x_work_scope`, a document job's stage, a crawl's resume). A record
-    that names no account (Kazma's own, "operator") is left to its space's
-    rules. A feature off keeps the person's data.
-  - The root conftest gives every test's people every feature (the admin's
-    Development kept); a test of the features themselves is marked
-    `real_features`. `create_app()` reads the stored Spaces switch into the
+    403 `feature_off` (`route_scopes.features_of_route`: a route's own
+    feature and `features.ALSO_NEEDS`'s, one thread with the host check,
+    `auth._rules_here`; a page is a page in its language,
+    `auth._feature_off_response`) and remembers the page's grants for the
+    sidebar (`feature_here`); a socket at its handshake
+    (`space_binding.space_for_socket`, close 4403 `feature_off`); the
+    command palette and shortcuts offer only what the sidebar shows
+    (`search_pages.pageOffered`); tools at the offer and the call through
+    `spaces.tools.tool_refusal` (host groups and features together:
+    `offered_here`, the registry, the MCP branch, the environment note);
+    chat commands (`features.command_refusal`, which reads a command as the
+    handlers do: a bot's name and a prefix, and every chat-app handler's
+    `_command_claimed`); the intent engine (`features.INTENT_HANDLERS`: a
+    decision whose work needs a feature the person lacks is dropped).
+    Refusals name the feature as People does (`features.NAMES`, held equal
+    to the catalog) in the message's language.
+  - **Checked where the work is admitted** (the S2-11 review):
+    `features.ADMISSIONS` names, per feature, the functions every door to
+    its work passes -- research's `research_runtime._frozen`, X's
+    `book_x_post` and `x_work_scope`, a document stage, a crawl's every page
+    and its resume, a swarm dispatch, a scheduled fire, a feature's socket
+    -- and each asks `work_refusal` for the person the work is for (a
+    booked post records its `booker`; a crawl its `asker`).
+    `features.NO_ADMISSION` says why the rest have none. Work that cannot
+    run waits (`FeatureOff`): a booked or legacy X post stays due, a crawl
+    stops `interrupted` (`feature_off`) for a Resume, nothing held or
+    failed; a document job fails with Retry, and an identity outage in its
+    stage is retried as `metadata_unavailable`. A new door passes an
+    admission or is a new one. A record that names no account (Kazma's
+    own, "operator") is left to its space's rules. A feature off keeps the
+    person's data.
+  - The root conftest gives every test's people -- real accounts only --
+    every feature (the admin's Development kept); a test of the features
+    themselves is marked `real_features`. `create_app()` reads the stored Spaces switch into the
     process: a test that sets `scope._enforced` imports what builds the app
     at collection, never mid-test.
   - The precondition of a second account (`features.precondition`, S1-33)
@@ -15087,8 +15106,15 @@ an install with one account behaves as before.
     the registry, the commands and the loops; X Studio on for Y and off for
     G through routes, the offer, the call, a scheduled job's executor, a
     real swarm worker, `/x` and X's background work; a grant that only hides
-    the menu entry as the control), `tests/e2e/test_feature_grants_browser.py`
-    (by the sidebar, EN/AR).
+    the menu entry as the control), `tests/test_feature_admissions.py` (the
+    admission gate with a planted admission and the document stage without
+    its call as controls; the intent path through the real supervisor graph;
+    research's admission; X booked through Scheduled, the booker, a post that
+    waits; a crawl through the real replayed crawl; the real document
+    worker; live voice's handshake; every chat-app handler; pages and
+    refusals in both languages; Knowledge through Documents -- each with
+    its control), `tests/test_feature_grants_in_tests.py`,
+    `tests/e2e/test_feature_grants_browser.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

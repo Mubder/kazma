@@ -25,11 +25,15 @@ Who has what
   says.
 
 A feature that is off is gone for the person: no menu entry, its pages and
-routes refuse (the tenant middleware), its tools are neither offered nor
-callable (``spaces.tools.offered_here`` and ``tool_refusal``), its chat
-command refuses (:func:`command_refusal`), and its background work stops
-when it runs (:func:`work_refusal`). Turning it on again brings the
-person's data back: nothing is deleted.
+routes refuse (the tenant middleware, its live sockets at the handshake),
+its tools are neither offered nor callable (``spaces.tools.offered_here``
+and ``tool_refusal``), its chat command refuses (:func:`command_refusal`,
+and each chat app's command handler), the intent engine does not start its
+work (:data:`INTENT_HANDLERS`), and its work is checked where it is admitted
+(:data:`ADMISSIONS`: every door to the work passes one of them, and each
+asks :func:`work_refusal` for the person the work is for). Work that cannot
+run waits (:class:`FeatureOff`): nothing is failed or changed, and it goes on
+once the feature is on again.
 
 Nothing here acts unless Spaces is enforced: an install with one account
 behaves as before.
@@ -42,25 +46,32 @@ from __future__ import annotations
 
 import contextvars
 import logging
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, current_scope, spaces_enforced
 
 __all__ = [
+    "ADMISSIONS",
+    "ALSO_NEEDS",
     "ALWAYS_ON",
     "FEATURES",
     "INSTALL",
+    "INTENT_HANDLERS",
+    "NAMES",
+    "NO_ADMISSION",
     "AlwaysOn",
     "Feature",
+    "FeatureOff",
     "FeatureRefused",
     "Grants",
     "command_refusal",
     "feature_here",
+    "feature_refusal",
     "forget_page_grants",
     "grants_here",
     "grants_of",
+    "intent_refusal",
     "precondition",
     "remember_page_grants",
     "tool_refusal",
@@ -105,7 +116,9 @@ FEATURES: dict[str, Feature] = {f.id: f for f in (
     Feature(
         "x_studio", "space", False,
         pages=("/x",),
-        routes=("/x$", "/api/x", "/api/x/oauth2/callback$"),
+        # Booking an X post from the Scheduled page is X Studio's (the S2-11
+        # review: a person with Scheduled and without X booked posts there).
+        routes=("/x$", "/api/x", "/api/x/oauth2/callback$", "/api/scheduled/x"),
         tools=frozenset({
             "x_account", "x_api_act", "x_api_operations", "x_api_read", "x_cancel_scheduled_post",
             "x_delete_post", "x_download_media", "x_draft_posts", "x_list_scheduled", "x_post",
@@ -236,6 +249,92 @@ FEATURES: dict[str, Feature] = {f.id: f for f in (
     ),
 )}
 
+#: What each feature is called, (English, Arabic): the People page's words
+#: (the catalog's ``settings.feature.<id>``, held equal by a test), which a
+#: refusal names.
+NAMES: dict[str, tuple[str, str]] = {
+    "x_studio": ("X Studio", "استوديو X"),
+    "email_calendar": ("Email and calendar", "البريد والتقويم"),
+    "documents": ("Documents", "المستندات"),
+    "knowledge": ("Knowledge", "المعرفة"),
+    "research": ("Research", "البحث"),
+    "swarm": ("Swarm", "السرب"),
+    "scheduled": ("Scheduled", "المجدولة"),
+    "code": ("Code", "الكود"),
+    "web": ("Web", "الويب"),
+    "browser": ("Browser", "المتصفح"),
+    "images_voice": ("Images and voice", "الصور والصوت"),
+    "chat_apps": ("Chat apps", "تطبيقات المحادثة"),
+    "development": ("Development", "التطوير"),
+}
+
+#: A tool or route that needs a second feature as well (decided in the S2-11
+#: review): putting a document into a library, or searching libraries
+#: through Documents, is Knowledge's too. Tool name, or route pattern in
+#: ``kazma_ui.route_scopes``'s form, -> the features it needs besides its own.
+ALSO_NEEDS: dict[str, tuple[str, ...]] = {
+    "document_index": ("knowledge",),
+    "document_search": ("knowledge",),
+    "/api/documents/index$": ("knowledge",),
+    "/api/documents/search$": ("knowledge",),
+}
+
+#: The intent engine's handlers (``agent.intent.handlers``) -> the features
+#: the work each starts needs. A person without them gets no such decision:
+#: the turn goes on as an ordinary one, where the feature's tools are not
+#: offered (the supervisor, :func:`intent_refusal`).
+INTENT_HANDLERS: dict[str, tuple[str, ...]] = {
+    "research_deep": ("research",),
+    "document_generate": ("documents",),
+    "research_then_document": ("research", "documents"),
+}
+
+#: Where each feature's work is admitted (``path::qualified.name``): every
+#: door to the work -- a tool, a route, a chat command, the intent engine,
+#: a resume, a booked job when it runs -- passes one of these, and each asks
+#: :func:`work_refusal` for the person the work is for (a gate reads them).
+#: A new door that does not pass one of them is a new admission here.
+ADMISSIONS: dict[str, tuple[str, ...]] = {
+    "x_studio": (
+        "kazma-core/kazma_core/x_api/booking.py::book_x_post",
+        "kazma-core/kazma_core/x_api/ownership.py::x_work_scope",
+    ),
+    "documents": ("kazma-core/kazma_core/documents/worker.py::DocumentWorker._process_claimed",),
+    "knowledge": (
+        "kazma-core/kazma_core/stores/knowledge_ingest.py::_knowledge_off_now",  # before every page
+        "kazma-ui/kazma_ui/kb_api.py::_in_the_crawls_space",
+    ),
+    "research": ("kazma-core/kazma_core/web_acquire/research_runtime.py::_frozen",),
+    "swarm": ("kazma-core/kazma_core/swarm/worker_dispatch.py::_worker_scope",),
+    "scheduled": ("kazma-core/kazma_core/cron/scheduler.py::_fire_binding",),
+    "images_voice": ("kazma-ui/kazma_ui/space_binding.py::_socket_feature_refusal",),
+}
+
+#: The features with no work admitted outside a tool call or a request,
+#: and why: refused at the offer, the call and the route, nothing of theirs
+#: runs later.
+NO_ADMISSION: dict[str, str] = {
+    "email_calendar": "tools and routes only: a mailbox or calendar call is made in the tool or the request",
+    "code": "one tool (python_exec), run in its call",
+    "web": "tools only: a fetch, a search or a crawl runs in its tool call",
+    "browser": "tools only: a page is driven in its tool call",
+    "chat_apps": "nothing of it exists until stage 3 links chat apps to accounts",
+    "development": "host tools and routes (S1-20's group rule, checked at the offer, the call and the route)",
+}
+
+
+class FeatureOff(PermissionError):
+    """Work of a feature that is off for the person it is for (S2-11). It
+    waits: nothing is failed, held for review or changed, and it goes on
+    once the admin turns the feature on again. ``str()`` is the refusal."""
+
+    code = "feature_off"
+
+    def __init__(self, feature: str, message: str) -> None:
+        super().__init__(message)
+        self.feature = feature
+
+
 ALWAYS_ON: dict[str, AlwaysOn] = {
     "chat": AlwaysOn(
         "Chat is what Kazma is: a person's own conversations, the turn's approvals, its steps "
@@ -361,14 +460,42 @@ def _feature_of_tool(name: str) -> str | None:
     return "development"
 
 
+def _features_of_tool(name: str) -> tuple[str, ...]:
+    """Every feature the tool *name* needs: its own and :data:`ALSO_NEEDS`."""
+    own = _feature_of_tool(name)
+    return ((own,) if own else ()) + ALSO_NEEDS.get(name, ())
+
+
+def _command_head(text: str) -> str:
+    """The command a message starts with, as the chat apps' handlers read it:
+    the first word without its "/" and a bot's name ("/kb@kazma_bot"),
+    lower case; "" for a message that is no command."""
+    words = str(text or "").strip().split(maxsplit=1)
+    if not words or not words[0].startswith("/"):
+        return ""
+    return words[0][1:].split("@", 1)[0].lower()
+
+
 def _feature_of_command(name: str) -> str | None:
     """The feature of the chat command *name* (without its "/"); None for an
-    always-on or an admin's command."""
-    name = str(name or "").lower().lstrip("/")
+    always-on or an admin's command. A name that only starts with a
+    feature's command ("kbx", "researchfoo") is that feature's, as the chat
+    apps' handlers read it by prefix; an always-on command's own name is
+    never a feature's."""
+    name = str(name or "").lower().lstrip("/").split("@", 1)[0]
+    if not name:
+        return None
     for feature in FEATURES.values():
         if name in feature.commands:
             return feature.id
-    return None
+    if any(name in always.commands for always in ALWAYS_ON.values()) or f"command:{name}" in INSTALL:
+        return None
+    best: tuple[int, str] | None = None
+    for feature in FEATURES.values():
+        for command in feature.commands:
+            if name.startswith(command) and (best is None or len(command) > best[0]):
+                best = (len(command), feature.id)
+    return best[1] if best else None
 
 
 # ── Who has what ────────────────────────────────────────────────────────
@@ -435,38 +562,73 @@ def grants_here() -> Grants | None:
     return grants_of(identity.read_registry(), bound.asker)
 
 
+def _english(feature: str) -> str:
+    return NAMES.get(feature, (feature, feature))[0]
+
+
 def _refusal(feature: str, lang: str = "en") -> str:
-    if lang == "ar":
-        return (f"غير متاح: الميزة «{feature}» معطّلة لهذا الشخص. يفعّلها المسؤول من "
-                "الإعدادات ← الأشخاص.")
-    return (f"Not available: the feature '{feature}' is off for this person. The admin turns it "
-            "on in Settings → People.")
+    """The refusal of *feature* in *lang* ("en", "ar", or "both": Arabic
+    first, for work no message of the person's says the language of)."""
+    english, arabic = NAMES.get(feature, (feature, feature))
+    ar = f"غير متاح لك: ميزة «{arabic}» غير مفعّلة. يفعّلها المسؤول من الإعدادات ← الأشخاص."
+    en = f"Not available to you: {english} is off. The admin turns it on in Settings → People."
+    return ar if lang == "ar" else en if lang == "en" else f"{ar}\n{en}"
+
+
+def _lang_of(user_text: str | None) -> str:
+    from kazma_core.language_lock import detect_user_language
+
+    found = detect_user_language(user_text or "") if user_text else ""
+    return found if found in ("en", "ar") else "both"
 
 
 def tool_refusal(name: str, grants: Grants | None = None) -> str | None:
     """Why the tool *name* is not for the person of the work bound now, or
-    None. With *grants* none (no rule), never refused here."""
-    feature = _feature_of_tool(name)
-    if feature is None or grants is None or grants.has(feature):
+    None. With *grants* none (no rule), never refused here. Said to the
+    model, which tells the person in their language."""
+    if grants is None:
         return None
-    return (f"Tool '{name}' is not available to this person: its feature ({feature}) is off. "
-            "Tell the user the admin turns it on in Settings → People.")
+    for feature in _features_of_tool(name):
+        if not grants.has(feature):
+            return (f"Tool '{name}' is not available to this person: {_english(feature)} is off for "
+                    "them. Tell the user the admin turns it on in Settings → People.")
+    return None
 
 
-def command_refusal(text: str, lang: str = "en") -> str | None:
+def command_refusal(text: str, lang: str | None = None) -> str | None:
     """Why the chat command that *text* starts with refuses for the person
-    of the work bound now (in *lang*), or None. Blocking (one identity read,
-    only for a command of a feature)."""
-    words = str(text or "").strip().split(maxsplit=1)
-    if not words or not words[0].startswith("/"):
-        return None
-    feature = _feature_of_command(words[0])
+    of the work bound now, or None: in *lang* ("en" or "ar"), else in the
+    message's own language. Blocking (one identity read, only for a command
+    of a feature)."""
+    feature = _feature_of_command(_command_head(text))
     if feature is None:
         return None
     grants = grants_here()
     if grants is None or grants.has(feature):
         return None
-    return _refusal(feature, lang)
+    return _refusal(feature, lang or _lang_of(text))
+
+
+def feature_refusal(feature: str, user_text: str | None = None) -> str | None:
+    """Why *feature* is not for the person of the work bound now, in the
+    language of *user_text* (a chat app's command handler, once it knows the
+    message is its own), or None. Blocking (one identity read)."""
+    grants = grants_here()
+    if grants is None or grants.has(feature):
+        return None
+    return _refusal(feature, _lang_of(user_text))
+
+
+def intent_refusal(handler: str) -> str | None:
+    """Whether the intent engine may start *handler*'s work for the person
+    of the turn: None, or the feature it needs that they lack. Blocking."""
+    needed = INTENT_HANDLERS.get(str(handler or ""), ())
+    if not needed:
+        return None
+    grants = grants_here()
+    if grants is None:
+        return None
+    return next((feature for feature in needed if not grants.has(feature)), None)
 
 
 def work_refusal(feature: str, account: str | None) -> str | None:
@@ -485,7 +647,7 @@ def work_refusal(feature: str, account: str | None) -> str | None:
         return None
     if grants_of(registry, account).has(feature):
         return None
-    return _refusal(feature)
+    return _refusal(feature, "both")
 
 
 # ── The page being drawn ────────────────────────────────────────────────
@@ -513,15 +675,6 @@ def feature_here(feature: str) -> bool:
         return True
     grants = _page_grants.get()
     return grants is not None and grants.has(feature)
-
-
-def features_off_here() -> list[str]:
-    """The features the page's person does not have (for the page's own
-    menus: the command palette, the keyboard shortcuts). No I/O."""
-    if not spaces_enforced():
-        return []
-    grants = _page_grants.get()
-    return sorted(set(FEATURES) - set(grants.on if grants is not None else ()))
 
 
 # ── Changing a person's features ────────────────────────────────────────

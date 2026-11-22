@@ -1118,7 +1118,7 @@ class CronScheduler:
             due = _parse_dt(current.fire_due or current.next_run)
             if binding is not None and binding.refusal:
                 result = FireResult(success=False, outcome=binding.refusal,
-                                    result_text=_FIRE_REFUSALS[binding.refusal])
+                                    result_text=_fire_refusal_text(binding.refusal, current.prompt))
             else:
                 result = await self._produce(current, settings, zone, zone_name, due=due, now=now)
             result.target = await self._resolve_target(current)
@@ -1465,6 +1465,22 @@ _FIRE_REFUSALS = {
     "feature_off": ("Error: Scheduled is off for the person this job acts for (Settings → "
                     "People), so it does not fire."),
 }
+
+#: The refusals said in Arabic too, for a job written in Arabic.
+_FIRE_REFUSALS_AR = {
+    "feature_off": ("خطأ: ميزة المجدولة غير مفعّلة للشخص الذي تعمل له هذه المهمة (الإعدادات ← "
+                    "الأشخاص)، فلا تعمل."),
+}
+
+
+def _fire_refusal_text(refusal: str, prompt: str | None) -> str:
+    """A refused fire's text, in the language the job was written in."""
+    arabic = _FIRE_REFUSALS_AR.get(refusal)
+    if arabic is None:
+        return _FIRE_REFUSALS[refusal]
+    from kazma_core.language_lock import in_their_language
+
+    return in_their_language(prompt, _FIRE_REFUSALS[refusal], arabic)
 
 
 @dataclass(frozen=True)

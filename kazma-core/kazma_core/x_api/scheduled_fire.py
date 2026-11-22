@@ -129,11 +129,17 @@ async def _fire_post(post: ScheduledXPost) -> None:
     from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
 
     if spaces_enforced():
+        from kazma_core.spaces.features import FeatureOff
         from kazma_core.spaces.identity import IdentityUnavailable
         from kazma_core.x_api.ownership import x_work_scope
 
         try:
             scope = await asyncio.to_thread(x_work_scope, post.tenant_id)
+        except FeatureOff:
+            # The person it is for no longer has X Studio (Spaces S2-11):
+            # still pending, nothing failed; it goes once the feature is on.
+            logger.info("[x-schedule] post %s waits: X Studio is off for the person it is for", post.id)
+            return
         except NoSpaceBound:
             logger.warning("[x-schedule] post %s: no space of this install holds it; not sent", post.id)
             store = await asyncio.to_thread(get_x_scheduled_store)

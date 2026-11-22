@@ -132,11 +132,18 @@ you turn it on. Grants are per person, in a shared space too, and only you
 make them.
 
 A feature that is off is gone for that person: no menu entry, its pages
-and routes refuse, its chat commands refuse, its tools are neither offered
-to the model nor run, and its work in the background (a scheduled job, a
-swarm worker, a document job, a booked X post) stops when it runs. Their
-data stays, and turning the feature on again brings it back. You have every
-feature; Development is the one you can switch off for yourself.
+say it is off, its routes and live voice refuse, its chat commands refuse,
+its tools are neither offered to the model nor run, and a request that
+would start its work (asking for a deep research, booking an X post from
+Scheduled) starts nothing. Work they started before it was switched off
+waits: a booked X post stays booked and goes once the feature is on again,
+a Knowledge crawl stops before its next page and finishes on Resume, a
+scheduled job does not fire, a swarm worker does not run, and a document
+job stops and can be retried. A research run already going finishes. Their
+data stays, and turning the feature on again brings it back. Putting a
+document into a library, or searching libraries through Documents, needs
+Knowledge too. You have every feature; Development is the one you can
+switch off for yourself.
 
 ## Taking your space with you, and deleting it
 

@@ -55,7 +55,7 @@ __all__ = [
     "Rule",
     "compile_rules",
     "deciding_rule",
-    "feature_of_route",
+    "features_of_route",
     "sample_requests",
     "scope_of",
     "unclassed",
@@ -411,11 +411,37 @@ def _feature_class_of_route(path: str, method: str = "GET") -> str | None:
     return None
 
 
-def feature_of_route(path: str, method: str = "GET") -> str | None:
+def _feature_of_route(path: str, method: str = "GET") -> str | None:
     """The feature ``method path`` belongs to (``spaces.features``), None for
     a route of no feature. No I/O."""
     label = _feature_class_of_route(path, method)
     return label.split(":", 1)[1] if label and label.startswith("feature:") else None
+
+
+#: ``spaces.features.ALSO_NEEDS``'s routes, compiled once.
+_ALSO_RULES: list[tuple[Rule, tuple[str, ...]]] = []
+
+
+def _also_rules() -> list[tuple[Rule, tuple[str, ...]]]:
+    if not _ALSO_RULES:
+        from kazma_core.spaces.features import ALSO_NEEDS
+
+        rows = [(pattern, needs) for pattern, needs in ALSO_NEEDS.items() if pattern.startswith("/")]
+        compiled = compile_rules((pattern, SPACE) for pattern, _ in rows)
+        _ALSO_RULES.extend(zip(compiled, (needs for _, needs in rows), strict=True))
+    return _ALSO_RULES
+
+
+def features_of_route(path: str, method: str = "GET") -> tuple[str, ...]:
+    """Every feature ``method path`` needs: its own (:func:`_feature_of_route`)
+    and those ``spaces.features.ALSO_NEEDS`` adds (indexing a document into
+    a library is Knowledge's too). No I/O."""
+    own = _feature_of_route(path, method)
+    wanted = "GET" if (method or "").upper() == "HEAD" else (method or "").upper()
+    segments = _segments(path)
+    extra = tuple(feature for rule, needs in _also_rules() if rule.matches(wanted, segments)
+                  for feature in needs)
+    return ((own,) if own else ()) + extra
 
 
 def deciding_rule(

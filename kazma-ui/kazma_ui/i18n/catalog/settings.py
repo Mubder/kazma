@@ -2788,6 +2788,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.feature.chat_apps": {"en": "Chat apps", "ar": "تطبيقات المحادثة"},
     "settings.feature.development": {"en": "Development", "ar": "التطوير"},
     "settings.people_feature_of": {"en": "{feature} for {name}", "ar": "{feature} لـ {name}"},
+    "settings.feature_off_title": {"en": "Not available to you", "ar": "غير متاح لك"},
+    "settings.feature_off_body": {
+        "en": "{feature} is off for you. The admin turns it on in Settings → People.",
+        "ar": "ميزة {feature} غير مفعّلة لك. يفعّلها المسؤول من الإعدادات ← الأشخاص.",
+    },
+    "settings.feature_off_back": {"en": "Back to chat", "ar": "العودة إلى المحادثة"},
     "settings.people_features_saved": {"en": "Features saved.", "ar": "حُفظت الميزات."},
     "settings.people_err.unknown_feature": {"en": "There is no such feature.", "ar": "لا توجد ميزة بهذا الاسم."},
     "settings.people_err.bad_switch": {"en": "A feature is switched on or off.", "ar": "الميزة إما مفعّلة أو معطّلة."},

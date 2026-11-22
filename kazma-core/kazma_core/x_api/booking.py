@@ -100,6 +100,9 @@ def book_x_post(
     ``id``, ``text``, ``fire_at``, ``tz``; on failure a single ``error``.
     """
     from kazma_core.cron.scheduler import resolve_cron_zone
+    from kazma_core.spaces.features import work_refusal
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_core.spaces.scope import bound_asker
     from kazma_core.x_api.ownership import x_tenant_id
     from kazma_core.x_api.publication_service import schedule
     from kazma_core.x_api.schedule import x_schedule_enabled
@@ -108,6 +111,18 @@ def book_x_post(
         return False, {"error": "X post scheduling is disabled (KAZMA_X_SCHEDULE / KAZMA_X_POST)."}
     if tenant_id != x_tenant_id():
         return False, {"error": "Scheduled publication tenant does not match authenticated context."}
+    # X Studio's admission (Spaces S2-11): every booking -- the tool, X
+    # Studio, the Scheduled page -- passes here, and the person booking is
+    # recorded on the row, so the post is held to them when it fires too
+    # (``x_work_scope``): switched off later, their posts wait.
+    booker = bound_asker() or ""
+    try:
+        refused = work_refusal("x_studio", booker)
+    except IdentityUnavailable:
+        return False, {"error": "Accounts cannot be read right now; nothing was booked.",
+                       "code": "identity_unavailable"}
+    if refused:
+        return False, {"error": refused, "code": "feature_off"}
     try:
         fire_at = _parse_when(when)
     except ValueError as exc:
@@ -116,6 +131,7 @@ def book_x_post(
     return schedule(text=text, fire_at=fire_at, reply_to_id=reply_to_id or "", idempotency_key=idempotency_key,
                     metadata={"thread_id": thread_id, "delivery_target": delivery_target,
                               "tz": zone_name, "proposal_id": proposal_id,
+                              **({"booker": booker} if booker else {}),
                               **({"media_ids": list(media_ids)} if media_ids else {})})
 
 

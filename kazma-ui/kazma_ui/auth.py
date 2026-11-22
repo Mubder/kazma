@@ -1774,6 +1774,44 @@ def _rules_here() -> tuple[Any, Any]:
     return host_allowance(), grants_here()
 
 
+def _lacking_feature(needed: tuple[str, ...], grants: Any) -> str | None:
+    """The first of *needed* the person's *grants* do not hold; None when
+    they hold every one, or no rule applies (*grants* None)."""
+    if grants is None:
+        return None
+    return next((feature for feature in needed if not grants.has(feature)), None)
+
+
+def _feature_off_response(request: Request, feature: str, *, page: bool) -> Response:
+    """The answer to a request for a feature the person has not got (Spaces
+    S2-11), in the page's language: a page says so, an API call answers
+    ``feature_off`` with the same words."""
+    from html import escape
+
+    from kazma_ui.i18n import current_language, t
+
+    lang = current_language()
+    name = t(f"settings.feature.{feature}", lang)
+    text = t("settings.feature_off_body", lang, feature=name)
+    if not page:
+        return JSONResponse({"ok": False, "code": "feature_off", "feature": feature, "error": text},
+                            status_code=403)
+    from fastapi.responses import HTMLResponse
+
+    title = t("settings.feature_off_title", lang)
+    page_dir = "rtl" if lang == "ar" else "ltr"
+    return HTMLResponse(
+        f'<!doctype html><html lang="{lang}" dir="{page_dir}"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f'<title>{escape(title)}</title><link rel="stylesheet" href="/static/css/kazma.css"></head>'
+        '<body><main class="card" id="feature-off" style="max-width:36rem;margin:15vh auto;padding:1.5rem">'
+        f'<h1 class="card-title">{escape(title)}</h1><p>{escape(text)}</p>'
+        f'<p><a class="btn btn-primary" href="/chat">{escape(t("settings.feature_off_back", lang))}</a></p>'
+        '</main></body></html>',
+        status_code=403,
+    )
+
+
 def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitable[Response]]], Awaitable[Response]]:
     """Create an HTTP middleware that extracts tenant id and propagates it.
 
@@ -1926,14 +1964,14 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                 from kazma_core.spaces.features import remember_page_grants
                 from kazma_core.spaces.tools import remember_allowance
 
-                from kazma_ui.route_scopes import feature_of_route, is_development_route
+                from kazma_ui.route_scopes import features_of_route, is_development_route
 
                 path = judged_path(request)
                 host_route = is_development_route(path, request.method)
-                feature = feature_of_route(path, request.method)
+                needed = features_of_route(path, request.method)
                 page = request.method in ("GET", "HEAD") and not path.startswith(
                     ("/api/", "/static/", "/ws/", "/health"))
-                if host_route or page or feature:
+                if host_route or page or needed:
                     try:
                         allowance, grants = await asyncio.to_thread(_rules_here)
                     except IdentityUnavailable:
@@ -1949,12 +1987,9 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                              "error": f"Not available in this space: {allowance.why_not}."},
                             status_code=403,
                         )
-                    if feature and grants is not None and not grants.has(feature):
-                        return JSONResponse(
-                            {"ok": False, "code": "feature_off", "feature": feature,
-                             "error": "Not available to you: the admin turns it on in Settings → People."},
-                            status_code=403,
-                        )
+                    lacking = _lacking_feature(needed, grants)
+                    if lacking:
+                        return _feature_off_response(request, lacking, page=page)
                     allowance_token = remember_allowance(allowance)
                     grants_token = remember_page_grants(grants)
             response = await call_next(request)

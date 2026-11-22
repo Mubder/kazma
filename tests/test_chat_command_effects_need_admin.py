@@ -92,6 +92,8 @@ READS = frozenset({
     "get_workspace_store().list_workspaces", "get_github_token", "list_agent_skills", "get_skill",
     "_x_read_command", "get_x_config", "get_reply_config", "XClient", "XClient(xcfg.credentials).get_tweet",
     "_get_visible_providers", "chat_model_for", "get_model_registry", "get_model_registry().get_active_profile",
+    # Reads the person's features and replies with a refusal (Spaces S2-11).
+    "_command_claimed",
 })
 
 #: Branches that act and are open to any allowed sender, with why.

@@ -314,7 +314,7 @@ def create_ws_chat_router(
             binding = await asyncio.to_thread(space_binding.space_for_socket, principal, websocket)
         except space_binding.SpaceRefused as refused:
             await websocket.accept()
-            await websocket.close(code=4003, reason=refused.code)
+            await websocket.close(code=refused.close_code, reason=refused.code)
             return
         with space_binding.bound_to(binding):
             await _observe_session(websocket, session_id)
