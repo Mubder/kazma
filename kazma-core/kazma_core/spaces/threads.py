@@ -77,6 +77,11 @@ class ThreadInAnotherSpace(NoSpaceBound):
     """A turn was asked for on a thread that belongs to another space."""
 
 
+class _AskerNotInSpace(NoSpaceBound):
+    """A turn was asked for by a person who is no longer a member of its
+    space (the S2-12 review, finding 7)."""
+
+
 @dataclass(frozen=True)
 class ThreadRecord:
     """Where a chat thread lives and who opened it."""
@@ -315,6 +320,19 @@ class TurnScope:
     bind_tenant: bool
 
 
+def _still_a_member(found: Scope) -> None:
+    """Every turn starts for a member of its space (the S2-12 review,
+    finding 7): a person who left it -- between their request and the turn,
+    or before a resume -- gets none. An identity store that cannot answer
+    raises its own error."""
+    if not found.asker:
+        return
+    from kazma_core.spaces import identity
+
+    if not identity.is_member(found.asker, found.space_id):
+        raise _AskerNotInSpace("you are no longer in this space, so this chat's turn does not run")
+
+
 def scope_for_turn(thread_id: str) -> TurnScope:
     """The scope a turn on *thread_id* runs in, recording the thread on its
     first turn. Reads and writes the record store: call it off the loop.
@@ -333,13 +351,17 @@ def scope_for_turn(thread_id: str) -> TurnScope:
                 record = record_thread(thread_id, entry.space_id, entry.asker)
         if record is not None and record.space_id != entry.space_id:
             _other_space(thread_id, record.space_id, entry.space_id, enforced)
+        if enforced:
+            _still_a_member(entry)
         return TurnScope(scope=entry, bind_tenant=True)
 
     # The entry point bound no scope: a watchdog, a resume at start, or an
     # older entry point that binds the tenant alone or nothing.
     if record is not None:
         if enforced:
-            return TurnScope(scope=Scope(record.space_id, record.opener), bind_tenant=True)
+            found = Scope(record.space_id, record.opener)
+            _still_a_member(found)
+            return TurnScope(scope=found, bind_tenant=True)
         if _legacy_tenant_bound():
             # An older entry point bound a tenant and no asker: the turn runs
             # in that tenant, as before Spaces.

@@ -62,9 +62,14 @@ def x_work_scope(tenant: str, booker: str | None = None) -> Callable[[], Abstrac
     if not spaces_enforced():
         return functools.partial(tenant_scope, tenant)
     from kazma_core.spaces.features import FeatureOff, work_refusal
-    from kazma_core.spaces.identity import work_scope
+    from kazma_core.spaces.identity import AskerLeft, work_scope
 
-    found = work_scope(str(tenant or ""), booker or None)
+    try:
+        found = work_scope(str(tenant or ""), booker or None)
+    except AskerLeft as exc:
+        # The person who booked it left the space: never posted as anyone
+        # else (the S2-12 review, finding 6). As work of no space: refused.
+        raise NoSpaceBound(f"X work of {tenant!r}: {exc}") from exc
     if found is None:
         raise NoSpaceBound(f"X work of {tenant!r}: no space of this install holds it")
     refused = work_refusal("x_studio", found[1])

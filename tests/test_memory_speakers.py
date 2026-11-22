@@ -529,6 +529,10 @@ def test_forget_every_fact_under_an_entry(team) -> None:
     with sqlite3.connect(str(before)) as copy:
         team.db.backup(copy)
     copy.close()
+    # She has left (the leave and remove flow forgets after the membership
+    # changes): a replay forgets only a departed person's entry (the S2-12
+    # review, finding 4; tests/test_member_forget_converges.py).
+    identity.remove_member(TEAM, SARA)
     out = forget.forget_entry(f"member_{SARA}", tenant_id=TEAM)
     assert out["ok"] and len(out["facts"]) == 2
     for asker in (SARA, OMAR, OWNER_ACCOUNT_ID):

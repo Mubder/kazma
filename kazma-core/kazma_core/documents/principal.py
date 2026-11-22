@@ -50,6 +50,7 @@ __all__ = [
     "DocumentsRefused",
     "owner_actor",
     "surface_scope",
+    "take_back_access",
 ]
 
 MULTI_USER_REFUSAL = (
@@ -102,6 +103,21 @@ def _give_access(service: Any, tenant_id: str, member: str) -> None:
         grant(tenant_id=tenant_id, member=member)
     except (DocumentAccessError, *store_errors()):
         logger.warning("[documents.principal] the member's access grant failed", exc_info=True)
+
+
+def take_back_access(tenant_id: str, member: str) -> int | None:
+    """Take back the share of a space's documents a member was given
+    (``grant_member_access``): they left the shared space, or were removed
+    (Spaces S2-12). The documents they own stay theirs. None when no
+    document service runs in this process: the rows left reach nobody, since
+    every read needs membership of the space, and a member who comes back is
+    given them again. Blocking."""
+    from .ingestion import peek_ingestion_service
+
+    service = peek_ingestion_service()
+    if service is None:
+        return None
+    return int(service.revoke_member_access(tenant_id=tenant_id, member=member))
 
 
 def surface_scope(service: Any, *, page_user: Callable[[], str] | None = None) -> DocumentScope:

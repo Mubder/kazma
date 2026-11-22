@@ -131,6 +131,44 @@
         return true;
     }
 
+    /**
+     * Say which space this tab is in, in the header (Spaces S2-12): its kind
+     * always (personal, shared, shared with a project folder), its name when
+     * there is no switcher to show it, and "New private chat" in a shared
+     * space, which opens a new chat in the person's own space. Returns the
+     * person's personal space, or null.
+     */
+    function showSpace(doc, spaces, currentId) {
+        if (!doc || !doc.getElementById || !Array.isArray(spaces)) return null;
+        var current = null;
+        var personal = null;
+        spaces.forEach(function (space) {
+            if (!space || !validId(space.id)) return;
+            if (space.id === currentId) current = space;
+            if (space.personal && !personal) personal = space;
+        });
+        if (!current) return personal;
+        var kind = doc.getElementById('space-kind');
+        if (kind) {
+            var word = current.personal ? kind.getAttribute('data-personal')
+                : (current.kind === 'host' ? kind.getAttribute('data-project') : kind.getAttribute('data-shared'));
+            kind.textContent = word || '';
+            kind.setAttribute('data-kind', current.personal ? 'personal' : (current.kind === 'host' ? 'project' : 'shared'));
+            kind.hidden = !word;
+        }
+        var name = doc.getElementById('space-name');
+        var select = doc.getElementById('space-switcher');
+        if (name) {
+            var switcher = select && !select.hidden;
+            var label = select ? (select.getAttribute('data-personal-label') || '') : '';
+            name.textContent = current.name || (current.personal ? label : current.id);
+            name.hidden = !!switcher;
+        }
+        var privateChat = doc.getElementById('new-private-chat');
+        if (privateChat) privateChat.hidden = !(personal && !current.personal);
+        return personal;
+    }
+
     /** True when the page says this install enforces Spaces. */
     function pageEnforces(doc) {
         var flag = doc && doc.querySelector
@@ -138,7 +176,7 @@
         return !!flag && flag.getAttribute('content') === '1';
     }
 
-    function offerSwitcher(win, currentId) {
+    function offerSwitcher(win, currentId, state) {
         var doc = win.document;
         if (!pageEnforces(doc)) return;
         function load() {
@@ -151,6 +189,13 @@
                         fillSwitcher(select, body.spaces, currentId, function (id) {
                             win.kazmaSpace.switchTo(id);
                         });
+                        if (state) {
+                            state.spaces = body.spaces;
+                            state.personal = showSpace(doc, body.spaces, currentId);
+                            if (doc.dispatchEvent && typeof win.CustomEvent === 'function') {
+                                doc.dispatchEvent(new win.CustomEvent('kazma:spaces', { detail: body.spaces }));
+                            }
+                        }
                     }
                 })
                 .catch(function () { /* no switcher; the tab stays in its space */ });
@@ -215,13 +260,26 @@
             win.WebSocket = Wrapped;
         }
 
-        offerSwitcher(win, state.id);
+        offerSwitcher(win, state.id, state);
 
         win.kazmaSpace = {
             /** The id of the space this tab is in. */
             get id() { return state.id; },
+            /** The person's spaces, once read (else an empty list). */
+            get spaces() { return Array.isArray(state.spaces) ? state.spaces.slice() : []; },
             /** `url` with this tab's space, for a link or a download. */
             url: function (url) { return withSpace(url, getId(), origin); },
+            /** A new chat in the person's own space, from a shared one
+             * (S2-12): the tab moves to that space with an empty chat. */
+            newPrivateChat: function () {
+                var own = state.personal;
+                if (!enforced || !own || !validId(own.id)) return;
+                remember(storage, own.id);
+                var next = new URL('/chat', origin + '/');
+                next.searchParams.set('new', '1');
+                next.searchParams.set(QUERY, own.id);
+                win.location.assign(next.toString());
+            },
             /** Switch this tab to another space: the page loads again for it. */
             switchTo: function (id) {
                 if (!enforced || !validId(id) || id === state.id) return;
@@ -242,6 +300,7 @@
         wrapFetch: wrapFetch,
         wrapUrlConstructor: wrapUrlConstructor,
         fillSwitcher: fillSwitcher,
+        showSpace: showSpace,
         install: install,
     };
     if (typeof module !== 'undefined' && module.exports) {

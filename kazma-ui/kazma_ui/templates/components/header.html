@@ -70,6 +70,16 @@
         <select id="space-switcher" class="form-select header-space-switcher" hidden
                 title="{{ t('spaces.switcher') }}" aria-label="{{ t('spaces.switcher') }}"
                 data-personal-label="{{ t('spaces.personal') }}" translate="no"></select>
+        {# The space's name (when there is no switcher) and its kind, and a
+           private chat from a shared space (Spaces S2-12). space_scope.js
+           fills them once it has read the person's spaces. #}
+        <span id="space-name" class="header-space-name" hidden translate="no"></span>
+        <span id="space-kind" class="badge badge-secondary header-space-kind" hidden
+              data-personal="{{ t('spaces.kind_personal') }}" data-shared="{{ t('spaces.kind_shared') }}"
+              data-project="{{ t('spaces.kind_project') }}"></span>
+        <button id="new-private-chat" class="btn btn-sm btn-secondary header-private-chat" type="button" hidden
+                title="{{ t('spaces.new_private_chat_title') }}"
+                @click="window.kazmaSpace && window.kazmaSpace.newPrivateChat()">{{ t('spaces.new_private_chat') }}</button>
 
         {# Report a problem (REMAINING 3.1): the report is shown whole before it is sent. #}
         <button class="header-btn" id="report-problem" type="button" @click="window.kazmaReportProblem({})"

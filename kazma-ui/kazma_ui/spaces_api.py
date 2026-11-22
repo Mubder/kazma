@@ -9,6 +9,19 @@
 * ``DELETE /api/spaces/{space_id}`` -- erase it: an owner of a shared space,
   or the admin for the closed personal space of a person they deleted.
 
+Who is in a shared space (S2-12):
+
+* ``GET /api/spaces/{space_id}/members`` -- its members (id, name, role): a
+  member or the admin.
+* ``POST /api/spaces/{space_id}/members`` -- the admin adds a person
+  (``{"account_id": ...}``); they are told at their next page load.
+* ``DELETE /api/spaces/{space_id}/members/{account_id}`` -- its owner or the
+  admin takes a member out.
+* ``POST /api/spaces/{space_id}/leave`` -- the caller leaves.
+
+A member who goes, either way, loses every fact under their own memory entry
+in the space (N36); their messages stay (``people.leave_space``).
+
 The space is named in the path, so the routes are ``install`` routes
 (``route_scopes``) and check the caller against the space themselves; an
 erase in progress (``erasing_at``) takes the space's members away, so the
@@ -30,7 +43,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 from kazma_core.errors import validation_error
 from kazma_core.security.sealed_zip import MIN_PASSWORD
-from kazma_core.spaces import space_data
+from kazma_core.spaces import people, space_data
 from kazma_core.spaces.identity import IdentityUnavailable, read_registry
 from kazma_core.spaces.people import PeopleRefused
 from kazma_core.spaces.scope import spaces_enforced
@@ -66,7 +79,13 @@ def _refusal(request: Request, space_id: str, action: str) -> JSONResponse | Non
     role = _role(account, space_id)
     admin = auth.admin_decision(request) == "ok"
     space = read_registry()["spaces"].get(space_id) or {}
-    if action == "count" and (admin or role):
+    if action in ("count", "members") and (admin or role):
+        return None
+    if action == "add" and admin:
+        return None
+    if action == "remove" and (admin or role == "owner"):
+        return None
+    if action == "leave" and role:
         return None
     if action == "export" and role == "owner":
         return None
@@ -110,6 +129,57 @@ def create_spaces_router() -> APIRouter:
                                  "role": _role(account, space_id) or ""})
 
         return _guarded(request, space_id, "count", _run)
+
+    @router.get("/{space_id}/members")
+    def members(space_id: str, request: Request) -> Any:
+        def _run() -> Any:
+            account = space_binding.account_of(auth.get_request_principal(request))
+            registry = read_registry()
+            space = registry["spaces"].get(space_id) or {}
+            names = {key: str(value.get("name") or "") for key, value in registry["accounts"].items()}
+            listed = [
+                {"id": str(m.get("account")), "name": names.get(str(m.get("account")), ""),
+                 "role": str(m.get("role") or "member")}
+                for m in registry["memberships"] if m.get("space") == space_id
+            ]
+            return JSONResponse({
+                "ok": True, "members": sorted(listed, key=lambda m: (m["role"] != "owner", m["name"].lower())),
+                "me": account or "", "role": _role(account, space_id) or "",
+                "personal": bool(space.get("personal_of")),
+            })
+
+        return _guarded(request, space_id, "members", _run)
+
+    @router.post("/{space_id}/members")
+    async def add_member(space_id: str, request: Request) -> Any:
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        account_id = str(body.get("account_id") or "") if isinstance(body, dict) else ""
+
+        def _run() -> Any:
+            by = space_binding.account_of(auth.get_request_principal(request)) or ""
+            people.add_member(space_id, account_id, by=by)
+            return JSONResponse({"ok": True}, status_code=201)
+
+        return await asyncio.to_thread(_guarded, request, space_id, "add", _run)
+
+    @router.delete("/{space_id}/members/{account_id}")
+    def remove_member(space_id: str, account_id: str, request: Request) -> Any:
+        def _run() -> Any:
+            by = space_binding.account_of(auth.get_request_principal(request)) or ""
+            return JSONResponse({"ok": True, **people.remove_member(space_id, account_id, by=by)})
+
+        return _guarded(request, space_id, "remove", _run)
+
+    @router.post("/{space_id}/leave")
+    def leave(space_id: str, request: Request) -> Any:
+        def _run() -> Any:
+            by = space_binding.account_of(auth.get_request_principal(request)) or ""
+            return JSONResponse({"ok": True, **people.leave_space(space_id, by=by)})
+
+        return _guarded(request, space_id, "leave", _run)
 
     @router.post("/{space_id}/export")
     async def export(space_id: str, request: Request) -> Any:

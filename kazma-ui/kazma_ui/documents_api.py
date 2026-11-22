@@ -532,6 +532,43 @@ def create_documents_router() -> APIRouter:
                 return _policy_error(exc)
             return _action_error(exc, "convert")
 
+    @router.post("/{document_id}/move", dependencies=[Depends(rate_limit("documents", 10))])
+    async def move(request: Request, document_id: str, payload: dict[str, Any] = Depends(_json_body)) -> Any:
+        """Move the asker's own document from this space to another of theirs
+        (Spaces S2-12): their own space and a shared one, either way. The
+        target space is named in the body; ``spaces.moves`` checks both."""
+        import asyncio
+
+        from kazma_core.documents.capacity import CapacityError
+        from kazma_core.documents.ingestion import DocumentIngestionError
+        from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_core.spaces.moves import MoveRefused, move_document
+
+        svc = _svc(request)
+        if svc is None:
+            return _unavailable()
+        tenant, actor, workspace = await _resolve_scope(request)
+        to_space = str(payload.get("to_space") or "").strip()
+        if not to_space:
+            return _coded_error("invalid_request", "Name the space to move it to.", default=400)
+        try:
+            moved = await asyncio.to_thread(
+                move_document, document_id, from_space=tenant, to_space=to_space, by=actor,
+                workspace_id=workspace, service=svc,
+            )
+            return {"ok": True, **moved}
+        except MoveRefused as exc:
+            return _coded_error(exc.code, validation_error(exc), default=exc.status)
+        except IdentityUnavailable:
+            return _coded_error("identity_unavailable", "Accounts cannot be read right now. Try again.",
+                                default=503)
+        except DocumentPolicyError as exc:
+            return _policy_error(exc)
+        except CapacityError as exc:
+            return _capacity_error(exc)
+        except (DocumentIngestionError, OSError) as exc:
+            return _action_error(exc, "move")
+
     @router.get("/{document_id}/pdf-info")
     async def pdf_info(request: Request, document_id: str) -> Any:
         svc = _svc(request)
@@ -685,7 +722,10 @@ def create_documents_router() -> APIRouter:
             docs = await asyncio.to_thread(
                 svc.list_documents, tenant_id=tenant, actor_id=actor
             )
-            return {"ok": True, "documents": docs}
+            # The lines a shared space keeps for documents their makers took
+            # out (Spaces S2-12): the title it had, who and when.
+            taken = await asyncio.to_thread(_taken_out_lines, svc, tenant)
+            return {"ok": True, "documents": docs, "taken_out": taken}
         except Exception as exc:  # noqa: BLE001
             if isinstance(exc, DocumentPolicyError):
                 return _policy_error(exc)
@@ -1165,6 +1205,23 @@ def create_documents_router() -> APIRouter:
     return router
 
 
+def _taken_out_lines(svc: Any, tenant: str) -> list[dict[str, Any]]:
+    """The space's taken-out lines with the name of who took each out, once
+    Spaces is enforced (none before: no document moves then)."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return []
+    from kazma_core.spaces.identity import IdentityUnavailable, read_registry
+
+    lines = svc.taken_out_documents(tenant_id=tenant)
+    try:
+        names = {key: str(value.get("name") or "") for key, value in read_registry()["accounts"].items()}
+    except IdentityUnavailable:
+        names = {}  # the lines stay; who took each out is shown when accounts can be read
+    return [{**line, "by_name": names.get(line["by"], "")} for line in lines]
+
+
 def _opt_str(value: Any) -> str | None:
     if value is None:
         return None
@@ -1206,6 +1263,10 @@ _STATUS_BY_CODE: dict[str, int] = {
     "invalid_document_encoding": 400,
     "intake_corrupt": 400,
     "document_access_denied": 404,
+    "not_movable": 404,
+    "move_in_progress": 409,
+    "more_than_one_version": 409,
+    "reserved_reason": 400,
     "library_not_found": 404,
     "artifact_access_denied": 404,
     "not_ready": 409,

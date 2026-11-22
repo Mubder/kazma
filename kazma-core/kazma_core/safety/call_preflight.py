@@ -11,12 +11,19 @@ Windows, ``web_acquire.browser_isolation.launch_refusal``).
 graph's (``graph_tool_worker._refuse_unrunnable_calls``) and the swarm bus's
 (``LocalToolRegistry.execute``). The tools ask the same question themselves
 and raise ``RefusedBeforeEffect``, so a direct call is refused the same way.
+
+An always-ask action or a folder grant of a person other than the admin who
+holds Development, in a shared space with a project folder, is refused here
+too until approvals reach the admin (``spaces.tools.approval_refusal``,
+decision N21; S2-05 lifts it).
 """
 
 from __future__ import annotations
 
 import asyncio
 from typing import Any
+
+from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
 
 #: The tools that start the native browser on their first call
 #: (``computer_use`` drives the same page).
@@ -26,7 +33,7 @@ BROWSER_TOOLS = frozenset({
     "computer_use",
 })
 
-__all__ = ["BROWSER_TOOLS", "PREFLIGHT_TOOLS", "call_refusal", "browser_refusal"]
+__all__ = ["ALWAYS_ASK_TOOLS", "BROWSER_TOOLS", "PREFLIGHT_TOOLS", "call_refusal", "browser_refusal"]
 
 
 async def browser_refusal() -> str | None:
@@ -36,9 +43,16 @@ async def browser_refusal() -> str | None:
     return await asyncio.to_thread(launch_refusal)
 
 
-async def call_refusal(name: str, arguments: Any) -> str | None:
-    """Why this call would be refused before it acts, or None."""
+async def call_refusal(name: str, arguments: Any, *, user_text: str | None = None) -> str | None:
+    """Why this call would be refused before it acts, or None. *user_text*:
+    the person's latest message, the language a refusal of theirs is in."""
     args = arguments if isinstance(arguments, dict) else {}
+    if name in ALWAYS_ASK_TOOLS:
+        from kazma_core.spaces.tools import approval_refusal
+
+        refused = await asyncio.to_thread(approval_refusal, name, user_text)
+        if refused:
+            return refused
     if name == "shell_exec":
         from kazma_core.safety.shell_paths import shell_target_refusal
         from kazma_core.safety.shell_preflight import shell_refusal
@@ -53,5 +67,8 @@ async def call_refusal(name: str, arguments: Any) -> str | None:
     return None
 
 
+#: The always-ask actions and folder grants (N21's interim refusal).
+ALWAYS_ASK_TOOLS = frozenset({*ALWAYS_HITL_TOOLS, "request_path_access"})
+
 #: Every tool ``call_refusal`` answers for.
-PREFLIGHT_TOOLS = frozenset({"shell_exec", *BROWSER_TOOLS})
+PREFLIGHT_TOOLS = frozenset({"shell_exec", *BROWSER_TOOLS, *ALWAYS_ASK_TOOLS})

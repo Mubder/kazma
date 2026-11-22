@@ -355,6 +355,7 @@ class DocumentWorker:
 
     async def _process_claimed(self, job: DocumentJobRecord, owner: str) -> None:
         from kazma_core.spaces.features import work_refusal
+        from kazma_core.spaces.identity import asker_left
 
         current = job
         while current.state in _PROCESSING_STATES:
@@ -376,6 +377,14 @@ class DocumentWorker:
                 refused = await asyncio.to_thread(work_refusal, "documents", current.actor_id)
                 if refused:
                     raise PermanentDocumentError("feature_off", refused)
+                # The person it is for left its space: never run for anyone
+                # else (the S2-12 review, finding 6).
+                if await asyncio.to_thread(asker_left, current.tenant_id, current.actor_id):
+                    raise PermanentDocumentError(
+                        "asker_left",
+                        "The person who asked for this document is no longer in its space, so it is "
+                        "not processed.",
+                    )
                 handler = self._handlers.get(current.state)
                 if handler is None:
                     raise PermanentDocumentError(

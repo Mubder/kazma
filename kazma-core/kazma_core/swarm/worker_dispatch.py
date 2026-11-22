@@ -117,9 +117,13 @@ def _worker_scope(tenant_id: str | None, asker: str | None) -> Callable[[], Any]
 
     if not spaces_enforced():
         return functools.partial(tenant_scope, space_of_record(tenant_id))
-    from kazma_core.spaces.identity import work_scope
+    from kazma_core.spaces.identity import AskerLeft, work_scope
 
-    found = work_scope(str(tenant_id or ""), asker)
+    try:
+        found = work_scope(str(tenant_id or ""), asker)
+    except AskerLeft as exc:
+        # Never run as the space's acting account (the S2-12 review, finding 6).
+        raise _TaskOfNoSpace(str(exc)) from exc
     if found is None:
         raise _TaskOfNoSpace("this task belongs to no space of this install, so its worker does not run")
     # The person no longer has the feature Swarm (Spaces S2-11): the check

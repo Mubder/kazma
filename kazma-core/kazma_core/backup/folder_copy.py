@@ -28,7 +28,6 @@ failure of the backup: the copy is left out of that run, said once
 
 from __future__ import annotations
 
-import errno
 import logging
 import os
 import shutil
@@ -37,6 +36,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+from kazma_core.workspace import folder_identity
 
 logger = logging.getLogger(__name__)
 
@@ -109,63 +110,12 @@ def _data_dir() -> Path:
     return data_dir(create=False)
 
 
-class _UnreachableError(Exception):
-    """A path that is there to ask about but did not answer: a share whose
-    host is offline, a folder this account may not read."""
-
-
-def _not_made_yet(exc: OSError) -> bool:
-    """True for "no such file or folder", as opposed to a host or a disk that
-    cannot be reached (Windows maps an unreachable share to ENOENT too, so its
-    own code decides there)."""
-    winerror = getattr(exc, "winerror", None)
-    if winerror is not None:
-        return winerror in (2, 3)  # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
-    return exc.errno in (errno.ENOENT, errno.ENOTDIR)
-
-
-def _identity(path: Path) -> tuple[int, int] | None:
-    """*path*'s ``(st_dev, st_ino)``: the volume and the file on it, the same
-    whatever name reaches it; None when it is not there. Raises
-    :class:`_UnreachableError` when it could not be asked."""
-    try:
-        info = os.stat(path)
-    except OSError as exc:
-        if _not_made_yet(exc):
-            return None
-        raise _UnreachableError(str(path)) from exc
-    except ValueError:
-        return None
-    return info.st_dev, info.st_ino
-
-
-def _inside(child: Path, parent: Path) -> bool:
-    """True when *child* is *parent* or under it, by its real path or by its
-    identity. A real path keeps a second name of the same folder: a loopback
-    share (``\\\\localhost\\C$\\...``) resolves to itself, so the identity of
-    each of *child*'s folders that exists is compared with *parent*'s too
-    (2026-11-21, the SonarCloud review of the folder's Test). The walk up
-    stops at the first folder that cannot be asked: an offline share answers
-    each level only after the network's timeout."""
-    try:
-        child.resolve().relative_to(parent.resolve())
-        return True
-    except (ValueError, OSError):
-        pass
-    try:
-        target = _identity(parent)
-        if target is None or not target[1]:
-            return False  # not there, or a file system with no file ids
-        here = child
-        while True:
-            if _identity(here) == target:
-                return True
-            up = here.parent
-            if up == here:
-                return False
-            here = up
-    except _UnreachableError:
-        return False
+# One home for "is this folder that one, under any name" (the project
+# folder of a shared space asks it too): ``workspace.folder_identity``.
+_UnreachableError = folder_identity.UnreachableError
+_not_made_yet = folder_identity.not_made_yet
+_identity = folder_identity.identity
+_inside = folder_identity.inside
 
 
 #: Every code :func:`path_problem` answers, in the order it asks: the save

@@ -452,6 +452,7 @@ def register_misc_routes(self: Any) -> None:
         # like every request (Spaces S1-22): another space's traces are
         # never sent to it.
         shown: str | None = None
+        asker: str | None = None
         if spaces_enforced():
             from kazma_ui import space_binding
 
@@ -460,9 +461,14 @@ def register_misc_routes(self: Any) -> None:
             except space_binding.SpaceRefused as refused:
                 await websocket.close(code=refused.close_code, reason=refused.code)
                 return
-            shown = binding.space_id
+            shown, asker = binding.space_id, binding.asker
+        from kazma_ui.live_connections import socket_watched
+
         store = get_trace_store()
         store.register_ws(websocket, shown)
+        # Closed when its person leaves the space (the S2-12 review, finding 7).
+        watched = socket_watched(asker, shown, websocket)
+        watched.__enter__()
         try:
             import json
 
@@ -485,6 +491,7 @@ def register_misc_routes(self: Any) -> None:
         except Exception as exc:
             logger.debug("WS events handler stopped: %s", exc)
         finally:
+            watched.__exit__(None, None, None)
             store.unregister_ws(websocket)
     @self.app.get("/")
     def root(request: Request) -> RedirectResponse:

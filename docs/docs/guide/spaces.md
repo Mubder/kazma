@@ -82,6 +82,17 @@ The tools a space has follow its kind: a sandboxed space has no shell, git,
 IDE or MCP servers, and its code runs in a container that sees only the
 space's folder.
 
+In a shared space with a project folder, a person you give Development to
+gets git, GitHub and the project's files, and nothing of the project's runs
+on this computer for them: no shell, no tests or package installs, git with
+its hooks and the project's own git programs switched off, nothing written
+in the repository's `.git` folder, and none of your MCP servers. A
+repository whose git configuration names a program (a filter or merge
+driver) is yours alone until you remove it. The filesystem MCP server is
+never in a shared space, for you either. Outside your own space, git signs
+in with the space's own GitHub account and never with this computer's SSH
+keys or saved passwords.
+
 ## What the admin can and cannot do
 
 | The admin can | The admin cannot |

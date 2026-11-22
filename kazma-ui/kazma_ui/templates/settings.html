@@ -2490,6 +2490,67 @@
               </template>
             </div>
         </div>
+        <!-- Shared spaces (Spaces S2-12): the admin makes a plain shared
+             space (the default) or one with a project folder, the one kind
+             that can ever have Development or GitHub (plan 4.11, N29). -->
+        <div class="settings-group mb-6" id="people-shared-spaces" x-show="peopleLoaded && !peopleFailed" x-cloak>
+            <h3>{{ t('settings.people_spaces_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_spaces_help') }}</p>
+            <div class="account-list-table" x-show="sharedSpaces.length > 0" x-cloak>
+              <template x-for="s in sharedSpaces" :key="s.id">
+                <div :data-shared-space="s.id">
+                  <div class="account-list-row">
+                    <span class="account-list-name"><bdi translate="no" x-text="s.name"></bdi></span>
+                    <span class="badge" :class="s.kind === 'host' ? 'badge-warning' : 'badge-secondary'" x-text="s.kind === 'host' ? window.t('settings.people_space_kind_project') : window.t('settings.people_space_kind_plain')"></span>
+                    <span class="account-list-meta" x-text="window.kazmaCount('settings.people_space_members', s.members.length)"></span>
+                    <span class="account-list-meta" x-show="s.project_folder" x-cloak><bdi dir="ltr" translate="no" x-text="s.project_folder"></bdi></span>
+                  </div>
+                  <template x-for="m in s.members" :key="s.id + ':' + m.id">
+                    <div class="account-list-row" :data-space-member="m.id">
+                      <span class="account-list-name"><bdi translate="no" x-text="m.name || window.t('settings.space_member_admin')"></bdi></span>
+                      <span class="account-list-meta" x-text="m.role === 'owner' ? window.t('settings.space_role_owner') : window.t('settings.space_role_member')"></span>
+                      <button class="btn btn-secondary btn-sm" type="button" x-show="m.role !== 'owner'" x-cloak @click="removeFromSpace(s.id, s.name, m)">{{ t('settings.space_remove') }}</button>
+                    </div>
+                  </template>
+                  <div class="account-list-row" x-show="peopleOutside(s).length > 0" x-cloak>
+                    <label class="form-label" :for="'people-space-add-' + s.id">{{ t('settings.space_add_person') }}</label>
+                    <select class="form-input" :id="'people-space-add-' + s.id" x-model="spaceAddChoice[s.id]">
+                      <option value="">{{ t('settings.space_choose_person') }}</option>
+                      <template x-for="p in peopleOutside(s)" :key="s.id + ':' + p.id">
+                        <option :value="p.id" x-text="p.name"></option>
+                      </template>
+                    </select>
+                    <button class="btn btn-secondary btn-sm" type="button" :data-space-add="s.id" :disabled="!spaceAddChoice[s.id]" @click="addToSpace(s)">{{ t('settings.space_add') }}</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+            <p class="form-hint" x-show="peopleLoaded && !peopleFailed && sharedSpaces.length === 0" x-cloak>{{ t('settings.people_spaces_none') }}</p>
+            <h4>{{ t('settings.people_space_new') }}</h4>
+            <div class="form-group">
+                <label class="form-label" for="people-space-name">{{ t('settings.people_space_name') }}</label>
+                <input type="text" class="form-input" id="people-space-name" x-model="newSpace.name" maxlength="64">
+            </div>
+            <fieldset class="form-group" id="people-space-kind">
+                <legend class="form-label">{{ t('settings.people_space_kind') }}</legend>
+                <div class="toggle-row">
+                    <input type="radio" name="people-space-kind" id="people-space-kind-plain" value="sandboxed" x-model="newSpace.kind">
+                    <label for="people-space-kind-plain">{{ t('settings.people_space_kind_plain') }}</label>
+                </div>
+                <p class="form-hint">{{ t('settings.people_space_kind_plain_help') }}</p>
+                <div class="toggle-row">
+                    <input type="radio" name="people-space-kind" id="people-space-kind-project" value="host" x-model="newSpace.kind">
+                    <label for="people-space-kind-project">{{ t('settings.people_space_kind_project') }}</label>
+                </div>
+                <p class="form-hint">{{ t('settings.people_space_kind_project_help') }}</p>
+            </fieldset>
+            <div class="form-group" x-show="newSpace.kind === 'host'" x-cloak>
+                <label class="form-label" for="people-space-folder">{{ t('settings.people_space_folder') }}</label>
+                <input type="text" class="form-input" id="people-space-folder" x-model="newSpace.folder" dir="ltr" translate="no">
+                <p class="form-hint">{{ t('settings.people_space_folder_help') }}</p>
+            </div>
+            <button class="btn btn-primary" type="button" id="people-space-create" @click="createSharedSpace()">{{ t('settings.people_space_create') }}</button>
+        </div>
         <!-- Daily limits (Spaces S2-02): the limit for people, and each
              person's limit beside what they used today (counts and money,
              never what they asked, N11). -->
@@ -2546,6 +2607,7 @@
         <div class="settings-group mb-6" id="people-features" x-show="peopleLoaded && !peopleFailed" x-cloak>
             <h3>{{ t('settings.people_features_title') }}</h3>
             <p class="form-hint">{{ t('settings.people_features_help') }}</p>
+            <p class="form-hint" id="people-development-means">{{ t('settings.people_development_means') }}</p>
             <div class="account-list-table">
               <template x-for="p in people" :key="'features-' + p.id">
                 <div class="people-features-row" :data-person-features="p.id">
@@ -2606,6 +2668,26 @@
                 <button class="btn btn-danger" type="button" id="space-data-delete" x-show="spaceData.role === 'owner' && !spaceData.personal" x-cloak :disabled="spaceDataBusy" @click="deleteThisSpace()">{{ t('settings.space_data_delete') }}</button>
             </div>
             <p class="form-hint" x-show="spaceDataLoaded && spaceData.personal" x-cloak>{{ t('settings.space_data_personal_hint') }}</p>
+        </div>
+        <!-- Who is in a shared space (Spaces S2-12): its owner takes a member
+             out, a member leaves; what goes and what stays is said first. -->
+        <div class="settings-group mb-6" id="space-members" x-show="spaceDataLoaded && !spaceData.personal" x-cloak>
+            <h3>{{ t('settings.space_members_title') }}</h3>
+            <p class="form-hint">{{ t('settings.space_members_help') }}</p>
+            <div class="notice tone-danger" x-show="spaceMembersFailed" x-cloak>{{ t('settings.space_members_failed') }}</div>
+            <div class="account-list-table" x-show="spaceMembersLoaded && !spaceMembersFailed" x-cloak>
+              <template x-for="m in spaceMembers" :key="m.id">
+                <div class="account-list-row" :data-space-member="m.id">
+                  <span class="account-list-name"><bdi translate="no" x-text="m.name || window.t('settings.space_member_admin')"></bdi></span>
+                  <span class="account-list-meta" x-text="m.role === 'owner' ? window.t('settings.space_role_owner') : window.t('settings.space_role_member')"></span>
+                  <button class="btn btn-secondary btn-sm" type="button" x-show="spaceData.role === 'owner' && m.role !== 'owner'" x-cloak @click="removeFromSpace(_thisSpace(), spaceData.name, m)">{{ t('settings.space_remove') }}</button>
+                </div>
+              </template>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;" x-show="spaceMembersLoaded && spaceData.role && spaceData.role !== 'owner'" x-cloak>
+                <button class="btn btn-danger" type="button" id="space-leave" :disabled="spaceDataBusy" @click="leaveThisSpace()">{{ t('settings.space_leave') }}</button>
+            </div>
+            <p class="form-hint" x-show="spaceMembersLoaded && spaceData.role === 'owner'" x-cloak>{{ t('settings.space_owner_stays') }}</p>
         </div>
     </div>
     {% endif %}

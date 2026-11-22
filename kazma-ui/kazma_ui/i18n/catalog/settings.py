@@ -2878,6 +2878,150 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.people_err.is_the_owner": {"en": "Your own sign-in is changed in My account.", "ar": "تُغيَّر بيانات دخولك من «حسابي»."},
     "settings.people_err.no_such_account": {"en": "That person is not there any more.", "ar": "هذا الشخص لم يعد موجودًا."},
     "settings.people_err.identity_unavailable": {"en": "Accounts cannot be read right now. Try again.", "ar": "تتعذّر قراءة الحسابات الآن. حاول مجددًا."},
+    # Shared spaces (Spaces S2-12, plan 4.11, N29).
+    "settings.people_spaces_title": {"en": "Shared spaces", "ar": "المساحات المشتركة"},
+    "settings.people_spaces_help": {
+        "en": "A space you share with people you add to it. Everyone also keeps a personal space for what "
+              "they do not share.",
+        "ar": "مساحة تشاركها مع من تضيفهم إليها. ويحتفظ كل شخص أيضًا بمساحة شخصية لما لا يشاركه.",
+    },
+    "settings.people_spaces_none": {"en": "No shared space yet.", "ar": "لا توجد مساحة مشتركة بعد."},
+    "settings.people_space_new": {"en": "New shared space", "ar": "مساحة مشتركة جديدة"},
+    "settings.people_space_name": {"en": "Name", "ar": "الاسم"},
+    "settings.people_space_kind": {"en": "Kind", "ar": "النوع"},
+    "settings.people_space_kind_plain": {"en": "Plain shared space", "ar": "مساحة مشتركة عادية"},
+    "settings.people_space_kind_plain_help": {
+        "en": "For family and friends: shared chats, memory, documents and schedules. No project folder, no "
+              "Development, no GitHub.",
+        "ar": "للعائلة والأصدقاء: محادثات وذاكرة ومستندات وجداول مشتركة. دون مجلد مشروع، ودون التطوير، ودون GitHub.",
+    },
+    "settings.people_space_kind_project": {"en": "Shared space with a project folder", "ar": "مساحة مشتركة بمجلد مشروع"},
+    "settings.people_space_kind_project_help": {
+        "en": "For development. Only this kind can ever have Development or GitHub, and only for the people "
+              "you turn it on for.",
+        "ar": "للتطوير. هذا النوع وحده يمكن أن يكون فيه التطوير أو GitHub، ولمن تفعّله لهم فقط.",
+    },
+    "settings.people_space_folder": {"en": "Project folder", "ar": "مجلد المشروع"},
+    "settings.people_space_folder_help": {
+        "en": "A folder on this computer that the space works in. Never Kazma's own folders, and never "
+              "another space's folder.",
+        "ar": "مجلد على هذا الحاسوب تعمل فيه المساحة. ليس أحد مجلدات Kazma نفسه، ولا مجلد مساحة أخرى.",
+    },
+    "settings.people_space_create": {"en": "Make the space", "ar": "إنشاء المساحة"},
+    "settings.people_space_created": {"en": "{name} is made.", "ar": "أُنشئت {name}."},
+    "settings.people_space_members.zero": {"en": "no members", "ar": "لا أعضاء"},
+    "settings.people_space_members.one": {"en": "1 member", "ar": "عضو واحد"},
+    "settings.people_space_members.two": {"en": "{n} members", "ar": "عضوان"},
+    "settings.people_space_members.few": {"en": "{n} members", "ar": "{n} أعضاء"},
+    "settings.people_space_members.many": {"en": "{n} members", "ar": "{n} عضوًا"},
+    "settings.people_space_members.other": {"en": "{n} members", "ar": "{n} عضو"},
+    "settings.people_err.admin_only": {"en": "Only the admin can do that.", "ar": "المسؤول وحده يستطيع ذلك."},
+    "settings.people_err.bad_kind": {"en": "Choose the kind of space.", "ar": "اختر نوع المساحة."},
+    "settings.people_err.folder_empty": {"en": "Name the project folder.", "ar": "حدّد مجلد المشروع."},
+    "settings.people_err.folder_network": {
+        "en": "Choose a folder on this computer, not a network or device path.",
+        "ar": "اختر مجلدًا على هذا الحاسوب، لا مسارًا شبكيًا أو مسار جهاز.",
+    },
+    "settings.people_err.folder_relative": {"en": "Give the folder's full path.", "ar": "اكتب المسار الكامل للمجلد."},
+    "settings.people_err.folder_missing": {"en": "That folder does not exist.", "ar": "هذا المجلد غير موجود."},
+    "settings.people_err.folder_not_a_folder": {"en": "That is a file, not a folder.", "ar": "هذا ملف وليس مجلدًا."},
+    "settings.people_err.folder_unreachable": {"en": "That folder cannot be read right now.", "ar": "تتعذّر قراءة هذا المجلد الآن."},
+    "settings.people_err.folder_kazma_folder": {
+        "en": "That folder is one of Kazma's own, inside one, or holds one. Choose another.",
+        "ar": "هذا المجلد من مجلدات Kazma، أو داخل أحدها، أو يحتوي أحدها. اختر غيره.",
+    },
+    "settings.people_err.folder_machine_workspace": {
+        "en": "That folder is, or overlaps, your own workspace on this computer. Choose another.",
+        "ar": "هذا المجلد هو مساحة عملك على هذا الحاسوب أو يتداخل معها. اختر غيره.",
+    },
+    "settings.people_err.folder_another_space": {
+        "en": "That folder is, or overlaps, another space's folder. Choose another.",
+        "ar": "هذا المجلد هو مجلد مساحة أخرى أو يتداخل معه. اختر غيره.",
+    },
+    "settings.people_err.not_shared": {"en": "That is not a shared space.", "ar": "هذه ليست مساحة مشتركة."},
+    "settings.people_err.already_member": {"en": "That person is already in this space.", "ar": "هذا الشخص موجود في هذه المساحة بالفعل."},
+    "settings.people_err.not_a_member": {"en": "That person is not in this space.", "ar": "هذا الشخص ليس في هذه المساحة."},
+    "settings.people_err.last_owner": {
+        "en": "A shared space keeps its owner: the owner does not leave it.",
+        "ar": "تبقى المساحة المشتركة مع مالكها: المالك لا يغادرها.",
+    },
+    "settings.people_err.not_yours": {"en": "That is not yours to do in this space.", "ar": "ليس لك أن تفعل ذلك في هذه المساحة."},
+    "settings.people_err.forget_failed": {
+        "en": "The person is out of the space, but the facts Kazma filed under them there could not be "
+              "forgotten yet. Tell the admin.",
+        "ar": "خرج الشخص من المساحة، لكن تعذّر حتى الآن نسيان الحقائق التي سجّلها Kazma عنه فيها. أبلغ المسؤول.",
+    },
+    "settings.people_development_means": {
+        "en": "Development, for someone other than you: in a shared space with a project folder that they are "
+              "in, they get git, GitHub and that project's files. Nothing of the project's runs on this computer "
+              "for them: no shell, no tests or package installs, git with its hooks and the project's own git "
+              "programs switched off, and none of your MCP servers. They approve their own file and git steps. "
+              "Their always-ask actions, such as posting on X, and their folder grants need your approval, which "
+              "comes in a later update: until then Kazma refuses them.",
+        "ar": "التطوير لشخص غيرك: في مساحة مشتركة بمجلد مشروع هو عضو فيها، يحصل على git وGitHub وملفات ذلك "
+              "المشروع. ولا يعمل له شيء من المشروع على هذا الحاسوب: لا طرفية، ولا تشغيل اختبارات أو تثبيت حزم، "
+              "ويعمل git وخطافاته وبرامج المشروع الخاصة به معطّلة، ولا يصل إلى أيّ من خوادم MCP التي أعددتها. "
+              "يوافق بنفسه على خطوات الملفات وgit. أما الإجراءات التي تُطلب الموافقة عليها دائمًا، كالنشر على "
+              "X، ومنح صلاحية المجلدات، فتحتاج موافقتك، وهذه تأتي في تحديث لاحق: إلى ذلك الحين يرفضها Kazma.",
+    },
+    "settings.people_development_title": {"en": "Turn on Development for {name}?", "ar": "تفعيل التطوير لـ {name}؟"},
+    "settings.people_development_turn_on": {"en": "Turn on", "ar": "تفعيل"},
+    "settings.space_members_title": {"en": "Who is in this space", "ar": "من في هذه المساحة"},
+    "settings.space_members_help": {
+        "en": "Everyone here sees the space's chats, memory and documents. The admin adds people.",
+        "ar": "يرى كل من هنا محادثات المساحة وذاكرتها ومستنداتها. المسؤول هو من يضيف الأشخاص.",
+    },
+    "settings.space_members_failed": {"en": "The members could not be read. Try again.", "ar": "تعذّرت قراءة الأعضاء. حاول مجددًا."},
+    "settings.space_member_admin": {"en": "The admin", "ar": "المسؤول"},
+    "settings.space_role_owner": {"en": "Owner", "ar": "المالك"},
+    "settings.space_role_member": {"en": "Member", "ar": "عضو"},
+    "settings.space_add_person": {"en": "Add a person", "ar": "إضافة شخص"},
+    "settings.space_choose_person": {"en": "Choose a person", "ar": "اختر شخصًا"},
+    "settings.space_add": {"en": "Add", "ar": "إضافة"},
+    "settings.space_added": {
+        "en": "{name} was added. They are told at their next page load.",
+        "ar": "أُضيف {name}. سيُبلَّغ عند تحميل صفحته التالية.",
+    },
+    "settings.space_remove": {"en": "Take out", "ar": "إخراج"},
+    "settings.space_remove_title": {"en": "Take {name} out of {space}?", "ar": "إخراج {name} من {space}؟"},
+    "settings.space_remove_confirm": {
+        "en": "Kazma forgets every fact it filed under them in this space: what they said about themself and "
+              "what others said about them. Their messages stay in its chats. They are told at their next "
+              "page load.",
+        "ar": "ينسى Kazma كل حقيقة سجّلها عنه في هذه المساحة: ما قاله عن نفسه وما قاله الآخرون عنه. تبقى "
+              "رسائله في محادثاتها. سيُبلَّغ عند تحميل صفحته التالية.",
+    },
+    "settings.space_removed": {"en": "{name} was taken out.", "ar": "أُخرج {name}."},
+    "settings.space_leave": {"en": "Leave this space", "ar": "مغادرة هذه المساحة"},
+    "settings.space_leave_title": {"en": "Leave {name}?", "ar": "مغادرة {name}؟"},
+    "settings.space_leave_confirm": {
+        "en": "When you leave, Kazma forgets every fact it filed under you in this space: what you said about "
+              "yourself and what others said about you. Your messages stay in its chats, as the "
+              "conversation's history. To come back, the admin adds you again.",
+        "ar": "عند مغادرتك ينسى Kazma كل حقيقة سجّلها عنك في هذه المساحة: ما قلته عن نفسك وما قاله الآخرون "
+              "عنك. تبقى رسائلك في محادثاتها، جزءًا من تاريخ المحادثة. وللعودة يضيفك المسؤول من جديد.",
+    },
+    "settings.space_left": {"en": "You left {name}.", "ar": "غادرت {name}."},
+    "settings.space_owner_stays": {
+        "en": "You own this space, so you stay in it. To end it, delete it above.",
+        "ar": "أنت مالك هذه المساحة، لذا تبقى فيها. لإنهائها احذفها من الأعلى.",
+    },
+    "account.notice_added_title": {"en": "You were added to a space", "ar": "أُضفت إلى مساحة"},
+    "account.notice_added_body": {
+        "en": "The admin added you to {space} on {when}. Switch to it from the space menu at the top of the page.",
+        "ar": "أضافك المسؤول إلى {space} في {when}. انتقل إليها من قائمة المساحات أعلى الصفحة.",
+    },
+    "account.notice_removed_title": {"en": "You were taken out of a space", "ar": "أُخرجت من مساحة"},
+    "account.notice_removed_body": {
+        "en": "You were taken out of {space} on {when}. Kazma forgot the facts it filed under you there; "
+              "your messages stay in its chats.",
+        "ar": "أُخرجت من {space} في {when}. نسي Kazma الحقائق التي سجّلها عنك هناك، وتبقى رسائلك في محادثاتها.",
+    },
+    "account.notice_removed_body_pending": {
+        "en": "You were taken out of {space} on {when}. Kazma is forgetting the facts it filed under you there; "
+              "your messages stay in its chats.",
+        "ar": "أُخرجت من {space} في {when}. ينسى Kazma الحقائق التي سجّلها عنك هناك، وتبقى رسائلك في محادثاتها.",
+    },
     "account.notice_reset_title": {"en": "Your password was reset", "ar": "أُعيد تعيين كلمة مرورك"},
     "account.notice_reset_body": {
         "en": "The admin reset your password on {when}. If you did not ask for this, tell them.",

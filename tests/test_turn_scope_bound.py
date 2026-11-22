@@ -41,7 +41,30 @@ def _own_record_store(tmp_path, monkeypatch):
 
 @pytest.fixture
 def enforced(monkeypatch):
+    """Spaces enforced, with the memberships the turns below are for: a turn
+    starts only for a member of its space (the S2-12 review, finding 7)."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.spaces import identity
+
     monkeypatch.setattr(scope, "_enforced", True)
+    get_config_store().delete(identity.REGISTRY_KEY)
+
+    def people(reg: dict) -> None:
+        for account in ("layla", "omar"):
+            reg["accounts"][account] = {"id": account, "name": account.title(), "role": "member",
+                                        "enabled": True}
+        reg["spaces"]["family"] = {"id": "family", "name": "Family", "kind": "sandboxed",
+                                   "personal_of": None, "created_by": "layla"}
+        reg["spaces"]["omar-own"] = {"id": "omar-own", "name": "", "kind": "sandboxed",
+                                     "personal_of": "omar", "created_by": "omar"}
+        reg["memberships"] += [{"account": "layla", "space": "family", "role": "owner"},
+                               {"account": "omar", "space": "omar-own", "role": "owner"}]
+
+    identity.update_registry(people)
+    try:
+        yield
+    finally:
+        get_config_store().delete(identity.REGISTRY_KEY)
 
 
 async def _run_turn(thread_id: str) -> tuple[Scope | None, str | None, str]:

@@ -90,7 +90,7 @@ BASELINE = {
     # except Exception / except BaseException / bare except, any body
     "blind_except": 3326,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 375,
+    "silent_except": 373,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
@@ -116,7 +116,7 @@ STRUCTURAL_BASELINE = {
     # 521 since 2026-11-21 (S1-26): vault.SpaceKeyMissing, what a sealed row
     # whose space key is lost raises. Its callers catch it as the ValueError
     # it is; the switch-on check (S1-33) names it.
-    "module_local_public_symbols": 521,
+    "module_local_public_symbols": 519,
     "patched_value_imports": 71,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

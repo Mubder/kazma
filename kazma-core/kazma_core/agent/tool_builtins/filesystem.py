@@ -286,8 +286,9 @@ def _request_path_access_sync(path: str, mode: str, scope: str, label: str) -> s
 
     # Already allowed?
     existing = check_path_access(path, mode_n)
-    if existing.via == "store":
-        # No grant opens a Kazma store; granting one would change nothing.
+    if existing.via in ("store", "git"):
+        # No grant opens a Kazma store, nor a repository's .git folder to a
+        # person other than the admin; granting one would change nothing.
         raise RefusedBeforeEffect(f"Error: {existing.reason}")
     if existing.allowed and existing.via != "absolute":
         return (

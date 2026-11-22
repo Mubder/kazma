@@ -37,6 +37,7 @@ from pathlib import Path
 import pytest
 from kazma_core.backup import folder_copy as fc
 from kazma_core.settings_validation import SettingRejected, validate_setting
+from kazma_core.workspace import folder_identity
 from kazma_core.workspace.remote_paths import device_path_reason, remote_path_reason
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -166,7 +167,10 @@ def test_inside_data_is_judged_by_identity_too(tmp_path, monkeypatch):
             return real_identity(data)
         return real_identity(path)
 
+    # The rule lives in ``workspace.folder_identity`` (Spaces S2-12): the
+    # backup folder and a shared space's project folder ask it.
     monkeypatch.setattr(fc, "_identity", identity)
+    monkeypatch.setattr(folder_identity, "identity", identity)
     assert fc.path_problem(str(alias)) == "inside_data"
     assert fc.path_problem(str(tmp_path / "other")) is None
     assert fc.path_problem(str(data / "backups" / "copy")) == "inside_data"
@@ -199,6 +203,7 @@ def test_an_offline_share_is_asked_once_not_once_per_folder(tmp_path, monkeypatc
             return os.stat(path, *args, **kwargs)
 
     monkeypatch.setattr(fc, "os", _Os())
+    monkeypatch.setattr(folder_identity, "os", _Os())
     folder = tmp_path / "nas-asleep" / "share" / "backups"
     assert fc.path_problem(str(folder)) is None
     assert asked == [str(folder)], f"one question to the offline share, not one per level: {asked}"
