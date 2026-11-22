@@ -420,7 +420,8 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
                 delivery_target=delivery_target,
                 kind=kind,
                 capabilities=capabilities,
-                tenant_id=ctx["tenant"] or "default",
+                # None: the scheduler books it in the bound space (S1-02).
+                tenant_id=ctx["tenant"],
                 actor=ctx["actor"],
                 source="web",
                 zone=ctx["zone"],

@@ -782,8 +782,15 @@ def _scribe_stores(matrix: Matrix, monkeypatch, mark: str) -> list[str]:
         task = SwarmTask(prompt="store the note", workers=["scribe"],
                          metadata={"tenant_id": Matrix.SPACE_A, "asker": matrix.account_a})
         contextvars.Context().run(asyncio.run, w.engine.dispatch(task))
-    with sqlite3.connect(primary_memory_db()) as conn:
+    conn = sqlite3.connect(primary_memory_db())
+    try:
+        # A run that refused before any memory was written (a worker bound to
+        # no space once Spaces is enforced, S1-02) leaves no memory table.
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'episodes'").fetchone() is None:
+            return []
         rows = conn.execute("SELECT tenant_id FROM episodes WHERE user_text LIKE ?", (f"%{mark}%",)).fetchall()
+    finally:
+        conn.close()
     return [str(row[0]) for row in rows]
 
 

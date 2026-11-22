@@ -55,6 +55,7 @@ __all__ = [
     "reset_scope_only",
     "set_enforced",
     "set_scope",
+    "space_of_record",
     "space_of_state",
     "set_scope_only",
     "spaces_enforced",
@@ -256,6 +257,16 @@ def space_of_state(state: object) -> str:
     if scope is not None:
         return scope.space_id
     return tenant or require_space_id()
+
+
+def space_of_record(tenant: object) -> str:
+    """The space a stored record belongs to: its own tenant, else the
+    owner's space -- a record that names none was written before Spaces, and
+    every such record is the owner's (decision N19). For a value read from a
+    row, a session or a task; never for work that names no space (that asks
+    :func:`require_space_id`). No I/O."""
+    value = str(tenant or "").strip()
+    return value or OWNER_SPACE_ID
 
 
 def bound_asker() -> str | None:

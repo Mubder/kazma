@@ -73,9 +73,14 @@ def main() -> None:
     _sub = next((a for a in sys.argv[1:] if not a.startswith("-")), "")
     load_env_files(include_cwd=_sub not in ("mcp", "ask"))
 
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
     from kazma_core.tenant_context import set_current_tenant_id
 
-    set_current_tenant_id(_os.environ.get("KAZMA_TENANT_ID") or "default")
+    # Work on the machine is the admin's (Spaces S1-20): the owner's space
+    # unless KAZMA_TENANT_ID names another. A command that runs a turn
+    # (`kazma ask`, `kazma mcp`) binds the owner's scope, or the space its
+    # --space names, before it does anything (spaces.machine).
+    set_current_tenant_id(_os.environ.get("KAZMA_TENANT_ID") or OWNER_SPACE_ID)
 
     # Parse --no-banner early (consume it if present)
     show_banner_flag = True

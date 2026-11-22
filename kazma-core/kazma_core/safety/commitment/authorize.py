@@ -150,7 +150,7 @@ def _authorize_effect(
     memory_beliefs: list[dict[str, Any]] | None = None,
     thread_id: str | None = None,
     turn_id: str | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     # Phase 1 knobs:
     enforce_unknown_mutators: bool = False,
     cfg: dict[str, Any] | None = None,
@@ -213,6 +213,14 @@ def _authorize_effect(
     except Exception:  # noqa: BLE001
         # Fail-open: never let the kill-switch check itself block tool exec.
         logger.debug("[commitment] kill-switch check failed; continuing enabled")
+
+    # The space this effect is in (Spaces S1-02): the caller's, else the
+    # bound scope's -- the registry and a handoff name none, and recorded the
+    # decision, and read the scheduled jobs, under the owner's space.
+    if not tenant_id:
+        from kazma_core.spaces.scope import require_space_id
+
+        tenant_id = require_space_id()
 
     # Phase 1 enforcement: fail-closed unregistered mutators.
     # Config default is ON (get_commitment_config); callers must pass the

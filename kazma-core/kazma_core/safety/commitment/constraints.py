@@ -29,14 +29,18 @@ def is_commitment_enabled() -> bool:
         return True
 
 
-def load_constraint_beliefs(tenant_id: str = "default", *, limit: int = 50) -> list[dict[str, Any]]:
+def load_constraint_beliefs(tenant_id: str | None = None, *, limit: int = 50) -> list[dict[str, Any]]:
     """Active functional beliefs (current-truth facts) for the gate to check.
 
     Returns ``[{"predicate": ..., "object": ...}, ...]`` — the small set of
     single-valued facts (next_reset dates, subscriptions, identity) the remind
     resolver anchors against. Best-effort: any failure returns ``[]`` so the
-    gate degrades to from-now resolution rather than erroring the turn.
+    gate degrades to from-now resolution rather than erroring the turn. With
+    no *tenant_id*, the space of the work bound now (Spaces S1-02).
     """
+    from kazma_core.safety.commitment.store import _space
+
+    tenant_id = _space(tenant_id)
     try:
         from kazma_core.paths import primary_memory_db
 
@@ -65,7 +69,7 @@ LIVE_JOB_STATUSES = ("pending", "running", "delivering")
 
 
 def cron_pending_jobs(
-    thread_id: str | None = None, tenant_id: str = "default",
+    thread_id: str | None = None, tenant_id: str | None = None,
     statuses: tuple[str, ...] = LIVE_JOB_STATUSES,
 ) -> list[dict[str, str]] | None:
     """Sync read of the live cron jobs for the cancel_job / edit_job resolvers (plan §3.5).
@@ -81,6 +85,9 @@ def cron_pending_jobs(
     error) so the resolver can degrade rather than over-block when
     verification is unavailable.
     """
+    from kazma_core.safety.commitment.store import _space
+
+    tenant_id = _space(tenant_id)  # none named: the space of the work bound now (S1-02)
     marks = ", ".join("?" for _ in statuses) or "''"
     try:
         from kazma_core.cron.scheduler import get_cron_scheduler

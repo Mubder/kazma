@@ -211,7 +211,10 @@ def _turn_tenant(state: dict[str, Any] | None) -> Iterator[None]:
     if get_current_tenant_id():
         yield
         return
-    tid = str((state or {}).get("tenant_id") or "default")
+    from kazma_core.spaces.scope import space_of_state
+
+    # The state's own tenant, else the space the work is in (S1-02).
+    tid = space_of_state(state or {})
     token = set_current_tenant_id(tid)
     try:
         yield

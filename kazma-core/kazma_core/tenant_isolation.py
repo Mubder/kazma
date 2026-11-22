@@ -84,7 +84,7 @@ def require_tenant_id() -> str:
 
 def tenant_key(base: str, *, tenant_id: str | None = None) -> str:
     """Prefix a ConfigStore-style key with tenant for isolation."""
-    tid = (tenant_id or require_tenant_id()).strip() or "default"
+    tid = (tenant_id or "").strip() or require_tenant_id()
     if tid == "default":
         return base
     return f"tenant.{tid}.{base}"

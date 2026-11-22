@@ -72,12 +72,14 @@ def _attach_hitl_view(
 
 
 def _current_tenant() -> str:
-    try:
-        from kazma_core.tenant_context import get_current_tenant_id
+    """The space this request acts in (Spaces S1-02): ``""`` -- which no row
+    holds -- when none is bound once Spaces is enforced, never the owner's."""
+    from kazma_core.spaces.scope import NoSpaceBound, require_space_id
 
-        return (get_current_tenant_id() or "default").strip() or "default"
-    except Exception:
-        return "default"
+    try:
+        return require_space_id()
+    except NoSpaceBound:
+        return ""
 
 
 def _sampling_shown_here() -> bool:
@@ -108,7 +110,9 @@ def _is_own_bridge_gate(item: dict) -> bool:
     """
     if str(item.get("mechanism") or "") != "bus_bridge":
         return False
-    return str(item.get("tenant_id") or "default") == _current_tenant()
+    from kazma_core.spaces.scope import space_of_record
+
+    return space_of_record(item.get("tenant_id")) == _current_tenant()
 
 
 async def _request_actor(request: Any) -> str:
@@ -168,6 +172,8 @@ async def _decide_bridge_gate(
         logger.debug("[HITL] bridge gate lookup failed", exc_info=True)
         return None
 
+    from kazma_core.spaces.scope import space_of_record
+
     tenant = _current_tenant()
     match = next(
         (
@@ -175,7 +181,7 @@ async def _decide_bridge_gate(
             for r in rows
             if str(getattr(r, "mechanism", "")) == "bus_bridge"
             and str(getattr(r, "thread_id", "")) == thread_id
-            and str(getattr(r, "tenant_id", "") or "default") == tenant
+            and space_of_record(getattr(r, "tenant_id", "")) == tenant
         ),
         None,
     )

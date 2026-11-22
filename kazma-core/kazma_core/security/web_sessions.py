@@ -143,7 +143,12 @@ def create_session(
     sid = secrets.token_urlsafe(32)
     now = time.time()
     ttl = _ttl()
-    tenant = (tenant_id or "").strip() or "default"
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    # A sign-in that names no tenant is the install's own (the owner's). Once
+    # Spaces is enforced a session is no space's: the page names its space on
+    # every call and membership is checked then (Spaces S1-06).
+    tenant = (tenant_id or "").strip() or OWNER_SPACE_ID
     payload: dict[str, Any] = {
         "created_at": now,
         "expires_at": now + ttl,

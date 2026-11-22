@@ -354,7 +354,7 @@ def register_memory_tools(registry: Any) -> None:
             # user forgets those, so this is the Memory page's Forget. Live
             # 2026-10-19 the model passed two; "not found" from the facts
             # table was recorded as an unknown effect and failed the turn.
-            return _forget_memory(bid, tenant or "default")
+            return _forget_memory(bid, tenant)
         from kazma_core.memory.forget import notes_for_forgotten_facts
         from kazma_core.memory.speakers import may_forget_turn
         from kazma_core.spaces.scope import bound_asker
@@ -387,7 +387,7 @@ def register_memory_tools(registry: Any) -> None:
                 # (memory.forget.forget_belief_source, live 2026-10-19).
                 from kazma_core.memory.forget import forget_belief_source
 
-                result["source_turn"] = forget_belief_source(bid, tenant_id=tenant or "default")
+                result["source_turn"] = forget_belief_source(bid, tenant_id=tenant)
                 result["this_turn_kept_out"] = _keep_this_turn_out()
             return json.dumps(result, ensure_ascii=False, indent=2)
         except RefusedBeforeEffect:
@@ -406,7 +406,7 @@ def register_memory_tools(registry: Any) -> None:
         if len(needle) < MENTION_MIN_CHARS:
             raise RefusedBeforeEffect(f"Error: text must be at least {MENTION_MIN_CHARS} characters")
         try:
-            result = forget_mentions(needle, tenant_id=get_current_tenant_id() or "default")
+            result = forget_mentions(needle, tenant_id=get_current_tenant_id())
         except (sqlite3.Error, OSError) as exc:
             logger.warning("[memory_forget_mentions] failed: %s", exc, exc_info=True)
             return f"Error: memory_forget_mentions failed — {exc}"
@@ -432,7 +432,7 @@ def register_memory_tools(registry: Any) -> None:
         chat, turn = _chat_of_call()
         question = latest_user_message(get_current_session_messages() or [])
         try:
-            return keep_turn_out(chat, turn, question, tenant_id=get_current_tenant_id() or "default")
+            return keep_turn_out(chat, turn, question, tenant_id=get_current_tenant_id())
         except (sqlite3.Error, OSError):
             logger.warning("[memory] could not keep the forgetting turn out of memory", exc_info=True)
             return False
@@ -480,7 +480,7 @@ def register_memory_tools(registry: Any) -> None:
             from kazma_core.memory.entity_protection import merge_refusal
             from kazma_core.safety.hitl import get_current_tenant_id
 
-            caller = get_current_tenant_id() or "default"
+            caller = get_current_tenant_id()
             tenant = entity_owner(conn, src_id, caller)
             # The page's rule (memory/entity_protection.py): the hub, the
             # agent, the owner's own names (which may go INTO the hub) and the

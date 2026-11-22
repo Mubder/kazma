@@ -110,6 +110,12 @@ def norm_iso(value: datetime | str | None) -> str:
     return dt.astimezone(UTC).replace(microsecond=0).isoformat()
 
 
+def _bound_space() -> str:
+    from kazma_core.spaces.scope import require_space_id
+
+    return require_space_id()
+
+
 @dataclass
 class ScheduledJob:
     job_id: str
@@ -121,7 +127,8 @@ class ScheduledJob:
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     next_run: str | None = None
     last_result: str | None = None
-    tenant_id: str = "default"
+    # Made with no tenant: the space of the work bound now (Spaces S1-02).
+    tenant_id: str = field(default_factory=lambda: _bound_space())
     # Platform-prefixed delivery target (e.g. "telegram:<chat_id>") captured at
     # schedule time so the result routes back to the originating chat long
     # after the SessionStore row has been TTL-evicted (5-min default). It
@@ -475,6 +482,8 @@ class SQLiteCronStore:
     # ── reads ────────────────────────────────────────────────────────────
 
     def _row_to_job(self, row: Any) -> ScheduledJob:
+        from kazma_core.spaces.scope import space_of_record  # a row with no tenant is the owner's (N19)
+
         def val(name: str, default: Any) -> Any:
             try:
                 v = row[name]
@@ -493,7 +502,7 @@ class SQLiteCronStore:
             job_id=row["job_id"], timing=row["timing"], prompt=row["prompt"], platform=row["platform"],
             thread_id=row["thread_id"], status=st, created_at=val("created_at", ""),
             next_run=row["next_run"], last_result=row["last_result"],
-            tenant_id=str(val("tenant_id", "default")), delivery_target=str(val("delivery_target", "")),
+            tenant_id=space_of_record(val("tenant_id", "")), delivery_target=str(val("delivery_target", "")),
             failure_count=int(val("failure_count", 0) or 0), kind=str(val("kind", "task")),
             capabilities=str(val("capabilities", "read")), version=int(val("version", 1) or 1),
             fire_owner=str(val("fire_owner", "")), lease_until=float(val("lease_until", 0) or 0),

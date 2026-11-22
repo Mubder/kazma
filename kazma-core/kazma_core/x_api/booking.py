@@ -87,7 +87,7 @@ def book_x_post(
     text: str,
     when: str,
     reply_to_id: str = "",
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     thread_id: str = "",
     delivery_target: str = "",
     idempotency_key: str = "",
@@ -109,7 +109,8 @@ def book_x_post(
 
     if not x_schedule_enabled():
         return False, {"error": "X post scheduling is disabled (KAZMA_X_SCHEDULE / KAZMA_X_POST)."}
-    if tenant_id != x_tenant_id():
+    # None named: the X account's space, the bound one (Spaces S1-02).
+    if tenant_id is not None and tenant_id != x_tenant_id():
         return False, {"error": "Scheduled publication tenant does not match authenticated context."}
     # X Studio's admission (Spaces S2-11): every booking -- the tool, X
     # Studio, the Scheduled page -- passes here, and the person booking is

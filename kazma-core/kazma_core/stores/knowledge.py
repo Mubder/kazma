@@ -938,7 +938,9 @@ class KnowledgeStore:
         lib = self._library_row_to_dict(row)
         # Cross-tenant read deny when multi-user/prod tenant filter is on
         if self._tenant_filter_enabled():
-            lib_tenant = str(lib.get("tenant_id") or "default")
+            from kazma_core.spaces.scope import space_of_record
+
+            lib_tenant = space_of_record(lib.get("tenant_id"))  # none: before Spaces, the owner's
             if lib_tenant != self._current_tenant():
                 return None
         return lib

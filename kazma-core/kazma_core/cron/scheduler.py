@@ -622,7 +622,9 @@ class CronScheduler:
         zone, zone_name = await self._zone(zone, zone_name)
         now = now or self._clock.now()
         resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=now)
-        if tenant_id is None:
+        if not tenant_id:
+            # None named: the space of the work bound now (Spaces S1-02; ""
+            # made the job the owner's whatever space booked it).
             from kazma_core.tenant_isolation import require_tenant_id
 
             tenant_id = require_tenant_id()
@@ -658,7 +660,7 @@ class CronScheduler:
             thread_id=thread_id,
             created_at=self._clock.now().isoformat(),
             next_run=norm_iso(resolved.first),
-            tenant_id=tenant_id or "default",
+            tenant_id=tenant_id,
             delivery_target=delivery_target,
             kind=kind,
             capabilities=capabilities,
@@ -1085,12 +1087,14 @@ class CronScheduler:
         # for its tenant (live 2026-09-12: both daily reminders failed with
         # "no usable API key" while the key was there). Fixed here rather than
         # by loosening the vault's fallback.
+        from kazma_core.spaces.scope import space_of_record
         from kazma_core.tenant_context import (
             reset_current_tenant_id,
             set_current_tenant_id,
         )
 
-        tenant_token = set_current_tenant_id(job.tenant_id or "default")
+        # A job stored with no tenant was booked before Spaces: the owner's (N19).
+        tenant_token = set_current_tenant_id(space_of_record(job.tenant_id))
         # Once Spaces is enforced the fire runs as a whole scope: the job's
         # space and the account that booked it (S1-14). A job whose tenant is
         # no space of this install, or one that acts for anyone but the owner

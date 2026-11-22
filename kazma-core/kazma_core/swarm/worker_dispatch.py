@@ -112,11 +112,11 @@ def _worker_scope(tenant_id: str | None, asker: str | None) -> Callable[[], Any]
     :class:`_TaskOfNoSpace` and runs nothing, and an identity store that
     cannot answer raises ``IdentityUnavailable``.
     """
-    from kazma_core.spaces.scope import bind_scope, spaces_enforced
+    from kazma_core.spaces.scope import bind_scope, space_of_record, spaces_enforced
     from kazma_core.tenant_context import tenant_scope
 
     if not spaces_enforced():
-        return functools.partial(tenant_scope, tenant_id or "default")
+        return functools.partial(tenant_scope, space_of_record(tenant_id))
     from kazma_core.spaces.identity import work_scope
 
     found = work_scope(str(tenant_id or ""), asker)
