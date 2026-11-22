@@ -1,0 +1,90 @@
+{
+ "what": "Both cross-encoders on this PC's CPU (torch 2.15, fp32), at most 256 tokens a pair: 20 (question, memory) pairs read in one batch, the median and the slowest of 15 runs (short: about 25 tokens a memory; mixed: 8 short, 8 of about 150 and 4 of 256; long: 20 of 256), and one pair at a time (one_pair_ms, the mean of 8). Measured 23 Nov about 01:10 with another job running (bge-m3 embedding, 4 threads): an upper bound. The plan's budget: at most 150 ms p50 and 400 ms p95 added to a recall.",
+ "script": "docs/audits/evidence/memory_rerank/ce_timing.py",
+ "runs": [
+  {
+   "model": "bge",
+   "threads": 4,
+   "max_length": 256,
+   "load_s": 3.26,
+   "short": {
+    "p50_ms": 1141.1,
+    "p95_ms": 1268.4,
+    "one_pair_ms": 98.8
+   },
+   "mixed": {
+    "p50_ms": 7314.6,
+    "p95_ms": 7538.0,
+    "one_pair_ms": 102.4
+   },
+   "long": {
+    "p50_ms": 7281.8,
+    "p95_ms": 7560.6,
+    "one_pair_ms": 373.8
+   }
+  },
+  {
+   "model": "bge",
+   "threads": 8,
+   "max_length": 256,
+   "load_s": 2.83,
+   "short": {
+    "p50_ms": 1184.5,
+    "p95_ms": 1225.8,
+    "one_pair_ms": 90.7
+   },
+   "mixed": {
+    "p50_ms": 7398.7,
+    "p95_ms": 7520.1,
+    "one_pair_ms": 86.3
+   },
+   "long": {
+    "p50_ms": 7350.3,
+    "p95_ms": 7513.2,
+    "one_pair_ms": 430.7
+   }
+  },
+  {
+   "model": "mmarco",
+   "threads": 4,
+   "max_length": 256,
+   "load_s": 1.99,
+   "short": {
+    "p50_ms": 104.9,
+    "p95_ms": 121.8,
+    "one_pair_ms": 12.4
+   },
+   "mixed": {
+    "p50_ms": 641.5,
+    "p95_ms": 699.1,
+    "one_pair_ms": 12.7
+   },
+   "long": {
+    "p50_ms": 641.2,
+    "p95_ms": 745.3,
+    "one_pair_ms": 48.2
+   }
+  },
+  {
+   "model": "mmarco",
+   "threads": 8,
+   "max_length": 256,
+   "load_s": 1.9,
+   "short": {
+    "p50_ms": 103.3,
+    "p95_ms": 109.4,
+    "one_pair_ms": 13.1
+   },
+   "mixed": {
+    "p50_ms": 661.1,
+    "p95_ms": 693.7,
+    "one_pair_ms": 12.6
+   },
+   "long": {
+    "p50_ms": 658.8,
+    "p95_ms": 703.9,
+    "one_pair_ms": 45.6
+   }
+  }
+ ]
+}

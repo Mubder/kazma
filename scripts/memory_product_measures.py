@@ -73,6 +73,8 @@ VECTORS = FIXTURES / "vectors.npz"
 #: The passages' vectors (W5, ``scripts/memory_bench.py passage-vectors``):
 #: replayed beside VECTORS when ``measure --passages`` turns passages on.
 PASSAGE_VECTORS = FIXTURES / "passage_vectors.npz"
+RERANK_SCORES = FIXTURES / "rerank_scores.npz"
+RERANK_REFERENCE = FIXTURES / "rerank_reference.npz"
 RECORD = FIXTURES / "product_measures.json"
 LIVE_LENGTHS = FIXTURES / "live_lengths.json"
 STORES = ("store", "scale", "long")
@@ -306,20 +308,36 @@ def embedding_seconds(questions: list[dict[str, Any]]) -> list[float]:
 
 
 def measure(*, real_embedder: bool = False, small: bool = True, scale: bool = True,
-            long: bool = True, with_passages: bool = False) -> dict[str, Any]:
+            long: bool = True, with_passages: bool = False, with_rerank: bool = False,
+            real_reranker: bool = False, reference: bool = False) -> dict[str, Any]:
     """Every measure; *with_passages* turns passages on (the memory plan's
     W5: every store seeded with them, recall reading them), the same
-    stores and questions, for the with-and-without comparison."""
-    from kazma_core.memory import benchmark, passages
+    stores and questions, for the with-and-without comparison.
+    *with_rerank* turns the reranker on (W3, and passages with it: they
+    bring its candidates), its scores replayed (``RERANK_SCORES``), or read
+    by the model itself with *real_reranker* (for recall's time, under its
+    budget: what the model leaves unread keeps today's rule). *reference*:
+    the quality reference model's instead (measured, not shipped)."""
+    from kazma_core.memory import benchmark, passages, reranker
 
     data = benchmark.load_dataset()
     questions = _questions(data)
+    with_passages = with_passages or with_rerank
     replay = (benchmark.SpeakerReplay(VECTORS, PASSAGE_VECTORS) if with_passages
               else benchmark.ReplayEmbedder(VECTORS))
     report: dict[str, Any] = {"dataset_version": data.get("version"), "questions": len(questions)}
     if with_passages:
         report["passages"] = True
-    with _replayed(replay), passages.used(with_passages):
+    scorer = None
+    if with_rerank:
+        name = reranker.REFERENCE_MODEL if reference else reranker.MODEL
+        scorer = (reranker.Reranker(name) if real_reranker
+                  else benchmark.ReplayReranker(RERANK_REFERENCE if reference else RERANK_SCORES))
+        report["rerank"] = {"model": name, "scores": "read now" if real_reranker else "replayed"}
+    patched = contextlib.ExitStack()
+    if scorer is not None:
+        patched.enter_context(mock.patch("kazma_core.memory.reranker.get_reranker", lambda: scorer))
+    with _replayed(replay), passages.used(with_passages), reranker.used(with_rerank), patched:
         with benchmark._seeded_store(data) as (conn, refs, covers):
             report["benchmark"] = scores_by_language(conn, refs, covers, questions)
             by_evidence: dict[str, list[int]] = {}
@@ -340,9 +358,11 @@ def measure(*, real_embedder: bool = False, small: bool = True, scale: bool = Tr
                 lengthen(conn, json.loads(LIVE_LENGTHS.read_text(encoding="utf-8")), tenant_id=benchmark.BENCH_TENANT)
                 benchmark.fill_passages_whole(conn)  # the lengthened text's own passages (W5)
                 by_evidence = {}
-                tokens, _seconds = block_tokens(conn, questions, by_evidence=by_evidence)
+                tokens, seconds = block_tokens(conn, questions, by_evidence=by_evidence)
                 report["block_tokens"]["long"] = token_summary(tokens)
                 report["block_tokens_by_evidence"]["long"] = evidence_summary(by_evidence)
+                report["recall_ms_long"] = {"p50": round(_pct(seconds, 0.5) * 1000, 1),
+                                            "p95": round(_pct(seconds, 0.95) * 1000, 1)}
         if small:
             report["small_store"] = benchmark.run_small_store_benchmark(data)["overall"]
     if real_embedder:
@@ -364,8 +384,10 @@ def changed_tokens(record: dict[str, Any], today: dict[str, Any]) -> list[str]:
     return problems
 
 
-def _cmd_measure(write: bool, real_embedder: bool, with_passages: bool = False, out: Path | None = None) -> int:
-    report = measure(real_embedder=real_embedder, with_passages=with_passages)
+def _cmd_measure(write: bool, real_embedder: bool, with_passages: bool = False, out: Path | None = None,
+                 with_rerank: bool = False, real_reranker: bool = False, reference: bool = False) -> int:
+    report = measure(real_embedder=real_embedder, with_passages=with_passages, with_rerank=with_rerank,
+                     real_reranker=real_reranker, reference=reference)
     if out is not None:
         out.write_text(json.dumps(report, indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
     old = json.loads(RECORD.read_text(encoding="utf-8")) if RECORD.is_file() else {}
@@ -397,6 +419,9 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("--write", action="store_true", help="record it in tests/fixtures/memory_bench")
     m.add_argument("--real-embedder", action="store_true", help="also time the embedding model on this machine")
     m.add_argument("--passages", action="store_true", help="passages on (W5): the with-and-without comparison")
+    m.add_argument("--rerank", action="store_true", help="the reranker on (W3), its scores replayed")
+    m.add_argument("--real-reranker", action="store_true", help="with --rerank: the model reads, for recall's time")
+    m.add_argument("--reference", action="store_true", help="with --rerank: the quality reference model (not shipped)")
     m.add_argument("--out", type=Path, default=None, help="also write the report to this file")
     sub.add_parser("check")
     live = sub.add_parser("live-lengths", help="record live's episode lengths from a native backup")
@@ -405,9 +430,12 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     random.seed(0)
     if args.cmd == "measure":
-        if args.write and args.passages:
-            p.error("--write records the product as it ships; measure passages without it")
-        return _cmd_measure(args.write, args.real_embedder, args.passages, args.out)
+        if args.write and (args.passages or args.rerank):
+            p.error("--write records the product as it ships; measure passages and the reranker without it")
+        if (args.real_reranker or args.reference) and not args.rerank:
+            p.error("--real-reranker and --reference need --rerank")
+        return _cmd_measure(args.write, args.real_embedder, args.passages, args.out, args.rerank,
+                            args.real_reranker, args.reference)
     if args.cmd == "live-lengths":
         report = live_lengths(args.backup)
         LIVE_LENGTHS.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8", newline="\n")

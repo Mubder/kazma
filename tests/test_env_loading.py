@@ -279,6 +279,10 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
     "scripts/memory_threshold_sweep.py": (
         "asks the retrieval benchmark's private temp stores with recorded vectors; reads no install"
     ),
+    "scripts/memory_rerank_calibrate.py": (
+        "fits the reranker's calibration on the retrieval benchmark's private temp store with recorded "
+        "vectors and scores; reads no install"
+    ),
     "scripts/recall_block_bounds.py": (
         "measures the recall block on private temp stores (LongMemEval's in a temp data folder) with "
         "recorded vectors; the DeepSeek key, when answering, comes from the shell, never an install"

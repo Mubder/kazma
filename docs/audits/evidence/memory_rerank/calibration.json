@@ -1,0 +1,417 @@
+{
+ "model": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+ "fitted_on": "first set",
+ "kinds": {
+  "episode": {
+   "calibration": [
+    -2.6177,
+    13.2456,
+    0.2978
+   ],
+   "first_set": {
+    "pairs": 4408,
+    "answers": 130,
+    "auc": {
+     "evidence": 0.935,
+     "score": 0.8781,
+     "calibrated": 0.9439
+    },
+    "reliability": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 4225,
+      "mean_p": 0.011,
+      "answers": 0.009
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 65,
+      "mean_p": 0.137,
+      "answers": 0.292
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 24,
+      "mean_p": 0.249,
+      "answers": 0.375
+     },
+     {
+      "bin": [
+       0.3,
+       0.5
+      ],
+      "n": 19,
+      "mean_p": 0.397,
+      "answers": 0.421
+     },
+     {
+      "bin": [
+       0.5,
+       0.7
+      ],
+      "n": 26,
+      "mean_p": 0.596,
+      "answers": 0.654
+     },
+     {
+      "bin": [
+       0.7,
+       1.0
+      ],
+      "n": 49,
+      "mean_p": 0.913,
+      "answers": 0.776
+     }
+    ]
+   },
+   "second_set": {
+    "pairs": 1747,
+    "answers": 44,
+    "auc": {
+     "evidence": 0.918,
+     "score": 0.8771,
+     "calibrated": 0.9494
+    },
+    "reliability": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 1685,
+      "mean_p": 0.011,
+      "answers": 0.008
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 19,
+      "mean_p": 0.132,
+      "answers": 0.211
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 14,
+      "mean_p": 0.232,
+      "answers": 0.429
+     },
+     {
+      "bin": [
+       0.3,
+       0.5
+      ],
+      "n": 11,
+      "mean_p": 0.406,
+      "answers": 0.545
+     },
+     {
+      "bin": [
+       0.5,
+       0.7
+      ],
+      "n": 7,
+      "mean_p": 0.587,
+      "answers": 0.714
+     },
+     {
+      "bin": [
+       0.7,
+       1.0
+      ],
+      "n": 11,
+      "mean_p": 0.899,
+      "answers": 0.818
+     }
+    ]
+   }
+  },
+  "belief": {
+   "calibration": [
+    -2.7618,
+    13.9291,
+    0.2418
+   ],
+   "first_set": {
+    "pairs": 2740,
+    "answers": 95,
+    "auc": {
+     "evidence": 0.9379,
+     "score": 0.8443,
+     "calibrated": 0.9355
+    },
+    "reliability": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 2597,
+      "mean_p": 0.013,
+      "answers": 0.013
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 42,
+      "mean_p": 0.142,
+      "answers": 0.167
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 26,
+      "mean_p": 0.242,
+      "answers": 0.385
+     },
+     {
+      "bin": [
+       0.3,
+       0.5
+      ],
+      "n": 24,
+      "mean_p": 0.387,
+      "answers": 0.417
+     },
+     {
+      "bin": [
+       0.5,
+       0.7
+      ],
+      "n": 16,
+      "mean_p": 0.608,
+      "answers": 0.75
+     },
+     {
+      "bin": [
+       0.7,
+       1.0
+      ],
+      "n": 35,
+      "mean_p": 0.876,
+      "answers": 0.657
+     }
+    ]
+   },
+   "second_set": {
+    "pairs": 1080,
+    "answers": 36,
+    "auc": {
+     "evidence": 0.9453,
+     "score": 0.823,
+     "calibrated": 0.9458
+    },
+    "reliability": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 1028,
+      "mean_p": 0.014,
+      "answers": 0.012
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 14,
+      "mean_p": 0.142,
+      "answers": 0.214
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 6,
+      "mean_p": 0.241,
+      "answers": 0.5
+     },
+     {
+      "bin": [
+       0.3,
+       0.5
+      ],
+      "n": 14,
+      "mean_p": 0.37,
+      "answers": 0.357
+     },
+     {
+      "bin": [
+       0.5,
+       0.7
+      ],
+      "n": 5,
+      "mean_p": 0.605,
+      "answers": 0.8
+     },
+     {
+      "bin": [
+       0.7,
+       1.0
+      ],
+      "n": 13,
+      "mean_p": 0.884,
+      "answers": 0.692
+     }
+    ]
+   }
+  },
+  "summary": {
+   "calibration": [
+    -4.4445,
+    13.5682,
+    0.253
+   ],
+   "first_set": {
+    "pairs": 2700,
+    "answers": 70,
+    "auc": {
+     "evidence": 0.937,
+     "score": 0.9273,
+     "calibrated": 0.9559
+    },
+    "reliability": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 2576,
+      "mean_p": 0.008,
+      "answers": 0.008
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 37,
+      "mean_p": 0.152,
+      "answers": 0.189
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 19,
+      "mean_p": 0.257,
+      "answers": 0.368
+     },
+     {
+      "bin": [
+       0.3,
+       0.5
+      ],
+      "n": 23,
+      "mean_p": 0.387,
+      "answers": 0.391
+     },
+     {
+      "bin": [
+       0.5,
+       0.7
+      ],
+      "n": 29,
+      "mean_p": 0.605,
+      "answers": 0.483
+     },
+     {
+      "bin": [
+       0.7,
+       1.0
+      ],
+      "n": 16,
+      "mean_p": 0.815,
+      "answers": 0.812
+     }
+    ]
+   },
+   "second_set": {
+    "pairs": 1080,
+    "answers": 20,
+    "auc": {
+     "evidence": 0.9637,
+     "score": 0.9157,
+     "calibrated": 0.9707
+    },
+    "reliability": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 1053,
+      "mean_p": 0.007,
+      "answers": 0.009
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 13,
+      "mean_p": 0.134,
+      "answers": 0.385
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 2,
+      "mean_p": 0.205,
+      "answers": 0.0
+     },
+     {
+      "bin": [
+       0.3,
+       0.5
+      ],
+      "n": 6,
+      "mean_p": 0.334,
+      "answers": 0.167
+     },
+     {
+      "bin": [
+       0.5,
+       0.7
+      ],
+      "n": 1,
+      "mean_p": 0.659,
+      "answers": 1.0
+     },
+     {
+      "bin": [
+       0.7,
+       1.0
+      ],
+      "n": 5,
+      "mean_p": 0.858,
+      "answers": 0.8
+     }
+    ]
+   }
+  }
+ }
+}

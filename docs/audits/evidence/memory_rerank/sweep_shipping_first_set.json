@@ -1,0 +1,4238 @@
+{
+ "dataset_version": 8,
+ "speakers_version": 1,
+ "split_by": "sets",
+ "split": {
+  "bench": {
+   "tune": [
+    "q001",
+    "q002",
+    "q003",
+    "q004",
+    "q005",
+    "q006",
+    "q007",
+    "q008",
+    "q009",
+    "q010",
+    "q011",
+    "q012",
+    "q013",
+    "q014",
+    "q015",
+    "q016",
+    "q017",
+    "q018",
+    "q101",
+    "q102",
+    "q103",
+    "q104",
+    "q105",
+    "q106",
+    "q107",
+    "q108",
+    "q201",
+    "q202",
+    "q203",
+    "q204",
+    "q205",
+    "q206",
+    "q301",
+    "q302",
+    "q303",
+    "q304",
+    "q401",
+    "q402",
+    "q403",
+    "q404",
+    "q405",
+    "q406",
+    "q501",
+    "q502",
+    "q503",
+    "q504",
+    "q601",
+    "q602",
+    "q603",
+    "q701",
+    "q702",
+    "q703",
+    "q704",
+    "q705",
+    "q706",
+    "q707",
+    "q708",
+    "q801",
+    "q802",
+    "q803",
+    "q804",
+    "q805",
+    "q806",
+    "q807",
+    "q808",
+    "q809",
+    "q810",
+    "q811",
+    "q812",
+    "q813",
+    "q814",
+    "q815",
+    "q816",
+    "q817",
+    "q818",
+    "q901",
+    "q902",
+    "q903",
+    "q904",
+    "q951",
+    "q952",
+    "q953",
+    "q954",
+    "q955",
+    "q956",
+    "q957",
+    "q960",
+    "q958",
+    "q959",
+    "q1001",
+    "q1002",
+    "q1003",
+    "q1004",
+    "q1005",
+    "q1006",
+    "q1007",
+    "q1008",
+    "q1011",
+    "q1012",
+    "q1013",
+    "q1014",
+    "q1015",
+    "q1016",
+    "q1101",
+    "q1102",
+    "q1103",
+    "q1104",
+    "q1105",
+    "q1106",
+    "q1107",
+    "q1108",
+    "q1109",
+    "q1201",
+    "q1202",
+    "q1203",
+    "q1204",
+    "q1205",
+    "q1206",
+    "q1301",
+    "q1302",
+    "q1303",
+    "q1305",
+    "q1306",
+    "q1307",
+    "q1308",
+    "q1309",
+    "q1310",
+    "q1401",
+    "q1402",
+    "q1403",
+    "q1404"
+   ],
+   "held": [
+    "h001",
+    "h002",
+    "h003",
+    "h004",
+    "h005",
+    "h006",
+    "h007",
+    "h008",
+    "h009",
+    "h010",
+    "h011",
+    "h012",
+    "h013",
+    "h014",
+    "h015",
+    "h016",
+    "h017",
+    "h018",
+    "h019",
+    "h020",
+    "h021",
+    "h022",
+    "h023",
+    "h024",
+    "h025",
+    "h026",
+    "h027",
+    "h028",
+    "h029",
+    "h030",
+    "h031",
+    "h032",
+    "h033",
+    "h034",
+    "h035",
+    "h036",
+    "h037",
+    "h038",
+    "h039",
+    "h040",
+    "h041",
+    "h042",
+    "h043",
+    "h044",
+    "h045",
+    "h046",
+    "h047",
+    "h048",
+    "h049",
+    "h050",
+    "h051",
+    "h052"
+   ]
+  },
+  "speakers": {
+   "tune": [
+    "q28",
+    "q14",
+    "q13",
+    "q24",
+    "q22",
+    "q25",
+    "q26",
+    "q04",
+    "q08",
+    "q09",
+    "q05",
+    "q03",
+    "q31",
+    "q34",
+    "q32",
+    "q11",
+    "q15",
+    "q17"
+   ],
+   "held": [
+    "q29",
+    "q12",
+    "q37",
+    "q20",
+    "q23",
+    "q21",
+    "q07",
+    "q01",
+    "q02",
+    "q10",
+    "q06",
+    "q35",
+    "q30",
+    "q33",
+    "q27",
+    "q36",
+    "q16"
+   ]
+  }
+ },
+ "today": {
+  "episode_floor": 0.04,
+  "episode_gap": 0.15,
+  "episode_coverage": 0.12,
+  "episode_recency": 0.05,
+  "belief_floor": 0.06,
+  "belief_gap": 0.08,
+  "belief_coverage": 0.06,
+  "belief_recency": 0.02,
+  "summary_floor": 0.21,
+  "summary_gap": 0.1,
+  "summary_coverage": 0.12,
+  "rerank_episode_floor": 0.12,
+  "rerank_episode_gap": 1.0,
+  "rerank_belief_floor": 0.12,
+  "rerank_belief_gap": 1.0,
+  "rerank_summary_floor": 0.12,
+  "rerank_summary_gap": 1.0
+ },
+ "stages": [
+  {
+   "stage": "rerank turns",
+   "axes": {
+    "rerank_episode_floor": [
+     0.03,
+     0.06,
+     0.09,
+     0.12,
+     0.15,
+     0.18,
+     0.21,
+     0.24,
+     0.27,
+     0.3,
+     0.33,
+     0.36,
+     0.39,
+     0.42,
+     0.45
+    ],
+    "rerank_episode_gap": [
+     0.3,
+     0.5,
+     0.7,
+     1.0
+    ]
+   },
+   "chosen": null,
+   "rows": [
+    {
+     "values": {
+      "rerank_episode_floor": 0.03,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 4,
+     "lost_ids": [
+      "scale:q204",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7535,
+       "precision": 0.5505,
+       "shown": 3.97
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7405,
+       "precision": 0.5089,
+       "shown": 4.21
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.689,
+       "shown": 2.58
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6314,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.408
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.03,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q204"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7528,
+       "precision": 0.5159,
+       "shown": 4.38
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7405,
+       "precision": 0.4718,
+       "shown": 4.62
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6889,
+       "shown": 2.63
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6118,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.3859
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.03,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q204"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7484,
+       "precision": 0.4788,
+       "shown": 4.69
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7346,
+       "precision": 0.4437,
+       "shown": 4.92
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6746,
+       "shown": 2.7
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6118,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.3634
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.03,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q204"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7484,
+       "precision": 0.4151,
+       "shown": 5.2
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7346,
+       "precision": 0.3821,
+       "shown": 5.37
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7895,
+       "precision": 0.6672,
+       "shown": 2.75
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.5127,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.3051
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.06,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 9,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "scale:q107",
+      "scale:q204",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 5,
+       "mrr": 0.74,
+       "precision": 0.5757,
+       "shown": 3.28
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 4,
+       "mrr": 0.7296,
+       "precision": 0.5502,
+       "shown": 3.27
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6803,
+       "shown": 2.5
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6902,
+       "shown": 0.0
+      }
+     },
+     "abstained": 10,
+     "quality": 1.4285
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.06,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 6,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "scale:q107",
+      "scale:q204",
+      "small:q1307"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 5,
+       "mrr": 0.7392,
+       "precision": 0.5575,
+       "shown": 3.5
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 4,
+       "mrr": 0.7296,
+       "precision": 0.5331,
+       "shown": 3.48
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 93,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7809,
+       "precision": 0.6784,
+       "shown": 2.54
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 10,
+     "quality": 1.415
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.06,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 6,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "scale:q107",
+      "scale:q204",
+      "small:q1307"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 5,
+       "mrr": 0.7348,
+       "precision": 0.5436,
+       "shown": 3.65
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 4,
+       "mrr": 0.7296,
+       "precision": 0.517,
+       "shown": 3.63
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 93,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7809,
+       "precision": 0.6724,
+       "shown": 2.57
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 10,
+     "quality": 1.4049
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.06,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 6,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "scale:q107",
+      "scale:q204",
+      "small:q1307"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 5,
+       "mrr": 0.7348,
+       "precision": 0.5148,
+       "shown": 3.84
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 4,
+       "mrr": 0.7296,
+       "precision": 0.4938,
+       "shown": 3.82
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 93,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7792,
+       "precision": 0.6706,
+       "shown": 2.59
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6255,
+       "shown": 0.0
+      }
+     },
+     "abstained": 10,
+     "quality": 1.3797
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.09,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 10,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.74,
+       "precision": 0.5934,
+       "shown": 3.02
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 5,
+       "mrr": 0.7208,
+       "precision": 0.5728,
+       "shown": 3.01
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6868,
+       "shown": 2.45
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7147,
+       "shown": 0.0
+      }
+     },
+     "abstained": 12,
+     "quality": 1.4442
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.09,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 9,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7392,
+       "precision": 0.5782,
+       "shown": 3.19
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 5,
+       "mrr": 0.7208,
+       "precision": 0.5634,
+       "shown": 3.15
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7809,
+       "precision": 0.6833,
+       "shown": 2.48
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6951,
+       "shown": 0.0
+      }
+     },
+     "abstained": 12,
+     "quality": 1.4329
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.09,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 9,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7392,
+       "precision": 0.5699,
+       "shown": 3.28
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 5,
+       "mrr": 0.7208,
+       "precision": 0.5558,
+       "shown": 3.22
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7809,
+       "precision": 0.6782,
+       "shown": 2.5
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6951,
+       "shown": 0.0
+      }
+     },
+     "abstained": 12,
+     "quality": 1.4276
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.09,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 9,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7392,
+       "precision": 0.5493,
+       "shown": 3.44
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 5,
+       "mrr": 0.7208,
+       "precision": 0.5389,
+       "shown": 3.34
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7792,
+       "precision": 0.6765,
+       "shown": 2.52
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6657,
+       "shown": 0.0
+      }
+     },
+     "abstained": 12,
+     "quality": 1.4101
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.12,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 12,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7311,
+       "precision": 0.6009,
+       "shown": 2.92
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7208,
+       "precision": 0.5804,
+       "shown": 2.87
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 89,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7741,
+       "precision": 0.6847,
+       "shown": 2.38
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7196,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4455
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.12,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 11,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7304,
+       "precision": 0.5929,
+       "shown": 3.03
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7208,
+       "precision": 0.5739,
+       "shown": 2.97
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6813,
+       "shown": 2.41
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4368
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.12,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 11,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7304,
+       "precision": 0.5849,
+       "shown": 3.08
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7208,
+       "precision": 0.5682,
+       "shown": 3.01
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6761,
+       "shown": 2.43
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4321
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.12,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 11,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7304,
+       "precision": 0.5753,
+       "shown": 3.16
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7208,
+       "precision": 0.5571,
+       "shown": 3.08
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6761,
+       "shown": 2.44
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4269
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.15,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 12,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7311,
+       "precision": 0.6001,
+       "shown": 2.82
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.723,
+       "precision": 0.5848,
+       "shown": 2.79
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 89,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7741,
+       "precision": 0.6872,
+       "shown": 2.36
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7588,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4574
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.15,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 11,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7304,
+       "precision": 0.5921,
+       "shown": 2.91
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.723,
+       "precision": 0.5761,
+       "shown": 2.86
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6838,
+       "shown": 2.38
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7392,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4482
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.15,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 11,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7304,
+       "precision": 0.5845,
+       "shown": 2.95
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.723,
+       "precision": 0.5703,
+       "shown": 2.9
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6786,
+       "shown": 2.41
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7392,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4435
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.15,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 11,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7304,
+       "precision": 0.5783,
+       "shown": 3.0
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.723,
+       "precision": 0.5652,
+       "shown": 2.94
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6786,
+       "shown": 2.42
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7392,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4407
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.18,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 13,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7237,
+       "precision": 0.5978,
+       "shown": 2.74
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7156,
+       "precision": 0.5761,
+       "shown": 2.71
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 89,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7741,
+       "precision": 0.6882,
+       "shown": 2.35
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7647,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4527
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.18,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 12,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7237,
+       "precision": 0.5904,
+       "shown": 2.8
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7156,
+       "precision": 0.5689,
+       "shown": 2.78
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6848,
+       "shown": 2.37
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4442
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.18,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 12,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7237,
+       "precision": 0.5827,
+       "shown": 2.85
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7156,
+       "precision": 0.5616,
+       "shown": 2.81
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6796,
+       "shown": 2.4
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4391
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.18,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 12,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7237,
+       "precision": 0.5786,
+       "shown": 2.87
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7156,
+       "precision": 0.5594,
+       "shown": 2.83
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6796,
+       "shown": 2.4
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4375
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.21,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 14,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7252,
+       "precision": 0.5971,
+       "shown": 2.69
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7156,
+       "precision": 0.5763,
+       "shown": 2.68
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 88,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7637,
+       "precision": 0.6779,
+       "shown": 2.34
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7647,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4478
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.21,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 13,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7252,
+       "precision": 0.5904,
+       "shown": 2.75
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7156,
+       "precision": 0.5698,
+       "shown": 2.73
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 89,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7672,
+       "precision": 0.6745,
+       "shown": 2.37
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4396
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.21,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 13,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7252,
+       "precision": 0.5827,
+       "shown": 2.79
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7156,
+       "precision": 0.5625,
+       "shown": 2.76
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 89,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7672,
+       "precision": 0.6693,
+       "shown": 2.39
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4345
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.21,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 13,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 103,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7252,
+       "precision": 0.5827,
+       "shown": 2.79
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7156,
+       "precision": 0.5611,
+       "shown": 2.78
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 89,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7672,
+       "precision": 0.6693,
+       "shown": 2.39
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4342
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.24,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 16,
+     "lost_ids": [
+      "main:q1005",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7164,
+       "precision": 0.5882,
+       "shown": 2.66
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5792,
+       "shown": 2.63
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 88,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7637,
+       "precision": 0.6805,
+       "shown": 2.3
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7647,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4438
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.24,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 16,
+     "lost_ids": [
+      "main:q1005",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7164,
+       "precision": 0.5816,
+       "shown": 2.72
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5757,
+       "shown": 2.67
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 88,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7637,
+       "precision": 0.6736,
+       "shown": 2.32
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4346
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.24,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 16,
+     "lost_ids": [
+      "main:q1005",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7164,
+       "precision": 0.5754,
+       "shown": 2.76
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5691,
+       "shown": 2.69
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 88,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7637,
+       "precision": 0.6736,
+       "shown": 2.34
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4315
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.24,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 16,
+     "lost_ids": [
+      "main:q1005",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7164,
+       "precision": 0.5754,
+       "shown": 2.76
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5683,
+       "shown": 2.7
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 88,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7637,
+       "precision": 0.6736,
+       "shown": 2.34
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4312
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.27,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 16,
+     "lost_ids": [
+      "main:q1005",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7171,
+       "precision": 0.5875,
+       "shown": 2.65
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5807,
+       "shown": 2.61
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 88,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7637,
+       "precision": 0.6788,
+       "shown": 2.3
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7745,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4462
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.27,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 16,
+     "lost_ids": [
+      "main:q1005",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7171,
+       "precision": 0.5813,
+       "shown": 2.69
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5776,
+       "shown": 2.65
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 88,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7637,
+       "precision": 0.6719,
+       "shown": 2.31
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7549,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4372
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.27,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 16,
+     "lost_ids": [
+      "main:q1005",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7171,
+       "precision": 0.5736,
+       "shown": 2.73
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5711,
+       "shown": 2.67
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 88,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7637,
+       "precision": 0.6736,
+       "shown": 2.32
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7549,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4341
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.27,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 16,
+     "lost_ids": [
+      "main:q1005",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 102,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7171,
+       "precision": 0.5736,
+       "shown": 2.73
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5711,
+       "shown": 2.67
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 88,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7637,
+       "precision": 0.6736,
+       "shown": 2.32
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7549,
+       "shown": 0.0
+      }
+     },
+     "abstained": 13,
+     "quality": 1.4341
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.3,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 18,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7127,
+       "precision": 0.5831,
+       "shown": 2.61
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5822,
+       "shown": 2.59
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.6719,
+       "shown": 2.28
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7745,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4414
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.3,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 18,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7127,
+       "precision": 0.576,
+       "shown": 2.65
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5782,
+       "shown": 2.62
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.3
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7549,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.432
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.3,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 18,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7127,
+       "precision": 0.5751,
+       "shown": 2.66
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5731,
+       "shown": 2.63
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.6668,
+       "shown": 2.3
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7549,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4309
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.3,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 18,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q107",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7127,
+       "precision": 0.5751,
+       "shown": 2.66
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 101,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7119,
+       "precision": 0.5731,
+       "shown": 2.63
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.6668,
+       "shown": 2.3
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7549,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4309
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.33,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 21,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 100,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7097,
+       "precision": 0.5801,
+       "shown": 2.6
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 99,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7068,
+       "precision": 0.578,
+       "shown": 2.56
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.6719,
+       "shown": 2.26
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7647,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4351
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.33,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 21,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 100,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7097,
+       "precision": 0.573,
+       "shown": 2.63
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 99,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7068,
+       "precision": 0.574,
+       "shown": 2.59
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.28
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4257
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.33,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 21,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 100,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7097,
+       "precision": 0.5721,
+       "shown": 2.64
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 99,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7068,
+       "precision": 0.5689,
+       "shown": 2.6
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.6668,
+       "shown": 2.29
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4246
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.33,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 21,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 100,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7097,
+       "precision": 0.5721,
+       "shown": 2.64
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 99,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7068,
+       "precision": 0.5689,
+       "shown": 2.6
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.6668,
+       "shown": 2.29
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7451,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4246
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.36,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 22,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 100,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7112,
+       "precision": 0.5855,
+       "shown": 2.58
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5735,
+       "shown": 2.53
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.6719,
+       "shown": 2.26
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7941,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.442
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.36,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 22,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 100,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7112,
+       "precision": 0.5784,
+       "shown": 2.62
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5695,
+       "shown": 2.56
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.28
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7745,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4325
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.36,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 22,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 100,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7112,
+       "precision": 0.5784,
+       "shown": 2.62
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5689,
+       "shown": 2.57
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.28
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7745,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4324
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.36,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 22,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 100,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7112,
+       "precision": 0.5784,
+       "shown": 2.62
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5689,
+       "shown": 2.57
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.28
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7745,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4324
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.39,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 23,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 99,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7068,
+       "precision": 0.5825,
+       "shown": 2.55
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5735,
+       "shown": 2.5
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.6719,
+       "shown": 2.26
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8235,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4474
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.39,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 23,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 99,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7068,
+       "precision": 0.5754,
+       "shown": 2.59
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5695,
+       "shown": 2.53
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.28
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8039,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4381
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.39,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 23,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 99,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7068,
+       "precision": 0.5754,
+       "shown": 2.59
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5689,
+       "shown": 2.54
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.28
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8039,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4379
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.39,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 23,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 99,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7068,
+       "precision": 0.5754,
+       "shown": 2.59
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5689,
+       "shown": 2.54
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.28
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8039,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4379
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.42,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 24,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1006",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7024,
+       "precision": 0.5781,
+       "shown": 2.53
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5735,
+       "shown": 2.5
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.6719,
+       "shown": 2.24
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8235,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4453
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.42,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 24,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1006",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7024,
+       "precision": 0.571,
+       "shown": 2.56
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5695,
+       "shown": 2.53
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.26
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8039,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4359
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.42,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 24,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1006",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7024,
+       "precision": 0.571,
+       "shown": 2.56
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5695,
+       "shown": 2.53
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.26
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8039,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4359
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.42,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 24,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1006",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7024,
+       "precision": 0.571,
+       "shown": 2.56
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7024,
+       "precision": 0.5695,
+       "shown": 2.53
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 87,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7586,
+       "precision": 0.665,
+       "shown": 2.26
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8039,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4359
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.45,
+      "rerank_episode_gap": 0.3
+     },
+     "lost": 25,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1006",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7024,
+       "precision": 0.5781,
+       "shown": 2.51
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7053,
+       "precision": 0.5758,
+       "shown": 2.48
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 86,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7552,
+       "precision": 0.6736,
+       "shown": 2.21
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8235,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4461
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.45,
+      "rerank_episode_gap": 0.5
+     },
+     "lost": 25,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1006",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7024,
+       "precision": 0.574,
+       "shown": 2.54
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7053,
+       "precision": 0.5717,
+       "shown": 2.51
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 86,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7552,
+       "precision": 0.6668,
+       "shown": 2.23
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8039,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4375
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.45,
+      "rerank_episode_gap": 0.7
+     },
+     "lost": 25,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1006",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7024,
+       "precision": 0.574,
+       "shown": 2.54
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7053,
+       "precision": 0.5717,
+       "shown": 2.51
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 86,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7552,
+       "precision": 0.6668,
+       "shown": 2.23
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8039,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4375
+    },
+    {
+     "values": {
+      "rerank_episode_floor": 0.45,
+      "rerank_episode_gap": 1.0
+     },
+     "lost": 25,
+     "lost_ids": [
+      "main:q1005",
+      "main:q1006",
+      "main:q1007",
+      "main:q1011",
+      "main:q107",
+      "main:q1109",
+      "main:q1307",
+      "main:q204",
+      "main:q707",
+      "scale:q1005",
+      "scale:q1006",
+      "scale:q1007",
+      "scale:q1011",
+      "scale:q107",
+      "scale:q1109",
+      "scale:q204",
+      "scale:q707",
+      "small:q007",
+      "small:q1005",
+      "small:q1007",
+      "small:q1203",
+      "small:q1307",
+      "small:q204",
+      "small:q303",
+      "small:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 7,
+       "mrr": 0.7024,
+       "precision": 0.574,
+       "shown": 2.54
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 98,
+       "unanswerable": 18,
+       "abstained": 6,
+       "mrr": 0.7053,
+       "precision": 0.5717,
+       "shown": 2.51
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 86,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7552,
+       "precision": 0.6668,
+       "shown": 2.23
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.8039,
+       "shown": 0.0
+      }
+     },
+     "abstained": 14,
+     "quality": 1.4375
+    }
+   ]
+  }
+ ],
+ "rerank": true,
+ "today_tune": {
+  "stores": {
+   "main": {
+    "answerable": 113,
+    "answered": 107,
+    "unanswerable": 18,
+    "abstained": 0,
+    "mrr": 0.7487,
+    "precision": 0.4872,
+    "shown": 4.76
+   },
+   "scale": {
+    "answerable": 113,
+    "answered": 106,
+    "unanswerable": 18,
+    "abstained": 1,
+    "mrr": 0.7364,
+    "precision": 0.4379,
+    "shown": 5.08
+   },
+   "small": {
+    "answerable": 97,
+    "answered": 94,
+    "unanswerable": 18,
+    "abstained": 1,
+    "mrr": 0.7912,
+    "precision": 0.6722,
+    "shown": 2.73
+   },
+   "speakers": {
+    "answerable": 17,
+    "answered": 17,
+    "unanswerable": 1,
+    "abstained": 1,
+    "mrr": 0.9706,
+    "precision": 0.6255,
+    "shown": 0.0
+   }
+  },
+  "abstained": 2,
+  "quality": 1.3674
+ },
+ "rerank_tune": {
+  "stores": {
+   "main": {
+    "answerable": 113,
+    "answered": 103,
+    "unanswerable": 18,
+    "abstained": 6,
+    "mrr": 0.7304,
+    "precision": 0.5753,
+    "shown": 3.16
+   },
+   "scale": {
+    "answerable": 113,
+    "answered": 103,
+    "unanswerable": 18,
+    "abstained": 6,
+    "mrr": 0.7208,
+    "precision": 0.5571,
+    "shown": 3.08
+   },
+   "small": {
+    "answerable": 97,
+    "answered": 90,
+    "unanswerable": 18,
+    "abstained": 1,
+    "mrr": 0.7775,
+    "precision": 0.6761,
+    "shown": 2.44
+   },
+   "speakers": {
+    "answerable": 17,
+    "answered": 17,
+    "unanswerable": 1,
+    "abstained": 1,
+    "mrr": 0.9706,
+    "precision": 0.7,
+    "shown": 0.0
+   }
+  },
+  "abstained": 13,
+  "quality": 1.4269
+ },
+ "chosen": null
+}

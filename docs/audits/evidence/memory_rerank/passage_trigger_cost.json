@@ -1,0 +1,36 @@
+{
+ "statements_each": 2000,
+ "rounds": 6,
+ "per_statement": {
+  "insert": {
+   "with_triggers_us": 24.28,
+   "without_us": 24.02,
+   "added_us": 0.25
+  },
+  "tier move (not forgotten)": {
+   "with_triggers_us": 8.81,
+   "without_us": 9.44,
+   "added_us": -0.63
+  },
+  "access bump": {
+   "with_triggers_us": 8.69,
+   "without_us": 8.37,
+   "added_us": 0.32
+  },
+  "text change": {
+   "with_triggers_us": 30.64,
+   "without_us": 24.69,
+   "added_us": 5.96
+  },
+  "forget": {
+   "with_triggers_us": 26.77,
+   "without_us": 24.05,
+   "added_us": 2.71
+  },
+  "delete": {
+   "with_triggers_us": 9.48,
+   "without_us": 10.11,
+   "added_us": -0.62
+  }
+ }
+}

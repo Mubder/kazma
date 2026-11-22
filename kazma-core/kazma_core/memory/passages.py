@@ -27,15 +27,22 @@ no text, only its vector and the model that made it.
   when its row goes, when it becomes ``forgotten``, when its text changes
   (the repair writes them again) or when it moves to another space
   (:func:`ensure_passages_schema`).
-* **Searched with the memory** (``VectorEngine.best_passages``): a memory's
-  meaning similarity is the better of its vector and its best passage, and
-  the block shows the best passage's stretch (W1b, ``recall``).
+* **Searched for candidates** (``VectorEngine.best_passages``): the memories
+  whose best passage is among the question's nearest are candidates the
+  reranker reads beside that passage (W3, ``memory/reranker.py``), and the
+  block shows the stretch a memory was kept by (W1b, ``recall``).
 
-Off (:func:`in_use`). Measured 22 Nov with and without on Kazma's benchmark:
-counted this way they lost an answer at four times the store and one in the
-speakers' space, and lowered precision, and no threshold the plan's rule
-allows recovered it (``docs/plans/MEMORY_TOP_SCORES_PLAN.md``, W5). A lane of
-their own, judged on their own evidence, is the next measure.
+Off (:func:`in_use`). Counted as a memory's meaning -- the better of its
+vector and its best passage -- they lost an answer at four times the store
+and one in the speakers' space, and lowered precision, and no threshold the
+plan's rule allows recovered it (measured 22 Nov,
+``docs/plans/MEMORY_TOP_SCORES_PLAN.md``, W5): they never lift a memory's
+meaning. The main session's decision: they bring the reranker's candidates.
+With the switch off, the triggers on ``episodes`` are all that runs: an
+insert fires none; a change of a memory's text, tier or space fires
+``kazma_passages_au`` (two deletes by key on empty tables when the text
+changed or the memory was forgotten, nothing otherwise), a delete fires
+``kazma_passages_ad`` (the same two deletes).
 """
 
 from __future__ import annotations

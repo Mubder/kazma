@@ -1685,25 +1685,53 @@ came up short, and archiving had erased 76 memories.
   covers the start of a long memory** (`EMBED_TEXT_CHARS`, 4,000: the vector
   is what it always was), **keyword search all of it**. **Passages** (the
   memory plan's W5 + W1b, 2026-11-22, `memory/passages.py`, behind
-  `passages.in_use()`, off: counted as max(vector, best passage) they lost
-  answers and precision on Kazma's benchmark and no threshold the plan's
-  rule allows recovered them -- `docs/plans/MEMORY_TOP_SCORES_PLAN.md` W5 has
-  the numbers; a lane of their own is next):
+  `passages.in_use()`, off):
   vectors of about 256 tokens (`limits.PASSAGE_TOKENS`, whole sentences, 32
   overlapping) of what a memory's own vector misses -- every side but the
   vector's, and the vector's own past `EMBED_TEXT_CHARS` -- in
   `episode_passages` (memory id, space, side, offsets, vector, model; no
   text). Triggers on `episodes` take them with a row's delete, a forget, a
-  text change and a move of space; the writer fills them after its own
-  vector (`write_passages`: vectors first, then a compare-and-set on the
-  text), the vector repair sweep fills older memories (`fill_passages`, 200
-  a pass), the benchmark's seeding fills its stores
-  (`benchmark.fill_passages_whole`, refusing a store missing any). Recall
-  takes the better of a memory's vector and its best passage
-  (`recall._with_passages`, both paths, the local database's passages) and
-  the block shows the stretch a passage won (`display_at(anchor=)`). Gate:
-  `tests/test_memory_passages.py` (EN/AR; the writer off, a stale write and
-  a forget as controls).
+  text change and a move of space (with the switch off they cost an insert
+  nothing and a forget about 3 µs: the plan's W5); the writer fills them
+  after its own vector (`write_passages`: vectors first, then a
+  compare-and-set on the text), the vector repair sweep fills older memories
+  (`fill_passages`, 200 a pass, behind the switch), the benchmark's seeding
+  fills its stores (`benchmark.fill_passages_whole`, refusing a store
+  missing any). **They never lift a memory's meaning**: counted as
+  max(vector, best passage) they lost answers and precision on Kazma's
+  benchmark and no threshold the plan's rule allows recovered them (the
+  plan's W5 has the numbers; the main session's decision: no cosine lane of
+  their own). **They bring the reranker's candidates** (W3, below): the
+  memories whose best passage is among the question's nearest are read
+  beside that passage, and the block shows the stretch a memory was kept by
+  (`display_at(anchor=)`, W1b). Gate: `tests/test_memory_passages.py`
+  (EN/AR; the writer off, a stale write and a forget as controls).
+  **Relevance: a cross-encoder decides what is shown** (the memory plan's
+  W3 + W2, 2026-11-22, `memory/reranker.py`, `recall._by_relevance`, behind
+  `reranker.in_use()`, off: **not accepted** -- under the plan's rule no
+  floor keeps every answer on the four stores with either model, and the
+  reference model is several times the latency budget; the plan's W3 has
+  the numbers): inside `_rank_by_evidence`, the
+  one ranking of every path, the shipping model (`reranker.MODEL`, pinned,
+  local files only, no remote code) reads the question beside the best 20
+  candidates by today's evidence and every memory a passage brought (a
+  memory's start and its passage's stretch, the better counting), a few
+  pairs at a time until the recall's budget (`reranker.BUDGET_S`, all kinds
+  together) ends; the probability it answers is a logistic fit of the
+  evidence and the model's score together (`reranker.CALIBRATION`, per kind,
+  fitted on the benchmark's first set by `scripts/memory_rerank_calibrate.py`),
+  and a memory is shown at or above the kind's floor and within its gap of
+  the best (`_RERANK_*_FLOOR`, `_RERANK_*_GAP`). What the budget left unread
+  keeps today's rule, ranked after what was read, and the recall says so
+  (`RecallResult.rerank`: "whole" / "partial"); no model on disk is today's
+  rule (said once, tried again after ten minutes). Facts are not reranked
+  (`_RERANK_KINDS`: their calibrated probability ranked no better than the
+  evidence). Measurements replay the model's recorded scores
+  (`memory_bench.py rerank-scores`, not committed while the reranker is
+  off; `benchmark.ReplayReranker` refuses a pair it lacks).
+  Gate: `tests/test_memory_rerank.py` (EN/AR, both recall paths, a scripted
+  model; today's rule, no floor, the budget ended and passages alone as
+  controls).
   **Shown bounded, read whole**: the recall block shows a memory with its
   own bounds -- **room by rank** (the memory plan's W1a, 2026-11-22,
   `recall._room_by_rank`, `episode_text.display_at`), **for the
