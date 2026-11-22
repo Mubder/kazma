@@ -135,6 +135,33 @@ def server_env(home: Path, data: Path, port: int, checkout: Path = REPO) -> dict
     return env
 
 
+#: What a kept store holds: the memory databases only. The data folder's
+#: vault holds the provider's key, saved as Settings saves it; it is never
+#: kept.
+MEMORY_DATABASES = ("memory_state.db", "memory_ops.db")
+
+
+def keep_memory_databases(data: Path, into: Path) -> list[str]:
+    """Copy the private install's memory databases (a consistent copy of
+    each, the write-ahead log folded in) to *into*, to read why a step
+    failed with no model call; never the vault or the settings."""
+    into.mkdir(parents=True, exist_ok=True)
+    kept = []
+    for name in MEMORY_DATABASES:
+        source = data / name
+        if not source.is_file():
+            continue
+        src = sqlite3.connect(str(source))
+        dst = sqlite3.connect(str(into / name))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        kept.append(name)
+    return kept
+
+
 def turn_failed(answer: str) -> bool:
     """Whether *answer* is Kazma's own error message (``friendly_llm_error``
     starts every one with the warning sign), not the model's reply."""
@@ -299,7 +326,7 @@ def set_up_model(browser: Any, *, provider: str, model: str, key: str, base_url:
 def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, playwright: Any,
                  workdir: Path, reasoning: str = "low", transcript: list[dict[str, Any]] | None = None,
                  provider: str = "deepseek", base_url: str | None = None, checkout: Path = REPO,
-                 ) -> dict[str, Any]:
+                 keep_memory: Path | None = None) -> dict[str, Any]:
     home, data = workdir / language.lang / "home", workdir / language.lang / "data"
     for folder in (home, data, home / "workspace"):
         folder.mkdir(parents=True, exist_ok=True)
@@ -355,6 +382,8 @@ def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, p
         if browser is not None:
             browser.close()
         server.stop()
+        if keep_memory is not None:
+            keep_memory_databases(data, keep_memory / language.lang)
     return {"lang": language.lang, "steps": steps, "passed": all(s["passed"] for s in steps),
             "page_errors": len(page_errors), "spent": spent_tokens(data), "judge_spent": judged}
 
@@ -376,6 +405,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--checkout", type=Path, default=REPO, help="the checkout the private Kazma runs from")
     p.add_argument("--languages", default="en,ar")
     p.add_argument("--reasoning", default="low", help="agent.chat_reasoning in the private install")
+    p.add_argument("--keep-memory", type=Path, default=None,
+                   help="a folder outside the repository to keep each language's memory databases in "
+                        "(never the vault or the settings), to read a failure with no model call")
     p.add_argument("--transcript", type=Path, default=None,
                    help="a folder outside the repository for the replies and the servers' logs (to read why)")
     args = p.parse_args(argv)
@@ -397,9 +429,10 @@ def main(argv: list[str] | None = None) -> int:
     wanted = [x.strip() for x in args.languages.split(",") if x.strip()]
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=checkout, capture_output=True,
                             text=True, check=False).stdout.strip()
-    if args.transcript is not None and REPO in args.transcript.resolve().parents:
-        print("the transcript holds the replies' text: keep it outside the repository", file=sys.stderr)
-        return 2
+    for folder, what in ((args.transcript, "the transcript"), (args.keep_memory, "the kept memory")):
+        if folder is not None and REPO in folder.resolve().parents:
+            print(f"{what} holds the replies' text: keep it outside the repository", file=sys.stderr)
+            return 2
     transcript: list[dict[str, Any]] | None = [] if args.transcript is not None else None
     results = []
     with tempfile.TemporaryDirectory(prefix="kazma-real-use-", ignore_cleanup_errors=True) as tmp, \
@@ -409,7 +442,8 @@ def main(argv: list[str] | None = None) -> int:
                 results.append(run_language(language, model=args.model, key=key, judge=judge,
                                             playwright=playwright, workdir=Path(tmp), reasoning=args.reasoning,
                                             transcript=transcript, provider=args.provider,
-                                            base_url=args.base_url, checkout=checkout))
+                                            base_url=args.base_url, checkout=checkout,
+                                            keep_memory=args.keep_memory))
         if args.transcript is not None:
             args.transcript.mkdir(parents=True, exist_ok=True)
             (args.transcript / "transcript.json").write_text(json.dumps(transcript, indent=1, ensure_ascii=False),

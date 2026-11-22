@@ -123,3 +123,24 @@ def test_a_turn_that_ended_in_kazmas_error_is_said_apart(suite):
     error = friendly_llm_error(RuntimeError("LLM call failed (HTTP 400): data_inspection_failed"))
     assert suite.turn_failed(error)
     assert not suite.turn_failed("You live in Porto.") and not suite.turn_failed("")
+
+
+def test_a_kept_store_is_the_memory_databases_and_never_the_vault(suite, tmp_path):
+    """--keep-memory keeps what a failure is read from with no model call;
+    the vault (the provider's key, saved as Settings saves it) stays behind."""
+    import sqlite3
+
+    data = tmp_path / "data"
+    data.mkdir()
+    for name in ("memory_state.db", "memory_ops.db", "vault.db", "settings.db"):
+        conn = sqlite3.connect(str(data / name))
+        conn.execute("CREATE TABLE t (x TEXT)")
+        conn.execute("INSERT INTO t VALUES (?)", (name,))
+        conn.commit()
+        conn.close()
+    kept = suite.keep_memory_databases(data, tmp_path / "kept" / "ar")
+    assert kept == ["memory_state.db", "memory_ops.db"]
+    assert sorted(p.name for p in (tmp_path / "kept" / "ar").iterdir()) == ["memory_ops.db", "memory_state.db"]
+    conn = sqlite3.connect(str(tmp_path / "kept" / "ar" / "memory_state.db"))
+    assert conn.execute("SELECT x FROM t").fetchone() == ("memory_state.db",)
+    conn.close()
