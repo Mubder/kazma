@@ -82,6 +82,7 @@
             </span>
             <span class="nav-label">{{ t('nav.memory') }}</span>
         </a>
+        {% if feature_here is not defined or feature_here('knowledge') %}
         <a href="/knowledge" class="nav-link {{ 'active' if active_page == 'knowledge' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -91,6 +92,8 @@
             </span>
             <span class="nav-label">{{ t('nav.knowledge') }}</span>
         </a>
+        {% endif %}
+        {% if feature_here is not defined or feature_here('documents') %}
         <a href="/documents" class="nav-link {{ 'active' if active_page == 'documents' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -102,6 +105,8 @@
             </span>
             <span class="nav-label">{{ t('nav.documents') }}</span>
         </a>
+        {% endif %}
+        {% if feature_here is not defined or feature_here('research') %}
         <a href="/research" class="nav-link {{ 'active' if active_page == 'research' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -111,6 +116,7 @@
             </span>
             <span class="nav-label">{{ t('nav.research') }}</span>
         </a>
+        {% endif %}
 
         <span class="nav-section-title">{{ t('nav.section_automation') }}</span>
         <a href="/agents" class="nav-link {{ 'active' if active_page == 'agents' else '' }}" @click="closeMobileNav()">
@@ -151,6 +157,7 @@
             </span>
             <span class="nav-label">{{ t('nav.dashboard') }}</span>
         </a>
+        {% if feature_here is not defined or feature_here('swarm') %}
         <a href="/swarm" class="nav-link {{ 'active' if active_page == 'swarm' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -163,6 +170,7 @@
             </span>
             <span class="nav-label">{{ t('nav.swarm') }}</span>
         </a>
+        {% endif %}
         <a href="/replay" class="nav-link {{ 'active' if active_page == 'replay' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -172,6 +180,7 @@
             </span>
             <span class="nav-label">{{ t('nav.replay') }}</span>
         </a>
+        {% if feature_here is not defined or feature_here('scheduled') %}
         <a href="/scheduled" class="nav-link {{ 'active' if active_page == 'scheduled' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -183,6 +192,8 @@
             </span>
             <span class="nav-label">{{ t('nav.scheduled') }}</span>
         </a>
+        {% endif %}
+        {% if feature_here is not defined or feature_here('x_studio') %}
         <a href="/x" class="nav-link {{ 'active' if active_page == 'x_studio' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -192,6 +203,7 @@
             </span>
             <span class="nav-label">{{ t('nav.x_studio') }}</span>
         </a>
+        {% endif %}
 
         <span class="nav-section-title">{{ t('nav.configuration') }}</span>
         <a href="/settings" class="nav-link {{ 'active' if active_page == 'settings' else '' }}" @click="closeMobileNav()">

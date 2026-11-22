@@ -119,10 +119,10 @@ def test_the_other_spaces_file_tools_stay_in_its_workspace(two_hosts) -> None:
 
 
 def test_a_filesystem_mcp_call_in_the_space_it_does_not_serve_is_refused(two_hosts) -> None:
-    from kazma_core.spaces.tools import host_refusal
+    from kazma_core.spaces.tools import _host_refusal
 
     with scope.bind_scope(two_hosts["other"], OWNER_ACCOUNT_ID):
-        assert host_refusal("mcp__filesystem__read_file")
+        assert _host_refusal("mcp__filesystem__read_file")
 
 
 def test_the_environment_note_of_the_other_space_names_nothing_of_the_machine(two_hosts) -> None:

@@ -2762,7 +2762,41 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.people_tokens.few": {"en": "{n} tokens", "ar": "{n} رموز"},
     "settings.people_tokens.many": {"en": "{n} tokens", "ar": "{n} رمزًا"},
     "settings.people_tokens.other": {"en": "{n} tokens", "ar": "{n} رمز"},
-    "settings.people_err.bad_tokens": {"en": "Tokens a day is a whole number above zero.", "ar": "الرموز في اليوم عدد صحيح أكبر من صفر."},
+    # Features per person (Spaces S2-11).
+    "settings.people_features_title": {"en": "Features", "ar": "الميزات"},
+    "settings.people_features_help": {
+        "en": "What each person may use. A new person starts with chat and its memory, documents, knowledge, "
+              "web, research, and images and voice; the rest is off until you turn it on. A feature that is "
+              "off is gone for them: no menu entry, its pages and commands refuse, and its tools are not "
+              "offered. Their data stays. You have every feature; only Development is yours to switch off.",
+        "ar": "ما يمكن لكل شخص استخدامه. يبدأ الشخص الجديد بالمحادثة وذاكرتها والمستندات والمعرفة والويب "
+              "والبحث والصور والصوت؛ والباقي معطّل حتى تفعّله. الميزة المعطّلة تختفي عنده: لا مدخل لها في "
+              "القائمة، وترفض صفحاتها وأوامرها، ولا تُعرض أدواتها. وتبقى بياناته. لديك كل الميزات؛ والتطوير "
+              "وحده يمكنك تعطيله لنفسك.",
+    },
+    "settings.feature.x_studio": {"en": "X Studio", "ar": "استوديو X"},
+    "settings.feature.email_calendar": {"en": "Email and calendar", "ar": "البريد والتقويم"},
+    "settings.feature.documents": {"en": "Documents", "ar": "المستندات"},
+    "settings.feature.knowledge": {"en": "Knowledge", "ar": "المعرفة"},
+    "settings.feature.research": {"en": "Research", "ar": "البحث"},
+    "settings.feature.swarm": {"en": "Swarm", "ar": "السرب"},
+    "settings.feature.scheduled": {"en": "Scheduled", "ar": "المجدولة"},
+    "settings.feature.code": {"en": "Code", "ar": "الكود"},
+    "settings.feature.web": {"en": "Web", "ar": "الويب"},
+    "settings.feature.browser": {"en": "Browser", "ar": "المتصفح"},
+    "settings.feature.images_voice": {"en": "Images and voice", "ar": "الصور والصوت"},
+    "settings.feature.chat_apps": {"en": "Chat apps", "ar": "تطبيقات المحادثة"},
+    "settings.feature.development": {"en": "Development", "ar": "التطوير"},
+    "settings.people_feature_of": {"en": "{feature} for {name}", "ar": "{feature} لـ {name}"},
+    "settings.people_features_saved": {"en": "Features saved.", "ar": "حُفظت الميزات."},
+    "settings.people_err.unknown_feature": {"en": "There is no such feature.", "ar": "لا توجد ميزة بهذا الاسم."},
+    "settings.people_err.bad_switch": {"en": "A feature is switched on or off.", "ar": "الميزة إما مفعّلة أو معطّلة."},
+    "settings.people_err.bad_features": {"en": "Name the features to switch.", "ar": "حدّد الميزات المراد تبديلها."},
+    "settings.people_err.admin_has_every_feature": {
+        "en": "The admin has every feature; only Development can be switched off.",
+        "ar": "لدى المسؤول كل الميزات؛ والتطوير وحده يمكن تعطيله.",
+    },
+    "settings.people_err.bad_tokens":{"en": "Tokens a day is a whole number above zero.", "ar": "الرموز في اليوم عدد صحيح أكبر من صفر."},
     "settings.people_err.bad_usd": {"en": "Dollars a day is a number, 0 or more.", "ar": "الدولارات في اليوم رقم، صفر أو أكثر."},
     "settings.people_err.bad_limit": {"en": "That is not a limit.", "ar": "هذا ليس حدًّا."},
     "settings.tab_space_data":{"en": "This space's data", "ar": "بيانات هذه المساحة"},

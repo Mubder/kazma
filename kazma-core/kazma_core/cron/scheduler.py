@@ -1462,6 +1462,8 @@ _FIRE_REFUSALS = {
                        "addresses Kazma has are the owner's, so it does not fire."),
     "identity_unavailable": ("Error: the accounts of this install cannot be read, so who this job "
                              "acts for is unknown and it does not fire."),
+    "feature_off": ("Error: Scheduled is off for the person this job acts for (Settings → "
+                    "People), so it does not fire."),
 }
 
 
@@ -1517,9 +1519,12 @@ def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
     (``refusal``) when the job's tenant is no space of the install
     (``no_space``), or when it acts for anyone but the owner
     (``no_own_address``): until people link their own chat apps (S3-05)
-    every address a job can deliver to is the owner's.
+    every address a job can deliver to is the owner's. Nor when the person
+    it acts for no longer has the feature Scheduled (``feature_off``, S2-11:
+    the check made again when the work runs).
     """
     from kazma_core.spaces import identity
+    from kazma_core.spaces.features import work_refusal
     from kazma_core.spaces.scope import spaces_enforced
 
     if not spaces_enforced():
@@ -1528,6 +1533,8 @@ def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
     if found is None:
         return _FireBinding(space="", asker="", refusal="no_space")
     space, asker = found
+    if work_refusal("scheduled", asker):
+        return _FireBinding(space=space, asker=asker, refusal="feature_off")
     if asker != _owner_account():
         return _FireBinding(space=space, asker=asker, refusal="no_own_address")
     return _FireBinding(space=space, asker=asker)

@@ -17,8 +17,8 @@ a password, sign in as them), so it is never silent:
   have read it.
 
 The admin also sets each person's daily limit and the limit for people who
-have none of their own (S2-02, ``spaces.daily_limits``): recorded like the
-rest.
+have none of their own (S2-02, ``spaces.daily_limits``), and switches each
+person's features (S2-11, ``spaces.features``): recorded like the rest.
 
 A new person gets a personal space (sandboxed, one member forever). Deleting
 a person ends their sessions and takes them out of every space; their
@@ -62,13 +62,14 @@ __all__ = [
     "reset_password",
     "set_daily_limit",
     "set_default_daily_limit",
+    "set_features",
 ]
 
 logger = logging.getLogger(__name__)
 
 #: What the record holds.
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
-          "daily_limit_set", "default_daily_limit_set")
+          "daily_limit_set", "default_daily_limit_set", "features_set")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset",)
 _NAME_MAX = 64
@@ -188,11 +189,14 @@ def list_people() -> list[dict[str, Any]]:
 
 
 def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str, Any]:
+    from kazma_core.spaces import features
+
     policy = reg["policies"].get(account_id) or {}
     own = policy.get("daily_limit") if isinstance(policy, dict) else None
     limit, source = limit_of(reg, account_id)
     return {"daily_limit": own if isinstance(own, dict) else None,
-            "limit": limit.as_dict() if limit else None, "limit_source": source}
+            "limit": limit.as_dict() if limit else None, "limit_source": source,
+            "features": features.listed(features.grants_of(reg, account_id))}
 
 
 def limits_for_people() -> dict[str, Any]:
@@ -417,6 +421,35 @@ def set_default_daily_limit(raw: dict[str, Any] | None, *, by: str) -> None:
 
     _changed(_change)
     logger.info("[people] the daily limit for people was set by=%s", by)
+
+
+def set_features(account_id: str, changes: dict[str, Any], *, by: str) -> None:
+    """Switch a person's features (``{feature: on}``, S2-11): one step,
+    recorded. The admin has every feature; only Development is theirs to
+    switch (N28). Refused: an unknown feature, a value that is not a switch."""
+    _require_enforced()
+    from kazma_core.spaces import features
+
+    if not isinstance(changes, dict) or not changes:
+        raise PeopleRefused("bad_features", 400, "Name the features to switch.")
+
+    def _change(reg: dict[str, Any]) -> None:
+        if account_id not in reg["accounts"]:
+            raise identity.IdentityError("no_such_account", "There is no such person.")
+        try:
+            checked = features.checked_change(account_id, changes, reg)
+        except features.FeatureRefused as exc:
+            raise identity.IdentityError(exc.code, str(exc)) from exc
+        features.apply_change(reg, account_id, checked)
+        _record(reg, "features_set", account_id, by)
+
+    try:
+        _changed(_change)
+    except PeopleRefused as exc:
+        if exc.code in ("unknown_feature", "bad_switch"):
+            raise PeopleRefused(exc.code, 400, str(exc)) from exc
+        raise
+    logger.info("[people] features set id=%s by=%s", account_id, by)
 
 
 def _end_sessions(reg: dict[str, Any], account_id: str) -> None:

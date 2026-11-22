@@ -253,9 +253,18 @@ async def _in_the_crawls_space(row: dict[str, Any], route: Any) -> Any:
         space = get_knowledge_store().library_space(row["library_id"])
         return None if space is None else (space, acting_account(space))
 
+    def knowledge_off(account: str) -> bool:
+        from kazma_core.spaces.features import work_refusal
+
+        return work_refusal("knowledge", account) is not None
+
     found = await asyncio.to_thread(where)
     if found is None:
         return {"ok": False, "code": "not_found"}
+    # The person it acts for no longer has Knowledge (Spaces S2-11): the
+    # crawl waits; the owner's Resume once it is on again finishes it.
+    if await asyncio.to_thread(knowledge_off, found[1]):
+        return {"ok": False, "code": "feature_off"}
     with bind_scope(*found):
         return await route(row["job_id"])
 

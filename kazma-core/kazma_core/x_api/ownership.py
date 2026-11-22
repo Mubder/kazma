@@ -62,6 +62,13 @@ def x_work_scope(tenant: str) -> Callable[[], AbstractContextManager[object]]:
     found = work_scope(str(tenant or ""), None)
     if found is None:
         raise NoSpaceBound(f"X work of {tenant!r}: no space of this install holds it")
+    # The person it acts for no longer has X Studio (Spaces S2-11): the check
+    # made again when the work runs -- the mentions loop and a booked post
+    # skip them as they skip a row of no space.
+    from kazma_core.spaces.features import work_refusal
+
+    if work_refusal("x_studio", found[1]):
+        raise NoSpaceBound(f"X work of {tenant!r}: X Studio is off for the person it acts for")
     return functools.partial(bind_scope, *found)
 
 

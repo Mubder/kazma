@@ -19,5 +19,21 @@ export const KAZMA_SEARCH_PAGES = [
     { href: "/settings", title: "Settings", key: "nav.settings" },
     // Not in the sidebar: the first-run guide, reached from the chat page's
     // card, Settings -> Providers and here.
-    { href: "/setup", title: "Setup guide", key: "setup.reopen" },
+    { href: "/setup", title: "Setup guide", key: "setup.reopen", sidebar: false },
 ];
+
+// Whether a page is offered here: a page the sidebar names is offered only
+// while the sidebar shows its link. The server leaves out the link of a
+// feature that is off for the person (Spaces S2-11) and of the Development
+// pages where they do not exist (S1-20), so the command palette and the
+// keyboard shortcuts offer no page the sidebar does not.
+export function pageOffered(href) {
+    const page = KAZMA_SEARCH_PAGES.find((p) => p.href === href);
+    if (!page || page.sidebar === false) return true;
+    const nav = document.querySelector('.sidebar .nav-links');
+    if (!nav) return true;
+    return !!nav.querySelector('a[href="' + href + '"]');
+}
+
+// The keyboard shortcuts (nav.js) ask the same rule.
+if (typeof window !== 'undefined') window.kazmaPageOffered = pageOffered;

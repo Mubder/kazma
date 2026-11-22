@@ -459,7 +459,8 @@
 
         async loadPeople() {
             this.peopleFailed = false;
-            const data = await window.kazmaGetJson('/api/people');
+            const data = typeof window.kazmaGetJson === 'function'
+                ? await window.kazmaGetJson('/api/people') : null;
             if (!data || !Array.isArray(data.people)) {
                 this.peopleFailed = true;
                 return;
@@ -514,19 +515,11 @@
         },
 
         async _putLimit(url, limit) {
+            // kazmaSave: a 200 that says {"ok": false} is a refusal too.
             try {
-                const resp = await fetch(url, {
-                    method: 'PUT', credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ limit: limit }),
-                });
-                const data = await resp.json().catch(() => ({}));
-                if (!resp.ok) {
-                    showToast(this._peopleError(data), 'error');
-                    return false;
-                }
+                await window.kazmaSave(url, { method: 'PUT', body: { limit: limit } });
             } catch (e) {
-                showToast(this._peopleError(null), 'error');
+                showToast(this._peopleError(e && e.body), 'error');
                 return false;
             }
             showToast(_t('settings.people_limit_saved', 'Limit saved.'), 'success');
@@ -550,9 +543,23 @@
         },
 
         async savePersonLimit(person) {
+            if (!person) return;
             const done = await this._putLimit('/api/people/' + encodeURIComponent(person.id) + '/daily-limit',
                 { tokens: this.limitDraft.tokens, usd: this.limitDraft.usd });
             if (done) this.limitEditing = '';
+        },
+
+        async toggleFeature(person, feature, on) {
+            try {
+                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/features',
+                    { method: 'PUT', body: { features: { [feature.id]: !!on } } });
+            } catch (e) {
+                showToast(this._peopleError(e && e.body), 'error');
+                await this.loadPeople();
+                return;
+            }
+            showToast(_t('settings.people_features_saved', 'Features saved.'), 'success');
+            await this.loadPeople();
         },
 
         async clearPersonLimit(person) {

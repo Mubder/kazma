@@ -920,6 +920,23 @@ class KazmaAppBuilder:
 
         self.templates.env.globals["development_here"] = _development_here
 
+        def _feature_here(feature: str) -> bool:
+            # Whether the sidebar shows a feature's entry (Spaces S2-11): no
+            # I/O, the tenant middleware worked it out.
+            from kazma_core.spaces.features import feature_here
+
+            return feature_here(feature)
+
+        def _features_off_here() -> str:
+            # The features the page's person does not have, for the page's
+            # own menus (the command palette, the shortcuts).
+            from kazma_core.spaces.features import features_off_here
+
+            return " ".join(features_off_here())
+
+        self.templates.env.globals["feature_here"] = _feature_here
+        self.templates.env.globals["features_off_here"] = _features_off_here
+
         # NOTE: no browser WS token is injected anymore. The per-session WS
         # token was embedded as a <meta> tag + ?token= query param, which
         # leaked the bearer token into page source, proxy/access logs, browser

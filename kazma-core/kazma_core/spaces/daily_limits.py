@@ -141,7 +141,7 @@ def _stored(raw: Any) -> Limit | None:
 
 def default_limit(registry: dict[str, Any]) -> Limit:
     """The limit for people who have none of their own."""
-    stored = _stored(((registry.get("defaults") or {}).get("daily_limit")))
+    stored = _stored((registry.get("defaults") or {}).get("daily_limit"))
     return stored or SHIPPED_DEFAULT
 
 

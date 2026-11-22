@@ -34,8 +34,8 @@ kazma spaces migrate --check
 
 It changes nothing and lists each one as holding or missing, with what
 closes it. While one is missing, adding a second person is refused and the
-refusal names it. Today the per-person features are not built yet, so the
-list is never empty. The plan, with every step and
+refusal names it. Today some of Kazma's own code still falls back to the
+owner's space when no space is named, so the list is never empty. The plan, with every step and
 its state, is `docs/plans/SPACES_PLAN.md`.
 
 This page describes what Spaces does once it is on.
@@ -110,6 +110,23 @@ tokens and $1.00 a day) and, for any person, a limit of their own, and
 shows what each person used today: counts and money, never what they
 asked. Each change is recorded. The limit counts what the per-call ledger
 records, so with the ledger off a person's requests are refused.
+
+## Features per person
+
+What each person may use is a switch per feature, on Settings → People:
+X Studio, email and calendar, documents, knowledge, research, the swarm,
+scheduled tasks, code, the web, the browser, images and voice, and
+Development. A new person starts with chat and its memory, documents,
+knowledge, the web, research, and images and voice; the rest is off until
+you turn it on. Grants are per person, in a shared space too, and only you
+make them.
+
+A feature that is off is gone for that person: no menu entry, its pages
+and routes refuse, its chat commands refuse, its tools are neither offered
+to the model nor run, and its work in the background (a scheduled job, a
+swarm worker, a document job, a booked X post) stops when it runs. Their
+data stays, and turning the feature on again brings it back. You have every
+feature; Development is the one you can switch off for yourself.
 
 ## Taking your space with you, and deleting it
 

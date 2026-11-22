@@ -366,6 +366,14 @@ class DocumentWorker:
             stage_label = current.state.value
             stage_started = time.monotonic()
             try:
+                # The person this job is for no longer has Documents (Spaces
+                # S2-11): the check made again when the work runs. The job
+                # fails and can be retried once the feature is on again.
+                if await asyncio.to_thread(_documents_off_for, current.actor_id):
+                    raise PermanentDocumentError(
+                        "feature_off",
+                        "Documents is off for the person this job is for (Settings → People)",
+                    )
                 handler = self._handlers.get(current.state)
                 if handler is None:
                     raise PermanentDocumentError(
@@ -576,6 +584,14 @@ class DocumentWorker:
             code,
             transient,
         )
+
+
+def _documents_off_for(actor_id: str) -> bool:
+    """Whether Documents is off for the person a job is for (Spaces S2-11);
+    False while Spaces is not enforced. Blocking (the identity store)."""
+    from kazma_core.spaces.features import work_refusal
+
+    return work_refusal("documents", actor_id) is not None
 
 
 def _classify_failure(failure: Exception) -> tuple[str, str, bool]:

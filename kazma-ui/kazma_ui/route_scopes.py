@@ -55,6 +55,7 @@ __all__ = [
     "Rule",
     "compile_rules",
     "deciding_rule",
+    "feature_of_route",
     "sample_requests",
     "scope_of",
     "unclassed",
@@ -378,6 +379,43 @@ _DEVELOPMENT_RULES = compile_rules((pattern, SPACE) for pattern in DEVELOPMENT_R
 def is_development_route(path: str, method: str = "GET") -> bool:
     """True when ``method path`` is one of the Development routes."""
     return deciding_rule(method, path, _DEVELOPMENT_RULES) is not None
+
+
+_FEATURE_RULES: list[tuple[Rule, str]] = []
+
+
+def _feature_rules() -> list[tuple[Rule, str]]:
+    """Every feature's routes and every always-on group's (Spaces S2-11,
+    ``spaces.features``), compiled once: ``(rule, "feature:<id>")`` or
+    ``(rule, "always:<id>")``."""
+    if not _FEATURE_RULES:
+        from kazma_core.spaces.features import ALWAYS_ON, FEATURES
+
+        rows: list[tuple[Pattern, str]] = [
+            (pattern, f"feature:{fid}") for fid, f in FEATURES.items() for pattern in f.routes
+        ]
+        rows += [(pattern, f"always:{aid}") for aid, a in ALWAYS_ON.items() for pattern in a.routes]
+        compiled = compile_rules((pattern, SPACE) for pattern, _ in rows)
+        _FEATURE_RULES.extend(zip(compiled, (label for _, label in rows), strict=True))
+    return _FEATURE_RULES
+
+
+def _feature_class_of_route(path: str, method: str = "GET") -> str | None:
+    """``"feature:<id>"`` or ``"always:<id>"`` for ``method path``, None when
+    no feature or always-on group names it (S2-11's gate reads this)."""
+    wanted = "GET" if (method or "").upper() == "HEAD" else (method or "").upper()
+    segments = _segments(path)
+    for rule, label in _feature_rules():
+        if rule.matches(wanted, segments):
+            return label
+    return None
+
+
+def feature_of_route(path: str, method: str = "GET") -> str | None:
+    """The feature ``method path`` belongs to (``spaces.features``), None for
+    a route of no feature. No I/O."""
+    label = _feature_class_of_route(path, method)
+    return label.split(":", 1)[1] if label and label.startswith("feature:") else None
 
 
 def deciding_rule(

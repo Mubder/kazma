@@ -2540,6 +2540,30 @@
               </template>
             </div>
         </div>
+        <!-- Features (Spaces S2-11): a switch per feature for each person.
+             The admin has every feature; only Development is theirs to
+             switch off (N28). -->
+        <div class="settings-group mb-6" id="people-features" x-show="peopleLoaded && !peopleFailed" x-cloak>
+            <h3>{{ t('settings.people_features_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_features_help') }}</p>
+            <div class="account-list-table">
+              <template x-for="p in people" :key="'features-' + p.id">
+                <div class="people-features-row" :data-person-features="p.id">
+                  <span class="account-list-name"><bdi translate="no" x-text="p.name || window.t('settings.people_owner')"></bdi></span>
+                  <span class="people-features-list">
+                    <template x-for="f in (p.features || [])" :key="p.id + '-' + f.id">
+                      <span class="people-feature">
+                        <input type="checkbox" :checked="f.on" :disabled="f.fixed" :data-feature="f.id"
+                               :aria-label="window.t('settings.people_feature_of', {feature: window.t('settings.feature.' + f.id), name: p.name || window.t('settings.people_owner')})"
+                               @change="toggleFeature(p, f, $event.target.checked)">
+                        <span aria-hidden="true" x-text="window.t('settings.feature.' + f.id)"></span>
+                      </span>
+                    </template>
+                  </span>
+                </div>
+              </template>
+            </div>
+        </div>
         <!-- The closed spaces of deleted people (S1-27): the admin erases
              them; their contents are never shown here. -->
         <div class="settings-group mb-6" id="people-closed-spaces" x-show="peopleLoaded && closedSpaces.length > 0" x-cloak>

@@ -1764,6 +1764,16 @@ def extract_tenant_from_jwt(token: str) -> str | None:
     return None
 
 
+def _rules_here() -> tuple[Any, Any]:
+    """The host groups and the features of the work bound now (Spaces S1-20,
+    S2-11): one thread for both reads. Raises ``IdentityUnavailable`` when
+    the features cannot be read."""
+    from kazma_core.spaces.features import grants_here
+    from kazma_core.spaces.tools import host_allowance
+
+    return host_allowance(), grants_here()
+
+
 def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitable[Response]]], Awaitable[Response]]:
     """Create an HTTP middleware that extracts tenant id and propagates it.
 
@@ -1906,28 +1916,47 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         else:
             token = set_current_tenant_id(tenant_id)
         allowance_token = None
+        grants_token = None
         try:
             if spaces_enforced():
                 # Host pages and routes exist only where the space may have
-                # Development (Spaces S1-20); a page drawn here learns whether
-                # to show their entries, with no read of its own.
-                from kazma_core.spaces.tools import host_allowance, remember_allowance
+                # Development (Spaces S1-20), and a feature's pages and routes
+                # only for a person who has it (S2-11); a page drawn here
+                # learns which menu entries to show, with no read of its own.
+                from kazma_core.spaces.features import remember_page_grants
+                from kazma_core.spaces.tools import remember_allowance
 
-                from kazma_ui.route_scopes import is_development_route
+                from kazma_ui.route_scopes import feature_of_route, is_development_route
 
                 path = judged_path(request)
                 host_route = is_development_route(path, request.method)
+                feature = feature_of_route(path, request.method)
                 page = request.method in ("GET", "HEAD") and not path.startswith(
                     ("/api/", "/static/", "/ws/", "/health"))
-                if host_route or page:
-                    allowance = await asyncio.to_thread(host_allowance)
+                if host_route or page or feature:
+                    try:
+                        allowance, grants = await asyncio.to_thread(_rules_here)
+                    except IdentityUnavailable:
+                        return JSONResponse(
+                            {"ok": False, "error": "Accounts cannot be read right now. Try again.",
+                             "code": "identity_unavailable"},
+                            status_code=503,
+                            headers={"Retry-After": "5"},
+                        )
                     if host_route and not allowance.development:
                         return JSONResponse(
                             {"ok": False, "code": "host_only",
                              "error": f"Not available in this space: {allowance.why_not}."},
                             status_code=403,
                         )
+                    if feature and grants is not None and not grants.has(feature):
+                        return JSONResponse(
+                            {"ok": False, "code": "feature_off", "feature": feature,
+                             "error": "Not available to you: the admin turns it on in Settings → People."},
+                            status_code=403,
+                        )
                     allowance_token = remember_allowance(allowance)
+                    grants_token = remember_page_grants(grants)
             response = await call_next(request)
             if explicit_tenant and tenant_id and allow_spoof:
                 if request.cookies.get("X-Tenant-ID") != tenant_id:
@@ -1945,6 +1974,10 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                 from kazma_core.spaces.tools import forget_allowance
 
                 forget_allowance(allowance_token)
+            if grants_token is not None:
+                from kazma_core.spaces.features import forget_page_grants
+
+                forget_page_grants(grants_token)
             if scope_tokens is not None:
                 reset_scope(scope_tokens)
             else:

@@ -15034,6 +15034,50 @@ an install with one account behaves as before.
     `resilient_chat`; the install-wide sum as the control, the checks taken
     out fail seven), `tests/e2e/test_person_daily_limit_browser.py` (by the
     sidebar, EN/AR).
+- **Features per person (S2-11, 2026-11-22; plan 4.8, decision N18).** Only
+  where Spaces is enforced: an install that does not enforce it refuses
+  nothing and reads nothing.
+  - `kazma_core/spaces/features.py` is the one table: each feature's pages,
+    routes (`kazma_ui.route_scopes` patterns), tools, chat commands,
+    background loops and connected accounts; `ALWAYS_ON` (chat, memory, My
+    account, with why) and `INSTALL` (the admin's commands, Kazma's own
+    loops) declare the rest. A new page, route, tool, command or loop with
+    neither fails `tests/test_feature_grants.py` (planted ones as controls),
+    and so does a declaration that names nothing.
+  - Who has what (`grants_of`): the admin every feature, Development theirs
+    to switch off (N28, the switch `identity.holds_development` reads);
+    anyone else N18's (`Feature.new_member`: documents, knowledge, research,
+    web, images and voice) plus what the admin turned on
+    (`identity` `policies[account]["features"]`). People sets them
+    (`people.set_features`, `PUT /api/people/{account_id}/features`), an
+    event of the identity record each time. A grant never passes S1-20's
+    group rule.
+  - Refused at every part: the tenant middleware answers a feature's route
+    403 `feature_off` (`route_scopes.feature_of_route`, one thread with the
+    host check, `auth._rules_here`) and remembers the page's grants for the
+    sidebar (`feature_here`); the command palette and shortcuts offer only
+    what the sidebar shows (`search_pages.pageOffered`); tools at the offer
+    and the call through `spaces.tools.tool_refusal` (host groups and
+    features together: `offered_here`, the registry, the MCP branch, the
+    environment note); chat commands (`features.command_refusal`, the web
+    chat and the gateway); background work when it runs (`work_refusal`:
+    a scheduled job's fire `feature_off`, a swarm worker, X work through
+    `x_work_scope`, a document job's stage, a crawl's resume). A record
+    that names no account (Kazma's own, "operator") is left to its space's
+    rules. A feature off keeps the person's data.
+  - The root conftest gives every test's people every feature (the admin's
+    Development kept); a test of the features themselves is marked
+    `real_features`. `create_app()` reads the stored Spaces switch into the
+    process: a test that sets `scope._enforced` imports what builds the app
+    at collection, never mid-test.
+  - The precondition of a second account (`features.precondition`, S1-33)
+    holds while every stored switch names a feature of the table.
+  - Gates: `tests/test_feature_grants.py` (the table against the real app,
+    the registry, the commands and the loops; X Studio on for Y and off for
+    G through routes, the offer, the call, a scheduled job's executor, a
+    real swarm worker, `/x` and X's background work; a grant that only hides
+    the menu entry as the control), `tests/e2e/test_feature_grants_browser.py`
+    (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 
