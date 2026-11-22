@@ -755,3 +755,14 @@ alone as the negative controls.
    it plainly is not such a value (finding 15's "We moved to Slack").
    Evidence: `docs/audits/evidence/memory_real_use/f17_qwen*.json`,
    `docs/audits/evidence/memory_findings/finding17_real_use_recall.json`.
+   Two runs at 6834360b3: 18/18 and 18/18; step 6 passed in all four
+   language-runs. In three of them step 5 recorded the question, recall
+   showed the waiting change, and the model answered Porto, said it was not
+   confirmed yet, named Lisbon and asked. In the fourth (English, run 1) the
+   model retired Lisbon itself and the move became Kazma's reading; the
+   turn was kept (finding 16). Evidence:
+   `docs/audits/evidence/memory_real_use/f17b_qwen*.json`,
+   `docs/audits/evidence/memory_findings/finding17b_real_use_recall.json`.
+   Spend of the six runs after finding 16: 146 model calls, 5.40M prompt
+   tokens, 24,915 completion tokens; the judge 60 calls, 10,098 prompt
+   tokens.
