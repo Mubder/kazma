@@ -2607,6 +2607,7 @@
         <div class="settings-group mb-6" id="people-features" x-show="peopleLoaded && !peopleFailed" x-cloak>
             <h3>{{ t('settings.people_features_title') }}</h3>
             <p class="form-hint">{{ t('settings.people_features_help') }}</p>
+            <p class="form-hint" id="people-development-means">{{ t('settings.people_development_means') }}</p>
             <div class="account-list-table">
               <template x-for="p in people" :key="'features-' + p.id">
                 <div class="people-features-row" :data-person-features="p.id">

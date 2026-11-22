@@ -177,6 +177,7 @@ async def _refuse_unrunnable_calls(
     pending: list[PendingToolCall],
     *,
     truncated: bool = False,
+    user_text: str | None = None,
 ) -> tuple[list[PendingToolCall], list[ToolResult]]:
     """Take out the calls that cannot run, before any card.
 
@@ -210,7 +211,7 @@ async def _refuse_unrunnable_calls(
             ))
             continue
         if name in PREFLIGHT_TOOLS:
-            reason = await call_refusal(name, tc.get("arguments"))
+            reason = await call_refusal(name, tc.get("arguments"), user_text=user_text)
             if reason:
                 logger.info("[ToolWorker] %s refused before approval: %s", name, reason[:120])
                 refused.append(ToolResult(
@@ -914,8 +915,11 @@ async def tool_worker_node(
         allow_interrupt = False
 
     try:
+        from kazma_core.agent.turn_input import extract_latest_user_text
+
         pending, preflight_refused = await _refuse_unrunnable_calls(
-            pending, truncated=state.get("_last_finish_reason") == "length")
+            pending, truncated=state.get("_last_finish_reason") == "length",
+            user_text=extract_latest_user_text(state.get("messages") or [], image_marker=False))
         _cut_twice = _severed_again(state, preflight_refused)
         if _cut_twice:
             state["turn_failed"] = True

@@ -25,10 +25,17 @@ a space (:func:`host_allowance`):
 * the owner's space has the admin's tools, and Development's while the
   owner's Development switch is on (``identity.holds_development``, on at
   first: N28);
-* another host space (the shared workspace of 4.11) has none yet: its own
-  project folder comes with S1-34, and until then its work would run in the
-  owner's folder;
+* another host space (a shared space with a project folder, 4.11 and
+  S2-12) has Development for each person who holds it, the admin too
+  (``identity.holds_development``: on at first for the admin, N28; turned on
+  per person on People, N1), working in that space's own folder (S1-34);
+  the admin's own tools are never there;
 * work with no space bound, or a space whose kind cannot be read, has none.
+
+Until approvals reach the admin (S2-05), a person other than the admin who
+holds Development is refused their always-ask actions and folder grants in a
+shared space with a project folder (:func:`approval_refusal`, decision N21:
+the admin approves those): before any card, with no effect.
 
 The rule is applied where a model is offered tools (``skills.switches.offered``,
 a swarm worker's list) and again where a tool is called
@@ -58,6 +65,7 @@ __all__ = [
     "OUTSIDE",
     "SPACE",
     "HostAllowance",
+    "approval_refusal",
     "development_here",
     "forget_allowance",
     "host_allowance",
@@ -160,6 +168,9 @@ class HostAllowance:
     development: bool
     admin: bool
     why_not: str = ""
+    #: Why the admin's tools are not here, when that differs from *why_not*
+    #: (a shared space with a project folder: Development, never them).
+    why_not_admin: str = ""
 
     def allows(self, group: str) -> bool:
         if group == "development":
@@ -199,9 +210,18 @@ def host_allowance() -> HostAllowance:
     if kind != "host":
         return _none("host tools do not exist in this space")
     if bound.space_id != OWNER_SPACE_ID:
-        return _none(
-            "a shared space with a project folder has no host tools until it has "
-            "its own folder (plan S1-34)"
+        # A shared space with a project folder (S2-12): Development for the
+        # people who hold it, in the space's own folder; the admin's own
+        # tools stay in the admin's personal space.
+        try:
+            development = identity.holds_development(bound.asker)
+        except (identity.IdentityUnavailable, identity.IdentityError) as exc:
+            return _none(f"the account could not be read: {exc}")
+        return HostAllowance(
+            development=development,
+            admin=False,
+            why_not="" if development else "Development is not switched on for this person",
+            why_not_admin="the admin's own tools are only in the admin's personal space",
         )
     try:
         admin = identity.is_admin_account(bound.asker)
@@ -226,10 +246,56 @@ def _host_refusal(name: str, allowance: HostAllowance | None = None) -> str | No
     allowed = allowance if allowance is not None else host_allowance()
     if allowed.allows(group):
         return None
+    why = allowed.why_not_admin if group == "admin" and allowed.why_not_admin else allowed.why_not
     return (
-        f"Tool '{name}' does not exist in this space ({allowed.why_not}). "
+        f"Tool '{name}' does not exist in this space ({why}). "
         "It touches the machine Kazma runs on; tell the user what you would have "
         "used it for instead."
+    )
+
+
+def _always_ask(name: str) -> bool:
+    """The always-ask tools and folder grants (``safety.hitl.ALWAYS_HITL_TOOLS``),
+    whose card the admin answers for a person holding Development (N21)."""
+    from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
+
+    return name in ALWAYS_HITL_TOOLS or name == "request_path_access"
+
+
+def approval_refusal(name: str, user_text: str | None = None) -> str | None:
+    """Why the call of *name* is refused before its card for the work bound
+    now (decision N21, until S2-05), or None.
+
+    In a shared space with a project folder, a person other than the admin
+    who holds Development has their always-ask actions and folder grants
+    approved by the admin. Until approvals reach the admin (S2-05), Kazma
+    refuses them, before any card and with no effect, saying why in the
+    person's language (*user_text*: their latest message). S2-05 lifts it.
+    Blocking (the identity store)."""
+    if not spaces_enforced() or not _always_ask(name):
+        return None
+    bound = current_scope()
+    if bound is None or bound.space_id == OWNER_SPACE_ID:
+        return None
+    from kazma_core.language_lock import in_their_language
+    from kazma_core.spaces import files as space_files
+    from kazma_core.spaces import identity
+
+    try:
+        if space_files.space_kind(bound.space_id) != "host":
+            return None
+        if identity.is_admin_account(bound.asker) or not identity.holds_development(bound.asker):
+            return None
+    except (space_files.SpaceKindUnknown, identity.IdentityUnavailable, identity.IdentityError):
+        # Who answers the card cannot be told: never a card the wrong
+        # person answers.
+        pass
+    return in_their_language(
+        user_text,
+        f"'{name}' needs the admin's approval here, which comes in a later update of Kazma. "
+        "Nothing was done. Tell the user so.",
+        f"تحتاج «{name}» هنا إلى موافقة المسؤول، وهذه تأتي في تحديث لاحق لـ Kazma. "
+        "لم يُنفَّذ شيء. أخبر المستخدم بذلك.",
     )
 
 

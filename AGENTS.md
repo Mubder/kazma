@@ -14621,8 +14621,9 @@ an install with one account behaves as before.
     server's) is `development`.
   - `host_allowance()` is the one rule: a sandboxed space has no host tool;
     the owner's space has the admin tools, and Development's while
-    `identity.holds_development` (N28, on at first); another host space has
-    none until S1-34 gives it its own folder; no space bound, none.
+    `identity.holds_development` (N28, on at first); a shared space with a
+    project folder has Development for each person who holds it and never
+    the admin tools (S2-12, piece 3); no space bound, none.
   - Applied at the offer (`skills.switches.offered`, a swarm worker's list,
     both through `offered_here`) and at the call
     (`LocalToolRegistry._execute_inner`, `UnifiedToolExecutor`'s MCP
@@ -15265,6 +15266,26 @@ an install with one account behaves as before.
     `tests/test_document_listing_queries_are_joined.py` (the take-back on
     SQLite and Postgres), `tests/e2e/test_space_membership_browser.py` (by
     the sidebar, EN/AR).
+  - **Development per person (piece 3).** In a shared space with a project
+    folder `spaces.tools.host_allowance` gives Development to each person
+    who holds it (`identity.holds_development`, turned on per person on
+    People; the admin's own switch, N28), in that space's own folder; the
+    admin's own tools are never there (`why_not_admin`). A plain shared
+    space has none, for anyone. People says what turning it on means, and
+    asks first (EN/AR).
+  - **N21's interim refusal, until S2-05.** A person other than the admin
+    who holds Development is refused their always-ask actions and folder
+    grants in a shared space with a project folder
+    (`spaces.tools.approval_refusal`), before any card on both gates
+    (`safety.call_preflight.call_refusal`, `ALWAYS_ASK_TOOLS`, with the
+    person's latest message for the language) and at the registry's own
+    call, with no effect: "this needs the admin's approval, which comes in a
+    later update", in their language. Their shell, file and git cards stay
+    their own. S2-05's row names lifting it.
+  - Gates: `tests/test_development_per_person.py` (S1-20's rule and the
+    flow without the interim refusal as the controls),
+    `tests/test_host_tools_absent.py` (re-pointed), the People confirm in
+    `tests/e2e/test_shared_spaces_browser.py` (EN/AR).
 
 ## UI Conventions (Web)
 

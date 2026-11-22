@@ -3,9 +3,10 @@
 Every registered tool is in one group (``spaces.tools``): a new tool with
 none fails. Once Spaces is enforced a sandboxed space is offered no host
 tool and runs none it calls anyway; the owner's space has the admin's tools
-and, while the owner's Development switch is on, Development's; another host
-space has none until it has its own folder (S1-34); work with no space bound
-has none. Host routes, the sidebar's Workspace and IDE entries, the chat
+and, while the owner's Development switch is on, Development's; a shared
+space with a project folder has Development for each person who holds it and
+never the admin's tools (S2-12, ``tests/test_development_per_person.py``);
+work with no space bound has none. Host routes, the sidebar's Workspace and IDE entries, the chat
 apps' ``/ide`` and a clone's credentials follow the same rule.
 
 Each rule is shown failing with it taken out: the plan's control is a policy
@@ -211,12 +212,14 @@ def test_a_member_holds_no_development_until_granted() -> None:
     assert identity.holds_development("no-such-account") is False
 
 
-def test_a_second_host_space_has_no_host_tool_until_its_own_folder(matrix, enforced) -> None:
+def test_a_second_host_space_has_development_per_person_never_the_admin_tools(matrix, enforced) -> None:
+    # S1-20 gave another host space no host tool until it had its own folder
+    # (S1-34); S2-12 gives it Development for each person who holds it.
     identity.create_space("Dev", created_by=OWNER_ACCOUNT_ID, space_id="matrix-dev", kind="host")
     with bind_scope("matrix-dev", OWNER_ACCOUNT_ID):
         allowance = host_tools.host_allowance()
-    assert not allowance.development and not allowance.admin
-    assert "S1-34" in allowance.why_not
+    assert allowance.development and not allowance.admin
+    assert "personal space" in allowance.why_not_admin
 
 
 def test_work_with_no_space_bound_has_no_host_tool(matrix, enforced) -> None:

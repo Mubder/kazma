@@ -2951,6 +2951,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
               "forgotten yet. Tell the admin.",
         "ar": "خرج الشخص من المساحة، لكن تعذّر حتى الآن نسيان الحقائق التي سجّلها Kazma عنه فيها. أبلغ المسؤول.",
     },
+    "settings.people_development_means": {
+        "en": "Development, for someone other than you: in a shared space with a project folder that they are "
+              "in, they get the shell, git, GitHub and that project's files. They approve their own shell, file "
+              "and git steps. Their always-ask actions, such as posting on X, and their folder grants need your "
+              "approval, which comes in a later update: until then Kazma refuses them.",
+        "ar": "التطوير لشخص غيرك: في مساحة مشتركة بمجلد مشروع هو عضو فيها، يحصل على الطرفية وgit وGitHub "
+              "وملفات ذلك المشروع. يوافق بنفسه على خطوات الطرفية والملفات وgit. أما الإجراءات التي تُطلب "
+              "الموافقة عليها دائمًا، كالنشر على X، ومنح صلاحية المجلدات، فتحتاج موافقتك، وهذه تأتي في تحديث "
+              "لاحق: إلى ذلك الحين يرفضها Kazma.",
+    },
+    "settings.people_development_title": {"en": "Turn on Development for {name}?", "ar": "تفعيل التطوير لـ {name}؟"},
+    "settings.people_development_turn_on": {"en": "Turn on", "ar": "تفعيل"},
     "settings.space_members_title": {"en": "Who is in this space", "ar": "من في هذه المساحة"},
     "settings.space_members_help": {
         "en": "Everyone here sees the space's chats, memory and documents. The admin adds people.",

@@ -95,3 +95,64 @@ def test_the_admin_makes_both_kinds_of_shared_space(lang, tmp_path):
             browser.close()
             scope.set_enforced(False)
     assert refused == [], refused
+
+
+@pytest.mark.real_features
+@pytest.mark.parametrize("lang", ["en", "ar"])
+def test_turning_development_on_for_someone_says_what_it_means(lang):
+    """S2-12, piece 3: on People, turning Development on for a person other
+    than the admin is confirmed after the page says what it means (N21);
+    Cancel leaves it off."""
+    from kazma_core.spaces import identity, scope
+    from playwright.sync_api import sync_playwright
+
+    from tests.e2e.test_people_page_browser import _modal_action
+
+    def plain(text: str) -> str:
+        return " ".join(text.replace("\u2068", "").replace("\u2069", "").split())
+
+    with unified_turn_server(Script(steps=[], final="ok")) as h, sync_playwright() as p:
+        os.environ["KAZMA_SECRET"] = "development-means-test-secret-" + "x" * 24
+        scope.set_enforced(True)
+        browser = p.chromium.launch()
+        try:
+            context = browser.new_context()
+            context.add_cookies([{"name": "kazma-lang", "value": lang, "url": h.base}])
+            pg = context.new_page()
+            pg.goto(f"{h.base}/chat?space=default", wait_until="domcontentloaded")
+            pg.wait_for_function("() => !!window.kazmaSpace", timeout=20000)
+            person = pg.evaluate(
+                "() => fetch('/api/people', {method: 'POST', credentials: 'same-origin',"
+                " headers: {'Content-Type': 'application/json'},"
+                " body: JSON.stringify({name: 'coder', password: 'a-long-enough-password'})}).then(r => r.json())")
+            pid = person["person"]["id"]
+            _soft_nav(pg, "/settings")
+            _settings_loaded(pg)
+            pg.locator(".settings-tab", has_text=_t("settings.tab_people", lang)).click()
+            means = plain(_t("settings.people_development_means", lang))
+            assert means in plain(pg.locator("#people-development-means").inner_text())
+            box = pg.locator(f"[data-person-features='{pid}'] input[data-feature='development']")
+            box.wait_for(state="visible", timeout=20000)
+            assert not box.is_checked()
+
+            dialog = pg.locator(".modal", has=pg.locator("#modal-title"))
+            box.click()
+            pg.locator("#modal-title").wait_for(state="visible", timeout=10000)
+            assert plain(pg.locator("#modal-title").inner_text()) == plain(
+                _t("settings.people_development_title", lang, name="coder"))
+            assert means in plain(dialog.inner_text())
+            _modal_action(pg, _t("common.cancel", lang))
+            pg.wait_for_function(
+                "(id) => !document.querySelector(\"[data-person-features='\" + id + \"'] input[data-feature='development']\").checked",
+                arg=pid, timeout=10000)
+            assert not identity.holds_development(pid)
+
+            box.click()
+            pg.locator("#modal-title").wait_for(state="visible", timeout=10000)
+            with pg.expect_response(lambda r: r.url.endswith("/features")) as saved:
+                _modal_action(pg, _t("settings.people_development_turn_on", lang))
+            assert saved.value.ok, saved.value.text()
+            assert identity.holds_development(pid)
+        finally:
+            browser.close()
+            scope.set_enforced(False)
