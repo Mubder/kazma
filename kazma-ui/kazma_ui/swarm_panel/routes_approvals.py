@@ -60,7 +60,8 @@ def _not_theirs(approval_id: str) -> bool:
     from kazma_core.swarm.single_operator import answered_by_caller
 
     space, asker = shared_approvals.whose(approval_id)
-    return not answered_by_caller(space, asker or None)
+    tool = str((shared_approvals.get(approval_id) or {}).get("tool") or "")
+    return not answered_by_caller(space, asker or None, (tool,) if tool else ())
 
 
 def register_approval_routes(router: APIRouter) -> None:

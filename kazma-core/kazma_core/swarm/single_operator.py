@@ -118,19 +118,26 @@ def _acts_for(space: str, asker: str | None) -> str:
     return found[1] if found is not None else ""
 
 
-def answered_by_caller(space: str, asker: str | None) -> bool:
+def answered_by_caller(space: str, asker: str | None, tools: tuple[str, ...] = ()) -> bool:
     """Whether the work this call is bound to may answer work of *space*
-    asked by *asker* (decision N4, Spaces S1-15 review): always while Spaces
-    is not enforced; once it is, only the person it acts for -- approve,
-    reject, cancel or retry a task, decide its worker's approval. Another
+    asked by *asker* about *tools* (decision N4, Spaces S1-15 review): always
+    while Spaces is not enforced; once it is, only the people the one rule of
+    who answers names (``spaces.approvals``, S2-05) for the person the work
+    acts for -- approve, reject, cancel or retry a task, decide its worker's
+    approval. That is the person themself, unless the admin set approvers on
+    their account (N4) or the card is a Development holder's always-ask
+    action in a shared space with a project folder (N21: the admin). Another
     member of a shared space sees it and does not answer it. Blocking (the
     identity store)."""
+    from kazma_core.spaces.approvals import answer_refusal
     from kazma_core.spaces.scope import bound_asker, spaces_enforced
 
     if not spaces_enforced():
         return True
     caller = bound_asker() or ""
-    return bool(caller) and caller == _acts_for(space, asker)
+    if not caller:
+        return False
+    return answer_refusal(space, _acts_for(space, asker), tools, caller=caller) is None
 
 
 def task_answered_by_caller(task: object) -> bool:

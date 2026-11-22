@@ -29,11 +29,20 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["DECISIONS", "GateDecisionUnavailable", "record_gate_decision"]
+__all__ = ["DECISIONS", "GateDecisionUnavailable", "GateNotYours", "record_gate_decision"]
 
 
 class GateDecisionUnavailable(RuntimeError):
     """Execution stays paused because the decision could not be persisted."""
+
+
+class GateNotYours(PermissionError):
+    """A person decided a card that is not theirs to answer (Spaces S2-05):
+    nothing was recorded and the gate stays pending."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(f"this approval is not yours to answer ({code})")
 
 #: decision -> (transcript/journal state, registry decision)
 DECISIONS: dict[str, tuple[str, str]] = {
@@ -149,6 +158,17 @@ async def record_gate_decision(
     if iid:
         body["interrupt_id"] = iid
     tool = str(tool or body.get("tool") or "")
+    if decision != "timeout":
+        # A person's answer, from any surface -- the web card, a chat app's
+        # button or command: only the people the card goes to decide it
+        # (Spaces S2-05). The watchdog's timeout is nobody's answer.
+        from kazma_ui.hitl_answerers import refusal_for_card
+
+        refused, _whose = await asyncio.to_thread(refusal_for_card, thread_id, iid, body)
+        if refused:
+            logger.warning("[gate-decision] %s refused for thread=%s: %s", decision,
+                           str(thread_id)[:12], refused)
+            raise GateNotYours(refused)
 
     session_id, turn_id = await asyncio.to_thread(_resolve_turn, thread_id, session_id, turn_id)
 

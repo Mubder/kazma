@@ -12,10 +12,11 @@ graph's (``graph_tool_worker._refuse_unrunnable_calls``) and the swarm bus's
 (``LocalToolRegistry.execute``). The tools ask the same question themselves
 and raise ``RefusedBeforeEffect``, so a direct call is refused the same way.
 
-An always-ask action or a folder grant of a person other than the admin who
-holds Development, in a shared space with a project folder, is refused here
-too until approvals reach the admin (``spaces.tools.approval_refusal``,
-decision N21; S2-05 lifts it).
+An always-ask action or a folder grant (:data:`ALWAYS_ASK_TOOLS`) is not
+refused here: its card is made, and the one rule of who answers it decides
+(``spaces.approvals``; for a person other than the admin who holds
+Development in a shared space with a project folder, the admin answers it,
+decision N21). Until S2-05 such a call was refused here.
 """
 
 from __future__ import annotations
@@ -45,14 +46,9 @@ async def browser_refusal() -> str | None:
 
 async def call_refusal(name: str, arguments: Any, *, user_text: str | None = None) -> str | None:
     """Why this call would be refused before it acts, or None. *user_text*:
-    the person's latest message, the language a refusal of theirs is in."""
+    the person's latest message (kept for callers: since S2-05 lifted N21's
+    interim refusal, no refusal here is worded in their language)."""
     args = arguments if isinstance(arguments, dict) else {}
-    if name in ALWAYS_ASK_TOOLS:
-        from kazma_core.spaces.tools import approval_refusal
-
-        refused = await asyncio.to_thread(approval_refusal, name, user_text)
-        if refused:
-            return refused
     if name == "shell_exec":
         from kazma_core.safety.shell_paths import shell_target_refusal
         from kazma_core.safety.shell_preflight import shell_refusal
@@ -67,8 +63,10 @@ async def call_refusal(name: str, arguments: Any, *, user_text: str | None = Non
     return None
 
 
-#: The always-ask actions and folder grants (N21's interim refusal).
+#: The always-ask actions and folder grants: the cards the admin answers for
+#: a person other than the admin who holds Development, in a shared space
+#: with a project folder (N21, ``spaces.approvals``).
 ALWAYS_ASK_TOOLS = frozenset({*ALWAYS_HITL_TOOLS, "request_path_access"})
 
 #: Every tool ``call_refusal`` answers for.
-PREFLIGHT_TOOLS = frozenset({"shell_exec", *BROWSER_TOOLS, *ALWAYS_ASK_TOOLS})
+PREFLIGHT_TOOLS = frozenset({"shell_exec", *BROWSER_TOOLS})

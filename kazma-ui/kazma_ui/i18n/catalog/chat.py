@@ -1264,6 +1264,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تلميح: <strong>السماح بالأداة</strong> يوقف تكرار الطلب لهذه الأداة فقط. <strong>جلسة YOLO</strong> تتخطى كل أداة خطرة (الأصلية وأدوات MCP) حتى <code>/yolo off</code> أو انتهاء المدة.",
         "en": "Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. <strong>YOLO session</strong> skips every danger tool (native + MCP) until you <code>/yolo off</code> or TTL.",
     },
+    # Spaces S2-05: a card goes to the person it asks; anyone else watching
+    # the chat sees it waiting, with no buttons.
+    "chat.hitl_waiting_for": {
+        "ar": "بانتظار ردّ {names}",
+        "en": "Waiting for {names} to answer",
+    },
     "chat.hitl_tip_always": {
         "ar": "هذه الأداة <strong>تتطلب الموافقة دائمًا</strong> (حماية أمان) — لا يتخطاها YOLO ولا أذونات الجلسة.",
         "en": "This tool <strong>always requires approval</strong> (safety fail-safe) — YOLO and session grants cannot skip it.",

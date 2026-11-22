@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.responses import JSONResponse as _JSONResponse
 
 from kazma_ui.rate_limit import rate_limit
-from kazma_ui.hitl_decision import GateDecisionUnavailable
+from kazma_ui.hitl_decision import GateDecisionUnavailable, GateNotYours
 from kazma_core.safety.hitl_gates import TransitionConflict
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
@@ -69,6 +69,29 @@ def _attach_hitl_view(
     if iid and not out.get("interrupt_id"):
         out["interrupt_id"] = iid
     return out
+
+
+def _not_yours_response(thread_id: str, code: str, card: dict[str, Any] | None) -> _JSONResponse:
+    """The answer to someone who may not decide a card (Spaces S2-05): 403,
+    nothing claimed, the card still pending for whoever it asks. Names who
+    it waits for when the card says (its ``answered_by_names``)."""
+    unavailable = code == "identity_unavailable"
+    names = [str(n) for n in ((card or {}).get("answered_by_names") or []) if n]
+    body: dict[str, Any] = {
+        "ok": False,
+        "code": code,
+        "reason": code,
+        "thread_id": thread_id,
+        "hitl_state": "pending",
+        "running": False,
+        "error": ("Who answers this approval could not be read; it stays pending."
+                  if unavailable else "This approval is not yours to answer; it waits for "
+                  + (", ".join(names) if names else "the person it asks") + "."),
+    }
+    if names:
+        body["answered_by_names"] = names
+    return _JSONResponse(body, status_code=503 if unavailable else 403,
+                         headers={"Retry-After": "5"} if unavailable else None)
 
 
 def _current_tenant() -> str:
@@ -187,6 +210,14 @@ async def _decide_bridge_gate(
     )
     if match is None:
         return None
+    # Whose card it is decides who answers it (Spaces S2-05): a bridge gate
+    # is the machine's work for the person bound when it was queued.
+    from kazma_ui.hitl_answerers import refusal_for_card
+
+    refusal, _whose = await asyncio.to_thread(
+        refusal_for_card, thread_id, match.gate_id, match.payload(), row=match)
+    if refusal:
+        return _not_yours_response(thread_id, refusal, match.payload())
 
     decision = "approve" if approved else "deny"
     # AUD-100: the actor is the caller's server-side session (``actor``,
@@ -368,7 +399,18 @@ def register_misc_routes(self: Any) -> None:
         # The install's own alerts are the admin's once Spaces is enforced;
         # a run's notices keep to its space (S1-32).
         install = AlertDispatcher.get_recent_alerts() if install_notices_here() else []
-        for a in [*install, *recent_alerts(current_language()), *incidents]:
+        # The cards waiting for this person's answer (Spaces S2-05): theirs
+        # only, once Spaces is enforced; none before.
+        from kazma_ui.hitl_answerers import bell_items
+
+        try:
+            waiting = bell_items(current_language())
+        except (OSError, RuntimeError, ValueError) as exc:
+            # A card read that fails must not erase the other alerts (an
+            # identity store that cannot answer is a RuntimeError).
+            logger.warning("[alerts] waiting approvals could not be read: %s", type(exc).__name__)
+            waiting = []
+        for a in [*install, *recent_alerts(current_language()), *incidents, *waiting]:
             item = a.to_dict() if hasattr(a, "to_dict") else a
             try:
                 encoded = jsonable_encoder(item)
@@ -847,6 +889,18 @@ def register_misc_routes(self: Any) -> None:
             pending_tool_name = str(_live_payload.get("tool") or "")
             pending_tools = list(_live_payload.get("tools") or [])
 
+            # The card goes to its asker and nobody else answers it (Spaces
+            # S2-05, decisions N4 and N21): another member of the same space
+            # is refused here, before anything is claimed, and the gate stays
+            # pending for the person it asks. Nothing changes on an install
+            # that does not enforce Spaces.
+            from kazma_ui.hitl_answerers import refusal_for_card
+
+            _not_yours, _whose = await asyncio.to_thread(
+                refusal_for_card, thread_id, _body_interrupt_id(body) or _live_iid, _live_payload)
+            if _not_yours:
+                return _not_yours_response(thread_id, _not_yours, _live_payload)
+
             # An always-ask tool (X writes) takes a one-time approval only. A
             # "allow for this chat" (or YOLO) answer approved THIS call and
             # stored a grant that can never apply: live 2026-10-16 a click on
@@ -1176,16 +1230,23 @@ def register_misc_routes(self: Any) -> None:
                 if isinstance(resume_cmd.resume, dict) and "scope" in resume_cmd.resume:
                     resume_cmd.resume["scope"] = scope
                 _resume_inflight.add(thread_id)
-                _resume_task = asyncio.create_task(
-                    _drive_graph_to_journal(
-                        graph_ref,
-                        resume_cmd,
-                        config,
-                        thread_id=thread_id,
-                        session_id=_resume_session_id,
-                        reply_turn_id=_resume_turn,
+                # The resumed turn is its asker's, whoever answered (S2-05):
+                # an approver or the admin pressing for someone never runs
+                # their turn as themself -- its tools, limits and records stay
+                # the asker's. The task copies the scope bound when it is made.
+                from kazma_ui.hitl_answerers import as_the_asker
+
+                with as_the_asker(_whose):
+                    _resume_task = asyncio.create_task(
+                        _drive_graph_to_journal(
+                            graph_ref,
+                            resume_cmd,
+                            config,
+                            thread_id=thread_id,
+                            session_id=_resume_session_id,
+                            reply_turn_id=_resume_turn,
+                        )
                     )
-                )
                 # Register BEFORE unpausing. Unpause-then-register left a
                 # window where attach saw not-running and not-paused and
                 # closed the live tail (the 70s-tool-after-Approve class).
@@ -1220,6 +1281,8 @@ def register_misc_routes(self: Any) -> None:
                 {"error": "Approval remains paused: decision storage unavailable", "code": "gate_decision_unavailable"},
                 status_code=503, headers={"Retry-After": "5"},
             )
+        except GateNotYours as not_yours:
+            return _not_yours_response(thread_id, not_yours.code, None)
         except TransitionConflict as conflict:
             return _JSONResponse(
                 await asyncio.to_thread(_attach_hitl_view,
@@ -1286,6 +1349,11 @@ def register_misc_routes(self: Any) -> None:
                 for item in candidates
                 if str(item.get("thread_id") or "") in owned_set or _is_own_bridge_gate(item)
             ]
+            # Each person's own cards (Spaces S2-05): a card of another member
+            # of the space is not listed for them to answer.
+            from kazma_ui.hitl_answerers import answerable
+
+            pending = await asyncio.to_thread(answerable, pending)
             pending = list(pending) + list(sampling)
             return _JSONResponse({"pending": pending, "count": len(pending)})
         except Exception:
@@ -1323,9 +1391,15 @@ def register_misc_routes(self: Any) -> None:
                 }
             )
             cleared = 0
+            from kazma_ui.hitl_answerers import clearable_thread
+
             for item in pending:
                 thread_id = str(item["thread_id"])
                 if thread_id not in owned:
+                    continue
+                # Only the chats whose every card is the caller's to answer
+                # (Spaces S2-05): clearing denies them.
+                if not await asyncio.to_thread(clearable_thread, thread_id, item):
                     continue
                 from kazma_ui.thread_locks import thread_mutation
 

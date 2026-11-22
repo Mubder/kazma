@@ -567,7 +567,7 @@ def test_in_a_shared_space_only_the_asker_answers_a_task(verb, status, matrix, s
 def test_control_any_member_answers_a_task(verb, status, matrix, shared, monkeypatch) -> None:
     import kazma_core.swarm.single_operator as single_operator
 
-    monkeypatch.setattr(single_operator, "answered_by_caller", lambda space, asker: True)
+    monkeypatch.setattr(single_operator, "answered_by_caller", lambda space, asker, tools=(): True)
     _seen, theirs, _own, _untouched = _b_answers_as(verb, status, matrix, shared)
     assert theirs.json().get("code") != "not_yours", theirs.text
 
@@ -599,7 +599,7 @@ def test_in_a_shared_space_only_the_asker_decides_an_approval(matrix, shared) ->
 def test_control_any_member_decides_an_approval(matrix, shared, monkeypatch) -> None:
     import kazma_core.swarm.single_operator as single_operator
 
-    monkeypatch.setattr(single_operator, "answered_by_caller", lambda space, asker: True)
+    monkeypatch.setattr(single_operator, "answered_by_caller", lambda space, asker, tools=(): True)
     _seen, after_theirs, theirs, _own = _b_decides(matrix, shared)
     assert theirs.status_code == 200 and after_theirs == "approved", theirs.text
 

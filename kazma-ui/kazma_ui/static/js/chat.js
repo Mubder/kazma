@@ -5912,6 +5912,54 @@
    * idempotency skip let the first live card on the page eat every later
    * approval (2026-09-02, three watchdog auto-denials in a row).
    */
+  /**
+   * Spaces S2-05: a card goes to the people it asks (`answered_by`, which the
+   * server sends only on an install that enforces Spaces). Anyone else
+   * watching the chat sees it waiting, with no buttons; the server refuses
+   * their answer too. Returns the names it waits for, or '' when the person
+   * looking may answer it (or the card names nobody, or the page does not
+   * know its account: the server decides).
+   */
+  function _hitlWaitingFor(data, mine) {
+    var by = data && Array.isArray(data.answered_by) ? data.answered_by : null;
+    if (!by || !by.length || !mine) return '';
+    if (by.indexOf(mine) !== -1) return '';
+    var names = (Array.isArray(data.answered_by_names) ? data.answered_by_names : [])
+      .map(function (n) { return String(n || '').trim(); })
+      .filter(function (n) { return n; });
+    return names.length ? names.join(', ') : '\u2026';
+  }
+
+  /** The line a waiting card shows instead of its buttons. */
+  function _hitlWaitingHtml(names) {
+    return '<span class="hitl-status hitl-waiting-for">' +
+      escapeHtml(tiFmt('hitl_waiting_for', 'Waiting for {names} to answer', { names: '\u0001' }))
+        .replace('\u0001', '<bdi translate="no">' + escapeHtml(names) + '</bdi>') +
+      '</span>';
+  }
+
+  /** Hide and disable a card's buttons and say who it waits for. */
+  function _markHitlWaiting(card, names) {
+    if (!card || !names) return;
+    var act = card.querySelector('.hitl-approval-actions');
+    if (!act) return;
+    Array.prototype.forEach.call(act.querySelectorAll('button'), function (b) {
+      // `hidden` alone loses to `.btn`'s display: the style is what hides it.
+      b.hidden = true;
+      b.style.display = 'none';
+      b.disabled = true;
+    });
+    act.insertAdjacentHTML('beforeend', _hitlWaitingHtml(names));
+    try { card.setAttribute('data-hitl-waiting', '1'); } catch (eW) { /* ignore */ }
+  }
+
+  function _pageAccount() {
+    try {
+      var accountMeta = document.querySelector('meta[name="kazma-account"]');
+      return accountMeta ? String(accountMeta.getAttribute('content') || '') : '';
+    } catch (e) { return ''; }
+  }
+
   function renderHitlCard(data, opts) {
     if (!data) return null;
     var lockComposer = !(opts && opts.lock === false);
@@ -5965,6 +6013,7 @@
                    escapeHtml(opt.id) + '">' + escapeHtml(semanticOptionLabel(opt)) + '</button>';
           }).join('') +
         '</div>';
+      _markHitlWaiting(_semCard, _hitlWaitingFor(data, _pageAccount()));
       // Attach only — TurnView's next pass moves it to its declared slot.
       content.appendChild(_semCard);
       _revealHitlCard(_semCard);
@@ -6164,6 +6213,7 @@
           : '') +
         '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">' + escapeHtml(ti('hitl_deny', 'Deny')) + '</button>' +
       '</div>';
+    _markHitlWaiting(card, _hitlWaitingFor(data, _pageAccount()));
     // Attach only — TurnView's next pass moves it to its declared slot.
     content.appendChild(card);
     _revealHitlCard(card);

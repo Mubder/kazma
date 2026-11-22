@@ -213,16 +213,26 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
                 )
             )
         else:
-            task = asyncio.create_task(
-                _drive_graph_to_journal(
-                    graph,
-                    _resume_cmd,
-                    config,
-                    thread_id=thread_id,
-                    session_id=session_id,
-                    reply_turn_id=turn_id,
+            # The turn goes on as its asker (Spaces S2-05): the card's own,
+            # not the chat's opener whom a resume with nothing bound would
+            # run as. Nothing is bound on an install that does not enforce
+            # Spaces.
+            from kazma_core.spaces.scope import spaces_enforced
+            from kazma_ui.hitl_answerers import as_the_asker, whose_card
+
+            whose = (await asyncio.to_thread(whose_card, thread_id, _iid, dict(_intr_payload or {}))
+                     if spaces_enforced() else None)
+            with as_the_asker(whose):
+                task = asyncio.create_task(
+                    _drive_graph_to_journal(
+                        graph,
+                        _resume_cmd,
+                        config,
+                        thread_id=thread_id,
+                        session_id=session_id,
+                        reply_turn_id=turn_id,
+                    )
                 )
-            )
         _deny_tasks.add(task)
         task.add_done_callback(_deny_tasks.discard)
         register_turn(thread_id, task)

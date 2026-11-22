@@ -414,9 +414,24 @@ class TurnBroker:
             if summary and not (isinstance(data, dict) and data.get("capacity")):
                 spawn_background(self._push_terminal(summary, thread_id), name="delivery-push-terminal")
 
+        # Spaces S2-05: a card waiting for an answer reaches the devices of
+        # the people it asks, and only theirs. The card names them
+        # (``answered_by``) only on an install that enforces Spaces; nothing
+        # is pushed for a pause elsewhere, as before.
+        if stamped.get("type") == "approval_required":
+            card = stamped.get("data") if isinstance(stamped.get("data"), dict) else stamped
+            if isinstance(card, dict) and card.get("answered_by"):
+                spawn_background(self._push_approval(card), name="delivery-push-approval")
+
         if cancelled:
             raise asyncio.CancelledError
         return stamped
+
+    async def _push_approval(self, card: dict[str, Any]) -> None:
+        from kazma_ui.push import notify_push_approval
+
+        # Never raises: what it cannot read or send, it logs.
+        await notify_push_approval(card)
 
     async def _push_terminal(self, summary: str, thread_id: str) -> None:
         try:

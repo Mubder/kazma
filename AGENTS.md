@@ -15526,15 +15526,12 @@ an install with one account behaves as before.
     admin's own tools are never there (`why_not_admin`). A plain shared
     space has none, for anyone. People says what turning it on means, and
     asks first (EN/AR).
-  - **N21's interim refusal, until S2-05.** A person other than the admin
-    who holds Development is refused their always-ask actions and folder
-    grants in a shared space with a project folder
-    (`spaces.tools.approval_refusal`), before any card on both gates
-    (`safety.call_preflight.call_refusal`, `ALWAYS_ASK_TOOLS`, with the
-    person's latest message for the language) and at the registry's own
-    call, with no effect: "this needs the admin's approval, which comes in a
-    later update", in their language. Their file and git cards stay
-    their own. S2-05's row names lifting it.
+  - **N21: the admin answers a holder's always-ask cards.** Until S2-05 a
+    person other than the admin who holds Development was refused their
+    always-ask actions and folder grants in a shared space with a project
+    folder, before any card. S2-05 lifted that refusal: the card is made and
+    goes to the admin (`spaces.approvals`, below). Their file and git cards
+    stay their own.
   - **A person other than the admin runs no project code on the host** (the
     S2-12 review, findings 1, 2 and 8; decision 3: members' code runs only
     in a container, S4-05). `HostAllowance.member` (a holder who is not the
@@ -15606,6 +15603,56 @@ an install with one account behaves as before.
     leaves its earlier versions behind. Gate:
     `tests/test_document_move_safety.py` (piece 5's move, interleaved, as
     the control: in neither space).
+- **An approval card goes to the person it asks (S2-05, 2026-11-22;
+  decisions N4 and N21).** Only where Spaces is enforced; an install that
+  does not enforce it shows, lists, pushes and decides every card as
+  before.
+  - **One rule** (`kazma_core/spaces/approvals.py`, `_answerers`): a card
+    asked for a person other than the admin who holds Development, about
+    an always-ask action or a folder grant (`call_preflight.ALWAYS_ASK_TOOLS`),
+    in a shared space with a project folder, is answered by the admin
+    (N21); else by the asker's approvers, when the admin set some
+    (`identity` `policies[asker]["approvers"]`, N4: empty for everyone, no
+    page sets it yet; they answer in the asker's place); else by the asker;
+    a card that names no asker by the space's owners. `answer_refusal`
+    (`not_yours`, `identity_unavailable`) is what every surface asks.
+  - **The card names it**: the graph adds `asker`, `answered_by` and
+    `answered_by_names` to its interrupt (`graph_tool_worker._whose_card`,
+    the security and the clarify card), and every copy of a card keeps them
+    (`kazma_ui.hitl_answerers.card_who`: the stream's saved card, the
+    checkpoint scan, the registry's pending items); the registry row's
+    `asker` is the card's own, never whoever registers it
+    (`hitl_gate_bridge`). `kazma_ui/hitl_answerers.py` finds whose card it
+    is for a chat (`whose_card`: the row, the card, the chat's opener).
+  - **Asked everywhere a card is decided or shown**: the approve route
+    (403 `not_yours`, before anything is claimed: the gate stays pending)
+    and its bridge-gate branch; the one decision writer
+    (`hitl_decision.record_gate_decision` raises `GateNotYours` for a
+    person's answer; the watchdog's timeout is nobody's), so the chat apps'
+    buttons too; the pending list (`answerable`) and the clear route
+    (`clearable_thread`: only chats whose every card is the caller's); the
+    swarm (`single_operator.answered_by_caller` asks the one rule, with
+    the request's tool for N21); the bell (`bell_items`: the person's
+    waiting cards, a tool's name, never its arguments); Web Push
+    (`push.notify_push_approval`, from the `approval_required` frame, to the
+    devices of the accounts the card names, under the notifications switch).
+  - **A resumed turn is its asker's**, whoever answered:
+    `hitl_answerers.as_the_asker` binds the card's asker around the resume
+    task, on the approve route and the timeout watchdog's journal resume.
+    An approver or the admin pressing for someone never runs their turn as
+    themself.
+  - **The page**: a card for someone else shows "Waiting for {names} to
+    answer" (`chat.hitl_waiting_for`, EN/AR) with its buttons hidden
+    (`chat.js` `_hitlWaitingFor`, `_markHitlWaiting`; the page's account is
+    `<meta name="kazma-account">`).
+  - Gates: `tests/test_approvals_reach_the_asker.py` (another member is
+    refused and the gate stays pending; the thread-owner rule as the
+    control; an approver's answer resumes as the asker, with no binding as
+    the control), `tests/test_development_per_person.py` (N21 over every
+    always-ask tool), `tests/js/test_hitl_waiting_for.js`,
+    `tests/e2e/test_approval_card_reaches_the_asker.py` (by the sidebar,
+    EN/AR: the member sees the card waiting with no button, is refused, the
+    owner answers).
 
 ## UI Conventions (Web)
 

@@ -29,6 +29,10 @@ Design (industry standard: RFC 8030 Web Push + VAPID auth):
   thread's space (:func:`_recipient`). A subscription that names no account
   gets nothing there. An install that does not enforce Spaces pushes to
   every device, as before.
+- **A card waiting for an answer goes to the people it asks** (Spaces
+  S2-05, :func:`notify_push_approval`): on an install that enforces Spaces,
+  the devices of the accounts the card names (``answered_by``), under the
+  same switch. Nothing is pushed for a pause elsewhere.
 """
 
 from __future__ import annotations
@@ -48,6 +52,7 @@ __all__ = [
     "subscribe",
     "unsubscribe",
     "list_subscriptions",
+    "notify_push_approval",
     "notify_push_turn_complete",
     "turn_complete_notifications_on",
 ]
@@ -282,6 +287,69 @@ def _push_plan(
     if not keys:
         return None
     return keys, subs
+
+
+def _approval_plan(card: dict[str, Any]) -> tuple[tuple[str, str], list[dict[str, Any]]] | None:
+    """The keys and the devices a card waiting for an answer is pushed to
+    (Spaces S2-05): only on an install that enforces Spaces, under the
+    notifications switch, to the devices of the accounts the card names.
+    Settings-store reads: off the event loop."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced() or not turn_complete_notifications_on():
+        return None
+    people = {str(a) for a in card.get("answered_by") or () if a}
+    subs = [s for s in list_subscriptions() if s.get("_account") in people] if people else []
+    if not subs:
+        return None
+    keys = ensure_vapid_keys()
+    return (keys, subs) if keys else None
+
+
+async def notify_push_approval(card: dict[str, Any]) -> int:
+    """Push "an approval is waiting" to the devices of the people *card*
+    asks (:func:`_approval_plan`). Returns the delivered count; never
+    raises. The text names the tool only: never its arguments."""
+    try:
+        from pywebpush import WebPushException, webpush
+    except ImportError:
+        return 0
+    from kazma_core.db.pg_helpers import store_errors
+
+    try:
+        plan = await asyncio.to_thread(_approval_plan, card)
+    except (*store_errors(), OSError, RuntimeError, ValueError, TypeError):
+        # The settings store or the identity store could not answer: nothing
+        # is pushed, never a guess at whose devices.
+        logger.warning("[Push] the devices for a waiting card could not be read", exc_info=True)
+        return 0
+    if plan is None:
+        return 0
+    (_pub, priv), subs = plan
+    tool = str(card.get("tool") or "")[:80]
+
+    def _send_one(sub: dict[str, Any]) -> bool:
+        refusal = _endpoint_refusal(str(sub.get("endpoint") or ""))
+        if refusal:
+            logger.warning("[Push] subscription not sent: %s", refusal)
+            return False
+        try:
+            webpush(
+                subscription_info={"endpoint": sub.get("endpoint"), "keys": sub.get("keys") or {}},
+                data=json.dumps({"title": "Kazma \u2014 approval waiting",
+                                 "body": f"Kazma is waiting for your approval: {tool}" if tool
+                                 else "Kazma is waiting for your approval."}),
+                vapid_private_key=priv,
+                vapid_claims={"sub": "mailto:admin@kazma.local"},
+                ttl=_PUSH_TTL_SECONDS,
+            )
+            return True
+        except (WebPushException, OSError, ValueError, TypeError):
+            logger.debug("[Push] approval push failed", exc_info=True)
+            return False
+
+    results = await asyncio.gather(*(asyncio.to_thread(_send_one, s) for s in subs))
+    return sum(1 for ok in results if ok)
 
 
 async def notify_push_turn_complete(summary: str, *, thread_id: str | None = None) -> int:

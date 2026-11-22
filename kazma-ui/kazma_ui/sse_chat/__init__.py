@@ -26,6 +26,7 @@ code to one another).
   context_compacted  detail, and counts
   approval_required  thread_id, interrupt_id, kind, tool, args, tools, items,
                      message, yolo_allowed, always_ask, approval_deadline,
+                     asker, answered_by, answered_by_names (Spaces enforced),
                      view, gate_views (paused for approval; no done follows)
   hitl               state, interrupt_id, tool, thread_id, turn_id, actor,
                      view, gate_views (an approval decided)

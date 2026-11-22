@@ -32,10 +32,10 @@ a space (:func:`host_allowance`):
   the admin's own tools are never there;
 * work with no space bound, or a space whose kind cannot be read, has none.
 
-Until approvals reach the admin (S2-05), a person other than the admin who
-holds Development is refused their always-ask actions and folder grants in a
-shared space with a project folder (:func:`approval_refusal`, decision N21:
-the admin approves those): before any card, with no effect.
+A person other than the admin who holds Development has their always-ask
+actions and folder grants in a shared space with a project folder approved
+by the admin (decision N21): the card is made and goes to the admin
+(``spaces.approvals``, S2-05). Until S2-05 such a call was refused here.
 
 **A person other than the admin runs no project code on the host** (the
 S2-12 review; the owner's decision 3, plan 4.8: members' code runs only in a
@@ -78,7 +78,6 @@ __all__ = [
     "OUTSIDE",
     "SPACE",
     "HostAllowance",
-    "approval_refusal",
     "development_here",
     "forget_allowance",
     "host_allowance",
@@ -123,7 +122,7 @@ MEMBER_DEVELOPMENT: dict[str, str] = {
     "github_merge_pr": "GitHub's API with the space's own connection",
     "codebase_search": "Kazma's own code index, read in Kazma's process",
     "codebase_status": "Kazma's own code index, read in Kazma's process",
-    "request_path_access": "a folder grant, which the admin approves (N21): refused until S2-05",
+    "request_path_access": "a folder grant, which the admin approves (N21, spaces.approvals)",
     "list_agent_skills": "lists skill folders; runs nothing",
     "search_agent_skills": "searches the skills marketplace; runs nothing",
     "activate_skill": "adds a skill's text to the turn; runs nothing",
@@ -307,51 +306,6 @@ def _host_refusal(name: str, allowance: HostAllowance | None = None) -> str | No
         f"Tool '{name}' does not exist in this space ({why}). "
         "It touches the machine Kazma runs on; tell the user what you would have "
         "used it for instead."
-    )
-
-
-def _always_ask(name: str) -> bool:
-    """The always-ask tools and folder grants (``safety.hitl.ALWAYS_HITL_TOOLS``),
-    whose card the admin answers for a person holding Development (N21)."""
-    from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
-
-    return name in ALWAYS_HITL_TOOLS or name == "request_path_access"
-
-
-def approval_refusal(name: str, user_text: str | None = None) -> str | None:
-    """Why the call of *name* is refused before its card for the work bound
-    now (decision N21, until S2-05), or None.
-
-    In a shared space with a project folder, a person other than the admin
-    who holds Development has their always-ask actions and folder grants
-    approved by the admin. Until approvals reach the admin (S2-05), Kazma
-    refuses them, before any card and with no effect, saying why in the
-    person's language (*user_text*: their latest message). S2-05 lifts it.
-    Blocking (the identity store)."""
-    if not spaces_enforced() or not _always_ask(name):
-        return None
-    bound = current_scope()
-    if bound is None or bound.space_id == OWNER_SPACE_ID:
-        return None
-    from kazma_core.language_lock import in_their_language
-    from kazma_core.spaces import files as space_files
-    from kazma_core.spaces import identity
-
-    try:
-        if space_files.space_kind(bound.space_id) != "host":
-            return None
-        if identity.is_admin_account(bound.asker) or not identity.holds_development(bound.asker):
-            return None
-    except (space_files.SpaceKindUnknown, identity.IdentityUnavailable, identity.IdentityError):
-        # Who answers the card cannot be told: never a card the wrong
-        # person answers.
-        pass
-    return in_their_language(
-        user_text,
-        f"'{name}' needs the admin's approval here, which comes in a later update of Kazma. "
-        "Nothing was done. Tell the user so.",
-        f"تحتاج «{name}» هنا إلى موافقة المسؤول، وهذه تأتي في تحديث لاحق لـ Kazma. "
-        "لم يُنفَّذ شيء. أخبر المستخدم بذلك.",
     )
 
 
