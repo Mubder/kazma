@@ -456,6 +456,14 @@
         limitDraft: { tokens: '', usd: '' },
         // Models per person (Spaces S2-03): every model the install offers.
         peopleModelOptions: [],
+        // Limits per space (Spaces S2-08): bytes are shown and typed in MiB.
+        spaceUsage: [],
+        spaceUsageLoaded: false,
+        spaceLimitNames: ['disk_bytes', 'documents_bytes', 'knowledge_bytes', 'crawls', 'research', 'swarm'],
+        limitsForSpaces: { limits: null, set: false, shipped: null },
+        spaceLimitsDraft: {},
+        spaceLimitEditing: '',
+        spaceLimitDraftOne: {},
 
         _peopleError(data) {
             const code = (data && data.error) || 'failed';
@@ -486,6 +494,117 @@
             this.peopleModelOptions = models && Array.isArray(models.options)
                 ? models.options.map((o) => o.ref) : [];
             this.peopleLoaded = true;
+            await this.loadSpaceUsage();
+        },
+
+        // ── Limits per space (Spaces S2-08) ──
+        async loadSpaceUsage() {
+            const data = typeof window.kazmaGetJson === 'function'
+                ? await window.kazmaGetJson('/api/people/spaces/usage') : null;
+            if (!data || !Array.isArray(data.spaces)) {
+                this.spaceUsageLoaded = false;
+                return;
+            }
+            this.spaceUsage = data.spaces;
+            this.limitsForSpaces = { limits: data.limits_for_spaces, set: !!data.set, shipped: data.shipped };
+            this.spaceLimitsDraft = this._spaceDraft(data.limits_for_spaces || {});
+            this.spaceUsageLoaded = true;
+        },
+
+        _isBytes(name) {
+            return /_bytes$/.test(name);
+        },
+
+        // A limit as typed: MiB for bytes, the number itself for work at once.
+        _spaceDraft(limits) {
+            const draft = {};
+            for (const name of this.spaceLimitNames) {
+                const value = limits[name];
+                draft[name] = value == null ? '' : String(this._isBytes(name)
+                    ? Math.round(Number(value) / 1048576) : Number(value));
+            }
+            return draft;
+        },
+
+        _spaceLimitsBody(draft) {
+            const body = {};
+            for (const name of this.spaceLimitNames) {
+                const raw = String(draft[name] == null ? '' : draft[name]).trim();
+                if (raw === '') continue;
+                const number = Number(raw);
+                body[name] = this._isBytes(name) ? Math.round(number * 1048576) : Math.round(number);
+            }
+            return body;
+        },
+
+        spaceLimitLabel(name) {
+            const words = {
+                disk_bytes: 'Files (MiB)', documents_bytes: 'Documents (MiB)', knowledge_bytes: 'Knowledge (MiB)',
+                crawls: 'Crawls at once', research: 'Research at once', swarm: 'Swarm tasks at once',
+            };
+            return _t('settings.space_limit.' + name, words[name] || name);
+        },
+
+        _mib(bytes) {
+            const n = Number(bytes) / 1048576;
+            const shown = window.KazmaFormat
+                ? window.KazmaFormat.number(n, { maximumFractionDigits: n < 10 ? 1 : 0 }) : n.toFixed(n < 10 ? 1 : 0);
+            return _t('settings.people_space_mib', '{size} MiB', { size: shown });
+        },
+
+        spaceUsedText(space, name) {
+            const used = space[name];
+            const limit = (space.limits || {})[name];
+            if (name === 'disk_bytes' && space.has_folder === false) {
+                return _t('settings.people_space_usage_install_files', "The install's own folders");
+            }
+            if (used == null || limit == null) return _t('settings.people_space_usage_unknown', 'Not counted');
+            if (this._isBytes(name)) {
+                return _t('settings.people_space_usage_of', '{used} of {limit}',
+                    { used: this._mib(used), limit: this._mib(limit) });
+            }
+            return _t('settings.people_space_usage_of', '{used} of {limit}',
+                { used: String(used), limit: String(limit) });
+        },
+
+        async _putSpaceLimits(url, limits) {
+            try {
+                await window.kazmaSave(url, { method: 'PUT', body: { limits: limits } });
+            } catch (e) {
+                showToast(this._peopleError(e && e.body), 'error');
+                return false;
+            }
+            showToast(_t('settings.people_space_limits_saved', 'Limits saved.'), 'success');
+            await this.loadSpaceUsage();
+            return true;
+        },
+
+        async saveLimitsForSpaces() {
+            await this._putSpaceLimits('/api/people/space-limits', this._spaceLimitsBody(this.spaceLimitsDraft));
+        },
+
+        async useShippedSpaceLimits() {
+            await this._putSpaceLimits('/api/people/space-limits', null);
+        },
+
+        // The space's own limits only: a field left empty takes the limits
+        // for spaces (its placeholder shows the one in force).
+        editSpaceLimits(space) {
+            this.spaceLimitDraftOne = this._spaceDraft(space.own_limits || {});
+            this.spaceLimitEditing = space.id;
+        },
+
+        async saveSpaceLimits(space) {
+            if (!space) return;
+            const done = await this._putSpaceLimits('/api/people/spaces/' + encodeURIComponent(space.id) + '/limits',
+                this._spaceLimitsBody(this.spaceLimitDraftOne));
+            if (done) this.spaceLimitEditing = '';
+        },
+
+        async clearSpaceLimits(space) {
+            if (!space) return;
+            const done = await this._putSpaceLimits('/api/people/spaces/' + encodeURIComponent(space.id) + '/limits', null);
+            if (done) this.spaceLimitEditing = '';
         },
 
         _tokensText(n) {

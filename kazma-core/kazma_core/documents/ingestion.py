@@ -865,7 +865,7 @@ class DocumentIngestionService:
                 max_bytes=self.config.intake_max_bytes,
                 tenant_id=tenant,
                 repository=self.repository,
-                tenant_quota_bytes=self.config.quota_tenant_bytes,
+                tenant_quota_bytes=_space_documents_bytes(tenant, self.config.quota_tenant_bytes),
                 expected_byte_size=content_length,
             )
         except BlobTooLargeError as exc:
@@ -3563,3 +3563,11 @@ def _safe_filename(filename: str) -> str:
     if not name or name in {".", ".."}:
         raise DocumentIngestionError("invalid_request", "A valid filename is required")
     return name
+
+
+def _space_documents_bytes(tenant_id: str, install_value: int) -> int:
+    """The documents quota an intake streams under: the space's own limit
+    once Spaces is enforced (S2-08), else the install's value, as before."""
+    from kazma_core.spaces.space_limits import documents_bytes
+
+    return documents_bytes(tenant_id, install_value)

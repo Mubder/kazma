@@ -82,7 +82,10 @@ __all__ = [
     "set_features",
     "set_enabled",
     "set_models",
+    "set_default_space_limits",
+    "set_space_limits",
     "set_tools",
+    "spaces_usage",
 ]
 
 logger = logging.getLogger(__name__)
@@ -90,7 +93,8 @@ logger = logging.getLogger(__name__)
 #: What the record holds.
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
           "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
-          "models_set", "account_disabled", "account_enabled", "space_created", "member_added", "member_left", "member_removed")
+          "models_set", "account_disabled", "account_enabled", "space_created", "member_added", "member_left", "member_removed",
+          "space_limits_set", "default_space_limits_set")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset", "member_added", "member_removed")
 _NAME_MAX = 64
@@ -497,7 +501,7 @@ def _changed_on(change: Any, reg: dict[str, Any]) -> None:
     try:
         change(reg)
     except identity.IdentityError as exc:
-        status = 404 if exc.code == "no_such_account" else 409
+        status = 404 if exc.code in ("no_such_account", "no_such_space") else 409
         raise PeopleRefused(exc.code, status, str(exc)) from exc
 
 
@@ -620,7 +624,7 @@ def _changed(change: Any) -> dict[str, Any]:
     try:
         return identity.update_registry(change)
     except identity.IdentityError as exc:
-        status = 404 if exc.code == "no_such_account" else 409
+        status = 404 if exc.code in ("no_such_account", "no_such_space") else 409
         raise PeopleRefused(exc.code, status, str(exc)) from exc
 
 
@@ -787,6 +791,83 @@ def set_default_daily_limit(raw: dict[str, Any] | None, *, by: str) -> None:
 
     _changed(_change)
     logger.info("[people] the daily limit for people was set by=%s", by)
+
+
+# ── Limits per space (S2-08) ────────────────────────────────────────────
+
+
+def _checked_space_limits(raw: Any) -> dict[str, int]:
+    from kazma_core.spaces.space_limits import LimitsRefused, parse_limits
+
+    try:
+        return parse_limits(raw)
+    except LimitsRefused as exc:
+        raise PeopleRefused(exc.code, 400, str(exc)) from exc
+
+
+def set_space_limits(space_id: str, raw: dict[str, Any] | None, *, by: str) -> None:
+    """Set a space's own limits (``{name: value}``, ``spaces.space_limits``;
+    a limit left out or empty takes the limits for spaces), or take them
+    all away (``None``). Recorded."""
+    _require_enforced()
+    limits = _checked_space_limits(raw)
+
+    def _change(reg: dict[str, Any]) -> None:
+        space = reg["spaces"].get(space_id)
+        if not isinstance(space, dict) or space.get("erasing_at"):
+            raise identity.IdentityError("no_such_space", "There is no such space.")
+        if limits:
+            space["limits"] = dict(limits)
+        else:
+            space.pop("limits", None)
+        _record(reg, "space_limits_set", "", by, space=space_id)
+
+    _changed(_change)
+    logger.info("[people] limits set space=%s by=%s", space_id, by)
+
+
+def set_default_space_limits(raw: dict[str, Any] | None, *, by: str) -> None:
+    """Set the limits for spaces that have none of their own, or go back to
+    Kazma's own (``None``). Recorded."""
+    _require_enforced()
+    limits = _checked_space_limits(raw)
+
+    def _change(reg: dict[str, Any]) -> None:
+        if limits:
+            reg["defaults"]["space_limits"] = dict(limits)
+        else:
+            reg["defaults"].pop("space_limits", None)
+        _record(reg, "default_space_limits_set", "", by)
+
+    _changed(_change)
+    logger.info("[people] the limits for spaces were set by=%s", by)
+
+
+def spaces_usage() -> dict[str, Any]:
+    """Every space that is open, the owner's first: its name and kind
+    (``personal`` or ``shared``), its own limits (``None`` each not set)
+    and what it holds and runs beside the limits it has
+    (``space_limits.usage_of``); and the limits for spaces. Counts and
+    sizes only, never a word of what a space holds. Blocking."""
+    from kazma_core.spaces.space_limits import SHIPPED, limits_for_spaces, usage_of
+
+    reg = identity.read_registry()
+    names = {account_id: str(account.get("name") or "") for account_id, account in reg["accounts"].items()}
+    out = []
+    for space_id, space in reg["spaces"].items():
+        if space.get("erasing_at") or (space.get("personal_of") and space.get("account_deleted_at")):
+            continue
+        personal = space.get("personal_of")
+        out.append({
+            "id": space_id,
+            "name": str(space.get("name") or "") or names.get(str(personal or ""), ""),
+            "kind": "personal" if personal or space_id == OWNER_SPACE_ID else "shared",
+            "own_limits": dict(space.get("limits") or {}),
+            **usage_of(space_id),
+        })
+    out.sort(key=lambda s: (s["id"] != OWNER_SPACE_ID, s["kind"] != "personal", s["name"].lower()))
+    return {"spaces": out, "limits_for_spaces": limits_for_spaces(reg).as_dict(),
+            "set": isinstance(reg["defaults"].get("space_limits"), dict), "shipped": SHIPPED.as_dict()}
 
 
 def set_features(account_id: str, changes: dict[str, Any], *, by: str) -> None:

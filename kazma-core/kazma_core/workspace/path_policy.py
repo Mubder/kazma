@@ -418,6 +418,27 @@ async def resolve_and_check(
     return await asyncio.to_thread(_run)
 
 
+def _space_disk_refusal(resolved: Path) -> str | None:
+    """Why a write at *resolved* is refused for its space's disk limit
+    (``spaces.space_limits.disk_refusal``): only a path inside the bound
+    space's own folder, once Spaces is enforced. Blocking."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    bound = current_scope()
+    if bound is None or bound.space_id == OWNER_SPACE_ID:
+        return None
+    from kazma_core.spaces.files import space_dir
+    from kazma_core.spaces.space_limits import disk_refusal
+
+    try:
+        Path(resolved).resolve().relative_to(space_dir(bound.space_id).resolve())
+    except (OSError, ValueError):
+        return None
+    return disk_refusal(bound.space_id)
+
+
 def check_path_access(
     path: str | Path,
     mode: AccessMode | str = "read",
@@ -473,6 +494,16 @@ def check_path_access(
                 via="git",
                 resolved=str(resolved),
                 workspace=str(workspace),
+            )
+
+    # A space at its disk limit takes no more files in its folder (Spaces
+    # S2-08): an admission check, as the stores' quotas are.
+    if need == "write":
+        full = _space_disk_refusal(resolved)
+        if full is not None:
+            return PathAccessResult(
+                allowed=False, reason=full, mode=need, via="denied",
+                resolved=str(resolved), workspace=str(workspace),
             )
 
     # 0) Kazma's own databases are never opened by file tools. Checked

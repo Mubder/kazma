@@ -119,6 +119,13 @@ def share_file(path: Path, *, thread_id: str) -> SharedFile:
     size = src.stat().st_size
     if size > MAX_SHARED_BYTES:
         raise ValueError(f"file too large ({size // 1024 // 1024} MB; max 50 MB)")
+    from kazma_core.spaces.space_limits import SpaceOverLimit, refuse_write_for_disk
+
+    try:
+        # The space's disk limit (Spaces S2-08), before the copy.
+        refuse_write_for_disk(size)
+    except SpaceOverLimit as exc:
+        raise ValueError(str(exc)) from exc
     with src.open("rb") as fh:
         mime = _sniff(fh.read(16))
     file_id = f"att_{uuid.uuid4().hex}"

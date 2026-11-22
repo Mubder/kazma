@@ -142,6 +142,28 @@ knowledge, the web, research, and images and voice; the rest is off until
 you turn it on. Grants are per person, in a shared space too, and only you
 make them.
 
+## Limits per space
+
+One space at its limit does not slow or stop another. Each space has its
+own limits beside the install's:
+
+- **Work running at once.** A space runs at most its share of the
+  install's slots: by default 2 of the 4 Knowledge crawls, 2 of the 4
+  research runs and 5 of the 10 swarm tasks, so two spaces at their limit
+  still leave each other room. Work past its share is refused at once and
+  can be started again when one ends; it never waits in the install's
+  queue.
+- **Storage.** The files in the space's own folder (2 GiB by default), its
+  documents (10 GiB) and its Knowledge libraries (256 MiB). A space at one
+  of these takes no more of it -- an upload, a saved file, a generated
+  image, a new document or library page is refused with the reason -- and
+  everything it holds stays. Your own space keeps the install's folders and
+  has no files limit.
+
+Settings → People shows each space's usage beside its limits (counts and
+sizes, never what it holds), and sets the limits for spaces and, for any
+space, limits of its own. Each change is recorded.
+
 A feature that is off is gone for that person: no menu entry, its pages
 say it is off, its routes and live voice refuse, its chat commands refuse,
 its tools are neither offered to the model nor run, and a request that

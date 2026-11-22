@@ -799,6 +799,7 @@ class DocumentOperations:
         artifact_id: ArtifactId,
     ) -> Path:
         directory = directory.expanduser().resolve()
+        _refuse_a_full_space_folder(directory, source.stat().st_size)
         directory.mkdir(parents=True, exist_ok=True)
         stem = _SLUG.sub("-", Path(requested_name).stem).strip(".-_")[:80] or "document"
         target = directory / f"{stem}-{artifact_id}-{uuid.uuid4().hex}.{extension}"
@@ -823,3 +824,16 @@ class DocumentOperations:
             return target
         finally:
             temporary.unlink(missing_ok=True)
+
+
+def _refuse_a_full_space_folder(directory: Path, incoming: int) -> None:
+    """A document made into a space's own folder is refused when that
+    folder is at the space's disk limit (Spaces S2-08,
+    ``spaces.space_limits.disk_refusal``): nothing is written there."""
+    from kazma_core.spaces.files import space_of_folder
+    from kazma_core.spaces.space_limits import disk_refusal
+
+    space = space_of_folder(directory)
+    refused = disk_refusal(space, incoming) if space else None
+    if refused:
+        raise DocumentParseError(refused, code="space_limit")

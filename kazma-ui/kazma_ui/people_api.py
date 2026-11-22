@@ -340,6 +340,58 @@ def create_people_router() -> APIRouter:
             return invalid_json_response()
         return await asyncio.to_thread(_set_models, request, account_id, body)
 
+    @router.get("/api/people/spaces/usage")
+    def spaces_usage(request: Request) -> JSONResponse:
+        """Every space's limits and what it holds and runs now (Spaces
+        S2-08): counts and sizes, never a word of what a space holds."""
+        denied = _not_admin(request)
+        if denied:
+            return denied
+        try:
+            usage = people.spaces_usage()
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True, "enforced": spaces_enforced(), **usage})
+
+    def _set_space_limits(request: Request, space_id: str | None, body: dict[str, Any]) -> JSONResponse:
+        raw = body.get("limits")
+        if raw is not None and not isinstance(raw, dict):
+            return JSONResponse({"ok": False, "error": "bad_limits"}, status_code=400)
+        try:
+            if space_id is None:
+                people.set_default_space_limits(raw, by=_caller(request) or "")
+            else:
+                people.set_space_limits(space_id, raw, by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True})
+
+    async def _space_limits_route(request: Request, space_id: str | None) -> JSONResponse:
+        denied = await asyncio.to_thread(_not_admin, request)
+        if denied:
+            return denied
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_set_space_limits, request, space_id, body)
+
+    @router.put("/api/people/space-limits")
+    async def set_default_space_limits(request: Request) -> JSONResponse:
+        """The limits for spaces with none of their own (Spaces S2-08):
+        ``{"limits": {name: value} or null}``."""
+        return await _space_limits_route(request, None)
+
+    @router.put("/api/people/spaces/{space_id}/limits")
+    async def set_space_limits(space_id: str, request: Request) -> JSONResponse:
+        """A space's own limits (Spaces S2-08): ``{"limits": {name: value}
+        or null}``."""
+        return await _space_limits_route(request, space_id)
+
     @router.get("/api/account/notices")
     def my_notices(request: Request) -> JSONResponse:
         account = _caller(request)

@@ -2604,6 +2604,56 @@
               </template>
             </div>
         </div>
+        <!-- Limits per space (Spaces S2-08): what each space holds and runs
+             beside its limits, counts and sizes only; the limits for spaces
+             and each space's own. -->
+        <div class="settings-group mb-6" id="people-space-usage" x-show="peopleLoaded && !peopleFailed && spaceUsageLoaded" x-cloak>
+            <h3>{{ t('settings.people_space_limits_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_space_limits_help') }}</p>
+            <h4>{{ t('settings.people_space_limits_default') }}</h4>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:flex-end;">
+              <template x-for="name in spaceLimitNames" :key="'default-' + name">
+                <div style="flex:1;min-width:120px">
+                  <label class="form-label" :for="'space-limits-default-' + name" x-text="spaceLimitLabel(name)"></label>
+                  <input type="number" min="1" step="1" class="form-input" :id="'space-limits-default-' + name" x-model="spaceLimitsDraft[name]">
+                </div>
+              </template>
+              <button class="btn btn-primary" type="button" id="space-limits-default-save" @click="saveLimitsForSpaces()">{{ t('settings.people_limit_save') }}</button>
+              <button class="btn btn-secondary" type="button" id="space-limits-default-shipped" x-show="limitsForSpaces.set" x-cloak @click="useShippedSpaceLimits()">{{ t('settings.people_limit_shipped') }}</button>
+            </div>
+            <div class="account-list-table">
+              <template x-for="s in spaceUsage" :key="'usage-' + s.id">
+                <div :data-space-usage="s.id">
+                  <div class="account-list-row">
+                    <span class="account-list-name"><bdi translate="no" x-text="s.name || window.t('settings.people_owner')"></bdi></span>
+                    <span class="badge badge-secondary" x-text="s.kind === 'shared' ? window.t('settings.people_space_usage_shared') : window.t('settings.people_space_usage_personal')"></span>
+                    <span class="account-list-actions">
+                      <button type="button" class="btn btn-sm btn-secondary" @click="editSpaceLimits(s)" :aria-label="window.t('settings.people_space_limits_edit_of', {name: s.name || window.t('settings.people_owner')})">{{ t('settings.people_limit_edit') }}</button>
+                    </span>
+                  </div>
+                  <div class="account-list-row" style="flex-wrap:wrap;gap:6px 16px">
+                    <template x-for="name in spaceLimitNames" :key="s.id + ':' + name">
+                      <span class="account-list-meta" :data-space-used="s.id + ':' + name"
+                            x-text="spaceLimitLabel(name) + ': ' + spaceUsedText(s, name)"></span>
+                    </template>
+                  </div>
+                  <div x-show="spaceLimitEditing === s.id" x-cloak :data-space-limits-editor="s.id">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 12px;">
+                      <template x-for="name in spaceLimitNames" :key="s.id + ':edit:' + name">
+                        <input type="number" min="1" step="1" class="form-input" style="flex:1;min-width:110px"
+                               x-model="spaceLimitDraftOne[name]" :data-space-limit-input="name"
+                               :placeholder="_spaceDraft(s.limits || {})[name]"
+                               :aria-label="window.t('settings.people_space_limit_of', {limit: spaceLimitLabel(name), name: s.name || window.t('settings.people_owner')})">
+                      </template>
+                      <button type="button" class="btn btn-sm btn-primary" @click="saveSpaceLimits(s)">{{ t('settings.people_limit_save') }}</button>
+                      <button type="button" class="btn btn-sm btn-secondary" x-show="Object.keys(s.own_limits || {}).length" x-cloak @click="clearSpaceLimits(s)">{{ t('settings.people_space_limits_clear') }}</button>
+                      <button type="button" class="btn btn-sm btn-ghost" @click="spaceLimitEditing = ''">{{ t('settings.people_limit_cancel') }}</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+        </div>
         <!-- Features (Spaces S2-11): a switch per feature for each person.
              The admin has every feature; only Development is theirs to
              switch off (N28). -->

@@ -15870,6 +15870,55 @@ an install with one account behaves as before.
     `CronScheduler` fire; the tools frozen at booking as the control),
     `tests/js/test_scheduled_page.js` (the paused note),
     `tests/e2e/test_person_disable_browser.py` (by the sidebar, EN/AR).
+- **Limits per space (S2-08, 2026-11-22).** Only where Spaces is enforced;
+  an install that does not enforce it reads nothing here and keeps the
+  install's own limits, as before.
+  - `kazma_core/spaces/space_limits.py` is the one rule. A space's limits
+    (`SpaceLimits`): the bytes of its own folder (`disk_bytes`), its
+    documents (`documents_bytes`) and its libraries (`knowledge_bytes`), and
+    how many Knowledge crawls, research runs and swarm tasks it runs at once
+    (`crawls`, `research`, `swarm`). Whose: the space's own
+    (`identity` `spaces[id]["limits"]`), else the limits for spaces
+    (`defaults["space_limits"]`), else `SHIPPED` (2 GiB of files, the
+    install's 10 GiB of documents, 256 MiB of libraries, half of each of the
+    install's slots: 2 crawls, 2 research runs, 5 swarm tasks). The owner's
+    space has no folder of its own, so no disk limit.
+  - **A share of the install's slots**: asked at admission, before a slot
+    is taken, so a space at its share is refused and holds no place another
+    space's work could run in -- the swarm in `SwarmEngine._dispatch`
+    (after the install's cap, with the task's slot held while the share is
+    read and only the space's tasks admitted ahead of it counted,
+    `_running_ahead_of`; `admission_denied`, code `space_limit`), research in `bounded_pipeline` and
+    `bounded_session` (`research_runtime._take_space_share`, counted per
+    process, a session's own pipeline counted once), a crawl in
+    `crawl_jobs.start` (the journal row names its `space`; a research
+    pipeline's row is research's, never a crawl's). The install's own caps
+    still bound every space together.
+  - **Bytes**: the documents store's quota (`_space_quota` in both
+    repositories, `ingestion._space_documents_bytes` for an intake) and the
+    Knowledge share (`KnowledgeStore._space_over_its_share`) read the limit
+    set for the space or for every space, else the install's own values
+    (`documents.quotas.tenant_bytes`, the 256 MiB share) as before; the disk
+    limit (`disk_refusal`, a folder measured at most once a minute):
+    `check_path_access` refuses a write inside the bound space's folder at
+    its limit, an upload is 507 `space_limit`, a shared copy, a generated
+    image and a document made into the folder are refused. All admission
+    checks: a write admitted under the limit may carry the space past it,
+    and the next is refused. A new writer into a space's folder asks
+    `refuse_write_for_disk` first.
+  - People sets them (`people.set_space_limits`,
+    `set_default_space_limits`; `PUT /api/people/spaces/{space_id}/limits`,
+    `PUT /api/people/space-limits`; events `space_limits_set` /
+    `default_space_limits_set`) and shows each space's usage beside its
+    limits (`people.spaces_usage`, `GET /api/people/spaces/usage`: counts
+    and sizes only, never a word of what a space holds); a space's editor
+    holds its own limits only, an empty field taking the limits for spaces.
+  - Gates: `tests/test_space_quotas.py` (one space at its share refused
+    while another runs, for swarm tasks, research and crawls; the install's
+    quota alone, the shares taken out, as the control: one space fills the
+    install and the other is refused; each byte limit taken out as its
+    control; the routes and refusals; nothing read without Spaces),
+    `tests/e2e/test_space_limits_browser.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 
