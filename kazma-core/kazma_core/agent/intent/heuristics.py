@@ -122,6 +122,43 @@ _REMIND_RE = re.compile(
     r"|ذكرني|تذكير",
     re.IGNORECASE,
 )
+#: "Remind me what you said", "remind me of the website you recommended",
+#: "ذكرني شنو قلت", "ذكرني بالموقع": asks Kazma to recall, not to book a
+#: reminder -- "remind me" followed by a question word, "of" or "about"
+#: (Arabic: a question word, or "ب" before a noun). Until 2026-11-22 every
+#: "remind me" was a reminder to book: the turn was told to use
+#: `schedule_task`, and the act sent it to the 4 s refinement (15 of the 200
+#: LongMemEval dev questions; the memory plan's finding 13). Fixed words and
+#: one bounded word: linear.
+_RECALL_ASK_RE = re.compile(
+    r"\bremind\s+me\s+(?:again\s+)?(?:what|who|whom|whose|where|which|how|why|whether|if|of|about)\b"
+    r"|ذكرني\s+(?:مرة\s+ثانية\s+)?(?:شنو|وش|ايش|إيش|اش|ماذا|ما|مين|من|وين|أين|اين|كيف|شلون|ليش|لماذا|هل|أي|اي"
+    r"|ب(?!عد)\w{2,})",
+    re.IGNORECASE,
+)
+#: A time to book a reminder at, named anywhere in the message: a recall ask
+#: with one is still a booking ("remind me about the dentist tomorrow",
+#: "ذكرني بموعد الدكتور بكرة").
+_BOOKING_TIME_RE = re.compile(
+    r"\b(?:tomorrow|tonight|later\s+today|every\s+(?:day|week|month|morning|evening|night)|daily|weekly"
+    r"|next\s+(?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+    r"|in\s+\d{1,3}\s*(?:min(?:ute)?s?|hours?|days?|weeks?)|at\s+\d{1,2}(?::\d{2})?"
+    r"|\d{1,2}(?::\d{2})?\s*(?:am|pm)|on\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b"
+    r"|بكرة|بكره|باجر|غدا|غداً|الليلة|الساعة\s*\d|الساعه\s*\d|كل\s+يوم|الأسبوع\s+الجاي|الاسبوع\s+الجاي"
+    r"|بعد\s+(?:\d|ساعة|ساعه|ساعتين|شوي|يوم|يومين|أسبوع|اسبوع|دقيقة|دقيقه|دقايق|نص)|الصبح|المسا",
+    re.IGNORECASE,
+)
+
+
+def books_a_reminder(text: str) -> bool:
+    """Whether *text* asks Kazma to book a reminder: "remind me" (or a
+    reminder named) that is not only a request to recall what was said,
+    or one that names a time to book at."""
+    if not _REMIND_RE.search(text):
+        return False
+    if _BOOKING_TIME_RE.search(text):
+        return True
+    return bool(_REMIND_RE.search(_RECALL_ASK_RE.sub(" ", text)))
 
 
 #: Words that say "a document" without naming its format: a format named
@@ -275,7 +312,7 @@ def detect_acts(
         acts.append(IntentAct(kind=ActKind.DOCUMENT_INTEL, confidence=0.70))
 
     # ── remind ───────────────────────────────────────────────────────
-    if _REMIND_RE.search(t):
+    if books_a_reminder(t):
         acts.append(IntentAct(kind=ActKind.REMIND, confidence=0.70))
 
     if not acts:

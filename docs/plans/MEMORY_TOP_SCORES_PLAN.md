@@ -588,6 +588,15 @@ session and fixed in two commits.
    4 s refinement (15 of finding 12's 16). Recalling what was said is not
    booking a reminder. The main session's decision: its own commit, after
    finding 11, with a paired EN/AR gate through the real classifier.
+   Fixed the same day (`heuristics.books_a_reminder`): "remind me"
+   followed by a question word, "of" or "about" (Arabic: a question word, or
+   "ب" before a noun) asks to recall, unless the message names a time to
+   book at ("remind me about the dentist tomorrow", "ذكرني بموعد الدكتور
+   بكرة" still book). On the 200 dev questions the refinement is now asked
+   for none (15 before, every one a recall question). A reminder named with
+   no time ("remind me about my appointment") is now no `remind` act: the
+   turn's model still books one when asked, with no intent-engine hint.
+   Gate: `tests/test_remind_me_what_you_said.py`.
 14. **"Work on this" shows the user's employer.** Found measuring finding
    10's fix (22 Nov): "Can you work on this report?" and "اشتغل على
    هالتقرير" show the user's `works_at` fact, before the fix and after it,
