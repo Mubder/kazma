@@ -2508,7 +2508,7 @@
                     <input type="number" min="0" step="0.01" class="form-input" id="people-default-usd" x-model="limitDraftForPeople.usd">
                 </div>
                 <button class="btn btn-primary" type="button" id="people-default-save" @click="saveLimitForPeople()">{{ t('settings.people_limit_save') }}</button>
-                <button class="btn btn-secondary" type="button" id="people-default-shipped" x-show="limitForPeople.set" @click="useShippedLimit()">{{ t('settings.people_limit_shipped') }}</button>
+                <button class="btn btn-secondary" type="button" id="people-default-shipped" x-show="limitForPeople.set" x-cloak @click="useShippedLimit()">{{ t('settings.people_limit_shipped') }}</button>
             </div>
             <div class="account-list-table">
               <div class="account-list-head">
@@ -2532,7 +2532,7 @@
                       <input type="number" min="1" step="1" class="form-input" style="flex:1;min-width:120px" x-model="limitDraft.tokens" :aria-label="window.t('settings.people_limit_tokens_of', {name: p.name || window.t('settings.people_owner')})">
                       <input type="number" min="0" step="0.01" class="form-input" style="flex:1;min-width:120px" x-model="limitDraft.usd" :aria-label="window.t('settings.people_limit_usd_of', {name: p.name || window.t('settings.people_owner')})">
                       <button type="button" class="btn btn-sm btn-primary" @click="savePersonLimit(p)">{{ t('settings.people_limit_save') }}</button>
-                      <button type="button" class="btn btn-sm btn-secondary" x-show="p.daily_limit" @click="clearPersonLimit(p)" x-text="p.owner ? window.t('settings.people_limit_clear_admin') : window.t('settings.people_limit_clear')"></button>
+                      <button type="button" class="btn btn-sm btn-secondary" x-show="p.daily_limit" x-cloak @click="clearPersonLimit(p)" x-text="p.owner ? window.t('settings.people_limit_clear_admin') : window.t('settings.people_limit_clear')"></button>
                       <button type="button" class="btn btn-sm btn-ghost" @click="limitEditing = ''">{{ t('settings.people_limit_cancel') }}</button>
                     </div>
                   </div>
