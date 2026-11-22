@@ -31,6 +31,8 @@ import sqlite3
 import time
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record
+
 __all__ = [
     "LEGACY_EPISODE_TABLE",
     "LEGACY_SESSION_PREFIX",
@@ -83,7 +85,7 @@ def _texts_by_tenant(conn: sqlite3.Connection) -> dict[str, set[str]]:
     ):
         key = _text_key(user, summary, answer)
         if key:
-            held.setdefault(str(tenant or "default"), set()).add(key)
+            held.setdefault(space_of_record(tenant), set()).add(key)
     return held
 
 
@@ -98,7 +100,7 @@ def _forgotten(conn: sqlite3.Connection, row: Any, cols: list[str]) -> bool:
 
     return refuses_write(
         conn,
-        tenant_id=str(_row_value(row, cols, "tenant_id") or "default"),
+        tenant_id=space_of_record(_row_value(row, cols, "tenant_id")),
         session_id=str(_row_value(row, cols, "session_id") or ""),
         turn_number=int(_row_value(row, cols, "turn_number") or 0),
         user_text=_row_value(row, cols, "user_text"),
@@ -131,7 +133,7 @@ def legacy_archive_counts(conn: sqlite3.Connection) -> dict[str, int]:
             _row_value(row, cols, "summary_text"),
             _row_value(row, cols, "assistant_text"),
         )
-        tenant = str(_row_value(row, cols, "tenant_id") or "default")
+        tenant = space_of_record(_row_value(row, cols, "tenant_id"))
         if key and key in held.get(tenant, set()):
             out["duplicate"] += 1
         elif _forgotten(conn, row, cols):
@@ -176,7 +178,7 @@ def restore_legacy_episode_archive(conn: sqlite3.Connection) -> dict[str, int]:
         if not key:
             report["empty"] += 1
             continue
-        tenant = str(_row_value(row, cols, "tenant_id") or "default")
+        tenant = space_of_record(_row_value(row, cols, "tenant_id"))
         if key in held.get(tenant, set()):
             report["duplicate"] += 1
             continue
@@ -255,7 +257,7 @@ def legacy_copies(
     """
     from kazma_core.memory.vector_engine import RECALLABLE_TIERS
 
-    tenant = tenant_id or "default"
+    tenant = space_named_or_bound(tenant_id)
     tiers = ",".join("?" for _ in RECALLABLE_TIERS)
     if rows is None:
         rows = conn.execute(

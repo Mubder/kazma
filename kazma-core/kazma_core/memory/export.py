@@ -15,6 +15,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["export_nightly_snapshots"]
@@ -83,7 +85,7 @@ def _name(table: str, tenant_id: str, ext: str = "jsonl") -> str:
     return f"kazma_{table}_latest.{ext}" if tenant_id == "default" else f"kazma_{table}_{tenant_id}.{ext}"
 
 
-def export_nightly_snapshots(*, tenant_id: str = "default") -> _ExportResult:
+def export_nightly_snapshots(*, tenant_id: str | None = None) -> _ExportResult:
     """Export the tenant's memory as portable text: current facts, memories,
     archived facts and merge ledgers (JSON-L), the entity graph (GraphML),
     and the audit trail (JSON-L), each whole. Native ``.db`` backups remain
@@ -92,6 +94,7 @@ def export_nightly_snapshots(*, tenant_id: str = "default") -> _ExportResult:
     Returns an :class:`_ExportResult`; a piece that failed is named in
     ``failed`` (a partial export still lands what it could).
     """
+    tenant_id = space_named_or_bound(tenant_id)
     from kazma_core.paths import exports_dir, memory_ops_db, primary_memory_db
 
     out_dir = exports_dir()

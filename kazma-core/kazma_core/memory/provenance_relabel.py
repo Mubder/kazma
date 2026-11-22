@@ -50,6 +50,8 @@ import uuid
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from kazma_core.spaces.scope import space_of_record
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["apply_relabel", "size_relabel"]
@@ -142,7 +144,7 @@ def _classify_tool_facts(
     unnamed: list[sqlite3.Row] = []
     for note in notes:
         if note["chat"] and note["chat_turn"] is not None:
-            by_turn[(str(note["tenant_id"] or "default"), str(note["chat"]), int(note["chat_turn"]))] = note
+            by_turn[(space_of_record(note["tenant_id"]), str(note["chat"]), int(note["chat_turn"]))] = note
         else:
             unnamed.append(note)
     out: dict[str, list[dict[str, Any]]] = {"relabel": [], "kept": [], "unattributed": []}
@@ -152,14 +154,14 @@ def _classify_tool_facts(
         "FROM beliefs WHERE extraction_method = ? ORDER BY ingested_at, id",
         (USER_EXPLICIT,),
     ):
-        tenant = str(fact["tenant_id"] or "default")
+        tenant = space_of_record(fact["tenant_id"])
         session = str(fact["source_session"] or "")
         turn = fact["source_turn"]
         note = by_turn.get((tenant, session, int(turn))) if session and turn is not None else None
         value = str(fact["object"] or "")
         if note is None and not session and value:
             for candidate in unnamed:
-                if (str(candidate["tenant_id"] or "default") == tenant
+                if (space_of_record(candidate["tenant_id"]) == tenant
                         and abs(float(fact["ingested_at"] or 0) - float(candidate["created_at"] or 0)) <= _NOTE_WINDOW_S
                         and value in str(candidate["user_text"] or "")):
                     note = candidate

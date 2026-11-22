@@ -466,3 +466,45 @@ def test_memory_searches_with_no_space_are_refused_once_enforced(enforced) -> No
         search_transcripts("where did I park")
     assert inspect.signature(VectorEngine.nearest_entities).parameters["tenant_id"].default \
         is inspect.Parameter.empty
+
+
+# ── memory: summaries and maintenance ───────────────────────────────────
+
+
+def test_memory_maintenance_with_no_space_is_refused_once_enforced(enforced) -> None:
+    import sqlite3
+
+    from kazma_core.memory.export import export_nightly_snapshots
+    from kazma_core.memory.macro_sleep import run_macro_sleep
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(NoSpaceBound):
+            run_macro_sleep(conn)
+    finally:
+        conn.close()
+    with pytest.raises(NoSpaceBound):
+        export_nightly_snapshots()
+
+
+def test_the_golden_eval_keeps_to_its_own_fixture_tenant() -> None:
+    """It seeds and recalls in a private database of its own: under the
+    owner's tenant whatever space the page asking for it is in, never the
+    bound space (seeded there and recalled as the owner's, it found
+    nothing)."""
+    import inspect
+
+    from kazma_core.memory import eval_golden
+
+    source = inspect.getsource(eval_golden)
+    assert source.count("tenant_id=OWNER_SPACE_ID") == 3
+    assert 'tenant_id="default"' not in source
+
+
+def test_every_memory_fallback_left_is_recall_s() -> None:
+    """The memory session holds recall.py and takes its four itself."""
+    from tests.test_no_space_no_data import _FALLBACK_RE, _product_files
+
+    left = {path.name for path in _product_files()
+            if _FALLBACK_RE.search(path.read_text(encoding="utf-8"))}
+    assert left <= {"recall.py"}, left

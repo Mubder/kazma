@@ -30,6 +30,7 @@ from typing import Any, Callable
 
 from kazma_core.memory.episode_text import embed_text
 from kazma_core.memory.speakers import fact_vector_text
+from kazma_core.spaces.scope import space_of_record
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +267,7 @@ def rebuild_embeddings(
                     conn, emb, "episodes", str(row["id"]), text,
                     still_params=(row["user_text"], row["assistant_text"], row["summary_text"]),
                     replacing=row["embedding"], model=target_model,
-                    tenant_id=str(row["tenant_id"] or "default"),
+                    tenant_id=space_of_record(row["tenant_id"]),
                     meta={"kind": "episode", "tier": row["tier"] or "episodic"},
                 )
                 if outcome != "written":
@@ -291,7 +292,7 @@ def rebuild_embeddings(
                     conn, emb, "beliefs", str(row["id"]), text,
                     still_params=(row["subject"], row["predicate"], row["object"]),
                     replacing=row["embedding"], model=target_model,
-                    tenant_id=str(row["tenant_id"] or "default"),
+                    tenant_id=space_of_record(row["tenant_id"]),
                     meta={"kind": "belief", "tier": "semantic"},
                 )
                 if outcome != "written":

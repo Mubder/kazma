@@ -55,6 +55,7 @@ from typing import Any
 
 from kazma_core.memory.chat_history import STORE_ERRORS
 from kazma_core.memory.limits import LEGACY_BRIDGE_CUT, LEGACY_SUMMARY_CUT, LEGACY_TEXT_CUT
+from kazma_core.spaces.scope import space_of_record
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ def _ids_for(row: Any, cand: _Candidate) -> tuple[str, ...]:
     """The ids the episode's writer may have given *cand* in the row's
     tenant: today's form and the one from before a space was part of it."""
     session, turn = str(row["session_id"] or ""), int(row["turn_number"] or 0)
-    tenant = str(row["tenant_id"] or "default") if "tenant_id" in row.keys() else "default"
+    tenant = space_of_record(row["tenant_id"] if "tenant_id" in row.keys() else None)
     if _is_bridge(row):
         from kazma_core.memory.swarm_bridge import bridge_episode_ids
 
@@ -446,7 +447,7 @@ def _forgotten_by_the_user(conn: sqlite3.Connection, row: Any, question: str | N
 
     session = str(row["session_id"] or "")
     keys = list(dict.fromkeys([session, *chat_keys(session)]))
-    _whole, turns = forgotten_turns(conn, tenant_id=str(row["tenant_id"] or "default"), keys=keys)
+    _whole, turns = forgotten_turns(conn, tenant_id=space_of_record(row["tenant_id"]), keys=keys)
     return (int(row["turn_number"] or 0), question_sha(question)) in turns
 
 

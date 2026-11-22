@@ -33,6 +33,8 @@ import sqlite3
 import time
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_macro_sleep"]
@@ -112,7 +114,7 @@ def run_macro_sleep(
     primary_conn: sqlite3.Connection,
     *,
     cfg: dict[str, Any] | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     now: float | None = None,
 ) -> dict[str, Any]:
     """Execute one macro-consolidation sweep.
@@ -120,6 +122,7 @@ def run_macro_sleep(
     Returns a stats dict: ``{demoted_recall, demoted_episodic,
     archived_beliefs, scored_episodes}``.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     now = now if now is not None else time.time()
     # Recalls the database was too busy to count (recall.flush_access_bumps):
     # counted before the access clock decides what to archive (Memory audit M14).
