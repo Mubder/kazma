@@ -37,7 +37,9 @@ what the English pass refuses by capitalisation, which Arabic does not have:
   ("شركة", "بنك" ...) or a Latin name; "عند/لدى X" is an employer;
 * a place must END there -- end of sentence, a conjunction, a time word --
   so "انتقلت إلى وظيفة جديدة" (a new job) and "ساكن في شقة صغيرة" are not
-  places.
+  places. The present after it ends it too ("أسكن في لشبونة هالأيام":
+  ``time_words.present_ar_words``, the one list of the present that recall
+  reads; it kept nothing until 2026-11-22, the memory plan's finding 10).
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ import re
 from typing import Any
 
 from kazma_core.memory.clause_subject import OTHER, subjects
+from kazma_core.memory.time_words import present_ar_words
 
 __all__ = ["extract_arabic_facts"]
 
@@ -187,7 +190,8 @@ def _ends(words: list[_Word], i: int) -> bool:
     if i >= len(words):
         return True
     w = words[i]
-    return w.punct or w.folded in _ENDERS or (w.arabic and w.folded[0] in "وف" and len(w.folded) > 3)
+    return (w.punct or w.folded in _ENDERS or w.folded in present_ar_words()
+            or (w.arabic and w.folded[0] in "وف" and len(w.folded) > 3))
 
 
 def _latin_run(words: list[_Word], i: int, pattern: re.Pattern[str] = _LATIN_NAME) -> tuple[str, int]:

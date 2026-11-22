@@ -305,7 +305,7 @@
    "heuristic.ar.named": 1.0,
    "heuristic.ar.quiet": 1.0,
    "heuristic.ar.right": 1.0,
-   "heuristic.en.found": 0.3158,
+   "heuristic.en.found": 0.4211,
    "heuristic.en.named": 1.0,
    "heuristic.en.quiet": 1.0,
    "heuristic.en.right": 1.0,
@@ -498,7 +498,14 @@
   ]
  },
  "writes": {
-  "version": 7,
+  "version": 8,
+  "versions": [
+   {
+    "version": 8,
+    "date": "2026-11-22",
+    "reason": "English moved-to statements read as the Arabic twin's; the two scenarios locked the old difference between the languages"
+   }
+  ],
   "recording": {
    "sha256": "632cc76d5f590784be9e1f4fa7f26903646aa24f0809b7c2a7665d726d1e4d3c",
    "replies_sha256": "e254d88e80f5f4643932bc9c9c5fbd35c986131c67f4b599ed5e956c004bd056",

@@ -1,5 +1,5 @@
 {
- "version": 7,
+ "version": 8,
  "scenarios": [
   {
    "id": "update-en-moved",
@@ -26,6 +26,52 @@
    "current": [
     {
      "subject": "user",
+     "object": "Rotterdam",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Paris"
+    }
+   ],
+   "updates": [
+    {
+     "subject": "user",
+     "object": "Rotterdam",
+     "replaced": "Paris"
+    }
+   ]
+  },
+  {
+   "id": "update-en-moved-undone",
+   "category": "update",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "We moved to Rotterdam last month.",
+     "recorded": "e06"
+    },
+    {
+     "answer": "undo"
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
      "object": "Paris",
      "trust": "user"
     }
@@ -36,12 +82,7 @@
      "object": "Rotterdam"
     }
    ],
-   "pending": [
-    {
-     "subject": "user",
-     "object": "Rotterdam"
-    }
-   ]
+   "updates": []
   },
   {
    "id": "update-en-moved-confirmed",
@@ -210,7 +251,54 @@
      "subject": "user",
      "object": "الكويت"
     }
+   ],
+   "updates": [
+    {
+     "subject": "user",
+     "object": "الرياض",
+     "replaced": "الكويت"
+    }
    ]
+  },
+  {
+   "id": "update-ar-moved-undone",
+   "category": "update",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "انتقلنا إلى الرياض الشهر الماضي.",
+     "recorded": "a05"
+    },
+    {
+     "answer": "undo"
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "الرياض"
+    }
+   ],
+   "updates": []
   },
   {
    "id": "update-ar-new-job",
@@ -326,20 +414,21 @@
    "current": [
     {
      "subject": "user",
-     "object": "Kuwait City",
+     "object": "Rotterdam",
      "trust": "user"
     }
    ],
    "not_current": [
     {
      "subject": "user",
-     "object": "Rotterdam"
+     "object": "Kuwait City"
     }
    ],
-   "pending": [
+   "updates": [
     {
      "subject": "user",
-     "object": "Rotterdam"
+     "object": "Rotterdam",
+     "replaced": "Kuwait City"
     }
    ]
   },

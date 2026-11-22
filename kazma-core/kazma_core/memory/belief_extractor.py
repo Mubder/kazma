@@ -318,7 +318,6 @@ def turn_message(
         DEEP_PASS_PREVIOUS_QUESTION,
         DEEP_PASS_QUESTION,
     )
-
     from kazma_core.safety.prompt_fence import format_untrusted_block
 
     material = []
@@ -682,6 +681,24 @@ def _started_on(since: str | None, said_at: float | None, zone: Any) -> str | No
 # ── Heuristic fallback (no LLM) ──────────────────────────────────────────
 
 
+#: Where an English value (a place, an employer) ends: a time phrase
+#: ("these days", "last month": ``time_words.TIME_AFTER_EN``), "too",
+#: "also", punctuation, "and", "I", Arabic script ("I work at Zain الحين"),
+#: or the end. A time phrase after the place voided the fact until
+#: 2026-11-22 ("I live in Lisbon these days" kept nothing; the memory
+#: plan's finding 10): only "now" and "currently" ended it.
+def _value_end_en() -> str:
+    from kazma_core.memory.time_words import TIME_AFTER_EN
+
+    return rf"(?:\s+(?:too|also|{TIME_AFTER_EN})\b|[.,!]|\s+and\s|\s+[Ii]\s|\s+(?=[\u0621-\u064a])|$)"
+
+
+#: "I moved to Porto" / "We moved to Porto": where the user lives now, as
+#: the Arabic pass reads "انتقلت إلى بورتو" (it kept nothing in English).
+#: A capitalised name that ends where a value ends, like "I live in".
+_MOVED_EN = r"\b(?:[Ii]|[Ww]e) (?:moved|relocated) to\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})"
+
+
 def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
     """Cheap offline belief extraction (no LLM call).
 
@@ -698,6 +715,7 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
     if not text:
         return []
     beliefs: list[dict[str, Any]] = []
+    end = _value_end_en()
     patterns: list[tuple[re.Pattern[str], str]] = [
         # All patterns deliberately AVOID re.IGNORECASE because it would make
         # [A-Z] match lowercase, breaking case-sensitive name/place detection
@@ -705,11 +723,12 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
         # explicit [Mm]/[Ii] alternation for case tolerance.
         (re.compile(r"\b(?:[Mm]y name is|[Ii](?:'m| am) (?:called|named)|[Cc]all me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})"), "name"),
         # A Latin name ends where Arabic script starts ("I work at Zain الحين").
-        (re.compile(r"\b[Ii] live (?:in|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|\s+(?=[\u0621-\u064a])|$)"), "location"),
+        (re.compile(r"\b[Ii] live (?:in|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})" + end), "location"),
         # "I work at X" is where the user works, not where they live: it was
         # one pattern with "I live in" and stored the employer as lives_in.
         # "I work in X" names a place or a field -- too ambiguous to store.
-        (re.compile(r"\b[Ii] work (?:at|for)\s+([A-Z][a-zA-Z0-9&]+(?:\s+[A-Z][a-zA-Z0-9&]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|\s+(?=[\u0621-\u064a])|$)"), "employer"),
+        (re.compile(r"\b[Ii] work (?:at|for)\s+([A-Z][a-zA-Z0-9&]+(?:\s+[A-Z][a-zA-Z0-9&]+){0,2})" + end), "employer"),
+        (re.compile(_MOVED_EN + end), "moved"),
         (re.compile(r"\b[Mm]y (?:favorite|favourite)\s+(\w+)\s+is\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "favorite"),
         # Not "need": "I need to finish this report" is no preference.
         (re.compile(r"\b[Ii] (?:prefer|like|love|use)\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2}"
@@ -728,6 +747,12 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
             val = m.group(1).strip().rstrip(".,!")
             beliefs.append({"subject": "user", "predicate": "lives_in", "predicate_type": "functional",
                             "object": val, "confidence": 0.85, "importance": 4})
+        elif kind == "moved":
+            if any(b["predicate"] == "lives_in" for b in beliefs):
+                continue  # "I live in Braga" said in the same message wins
+            val = m.group(1).strip().rstrip(".,!")
+            beliefs.append({"subject": "user", "predicate": "lives_in", "predicate_type": "functional",
+                            "object": val, "confidence": 0.8, "importance": 4})
         elif kind == "employer":
             val = m.group(1).strip().rstrip(".,!")
             beliefs.append({"subject": "user", "predicate": "works_at", "predicate_type": "functional",

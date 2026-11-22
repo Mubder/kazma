@@ -2651,6 +2651,19 @@ four injected were noise.
   kind, the English reading first. Gate: `tests/test_memory_arabic_facts.py`
   (sentences not in the benchmark, both ways; the pass switched off as the
   negative control).
+- **A time word after a place ends it, in both languages** (2026-11-22,
+  the memory plan's finding 10): "I live in Lisbon these days." and
+  "أسكن في لشبونة هالأيام." kept nothing in any real-use run (only "now"
+  and "currently" ended an English place; "هالأيام" was no Arabic end).
+  One list, `memory/time_words.py`: `TIME_AFTER_EN` (the present, a period
+  named from today, "N units ago") ends the English pass's place and
+  employer (`belief_extractor._value_end_en`), `present_ar_words()` the
+  Arabic pass's (`arabic_facts._ends`). "I moved to Porto." / "We moved to
+  ..." is the user's home as "انتقلت إلى بورتو" is (`_MOVED_EN`; "I live in"
+  in the same message wins). Gate: `tests/test_memory_time_ends_a_place.py`
+  (each statement stored by the real quick pass, EN/AR, with and without a
+  time word; not-a-place and someone else's move keep nothing; today's rules
+  as the negative control).
 - **A fact about someone else is never the user's** (2026-11, the memory
   framework audit's speaker rule, `memory/clause_subject.py`). `subjects` says, for
   each word, who the words before it last named: the speaker ("أنا", "I",

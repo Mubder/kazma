@@ -1912,6 +1912,12 @@ def _said(subject: str, predicate: str, kind: str, obj: str) -> dict[str, Any]:
     return {"subject": subject, "predicate": predicate, "predicate_type": kind, "object": obj, "confidence": 0.9}
 
 
+def _update(subject: str, obj: str, replaced: str) -> dict[str, Any]:
+    """An update the change log shows with Undo (``updates``): the user's
+    fact *replaced* by *obj* (``memory/changes.py``)."""
+    return {"subject": subject, "object": obj, "replaced": replaced}
+
+
 def _now(subject: str, obj: str, trust: str | None = None, *, exact: bool = False,
          started: str | bool | None = False, predicate: str | None = None,
          ended: bool = False) -> dict[str, Any]:
@@ -1967,16 +1973,25 @@ def _attached(message: str, filename: str, mime: str, document: str) -> str:
 WRITE_SCENARIOS: list[dict[str, Any]] = [
     # ── update: stated, then corrected in the user's own words ──────────────
     # A correction the quick pass reads in its exact shapes replaces the fact
-    # ("I live in Rotterdam now", "انتقلنا إلى ..."). One only the model reads
-    # never does: Kazma cannot tell without a model whether the model's name
-    # fits the words, so it keeps the user's fact and asks (``pending``);
-    # the user's "Yes, change it" (an ``answer`` turn) makes the change (the
-    # review of the memory framework audit's F1, 2026-11-18; v3).
+    # ("I live in Rotterdam now", "We moved to ...", "انتقلنا إلى ..."), and
+    # the change log shows it with Undo (``updates``; an ``undo`` turn takes it
+    # back). One only the model reads never does: Kazma cannot tell without a
+    # model whether the model's name fits the words, so it keeps the user's
+    # fact and asks (``pending``); the user's "Yes, change it" (an ``answer``
+    # turn) makes the change (the review of the memory framework audit's F1,
+    # 2026-11-18; v3). "We moved to Rotterdam" was the model's alone until
+    # v8: the English quick pass did not read a move its Arabic twin read
+    # (the memory plan's finding 10, 2026-11-22).
     {"id": "update-en-moved", "category": "update", "lang": "en", "turns": [
         ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
         ("We moved to Rotterdam last month.", ("recorded", "e06"))],
-     "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Rotterdam")],
-     "pending": [_now("user", "Rotterdam")]},
+     "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Paris")],
+     "updates": [_update("user", "Rotterdam", "Paris")]},
+    {"id": "update-en-moved-undone", "category": "update", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("We moved to Rotterdam last month.", ("recorded", "e06")),
+        ("", ("answer", "undo"))],
+     "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Rotterdam")], "updates": []},
     {"id": "update-en-moved-confirmed", "category": "update", "lang": "en", "turns": [
         ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
         ("We moved to Rotterdam last month.", ("recorded", "e06")),
@@ -1994,7 +2009,13 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
     {"id": "update-ar-moved", "category": "update", "lang": "ar", "turns": [
         ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
         ("انتقلنا إلى الرياض الشهر الماضي.", ("recorded", "a05"))],
-     "current": [_now("user", "الرياض", "user")], "not_current": [_now("user", "الكويت")]},
+     "current": [_now("user", "الرياض", "user")], "not_current": [_now("user", "الكويت")],
+     "updates": [_update("user", "الرياض", "الكويت")]},
+    {"id": "update-ar-moved-undone", "category": "update", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("انتقلنا إلى الرياض الشهر الماضي.", ("recorded", "a05")),
+        ("", ("answer", "undo"))],
+     "current": [_now("user", "الكويت", "user")], "not_current": [_now("user", "الرياض")], "updates": []},
     {"id": "update-ar-new-job", "category": "update", "lang": "ar", "turns": [
         ("أشتغل في شركة زين.", ("written", [_said("user", "works_at", "functional", "شركة زين")])),
         ("تركت زين، أشتغل الحين في أريدُو.", ("written", [_said("user", "works_at", "functional", "أريدو")]))],
@@ -2008,8 +2029,8 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
     {"id": "update-mixed-moved", "category": "update", "lang": "mixed", "turns": [
         ("My name is Omar وساكن في Kuwait City.", ("recorded", "m01")),
         ("We moved to Rotterdam last month.", ("recorded", "e06"))],
-     "current": [_now("user", "Kuwait City", "user")], "not_current": [_now("user", "Rotterdam")],
-     "pending": [_now("user", "Rotterdam")]},
+     "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Kuwait City")],
+     "updates": [_update("user", "Rotterdam", "Kuwait City")]},
     # A word that also introduces a text to work on, said with no text named:
     # the user's own correction, kept as theirs.
     {"id": "update-en-correction", "category": "update", "lang": "en", "turns": [
@@ -2273,8 +2294,11 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
 #: itself (rule A of the second security review, 2026-11-18); its first
 #: reading of a fact is Kazma's own and no question. 5: ``temporal`` (the
 #: framework audit's part C2, 2026-11-20). 6: ``replaces`` (C2, F4's second
-#: layer). 7: ``retraction`` (C2).
-WRITES_VERSION = 7
+#: layer). 7: ``retraction`` (C2). 8: English moved-to statements read as
+#: the Arabic twin's; the two scenarios locked the old difference between the
+#: languages (the memory plan's finding 10, 2026-11-22); the change log's
+#: update in the expected outcome (``updates``) and an ``undo`` turn.
+WRITES_VERSION = 8
 
 
 def build_writes() -> dict[str, Any]:
@@ -2298,8 +2322,8 @@ def build_writes() -> dict[str, Any]:
                         raise ValueError(f"{sc['id']}: a written reply holds only what the model's reply holds")
                 turns.append({"user": text, "written": reply})
             elif kind == "answer":
-                if reply not in ("confirm", "dismiss"):
-                    raise ValueError(f"{sc['id']}: the user answers confirm or dismiss, not {reply!r}")
+                if reply not in ("confirm", "dismiss", "undo"):
+                    raise ValueError(f"{sc['id']}: the user answers confirm, dismiss or undo, not {reply!r}")
                 turns.append({"answer": reply})
             else:
                 raise ValueError(f"{sc['id']}: a turn's reply is recorded, written or an answer, not {kind!r}")
@@ -2307,6 +2331,8 @@ def build_writes() -> dict[str, Any]:
                  "current": sc["current"], "not_current": sc["not_current"]}
         if sc.get("pending"):
             built["pending"] = sc["pending"]
+        if "updates" in sc:
+            built["updates"] = sc["updates"]
         scenarios.append(built)
     ids = [s["id"] for s in scenarios]
     if len(set(ids)) != len(ids):
@@ -2545,7 +2571,8 @@ def _edge_lock(
 
 
 def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | None = None,
-              edges: list[tuple[str, str]] | None = None, prompt_changed: str | None = None) -> int:
+              edges: list[tuple[str, str]] | None = None, prompt_changed: str | None = None,
+              why: str | None = None) -> int:
     """Write the replayed scores as the ratchet; refuse to lower any of them.
 
     The ratchet names the dataset versions it was measured on (the recall
@@ -2633,7 +2660,7 @@ def _cmd_lock(rebaseline: bool, trade: str | None = None, new_recording: str | N
         extraction, problems = _extraction_lock(old.get("extraction") or {}, fresh=extraction_new,
                                                 new_recording=new_recording, prompt_changed=prompt_changed)
         writes, more = _writes_lock(old.get("writes") or {}, fresh=writes_new, new_recording=new_recording,
-                                    pending=extraction.get("pending_recording"))
+                                    pending=extraction.get("pending_recording"), why=why)
         problems += more
         speakers, more = _speakers_lock(old.get("speakers") or {}, fresh=speakers_new)
         problems += more
@@ -2918,9 +2945,26 @@ def _scale_lock(old: dict[str, Any], *, fresh: bool = False) -> tuple[dict[str, 
             "scores": now}, problems
 
 
+def writes_versions(old: dict[str, Any], version: int, why: str | None) -> tuple[list[dict[str, Any]], list[str]]:
+    """The lock's record of the write scenarios' versions, with *version*
+    added when it is new, and why it is refused: a new version is locked
+    with its reason (``lock --rebaseline --why``), which the record keeps
+    beside the version and the day. Never a quiet edit: a scenario's
+    expected outcome changes only in a new version, and the lock says why."""
+    import datetime as _dt
+
+    held = list(old.get("versions") or [])
+    if old.get("version") == version:
+        return held, []
+    if not (why or "").strip():
+        return held, [f"write scenarios v{version}: a new version is locked with its reason (lock --rebaseline "
+                      "--why \"...\")"]
+    return [*held, {"version": version, "date": _dt.date.today().isoformat(), "reason": why.strip()}], []
+
+
 def _writes_lock(
     old: dict[str, Any], *, fresh: bool = False, new_recording: str | None = None,
-    pending: dict[str, Any] | None = None,
+    pending: dict[str, Any] | None = None, why: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """The write scenarios' part of the lock, and why it is refused.
 
@@ -2953,7 +2997,9 @@ def _writes_lock(
         newly = sorted(set(report["failing"]) - set(old.get("failing") or []))
         if newly:
             problems.append(f"writes: scenarios that passed now fail: {newly}")
-    return {"version": report["version"], "recording": identity, "scores": now,
+    versions, more = writes_versions(old, report["version"], why)
+    problems += more
+    return {"version": report["version"], "versions": versions, "recording": identity, "scores": now,
             "failing": report["failing"]}, problems
 
 
@@ -3058,7 +3104,7 @@ def _sealed_vectors(questions: list[dict[str, Any]], replay_model: str) -> str |
     """Record the sealed questions' vectors with the real model the first
     time (never the memories': they replay from the benchmark's recording).
     Returns why it cannot, or None."""
-    from kazma_core.memory.benchmark import ReplayEmbedder, RecordingEmbedder, _text_key
+    from kazma_core.memory.benchmark import RecordingEmbedder, ReplayEmbedder, _text_key
 
     if SEALED_VECTORS.is_file():
         held = ReplayEmbedder(SEALED_VECTORS)
@@ -3173,6 +3219,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="declare a change of the extraction prompt that waits for its recording; recorded")
     lock.add_argument("--edge", nargs=2, action="append", metavar=("QUESTION", "REASON"),
                       help="name a question whose hit flips inside the vectors' rounding (EDGE_RULE); recorded")
+    lock.add_argument("--why", metavar="REASON",
+                      help="why a new version of the write scenarios is locked (required with it); recorded")
     pgv = sub.add_parser("lock-pgvector", help="lock the pgvector path's floors from a named run")
     pgv.add_argument("--from", dest="source", required=True,
                      help="the measurement file, or a CI log holding its PGVECTOR_MEASUREMENT line")
@@ -3196,7 +3244,7 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_vectors(fresh=args.fresh)
     if args.cmd == "lock":
         return _cmd_lock(args.rebaseline, args.trade, args.new_recording,
-                         [tuple(e) for e in args.edge] if args.edge else None, args.prompt_changed)
+                         [tuple(e) for e in args.edge] if args.edge else None, args.prompt_changed, args.why)
     if args.cmd == "lock-pgvector":
         return _cmd_lock_pgvector(args.source, args.run, args.mode)
     if args.cmd == "sealed":

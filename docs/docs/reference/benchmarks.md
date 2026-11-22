@@ -50,7 +50,7 @@ Turns in English, Arabic and both, with the facts a person would expect remember
 
 | Pass | Language | Found | Same name | Right | Quiet | Rests on |
 |---|---|---|---|---|---|---|
-| Quick pass | English | 31.6 % | 100.0 % | 100.0 % | 100.0 % | 18 turns |
+| Quick pass | English | 42.1 % | 100.0 % | 100.0 % | 100.0 % | 18 turns |
 | Quick pass | Arabic | 50.0 % | 100.0 % | 100.0 % | 100.0 % | 14 turns |
 | Quick pass | Mixed | 60.0 % | 100.0 % | 100.0 % | 100.0 % | 8 turns |
 | Model pass (5 askings a turn) | English | 100.0 % | 86.3 % | 100.0 % | 100.0 % | 90 askings (18 turns, 5 each) |

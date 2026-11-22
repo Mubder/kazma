@@ -1670,9 +1670,17 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
         for number, turn in enumerate(scenario["turns"], 1):
             if "answer" in turn:
                 # The user answers the newest change waiting for them, on the
-                # Memory page or with /memory confirm (memory/changes.py).
+                # Memory page or with /memory confirm (memory/changes.py), or
+                # takes the newest update back (Undo, /memory undo).
                 from kazma_core.memory import changes
 
+                if turn["answer"] == "undo":
+                    updates = [c for c in changes.list_changes(primary, tenant_id=BENCH_TENANT)
+                               if c["kind"] == "update"]
+                    if updates:
+                        changes.undo(primary, updates[0]["id"], tenant_id=BENCH_TENANT, actor="benchmark",
+                                     ops_conn=ops)
+                    continue
                 waiting = [c for c in changes.list_changes(primary, tenant_id=BENCH_TENANT)
                            if c["kind"] == "pending"]
                 if waiting and turn["answer"] == "confirm":
@@ -1707,6 +1715,9 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
             "SELECT subject, CASE WHEN new_value = '' THEN old_value ELSE new_value END AS object, "
             "new_value = '' AS ended FROM memory_changes WHERE tenant_id = ? AND kind = 'pending' "
             "AND state = 'open' ORDER BY created_at", (BENCH_TENANT,))]
+        updated = [dict(r) for r in primary.execute(
+            "SELECT subject, new_value AS object, old_value AS replaced FROM memory_changes "
+            "WHERE tenant_id = ? AND kind = 'update' AND state = 'open' ORDER BY created_at", (BENCH_TENANT,))]
     finally:
         primary.close()
         ops.close()
@@ -1732,10 +1743,23 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
             problems.append(f"not waiting for the user: {expected['subject']} {expected['object']}")
     problems += [f"waiting for the user, unexpected: {w['subject']} {w['object']}" for w in waiting
                  if not any(_expected_holds(e, {**w, "extraction_method": ""}) for e in expected_waiting)]
+    # The user's fact replaced from another turn is in the change log with
+    # Undo (memory/changes.py): exactly the scenario's ``updates``, when it
+    # names them.
+    if "updates" in scenario:
+        def _is_update(e: dict[str, Any], u: dict[str, Any]) -> bool:
+            return (_expected_holds(e, {**u, "extraction_method": ""})
+                    and _holds(_folded(e["replaced"]), _folded(u["replaced"])))
+
+        problems += [f"not in the change log: {e['subject']} {e['object']} (was {e['replaced']})"
+                     for e in scenario["updates"] if not any(_is_update(e, u) for u in updated)]
+        problems += [f"in the change log, unexpected: {u['subject']} {u['object']} (was {u['replaced']})"
+                     for u in updated if not any(_is_update(e, u) for e in scenario["updates"])]
     return {"id": scenario["id"], "category": scenario["category"], "lang": scenario["lang"],
             "passed": not problems, "problems": problems,
             "current": [f"{r['subject']} {r['predicate']} {r['object']} [{r['extraction_method']}]" for r in rows],
-            "waiting": [f"{w['subject']} {w['object']}" for w in waiting]}
+            "waiting": [f"{w['subject']} {w['object']}" for w in waiting],
+            "updated": [f"{u['subject']} {u['object']} (was {u['replaced']})" for u in updated]}
 
 
 def run_write_scenarios(

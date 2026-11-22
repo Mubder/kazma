@@ -16,6 +16,11 @@ words of a question, in English and Arabic (Gulf and MSA), with no model:
   "used to", "previously", "قبل ما نغيره", "في البداية", "سابقاً". Recall
   then shows the values a fact had before its current one (its history), the
   earlier first.
+* **The present after a statement** ends a place the quick fact pass reads:
+  "I live in Lisbon these days", "أسكن في لشبونة هالأيام" (it kept
+  nothing; the memory plan's finding 10, 2026-11-22), and a period named
+  after it ("I moved to Porto last month"): :data:`TIME_AFTER_EN`,
+  :func:`present_ar_words`.
 
 The words read here are not content words of the question
 (:attr:`TimeAsk.words`): a month's name matched nothing a memory says about
@@ -30,7 +35,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-__all__ = ["TimeAsk", "read_time"]
+__all__ = ["TIME_AFTER_EN", "TimeAsk", "present_ar_words", "read_time"]
 
 DAY = 86400.0
 
@@ -147,6 +152,34 @@ _AR_RELATIVE = re.compile(
     r"الشهر الماضي|الشهر اللي فات|الشهر اللي طاف|الشهر السابق|السنه الماضيه|السنه اللي فاتت|"
     r"العام الماضي|هالاسبوع|هذا الاسبوع|هالشهر|هذا الشهر|هالسنه|هذي السنه)(?=\s|$|[؟?.,،])"
 )
+
+#: "Now" in Arabic (Gulf and MSA), as written; read folded.
+_NOW_AR_RAW = ("الحين", "هالحين", "الحينه", "دحين", "ذحين", "الآن")
+#: The present after a statement, Arabic, as written; read folded: where the
+#: quick pass ends a place (one-word forms; a phrase's first word, "هذي",
+#: already ends one).
+_PRESENT_AR_RAW = (*_NOW_AR_RAW, "حالياً", "هالأيام", "هالفترة", "هالوقت", "مؤخراً")
+#: A time phrase that may follow the value a statement names, lower case:
+#: the present, a period named from today, "N units ago". Where the quick
+#: pass's English place ends ("I live in Lisbon these days", "I moved to
+#: Porto last month"). Fixed words and one bounded number: linear.
+TIME_AFTER_EN = (
+    r"right\s+now|nowadays|now|currently|these\s+days|at\s+the\s+moment|at\s+present|for\s+now|lately|"
+    r"recently|today|yesterday|(?:last|this|past)\s+(?:week|month|year)|"
+    r"(?:\d{1,3}|a\s+couple\s+of|a\s+few|an?|one|two|three|four|five|six|few)\s+"
+    r"(?:days?|weeks?|months?|years?)\s+ago"
+)
+_PRESENT_AR_CACHE: list[frozenset[str]] = []
+
+
+def present_ar_words() -> frozenset[str]:
+    """The one-word forms of the Arabic present, folded ("الحين",
+    "هالايام", "حاليا"): where the Arabic quick pass ends a place."""
+    if not _PRESENT_AR_CACHE:
+        from kazma_core.documents.arabic import fold_for_search
+
+        _PRESENT_AR_CACHE.append(frozenset(fold_for_search(p) for p in _PRESENT_AR_RAW))
+    return _PRESENT_AR_CACHE[0]
 
 
 def _ar_months() -> dict[str, int]:
