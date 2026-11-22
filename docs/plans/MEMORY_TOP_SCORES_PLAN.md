@@ -335,6 +335,28 @@ the benchmarks page regenerated.
 
 ## 7. Found while measuring, to fix (not inside W0)
 
+**First: finding 10, an Arabic question recalls no fact.** Found by the
+real-use suite on qwen3.7-plus (22 Nov), the owner's own language. In every
+Arabic turn of both runs, before and with W1a, recall showed no fact
+("V2 recall: 0 beliefs"), while in English "Where do I live now?" recalled
+the fact. So after "انتقلت إلى بورتو الشهر الماضي" ("I moved to Porto last
+month"), "وين أسكن الحين؟" ("where do I live now?") reached only the two
+conversations, both dated the same day, and the model answered with the
+older city (Lisbon). On deepseek-flash the same step passed, by the model
+reading the turns; the fact never reached the block in either. The product
+cost: an Arabic user's changed facts do not reach the answer. Scheduled
+next after W1a's acceptance, before W1c's runs or anything else (the main
+session's decision): diagnose it with no model call, step by step through
+`_recall_beliefs` as an English-Arabic pair (what the passes stored for the
+statement -- subject, predicate, the value's spelling, its vector -- and
+where the Arabic question loses it: content words, the fact lane's meaning
+floor, the fact vector's text `user lives_in <obj>`, a script mismatch);
+fix where it fails, with a paired gate (the same facts told in English and
+in Arabic, asked in both, all recalled; today's code as the negative
+control); then the speakers set, the benchmark EN/AR and the product
+measures. Two causes, or one W3 also touches, go to the main session
+before building.
+
 1. **A fact told once is kept twice, and forgetting one copy leaves it
    known.** In the real-use suite (`scripts/memory_real_use.py`, 22 Nov)
    "My sister Noura works as a dentist." became two memories: the turn, and
