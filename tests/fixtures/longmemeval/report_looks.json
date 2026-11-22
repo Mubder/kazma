@@ -1,3 +1,16 @@
 {
- "looks": []
+ "looks": [
+  {
+   "date": "2026-11-21",
+   "reason": "W0 starting numbers: the retrieval baseline (no model), before any change is accepted",
+   "commit": "f1c0f0617b600aef0a000dd54148da53414efad9",
+   "command": "retrieve"
+  },
+  {
+   "date": "2026-11-21",
+   "reason": "W0 starting numbers, the same look (the first run was stopped while embedding, before it asked any question)",
+   "commit": "f1c0f0617b600aef0a000dd54148da53414efad9",
+   "command": "retrieve"
+  }
+ ]
 }

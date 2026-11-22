@@ -2342,7 +2342,11 @@ four injected were noise.
   rounds as Kazma showed; ten): within its median block bge-m3 finds 70.1 %
   and 42.3 %, with as many rounds 89.7 % and 77.3 % (2,310 tokens), and
   passes Kazma only at ten rounds (94.8 % and 91.8 %, 5,148 tokens). On the
-  six questions with no answer Kazma still shows 4.7 memories. Result
+  six questions with no answer Kazma still shows 4.7 memories. The report
+  300's starting numbers, one logged look (`retrieval_report.json`): Kazma
+  92.4 % and 82.6 %; bge-m3 within its median block 70.3 % and 38.4 %, as
+  many rounds 88.0 % and 81.2 %, ten rounds 97.5 % and 90.6 %; none of
+  the 24 questions with no answer shows nothing. Result
   rows are written one line each (`dump_result`, `compact_row`). Most missed answers were
   shown but cut by the block's per-memory bounds (`limits.RECALL_SHOW_*`).
   The bounds measured (`scripts/recall_block_bounds.py`, evidence in

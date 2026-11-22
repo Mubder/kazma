@@ -1144,8 +1144,13 @@ and at ten. Tokens are counted as the product measures count the block.
 
 At the same size Kazma finds more; ten whole rounds find more than Kazma,
 at almost five times its tokens (BM25 finds less than bge-m3 at every size;
-the benchmarks page has both). On the six questions with no answer Kazma
-still shows 4.7 memories: it does not yet say nothing. For the questions
+the benchmarks page has both). The 300 report questions, looked at once for
+these starting numbers, say the same: Kazma shows the answer's round for
+92.4 % and every answering conversation for 82.6 %; bge-m3's rounds within
+its block 70.3 % and 38.4 %, as many rounds 88.0 % and 81.2 %, ten rounds
+97.5 % and 90.6 %. On the questions with no answer (6 on
+dev, 24 on report) Kazma still shows memories: it does not yet say
+nothing. For the questions
 whose answer is a word or a phrase, the answer is in the rounds shown for
 45 %, and in the block after its bounds for 30 %.
 
