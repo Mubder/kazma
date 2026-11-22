@@ -135,6 +135,12 @@ def server_env(home: Path, data: Path, port: int, checkout: Path = REPO) -> dict
     return env
 
 
+def turn_failed(answer: str) -> bool:
+    """Whether *answer* is Kazma's own error message (``friendly_llm_error``
+    starts every one with the warning sign), not the model's reply."""
+    return answer.lstrip().startswith("⚠")
+
+
 def judge_item(step: Step, n: int) -> dict[str, Any]:
     """The item LongMemEval's judge prompt reads for *step*."""
     qid = f"real-use-{n}" + ("_abs" if step.abstention else "")
@@ -324,6 +330,11 @@ def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, p
                 answer, phase, asked = browser.send(step.text)
                 row["phase"] = phase
                 row["answered"] = bool(answer.strip())
+                # A turn that ended in Kazma's own error (friendly_llm_error's
+                # sign: a model call the provider refused, such as Qwen's
+                # content inspection) is no memory miss: said apart.
+                if turn_failed(answer):
+                    row["turn_failed"] = True
                 if asked:
                     row["approval_tools"] = asked
                 if step.action == "tell":

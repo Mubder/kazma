@@ -66,7 +66,7 @@ def test_a_kept_result_holds_no_reply_text():
     allowed = {"made_on", "commit", "model", "reasoning", "what", "passed", "languages", "lang", "steps",
                "page_errors", "spent", "n", "kind", "action", "phase", "answered", "calls", "prompt_tokens",
                "completion_tokens", "approval_tools", "forgotten", "provider", "judge", "judge_spent",
-               "prompt_cache_hit_tokens"}
+               "prompt_cache_hit_tokens", "turn_failed"}
     for path in EVIDENCE.glob("*.json"):
         data = json.loads(path.read_text(encoding="utf-8"))
         keys: set[str] = set()
@@ -113,3 +113,13 @@ def test_another_provider_and_another_checkout(suite, monkeypatch, tmp_path):
     suite.set_up_model(browser, provider="deepseek", model="deepseek-flash", key="k", base_url=None)
     assert browser.calls == [("POST", "/api/setup/bootstrap",
                               {"provider": "deepseek", "api_key": "k", "model": "deepseek-flash"})]
+
+
+def test_a_turn_that_ended_in_kazmas_error_is_said_apart(suite):
+    """Qwen's content inspection refused a harmless Arabic question (22 Nov):
+    the turn ended in Kazma's own error, which is no memory miss."""
+    from kazma_core.retry import friendly_llm_error
+
+    error = friendly_llm_error(RuntimeError("LLM call failed (HTTP 400): data_inspection_failed"))
+    assert suite.turn_failed(error)
+    assert not suite.turn_failed("You live in Porto.") and not suite.turn_failed("")
