@@ -642,7 +642,18 @@ completion tokens.
    new office and the Dubai office store nothing. "moved to" is ambiguous: a
    question costs one click, a wrong home is wrong in every later answer.
    The write scenarios are v9 (the moved ones asked, answered Yes, undone).
-   Gate: `tests/test_memory_moved_to_asks.py`.
+   Gate: `tests/test_memory_moved_to_asks.py`. The real-use suite on it
+   (3405f2f49, two runs, judge qwen3.8-flash): 17/18 and 17/18; its own
+   move ("I moved to Porto last month") is now a bare move, and the changed
+   fact asked passed in all four language-runs. The question was recorded
+   once (English, run 2: the user's Lisbon held, Porto asked); in the
+   others the model reached the move itself (it invalidated the old fact,
+   and Porto became Kazma's reading, or finding 16 kept the move turn out).
+   Missed: the forgotten fact (finding 1) and the Arabic question in other
+   words (no "city"/"home" ask-words), once each. Evidence:
+   `docs/audits/evidence/memory_real_use/f15_qwen*.json`,
+   `docs/audits/evidence/memory_findings/finding15_real_use_recall.json`.
+   Spend: 78 model calls, 2.15M prompt tokens, 10,526 completion tokens.
 16. **A forget the model makes in an update turn keeps the update out.**
    Found in finding 10's real-use runs (22 Nov, after, run 2, Arabic): told
    "انتقلت إلى بورتو الشهر الماضي", the model called `memory_invalidate` on
