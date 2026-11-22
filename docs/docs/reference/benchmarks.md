@@ -156,9 +156,13 @@ Of the 129 answerable questions whose answer is a word or a phrase, its text is 
 | bge-m3's 10 nearest rounds (plain retrieval) | 83.5 % | 82.5 % | 6 | 97.5 % | 4,790 |
 | BM25's 10 best rounds (plain retrieval) | 74.5 % | 74.0 % | 3 | 98.0 % | 5,196 |
 
+**Where Kazma stands**: from its recall block alone Kazma answers 67.5 %, against 83.5 % for plain top-10 retrieval (bge-m3) at 3.6 times the tokens, and 89.5 % for the whole history. Kazma's own turn, which reads a memory whole when the block shows it in part, reaches 76.5 %. The largest gaps are multi-session questions (39.6 % against 88.7 % for the whole history; W4) and temporal-reasoning questions (60.4 % against 90.6 % for the whole history; W2).
+
 Kazma's own turn answers through the agent's chat turn (W1c): its base prompt, the recall block a turn gets, `memory_search`, `memory_read` and `memory_list`, at most three tool rounds, asked once (1.76 model calls and 0.71 tool requests a question, 10.43 s median).
 
 Answers cut at the reader's limit: 0; answers or verdicts the API refused: 4 (scored wrong).
+
+**The judges, read beside**: 50 answers read by Claude (labelled model-read until the owner checks them), the 27 the two judges disagree on first. The first judge gave the reading's verdict on 60.0 % of them, the second on 86.0 %; on the disagreements 25.9 % and 74.1 %.
 
 Reproduce: download LongMemEval into a folder of its own, then `python scripts/longmemeval_bench.py retrieve --data DIR` (and `answer`, `translate`, `parallel`; those call a model).
 

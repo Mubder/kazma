@@ -152,7 +152,17 @@ completion 1.04M and 1.05M (0.93M and 0.94M reasoning); Qwen served 1 % and
 own). Results: `tests/fixtures/longmemeval/answers_dev.json`,
 `answers_dev_noise.json`, `noise_dev.json`; the page prints them. The
 largest gaps to the whole history: multi-session 0.40 against 0.89 (W4's),
-temporal 0.60 against 0.91. Left in W0: the 50 model-read answers.
+temporal 0.60 against 0.91 (W2's). Said plainly (the page says it too): from
+its block alone Kazma answers 0.675, against 0.835 for plain top-10
+retrieval at 3.6 times the tokens and 0.895 for the whole history; its own
+turn reaches 0.765 (W1c). The 50 answers read beside the judges
+(`model_read.json`, Claude's reading, labelled model-read until the owner
+checks them; the 27 the judges disagree on first): the first judge gave the
+reading's verdict on 60 % of them, the second on 86 %; on the disagreements
+26 % and 74 %. The first judge (qwen3.7-plus) says no to a right answer that
+adds a detail ("a yellow dress and a pair of earrings") or names the missing
+information and then estimates; the disagreements are 2 % of the 1,400
+pairs, so a score moves a point or two at most. W0 is complete.
 
 ### W1a. Show the answer (M)
 
@@ -520,5 +530,14 @@ before building.
    seconds.** Found the same day: on a gray-zone request
    `agent/intent/classify._refine_acts_llm` asks the chat model to classify
    the request, with a 4 s limit and no reasoning switch; qwen3.7-plus thinks
-   by default. Whether it answers in time, and what it costs a turn, is not
-   measured yet. Not fixed now.
+   by default. Measured the same day on the 16 dev questions where it ran
+   (`_refine_acts_llm` as the turn calls it, then the same request with no
+   limit): it answered in time 0 of 16 -- every one waited the full 4.0 s
+   and kept the heuristics' acts; with no limit qwen3.7-plus takes 8.8-24 s
+   (p50 14 s) and 470-1,240 completion tokens, nearly all reasoning, and then
+   answers the JSON. So on Qwen every gray-zone turn waits 4 s for nothing
+   (and the request may still run and be billed after it is abandoned). The
+   fix is provider-side: Kazma's reasoning switch reaching Qwen
+   (`enable_thinking`), on the owner's list. Also seen: 15 of the 16 were
+   gray because the heuristics read "Can you remind me what you said..." as
+   a `remind` act (a reminder to book): a memory question, not a reminder.

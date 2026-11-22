@@ -457,6 +457,31 @@ def _judges_agree(results: list[dict]) -> dict[str, float]:
     return out
 
 
+#: The question types whose gap to the whole history the memory plan goes
+#: after next, and the work item that does.
+_GAPS = {"multi-session": "W4", "temporal-reasoning": "W2"}
+
+
+def _where_kazma_stands(o: dict, tokens: dict, types: dict) -> list[str]:
+    """Where Kazma stands, said plainly from the run's own numbers: its block
+    against plain top-10 retrieval (and how many times its tokens), the whole
+    history and Kazma's own turn, and the question types it is furthest
+    behind on (the main session's rule, 22 Nov: the report says what the
+    block does not yet do)."""
+    if not all(k in o for k in ("kazma", "bge_top10", "full")):
+        return []
+    ratio = tokens.get("bge_top10", 0) / max(1, tokens.get("kazma", 0))
+    turn = (f" Kazma's own turn, which reads a memory whole when the block shows it in part, reaches "
+            f"{_pct(o['kazma_turn'])}." if "kazma_turn" in o else "")
+    gaps = [f"{name} questions ({_pct(types[name].get('kazma'))} against {_pct(types[name].get('full'))} for "
+            f"the whole history; {item})" for name, item in _GAPS.items()
+            if name in types and "kazma" in types[name] and "full" in types[name]]
+    return ["", f"**Where Kazma stands**: from its recall block alone Kazma answers {_pct(o['kazma'])}, "
+                f"against {_pct(o['bge_top10'])} for plain top-10 retrieval (bge-m3) at {ratio:.1f} times the "
+                f"tokens, and {_pct(o['full'])} for the whole history.{turn}"
+                + (f" The largest gaps are {' and '.join(gaps)}." if gaps else "")]
+
+
 def _longmemeval_dev(folder: Path) -> list[str]:
     """The dev split (the memory plan's W0): what recall finds beside the
     plain retrieval baselines, and the end-to-end runs -- each history
@@ -568,6 +593,7 @@ def _longmemeval_dev(folder: Path) -> list[str]:
         f = flips.get(key) or {}
         lines.append(f"| {name} | {_pct(o[key])} | {_pct(f.get('b'))} | "
                      f"{f.get('flips', '–')} | {_pct(agree.get(key))} | {tokens.get(key, 0):,} |")
+    lines += _where_kazma_stands(o, tokens, a.get("types") or {})
     cut = dict(a.get("cut_at_limit") or {})
     unasked = dict(a.get("unanswered") or {})
     if turn and "kazma_turn" in o:

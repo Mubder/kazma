@@ -63,6 +63,20 @@ def test_kazma_s_turn_sits_beside_the_block_it_reads(tmp_path) -> None:
         in text
 
 
+def test_the_dev_table_says_where_kazma_stands() -> None:
+    """The main session's rule (22 Nov): the page says, from the run's own
+    numbers, that the block alone answers less than plain top-10 retrieval
+    and the whole history, and names the gaps the plan goes after."""
+    module = _page_module()
+    o = {"kazma": 0.6, "bge_top10": 0.8, "full": 0.9, "kazma_turn": 0.7}
+    types = {"multi-session": {"kazma": 0.4, "full": 0.9}, "temporal-reasoning": {"kazma": 0.6, "full": 0.9}}
+    text = "\n".join(module._where_kazma_stands(o, {"kazma": 1000, "bge_top10": 4000}, types))
+    assert "answers 60.0 %, against 80.0 % for plain top-10 retrieval (bge-m3) at 4.0 times the tokens" in text
+    assert "reaches 70.0 %" in text and "multi-session questions (40.0 % against 90.0 %" in text and "W4" in text
+    # Control: a run without the baselines says nothing it cannot back.
+    assert module._where_kazma_stands({"kazma": 0.6}, {}, types) == []
+
+
 def test_every_number_comes_from_a_result_file() -> None:
     text = (ROOT / "docs" / "docs" / "reference" / "benchmarks.md").read_text(encoding="utf-8")
     for source in ("scripts/memory_bench.py", "scripts/knowledge_bench.py", "scripts/document_fidelity.py"):
