@@ -14,7 +14,9 @@ own limit (``agent.daily_cost_limit_usd``, unchanged) does. At the limit the
 person's turns stop until the next day, and they are told (N8): a turn that
 starts once their spend has reached it is refused before any model call
 (``graph_supervisor``), and so is a model call outside a turn made for them
--- a swarm worker's, research's (``resilient_chat``). A turn that started
+-- a swarm worker's, research's (``resilient_chat``), X Studio's
+(``x_api.model_selection.x_chat``). Every other model call is declared in
+``tests/test_model_calls_checked.py`` with why. A turn that started
 under the limit runs to its own end: its own token budget
 (``agent.turn_token_budget``) bounds how far past.
 
@@ -81,8 +83,13 @@ class Limit:
 
 
 #: The limit for people when the admin has set none (N8: both; the admin
-#: raises it). A friend's day of ordinary chat; a long research run reaches it.
-SHIPPED_DEFAULT = Limit(tokens=1_000_000, usd=1.0)
+#: raises it). Measured on the live install's ledger from 1 to 22 November
+#: 2026 (read only): a turn used a median of 71,830 tokens (75th percentile
+#: 80,676, 90th 189,117) -- the base prompt, the turn's notes and the
+#: conversation are sent with every call. 3,000,000 tokens is about 40
+#: ordinary turns a day. The model in use there has no price known to Kazma,
+#: so the tokens are what binds; $1.00 binds a model whose price is known.
+SHIPPED_DEFAULT = Limit(tokens=3_000_000, usd=1.0)
 
 
 class LimitRefused(ValueError):
@@ -260,8 +267,8 @@ def refusal_text(user_text: str | None, found: dict[str, Any]) -> str:
 
 
 def call_refusal() -> str | None:
-    """For a model call outside a turn (``resilient_chat``): the reason it
-    is refused, or None. Blocking."""
+    """For a model call outside a turn (``resilient_chat``, ``x_chat``): the
+    reason it is refused, or None. Blocking."""
     found = verdict()
     if not found or not found["over"]:
         return None

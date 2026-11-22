@@ -8,7 +8,11 @@ always, dollars where the price is known.
   call, through the real supervisor graph; another person's turn runs. The
   control: the install-wide sum in its place refuses the other person too.
 * A model call outside a turn (``resilient_chat``: a swarm worker's,
-  research's) is refused the same way, before any provider.
+  research's) is refused the same way, before any provider, and so is X
+  Studio's (``x_chat``), before X's own budget is spent; each answered X
+  call is a ledger row of its person (the review of 22 November; x_chat as
+  it was is the control). Every other model call is declared in
+  ``tests/test_model_calls_checked.py``.
 * Tokens cover a model of unknown price; dollars stop a priced day.
 * A spend that cannot be counted (the ledger off) refuses: a person's limit
   is never taken as unspent.
@@ -313,6 +317,123 @@ def test_a_call_outside_a_turn_is_refused_for_the_person_and_runs_for_another(ma
     assert client.calls == 1 and refused is None
 
 
+# ── X Studio (the review of 22 November) ─────────────────────────────────
+
+
+class _XModel:
+    """The model X Studio's calls reach; counts them, answers with usage."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, messages, **kwargs):
+        from kazma_core.llm_provider import LLMResponse
+
+        self.calls += 1
+        return LLMResponse(content='{"drafts": ["Kazma asks before it acts."]}', tool_calls=[],
+                           finish_reason="stop", model="x-stub",
+                           usage={"prompt_tokens": 40, "completion_tokens": 7}, cost_usd=0.0)
+
+
+@pytest.fixture
+def x_model(monkeypatch) -> _XModel:
+    model = _XModel()
+    reserved: list[int] = []
+
+    class Registry:
+        def get_client(self):
+            return model
+
+    from kazma_core.x_api import ai_budget
+
+    real_reserve = ai_budget.reserve_daily
+
+    def reserve(tokens, limits):
+        reserved.append(tokens)
+        return real_reserve(tokens, limits)
+
+    monkeypatch.setattr("kazma_core.model_registry.get_model_registry", lambda: Registry())
+    monkeypatch.setattr(ai_budget, "reserve_daily", reserve)
+    model.reserved = reserved
+    return model
+
+
+def _x_call(bound: Any) -> BaseException | None:
+    from kazma_core.x_api.model_selection import x_chat, x_model_scope
+
+    async def run() -> None:
+        async with x_model_scope():
+            await x_chat("drafting", [{"role": "user", "content": "a reply"}], max_tokens=100)
+
+    with bound:
+        try:
+            asyncio.run(run())
+        except Exception as exc:  # noqa: BLE001 -- the refusal is the answer
+            return exc
+    return None
+
+
+def test_x_studio_is_refused_for_a_person_at_their_limit_and_runs_for_another(matrix, enforced, ledger,
+                                                                              x_model) -> None:
+    from kazma_core.x_api.ai_budget import XBudgetUnavailable, XDailyLimitReached
+
+    _limit_for_people(100)
+    _spend(matrix.as_a(), 150)
+    refused = _x_call(matrix.as_a())
+    assert isinstance(refused, XDailyLimitReached) and isinstance(refused, XBudgetUnavailable)
+    assert "daily limit" in str(refused) and "150" in str(refused)
+    assert x_model.calls == 0 and x_model.reserved == [], "spent X's budget or called the model"
+    assert _x_call(matrix.as_b()) is None and x_model.calls == 1
+
+
+def test_an_answered_x_call_counts_toward_its_person(matrix, enforced, ledger, x_model) -> None:
+    """X Studio's calls are rows of the ledger the limit counts: drafting
+    alone reaches the limit."""
+    _limit_for_people(100)
+    assert _x_call(matrix.as_a()) is None
+    since, _zone = daily_limits.today_start()
+    assert llm_ledger.usage_of(matrix.account_a, since)["tokens"] == 47
+    assert llm_ledger.usage_of(matrix.account_b, since)["tokens"] == 0
+    _spend(matrix.as_a(), 60)  # 107 of 100
+    assert _x_call(matrix.as_a()) is not None and x_model.calls == 1
+
+
+def test_control_without_the_check_x_studio_drafts_past_the_limit(matrix, enforced, ledger, x_model,
+                                                                  monkeypatch) -> None:
+    """x_chat as it was: the client called directly, the limit never asked."""
+    _limit_for_people(100)
+    _spend(matrix.as_a(), 150)
+    monkeypatch.setattr(daily_limits, "call_refusal", lambda: None)
+    assert _x_call(matrix.as_a()) is None and x_model.calls == 1
+
+
+def test_a_draft_refused_by_the_limit_says_so(matrix, enforced, ledger, x_model, monkeypatch) -> None:
+    from kazma_core.x_api.ai_budget import XDailyLimitReached
+    from kazma_core.x_api.post_drafting import draft_posts
+    from kazma_core.x_api.reply import DraftFailed, _draft_error_text
+    from kazma_core.x_api.stance import ReplyConfig
+
+    cfg = ReplyConfig(enabled=False, mode="draft", summoners=(), trigger="", max_replies_per_day=5,
+                      max_replies_per_target_per_day=1, cooldown_per_thread_s=0, min_target_followers=0,
+                      poll_interval_s=60)
+    monkeypatch.setattr("kazma_core.x_api.stance.get_reply_config", lambda: cfg)
+    _limit_for_people(100)
+    _spend(matrix.as_a(), 150)
+    with matrix.as_a(), pytest.raises(DraftFailed) as failed:
+        asyncio.run(draft_posts("Introduce Kazma in one short sentence."))
+    assert "daily limit" in str(failed.value) and x_model.calls == 0
+    # A reply's draft says it too, not "the model call failed".
+    assert "daily limit" in _draft_error_text(XDailyLimitReached("Not sent: the daily limit."))
+
+
+def test_an_install_of_one_account_asks_nothing_of_x_studio(matrix, ledger, x_model, monkeypatch) -> None:
+    def no(*_a, **_k):
+        raise AssertionError("asked the person's limit on an install that does not enforce Spaces")
+
+    monkeypatch.setattr(daily_limits, "call_refusal", no)
+    assert _x_call(matrix.as_a()) is None and x_model.calls == 1
+
+
 # ── the admin's page ─────────────────────────────────────────────────────
 
 
@@ -395,7 +516,7 @@ def test_the_precondition_holds_while_every_person_has_a_limit(matrix) -> None:
     from kazma_core.spaces import preconditions
 
     holds, why = daily_limits.precondition()
-    assert holds and "1,000,000 tokens" in why
+    assert holds and "3,000,000 tokens" in why
     ok, detail, _fix = preconditions._built("daily_limits", "a daily spending limit per person")
     assert ok, detail
 

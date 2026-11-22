@@ -15007,9 +15007,10 @@ an install with one account behaves as before.
     price is known (0: none). Whose: a person's own
     (`identity` `policies[account]["daily_limit"]`), else the limit for
     people (`identity` `defaults["daily_limit"]`), else `SHIPPED_DEFAULT`
-    (1,000,000 tokens and $1.00); the admin has none unless one is set for
-    them (the install's own `agent.daily_cost_limit_usd` covers the admin
-    and is unchanged).
+    (3,000,000 tokens and $1.00: about 40 ordinary turns, from a median turn
+    of 71,830 tokens on the live install's ledger in November 2026); the
+    admin has none unless one is set for them (the install's own
+    `agent.daily_cost_limit_usd` covers the admin and is unchanged).
   - Counted from the ledger by the person the calls were for
     (`llm_ledger.usage_of`, `asker` and `ts`, index `idx_llm_calls_asker_ts`)
     since the local midnight (`cron.timezone`). A spend that cannot be
@@ -15019,9 +15020,19 @@ an install with one account behaves as before.
     turn at iteration 0 before any model call (`verdict`, off the loop,
     after the install's own check), and `resilient_chat` refuses a call
     outside a turn (`call_refusal`: `LLMError(kind="daily_limit")`, a swarm
-    worker's, research's). A turn that started under the limit runs to its
-    end; its own token budget bounds how far past. A new place that calls a
-    model for a person outside these two asks `call_refusal` too.
+    worker's, research's), and so does X Studio's `x_chat`
+    (`XDailyLimitReached`, the work held), which also writes each answered
+    call to the ledger the limit counts. A turn that started under the limit
+    runs to its end; its own token budget bounds how far past.
+  - **Every model call is checked or declared**
+    (`tests/test_model_calls_checked.py`): each product `.chat(`,
+    `.chat_stream(`, `invoke_llm_chat(` and each `.chat` handed on is in a
+    function that asks `daily_limits.call_refusal` or `verdict`, or is
+    declared with why (in a checked turn; Kazma's own work after a turn,
+    not refused until S2-07 and not in the ledger today; the admin's own; a
+    client's own retries). A new model call asks `call_refusal` or is
+    declared; a planted direct call and `x_chat` without its check are the
+    controls.
   - The admin sets limits on People (`people.set_daily_limit`,
     `set_default_daily_limit`, `PUT /api/people/{account_id}/daily-limit`,
     `PUT /api/people/default-limit`), each change an event of the identity

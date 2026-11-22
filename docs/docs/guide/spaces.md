@@ -99,17 +99,27 @@ told the next time they open Kazma.
 
 Your friends use your model keys, so each person but you has a daily
 limit, counted from midnight: a number of tokens, which every model call
-counts, and an amount in dollars, which the calls of known price count (0
-for none). A model whose price Kazma does not know is still covered by the
-tokens. When a person reaches their limit, their requests stop until
+made for their requests counts -- chat, research, the swarm, X Studio --
+and an amount in dollars, which the calls of known price count (0 for
+none). A model whose price Kazma does not know is still covered by the
+tokens. The memory work Kazma does after a turn (learning facts and
+lessons from it) is not counted yet. When a person reaches their limit, their requests stop until
 midnight and they are told; a request that had already started finishes.
 Your own use is covered by the install's limit (Settings → System).
 
-Settings → People sets the limit for people (Kazma's own is 1,000,000
-tokens and $1.00 a day) and, for any person, a limit of their own, and
-shows what each person used today: counts and money, never what they
-asked. Each change is recorded. The limit counts what the per-call ledger
-records, so with the ledger off a person's requests are refused.
+Settings → People sets the limit for people and, for any person, a limit
+of their own, and shows what each person used today: counts and money,
+never what they asked. Each change is recorded. The limit counts what the
+per-call ledger records, so with the ledger off a person's requests are
+refused.
+
+Kazma's own limit for people is 3,000,000 tokens and $1.00 a day. Every
+model call sends the instructions, the turn's notes and the conversation
+again, so a turn costs more than its words: on Kazma's own install in
+November 2026 a turn used about 72,000 tokens in the middle of the range,
+and one in ten used more than 189,000. 3,000,000 tokens is about 40
+ordinary turns a day; the dollar amount binds only a model whose price
+Kazma knows. Raise or lower it for everyone, or for one person.
 
 ## Features per person
 

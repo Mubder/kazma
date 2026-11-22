@@ -571,10 +571,13 @@ def _draft_error_text(exc: BaseException) -> str:
     text -- a provider's endpoint and answer, a library's internals -- is
     logged, never quoted (it named the provider's URL and body).
     """
+    from kazma_core.x_api.ai_budget import XDailyLimitReached
+
     msg = str(exc).strip() or type(exc).__name__
-    if isinstance(exc, DraftFailed):
+    if isinstance(exc, (DraftFailed, XDailyLimitReached)):
         # Kazma's own reason (no provider configured, an empty answer from a
-        # reasoning model): the sentence that says what to change.
+        # reasoning model, the person's daily limit): the sentence that says
+        # what to change.
         return msg
     low = msg.lower()
     logger.warning("[x-reply] draft model call failed: %s: %s", type(exc).__name__, msg[:500])

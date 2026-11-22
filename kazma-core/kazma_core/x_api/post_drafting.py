@@ -12,6 +12,7 @@ from kazma_core.llm_provider import LLMError
 from kazma_core.safety.prompt_fence import format_untrusted_block
 from kazma_core.x_api import model_selection as _models
 from kazma_core.x_api import stance as _stance
+from kazma_core.x_api.ai_budget import XDailyLimitReached
 from kazma_core.x_api.context import ContextSnapshot
 from kazma_core.x_api.model_selection import x_chat, x_model_turn
 from kazma_core.x_api.references import load_references
@@ -89,6 +90,8 @@ async def draft_posts(brief: str, *, count: int = 1, subject_id: str = "") -> Po
         raw = json.loads(str(getattr(response, "content", "") or ""))
     except asyncio.CancelledError:
         raise
+    except XDailyLimitReached as exc:
+        raise DraftFailed(str(exc)) from exc
     except (LLMError, OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
         raise DraftFailed("X post drafting failed. Check the selected X model and retry; no post was sent.") from exc
     if (not isinstance(raw, dict) or set(raw) != {"drafts"} or not isinstance(raw["drafts"], list)
