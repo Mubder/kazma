@@ -635,7 +635,7 @@ alone as the negative controls.
    4 s refinement (15 of finding 12's 16). Recalling what was said is not
    booking a reminder. The main session's decision: its own commit, after
    finding 11, with a paired EN/AR gate through the real classifier.
-   Fixed the same day (`heuristics.books_a_reminder`): "remind me"
+   Fixed the same day (`heuristics._books_a_reminder`): "remind me"
    followed by a question word, "of" or "about" (Arabic: a question word, or
    "ب" before a noun) asks to recall, unless the message names a time to
    book at ("remind me about the dentist tomorrow", "ذكرني بموعد الدكتور

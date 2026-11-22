@@ -312,6 +312,27 @@ def _fact(predicate: str, value: str, ptype: str, confidence: float, importance:
             "object": value.strip(), "confidence": confidence, "importance": importance}
 
 
+def _favourite_fact(words: list[Any], i: int) -> dict[str, Any] | None:
+    """The favourite *words[i]* names, the word after it being "favourite"
+    ("لوني المفضل أزرق", "اللون المفضل عندي ..."): ``favorite_<kind>`` and
+    its value, or None when the word is no kind, or "the favourite colour"
+    is not said to be mine."""
+    w = words[i]
+    stem = w.folded if _kind(w.folded) else w.bare  # "فريقي" keeps its "ف"
+    kind = _kind(stem)
+    if not kind:
+        return None
+    j = i + 2
+    if stem.startswith("ال"):
+        if j >= len(words) or words[j].folded not in _MINE:
+            return None  # "the favourite colour" with no "mine"
+        j += 1
+    while j < len(words) and words[j].folded in {"هو", "هي"}:
+        j += 1
+    value = _phrase(words, j, first_definite=False) or _latin_run(words, j, _LATIN_WORD)[0]
+    return _fact(f"favorite_{kind}", value, "functional", 0.8, 4)
+
+
 def extract_arabic_facts(text: str) -> list[dict[str, Any]]:
     """The facts an Arabic (or mixed) message states about its writer.
 
@@ -350,19 +371,9 @@ def extract_arabic_facts(text: str) -> list[dict[str, Any]]:
         elif _is(w, _WORK_TRIGGERS):
             keep(_fact("works_at", _employer(words, i + 1), "functional", 0.85, 4))
         elif nxt is not None and nxt.folded in _FAVOURITE:
-            stem = w.folded if _kind(w.folded) else w.bare  # "فريقي" keeps its "ف"
-            kind = _kind(stem)
-            if not kind:
-                continue
-            j = i + 2
-            if stem.startswith("ال"):
-                if j >= len(words) or words[j].folded not in _MINE:
-                    continue  # "the favourite colour" with no "mine"
-                j += 1
-            while j < len(words) and words[j].folded in {"هو", "هي"}:
-                j += 1
-            value = _phrase(words, j, first_definite=False) or _latin_run(words, j, _LATIN_WORD)[0]
-            keep(_fact(f"favorite_{kind}", value, "functional", 0.8, 4))
+            favourite = _favourite_fact(words, i)
+            if favourite is not None:
+                keep(favourite)
         elif _is(w, _LIKE_TRIGGERS | _USE_TRIGGERS) or w.bare == "افضل":
             value = _phrase(words, i + 1, first_definite=True) or _latin_run(words, i + 1, _LATIN_WORD)[0]
             if w.bare == "افضل":

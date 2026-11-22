@@ -26,7 +26,7 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
-from kazma_core.memory.forget_request import asks_to_forget, is_forget_request
+from kazma_core.memory.forget_request import _asks_to_forget, is_forget_request
 from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
 
 # ── the reader ──────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ def test_only_the_users_own_words_count(text):
     """A "forget" inside a quote or a text to translate is not the user's
     request; read raw it would be (the control)."""
     assert not is_forget_request(text)
-    assert asks_to_forget(text)
+    assert _asks_to_forget(text)
 
 
 # ── the real turn ───────────────────────────────────────────────────────────
