@@ -203,6 +203,24 @@ shipped reasoning level, at most three tool rounds, with tokens, calls and
 time reported. This is how searching again arrives without a model in the
 recall path (decision 14 stays).
 
+State, 22 Nov: built and tested with a stand-in model, not yet run (it runs
+with W0's credit runs). `longmemeval_bench.py answer --conditions kazma_turn`
+asks each question through the supervisor graph (`scripts/longmemeval_turn.py`):
+the agent's own base prompt with the question's date
+(`cultural_context_enrichment.note_for_day`, the one format), recall on a
+private store of the question's history at the question's time, the block as
+a turn sends it, `memory_search`, `memory_read` and `memory_list` only, the
+run's `--reasoning` as `agent.chat_reasoning` (low, live's; the shipped
+default sends nothing, which on DeepSeek is "high"), at most three tool rounds
+(the turn's own iteration budget refuses a fourth), `persist=False`. Each
+answer is cached by what it was asked from (the base prompt, question, date,
+recall block, reader) and judged like the others; the result has its calls,
+tool requests, tokens, the cache's share, seconds, and whether the turn's
+block was the harness's. The reader is Kazma's own DeepSeek client, so its
+temperature is the product's (ignored by DeepSeek while it reasons). Turns
+run one at a time. Left for a later piece: facts and summaries in the store
+(the harness seeds conversations only, so the turn's block has neither).
+
 ### W5 + W1b. One passage unit (M)
 
 A passage of about 256 tokens per stretch of a long memory, in a table of
@@ -391,3 +409,15 @@ the benchmarks page regenerated.
    checkout's environment. So for an Arabic chat the compaction threshold
    sees about two thirds of the tokens the trim sees. For later: one
    estimator for context, or the reason two stay. Not fixed now.
+8. **Every block measure leaves out what a turn adds to each memory.** Found
+   building W1c (22 Nov). Kazma ships `memory.v2.explain_recall` on, so a
+   chat turn's recall block ends each memory with its sources ("_(via fts5,
+   dense)_"); the product measures, the bounds script and LongMemEval's
+   block condition all build the block with `explain=False`. Measured with
+   and without on one commit, no model call: the product store's block p50 /
+   p95 675 / 1,030 tokens without, 698 / 1,068 with; the long store 1,073 /
+   1,484 without, 1,096 / 1,485 with, and in 3 of its blocks the budget
+   leaves a memory out. The sources are the operator's view (the "Memory
+   used" row has its own payload, `build_memory_explain_payload`); whether
+   the model's block should carry them, or the measures should, is a
+   decision for later. Not changed now: W1a's acceptance is measured one way.

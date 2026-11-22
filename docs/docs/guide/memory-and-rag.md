@@ -1092,7 +1092,8 @@ prompts; the share the judge called correct):
 | All questions | 0.47 | 0.77 | 0.72 | 0.94 |
 | Tokens sent a question | 1,017 | 2,214 | 96,356 | 6,306 |
 
-"Kazma's recall" is the block as a chat turn's model is shown it. It shows
+"Kazma's recall" is the block as a chat turn's model is shown it, without
+the sources a turn adds after each memory ("via fts5"). It shows
 each memory with 200 characters of the question and 300 of the reply, and
 points the model at `memory_read` for the rest; a one-shot reader cannot call it.
 For 44 of the 51 answerable questions it missed, the round holding the
@@ -1103,8 +1104,9 @@ conversations, which left out sessions in every dev question and an answer
 session in 33 of these 100: it is not a full-context score. Since 22 Nov
 the harness sends the whole history uncut (the reader's window holds the
 longest, 115,818 tokens); the full-context score is measured on dev with
-the plan's next runs. Run with an agent that calls `memory_read` itself is
-the next measurement.
+the plan's next runs. Asked through Kazma's own chat turn, which calls
+`memory_read` itself (`--conditions kazma_turn`, built 22 Nov), is the next
+measurement.
 
 **The block's bounds, measured** (`scripts/recall_block_bounds.py`, the
 same reader and judge; not yet built into the product):

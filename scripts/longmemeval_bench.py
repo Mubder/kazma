@@ -31,10 +31,15 @@ scores only (``tests/fixtures/longmemeval/*.json``).
         # each question asked in both languages of one shared store
 
 ``answer`` asks a model (``--model``, ``deepseek-flash`` by default, on
-DeepSeek's API; the key from ``DEEPSEEK_API_KEY``, never written): 3 reader
-and 3 judge calls a question. The replies are kept in ``DIR`` (a run that
-stops goes on where it stopped); the result file holds the scores and the
-tokens each call used.
+DeepSeek's API; the key from ``DEEPSEEK_API_KEY``, never written): a reader
+and a judge call a question and history. The replies are kept in ``DIR`` (a
+run that stops goes on where it stopped); the result file holds the scores
+and the tokens each call used. ``--conditions kazma_turn`` also asks each
+question through Kazma's own chat turn (``scripts/longmemeval_turn.py``, the
+memory plan's W1c): the base prompt, the recall block and its rules, the
+memory read tools, the reasoning level ``--reasoning`` names, at most three
+tool rounds; its calls, tokens, tool rounds and time are reported. Those
+turns run one at a time.
 
 ``retrieve`` loads the configured embedder (bge-m3) and embeds every turn
 of the sample's histories once, into a cache in ``DIR``; it makes no other
@@ -673,6 +678,10 @@ JUDGE = {
 #: read whole (what the model gets when it opens them with ``memory_read``,
 #: which a one-shot reader cannot call); the whole history; the oracle.
 CONDITIONS = ("kazma", "kazma_whole", "full", "oracle", "bge_top10", "bm25_top10")
+#: Kazma's own chat turn (W1c): asked only when ``--conditions`` names it
+#: (several model calls a question, one question at a time).
+TURN = "kazma_turn"
+ALL_CONDITIONS = (*CONDITIONS, TURN)
 #: The whole history, uncut (None), or cut from its oldest session to this
 #: many characters. Uncut since 22 Nov: the longest of the 500 histories
 #: (540,508 characters, 115,818 tokens) was served whole by deepseek-flash
@@ -715,6 +724,10 @@ def history_string(item: dict[str, Any], *, only: set[str] | None = None,
     return text, dropped
 
 
+#: What a reader is shown for a history recall found nothing in.
+NO_MEMORIES = "(no memories)"
+
+
 def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str, str, dict[str, Any]]:
     """The recall block a chat turn's model would be shown for *item*'s
     question, on a private database holding its history; and the same
@@ -736,6 +749,10 @@ def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str
             result = recall(str(item["question"]), conn=conn, tenant_id=TENANT, limit=LIMIT,
                             local_only=True, now=parse_date(item["question_date"]))
             block = format_recall_block(result, explain=False) if not result.empty else ""
+            # As a chat turn sends it: the shipped setting adds each memory's
+            # sources ("_(via fts5)_", memory.v2.explain_recall). Compared with
+            # what Kazma's turn showed (W1c), never sent to a reader here.
+            as_sent = format_recall_block(result) if not result.empty else ""
         whole = read_whole([back[h.id] for h in result.episodes if h.id in back])
     finally:
         conn.close()
@@ -744,8 +761,8 @@ def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str
                 os.remove(path + suffix)
             except OSError:
                 pass
-    return (block or "(no memories)", whole or "(no memories)",
-            {"shown": len(result.episodes), "facts": len(result.beliefs)})
+    return (block or NO_MEMORIES, whole or NO_MEMORIES,
+            {"shown": len(result.episodes), "facts": len(result.beliefs), "as_sent": as_sent})
 
 
 #: Reasoning a reader may be asked for: ``off``, or an effort DeepSeek's API
@@ -803,6 +820,18 @@ class Chat:
         return "", {"error": 0}
 
 
+def _prompt_digest(prompt: str) -> str:
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:24]
+
+
+def _fresh_entry(entry: dict[str, Any], prompt: str) -> None:
+    """Empty *entry* when it holds the answer to another prompt."""
+    digest = _prompt_digest(prompt)
+    if entry.get("prompt_sha") != digest:
+        entry.clear()
+        entry["prompt_sha"] = digest
+
+
 def answer_entry(entry: dict[str, Any], item: dict[str, Any], prompt: str, *, reader: Any, judge: Any,
                  second: Any = None, reader_tokens: int = 800) -> None:
     """Answer *prompt* into its cache *entry* and judge the answer, asking
@@ -810,10 +839,7 @@ def answer_entry(entry: dict[str, Any], item: dict[str, Any], prompt: str, *, re
     made from another prompt (a cut history, another block) is asked again.
     A call the API refused (no balance, a rate limit past its retries) is
     asked again on the next run, never kept as an answer or a verdict."""
-    digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:24]
-    if entry.get("prompt_sha") != digest:
-        entry.clear()
-        entry["prompt_sha"] = digest
+    _fresh_entry(entry, prompt)
     if "hypothesis" not in entry:
         text, usage = reader.ask(prompt, max_tokens=reader_tokens)
         if "error" in usage:
@@ -821,7 +847,14 @@ def answer_entry(entry: dict[str, Any], item: dict[str, Any], prompt: str, *, re
             return
         entry.update({"hypothesis": text, "reader_usage": usage})
         entry.pop("reader_error", None)
-    if "verdict" not in entry and entry["hypothesis"]:
+    judge_entry(entry, item, judge=judge, second=second)
+
+
+def judge_entry(entry: dict[str, Any], item: dict[str, Any], *, judge: Any, second: Any = None) -> None:
+    """Judge the answer *entry* holds, asking only the verdicts it lacks."""
+    if not entry.get("hypothesis"):
+        return
+    if "verdict" not in entry:
         verdict, usage = judge.ask(judge_prompt(item, entry["hypothesis"]), max_tokens=10)
         if "error" not in usage:
             entry.update({"verdict": verdict, "judge_usage": usage})
@@ -829,6 +862,114 @@ def answer_entry(entry: dict[str, Any], item: dict[str, Any], prompt: str, *, re
         verdict, usage = second.ask(judge_prompt(item, entry["hypothesis"]), max_tokens=10)
         if "error" not in usage:
             entry.update({"verdict2": verdict, "judge2_usage": usage})
+
+
+def turn_identity(item: dict[str, Any], block: str, *, model: str, reasoning: str, system_prompt: str) -> str:
+    """What Kazma's turn for *item* is asked from: a cached answer stands
+    while this is unchanged (the base prompt, the question, its date, the
+    recall block of its history, the reader, the turn's own version)."""
+    from longmemeval_turn import TOOL_ROUNDS, TURN_VERSION
+
+    return "\n".join((
+        f"kazma_turn v{TURN_VERSION} rounds={TOOL_ROUNDS} model={model} reasoning={reasoning}",
+        _prompt_digest(system_prompt), str(item["question_date"]), str(item["question"]), block,
+    ))
+
+
+def turn_entry(entry: dict[str, Any], identity: str, run: Any) -> None:
+    """Kazma's turn's answer into its cache *entry* (``run()`` gives a
+    ``TurnOutcome``), asked only when the entry has none for *identity*. A
+    turn that failed is asked again on the next run, never judged."""
+    _fresh_entry(entry, identity)
+    if "hypothesis" in entry:
+        return
+    outcome = run()
+    if outcome.error:
+        entry["reader_error"] = outcome.error
+        entry["reader_usage"] = outcome.usage
+        return
+    entry.update({"hypothesis": outcome.text, "reader_usage": outcome.usage,
+                  "block_sha": _prompt_digest(outcome.block)})
+    entry.pop("reader_error", None)
+
+
+def _turn_reader(model: str, base_url: str, key: str) -> tuple[Any, str]:
+    """The reader Kazma's turns call, and Kazma's base prompt, as a chat turn
+    has it (``KazmaAgent``, built in the run's private data folder)."""
+    from kazma_core.agent_runner import KazmaAgent, load_config
+    from longmemeval_turn import CountingClient, reader_client
+
+    # The turn's workspace is an empty folder of the run's own: the turn's
+    # environment note describes it, never the checkout the run starts in.
+    os.environ["KAZMA_WORKSPACE"] = tempfile.mkdtemp(prefix="workspace-", dir=os.environ.get("KAZMA_DATA_DIR"))
+    agent = KazmaAgent(load_config())
+    return CountingClient(reader_client(model=model, base_url=base_url, key=key)), agent.system_prompt
+
+
+def _answer_turns(items: list[dict[str, Any]], histories: dict[str, dict[str, Any]], cache: dict[str, Any],
+                  cache_path: Path, *, model: str, base_url: str, key: str, reasoning: str) -> None:
+    """Every question through Kazma's own turn, one at a time, its answer
+    kept in *cache* (W1c)."""
+    import asyncio
+
+    from longmemeval_turn import run_turn
+
+    client, system_prompt = _turn_reader(model, base_url, key)
+
+    async def all_of_them() -> None:
+        for n, item in enumerate(items, 1):
+            qid = str(item["question_id"])
+            identity = turn_identity(item, histories[qid]["kazma"], model=model, reasoning=reasoning,
+                                     system_prompt=system_prompt)
+            entry = cache.setdefault(qid, {}).setdefault(TURN, {})
+            _fresh_entry(entry, identity)
+            if "hypothesis" in entry:
+                continue
+            rows = history_rows(item)
+            outcome = await run_turn(
+                str(item["question"]), now=parse_date(item["question_date"]), tenant=TENANT,
+                seed=lambda conn, rows=rows: _seed_history(conn, rows), client=client,
+                system_prompt=system_prompt, thread_id=f"lme-turn-{qid}", reasoning=reasoning)
+            turn_entry(entry, identity, lambda outcome=outcome: outcome)
+            # Whether the turn's own recall showed the block the harness
+            # builds for its question, as a turn sends it.
+            entry["same_block"] = outcome.block.strip() == str(histories[qid].get("as_sent") or "").strip()
+            if n % 5 == 0:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+                print(f"  {n} of {len(items)} asked through Kazma's turn", flush=True)
+
+    asyncio.run(all_of_them())
+
+
+def turn_row(entry: dict[str, Any]) -> dict[str, Any]:
+    """A turn's counts for its result row: numbers only."""
+    usage = entry.get("reader_usage") or {}
+    return {f"{TURN}_calls": int(usage.get("calls", 0)),
+            f"{TURN}_tool_requests": int(usage.get("tool_requests", 0)),
+            f"{TURN}_tools": int(sum((usage.get("tools") or {}).values())),
+            f"{TURN}_cache_hit_tokens": int(usage.get("prompt_cache_hit_tokens", 0)),
+            f"{TURN}_seconds": float(usage.get("seconds", 0.0)),
+            f"{TURN}_same_block": bool(entry.get("same_block"))}
+
+
+def summarise_turns(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """What Kazma's turns cost: model calls, tool rounds asked for, tokens,
+    seconds, and how often the turn's recall block was the block condition's."""
+    rows = [r for r in results if f"{TURN}_calls" in r]
+    if not rows:
+        return {}
+    def mean(key: str) -> float:
+        return round(statistics.fmean(r[key] for r in rows), 2)
+    seconds = sorted(r[f"{TURN}_seconds"] for r in rows)
+    return {
+        "n": len(rows), "calls_mean": mean(f"{TURN}_calls"), "tool_requests_mean": mean(f"{TURN}_tool_requests"),
+        "tool_requests": {str(k): sum(1 for r in rows if r[f"{TURN}_tool_requests"] == k)
+                          for k in sorted({r[f"{TURN}_tool_requests"] for r in rows})},
+        "prompt_tokens_mean": round(statistics.fmean(r[f"{TURN}_prompt_tokens"] for r in rows)),
+        "seconds_p50": seconds[len(seconds) // 2], "seconds_max": seconds[-1],
+        "same_block": round(sum(1 for r in rows if r.get(f"{TURN}_same_block")) / len(rows), 4),
+    }
 
 
 def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, workers: int,
@@ -865,9 +1006,15 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
             full, dropped = history_string(item, max_chars=FULL_MAX_CHARS)
             oracle, _ = history_string(item, only={str(s) for s in item.get("answer_session_ids") or []})
             plain = {f"{how}_top10": read_whole(plain_top(str(item["question"]), rows, how, embedder=embedder))
-                     or "(no memories)" for how in ("bge", "bm25")}
+                     or NO_MEMORIES for how in ("bge", "bm25")}
             histories[qid] = {"kazma": block, "kazma_whole": whole, "full": full, "oracle": oracle, **plain,
                               "dropped": dropped, **shown}
+        # Kazma's own turns, one at a time, on the same embedder (W1c).
+        if TURN in conditions:
+            _answer_turns(items, histories, cache, cache_path, model=model, base_url=base_url, key=key,
+                          reasoning=reasoning)
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
     reader = Chat(model=model, base_url=base_url, key=key, reasoning=reasoning)
     judge = Chat(model=model, base_url=base_url, key=key)
     second = Chat(model=judge2, base_url=base_url, key=key) if judge2 else None
@@ -876,9 +1023,13 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
 
     def ask_one(qid: str, condition: str) -> None:
         item = by_id[qid]
+        entry = cache.setdefault(qid, {}).setdefault(condition, {})
+        if condition == TURN:
+            # Answered by Kazma's turn above: judged here, never asked here.
+            judge_entry(entry, item, judge=judge, second=second)
+            return
         prompt = READER.format(histories[qid][condition], item["question_date"], item["question"])
-        answer_entry(cache.setdefault(qid, {}).setdefault(condition, {}), item, prompt,
-                     reader=reader, judge=judge, second=second, reader_tokens=reader_tokens)
+        answer_entry(entry, item, prompt, reader=reader, judge=judge, second=second, reader_tokens=reader_tokens)
 
     jobs = [(str(i["question_id"]), c) for i in items for c in conditions]
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -903,8 +1054,12 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
                 row[f"{c}_cut"] = True
             if second is not None:
                 row[f"{c}_judge2"] = str(entry.get("verdict2", "")).strip().lower().startswith("yes")
+            if c == TURN and entry.get("reader_usage"):
+                row.update(turn_row(entry))
         results.append(row)
     summary = summarise_answers(results, conditions)
+    if TURN in conditions:
+        summary["turn"] = summarise_turns(results)
     usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0,
              "reasoning_tokens": 0}
     for qid in (str(i["question_id"]) for i in items):
@@ -912,7 +1067,8 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
             for part in ("reader_usage", "judge_usage", "judge2_usage"):
                 u = cache[qid][c].get(part) or {}
                 if u:
-                    usage["calls"] += 1
+                    # Kazma's turn counts its own calls (several a question).
+                    usage["calls"] += int(u.get("calls", 1))
                     for k in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens", "reasoning_tokens"):
                         usage[k] += int(u.get(k, 0))
     if second is not None:
@@ -931,7 +1087,8 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
         "made_on": datetime.now(UTC).date().isoformat(), "limit": LIMIT, "full_max_chars": FULL_MAX_CHARS,
         "what": "One reader answers each question from Kazma's recall block, from the same recalled rounds read "
                 "whole, from the whole history (uncut unless full_max_chars says) and from the answer sessions "
-                "alone; "
+                "alone; kazma_turn asks it through Kazma's own chat turn (base prompt, recall block, the memory "
+                "read tools, at most three tool rounds); "
                 "LongMemEval's judge prompts score each answer. Scores and token counts only.",
         "usage": usage, **summary, "results": results,
     }, indent=1) + "\n", encoding="utf-8", newline="\n")
@@ -1293,6 +1450,9 @@ def _private_data_folder() -> None:
     os.environ["KAZMA_DATA_DIR"] = folder
     os.environ["KAZMA_USER_HOME"] = folder
     os.environ.setdefault("KAZMA_EMBEDDER_PREWARM", "0")
+    # No alert leaves a benchmark run (a turn builds Kazma's agent, whose
+    # model registry may report a substitution).
+    os.environ["KAZMA_OPS_ALERTS"] = "0"
 
 
 def _cmd_sample(data: Path) -> int:
@@ -1426,7 +1586,8 @@ def main(argv: list[str] | None = None) -> int:
             s.add_argument("--judge2", default=None, help="a second judge model (agreement is reported)")
             s.add_argument("--run", default="", help="a run label: its own cache and result file (the noise run)")
             s.add_argument("--conditions", default=",".join(CONDITIONS),
-                           help="the histories to answer from, comma-separated")
+                           help="the histories to answer from, comma-separated; kazma_turn asks through "
+                                "Kazma's own chat turn")
         if name in ("answer", "translate"):
             s.add_argument("--model", default="deepseek-flash")
             s.add_argument("--base-url", default="https://api.deepseek.com")
@@ -1446,7 +1607,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "answer":
         return _cmd_answer(args.data, args.limit, args.model, args.base_url, args.workers, args.split, args.look,
                            args.reasoning, args.judge2, args.run,
-                           tuple(c for c in args.conditions.split(",") if c in CONDITIONS))
+                           tuple(c for c in args.conditions.split(",") if c in ALL_CONDITIONS))
     if args.cmd == "translate":
         return _cmd_translate(args.data, args.model, args.base_url, args.workers)
     if args.cmd == "parallel":

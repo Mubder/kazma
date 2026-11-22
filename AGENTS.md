@@ -2350,7 +2350,14 @@ four injected were noise.
   `--judge2` a second judge on every answer, its agreement in the result;
   `--run` a run's own cache and result file; `--conditions`; a call the API
   refuses is asked again on the next run, never kept as an answer or a
-  verdict, `answer_entry`), `noise` (two runs of one build: the answers that
+  verdict, `answer_entry`; `--conditions kazma_turn` also asks each question
+  through Kazma's own chat turn, `scripts/longmemeval_turn.py`, the memory
+  plan's W1c: the supervisor graph with the agent's base prompt dated at the
+  question's date, the recall block as a turn sends it, `memory_search`,
+  `memory_read` and `memory_list` only, the run's level as
+  `agent.chat_reasoning`, at most three tool rounds, nothing written after;
+  its calls, tokens, tool requests and seconds in the result, one turn at a
+  time), `noise` (two runs of one build: the answers that
   flip, `noise_dev.json`), `reading-sheet` and `model-read` (the answers
   read beside the judges, their disagreements first, labelled model-read:
   `model_read.json`), `translate` and `parallel` (40 questions' 84 answer
@@ -2401,7 +2408,11 @@ four injected were noise.
   speakers set are unchanged (no memory there passes the fixed bounds).
   Gate: `tests/test_longmemeval_harness.py` (a history without its evidence
   round finds nothing: the control; the page's refusal with its control; no
-  dataset text in a result file).
+  dataset text in a result file), `tests/test_longmemeval_turn.py` (a
+  scripted stand-in model: the base prompt and the question's date first, a
+  cut memory read whole, three tool rounds and no fourth with five as the
+  control, the question's clock in recall with the real clock as the
+  control, a refused call never judged).
 - **The product measures and the real-use suite** (2026-11-22, the memory
   plan's W0 and section 2.1: every memory change is gated on these before
   an outside score counts). `scripts/memory_product_measures.py`, on the
