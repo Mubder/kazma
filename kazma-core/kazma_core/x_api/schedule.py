@@ -93,6 +93,12 @@ def x_schedule_enabled() -> bool:
     )
 
 
+def _space_of_record(tenant: object) -> str:
+    from kazma_core.spaces.scope import space_of_record
+
+    return space_of_record(tenant)
+
+
 class ScheduledXPost:
     """A row from ``x_scheduled_posts`` as a plain object."""
 
@@ -105,7 +111,7 @@ class ScheduledXPost:
         self.status = str(row["status"])
         self.thread_id = str(row["thread_id"] or "")
         self.delivery_target = str(row["delivery_target"] or "")
-        self.tenant_id = str(row["tenant_id"] or "default")
+        self.tenant_id = _space_of_record(row["tenant_id"])  # none: before Spaces, the owner's (N19)
         self.created_at = float(row["created_at"])
         self.fired_at = row["fired_at"]
         self.tweet_id = str(row["tweet_id"] or "")
@@ -181,11 +187,16 @@ class XScheduledStore:
         reply_to_id: str = "",
         thread_id: str = "",
         delivery_target: str = "",
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         operation_id: str = "",
         status: str = STATUS_PENDING,
     ) -> int:
-        """Insert a pending scheduled post. Returns the row id."""
+        """Insert a pending scheduled post. Returns the row id. With no
+        *tenant_id*, the space of the work bound now (Spaces S1-02)."""
+        if not tenant_id:
+            from kazma_core.spaces.scope import require_space_id
+
+            tenant_id = require_space_id()
         with self._lock:
             conn = self._connect()
             try:

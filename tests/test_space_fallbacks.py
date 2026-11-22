@@ -169,3 +169,68 @@ def test_a_bridge_approval_with_no_space_is_refused_once_enforced(enforced, monk
     asked = bus_bridge.request_approval_via_registry(tool_name="mcp__fs__write_file", tool_args="{}")
     assert asyncio.run(asked) is False
     assert registered == []
+
+
+# ── cron, X and Scheduled ───────────────────────────────────────────────
+
+
+async def test_a_booking_that_names_no_tenant_is_in_the_bound_space(tmp_path) -> None:
+    """The Scheduled page names no tenant on an install that sees its whole
+    schedule; it passed the owner's, so a job booked in another space was
+    the owner's."""
+    from kazma_core.cron.scheduler import CronScheduler
+    from kazma_core.cron.store import SQLiteCronStore
+
+    store = SQLiteCronStore(db_path=str(tmp_path / "cron.db"))
+    await store.init()
+    sched = CronScheduler(store=store, graph_builder=None)
+    try:
+        with bind_scope("family", "layla"):
+            booked = await sched.schedule(timing="2h", prompt="water the plants", kind="reminder",
+                                          tenant_id="", delivery_target="telegram:1")
+            # control: the page's old fallback named the owner's space
+            old = await sched.schedule(timing="2h", prompt="water the plants", kind="reminder",
+                                       tenant_id="" or "default", delivery_target="telegram:1")
+        assert (await store.get(booked["job_id"])).tenant_id == "family"
+        assert (await store.get(old["job_id"])).tenant_id == scope.OWNER_SPACE_ID
+    finally:
+        await store.close()
+
+
+def test_a_job_made_or_stored_with_no_tenant(enforced) -> None:
+    from kazma_core.cron.store import ScheduledJob, SQLiteCronStore
+
+    with bind_scope("family", "layla"):
+        assert ScheduledJob(job_id="j", timing="2h", prompt="p", platform="telegram",
+                            thread_id="t").tenant_id == "family"
+    with pytest.raises(NoSpaceBound):
+        ScheduledJob(job_id="j", timing="2h", prompt="p", platform="telegram", thread_id="t")
+    row = {"job_id": "j", "timing": "2h", "prompt": "p", "platform": "telegram", "thread_id": "t",
+           "next_run": None, "last_result": None, "tenant_id": None}
+    # A row stored before Spaces is the owner's (N19), whatever is bound.
+    with bind_scope("family", "layla"):
+        assert SQLiteCronStore._row_to_job(None, row).tenant_id == scope.OWNER_SPACE_ID
+
+
+def test_a_legacy_x_post_with_no_tenant(tmp_path, enforced) -> None:
+    from kazma_core.x_api.schedule import XScheduledStore
+
+    store = XScheduledStore(db_path=tmp_path / "x.db")
+    with bind_scope("family", "layla"):
+        mine = store.add(text="hello", fire_at=4_000_000_000.0)
+    with pytest.raises(NoSpaceBound):
+        store.add(text="hello", fire_at=4_000_000_000.0)
+    with bind_scope("family", "layla"):
+        assert store.get(mine).tenant_id == "family"
+    unnamed = store.add(text="older", fire_at=4_000_000_000.0, tenant_id="family")
+    import sqlite3
+
+    conn = sqlite3.connect(tmp_path / "x.db")
+    try:
+        conn.execute("UPDATE x_scheduled_posts SET tenant_id = '' WHERE id = ?", (unnamed,))
+        conn.commit()
+    finally:
+        conn.close()
+    # A row stored before Spaces is the owner's (N19).
+    [older] = [post for post in store.list_due(now=5_000_000_000.0) if post.id == unnamed]
+    assert older.tenant_id == scope.OWNER_SPACE_ID
