@@ -316,6 +316,28 @@ is unchanged:
   one more matching memory in a tiny store, and the raised background left
   one of them out. The design the study chose does not file that way.
 
+**Re-run on 2026-11-22.** Two changes of the memory plan's finding 10
+moved the study (`results.json`). The chosen design's numbers do not move.
+
+- The Arabic words for "now" (الحين, الآن ...) are no longer content words,
+  as English "now" is not (5fc4150b7). Layla's "شنو سيارتي الحين؟" (q22)
+  matched her Tesla turn ("بعت المازدا، والحين سيارتي تسلا موديل ٣") by
+  "والحين", and no longer does, so Omar's "سيارتي نيسان باترول" ranks above it
+  among the turns. In the chosen design and every `id` design, her own fact
+  `user car تسلا موديل ٣` is still shown first and q22's rr stays 1.0: only
+  the two turns below it swap, Omar's under his name. In the `name`
+  designs, which do not show the fact for q22, her Tesla turn goes from
+  first to second behind Omar's: `name`, `named_first` mrr 0.969 to 0.953
+  (Arabic 0.944 to 0.889); `name`, `self_first` 0.964 to 0.948 (Arabic
+  0.926 to 0.870); `name`, `label` 0.730 to 0.728 (Arabic 0.667 to 0.657).
+  Her old car (the Mazda) stays last in every design. Not a loss for the
+  asker: the match was an accident of the turn's wording, and the change
+  is what lets "وين أسكن الحين؟" find the user's home.
+- "We moved to Rotterdam last month." (extraction turn e06) now gives
+  `lives_in Rotterdam` in the quick pass, the fact its gold names
+  (11655e4df): quick-pass facts 19 to 20 (section 4.4), English recall
+  0.4615 to 0.5385 in the untagged and tagged runs.
+
 By kind of question, chosen design (today in brackets): about the asker,
 fact hit 0.957 (0.522) and mrr 0.971 (0.621); the asker never said, 3 of 3
 show nothing as the asker's (0 of 3); another member by name, hit 1.000
@@ -375,7 +397,7 @@ members in turn, `user` mapped to the speaker's entry:
 
 | Pass | Facts kept | About the speaker | Scores against the locked ones |
 |---|---|---|---|
-| Quick pass | 19 | 19, all filed under the speaker | 9 of 9 equal |
+| Quick pass | 20 (19 before 2026-11-22: section 4.2's note) | 20, all filed under the speaker | 9 of 9 equal |
 | Deep pass, the existing recording (deepseek-flash) | 37 | 31 under the speaker; 6 about someone else stay where they were | 9 of 9 equal |
 
 Tagging a turn with its speaker changes no extraction score, because the

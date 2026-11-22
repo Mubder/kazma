@@ -2516,7 +2516,7 @@ def _cmd_fact_languages_vectors() -> int:
               if (r["want"] and r["want"] not in r["shown"]) or (not r["want"] and r["shown"])]
     print(f"{out}: {n} vectors from {model}; {len(rows) - len(missed)} of {len(rows)} rows hold")
     for r in missed:
-        print("  ", json.dumps(r, ensure_ascii=False))
+        print("  ", json.dumps(r))
     return 0
 
 
