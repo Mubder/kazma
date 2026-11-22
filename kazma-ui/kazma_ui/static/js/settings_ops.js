@@ -1023,6 +1023,30 @@
             }
         },
 
+        // ── Disable / enable (Spaces S2-07): their work waits while disabled ──
+        async setPersonEnabled(person, enabled) {
+            if (!enabled) {
+                const ok = await window.kazmaConfirm({
+                    title: _t('settings.people_disable_title', 'Disable {name}?', { name: _iso(person.name) }),
+                    message: _t('settings.people_disable_confirm',
+                        'They can no longer sign in, and their scheduled jobs and other work wait until you enable them again. Their spaces and data stay.'),
+                    confirmText: _t('settings.people_disable', 'Disable'),
+                });
+                if (!ok) return;
+            }
+            try {
+                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/enabled',
+                    { method: 'PUT', body: { enabled: !!enabled } });
+            } catch (e) {
+                showToast(this._peopleError(e && e.body), 'error');
+                return;
+            }
+            showToast(enabled
+                ? _t('settings.people_enabled_done', '{name} is enabled again.', { name: _iso(person.name) })
+                : _t('settings.people_disabled_done', '{name} is disabled.', { name: _iso(person.name) }), 'success');
+            await this.loadPeople();
+        },
+
         async deletePerson(person) {
             const ok = await window.kazmaConfirm({
                 title: _t('settings.people_delete_title', 'Delete {name}?', { name: _iso(person.name) }),

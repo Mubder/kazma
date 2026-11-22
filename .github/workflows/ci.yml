@@ -855,6 +855,7 @@ jobs:
             tests/e2e/test_feature_grants_browser.py \
             tests/e2e/test_person_tools_browser.py \
             tests/e2e/test_person_models_browser.py \
+            tests/e2e/test_person_disable_browser.py \
             tests/e2e/test_shared_memory_notice.py \
             tests/e2e/test_attached_text_browser.py \
             tests/e2e/test_return_to_running_turn.py \

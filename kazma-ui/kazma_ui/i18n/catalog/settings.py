@@ -2818,6 +2818,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
                                       "ar": "حدّد الأدوات المراد تعطيلها في قائمة."},
     "settings.people_err.admin_has_every_tool": {"en": "The admin has every tool.",
                                                  "ar": "لدى المسؤول كل الأدوات."},
+    # Spaces S2-07: the admin disables a person; their work waits.
+    "settings.people_disabled": {"en": "Disabled", "ar": "معطّل"},
+    "settings.people_disable": {"en": "Disable", "ar": "تعطيل"},
+    "settings.people_enable": {"en": "Enable", "ar": "تفعيل"},
+    "settings.people_disable_of": {"en": "Disable {name}", "ar": "تعطيل {name}"},
+    "settings.people_enable_of": {"en": "Enable {name}", "ar": "تفعيل {name}"},
+    "settings.people_disable_title": {"en": "Disable {name}?", "ar": "تعطيل {name}؟"},
+    "settings.people_disable_confirm": {
+        "en": "They can no longer sign in, and their scheduled jobs and other work wait until you enable "
+              "them again. Their spaces and data stay.",
+        "ar": "لن يستطيع تسجيل الدخول، وتنتظر مهامه المجدولة وأعماله الأخرى حتى تفعّله مجددًا. تبقى مساحاته وبياناته.",
+    },
+    "settings.people_disabled_done": {"en": "{name} is disabled.", "ar": "عُطّل {name}."},
+    "settings.people_enabled_done": {"en": "{name} is enabled again.", "ar": "فُعّل {name} مجددًا."},
+    "settings.people_err.bad_enabled": {"en": "A person is enabled or disabled.",
+                                        "ar": "الشخص إما مفعّل أو معطّل."},
     # Spaces S2-03: the models a person may use, and their default.
     "settings.people_models_title": {"en": "Models", "ar": "النماذج"},
     "settings.people_models_help": {

@@ -80,6 +80,7 @@ __all__ = [
     "set_daily_limit",
     "set_default_daily_limit",
     "set_features",
+    "set_enabled",
     "set_models",
     "set_tools",
 ]
@@ -89,7 +90,7 @@ logger = logging.getLogger(__name__)
 #: What the record holds.
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
           "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
-          "models_set", "space_created", "member_added", "member_left", "member_removed")
+          "models_set", "account_disabled", "account_enabled", "space_created", "member_added", "member_left", "member_removed")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset", "member_added", "member_removed")
 _NAME_MAX = 64
@@ -847,6 +848,28 @@ def set_tools(account_id: str, off: Any, *, by: str) -> list[str]:
         raise
     logger.info("[people] tools set id=%s off=%d by=%s", account_id, len(kept), by)
     return kept
+
+
+def set_enabled(account_id: str, enabled: Any, *, by: str) -> None:
+    """Disable or enable a person (S2-07). Disabled, they cannot sign in,
+    their sessions end, and their work waits -- a scheduled job is held at
+    its occurrence and says why, any other background work is refused as
+    work of a feature that is off (``features.Grants.disabled``) -- until
+    they are enabled again. Their spaces, data and switches stay. One step,
+    recorded. Refused: the owner, a value that is not true or false."""
+    _require_enforced()
+    if not isinstance(enabled, bool):
+        raise PeopleRefused("bad_enabled", 400, "A person is enabled or disabled.")
+
+    def _change(reg: dict[str, Any]) -> None:
+        account = _person(reg, account_id)
+        account["enabled"] = enabled
+        _record(reg, "account_enabled" if enabled else "account_disabled", account_id, by)
+
+    reg = _changed(_change)
+    if not enabled:
+        _end_sessions(reg, account_id)
+    logger.warning("[people] account %s id=%s by=%s", "enabled" if enabled else "disabled", account_id, by)
 
 
 def set_models(account_id: str, allowed: Any, default: Any, *, by: str) -> dict[str, Any]:

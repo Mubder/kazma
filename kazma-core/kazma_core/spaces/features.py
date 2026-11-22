@@ -23,6 +23,13 @@ Who has what
 * A grant never passes the group rule (S1-20): Development's tools exist
   only in a host space (``spaces.tools.host_allowance``), whatever a grant
   says.
+* **A disabled person's work waits** (S2-07): while the admin has a person
+  disabled (``accounts[id]["enabled"]`` false), :meth:`Grants.has` holds
+  nothing for them, so every door that asks for a feature (:func:`work_refusal`,
+  the admissions) and every tool (:func:`tool_refusal`) refuses their work
+  with :func:`_disabled_refusal` -- their background work waits, as work of a
+  feature that is off does, and goes on once they are enabled again. Their
+  switches are kept as they are (People still shows them).
 * **Inside a feature the admin can still switch single tools off for a
   person** (S2-01, plan 4.8: "X Studio on, but posting off"): the person's
   ``policies[account]["tools_off"]`` (:data:`TOOLS_OFF_POLICY`). A tool
@@ -530,9 +537,12 @@ class Grants:
     on: frozenset[str]
     admin: bool = False
     tools_off: frozenset[str] = frozenset()
+    #: The admin disabled the person (S2-07): nothing is theirs to use, and
+    #: their work waits; ``on`` keeps their switches as stored.
+    disabled: bool = False
 
     def has(self, feature: str) -> bool:
-        return feature in self.on
+        return not self.disabled and feature in self.on
 
 
 def grants_of(registry: dict[str, Any], account_id: str) -> Grants:
@@ -562,7 +572,8 @@ def grants_of(registry: dict[str, Any], account_id: str) -> Grants:
             on.add(fid)
     off = policy.get(TOOLS_OFF_POLICY)
     tools_off = frozenset(str(t) for t in off if t) if isinstance(off, (list, tuple)) else frozenset()
-    return Grants(account_id, frozenset(on), tools_off=tools_off)
+    disabled = (accounts.get(account_id) or {}).get("enabled") is False
+    return Grants(account_id, frozenset(on), tools_off=tools_off, disabled=disabled)
 
 
 def grants_here() -> Grants | None:
@@ -598,12 +609,23 @@ def _lang_of(user_text: str | None) -> str:
     return found if found in ("en", "ar") else "both"
 
 
+def _disabled_refusal(lang: str = "both") -> str:
+    """Why a disabled person's work does not run now (S2-07), in *lang*
+    ("en", "ar", or "both": Arabic first)."""
+    ar = "غير متاح الآن: حساب هذا الشخص معطّل، فأعماله تنتظر حتى يفعّله المسؤول من الإعدادات ← الأشخاص."
+    en = ("Not available now: this person's account is disabled, so their work waits until the admin "
+          "enables them in Settings → People.")
+    return ar if lang == "ar" else en if lang == "en" else f"{ar}\n{en}"
+
+
 def tool_refusal(name: str, grants: Grants | None = None) -> str | None:
     """Why the tool *name* is not for the person of the work bound now, or
     None. With *grants* none (no rule), never refused here. Said to the
     model, which tells the person in their language."""
     if grants is None:
         return None
+    if grants.disabled:
+        return f"Tool '{name}' is not run. " + _disabled_refusal("en")
     for feature in _features_of_tool(name):
         if not grants.has(feature):
             return (f"Tool '{name}' is not available to this person: {_english(feature)} is off for "
@@ -665,9 +687,10 @@ def work_refusal(feature: str, account: str | None) -> str | None:
         # Not a person: Kazma's own work, or a record made before Spaces
         # (a document's "operator"); the space's own rules decide it.
         return None
-    if grants_of(registry, account).has(feature):
+    grants = grants_of(registry, account)
+    if grants.has(feature):
         return None
-    return _refusal(feature, "both")
+    return _disabled_refusal() if grants.disabled else _refusal(feature, "both")
 
 
 # ── The page being drawn ────────────────────────────────────────────────
@@ -775,7 +798,7 @@ def listed_tools(grants: Grants) -> list[dict[str, Any]]:
     feature or always-on key, "tools": [{"name", "on"}]}]``."""
     out: list[dict[str, Any]] = []
     for key, tools in _switchable_tools().items():
-        if key in FEATURES and not grants.has(key):
+        if key in FEATURES and key not in grants.on:
             continue
         out.append({"from": key, "tools": [{"name": name, "on": name not in grants.tools_off}
                                            for name in sorted(tools)]})
@@ -784,7 +807,7 @@ def listed_tools(grants: Grants) -> list[dict[str, Any]]:
 
 def listed(grants: Grants) -> list[dict[str, Any]]:
     """Every feature with whether *grants* holds it, in the table's order."""
-    return [{"id": fid, "group": f.group, "on": grants.has(fid),
+    return [{"id": fid, "group": f.group, "on": fid in grants.on,
              "fixed": grants.admin and fid != "development"} for fid, f in FEATURES.items()]
 
 

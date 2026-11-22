@@ -75,6 +75,7 @@ __all__ = [
     "IdentityError",
     "IdentityUnavailable",
     "acting_account",
+    "disabled_accounts",
     "work_scope",
     "add_member",
     "create_space",
@@ -522,6 +523,17 @@ class AskerLeft(Exception):  # noqa: N818 -- named for what happened
     finding 6)."""
 
     code = "asker_left"
+
+
+def disabled_accounts() -> frozenset[str]:
+    """The accounts the admin has disabled (S2-07): their work waits. Empty
+    while Spaces is not enforced (no read then). Blocking."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return frozenset()
+    return frozenset(str(account_id) for account_id, account in (read_registry().get("accounts") or {}).items()
+                     if isinstance(account, dict) and account.get("enabled") is False)
 
 
 def work_scope(space_id: str, asker: str | None) -> tuple[str, str] | None:

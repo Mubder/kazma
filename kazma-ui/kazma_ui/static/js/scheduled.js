@@ -285,6 +285,8 @@ function scheduledPage() {
             }
             if (task.edit_pending) bits.push(this.t('scheduled.edit_pending'));
             if (task.cancel_pending) bits.push(this.t('scheduled.cancel_pending'));
+            // A paused job says why (Spaces S2-07).
+            if (task.paused === 'creator_disabled') bits.push(this.t('scheduled.paused_creator_disabled'));
             return bits.join(' · ');
         },
 

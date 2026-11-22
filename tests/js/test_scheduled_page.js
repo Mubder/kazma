@@ -123,6 +123,16 @@ ok("a known status reads its catalog label", labelled.statusLabel({ status: "don
 ok("an unlabelled status reads as needs attention, not its id",
    labelled.statusLabel({ status: "brand_new" }) === "Needs attention");
 
+// ── a paused job says why (Spaces S2-07) ─────────────────────────────────
+const pausedCatalog = { "scheduled.paused_creator_disabled": "Paused: the person who booked it is disabled" };
+const pausedPage = load("en", pausedCatalog).scheduledPage();
+ok("a job whose person is disabled says it is paused, and why",
+   pausedPage.detailLine({ source: "cron", status: "pending", paused: "creator_disabled" })
+     .indexOf("Paused: the person who booked it is disabled") >= 0,
+   pausedPage.detailLine({ source: "cron", status: "pending", paused: "creator_disabled" }));
+ok("a job that is not paused says nothing of it",
+   pausedPage.detailLine({ source: "cron", status: "pending" }).indexOf("Paused") < 0);
+
 if (fail) {
   console.log(fail + " failure(s)");
   process.exit(1);

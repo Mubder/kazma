@@ -397,6 +397,8 @@ class CronScheduler:
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._in_flight: set[str] = set()
+        #: Paused occurrences already said (S2-07), so a wait is said once.
+        self._said_paused: set[tuple[str, str]] = set()
         #: Delivery ids this scheduler is sending now: recovery never calls
         #: them interrupted, however long the send outlives its lease
         #: (audit 2026-10-26 AUD-017), as ``_in_flight`` does for fires.
@@ -707,10 +709,14 @@ class CronScheduler:
             scoped, tenant_id = await asyncio.to_thread(_tenant_scope)
         jobs = await self._store.list_all(tenant_id=tenant_id if scoped else None)
         zone, zone_name = await self._zone(zone, zone_name)
+        # A paused job says why (S2-07): its person is disabled.
+        disabled = await self._disabled_accounts() if any(j.creator for j in jobs) else frozenset()
         out = []
         for job in jobs:
             d = job.to_dict()
             d.update(_fire_times_in_zone(job.next_run, zone, zone_name))
+            if job.creator and job.creator in disabled and job.status.value in ("pending", "running"):
+                d["paused"] = "creator_disabled"
             out.append(d)
         return out
 
@@ -904,6 +910,20 @@ class CronScheduler:
                        type(cause).__name__, "held for the next pass" if released else "the claim was gone")
         return True
 
+    async def _pause_fire(self, job: ScheduledJob, refusal: str) -> None:
+        """A fire whose job is paused (``_PAUSES``, S2-07) gives its claim
+        back: the job waits at the same occurrence, and a later pass fires
+        it once the pause ends -- or, past its catch-up window, records it
+        missed with the reason. Said once per occurrence."""
+        released = await self._store.release_fire(job.job_id, owner=self._owner, reason=refusal)
+        key = (job.job_id, str(job.next_run))
+        if key not in self._said_paused:
+            if len(self._said_paused) >= 1000:
+                self._said_paused.clear()
+            self._said_paused.add(key)
+            logger.info("[CronScheduler] %s waits (%s); %s", job.job_id, refusal,
+                        "held for a later pass" if released else "the claim was gone")
+
     # ── the poll loop ────────────────────────────────────────────────────
 
     async def _loop(self) -> None:
@@ -938,6 +958,8 @@ class CronScheduler:
         sem = self._sem or asyncio.Semaphore(self._max_concurrent)
         settings = None
         held = 0
+        waiting = 0
+        paused: frozenset[str] | None = None
         from kazma_core.db import availability
         from kazma_core.spaces.scope import spaces_enforced
 
@@ -964,6 +986,14 @@ class CronScheduler:
                 # which is in the database (S1-14 review).
                 held += 1
                 continue
+            if spaces_enforced() and job.creator:
+                # A job whose person is disabled waits (S2-07): not claimed,
+                # so not fired; past its window it is missed, with the reason.
+                if paused is None:
+                    paused = await self._disabled_accounts()
+                if job.creator in paused:
+                    waiting += 1
+                    continue
             # Every due job of the pass is started; the semaphore holds all
             # but max_concurrent until a slot frees (the claim, and so the
             # lease, comes after it). Starting only max_concurrent a pass left
@@ -975,8 +1005,20 @@ class CronScheduler:
             exec_task.add_done_callback(self._exec_done(job.job_id))
         if held:
             logger.debug("[CronScheduler] %d task fire(s) wait for the database", held)
+        if waiting:
+            logger.debug("[CronScheduler] %d job(s) wait: the person who booked them is disabled", waiting)
         await self._drain_deliveries()
         await self._drain_alerts()
+
+    async def _disabled_accounts(self) -> frozenset[str]:
+        """The disabled accounts, read once a pass (S2-07); none when the
+        identity store cannot answer -- the fire's own binding decides then."""
+        from kazma_core.spaces import identity
+
+        try:
+            return await asyncio.to_thread(identity.disabled_accounts)
+        except identity.IdentityUnavailable:
+            return frozenset()
 
     def _exec_done(self, job_id: str) -> Callable[[asyncio.Task], None]:
         def done(t: asyncio.Task) -> None:
@@ -1112,6 +1154,9 @@ class CronScheduler:
                 if await self._hold_for_identity(job, exc):
                     return
                 binding = _FireBinding(space="", asker="", refusal="identity_unavailable")
+            if binding is not None and binding.refusal in _PAUSES:
+                await self._pause_fire(job, binding.refusal)
+                return
             if binding is not None and not binding.refusal:
                 from kazma_core.spaces.scope import set_scope
 
@@ -1306,9 +1351,10 @@ class CronScheduler:
             notice = (f"⏰ A scheduled task did not run: it was due {when}, while Kazma was offline.\n\n"
                       f"Task: {job.prompt.strip()[:500]}")
         target = "" if refused else await self._resolve_target(job)
+        reason = _fire_refusal_text(refused, job.prompt) if refused in _PAUSES else ""
         res = await self._store.mark_missed(job.job_id, expected_next_run=str(job.next_run), notice=notice,
                                             target=target, advance=self._advancer(zone), now=now,
-                                            refused=refused)
+                                            refused=refused, reason=reason)
         if res is None:
             return
         logger.warning("[cron] outcome job=%s outcome=missed status=%s (due %s)", job.job_id, res["status"], when)
@@ -1470,13 +1516,22 @@ _FIRE_REFUSALS = {
                     "People), so it does not fire."),
     "asker_left": ("Error: the person who booked this job is no longer in its space, so it "
                    "does not fire."),
+    "creator_disabled": ("Paused: the person who booked this job is disabled, so it does not run "
+                         "until the admin enables them (Settings → People)."),
 }
+
+#: Refusals that pause a job rather than fail it (S2-07): the fire gives its
+#: claim back, the job waits at its occurrence, and past its catch-up window
+#: the occurrence is missed with the reason -- never a failure.
+_PAUSES = frozenset({"creator_disabled"})
 
 #: The refusals said in Arabic too, for a job written in Arabic.
 _FIRE_REFUSALS_AR = {
     "feature_off": ("خطأ: ميزة المجدولة غير مفعّلة للشخص الذي تعمل له هذه المهمة (الإعدادات ← "
                     "الأشخاص)، فلا تعمل."),
     "asker_left": "خطأ: الشخص الذي حجز هذه المهمة لم يعد في مساحتها، فلا تعمل.",
+    "creator_disabled": ("متوقفة مؤقتًا: حساب الشخص الذي حجز هذه المهمة معطّل، فلا تعمل حتى يفعّله "
+                         "المسؤول (الإعدادات ← الأشخاص)."),
 }
 
 
@@ -1544,10 +1599,11 @@ def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
     (``no_own_address``): until people link their own chat apps (S3-05)
     every address a job can deliver to is the owner's. Nor when the person
     it acts for no longer has the feature Scheduled (``feature_off``, S2-11:
-    the check made again when the work runs).
+    the check made again when the work runs). A job whose person is disabled
+    waits (``creator_disabled``, S2-07: a pause, never a failure).
     """
     from kazma_core.spaces import identity
-    from kazma_core.spaces.features import work_refusal
+    from kazma_core.spaces.features import grants_of, work_refusal
     from kazma_core.spaces.scope import spaces_enforced
 
     if not spaces_enforced():
@@ -1560,6 +1616,8 @@ def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
     if found is None:
         return _FireBinding(space="", asker="", refusal="no_space")
     space, asker = found
+    if grants_of(identity.read_registry(), asker).disabled:
+        return _FireBinding(space=space, asker=asker, refusal="creator_disabled")
     if work_refusal("scheduled", asker):
         return _FireBinding(space=space, asker=asker, refusal="feature_off")
     if asker != _owner_account():

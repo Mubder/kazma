@@ -15795,6 +15795,34 @@ an install with one account behaves as before.
     the person may not use and one with none, every provider class asking
     with a planted class as control; the install's list as the control),
     `tests/e2e/test_person_models_browser.py` (by the sidebar, EN/AR).
+- **Background work uses its creator's policy as it is when it runs; a
+  disabled creator pauses their jobs (S2-07, 2026-11-22; R13).** Only where
+  Spaces is enforced.
+  - Nothing a person's work may use is frozen when it is booked: every door
+    reads the person's features, tools, models and daily limit when the work
+    runs (a scheduled fire binds its creator, S1-14; the checks are S2-11's
+    `work_refusal` and `tool_refusal`, S2-01's tool list, S2-03's call check,
+    S2-02's limit). A new kind of later work binds its person and asks them
+    when it runs, never a copy made at booking.
+  - **People disables and enables a person** (`people.set_enabled`, `PUT
+    /api/people/{account_id}/enabled`, events `account_disabled` /
+    `account_enabled`; disabling ends their sessions; the owner cannot be
+    disabled). Disabled, `features.Grants.disabled` holds nothing for them:
+    every door (`work_refusal`, which answers `features._disabled_refusal`) and
+    every tool refuses their work, so it waits as work of a feature that is
+    off does; their switches stay as stored (People shows them).
+  - **A scheduled job of a disabled creator pauses**: the poll does not
+    claim it (`identity.disabled_accounts`, read once a pass), a fire
+    already started gives its claim back (`_fire_binding` refusal
+    `creator_disabled`, `scheduler._PAUSES`), nothing counts as a failure;
+    past its catch-up window the occurrence is missed with the reason as its
+    last result (`mark_missed(reason=)`); enabled again, it fires. The list
+    says why (`paused`, the Scheduled page's `scheduled.paused_creator_disabled`,
+    EN/AR).
+  - Gates: `tests/test_background_uses_creator_policy.py` (a real
+    `CronScheduler` fire; the tools frozen at booking as the control),
+    `tests/js/test_scheduled_page.js` (the paused note),
+    `tests/e2e/test_person_disable_browser.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 
