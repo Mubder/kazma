@@ -234,7 +234,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_REPLICA_ID` | (none) | `kazma_ui.replica_affinity` | yes |
 | `KAZMA_RESEARCH_ALLOW_THIN` | (none) | `kazma_core.tools.research_pipeline`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_RESEARCH_DIGEST_MAX` | (none) | `kazma_core.tools.read_url`, `kazma_core.web_acquire.research_pipeline_job` | yes |
-| `KAZMA_RESEARCH_DIR` | (none) | `kazma_core.tools.read_url` | yes |
+| `KAZMA_RESEARCH_DIR` | (none) | `kazma_core.store_registry`, `kazma_core.tools.read_url` | yes |
 | `KAZMA_RESEARCH_EXPORT_DOCX` | (none) | `kazma_core.tools.research_pipeline`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_RESEARCH_GAP_LOOP` | `True` | `kazma_core.tools.research_pipeline`, `kazma_core.tools.research_planner`, `kazma_core.web_acquire.research_pipeline_job` | yes |
 | `KAZMA_RESEARCH_LLM_CRITIC` | `True` | `kazma_core.tools.research_planner` | yes |
@@ -291,16 +291,16 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_UNRESTRICTED_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_UPDATE_REMOTE_ALLOWLIST` | `""` | `kazma_cli.update` | yes |
 | `KAZMA_UPDATE_VERIFY_SIGNATURES` | `""` | `kazma_cli.update` | yes |
-| `KAZMA_USER_HOME` | (none) | `kazma_core.paths` | yes |
+| `KAZMA_USER_HOME` | (none) | `kazma_core.paths`, `kazma_core.store_registry` | yes |
 | `KAZMA_VAULT_KEY` | `""` | `kazma_core.backup.restore_drill`, `kazma_core.migration.bundle`, `kazma_core.migration.exporter` +5 | yes |
 | `KAZMA_VECTOR_DB` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_VECTOR_MODEL` | `""` | `kazma_core.memory.embedder` | yes |
-| `KAZMA_VECTOR_PATH` | (none) | `kazma_core.paths`, `kazma_core.stores.knowledge_index` | yes |
+| `KAZMA_VECTOR_PATH` | (none) | `kazma_core.paths`, `kazma_core.store_registry`, `kazma_core.stores.knowledge_index` | yes |
 | `KAZMA_VERBOSE_ERRORS` | (none) | `kazma_core.errors` | yes |
 | `KAZMA_VISION_MODELS` | `""` | `kazma_core.vision_capability` | yes |
 | `KAZMA_VOICE_DUPLEX` | (none) | `kazma_core.voice.livekit` | yes |
 | `KAZMA_WATCHER_STALE_SECONDS` | (none) | `kazma_core.safety.bus_bridge` | yes |
-| `KAZMA_WORKSPACE` | `""` | `kazma_core.stores.workspaces`, `kazma_core.tools.research_pipeline`, `kazma_core.workspace.binding` +1 | yes |
+| `KAZMA_WORKSPACE` | `""` | `kazma_core.spaces.project_folder`, `kazma_core.stores.workspaces`, `kazma_core.tools.research_pipeline` +2 | yes |
 | `KAZMA_WORKSPACE_ROOT` | `""` | `kazma_core.workspace.root_policy`, `kazma_gateway.routers.workspaces` | yes |
 | `KAZMA_WS_EXTRA_ORIGINS` | (none) | `kazma_ui.auth` | yes |
 | `KAZMA_WS_ORIGIN_CHECK` | `""` | `kazma_ui.auth` | yes |
