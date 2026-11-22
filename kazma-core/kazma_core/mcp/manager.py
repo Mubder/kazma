@@ -2432,9 +2432,9 @@ class UnifiedToolExecutor:
             from kazma_core.spaces.scope import spaces_enforced
 
             if spaces_enforced():
-                from kazma_core.spaces.tools import host_refusal
+                from kazma_core.spaces.tools import tool_refusal
 
-                refusal = await asyncio.to_thread(host_refusal, tool_name)
+                refusal = await asyncio.to_thread(tool_refusal, tool_name)
                 if refusal is not None:
                     return {"content": refusal, "is_error": True, "refused": True}
             server_name = self._mcp.get_server_for_tool(tool_name)

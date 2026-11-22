@@ -80,6 +80,8 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from kazma_core.spaces.scope import space_of_record
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -501,7 +503,7 @@ def _drain_batches(conn: sqlite3.Connection, be: Any, rows: list[Any], total: _D
     one cut short (writes or time) stays whole for the next pass."""
     groups: dict[str, dict[str, list[int]]] = {}
     for seq, bid, tenant in rows:
-        groups.setdefault(str(tenant or "default"), {}).setdefault(str(bid), []).append(int(seq))
+        groups.setdefault(space_of_record(tenant), {}).setdefault(str(bid), []).append(int(seq))
     for tenant, by_bid in groups.items():
         bids = list(by_bid)
         for start in range(0, len(bids), BATCH):
@@ -912,7 +914,7 @@ def _went_back(conn: sqlite3.Connection, be: Any, now: float, *, keyed: bool) ->
         return False
     for tenant, sub, pred, obj in rows:
         _no_write_open(conn)
-        if be.edges_at_keys(str(tenant or "default"), [(str(sub), rel_name(str(pred or "")), str(obj))],
+        if be.edges_at_keys(space_of_record(tenant), [(str(sub), rel_name(str(pred or "")), str(obj))],
                             keyed=keyed):
             return False
     with _STATE_LOCK:

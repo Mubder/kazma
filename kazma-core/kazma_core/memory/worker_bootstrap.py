@@ -26,6 +26,7 @@ from collections.abc import Callable
 from typing import Any
 
 from kazma_core.memory.task_queue import failed_because
+from kazma_core.spaces.scope import space_of_record
 
 logger = logging.getLogger(__name__)
 
@@ -378,8 +379,8 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
             from kazma_core.memory.entity_resolution import entity_vocabulary
             from kazma_core.memory.predicates import predicate_vocabulary
 
-            vocabulary = predicate_vocabulary(primary, tenant_id=row["tenant_id"] or "default")
-            entities = entity_vocabulary(primary, tenant_id=row["tenant_id"] or "default")
+            vocabulary = predicate_vocabulary(primary, tenant_id=space_of_record(row["tenant_id"]))
+            entities = entity_vocabulary(primary, tenant_id=space_of_record(row["tenant_id"]))
         keep = True
         return {"primary": primary, "ops": ops, "row": dict(row), "use_llm": use_llm,
                 "vocabulary": vocabulary, "entities": entities, **_turn_context(primary, row)}
@@ -1341,7 +1342,7 @@ async def _handle_topic_summaries(payload: dict[str, Any]) -> bool:
     from kazma_core.memory.topic_summaries import summarize_period
 
     return await summarize_period(
-        str(payload.get("tenant_id") or "default"), str(payload.get("period_key") or ""),
+        space_of_record(payload.get("tenant_id")), str(payload.get("period_key") or ""),
         float(payload.get("start") or 0), float(payload.get("end") or 0),
     )
 

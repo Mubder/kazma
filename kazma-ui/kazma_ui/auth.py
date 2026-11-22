@@ -1764,6 +1764,54 @@ def extract_tenant_from_jwt(token: str) -> str | None:
     return None
 
 
+def _rules_here() -> tuple[Any, Any]:
+    """The host groups and the features of the work bound now (Spaces S1-20,
+    S2-11): one thread for both reads. Raises ``IdentityUnavailable`` when
+    the features cannot be read."""
+    from kazma_core.spaces.features import grants_here
+    from kazma_core.spaces.tools import host_allowance
+
+    return host_allowance(), grants_here()
+
+
+def _lacking_feature(needed: tuple[str, ...], grants: Any) -> str | None:
+    """The first of *needed* the person's *grants* do not hold; None when
+    they hold every one, or no rule applies (*grants* None)."""
+    if grants is None:
+        return None
+    return next((feature for feature in needed if not grants.has(feature)), None)
+
+
+def _feature_off_response(request: Request, feature: str, *, page: bool) -> Response:
+    """The answer to a request for a feature the person has not got (Spaces
+    S2-11), in the page's language: a page says so, an API call answers
+    ``feature_off`` with the same words."""
+    from html import escape
+
+    from kazma_ui.i18n import current_language, t
+
+    lang = current_language()
+    name = t(f"settings.feature.{feature}", lang)
+    text = t("settings.feature_off_body", lang, feature=name)
+    if not page:
+        return JSONResponse({"ok": False, "code": "feature_off", "feature": feature, "error": text},
+                            status_code=403)
+    from fastapi.responses import HTMLResponse
+
+    title = t("settings.feature_off_title", lang)
+    page_dir = "rtl" if lang == "ar" else "ltr"
+    return HTMLResponse(
+        f'<!doctype html><html lang="{lang}" dir="{page_dir}"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f'<title>{escape(title)}</title><link rel="stylesheet" href="/static/css/kazma.css"></head>'
+        '<body><main class="card" id="feature-off" style="max-width:36rem;margin:15vh auto;padding:1.5rem">'
+        f'<h1 class="card-title">{escape(title)}</h1><p>{escape(text)}</p>'
+        f'<p><a class="btn btn-primary" href="/chat">{escape(t("settings.feature_off_back", lang))}</a></p>'
+        '</main></body></html>',
+        status_code=403,
+    )
+
+
 def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitable[Response]]], Awaitable[Response]]:
     """Create an HTTP middleware that extracts tenant id and propagates it.
 
@@ -1772,7 +1820,7 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
     present (audit H11 + SaaS residual). Single-tenant default is ``default``.
     """
     from kazma_core.spaces.identity import IdentityUnavailable
-    from kazma_core.spaces.scope import reset_scope, set_scope, spaces_enforced, valid_space_id
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, reset_scope, set_scope, spaces_enforced, valid_space_id
     from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
     from kazma_core.tenant_isolation import (
         client_tenant_spoof_allowed,
@@ -1847,12 +1895,13 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                 )
             if tenant_id:
                 explicit_tenant = True
-        elif not tenant_id:
-            # Hardened mode — never trust client header
-            tenant_id = "default"
 
         if not tenant_id:
-            tenant_id = "default"
+            # Hardened mode never trusts a client header. A request with no
+            # tenant runs in the owner's space while Spaces is not enforced;
+            # once it is, space_for_request below binds the space the page
+            # names and checks membership (Spaces S1-04, S1-06).
+            tenant_id = OWNER_SPACE_ID
 
         if tenant_id:
             logger.debug("[TENANT] Inbound request scoped to tenant_id: %s", tenant_id)
@@ -1906,28 +1955,44 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         else:
             token = set_current_tenant_id(tenant_id)
         allowance_token = None
+        grants_token = None
         try:
             if spaces_enforced():
                 # Host pages and routes exist only where the space may have
-                # Development (Spaces S1-20); a page drawn here learns whether
-                # to show their entries, with no read of its own.
-                from kazma_core.spaces.tools import host_allowance, remember_allowance
+                # Development (Spaces S1-20), and a feature's pages and routes
+                # only for a person who has it (S2-11); a page drawn here
+                # learns which menu entries to show, with no read of its own.
+                from kazma_core.spaces.features import remember_page_grants
+                from kazma_core.spaces.tools import remember_allowance
 
-                from kazma_ui.route_scopes import is_development_route
+                from kazma_ui.route_scopes import features_of_route, is_development_route
 
                 path = judged_path(request)
                 host_route = is_development_route(path, request.method)
+                needed = features_of_route(path, request.method)
                 page = request.method in ("GET", "HEAD") and not path.startswith(
                     ("/api/", "/static/", "/ws/", "/health"))
-                if host_route or page:
-                    allowance = await asyncio.to_thread(host_allowance)
+                if host_route or page or needed:
+                    try:
+                        allowance, grants = await asyncio.to_thread(_rules_here)
+                    except IdentityUnavailable:
+                        return JSONResponse(
+                            {"ok": False, "error": "Accounts cannot be read right now. Try again.",
+                             "code": "identity_unavailable"},
+                            status_code=503,
+                            headers={"Retry-After": "5"},
+                        )
                     if host_route and not allowance.development:
                         return JSONResponse(
                             {"ok": False, "code": "host_only",
                              "error": f"Not available in this space: {allowance.why_not}."},
                             status_code=403,
                         )
+                    lacking = _lacking_feature(needed, grants)
+                    if lacking:
+                        return _feature_off_response(request, lacking, page=page)
                     allowance_token = remember_allowance(allowance)
+                    grants_token = remember_page_grants(grants)
             response = await call_next(request)
             if explicit_tenant and tenant_id and allow_spoof:
                 if request.cookies.get("X-Tenant-ID") != tenant_id:
@@ -1945,6 +2010,10 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                 from kazma_core.spaces.tools import forget_allowance
 
                 forget_allowance(allowance_token)
+            if grants_token is not None:
+                from kazma_core.spaces.features import forget_page_grants
+
+                forget_page_grants(grants_token)
             if scope_tokens is not None:
                 reset_scope(scope_tokens)
             else:

@@ -740,6 +740,15 @@ DECLARED: dict[str, str] = {
     "kazma-skills/kazma_skills/native/email_manager/analyze.py": "the product's Arabic name in a prompt",
     "kazma-ui/kazma_ui/config_errors.py": "a settings-save error in the PAGE's language (current_language), "
                                           "English otherwise; tests/test_durable_config_outage.py",
+    M + "cron/scheduler.py": "a job's refusal when its person lacks the Scheduled feature, an (English, "
+                             "Arabic) pair chosen by the job's language; nothing is decided by Arabic "
+                             "text; tests/test_feature_grants.py",
+    M + "spaces/daily_limits.py": "the daily-limit refusal as two fixed strings that "
+                                  "language_lock.in_their_language chooses between; nothing is decided "
+                                  "by Arabic text; tests/test_person_daily_limit.py",
+    M + "spaces/features.py": "each feature's name and its refusal in both languages (NAMES, held equal "
+                              "to the catalog); nothing is decided by Arabic text; "
+                              "tests/test_feature_grants.py",
 }
 
 _ARABIC = re.compile("[؀-ۿ]")

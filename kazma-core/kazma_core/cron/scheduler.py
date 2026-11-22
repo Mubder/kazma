@@ -622,7 +622,9 @@ class CronScheduler:
         zone, zone_name = await self._zone(zone, zone_name)
         now = now or self._clock.now()
         resolved = resolve_timing(timing, zone=zone, zone_name=zone_name, now=now)
-        if tenant_id is None:
+        if not tenant_id:
+            # None named: the space of the work bound now (Spaces S1-02; ""
+            # made the job the owner's whatever space booked it).
             from kazma_core.tenant_isolation import require_tenant_id
 
             tenant_id = require_tenant_id()
@@ -658,7 +660,7 @@ class CronScheduler:
             thread_id=thread_id,
             created_at=self._clock.now().isoformat(),
             next_run=norm_iso(resolved.first),
-            tenant_id=tenant_id or "default",
+            tenant_id=tenant_id,
             delivery_target=delivery_target,
             kind=kind,
             capabilities=capabilities,
@@ -1085,12 +1087,14 @@ class CronScheduler:
         # for its tenant (live 2026-09-12: both daily reminders failed with
         # "no usable API key" while the key was there). Fixed here rather than
         # by loosening the vault's fallback.
+        from kazma_core.spaces.scope import space_of_record
         from kazma_core.tenant_context import (
             reset_current_tenant_id,
             set_current_tenant_id,
         )
 
-        tenant_token = set_current_tenant_id(job.tenant_id or "default")
+        # A job stored with no tenant was booked before Spaces: the owner's (N19).
+        tenant_token = set_current_tenant_id(space_of_record(job.tenant_id))
         # Once Spaces is enforced the fire runs as a whole scope: the job's
         # space and the account that booked it (S1-14). A job whose tenant is
         # no space of this install, or one that acts for anyone but the owner
@@ -1118,7 +1122,7 @@ class CronScheduler:
             due = _parse_dt(current.fire_due or current.next_run)
             if binding is not None and binding.refusal:
                 result = FireResult(success=False, outcome=binding.refusal,
-                                    result_text=_FIRE_REFUSALS[binding.refusal])
+                                    result_text=_fire_refusal_text(binding.refusal, current.prompt))
             else:
                 result = await self._produce(current, settings, zone, zone_name, due=due, now=now)
             result.target = await self._resolve_target(current)
@@ -1462,7 +1466,25 @@ _FIRE_REFUSALS = {
                        "addresses Kazma has are the owner's, so it does not fire."),
     "identity_unavailable": ("Error: the accounts of this install cannot be read, so who this job "
                              "acts for is unknown and it does not fire."),
+    "feature_off": ("Error: Scheduled is off for the person this job acts for (Settings → "
+                    "People), so it does not fire."),
 }
+
+#: The refusals said in Arabic too, for a job written in Arabic.
+_FIRE_REFUSALS_AR = {
+    "feature_off": ("خطأ: ميزة المجدولة غير مفعّلة للشخص الذي تعمل له هذه المهمة (الإعدادات ← "
+                    "الأشخاص)، فلا تعمل."),
+}
+
+
+def _fire_refusal_text(refusal: str, prompt: str | None) -> str:
+    """A refused fire's text, in the language the job was written in."""
+    arabic = _FIRE_REFUSALS_AR.get(refusal)
+    if arabic is None:
+        return _FIRE_REFUSALS[refusal]
+    from kazma_core.language_lock import in_their_language
+
+    return in_their_language(prompt, _FIRE_REFUSALS[refusal], arabic)
 
 
 @dataclass(frozen=True)
@@ -1517,9 +1539,12 @@ def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
     (``refusal``) when the job's tenant is no space of the install
     (``no_space``), or when it acts for anyone but the owner
     (``no_own_address``): until people link their own chat apps (S3-05)
-    every address a job can deliver to is the owner's.
+    every address a job can deliver to is the owner's. Nor when the person
+    it acts for no longer has the feature Scheduled (``feature_off``, S2-11:
+    the check made again when the work runs).
     """
     from kazma_core.spaces import identity
+    from kazma_core.spaces.features import work_refusal
     from kazma_core.spaces.scope import spaces_enforced
 
     if not spaces_enforced():
@@ -1528,6 +1553,8 @@ def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
     if found is None:
         return _FireBinding(space="", asker="", refusal="no_space")
     space, asker = found
+    if work_refusal("scheduled", asker):
+        return _FireBinding(space=space, asker=asker, refusal="feature_off")
     if asker != _owner_account():
         return _FireBinding(space=space, asker=asker, refusal="no_own_address")
     return _FireBinding(space=space, asker=asker)

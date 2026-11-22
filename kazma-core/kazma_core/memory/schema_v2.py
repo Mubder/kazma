@@ -39,6 +39,7 @@ import logging
 from typing import Any
 
 from kazma_core.db.sqlite_columns import add_missing_columns
+from kazma_core.spaces.scope import space_of_record
 
 __all__ = [
     "ENTITIES_INDEX_DDL",
@@ -779,7 +780,7 @@ def _backfill_entity_counts(conn: Any) -> None:
         for tenant, eid in conn.execute(
             "SELECT tenant_id, id FROM entities WHERE belief_count = -1 LIMIT 5000"
         ).fetchall():
-            stale.setdefault(str(tenant or "default"), []).append(str(eid))
+            stale.setdefault(space_of_record(tenant), []).append(str(eid))
         # Recompute in batches to bound transaction size on large memories.
         for tenant, stale_ids in stale.items():
             for i in range(0, len(stale_ids), 500):

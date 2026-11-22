@@ -145,19 +145,17 @@ def keep_memory_databases(data: Path, into: Path) -> list[str]:
     """Copy the private install's memory databases (a consistent copy of
     each, the write-ahead log folded in) to *into*, to read why a step
     failed with no model call; never the vault or the settings."""
+    # Kazma's one copier of a live SQLite database (AGENTS §21: a batched
+    # copy restarts under a writer; tests/test_sqlite_snapshot.py).
+    from kazma_core.db.sqlite_snapshot import snapshot_copy
+
     into.mkdir(parents=True, exist_ok=True)
     kept = []
     for name in MEMORY_DATABASES:
         source = data / name
         if not source.is_file():
             continue
-        src = sqlite3.connect(str(source))
-        dst = sqlite3.connect(str(into / name))
-        try:
-            src.backup(dst)
-        finally:
-            dst.close()
-            src.close()
+        snapshot_copy(source, into / name, read_only=True)
         kept.append(name)
     return kept
 

@@ -18,6 +18,8 @@ import sqlite3
 import time
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_global_reconsolidation", "subject_partition_index"]
@@ -39,7 +41,7 @@ def subject_partition_index(subject: str, partition_count: int) -> int:
 def run_global_reconsolidation(
     conn: sqlite3.Connection,
     *,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     max_merges: int = 50,
     reembed_limit: int = 100,
     partition_index: int = 0,
@@ -60,6 +62,7 @@ def run_global_reconsolidation(
 
     Returns stats dict. Best-effort — never raises to the worker.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     p_count = max(1, int(partition_count or 1))
     p_index = max(0, int(partition_index or 0)) % p_count
 

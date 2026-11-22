@@ -14118,7 +14118,16 @@ an install with one account behaves as before.
   `tenant_isolation.require_tenant_id` asks them. Never catch `NoSpaceBound`
   to fall back to `default`, and never write a new `or "default"` for a
   tenant: the ratchet in `tests/test_no_space_no_data.py` counts the ones
-  left and only goes down. Enforcement is one stored switch
+  left and only goes down (the four left are in `memory/recall.py`, which
+  the memory session holds, since 2026-11-22). A stored record that names
+  no space is read with `scope.space_of_record` (written before Spaces: the
+  owner's, N19). A parameter some caller leaves out resolves with
+  `scope.space_named_or_bound`: the owner's while Spaces is off -- what
+  such code wrote before, so nothing moves -- and the bound space once it
+  is on. Not `require_space_id` there: while Spaces is off it answers the
+  ambient tenant and refuses inside `install_work`, which would move rows
+  today. Work of the install or the machine that needs the owner's space
+  names `OWNER_SPACE_ID` and says why. Enforcement is one stored switch
   (`identity.ENFORCED_KEY`) kept in memory (`scope.spaces_enforced`): asking
   for a space reads no settings.
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
@@ -15270,6 +15279,122 @@ an install with one account behaves as before.
     the chat's stream and live voice): the session id in the owner's space,
     a fresh id in any other. Gate: `tests/test_web_thread_ids.py` (no web
     code gives a thread its session id itself, but two declared places).
+- **A daily spending limit per person (S2-02, 2026-11-22; decision N8).**
+  Only where Spaces is enforced: an install that does not enforce it reads
+  nothing more (`daily_limits.may_apply`, a check in memory).
+  - `kazma_core/spaces/daily_limits.py` is the one rule. A limit is tokens
+    always (every call, a model of unknown price too) and dollars where the
+    price is known (0: none). Whose: a person's own
+    (`identity` `policies[account]["daily_limit"]`), else the limit for
+    people (`identity` `defaults["daily_limit"]`), else `SHIPPED_DEFAULT`
+    (3,000,000 tokens and $1.00: about 40 ordinary turns, from a median turn
+    of 71,830 tokens on the live install's ledger in November 2026); the
+    admin has none unless one is set for them (the install's own
+    `agent.daily_cost_limit_usd` covers the admin and is unchanged).
+  - Counted from the ledger by the person the calls were for
+    (`llm_ledger.usage_of`, `asker` and `ts`, index `idx_llm_calls_asker_ts`)
+    since the local midnight (`cron.timezone`). A spend that cannot be
+    counted (the ledger off or unreadable) refuses: a person's limit is
+    never taken as unspent.
+  - Asked where a model is called for a person: the supervisor refuses a
+    turn at iteration 0 before any model call (`verdict`, off the loop,
+    after the install's own check), and `resilient_chat` refuses a call
+    outside a turn (`call_refusal`: `LLMError(kind="daily_limit")`, a swarm
+    worker's, research's), and so does X Studio's `x_chat`
+    (`XDailyLimitReached`, the work held), which also writes each answered
+    call to the ledger the limit counts. A turn that started under the limit
+    runs to its end; its own token budget bounds how far past.
+  - **Every model call is checked or declared**
+    (`tests/test_model_calls_checked.py`): each product `.chat(`,
+    `.chat_stream(`, `invoke_llm_chat(` and each `.chat` handed on is in a
+    function that asks `daily_limits.call_refusal` or `verdict`, or is
+    declared with why (in a checked turn; Kazma's own work after a turn,
+    not refused until S2-07 and not in the ledger today; the admin's own; a
+    client's own retries). A new model call asks `call_refusal` or is
+    declared; a planted direct call and `x_chat` without its check are the
+    controls.
+  - The admin sets limits on People (`people.set_daily_limit`,
+    `set_default_daily_limit`, `PUT /api/people/{account_id}/daily-limit`,
+    `PUT /api/people/default-limit`), each change an event of the identity
+    store's record; `GET /api/people` gives each person's limit and today's
+    spend (counts and money, N11). Deleting a person takes their limit.
+  - The precondition of a second account (`daily_limits.precondition`,
+    S1-33) holds while the ledger counts and every person but the admin
+    resolves to a limit.
+  - Gates: `tests/test_person_daily_limit.py` (the real supervisor graph and
+    `resilient_chat`; the install-wide sum as the control, the checks taken
+    out fail seven), `tests/e2e/test_person_daily_limit_browser.py` (by the
+    sidebar, EN/AR).
+- **Features per person (S2-11, 2026-11-22; plan 4.8, decision N18).** Only
+  where Spaces is enforced: an install that does not enforce it refuses
+  nothing and reads nothing.
+  - `kazma_core/spaces/features.py` is the one table: each feature's pages,
+    routes (`kazma_ui.route_scopes` patterns), tools, chat commands,
+    background loops and connected accounts; `ALWAYS_ON` (chat, memory, My
+    account, with why) and `INSTALL` (the admin's commands, Kazma's own
+    loops) declare the rest. A new page, route, tool, command or loop with
+    neither fails `tests/test_feature_grants.py` (planted ones as controls),
+    and so does a declaration that names nothing.
+  - Who has what (`grants_of`): the admin every feature, Development theirs
+    to switch off (N28, the switch `identity.holds_development` reads);
+    anyone else N18's (`Feature.new_member`: documents, knowledge, research,
+    web, images and voice) plus what the admin turned on
+    (`identity` `policies[account]["features"]`). People sets them
+    (`people.set_features`, `PUT /api/people/{account_id}/features`), an
+    event of the identity record each time. A grant never passes S1-20's
+    group rule.
+  - Refused at every part: the tenant middleware answers a feature's route
+    403 `feature_off` (`route_scopes.features_of_route`: a route's own
+    feature and `features.ALSO_NEEDS`'s, one thread with the host check,
+    `auth._rules_here`; a page is a page in its language,
+    `auth._feature_off_response`) and remembers the page's grants for the
+    sidebar (`feature_here`); a socket at its handshake
+    (`space_binding.space_for_socket`, close 4403 `feature_off`); the
+    command palette and shortcuts offer only what the sidebar shows
+    (`search_pages.pageOffered`); tools at the offer and the call through
+    `spaces.tools.tool_refusal` (host groups and features together:
+    `offered_here`, the registry, the MCP branch, the environment note);
+    chat commands (`features.command_refusal`, which reads a command as the
+    handlers do: a bot's name and a prefix, and every chat-app handler's
+    `_command_claimed`); the intent engine (`features.INTENT_HANDLERS`: a
+    decision whose work needs a feature the person lacks is dropped).
+    Refusals name the feature as People does (`features.NAMES`, held equal
+    to the catalog) in the message's language.
+  - **Checked where the work is admitted** (the S2-11 review):
+    `features.ADMISSIONS` names, per feature, the functions every door to
+    its work passes -- research's `research_runtime._frozen`, X's
+    `book_x_post` and `x_work_scope`, a document stage, a crawl's every page
+    and its resume, a swarm dispatch, a scheduled fire, a feature's socket
+    -- and each asks `work_refusal` for the person the work is for (a
+    booked post records its `booker`; a crawl its `asker`).
+    `features.NO_ADMISSION` says why the rest have none. Work that cannot
+    run waits (`FeatureOff`): a booked or legacy X post stays due, a crawl
+    stops `interrupted` (`feature_off`) for a Resume, nothing held or
+    failed; a document job fails with Retry, and an identity outage in its
+    stage is retried as `metadata_unavailable`. A new door passes an
+    admission or is a new one. A record that names no account (Kazma's
+    own, "operator") is left to its space's rules. A feature off keeps the
+    person's data.
+  - The root conftest gives every test's people -- real accounts only --
+    every feature (the admin's Development kept); a test of the features
+    themselves is marked `real_features`. `create_app()` reads the stored Spaces switch into the
+    process: a test that sets `scope._enforced` imports what builds the app
+    at collection, never mid-test.
+  - The precondition of a second account (`features.precondition`, S1-33)
+    holds while every stored switch names a feature of the table.
+  - Gates: `tests/test_feature_grants.py` (the table against the real app,
+    the registry, the commands and the loops; X Studio on for Y and off for
+    G through routes, the offer, the call, a scheduled job's executor, a
+    real swarm worker, `/x` and X's background work; a grant that only hides
+    the menu entry as the control), `tests/test_feature_admissions.py` (the
+    admission gate with a planted admission and the document stage without
+    its call as controls; the intent path through the real supervisor graph;
+    research's admission; X booked through Scheduled, the booker, a post that
+    waits; a crawl through the real replayed crawl; the real document
+    worker; live voice's handshake; every chat-app handler; pages and
+    refusals in both languages; Knowledge through Documents -- each with
+    its control), `tests/test_feature_grants_in_tests.py`,
+    `tests/e2e/test_feature_grants_browser.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

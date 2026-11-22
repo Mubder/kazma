@@ -299,7 +299,7 @@ def _sandboxed_space_note() -> str:
     named only by relative paths, and the tools it has. Never the install's
     folder, workspace, repository, MCP binding or host shell: a member's
     turn is told none of them."""
-    from kazma_core.spaces.tools import host_allowance, host_refusal
+    from kazma_core.spaces.tools import host_allowance, tool_grants, tool_refusal
 
     lines = _identity_lines()
     lines.extend(
@@ -334,7 +334,8 @@ def _sandboxed_space_note() -> str:
     )
     lines.extend(_visible_work_lines())
     allowance = host_allowance()
-    tools = [t for t in _list_available_tools() if host_refusal(t, allowance) is None]
+    grants = tool_grants()
+    tools = [t for t in _list_available_tools() if tool_refusal(t, allowance, grants) is None]
     lines.append("")
     if tools:
         lines.append("Available tools in this space: " + ", ".join(tools) + ".")

@@ -112,8 +112,18 @@ def _knowledge_inject_for_turn(user_text: str) -> Any:
     each library's opt-in are checked by
     :func:`kazma_core.stores.knowledge_index.build_knowledge_inject`. The
     caller removes any Knowledge note already in the messages first: a turn
-    carries ONE (KB-S08).
+    carries ONE (KB-S08). None too for a person without Knowledge (Spaces
+    S2-11), or whose features cannot be read.
     """
+    from kazma_core.spaces.features import grants_here
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    try:
+        grants = grants_here()
+    except IdentityUnavailable:
+        return None
+    if grants is not None and not grants.has("knowledge"):
+        return None
     try:
         from kazma_core.memory.config import read_memory_cfg
 
@@ -428,6 +438,24 @@ async def supervisor_node(
                     ),
                 }],
             }
+        # The person's own daily limit (Spaces S2-02): only where Spaces is
+        # enforced and a person is bound -- may_apply is a check in memory,
+        # so an install with one account reads nothing more here.
+        from kazma_core.spaces import daily_limits as _person_limits
+
+        if _person_limits.may_apply():
+            _mine = await asyncio.to_thread(_person_limits.verdict)
+            if _mine and _mine.get("over"):
+                logger.warning("[Supervisor] a person's daily limit is reached -- turn refused")
+                return {
+                    **breaker_reset,
+                    **_mission_carry,
+                    "next_node": NodeName.RESPOND,
+                    "messages": messages + [{
+                        "role": "assistant",
+                        "content": _person_limits.refusal_text(_turn_user_text, _mine),
+                    }],
+                }
     _token_limit = _ttb.effective_limit(_turn_view, _token_base)
     _turn_tokens_used = int(_turn_view.get("turn_tokens") or 0)
 
@@ -674,6 +702,22 @@ async def supervisor_node(
             except Exception:
                 logger.debug("[Supervisor] Intent engine failed (non-fatal)", exc_info=True)
                 _decision = None
+            if _decision is not None and _decision.handler:
+                # A decision whose work needs a feature the person has not
+                # got (Spaces S2-11) is no decision: the turn goes on as an
+                # ordinary one, where that feature's tools are not offered.
+                from kazma_core.spaces.features import intent_refusal
+                from kazma_core.spaces.identity import IdentityUnavailable
+
+                try:
+                    _lacking = await asyncio.to_thread(intent_refusal, _decision.handler)
+                except IdentityUnavailable:  # unreadable grants: never start the work
+                    _lacking = "unknown"
+                if _lacking:
+                    logger.info("[Supervisor] Intent Engine: %s left out (%s is off for this person)",
+                                _decision.handler, _lacking)
+                    intent_patch["intent_route"] = "loop"
+                    _decision = None
 
         # Execute (Phase 2+: document_generate / research_deep / composer)
         if _decision is not None and _decision.route.value == "execute" and _decision.handler:

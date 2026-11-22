@@ -35,6 +35,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -135,7 +137,7 @@ def append(
         cur = conn.execute(
             "INSERT INTO forget_journal (at, kind, tenant_id, session_key, turn_number, question_sha, "
             "episode_id, summary_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (time.time(), kind, tenant_id or "default", session_key or "", int(turn_number or 0),
+            (time.time(), kind, space_named_or_bound(tenant_id), session_key or "", int(turn_number or 0),
              question_sha or "", episode_id or "", summary_id or "", detail or ""),
         )
         return int(cur.lastrowid)
@@ -315,7 +317,7 @@ def queue_remote_delete(item_id: str, tenant_id: str) -> None:
     try:
         conn.execute(
             "INSERT OR IGNORE INTO forget_remote_pending (item_id, tenant_id, added_at) VALUES (?, ?, ?)",
-            (item_id, tenant_id or "default", time.time()),
+            (item_id, space_named_or_bound(tenant_id), time.time()),
         )
     finally:
         conn.close()

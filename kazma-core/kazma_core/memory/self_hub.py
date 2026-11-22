@@ -75,7 +75,7 @@ def is_self_entity(
     return False
 
 
-def collect_self_entity_ids(conn: sqlite3.Connection, tenant_id: str = "default") -> set[str]:
+def collect_self_entity_ids(conn: sqlite3.Connection, tenant_id: str) -> set[str]:
     """All entity ids that should collapse to the hub for graph focus."""
     ids: set[str] = {HUB_ID}
     try:
@@ -112,7 +112,7 @@ def collect_self_entity_ids(conn: sqlite3.Connection, tenant_id: str = "default"
 def resolve_hub_display_name(
     conn: sqlite3.Connection,
     *,
-    tenant_id: str = "default",
+    tenant_id: str,
     default: str = "You",
 ) -> str:
     """Best display label for the canvas hub (never empty)."""
@@ -166,7 +166,7 @@ def ensure_user_hub(
     display_name: str,
     *,
     extra_aliases: list[str] | None = None,
-    tenant_id: str = "default",
+    tenant_id: str,
 ) -> dict[str, Any]:
     """Upsert *tenant_id*'s ``user`` hub with display name + aliases. Does not commit.
 
@@ -177,7 +177,7 @@ def ensure_user_hub(
     written; the result says ``skipped``."""
     name = (display_name or "").strip() or "You"
     aliases: list[str] = []
-    caller = tenant_id or "default"
+    caller = tenant_id
     row = conn.execute(
         "SELECT name, aliases_json FROM entities WHERE id=? AND tenant_id=?", (HUB_ID, caller)
     ).fetchone()

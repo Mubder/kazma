@@ -39,6 +39,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -110,7 +112,7 @@ def _snippet(text: str, terms: list[str]) -> str:
 def search_transcripts(
     query: str,
     *,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     exclude_session_id: str | None = None,
     db_path: str | Path | None = None,
     limit: int = _MAX_HITS,
@@ -125,6 +127,7 @@ def search_transcripts(
     {session_id, thread_id, title, created_at, score, matched, snippet}; empty
     when the store is missing or no session is about the question.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     try:
         from kazma_core.memory.episode_text import is_small_talk
 

@@ -20,6 +20,8 @@ import threading
 import time
 from typing import Any, Protocol, runtime_checkable
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 # Liveness-probe cache TTL for remote vector backends' `available` property.
@@ -247,7 +249,7 @@ class VectorBackend(Protocol):
         self,
         query_vec: list[float] | None,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         tier: str | list[str] | None = "recall",
         limit: int = 10,
         kind: str | None = None,
@@ -258,18 +260,18 @@ class VectorBackend(Protocol):
         item_id: str,
         vec: list[float],
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> bool: ...
 
-    def delete(self, item_id: str, *, tenant_id: str = "default") -> bool: ...
+    def delete(self, item_id: str, *, tenant_id: str | None = None) -> bool: ...
 
     def similarities(
         self,
         query_vec: list[float] | None,
         ids: list[str],
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         kind: str | None = None,
     ) -> dict[str, float]:
         """Cosine of exactly these items with *query_vec*; an unknown one is absent."""
@@ -296,11 +298,12 @@ class LocalSqliteVectorBackend:
         self,
         query_vec: list[float] | None,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         tier: str | list[str] | None = "recall",
         limit: int = 10,
         kind: str | None = None,
     ) -> list[tuple[str, float]]:
+        tenant_id = space_named_or_bound(tenant_id)
         if str(kind or "") == "belief":
             return self._engine.search_beliefs(query_vec, tenant_id=tenant_id, limit=limit)
         return self._engine.search(
@@ -312,7 +315,7 @@ class LocalSqliteVectorBackend:
         item_id: str,
         vec: list[float],
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> bool:
         """Store the float32 embedding on its row (local path).
@@ -341,7 +344,7 @@ class LocalSqliteVectorBackend:
             logger.debug("[vector_backend] local upsert failed", exc_info=True)
             return False
 
-    def delete(self, item_id: str, *, tenant_id: str = "default") -> bool:
+    def delete(self, item_id: str, *, tenant_id: str | None = None) -> bool:
         del tenant_id
         try:
             self._conn.execute(
@@ -357,7 +360,7 @@ class LocalSqliteVectorBackend:
         query_vec: list[float] | None,
         ids: list[str],
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         kind: str | None = None,
     ) -> dict[str, float]:
         del tenant_id  # row id is global PK
@@ -376,16 +379,16 @@ class _EmptyVectorBackend:
     def available(self) -> bool:
         return False
 
-    def search(self, query_vec, *, tenant_id="default", tier=None, limit=10, kind=None):
+    def search(self, query_vec, *, tenant_id=None, tier=None, limit=10, kind=None):
         return []
 
-    def upsert(self, item_id, vec, *, tenant_id="default", meta=None):
+    def upsert(self, item_id, vec, *, tenant_id=None, meta=None):
         return False
 
-    def delete(self, item_id, *, tenant_id="default"):
+    def delete(self, item_id, *, tenant_id=None):
         return False
 
-    def similarities(self, query_vec, ids, *, tenant_id="default", kind=None):
+    def similarities(self, query_vec, ids, *, tenant_id=None, kind=None):
         return {}
 
 
@@ -476,11 +479,12 @@ class QdrantVectorBackend:
         self,
         query_vec: list[float] | None,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         tier: str | list[str] | None = "recall",
         limit: int = 10,
         kind: str | None = None,
     ) -> list[tuple[str, float]]:
+        tenant_id = space_named_or_bound(tenant_id)
         if not query_vec or not self._url:
             return []
         try:
@@ -529,10 +533,11 @@ class QdrantVectorBackend:
         query_vec: list[float] | None,
         ids: list[str],
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         kind: str | None = None,
     ) -> dict[str, float]:
         """A search confined to these items: Qdrant scores exactly them."""
+        tenant_id = space_named_or_bound(tenant_id)
         wanted = list(dict.fromkeys(str(i) for i in ids if i))
         if not query_vec or not wanted or not self._url:
             return {}
@@ -573,9 +578,10 @@ class QdrantVectorBackend:
         item_id: str,
         vec: list[float],
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> bool:
+        tenant_id = space_named_or_bound(tenant_id)
         if not item_id or not vec or not self._url:
             return False
         try:
@@ -614,7 +620,7 @@ class QdrantVectorBackend:
             logger.debug("[qdrant] upsert failed", exc_info=True)
             return False
 
-    def delete(self, item_id: str, *, tenant_id: str = "default") -> bool:
+    def delete(self, item_id: str, *, tenant_id: str | None = None) -> bool:
         del tenant_id
         if not item_id or not self._url:
             return False
@@ -816,11 +822,12 @@ class PgvectorBackend:
         self,
         query_vec: list[float] | None,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         tier: str | list[str] | None = "recall",
         limit: int = 10,
         kind: str | None = None,
     ) -> list[tuple[str, float]]:
+        tenant_id = space_named_or_bound(tenant_id)
         if not query_vec or not self._dsn or not self.available:
             return []
         try:
@@ -883,10 +890,11 @@ class PgvectorBackend:
         query_vec: list[float] | None,
         ids: list[str],
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         kind: str | None = None,
     ) -> dict[str, float]:
         """Cosine of exactly these rows with *query_vec* (one statement)."""
+        tenant_id = space_named_or_bound(tenant_id)
         wanted = list(dict.fromkeys(str(i) for i in ids if i))
         if not query_vec or not wanted or not self._dsn or not self.available:
             return {}
@@ -924,11 +932,12 @@ class PgvectorBackend:
         item_id: str,
         vec: list[float],
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> bool:
         # The hybrid backend writes here on every upsert; on a Postgres with no
         # pgvector that was a refused CREATE TABLE each time.
+        tenant_id = space_named_or_bound(tenant_id)
         if not item_id or not vec or not self._dsn or not self.available:
             return False
         try:
@@ -968,7 +977,7 @@ class PgvectorBackend:
             logger.debug("[pgvector] upsert failed", exc_info=True)
             return False
 
-    def delete(self, item_id: str, *, tenant_id: str = "default") -> bool:
+    def delete(self, item_id: str, *, tenant_id: str | None = None) -> bool:
         del tenant_id
         if not item_id or not self._dsn:
             return False
@@ -1023,7 +1032,7 @@ class HybridVectorBackend:
         self,
         query_vec: list[float] | None,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         tier: str | list[str] | None = "recall",
         limit: int = 10,
         kind: str | None = None,
@@ -1051,7 +1060,7 @@ class HybridVectorBackend:
         query_vec: list[float] | None,
         ids: list[str],
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         kind: str | None = None,
     ) -> dict[str, float]:
         """The remote index's answer, and the local vectors for what it lacks."""
@@ -1072,7 +1081,7 @@ class HybridVectorBackend:
         item_id: str,
         vec: list[float],
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> bool:
         ok_l = self._local.upsert(item_id, vec, tenant_id=tenant_id, meta=meta)
@@ -1083,7 +1092,7 @@ class HybridVectorBackend:
             logger.debug("[hybrid] remote upsert failed", exc_info=True)
         return bool(ok_l or ok_r)
 
-    def delete(self, item_id: str, *, tenant_id: str = "default") -> bool:
+    def delete(self, item_id: str, *, tenant_id: str | None = None) -> bool:
         a = self._local.delete(item_id, tenant_id=tenant_id)
         b = False
         try:

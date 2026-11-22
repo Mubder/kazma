@@ -39,6 +39,7 @@ from typing import Any
 from kazma_core.memory import fact_names
 from kazma_core.memory.limits import episode_text
 from kazma_core.memory.entity_resolution import slug as _slug
+from kazma_core.spaces.scope import OWNER_SPACE_ID
 
 logger = logging.getLogger(__name__)
 
@@ -329,7 +330,7 @@ def _llm_extract_beliefs_from_memories(
                 action = mutate_belief(
                     primary, subj, pred, obj,
                     ops_conn=ops, predicate_type=ptype,
-                    confidence=conf, importance=4,
+                    confidence=conf, importance=4, tenant_id=OWNER_SPACE_ID,  # V1 predates tenants: the owner's
                     # The model's reading of a stored note, not the user's
                     # words (memory.provenance, Memory audit M03).
                     extraction_method="llm_inferred",

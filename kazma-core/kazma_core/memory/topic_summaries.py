@@ -73,6 +73,7 @@ from kazma_core.memory.legacy_tables import LEGACY_SESSION_PREFIX, LEGACY_TURN
 from kazma_core.memory.limits import turn_key
 
 from kazma_core.memory.tenant_view import narrowed_to, sees_every_tenant
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +252,7 @@ def _load_turns(
         "embedding, embedding_model_version, metadata_json FROM episodes "
         f"WHERE tenant_id = ? AND tier IN ({','.join('?' for _ in RECALLABLE_TIERS)})"
     )
-    params: list[Any] = [tenant_id or "default", *RECALLABLE_TIERS]
+    params: list[Any] = [space_named_or_bound(tenant_id), *RECALLABLE_TIERS]
     if ids is not None:
         wanted = list(dict.fromkeys(str(i) for i in ids))
         if not wanted:
@@ -349,7 +350,7 @@ def _meaning_bar(conn: sqlite3.Connection, tenant_id: str, size: int) -> float |
         "SELECT embedding FROM episodes WHERE tenant_id = ? AND embedding IS NOT NULL "
         "AND length(embedding) = ? AND (embedding_model_version IS NULL "
         "OR embedding_model_version = '' OR embedding_model_version = ?) ORDER BY id LIMIT ?",
-        (tenant_id or "default", size, model or "", _BAR_SAMPLE),
+        (space_named_or_bound(tenant_id), size, model or "", _BAR_SAMPLE),
     ).fetchall()
     if len(rows) < _BAR_MIN:
         return None
@@ -789,7 +790,7 @@ async def summarize_period(
     from kazma_core.llm_provider import LLMError
 
     cfg = await asyncio.to_thread(_config)  # memory settings (audit 2026-10-26 AUD-111)
-    tenant_id = tenant_id or "default"
+    tenant_id = space_named_or_bound(tenant_id)
 
     def prepare() -> tuple[sqlite3.Connection | None, list[_Turn], _Grouping]:
         from kazma_core.memory.chat_history import chat_ids
@@ -980,7 +981,7 @@ def _due_periods(conn: sqlite3.Connection, now: float, min_turns: int) -> list[t
     ):
         key, start, end = _week_of(float(at or 0))
         if end + _WEEK_GRACE_S <= now:
-            weeks.setdefault((str(tenant or "default"), key), [start, end, 0])[2] += 1
+            weeks.setdefault((space_of_record(tenant), key), [start, end, 0])[2] += 1
     state = {
         (r["tenant_id"], r["period_key"]): r
         for r in conn.execute(
@@ -1087,14 +1088,14 @@ def forget_summary(
     (``forget_journal``): a restored memory database forgets it again."""
     from kazma_core.memory import forget_journal
 
-    seq = (forget_journal.append("summary", tenant_id=tenant_id or "default", summary_id=summary_id)
+    seq = (forget_journal.append("summary", tenant_id=space_named_or_bound(tenant_id), summary_id=summary_id)
            if journal else None)
     own = conn is None
     conn = conn or _open()
     if conn is None:
         return {"ok": False, "error": "not_found"}
     try:
-        caller = tenant_id or "default"
+        caller = space_named_or_bound(tenant_id)
         only = narrowed_to(caller)  # the caller's own summary, in each statement (Spaces S1-35)
         row = conn.execute(
             "SELECT tenant_id, status, metadata_json FROM memory_summaries "
@@ -1133,7 +1134,7 @@ def forget_summary(
 
 def _summary_filter(tenant_id: str, include_hidden: bool) -> tuple[str, list[Any]]:
     where, params = ["1 = 1"], []
-    if not sees_every_tenant(tenant_id or "default"):
+    if not sees_every_tenant(space_named_or_bound(tenant_id)):
         where.append("tenant_id = ?")
         params.append(tenant_id)
     if not include_hidden:

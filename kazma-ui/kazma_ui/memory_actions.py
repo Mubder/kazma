@@ -104,7 +104,9 @@ def _actor_and_tenant(headers: list[tuple[bytes, bytes]]) -> tuple[str, str]:
     from kazma_ui.web_actor import actor_for_session
 
     payload = get_session_payload(sid) or {}
-    tenant = str(payload.get("tenant_id") or "default")
+    from kazma_core.spaces.scope import space_of_record
+
+    tenant = space_of_record(payload.get("tenant_id"))  # a session naming none: the owner's
     return actor_for_session(sid, payload), tenant
 
 

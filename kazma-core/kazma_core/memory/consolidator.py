@@ -30,6 +30,7 @@ from collections import OrderedDict
 from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record
 
 __all__ = [
     "reset_turn_counter",
@@ -239,7 +240,7 @@ def remember_turn(values: dict[str, Any] | None, *, thread_id: str = "") -> bool
         messages,
         session_id=session or None,
         turn=turn,
-        tenant_id=str(post.get("tenant_id") or "default"),
+        tenant_id=space_of_record(post.get("tenant_id")),
         # Who asked (Spaces S1-11): in a shared space "I" is that member.
         said_by=str(post.get("said_by") or "") or None,
     )
@@ -251,7 +252,7 @@ def _schedule_post_turn_memory(
     *,
     session_id: str | None = None,
     turn: int | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     said_by: str | None = None,
 ) -> None:
     """Run the V2 post-turn memory pipeline in a dedicated thread.
@@ -275,6 +276,7 @@ def _schedule_post_turn_memory(
             writes NULL provenance, never fails.
         turn: The turn number within the session. None when unavailable.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     import asyncio
 
     # Confirm we're inside a running loop — the legacy path and the V2
@@ -384,7 +386,7 @@ def run_deferred_turn_memory(payload: dict[str, Any]) -> bool:
         messages,
         session_id=payload.get("session_id"),
         turn=int(turn) if turn is not None else None,
-        tenant_id=str(payload.get("tenant_id") or "default"),
+        tenant_id=space_of_record(payload.get("tenant_id")),
         at=float(at) if at is not None else None,
         # Absent in a task queued before Spaces S1-11: no speaker, so in a
         # shared space the turn is remembered and no first-person fact filed.
@@ -397,7 +399,7 @@ def _run_turn_memory(
     *,
     session_id: str | None,
     turn: int | None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     at: float | None = None,
     said_by: str | None = None,
 ) -> bool:
@@ -425,6 +427,7 @@ def _run_turn_memory(
     Returns False when the episode or the facts could not be written (a
     deferred turn is then retried by the queue).
     """
+    tenant_id = space_named_or_bound(tenant_id)
     ok = True
     at = time.time() if at is None else float(at)
     # ── A chat the user keeps out of memory (plan U1) ─────────────
@@ -545,7 +548,7 @@ def _mirror_turn_to_v2(
     *,
     session_id: str | None,
     turn: int | None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     created_at: float | None = None,
     said_by: str | None = None,
 ) -> str | None:
@@ -555,6 +558,7 @@ def _mirror_turn_to_v2(
     tier by default; explicit-remember → recall). Returns the id the episode
     is stored under (the writer's choice), or None when nothing was written.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     from kazma_core.memory.dual_write import EpisodeWriteFailed, write_episode
 
     user_text, assistant_text = extract_turn_texts(messages)
@@ -587,7 +591,7 @@ def _v2_extract_sync(
     *,
     session_id: str | None,
     turn: int | None,
-    tenant_id: str = "default",
+    tenant_id: str,
     now: float | None = None,
     said_by: str | None = None,
 ) -> None:

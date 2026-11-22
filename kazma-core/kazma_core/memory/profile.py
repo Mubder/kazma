@@ -28,6 +28,8 @@ import threading
 import time
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 __all__ = ["ABOUT_MAX_CHARS", "ABOUT_MARKER", "about_block", "about_for_turn", "copy_from_personal",
            "get_about", "set_about"]
 
@@ -73,7 +75,7 @@ def get_about(tenant_id: str, *, conn: sqlite3.Connection | None = None,
     """``{"about": text, "updated_at": epoch or None}`` for the tenant: in a
     shared space *account*'s own text (none for no account), else the
     tenant's."""
-    tenant = tenant_id or "default"
+    tenant = space_named_or_bound(tenant_id)
     shared = _shared(tenant)
     if shared and not account:
         return {"about": "", "updated_at": None}
@@ -105,7 +107,7 @@ def about_for_turn(tenant_id: str, asker: str | None = None) -> dict[str, Any]:
     reply"). Under enforcement a tenant sees only its own."""
     from kazma_core.memory.config import memory_tenant_enforced
 
-    tid = tenant_id or "default"
+    tid = space_named_or_bound(tenant_id)
     if _shared(tid):
         # Only the asker's own text, in their own turns (N31).
         return get_about(tid, account=asker)
@@ -125,7 +127,7 @@ def set_about(tenant_id: str, text: str, *, conn: sqlite3.Connection | None = No
         # A code the page words in its own language (Memory audit M32).
         return {"ok": False, "error": "about_too_long", "code": "about_too_long",
                 "length": len(about), "max": ABOUT_MAX_CHARS}
-    tenant = tenant_id or "default"
+    tenant = space_named_or_bound(tenant_id)
     if _shared(tenant):
         return _set_member_about(tenant, account, about, conn=conn)
     own = conn is None

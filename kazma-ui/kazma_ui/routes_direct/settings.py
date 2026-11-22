@@ -219,8 +219,11 @@ def register_settings_routes(self: Any) -> None:
         (and re-running re-syncs after edits). Idempotent. SQLite stays primary.
         """
         from kazma_core.memory.state_backend import backfill_state_mirror
+        from kazma_core.spaces.scope import require_space_id
 
-        return backfill_state_mirror(tenant_id="default")
+        # The space the admin's page names (Spaces S1-02; it copied the
+        # owner's memory whatever space the page was in).
+        return backfill_state_mirror(tenant_id=require_space_id())
     @self.app.post("/api/settings/memory/backends/reset-local")
     def _settings_memory_reset_local():
         from kazma_core.memory.backends import reset_backends_to_local

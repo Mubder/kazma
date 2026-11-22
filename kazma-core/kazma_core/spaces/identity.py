@@ -15,7 +15,11 @@ What it holds:
   shared space), who made it.
 * ``memberships`` -- account, space, role in the space (``owner`` or
   ``member``).
-* ``links``, ``policies`` -- kept empty here; stages 2 and 3 fill them.
+* ``links``, ``policies`` -- ``policies`` holds what the admin set for one
+  account (its Development switch, its daily limit, S2-02); ``links`` is
+  stage 3's.
+* ``defaults`` -- what the admin set for every person who has no setting of
+  their own (the daily limit people get, S2-02).
   (A space's key is not here: it lives in the vault's own file, beside the
   secrets it seals -- ``kazma_core.spaces.space_keys``, S1-26. A registry
   written before then held an empty ``space_keys`` field, dropped on read.)
@@ -180,6 +184,7 @@ def _empty_registry() -> dict[str, Any]:
         ],
         "links": [],
         "policies": {},
+        "defaults": {},
         "events": [],
         "events_seen": {},
         "moved_platform_users": False,
@@ -200,7 +205,7 @@ def _normalized(raw: Any) -> dict[str, Any]:
     # Before S1-26 the document held an empty ``space_keys`` field; the keys
     # live in the vault's file, never here.
     reg.pop("space_keys", None)
-    for table in ("accounts", "spaces", "policies", "events_seen"):
+    for table in ("accounts", "spaces", "policies", "defaults", "events_seen"):
         if not isinstance(reg.get(table), dict):
             reg[table] = {}
     for table in ("memberships", "links", "events"):

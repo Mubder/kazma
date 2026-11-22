@@ -358,10 +358,10 @@ class InProcessWorker(SwarmWorker):
                      if await asyncio.to_thread(is_unrestricted) else _TRUNCATOR)
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex}"
         from kazma_core.agent.effect_journal import EffectUncertain, execute_effect
-        from kazma_core.tenant_context import get_current_tenant_id
+        from kazma_core.spaces.scope import require_space_id
 
         effect_state = {
-            "thread_id": task_id, "tenant_id": get_current_tenant_id() or "default",
+            "thread_id": task_id, "tenant_id": require_space_id(),
             "created_at": task_id,
         }
         logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")

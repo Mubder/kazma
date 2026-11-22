@@ -115,7 +115,8 @@ class Commitment:
     updated_at: float = 0.0
     expires_at: float | None = None
     resolved_at: float | None = None
-    tenant_id: str = "default"
+    # Made with no tenant: the space of the work bound now (Spaces S1-02).
+    tenant_id: str = field(default_factory=lambda: _space(None))
 
 
 # ── schema ─────────────────────────────────────────────────────────────────
@@ -375,8 +376,20 @@ def update_status(
     return get_commitment(commitment_id)
 
 
-def list_pending_soul(tenant_id: str = "default") -> list[Commitment]:
+def _space(tenant_id: str | None) -> str:
+    """*tenant_id*, else the space of the work bound now (Spaces S1-02): the
+    owner's while Spaces is not enforced, ``NoSpaceBound`` with nothing
+    bound once it is."""
+    if tenant_id:
+        return tenant_id
+    from kazma_core.spaces.scope import require_space_id
+
+    return require_space_id()
+
+
+def list_pending_soul(tenant_id: str | None = None) -> list[Commitment]:
     """All needs_confirm soul_delta commitments (the confirm-card queue)."""
+    tenant_id = _space(tenant_id)
     ensure_commitment_schema()
     with _connect() as conn:
         rows = conn.execute(
@@ -388,7 +401,8 @@ def list_pending_soul(tenant_id: str = "default") -> list[Commitment]:
 
 
 def list_by_thread(thread_id: str, *, status: str | None = None,
-                   tenant_id: str = "default") -> list[Commitment]:
+                   tenant_id: str | None = None) -> list[Commitment]:
+    tenant_id = _space(tenant_id)
     ensure_commitment_schema()
     with _connect() as conn:
         if status:
@@ -442,8 +456,9 @@ def sweep_expired(now: float | None = None, *, cfg: dict[str, Any] | None = None
 
 
 def enforce_pending_cap(thread_id: str, *, cap: int | None = None,
-                        tenant_id: str = "default") -> int:
+                        tenant_id: str | None = None) -> int:
     """§3.9 rule 6: cap pending commitments per thread; abort oldest over cap."""
+    tenant_id = _space(tenant_id)
     ensure_commitment_schema()
     cap = cap if cap is not None else PENDING_CAP_PER_THREAD
     now = time.time()
@@ -474,8 +489,9 @@ def enforce_pending_cap(thread_id: str, *, cap: int | None = None,
 
 
 def abort_pending_for_thread(thread_id: str, *, reason: str = "superseded_by_new_turn",
-                             tenant_id: str = "default") -> int:
+                             tenant_id: str | None = None) -> int:
     """§3.9 rule 5: a new user turn supersedes pending HITL — abort pending."""
+    tenant_id = _space(tenant_id)
     ensure_commitment_schema()
     now = time.time()
     aborted = 0
@@ -507,12 +523,16 @@ def enforce_all_pending_caps(cap: int | None = None) -> int:
     ensure_commitment_schema()
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT thread_id FROM commitments WHERE status IN "
+            "SELECT DISTINCT thread_id, tenant_id FROM commitments WHERE status IN "
             "('draft','needs_clarify','needs_confirm','ready')",
         ).fetchall()
     total = 0
+    # Kazma's own sweep: each thread's cap in its own space (Spaces S1-02;
+    # it capped every thread under the owner's space, whatever its own).
+    from kazma_core.spaces.scope import space_of_record
+
     for r in rows:
-        total += enforce_pending_cap(r["thread_id"], cap=cap)
+        total += enforce_pending_cap(r["thread_id"], cap=cap, tenant_id=space_of_record(r["tenant_id"]))
     return total
 
 
@@ -623,7 +643,7 @@ async def async_list_by_thread(thread_id: str) -> list[Commitment]:
     return await asyncio.to_thread(list_by_thread, thread_id)
 
 
-async def async_list_pending_soul(tenant_id: str = "default") -> list[Commitment]:
+async def async_list_pending_soul(tenant_id: str | None = None) -> list[Commitment]:
     """Async wrapper for list_pending_soul via asyncio.to_thread."""
     return await asyncio.to_thread(list_pending_soul, tenant_id=tenant_id)
 

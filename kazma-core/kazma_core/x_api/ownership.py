@@ -43,25 +43,33 @@ def x_config_key(key: str) -> str:
     return key if tenant == "default" else f"tenant.{tenant}.{key}"
 
 
-def x_work_scope(tenant: str) -> Callable[[], AbstractContextManager[object]]:
+def x_work_scope(tenant: str, booker: str | None = None) -> Callable[[], AbstractContextManager[object]]:
     """What background X work for a row of *tenant* runs in: call the answer
-    and enter it (``with x_work_scope(tenant)():``).
+    and enter it (``with x_work_scope(tenant, booker)():``).
 
     While Spaces is not enforced, the tenant alone, as before. Once it is, the
-    whole scope: the space and the account its own work acts for
-    (``identity.work_scope``); ``NoSpaceBound`` for a tenant that is no space
-    of the install -- its work does not run. Blocking (the identity store):
-    async callers resolve it in a thread and enter it on the loop."""
+    whole scope: the space and the person the work is for -- *booker*, who
+    booked the post, while still a member, else the account the space's own
+    work acts for (``identity.work_scope``); ``NoSpaceBound`` for a tenant
+    that is no space of the install -- its work does not run; ``FeatureOff``
+    when that person no longer has X Studio (Spaces S2-11) -- its work waits,
+    nothing failed, and goes on once the feature is on again. Blocking (the
+    identity store): async callers resolve it in a thread and enter it on the
+    loop."""
     from kazma_core.spaces.scope import NoSpaceBound, bind_scope, spaces_enforced
     from kazma_core.tenant_context import tenant_scope
 
     if not spaces_enforced():
         return functools.partial(tenant_scope, tenant)
+    from kazma_core.spaces.features import FeatureOff, work_refusal
     from kazma_core.spaces.identity import work_scope
 
-    found = work_scope(str(tenant or ""), None)
+    found = work_scope(str(tenant or ""), booker or None)
     if found is None:
         raise NoSpaceBound(f"X work of {tenant!r}: no space of this install holds it")
+    refused = work_refusal("x_studio", found[1])
+    if refused:
+        raise FeatureOff("x_studio", refused)
     return functools.partial(bind_scope, *found)
 
 

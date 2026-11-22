@@ -45,6 +45,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kazma_core.spaces.scope import OWNER_SPACE_ID
+
 __all__ = ["GOLDEN_PATH", "load_golden_cases", "run_golden_eval"]
 
 logger = logging.getLogger(__name__)
@@ -103,6 +105,7 @@ def _seed_episode(
 
     row = episode_row(
         session_id=session_id,
+        tenant_id=OWNER_SPACE_ID,  # a private fixture database (see run_golden_eval)
         turn_number=turn,
         user_text=content,
         summary_text=content[:500],
@@ -141,7 +144,7 @@ def _seed_belief(conn: sqlite3.Connection, fact: dict[str, Any], *, now: float) 
         confidence=0.9,
         importance=4,
         extraction_method="user_explicit",
-        tenant_id="default",
+        tenant_id=OWNER_SPACE_ID,
         now=now,
         private=True,
     )
@@ -247,7 +250,7 @@ def run_golden_eval(
                 query,
                 conn=conn,
                 limit=8,
-                tenant_id="default",
+                tenant_id=OWNER_SPACE_ID,
                 session_id=session,
                 explain=True,
             )

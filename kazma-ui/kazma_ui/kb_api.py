@@ -238,24 +238,30 @@ async def _in_the_crawls_space(row: dict[str, Any], route: Any) -> Any:
     """Resume the crawl *row* in its library's space (Spaces S1-13).
 
     Nothing is bound at start-up. Once Spaces is enforced the resume runs as
-    the library's space and the account Kazma's own work there acts for
-    (``identity.acting_account``); a library that is gone is not resumed.
-    Not enforced: as before."""
+    the library's space and the person who started the crawl (the row's
+    ``asker``, while still a member; else the account Kazma's own work there
+    acts for, ``identity.work_scope``); a library that is gone is not
+    resumed. Not enforced: as before."""
+    from kazma_core.spaces.features import work_refusal
     from kazma_core.spaces.scope import bind_scope, spaces_enforced
 
     if not spaces_enforced():
         return await route(row["job_id"])
 
     def where() -> tuple[str, str] | None:
-        from kazma_core.spaces.identity import acting_account
+        from kazma_core.spaces.identity import work_scope
         from kazma_core.stores.knowledge import get_knowledge_store
 
         space = get_knowledge_store().library_space(row["library_id"])
-        return None if space is None else (space, acting_account(space))
+        return None if space is None else work_scope(space, row.get("asker") or None)
 
     found = await asyncio.to_thread(where)
     if found is None:
         return {"ok": False, "code": "not_found"}
+    # The person it is for no longer has Knowledge (Spaces S2-11): the crawl
+    # waits, nothing changed; a Resume once it is on again finishes it.
+    if await asyncio.to_thread(work_refusal, "knowledge", found[1]):
+        return {"ok": False, "code": "feature_off"}
     with bind_scope(*found):
         return await route(row["job_id"])
 

@@ -35,6 +35,8 @@ import re
 import sqlite3
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -104,7 +106,7 @@ def object_should_mint_entity(
     obj: str,
     *,
     predicate: str = "",
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
 ) -> bool:
     """True when the belief *object* should become one of *tenant_id*'s
     concept entities.
@@ -113,6 +115,7 @@ def object_should_mint_entity(
     minting them made write-time :func:`is_payload_object` return False
     and skipped the hub edge (the remaining orphan factory).
     """
+    tenant_id = space_named_or_bound(tenant_id)
     s = (obj or "").strip()
     if not s or s == "user":
         return False
@@ -128,7 +131,7 @@ def object_should_mint_entity(
     try:
         row = conn.execute(
             "SELECT 1 FROM entities WHERE tenant_id = ? AND (id = ? OR name = ?) LIMIT 1",
-            (tenant_id or "default", s, s),
+            (tenant_id, s, s),
         ).fetchone()
         if row is not None:
             return True
@@ -187,13 +190,14 @@ def subject_should_mint_entity(subject: str) -> bool:
 
 
 def is_payload_object(
-    conn: sqlite3.Connection, obj: str, *, predicate: str = "", tenant_id: str = "default"
+    conn: sqlite3.Connection, obj: str, *, predicate: str = "", tenant_id: str | None = None
 ) -> bool:
     """True when *obj* is a literal value rather than an entity node.
 
     Empty/junk tokens are NOT payloads — they are rejected upstream entirely
     and must not trigger anchoring.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     s = (obj or "").strip()
     if not s or s == "user":
         return False
@@ -211,13 +215,14 @@ def subject_reaches_hub(
     conn: sqlite3.Connection,
     subject: str,
     *,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
 ) -> bool:
     """True when *subject* already has a live belief touching ``user``.
 
     Any-entity linkage is NOT enough — a floating A→B cluster is still an
     orphan from the ego-graph's point of view.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     if not subject or subject == "user":
         return True
     try:
@@ -249,7 +254,7 @@ def anchor_leaf_subject(
     conn: sqlite3.Connection,
     subject: str,
     *,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     cfg: dict[str, Any] | None = None,
     source_session: str | None = None,
 ) -> dict[str, Any]:
@@ -258,6 +263,7 @@ def anchor_leaf_subject(
     No-op (without writing) when the subject already has an entity-side
     link — idempotent by construction.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     if not subject or subject == "user":
         return {"action": "noop", "reason": "not_anchorable"}
     if subject_reaches_hub(conn, subject, tenant_id=tenant_id):
@@ -293,7 +299,7 @@ def anchor_leaf_subject(
 def anchor_orphan_leaf_concepts(
     conn: sqlite3.Connection,
     *,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     limit: int = 200,
     cfg: dict[str, Any] | None = None,
 ) -> dict[str, int]:
@@ -304,6 +310,7 @@ def anchor_orphan_leaf_concepts(
     entity clusters. Idempotent: once hub-anchored, the subject stops
     qualifying.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     stats = {"scanned": 0, "anchored": 0, "skipped_linked": 0}
     try:
         rows = conn.execute(

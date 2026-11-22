@@ -420,7 +420,8 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
                 delivery_target=delivery_target,
                 kind=kind,
                 capabilities=capabilities,
-                tenant_id=ctx["tenant"] or "default",
+                # None: the scheduler books it in the bound space (S1-02).
+                tenant_id=ctx["tenant"],
                 actor=ctx["actor"],
                 source="web",
                 zone=ctx["zone"],
@@ -581,7 +582,8 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             except Exception:  # noqa: BLE001
                 logger.debug("[scheduled] proposal_posted failed", exc_info=True)
             payload["proposal_id"] = proposal_ref
-        status = 200 if ok else (409 if payload.get("code") == "booking_conflict" else 400)
+        status = 200 if ok else {"booking_conflict": 409, "feature_off": 403,
+                                 "identity_unavailable": 503}.get(str(payload.get("code") or ""), 400)
         if not ok:
             payload.setdefault("code", "booking_refused")
         return JSONResponse({"ok": ok, **payload}, status_code=status)

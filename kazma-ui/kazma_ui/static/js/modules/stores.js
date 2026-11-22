@@ -2,7 +2,7 @@
 // Alpine.js global stores. Registered on alpine:init so they exist before
 // any component initializes. Imported by the app.js entry module.
 
-import { KAZMA_SEARCH_PAGES } from './search_pages.js';
+import { KAZMA_SEARCH_PAGES, pageOffered } from './search_pages.js';
 
 /* A dialog's default label in the page's language (window.tOr, base.html),
    English when the catalog is not on the page. */
@@ -433,6 +433,7 @@ export function registerStores() {
                 var matches = [];
 
                 this._pages.forEach(function (p) {
+                    if (!pageOffered(p.href)) return;  // a feature that is off (S2-11)
                     // The page's name in the reader's language, found by it,
                     // by its English name or by its address.
                     var name = window.tOr ? window.tOr(p.key, p.title) : p.title;

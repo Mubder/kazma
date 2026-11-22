@@ -2112,6 +2112,20 @@ def _stops_the_crawl(exc: BaseException) -> bool:
         'storage_error', 'policy_error', 'resource_limit')
 
 
+def _knowledge_off_now(asker: str | None) -> str:
+    """Why a crawl for *asker* may not fetch its next page: Knowledge is off
+    for them (Spaces S2-11), or their features cannot be read; "" when it
+    may. Knowledge's admission for a crawl in progress
+    (``features.ADMISSIONS``). Blocking (the identity store)."""
+    from kazma_core.spaces.features import work_refusal
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    try:
+        return work_refusal("knowledge", asker) or ""
+    except IdentityUnavailable:
+        return "Accounts cannot be read right now; the crawl waits for a Resume."
+
+
 async def _ingest_site_impl(
     library_id: str,
     seed_url: str,
@@ -2208,9 +2222,12 @@ async def _ingest_site_impl(
             disco_task.cancel()
         await _aio.gather(disco_task, return_exceptions=True)
 
+    from kazma_core.spaces.scope import bound_asker
     from kazma_core.stores.knowledge import KnowledgeLibraryGone, KnowledgeStorageFull
     from kazma_core.web_acquire.crawl_jobs import refusal_text, stop_refused
     from kazma_core.web_acquire.page_outcome import RefusalStreak
+
+    crawl_asker = bound_asker()  # whom the crawl is for: its start's or its resume's scope
 
     index = await call(_knowledge_index)
     store = await call(_knowledge_store)
@@ -2242,12 +2259,19 @@ async def _ingest_site_impl(
     budget = _RetryBudget()
     streak = RefusalStreak()
     refused = None  # the class of refusal that stopped the crawl, if one did
+    feature_off = ""  # why the person's Knowledge stopped the crawl, if it did
     async with _pw_browser_scope():
         for i, url in enumerate(pages):
             # A deleted library stops its crawl before the next fetch: no
             # more egress, allowance or writes for it (KB-E02).
             if not await call(store.library_exists, library_id):
                 stopped = "the library was deleted; the crawl stopped"
+                break
+            # Knowledge's admission, asked before every page (Spaces S2-11):
+            # switched off for the person the crawl is for, the crawl stops
+            # before the next fetch and its pages wait for a Resume.
+            feature_off = await call(_knowledge_off_now, crawl_asker)
+            if feature_off:
                 break
             if not await call(checkpoint.begin_page, url):
                 continue
@@ -2368,6 +2392,17 @@ async def _ingest_site_impl(
     # Refresh counts. Absence from discovery never takes a page out: only the
     # site's own answer for the page does (page_gone).
     await call(_refresh_chunk_count, store, library_id)
+
+    if feature_off:
+        logger.info("[kb_ingest] crawl of %s waits: %s", library_id, feature_off)
+        yield ProgressUpdate(
+            phase="interrupted", interrupted_by="feature_off",
+            discovered=len(pages), fetched=fetched, ingested=chunks_new,
+            skipped=chunks_skipped, failed=failed, pages_unchanged=pages_unchanged, excluded=excluded,
+            removed=removed, message=feature_off, errors=[feature_off],
+            started_at=started,
+        )
+        return
 
     if stopped:
         yield ProgressUpdate(

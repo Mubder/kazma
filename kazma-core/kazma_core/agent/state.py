@@ -419,7 +419,7 @@ def initial_supervisor_state(
     *,
     thread_id: str | None = None,
     max_iterations: int | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
 ) -> SupervisorState:
     """Create a fresh SupervisorState with sensible defaults.
 
@@ -454,6 +454,8 @@ def initial_supervisor_state(
         max_iterations = max(5, min(_cap, int(max_iterations)))
     except (TypeError, ValueError):
         max_iterations = 15
+    from kazma_core.spaces.scope import require_space_id
+
     now = datetime.now(UTC).isoformat()
     return SupervisorState(
         messages=[],
@@ -471,7 +473,10 @@ def initial_supervisor_state(
         turn_budget_stopped=False,
         turn_token_budget_granted=0,
         thread_id=thread_id or str(uuid.uuid4()),
-        tenant_id=tenant_id,
+        # A state made with no tenant is in the space of the work bound now
+        # (Spaces S1-02): the owner's while Spaces is not enforced, a refusal
+        # with nothing bound once it is.
+        tenant_id=tenant_id or require_space_id(),
         snapshot_id="",
         snapshot_iteration=-1,
         created_at=now,

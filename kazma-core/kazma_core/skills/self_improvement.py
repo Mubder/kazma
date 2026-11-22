@@ -1504,9 +1504,11 @@ def learn_from_finished_turn(values: dict[str, Any] | None, *, thread_id: str = 
         while len(_learned) > _LEARNED_MAX:
             _learned.popitem(last=False)
     from kazma_core.background import spawn_background
-    from kazma_core.spaces.scope import current_scope
+    from kazma_core.spaces.scope import current_scope, space_of_record
 
-    tenant = str(post.get("tenant_id") or "default")
+    # The turn's record names its space (respond_node, space_of_state); one
+    # that names none is from before Spaces: the owner's (N19).
+    tenant = space_of_record(post.get("tenant_id"))
     # The person the turn ran for, when the closing code is still bound to
     # the turn's space: the lesson is learned for them.
     bound = current_scope()

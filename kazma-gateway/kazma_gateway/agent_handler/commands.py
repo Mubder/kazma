@@ -50,6 +50,36 @@ def safe_repo_dir_name(owner_repo: str) -> str | None:
     return segment
 
 
+async def _command_claimed(msg: IncomingMessage, store: SessionStore, manager: Any, thread_id: str,
+                           feature: str, *, mine: bool) -> bool | None:
+    """Whether a command handler takes *msg*, with *feature*'s check
+    (Spaces S2-11): False when it is not the handler's command (*mine*, the
+    handler's own reading of it: a prefix, a bot's name, a bare "use the
+    swarm to ..."); True when it is, and the person has not got *feature*
+    -- the refusal is said, in the message's language, and the command is
+    handled; None to go on. Every command handler of a feature asks it
+    first, so no spelling of a command passes. The feature is asked only
+    where Spaces is enforced and a person is bound."""
+    from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+    if not mine:
+        return False
+    if not (spaces_enforced() and bound_asker()):
+        return None
+    from kazma_core.spaces.features import feature_refusal
+
+    refused = await asyncio.to_thread(feature_refusal, feature, msg.text)
+    if not refused:
+        return None
+    ctx = await store.get(thread_id) or msg.context_metadata
+    sent = await manager.send(OutboundMessage(target_id=_build_target_id(msg.platform, ctx),
+                                              text="⛔ " + refused, context_metadata=ctx))
+    if not sent:
+        logger.warning("[agent-handler] the %s refusal did not reach the chat thread=%s",
+                       feature, thread_id[:12])
+    return True
+
+
 async def _try_swarm_command(
     msg: IncomingMessage,
     state: dict[str, Any],
@@ -101,8 +131,9 @@ async def _try_swarm_command(
                 bare_swarm = True
                 break
 
-    if not is_slash and not bare_swarm:
-        return False
+    claimed = await _command_claimed(msg, store, manager, thread_id, "swarm", mine=is_slash or bare_swarm)
+    if claimed is not None:
+        return claimed
 
     # Lazy import — skip if swarm engine isn't available
     try:
@@ -439,8 +470,10 @@ async def _try_ide_command(
     Returns ``True`` if handled (so the caller skips the graph), else ``False``.
     """
     text = (msg.text or "").strip()
-    if not text.lower().startswith("/ide"):
-        return False
+    claimed = await _command_claimed(msg, store, manager, thread_id, "development",
+                                     mine=text.lower().startswith("/ide"))
+    if claimed is not None:
+        return claimed
 
     # Extract the command body (everything after "/ide").
     parts = text.split(None, 1)
@@ -982,8 +1015,10 @@ async def _try_kb_command(
     Returns ``True`` if handled (so the caller skips the graph), else ``False``.
     """
     text = (msg.text or "").strip()
-    if not text.lower().startswith("/kb"):
-        return False
+    claimed = await _command_claimed(msg, store, manager, thread_id, "knowledge",
+                                     mine=text.lower().startswith("/kb"))
+    if claimed is not None:
+        return claimed
 
     parts = text.split(None, 1)
     body = parts[1].strip() if len(parts) > 1 else ""
@@ -1263,8 +1298,10 @@ async def _try_documents_command(
     """
     text = (msg.text or "").strip()
     low = text.lower()
-    if not (low == "/documents" or low.startswith("/documents ") or low == "/docs" or low.startswith("/docs ")):
-        return False
+    claimed = await _command_claimed(msg, store, manager, thread_id, "documents", mine=(
+        low == "/documents" or low.startswith("/documents ") or low == "/docs" or low.startswith("/docs ")))
+    if claimed is not None:
+        return claimed
 
     parts = text.split(None, 1)
     body = parts[1].strip() if len(parts) > 1 else ""
@@ -1515,8 +1552,10 @@ async def _try_research_command(
     """Handle ``/research deep <topic>`` (and ``/research <topic>`` as deep)."""
     text = (msg.text or "").strip()
     low = text.lower()
-    if not low.startswith("/research"):
-        return False
+    claimed = await _command_claimed(msg, store, manager, thread_id, "research",
+                                     mine=low.startswith("/research"))
+    if claimed is not None:
+        return claimed
     parts = text.split(maxsplit=2)
     if len(parts) == 1:
         await _send_model_reply(
@@ -1840,8 +1879,10 @@ async def _try_skill_command(
     """
     text = _normalize_slash_text(msg.text or "")
     low = text.lower()
-    if not (low == "/skill" or low.startswith("/skill ")):
-        return False
+    claimed = await _command_claimed(msg, store, manager, thread_id, "development",
+                                     mine=low == "/skill" or low.startswith("/skill "))
+    if claimed is not None:
+        return claimed
 
     parts = text.split(None, 2)
     # parts: ["/skill"] | ["/skill", sub] | ["/skill", sub, rest]
@@ -2315,8 +2356,10 @@ async def _try_x_command(
     """
     text = (msg.text or "").strip()
     low = text.lower()
-    if not (low == "/x" or low.startswith("/x ")):
-        return False
+    claimed = await _command_claimed(msg, store, manager, thread_id, "x_studio",
+                                     mine=low == "/x" or low.startswith("/x "))
+    if claimed is not None:
+        return claimed
 
     parts = text.split(maxsplit=2)
     sub = parts[1].lower() if len(parts) > 1 else ""

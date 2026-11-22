@@ -343,6 +343,8 @@ def _valid_optional_fields(row):
         return False
     if 'failure' in row and (not isinstance(row['failure'], str) or len(row['failure']) > _FAILURE_MAX):
         return False
+    if 'asker' in row and (not isinstance(row['asker'], str) or len(row['asker']) > 120):
+        return False
     return not ('notes' in row and (not isinstance(row['notes'], list) or len(row['notes']) > 16
                                     or any(not isinstance(note, str) for note in row['notes'])))
 
@@ -562,6 +564,9 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
     owner = _owner()
     install, host = owner['install'], owner['host']
     now = time.time()
+    from kazma_core.spaces.scope import bound_asker
+
+    asker = str(bound_asker() or '')[:120]
     def change(jobs):
         _recover(jobs)
         row = jobs.get(job_id)
@@ -591,6 +596,10 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
         if row is None:
             row = dict(job_id=job_id, library_id=library, seed=seed, policy=policy, pages=[], discovered=False,
                 created_at=now, fetched=0, failed=0, ingested=0, skipped=0, pages_unchanged=0, progress={})
+            if asker:
+                # Who started it (Spaces S2-11): a resume after a restart
+                # runs as them and is held to their features.
+                row['asker'] = asker
             jobs[job_id] = row
         elif (row.get('kind', 'site') in _KB_KINDS):
             row.pop('interrupted_by', None)
@@ -908,6 +917,9 @@ def failure_reason(row):
     if row.get('status') == 'interrupted':
         if row.get('interrupted_by') == 'site_refusing':
             return refusal_text(row)
+        if row.get('interrupted_by') == 'feature_off':
+            return ('Knowledge is off for the person this crawl is for; '
+                    'it waits for a Resume once the admin turns it on (Settings → People)')
         return ('Kazma restarted while it ran' if row.get('interrupted_by') == 'process_ended'
                 else 'Stopped before it finished')
     for key, effect in (row.get('effects') or {}).items():

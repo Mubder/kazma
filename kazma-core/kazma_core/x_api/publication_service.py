@@ -734,19 +734,42 @@ _NO_SPACE = "No space of this install holds this post; it was not sent."
 _UNREADABLE = "Whose post this is cannot be read; it was not sent."
 
 
-async def _work_scope(tenant: str) -> Any:
-    """What X work of *tenant* runs in (Spaces S1-17 part b), resolved off
-    the loop (the identity store): a scope to call and enter; ``_WAIT`` when
-    whose it is cannot be read for now (the database away, a locked file:
-    ``identity_failure_passes``) -- it waits for a later pass, nothing held
-    or failed; else the reason it does not run (a tenant no space of the
-    install holds, an identity store that cannot be read), said once."""
+def _booker_of(row: dict[str, Any]) -> str:
+    """The person who booked the post *row* (its metadata's ``booker``,
+    Spaces S2-11), "" for a row booked before it was recorded."""
+    try:
+        metadata = json.loads(row.get("metadata") or "{}")
+    except (TypeError, ValueError):
+        return ""
+    booker = metadata.get("booker") if isinstance(metadata, dict) else ""
+    return booker if isinstance(booker, str) else ""
+
+
+async def _work_scope(tenant: str, booker: str = "") -> Any:
+    """What X work of *tenant* (booked by *booker*) runs in (Spaces S1-17
+    part b, S2-11), resolved off the loop (the identity store): a scope to
+    call and enter; ``_WAIT`` when whose it is cannot be read for now (the
+    database away, a locked file: ``identity_failure_passes``) or the person
+    it is for no longer has X Studio -- it waits for a later pass, nothing
+    held or failed, and goes once the feature is on again; else the reason it
+    does not run (a tenant no space of the install holds, an identity store
+    that cannot be read), said once."""
+    from kazma_core.spaces.features import FeatureOff
     from kazma_core.spaces.identity import IdentityUnavailable
     from kazma_core.spaces.scope import NoSpaceBound
     from kazma_core.x_api.ownership import identity_failure_passes, x_work_scope
 
     try:
-        scope = await asyncio.to_thread(x_work_scope, tenant)
+        scope = await asyncio.to_thread(x_work_scope, tenant, booker or None)
+    except FeatureOff:
+        said = f"{tenant} for {booker}"
+        if said not in _SAID_NOT_RUN:
+            if len(_SAID_NOT_RUN) >= _SAID_NOT_RUN_MAX:
+                _SAID_NOT_RUN.clear()
+            _SAID_NOT_RUN.add(said)
+            logger.info("[x-publication] X work of %r waits: X Studio is off for the person it is for",
+                        tenant)
+        return _WAIT
     except NoSpaceBound:
         why = _NO_SPACE
     except IdentityUnavailable as exc:
@@ -757,6 +780,7 @@ async def _work_scope(tenant: str) -> Any:
         why = _UNREADABLE
     else:
         _SAID_NOT_RUN.discard(tenant)  # it runs: said again if it stops again
+        _SAID_NOT_RUN.discard(f"{tenant} for {booker}")
         return scope
     if tenant not in _SAID_NOT_RUN:
         if len(_SAID_NOT_RUN) >= _SAID_NOT_RUN_MAX:
@@ -795,7 +819,7 @@ async def fire_due_operations() -> None:
         return
     due = await asyncio.to_thread(store.due)
     for row in due:
-        scope = await _work_scope(row["tenant_id"])
+        scope = await _work_scope(row["tenant_id"], _booker_of(row))
         if scope is _WAIT:
             continue  # due again at the next pass
         if not callable(scope):

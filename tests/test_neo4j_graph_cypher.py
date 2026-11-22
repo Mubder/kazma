@@ -223,4 +223,6 @@ def test_the_memory_page_s_edit_names_the_fact_s_tenant():
     source = inspect.getsource(memory_api)
     call = source[source.index("delete_belief_edge(\n                belief_id=bid,"):]
     call = call[:call.index(")\n")]
-    assert 'tenant_id=str(row["tenant_id"] or "default")' in call
+    # Since Spaces S1-02 the row's tenant is read as a record's
+    # (spaces.scope.space_of_record: a row naming none is the owner's, N19).
+    assert 'tenant_id=space_of_record(row["tenant_id"])' in call

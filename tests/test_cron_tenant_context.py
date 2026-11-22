@@ -89,7 +89,8 @@ def test_the_fallback_is_tenant_then_global_and_not_the_reverse(tmp_path, monkey
 
 def test_execute_installs_the_jobs_tenant():
     src = inspect.getsource(sched_mod.CronScheduler._execute)
-    assert "set_current_tenant_id(job.tenant_id" in src, (
+    # The job's space (Spaces S1-02): a job stored naming none is the owner's.
+    assert "set_current_tenant_id(space_of_record(job.tenant_id))" in src, (
         "a cron turn runs context-less and cannot read its own tenant's secrets"
     )
     assert "reset_current_tenant_id(tenant_token)" in src, (

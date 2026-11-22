@@ -112,16 +112,23 @@ def _worker_scope(tenant_id: str | None, asker: str | None) -> Callable[[], Any]
     :class:`_TaskOfNoSpace` and runs nothing, and an identity store that
     cannot answer raises ``IdentityUnavailable``.
     """
-    from kazma_core.spaces.scope import bind_scope, spaces_enforced
+    from kazma_core.spaces.scope import bind_scope, space_of_record, spaces_enforced
     from kazma_core.tenant_context import tenant_scope
 
     if not spaces_enforced():
-        return functools.partial(tenant_scope, tenant_id or "default")
+        return functools.partial(tenant_scope, space_of_record(tenant_id))
     from kazma_core.spaces.identity import work_scope
 
     found = work_scope(str(tenant_id or ""), asker)
     if found is None:
         raise _TaskOfNoSpace("this task belongs to no space of this install, so its worker does not run")
+    # The person no longer has the feature Swarm (Spaces S2-11): the check
+    # made again when the work runs.
+    from kazma_core.spaces.features import work_refusal
+
+    if work_refusal("swarm", found[1]):
+        raise _TaskOfNoSpace("Swarm is off for the person this task is for (Settings → People), "
+                             "so its worker does not run")
     return functools.partial(bind_scope, *found)
 
 

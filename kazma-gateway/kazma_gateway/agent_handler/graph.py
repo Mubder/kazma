@@ -1585,6 +1585,21 @@ def create_graph_handler(
                     )
                 )
                 return
+            # A command of a feature that is off for the person refuses
+            # (Spaces S2-11): only where Spaces is enforced and a person is
+            # bound -- a chat app acts as the owner, who has every feature,
+            # until chat apps are linked to accounts (stage 3).
+            from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+            if spaces_enforced() and bound_asker():
+                from kazma_core.spaces.features import command_refusal
+
+                refused = await asyncio.to_thread(command_refusal, msg.text)
+                if refused:
+                    ctx = await _store.get(thread_id) or msg.context_metadata
+                    await manager.send(OutboundMessage(target_id=_build_target_id(msg.platform, ctx),
+                                                       text="⛔ " + refused, context_metadata=ctx))
+                    return
             # Build context for the command resolver with real data
             slash_ctx = await _build_slash_ctx(
                 thread_id, msg, manager=manager, graph=graph, config=config

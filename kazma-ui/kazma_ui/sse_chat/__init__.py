@@ -513,6 +513,23 @@ def create_sse_chat_router(
         from kazma_ui.i18n import current_language
         from kazma_ui.sse_chat._command_discovery import discovery_reply
 
+        # A command of a feature that is off for the person refuses at once
+        # (Spaces S2-11): only where Spaces is enforced and a person is bound.
+        from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+        if raw_msg.startswith("/") and spaces_enforced() and bound_asker():
+            from kazma_core.spaces.features import command_refusal
+
+            _refused = await asyncio.to_thread(command_refusal, raw_msg, current_language())
+            if _refused:
+                _refused = "⛔ " + _refused
+                await asyncio.to_thread(_persist_instant_turn, session, thread_id, raw_msg, _refused)
+
+                async def _refused_gen() -> AsyncGenerator[str, None]:
+                    yield await _journal_fast_path(thread_id, "token", {"content": _refused, "capacity": True})
+                    yield await _journal_fast_path(thread_id, "done", {"content": _refused, "tokens": 0, "cost": 0.0, "duration_ms": 0, "capacity": True})
+
+                return StreamingResponse(_refused_gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
         _discovery = discovery_reply(raw_msg, current_language())
         if _discovery is not None:
             await asyncio.to_thread(_persist_instant_turn, session, thread_id, raw_msg, _discovery)

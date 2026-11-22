@@ -31,7 +31,7 @@ from typing import Any
 
 from kazma_core.db.pg_helpers import store_errors
 from kazma_core.paths import chat_spool_db
-from kazma_core.spaces.scope import OWNER_SPACE_ID
+from kazma_core.spaces.scope import OWNER_SPACE_ID, space_named_or_bound, space_of_record
 
 logger = logging.getLogger(__name__)
 
@@ -344,7 +344,7 @@ def sessions_changed_since(
             r = {**r, "messages": copy.get("messages") or []}
         msgs = _json(r.get("messages"), [])
         out.append({
-            "tenant_id": str(r.get("tenant_id") or "default"),
+            "tenant_id": space_of_record(r.get("tenant_id")),
             "session_id": str(r.get("session_id") or ""),
             "thread_id": str(r.get("thread_id") or ""),
             "created_at": str(r.get("created_at") or ""),
@@ -498,7 +498,7 @@ def _score(title: str, messages: str, words: list[str]) -> int:
 def search_sessions(
     terms: list[str],
     *,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     exclude_session_id: str | None = None,
     limit: int = 3,
     sqlite_path: Path | None = None,
@@ -513,6 +513,7 @@ def search_sessions(
     messages`` (text) and ``score``. *sqlite_path* searches that SQLite chat
     file whatever the backend.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     words = [t.lower() for t in terms if t]
     if not words:
         return []

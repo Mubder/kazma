@@ -885,13 +885,16 @@ async def _check_memory_recall() -> dict[str, Any]:
     t0 = time.perf_counter()
     try:
         from kazma_core.memory.recall import recall
+        from kazma_core.spaces.scope import OWNER_SPACE_ID
 
         result = await asyncio.to_thread(
             recall,
             "health canary probe",
             limit=1,
             session_id="health-canary",
-            tenant_id="default",
+            # The install's own canary, in a read-only scope: the owner's
+            # space, never a member's (Spaces S1-02).
+            tenant_id=OWNER_SPACE_ID,
             explain=False,
         )
         beliefs = getattr(result, "beliefs", None)

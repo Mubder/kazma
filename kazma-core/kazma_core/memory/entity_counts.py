@@ -28,6 +28,8 @@ import logging
 import sqlite3
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -94,7 +96,7 @@ def recompute_entity_counts(
     conn: Any,
     entity_ids: list[str],
     *,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     neighbours: bool = False,
 ) -> int:
     """Recompute and persist belief_count + graph_degree for the given entities.
@@ -120,6 +122,7 @@ def recompute_entity_counts(
     path falls back to. Never raises — logs on failure so a bad entity id
     can't break the calling write.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     # De-dup + drop empties, preserving order.
     seen: set[str] = set()
     ids: list[str] = []
@@ -132,7 +135,7 @@ def recompute_entity_counts(
             ids.append(s)
     if not ids:
         return 0
-    tenant = str(tenant_id or "default")
+    tenant = tenant_id
     if neighbours:
         for other in _neighbours(conn, ids, tenant):
             if other not in seen:
@@ -196,7 +199,7 @@ def repair_entity_counts(conn: Any, *, limit: int = 500) -> list[str]:
     ids: list[str] = []
     for tenant, eid in (tuple(r) for r in rows):
         if eid:
-            by_tenant.setdefault(str(tenant or "default"), []).append(str(eid))
+            by_tenant.setdefault(space_of_record(tenant), []).append(str(eid))
             ids.append(str(eid))
     for tenant, tenant_ids in by_tenant.items():
         recompute_entity_counts(conn, tenant_ids, tenant_id=tenant)
