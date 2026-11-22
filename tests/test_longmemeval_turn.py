@@ -384,6 +384,7 @@ def test_the_turns_reader_follows_the_provider(scripts):
     assert turn.preset_for("http://127.0.0.1:1234/v1") == "custom"
     client = turn.reader_client(model="qwen3.7-plus", key="k",
                                 base_url="https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1")
-    # Kazma's reasoning switch reaches DeepSeek's API only: Qwen is sent nothing.
-    assert client.config.model == "qwen3.7-plus" and client.can_turn_off_reasoning() is False
+    # Qwen takes Kazma's switch for "off" alone (enable_thinking, finding 12):
+    # an effort level is sent to it as nothing.
+    assert client.config.model == "qwen3.7-plus" and client.can_turn_off_reasoning() is True
     assert client.config.base_url == "https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1"

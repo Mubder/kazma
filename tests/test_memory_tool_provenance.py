@@ -51,7 +51,9 @@ def mem(tmp_path, monkeypatch):
 
 def _store(text: str, *, thread: str | None = THREAD, turns: int = 1) -> str:
     """The memory_store tool, called as the tool worker calls it: in a chat
-    whose turn *turns* is running."""
+    whose turn *turns* is running, the user's message of that turn asking to
+    remember *text* (memory_store writes only then: the memory plan's
+    finding 1)."""
     from kazma_core.agent.tool_builtins import register_builtin_tools
     from kazma_core.agent.tool_registry import LocalToolRegistry
     from kazma_core.safety.hitl import reset_current_thread_id, set_current_thread_id
@@ -62,7 +64,8 @@ def _store(text: str, *, thread: str | None = THREAD, turns: int = 1) -> str:
     tool = registry.get_tool("memory_store")
     messages = []
     for i in range(turns):
-        messages += [{"role": "user", "content": f"q{i}"}, {"role": "assistant", "content": f"a{i}"}]
+        asked = f"Please remember: {text}" if i == turns - 1 else f"q{i}"
+        messages += [{"role": "user", "content": asked}, {"role": "assistant", "content": f"a{i}"}]
     t_tok = set_current_thread_id(thread)
     m_tok = set_current_session_messages(messages)
     try:

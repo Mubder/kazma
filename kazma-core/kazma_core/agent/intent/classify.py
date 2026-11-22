@@ -258,9 +258,14 @@ async def _refine_acts_llm(
         '"slots": {}}]}\n\n'
         f"{request_block}\n\nJSON:"
     )
+    # Reasoning off where the model has a switch Kazma knows: a thinking
+    # model spent the whole 4 s reasoning and answered nothing (qwen3.7-plus
+    # in 0 of 16 dev turns, the memory plan's finding 12).
+    from kazma_core.agent.chat_reasoning import _reasoning_kwargs_for
+
     try:
         resp = await asyncio.wait_for(
-            llm.chat([{"role": "user", "content": prompt}], tools=None),
+            llm.chat([{"role": "user", "content": prompt}], tools=None, **_reasoning_kwargs_for(llm, "off")),
             timeout=4.0,
         )
         content = (getattr(resp, "content", "") or "").strip()

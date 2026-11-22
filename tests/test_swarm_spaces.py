@@ -761,10 +761,13 @@ async def test_a_members_task_result_is_not_sent_to_a_chat(matrix, enforced, mon
 # ── the review: a real tool call lands in the asker's space ──────────────
 
 
-def _scribe_stores(matrix: Matrix, monkeypatch, mark: str) -> list[str]:
+def _scribe_stores(matrix: Matrix, monkeypatch, mark: str, *, tool: str = "memory_link_entities") -> list[str]:
     """A real in-process worker, run by the engine with nothing bound (as a
-    task resumed after a restart is), calls the product's ``memory_store``:
-    the spaces the note was stored in."""
+    task resumed after a restart is), calls the product's ``memory_link_entities``
+    (a fact) or ``memory_store`` (a note): the spaces it was stored in.
+    ``memory_store`` writes only when the user's own words ask to remember (the
+    memory plan's finding 1), and a worker has no user message: its note is
+    refused (``test_a_workers_memory_store_is_refused``)."""
     import contextvars
     import sqlite3
 
@@ -777,14 +780,16 @@ def _scribe_stores(matrix: Matrix, monkeypatch, mark: str) -> list[str]:
     from tests._chat_space_cases import _registry
     from tests._swarm_space_cases import world
 
+    arguments = ({"text": f"scribe note {mark}"} if tool == "memory_store"
+                 else {"subject": "user", "object": f"scribe note {mark}", "predicate": "noted"})
     _scripted_model(monkeypatch, [
-        _reply(calls=[ToolCall(id="call-1", name="memory_store", arguments={"text": f"scribe note {mark}"})]),
+        _reply(calls=[ToolCall(id="call-1", name=tool, arguments=arguments)]),
         _reply("stored"),
     ])
     monkeypatch.setattr(tool_registry, "get_tool_registry", _registry)
     with world(matrix) as w:
         w.engine._workers["scribe"] = InProcessWorker(
-            name="scribe", role="scribe", capabilities=WorkerCapabilities(role="scribe", tools=["memory_store"]))
+            name="scribe", role="scribe", capabilities=WorkerCapabilities(role="scribe", tools=[tool]))
         task = SwarmTask(prompt="store the note", workers=["scribe"],
                          metadata={"tenant_id": Matrix.SPACE_A, "asker": matrix.account_a})
         contextvars.Context().run(asyncio.run, w.engine.dispatch(task))
@@ -795,6 +800,7 @@ def _scribe_stores(matrix: Matrix, monkeypatch, mark: str) -> list[str]:
         if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'episodes'").fetchone() is None:
             return []
         rows = conn.execute("SELECT tenant_id FROM episodes WHERE user_text LIKE ?", (f"%{mark}%",)).fetchall()
+        rows += conn.execute("SELECT tenant_id FROM beliefs WHERE object LIKE ?", (f"%{mark}%",)).fetchall()
     finally:
         conn.close()
     return [str(row[0]) for row in rows]
@@ -803,6 +809,13 @@ def _scribe_stores(matrix: Matrix, monkeypatch, mark: str) -> list[str]:
 def test_a_workers_real_tool_call_lands_in_the_askers_space(matrix, monkeypatch) -> None:
     mark = matrix.plant("scribe").a
     assert _scribe_stores(matrix, monkeypatch, mark) == [Matrix.SPACE_A]
+
+
+def test_a_workers_memory_store_is_refused(matrix, monkeypatch) -> None:
+    """A swarm worker has no user message, so no user asked it to remember:
+    its note is refused before anything is written (finding 1)."""
+    mark = matrix.plant("scribe").a
+    assert _scribe_stores(matrix, monkeypatch, mark, tool="memory_store") == []
 
 
 def test_control_a_worker_run_bound_to_nothing_stores_nothing_in_the_askers_space(matrix, monkeypatch) -> None:

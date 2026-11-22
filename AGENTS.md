@@ -3217,6 +3217,22 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   a test chat's token ("pebble-live") outlived the chat as a current fact.
   Gate: `tests/test_memory_tool_provenance.py` (every memory write in the
   agent's tool code names its chat).
+- **`memory_store` writes only when the user asks to remember** (2026-11-22,
+  the memory plan's finding 1, the main session's decision A). Its
+  description opened "Use when the user shares personal info", so a fact the
+  user simply told was kept twice -- the turn, which Kazma keeps and learns
+  from, and the model's note -- and forgetting one copy left the other
+  answering. Now it stores a note only when the running turn's latest user
+  message, in the user's own words, asks to remember
+  (`tool_builtins.memory._asked_to_remember`: `remember_request` through
+  `own_words`, English and Arabic); anything else is refused before any
+  store opens (`RefusedBeforeEffect`: "this turn is already remembered"). A
+  swarm worker (no user message) is refused; a scheduled task's stored
+  prompt is its turn's user message. Notes stored before are untouched.
+  `memory_invalidate`'s description says to use it only when the user asks
+  to forget or says a fact is wrong, never to record a change they told
+  (finding 2). Gate: `tests/test_memory_store_only_when_asked.py` (EN/AR;
+  today's tool as the control).
 - **A swarm task's result follows the chat that started it** (2026-11-20,
   the framework audit's F10, part C2). The dispatch hands the task's
   conversation (`source_thread_id`, `worker_dispatch._source_chat`) and its
@@ -8136,6 +8152,26 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   kazma.yaml, then the settings store) are a loop-stall helper too; the
   supervisor, `resilient_chat`, `run_agent_turn` and the runner await it in
   a thread.
+- **Every model call is in the ledger, with the cache's share** (2026-11-22,
+  the memory plan's findings 6 and 9). Memory's own calls -- the deep pass,
+  the weekly summaries and roll-ups, the lesson refiner, the V1 backfill --
+  were in no ledger, so no spend report, product measure or person's daily
+  limit counted them; they go through `llm_ledger.ledgered_chat` (one call
+  and its row, thread `memory:<work>` when none is bound, whose call from
+  the bound scope; a failed call an `error` row). And no row counted the
+  prompt tokens a provider served from its cache: an answered call's row
+  hands its usage over (`usage=`) and the ledger reads it with
+  `kazma_core.token_usage.token_counts`, whatever the shape (DeepSeek's
+  `prompt_cache_hit_tokens`, OpenAI's and Qwen's
+  `prompt_tokens_details.cached_tokens`, Anthropic's
+  `cache_read_input_tokens` beside an `input_tokens` that leaves it out --
+  read raw, an Anthropic row's prompt counted none) into `cached_tokens`;
+  every sum gives `prompt_tokens` and `cached_tokens` beside each other.
+  Entity resolution's tier 3 is declared: its `client.chat(` is a coroutine
+  never awaited, so it reaches no provider. Gate:
+  `tests/test_memory_calls_ledgered.py` (the deep pass EN/AR, the summaries'
+  chat and the refiner through the real code; today's calls, today's rows
+  and planted sites as the controls).
 
 **F. Errors do not carry internals.**
 - API handlers return `kazma_core.errors.safe_error(exc)` — a stable code
@@ -12554,15 +12590,21 @@ is the reasoning setting below plus the tool count per turn (open).
   its failover, the empty-answer nudge, the respond synthesis -- as
   `chat_reasoning_kwargs(client)`: only where the client takes it
   (`LLMProvider.can_turn_off_reasoning`: DeepSeek's own API, `thinking`
-  for off, `reasoning_effort` for the rest, `llm_provider.REASONING_EFFORTS`),
-  so a failover to a provider with a `chat` of its own receives nothing. A
-  model that refuses the field is asked again without it (the blocking
-  path's reasoning-switch fallback; the stream's 4xx falls back to it). X
-  drafting and research keep `reasoning="off"`. Gate:
-  `tests/test_chat_reasoning.py` (each level on the wire, the refusal, the
-  stream, a real turn through the supervisor graph with the call before the
-  setting as the negative control, every `invoke_llm_chat` call in the chat
-  turn's modules carrying the level).
+  for off, `reasoning_effort` for the rest, `llm_provider.REASONING_EFFORTS`;
+  Qwen's on Model Studio, `enable_thinking: false` for off alone -- no
+  effort level is documented for Qwen, so one is sent as nothing; the
+  memory plan's finding 12, 2026-11-22), so a failover to a provider with a
+  `chat` of its own receives nothing. A model that refuses the field is
+  asked again without it (the blocking path's reasoning-switch fallback,
+  every field of `llm_provider._REASONING_FIELDS`; the stream's 4xx falls
+  back to it). X drafting, research and the intent classifier's refinement
+  (`intent/classify._refine_acts_llm`: a thinking model spent its whole 4 s
+  reasoning) keep `reasoning="off"`. Gates: `tests/test_chat_reasoning.py`
+  (each level on the wire, the refusal, the stream, a real turn through the
+  supervisor graph with the call before the setting as the negative
+  control, every `invoke_llm_chat` call in the chat turn's modules carrying
+  the level), `tests/test_qwen_reasoning_off.py` (Qwen's switch on the wire,
+  the classifier in English and Arabic, today's classifier as the control).
 
 - **A result that says whether it worked is read where it is returned**
   (theme 1). `tests/test_failure_results_are_used.py` covers the vault, the
@@ -15322,11 +15364,11 @@ an install with one account behaves as before.
     runs to its end; its own token budget bounds how far past.
   - **Every model call is checked or declared**
     (`tests/test_model_calls_checked.py`): each product `.chat(`,
-    `.chat_stream(`, `invoke_llm_chat(` and each `.chat` handed on is in a
-    function that asks `daily_limits.call_refusal` or `verdict`, or is
-    declared with why (in a checked turn; Kazma's own work after a turn,
-    not refused until S2-07 and not in the ledger today; the admin's own; a
-    client's own retries). A new model call asks `call_refusal` or is
+    `.chat_stream(`, `invoke_llm_chat(`, `ledgered_chat(` and each `.chat`
+    handed on is in a function that asks `daily_limits.call_refusal` or
+    `verdict`, or is declared with why (in a checked turn; Kazma's own work
+    after a turn, not refused until S2-07 but in the ledger since the memory
+    plan's finding 6, so counted; the admin's own; a client's own retries). A new model call asks `call_refusal` or is
     declared; a planted direct call and `x_chat` without its check are the
     controls.
   - The admin sets limits on People (`people.set_daily_limit`,

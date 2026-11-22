@@ -276,10 +276,12 @@ def _llm_extract_beliefs_from_memories(
             import inspect
             import re as _re
 
-            res = client.chat([
+            from kazma_core.observability.llm_ledger import ledgered_chat
+
+            res = ledgered_chat(client, [
                 {"role": "system", "content": "You are a memory extraction engine. Return only JSON."},
                 {"role": "user", "content": prompt},
-            ])
+            ], work="backfill")
             if inspect.isawaitable(res):
                 try:
                     loop = asyncio.get_running_loop()

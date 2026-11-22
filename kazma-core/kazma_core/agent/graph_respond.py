@@ -35,20 +35,17 @@ async def _ledger_synthesis_call(
     """
     from kazma_core.observability.llm_ledger import arecord_llm_call, provider_of
 
-    usage = getattr(resp, "usage", None) or {}
+    usage = getattr(resp, "usage", None)
     try:
-        prompt = int(usage.get("prompt_tokens", 0) or 0)
-        completion = int(usage.get("completion_tokens", 0) or 0)
         cost = float(getattr(resp, "cost_usd", 0.0) or 0.0)
-    except (AttributeError, TypeError, ValueError):
-        prompt, completion, cost = 0, 0, 0.0
+    except (TypeError, ValueError):
+        cost = 0.0
     await arecord_llm_call(
         thread_id=str(state.get("thread_id", "")),
         iteration=int(state.get("iteration", 0) or 0),
         provider=provider_of(llm),
         model=str(getattr(resp, "model", "") or ""),
-        prompt_tokens=prompt,
-        completion_tokens=completion,
+        usage=usage if isinstance(usage, dict) else {},
         cost_usd=cost,
         duration_ms=duration_ms,
         status="ok",

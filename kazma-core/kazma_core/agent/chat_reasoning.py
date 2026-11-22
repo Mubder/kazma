@@ -11,9 +11,11 @@ choice), ``off``, ``low``, ``high`` or ``max``.
 
 It reaches a model only where it is a switch Kazma knows
 (``LLMProvider.can_turn_off_reasoning``: DeepSeek's own API, as
-``thinking`` / ``reasoning_effort``); any other provider gets nothing, so a
-failover to a provider with a ``chat`` of its own never receives an argument
-it does not take. A model that refuses the field is asked again without it
+``thinking`` / ``reasoning_effort``; Qwen's on Model Studio for ``off``
+alone, as ``enable_thinking``, the memory plan's finding 12 -- an effort
+level is sent to Qwen as nothing, the model's default); any other provider
+gets nothing, so a failover to a provider with a ``chat`` of its own never
+receives an argument it does not take. A model that refuses the field is asked again without it
 (``LLMProvider._chat_inner``'s reasoning-switch fallback).
 
 It applies to the chat turn's own model calls: the supervisor's, its

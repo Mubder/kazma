@@ -563,14 +563,21 @@ ChatFn = Callable[[list[dict[str, str]]], Awaitable[Any]]
 
 def _default_chat() -> tuple[ChatFn | None, str]:
     """The active model's chat call and its name; ``(None, "")`` when none.
-    Resolved on the loop, as the fact extractor's is (``belief_extractor``)."""
+    Resolved on the loop, as the fact extractor's is (``belief_extractor``).
+    Each call is in the per-call ledger (``ledgered_chat``, the memory plan's
+    finding 6)."""
     from kazma_core.model_registry import get_model_registry
+    from kazma_core.observability.llm_ledger import ledgered_chat
 
     registry = get_model_registry()
     client = registry.get_client()
     if client is None:
         return None, ""
-    return client.chat, str(getattr(registry, "active_model", "") or "")
+
+    async def _chat(messages: list[dict[str, str]]) -> Any:
+        return await ledgered_chat(client, messages, work="summaries")
+
+    return _chat, str(getattr(registry, "active_model", "") or "")
 
 
 # ── Storing ──────────────────────────────────────────────────────────────

@@ -173,17 +173,23 @@ def judge_item(step: Step, n: int) -> dict[str, Any]:
 
 
 def spent_tokens(data: Path) -> dict[str, int]:
-    """What the private install's model calls cost, from its own ledger."""
+    """What the private install's model calls cost, from its own ledger: the
+    calls, their prompt and completion tokens, and the prompt tokens the
+    provider served from its cache (the ledger's ``cached_tokens``, finding
+    9; a ledger from before it counts none)."""
     path = data / "llm_calls.db"
     if not path.is_file():
-        return {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
+        return {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0}
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_calls)")}
+        cached = "COALESCE(SUM(cached_tokens), 0)" if "cached_tokens" in columns else "0"
         row = conn.execute("SELECT COUNT(*), COALESCE(SUM(prompt_tokens), 0), "
-                           "COALESCE(SUM(completion_tokens), 0) FROM llm_calls").fetchone()
+                           f"COALESCE(SUM(completion_tokens), 0), {cached} FROM llm_calls").fetchone()
     finally:
         conn.close()
-    return {"calls": int(row[0]), "prompt_tokens": int(row[1]), "completion_tokens": int(row[2])}
+    return {"calls": int(row[0]), "prompt_tokens": int(row[1]), "completion_tokens": int(row[2]),
+            "cached_tokens": int(row[3])}
 
 
 class Browser:
@@ -332,9 +338,11 @@ def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, p
     server = Server(Path(sys.executable), server_env(home, data, port, checkout), home,
                     workdir / f"{language.lang}.log", port)
     steps: list[dict[str, Any]] = []
-    # The judge's own calls (the install's are in its ledger, which keeps no
-    # count of the cache's share): calls, tokens, the cache's share.
-    judged = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0}
+    from kazma_core.token_usage import token_counts
+
+    # The judge's own calls (the install's are in its ledger): calls, tokens,
+    # the cache's share, read as the ledger reads it (token_counts).
+    judged = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0}
     browser = None
     try:
         server.wait_live()
@@ -367,8 +375,10 @@ def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, p
                 else:
                     verdict, usage = judge.ask(lme.judge_prompt(judge_item(step, n), answer), max_tokens=10)
                     judged["calls"] += 1
-                    for k in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens"):
-                        judged[k] += int(usage.get(k, 0))
+                    counts = token_counts(usage)
+                    judged["prompt_tokens"] += counts.prompt
+                    judged["completion_tokens"] += counts.completion
+                    judged["cached_tokens"] += counts.cached
                     row["passed"] = phase == "completed" and verdict.strip().lower().startswith("yes")
             steps.append(row)
             if transcript is not None:
