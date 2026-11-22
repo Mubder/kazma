@@ -150,13 +150,19 @@ the bounds proposal shaped it: the best conversation up to 1,500
 characters, the others 500, each side cut around the stretch holding the
 question's words, the others giving way first (to 250) and then the best
 (to 500) when the 1,500-token budget would leave a line out; the cap stays.
-Neighbouring rounds are not added (recall's joined follow-ups keep their
-own line). With and without it on one commit, no model call: on dev the
-answer's text is in the block for 0.434 of the worded questions (0.302
-without; 0.450 in the rounds shown), 18 gained and one lost; the block's
-tokens p50 1,075 -> 1,350 and p95 1,317 -> 1,907 there; an ordinary turn's
+A side whose stretch is deep inside it shows its opening sentence first (up
+to 120 characters), unless the stretch alone would begin inside that
+opening. Neighbouring rounds are not added (recall's joined follow-ups keep
+their own line). With and without it on one commit, no model call: on dev
+the answer's text is in the block for 0.442 of the worded questions (0.302
+without; 0.450 in the rounds shown), 19 gained and none lost; the block's
+tokens p50 1,075 -> 1,372 and p95 1,317 -> 1,894 there; an ordinary turn's
 block, Kazma's benchmark EN/AR, the small store and the speakers set
-unchanged. Accepted only on W0's end-to-end dev answering, its noise run,
+unchanged. The opening was chosen against the stretch alone on dev: one
+answer gained (a name in a memory's first sentence), none lost, 8 tokens
+a question on average; a plain "opening first" rule tied (one gained, one
+lost, the opening spending room the stretch nearly showed), and the rule
+that settles it was set after reading that one question. Accepted only on W0's end-to-end dev answering, its noise run,
 the second judge and the model-read answers, all waiting for DeepSeek
 credit.
 

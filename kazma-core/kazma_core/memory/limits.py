@@ -63,6 +63,7 @@ __all__ = [
     "OBJECT_MAX",
     "PREDICATE_MAX",
     "RECALL_FOCUS_READ",
+    "RECALL_KEEP_OPENING",
     "RECALL_LEAD_LEAST",
     "RECALL_LEAD_SHOW",
     "RECALL_LEAD_STEP",
@@ -144,6 +145,11 @@ RECALL_LEAD_STEP = 100
 #: Of a long memory, the focus cut reads at most this much of each side to
 #: find the question's words (a memory is kept whole, up to 2 MiB a side).
 RECALL_FOCUS_READ = 50_000
+#: When the stretch shown is not a side's start, its opening sentence is
+#: shown first, up to this many characters (at most half the side's room),
+#: then " … " and the stretch: a memory often names its subject first ("My
+#: sister Noura ..."). 0 shows the stretch alone.
+RECALL_KEEP_OPENING = 120
 
 #: A question that asks for every memory of a kind ("how many", "list them
 #: all", "كم مرة"; framework audit F9, part F): recall shows up to this many

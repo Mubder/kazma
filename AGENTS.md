@@ -1691,7 +1691,11 @@ came up short, and archiving had erased 76 memories.
   conversation up to `RECALL_LEAD_SHOW` (1,500) characters, every other
   `RECALL_OTHER_SHOW` (500), each side cut around the stretch holding the
   most of the question's words (`query_terms.word_term`: search's reading,
-  folded, the article and one-letter prefixes, a light plural); when the
+  folded, the article and one-letter prefixes, a light plural); when that
+  stretch is not the side's start, the side's opening sentence comes first
+  (up to `RECALL_KEEP_OPENING`, 120 characters, at most half its room),
+  then " … " and the stretch -- a memory often names its subject first --
+  unless the stretch shown alone would begin inside the opening; when the
   block's budget would leave a line out the others give way first (to
   `RECALL_OTHER_LEAST`), then the best (to `RECALL_LEAD_LEAST`). Recall
   keeps each conversation's first `RECALL_FOCUS_READ` characters a side
@@ -1699,7 +1703,8 @@ came up short, and archiving had erased 76 memories.
   follow-up joined to its turn and another member's turn keep recall's
   line (`_roomy`), and a hit with no sides is shown at `RECALL_SHOW_*` as
   before. Gate: `tests/test_recall_room_by_rank.py` (the fixed bounds, the
-  block without the ladder and a raw word reading as negative controls) --
+  block without the ladder, a raw word reading, the stretch alone and a
+  plain opening rule as negative controls) --
   and, when it leaves some out, a note in the
   memory's language naming how many characters and `memory_read("<id>")`
   (`episode_text.more_note`); `memory_search` and the probe show up to
@@ -2372,11 +2377,14 @@ four injected were noise.
   (room by rank, §15F, 2026-11-22) and **not yet accepted**: acceptance
   waits for W0's end-to-end dev answering and its noise run. With and
   without it on one commit, no model call: on dev 200 the answer's text is
-  in the block for 0.434 of the 129 questions with a worded answer (0.302
-  with the fixed bounds; 0.450 have it in the rounds shown), 18 gained and
-  one lost (a name at a memory's start, the question's other words further
-  on); the block's tokens p50 1,075 -> 1,350, p95 1,317 -> 1,907; making
-  the block 0.34 -> 2.7 ms p50, 10.5 ms at most. Kazma's benchmark EN/AR,
+  in the block for 0.442 of the 129 questions with a worded answer (0.302
+  with the fixed bounds; 0.450 have it in the rounds shown), 19 gained and
+  none lost; the block's tokens p50 1,075 -> 1,372, p95 1,317 -> 1,894;
+  making the block 0.34 -> 2.5 ms p50, 9.5 ms at most. The opening kept
+  (W1a's second piece) gained the one answer the stretch alone lost (a
+  name in a memory's first sentence) for 8 tokens a question on average;
+  its rule (no opening when the stretch alone starts inside it) was set
+  after reading the one dev answer a plain opening lost. Kazma's benchmark EN/AR,
   an ordinary turn's block (675 / 1,030 tokens), the small store and the
   speakers set are unchanged (no memory there passes the fixed bounds).
   Gate: `tests/test_longmemeval_harness.py` (a history without its evidence

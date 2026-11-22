@@ -66,9 +66,53 @@ def test_a_long_memory_is_cut_around_the_question_s_words():
         + FILLER_EN * 60
     shown = focused(text, 300, _terms("When is my vaccine appointment?"))
     assert "vaccines appointment at the Salmiya clinic" in shown
-    assert shown.startswith("…") and shown.endswith("…") and len(shown) <= 300
+    # Its opening sentence, then the stretch (the opening is kept).
+    assert shown.startswith(FILLER_EN.strip() + " … ") and shown.endswith("…") and len(shown) <= 300
     # No word of the question there: its start, as before.
     assert focused(text, 300, _terms("Where is the lighthouse?")).startswith(FILLER_EN[:40])
+
+
+def test_a_memory_that_names_its_subject_first_keeps_its_opening(monkeypatch):
+    """Memories often name their subject first ("My sister Noura ...") and
+    the question's other words come later: the opening sentence is shown,
+    then " … " and the stretch. The stretch alone lost one dev answer this
+    way (a name in the opening sentence)."""
+    from kazma_core.memory import episode_text
+
+    en = ("My sister Noura started a new job this month. " + FILLER_EN * 30
+          + "She works as a dentist at the Salmiya clinic and loves it. " + FILLER_EN * 30)
+    ar = ("أختي نورة بدأت عملاً جديداً هذا الشهر. " + FILLER_AR * 40
+          + "تشتغل طبيبة أسنان في عيادة السالمية وتحب شغلها. " + FILLER_AR * 40)
+    for text, question, name, stretch in (
+        (en, "What does she do at the clinic, the dentist job?", "Noura", "dentist at the Salmiya clinic"),
+        (ar, "شنو تشتغل في العيادة طبيبة أسنان؟", "نورة", "طبيبة أسنان في عيادة السالمية"),
+    ):
+        shown = focused(text, 300, _terms(question))
+        assert name in shown and stretch in shown and " … " in shown and len(shown) <= 300
+        # Negative control: the stretch alone shows the stretch, not the name.
+        monkeypatch.setattr(episode_text, "RECALL_KEEP_OPENING", 0)
+        alone = focused(text, 300, _terms(question))
+        monkeypatch.undo()
+        assert stretch in alone and name not in alone
+
+
+def test_an_opening_the_stretch_already_shows_is_not_repeated():
+    """When the stretch shown alone would begin inside the opening, the
+    opening is not added: it would spend the stretch's room on text the
+    stretch nearly shows already. A plain "opening first" rule lost one dev
+    answer this way; it is the negative control."""
+    from kazma_core.memory import episode_text
+
+    text = ("I'm also interested in exploring different genres of music and discovering new artists. "
+            "I recently discovered a bluegrass band that features a banjo player and started enjoying "
+            "their music today. " + FILLER_EN * 30)
+    terms = _terms("What is the artist that I started to listen to last Friday?")
+    shown = focused(text, 200, terms)
+    assert " … " not in shown
+    assert "a bluegrass band that features a banjo player" in shown
+    spans = episode_text._spans_of(text[:limits.RECALL_FOCUS_READ], terms)
+    plain = episode_text._with_opening(text, spans, 198, 200, 0, alone_at=10**9)
+    assert plain is not None and "a bluegrass band" not in plain[0]
 
 
 def test_a_long_arabic_memory_is_cut_around_the_arabic_question_s_words():

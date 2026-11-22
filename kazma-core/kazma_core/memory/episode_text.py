@@ -37,6 +37,7 @@ import re
 from kazma_core.memory.limits import (
     MATCH_TEXT_CHARS,
     RECALL_FOCUS_READ,
+    RECALL_KEEP_OPENING,
     RECALL_SHOW_ANSWER,
     RECALL_SHOW_ONE,
     RECALL_SHOW_QUESTION,
@@ -248,6 +249,62 @@ def _best_stretch(spans: tuple[tuple[int, int, str], ...], room: int) -> tuple[i
     return best, best_at, best_end
 
 
+#: Between a side's opening and the stretch after it.
+_JOIN = " … "
+#: The least room a stretch keeps beside the opening; less, and the stretch
+#: is shown alone.
+_LEAST_STRETCH = 60
+_SENTENCE_END = re.compile(r"[.!?؟](?=\s)")
+
+
+def _opening(text: str, cap: int) -> str:
+    """*text*'s first sentence when it ends within *cap* characters, else its
+    first whole words within *cap*."""
+    end = _SENTENCE_END.search(text, 0, cap + 1)
+    if end is not None:
+        return text[: end.end()].strip()
+    cut = text.rfind(" ", 0, cap)
+    return text[:cut].strip() if cut > 0 else ""
+
+
+def _window(text: str, best_at: int, best_end: int, room: int, lead_in: int, floor: int = 0) -> tuple[int, int]:
+    """Where the stretch from *best_at* to *best_end* is shown in *room*
+    characters: a little before it (*lead_in*, as the room after it allows),
+    never before *floor* nor into a word; to a word's end."""
+    start = max(floor, best_at - min(lead_in, room - (best_end - best_at)))
+    if start > floor and not text[start - 1].isspace():
+        space = text.find(" ", start, best_at)
+        start = space + 1 if space != -1 else best_at
+    stop = min(len(text), start + room)
+    if stop < len(text):
+        space = text.rfind(" ", best_end, stop)
+        if space != -1:
+            stop = space
+    return start, stop
+
+
+def _with_opening(text: str, spans: tuple[tuple[int, int, str], ...], room: int, limit: int,
+                  beyond: int, alone_at: int) -> tuple[str, int] | None:
+    """The side's opening, " … ", and the stretch after it holding the most of
+    the question's words, in *room*; None when the stretch shown alone
+    (from *alone_at*) would begin inside the opening (it shows most of it
+    already), the room left is too small, or no stretch after the opening
+    holds one of the words."""
+    head = _opening(text, min(RECALL_KEEP_OPENING, room // 2))
+    rest = room - len(head) - len(_JOIN)
+    if not head or alone_at <= len(head) or rest < _LEAST_STRETCH:
+        return None
+    best, best_at, best_end = _best_stretch(tuple(s for s in spans if s[0] >= len(head)), rest)
+    if best == 0:
+        return None
+    start, stop = _window(text, best_at, best_end, rest, limit // 5, floor=len(head))
+    if start <= len(head) + len(_JOIN):
+        return None  # the stretch follows the opening: the start is shown whole
+    core = text[start:stop].strip()
+    shown = head + _JOIN + core + ("…" if stop < len(text) or beyond else "")
+    return shown, max(0, len(text) - len(head) - len(core)) + beyond
+
+
 def _focus(text: str, limit: int, terms: frozenset[str], beyond: int = 0) -> tuple[str, int]:
     """:func:`focused`'s text and how many characters it leaves out. *beyond*:
     how many more characters the memory holds past *text* (the part of it
@@ -259,20 +316,17 @@ def _focus(text: str, limit: int, terms: frozenset[str], beyond: int = 0) -> tup
     if not terms or limit < 3:
         return _clip(text, limit), _hidden(text, limit) + beyond
     room = limit - 2  # the two ellipses
-    best, best_at, best_end = _best_stretch(_spans_of(text[:RECALL_FOCUS_READ], terms), room)
+    spans = _spans_of(text[:RECALL_FOCUS_READ], terms)
+    best, best_at, best_end = _best_stretch(spans, room)
     if best == 0:
         return _clip(text, limit), _hidden(text, limit) + beyond
     # A little before the stretch, so its sentence reads, as far as the room
     # after its last word allows; never into a word.
-    start = max(0, best_at - min(limit // 5, room - (best_end - best_at)))
-    if start > 0 and not text[start - 1].isspace():
-        space = text.find(" ", start, best_at)
-        start = space + 1 if space != -1 else best_at
-    stop = min(len(text), start + room)
-    if stop < len(text):
-        space = text.rfind(" ", best_end, stop)
-        if space != -1:
-            stop = space
+    start, stop = _window(text, best_at, best_end, room, limit // 5)
+    if start > 0 and RECALL_KEEP_OPENING:
+        kept = _with_opening(text, spans, room, limit, beyond, start)
+        if kept is not None:
+            return kept
     core = text[start:stop].strip()
     shown = ("…" if start > 0 else "") + core + ("…" if stop < len(text) or beyond else "")
     return shown, max(0, len(text) - len(core)) + beyond
