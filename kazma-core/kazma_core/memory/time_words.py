@@ -16,11 +16,19 @@ words of a question, in English and Arabic (Gulf and MSA), with no model:
   "used to", "previously", "قبل ما نغيره", "في البداية", "سابقاً". Recall
   then shows the values a fact had before its current one (its history), the
   earlier first.
+* **Now**: "الحين", "الآن", "دحين" (the memory plan's finding 10,
+  2026-11-22). Not a period: recall keeps what is true now, as with no time
+  word. Not a content word either, as English "now" is not (a stopword):
+  "وين أسكن الحين؟" counted "حين" as half of what it asked. Only the words
+  for "now": "these days", "lately", "هالأيام" stay content words in both
+  languages ("days" in "How often do I exercise these days?" holds its
+  answer, "three days a week", above the rest; measured), and so does
+  "الحين" after "until" ("لحد الحين", so far: "وإلى الحين صرفنا" answers
+  "كم صرفنا لحد الحين؟"; measured).
 * **The present after a statement** ends a place the quick fact pass reads:
   "I live in Lisbon these days", "أسكن في لشبونة هالأيام" (it kept
-  nothing; the memory plan's finding 10, 2026-11-22), and a period named
-  after it ("I moved to Porto last month"): :data:`TIME_AFTER_EN`,
-  :func:`present_ar_words`.
+  nothing), and a period named after it ("I moved to Porto last month"):
+  :data:`TIME_AFTER_EN`, :func:`present_ar_words`.
 
 The words read here are not content words of the question
 (:attr:`TimeAsk.words`): a month's name matched nothing a memory says about
@@ -153,8 +161,13 @@ _AR_RELATIVE = re.compile(
     r"العام الماضي|هالاسبوع|هذا الاسبوع|هالشهر|هذا الشهر|هالسنه|هذي السنه)(?=\s|$|[؟?.,،])"
 )
 
-#: "Now" in Arabic (Gulf and MSA), as written; read folded.
+#: "Now" in Arabic (Gulf and MSA), as written; read folded: never a content
+#: word of a question (English "now" is a stopword).
 _NOW_AR_RAW = ("الحين", "هالحين", "الحينه", "دحين", "ذحين", "الآن")
+#: "Until" before "now": "لحد الحين", "إلى الحين" is "so far", which a memory
+#: says too ("وإلى الحين صرفنا اثنعش"): a content word still, as English
+#: "so far" is. Folded.
+_UNTIL_AR = frozenset({"لحد", "لحدي", "لين", "الين", "الي", "حتي", "لغايه", "لغايت"})
 #: The present after a statement, Arabic, as written; read folded: where the
 #: quick pass ends a place (one-word forms; a phrase's first word, "هذي",
 #: already ends one).
@@ -169,17 +182,27 @@ TIME_AFTER_EN = (
     r"(?:\d{1,3}|a\s+couple\s+of|a\s+few|an?|one|two|three|four|five|six|few)\s+"
     r"(?:days?|weeks?|months?|years?)\s+ago"
 )
-_PRESENT_AR_CACHE: list[frozenset[str]] = []
+_PRESENT_AR_CACHE: list[tuple[frozenset[str], re.Pattern[str]]] = []
+
+
+def _present_ar() -> tuple[frozenset[str], re.Pattern[str]]:
+    """The Arabic present after a statement, folded, and a pattern for
+    "now" in the folded text of a question (an optional "و"/"ف" before it)."""
+    if not _PRESENT_AR_CACHE:
+        from kazma_core.documents.arabic import fold_for_search
+
+        present = frozenset(fold_for_search(p) for p in _PRESENT_AR_RAW)
+        now = sorted({fold_for_search(p) for p in _NOW_AR_RAW}, key=len, reverse=True)
+        words = "|".join(re.escape(p) for p in now) or "(?!)"
+        pattern = re.compile(r"(?:^|\s)[وف]?(" + words + r")(?=\s|$|[؟?.,،!])")
+        _PRESENT_AR_CACHE.append((present, pattern))
+    return _PRESENT_AR_CACHE[0]
 
 
 def present_ar_words() -> frozenset[str]:
     """The one-word forms of the Arabic present, folded ("الحين",
     "هالايام", "حاليا"): where the Arabic quick pass ends a place."""
-    if not _PRESENT_AR_CACHE:
-        from kazma_core.documents.arabic import fold_for_search
-
-        _PRESENT_AR_CACHE.append(frozenset(fold_for_search(p) for p in _PRESENT_AR_RAW))
-    return _PRESENT_AR_CACHE[0]
+    return _present_ar()[0]
 
 
 def _ar_months() -> dict[str, int]:
@@ -313,10 +336,13 @@ def read_time(question: str, *, now: float, zone: Any, past: bool | None = None)
     before = _BEFORE_EN.search(text)
     if before and not _ROUTINE_AFTER_BEFORE.search(text):
         history = True
-    if not spans and not history:
+    # "Now" names no period: its words are left out, nothing else.
+    now_words = [m.group(1) for m in _present_ar()[1].finditer(folded)
+                 if not set(folded[:m.start(1)].split()[-1:]) & _UNTIL_AR]
+    if not spans and not history and not now_words:
         return None
     from kazma_core.memory.query_terms import content_terms
 
-    words = frozenset(w for span in spans for w in content_terms(span))
+    words = frozenset(w for span in (*spans, *now_words) for w in content_terms(span))
     return TimeAsk(start=start, end=end, history=history, said=said and start is not None,
                    words=words, named=", ".join(spans))

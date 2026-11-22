@@ -26,7 +26,8 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 
-__all__ = ["KINDS", "plural_of_a_kind", "users_names", "users_predicate"]
+__all__ = ["ASKED_WITH", "KINDS", "NOT_ASKED_BY_WORDS", "asked_words", "kinds_asked", "plural_of_a_kind",
+           "users_names", "users_predicate"]
 
 #: Kazma's name -> the names a model gives the same fact about a person.
 KINDS: dict[str, tuple[str, ...]] = {
@@ -40,6 +41,97 @@ KINDS: dict[str, tuple[str, ...]] = {
                  "current_employer", "employer_name"),
     "current_role": ("job_title", "occupation", "profession", "job_role", "position", "works_as", "job"),
 }
+
+
+#: The words a person asks each of these facts with, English and Arabic
+#: (Gulf and MSA), as written; read folded, as search reads a question
+#: (``query_terms.content_terms``). A fact's words are Kazma's English name
+#: for it ("user lives in بورتو"): an English question matched the name
+#: ("live" in lives_in, worth recall's whole fact floor) and an Arabic one no
+#: word of it, so the Arabic question had to clear the floor on meaning alone
+#: -- "وين أسكن الحين؟" found the user's home once in four runs of the
+#: real-use suite (the memory plan's finding 10, 2026-11-22). The same sense
+#: only, in both languages -- living, working, a name, an allergy, a
+#: favourite -- never a word of other common senses ("home", "بيت", "شغّل"):
+#: recall's word coverage reads them beside the fact's own words
+#: (``recall._belief_candidate``) and asks its keyword index for the kinds a
+#: question names (``recall._belief_search_words``). The fact's vector is
+#: left as it is (W3 measures what this table gives).
+ASKED_WITH: dict[str, tuple[str, ...]] = {
+    "lives_in": ("live", "lives", "lived", "reside", "resides", "residing",
+                 "أسكن", "نسكن", "تسكن", "يسكن", "ساكن", "ساكنة", "ساكنين", "سكني", "سكنت", "سكنا",
+                 "أعيش", "نعيش", "تعيش", "يعيش", "عايش", "عايشة", "عايشين",
+                 "مقيم", "مقيمة", "مقيمين", "أقيم", "نقيم", "تقيم", "يقيم"),
+    "works_at": ("work", "works", "working", "worked", "employer", "employed",
+                 "أشتغل", "نشتغل", "تشتغل", "يشتغل", "شغال", "شغالة", "أعمل", "نعمل", "تعمل", "يعمل",
+                 "أداوم", "نداوم", "تداوم", "يداوم", "دوامي", "شغلي", "موظف", "موظفة"),
+    "current_role": ("role", "job", "work", "works", "working", "profession", "occupation",
+                     "وظيفة", "وظيفتي", "وظيفتك", "وظيفته", "وظيفتها", "مهنة", "مهنتي", "مهنتك", "مهنته",
+                     "مهنتها", "شغلي", "شغلك", "شغله", "شغلها", "أشتغل", "تشتغل", "يشتغل", "منصب", "منصبي"),
+    "name_is": ("name", "named", "called", "اسم", "اسمي", "اسمك", "اسمه", "اسمها"),
+    "preferred_name": ("name", "call", "called", "nickname", "اسم", "اسمي", "ناديني", "نادني", "أناديك",
+                       "لقب", "لقبي"),
+    "allergic_to": ("allergic", "allergy", "allergies", "حساسية", "حساسيتي"),
+    #: Every favourite_<kind>: the kind's own words come with it
+    #: (:func:`_favourite_kind_words`).
+    "favorite_": ("favorite", "favourite", "مفضل", "مفضلة", "المفضل", "المفضلة"),
+}
+#: The facts a quick pass writes that no word table asks: meaning decides.
+NOT_ASKED_BY_WORDS: dict[str, str] = {
+    "prefers": "like, love, use, أحب, أستخدم are said of anything; a table would cover every question",
+}
+
+
+def _favourite_kind_words(kind: str) -> tuple[str, ...]:
+    """The words of a favourite's kind ("color"), English and Arabic: the
+    Arabic quick pass's own table (``arabic_facts._KINDS``), with "my"
+    ("لوني", "رياضتي")."""
+    from kazma_core.memory.arabic_facts import favourite_kind_words
+
+    return (kind, *({"color": ("colour",)}.get(kind, ())), *favourite_kind_words(kind))
+
+
+def _table_key(predicate: str) -> str | None:
+    name = str(predicate or "")
+    if name in ASKED_WITH:
+        return name
+    if name.startswith("favorite_") and len(name) > len("favorite_"):
+        return "favorite_"
+    return None
+
+
+@lru_cache(maxsize=256)
+def asked_words(predicate: str) -> str:
+    """The words *predicate*'s fact is asked with, folded, one text ("" when
+    the table names none): recall reads them beside the fact's own words."""
+    from kazma_core.memory.query_terms import content_terms
+
+    key = _table_key(predicate)
+    if key is None:
+        return ""
+    words = list(ASKED_WITH[key])
+    if key == "favorite_":
+        words += _favourite_kind_words(predicate[len("favorite_"):])
+    return " ".join(content_terms(" ".join(words)))
+
+
+@lru_cache(maxsize=1)
+def _asked_sets() -> dict[str, frozenset[str]]:
+    from kazma_core.memory.query_terms import content_terms
+
+    return {key: frozenset(content_terms(" ".join(words))) for key, words in ASKED_WITH.items()}
+
+
+def kinds_asked(terms: list[str] | frozenset[str]) -> tuple[str, ...]:
+    """The facts a question's content words (``query_terms.content_terms``,
+    its time words out) ask by the table: Kazma's names, and "favorite" for
+    a favourite of any kind. Recall's keyword index is asked for them."""
+    held = set(terms)
+    out = []
+    for key, words in _asked_sets().items():
+        if held & words:
+            out.append("favorite" if key == "favorite_" else key)
+    return tuple(out)
 
 
 @lru_cache(maxsize=1)

@@ -1040,7 +1040,6 @@ def _locally_forgotten(rows: dict[str, dict[str, Any]], *, tenant_id: str) -> se
     if not rows:
         return set()
     from kazma_core.memory.forget import FORGOTTEN_TIER, forgotten_turns, question_sha
-
     from kazma_core.paths import primary_memory_db
 
     gone: set[str] = set()
@@ -1280,7 +1279,7 @@ def _pg_primary_beliefs(
     )
     sims = {str(bid): float(sim) for bid, sim in dense_pairs}
     rows: dict[str, dict[str, Any]] = {}
-    for row in search_state_beliefs(" ".join(_search_words(query)), tenant_id=tenant_id,
+    for row in search_state_beliefs(" ".join(_belief_search_words(query)), tenant_id=tenant_id,
                                     limit=limit * 3, strict=True):
         if row.get("id"):
             rows[str(row["id"])] = row
@@ -1688,7 +1687,7 @@ def _recall_beliefs(
         for bid in ids:
             sources.setdefault(str(bid), []).append(channel)
 
-    _found([r["id"] for r in _belief_fts(conn, q, tenant_id, limit * 3)], "belief_fts")
+    _found([r["id"] for r in _belief_fts(conn, _belief_search_words(q), tenant_id, limit * 3)], "belief_fts")
     dense = _belief_dense_scored(conn, q, vector_engine, tenant_id, max(_DENSE_POOL, limit * 3))
     _found([bid for bid, _sim in dense], "dense")
     _found(_beliefs_from_turns(conn, seed_episodes or [], tenant_id), "belief_bridge")
@@ -1881,10 +1880,15 @@ def _facts_in_time(ranked: list[RecallHit], rows: dict[str, Any], ask: Any) -> l
 def _belief_candidate(
     bid: str, row: Any, similarity: float | None, by_meaning: bool
 ) -> _Candidate:
+    from kazma_core.memory.fact_names import asked_words
+
     text = _format_belief_text(row)
     return _Candidate(
         id=bid,
-        text=text,
+        # The words the fact is asked with, in both languages, beside its own
+        # (``fact_names.ASKED_WITH``): its own are Kazma's English name, and
+        # an Arabic question matched none (the memory plan's finding 10).
+        text=f"{text} {asked_words(str(_field(row, 'predicate') or ''))}".strip(),
         created_at=float(_field(row, "valid_from") or 0.0),
         similarity=similarity,
         by_meaning=by_meaning,
@@ -2950,9 +2954,29 @@ def _fts_match_query(query: str) -> str:
     is quoted and prefix-matched, so "vaccine" also finds "vaccines". Empty
     when the question has no content word.
     """
+    return _fts_match_words(_search_words(query))
+
+
+def _fts_match_words(search_words: list[str]) -> str:
+    """:func:`_fts_match_query` from words already chosen."""
     # Each content word gives at most two forms (as written, folded).
-    words = [w.replace('"', "") for w in _search_words(query)][: 2 * _QUESTION_MAX_TERMS]
+    words = [w.replace('"', "") for w in search_words][: 2 * _QUESTION_MAX_TERMS]
     return " OR ".join(f'"{w}"*' for w in words if w)
+
+
+def _belief_search_words(query: str) -> list[str]:
+    """The words the fact lane's keyword search is asked for: the
+    question's (:func:`_search_words`), then Kazma's name of each fact kind
+    the question asks by its words, in either language ("وين أسكن" asks
+    ``lives_in``: ``fact_names.kinds_asked``). A fact's words are that
+    English name, and an Arabic question's own found no fact (the memory
+    plan's finding 10). The kinds come first: the words are cut at
+    :data:`_QUESTION_MAX_TERMS`."""
+    from kazma_core.memory.fact_names import kinds_asked
+    from kazma_core.memory.query_terms import content_terms
+
+    kinds = list(kinds_asked(_without_time_words(content_terms(query))))
+    return [*kinds, *(w for w in _search_words(query) if w not in kinds)]
 
 
 def _search_words(query: str) -> list[str]:
@@ -3084,12 +3108,13 @@ def _episode_word_fallback(
 
 def _belief_fts(
     conn: sqlite3.Connection,
-    query: str,
+    words: list[str],
     tenant_id: str,
     limit: int,
 ) -> list[Any]:
-    """FTS5 MATCH over beliefs; empty list if FTS unavailable."""
-    match_q = _fts_match_query(query)
+    """FTS5 MATCH over beliefs for *words* (:func:`_belief_search_words`);
+    empty list if FTS unavailable."""
+    match_q = _fts_match_words(words)
     if not match_q:
         return []
     try:

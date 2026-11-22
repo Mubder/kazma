@@ -420,6 +420,37 @@ control); then the speakers set, the benchmark EN/AR and the product
 measures. Two causes, or one W3 also touches, go to the main session
 before building.
 
+Diagnosed (22 Nov, no model call: the statements through the product's
+quick pass, `recall()` with the real bge-m3, each fact's evidence split
+into meaning lift and word coverage): two causes, both decided by the main
+session and fixed in two commits.
+* **The quick pass voided a place followed by a time word.** A place must
+  end where it is read, and "هالأيام" was no Arabic end; English ended a
+  place only at "now" and "currently", so "I live in Lisbon these days."
+  kept nothing either. And "I moved to Porto." kept nothing in English
+  while "انتقلت إلى بورتو" kept the move. Now a time word ends the place in
+  both (`time_words.TIME_AFTER_EN`, `present_ar_words`), and "I/We moved
+  to X" reads as its Arabic twin. Two locked write scenarios had locked the
+  old difference ("We moved to Rotterdam" stayed a question in English,
+  "انتقلنا إلى الرياض" replaced the city in Arabic): scenarios v8 expect the
+  update in both, with the change log's row and Undo. Gate:
+  `tests/test_memory_time_ends_a_place.py`.
+* **An Arabic question never matched a fact's words.** A fact's words are
+  Kazma's English name ("user lives in بورتو"): an English question gets
+  the name ("live", worth the whole fact floor), an Arabic one nothing, and
+  its meaning lift is lower against that mostly-English text (0.035-0.047
+  against 0.065-0.080 for "where do I live now?" in a one-fact store). Now
+  each fact kind's ask-words, in both languages, are read beside its own
+  (`fact_names.ASKED_WITH`), and the Arabic words for "now" are not content
+  words, as English "now" is not. The vector is unchanged (W3). Gate
+  (`tests/test_memory_fact_languages.py`, bge-m3's recorded vectors): 36/42
+  -> 42/42, every loss before an Arabic question. Kazma's benchmark, the
+  speakers set and the small store: no question moves. Narrowed after the
+  first measure: dropping "these days" / "هالأيام" cost q104 its answer's
+  lead and "living" matched "for a living", so both stay out; "الحين" after
+  "until" ("لحد الحين", so far) stays a content word (q1008's answer says
+  "وإلى الحين").
+
 1. **A fact told once is kept twice, and forgetting one copy leaves it
    known.** In the real-use suite (`scripts/memory_real_use.py`, 22 Nov)
    "My sister Noura works as a dentist." became two memories: the turn, and
@@ -549,3 +580,26 @@ before building.
    (`enable_thinking`), on the owner's list. Also seen: 15 of the 16 were
    gray because the heuristics read "Can you remind me what you said..." as
    a `remind` act (a reminder to book): a memory question, not a reminder.
+13. **"Remind me what you said" is read as a reminder to book.** Found by
+   finding 12's measurement (22 Nov): the heuristics' remind rule
+   (`agent/intent/heuristics._REMIND_RE`) matches "remind me" and
+   "ذكرني" alone, so "Can you remind me what you said about..." and
+   "ذكرني شنو قلت" are a `remind` act, and the gray zone sends them to the
+   4 s refinement (15 of finding 12's 16). Recalling what was said is not
+   booking a reminder. The main session's decision: its own commit, after
+   finding 11, with a paired EN/AR gate through the real classifier.
+14. **"Work on this" shows the user's employer.** Found measuring finding
+   10's fix (22 Nov): "Can you work on this report?" and "اشتغل على
+   هالتقرير" show the user's `works_at` fact, before the fix and after it,
+   in both languages (English by the word "work" in the fact's own name,
+   Arabic by meaning: lift 0.09). A request, not a question about the user.
+   The fix's table neither adds nor removes it. For W3 + W2 (relevance) to
+   judge; not fixed now.
+15. **A move to a product named alone reads as a home.** Found the same
+   day: "We moved to Slack." and "انتقلنا إلى سلاك." store `lives_in` in
+   both languages (the Arabic pass refuses only a Latin name after
+   "انتقلنا", as a tool; English has no script to tell). "We moved to
+   Python 3.12", "to the next item", "to a new office" store nothing in
+   either. The update is in the change log with Undo, so the user can take
+   it back; a list of product names the pass would refuse is the fix if it
+   is seen in use. Not fixed now.

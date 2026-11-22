@@ -50,7 +50,7 @@ from typing import Any
 from kazma_core.memory.clause_subject import OTHER, subjects
 from kazma_core.memory.time_words import present_ar_words
 
-__all__ = ["extract_arabic_facts"]
+__all__ = ["extract_arabic_facts", "favourite_kind_words"]
 
 #: A word, or one punctuation mark of its own.
 _TOKEN_RE = re.compile(r"[^\s.,!?،؛؟:;()\"«»]+|[.,!?،؛؟:;()]")
@@ -119,6 +119,17 @@ _I = {"انا", "وانا", "احنا", "نحن"}
 _HAVE = {"عندي", "لدي"}
 _ALLERGY = {"حساسيه"}
 _ALLERGY_PREPS = {"من", "ضد", "علي", "تجاه"}
+
+
+def favourite_kind_words(kind: str) -> tuple[str, ...]:
+    """The Arabic words of a favourite's kind named in English ("color" ->
+    "لون", "لوني"), with "my": what recall reads beside a favourite's fact
+    (``fact_names.asked_words``)."""
+    out: list[str] = []
+    for stem, english in _KINDS.items():
+        if english == kind:
+            out += [stem, (stem[:-1] + "تي") if stem.endswith("ه") else stem + "ي"]
+    return tuple(out)
 
 
 class _Word:

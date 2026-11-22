@@ -242,7 +242,7 @@ def test_the_fact_a_question_means_is_recalled_past_keyword_noise(conn, monkeypa
     """Six facts share the question's word and none answers it: enough for
     keyword search alone to fill the result, which is when the old code
     stopped looking. The answer shares no word with the question."""
-    from kazma_core.memory.recall import _belief_fts, _recall_beliefs
+    from kazma_core.memory.recall import _belief_fts, _belief_search_words, _recall_beliefs
 
     question = "what coffee do I drink"
     meaning = _unit(7)
@@ -262,7 +262,7 @@ def test_the_fact_a_question_means_is_recalled_past_keyword_noise(conn, monkeypa
             obj="a double espresso")
     conn.commit()
 
-    keyword_only = _belief_fts(conn, question, "default", 15)
+    keyword_only = _belief_fts(conn, _belief_search_words(question), "default", 15)
     assert len(keyword_only) >= 5  # the old code skipped meaning search here...
     assert "target" not in {r["id"] for r in keyword_only}  # ...and never saw the answer
 

@@ -2133,3 +2133,93 @@ class SpeakerReplay:
             except KeyError:
                 continue
         raise KeyError(f"no recorded vector for {text[:60]!r} in the speakers or v5 recordings")
+
+
+# ── Facts asked across languages (the memory plan's finding 10, 2026-11-22) ─
+#
+# A fact's words are Kazma's English name for it ("user lives in بورتو"): an
+# English question matched the name ("live", worth the whole fact floor), an
+# Arabic one no word of it, so the Arabic question had to clear the floor on
+# meaning alone -- "وين أسكن الحين؟" found the user's home once in four runs
+# of the real-use suite. The same five facts, told in English and in Arabic
+# through the quick pass, in a store of one fact and of all five, are asked
+# in both languages; questions that use a fact's word in another sense show
+# none. CI replays bge-m3's recorded vectors (:data:`FACT_LANGUAGES_VECTORS`,
+# ``scripts/memory_bench.py fact-languages-vectors``).
+
+FACT_LANGUAGES: dict[str, Any] = {
+    "told": {
+        "en": ["I live in Porto.", "I work at Initech.", "My name is Layla.", "I am allergic to peanuts.",
+               "My favorite color is blue."],
+        "ar": ["أسكن في بورتو.", "أشتغل في شركة إنيتك.", "اسمي ليلى.", "عندي حساسية من الفول السوداني.",
+               "لوني المفضل أزرق."],
+    },
+    # (language, the fact it asks, question)
+    "asked": [
+        ("en", "lives_in", "Where do I live?"), ("en", "lives_in", "Where do I live now?"),
+        ("en", "lives_in", "Where do I live these days?"),
+        ("ar", "lives_in", "وين أسكن؟"), ("ar", "lives_in", "وين أسكن الحين؟"),
+        ("ar", "lives_in", "وين أسكن هالأيام؟"),
+        ("en", "works_at", "Where do I work?"), ("en", "works_at", "Where do I work now?"),
+        ("ar", "works_at", "وين أشتغل؟"), ("ar", "works_at", "وين أشتغل الحين؟"),
+        ("en", "name_is", "What is my name?"), ("ar", "name_is", "شنو اسمي؟"),
+        ("en", "allergic_to", "What am I allergic to?"), ("ar", "allergic_to", "عندي حساسية من شنو؟"),
+        ("en", "favorite_color", "What is my favorite color?"), ("ar", "favorite_color", "شنو لوني المفضل؟"),
+    ],
+    # (language, question): a fact's word in another sense, asked of the
+    # store of all five facts.
+    "other_sense": [
+        ("en", "What is the name of this song?"), ("en", "Which animals live in the forest?"),
+        ("en", "Is the concert live tonight?"),
+        ("ar", "شنو اسم هالأغنية؟"), ("ar", "أي حيوان يعيش في الغابة؟"),
+    ],
+}
+FACT_LANGUAGES_VECTORS = "fact_languages_vectors.npz"
+
+
+def run_fact_languages() -> list[dict[str, Any]]:
+    """Every (told language, store size, question): the facts recall
+    showed, by Kazma's name, and the one it was asked for (None: a word in
+    another sense, which wants none)."""
+    from datetime import UTC
+    from unittest import mock
+
+    from kazma_core.memory.belief_extractor import extract_and_apply_beliefs_sync
+    from kazma_core.memory.recall import recall
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+
+    rows: list[dict[str, Any]] = []
+    for told, statements in FACT_LANGUAGES["told"].items():
+        for size in (1, len(statements)):
+            folder = tempfile.mkdtemp(prefix="kazma-fact-languages-")
+            primary = sqlite3.connect(os.path.join(folder, "memory_state.db"))
+            primary.row_factory = sqlite3.Row
+            ops = sqlite3.connect(os.path.join(folder, "memory_ops.db"), isolation_level=None)
+            try:
+                ensure_primary_schema(primary)
+                ensure_ops_schema(ops)
+                for n, text in enumerate(statements[:size]):
+                    extract_and_apply_beliefs_sync(primary, ops, text, "Noted.", session_id=f"s{n}", turn=1,
+                                                   tenant_id=BENCH_TENANT, now=BASE_TIME + n * 60, private=True)
+                kinds = {str(r["id"]): str(r["predicate"])
+                         for r in primary.execute("SELECT id, predicate FROM beliefs")}
+                asked = [(lang, want, q) for lang, want, q in FACT_LANGUAGES["asked"] if want in kinds.values()]
+                if size > 1:
+                    asked += [(lang, None, q) for lang, q in FACT_LANGUAGES["other_sense"]]
+                zone = mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC)
+                for lang, want, q in asked:
+                    with zone:
+                        res = recall(q, conn=primary, tenant_id=BENCH_TENANT, limit=5, local_only=True,
+                                     now=BASE_TIME + 86400)
+                    rows.append({"told": told, "size": size, "asked": lang, "question": q, "want": want,
+                                 "shown": [kinds.get(h.id, h.id) for h in res.beliefs],
+                                 "degraded": res.degraded})
+            finally:
+                primary.close()
+                ops.close()
+                for name in os.listdir(folder):
+                    with contextlib.suppress(OSError):
+                        os.remove(os.path.join(folder, name))
+                with contextlib.suppress(OSError):
+                    os.rmdir(folder)
+    return rows

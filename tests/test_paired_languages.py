@@ -308,6 +308,15 @@ def _time_asked(text: str) -> tuple:
     return (day(ask.start), day(ask.end), ask.said, ask.history)
 
 
+def _kinds_asked(text: str) -> tuple[str, ...]:
+    """The fact kinds a question asks by its words (the memory plan's
+    finding 10): an Arabic question names the fact an English one does."""
+    from kazma_core.memory.fact_names import kinds_asked
+    from kazma_core.memory.query_terms import content_terms
+
+    return kinds_asked(content_terms(text))
+
+
 def _follow_up(text: str) -> bool:
     from kazma_core.memory.question_shape import is_follow_up
 
@@ -415,6 +424,12 @@ PAIRS: list[Pair] = [
          ("How old is Pixel?", "Three."), ("كم عمر بكسل؟", "ثلاث سنوات."), _small_talk, False),
     Pair("content_words", (M + "memory/query_terms.py",),
          "where does my sister live", "وين تسكن أختي", _content_words, 2),
+    Pair("asked_where_i_live", (M + "memory/fact_names.py",),
+         "Where do I live now?", "وين أسكن الحين؟", _kinds_asked, ("lives_in",)),
+    Pair("asked_my_name", (M + "memory/fact_names.py",),
+         "What is my name?", "شنو اسمي؟", _kinds_asked, ("name_is", "preferred_name")),
+    Pair("asked_nothing_of_the_user", (M + "memory/fact_names.py",),
+         "What time is it in Tokyo?", "كم الساعة في طوكيو؟", _kinds_asked, ()),
     Pair("fact_lives_in", (M + "memory/belief_extractor.py", M + "memory/arabic_facts.py"),
          "I live in Dubai.", "أنا ساكن في دبي.", _facts, [("user", "lives_in")]),
     Pair("fact_name", (M + "memory/belief_extractor.py", M + "memory/arabic_facts.py"),
@@ -644,6 +659,9 @@ DECLARED: dict[str, str] = {
         "the restart notice of a continued turn is two fixed strings that "
         "language_lock.in_their_language chooses between (the fixed_reply pair runs that "
         "chooser); tests/test_turn_resume.py delivers it",
+    M + "memory/benchmark.py": "the statements and questions of finding 10's gate, told and asked in "
+                               "both languages (FACT_LANGUAGES): data the benchmark runs, nothing decided "
+                               "by Arabic text; tests/test_memory_fact_languages.py",
     M + "agent/command_catalog.py": "each command's description in both languages (description / "
                                     "description_ar); tests/test_slash_help_and_menu.py",
     M + "safety/card_notes.py": "the approval cards' notes worded in both languages (NOTE_TEXT); "

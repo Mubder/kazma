@@ -2061,6 +2061,32 @@ four injected were noise.
   read that fails leaves the dates out with a WARNING. Gate:
   `tests/test_memory_recall_dates.py` (recall without the dating step as
   the negative control).
+- **A fact is found by a question in either language** (2026-11-22, the
+  memory plan's finding 10). A fact's words are Kazma's English name for it
+  ("user lives in بورتو"): an English question matched the name ("live",
+  worth the whole fact floor) and an Arabic one no word of it, so "وين أسكن
+  الحين؟" found the user's home once in four real-use runs. The words each
+  fact kind is asked with, in both languages and one sense only, live
+  beside `fact_names.KINDS` (`ASKED_WITH`; a favourite's kind words from
+  `arabic_facts.favourite_kind_words`; `NOT_ASKED_BY_WORDS` names a fact
+  meaning alone decides, with why): recall's word coverage reads them beside
+  the fact's own words (`recall._belief_candidate`, `asked_words`), and the
+  fact lane's keyword search (local and Postgres-primary) is asked for the
+  kinds a question names (`_belief_search_words`, `kinds_asked`). The Arabic
+  words for "now" (الحين, الآن ...) are not content words, as English "now"
+  is not (`time_words`, part F's non-content handling); "these days",
+  "هالأيام" stay content in both. The fact's vector is unchanged (W3
+  measures what this table gives). Measured: the gate 36/42 -> 42/42 (every
+  loss an Arabic question); Kazma's benchmark hit rate and MRR unchanged,
+  precision 0.4872 -> 0.4828 (q1008 "كم صرفنا لحد الحين؟" shows one more
+  turn: its answer held "الحين", a word it no longer counts); the speakers
+  set and the small store unchanged. Gate: `tests/test_memory_fact_languages.py`
+  (`benchmark.run_fact_languages`: five facts told by the real quick pass in
+  each language, stores of one and five, asked in both, bge-m3's recorded
+  vectors, `scripts/memory_bench.py fact-languages-vectors`; a word in
+  another sense shows none; every predicate a quick pass writes has words in
+  both languages or a reason; today's rules as the negative control, which
+  lose Arabic questions only).
 - **One fact, one predicate name (W6, `memory/predicates.py`).** The
   extractor names predicates freely; under two names a single-valued fact is
   never superseded (live 2026-09-27: "daily_tweet_cap" 16 and

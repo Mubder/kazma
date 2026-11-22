@@ -2456,6 +2456,34 @@ def _cmd_vectors(fresh: bool = False) -> int:
     return 0
 
 
+def _cmd_fact_languages_vectors() -> int:
+    """Record bge-m3's vectors for ``benchmark.run_fact_languages`` (the
+    memory plan's finding 10): every text its stores and questions embed,
+    into the file its gate replays (``tests/test_memory_fact_languages.py``)."""
+    from kazma_core.memory.benchmark import FACT_LANGUAGES_VECTORS, RecordingEmbedder, run_fact_languages
+    from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
+
+    _limit_cpu_threads()
+    real = get_embedder()
+    if real is None:
+        print("no embedder is configured: install the rag extra (bge-m3)", file=sys.stderr)
+        return 2
+    model = get_embedding_model_name()
+    recorder = RecordingEmbedder(real)
+    a, b = _patched(recorder, model)
+    deadline = mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0)
+    with a, b, deadline:
+        rows = run_fact_languages()
+    out = VECTORS.with_name(FACT_LANGUAGES_VECTORS)
+    n = recorder.save(out, model=model)
+    missed = [r for r in rows
+              if (r["want"] and r["want"] not in r["shown"]) or (not r["want"] and r["shown"])]
+    print(f"{out}: {n} vectors from {model}; {len(rows) - len(missed)} of {len(rows)} rows hold")
+    for r in missed:
+        print("  ", json.dumps(r, ensure_ascii=False))
+    return 0
+
+
 def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
     from kazma_core.memory.benchmark import ReplayEmbedder, run_benchmark
 
@@ -3233,6 +3261,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="a change was decided by this look: the set is spent after it")
     sub.add_parser("extraction")
     sub.add_parser("writes")
+    sub.add_parser("fact-languages-vectors",
+                   help="record the vectors of the facts-across-languages gate (the real model)")
     run = sub.add_parser("run")
     run.add_argument("--real", action="store_true", help="load the real embedder")
     run.add_argument("--json", action="store_true")
@@ -3253,6 +3283,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_extraction()
     if args.cmd == "writes":
         return _cmd_writes()
+    if args.cmd == "fact-languages-vectors":
+        return _cmd_fact_languages_vectors()
     return _cmd_run(args.real, args.json, args.details)
 
 
