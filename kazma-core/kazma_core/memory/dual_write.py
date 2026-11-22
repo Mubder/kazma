@@ -39,6 +39,7 @@ from typing import Any
 from kazma_core.memory.episode_text import embed_text
 from kazma_core.memory.limits import episode_text
 from kazma_core.memory.remember_request import is_remember_request
+from kazma_core.spaces.scope import space_named_or_bound
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,7 @@ def episode_row(
     user_text: str = "",
     assistant_text: str = "",
     summary_text: str = "",
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     tier: str = "episodic",
     importance: int = 1,
     source: str = "dual_write_mirror",
@@ -149,6 +150,7 @@ def episode_row(
     none of them can drift from what live chat turns get. *metadata* adds to
     the row's (the chat an agent's note was written in, for example).
     """
+    tenant_id = space_named_or_bound(tenant_id)
     content = (user_text or assistant_text or summary_text or "").strip()
     meta: dict[str, Any] = {**(metadata or {}), "source": source}
     effective_tier = tier
@@ -257,7 +259,7 @@ class DualWriteMirror:
         user_text: str = "",
         assistant_text: str = "",
         summary_text: str = "",
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         tier: str = "episodic",
         importance: int = 1,
         source: str = "dual_write_mirror",
@@ -271,6 +273,7 @@ class DualWriteMirror:
         id, or None if refused/inactive/failed -- :meth:`write_episode` says
         which.
         """
+        tenant_id = space_named_or_bound(tenant_id)
         status, eid = self.write_episode(
             session_id=session_id, turn_number=turn_number, user_text=user_text,
             assistant_text=assistant_text, summary_text=summary_text, tenant_id=tenant_id, tier=tier,
@@ -286,7 +289,7 @@ class DualWriteMirror:
         user_text: str = "",
         assistant_text: str = "",
         summary_text: str = "",
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         tier: str = "episodic",
         importance: int = 1,
         source: str = "dual_write_mirror",
@@ -299,6 +302,7 @@ class DualWriteMirror:
         audit M12): the post-turn pipeline counted a turn whose episode was
         never written as remembered, and its queue task as done.
         """
+        tenant_id = space_named_or_bound(tenant_id)
         if not self._ensure():
             return "failed", None
         from kazma_core.spaces.scope import OWNER_SPACE_ID

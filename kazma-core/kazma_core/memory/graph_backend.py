@@ -36,6 +36,8 @@ import time
 from collections.abc import Iterator
 from typing import Any, Protocol, runtime_checkable
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 _driver_missing_lock = threading.Lock()
@@ -483,7 +485,7 @@ class GraphBackend(Protocol):
         predicate: str,
         obj: str,
         belief_id: str = "",
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         confidence: float = 0.5,
     ) -> bool: ...
 
@@ -491,7 +493,7 @@ class GraphBackend(Protocol):
         self,
         entity: str,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]: ...
 
@@ -546,7 +548,7 @@ class SqliteGraphBackend:
         predicate: str,
         obj: str,
         belief_id: str = "",
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         confidence: float = 0.5,
     ) -> bool:
         # Beliefs are written by mutate_belief / dual_write — no-op here.
@@ -557,9 +559,10 @@ class SqliteGraphBackend:
         self,
         entity: str,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
+        tenant_id = space_named_or_bound(tenant_id)
         try:
             with self._reading() as c:
                 rows = c.execute(
@@ -828,9 +831,10 @@ class Neo4jGraphBackend:
         predicate: str,
         obj: str,
         belief_id: str = "",
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         confidence: float = 0.5,
     ) -> bool:
+        tenant_id = space_named_or_bound(tenant_id)
         if not subject or not obj:
             return False
         try:
@@ -848,7 +852,7 @@ class Neo4jGraphBackend:
         predicate: str = "",
         obj: str = "",
         belief_id: str = "",
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
     ) -> bool:
         """Remove a dual-written edge (by belief_id preferred, else S-P-O).
 
@@ -861,6 +865,7 @@ class Neo4jGraphBackend:
         gone (2026-11-13). With no subject named, every edge is still read,
         this install's only.
         """
+        tenant_id = space_named_or_bound(tenant_id)
         drv = self._get_driver()
         if drv is None:
             return False
@@ -912,7 +917,7 @@ class Neo4jGraphBackend:
             logger.debug("[graph_backend] neo4j delete failed", exc_info=True)
             return False
 
-    def clear_tenant_edges(self, *, tenant_id: str = "default") -> int:
+    def clear_tenant_edges(self, *, tenant_id: str) -> int:
         """Delete this install's fact edges for a tenant (graph-clear).
 
         Kazma's (a ``belief_id``) and this install's or untagged: an edge
@@ -955,9 +960,10 @@ class Neo4jGraphBackend:
         self,
         entity: str,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
+        tenant_id = space_named_or_bound(tenant_id)
         drv = self._get_driver()
         if drv is None:
             return []
@@ -984,7 +990,7 @@ class Neo4jGraphBackend:
     def export_topology(
         self,
         *,
-        tenant_id: str = "default",
+        tenant_id: str,
         limit: int = 200,
     ) -> dict[str, Any]:
         """Export nodes/links for Dashboard when Neo4j is primary graph."""
@@ -1335,10 +1341,11 @@ def upsert_belief_edge(
     predicate: str,
     obj: str,
     belief_id: str = "",
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     confidence: float = 0.5,
 ) -> bool:
     """Best-effort dual-write of a belief triple to the active graph backend."""
+    tenant_id = space_named_or_bound(tenant_id)
     try:
         return bool(
             get_graph_backend().upsert_triple(
@@ -1360,9 +1367,10 @@ def delete_belief_edge(
     subject: str = "",
     predicate: str = "",
     obj: str = "",
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
 ) -> bool:
     """Best-effort remove a dual-written edge after soft-invalidate."""
+    tenant_id = space_named_or_bound(tenant_id)
     try:
         be = get_graph_backend()
         if getattr(be, "name", "") != "neo4j":
@@ -1385,7 +1393,7 @@ def delete_belief_edge(
         return False
 
 
-def clear_tenant_edges(*, tenant_id: str = "default") -> dict[str, Any]:
+def clear_tenant_edges(*, tenant_id: str) -> dict[str, Any]:
     """Best-effort mass Neo4j edge cleanup after a tenant graph-clear (M-15).
 
     SQLite-only installs no-op (beliefs SoT already invalidated). Never raises.

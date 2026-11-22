@@ -24,6 +24,8 @@ import threading
 import time
 from collections.abc import Iterable
 
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record
+
 # Liveness-probe cache TTL for the shared-state backend's `available`.
 _READY_PROBE_TTL = 60.0
 from typing import Any, Protocol, runtime_checkable
@@ -72,16 +74,16 @@ class StateBackend(Protocol):
 
     def mirror_belief(self, row: dict[str, Any]) -> bool: ...
 
-    def count_episodes(self, *, tenant_id: str = "default") -> int: ...
+    def count_episodes(self, *, tenant_id: str | None = None) -> int: ...
 
-    def count_beliefs(self, *, tenant_id: str = "default") -> int: ...
+    def count_beliefs(self, *, tenant_id: str | None = None) -> int: ...
 
     def search_episodes(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
+        self, query: str, *, tenant_id: str | None = None, limit: int = 10, strict: bool = False
     ) -> list[dict[str, Any]]: ...
 
     def search_beliefs(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
+        self, query: str, *, tenant_id: str | None = None, limit: int = 10, strict: bool = False
     ) -> list[dict[str, Any]]: ...
 
 
@@ -101,10 +103,10 @@ class _NullStateBackend:
     def mirror_belief(self, row: dict[str, Any]) -> bool:
         return False
 
-    def count_episodes(self, *, tenant_id: str = "default") -> int:
+    def count_episodes(self, *, tenant_id: str | None = None) -> int:
         return 0
 
-    def count_beliefs(self, *, tenant_id: str = "default") -> int:
+    def count_beliefs(self, *, tenant_id: str | None = None) -> int:
         return 0
 
     def delete_belief(self, row_id: str) -> bool:
@@ -124,7 +126,7 @@ class _NullStateBackend:
         return {}
 
     def search_episodes(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False,
+        self, query: str, *, tenant_id: str | None = None, limit: int = 10, strict: bool = False,
         between: tuple[float, float] | None = None,
     ) -> list[dict[str, Any]]:
         return []
@@ -135,17 +137,17 @@ class _NullStateBackend:
         return []
 
     def search_beliefs(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
+        self, query: str, *, tenant_id: str | None = None, limit: int = 10, strict: bool = False
     ) -> list[dict[str, Any]]:
         return []
 
     def fetch_episodes(
-        self, ids: list[str], *, tenant_id: str = "default"
+        self, ids: list[str], *, tenant_id: str | None = None
     ) -> list[dict[str, Any]]:
         return []
 
     def fetch_beliefs(
-        self, ids: list[str], *, tenant_id: str = "default"
+        self, ids: list[str], *, tenant_id: str | None = None
     ) -> list[dict[str, Any]]:
         return []
 
@@ -420,7 +422,7 @@ class PostgresStateBackend:
                     """,
                     (
                         row.get("id"),
-                        row.get("tenant_id") or "default",
+                        space_of_record(row.get("tenant_id")),
                         _pg_text(row.get("subject")),
                         _pg_text(row.get("predicate")),
                         row.get("predicate_type") or "functional",
@@ -443,10 +445,12 @@ class PostgresStateBackend:
             logger.debug("[state_backend] postgres belief mirror failed", exc_info=True)
             return False
 
-    def count_episodes(self, *, tenant_id: str = "default") -> int:
+    def count_episodes(self, *, tenant_id: str | None = None) -> int:
+        tenant_id = space_named_or_bound(tenant_id)
         return self._count("kazma_episodes", tenant_id)
 
-    def count_beliefs(self, *, tenant_id: str = "default") -> int:
+    def count_beliefs(self, *, tenant_id: str | None = None) -> int:
+        tenant_id = space_named_or_bound(tenant_id)
         return self._count("kazma_beliefs", tenant_id)
 
     def delete_belief(self, row_id: str) -> bool:
@@ -571,7 +575,7 @@ class PostgresStateBackend:
             conn.close()
 
     def search_episodes(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False,
+        self, query: str, *, tenant_id: str | None = None, limit: int = 10, strict: bool = False,
         between: tuple[float, float] | None = None,
     ) -> list[dict[str, Any]]:
         """Keyword search over mirrored episode text (multi-replica read).
@@ -585,6 +589,7 @@ class PostgresStateBackend:
         returned the newest memories whatever was asked. ``LIKE`` prefilters;
         whole words are confirmed in Python.
         """
+        tenant_id = space_named_or_bound(tenant_id)
         from kazma_core.memory.query_terms import mentions, search_terms
 
         terms = search_terms(query)[:8]
@@ -691,10 +696,11 @@ class PostgresStateBackend:
             conn.close()
 
     def search_beliefs(
-        self, query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
+        self, query: str, *, tenant_id: str | None = None, limit: int = 10, strict: bool = False
     ) -> list[dict[str, Any]]:
         """Keyword search over mirrored active beliefs (content words, whole words).
         *strict*: a failure raises, never [] (recall's primary path)."""
+        tenant_id = space_named_or_bound(tenant_id)
         from kazma_core.memory.query_terms import mentions, search_terms
 
         terms = search_terms(query)[:8]
@@ -757,8 +763,9 @@ class PostgresStateBackend:
             return []
 
     def fetch_episodes(
-        self, ids: list[str], *, tenant_id: str = "default"
+        self, ids: list[str], *, tenant_id: str | None = None
     ) -> list[dict[str, Any]]:
+        tenant_id = space_named_or_bound(tenant_id)
         wanted = [str(i) for i in ids if i][:50]
         if not wanted or not self._dsn:
             return []
@@ -791,8 +798,9 @@ class PostgresStateBackend:
             return []
 
     def fetch_beliefs(
-        self, ids: list[str], *, tenant_id: str = "default"
+        self, ids: list[str], *, tenant_id: str | None = None
     ) -> list[dict[str, Any]]:
+        tenant_id = space_named_or_bound(tenant_id)
         wanted = [str(i) for i in ids if i][:50]
         if not wanted or not self._dsn:
             return []
@@ -895,7 +903,7 @@ _EPISODE_UPSERT = """
 def _episode_params(row: dict[str, Any]) -> tuple[Any, ...]:
     return (
         row.get("id"),
-        row.get("tenant_id") or "default",
+        space_of_record(row.get("tenant_id")),
         row.get("session_id"),
         int(row.get("turn_number") or 0),
         _pg_text(row.get("user_text")),
@@ -1792,7 +1800,7 @@ def mirror_drift_summary(conn: Any, *, sample: int = 5) -> dict[str, Any]:
     return out
 
 
-def backfill_state_mirror(*, tenant_id: str = "default") -> dict[str, Any]:
+def backfill_state_mirror(*, tenant_id: str) -> dict[str, Any]:
     """One-shot: push existing SQLite beliefs + episodes into the Postgres mirror.
 
     The dual-mirror is write-forward only — it copies rows created AFTER it was
@@ -1885,7 +1893,7 @@ def backfill_state_mirror(*, tenant_id: str = "default") -> dict[str, Any]:
 
 
 def search_state_episodes(
-    query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False,
+    query: str, *, tenant_id: str, limit: int = 10, strict: bool = False,
     between: tuple[float, float] | None = None,
 ) -> list[dict[str, Any]]:
     """The mirror's keyword matches. *strict*: a search that fails raises
@@ -1920,7 +1928,7 @@ def state_episodes_between(
 
 
 def search_state_beliefs(
-    query: str, *, tenant_id: str = "default", limit: int = 10, strict: bool = False
+    query: str, *, tenant_id: str, limit: int = 10, strict: bool = False
 ) -> list[dict[str, Any]]:
     """:func:`search_state_episodes` for the mirror's current facts."""
     try:

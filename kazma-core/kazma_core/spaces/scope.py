@@ -55,6 +55,7 @@ __all__ = [
     "reset_scope_only",
     "set_enforced",
     "set_scope",
+    "space_named_or_bound",
     "space_of_record",
     "space_of_state",
     "set_scope_only",
@@ -267,6 +268,25 @@ def space_of_record(tenant: object) -> str:
     :func:`require_space_id`). No I/O."""
     value = str(tenant or "").strip()
     return value or OWNER_SPACE_ID
+
+
+def space_named_or_bound(tenant_id: str | None) -> str:
+    """The space *tenant_id* names; with none, the space of the work bound
+    now once Spaces is enforced (:class:`NoSpaceBound` with none: never the
+    owner's), and the owner's while it is not -- the value such code wrote
+    before Spaces, so nothing moves on an install that does not enforce it.
+
+    For a parameter some caller leaves out (Spaces S1-02). Unlike
+    :func:`require_space_id` it reads neither the ambient tenant nor
+    :func:`install_work` while Spaces is off: either would move rows today
+    (an older multi-user install's requests bind a principal's tenant; Kazma's
+    own sweeps run as install work). No I/O."""
+    value = str(tenant_id or "").strip()
+    if value:
+        return value
+    if not spaces_enforced():
+        return OWNER_SPACE_ID
+    return require_space_id()
 
 
 def bound_asker() -> str | None:

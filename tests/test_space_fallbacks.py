@@ -270,3 +270,75 @@ def test_a_tenant_key_named_empty_is_the_bound_space_s() -> None:
         assert tenant_key("x.y", tenant_id="") == "tenant.family.x.y"
         assert tenant_key("x.y", tenant_id=" ") == "tenant.family.x.y"
     assert tenant_key("x.y", tenant_id="") == "x.y"
+
+
+# ── memory: the helper, the mirror and the backends ─────────────────────
+
+
+def test_a_parameter_left_out_is_today_s_value_until_spaces_is_enforced(monkeypatch) -> None:
+    """``space_named_or_bound``: the named space; with none, the owner's while
+    Spaces is off -- whatever tenant a request bound (an older multi-user
+    install) and inside Kazma's own work -- and the bound space once it is on."""
+    from kazma_core.spaces.scope import install_work, space_named_or_bound
+    from kazma_core.tenant_context import tenant_scope
+
+    assert space_named_or_bound("acme") == "acme"
+    assert space_named_or_bound(None) == space_named_or_bound("") == scope.OWNER_SPACE_ID
+    with tenant_scope("acme"):
+        assert space_named_or_bound(None) == scope.OWNER_SPACE_ID
+    with install_work("a sweep"):
+        assert space_named_or_bound(None) == scope.OWNER_SPACE_ID
+    monkeypatch.setattr(scope, "_enforced", True)
+    with bind_scope("family", "layla"):
+        assert space_named_or_bound(None) == "family"
+    with pytest.raises(NoSpaceBound):
+        space_named_or_bound(None)
+
+
+def test_control_require_space_id_would_move_rows_while_spaces_is_off() -> None:
+    from kazma_core.spaces.scope import install_work, require_space_id
+    from kazma_core.tenant_context import tenant_scope
+
+    with tenant_scope("acme"):
+        assert require_space_id() == "acme"  # not the owner's, as the old default was
+    with install_work("a sweep"), pytest.raises(NoSpaceBound):
+        require_space_id()
+
+
+def test_an_episode_row_names_its_space() -> None:
+    from kazma_core.memory.dual_write import episode_row
+
+    def row(**kw):
+        return episode_row(session_id="s", turn_number=1, user_text="hi", **kw)["tenant_id"]
+
+    assert row() == scope.OWNER_SPACE_ID  # Spaces off: as before
+    with bind_scope("family", "layla"):
+        assert row() == scope.OWNER_SPACE_ID  # still off: nothing moves
+        assert row(tenant_id="family") == "family"
+
+
+def test_an_episode_row_with_no_space_is_refused_once_enforced(enforced) -> None:
+    from kazma_core.memory.dual_write import episode_row
+
+    with bind_scope("family", "layla"):
+        assert episode_row(session_id="s", turn_number=1, user_text="hi")["tenant_id"] == "family"
+    with pytest.raises(NoSpaceBound):
+        episode_row(session_id="s", turn_number=1, user_text="hi")
+
+
+def test_a_mirror_row_naming_no_space_is_the_owners() -> None:
+    from kazma_core.memory.state_backend import _episode_params
+
+    assert _episode_params({"id": "e1", "tenant_id": ""})[1] == scope.OWNER_SPACE_ID
+    assert _episode_params({"id": "e1", "tenant_id": "family"})[1] == "family"
+
+
+def test_the_mirror_searches_name_their_tenant() -> None:
+    """Every caller names it (recall); a caller that names none does not run."""
+    import inspect
+
+    from kazma_core.memory import graph_backend, state_backend
+
+    for fn in (state_backend.search_state_episodes, state_backend.search_state_beliefs,
+               state_backend.backfill_state_mirror, graph_backend.clear_tenant_edges):
+        assert inspect.signature(fn).parameters["tenant_id"].default is inspect.Parameter.empty, fn
