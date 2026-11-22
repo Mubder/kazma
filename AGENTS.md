@@ -15294,6 +15294,24 @@ an install with one account behaves as before.
     person's own space with an empty chat, whose thread is recorded there).
     Gates: `tests/js/test_space_scope.js`, the header test in
     `tests/e2e/test_shared_spaces_browser.py` (EN/AR).
+  - **Moving one's own document (piece 5).** "Private means in my personal
+    space": a person moves their own document from their own space into a
+    shared space they are in, or takes it back out (`spaces.moves`: Spaces
+    enforced, a member of both, one of the two their own personal space and
+    the other shared; `DocumentIngestionService.move_document` checks it is
+    theirs). The original goes through the target space's own intake (as an
+    upload would), then the source is unindexed and tombstoned; a source
+    that cannot be retired takes the copy back, so it is in exactly one
+    space. Taking it out leaves the shared space a line (who, when, the
+    title it had: `taken_out_documents`, tombstones of reason `taken_out`,
+    which only the move writes: a delete refuses `MOVE_REASONS`). A move is
+    the person's click on the Documents page (`POST
+    /api/documents/{document_id}/move`), never the agent's. Files and chats
+    are not moved here.
+  - Gates: `tests/test_document_moves.py` (a move that does not retire the
+    source as the control), the taken-out read on SQLite and Postgres
+    (`tests/test_document_listing_queries_are_joined.py`), the matrix case,
+    `tests/e2e/test_document_moves_browser.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

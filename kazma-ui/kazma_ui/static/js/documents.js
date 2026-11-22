@@ -10,6 +10,11 @@
 function documentsPage() {
   return {
     documents: [],
+    // Documents taken out of this shared space by their makers (Spaces
+    // S2-12): the line the space keeps. And the person's spaces, to move
+    // their own documents between their own space and a shared one.
+    takenOut: [],
+    spacesHere: (window.kazmaSpace && window.kazmaSpace.spaces) || [],
     // The library and the audit history say "none" only after the server
     // answered: an empty list before that is "not loaded yet", and the page
     // said "No documents yet." for seconds over a library of five
@@ -59,6 +64,9 @@ function documentsPage() {
     },
 
     async init() {
+      document.addEventListener("kazma:spaces", (event) => {
+        this.spacesHere = Array.isArray(event.detail) ? event.detail : [];
+      });
       await this.loadDocuments();
       await this.loadHealth();
       await this.loadOps();
@@ -121,6 +129,7 @@ function documentsPage() {
         const j = await r.json();
         if (j.ok) {
           this.documents = j.documents || [];
+          this.takenOut = Array.isArray(j.taken_out) ? j.taken_out : [];
           this.documentsLoaded = true;
           this.documentsError = "";
         } else {
@@ -695,6 +704,73 @@ function documentsPage() {
         this.acting = false;
       }
       await this.refreshDetail();
+    },
+
+    _spaceHere() {
+      const id = window.kazmaSpace ? window.kazmaSpace.id : "";
+      return (this.spacesHere || []).find((s) => s.id === id) || null;
+    },
+
+    /** In the person's own space: the shared spaces their document can go to. */
+    shareTargets() {
+      const here = this._spaceHere();
+      return here && here.personal ? (this.spacesHere || []).filter((s) => !s.personal) : [];
+    },
+
+    /** In a shared space: the person's own space, where their document can go back. */
+    takeOutTarget() {
+      const here = this._spaceHere();
+      return here && !here.personal ? (this.spacesHere || []).find((s) => s.personal) || null : null;
+    },
+
+    takenOutText(line) {
+      const when = window.KazmaFormat ? window.KazmaFormat.dateTime(line.at) : line.at;
+      return kazmaT("documents.taken_out_line", "taken out by {name} on {when}",
+        { name: line.by_name || "", when: when });
+    },
+
+    /**
+     * Move the person's own document to another of their spaces (Spaces
+     * S2-12): into a shared space, or out of one back to their own space.
+     * What it means is said first.
+     */
+    async moveDocument(d, toSpace) {
+      if (!d || !toSpace || this.acting) return;
+      const target = (this.spacesHere || []).find((s) => s.id === toSpace);
+      if (!target) return;
+      const here = this._spaceHere();
+      const takingOut = !!(here && !here.personal);
+      const name = (target.name || kazmaT("spaces.personal", "My space")).toString();
+      const proceed = await window.kazmaConfirm({
+        title: takingOut
+          ? kazmaT("documents.take_out_title", "Take this document out of {space}?", { space: (here && here.name) || "" })
+          : kazmaT("documents.share_title", "Share this document with {space}?", { space: name }),
+        message: takingOut
+          ? kazmaT("documents.take_out_confirm", "It goes back to your own space. The shared space keeps a line saying you took it out.")
+          : kazmaT("documents.share_confirm", "Everyone in that space will see it and can use it. It leaves your own space."),
+        confirmText: takingOut ? kazmaT("documents.take_out", "Take out") : kazmaT("documents.share", "Share"),
+      });
+      if (!proceed) return;
+      this.acting = true;
+      try {
+        const r = await fetch(`/api/documents/${encodeURIComponent(d.document_id)}/move`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ to_space: toSpace }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok) {
+          this.toast(kazmaT("documents.move_err." + (j.code || "failed"),
+            kazmaT("documents.move_err.failed", "The document could not be moved.")), "error");
+          return;
+        }
+        this.toast(takingOut ? kazmaT("documents.taken_out_done", "Taken out to your own space.")
+          : kazmaT("documents.shared_done", "Shared with {space}.", { space: name }), "success");
+        if (this.selected && this.selected.document_id === d.document_id) this.selected = null;
+      } finally {
+        this.acting = false;
+      }
+      await this.loadDocuments();
     },
 
     /**

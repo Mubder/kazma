@@ -91,6 +91,20 @@
             </div>
             <div class="doc-row-actions">
               <span class="badge state-badge" :class="stateClass(d.state)" x-text="tOr('documents.state_' + (d.state || 'unknown'), (d.state || 'unknown'))"></span>
+              <template x-if="d.mine && shareTargets().length > 0">
+                <select class="form-input doc-move-select" :data-doc-share="d.document_id" :disabled="acting"
+                        aria-label="{{ t('documents.share_with') }}"
+                        @click.stop @change="moveDocument(d, $event.target.value); $event.target.value = ''">
+                  <option value="">{{ t('documents.share_with') }}</option>
+                  <template x-for="s in shareTargets()" :key="d.document_id + ':' + s.id">
+                    <option :value="s.id" x-text="s.name" translate="no"></option>
+                  </template>
+                </select>
+              </template>
+              <button type="button" class="btn btn-sm btn-secondary" x-show="d.mine && takeOutTarget()" x-cloak
+                      :data-doc-take-out="d.document_id" :disabled="acting"
+                      title="{{ t('documents.take_out_hint') }}"
+                      @click.stop="moveDocument(d, takeOutTarget().id)">{{ t('documents.take_out') }}</button>
               <button type="button" class="btn btn-sm btn-danger"
                       title="{{ t('documents.delete_title') }}"
                       :disabled="acting"
@@ -98,6 +112,17 @@
             </div>
           </div>
         </template>
+        <!-- The documents taken out of this shared space by their makers
+             (Spaces S2-12): the line the space keeps. -->
+        <div id="documents-taken-out" x-show="takenOut.length > 0" x-cloak>
+          <h4 class="doc-meta">{{ t('documents.taken_out_title') }}</h4>
+          <template x-for="line in takenOut" :key="'out-' + line.document_id">
+            <div class="doc-meta" :data-taken-out="line.document_id">
+              <bdi translate="no" dir="auto" x-text="line.title"></bdi>
+              <span x-text="takenOutText(line)"></span>
+            </div>
+          </template>
+        </div>
         <p style="margin:.55rem 0 0;font-size:.7rem;color:var(--text-muted);">
           {{ t('documents.delete_hint') }}
         </p>

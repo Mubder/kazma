@@ -732,3 +732,21 @@ def tool_document_search(matrix: Matrix) -> None:
                           w.run(tools.document_search(k.lib_a, w.mark_b))):
                 w.nothing_of_b(reply)
             assert w.mark_a in w.run(tools.document_search(k.lib_a, w.mark_a))
+
+
+# ── moving one's own document (S2-12) ───────────────────────────────────────
+
+
+@case("POST /api/documents/{document_id}/move", ITEM)
+def documents_move(matrix: Matrix) -> None:
+    """A moves neither B's document nor their own into B's space: a move is
+    between one's own space and a shared space one is in, of one's own
+    document."""
+    with world(matrix) as w, w.as_a() as client:
+        for document_id in (w.b.document_id, w.a.document_id):
+            answer = client.post(f"/api/documents/{document_id}/move", json={"to_space": Matrix.SPACE_B})
+            assert answer.status_code in (400, 403, 404), (answer.status_code, answer.text[:300])
+            w.nothing_of_b(answer)
+        w.b_is_untouched()
+        listed = client.get("/api/documents").json()["documents"]
+        assert [row["document_id"] for row in listed] == [w.a.document_id], "A's own stayed where it was"

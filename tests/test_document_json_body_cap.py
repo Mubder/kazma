@@ -138,7 +138,8 @@ def test_every_json_route_reads_through_the_bounded_reader():
     # 2026-10-13 (DOC-A4): the delete route read ``await request.json()``,
     # which this gate did not look for: no route reads a body any other way.
     assert _unbounded_reads(tree) == []
-    assert len(readers) == 11
+    # 12 since the document move (Spaces S2-12, POST /{document_id}/move).
+    assert len(readers) == 12
 
 
 def _unbounded_reads(tree) -> list[str]:

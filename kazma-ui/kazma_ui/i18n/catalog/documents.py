@@ -96,6 +96,47 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تعذّر تحميل سجل التدقيق.",
         "en": "The audit history could not be loaded.",
     },
+    # Moving one's own document between one's own space and a shared one
+    # (Spaces S2-12).
+    "documents.share_with": {"en": "Share with…", "ar": "مشاركة مع…"},
+    "documents.share": {"en": "Share", "ar": "مشاركة"},
+    "documents.share_title": {"en": "Share this document with {space}?", "ar": "مشاركة هذا المستند مع {space}؟"},
+    "documents.share_confirm": {
+        "en": "Everyone in that space will see it and can use it. It leaves your own space.",
+        "ar": "سيراه كل من في تلك المساحة ويستطيع استخدامه. ويغادر مساحتك الخاصة.",
+    },
+    "documents.shared_done": {"en": "Shared with {space}.", "ar": "شوركت مع {space}."},
+    "documents.take_out": {"en": "Take out", "ar": "إخراج"},
+    "documents.take_out_hint": {
+        "en": "Take your document back to your own space.",
+        "ar": "أعد مستندك إلى مساحتك الخاصة.",
+    },
+    "documents.take_out_title": {"en": "Take this document out of {space}?", "ar": "إخراج هذا المستند من {space}؟"},
+    "documents.take_out_confirm": {
+        "en": "It goes back to your own space. The shared space keeps a line saying you took it out.",
+        "ar": "يعود إلى مساحتك الخاصة. وتحتفظ المساحة المشتركة بسطر يذكر أنك أخرجته.",
+    },
+    "documents.taken_out_done": {"en": "Taken out to your own space.", "ar": "أُخرج إلى مساحتك الخاصة."},
+    "documents.taken_out_title": {"en": "Taken out", "ar": "ما أُخرج"},
+    "documents.taken_out_line": {"en": "taken out by {name} on {when}", "ar": "أخرجه {name} في {when}"},
+    "documents.move_err.failed": {"en": "The document could not be moved.", "ar": "تعذّر نقل المستند."},
+    "documents.move_err.not_movable": {
+        "en": "Only your own document can be moved.",
+        "ar": "لا يُنقل إلا مستندك أنت.",
+    },
+    "documents.move_err.not_yours": {"en": "That is not yours to move there.", "ar": "ليس لك أن تنقله إلى هناك."},
+    "documents.move_err.not_between_own_and_shared": {
+        "en": "A document moves between your own space and a shared space you are in.",
+        "ar": "ينتقل المستند بين مساحتك الخاصة ومساحة مشتركة أنت عضو فيها.",
+    },
+    "documents.move_err.identity_unavailable": {
+        "en": "Accounts cannot be read right now. Try again.",
+        "ar": "تتعذّر قراءة الحسابات الآن. حاول مجددًا.",
+    },
+    "documents.move_err.spaces_off": {
+        "en": "Documents move between spaces once Spaces is on.",
+        "ar": "تنتقل المستندات بين المساحات بعد تشغيل المساحات.",
+    },
     "documents.delete_title": {
         "ar": "حذف هذا المستند / أرشفته",
         "en": "Delete / archive this document",

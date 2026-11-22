@@ -189,7 +189,13 @@
                         fillSwitcher(select, body.spaces, currentId, function (id) {
                             win.kazmaSpace.switchTo(id);
                         });
-                        if (state) state.personal = showSpace(doc, body.spaces, currentId);
+                        if (state) {
+                            state.spaces = body.spaces;
+                            state.personal = showSpace(doc, body.spaces, currentId);
+                            if (doc.dispatchEvent && typeof win.CustomEvent === 'function') {
+                                doc.dispatchEvent(new win.CustomEvent('kazma:spaces', { detail: body.spaces }));
+                            }
+                        }
                     }
                 })
                 .catch(function () { /* no switcher; the tab stays in its space */ });
@@ -259,6 +265,8 @@
         win.kazmaSpace = {
             /** The id of the space this tab is in. */
             get id() { return state.id; },
+            /** The person's spaces, once read (else an empty list). */
+            get spaces() { return Array.isArray(state.spaces) ? state.spaces.slice() : []; },
             /** `url` with this tab's space, for a link or a download. */
             url: function (url) { return withSpace(url, getId(), origin); },
             /** A new chat in the person's own space, from a shared one

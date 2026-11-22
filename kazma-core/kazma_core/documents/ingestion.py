@@ -105,6 +105,11 @@ from .worker_container import isolation_report
 
 logger = logging.getLogger(__name__)
 
+#: Tombstone reasons only Kazma's own document move writes (Spaces S2-12):
+#: ``taken_out`` is the line a shared space keeps for a document its maker
+#: took back to their own space; a delete route can name neither.
+MOVE_REASONS = frozenset({"taken_out", "shared_to_space"})
+
 __all__ = [
     "DocumentIngestionError",
     "DocumentIngestionService",
@@ -1634,6 +1639,9 @@ class DocumentIngestionService:
                     "updated_at": record.updated_at,
                     "state": state,
                     "job_id": latest[0]["job_id"] if latest else None,
+                    # The asker's own document: the one they may move to
+                    # another of their spaces (Spaces S2-12).
+                    "mine": record.owner_id == actor,
                 }
             )
         return rows
@@ -1989,7 +1997,97 @@ class DocumentIngestionService:
         document_id: DocumentId | str,
         reason: str = "user_requested",
     ) -> dict[str, Any]:
-        """Unindex + tombstone a document (physical bytes reclaimed later by GC)."""
+        """Unindex + tombstone a document (physical bytes reclaimed later by GC).
+
+        *reason* may not be one Kazma's own move writes (:data:`MOVE_REASONS`):
+        the line a shared space keeps for a document taken out of it is
+        never written by a delete (Spaces S2-12)."""
+        if _clean(reason, "reason") in MOVE_REASONS:
+            raise DocumentIngestionError("reserved_reason", "That reason is Kazma's own.")
+        return self._tombstone(tenant_id=tenant_id, actor_id=actor_id, document_id=document_id,
+                               reason=reason)
+
+    def move_document(
+        self,
+        *,
+        document_id: DocumentId | str,
+        from_tenant: str,
+        to_tenant: str,
+        actor_id: str,
+        workspace_id: str,
+        taken_out: bool,
+    ) -> dict[str, Any]:
+        """Move *actor_id*'s own document from the space *from_tenant* to
+        *to_tenant* (Spaces S2-12): its original goes through the target
+        space's own intake, as an upload by the same person would (checked,
+        parsed and indexed there), then the source is unindexed and
+        tombstoned. Never two copies: a source that cannot be retired takes
+        the new one back. *taken_out*: leaving a shared space for the
+        person's own, which the shared space keeps as a line
+        (:meth:`taken_out_documents`). The caller checks the spaces
+        (``spaces.moves``). Blocking."""
+        self._require_writes_enabled()
+        source = _clean(from_tenant, "from_tenant")
+        target = _clean(to_tenant, "to_tenant")
+        actor = _clean(actor_id, "actor_id")
+        doc_id = DocumentId(document_id)
+        try:
+            record = self.repository.get_document(tenant_id=source, document_id=doc_id, actor_id=actor)
+        except DocumentAccessError:
+            record = None  # not theirs to read: not theirs to move
+        if (record is None or record.deleted_at or record.owner_id != actor
+                or record.current_version_id is None):
+            raise DocumentIngestionError("not_movable", "Only your own document can be moved.")
+        version = self.repository.get_version(
+            tenant_id=source, version_id=record.current_version_id, actor_id=actor)
+        blob = self.repository.get_blob(tenant_id=source, blob_id=version.source_blob_id) if version else None
+        if version is None or blob is None:
+            raise DocumentIngestionError("not_movable", "This document's original is not there to move.")
+        original = self.storage.for_space(source).locate_blob(kind=blob.storage_kind, sha256=blob.sha256)
+        with original.open("rb") as stream:
+            moved = self.ingest_stream(
+                stream, filename=version.original_filename, tenant_id=target, workspace_id=workspace_id,
+                actor_id=actor, title=record.title, idempotency_key=f"move:{source}:{doc_id}",
+                content_length=blob.byte_size,
+            )
+        retired = False
+        try:
+            self._tombstone(tenant_id=source, actor_id=actor, document_id=doc_id,
+                            reason="taken_out" if taken_out else "shared_to_space")
+            retired = True
+        finally:
+            if not retired:
+                logger.warning("[documents] a move's source could not be retired: the copy is taken back")
+                self._tombstone(tenant_id=target, actor_id=actor, document_id=moved.document_id,
+                                reason="user_requested")
+        for tenant, action, other in ((source, "moved_out", target), (target, "moved_in", source)):
+            self.audit.record(
+                tenant_id=tenant, event_type="access", action=action, outcome="success",
+                actor_id=actor, document_id=doc_id if tenant == source else moved.document_id,
+                detail={"reason": "taken_out" if taken_out else "shared_to_space"},
+            )
+        logger.info("[documents] a document moved from space %s to %s", source, target)
+        return {"document_id": str(moved.document_id), "job_id": str(moved.job_id)}
+
+    def taken_out_documents(self, *, tenant_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        """The documents taken out of the space *tenant_id* by the people who
+        made them (Spaces S2-12), newest first: what the shared space keeps
+        as a line. Only Kazma's own move writes such a tombstone."""
+        tenant = _clean(tenant_id, "tenant_id")
+        return [
+            {"document_id": str(row["document_id"]), "title": str(row["title"] or ""),
+             "by": str(row["deleted_by"] or ""), "at": str(row["deleted_at"] or "")}
+            for row in self.repository.taken_out(tenant_id=tenant, limit=max(1, min(int(limit), 200)))
+        ]
+
+    def _tombstone(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        document_id: DocumentId | str,
+        reason: str,
+    ) -> dict[str, Any]:
         self._require_writes_enabled()
         tenant = _clean(tenant_id, "tenant_id")
         actor = _clean(actor_id, "actor_id")

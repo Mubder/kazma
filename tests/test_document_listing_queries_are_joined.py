@@ -149,6 +149,22 @@ def test_a_members_share_is_taken_back_and_their_own_documents_stay(stores):
     assert repo.revoke_member_access(tenant_id="t", principal_id="alice") == []
 
 
+def test_the_taken_out_lines_are_the_moves_own(stores):
+    """Spaces S2-12: a shared space keeps a line for each document its maker
+    took out (a tombstone Kazma's move writes, reason ``taken_out``), newest
+    first, with the title it had; an ordinary delete is no such line."""
+    repo, _jobs, _clock = stores
+    out = repo.create_document(tenant_id="t", owner_id="reem", title="Trip plan")
+    gone = repo.create_document(tenant_id="t", owner_id="omar", title="Old list")
+    elsewhere = repo.create_document(tenant_id="other", owner_id="reem", title="Elsewhere")
+    repo.tombstone_document(tenant_id="t", document_id=out.id, actor_id="reem", reason="taken_out")
+    repo.tombstone_document(tenant_id="t", document_id=gone.id, actor_id="omar", reason="user_requested")
+    repo.tombstone_document(tenant_id="other", document_id=elsewhere.id, actor_id="reem", reason="taken_out")
+    lines = repo.taken_out(tenant_id="t")
+    assert [(line["title"], line["deleted_by"], str(line["document_id"])) for line in lines] == [
+        ("Trip plan", "reem", str(out.id))]
+
+
 def test_the_newest_job_of_each_document_in_one_query(stores):
     repo, jobs, clock = stores
     a = repo.create_document(tenant_id="t", owner_id="alice", title="a")
