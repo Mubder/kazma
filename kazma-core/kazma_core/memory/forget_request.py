@@ -22,7 +22,7 @@ import re
 
 from kazma_core.memory.own_words import own_words
 
-__all__ = ["asks_to_forget", "is_forget_request"]
+__all__ = ["is_forget_request"]
 
 #: "forget" as a request: opening a clause, or after a polite opener ("please
 #: forget", "can you forget"). Never "I forget", "did I forget", "don't
@@ -64,10 +64,10 @@ def is_forget_request(text: str | None) -> bool:
     something: never a "forget" inside an attached document, a quote or a
     text the user asked Kazma to translate (``memory.own_words``). A request
     asked as a question counts ("Can you forget what I said about Dana?")."""
-    return asks_to_forget(own_words(text, questions=True))
+    return _asks_to_forget(own_words(text, questions=True))
 
 
-def asks_to_forget(text: str | None) -> bool:
+def _asks_to_forget(text: str | None) -> bool:
     """Whether *text*, as it stands, asks Kazma to forget something."""
     if not text:
         return False

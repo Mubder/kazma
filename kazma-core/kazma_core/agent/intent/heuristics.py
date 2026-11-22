@@ -150,7 +150,7 @@ _BOOKING_TIME_RE = re.compile(
 )
 
 
-def books_a_reminder(text: str) -> bool:
+def _books_a_reminder(text: str) -> bool:
     """Whether *text* asks Kazma to book a reminder: "remind me" (or a
     reminder named) that is not only a request to recall what was said,
     or one that names a time to book at."""
@@ -312,7 +312,7 @@ def detect_acts(
         acts.append(IntentAct(kind=ActKind.DOCUMENT_INTEL, confidence=0.70))
 
     # ── remind ───────────────────────────────────────────────────────
-    if books_a_reminder(t):
+    if _books_a_reminder(t):
         acts.append(IntentAct(kind=ActKind.REMIND, confidence=0.70))
 
     if not acts:

@@ -969,6 +969,41 @@ def _user_said_not_me(primary_conn, clean: dict[str, Any], *, tenant_id: str) ->
         return False  # a store with no change log holds no "Not me"
 
 
+def _said_not_me_before(primary_conn, clean: dict[str, Any], method: str, tenant_id: str,
+                        stats: dict[str, Any]) -> bool:
+    """Whether the model's reading *clean* of the user's fact is a value the
+    user said "Not me" to: never filed again by the model (the user's own
+    words still can). Counted in *stats*."""
+    if not (clean["subject"] == "user" and method == "llm_inferred"
+            and _user_said_not_me(primary_conn, clean, tenant_id=tenant_id)):
+        return False
+    stats["rejected"] += 1
+    stats["not_me"] = stats.get("not_me", 0) + 1
+    return True
+
+
+def _held_back_by_auto_store(clean: dict[str, Any], method: str, cfg: dict[str, Any] | None,
+                             stats: dict[str, Any]) -> bool:
+    """Commitment Layer §6.2, conservative auto-store: whether *clean* is
+    held back -- auto-store off, or a low-confidence fact in conservative
+    mode -- so post-turn extraction does not fill the belief graph with
+    noise (dates the assistant invented in dialogue among them). A fact the
+    user stated explicitly is never held back; superseding the user's fact
+    is the trust gate's (``mutate_belief``). Counted in *stats*."""
+    if method == "user_explicit":
+        return False
+    mode = get_auto_store_mode(cfg)
+    if mode == "off":
+        stats["rejected"] += 1
+        stats["skipped_auto_store_off"] = stats.get("skipped_auto_store_off", 0) + 1
+        return True
+    if mode == "conservative" and float(clean.get("confidence", 0.0)) < _CONSERVATIVE_CONF_THRESHOLD:
+        stats["rejected"] += 1
+        stats["skipped_low_confidence"] = stats.get("skipped_low_confidence", 0) + 1
+        return True
+    return False
+
+
 def _put_to_the_user(
     primary_conn, action: dict[str, Any], clean: dict[str, Any], *, user_text: str, tenant_id: str,
     session_id: str | None, turn: int | None, now: float | None, stats: dict[str, Any],
@@ -1126,24 +1161,10 @@ def _apply_beliefs_to_v2(
                 stats["rejected"] += 1
                 continue
         replaced = _take_replaces(clean, held, primary_conn, tenant_id)
-        if clean["subject"] == "user":
-            # "Not me" on Kazma's reading of this value: never filed again by
-            # the model (the user's own words still can).
-            if _method == "llm_inferred" and _user_said_not_me(primary_conn, clean, tenant_id=tenant_id):
-                stats["rejected"] += 1
-                stats["not_me"] = stats.get("not_me", 0) + 1
-                continue
-        if _method != "user_explicit":
-            _mode = get_auto_store_mode(cfg)
-            if _mode == "off":
-                stats["rejected"] += 1
-                stats["skipped_auto_store_off"] = stats.get("skipped_auto_store_off", 0) + 1
-                continue
-            if (_mode == "conservative"
-                    and float(clean.get("confidence", 0.0)) < _CONSERVATIVE_CONF_THRESHOLD):
-                stats["rejected"] += 1
-                stats["skipped_low_confidence"] = stats.get("skipped_low_confidence", 0) + 1
-                continue
+        if _said_not_me_before(primary_conn, clean, _method, tenant_id, stats):
+            continue
+        if _held_back_by_auto_store(clean, _method, cfg, stats):
+            continue
         if clean.get("ended"):
             # It stopped being true: the fact it names is ended, never written
             # anew (the memory framework audit's part C2, retractions).

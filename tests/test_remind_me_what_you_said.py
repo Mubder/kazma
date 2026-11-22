@@ -83,7 +83,7 @@ def test_a_reminder_to_book_is_still_one(en, ar):
 def test_control_today_s_rule_books_a_reminder_for_every_recall_ask(monkeypatch):
     """Every "remind me" a reminder: each recall ask a `remind` act, and the
     gray zone asks the refinement for it."""
-    monkeypatch.setattr(heuristics, "books_a_reminder", lambda text: bool(_OLD_RULE.search(text)))
+    monkeypatch.setattr(heuristics, "_books_a_reminder", lambda text: bool(_OLD_RULE.search(text)))
     for en, ar in RECALL:
         assert _classify(en) == (True, 1)
         assert _classify(ar) == (True, 1)
@@ -96,5 +96,5 @@ def test_the_rules_take_long_input_in_linear_time():
 
     text = ("remind me " * 4000) + ("ذكرني ب" * 4000)
     started = time.perf_counter()
-    heuristics.books_a_reminder(text)
+    heuristics._books_a_reminder(text)
     assert time.perf_counter() - started < 1.0
