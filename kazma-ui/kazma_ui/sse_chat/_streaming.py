@@ -1865,6 +1865,18 @@ async def _sse_attach_stream(
     queue = broker.subscribe(thread_id)
     last_yielded = int(after_seq or 0)
     turn_id = ""  # the turn the frames passed on name (theme 2)
+    # Whose stream this is: it ends when that person leaves the space (the
+    # S2-12 review, finding 7; the request's scope, bound by the tenant
+    # middleware for the life of the response).
+    from kazma_core.spaces import departures
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+    from kazma_ui.live_connections import stream_watched
+
+    whose = current_scope() if spaces_enforced() else None
+    asker, space = (whose.asker, whose.space_id) if whose is not None else (None, None)
+    watched = stream_watched(asker, space, queue, SHUTDOWN_WAKE)
+    watched.__enter__()
     try:
         frames, gap, head = broker.resume(thread_id, after_seq)
         running = is_turn_running(thread_id)
@@ -1907,6 +1919,9 @@ async def _sse_attach_stream(
 
         idle_ticks = 0
         while True:
+            if departures.departed(asker, space):
+                # Their person left the space: nothing more is sent to them.
+                return
             if is_shutting_down():
                 # Kazma is restarting: the page re-attaches when it is back
                 # (FA-261: this stream, open for a pending approval, held
@@ -1952,4 +1967,5 @@ async def _sse_attach_stream(
             if _attach_frame_is_terminal(frame):
                 return
     finally:
+        watched.__exit__(None, None, None)
         broker.unsubscribe(thread_id, queue)

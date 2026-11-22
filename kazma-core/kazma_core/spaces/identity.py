@@ -281,10 +281,12 @@ def update_registry(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
     refused: list[IdentityError] = []
     written: list[dict[str, Any]] = []
     spaces_before: list[set[str]] = []
+    members_before: list[set[tuple[str, str]]] = []
 
     def _updater(current: Any) -> Any:
         reg = _normalized(current)
         spaces_before[:] = [set(reg["spaces"])]
+        members_before[:] = [_member_pairs(reg)]
         if not reg["moved_platform_users"]:
             for account_id, account_ in _legacy_accounts(legacy).items():
                 reg["accounts"].setdefault(account_id, account_)
@@ -310,6 +312,12 @@ def update_registry(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         raise refused[0]
     if written and spaces_before:
         _key_new_spaces(set(written[-1]["spaces"]) - spaces_before[0])
+    if written and members_before:
+        # What is still open for a person who just left a space is closed
+        # (the S2-12 review, finding 7): the one writer of memberships says.
+        from kazma_core.spaces import departures
+
+        departures.note(members_before[0], _member_pairs(written[-1]))
     if legacy:
         # The list's users are in the registry now; the old key goes. A crash
         # between the two leaves the key behind, read by nothing: the
@@ -323,6 +331,11 @@ def update_registry(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
                 exc_info=True,
             )
     return copy.deepcopy(written[-1]) if written else read_registry()
+
+
+def _member_pairs(reg: dict[str, Any]) -> set[tuple[str, str]]:
+    return {(str(m.get("account")), str(m.get("space"))) for m in reg.get("memberships") or ()
+            if isinstance(m, dict)}
 
 
 def _key_new_spaces(new: set[str]) -> None:

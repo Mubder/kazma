@@ -15295,6 +15295,20 @@ an install with one account behaves as before.
     (`single_operator._acts_for`). Gate:
     `tests/test_departed_members_work_refused.py` (the rule of before, which
     ran their work as the admin, as the control).
+  - **Leaving ends what is open** (the S2-12 review, finding 7). The
+    identity store, the one writer of memberships, tells
+    `spaces.departures` every change it writes (`departures.note`: a
+    membership gone is a departure, one back clears it; in this process, in
+    memory). `kazma_ui.live_connections` listens: that person's sockets in
+    that space (chat, voice, the dashboard feed: `socket_watched`) are closed
+    4403 `not_a_member`, and their attached chat streams (`stream_watched`,
+    `sse_chat._sse_attach_stream`) are woken and end. A turn starts only for
+    a member of its space (`threads.scope_for_turn`, `_AskerNotInSpace`): a
+    request that slipped in before the removal, and a resume of their turn,
+    get none. A new socket or stream that names the space is refused by the
+    membership check every request passes. Gate:
+    `tests/test_departed_connections_closed.py` (the store that does not say
+    as the control).
   - **Development per person (piece 3).** In a shared space with a project
     folder `spaces.tools.host_allowance` gives Development to each person
     who holds it (`identity.holds_development`, turned on per person on

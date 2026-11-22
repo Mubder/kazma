@@ -316,7 +316,10 @@ def create_ws_chat_router(
             await websocket.accept()
             await websocket.close(code=refused.close_code, reason=refused.code)
             return
-        with space_binding.bound_to(binding):
+        from kazma_ui.live_connections import socket_watched
+
+        # Closed when its person leaves the space (the S2-12 review, finding 7).
+        with space_binding.bound_to(binding), socket_watched(binding.asker, binding.space_id, websocket):
             await _observe_session(websocket, session_id)
 
     async def _observe_session(websocket: WebSocket, session_id: str) -> None:

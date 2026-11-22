@@ -122,7 +122,10 @@ async def serve_voice_websocket(
     except space_binding.SpaceRefused as refused:
         await websocket.close(code=refused.close_code, reason=refused.code)
         return
-    with space_binding.bound_to(binding):
+    from kazma_ui.live_connections import socket_watched
+
+    # Closed when its person leaves the space (the S2-12 review, finding 7).
+    with space_binding.bound_to(binding), socket_watched(binding.asker, binding.space_id, websocket):
         await handle_voice_websocket(
             websocket, graph_getter=graph_getter, agent_getter=agent_getter
         )
