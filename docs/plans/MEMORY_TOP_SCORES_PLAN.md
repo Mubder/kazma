@@ -380,3 +380,14 @@ the benchmarks page regenerated.
    memory model call is ledgered, read from the source, a planted
    unledgered call as the negative control. The benchmark's recorded
    replies (`benchmark.py`'s recorder) are not the product's calls.
+7. **Two token estimators disagree on Arabic.** Found fixing the recall
+   block's budget (22 Nov). The context trim (`turn_input`), the recall
+   block's budget and the product measures count with
+   `summarizer.estimate_tokens`: Latin at four characters a token, Arabic at
+   about 2.5. The compaction authority (`authority.create_authority`, handed
+   to the supervisor graph) counts with `token_counter.TokenCounter`:
+   tiktoken's count when the package is installed and knows the model, else
+   four characters a token for every script -- and tiktoken is not in this
+   checkout's environment. So for an Arabic chat the compaction threshold
+   sees about two thirds of the tokens the trim sees. For later: one
+   estimator for context, or the reason two stay. Not fixed now.
