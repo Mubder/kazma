@@ -158,17 +158,24 @@ jobs:
 
   # The Windows installer (scripts/windows_installer, REMAINING 2.7), from the
   # source archive the build job made: build.py reads it with the updater's
-  # own rules and lays it out with the release-install marker. Signed here
-  # with Microsoft's Artifact Signing once the repository variable
-  # KAZMA_WINDOWS_SIGNING is "artifact-signing" (docs/SUPPLY_CHAIN.md says
-  # what to configure); until then it is published unsigned, and says so.
+  # own rules and lays it out with the release-install marker. Signed here by
+  # the service the repository variable KAZMA_WINDOWS_SIGNING names:
+  # "signpath" (SignPath Foundation), "ssl-com" (SSL.com eSigner) or
+  # "artifact-signing" (Microsoft). Moving from one to another is that one
+  # variable and the new service's secrets (docs/SUPPLY_CHAIN.md says what
+  # each needs). Unset, the installer is published unsigned and the run says
+  # so; any other value fails the job.
   windows-installer:
     name: Build the Windows installer
     runs-on: windows-latest
     needs: build
     permissions:
       contents: read
-      # Signing signs in to Azure with the run's OIDC token: no secret is stored.
+      # SignPath's connector reads this job and downloads the unsigned
+      # installer from its artifact with the run's token.
+      actions: read
+      # Artifact Signing signs in to Azure with the run's OIDC token: no
+      # secret is stored.
       id-token: write
     steps:
       - name: Checkout
@@ -197,43 +204,31 @@ jobs:
           python scripts/windows_installer/build.py --source "dist/kazma-${BASE}.tar.gz" \
             --out installer --install-inno
 
-      - name: Sign in to Azure for signing
-        if: ${{ vars.KAZMA_WINDOWS_SIGNING == 'artifact-signing' }}
-        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+      # One shared step signs here and in the manual signing test
+      # (windows-signing-test.yml): the service is the repository variable
+      # KAZMA_WINDOWS_SIGNING, and each service's secrets and variables are
+      # handed in whole, so changing service is the variable and its secrets.
+      - name: Sign the installer
+        uses: ./.github/actions/sign-windows-installer
         with:
-          client-id: ${{ secrets.AZURE_SIGNING_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SIGNING_SUBSCRIPTION_ID }}
-
-      - name: Sign the installer (Artifact Signing)
-        if: ${{ vars.KAZMA_WINDOWS_SIGNING == 'artifact-signing' }}
-        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
-        with:
-          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-          files-folder: ${{ github.workspace }}\installer
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          description: Kazma setup
-          description-url: https://kazma.ai
-
-      - name: Check the installer's signature
-        shell: pwsh
-        env:
-          SIGNING: ${{ vars.KAZMA_WINDOWS_SIGNING }}
-        run: |
-          $exe = Get-ChildItem installer -Filter 'kazma-*-windows-setup.exe' | Select-Object -First 1
-          if (-not $exe) { Write-Error 'no installer was built'; exit 1 }
-          $sig = Get-AuthenticodeSignature -LiteralPath $exe.FullName
-          if ($env:SIGNING -eq 'artifact-signing') {
-            if ($sig.Status -ne 'Valid') { Write-Error "the installer's signature is $($sig.Status)"; exit 1 }
-            Write-Host "Signed by $($sig.SignerCertificate.Subject)"
-          } else {
-            Write-Host "::notice::The installer is unsigned: no signing account is configured (KAZMA_WINDOWS_SIGNING)."
-          }
+          service: ${{ vars.KAZMA_WINDOWS_SIGNING }}
+          environment: release
+          folder: installer
+          signpath-api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          signpath-organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          signpath-project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signpath-signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          signpath-artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          ssl-com-username: ${{ secrets.SSL_COM_USERNAME }}
+          ssl-com-password: ${{ secrets.SSL_COM_PASSWORD }}
+          ssl-com-credential-id: ${{ secrets.SSL_COM_CREDENTIAL_ID }}
+          ssl-com-totp-secret: ${{ secrets.SSL_COM_TOTP_SECRET }}
+          azure-client-id: ${{ secrets.AZURE_SIGNING_CLIENT_ID }}
+          azure-tenant-id: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
+          azure-subscription-id: ${{ secrets.AZURE_SIGNING_SUBSCRIPTION_ID }}
+          azure-endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          azure-account: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          azure-profile: ${{ vars.AZURE_SIGNING_PROFILE }}
 
       - name: Hand the installer to the release job
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
