@@ -2070,6 +2070,20 @@ four injected were noise.
   2026)"), after the reading tag, one line. No model, no new storage; a
   read that fails leaves the dates out with a WARNING. Gate:
   `tests/test_memory_recall_dates.py` (recall without the dating step as
+  the negative control). **A change waiting for the user's yes is shown
+  beside its fact** (2026-11-22, the memory plan's finding 17): the same
+  step reads the newest open pending change on each shown fact
+  (`recall._waiting_changes`, `changes.PENDING`, state open: a decided or
+  expired change is not shown, another tenant's never) and `_dated_line`
+  ends the fact's line, inside the fence, with `WAITING_CHANGE` and the
+  value ("user lives in Lisbon; changed, not confirmed yet, to: Porto") or
+  `WAITING_ENDED`; a recall rule outside the fence says to give both
+  values and ask. A bare move is put to the user as a question (finding
+  15), and recall showed only the held home: the real-use suite run twice
+  after finding 16 answered "Where do I live now?" with the old home in 3
+  of 4 language-runs. A store from before the change log shows its facts
+  as before. Gate: `tests/test_memory_waiting_change_in_recall.py` (the
+  real quick pass, `recall` and block, EN/AR; recall reading no change as
   the negative control).
 - **A fact is found by a question in either language** (2026-11-22, the
   memory plan's finding 10). A fact's words are Kazma's English name for it

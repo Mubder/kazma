@@ -499,6 +499,36 @@ def _fact_dates(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dic
     return {str(r[0]): tuple(r[1:]) for r in rows}
 
 
+def _waiting_changes(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dict[str, str]:
+    """``fact id -> the value a change waits to give it`` ("" when the change
+    ends the fact): the newest open pending change on each of *ids*
+    (``changes.PENDING``, the memory plan's finding 17). A move put to the
+    user as a question ("I moved to Porto": "Yes, change it" / "No, keep it")
+    left recall showing only the held home, and "Where do I live now?" was
+    answered with it in 3 of 4 real-use runs. A store from before the change
+    log has none; any other read failure is a WARNING, and the facts are
+    shown without it."""
+    from kazma_core.memory.changes import PENDING
+
+    marks = ",".join("?" for _ in ids)
+    try:
+        rows = conn.execute(
+            f"SELECT old_belief_id, new_value FROM memory_changes WHERE tenant_id = ? AND kind = ? "  # nosec B608 - placeholders only
+            f"AND state = 'open' AND old_belief_id IN ({marks}) ORDER BY created_at DESC",
+            (tenant_id, PENDING, *ids)).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            logger.warning("[recall] could not read the changes waiting on the recalled facts", exc_info=True)
+        return {}
+    except sqlite3.Error:
+        logger.warning("[recall] could not read the changes waiting on the recalled facts", exc_info=True)
+        return {}
+    out: dict[str, str] = {}
+    for fact_id, value in rows:
+        out.setdefault(str(fact_id), str(value or ""))
+    return out
+
+
 def _started_label(started: Any) -> str:
     """A start a turn named, as the block shows it: "2019", "Apr 2026" or
     "3 Apr 2026"."""
@@ -544,13 +574,19 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
             conn = _connect_existing(primary_memory_db())
             if conn is None:
                 return
-        dates = _fact_dates(conn, [h.id for h in result.beliefs], tenant_id)
+        ids = [h.id for h in result.beliefs]
+        waiting = _waiting_changes(conn, ids, tenant_id)
+        dates = _fact_dates(conn, ids, tenant_id)
     except sqlite3.Error:
         logger.warning("[recall] could not read when the recalled facts began", exc_info=True)
         return
     finally:
         if own and conn is not None:
             conn.close()
+    for hit in result.beliefs:
+        if hit.id in waiting and not hit.metadata.get("until"):
+            # A change the user stated waits for their yes (finding 17).
+            hit.metadata["waiting"] = waiting[hit.id]
     for hit in result.beliefs:
         if hit.id not in dates or hit.metadata.get("until"):
             continue
@@ -3756,7 +3792,18 @@ def _dated_line(hit: RecallHit, shown: str) -> str:
         shown = f"[since {meta['since']}] {shown}"
     if meta.get("before"):
         shown = f"{shown}; before that: {_one_line(meta['before'])}"
+    if meta.get("waiting") is not None:
+        # The user's change that waits for their yes, after the value it would
+        # replace (finding 17); the recall rules say what it means.
+        shown = (f"{shown}; {WAITING_ENDED}" if not meta["waiting"]
+                 else f"{shown}; {WAITING_CHANGE} {_one_line(meta['waiting'])}")
     return shown
+
+
+#: How a fact's line names a change the user stated that waits for their
+#: yes (``changes.PENDING``, finding 17): the new value, or the fact ended.
+WAITING_CHANGE = "changed, not confirmed yet, to:"
+WAITING_ENDED = "ended, not confirmed yet"
 
 
 def format_recall_block(
@@ -3940,6 +3987,14 @@ def _rules(result: RecallResult, counts: dict[str, int]) -> str:
         "whole. memory_list lists every memory about a subject or a name, or "
         "from a time, a page at a time.\n"
     )
+    if any((h.metadata or {}).get("waiting") is not None for h in result.beliefs):
+        # Finding 17: a change the user stated, put to them as a question.
+        rules += (
+            f"- A fact marked \"{WAITING_CHANGE}\" or \"{WAITING_ENDED}\" holds a change "
+            "the user stated later, which Kazma has asked them to confirm. When the question "
+            "is about that fact, give both: what the user said last, that it is not confirmed "
+            "yet, and the value before it; then ask whether to record it.\n"
+        )
     if result.listing:
         # A count or a list (part F): what the block holds is not all there is.
         rules += (

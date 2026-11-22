@@ -707,3 +707,42 @@ alone as the negative controls.
    Lisbon" / "انسى إني ساكن في الكويت" still keeps its own turn out. Today's
    rule, every forget keeping its turn out, is the negative control: the
    update turn loses its new home, in both languages.
+17. **A move put to the user as a question is not in recall.** Found
+   reading finding 15's real-use runs (22 Nov). Finding 15 turns a bare move
+   ("I moved to Porto last month") into a question over the home the user
+   stated: a pending change, "Yes, change it" / "No, keep it". Recall reads
+   only current facts, so until the user answers, the next turn's recall
+   shows the held home (Lisbon) and nothing says a change waits. "Where do I
+   live now?" can then be answered with the old home, and the model has no
+   reason to ask. In finding 15's four language-runs the changed fact asked
+   (step 6) passed. In two of them the pass leaned on finding 16's fault:
+   the move turn was kept out of memory, and the model reached Porto another
+   way. The robust version, recorded by the main session's decision: an open
+   pending change is shown beside its fact in recall, in both languages,
+   e.g. "user lives in Lisbon -- the user said they moved to Porto; not
+   confirmed yet". The waiting value goes inside the block's data fence,
+   Kazma's words outside it. The model can then answer with both and ask.
+   Built only if the real-use suite, run twice after finding 16, shows step
+   6 dropping. It dropped. Two runs at 08c21984e (finding 16 and city/home
+   merged with main; qwen3.7-plus, judge qwen3.8-flash): 16/18 and 15/18.
+   Step 6 failed in English in both runs and in Arabic in one, 3 of 4
+   language-runs. In all four, step 5 recorded the question (a pending
+   change), no turn was kept out and the model made no forget call:
+   finding 16's crutch was gone. The one pass found Porto through the move
+   turn's own memory. The failures answered with Lisbon. Also seen: step 4
+   (the other-words question, city/home) passed in all four, and step 8 (the
+   forgotten fact asked) failed once (finding 1). Evidence:
+   `docs/audits/evidence/memory_real_use/f16_qwen*.json`,
+   `docs/audits/evidence/memory_findings/finding16_real_use_recall.json`.
+   Built the same day: recall's dating step reads the newest open pending
+   change on each shown fact (`recall._waiting_changes`), and the fact's
+   line ends, inside the fence, with "changed, not confirmed yet, to: Porto"
+   (or "ended, not confirmed yet"). A recall rule outside the fence says to
+   give both values and ask. Not "answer with the change": the change may be
+   finding 15's tool ("We moved to Slack"). A decided or expired change is
+   not shown, another tenant's never; a store from before the change log
+   shows its facts as before. The block is unchanged when nothing waits
+   (the product measures hold). Gate:
+   `tests/test_memory_waiting_change_in_recall.py`, through the real quick
+   pass, `recall` and block, EN/AR; recall reading no change is the negative
+   control.
