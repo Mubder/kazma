@@ -2956,13 +2956,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
               "in, they get git, GitHub and that project's files. Nothing of the project's runs on this computer "
               "for them: no shell, no tests or package installs, git with its hooks and the project's own git "
               "programs switched off, and none of your MCP servers. They approve their own file and git steps. "
-              "Their always-ask actions, such as posting on X, and their folder grants need your approval, which "
-              "comes in a later update: until then Kazma refuses them.",
+              "Their always-ask actions, such as posting on X, and their folder grants come to you to approve: "
+              "only you can answer those cards.",
         "ar": "التطوير لشخص غيرك: في مساحة مشتركة بمجلد مشروع هو عضو فيها، يحصل على git وGitHub وملفات ذلك "
               "المشروع. ولا يعمل له شيء من المشروع على هذا الحاسوب: لا طرفية، ولا تشغيل اختبارات أو تثبيت حزم، "
               "ويعمل git وخطافاته وبرامج المشروع الخاصة به معطّلة، ولا يصل إلى أيّ من خوادم MCP التي أعددتها. "
               "يوافق بنفسه على خطوات الملفات وgit. أما الإجراءات التي تُطلب الموافقة عليها دائمًا، كالنشر على "
-              "X، ومنح صلاحية المجلدات، فتحتاج موافقتك، وهذه تأتي في تحديث لاحق: إلى ذلك الحين يرفضها Kazma.",
+              "X، ومنح صلاحية المجلدات، فتأتيك أنت لتوافق عليها: لا يجيب عن تلك البطاقات غيرك.",
     },
     "settings.people_development_title": {"en": "Turn on Development for {name}?", "ar": "تفعيل التطوير لـ {name}؟"},
     "settings.people_development_turn_on": {"en": "Turn on", "ar": "تفعيل"},

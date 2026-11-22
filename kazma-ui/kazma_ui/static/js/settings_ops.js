@@ -560,7 +560,7 @@
                     title: _t('settings.people_development_title', 'Turn on Development for {name}?',
                         { name: _iso(person.name) }),
                     message: _t('settings.people_development_means',
-                        'Development, for someone other than you: in a shared space with a project folder that they are in, they get the shell, git, GitHub and that project\'s files. They approve their own shell, file and git steps. Their always-ask actions, such as posting on X, and their folder grants need your approval, which comes in a later update: until then Kazma refuses them.'),
+                        'Development, for someone other than you: in a shared space with a project folder that they are in, they get git, GitHub and that project\'s files. They approve their own file and git steps. Their always-ask actions, such as posting on X, and their folder grants come to you to approve: only you can answer those cards.'),
                     confirmText: _t('settings.people_development_turn_on', 'Turn on'),
                 });
                 if (!answer) {
