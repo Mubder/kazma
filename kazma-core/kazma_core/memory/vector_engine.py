@@ -35,6 +35,8 @@ import sqlite3
 import threading
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["BELIEF_ACTIVE_SQL", "NARROW_AUDIT_EVERY", "RECALLABLE_TIERS", "VectorEngine", "narrowing_health"]
@@ -134,7 +136,7 @@ class VectorEngine:
         self,
         query_vec: list[float] | None,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         tier: str | list[str] | tuple[str, ...] | None = "recall",
         limit: int = 10,
     ) -> list[tuple[str, float]]:
@@ -142,6 +144,7 @@ class VectorEngine:
 
         ``tier`` restricts to one tier, a list of tiers, or ``None`` for all.
         """
+        tenant_id = space_named_or_bound(tenant_id)
         where = ["tenant_id = ?"]
         params: list[Any] = [tenant_id]
         if isinstance(tier, (list, tuple)):
@@ -158,10 +161,11 @@ class VectorEngine:
         self,
         query_vec: list[float] | None,
         *,
-        tenant_id: str = "default",
+        tenant_id: str | None = None,
         limit: int = 10,
     ) -> list[tuple[str, float]]:
         """Rank EVERY current belief by cosine; return ``(id, similarity)``."""
+        tenant_id = space_named_or_bound(tenant_id)
         return self._exact(
             "beliefs", ["tenant_id = ?", BELIEF_ACTIVE_SQL], [tenant_id], query_vec, limit,
             narrow=("belief", tenant_id),
@@ -171,7 +175,7 @@ class VectorEngine:
         self,
         query_vec: list[float] | None,
         *,
-        tenant_id: str = "default",
+        tenant_id: str,
         limit: int = 1,
     ) -> list[tuple[str, float]]:
         """The tenant's entities whose stored name vector is nearest:

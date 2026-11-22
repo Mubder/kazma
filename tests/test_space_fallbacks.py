@@ -444,3 +444,25 @@ def test_the_v1_backfill_writes_the_owners_facts() -> None:
     from kazma_core.memory import backfill_v2
 
     assert "tenant_id=OWNER_SPACE_ID" in inspect.getsource(backfill_v2)
+
+
+# ── memory: search (recall.py is the memory session's) ─────────────────
+
+
+def test_memory_searches_with_no_space_are_refused_once_enforced(enforced) -> None:
+    import inspect
+    import sqlite3
+
+    from kazma_core.memory.transcript_recall import search_transcripts
+    from kazma_core.memory.vector_engine import VectorEngine
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(NoSpaceBound):
+            VectorEngine(conn).search([0.1, 0.2])
+    finally:
+        conn.close()
+    with pytest.raises(NoSpaceBound):
+        search_transcripts("where did I park")
+    assert inspect.signature(VectorEngine.nearest_entities).parameters["tenant_id"].default \
+        is inspect.Parameter.empty

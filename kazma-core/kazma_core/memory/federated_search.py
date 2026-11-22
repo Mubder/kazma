@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -79,7 +81,7 @@ def resolve_kb_library_ids(
 def federated_search(
     query: str,
     *,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     session_id: str | None = None,
     limit_memory: int = 5,
     limit_kb: int = 5,
@@ -107,6 +109,7 @@ def federated_search(
           "summary": {"memory": int, "knowledge": int, "total": int},
         }
     """
+    tenant_id = space_named_or_bound(tenant_id)
     q = (query or "").strip()
     if not q:
         return {
