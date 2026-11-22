@@ -16139,6 +16139,20 @@ an install with one account behaves as before.
   dropped; the old rule as the negative control) and
   `tests/e2e/test_soft_nav_into_chat.py` (Memory, then Chat by the sidebar,
   then a turn that must paint; away and back runs each module once).
+  **The page's scripts run in the order the page has them**
+  (`runPageScripts`, 2026-11-22), external and inline alike, as a page
+  load runs them: an inline script inside the swapped root runs where it
+  stands, one elsewhere in the body is added to the body. Pages define their
+  words inline before the script that reads them (chat.html's `CHAT_I18N`,
+  the Dashboard's `__DASH_I18N`, Knowledge's `__KB_STRINGS`, Memory's
+  `__MEM_STRINGS`); every script file used to run first, so whatever
+  `chat.js` painted before the inline scripts ran was English on an Arabic
+  page reached by the sidebar. No inline script ahead of a page script may
+  wait for the page's load (soft navigation would run it at once). Gate:
+  `tests/e2e/test_soft_nav_page_data_first.py` (Arabic, a tab opened on
+  Memory, Chat by the sidebar with the script after `chat.js` held back:
+  every text the turn header shows; the words moved after the page's last
+  script, today's order, as the control).
 - **Every `KazmaX.member` a page reads exists** (2026-09-28). The Swarm
   Templates tab called `KazmaUtils.esc` (the helper is `escapeHtml`), the
   render threw, and its fetch's `catch` showed "Failed to load templates"

@@ -54,7 +54,7 @@ def test_the_soft_navigation_still_drops_the_scripts_block_styles() -> None:
     styles; nothing copies a body ``<style>`` outside ``.page-body``."""
     nav = (TEMPLATES.parent / "static" / "js" / "modules" / "nav.js").read_text(encoding="utf-8")
     assert "function mergePageHead(doc)" in nav and "doc.head.children" in nav
-    assert "function runIncomingBodyScripts(doc)" in nav
-    body = nav[nav.index("function runIncomingBodyScripts(doc)"):]
+    assert "function runPageScripts(doc, root, rootSelector)" in nav
+    body = nav[nav.index("function runPageScripts(doc, root, rootSelector)"):]
     body = body[: body.index("\n    }\n")]
     assert "querySelectorAll('script')" in body and "style" not in body
