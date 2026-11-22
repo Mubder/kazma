@@ -1264,6 +1264,8 @@ _STATUS_BY_CODE: dict[str, int] = {
     "intake_corrupt": 400,
     "document_access_denied": 404,
     "not_movable": 404,
+    "move_in_progress": 409,
+    "more_than_one_version": 409,
     "reserved_reason": 400,
     "library_not_found": 404,
     "artifact_access_denied": 404,

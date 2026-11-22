@@ -124,6 +124,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Only your own document can be moved.",
         "ar": "لا يُنقل إلا مستندك أنت.",
     },
+    "documents.move_err.move_in_progress": {
+        "en": "This document is already being moved. Try again in a moment.",
+        "ar": "يجري نقل هذا المستند الآن. حاول مجددًا بعد قليل.",
+    },
+    "documents.move_err.more_than_one_version": {
+        "en": "This document has earlier versions, and a move would leave them behind, so it cannot be moved "
+              "yet. Keep it where it is, or upload its current file in the other space.",
+        "ar": "لهذا المستند نسخ سابقة، والنقل سيتركها خلفه، لذا لا يمكن نقله بعد. أبقِه في مكانه، أو ارفع ملفه "
+              "الحالي في المساحة الأخرى.",
+    },
     "documents.move_err.not_yours": {"en": "That is not yours to move there.", "ar": "ليس لك أن تنقله إلى هناك."},
     "documents.move_err.not_between_own_and_shared": {
         "en": "A document moves between your own space and a shared space you are in.",

@@ -15336,6 +15336,21 @@ an install with one account behaves as before.
     source as the control), the taken-out read on SQLite and Postgres
     (`tests/test_document_listing_queries_are_joined.py`), the matrix case,
     `tests/e2e/test_document_moves_browser.py` (by the sidebar, EN/AR).
+  - **A move is safe at once and across a stop** (the S2-12 review,
+    findings 3 and 5). One move of a document at a time, from reading it to
+    retiring it (`ingestion._move_lock`); each attempt has its own key
+    (`move:<uuid>`), is recorded before it starts in `ingestion.MOVES_KEY`
+    (`system.documents.moves`: ids only; a second move of the same document
+    is refused `move_in_progress`, 409, while one is recorded) and removed
+    when it ends. A failed retire takes back only a copy this attempt made
+    (not `reused`) and only while the source is still there. Every start
+    settles a move a stop cut off (`DocumentIngestionService.settle_moves`,
+    in `start_workers`): its copy is taken back while the source is still
+    there; one whose source was retired is done. A document with more than
+    one version is refused (`more_than_one_version`, 409): a move never
+    leaves its earlier versions behind. Gate:
+    `tests/test_document_move_safety.py` (piece 5's move, interleaved, as
+    the control: in neither space).
 
 ## UI Conventions (Web)
 

@@ -282,6 +282,16 @@ class DocumentIngestionService:
         if self.worker_running:
             return
         recovered_intake = await asyncio.to_thread(self.recover_interrupted_intake)
+        # A move a stop or a crash cut off is settled before any new one
+        # (Spaces S2-12 review, finding 5).
+        try:
+            settled = await asyncio.to_thread(self.settle_moves)
+        except store_errors() as exc:
+            settled = []
+            logger.warning("[documents.ingestion] the moves under way could not be settled (%s); the "
+                           "next start tries again", type(exc).__name__)
+        if settled:
+            logger.info("[documents.ingestion] settled %d move(s) a stop cut off", len(settled))
         if recovered_intake:
             logger.info(
                 "[documents.ingestion] recovered %d interrupted intake job(s)",
@@ -2031,35 +2041,11 @@ class DocumentIngestionService:
         target = _clean(to_tenant, "to_tenant")
         actor = _clean(actor_id, "actor_id")
         doc_id = DocumentId(document_id)
-        try:
-            record = self.repository.get_document(tenant_id=source, document_id=doc_id, actor_id=actor)
-        except DocumentAccessError:
-            record = None  # not theirs to read: not theirs to move
-        if (record is None or record.deleted_at or record.owner_id != actor
-                or record.current_version_id is None):
-            raise DocumentIngestionError("not_movable", "Only your own document can be moved.")
-        version = self.repository.get_version(
-            tenant_id=source, version_id=record.current_version_id, actor_id=actor)
-        blob = self.repository.get_blob(tenant_id=source, blob_id=version.source_blob_id) if version else None
-        if version is None or blob is None:
-            raise DocumentIngestionError("not_movable", "This document's original is not there to move.")
-        original = self.storage.for_space(source).locate_blob(kind=blob.storage_kind, sha256=blob.sha256)
-        with original.open("rb") as stream:
-            moved = self.ingest_stream(
-                stream, filename=version.original_filename, tenant_id=target, workspace_id=workspace_id,
-                actor_id=actor, title=record.title, idempotency_key=f"move:{source}:{doc_id}",
-                content_length=blob.byte_size,
-            )
-        retired = False
-        try:
-            self._tombstone(tenant_id=source, actor_id=actor, document_id=doc_id,
-                            reason="taken_out" if taken_out else "shared_to_space")
-            retired = True
-        finally:
-            if not retired:
-                logger.warning("[documents] a move's source could not be retired: the copy is taken back")
-                self._tombstone(tenant_id=target, actor_id=actor, document_id=moved.document_id,
-                                reason="user_requested")
+        # One move of a document at a time, from reading it to retiring it
+        # (the S2-12 review, finding 3: two at once left it in neither space).
+        with _move_lock(source, str(doc_id)):
+            moved = self._move_locked(source=source, target=target, actor=actor, doc_id=doc_id,
+                                      workspace_id=workspace_id, taken_out=taken_out)
         for tenant, action, other in ((source, "moved_out", target), (target, "moved_in", source)):
             self.audit.record(
                 tenant_id=tenant, event_type="access", action=action, outcome="success",
@@ -2068,6 +2054,87 @@ class DocumentIngestionService:
             )
         logger.info("[documents] a document moved from space %s to %s", source, target)
         return {"document_id": str(moved.document_id), "job_id": str(moved.job_id)}
+
+    def _move_locked(self, *, source: str, target: str, actor: str, doc_id: DocumentId,
+                     workspace_id: str, taken_out: bool) -> IngestionResult:
+        """The move itself, under its document's lock: recorded before it
+        starts (:data:`MOVES_KEY`) and settled when it ends, its own copy
+        under a key of this attempt alone."""
+        try:
+            record = self.repository.get_document(tenant_id=source, document_id=doc_id, actor_id=actor)
+        except DocumentAccessError:
+            record = None  # not theirs to read: not theirs to move
+        if (record is None or record.deleted_at or record.owner_id != actor
+                or record.current_version_id is None):
+            raise DocumentIngestionError("not_movable", "Only your own document can be moved.")
+        if len(self.repository.list_versions(tenant_id=source, document_id=doc_id, actor_id=actor)) > 1:
+            raise DocumentIngestionError(
+                "more_than_one_version",
+                "This document has earlier versions, and a move would leave them behind, so it cannot "
+                "be moved yet. Keep it where it is, or upload its current file in the other space.",
+            )
+        version = self.repository.get_version(
+            tenant_id=source, version_id=record.current_version_id, actor_id=actor)
+        blob = self.repository.get_blob(tenant_id=source, blob_id=version.source_blob_id) if version else None
+        if version is None or blob is None:
+            raise DocumentIngestionError("not_movable", "This document's original is not there to move.")
+        attempt = uuid.uuid4().hex
+        key = f"move:{attempt}"
+        _record_move(attempt, {"source": source, "target": target, "document_id": str(doc_id),
+                               "actor": actor, "key": key, "copy": "", "at": time.time()})
+        try:
+            original = self.storage.for_space(source).locate_blob(kind=blob.storage_kind, sha256=blob.sha256)
+            with original.open("rb") as stream:
+                moved = self.ingest_stream(
+                    stream, filename=version.original_filename, tenant_id=target,
+                    workspace_id=workspace_id, actor_id=actor, title=record.title, idempotency_key=key,
+                    content_length=blob.byte_size,
+                )
+            _record_move(attempt, {"copy": str(moved.document_id)})
+            retired = False
+            try:
+                self._tombstone(tenant_id=source, actor_id=actor, document_id=doc_id,
+                                reason="taken_out" if taken_out else "shared_to_space")
+                retired = True
+            finally:
+                # Only a copy this attempt made, and only while the source
+                # is still there: never the one thing left of the document.
+                if not retired and not moved.reused and self._still_there(source, doc_id):
+                    logger.warning("[documents] a move's source could not be retired: the copy is taken back")
+                    self._tombstone(tenant_id=target, actor_id=actor, document_id=moved.document_id,
+                                    reason="user_requested")
+        finally:
+            _settle_move(attempt)
+        return moved
+
+    def _still_there(self, tenant: str, document_id: DocumentId | str) -> bool:
+        record = self.repository.get_document(tenant_id=tenant, document_id=DocumentId(document_id))
+        return record is not None and not record.deleted_at
+
+    def settle_moves(self) -> list[dict[str, Any]]:
+        """Settle every move a stop or a crash cut off (the S2-12 review,
+        finding 5): a copy the move made while its source is still there is
+        taken back, so the document is where it was; a move whose source was
+        retired is done. Blocking; run at every start, before any move."""
+        settled: list[dict[str, Any]] = []
+        for attempt, entry in sorted(_moves_under_way().items()):
+            source, target = str(entry.get("source") or ""), str(entry.get("target") or "")
+            doc_id, actor = str(entry.get("document_id") or ""), str(entry.get("actor") or "")
+            copy = str(entry.get("copy") or "")
+            if not copy and target and entry.get("key"):
+                job = self.jobs.get_by_idempotency_key(tenant_id=target, idempotency_key=str(entry["key"]))
+                copy = str(job.document_id) if job is not None else ""
+            outcome = "done"
+            if copy and source and doc_id and self._still_there(source, doc_id) \
+                    and self._still_there(target, copy):
+                self._tombstone(tenant_id=target, actor_id=actor, document_id=copy, reason="user_requested")
+                outcome = "copy_taken_back"
+            elif not copy:
+                outcome = "nothing_copied"
+            _settle_move(attempt)
+            settled.append({"attempt": attempt, "outcome": outcome})
+            logger.info("[documents] a cut-off move settled: %s", outcome)
+        return settled
 
     def taken_out_documents(self, *, tenant_id: str, limit: int = 50) -> list[dict[str, Any]]:
         """The documents taken out of the space *tenant_id* by the people who
@@ -3407,6 +3474,69 @@ def _clean(value: str, name: str) -> str:
 
 #: How often a running service looks for intakes whose owner died.
 _INTAKE_SWEEP_SECONDS = 60.0
+
+#: The moves of a document between spaces under way (Spaces S2-12, the
+#: review's finding 5): each recorded before it starts and removed when it
+#: ends; one a stop or a crash cut off is settled at the next start
+#: (:meth:`DocumentIngestionService.settle_moves`). Ids, never content.
+MOVES_KEY = "system.documents.moves"
+_MOVE_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_MOVE_LOCKS_GUARD = threading.Lock()
+
+
+class _move_lock:  # noqa: N801 -- a context manager, named as it is used
+    """One move of a document at a time in this process, held from reading
+    it to retiring it; another process's is refused by the record
+    (:func:`_record_move`)."""
+
+    def __init__(self, tenant: str, document_id: str) -> None:
+        with _MOVE_LOCKS_GUARD:
+            self._lock = _MOVE_LOCKS.setdefault((tenant, document_id), threading.Lock())
+
+    def __enter__(self) -> None:
+        self._lock.acquire()
+
+    def __exit__(self, *_exc: object) -> None:
+        self._lock.release()
+
+
+def _moves_under_way() -> dict[str, dict[str, Any]]:
+    from kazma_core.config_store import get_config_store
+
+    value = get_config_store().get(MOVES_KEY)
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _record_move(attempt: str, fields: dict[str, Any]) -> None:
+    """Record (or update) a move under way; a new one is refused while
+    another move of the same document is recorded."""
+    from kazma_core.config_store import get_config_store
+
+    def update(current: Any) -> dict[str, Any]:
+        moves = dict(current) if isinstance(current, Mapping) else {}
+        entry = dict(moves.get(attempt) or {})
+        if not entry:
+            for other in moves.values():
+                if (isinstance(other, Mapping) and other.get("source") == fields.get("source")
+                        and other.get("document_id") == fields.get("document_id")):
+                    raise DocumentIngestionError(
+                        "move_in_progress", "This document is already being moved. Try again in a moment.")
+        entry.update(fields)
+        moves[attempt] = entry
+        return moves
+
+    get_config_store().atomic_update(MOVES_KEY, update)
+
+
+def _settle_move(attempt: str) -> None:
+    from kazma_core.config_store import get_config_store
+
+    def update(current: Any) -> dict[str, Any]:
+        moves = dict(current) if isinstance(current, Mapping) else {}
+        moves.pop(attempt, None)
+        return moves
+
+    get_config_store().atomic_update(MOVES_KEY, update)
 #: How long stopping the workers waits for a sweep pass to end on its own; a
 #: pass stops between intakes, so it ends within one intake's rollback.
 _INTAKE_SWEEP_STOP_WAIT_S = 30.0
