@@ -34,7 +34,7 @@ def _sidebar_hrefs_by_section() -> dict[str, list[str]]:
 
 
 def test_every_destination_sits_in_the_right_group() -> None:
-    """Sixteen destinations, grouped, nothing behind a disclosure.
+    """Seventeen destinations, grouped, nothing behind a disclosure.
 
     Work / Knowledge / Agents & tools / Activity / Settings.
     Skills+MCP sit with Agents; Swarm sits with Dashboard (live ops).
@@ -44,11 +44,12 @@ def test_every_destination_sits_in_the_right_group() -> None:
     assert groups["primary"] == ["/chat", "/workspace", "/ide"]
     assert groups["section_knowledge"] == ["/memory", "/knowledge", "/documents", "/research"]
     assert groups["section_automation"] == ["/agents", "/skills", "/mcp"]
-    assert groups["activity"] == ["/dashboard", "/swarm", "/replay", "/scheduled", "/x"]
+    # Activity (Spaces S2-09) is shown only where Spaces is enforced.
+    assert groups["activity"] == ["/dashboard", "/swarm", "/replay", "/activity", "/scheduled", "/x"]
     assert groups["configuration"] == ["/settings"]
     assert "capabilities" not in groups
     assert "/dashboard" not in groups["primary"]
-    assert sum(len(v) for v in groups.values()) == 16
+    assert sum(len(v) for v in groups.values()) == 17
 
 
 def test_bottom_nav_uses_dashboard_not_memory() -> None:

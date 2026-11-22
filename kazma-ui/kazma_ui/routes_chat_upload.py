@@ -98,14 +98,16 @@ async def upload_attachment(file: UploadFile = File(...)) -> dict[str, Any]:
     original = file.filename or "upload"
     # Up to 20 MB written to disk (and the data folder resolved): off the
     # loop (audit 2026-10-26 AUD-111).
+    from kazma_core.errors import validation_error
     from kazma_core.spaces.space_limits import SpaceOverLimit
 
     try:
         attach_id = await asyncio.to_thread(store_uploaded_attachment, data, original)
     except SpaceOverLimit as exc:
-        # The space's files are at its disk limit (Spaces S2-08).
+        # The space's files are at its disk limit (Spaces S2-08): Kazma's own
+        # refusal, worded by space_limits.
         raise HTTPException(status_code=507, detail={"code": exc.code, "limit": exc.limit,
-                                                     "message": str(exc)}) from exc
+                                                     "message": validation_error(exc)}) from exc
     logger.info(
         "[chat-upload] stored %s (%s, %d bytes) as %s",
         original, mime, len(data), attach_id,

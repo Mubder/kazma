@@ -144,7 +144,7 @@ def test_sidebar_shows_every_destination_grouped() -> None:
     assert "<details" not in nav_chunk, "a disclosure is back in the nav"
     assert 'style="display:' not in nav_chunk
     # Every destination, each under a heading.
-    assert nav_chunk.count('class="nav-link ') == 16
+    assert nav_chunk.count('class="nav-link ') == 17  # Activity (Spaces S2-09)
     assert nav_chunk.count('class="nav-section-title"') >= 5
 
 
