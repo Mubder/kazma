@@ -295,8 +295,15 @@ the benchmarks page regenerated.
    whole rounds.** On the 200 dev questions Kazma shows every answering
    conversation for 82.0 % (4.5 memories, 1,080 tokens median); bge-m3's
    nearest rounds that fit the same block, 42.3 %; as many rounds as Kazma
-   showed, 77.3 % (2,310 tokens); ten rounds, 91.8 % (5,148 tokens). On the
-   six questions with no answer Kazma shows 4.7 memories, never nothing
-   (`tests/fixtures/longmemeval/retrieval_dev.json`). Input to W1a (more of
-   the right conversations inside the budget), W3 + W2 (saying nothing) and
-   W4.
+   showed, 77.3 % (2,310 tokens); ten rounds, 91.8 % (5,148 tokens)
+   (`tests/fixtures/longmemeval/retrieval_dev.json`). The report split's
+   starting numbers, looked at once, say the same: 82.6 %; 38.4 % at
+   Kazma's block; 81.2 % at its count; 90.6 % at ten rounds
+   (`retrieval_report.json`). Input to W1a: more of the right
+   conversations inside the budget.
+5. **A question memory holds no answer to is never answered with
+   nothing.** On LongMemEval Kazma shows memories for every one of them:
+   0 of 6 on dev (4.7 memories, 982 tokens) and 0 of 24 on the report
+   split (4.8 memories, 1,089 tokens); on Kazma's own benchmark 0 of 22
+   English and 0 of 4 Arabic (`tests/fixtures/memory_bench/product_measures.json`).
+   W3 + W2's to fix: saying nothing when nothing fits.
