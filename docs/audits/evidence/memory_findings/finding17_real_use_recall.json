@@ -1,0 +1,297 @@
+{
+ "what": "The real-use suite's two runs on the memory plan's finding 17 (ecfbd3493: a change waiting for the user's yes shown beside its fact; qwen3.7-plus, judge qwen3.8-flash): per language and step, the facts and memories recall showed (null: recall showed nothing), the facts the quick pass wrote, the readings the deep pass wrote, the turns kept out of memory, the memory_invalidate calls the model made and the questions recorded. Counts only, from each run's server log.",
+ "runs": {
+  "run_1": {
+   "commit": "ecfbd3493",
+   "passed": false,
+   "languages": {
+    "en": {
+     "steps": [
+      {
+       "n": 1,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": null,
+       "memories_shown": null
+      },
+      {
+       "n": 2,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": null,
+       "memories_shown": null
+      },
+      {
+       "n": 3,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 2
+      },
+      {
+       "n": 4,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 3
+      },
+      {
+       "n": 5,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 0,
+       "memories_shown": 3
+      },
+      {
+       "n": 6,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 2
+      },
+      {
+       "n": 7,
+       "passed": true
+      },
+      {
+       "n": 8,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 0,
+       "memories_shown": 1
+      },
+      {
+       "n": 9,
+       "passed": true,
+       "recall_asked": false,
+       "facts_shown": null,
+       "memories_shown": null
+      }
+     ],
+     "quick_pass_facts": 1,
+     "deep_pass_readings": 0,
+     "turns_kept_out": 0,
+     "memory_invalidate_calls": 1,
+     "questions_recorded": 1,
+     "readings_recorded": 0
+    },
+    "ar": {
+     "steps": [
+      {
+       "n": 1,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": null,
+       "memories_shown": null
+      },
+      {
+       "n": 2,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": null,
+       "memories_shown": null
+      },
+      {
+       "n": 3,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 1
+      },
+      {
+       "n": 4,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 0
+      },
+      {
+       "n": 5,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 0,
+       "memories_shown": 3
+      },
+      {
+       "n": 6,
+       "passed": false,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 1
+      },
+      {
+       "n": 7,
+       "passed": true
+      },
+      {
+       "n": 8,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 0,
+       "memories_shown": 2
+      },
+      {
+       "n": 9,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 0,
+       "memories_shown": 2
+      }
+     ],
+     "quick_pass_facts": 1,
+     "deep_pass_readings": 0,
+     "turns_kept_out": 0,
+     "memory_invalidate_calls": 1,
+     "questions_recorded": 1,
+     "readings_recorded": 0
+    }
+   }
+  },
+  "run_2": {
+   "commit": "ecfbd3493",
+   "passed": false,
+   "languages": {
+    "en": {
+     "steps": [
+      {
+       "n": 1,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": null,
+       "memories_shown": null
+      },
+      {
+       "n": 2,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": null,
+       "memories_shown": null
+      },
+      {
+       "n": 3,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 1
+      },
+      {
+       "n": 4,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 2
+      },
+      {
+       "n": 5,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 0,
+       "memories_shown": 2
+      },
+      {
+       "n": 6,
+       "passed": false,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 1
+      },
+      {
+       "n": 7,
+       "passed": true
+      },
+      {
+       "n": 8,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 0,
+       "memories_shown": 1
+      },
+      {
+       "n": 9,
+       "passed": true,
+       "recall_asked": false,
+       "facts_shown": null,
+       "memories_shown": null
+      }
+     ],
+     "quick_pass_facts": 1,
+     "deep_pass_readings": 0,
+     "turns_kept_out": 0,
+     "memory_invalidate_calls": 0,
+     "questions_recorded": 1,
+     "readings_recorded": 0
+    },
+    "ar": {
+     "steps": [
+      {
+       "n": 1,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": null,
+       "memories_shown": null
+      },
+      {
+       "n": 2,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": null,
+       "memories_shown": null
+      },
+      {
+       "n": 3,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 1
+      },
+      {
+       "n": 4,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 0
+      },
+      {
+       "n": 5,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 0,
+       "memories_shown": 2
+      },
+      {
+       "n": 6,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 1,
+       "memories_shown": 1
+      },
+      {
+       "n": 7,
+       "passed": true
+      },
+      {
+       "n": 8,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 0,
+       "memories_shown": 3
+      },
+      {
+       "n": 9,
+       "passed": true,
+       "recall_asked": true,
+       "facts_shown": 0,
+       "memories_shown": 3
+      }
+     ],
+     "quick_pass_facts": 2,
+     "deep_pass_readings": 1,
+     "turns_kept_out": 0,
+     "memory_invalidate_calls": 1,
+     "questions_recorded": 0,
+     "readings_recorded": 1
+    }
+   }
+  }
+ }
+}

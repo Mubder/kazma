@@ -81,6 +81,9 @@ def test_a_change_waiting_for_the_users_yes_is_shown_beside_its_fact(store, held
     assert _fact_line(shown, held[1]).endswith(f"{WAITING_CHANGE} {moved[1]}")
     rules = shown.split("<kazma:data", 1)[0]
     assert WAITING_CHANGE in rules and moved[1] not in rules  # Kazma's words outside the fence, the value in it
+    # The user's last word leads (two of three real-use answers that led with
+    # the held home were judged wrong), still asked, never for a tool.
+    assert "answer with what the user said last" in rules and "Slack" in rules
 
 
 @pytest.mark.parametrize(("held", "moved", "question"), CASES)

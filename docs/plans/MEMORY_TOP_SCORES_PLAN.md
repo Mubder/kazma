@@ -745,4 +745,13 @@ alone as the negative controls.
    (the product measures hold). Gate:
    `tests/test_memory_waiting_change_in_recall.py`, through the real quick
    pass, `recall` and block, EN/AR; recall reading no change is the negative
-   control.
+   control. Two runs at ecfbd3493: 17/18 and 17/18. The marker reached the
+   model in all four language-runs and the model gave both values, but the
+   rule as first worded ("give both") had it lead with the held home: "you
+   live in Lisbon; you later mentioned Porto, not confirmed yet". The judge
+   failed that answer twice and passed it once. The user's last word is
+   Porto, so the rule now leads with it: answer with what the user said
+   last, say it is not confirmed yet and what it replaces, and ask -- unless
+   it plainly is not such a value (finding 15's "We moved to Slack").
+   Evidence: `docs/audits/evidence/memory_real_use/f17_qwen*.json`,
+   `docs/audits/evidence/memory_findings/finding17_real_use_recall.json`.

@@ -1,0 +1,196 @@
+{
+ "made_on": "2026-11-22",
+ "commit": "ecfbd3493",
+ "model": "qwen3.7-plus",
+ "provider": "dashscope",
+ "judge": "qwen3.8-flash",
+ "reasoning": "low",
+ "what": "Kazma's shipped path in a private install, driven in the browser by the sidebar; each answer judged with LongMemEval's prompts. Pass or fail per step, and tokens; no reply text.",
+ "passed": false,
+ "languages": [
+  {
+   "lang": "en",
+   "steps": [
+    {
+     "n": 1,
+     "kind": "told",
+     "action": "tell",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 2,
+     "kind": "told",
+     "action": "tell",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 3,
+     "kind": "asked",
+     "action": "ask",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 4,
+     "kind": "other_words",
+     "action": "ask",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 5,
+     "kind": "changed",
+     "action": "tell",
+     "phase": "completed",
+     "answered": true,
+     "approval_tools": [
+      "memory_invalidate"
+     ],
+     "passed": true
+    },
+    {
+     "n": 6,
+     "kind": "changed",
+     "action": "ask",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 7,
+     "kind": "forgotten",
+     "action": "forget",
+     "forgotten": 2,
+     "passed": true
+    },
+    {
+     "n": 8,
+     "kind": "forgotten",
+     "action": "ask",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 9,
+     "kind": "never_said",
+     "action": "ask",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    }
+   ],
+   "passed": true,
+   "page_errors": 0,
+   "spent": {
+    "calls": 13,
+    "prompt_tokens": 480028,
+    "completion_tokens": 1654
+   },
+   "judge_spent": {
+    "calls": 5,
+    "prompt_tokens": 826,
+    "completion_tokens": 5,
+    "prompt_cache_hit_tokens": 0
+   }
+  },
+  {
+   "lang": "ar",
+   "steps": [
+    {
+     "n": 1,
+     "kind": "told",
+     "action": "tell",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 2,
+     "kind": "told",
+     "action": "tell",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 3,
+     "kind": "asked",
+     "action": "ask",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 4,
+     "kind": "other_words",
+     "action": "ask",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 5,
+     "kind": "changed",
+     "action": "tell",
+     "phase": "completed",
+     "answered": true,
+     "approval_tools": [
+      "memory_invalidate"
+     ],
+     "passed": true
+    },
+    {
+     "n": 6,
+     "kind": "changed",
+     "action": "ask",
+     "phase": "completed",
+     "answered": true,
+     "passed": false
+    },
+    {
+     "n": 7,
+     "kind": "forgotten",
+     "action": "forget",
+     "forgotten": 2,
+     "passed": true
+    },
+    {
+     "n": 8,
+     "kind": "forgotten",
+     "action": "ask",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    },
+    {
+     "n": 9,
+     "kind": "never_said",
+     "action": "ask",
+     "phase": "completed",
+     "answered": true,
+     "passed": true
+    }
+   ],
+   "passed": false,
+   "page_errors": 0,
+   "spent": {
+    "calls": 13,
+    "prompt_tokens": 480429,
+    "completion_tokens": 2411
+   },
+   "judge_spent": {
+    "calls": 5,
+    "prompt_tokens": 846,
+    "completion_tokens": 5,
+    "prompt_cache_hit_tokens": 0
+   }
+  }
+ ]
+}

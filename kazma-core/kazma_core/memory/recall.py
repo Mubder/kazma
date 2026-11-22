@@ -3992,8 +3992,9 @@ def _rules(result: RecallResult, counts: dict[str, int]) -> str:
         rules += (
             f"- A fact marked \"{WAITING_CHANGE}\" or \"{WAITING_ENDED}\" holds a change "
             "the user stated later, which Kazma has asked them to confirm. When the question "
-            "is about that fact, give both: what the user said last, that it is not confirmed "
-            "yet, and the value before it; then ask whether to record it.\n"
+            "is about that fact, answer with what the user said last, then say it is not "
+            "confirmed yet and what it replaces, and ask whether to record it -- unless what "
+            "they said plainly is not such a value (\"We moved to Slack\" names no home).\n"
         )
     if result.listing:
         # A count or a list (part F): what the block holds is not all there is.
