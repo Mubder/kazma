@@ -1,0 +1,199 @@
+{
+ "model": "qwen3.7-plus",
+ "rows": [
+  {
+   "id": "en1",
+   "switch": true,
+   "answered": true,
+   "waited": 3.45,
+   "acts": [
+    "document_generate"
+   ],
+   "seconds": 3.44,
+   "prompt_tokens": 274,
+   "completion_tokens": 24,
+   "reasoning_tokens": 0
+  },
+  {
+   "id": "en1",
+   "switch": false,
+   "answered": false,
+   "waited": 4.02,
+   "acts": [
+    "general"
+   ],
+   "started": true,
+   "seconds": 4.02
+  },
+  {
+   "id": "en2",
+   "switch": true,
+   "answered": true,
+   "waited": 1.8,
+   "acts": [
+    "analysis"
+   ],
+   "seconds": 1.8,
+   "prompt_tokens": 275,
+   "completion_tokens": 30,
+   "reasoning_tokens": 0
+  },
+  {
+   "id": "en2",
+   "switch": false,
+   "answered": false,
+   "waited": 4.0,
+   "acts": [
+    "general"
+   ],
+   "started": true,
+   "seconds": 4.0
+  },
+  {
+   "id": "en3",
+   "switch": true,
+   "answered": true,
+   "waited": 1.73,
+   "acts": [
+    "analysis"
+   ],
+   "seconds": 1.73,
+   "prompt_tokens": 273,
+   "completion_tokens": 36,
+   "reasoning_tokens": 0
+  },
+  {
+   "id": "en3",
+   "switch": false,
+   "answered": false,
+   "waited": 4.0,
+   "acts": [
+    "general"
+   ],
+   "started": true,
+   "seconds": 4.0
+  },
+  {
+   "id": "en4",
+   "switch": true,
+   "answered": true,
+   "waited": 1.83,
+   "acts": [
+    "research"
+   ],
+   "seconds": 1.83,
+   "prompt_tokens": 270,
+   "completion_tokens": 31,
+   "reasoning_tokens": 0
+  },
+  {
+   "id": "en4",
+   "switch": false,
+   "answered": false,
+   "waited": 4.0,
+   "acts": [
+    "general"
+   ],
+   "started": true,
+   "seconds": 4.0
+  },
+  {
+   "id": "ar1",
+   "switch": true,
+   "answered": true,
+   "waited": 1.36,
+   "acts": [
+    "document_generate"
+   ],
+   "seconds": 1.36,
+   "prompt_tokens": 272,
+   "completion_tokens": 34,
+   "reasoning_tokens": 0
+  },
+  {
+   "id": "ar1",
+   "switch": false,
+   "answered": false,
+   "waited": 4.02,
+   "acts": [
+    "general"
+   ],
+   "started": true,
+   "seconds": 4.02
+  },
+  {
+   "id": "ar2",
+   "switch": true,
+   "answered": true,
+   "waited": 1.78,
+   "acts": [
+    "document_generate"
+   ],
+   "seconds": 1.78,
+   "prompt_tokens": 275,
+   "completion_tokens": 36,
+   "reasoning_tokens": 0
+  },
+  {
+   "id": "ar2",
+   "switch": false,
+   "answered": false,
+   "waited": 4.02,
+   "acts": [
+    "general"
+   ],
+   "started": true,
+   "seconds": 4.02
+  },
+  {
+   "id": "ar3",
+   "switch": true,
+   "answered": true,
+   "waited": 2.28,
+   "acts": [
+    "analysis"
+   ],
+   "seconds": 2.28,
+   "prompt_tokens": 276,
+   "completion_tokens": 69,
+   "reasoning_tokens": 0
+  },
+  {
+   "id": "ar3",
+   "switch": false,
+   "answered": false,
+   "waited": 4.02,
+   "acts": [
+    "general"
+   ],
+   "started": true,
+   "seconds": 4.02
+  },
+  {
+   "id": "ar4",
+   "switch": true,
+   "answered": true,
+   "waited": 2.0,
+   "acts": [
+    "research"
+   ],
+   "seconds": 2.0,
+   "prompt_tokens": 275,
+   "completion_tokens": 40,
+   "reasoning_tokens": 0
+  },
+  {
+   "id": "ar4",
+   "switch": false,
+   "answered": false,
+   "waited": 4.02,
+   "acts": [
+    "general"
+   ],
+   "started": true,
+   "seconds": 4.02
+  }
+ ],
+ "what": "Finding 12: intent/classify._refine_acts_llm as a turn calls it (4 s limit), on 8 gray-zone requests (en1-4, ar1-4), qwen3.7-plus at Model Studio (ap-southeast-1 qwencloudapi), with Kazma's reasoning off (switch true: enable_thinking false) and as it was (switch false), commit 4c5939b23. Ids, timings, token counts and the act kinds only; no request or reply text.",
+ "made_on": "2026-11-22"
+}

@@ -696,7 +696,17 @@ alone as the negative controls.
    hosts as the control, the refusal, the classifier in English and Arabic
    with today's classifier as the control). Not changed: Settings' chat
    reasoning card says the level does not apply on Qwen (true of
-   `low` / `high` / `max`, not of `off`).
+   `low` / `high` / `max`, not of `off`). Measured the same day on 4c5939b23
+   (`_refine_acts_llm` as a turn calls it, 8 gray-zone requests, 4 English
+   and 4 Gulf Arabic, qwen3.7-plus, with and without the switch): with it,
+   8 of 8 answered in time (1.4-3.4 s, median 1.8 s; 0 reasoning tokens;
+   274 prompt and 24-69 completion tokens each); without it, 0 of 8, each
+   abandoned at 4.0 s. Spend: the 8 answered calls 2,190 prompt and 300
+   completion tokens; the 8 abandoned calls' tokens are not reported (a
+   request cut off at its limit may still be billed: up to about 1,240
+   completion tokens each, from the first measurement). Evidence:
+   `docs/audits/evidence/memory_findings/finding12_classifier_qwen.json`
+   (ids, timings and token counts only), the script beside it.
 13. **"Remind me what you said" is read as a reminder to book.** Found by
    finding 12's measurement (22 Nov): the heuristics' remind rule
    (`agent/intent/heuristics._REMIND_RE`) matches "remind me" and
