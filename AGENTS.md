@@ -2286,6 +2286,14 @@ four injected were noise.
   store alone floor 0.06 and gap 0.04 would have raised precision 0.488 ->
   0.605 (judging half 0.439 -> 0.555) and lost five answers elsewhere (judging
   half four). A sweep on one store is never the evidence for a threshold.
+  Chosen a third time on 22 Nov by the memory plan's rule (`--by sets`:
+  chosen on the first set alone, the second set kept apart to judge): no
+  value moved, no answer lost or gained on either side. Only a judged run
+  logged in `docs/audits/evidence/memory_thresholds_v8/choices.json`
+  (`judge --record "why"`, `log_choice`) may set the thresholds; that run is
+  its first entry. The split of `run_benchmark` into `_seeded_store` and
+  `_ask_questions` left its output byte-identical (the whole report, every
+  question, `helper_split_identical.json` in the same folder).
   The scale run holds within 0.02 of hit rate and MRR, precision 0.05
   lower. Gate: `tests/test_memory_benchmark_pool.py` (every
   turn once, v7's pool failing the same check as the control; v7's

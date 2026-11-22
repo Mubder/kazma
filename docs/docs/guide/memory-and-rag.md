@@ -1253,6 +1253,13 @@ first choice lost answers; the final choice moved nothing
 (`scripts/memory_threshold_sweep.py`; every configuration measured is in
 `docs/audits/evidence/memory_thresholds_v8/`).
 
+On 22 Nov the sweep ran once more the way the memory plan sets it: chosen
+on the benchmark's first set alone (131 questions), with the second set
+(52) kept apart to judge. Nothing moved, and no answer was lost or gained
+on either set. Only a run logged with its reason in
+`docs/audits/evidence/memory_thresholds_v8/choices.json` may set the
+thresholds; this is the first.
+
 ### Benchmark report (dataset v7, part G, 2026-11-21)
 
 Dataset v7 adds the roll-ups the planner makes from the benchmark's weekly

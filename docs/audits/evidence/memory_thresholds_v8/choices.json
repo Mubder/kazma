@@ -1,0 +1,21 @@
+{
+ "choices": [
+  {
+   "date": "2026-11-22",
+   "commit": "d1eab3601",
+   "reason": "The memory plan's rule (W0, 22 Nov): chosen on the benchmark's first set alone, the second set kept apart to judge; the run that may set recall's thresholds",
+   "dataset_version": 8,
+   "split_by": "sets",
+   "moved": {},
+   "evidence": "judge_first_set.json",
+   "lost": {
+    "tune": [],
+    "held": []
+   },
+   "gained": {
+    "tune": [],
+    "held": []
+   }
+  }
+ ]
+}

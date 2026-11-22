@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Memory: the thresholds chosen on the first set alone (2026-11-22)
+
+- Recall's thresholds were swept once more by the memory plan's rule,
+  choosing on the benchmark's first set and judging on its second set.
+  Nothing moved. The run is logged; only a logged run may set them.
+- The benchmark's helper split (21 Nov) changes nothing it reports: its
+  whole output is byte-identical before and after.
+
 ## LongMemEval: plain retrieval beside Kazma's, and a harness that checks itself (2026-11-22)
 
 - On the 200 dev questions, at the same size, Kazma's recall finds more than

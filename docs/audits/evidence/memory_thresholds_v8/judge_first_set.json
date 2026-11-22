@@ -1,0 +1,206 @@
+{
+ "dataset_version": 8,
+ "split_by": "sets",
+ "today": {
+  "episode_floor": 0.04,
+  "episode_gap": 0.15,
+  "episode_coverage": 0.12,
+  "episode_recency": 0.05,
+  "belief_floor": 0.06,
+  "belief_gap": 0.08,
+  "belief_coverage": 0.06,
+  "belief_recency": 0.02,
+  "summary_floor": 0.21,
+  "summary_gap": 0.1,
+  "summary_coverage": 0.12
+ },
+ "chosen": {
+  "episode_floor": 0.04,
+  "episode_gap": 0.15,
+  "episode_coverage": 0.12,
+  "episode_recency": 0.05,
+  "belief_floor": 0.06,
+  "belief_gap": 0.08,
+  "belief_coverage": 0.06,
+  "belief_recency": 0.02,
+  "summary_floor": 0.21,
+  "summary_gap": 0.1,
+  "summary_coverage": 0.12
+ },
+ "tune": {
+  "today": {
+   "stores": {
+    "main": {
+     "answerable": 113,
+     "answered": 107,
+     "unanswerable": 18,
+     "abstained": 0,
+     "mrr": 0.7487,
+     "precision": 0.4872,
+     "shown": 4.76
+    },
+    "scale": {
+     "answerable": 113,
+     "answered": 106,
+     "unanswerable": 18,
+     "abstained": 1,
+     "mrr": 0.7364,
+     "precision": 0.4379,
+     "shown": 5.08
+    },
+    "small": {
+     "answerable": 97,
+     "answered": 94,
+     "unanswerable": 18,
+     "abstained": 1,
+     "mrr": 0.7912,
+     "precision": 0.6722,
+     "shown": 2.73
+    },
+    "speakers": {
+     "answerable": 17,
+     "answered": 17,
+     "unanswerable": 1,
+     "abstained": 1,
+     "mrr": 0.9706,
+     "precision": 0.6255,
+     "shown": 0.0
+    }
+   },
+   "abstained": 2,
+   "quality": 1.3674
+  },
+  "chosen": {
+   "stores": {
+    "main": {
+     "answerable": 113,
+     "answered": 107,
+     "unanswerable": 18,
+     "abstained": 0,
+     "mrr": 0.7487,
+     "precision": 0.4872,
+     "shown": 4.76
+    },
+    "scale": {
+     "answerable": 113,
+     "answered": 106,
+     "unanswerable": 18,
+     "abstained": 1,
+     "mrr": 0.7364,
+     "precision": 0.4379,
+     "shown": 5.08
+    },
+    "small": {
+     "answerable": 97,
+     "answered": 94,
+     "unanswerable": 18,
+     "abstained": 1,
+     "mrr": 0.7912,
+     "precision": 0.6722,
+     "shown": 2.73
+    },
+    "speakers": {
+     "answerable": 17,
+     "answered": 17,
+     "unanswerable": 1,
+     "abstained": 1,
+     "mrr": 0.9706,
+     "precision": 0.6255,
+     "shown": 0.0
+    }
+   },
+   "abstained": 2,
+   "quality": 1.3674
+  },
+  "lost": [],
+  "gained": []
+ },
+ "held": {
+  "today": {
+   "stores": {
+    "main": {
+     "answerable": 44,
+     "answered": 41,
+     "unanswerable": 8,
+     "abstained": 0,
+     "mrr": 0.7574,
+     "precision": 0.4042,
+     "shown": 4.92
+    },
+    "scale": {
+     "answerable": 44,
+     "answered": 40,
+     "unanswerable": 8,
+     "abstained": 0,
+     "mrr": 0.7305,
+     "precision": 0.3603,
+     "shown": 5.02
+    },
+    "small": {
+     "answerable": 41,
+     "answered": 39,
+     "unanswerable": 8,
+     "abstained": 0,
+     "mrr": 0.8028,
+     "precision": 0.6824,
+     "shown": 2.73
+    },
+    "speakers": {
+     "answerable": 15,
+     "answered": 15,
+     "unanswerable": 2,
+     "abstained": 2,
+     "mrr": 0.9222,
+     "precision": 0.5878,
+     "shown": 0.0
+    }
+   },
+   "abstained": 0,
+   "quality": 1.3119
+  },
+  "chosen": {
+   "stores": {
+    "main": {
+     "answerable": 44,
+     "answered": 41,
+     "unanswerable": 8,
+     "abstained": 0,
+     "mrr": 0.7574,
+     "precision": 0.4042,
+     "shown": 4.92
+    },
+    "scale": {
+     "answerable": 44,
+     "answered": 40,
+     "unanswerable": 8,
+     "abstained": 0,
+     "mrr": 0.7305,
+     "precision": 0.3603,
+     "shown": 5.02
+    },
+    "small": {
+     "answerable": 41,
+     "answered": 39,
+     "unanswerable": 8,
+     "abstained": 0,
+     "mrr": 0.8028,
+     "precision": 0.6824,
+     "shown": 2.73
+    },
+    "speakers": {
+     "answerable": 15,
+     "answered": 15,
+     "unanswerable": 2,
+     "abstained": 2,
+     "mrr": 0.9222,
+     "precision": 0.5878,
+     "shown": 0.0
+    }
+   },
+   "abstained": 0,
+   "quality": 1.3119
+  },
+  "lost": [],
+  "gained": []
+ }
+}

@@ -75,6 +75,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "vectors.npz"
 SPEAKER_VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "speakers_vectors.npz"
+#: Every judged sweep allowed to set recall's thresholds (``log_choice``).
+CHOICES = ROOT / "docs" / "audits" / "evidence" / "memory_thresholds_v8" / "choices.json"
 
 #: Every swept value: its name here and the module value recall reads
 #: (``recall._evidence_rules``, read at call time).
@@ -141,15 +143,29 @@ def _deal(groups: dict[Any, list[dict[str, Any]]]) -> dict[str, list[str]]:
     return halves
 
 
-def split(data: dict[str, Any], speakers: dict[str, Any]) -> dict[str, dict[str, list[str]]]:
-    """Question ids of the tuning half and the judging half: the retrieval
-    benchmark's (``bench``) and the speakers case set's (``speakers``)."""
-    bench: dict[Any, list[dict[str, Any]]] = {}
-    for q in _questions(data):
-        bench.setdefault((q["category"], _arabic(q["text"])), []).append(q)
+#: How the questions are divided: ``halves`` (both sets dealt into two halves
+#: by category and script, 21 Nov) or ``sets`` (the memory plan's rule, 22
+#: Nov: the benchmark's first set is the tuning side, its second set is kept
+#: apart and only judges).
+SPLIT_BY = ("halves", "sets")
+
+
+def split(data: dict[str, Any], speakers: dict[str, Any], by: str = "halves") -> dict[str, dict[str, list[str]]]:
+    """Question ids of the tuning side and the judging side: the retrieval
+    benchmark's (``bench``) and the speakers case set's (``speakers``, dealt
+    into halves either way: it has no second set)."""
+    if by not in SPLIT_BY:
+        raise ValueError(f"split by {by!r}: one of {SPLIT_BY}")
     people: dict[Any, list[dict[str, Any]]] = {}
     for q in speakers["questions"]:
         people.setdefault((q.get("category"), q.get("lang")), []).append(q)
+    if by == "sets":
+        bench_ids = {"tune": [q["id"] for q in data["questions"]],
+                     "held": [q["id"] for q in data.get("second") or []]}
+        return {"bench": bench_ids, "speakers": _deal(people)}
+    bench: dict[Any, list[dict[str, Any]]] = {}
+    for q in _questions(data):
+        bench.setdefault((q["category"], _arabic(q["text"])), []).append(q)
     return {"bench": _deal(bench), "speakers": _deal(people)}
 
 
@@ -302,9 +318,9 @@ def _load() -> tuple[dict[str, Any], dict[str, Any]]:
     return load_dataset(), load_speakers()
 
 
-def _cmd_split() -> int:
+def _cmd_split(by: str = "halves") -> int:
     data, speakers = _load()
-    halves = split(data, speakers)
+    halves = split(data, speakers, by)
     by_id = {q["id"]: q for q in _questions(data)}
     for half, ids in halves["bench"].items():
         cats: dict[str, int] = {}
@@ -321,12 +337,12 @@ def _short(m: dict[str, Any]) -> str:
                        for s, x in m["stores"].items()})
 
 
-def _cmd_sweep(out: Path) -> int:
+def _cmd_sweep(out: Path, by: str = "halves") -> int:
     data, speakers = _load()
-    halves = split(data, speakers)
+    halves = split(data, speakers, by)
     base = today()
     record: dict[str, Any] = {"dataset_version": data["version"], "speakers_version": speakers.get("version"),
-                              "split": halves, "today": base, "stages": []}
+                              "split_by": by, "split": halves, "today": base, "stages": []}
     with contextlib.ExitStack() as stack:
         started = time.perf_counter()
         stores = Stores(data, speakers, halves, stack)
@@ -377,12 +393,12 @@ def _cmd_sweep(out: Path) -> int:
     return 0
 
 
-def _cmd_judge(chosen_path: Path, out: Path) -> int:
+def _cmd_judge(chosen_path: Path, out: Path, by: str = "halves", reason: str | None = None) -> int:
     data, speakers = _load()
-    halves = split(data, speakers)
+    halves = split(data, speakers, by)
     chosen = json.loads(chosen_path.read_text(encoding="utf-8"))["chosen"]
     base = today()
-    record: dict[str, Any] = {"dataset_version": data["version"], "today": base, "chosen": chosen}
+    record: dict[str, Any] = {"dataset_version": data["version"], "split_by": by, "today": base, "chosen": chosen}
     with contextlib.ExitStack() as stack:
         stores = Stores(data, speakers, halves, stack)
         for half in ("tune", "held"):
@@ -394,7 +410,30 @@ def _cmd_judge(chosen_path: Path, out: Path) -> int:
             print(f"{half}: chosen {_short(summarise(now))}")
             print(f"{half}: answers lost {lost}, gained {gained}")
     out.write_text(json.dumps(record, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    if reason:
+        log_choice(record, reason, out)
     return 0
+
+
+def log_choice(record: dict[str, Any], reason: str, evidence: Path) -> dict[str, Any]:
+    """The choice log (``CHOICES``): every judged sweep allowed to set
+    recall's thresholds, kept with its reason, its commit and what it
+    moved. Only a logged run may change them."""
+    import subprocess
+
+    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True,
+                            check=False).stdout.strip()
+    moved = {k: [record["today"][k], v] for k, v in record["chosen"].items()
+             if abs(float(v) - float(record["today"][k])) > 1e-9}
+    entry = {"date": time.strftime("%Y-%m-%d"), "commit": commit, "reason": reason,
+             "dataset_version": record["dataset_version"], "split_by": record.get("split_by", "halves"),
+             "moved": moved, "evidence": evidence.name,
+             "lost": {half: record[half]["lost"] for half in ("tune", "held") if half in record},
+             "gained": {half: record[half]["gained"] for half in ("tune", "held") if half in record}}
+    held = json.loads(CHOICES.read_text(encoding="utf-8")) if CHOICES.is_file() else {"choices": []}
+    held["choices"].append(entry)
+    CHOICES.write_text(json.dumps(held, indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+    return entry
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -402,18 +441,22 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("split")
+    split_p = sub.add_parser("split")
     sweep = sub.add_parser("sweep")
     sweep.add_argument("--out", type=Path, required=True)
     judge = sub.add_parser("judge")
     judge.add_argument("--chosen", type=Path, required=True)
     judge.add_argument("--out", type=Path, required=True)
+    judge.add_argument("--record", default=None,
+                       help="why this run may set the thresholds: logged in the choice log")
+    for s in (split_p, sweep, judge):
+        s.add_argument("--by", choices=SPLIT_BY, default="halves")
     args = parser.parse_args(argv)
     if args.cmd == "split":
-        return _cmd_split()
+        return _cmd_split(args.by)
     if args.cmd == "sweep":
-        return _cmd_sweep(args.out)
-    return _cmd_judge(args.chosen, args.out)
+        return _cmd_sweep(args.out, args.by)
+    return _cmd_judge(args.chosen, args.out, args.by, args.record)
 
 
 if __name__ == "__main__":

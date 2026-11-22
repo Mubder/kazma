@@ -1,0 +1,7 @@
+{
+ "what": "run_benchmark(keep_results=True) on dataset v8 with its recorded vectors, before and after 0d5fb977b split it into _seeded_store and _ask_questions: the whole report (every category, overall, the second set, and each question's hit, rank, precision, memories shown and margin), latency fields removed, serialised with sorted keys.",
+ "before": {"commit": "032ac19bb", "sha256": "0db7f897b9b00610073372050c71b48d205765bc5b998e96620be7eb8bd720c1", "chars": 24310},
+ "after": {"commit": "220005245", "sha256": "0db7f897b9b00610073372050c71b48d205765bc5b998e96620be7eb8bd720c1", "chars": 24310},
+ "identical": true,
+ "made_on": "2026-11-22"
+}

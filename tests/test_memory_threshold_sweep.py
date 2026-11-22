@@ -119,3 +119,34 @@ def test_every_swept_value_is_one_recall_reads_and_today_is_inside_its_grid(swee
         for name, values in axes.items():
             today = float(getattr(recall, sweep.PARAMS[name]))
             assert values[0] < today < values[-1], name
+
+
+def test_split_by_sets_tunes_on_the_first_set_and_keeps_the_second_apart(sweep):
+    """The memory plan's rule (22 Nov): the first set is the tuning side and
+    the second set only judges. Control: the halves of 21 Nov put second-set
+    questions on the tuning side."""
+    data = {"questions": [_q(f"q{i}", "single") for i in range(6)],
+            "second": [_q(f"h{i}", "single") for i in range(6)]}
+    people = {"questions": [{"id": f"s{i}", "category": "self", "lang": "en"} for i in range(4)]}
+    sets = sweep.split(data, people, "sets")
+    assert sets["bench"]["tune"] == [f"q{i}" for i in range(6)]
+    assert sets["bench"]["held"] == [f"h{i}" for i in range(6)]
+    assert len(sets["speakers"]["tune"]) == len(sets["speakers"]["held"]) == 2
+    halves = sweep.split(data, people, "halves")
+    assert {q for q in halves["bench"]["tune"] if q.startswith("h")}
+    with pytest.raises(ValueError):
+        sweep.split(data, people, "random")
+
+
+def test_a_choice_that_may_set_thresholds_is_logged(sweep, tmp_path, monkeypatch):
+    monkeypatch.setattr(sweep, "CHOICES", tmp_path / "choices.json")
+    record = {"dataset_version": 8, "split_by": "sets", "today": {"turn_floor": 0.04, "turn_gap": 0.15},
+              "chosen": {"turn_floor": 0.04, "turn_gap": 0.15},
+              "tune": {"lost": [], "gained": []}, "held": {"lost": [], "gained": []}}
+    entry = sweep.log_choice(record, "the sweep on the first set", tmp_path / "judge.json")
+    assert entry["moved"] == {} and entry["split_by"] == "sets" and entry["reason"]
+    sweep.log_choice({**record, "chosen": {"turn_floor": 0.05, "turn_gap": 0.15}}, "again", tmp_path / "j2.json")
+    import json
+
+    logged = json.loads((tmp_path / "choices.json").read_text(encoding="utf-8"))["choices"]
+    assert len(logged) == 2 and logged[1]["moved"] == {"turn_floor": [0.04, 0.05]}
