@@ -122,5 +122,5 @@ def test_format_recall_block_has_footer(mem_db):
         ],
         episodes=[],
     )
-    block = format_recall_block(r, explain=False)
+    block = format_recall_block(r)
     assert "Sources used" in block or "belief" in block.lower()

@@ -1686,7 +1686,36 @@ came up short, and archiving had erased 76 memories.
   is what it always was), **keyword search all of it**; a passage vector per
   stretch of a long memory is a later step (`docs/plans/MEMORY_REMAINING.md`).
   **Shown bounded, read whole**: the recall block shows a memory with its
-  own bounds (`RECALL_SHOW_*`) and, when it leaves some out, a note in the
+  own bounds -- **room by rank** (the memory plan's W1a, 2026-11-22,
+  `recall._room_by_rank`, `episode_text.display_at`), **for the
+  conversations recall rates strong only** (a "possibly related" one keeps
+  the fixed bounds, `_roomy`: the block grows only where recall is fairly
+  sure it holds the answer): the best of them up to `RECALL_LEAD_SHOW`
+  (1,500) characters, every other `RECALL_OTHER_SHOW` (500), each side cut
+  around the stretch holding the
+  most of the question's words (`query_terms.word_term`: search's reading,
+  folded, the article and one-letter prefixes, a light plural); when that
+  stretch is not the side's start, the side's opening sentence comes first
+  (up to `RECALL_KEEP_OPENING`, 120 characters, at most half its room),
+  then " … " and the stretch -- a memory often names its subject first --
+  unless the stretch shown alone would begin inside the opening; when the
+  block's budget would leave a line out the others give way first (to
+  `RECALL_OTHER_LEAST`), then the best (to `RECALL_LEAD_LEAST`). **The
+  budget is the whole block's** (`max_tokens`, 1,500 from the supervisor):
+  rules, speakers note, fence and lines, counted as the context trim counts
+  (`summarizer.estimate_text_tokens`, Arabic at about 2.5 characters a
+  token). Until 2026-11-22 it bounded a quarter of the lines' characters,
+  so the frame and Arabic's shorter tokens fell outside it and a block
+  passed 1,500 (`tests/test_recall_block_budget.py`, Arabic counted as Latin
+  as the negative control). Recall
+  keeps each conversation's first `RECALL_FOCUS_READ` characters a side
+  and how much more it holds (`_keep_sides`, in the asker's tenant); a
+  follow-up joined to its turn and another member's turn keep recall's
+  line (`_roomy`), and a hit with no sides is shown at `RECALL_SHOW_*` as
+  before. Gate: `tests/test_recall_room_by_rank.py` (the fixed bounds, the
+  block without the ladder, a raw word reading, the stretch alone and a
+  plain opening rule as negative controls) --
+  and, when it leaves some out, a note in the
   memory's language naming how many characters and `memory_read("<id>")`
   (`episode_text.more_note`); `memory_search` and the probe show up to
   `MEMORY_SHOW_MAX` (1,500); `memory_read` (read tier, fenced, the caller's
@@ -2319,9 +2348,22 @@ four injected were noise.
   prompts; the reader at the reasoning Kazma's chat runs, `--reasoning
   low` by default, with room for it, an answer cut at its limit counted;
   `--judge2` a second judge on every answer, its agreement in the result;
-  `--run` a run's own cache and result file; `--conditions`; a call the API
+  a verdict kept with the model that gave it (`verdict_of`), so `rejudge`
+  puts the judges in another order from the cache with no model call
+  (qwen3.8-flash judges first since 22 Nov: it gave the model-read answers'
+  verdict on 86 % against 60 %), `judge` asks a judge added later for the
+  verdicts it lacks, and a cache keeping verdicts by place is refused until
+  `tag-judges` names them; `--run` a run's own cache and result file;
+  `--conditions`; a call the API
   refuses is asked again on the next run, never kept as an answer or a
-  verdict, `answer_entry`), `noise` (two runs of one build: the answers that
+  verdict, `answer_entry`; `--conditions kazma_turn` also asks each question
+  through Kazma's own chat turn, `scripts/longmemeval_turn.py`, the memory
+  plan's W1c: the supervisor graph with the agent's base prompt dated at the
+  question's date, the recall block as a turn sends it, `memory_search`,
+  `memory_read` and `memory_list` only, the run's level as
+  `agent.chat_reasoning`, at most three tool rounds, nothing written after;
+  its calls, tokens, tool requests and seconds in the result, one turn at a
+  time), `noise` (two runs of one build: the answers that
   flip, `noise_dev.json`), `reading-sheet` and `model-read` (the answers
   read beside the judges, their disagreements first, labelled model-read:
   `model_read.json`), `translate` and `parallel` (40 questions' 84 answer
@@ -2350,22 +2392,53 @@ four injected were noise.
   rows are written one line each (`dump_result`, `compact_row`). Most missed answers were
   shown but cut by the block's per-memory bounds (`limits.RECALL_SHOW_*`).
   The bounds measured (`scripts/recall_block_bounds.py`, evidence in
-  `docs/audits/evidence/recall_block_bounds/`; a proposal, not built):
-  0.48 today; every round shown whole 0.59, the budget raised to 4,000
-  tokens 0.58; the best round at up to 1,500 characters around the
-  question's words and the others at 500 (250 when the 1,500-token budget
-  needs it), list answers too, 0.74, no line left out.
+  `docs/audits/evidence/recall_block_bounds/`): 0.48 with the fixed
+  bounds; every round shown whole 0.59, the budget raised to 4,000 tokens
+  0.58; the best round at up to 1,500 characters around the question's
+  words and the others at 500 (250 when the 1,500-token budget needs it),
+  list answers too, 0.74, no line left out. That shape is built as W1a
+  (room by rank, §15F, 2026-11-22) and **not yet accepted**: acceptance
+  waits for W0's end-to-end dev answering and its noise run. With and
+  without it on one commit, no model call: on dev 200 the answer's text is
+  in the block for 0.434 of the 129 questions with a worded answer (0.302
+  with the fixed bounds; 0.450 have it in the rounds shown), 17 gained and
+  none lost; the block's tokens p50 1,080 -> 1,337, p95 1,317 -> 1,489,
+  with the whole-block budget and room for strong hits only; making the
+  block 0.34 -> 2.5 ms p50, 9.5 ms at most. Room for every hit had 0.442
+  (one more answer, held by a possibly related hit) for p50 1,373. The opening kept
+  (W1a's second piece) gained the one answer the stretch alone lost (a
+  name in a memory's first sentence) for 8 tokens a question on average;
+  its rule (no opening when the stretch alone starts inside it) was set
+  after reading the one dev answer a plain opening lost. Kazma's benchmark EN/AR,
+  an ordinary turn's block (675 / 1,030 tokens), the small store and the
+  speakers set are unchanged (no memory there passes the fixed bounds).
   Gate: `tests/test_longmemeval_harness.py` (a history without its evidence
   round finds nothing: the control; the page's refusal with its control; no
-  dataset text in a result file).
+  dataset text in a result file), `tests/test_longmemeval_turn.py` (a
+  scripted stand-in model: the base prompt and the question's date first, a
+  cut memory read whole, three tool rounds and no fourth with five as the
+  control, the question's clock in recall with the real clock as the
+  control, a refused call never judged).
 - **The product measures and the real-use suite** (2026-11-22, the memory
   plan's W0 and section 2.1: every memory change is gated on these before
   an outside score counts). `scripts/memory_product_measures.py`, on the
   retrieval benchmark's store with its recorded vectors: Kazma's benchmark
   in English and Arabic apart; the tokens the recall block adds to a turn
   (`format_recall_block` as the supervisor adds it, counted by
-  `summarizer.estimate_tokens`), on the store and at four times its
-  unrelated chat; recall's time; the embedding model's time
+  `summarizer.estimate_tokens`; **the block the model gets is the block
+  every measure builds**, 2026-11-22, the plan's finding 8: no line
+  carries the channels a memory was found by -- `memory.v2.explain_recall`
+  shows them in the turn's "Memory used" row -- and `format_recall_block`
+  has no option that changes a line; gate
+  `tests/test_recall_block_is_what_is_measured.py`, the real supervisor
+  against the measures, today's tags-in-block as the control), on the store, at four times its
+  unrelated chat, and where memories are as long as live's (`long`, since
+  2026-11-22: the store, each conversation lengthened to a length drawn
+  from live's episode lengths, `tests/fixtures/memory_bench/live_lengths.json`
+  -- percentiles only, read by the script's `live-lengths` from a native
+  backup of live's memory database opened immutable, never the live file --
+  and padded with stopwords after its own text, so recall chooses as on the
+  store); recall's time; the embedding model's time
   (`--real-embedder`); the small store. Kept in
   `tests/fixtures/memory_bench/product_measures.json` with Kazma's own share
   of the first token (`tests/e2e/test_first_token_latency.py`), shown on the
@@ -2374,7 +2447,17 @@ four injected were noise.
   control): a change to the block records its new numbers in the same
   commit. Baseline: a median 675 tokens a turn (711 English, 590 Arabic),
   1,030 at the 95th; no question without an answer shows nothing; recall
-  96 ms, the embedding 76 ms, Kazma's first-token share 0.115 s.
+  96 ms, the embedding 76 ms, Kazma's first-token share 0.115 s. Where
+  memories are as long as live's (answers a median 1,351 characters, 4,088
+  at the 95th): 1,146 / 1,659, the largest 1,922, with W1a (872 / 1,352 /
+  1,644 with the fixed bounds). The block's 1,500-token cap then bounded a
+  quarter of its lines' characters, so the rules, the fence and Arabic's
+  shorter tokens fell outside it and the estimate passed 1,500; since
+  2026-11-22 it bounds the whole block (§15F). With room for strong hits
+  only: 1,073 / 1,484 with W1a, 872 / 1,350 with the fixed bounds; split by
+  the question's top hit (`block_tokens_by_evidence`), p50 strong 1,133
+  against 869, weak 881 against 881, no answer 1,027 against 892 (an
+  unanswerable question's top hit is often rated strong: W3 + W2's).
   `scripts/memory_real_use.py` is the browser real-use suite, run by hand at
   every stage (it needs DeepSeek and the embedding model): a private Kazma
   from this checkout (`kazma serve`, the environment scrubbed of every Kazma

@@ -62,6 +62,14 @@ __all__ = [
     "NAME_MAX",
     "OBJECT_MAX",
     "PREDICATE_MAX",
+    "RECALL_FOCUS_READ",
+    "RECALL_KEEP_OPENING",
+    "RECALL_LEAD_LEAST",
+    "RECALL_LEAD_SHOW",
+    "RECALL_LEAD_STEP",
+    "RECALL_OTHER_LEAST",
+    "RECALL_OTHER_SHOW",
+    "RECALL_OTHER_STEP",
     "RECALL_SHOW_ANSWER",
     "RECALL_SHOW_ONE",
     "RECALL_SHOW_QUESTION",
@@ -119,6 +127,29 @@ KEYWORD_HIT_CHARS = 300
 RECALL_SHOW_QUESTION = 200
 RECALL_SHOW_ANSWER = 300
 RECALL_SHOW_ONE = 500
+
+#: Room by rank in the recall block (the memory plan's W1a): the best
+#: recalled conversation gets up to RECALL_LEAD_SHOW characters, every other
+#: RECALL_OTHER_SHOW, each cut around the stretch holding the question's words.
+#: When the block's budget would leave a line out, the others give way first
+#: (down to RECALL_OTHER_LEAST), then the best (down to RECALL_LEAD_LEAST).
+#: Measured on LongMemEval: 0.48 of questions answered with today's 200 + 300,
+#: 0.74 with this shape (docs/plans/RECALL_BLOCK_BOUNDS_PROPOSAL.md).
+RECALL_LEAD_SHOW = 1500
+RECALL_OTHER_SHOW = 500
+RECALL_OTHER_LEAST = 250
+RECALL_LEAD_LEAST = 500
+#: How far each step gives way, in characters.
+RECALL_OTHER_STEP = 50
+RECALL_LEAD_STEP = 100
+#: Of a long memory, the focus cut reads at most this much of each side to
+#: find the question's words (a memory is kept whole, up to 2 MiB a side).
+RECALL_FOCUS_READ = 50_000
+#: When the stretch shown is not a side's start, its opening sentence is
+#: shown first, up to this many characters (at most half the side's room),
+#: then " … " and the stretch: a memory often names its subject first ("My
+#: sister Noura ..."). 0 shows the stretch alone.
+RECALL_KEEP_OPENING = 120
 
 #: A question that asks for every memory of a kind ("how many", "list them
 #: all", "كم مرة"; framework audit F9, part F): recall shows up to this many

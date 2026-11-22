@@ -18,13 +18,14 @@ rarity) that a memory's text contains.
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 from collections.abc import Iterable, Mapping
 
 from kazma_core.documents.arabic import fold_for_search
 
-__all__ = ["content_terms", "coverage", "mentions", "search_terms"]
+__all__ = ["content_terms", "coverage", "mentions", "search_terms", "word_term"]
 
 #: A word: letters and digits, hyphen-joined ("wi-fi", "zx4-91q") -- an
 #: underscore separates, as it does in the full-text index, so a slug like
@@ -140,6 +141,57 @@ def mentions(text: str, words: Iterable[str]) -> bool:
     pattern = re.compile(r"(?<!\w)(?:" + "|".join(branches) + ")", re.UNICODE)
     raw = (text or "").replace("_", " ")  # a slug's words are words (see _TOKEN)
     return bool(pattern.search(fold_for_search(raw)) or pattern.search(raw.lower()))
+
+
+@functools.lru_cache(maxsize=64)
+def _word_pattern(terms: frozenset[str]) -> re.Pattern[str] | None:
+    """A word that begins with one of *terms* of three letters or more, an
+    Arabic word with its article or one-letter prefix first (the rule of
+    :func:`mentions`); the longest term first."""
+    long_words = sorted((w for w in terms if len(w) >= 3), key=lambda w: (-len(w), w))
+    if not long_words:
+        return None
+    return re.compile(_AR_PROCLITIC + "(" + "|".join(re.escape(w) for w in long_words) + ")", re.UNICODE)
+
+
+def word_term(word: str, terms: frozenset[str]) -> str | None:
+    """Which of *terms* (``content_terms``) the word *word* holds, or None.
+
+    *word* is one word of a text, folded (``fold_for_search``) and read by
+    the same token rule as a question. A word holds a term when it is that
+    term once normalised (its article, possessive or light plural off), or,
+    for a term of three letters or more, when it begins with the term after
+    an Arabic article or one-letter prefix -- :func:`mentions`' rule, so a
+    memory's "vaccines" and "وبالقهوة" hold the question's "vaccine" and
+    "قهوه". What the recall block cuts a long memory around (W1a)."""
+    term = _normalise(word)
+    if term in terms:
+        return term
+    pattern = _word_pattern(terms)
+    if pattern is None:
+        return None
+    m = pattern.match(word)
+    return m.group(1) if m else None
+
+
+def word_spans(text: str, terms: frozenset[str]) -> list[tuple[int, int, str]]:
+    """Where *text* holds each of *terms*: (start, end, term) per word that
+    holds one (:func:`word_term`), in order, the positions those of *text*
+    as written (a word is folded on its own: folding the whole text would
+    move them)."""
+    if not terms:
+        return []
+    out: list[tuple[int, int, str]] = []
+    for m in re.finditer(r"\S+", text):
+        chunk = m.group()
+        folded = chunk.casefold() if chunk.isascii() else fold_for_search(chunk)
+        for token in _TOKEN.findall(folded):
+            if token in _EN_STOPWORDS or token in _AR_STOPWORDS:
+                continue
+            term = word_term(token, terms)
+            if term is not None:
+                out.append((m.start(), m.end(), term))
+    return out
 
 
 def coverage(

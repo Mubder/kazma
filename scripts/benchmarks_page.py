@@ -35,6 +35,8 @@ PRODUCT_MEASURES = ROOT / "tests" / "fixtures" / "memory_bench" / "product_measu
 #: LongMemEval's histories in the dev runs, in the order the page shows them.
 _LME_CONDITIONS = {
     "kazma": "Kazma's recall",
+    "kazma_before": "Kazma's recall before the change judged (its blocks from the earlier code)",
+    "kazma_turn": "Kazma's own chat turn (it reads a memory whole with memory_read)",
     "kazma_whole": "The same conversations read whole",
     "full": "The whole history",
     "oracle": "Only the answering conversations (oracle)",
@@ -395,7 +397,8 @@ def _longmemeval(folder: Path) -> list[str]:
         full_what = (f"history cut to {cut_at:,} characters (its oldest conversations left out)" if cut_at
                      else "whole history, uncut")
         lines += [
-            f"**Answering from it** ({a['sample']} questions; reader and judge {a['reader']}, LongMemEval's own "
+            f"**Answering from it** ({a['sample']} questions; reader {a['reader']}, judge "
+            f"{a.get('judge') or a['reader']}, LongMemEval's own "
             "judge prompts): the share of answers the judge called correct, from Kazma's recall as the model is "
             "shown it, from the same recalled conversations read whole (what the model gets when it opens them "
             "with `memory_read`, which this one-shot reader cannot call), from the whole history (the "
@@ -439,6 +442,44 @@ def _longmemeval(folder: Path) -> list[str]:
     lines += ["Reproduce: download LongMemEval into a folder of its own, then `python scripts/longmemeval_bench.py "
               "retrieve --data DIR` (and `answer`, `translate`, `parallel`; those call a model).", ""]
     return lines
+
+
+def _judges_agree(results: list[dict]) -> dict[str, float]:
+    """How often the second judge gave the first judge's verdict, per
+    condition, from the per-question rows (``<condition>_judge2``): a run
+    summarised before every condition was counted (the block another build
+    made, Kazma's turn) is read the same way."""
+    out: dict[str, float] = {}
+    for c in sorted({k[: -len("_judge2")] for r in results for k in r if k.endswith("_judge2")}):
+        pairs = [(r[c], r[f"{c}_judge2"]) for r in results if c in r and f"{c}_judge2" in r]
+        if pairs:
+            out[c] = round(sum(1 for a, b in pairs if a == b) / len(pairs), 4)
+    return out
+
+
+#: The question types whose gap to the whole history the memory plan goes
+#: after next, and the work item that does.
+_GAPS = {"multi-session": "W4", "temporal-reasoning": "W2"}
+
+
+def _where_kazma_stands(o: dict, tokens: dict, types: dict) -> list[str]:
+    """Where Kazma stands, said plainly from the run's own numbers: its block
+    against plain top-10 retrieval (and how many times its tokens), the whole
+    history and Kazma's own turn, and the question types it is furthest
+    behind on (the main session's rule, 22 Nov: the report says what the
+    block does not yet do)."""
+    if not all(k in o for k in ("kazma", "bge_top10", "full")):
+        return []
+    ratio = tokens.get("bge_top10", 0) / max(1, tokens.get("kazma", 0))
+    turn = (f" Kazma's own turn, which reads a memory whole when the block shows it in part, reaches "
+            f"{_pct(o['kazma_turn'])}." if "kazma_turn" in o else "")
+    gaps = [f"{name} questions ({_pct(types[name].get('kazma'))} against {_pct(types[name].get('full'))} for "
+            f"the whole history; {item})" for name, item in _GAPS.items()
+            if name in types and "kazma" in types[name] and "full" in types[name]]
+    return ["", f"**Where Kazma stands**: from its recall block alone Kazma answers {_pct(o['kazma'])}, "
+                f"against {_pct(o['bge_top10'])} for plain top-10 retrieval (bge-m3) at {ratio:.1f} times the "
+                f"tokens, and {_pct(o['full'])} for the whole history.{turn}"
+                + (f" The largest gaps are {' and '.join(gaps)}." if gaps else "")]
 
 
 def _longmemeval_dev(folder: Path) -> list[str]:
@@ -524,11 +565,24 @@ def _longmemeval_dev(folder: Path) -> list[str]:
     noise_file = folder / "noise_dev.json"
     noise = json.loads(noise_file.read_text(encoding="utf-8")) if noise_file.is_file() else {}
     flips = (noise.get("conditions") or {})
-    agree = (a.get("judges_agree") or {})
-    o = a["overall"]
+    agree = _judges_agree(a.get("results") or [])
+    o = dict(a["overall"])
+    # Kazma's own chat turn (W1c) is asked in a run of its own: its row sits
+    # beside the block it reads.
+    turn_file = folder / "answers_dev_turn.json"
+    turn = json.loads(turn_file.read_text(encoding="utf-8")) if turn_file.is_file() else None
+    if turn and turn.get("reader") == a.get("reader") and "kazma_turn" in turn["overall"]:
+        o["kazma_turn"] = turn["overall"]["kazma_turn"]
+        o.setdefault("prompt_tokens_mean", {})
+        o["prompt_tokens_mean"] = {**o["prompt_tokens_mean"],
+                                   "kazma_turn": (turn["overall"].get("prompt_tokens_mean") or {}).get("kazma_turn", 0)}
+        agree = {**agree, **_judges_agree(turn.get("results") or [])}
     lines += [
         f"**Answering from it**: reader {a['reader']} with its reasoning {a.get('reader_reasoning', 'off')}; "
-        f"judges {a['judge']} and {a.get('judge2') or '–'} (LongMemEval's prompts). The same build answered "
+        f"judges {a['judge']} and {a.get('judge2') or '–'} (LongMemEval's prompts"
+        + (f"; the judges swapped on {a['rejudged']['on']}: each verdict is kept with the model that gave it, "
+           "and no answer was asked again" if a.get("rejudged") else "")
+        + "). The same build answered "
         "every question twice: an answer that flips between the two runs is the noise, and no change is accepted "
         "on a difference smaller than it.",
         "",
@@ -542,8 +596,18 @@ def _longmemeval_dev(folder: Path) -> list[str]:
         f = flips.get(key) or {}
         lines.append(f"| {name} | {_pct(o[key])} | {_pct(f.get('b'))} | "
                      f"{f.get('flips', '–')} | {_pct(agree.get(key))} | {tokens.get(key, 0):,} |")
-    cut = a.get("cut_at_limit") or {}
-    unasked = a.get("unanswered") or {}
+    lines += _where_kazma_stands(o, tokens, a.get("types") or {})
+    cut = dict(a.get("cut_at_limit") or {})
+    unasked = dict(a.get("unanswered") or {})
+    if turn and "kazma_turn" in o:
+        cut.update({k: v for k, v in (turn.get("cut_at_limit") or {}).items()})
+        unasked.update({k: v for k, v in (turn.get("unanswered") or {}).items()})
+        t = turn.get("turn") or {}
+        lines += ["", f"Kazma's own turn answers through the agent's chat turn (W1c): its base prompt, the recall "
+                      f"block a turn gets, `memory_search`, `memory_read` and `memory_list`, at most three tool "
+                      f"rounds, asked once ({t.get('calls_mean', '–')} model calls and "
+                      f"{t.get('tool_requests_mean', '–')} tool requests a question, {t.get('seconds_p50', '–')} s "
+                      f"median)."]
     if any(cut.values()) or any(unasked.values()):
         lines += ["", f"Answers cut at the reader's limit: {sum(cut.values())}; answers or verdicts the API "
                       f"refused: {sum(unasked.values())} (scored wrong)."]
@@ -561,13 +625,25 @@ def _longmemeval_dev(folder: Path) -> list[str]:
                   *rows]
     read_file = folder / "model_read.json"
     if read_file.is_file():
-        s = json.loads(read_file.read_text(encoding="utf-8"))["summary"]
-        lines += ["", f"**The judges, read beside**: {s['n']} answers read by Claude (labelled model-read until "
-                      f"the owner checks them), the {s['disagreements']} the two judges disagree on first. The "
-                      f"first judge gave the reading's verdict on {_pct(s['judge'])} of them, the second on "
-                      f"{_pct(s['judge2'])}; on the disagreements {_pct(s['judge_on_disagreements'])} and "
-                      f"{_pct(s['judge2_on_disagreements'])}."]
+        lines += _judges_read_beside(json.loads(read_file.read_text(encoding="utf-8")), a)
     return lines + [""]
+
+
+def _judges_read_beside(read: dict, run: dict) -> list[str]:
+    """The answers read beside the judges, each judge named with how often
+    it gave the reading's verdict; and why the run's first judge judges
+    first, said only when the reading backs that order (the main session's
+    rule, 22 Nov: every number from the stronger judge, and the page says
+    why)."""
+    s = read["summary"]
+    first, second = read.get("judge") or "the first judge", read.get("judge2") or "the second"
+    out = [f"**The judges, read beside**: {s['n']} answers read by Claude (labelled model-read until the owner "
+           f"checks them), the {s['disagreements']} the two judges disagree on first. {first} gave the "
+           f"reading's verdict on {_pct(s['judge'])} of them, {second} on {_pct(s['judge2'])}; on the "
+           f"disagreements {_pct(s['judge_on_disagreements'])} and {_pct(s['judge2_on_disagreements'])}."]
+    if read.get("judge") == run.get("judge") and s["judge"] > s["judge2"]:
+        out[0] += f" That is why {first} judges first" + (f": {read['found']}" if read.get("found") else ".")
+    return ["", out[0]]
 
 
 def _ordinary_turn(path: Path) -> list[str]:

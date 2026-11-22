@@ -458,8 +458,9 @@ def test_a_long_turn_end_to_end_stored_recalled_bounded_read_whole(mem, monkeypa
     """The whole path through the real code: the live writer stores a long
     turn whole; the real ``recall`` finds it by a word only its end holds
     (keyword search reads all of it); the block the model is shown carries
-    it bounded, with the note naming its id; ``memory_read`` with that id
-    gives back every character, page by page."""
+    it bounded -- the stretch holding the question's word, room by rank
+    (the memory plan's W1a) -- with the note naming its id; ``memory_read``
+    with that id gives back every character, page by page."""
     from kazma_core.memory.dual_write import mirror_episode
     from kazma_core.memory.recall import format_recall_block, recall
 
@@ -471,7 +472,9 @@ def test_a_long_turn_end_to_end_stored_recalled_bounded_read_whole(mem, monkeypa
     block = format_recall_block(result)
     line = next(x for x in block.splitlines() if "User:" in x)
     assert f'memory_read("{eid}")' in line
-    assert "ZEPHYRQUILL" not in block  # shown bounded: the end is not in the block
+    # Shown bounded, around the stretch that holds the question's word.
+    assert "ZEPHYRQUILL" in line and len(line) < limits.RECALL_LEAD_SHOW + 250
+    assert "نيلوفري" not in block  # the answer's own end is still left out
     read = _tools()["memory_read"]
     pages, offset = [], 0
     while offset is not None and len(pages) < 20:

@@ -137,6 +137,40 @@ measures' own baseline (tokens per ordinary turn, time to first token, small
 store), plus the browser real-use suite. The R9 v8 re-tune and the W1 work
 started on 21 Nov wait for this.
 
+*Measured, 22 Nov* (dev 200; reader qwen3.7-plus at the provider's default
+reasoning, what Kazma sends Qwen; judge qwen3.8-flash, second judge
+qwen3.7-plus; the owner moved the memory work from DeepSeek to Qwen that
+day, and the partial DeepSeek answers are kept aside, labelled, as a record
+only). The runs were judged first by qwen3.7-plus; the model-read answers
+below found qwen3.8-flash the stronger judge, so the main session swapped
+them the same day, from the cached verdicts (each verdict now kept with the
+model that gave it, `rejudge`; the noise run, which had no second judge,
+got qwen3.8-flash's verdicts on its answers, no answer asked again).
+Answered, the main run and its noise run (the answers that flip): Kazma's
+block 0.69 / 0.69 (2); the block before W1a 0.47 / 0.455 (5); the same
+rounds read whole 0.75 / 0.76 (4); the whole history 0.91 / 0.885 (13;
+three histories answered HTTP 400 in both); the oracle 0.92 / 0.925 (9);
+bge-m3's ten rounds 0.85 / 0.84 (8); BM25's 0.765 / 0.755 (2). With
+qwen3.7-plus first they read 0.675, 0.46, 0.755, 0.895, 0.905, 0.835 and
+0.745. Judges agree on 97.8 % of 1,400 pairs. Tokens: prompt 27.8M and 27.5M,
+completion 1.04M and 1.05M (0.93M and 0.94M reasoning); Qwen served 1 % and
+0.1 % of the prompt tokens from its cache (each history is its question's
+own). Results: `tests/fixtures/longmemeval/answers_dev.json`,
+`answers_dev_noise.json`, `noise_dev.json`; the page prints them. The
+largest gaps to the whole history: multi-session 0.40 against 0.92 (W4's),
+temporal 0.60 against 0.91 (W2's). Said plainly (the page says it too): from
+its block alone Kazma answers 0.69, against 0.85 for plain top-10
+retrieval at 3.6 times the tokens and 0.91 for the whole history; its own
+turn reaches 0.79 (W1c). The 50 answers read beside the judges
+(`model_read.json`, Claude's reading, labelled model-read until the owner
+checks them; the 27 the judges disagree on first): qwen3.8-flash gave the
+reading's verdict on 86 % of them, qwen3.7-plus on 60 %; on the
+disagreements 74 % and 26 %. qwen3.7-plus says no to a right answer that
+adds a detail ("a yellow dress and a pair of earrings") or names the missing
+information and then estimates (17 of its 20 wrong verdicts are such
+refusals); the disagreements are 2 % of the 1,400 pairs, so the swap moved
+a score by up to two and a half points. W0 is complete.
+
 ### W1a. Show the answer (M)
 
 A budget by rank (the top conversation shown whole when it fits, later ones
@@ -145,6 +179,65 @@ moved with it, and a conversation's neighbouring rounds when they continue
 it. Tuned on the free proxies and dev, gated on the tokens it adds to an
 ordinary turn: the block stays small when the evidence is weak.
 
+*State, 22 Nov (built on the side branch, not accepted).* Room by rank as
+the bounds proposal shaped it: the best conversation up to 1,500
+characters, the others 500, each side cut around the stretch holding the
+question's words, the others giving way first (to 250) and then the best
+(to 500) when the 1,500-token budget would leave a line out; the cap stays.
+A side whose stretch is deep inside it shows its opening sentence first (up
+to 120 characters), unless the stretch alone would begin inside that
+opening. Neighbouring rounds are not added (recall's joined follow-ups keep
+their own line). With and without it on one commit, no model call: on dev
+the answer's text is in the block for 0.442 of the worded questions (0.302
+without; 0.450 in the rounds shown), 19 gained and none lost; the block's
+tokens p50 1,075 -> 1,372 and p95 1,317 -> 1,894 there; an ordinary turn's
+block, Kazma's benchmark EN/AR, the small store and the speakers set
+unchanged. Where memories are as long as live's (the product measures'
+`long` store, live's episode lengths: answers a median 1,351 characters,
+4,088 at the 95th) an ordinary turn's block grows from 872 / 1,352 tokens
+(p50 / p95; 1,644 the largest) to 1,146 / 1,659 (1,922): about 275 tokens
+a turn on the median, 310 at the 95th. The cap bounded the lines'
+characters (a quarter of them counted as tokens), not the block: the rules,
+the fence and Arabic's shorter tokens were outside it, with or without W1a.
+Fixed 22 Nov (a bug from before W1a): the cap is the whole block's, counted
+as the context trim counts. Then (the same review) room by rank goes to hits
+recall rates strong only; a "possibly related" one keeps the fixed bounds.
+With and without W1a on one commit, split by the question's top hit (the
+long store; p50 / p95 / mean tokens):
+
+| Top hit | Questions | With W1a | Without | Growth (p50) |
+|---|---|---|---|---|
+| Strong | 129 | 1,133 / 1,486 / 1,109 | 869 / 1,348 / 904 | +264 |
+| Possibly related | 28 | 881 / 1,403 / 885 | 881 / 1,403 / 875 | 0 |
+| No answer | 26 | 1,027 / 1,494 / 1,018 | 892 / 1,352 / 915 | +135 |
+| All | 183 | 1,073 / 1,484 / 1,062 | 872 / 1,350 / 901 | +201 |
+
+The growth sits in the strong group; the no-answer group grows because recall
+still rates a wrong memory strong for a question memory cannot answer (item 5
+of section 7, W3 + W2's to fix). On dev: the answer's text in the block for
+0.434 of the worded questions (17 gained, none lost against the fixed bounds;
+room for every hit had 0.442, one more answer held by a possibly related
+hit), tokens p50 1,080 -> 1,337 and p95 1,317 -> 1,489. On the long store the block is then 1,146 /
+1,494 tokens (1,499 the largest) with W1a and 872 / 1,350 (1,497) without;
+on dev the answer's text in the block is unchanged (0.442 with W1a, 0.302
+without), the largest block 1,946 -> 1,498 with W1a and 1,620 -> 1,424
+without. The opening was chosen against the stretch alone on dev: one
+answer gained (a name in a memory's first sentence), none lost, 8 tokens
+a question on average; a plain "opening first" rule tied (one gained, one
+lost, the opening spending room the stretch nearly showed), and the rule
+that settles it was set after reading that one question. Accepted only on W0's end-to-end dev answering, its noise run,
+the second judge and the model-read answers, all waiting for DeepSeek
+credit.
+
+*Accepted, 22 Nov* on dev, with and without W1a on one reader and judge
+(the before-block built by 064dfec3b, `longmemeval_blocks.py`): answered
+0.47 -> 0.69 in the main run (+51 / -7 questions) and 0.455 -> 0.69 in the
+noise run (+54 / -7), +50 / -7 by the second judge (qwen3.7-plus); 51 gains
+and 5 losses repeat in both runs, against 2 (W1a's block) and 5 (the old
+block) answers that flip between two runs of one build. The real-use suite, two runs each
+side on qwen3.7-plus: 15/18 and 17/18 before, 16/18 and 18/18 with W1a: no
+regression, too noisy to credit (every miss an Arabic step; finding 10).
+
 ### W1c. The product path as the only path (M)
 
 The benchmark answers through Kazma's real turn: base prompt, recall rules,
@@ -152,6 +245,37 @@ facts, summaries, the memory tools (`memory_read` to open a cut memory), the
 shipped reasoning level, at most three tool rounds, with tokens, calls and
 time reported. This is how searching again arrives without a model in the
 recall path (decision 14 stays).
+
+State, 22 Nov: built and tested with a stand-in model, not yet run (it runs
+with W0's credit runs). `longmemeval_bench.py answer --conditions kazma_turn`
+asks each question through the supervisor graph (`scripts/longmemeval_turn.py`):
+the agent's own base prompt with the question's date
+(`cultural_context_enrichment.note_for_day`, the one format), recall on a
+private store of the question's history at the question's time, the block as
+a turn sends it, `memory_search`, `memory_read` and `memory_list` only, the
+run's `--reasoning` as `agent.chat_reasoning` (low, live's; the shipped
+default sends nothing, which on DeepSeek is "high"), at most three tool rounds
+(the turn's own iteration budget refuses a fourth), `persist=False`. Each
+answer is cached by what it was asked from (the base prompt, question, date,
+recall block, reader) and judged like the others; the result has its calls,
+tool requests, tokens, the cache's share, seconds, and whether the turn's
+block was the harness's. The reader is Kazma's own DeepSeek client, so its
+temperature is the product's (ignored by DeepSeek while it reasons). Turns
+run one at a time. Left for a later piece: facts and summaries in the store
+(the harness seeds conversations only, so the turn's block has neither).
+
+Run 22 Nov on dev (qwen3.7-plus, the provider's default reasoning, one run):
+0.79 answered (0.765 by qwen3.7-plus), ten points over the block alone
+(0.69), from its `memory_read` / `memory_list` calls; 1.76 model calls and
+0.71 tool requests a
+question, 20,727 prompt tokens mean (59 % from Qwen's cache: the base prompt
+repeats), 10.4 s median; one call refused (permanent). Judges agree on 96.5 %.
+The harness reported the turn's block equal to its own for 92 %: it read the
+first model call, and on a gray-zone request the intent classifier's
+refinement (`agent/intent/classify._refine_acts_llm`) asks first, with the
+user's message alone. Read from the call that holds the recall note (fixed
+the same day), the turn saw the harness's block for 199 of 200; the one left
+is a product finding (section 7, item 11).
 
 ### W5 + W1b. One passage unit (M)
 
@@ -267,6 +391,35 @@ the benchmarks page regenerated.
 
 ## 7. Found while measuring, to fix (not inside W0)
 
+**First: finding 10, an Arabic user's facts often do not reach the
+answer.** Found by the real-use suite on qwen3.7-plus (22 Nov), the owner's
+own language; four runs (two before W1a, two with it), read from the
+private installs' logs:
+* "أسكن في لشبونة هالأيام." ("I live in Lisbon these days") gave no fact
+  from the quick pass in any run; only the model's deep pass stored one,
+  in some runs. "وين أسكن؟" ("where do I live?") recalled a fact exactly in
+  those runs.
+* "انتقلت إلى بورتو الشهر الماضي." ("I moved to Porto last month") gave a
+  quick-pass fact in every run, and "وين أسكن الحين؟" ("where do I live
+  now?") recalled it in 1 of 4: three times the block held only the two
+  conversations, both dated the same day, and the model answered with the
+  older city (Lisbon) in all three.
+In English every step passed in all four. The product cost: an Arabic
+user's changed facts do not reach the answer. It may be two causes (the
+quick pass reading the first statement; the second statement's fact not
+found by the question); the diagnosis says, before anything is built. Scheduled
+next after W1a's acceptance, before W1c's runs or anything else (the main
+session's decision): diagnose it with no model call, step by step through
+`_recall_beliefs` as an English-Arabic pair (what the passes stored for the
+statement -- subject, predicate, the value's spelling, its vector -- and
+where the Arabic question loses it: content words, the fact lane's meaning
+floor, the fact vector's text `user lives_in <obj>`, a script mismatch);
+fix where it fails, with a paired gate (the same facts told in English and
+in Arabic, asked in both, all recalled; today's code as the negative
+control); then the speakers set, the benchmark EN/AR and the product
+measures. Two causes, or one W3 also touches, go to the main session
+before building.
+
 1. **A fact told once is kept twice, and forgetting one copy leaves it
    known.** In the real-use suite (`scripts/memory_real_use.py`, 22 Nov)
    "My sister Noura works as a dentist." became two memories: the turn, and
@@ -307,3 +460,92 @@ the benchmarks page regenerated.
    split (4.8 memories, 1,089 tokens); on Kazma's own benchmark 0 of 22
    English and 0 of 4 Arabic (`tests/fixtures/memory_bench/product_measures.json`).
    W3 + W2's to fix: saying nothing when nothing fits.
+6. **Memory's own model calls are not in the per-call ledger.** Found by
+   the Spaces builder's review of every model call (22 Nov) and checked in
+   the code: no module under `kazma_core/memory/` and not
+   `skills/self_improvement.py` calls `llm_ledger.record_llm_call` or goes
+   through `resilient_chat`. Unledgered:
+   - the deep pass (`belief_extractor._llm_extract`), a call per turn
+     that is not small talk;
+   - the weekly summaries and the month and project roll-ups
+     (`topic_summaries._default_chat`, used by `topic_rollups` too);
+   - entity disambiguation (`entity_resolution`, off by default:
+     `entity_llm_disambiguate`);
+   - the lesson refiner (`analyze_and_apply_chat_turn`, and
+     `_analyze_success` / `_analyze_failure` for the swarm worker);
+   - the V1 backfill's fact pass (`backfill_v2`).
+
+   So Kazma's spend reports never show them, the product measure "cost per
+   ordinary turn" misses them, and a person's daily limit (Spaces S2-02)
+   cannot count them. A product fix, scheduled after W0: ledger each call
+   under the person the turn was for (the asker the work's scope binds;
+   Kazma's own sweeps name nobody, as the ledger already does). Gate: every
+   memory model call is ledgered, read from the source, a planted
+   unledgered call as the negative control. The benchmark's recorded
+   replies (`benchmark.py`'s recorder) are not the product's calls.
+7. **Two token estimators disagree on Arabic.** Found fixing the recall
+   block's budget (22 Nov). The context trim (`turn_input`), the recall
+   block's budget and the product measures count with
+   `summarizer.estimate_tokens`: Latin at four characters a token, Arabic at
+   about 2.5. The compaction authority (`authority.create_authority`, handed
+   to the supervisor graph) counts with `token_counter.TokenCounter`:
+   tiktoken's count when the package is installed and knows the model, else
+   four characters a token for every script -- and tiktoken is not in this
+   checkout's environment. So for an Arabic chat the compaction threshold
+   sees about two thirds of the tokens the trim sees. For later: one
+   estimator for context, or the reason two stay. Not fixed now.
+8. **Every block measure leaves out what a turn adds to each memory.** Found
+   building W1c (22 Nov). Kazma ships `memory.v2.explain_recall` on, so a
+   chat turn's recall block ends each memory with its sources ("_(via fts5,
+   dense)_"); the product measures, the bounds script and LongMemEval's
+   block condition all build the block with `explain=False`. Measured with
+   and without on one commit, no model call: the product store's block p50 /
+   p95 675 / 1,030 tokens without, 698 / 1,068 with; the long store 1,073 /
+   1,484 without, 1,096 / 1,485 with, and in 3 of its blocks the budget
+   leaves a memory out. The sources are the operator's view (the "Memory
+   used" row has its own payload, `build_memory_explain_payload`).
+   Decided and fixed the same day (the main session): the tags explain
+   retrieval to a person, help no answer, cost tokens and push memories out
+   of the budget. The model's block never carries them;
+   `memory.v2.explain_recall` keeps feeding the "Memory used" row;
+   `format_recall_block` has no option that changes a line, so every
+   measure builds the block the model gets. Before and after on one store,
+   no model call: the block a turn sent, p50 / p95 698 / 1,068 tokens on
+   the product store and 1,096 / 1,485 on the long store; now 675 / 1,030
+   and 1,073 / 1,484, and the 3 long blocks keep their memory. The measures'
+   own numbers do not move (they always built it so). Gate:
+   `tests/test_recall_block_is_what_is_measured.py`. W0's runs are measured
+   on this block: the dev runs' block conditions were already built so, and
+   Kazma's turn and the real-use suite run after the fix.
+9. **The per-call ledger keeps no count of the cache's share.** Found moving
+   W0 to Qwen (22 Nov): `llm_calls` (`observability/llm_ledger.py`) has
+   prompt, completion and total tokens and no column for the prompt tokens
+   the provider served from its cache (DeepSeek's `prompt_cache_hit_tokens`,
+   Qwen's and OpenAI's `prompt_tokens_details.cached_tokens`), so Kazma's
+   spend reports and the real-use suite's "spent" cannot show it (the
+   suite now counts its judge's own, `judge_spent`). It belongs to the same
+   ledger fix as finding 6, after W0: one column, filled from either shape,
+   summed beside the prompt tokens. Not fixed now.
+11. **"Did I switch to more water" suppresses recall.** Found by W1c's run
+   (22 Nov): "For the coffee-to-water ratio in my French press, did I switch
+   to more water per tablespoon of coffee, or less?" is read by the intent
+   engine as an explicit topic shift (`intent_mode=shift_explicit`: the word
+   "switch"), and the supervisor suppresses memory recall for it. The turn
+   answered right from its tools. A question about the user's own past
+   change is not a change of subject; the shift rules belong to the intent
+   engine, not to memory. Not fixed now.
+12. **The intent classifier's refinement calls a thinking model for four
+   seconds.** Found the same day: on a gray-zone request
+   `agent/intent/classify._refine_acts_llm` asks the chat model to classify
+   the request, with a 4 s limit and no reasoning switch; qwen3.7-plus thinks
+   by default. Measured the same day on the 16 dev questions where it ran
+   (`_refine_acts_llm` as the turn calls it, then the same request with no
+   limit): it answered in time 0 of 16 -- every one waited the full 4.0 s
+   and kept the heuristics' acts; with no limit qwen3.7-plus takes 8.8-24 s
+   (p50 14 s) and 470-1,240 completion tokens, nearly all reasoning, and then
+   answers the JSON. So on Qwen every gray-zone turn waits 4 s for nothing
+   (and the request may still run and be billed after it is abandoned). The
+   fix is provider-side: Kazma's reasoning switch reaching Qwen
+   (`enable_thinking`), on the owner's list. Also seen: 15 of the 16 were
+   gray because the heuristics read "Can you remind me what you said..." as
+   a `remind` act (a reminder to book): a memory question, not a reminder.

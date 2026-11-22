@@ -10,6 +10,7 @@ suite has it)::
     python scripts/memory_product_measures.py measure --write      # record it
     python scripts/memory_product_measures.py measure --real-embedder
     python scripts/memory_product_measures.py check                # tokens against the record
+    python scripts/memory_product_measures.py live-lengths BACKUP  # live's episode lengths (W1a)
 
 Measured, on the retrieval benchmark's store (dataset v8, both sets) with its
 recorded vectors (no model is loaded unless ``--real-embedder``):
@@ -25,6 +26,20 @@ recorded vectors (no model is loaded unless ``--real-embedder``):
   ``check`` command and ``tests/test_memory_product_measures.py`` hold it to
   the record, so a change to the block's size records its new numbers in the
   same commit (its before and after).
+* **The same tokens split three ways** (``block_tokens_by_evidence``, on
+  the store and the long store): questions whose top hit recall rates
+  strong, those it rates "possibly related", and those memory holds no
+  answer to. Room by rank (W1a) is given to strong hits only, so its growth
+  belongs in the first.
+* **The same block where memories are as long as live's** (``long``): the
+  store, each conversation lengthened to a length drawn from live's episode
+  lengths (``tests/fixtures/memory_bench/live_lengths.json``: percentiles
+  only, read by ``live-lengths`` from a native backup of live's memory
+  database opened immutable, never the live file; no text leaves it). The
+  padding is stopwords only, after the conversation's own text: no word a
+  question asks about, the seeded vectors kept, so recall chooses as on the
+  store and the tokens measure the lengths alone. Since memories are kept
+  whole (2026-11-19) a live memory is mostly longer than the benchmark's.
 * **Recall's time per question** (the search and ranking, recorded vectors),
   and with ``--real-embedder`` the embedding model's time for each question on
   this machine: memory's share of the time to the first token. Kazma's whole
@@ -56,7 +71,10 @@ REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "tests" / "fixtures" / "memory_bench"
 VECTORS = FIXTURES / "vectors.npz"
 RECORD = FIXTURES / "product_measures.json"
-STORES = ("store", "scale")
+LIVE_LENGTHS = FIXTURES / "live_lengths.json"
+STORES = ("store", "scale", "long")
+#: The tiers recall reads (``vector_engine.RECALLABLE_TIERS``), counted in live's lengths.
+_LIVE_TIERS = ("working", "recall", "episodic", "archived")
 LANGS = ("en", "ar")
 
 
@@ -80,12 +98,44 @@ def _pct(values: list[float], share: float) -> float:
     return ordered[min(len(ordered) - 1, round(share * (len(ordered) - 1)))] if ordered else 0.0
 
 
-def block_tokens(conn: Any, questions: list[dict[str, Any]]) -> tuple[dict[str, list[int]], list[float]]:
+#: The three ways the block's tokens are split (the W1a review): the
+#: question's top hit rated strong, rated "possibly related", or a question
+#: memory holds no answer to (the benchmark's ``abstain``).
+EVIDENCE_GROUPS = ("strong", "weak", "no_answer")
+
+
+def evidence_group(result: Any, unanswerable: bool) -> str:
+    """Which of :data:`EVIDENCE_GROUPS` a question's recall falls in: its
+    top hit -- the first conversation, else the first fact, else the first
+    summary -- strong or weak (``strength``); an unanswerable question apart,
+    whatever it shows. A question that shows nothing counts as weak."""
+    if unanswerable:
+        return "no_answer"
+    top = next(iter(result.episodes or result.beliefs or result.summaries or []), None)
+    return "strong" if top is not None and (top.metadata or {}).get("strength") != "weak" else "weak"
+
+
+def recall_block(conn: Any, query: str, *, tenant_id: str, now: float) -> tuple[Any, str, float]:
+    """Recall for *query* on *conn* at *now*, the block a chat turn's model
+    is given for it (what every measure here counts:
+    ``tests/test_recall_block_is_what_is_measured.py`` holds it to the block
+    the supervisor injects), and recall's own seconds."""
+    from kazma_core.memory.recall import format_recall_block, recall
+
+    with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
+        started = time.perf_counter()
+        res = recall(query, conn=conn, tenant_id=tenant_id, limit=5, local_only=True, now=now)
+        seconds = time.perf_counter() - started
+    return res, ("" if res.empty else format_recall_block(res)), seconds
+
+
+def block_tokens(conn: Any, questions: list[dict[str, Any]], *,
+                 by_evidence: dict[str, list[int]] | None = None) -> tuple[dict[str, list[int]], list[float]]:
     """Each question's recall block as the supervisor adds it, in tokens, by
-    language; and recall's time per question."""
+    language; and recall's time per question. *by_evidence*, when given, is
+    filled with the same tokens by :func:`evidence_group`."""
     from kazma_core.memory import benchmark
     from kazma_core.memory.question_shape import standalone_query
-    from kazma_core.memory.recall import format_recall_block, recall
     from kazma_core.summarizer import estimate_tokens
 
     tokens: dict[str, list[int]] = {lang: [] for lang in LANGS}
@@ -93,14 +143,112 @@ def block_tokens(conn: Any, questions: list[dict[str, Any]]) -> tuple[dict[str, 
     for q in questions:
         query = standalone_query(q["text"], q.get("context"))
         now = benchmark.BASE_TIME + float(q.get("now_day", benchmark._ASKED_ON_DAY)) * 86400
-        with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
-            started = time.perf_counter()
-            res = recall(query, conn=conn, tenant_id=benchmark.BENCH_TENANT, limit=5, local_only=True, now=now)
-            seconds.append(time.perf_counter() - started)
-        block = "" if res.empty else format_recall_block(res, explain=False)
+        res, block, took = recall_block(conn, query, tenant_id=benchmark.BENCH_TENANT, now=now)
+        seconds.append(took)
         n = estimate_tokens([{"role": "system", "content": block}]) if block else 0
         tokens["ar" if _arabic(q["text"]) else "en"].append(n)
+        if by_evidence is not None:
+            by_evidence.setdefault(evidence_group(res, q.get("category") == "abstain"), []).append(n)
     return tokens, seconds
+
+
+def _filler(arabic: bool) -> str:
+    """Text holding no content word (``query_terms``' own stopwords): what a
+    lengthened memory is padded with, in its language."""
+    from kazma_core.memory import query_terms
+
+    words = sorted(query_terms._AR_STOPWORDS_RAW.split() if arabic else
+                   (w for w in query_terms._EN_STOPWORDS if w.isalpha()))
+    return " ".join(words) + " "
+
+
+def _to_length(text: str, length: int) -> str:
+    """*text*, then filler in its language, to *length* characters (whole
+    words); a text already that long is kept as it is."""
+    if len(text) >= length:
+        return text
+    filler = _filler(_arabic(text))
+    pad = (filler * (length // len(filler) + 2))[: max(0, length - len(text) - 1)]
+    return (text + " " + pad[: pad.rfind(" ")]).rstrip() if " " in pad else text
+
+
+def lengthen(conn: Any, lengths: dict[str, Any], *, tenant_id: str) -> int:
+    """Lengthen every conversation of the seeded store to a length drawn from
+    *lengths* (``live_lengths.json``), the draw seeded by the row's id: a
+    two-sided conversation's question and answer from their percentiles, a
+    one-sided one from the one-sided percentiles. Returns the rows changed."""
+    rows = conn.execute("SELECT id, user_text, assistant_text FROM episodes WHERE tenant_id = ?",
+                        (tenant_id,)).fetchall()
+    changed = 0
+    for row in rows:
+        draw = random.Random(f"live-lengths:{row[0]}")
+        question, answer = str(row[1] or ""), str(row[2] or "")
+        if question and answer:
+            question = _to_length(question, lengths["question_percentiles"][draw.randint(0, 100)])
+            answer = _to_length(answer, lengths["answer_percentiles"][draw.randint(0, 100)])
+        elif question or answer:
+            n = lengths["one_side_percentiles"][draw.randint(0, 100)]
+            question, answer = (_to_length(question, n), answer) if question else (question, _to_length(answer, n))
+        else:
+            continue
+        conn.execute("UPDATE episodes SET user_text = ?, assistant_text = ? WHERE id = ? "
+                     "AND (? IS NULL OR tenant_id = ?)", (question, answer, row[0], tenant_id, tenant_id))
+        changed += 1
+    conn.commit()
+    return changed
+
+
+def _percentiles(values: list[int]) -> list[int]:
+    ordered = sorted(values)
+    return [ordered[min(len(ordered) - 1, round(p / 100 * (len(ordered) - 1)))] for p in range(101)] if ordered else []
+
+
+def live_lengths(backup: Path) -> dict[str, Any]:
+    """Episode lengths from *backup*, a native backup of live's memory
+    database (``memory_state_<ts>.db``), opened immutable: nothing written,
+    no lock taken, lengths only (SQLite's ``length``), as percentiles. The
+    live file itself is refused."""
+    import sqlite3
+
+    # A native backup's own name (``memory/backup.py``: ``<stem>_<epoch>.db``
+    # of live's ``memory_state.db``), never the live file's.
+    if not re.fullmatch(r"memory_state_\d+\.db", backup.name):
+        raise SystemExit(f"{backup.name} is not a native backup of the memory database (memory_state_<ts>.db); "
+                         "the live file is never read")
+    conn = sqlite3.connect("file:" + backup.resolve().as_posix() + "?mode=ro&immutable=1", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT length(COALESCE(user_text,'')), length(COALESCE(assistant_text,'')) FROM episodes "
+            f"WHERE tier IN ({','.join('?' * len(_LIVE_TIERS))})", _LIVE_TIERS).fetchall()
+    finally:
+        conn.close()
+    both = [r for r in rows if r[0] and r[1]]
+    one = [max(r) for r in rows if bool(r[0]) != bool(r[1])]
+    return {
+        "what": "Live's episode lengths in characters, as percentiles 0..100, from a native backup of its "
+                "memory database opened immutable; lengths only, no text. Written by "
+                "scripts/memory_product_measures.py live-lengths.",
+        "backup_taken": int(backup.stem.rpartition("_")[2]),
+        "tiers": list(_LIVE_TIERS),
+        "episodes": len(rows),
+        "two_sided": len(both),
+        "one_sided": len(one),
+        "question_percentiles": _percentiles([r[0] for r in both]),
+        "answer_percentiles": _percentiles([r[1] for r in both]),
+        "one_side_percentiles": _percentiles(one),
+    }
+
+
+def evidence_summary(by_evidence: dict[str, list[int]]) -> dict[str, Any]:
+    """:data:`EVIDENCE_GROUPS`' tokens: how many questions, p50, p95, the
+    largest and the mean."""
+    out: dict[str, Any] = {}
+    for group in EVIDENCE_GROUPS:
+        values = by_evidence.get(group) or []
+        out[group] = {"n": len(values), "p50": _pct(values, 0.5), "p95": _pct(values, 0.95),
+                      "max": max(values, default=0),
+                      "mean": round(statistics.fmean(values), 1) if values else 0.0}
+    return out
 
 
 def token_summary(tokens: dict[str, list[int]]) -> dict[str, Any]:
@@ -154,7 +302,8 @@ def embedding_seconds(questions: list[dict[str, Any]]) -> list[float]:
     return out
 
 
-def measure(*, real_embedder: bool = False, small: bool = True, scale: bool = True) -> dict[str, Any]:
+def measure(*, real_embedder: bool = False, small: bool = True, scale: bool = True,
+            long: bool = True) -> dict[str, Any]:
     from kazma_core.memory import benchmark
 
     data = benchmark.load_dataset()
@@ -164,8 +313,10 @@ def measure(*, real_embedder: bool = False, small: bool = True, scale: bool = Tr
     with _replayed(replay):
         with benchmark._seeded_store(data) as (conn, refs, covers):
             report["benchmark"] = scores_by_language(conn, refs, covers, questions)
-            tokens, seconds = block_tokens(conn, questions)
+            by_evidence: dict[str, list[int]] = {}
+            tokens, seconds = block_tokens(conn, questions, by_evidence=by_evidence)
             report["block_tokens"] = {"store": token_summary(tokens)}
+            report["block_tokens_by_evidence"] = {"store": evidence_summary(by_evidence)}
             report["recall_ms"] = {"p50": round(_pct(seconds, 0.5) * 1000, 1),
                                    "p95": round(_pct(seconds, 0.95) * 1000, 1)}
         scaled = benchmark._scaled_dataset(data) if scale else None
@@ -175,6 +326,13 @@ def measure(*, real_embedder: bool = False, small: bool = True, scale: bool = Tr
                 report["block_tokens"]["scale"] = token_summary(tokens)
                 report["recall_ms_scale"] = {"p50": round(_pct(seconds, 0.5) * 1000, 1),
                                              "p95": round(_pct(seconds, 0.95) * 1000, 1)}
+        if long:
+            with benchmark._seeded_store(data) as (conn, _refs, _covers):
+                lengthen(conn, json.loads(LIVE_LENGTHS.read_text(encoding="utf-8")), tenant_id=benchmark.BENCH_TENANT)
+                by_evidence = {}
+                tokens, _seconds = block_tokens(conn, questions, by_evidence=by_evidence)
+                report["block_tokens"]["long"] = token_summary(tokens)
+                report["block_tokens_by_evidence"]["long"] = evidence_summary(by_evidence)
         if small:
             report["small_store"] = benchmark.run_small_store_benchmark(data)["overall"]
     if real_embedder:
@@ -227,11 +385,20 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("--write", action="store_true", help="record it in tests/fixtures/memory_bench")
     m.add_argument("--real-embedder", action="store_true", help="also time the embedding model on this machine")
     sub.add_parser("check")
+    live = sub.add_parser("live-lengths", help="record live's episode lengths from a native backup")
+    live.add_argument("backup", type=Path, help="a memory_state_<ts>.db native backup (opened immutable)")
     args = p.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     random.seed(0)
     if args.cmd == "measure":
         return _cmd_measure(args.write, args.real_embedder)
+    if args.cmd == "live-lengths":
+        report = live_lengths(args.backup)
+        LIVE_LENGTHS.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8", newline="\n")
+        q, a = report["question_percentiles"], report["answer_percentiles"]
+        print(f"{report['episodes']} episodes; question p50/p95 {q[50]}/{q[95]}, answer p50/p95 {a[50]}/{a[95]}")
+        print(f"wrote {LIVE_LENGTHS.relative_to(REPO)}")
+        return 0
     return _cmd_check()
 
 

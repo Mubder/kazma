@@ -81,7 +81,7 @@ def test_fit_fills_the_budget_and_leaves_no_line_out(bounds):
         h.metadata["display"], h.metadata["more"] = display(*row)
     from kazma_core.memory.recall import format_recall_block
 
-    assert bounds.lines_shown(format_recall_block(wide, explain=False)) < len(ids2)
+    assert bounds.lines_shown(format_recall_block(wide)) < len(ids2)
 
 
 def test_a_list_line_keeps_its_own_bounds(bounds):

@@ -1,0 +1,168 @@
+{
+ "source": {
+  "dataset": "xiaowu0162/longmemeval-cleaned",
+  "revision": "98d7416c24c778c2fee6e6f3006e7a073259d48f",
+  "sha256": {
+   "longmemeval_s_cleaned.json": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+   "longmemeval_oracle.json": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c"
+  }
+ },
+ "split": "dev",
+ "run": "smoke",
+ "sample": 2,
+ "reader": "qwen3.7-plus",
+ "reader_reasoning": "default",
+ "judge": "qwen3.7-plus",
+ "judge2": "qwen3.8-flash",
+ "conditions": [
+  "kazma",
+  "kazma_whole",
+  "full",
+  "oracle",
+  "bge_top10",
+  "bm25_top10",
+  "kazma_before"
+ ],
+ "blocks_from": {
+  "kazma_before": "064dfec3b"
+ },
+ "provider": "ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1",
+ "made_on": "2026-11-22",
+ "limit": 5,
+ "full_max_chars": null,
+ "what": "One reader answers each question from Kazma's recall block, from the same recalled rounds read whole, from the whole history (uncut unless full_max_chars says) and from the answer sessions alone; kazma_turn asks it through Kazma's own chat turn (base prompt, recall block, the memory read tools, at most three tool rounds); LongMemEval's judge prompts score each answer. Scores and token counts only.",
+ "usage": {
+  "calls": 42,
+  "prompt_tokens": 270495,
+  "completion_tokens": 7140,
+  "prompt_cache_hit_tokens": 0,
+  "reasoning_tokens": 6610
+ },
+ "overall": {
+  "n": 2,
+  "kazma": 1.0,
+  "kazma_whole": 1.0,
+  "full": 1.0,
+  "oracle": 1.0,
+  "bge_top10": 1.0,
+  "bm25_top10": 1.0,
+  "kazma_before": 0.5,
+  "prompt_tokens_mean": {
+   "kazma": 1238,
+   "kazma_whole": 1518,
+   "full": 117627,
+   "oracle": 3072,
+   "bge_top10": 3834,
+   "bm25_top10": 4518,
+   "kazma_before": 1062
+  }
+ },
+ "types": {
+  "single-session-user": {
+   "n": 2,
+   "kazma": 1.0,
+   "kazma_whole": 1.0,
+   "full": 1.0,
+   "oracle": 1.0,
+   "bge_top10": 1.0,
+   "bm25_top10": 1.0,
+   "kazma_before": 0.5
+  }
+ },
+ "kazma_vs_kazma_before": {
+  "questions": 2,
+  "gained": 1,
+  "lost": 0,
+  "net": 1,
+  "gained_ids": [
+   "6f9b354f"
+  ],
+  "lost_ids": []
+ },
+ "judges_agree": {
+  "kazma": 1.0,
+  "kazma_whole": 1.0,
+  "full": 1.0,
+  "oracle": 1.0,
+  "bge_top10": 1.0,
+  "bm25_top10": 1.0,
+  "overall": 1.0,
+  "n": 12
+ },
+ "unanswered": {
+  "kazma": 0,
+  "kazma_whole": 0,
+  "full": 0,
+  "oracle": 0,
+  "bge_top10": 0,
+  "bm25_top10": 0,
+  "kazma_before": 0
+ },
+ "cut_at_limit": {
+  "kazma": 0,
+  "kazma_whole": 0,
+  "full": 0,
+  "oracle": 0,
+  "bge_top10": 0,
+  "bm25_top10": 0,
+  "kazma_before": 0
+ },
+ "results": [
+  {
+   "id": "f4f1d8a4_abs",
+   "type": "single-session-user",
+   "abstention": true,
+   "kazma_shown": 5,
+   "full_sessions_dropped": 0,
+   "kazma": true,
+   "kazma_prompt_tokens": 1552,
+   "kazma_judge2": true,
+   "kazma_whole": true,
+   "kazma_whole_prompt_tokens": 1725,
+   "kazma_whole_judge2": true,
+   "full": true,
+   "full_prompt_tokens": 116963,
+   "full_judge2": true,
+   "oracle": true,
+   "oracle_prompt_tokens": 2674,
+   "oracle_judge2": true,
+   "bge_top10": true,
+   "bge_top10_prompt_tokens": 3092,
+   "bge_top10_judge2": true,
+   "bm25_top10": true,
+   "bm25_top10_prompt_tokens": 4196,
+   "bm25_top10_judge2": true,
+   "kazma_before": true,
+   "kazma_before_prompt_tokens": 1327,
+   "kazma_before_judge2": true
+  },
+  {
+   "id": "6f9b354f",
+   "type": "single-session-user",
+   "abstention": false,
+   "kazma_shown": 2,
+   "full_sessions_dropped": 0,
+   "kazma": true,
+   "kazma_prompt_tokens": 925,
+   "kazma_judge2": true,
+   "kazma_whole": true,
+   "kazma_whole_prompt_tokens": 1310,
+   "kazma_whole_judge2": true,
+   "full": true,
+   "full_prompt_tokens": 118291,
+   "full_judge2": true,
+   "oracle": true,
+   "oracle_prompt_tokens": 3469,
+   "oracle_judge2": true,
+   "bge_top10": true,
+   "bge_top10_prompt_tokens": 4576,
+   "bge_top10_judge2": true,
+   "bm25_top10": true,
+   "bm25_top10_prompt_tokens": 4841,
+   "bm25_top10_judge2": true,
+   "kazma_before": false,
+   "kazma_before_prompt_tokens": 798,
+   "kazma_before_judge2": false
+  }
+ ]
+}

@@ -124,15 +124,17 @@ def test_a_question_finds_its_evidence_among_unrelated_rounds(lme, monkeypatch, 
 
 def test_the_free_proxies_tell_a_cut_answer_from_a_shown_one(lme, monkeypatch, tmp_path):
     """The memory plan's W0: "the answer's text is in the block" beside "in
-    the rounds shown". An answer at the end of a long message is shown (its
-    round is recalled) and cut from the block; a short one is in both."""
+    the rounds shown". An answer at the end of a long message, far from the
+    question's words, is shown (its round is recalled) and cut from the block
+    (the block cuts a long memory around the question's words, W1a, and here
+    those are at its start); a short one is in both."""
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)
     others = ["How do I boil an egg?", "Recommend a film about space.", "What is the capital of Peru?"]
     short = {**_item("q3", "single-session-user", "Which degree did I graduate with?",
                      "I graduated with a degree in Business Administration last year.", others),
              "answer": "Business Administration"}
-    filler = "We also talked about the weather and the long drive to work that morning. " * 8
+    filler = "We also talked about the weather and the long drive to work that morning. " * 40
     long = {**_item("q4", "single-session-user", "Which degree did I graduate with?",
                     "About my degree: " + filler + "I graduated in Business Administration.", others),
             "answer": "Business Administration"}
@@ -346,6 +348,16 @@ def test_the_second_judge_is_compared_with_the_first(lme):
     assert lme.judges_agree([_row("a", {"kazma": True})]) == {}
 
 
+def test_the_second_judge_is_compared_on_every_condition_it_read(lme):
+    """Kazma's turn and another build's block are judged twice too: the
+    agreement names them (it read only the six base conditions)."""
+    rows = [_row("a", {lme.TURN: True, "kazma_before": True}, {lme.TURN: False, "kazma_before": True})]
+    agree = lme.judges_agree(rows)
+    assert agree == {lme.TURN: 0.0, "kazma_before": 1.0, "overall": 0.5, "n": 2}
+    # Control: the base conditions alone find nothing in this run.
+    assert not [c for c in lme.CONDITIONS if f"{c}_judge2" in rows[0]]
+
+
 def test_the_noise_run_counts_the_answers_that_flip(lme):
     a = {"results": [_row("a", {"kazma": True}), _row("b", {"kazma": False}), _row("c", {"kazma": True})]}
     b = {"results": [_row("a", {"kazma": True}), _row("b", {"kazma": True}), _row("c", {"kazma": False})]}
@@ -355,6 +367,21 @@ def test_the_noise_run_counts_the_answers_that_flip(lme):
     assert report["conditions"]["kazma"]["flipped"] == ["b", "c"]
     # Control: a run compared with itself flips nothing.
     assert lme.noise(a, a)["conditions"]["kazma"]["flips"] == 0
+
+
+def test_the_noise_run_counts_another_builds_block_too(lme):
+    """The block another build made (``--blocks``) flips like any condition:
+    W1a's before-and-after is read against both sides' noise."""
+    a = {"conditions": ["kazma"], "blocks_from": {"kazma_before": "abc"},
+         "results": [_row("a", {"kazma": True, "kazma_before": True}),
+                     _row("b", {"kazma": True, "kazma_before": False})]}
+    b = {"conditions": ["kazma"], "blocks_from": {"kazma_before": "abc"},
+         "results": [_row("a", {"kazma": True, "kazma_before": False}),
+                     _row("b", {"kazma": True, "kazma_before": False})]}
+    report = lme.noise(a, b)
+    assert report["conditions"]["kazma_before"]["flipped"] == ["a"]
+    # Control: a run that did not ask for that block compares none.
+    assert "kazma_before" not in lme.noise(a, {**b, "blocks_from": {}})["conditions"]
 
 
 def test_the_answers_read_by_hand_start_with_the_judges_disagreements(lme):
@@ -398,9 +425,10 @@ def test_a_cache_with_nothing_new_is_not_rewritten(lme, tmp_path):
 class _Scripted:
     """A model that answers from a list: text, or a refusal (HTTP 402)."""
 
-    def __init__(self, replies):
+    def __init__(self, replies, model="judge"):
         self.replies = list(replies)
         self.asked = 0
+        self.model = model
 
     def ask(self, prompt, *, max_tokens):
         self.asked += 1
@@ -418,12 +446,12 @@ def test_a_refused_call_is_asked_again_never_kept_as_wrong(lme):
     lme.answer_entry(entry, item, "prompt", reader=reader, judge=judge)
     assert "hypothesis" not in entry and entry["reader_error"] == 402 and judge.asked == 0
     lme.answer_entry(entry, item, "prompt", reader=reader, judge=judge)
-    assert entry["hypothesis"] == "In May." and "verdict" not in entry
+    assert entry["hypothesis"] == "In May." and lme.verdict_of(entry, "judge") is None
     lme.answer_entry(entry, item, "prompt", reader=reader, judge=judge)
-    assert entry["verdict"] == "yes" and reader.asked == 2 and judge.asked == 2
+    assert lme.verdict_of(entry, "judge") == "yes" and reader.asked == 2 and judge.asked == 2
     # Another prompt is another question: asked afresh.
     lme.answer_entry(entry, item, "another prompt", reader=_Scripted(["June"]), judge=_Scripted(["no"]))
-    assert entry["hypothesis"] == "June" and entry["verdict"] == "no"
+    assert entry["hypothesis"] == "June" and lme.verdict_of(entry, "judge") == "no"
 
 
 def test_the_plain_baselines_are_also_measured_at_kazmas_size(lme):
@@ -478,3 +506,190 @@ def test_a_result_file_keeps_each_row_on_one_line(lme):
     text = lme.dump_result({"what": "x", "overall": {"n": 2}, "results": [compact, compact]})
     assert json.loads(text)["results"] == [compact, compact]
     assert text.count("\n") < 12  # one line a row, not one a value
+
+
+# ── Another provider (Qwen), its judges, and a change judged in one run ────
+
+
+_QWEN_ANSWER = {"choices": [{"message": {"content": "In May.", "reasoning_content": "thinking..."},
+                             "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 11909, "completion_tokens": 120,
+                          "prompt_tokens_details": {"cached_tokens": 11520, "text_tokens": 11909},
+                          "completion_tokens_details": {"reasoning_tokens": 93, "text_tokens": 120}}}
+
+
+def test_the_default_level_sends_nothing_and_qwens_cache_is_counted(lme):
+    """Kazma sends a provider whose reasoning switch it does not know nothing
+    (Qwen then thinks by its own default): ``default`` does the same. Qwen
+    says the cache's share the OpenAI way; it is counted under one name."""
+    chat, sent = _chat(lme, "default", _QWEN_ANSWER)
+    text, usage = chat.ask("q", max_tokens=lme.READER_TOKENS["default"])
+    assert "reasoning_effort" not in sent[0] and "thinking" not in sent[0]
+    assert sent[0]["max_tokens"] == 16384 and text == "In May."
+    assert usage["prompt_cache_hit_tokens"] == 11520 and usage["reasoning_tokens"] == 93
+    # DeepSeek's own field, when there, is kept as it is.
+    chat, _ = _chat(lme, "off", {**_ANSWER, "usage": {**_ANSWER["usage"], "prompt_cache_hit_tokens": 7}})
+    assert chat.ask("q", max_tokens=10)[1]["prompt_cache_hit_tokens"] == 7
+
+
+def test_blocks_from_another_checkout_cover_every_question(lme, tmp_path):
+    path = tmp_path / "blocks.json"
+    path.write_text(json.dumps({"commit": "064dfec3b", "blocks": {"q1": "block one", "q2": "block two"}}),
+                    encoding="utf-8")
+    held = lme.load_blocks(path, ["q1", "q2"])
+    assert held == {"commit": "064dfec3b", "blocks": {"q1": "block one", "q2": "block two"}}
+    with pytest.raises(SystemExit):
+        lme.load_blocks(path, ["q1", "q3"])
+
+
+def test_a_change_is_judged_question_by_question_and_against_the_noise(lme):
+    rows = [_row("a", {"kazma": True, "kazma_before": False}), _row("b", {"kazma": False, "kazma_before": True}),
+            _row("c", {"kazma": True, "kazma_before": True}), _row("d", {"kazma": True, "kazma_before": False})]
+    pair = lme.pair_changes(rows, "kazma", "kazma_before")
+    assert (pair["gained"], pair["lost"], pair["net"]) == (2, 1, 1)
+    assert pair["gained_ids"] == ["a", "d"] and pair["lost_ids"] == ["b"]
+    # The noise run reads every condition both runs answered, the blocks'
+    # and the turn's too.
+    a = {"conditions": ["kazma", "kazma_before", "kazma_turn"], "results": rows}
+    b = {"conditions": ["kazma", "kazma_before"], "results": [{**r, "kazma_before": not r["kazma_before"]}
+                                                              for r in rows]}
+    out = lme.noise(a, b)
+    assert set(out["conditions"]) == {"kazma", "kazma_before"}
+    assert out["conditions"]["kazma_before"]["flips"] == 4 and out["conditions"]["kazma"]["flips"] == 0
+
+
+def test_the_blocks_are_built_by_the_checkout_named(tmp_path):
+    """The export loads the named checkout's harness and memory code, and
+    refuses to write the dataset's text into a checkout."""
+    sys.path.insert(0, str(REPO / "scripts"))
+    try:
+        import longmemeval_blocks
+    finally:
+        sys.path.pop(0)
+    bench = longmemeval_blocks.use_checkout(REPO)
+    assert Path(bench.__file__).resolve().parent == REPO / "scripts"
+    assert longmemeval_blocks.main(["--checkout", str(REPO), "--data", str(tmp_path),
+                                    "--out", str(REPO / "blocks.json")]) == 2
+    assert not (REPO / "blocks.json").exists()
+
+
+# ── Verdicts kept by the model that gave them (the judges swapped, 22 Nov) ──
+
+
+def _old_judge_entry(entry, item, *, judge, second=None, lme):
+    """The judging as it was before 22 Nov: verdicts kept by place."""
+    if "verdict" not in entry:
+        verdict, usage = judge.ask(lme.judge_prompt(item, entry["hypothesis"]), max_tokens=10)
+        entry.update({"verdict": verdict, "judge_usage": usage})
+    if second is not None and "verdict2" not in entry:
+        verdict, usage = second.ask(lme.judge_prompt(item, entry["hypothesis"]), max_tokens=10)
+        entry.update({"verdict2": verdict, "judge2_usage": usage})
+
+
+_ITEM = {"question_id": "q", "question_type": "single-session-user", "question": "?", "answer": "May"}
+
+
+def test_a_verdict_stays_with_the_model_that_gave_it(lme):
+    """The main session swapped the judges (22 Nov): the stronger judge
+    first, from the cached verdicts. Kept by model, the run with the judges
+    in the other order asks nothing again and reads each judge's own verdict.
+    Control: kept by place, the swapped run asks nothing either, and hands
+    the old first judge's verdict to the new first judge."""
+    plus, flash = _Scripted(["no"], model="plus"), _Scripted(["yes"], model="flash")
+    entry = {"hypothesis": "In May, and it rained."}
+    lme.judge_entry(entry, _ITEM, judge=plus, second=flash)
+    lme.judge_entry(entry, _ITEM, judge=flash, second=plus)
+    assert (plus.asked, flash.asked) == (1, 1)
+    columns = lme.condition_columns(entry, "kazma", "flash", "plus")
+    assert columns["kazma"] is True and columns["kazma_judge2"] is False
+    # Control: the old storage gives flash plus's "no".
+    old = {"hypothesis": "In May, and it rained."}
+    plus, flash = _Scripted(["no"], model="plus"), _Scripted(["yes"], model="flash")
+    _old_judge_entry(old, _ITEM, judge=plus, second=flash, lme=lme)
+    _old_judge_entry(old, _ITEM, judge=flash, second=plus, lme=lme)
+    assert (plus.asked, flash.asked) == (1, 1) and old["verdict"] == "no"
+
+
+def test_a_cache_kept_by_place_is_refused_until_its_judges_are_named(lme):
+    entry = {"hypothesis": "May", "verdict": "yes", "judge_usage": {"prompt_tokens": 3},
+             "verdict2": "no", "judge2_usage": {"prompt_tokens": 4}}
+    cache = {"q": {"kazma": entry, "full": {"reader_error": 402}}}
+    with pytest.raises(ValueError, match="tag-judges"):
+        lme.judge_entry(entry, _ITEM, judge=_Scripted([], model="plus"))
+    assert lme._untagged_in(cache) == 1
+    assert lme.tag_judges(cache, "plus", "flash") == 2
+    assert lme._untagged_in(cache) == 0 and "verdict" not in entry and "judge_usage" not in entry
+    assert lme.verdict_of(entry, "plus") == "yes" and lme.verdict_of(entry, "flash") == "no"
+    assert entry["judged"]["flash"]["usage"] == {"prompt_tokens": 4}
+    # A model already holding another verdict for the answer is refused.
+    entry["verdict"] = "no"
+    with pytest.raises(ValueError, match="already holds"):
+        lme.tag_judges(cache, "plus", "flash")
+    with pytest.raises(ValueError, match="two models"):
+        lme.tag_judges({}, "plus", "plus")
+
+
+def _judged_run(lme):
+    """A small run as ``answer`` writes it: two questions, two histories,
+    judged by plus first and flash second."""
+    verdicts = {("a", "kazma"): ("no", "yes"), ("a", "full"): ("yes", "yes"),
+                ("b", "kazma"): ("yes", "no"), ("b", "full"): ("no", "yes")}
+    cache = {qid: {c: {"prompt_sha": "x", "hypothesis": "h", "reader_usage": {"prompt_tokens": 100},
+                       "judged": {"plus": {"verdict": verdicts[qid, c][0], "usage": {"prompt_tokens": 5}},
+                                  "flash": {"verdict": verdicts[qid, c][1], "usage": {"prompt_tokens": 6}}}}
+                   for c in ("kazma", "full")} for qid in ("a", "b")}
+    conditions = ("kazma", "full")
+    results = []
+    for qid in ("a", "b"):
+        row = {"id": qid, "type": "multi-session", "abstention": False, "kazma_shown": 3,
+               "full_sessions_dropped": 0}
+        for c in conditions:
+            row.update(lme.condition_columns(cache[qid][c], c, "plus", "flash"))
+        results.append(row)
+    summary = lme.run_summary(results, conditions, judge2="flash")
+    run = {"split": "dev", "reader": "plus", "judge": "plus", "judge2": "flash", "conditions": list(conditions),
+           "blocks_from": {}, "made_on": "2026-11-22", "usage": lme.run_usage(cache, ["a", "b"], conditions,
+                                                                             ("plus", "flash")),
+           **summary, "results": results}
+    return run, cache
+
+
+def test_rejudge_reorders_the_judges_from_the_cache_alone(lme):
+    """``rejudge`` rebuilds a result file with the judges in another order,
+    from the cache, asking no model. In the same order it gives the file
+    back exactly (the control that it rebuilds what ``answer`` wrote)."""
+    run, cache = _judged_run(lme)
+    assert json.dumps(lme.rejudge(run, cache, "plus", "flash")) == json.dumps(run)
+    swapped = lme.rejudge(run, cache, "flash", "plus")
+    assert (swapped["judge"], swapped["judge2"]) == ("flash", "plus")
+    assert swapped["rejudged"]["judges_before"] == ["plus", "flash"]
+    assert swapped["overall"]["kazma"] == 0.5 and swapped["overall"]["full"] == 1.0
+    assert run["overall"]["kazma"] == 0.5 and run["overall"]["full"] == 0.5
+    row = swapped["results"][0]
+    assert row["kazma"] is True and row["kazma_judge2"] is False and row["kazma_shown"] == 3
+    assert swapped["usage"] == run["usage"] and swapped["judges_agree"]["overall"] == run["judges_agree"]["overall"]
+    # A judge with no verdict on an answer is refused, never counted wrong.
+    with pytest.raises(ValueError, match="other holds no verdict on 4"):
+        lme.rejudge(run, cache, "other", "plus")
+    del cache["b"]["full"]["judged"]["flash"]
+    with pytest.raises(ValueError, match="flash holds no verdict on 1"):
+        lme.rejudge(run, cache, "flash", "plus")
+    # A judge asked for the verdict it lacks (``judge``) fills it.
+    flash = _Scripted(["no"], model="flash")
+    lme.judge_entry(cache["b"]["full"], _ITEM, judge=flash, second=_Scripted([], model="plus"))
+    assert flash.asked == 1 and lme.rejudge(run, cache, "flash", "plus")["overall"]["full"] == 0.5
+
+
+def test_the_reading_s_finding_is_kept_beside_its_labels(lme, tmp_path, monkeypatch):
+    run, _cache = _judged_run(lme)
+    answers = tmp_path / "answers.json"
+    answers.write_text(json.dumps(run), encoding="utf-8")
+    labels = tmp_path / "labels.json"
+    labels.write_text(json.dumps({f"{p['id']}|{p['condition']}": True
+                                  for p in lme.pick_model_read(run["results"])}), encoding="utf-8")
+    out = tmp_path / "model_read.json"
+    monkeypatch.setattr(lme, "MODEL_READ", out)
+    assert lme._cmd_model_read(answers, labels, "The first judge refuses answers that add a detail.") == 0
+    held = json.loads(out.read_text(encoding="utf-8"))
+    assert held["found"] == "The first judge refuses answers that add a detail." and held["judge"] == "plus"
+    assert lme._cmd_model_read(answers, labels) == 0 and "found" not in json.loads(out.read_text(encoding="utf-8"))

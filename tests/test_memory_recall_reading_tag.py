@@ -68,7 +68,7 @@ def _seed(conn: sqlite3.Connection) -> None:
 
 def _block(conn: sqlite3.Connection, query: str) -> str:
     result = recall_mod.recall(query, conn=conn, local_only=True)
-    return format_recall_block(result, explain=False)
+    return format_recall_block(result)
 
 
 def _facts(block: str) -> list[str]:
@@ -106,7 +106,7 @@ def test_the_shared_store_path_reads_who_stated_it_from_this_install(db):
             RecallHit(id="b_elsewhere", content="user knows Dana", score=0.8, kind="belief",
                       metadata={"object": "Dana"})]
     recall_mod._add_local_methods(hits, tenant_id="default")
-    lines = _facts(format_recall_block(RecallResult(hits, []), explain=False))
+    lines = _facts(format_recall_block(RecallResult(hits, [])))
     assert lines == [f"- {READING_TAG_EN} user works at Initech", "- user lives in Rotterdam",
                      f"- {UNKNOWN_SOURCE_TAG_EN} user knows Dana"]
 
@@ -116,12 +116,12 @@ def test_only_a_source_that_says_the_user_goes_untagged(method):
     meta = {"object": "Dubai", **({} if method is None else {"extraction_method": method})}
     hit = RecallHit(id="b", content="user lives in Dubai", score=1.0, kind="belief", metadata=meta)
     tag = READING_TAG_EN if (method or "").strip() else UNKNOWN_SOURCE_TAG_EN
-    assert _facts(format_recall_block(RecallResult([hit], []), explain=False)) == [f"- {tag} user lives in Dubai"]
+    assert _facts(format_recall_block(RecallResult([hit], []))) == [f"- {tag} user lives in Dubai"]
 
 
 def test_an_arabic_fact_of_unknown_source_says_so_in_arabic():
     hit = RecallHit(id="b", content="user lives in دبي", score=1.0, kind="belief", metadata={"object": "دبي"})
-    assert _facts(format_recall_block(RecallResult([hit], []), explain=False)) == [
+    assert _facts(format_recall_block(RecallResult([hit], []))) == [
         f"- {UNKNOWN_SOURCE_TAG_AR} user lives in دبي"]
 
 
@@ -144,13 +144,13 @@ def test_a_thin_inferred_fact_says_both(db):
     hit = RecallHit(id="b", content="user works at Initech", score=0.1, kind="belief",
                     metadata={"strength": "weak", "extraction_method": "llm_inferred", "object": "Initech"})
     assert f"- (possibly related) {READING_TAG_EN} user works at Initech" in format_recall_block(
-        RecallResult([hit], []), explain=False)
+        RecallResult([hit], []))
 
 
 def test_an_episode_is_never_tagged():
     hit = RecallHit(id="e", content="We moved to Rotterdam", score=1.0, kind="episode",
                     metadata={"extraction_method": "llm_inferred"})
-    block = format_recall_block(RecallResult([], [hit]), explain=False)
+    block = format_recall_block(RecallResult([], [hit]))
     assert not any(tag in block for tag in _TAGS)
 
 
@@ -181,7 +181,7 @@ def test_control_the_old_rule_left_an_unknown_source_untagged(monkeypatch):
 
     monkeypatch.setattr(recall_mod, "_reading_tag", old_tag)
     hit = RecallHit(id="b", content="user lives in Dubai", score=1.0, kind="belief", metadata={"object": "Dubai"})
-    assert _facts(format_recall_block(RecallResult([hit], []), explain=False)) == ["- user lives in Dubai"]
+    assert _facts(format_recall_block(RecallResult([hit], []))) == ["- user lives in Dubai"]
 
 
 def test_control_without_the_source_the_users_own_facts_are_not_told_apart(db, monkeypatch):

@@ -264,7 +264,7 @@ def test_a_thin_match_is_shown_as_possibly_related(store):
     hits = recall(PASSPORT_Q, conn=store.conn, local_only=True).episodes
     assert [h.id for h in hits] == ["e_thin"]
     assert hits[0].metadata["strength"] == "weak"
-    block = format_recall_block(RecallResult([], hits), explain=False)
+    block = format_recall_block(RecallResult([], hits))
     # The turn's day sits between the mark and the text (framework audit F2).
     import re
 
@@ -272,7 +272,7 @@ def test_a_thin_match_is_shown_as_possibly_related(store):
 
     strong = recall_mod.RecallHit(id="x", content="Strong one", score=0.3,
                                   metadata={"strength": "strong"})
-    assert "(possibly related)" not in format_recall_block(RecallResult([], [strong]), explain=False)
+    assert "(possibly related)" not in format_recall_block(RecallResult([], [strong]))
 
 
 def test_a_keyword_candidate_is_judged_by_its_meaning_too(store):

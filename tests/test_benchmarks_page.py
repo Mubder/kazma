@@ -37,6 +37,63 @@ def test_a_changed_score_makes_the_page_stale(tmp_path, monkeypatch) -> None:
     assert "12.3 %" in module.render()
 
 
+def test_kazma_s_turn_sits_beside_the_block_it_reads(tmp_path) -> None:
+    """The turn is asked in a run of its own (W1c): its row is on the dev
+    table, and each condition's judge agreement comes from the per-question
+    rows, so a run summarised before every condition was counted still shows
+    it. Control: without the turn's file there is no turn row."""
+    import json
+
+    module = _page_module()
+    rows = [{"id": "a", "kazma": True, "kazma_judge2": True, "kazma_before": False, "kazma_before_judge2": True}]
+    main = {"reader": "r", "judge": "j", "judge2": "j2", "reader_reasoning": "default",
+            "overall": {"n": 1, "kazma": 1.0, "kazma_before": 0.0, "prompt_tokens_mean": {"kazma": 10}},
+            "judges_agree": {"kazma": 1.0}, "results": rows}
+    (tmp_path / "answers_dev.json").write_text(json.dumps(main), encoding="utf-8")
+    text = "\n".join(module._longmemeval_dev(tmp_path))
+    assert "Kazma's own chat turn" not in text
+    assert "| Kazma's recall before the change judged (its blocks from the earlier code) | 0.0 % | – | – | 0.0 % |" \
+        in text
+    turn = {"reader": "r", "overall": {"n": 1, "kazma_turn": 1.0, "prompt_tokens_mean": {"kazma_turn": 900}},
+            "turn": {"calls_mean": 1.5, "tool_requests_mean": 0.5, "seconds_p50": 9.0},
+            "results": [{"id": "a", "kazma_turn": True, "kazma_turn_judge2": True}]}
+    (tmp_path / "answers_dev_turn.json").write_text(json.dumps(turn), encoding="utf-8")
+    text = "\n".join(module._longmemeval_dev(tmp_path))
+    assert "| Kazma's own chat turn (it reads a memory whole with memory_read) | 100.0 % | – | – | 100.0 % | 900 |" \
+        in text
+
+
+def test_the_dev_table_says_where_kazma_stands() -> None:
+    """The main session's rule (22 Nov): the page says, from the run's own
+    numbers, that the block alone answers less than plain top-10 retrieval
+    and the whole history, and names the gaps the plan goes after."""
+    module = _page_module()
+    o = {"kazma": 0.6, "bge_top10": 0.8, "full": 0.9, "kazma_turn": 0.7}
+    types = {"multi-session": {"kazma": 0.4, "full": 0.9}, "temporal-reasoning": {"kazma": 0.6, "full": 0.9}}
+    text = "\n".join(module._where_kazma_stands(o, {"kazma": 1000, "bge_top10": 4000}, types))
+    assert "answers 60.0 %, against 80.0 % for plain top-10 retrieval (bge-m3) at 4.0 times the tokens" in text
+    assert "reaches 70.0 %" in text and "multi-session questions (40.0 % against 90.0 %" in text and "W4" in text
+    # Control: a run without the baselines says nothing it cannot back.
+    assert module._where_kazma_stands({"kazma": 0.6}, {}, types) == []
+
+
+def test_the_page_says_why_the_first_judge_judges_first() -> None:
+    """The main session's rule (22 Nov): every number comes from the judge
+    the reading found stronger, and the page says why, from the reading's
+    own file. Control: a run whose first judge the reading did not back
+    gets the numbers and no reason."""
+    module = _page_module()
+    read = {"judge": "flash", "judge2": "plus", "found": "plus refuses right answers that add a detail.",
+            "summary": {"n": 50, "disagreements": 27, "judge": 0.86, "judge2": 0.6,
+                        "judge_on_disagreements": 0.7407, "judge2_on_disagreements": 0.2593}}
+    text = "\n".join(module._judges_read_beside(read, {"judge": "flash"}))
+    assert "flash gave the reading's verdict on 86.0 % of them, plus on 60.0 %" in text
+    assert "That is why flash judges first: plus refuses right answers that add a detail." in text
+    assert "That is why" not in "\n".join(module._judges_read_beside(read, {"judge": "plus"}))
+    weaker = {**read, "summary": {**read["summary"], "judge": 0.5}}
+    assert "That is why" not in "\n".join(module._judges_read_beside(weaker, {"judge": "flash"}))
+
+
 def test_every_number_comes_from_a_result_file() -> None:
     text = (ROOT / "docs" / "docs" / "reference" / "benchmarks.md").read_text(encoding="utf-8")
     for source in ("scripts/memory_bench.py", "scripts/knowledge_bench.py", "scripts/document_fidelity.py"):

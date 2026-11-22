@@ -216,7 +216,7 @@ def render(result: Any, variant: dict[str, Any], query: str, conn: sqlite3.Conne
                                   (h.id, None, None)).fetchone() or [0])[0]
                 for h in result.episodes}
         result.episodes.sort(key=lambda h: float(when[h.id] or 0))
-    return rm.format_recall_block(result, explain=False, max_tokens=variant["budget"]) if not result.empty else ""
+    return rm.format_recall_block(result, max_tokens=variant["budget"]) if not result.empty else ""
 
 
 def _shown_at(hit: Any, row: Any, share: int, cut: str, query: str) -> None:
@@ -250,7 +250,7 @@ def _lead(result: Any, variant: dict[str, Any], query: str, conn: sqlite3.Connec
         for i, hit in enumerate(turns):
             if rows[hit.id] is not None:
                 _shown_at(hit, rows[hit.id], lead if i == 0 else rest, cut, query)
-        if lines_shown(rm.format_recall_block(result, explain=False, max_tokens=variant["budget"])) == every:
+        if lines_shown(rm.format_recall_block(result, max_tokens=variant["budget"])) == every:
             return
 
 
@@ -280,7 +280,7 @@ def _fit(result: Any, variant: dict[str, Any], query: str, conn: sqlite3.Connect
             hit.metadata.pop("more", None)
             if more:
                 hit.metadata["more"] = more
-        if lines_shown(rm.format_recall_block(result, explain=False, max_tokens=variant["budget"])) == every:
+        if lines_shown(rm.format_recall_block(result, max_tokens=variant["budget"])) == every:
             return
 
 

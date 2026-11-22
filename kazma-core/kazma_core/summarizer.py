@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 __all__ = ["SUMMARIZATION_SYSTEM_PROMPT", "SUMMARY_TEMPLATE", "TOKEN_THRESHOLD", "clear_summary", "estimate_tokens", "format_summary", "get_summary", "prune_tool_outputs", "store_summary", "summarize"]
@@ -112,19 +113,23 @@ _ARABIC_RANGES = (
 )
 
 
-def _estimate_text_tokens(text: str) -> int:
-    """Estimate tokens for one string: chars/4 for Latin, ~2.5 for Arabic."""
+_ARABIC_CHAR = re.compile("[" + "".join(f"{re.escape(chr(lo))}-{re.escape(chr(hi))}"
+                                          for lo, hi in _ARABIC_RANGES) + "]")
+
+
+def estimate_text_tokens(text: str) -> int:
+    """Estimate tokens for one string: chars/4 for Latin, ~2.5 for Arabic
+    (:data:`_ARABIC_RANGES`). The context trim's count (:func:`estimate_tokens`)
+    and the recall block's budget both use it."""
     if not text:
         return 0
-    arabic = 0
-    for ch in text:
-        cp = ord(ch)
-        for lo, hi in _ARABIC_RANGES:
-            if lo <= cp <= hi:
-                arabic += 1
-                break
+    arabic = len(_ARABIC_CHAR.findall(text))
     other = len(text) - arabic
     return (other // 4) + (arabic * 2) // 5
+
+
+#: Its older name, for the callers that read it.
+_estimate_text_tokens = estimate_text_tokens
 
 
 #: Older turns' tool outputs are cut to this many characters first.

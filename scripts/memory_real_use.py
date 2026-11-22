@@ -4,7 +4,9 @@
 A private Kazma (``kazma serve`` from this checkout, a temporary data folder
 and home, SQLite, this machine's environment without any Kazma or credential
 variable) runs its shipped path: the model the guide sets up (DeepSeek,
-``deepseek-flash`` unless ``--model``), the reasoning level the owner runs
+``deepseek-flash`` unless ``--model``; another provider with ``--provider``,
+at its own address with ``--base-url``, saved as Settings saves it), the
+reasoning level the owner runs
 (``agent.chat_reasoning``, ``low`` unless ``--reasoning``), the embedding model from this machine's cache, the deep pass on the memory
 queue. A browser, in English and then in Arabic (each its own private
 install), reached by the sidebar:
@@ -16,14 +18,19 @@ install), reached by the sidebar:
 5. forgets the other on the Memory page (Forget), then asks for it;
 6. asks about something never said.
 
-Each answer is judged by the same model with LongMemEval's judge prompts
+Each answer is judged by the same model (``--judge`` another) with LongMemEval's judge prompts
 (``scripts/longmemeval_bench.py``: an answer that should say "I don't know"
 is judged as an abstention). The result (``--out``) holds each step's kind,
 pass or fail, and the tokens spent; never a reply's text.
 
-Run (the DeepSeek key from the shell's environment, never written)::
+Run (the provider's key from the variable ``--key-env`` names, never
+written)::
 
     python scripts/memory_real_use.py --out docs/audits/evidence/memory_real_use/<date>.json
+
+``--checkout DIR`` runs the private Kazma from another checkout of this
+repository (the code before a change, driven by today's suite): a change is
+judged with and without itself on one model.
 
 It needs Playwright's Chromium and the embedding model in this machine's
 cache (``HF_HUB_OFFLINE=1``). Nothing of an install on this machine is read:
@@ -117,14 +124,48 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def server_env(home: Path, data: Path, port: int) -> dict[str, str]:
+def server_env(home: Path, data: Path, port: int, checkout: Path = REPO) -> dict[str, str]:
     """The private install's environment: this machine's minus every Kazma and
-    credential variable (``upgrade_drill.scrubbed_env``), this checkout's
-    packages first on the path, the embedding model from the cache."""
+    credential variable (``upgrade_drill.scrubbed_env``), *checkout*'s
+    packages first on the path (this one unless named), the embedding model
+    from the cache."""
     env = scrubbed_env(home, data, port)
-    env["PYTHONPATH"] = os.pathsep.join(str(REPO / p) for p in PACKAGES)
+    env["PYTHONPATH"] = os.pathsep.join(str(checkout / p) for p in PACKAGES)
     env["KAZMA_WORKSPACE"] = str(home / "workspace")
     return env
+
+
+#: What a kept store holds: the memory databases only. The data folder's
+#: vault holds the provider's key, saved as Settings saves it; it is never
+#: kept.
+MEMORY_DATABASES = ("memory_state.db", "memory_ops.db")
+
+
+def keep_memory_databases(data: Path, into: Path) -> list[str]:
+    """Copy the private install's memory databases (a consistent copy of
+    each, the write-ahead log folded in) to *into*, to read why a step
+    failed with no model call; never the vault or the settings."""
+    into.mkdir(parents=True, exist_ok=True)
+    kept = []
+    for name in MEMORY_DATABASES:
+        source = data / name
+        if not source.is_file():
+            continue
+        src = sqlite3.connect(str(source))
+        dst = sqlite3.connect(str(into / name))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        kept.append(name)
+    return kept
+
+
+def turn_failed(answer: str) -> bool:
+    """Whether *answer* is Kazma's own error message (``friendly_llm_error``
+    starts every one with the warning sign), not the model's reply."""
+    return answer.lstrip().startswith("⚠")
 
 
 def judge_item(step: Step, n: int) -> dict[str, Any]:
@@ -267,24 +308,40 @@ class Browser:
         return forgotten
 
 
+def set_up_model(browser: Any, *, provider: str, model: str, key: str, base_url: str | None) -> None:
+    """The model as a person sets it up: at the preset's address through the
+    guide; at an address of the provider's own (``base_url``) saved in
+    Settings first, then the guide, which keeps a saved address and key."""
+    if base_url:
+        saved = browser.api("POST", "/api/providers",
+                            {"name": provider, "preset": provider, "base_url": base_url, "api_key": key})
+        if saved.get("detail") or saved.get("error"):
+            raise SystemExit(f"the provider could not be saved: {saved.get('detail') or saved.get('error')}")
+        key = ""
+    set_up = browser.api("POST", "/api/setup/bootstrap", {"provider": provider, "api_key": key, "model": model})
+    if not set_up.get("ready", True) and set_up.get("error"):
+        raise SystemExit(f"the model could not be set up: {set_up.get('error')}")
+
+
 def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, playwright: Any,
                  workdir: Path, reasoning: str = "low", transcript: list[dict[str, Any]] | None = None,
-                 ) -> dict[str, Any]:
+                 provider: str = "deepseek", base_url: str | None = None, checkout: Path = REPO,
+                 keep_memory: Path | None = None) -> dict[str, Any]:
     home, data = workdir / language.lang / "home", workdir / language.lang / "data"
     for folder in (home, data, home / "workspace"):
         folder.mkdir(parents=True, exist_ok=True)
     port = free_port()
-    server = Server(Path(sys.executable), server_env(home, data, port), home, workdir / f"{language.lang}.log",
-                    port)
+    server = Server(Path(sys.executable), server_env(home, data, port, checkout), home,
+                    workdir / f"{language.lang}.log", port)
     steps: list[dict[str, Any]] = []
+    # The judge's own calls (the install's are in its ledger, which keeps no
+    # count of the cache's share): calls, tokens, the cache's share.
+    judged = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0}
     browser = None
     try:
         server.wait_live()
         browser = Browser(server.base, language.lang, playwright)
-        set_up = browser.api("POST", "/api/setup/bootstrap",
-                             {"provider": "deepseek", "api_key": key, "model": model})
-        if not set_up.get("ready", True) and set_up.get("error"):
-            raise SystemExit(f"the model could not be set up: {set_up.get('error')}")
+        set_up_model(browser, provider=provider, model=model, key=key, base_url=base_url)
         saved = browser.api("PUT", "/api/settings/single", {"key": "agent.chat_reasoning", "value": reasoning})
         if saved.get("status") != "ok":
             raise SystemExit(f"the reasoning level could not be set: {saved}")
@@ -300,12 +357,20 @@ def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, p
                 answer, phase, asked = browser.send(step.text)
                 row["phase"] = phase
                 row["answered"] = bool(answer.strip())
+                # A turn that ended in Kazma's own error (friendly_llm_error's
+                # sign: a model call the provider refused, such as Qwen's
+                # content inspection) is no memory miss: said apart.
+                if turn_failed(answer):
+                    row["turn_failed"] = True
                 if asked:
                     row["approval_tools"] = asked
                 if step.action == "tell":
                     row["passed"] = phase == "completed" and browser.wait_for_memory(step.words)
                 else:
-                    verdict, _usage = judge.ask(lme.judge_prompt(judge_item(step, n), answer), max_tokens=10)
+                    verdict, usage = judge.ask(lme.judge_prompt(judge_item(step, n), answer), max_tokens=10)
+                    judged["calls"] += 1
+                    for k in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens"):
+                        judged[k] += int(usage.get(k, 0))
                     row["passed"] = phase == "completed" and verdict.strip().lower().startswith("yes")
             steps.append(row)
             if transcript is not None:
@@ -317,8 +382,10 @@ def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, p
         if browser is not None:
             browser.close()
         server.stop()
+        if keep_memory is not None:
+            keep_memory_databases(data, keep_memory / language.lang)
     return {"lang": language.lang, "steps": steps, "passed": all(s["passed"] for s in steps),
-            "page_errors": len(page_errors), "spent": spent_tokens(data)}
+            "page_errors": len(page_errors), "spent": spent_tokens(data), "judge_spent": judged}
 
 
 def suite_covers_every_kind() -> list[str]:
@@ -331,25 +398,41 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--model", default="deepseek-flash")
+    p.add_argument("--provider", default="deepseek", help="the provider preset the model is set up with")
+    p.add_argument("--base-url", default=None, help="the provider's own address (else the preset's)")
+    p.add_argument("--key-env", default="DEEPSEEK_API_KEY", help="the variable holding the key (never written)")
+    p.add_argument("--judge", default=None, help="the judge model (the model unless named)")
+    p.add_argument("--checkout", type=Path, default=REPO, help="the checkout the private Kazma runs from")
     p.add_argument("--languages", default="en,ar")
     p.add_argument("--reasoning", default="low", help="agent.chat_reasoning in the private install")
+    p.add_argument("--keep-memory", type=Path, default=None,
+                   help="a folder outside the repository to keep each language's memory databases in "
+                        "(never the vault or the settings), to read a failure with no model call")
     p.add_argument("--transcript", type=Path, default=None,
                    help="a folder outside the repository for the replies and the servers' logs (to read why)")
     args = p.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    key = os.environ.get("DEEPSEEK_API_KEY", "")
+    key = os.environ.get(args.key_env, "")
     if not key:
-        print("set DEEPSEEK_API_KEY", file=sys.stderr)
+        print(f"set {args.key_env}", file=sys.stderr)
         return 2
+    from kazma_core.providers import PROVIDER_PRESETS
     from playwright.sync_api import sync_playwright
 
-    judge = lme.Chat(model=args.model, base_url="https://api.deepseek.com", key=key)
-    wanted = [x.strip() for x in args.languages.split(",") if x.strip()]
-    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True,
-                            text=True, check=False).stdout.strip()
-    if args.transcript is not None and REPO in args.transcript.resolve().parents:
-        print("the transcript holds the replies' text: keep it outside the repository", file=sys.stderr)
+    address = args.base_url or str((PROVIDER_PRESETS.get(args.provider) or {}).get("base_url") or "")
+    if not address:
+        print(f"no address for provider {args.provider!r}: give --base-url", file=sys.stderr)
         return 2
+    checkout = args.checkout.resolve()
+    judge_model = args.judge or args.model
+    judge = lme.Chat(model=judge_model, base_url=address, key=key)
+    wanted = [x.strip() for x in args.languages.split(",") if x.strip()]
+    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=checkout, capture_output=True,
+                            text=True, check=False).stdout.strip()
+    for folder, what in ((args.transcript, "the transcript"), (args.keep_memory, "the kept memory")):
+        if folder is not None and REPO in folder.resolve().parents:
+            print(f"{what} holds the replies' text: keep it outside the repository", file=sys.stderr)
+            return 2
     transcript: list[dict[str, Any]] | None = [] if args.transcript is not None else None
     results = []
     with tempfile.TemporaryDirectory(prefix="kazma-real-use-", ignore_cleanup_errors=True) as tmp, \
@@ -358,7 +441,9 @@ def main(argv: list[str] | None = None) -> int:
             if language.lang in wanted:
                 results.append(run_language(language, model=args.model, key=key, judge=judge,
                                             playwright=playwright, workdir=Path(tmp), reasoning=args.reasoning,
-                                            transcript=transcript))
+                                            transcript=transcript, provider=args.provider,
+                                            base_url=args.base_url, checkout=checkout,
+                                            keep_memory=args.keep_memory))
         if args.transcript is not None:
             args.transcript.mkdir(parents=True, exist_ok=True)
             (args.transcript / "transcript.json").write_text(json.dumps(transcript, indent=1, ensure_ascii=False),
@@ -367,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
                 (args.transcript / log.name).write_bytes(log.read_bytes())
     report = {
         "made_on": datetime.now(UTC).date().isoformat(), "commit": commit, "model": args.model,
-        "reasoning": args.reasoning,
+        "provider": args.provider, "judge": judge_model, "reasoning": args.reasoning,
         "what": "Kazma's shipped path in a private install, driven in the browser by the sidebar; each "
                 "answer judged with LongMemEval's prompts. Pass or fail per step, and tokens; no reply text.",
         "passed": all(r["passed"] for r in results), "languages": results,

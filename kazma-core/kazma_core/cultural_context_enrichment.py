@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime
 
-__all__ = ["daily_prompt_note"]
+__all__ = ["daily_prompt_note", "note_for_day"]
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +40,21 @@ def daily_prompt_note() -> str:
     cached = _daily_cache.get(key)
     if cached is not None:
         return cached
-    note = (
+    note = note_for_day(today, zone_name)
+    _daily_cache.clear()
+    _daily_cache[key] = note
+    return note
+
+
+def note_for_day(today: date, zone_name: str) -> str:
+    """The note ``daily_prompt_note`` gives on *today* in the zone named
+    *zone_name*: the one way it is written (the LongMemEval harness asks it
+    for a question's own date, scripts/longmemeval_turn.py)."""
+    return (
         f"TODAY: {today.strftime('%A')} {today.isoformat()} ({zone_name}). "
         "For the time of day, call current_datetime."
         + _cultural_prompt_suffix(today)
     )
-    _daily_cache.clear()
-    _daily_cache[key] = note
-    return note
 
 
 def _cultural_prompt_suffix(today: date | None = None) -> str:

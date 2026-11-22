@@ -123,7 +123,7 @@ def test_explain_summary_mode():
     assert full and full["detail"] == "full"
     assert summary and summary["detail"] == "summary"
     assert len(summary["beliefs"][0]["sources"]) <= 2
-    assert build_memory_explain_payload(query="x", explain=False) is None
+    assert build_memory_explain_payload(query="x") is None
 
 
 def test_recall_block_rules_outside_fence():
@@ -148,7 +148,7 @@ def test_recall_block_rules_outside_fence():
         ],
         episodes=[],
     )
-    block = format_recall_block(r, explain=False)
+    block = format_recall_block(r)
     fence_at = block.index("<kazma:data")
     rules_at = block.index("## Memory recall rules")
     assert rules_at < fence_at  # rules are trusted guidance, not fenced data

@@ -1,0 +1,368 @@
+{
+ "answers": "answers_dev.json",
+ "judge": "qwen3.8-flash",
+ "judge2": "qwen3.7-plus",
+ "read_by": "Claude (a model), labelled model-read until the owner has checked them by hand",
+ "what": "The answers read beside the two judges: every answer the judges disagree on first, then a fixed draw. Ids, verdicts and the reading's label only.",
+ "found": "qwen3.7-plus's wrong verdicts were mostly refusals of an answer the reading took for right (17 of its 20), typically a right answer that adds a detail the expected answer leaves out.",
+ "summary": {
+  "n": 50,
+  "judge": 0.86,
+  "judge2": 0.6,
+  "disagreements": 27,
+  "judge_on_disagreements": 0.7407,
+  "judge2_on_disagreements": 0.2593
+ },
+ "labels": [
+  {
+   "id": "66f24dbb",
+   "condition": "oracle",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "031748ae_abs",
+   "condition": "bge_top10",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "4d6b87c8",
+   "condition": "kazma",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "66f24dbb",
+   "condition": "bm25_top10",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "6456829e_abs",
+   "condition": "bm25_top10",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "a2f3aa27",
+   "condition": "full",
+   "judge": false,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "gpt4_59149c78",
+   "condition": "bge_top10",
+   "judge": false,
+   "judge2": true,
+   "read": false
+  },
+  {
+   "id": "09ba9854_abs",
+   "condition": "bge_top10",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "gpt4_93f6379c",
+   "condition": "bm25_top10",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "0edc2aef",
+   "condition": "kazma",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "66f24dbb",
+   "condition": "full",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "54026fce",
+   "condition": "bm25_top10",
+   "judge": true,
+   "judge2": false,
+   "read": false
+  },
+  {
+   "id": "66f24dbb",
+   "condition": "kazma_whole",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "54026fce",
+   "condition": "full",
+   "judge": true,
+   "judge2": false,
+   "read": false
+  },
+  {
+   "id": "gpt4_d31cdae3",
+   "condition": "kazma_whole",
+   "judge": false,
+   "judge2": true,
+   "read": false
+  },
+  {
+   "id": "88432d0a_abs",
+   "condition": "full",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "gpt4_d31cdae3",
+   "condition": "kazma",
+   "judge": false,
+   "judge2": true,
+   "read": false
+  },
+  {
+   "id": "gpt4_f420262d",
+   "condition": "kazma",
+   "judge": true,
+   "judge2": false,
+   "read": false
+  },
+  {
+   "id": "gpt4_e05b82a6",
+   "condition": "oracle",
+   "judge": false,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "e9327a54",
+   "condition": "bge_top10",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "66f24dbb",
+   "condition": "bge_top10",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "gpt4_59149c78",
+   "condition": "oracle",
+   "judge": true,
+   "judge2": false,
+   "read": false
+  },
+  {
+   "id": "e9327a54",
+   "condition": "oracle",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "6456829e_abs",
+   "condition": "oracle",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "b0479f84",
+   "condition": "kazma_whole",
+   "judge": false,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "6456829e_abs",
+   "condition": "full",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "66f24dbb",
+   "condition": "kazma",
+   "judge": true,
+   "judge2": false,
+   "read": true
+  },
+  {
+   "id": "099778bb",
+   "condition": "bm25_top10",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "f4f1d8a4_abs",
+   "condition": "kazma",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "10d9b85a",
+   "condition": "bm25_top10",
+   "judge": false,
+   "judge2": false,
+   "read": false
+  },
+  {
+   "id": "bcbe585f",
+   "condition": "full",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "gpt4_731e37d7",
+   "condition": "bge_top10",
+   "judge": false,
+   "judge2": false,
+   "read": false
+  },
+  {
+   "id": "2ebe6c90",
+   "condition": "bm25_top10",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "36580ce8",
+   "condition": "bge_top10",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "72e3ee87",
+   "condition": "kazma_whole",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "561fabcd",
+   "condition": "kazma_whole",
+   "judge": false,
+   "judge2": false,
+   "read": false
+  },
+  {
+   "id": "cc06de0d",
+   "condition": "kazma_whole",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "4388e9dd",
+   "condition": "kazma_whole",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "3a704032",
+   "condition": "full",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "77eafa52",
+   "condition": "kazma",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "50635ada",
+   "condition": "full",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "8ebdbe50",
+   "condition": "oracle",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "830ce83f",
+   "condition": "full",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "76d63226",
+   "condition": "kazma",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "45dc21b6",
+   "condition": "kazma",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "778164c6",
+   "condition": "bge_top10",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "15745da0",
+   "condition": "kazma",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "3a704032",
+   "condition": "bm25_top10",
+   "judge": false,
+   "judge2": false,
+   "read": false
+  },
+  {
+   "id": "6f9b354f",
+   "condition": "kazma_whole",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  },
+  {
+   "id": "4100d0a0",
+   "condition": "bm25_top10",
+   "judge": true,
+   "judge2": true,
+   "read": true
+  }
+ ]
+}

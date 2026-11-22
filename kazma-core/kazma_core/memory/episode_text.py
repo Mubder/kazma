@@ -31,10 +31,13 @@ memories shows of one is bounded and says how much more there is
 
 from __future__ import annotations
 
+import functools
 import re
 
 from kazma_core.memory.limits import (
     MATCH_TEXT_CHARS,
+    RECALL_FOCUS_READ,
+    RECALL_KEEP_OPENING,
     RECALL_SHOW_ANSWER,
     RECALL_SHOW_ONE,
     RECALL_SHOW_QUESTION,
@@ -42,8 +45,10 @@ from kazma_core.memory.limits import (
 )
 
 __all__ = [
+    "display_at",
     "display_parts",
     "display_text",
+    "focused",
     "embed_text",
     "is_small_talk",
     "is_small_talk_words",
@@ -200,6 +205,155 @@ def display_parts(user_text: str | None, assistant_text: str | None,
         return f"User: {shown_q} / Assistant: {shown_a}", hidden
     text = question or answer or _flat(summary_text)
     return _clip(text, one_max), _hidden(text, one_max)
+
+
+def focused(text: str, limit: int, terms: frozenset[str] | set[str]) -> str:
+    """*text* cut to *limit* characters around the stretch that holds the most
+    of *terms* (the question's content words, ``query_terms.content_terms``),
+    a word holding a term by ``query_terms.word_term``; its start when none
+    of them is there. Whole words; an ellipsis where text was left out. Only
+    the first ``limits.RECALL_FOCUS_READ`` characters are searched for the
+    words (the memory's start is shown when they are past it)."""
+    return _focus(text, limit, frozenset(terms))[0]
+
+
+@functools.lru_cache(maxsize=64)
+def _spans_of(head: str, terms: frozenset[str]) -> tuple[tuple[int, int, str], ...]:
+    """Where *head* holds the question's words: read once per memory and
+    question, though the block tries several rooms (W1a)."""
+    from kazma_core.memory.query_terms import word_spans
+
+    return tuple(word_spans(head, terms))
+
+
+def _best_stretch(spans: tuple[tuple[int, int, str], ...], room: int) -> tuple[int, int, int]:
+    """(how many of the words, where it starts, where it ends) for the
+    stretch of at most *room* characters holding the most distinct question
+    words, the first on a tie. One pass: each stretch starts at a word that
+    holds one, and runs to the last such word inside the room."""
+    best, best_at, best_end = 0, 0, 0
+    held: dict[str, int] = {}
+    j = 0
+    for i, (first, _end, term) in enumerate(spans):
+        if j < i:
+            j = i
+        while j < len(spans) and spans[j][1] - first <= room:
+            held[spans[j][2]] = held.get(spans[j][2], 0) + 1
+            j += 1
+        if j > i:
+            if len(held) > best:
+                best, best_at, best_end = len(held), first, spans[j - 1][1]
+            held[term] -= 1
+            if not held[term]:
+                del held[term]
+    return best, best_at, best_end
+
+
+#: Between a side's opening and the stretch after it.
+_JOIN = " … "
+#: The least room a stretch keeps beside the opening; less, and the stretch
+#: is shown alone.
+_LEAST_STRETCH = 60
+_SENTENCE_END = re.compile(r"[.!?؟](?=\s)")
+
+
+def _opening(text: str, cap: int) -> str:
+    """*text*'s first sentence when it ends within *cap* characters, else its
+    first whole words within *cap*."""
+    end = _SENTENCE_END.search(text, 0, cap + 1)
+    if end is not None:
+        return text[: end.end()].strip()
+    cut = text.rfind(" ", 0, cap)
+    return text[:cut].strip() if cut > 0 else ""
+
+
+def _window(text: str, best_at: int, best_end: int, room: int, lead_in: int, floor: int = 0) -> tuple[int, int]:
+    """Where the stretch from *best_at* to *best_end* is shown in *room*
+    characters: a little before it (*lead_in*, as the room after it allows),
+    never before *floor* nor into a word; to a word's end."""
+    start = max(floor, best_at - min(lead_in, room - (best_end - best_at)))
+    if start > floor and not text[start - 1].isspace():
+        space = text.find(" ", start, best_at)
+        start = space + 1 if space != -1 else best_at
+    stop = min(len(text), start + room)
+    if stop < len(text):
+        space = text.rfind(" ", best_end, stop)
+        if space != -1:
+            stop = space
+    return start, stop
+
+
+def _with_opening(text: str, spans: tuple[tuple[int, int, str], ...], room: int, limit: int,
+                  beyond: int, alone_at: int) -> tuple[str, int] | None:
+    """The side's opening, " … ", and the stretch after it holding the most of
+    the question's words, in *room*; None when the stretch shown alone
+    (from *alone_at*) would begin inside the opening (it shows most of it
+    already), the room left is too small, or no stretch after the opening
+    holds one of the words."""
+    head = _opening(text, min(RECALL_KEEP_OPENING, room // 2))
+    rest = room - len(head) - len(_JOIN)
+    if not head or alone_at <= len(head) or rest < _LEAST_STRETCH:
+        return None
+    best, best_at, best_end = _best_stretch(tuple(s for s in spans if s[0] >= len(head)), rest)
+    if best == 0:
+        return None
+    start, stop = _window(text, best_at, best_end, rest, limit // 5, floor=len(head))
+    if start <= len(head) + len(_JOIN):
+        return None  # the stretch follows the opening: the start is shown whole
+    core = text[start:stop].strip()
+    shown = head + _JOIN + core + ("…" if stop < len(text) or beyond else "")
+    return shown, max(0, len(text) - len(head) - len(core)) + beyond
+
+
+def _focus(text: str, limit: int, terms: frozenset[str], beyond: int = 0) -> tuple[str, int]:
+    """:func:`focused`'s text and how many characters it leaves out. *beyond*:
+    how many more characters the memory holds past *text* (the part of it
+    that was read, ``limits.RECALL_FOCUS_READ``); they are left out."""
+    if not beyond and len(text) <= limit:
+        return text, 0
+    if len(text) < limit:  # only what lies past the part read is left out
+        return text + "…", beyond
+    if not terms or limit < 3:
+        return _clip(text, limit), _hidden(text, limit) + beyond
+    room = limit - 2  # the two ellipses
+    spans = _spans_of(text[:RECALL_FOCUS_READ], terms)
+    best, best_at, best_end = _best_stretch(spans, room)
+    if best == 0:
+        return _clip(text, limit), _hidden(text, limit) + beyond
+    # A little before the stretch, so its sentence reads, as far as the room
+    # after its last word allows; never into a word.
+    start, stop = _window(text, best_at, best_end, room, limit // 5)
+    if start > 0 and RECALL_KEEP_OPENING:
+        kept = _with_opening(text, spans, room, limit, beyond, start)
+        if kept is not None:
+            return kept
+    core = text[start:stop].strip()
+    shown = ("…" if start > 0 else "") + core + ("…" if stop < len(text) or beyond else "")
+    return shown, max(0, len(text) - len(core)) + beyond
+
+
+def display_at(user_text: str | None, assistant_text: str | None, summary_text: str | None,
+               room: int, terms: frozenset[str] | set[str],
+               beyond: tuple[int, int, int] = (0, 0, 0)) -> tuple[str, int]:
+    """An episode's display in *room* characters, and how many of its
+    characters it leaves out (the memory plan's W1a): each side cut around
+    the question's words (:func:`focused`); a short side gives its room to
+    the other, the question keeping at least two fifths when both are long.
+    Labelled as :func:`display_parts` labels. *beyond*: how many characters
+    each side (question, answer, summary) holds past the text given (recall
+    reads ``limits.RECALL_FOCUS_READ`` of each)."""
+    terms = frozenset(terms)
+    question, answer = _flat(user_text), _flat(assistant_text)
+    if question and answer:
+        whole_q, whole_a = len(question) + beyond[0], len(answer) + beyond[1]
+        q_room = max(1, min(whole_q, max(room * 2 // 5, room - whole_a)))
+        a_room = max(1, room - q_room)
+        (shown_q, hidden_q), (shown_a, hidden_a) = (_focus(question, q_room, terms, beyond[0]),
+                                                    _focus(answer, a_room, terms, beyond[1]))
+        return f"User: {shown_q} / Assistant: {shown_a}", hidden_q + hidden_a
+    if question or answer:
+        return _focus(question or answer, room, terms, beyond[0] if question else beyond[1])
+    return _focus(_flat(summary_text), room, terms, beyond[2])
 
 
 def display_text(user_text: str | None, assistant_text: str | None,

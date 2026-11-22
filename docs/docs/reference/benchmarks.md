@@ -98,7 +98,7 @@ What differs from a live turn: a private store, a fixed "now", recorded vectors.
 
 Recall took 26.0 ms (median) on these stores.
 
-**Answering from it** (100 questions; reader and judge deepseek-flash, LongMemEval's own judge prompts): the share of answers the judge called correct, from Kazma's recall as the model is shown it, from the same recalled conversations read whole (what the model gets when it opens them with `memory_read`, which this one-shot reader cannot call), from the whole history (the full-context baseline) and from the conversations holding the answer alone (the oracle).
+**Answering from it** (100 questions; reader deepseek-flash, judge deepseek-flash, LongMemEval's own judge prompts): the share of answers the judge called correct, from Kazma's recall as the model is shown it, from the same recalled conversations read whole (what the model gets when it opens them with `memory_read`, which this one-shot reader cannot call), from the whole history (the full-context baseline) and from the conversations holding the answer alone (the oracle).
 
 | Question | Kazma's recall | Read whole | History cut to fit | Oracle |
 |---|---|---|---|---|
@@ -142,6 +142,27 @@ At Kazma's own block size, bge-m3's nearest rounds show the answer's round for 7
 Of the 129 answerable questions whose answer is a word or a phrase, its text is in the rounds Kazma shows for 45.0 %, and still in the block after the block's bounds for 30.2 %.
 
 **The 6 questions with no answer**: Kazma shows nothing for 0.0 % of them; it shows 4.67 memories (982 tokens, median), ten rounds show ten (4,825). Kazma showed nothing for 1.0 % of all the questions.
+
+**Answering from it**: reader qwen3.7-plus with its reasoning default; judges qwen3.8-flash and qwen3.7-plus (LongMemEval's prompts; the judges swapped on 2026-11-22: each verdict is kept with the model that gave it, and no answer was asked again). The same build answered every question twice: an answer that flips between the two runs is the noise, and no change is accepted on a difference smaller than it.
+
+| History | Answered | Second run | Answers that flipped | Judges agree | Tokens a question |
+|---|---|---|---|---|---|
+| Kazma's recall | 69.0 % | 69.0 % | 2 | 97.5 % | 1,322 |
+| Kazma's recall before the change judged (its blocks from the earlier code) | 47.0 % | 45.5 % | 5 | 98.0 % | 1,126 |
+| Kazma's own chat turn (it reads a memory whole with memory_read) | 79.0 % | – | – | 96.5 % | 20,727 |
+| The same conversations read whole | 75.0 % | 76.0 % | 4 | 98.5 % | 2,395 |
+| The whole history | 91.0 % | 88.5 % | 13 | 97.5 % | 114,326 |
+| Only the answering conversations (oracle) | 92.0 % | 92.5 % | 9 | 97.5 % | 6,495 |
+| bge-m3's 10 nearest rounds (plain retrieval) | 85.0 % | 84.0 % | 8 | 97.5 % | 4,790 |
+| BM25's 10 best rounds (plain retrieval) | 76.5 % | 75.5 % | 2 | 98.0 % | 5,196 |
+
+**Where Kazma stands**: from its recall block alone Kazma answers 69.0 %, against 85.0 % for plain top-10 retrieval (bge-m3) at 3.6 times the tokens, and 91.0 % for the whole history. Kazma's own turn, which reads a memory whole when the block shows it in part, reaches 79.0 %. The largest gaps are multi-session questions (39.6 % against 92.5 % for the whole history; W4) and temporal-reasoning questions (60.4 % against 90.6 % for the whole history; W2).
+
+Kazma's own turn answers through the agent's chat turn (W1c): its base prompt, the recall block a turn gets, `memory_search`, `memory_read` and `memory_list`, at most three tool rounds, asked once (1.76 model calls and 0.71 tool requests a question, 10.43 s median).
+
+Answers cut at the reader's limit: 0; answers or verdicts the API refused: 4 (scored wrong).
+
+**The judges, read beside**: 50 answers read by Claude (labelled model-read until the owner checks them), the 27 the two judges disagree on first. qwen3.8-flash gave the reading's verdict on 86.0 % of them, qwen3.7-plus on 60.0 %; on the disagreements 74.1 % and 25.9 %. That is why qwen3.8-flash judges first: qwen3.7-plus's wrong verdicts were mostly refusals of an answer the reading took for right (17 of its 20), typically a right answer that adds a detail the expected answer leaves out.
 
 Reproduce: download LongMemEval into a folder of its own, then `python scripts/longmemeval_bench.py retrieve --data DIR` (and `answer`, `translate`, `parallel`; those call a model).
 
