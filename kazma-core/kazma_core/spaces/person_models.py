@@ -163,14 +163,14 @@ def _install_default() -> str:
 
 
 def _their_choice(models: _PersonModels) -> str:
-    """The model a person's work runs with when nothing else is chosen:
-    their default, else the install's when they may use it ("": keep it),
-    else the first they may use."""
+    """The model a person's work runs with in place of one they may not
+    use: their default, else the install's when they may use it, else the
+    first they may use ("" when they may use none: the call is refused)."""
     if models.default:
         return models.default
     install = _install_default()
-    if not install or models.allows(install):
-        return ""
+    if install and models.allows(install):
+        return install
     return sorted(models.allowed or ())[0] if models.allowed else ""
 
 
@@ -231,7 +231,16 @@ def model_for_work(asked: str | None) -> str | None:
         return asked
     if asked and models.allows(_registry_ref(asked)):
         return asked
-    return _their_choice(models) or (None if not asked else asked)
+    if not asked and not models.default:
+        install = _install_default()
+        if not install or models.allows(install):
+            return None  # the install's default is theirs to use: kept
+    # A model they may not use -- a stored run_model, a router's hint, a
+    # checkpointed last_model (the name the provider returned, which may not
+    # be the configured id) -- gives way to one they may (the S2-03 second
+    # review: with the install's default allowed it was kept, and the call
+    # refused the turn).
+    return _their_choice(models) or asked or None
 
 
 def offered(listed: dict[str, Any], *, person: str | None = None) -> dict[str, Any]:

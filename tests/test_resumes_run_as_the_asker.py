@@ -15,10 +15,13 @@ Now ``continue_turn`` binds the turn's asker (``hitl_answerers.whose_turn``:
 the author of the chat's newest message) and does not go on when that person
 has left the space, and a hard steer by anyone but the asker is refused.
 
-The class gate: every product function that builds a resume command
-(``build_resume_command``) or continues a turn from its checkpoint (a drive
-with no input) binds the asker -- ``as_the_asker`` or ``bind_scope`` in the
-same function -- or is declared here with why. A planted unbound resume is
+The class gate, per call site (the second review: a binding anywhere in
+a function passed every resume in it): every call that runs a resume -- a
+resume command (``build_resume_command``, or a function that builds and
+returns one) or a turn continued from its checkpoint (``None``) given to
+what runs a turn, or handed on to a chat app's resumer -- sits inside
+``with as_the_asker(...)`` or ``with bind_scope(...)``, or its function is
+declared here with why. Planted unbound resumes, one beside a binding, are
 its control.
 """
 
@@ -43,7 +46,7 @@ ROOTS = ("kazma-core/kazma_core", "kazma-ui/kazma_ui", "kazma-gateway/kazma_gate
 
 #: Resumes that bind no asker in their own function, and why that is right.
 DECLARED = {
-    "kazma-core/kazma_core/agent/hitl_supersede.py::cancel_pending_hitl._deny_resume_cmd":
+    "kazma-core/kazma_core/agent/hitl_supersede.py::cancel_pending_hitl":
         "a deny of the chat's leftover card before the same person's new turn, in that person's "
         "request: another member's message is refused before it (sse_chat._card_waits_on_someone_else)",
     "kazma-core/kazma_core/cli/ask.py::_invoke_supervisor":
@@ -51,47 +54,126 @@ DECLARED = {
     "kazma-gateway/kazma_gateway/agent_handler/graph.py::create_graph_handler._handler_body":
         "a chat app's hard steer, inside the handler's own scope (the owner's until S3-04 binds "
         "the card's asker)",
+    "kazma-gateway/kazma_gateway/agent_handler/hitl.py::make_continue_resumer.continue_after_restart":
+        "runs in the task turn_resume.continue_turn starts inside as_the_asker(whose_turn)",
     "kazma-gateway/kazma_gateway/agent_handler/hitl.py::_handle_hitl_resume":
         "a chat app's /hitl decision, in the owner's scope until S3-04 binds the card's asker",
 }
 
 _BINDERS = {"as_the_asker", "bind_scope"}
+#: The calls that run a turn from a given input: a resume runs when its input
+#: is a resume command, or None (a turn continued from its checkpoint).
+_RUNNERS = {"_drive_graph_to_journal", "drive", "invoke_turn", "_run_resume", "_resume_into_chat"}
+#: Graph calls whose first argument is the input.
+_GRAPH_RUNNERS = {"ainvoke", "astream", "astream_events"}
+#: Keywords that hand a resume on to whatever runs it (a chat app's
+#: resumer; ``run_agent_turn``'s ``state``).
+_RESUME_KEYWORDS = {"resume_cmd", "resume_input", "state"}
+#: Calls that continue a cut turn, whatever they are given.
+_CONTINUERS = {"_continuer"}
+
+
+#: ``import ... as`` names of the module being read (``invoke_turn as
+#: _invoke_steer``), set by :func:`_resumes`.
+_ALIASES: dict[str, str] = {}
+#: The module's functions that build a resume command and return it (a
+#: call of one is a resume, ``hitl_supersede``'s ``_deny_resume_cmd``).
+_BUILDERS: set[str] = set()
+
+
+def _name_of(func: ast.AST) -> str:
+    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+    return _ALIASES.get(name, name)
+
+
+def _own(fn: ast.AST):
+    """*fn*'s own nodes: not those of a function defined inside it."""
+    todo = list(ast.iter_child_nodes(fn))
+    while todo:
+        node = todo.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        yield node
+        todo.extend(ast.iter_child_nodes(node))
+
+
+def _resume_names(fn: ast.AST) -> set[str]:
+    """The names *fn* binds to a resume command (``build_resume_command``)."""
+    out: set[str] = set()
+    for node in _own(fn):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Call)                 and _name_of(node.value.func) == "build_resume_command":
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            out |= {t.id for t in targets if isinstance(t, ast.Name)}
+    return out
+
+
+def _is_resume(value: ast.AST | None, names: set[str], *, none: bool = True) -> bool:
+    if isinstance(value, ast.Await):
+        value = value.value
+    if none and isinstance(value, ast.Constant) and value.value is None:
+        return True
+    if isinstance(value, ast.Name) and value.id in names:
+        return True
+    return isinstance(value, ast.Call) and _name_of(value.func) in ({"build_resume_command"} | _BUILDERS)
+
+
+def _runs_a_resume(call: ast.Call, names: set[str]) -> bool:
+    """Whether *call* runs a resume (or hands one on to what runs it)."""
+    name = _name_of(call.func)
+    if name in _CONTINUERS:
+        return True
+    if name in _RUNNERS and len(call.args) >= 2 and _is_resume(call.args[1], names):
+        return True
+    if name in _GRAPH_RUNNERS and call.args and _is_resume(call.args[0], names):
+        return True
+    return any(k.arg in _RESUME_KEYWORDS and _is_resume(k.value, names, none=k.arg != "state")
+               for k in call.keywords)
 
 
 def _resumes(tree: ast.AST) -> dict[str, bool]:
-    """Every function holding a resume, and whether it binds a scope."""
+    """Every function holding a call that runs a resume, and whether EACH
+    such call sits inside an asker binding (``with as_the_asker(...)`` or
+    ``with bind_scope(...)``) in that function: a binding elsewhere in the
+    function does not bind it (the second review)."""
     found: dict[str, bool] = {}
-    stack: list[ast.AST] = []
 
-    def binds(fn: ast.AST) -> bool:
-        for node in ast.walk(fn):
-            if isinstance(node, ast.Call):
-                f = node.func
-                name = f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")
-                if name in _BINDERS:
-                    return True
-        return False
+    def visit(fn: ast.AST, key: str) -> None:
+        names = _resume_names(fn)
 
-    class Visitor(ast.NodeVisitor):
-        def visit_FunctionDef(self, node: ast.AST) -> None:
-            stack.append(node)
-            self.generic_visit(node)
-            stack.pop()
+        def walk(node: ast.AST, bound: bool) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    visit(child, f"{key}.{child.name}")
+                    continue
+                if isinstance(child, ast.Lambda):
+                    continue
+                inner = bound
+                if isinstance(child, (ast.With, ast.AsyncWith)) and any(
+                        isinstance(i.context_expr, ast.Call) and _name_of(i.context_expr.func) in _BINDERS
+                        for i in child.items):
+                    inner = True
+                if isinstance(child, ast.Call) and _runs_a_resume(child, names):
+                    found[key] = found.get(key, True) and inner
+                walk(child, inner)
 
-        visit_AsyncFunctionDef = visit_FunctionDef
+        walk(fn, False)
 
-        def visit_Call(self, node: ast.Call) -> None:
-            f = node.func
-            name = f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")
-            resumes = name == "build_resume_command" or (
-                name in ("_drive_graph_to_journal", "drive") and len(node.args) >= 2
-                and isinstance(node.args[1], ast.Constant) and node.args[1].value is None)
-            if resumes and stack:
-                key = ".".join(getattr(fn, "name", "?") for fn in stack)
-                found[key] = found.get(key, False) or binds(stack[-1])
-            self.generic_visit(node)
-
-    Visitor().visit(tree)
+    _ALIASES.clear()
+    _BUILDERS.clear()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            _ALIASES.update({a.asname: a.name for a in node.names if a.asname})
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", "")) == "build_resume_command"
+                for n in _own(node)) and any(isinstance(n, ast.Return) and n.value is not None for n in _own(node)):
+            _BUILDERS.add(node.name)
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            visit(node, node.name)
+        elif isinstance(node, ast.ClassDef):
+            for item in ast.iter_child_nodes(node):
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    visit(item, f"{node.name}.{item.name}")
     return found
 
 
@@ -132,11 +214,41 @@ async def continue_it(graph, config):
     await _drive_graph_to_journal(graph, None, config, thread_id="t")
 
 async def bound_resume(graph, config, whose):
+    cmd = build_resume_command(action="apply")
     with as_the_asker(whose):
-        cmd = build_resume_command(action="apply")
+        await graph.ainvoke(cmd, config)
+
+async def binds_elsewhere(graph, config, whose):
+    with as_the_asker(whose):
+        pass
+    cmd = build_resume_command(action="apply")
+    await _drive_graph_to_journal(graph, cmd, config, thread_id="t")
+
+async def hands_it_on(graph, config, whose):
+    cmd = build_resume_command(action="apply")
+    _chat_app_resumer[1](resume_cmd=cmd, resume_config=config)
+
+async def continues_unbound(graph, config):
+    await _resume_into_chat(graph, None, None, resume_cmd=None, resume_config=config)
 '''
     assert sorted(_unbound_resumes({"planted.py": planted})) == [
-        "planted.py::continue_it", "planted.py::resume_for_someone"]
+        "planted.py::binds_elsewhere", "planted.py::continue_it", "planted.py::continues_unbound",
+        "planted.py::hands_it_on", "planted.py::resume_for_someone"]
+
+
+def test_control_the_function_level_rule_missed_a_resume_beside_a_binding() -> None:
+    """The gate before the second review passed a function holding any
+    binder: a resume run outside it went unseen."""
+    planted = ast.parse('''
+async def binds_elsewhere(graph, config, whose):
+    with as_the_asker(whose):
+        pass
+    cmd = build_resume_command(action="apply")
+    await _drive_graph_to_journal(graph, cmd, config, thread_id="t")
+''')
+    function = planted.body[0]
+    assert any(isinstance(n, ast.Call) and getattr(n.func, "id", "") in _BINDERS for n in ast.walk(function))
+    assert _resumes(planted) == {"binds_elsewhere": False}
 
 
 # ── continue_turn ──────────────────────────────────────────────────────

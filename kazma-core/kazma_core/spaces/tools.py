@@ -329,14 +329,17 @@ def _filesystem_server_tool(name: str) -> bool:
 
 def tool_grants() -> Any:
     """The bound person's features (S2-11), or None when no rule applies;
-    nothing when they cannot be read (never guessed)."""
+    when they cannot be read, grants marked ``unreadable``: every tool is
+    refused with a line saying why, an always-on one included (fail closed,
+    the S2-01 second review: an empty grant let a switched-off chat or
+    memory tool run)."""
     from kazma_core.spaces import features, identity
 
     try:
         return features.grants_here()
     except identity.IdentityUnavailable:
         bound = current_scope()
-        return features.Grants(bound.asker if bound else "", frozenset())
+        return features.Grants(bound.asker if bound else "", frozenset(), unreadable=True)
 
 
 def tool_refusal(name: str, allowance: HostAllowance | None = None, grants: Any = ...) -> str | None:

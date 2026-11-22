@@ -191,9 +191,17 @@ async def continue_turn(graph: Any, turn: CutTurn, *, drive: Any = None) -> tupl
     if turn.platform in _CHAT_APPS:
         if _continuer is None or not turn.target.startswith(f"{turn.platform}:"):
             return False, "The chat app this turn belongs to is not connected."
-        task = asyncio.create_task(_continuer(thread_id=turn.thread_id, resume_config=config,
-                                              platform=turn.platform, target_id=turn.target,
-                                              user_text=turn.user_text))
+        # A chat app's turn goes on as its asker too (the S2-05 second
+        # review: it ran unbound, as the chat's opener or no one).
+        whose, refusal = await _whose_turn_goes_on(turn.thread_id)
+        if refusal:
+            return False, refusal
+        from kazma_ui.hitl_answerers import as_the_asker
+
+        with as_the_asker(whose):
+            task = asyncio.create_task(_continuer(thread_id=turn.thread_id, resume_config=config,
+                                                  platform=turn.platform, target_id=turn.target,
+                                                  user_text=turn.user_text))
     else:
         from kazma_ui.reply_sink import resolve_reply_turn
         from kazma_ui.session_manager import get_session_manager

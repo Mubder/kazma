@@ -429,3 +429,34 @@ def test_control_x_studio_without_the_rule_posted_by_the_click(matrix, monkeypat
         _approvers(matrix.account_a, [OWNER_ACCOUNT_ID])
         w.call("a", "POST", "/api/x/post", json={"text": "my own click"})
         assert w.x_calls
+
+
+# ── the identity store away: fail closed ────────────────────────────────
+
+
+def _store_away(monkeypatch: Any) -> None:
+    def away() -> Any:
+        raise identity.IdentityUnavailable("the accounts store is away")
+
+    monkeypatch.setattr(identity, "read_registry", away)
+
+
+def test_no_tool_runs_while_the_accounts_cannot_be_read(y_posting_off, monkeypatch) -> None:
+    from kazma_core.spaces import tools
+
+    with y_posting_off.as_a():
+        _store_away(monkeypatch)
+        refused = tools.tool_refusal("file_read")  # always-on: refused too
+        offered = tools.offered_here([{"function": {"name": "file_read"}}, {"function": {"name": "memory_search"}}])
+    assert refused and "cannot read who may use it" in refused, refused
+    assert offered == []
+
+
+def test_control_an_empty_grant_let_an_always_on_tool_run(y_posting_off, monkeypatch) -> None:
+    from kazma_core.spaces import tools
+
+    people.set_tools(y_posting_off.account_a, ["file_read"], by=OWNER_ACCOUNT_ID)
+    with y_posting_off.as_a():
+        _store_away(monkeypatch)
+        empty = features.Grants(y_posting_off.account_a, frozenset())
+        assert tools.tool_refusal("file_read", grants=empty) is None  # switched off, and it ran

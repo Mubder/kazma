@@ -229,25 +229,27 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         # the timeout was recorded.
         if not enforced:
             route = await _chat_app_route(graph, config)
-        if route is not None and _chat_app_resumer is not None:
-            task = asyncio.create_task(
-                _chat_app_resumer[1](
-                    thread_id=thread_id,
-                    resume_cmd=_resume_cmd,
-                    resume_config=config,
-                    platform=route[0],
-                    target_id=route[1],
-                    tool=str((_intr_payload or {}).get("tool") or ""),
-                    timeout_s=timeout_s,
-                )
-            )
-        else:
-            # The turn goes on as its asker (Spaces S2-05): the card's own,
-            # read from the live interrupt before anything was recorded, not
-            # the chat's opener whom a resume with nothing bound would run as.
-            # Nothing is bound on an install that does not enforce Spaces.
-            from kazma_ui.hitl_answerers import as_the_asker
+        # The turn goes on as its asker (Spaces S2-05): the card's own, read
+        # from the live interrupt before anything was recorded, not the
+        # chat's opener whom a resume with nothing bound would run as -- a
+        # chat app's resume too (the second review: it ran unbound). Nothing
+        # is bound on an install that does not enforce Spaces.
+        from kazma_ui.hitl_answerers import as_the_asker
 
+        if route is not None and _chat_app_resumer is not None:
+            with as_the_asker(whose):
+                task = asyncio.create_task(
+                    _chat_app_resumer[1](
+                        thread_id=thread_id,
+                        resume_cmd=_resume_cmd,
+                        resume_config=config,
+                        platform=route[0],
+                        target_id=route[1],
+                        tool=str((_intr_payload or {}).get("tool") or ""),
+                        timeout_s=timeout_s,
+                    )
+                )
+        else:
             with as_the_asker(whose):
                 task = asyncio.create_task(
                     _drive_graph_to_journal(

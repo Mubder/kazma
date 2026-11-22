@@ -304,6 +304,59 @@ def test_work_that_names_no_model_runs_on_the_persons(y_with_one_model, monkeypa
     assert m.registry.built[-1] == "openrouter:model-c", "Y's own default"
 
 
+def _old_choice(models: Any) -> str:
+    """The choice before the S2-03 second review (the control): "" (keep
+    what was asked) when the install's default is allowed."""
+    if models.default:
+        return models.default
+    install = person_models._install_default()
+    if not install or models.allows(install):
+        return ""
+    return sorted(models.allowed or ())[0] if models.allowed else ""
+
+
+def _with_the_install_default_allowed(m: Matrix) -> None:
+    people.set_models(m.account_a, ["openrouter:model-b", INSTALL_DEFAULT], "", by=OWNER_ACCOUNT_ID)
+
+
+def test_a_model_they_may_not_use_gives_way_to_the_install_default(y_with_one_model) -> None:
+    m = y_with_one_model
+    _with_the_install_default_allowed(m)
+    with m.as_a():
+        assert person_models.model_for_work("openrouter:model-c") == INSTALL_DEFAULT
+        assert person_models.model_for_work("openrouter:model-b") == "openrouter:model-b"
+        assert person_models.model_for_work(None) is None, "the install's default is kept"
+
+
+def test_a_checkpointed_name_the_provider_returned_gives_way(y_with_one_model) -> None:
+    """The turn's last_model is the name the provider returned
+    ("deepseek-v3.2"), not the configured id: it gives way to a model they
+    may use, and the call runs on it, never refused."""
+    from kazma_core.runtime.live_llm import resolve_live_client
+
+    m = y_with_one_model
+    _with_the_install_default_allowed(m)
+    with m.as_a():
+        fallback = _provider(INSTALL_DEFAULT, m.registry.calls)
+        client, model = resolve_live_client(fallback, state={"last_model": "deepseek-v3.2"})
+        assert m.registry.built[-1] == INSTALL_DEFAULT and model == "deepseek-flash"
+        assert _ask(client, model) == "done"
+    assert m.registry.calls[-1] == INSTALL_DEFAULT
+
+
+def test_control_the_old_choice_kept_the_model_and_the_call_refused_the_turn(y_with_one_model,
+                                                                            monkeypatch) -> None:
+    from kazma_core.llm_provider import LLMError
+
+    m = y_with_one_model
+    _with_the_install_default_allowed(m)
+    monkeypatch.setattr(person_models, "_their_choice", _old_choice)
+    with m.as_a():
+        assert person_models.model_for_work("openrouter:model-c") == "openrouter:model-c"
+        with pytest.raises(LLMError):
+            _ask(_provider("openrouter:model-c", []))
+
+
 def test_control_the_install_list_calls_the_model(y_with_one_model, monkeypatch) -> None:
     _install_list(monkeypatch)
     calls: list[str] = []

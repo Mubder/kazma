@@ -15805,10 +15805,14 @@ an install with one account behaves as before.
     (`hitl_answerers.whose_turn`, `_turn_author`: the newest user row before
     the open turn's reply row, never a steer's row -- marked `steer` -- nor a
     later row; read in the chat's own space), not at all when they left.
-    Gate: every
-    product function that builds a resume command or continues a turn binds
-    the asker or is declared (`tests/test_resumes_run_as_the_asker.py`, a
-    planted unbound resume as the control).
+    Gate, per call site (the second review: a binding anywhere in a
+    function passed every resume in it, and a chat app's continue and the
+    watchdog's chat-app resume ran unbound): every call that runs a resume
+    -- a resume command, a function that builds one, or a turn continued
+    from its checkpoint, given to what runs a turn or handed to a chat app's
+    resumer -- sits inside `with as_the_asker(...)`/`bind_scope(...)`, or
+    its function is declared (`tests/test_resumes_run_as_the_asker.py`,
+    planted unbound resumes, one beside a binding, as the controls).
   - **Another member's message never drops a card**: a new message or
     voice utterance in a chat whose pending card waits on someone else is
     refused with a line naming them (`sse_chat._card_waits_on_someone_else`),
@@ -15864,6 +15868,10 @@ an install with one account behaves as before.
     or declared not one with why (`NOT_A_TOOL_DOOR`: the Memory page's
     edits stay the person's, the chat itself, answering a card...). A new
     page action reaching a tool's effect is a door or a reason.
+  - **Who may use what that cannot be read refuses every tool**
+    (`spaces.tools.tool_grants`: `Grants(unreadable=True)`, an always-on
+    tool included; the second review: an empty grant let a switched-off
+    chat or memory tool run while the identity store was away).
   - **N4 in X Studio**: a person whose cards go to approvers posts and
     deletes on X only through the chat's card; their own click (Post now,
     Delete) is refused with a line naming the approvers
@@ -15913,9 +15921,15 @@ an install with one account behaves as before.
     research -- the person's call of a model they may not use never leaves.
   - **Their model where none was chosen**: `ModelRegistry.get_client(None)`
     and the supervisor's `resolve_live_client` ask `model_for_work`; a
-    stored model they may no longer use gives way to theirs; swarm model
-    selection (`select_provider_for_task`) never picks one they may not use.
-    Async callers of `get_client` call it in a thread.
+    model they may not use -- a stored run_model, a router's hint, a
+    checkpointed `last_model` (the name the provider returned, which may not
+    be the configured id) -- gives way to their default, else the install's
+    when they may use it, else the first they may use (the second review:
+    with the install's default allowed it was kept, and the call refused the
+    turn; `person_models._their_choice`); swarm model selection
+    (`select_provider_for_task`) never picks one they may not use. Async
+    callers of `get_client` call it in a thread. Gate: the second review's
+    cases in `tests/test_person_models.py` (the old choice as the control).
   - **The pickers list only theirs** (`offered`): `/api/models/options` for
     the signed-in person, the chat apps' `/model` (a model not listed is "not
     offered"). The chat stream refuses a model the person names before

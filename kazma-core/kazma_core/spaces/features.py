@@ -729,9 +729,12 @@ class Grants:
     #: The admin disabled the person (S2-07): nothing is theirs to use, and
     #: their work waits; ``on`` keeps their switches as stored.
     disabled: bool = False
+    #: The identity store could not be read: nothing is known about them, so
+    #: nothing is theirs to use now (fail closed, the S2-01 second review).
+    unreadable: bool = False
 
     def has(self, feature: str) -> bool:
-        return not self.disabled and feature in self.on
+        return not self.disabled and not self.unreadable and feature in self.on
 
 
 def grants_of(registry: dict[str, Any], account_id: str) -> Grants:
@@ -813,6 +816,12 @@ def tool_refusal(name: str, grants: Grants | None = None) -> str | None:
     model, which tells the person in their language."""
     if grants is None:
         return None
+    if grants.unreadable:
+        # Who may use what cannot be read (the accounts store is away): no
+        # tool runs on a guess, an always-on one included (the S2-01 second
+        # review: a switched-off chat or memory tool ran while it was away).
+        return (f"Tool '{name}' is not run now: Kazma cannot read who may use it (the accounts store is "
+                "away). Tell the user to try again in a moment.")
     if grants.disabled:
         return f"Tool '{name}' is not run. " + _disabled_refusal("en")
     for feature in _features_of_tool(name):
