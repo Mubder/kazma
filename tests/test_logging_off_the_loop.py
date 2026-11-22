@@ -116,27 +116,33 @@ def test_the_real_setup_writes_through_the_queue(tmp_path):
     """A fresh interpreter, as the server starts: one queue handler on the
     root logger, and the file gets the message, its traceback and the turn id."""
     log_path = tmp_path / "kazma.log"
+    # The marks go to a file of their own: printed, they shared stdout with the
+    # log writer's console line, which CI once read in the middle of one
+    # (2026-11-22, "Extra data: line 1 column 10").
+    marks_path = tmp_path / "marks.json"
     script = textwrap.dedent(f"""
         import json, logging, sys
         from kazma_core import logging_config
         from kazma_core.observability.correlation import bind_turn_id
         logging_config.setup_logging("INFO")
         root = logging.getLogger()
-        print("HANDLERS=" + json.dumps([h.get_name() for h in root.handlers]))
+        marks = {{"HANDLERS": [h.get_name() for h in root.handlers]}}
         bind_turn_id("turn-fa135")
         try:
             raise ValueError("boom-fa135")
         except ValueError:
             logging.getLogger("kazma_core.fa135").exception("handled the boom")
-        print("STOPPED=" + str(logging_config._stop_log_writer(5.0)))
+        marks["STOPPED"] = logging_config._stop_log_writer(5.0)
+        with open({str(marks_path)!r}, "w", encoding="utf-8") as out:
+            out.write(json.dumps(marks))
     """)
     env = {**os.environ, "KAZMA_LOG_FILE": str(log_path), "KAZMA_DATA_DIR": str(tmp_path / "data"),
            "KAZMA_LOG_FORMAT": "json", "KAZMA_USER_HOME": str(tmp_path / "home")}
     done = subprocess.run([sys.executable, "-c", script], cwd=REPO, env=env, capture_output=True,
                           text=True, timeout=120)
     assert done.returncode == 0, done.stderr[-2000:]
-    marks = dict(line.split("=", 1) for line in done.stdout.splitlines() if line.startswith(("HANDLERS=", "STOPPED=")))
-    assert json.loads(marks["HANDLERS"]) == ["queue"] and marks["STOPPED"] == "True"
+    marks = json.loads(marks_path.read_text(encoding="utf-8"))
+    assert marks["HANDLERS"] == ["queue"] and marks["STOPPED"] is True
     text = log_path.read_text(encoding="utf-8")
     assert "handled the boom" in text and "ValueError: boom-fa135" in text
     assert "turn-fa135" in text, "the turn id is read on the caller's thread"
