@@ -12,6 +12,8 @@ area now does, with the old fallback as the control.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from kazma_core.spaces import scope
 from kazma_core.spaces.scope import NoSpaceBound, bind_scope, space_of_record
@@ -78,3 +80,92 @@ def test_a_swarm_task_of_no_tenant_is_the_owners_before_spaces() -> None:
         assert get_current_tenant_id() == scope.OWNER_SPACE_ID
     with _worker_scope("acme", None)():
         assert get_current_tenant_id() == "acme"
+
+
+# ── safety: the commitment layer and the bus bridge ─────────────────────
+
+
+def _pending(thread: str, space: str, n: int) -> None:
+    from kazma_core.safety.commitment.store import Commitment, create_commitment
+
+    for k in range(n):
+        create_commitment(Commitment(thread_id=thread, act="remind", status="needs_confirm",
+                                     goal_text=f"g{k}", tenant_id=space))
+
+
+def test_a_commitment_made_with_no_tenant_is_in_the_bound_space(enforced) -> None:
+    from kazma_core.safety.commitment.store import Commitment
+
+    with bind_scope("family", "layla"):
+        assert Commitment(thread_id="t").tenant_id == "family"
+    with pytest.raises(NoSpaceBound):
+        Commitment(thread_id="t")
+
+
+def test_the_commitment_reads_name_the_bound_space(enforced) -> None:
+    from kazma_core.safety.commitment.store import list_by_thread
+
+    _pending("t-space-read", "family", 1)
+    _pending("t-space-read", scope.OWNER_SPACE_ID, 1)
+    with bind_scope("family", "layla"):
+        assert {c.tenant_id for c in list_by_thread("t-space-read")} == {"family"}
+    with pytest.raises(NoSpaceBound):
+        list_by_thread("t-space-read")
+
+
+def test_the_cap_sweep_caps_each_thread_in_its_own_space() -> None:
+    """Kazma's own sweep: it capped every thread under the owner's space,
+    so another space's thread was never capped."""
+    from kazma_core.safety.commitment.store import enforce_all_pending_caps, list_by_thread
+
+    _pending("t-space-cap", "family", 5)
+    assert enforce_all_pending_caps(cap=2) >= 3
+    with bind_scope("family", "layla"):
+        left = [c for c in list_by_thread("t-space-cap") if c.status == "needs_confirm"]
+    assert len(left) == 2
+
+
+def test_control_the_sweep_of_before_left_another_space_uncapped(monkeypatch) -> None:
+    from kazma_core.safety.commitment import store
+
+    _pending("t-space-cap-old", "family", 5)
+    real = store.enforce_pending_cap
+    monkeypatch.setattr(store, "enforce_pending_cap",
+                        lambda thread_id, *, cap=None, tenant_id=None: real(thread_id, cap=cap,
+                                                                           tenant_id="default"))
+    store.enforce_all_pending_caps(cap=2)
+    with bind_scope("family", "layla"):
+        left = [c for c in store.list_by_thread("t-space-cap-old") if c.status == "needs_confirm"]
+    assert len(left) == 5
+
+
+def test_an_effect_s_jobs_are_read_in_the_bound_space(monkeypatch) -> None:
+    """The registry and a handoff name no tenant: the cancel resolver read
+    the owner's scheduled jobs for anyone's call."""
+    from kazma_core.safety.commitment import authorize
+
+    read: list[str] = []
+
+    def jobs(thread_id=None, tenant_id=None, statuses=()):
+        read.append(tenant_id)
+        return []
+
+    import kazma_core.safety.commitment.constraints as constraints
+
+    monkeypatch.setattr(constraints, "cron_pending_jobs", jobs)
+    with bind_scope("family", "layla"):
+        authorize.authorize_effect("cancel_scheduled", {"job_id": "cron-x"}, thread_id="t")
+    assert read and set(read) == {"family"}
+
+
+def test_a_bridge_approval_with_no_space_is_refused_once_enforced(enforced, monkeypatch) -> None:
+    from kazma_core.safety import bus_bridge, hitl_gates
+
+    registered: list[object] = []
+    monkeypatch.setattr(bus_bridge, "bridge_enabled", lambda: True)
+    monkeypatch.setattr(hitl_gates, "gate_registry_enabled", lambda: True)
+    monkeypatch.setattr(bus_bridge, "live_watcher", lambda: object())
+    monkeypatch.setattr(hitl_gates, "register_gate", lambda row: registered.append(row))
+    asked = bus_bridge.request_approval_via_registry(tool_name="mcp__fs__write_file", tool_args="{}")
+    assert asyncio.run(asked) is False
+    assert registered == []

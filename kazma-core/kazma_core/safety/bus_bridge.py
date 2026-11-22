@@ -255,16 +255,19 @@ async def request_approval_via_registry(
         return False
 
     # A bridge gate has no chat session to inherit tenancy from, so stamp the
-    # calling process's tenant explicitly. The dashboard admits these rows on
+    # calling process's space explicitly. The dashboard admits these rows on
     # tenant match alone (they fail the usual session-ownership check, having
     # no session), and an unstamped row would be admitted by whoever looked
-    # first.
-    try:
-        from kazma_core.tenant_context import get_current_tenant_id
+    # first. The space of the work bound now (Spaces S1-02): `kazma mcp`
+    # binds the machine's (S1-20); with nothing bound once Spaces is enforced
+    # the approval is refused, never asked in the owner's space.
+    from kazma_core.spaces.scope import NoSpaceBound, require_space_id
 
-        tenant = (get_current_tenant_id() or "default").strip() or "default"
-    except Exception:
-        tenant = "default"
+    try:
+        tenant = require_space_id()
+    except NoSpaceBound:
+        logger.warning("[BusBridge] %s names no space -- refused, not asked in the owner's", tool_name)
+        return False
 
     tid = thread_id or f"mcp:{_WATCHER_ID}"
     gate_id = make_gate_id(tid, tool_name, tool_args, seq=int(time.time() * 1000) % 1_000_000)
