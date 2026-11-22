@@ -421,16 +421,24 @@ def register_memory_tools(registry: Any) -> None:
 
     def _keep_this_turn_out() -> bool:
         """The turn asking to forget names what it forgets: keep it out of
-        memory (``forget.keep_turn_out``)."""
+        memory (``forget.keep_turn_out``) -- only when the user's own words
+        ask to forget (``memory.forget_request``). A model that retires an
+        old memory on its own, in a turn that states a new fact ("I moved to
+        Porto last month"), forgets that memory and keeps the turn: it is an
+        update, and its new fact must be written (the memory plan's finding
+        16, 2026-11-22)."""
         import sqlite3
 
         from kazma_core.memory.forget import keep_turn_out
+        from kazma_core.memory.forget_request import is_forget_request
         from kazma_core.memory.provenance import latest_user_message
         from kazma_core.safety.hitl import get_current_tenant_id
         from kazma_core.tools.export_session import get_current_session_messages
 
         chat, turn = _chat_of_call()
         question = latest_user_message(get_current_session_messages() or [])
+        if not is_forget_request(question):
+            return False
         try:
             return keep_turn_out(chat, turn, question, tenant_id=get_current_tenant_id() or "default")
         except (sqlite3.Error, OSError):

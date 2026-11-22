@@ -80,6 +80,12 @@ def _remember(text: str) -> bool:
     return is_remember_request(text)
 
 
+def _forget(text: str) -> bool:
+    from kazma_core.memory.forget_request import is_forget_request
+
+    return is_forget_request(text)
+
+
 def _provenance(pair: tuple[str, str]) -> str:
     from kazma_core.memory.provenance import agent_write_source
 
@@ -412,6 +418,12 @@ PAIRS: list[Pair] = [
          "Remember that my sister's name is Noura.", "تذكر إن اسم أختي نورة.", _remember, True),
     Pair("remember_question", (M + "memory/remember_request.py",),
          "Do you remember my sister's name?", "تتذكر اسم أختي؟", _remember, False),
+    Pair("forget_request", (M + "memory/forget_request.py",),
+         "Can you forget what I said about Dana?", "تقدر تنسى اللي قلته عن دانة؟", _forget, True),
+    Pair("forget_not_a_request", (M + "memory/forget_request.py",),
+         "I moved to Porto last month.", "انتقلت إلى بورتو الشهر الماضي.", _forget, False),
+    Pair("forget_dont_forget", (M + "memory/forget_request.py",),
+         "Don't forget my birthday.", "لا تنسى عيد ميلادي.", _forget, False),
     Pair("provenance_held", (M + "memory/provenance.py",),
          ("Remember that my sister's name is Noura.", "Noura"), ("تذكر إن اسم أختي نورة.", "نورة"),
          _provenance, "user_explicit"),

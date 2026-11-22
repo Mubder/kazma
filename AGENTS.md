@@ -1971,7 +1971,17 @@ four injected were noise.
   the codeword into every prompt), and a forget keeps its own turn out of
   memory (`forget.keep_turn_out`, the ledger row the writer asks first: the
   request "Forget every memory that mentions X" was written as a memory of
-  X). A lesson never quotes the task (it appended "Task context: '<the
+  X) -- **only when the user's own words ask to forget**
+  (`memory/forget_request.is_forget_request`, 2026-11-22, the memory plan's
+  finding 16: English and Arabic, a polite question too, read through
+  `own_words(questions=True)`, so never a "forget" in a quote, someone
+  else's words or a text to translate). A model that retires an old memory
+  on its own in a turn that states a new fact ("I moved to Porto",
+  "انتقلت إلى بورتو") keeps that turn: it is an update, and the quick pass
+  writes the new fact (live, the move was kept out and no new home was
+  written). Gate: `tests/test_forget_only_when_asked.py` (a real supervisor
+  graph and `close_turn`, EN/AR; every forget keeping its turn out as the
+  negative control). A lesson never quotes the task (it appended "Task context: '<the
   user's message>'"). The memory tool also takes a
   memory id (`e_...`, from `memory_search`) and forgets that memory, and an id
   it cannot find is refused before anything is done (`RefusedBeforeEffect`):

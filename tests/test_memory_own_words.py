@@ -298,7 +298,7 @@ def test_control_the_first_rules_missed_the_reviews_forms(monkeypatch):
     from kazma_core.memory import own_words as ow
 
     # The security review's layers (2026-11-18) came after: off here.
-    monkeypatch.setattr(ow, "_without_reported_or_asked", lambda body: body)
+    monkeypatch.setattr(ow, "_without_reported_or_asked", lambda body, **_: body)
     monkeypatch.setattr(ow, "_without_speaker_lines", lambda body: body)
     monkeypatch.setattr(ow, "_without_pasted_chats", lambda body: body)
     monkeypatch.setattr(ow, "_QUOTED_SPAN_RE", re.compile(r"\"[^\"\n]{1,400}+\"|“[^”\n]{1,400}+”|«[^»\n]{1,400}+»"))
@@ -421,7 +421,7 @@ def test_control_the_rules_before_the_review_gave_each_fact(monkeypatch):
     monkeypatch.setattr(ow, "_bounded", lambda body: body)
     monkeypatch.setattr(ow, "_without_speaker_lines", lambda body: body)
     monkeypatch.setattr(ow, "_without_quote_lines", lambda body: ow._QUOTE_LINE_RE.sub(" ", body))
-    monkeypatch.setattr(ow, "_without_reported_or_asked", lambda body: body)
+    monkeypatch.setattr(ow, "_without_reported_or_asked", lambda body, **_: body)
     monkeypatch.setattr(ow, "_without_addresses", lambda window: window)
     monkeypatch.setattr(ow, "_URL_RE", re.compile(r"(?!x)x"))
     monkeypatch.setattr(ow, "_LINE_ASIDES_EN", ())

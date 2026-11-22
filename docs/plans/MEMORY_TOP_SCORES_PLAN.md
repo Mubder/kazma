@@ -664,5 +664,19 @@ completion tokens.
    no fact for "وين أسكن الحين؟" (the step still passed, from the turn's
    own memory). In the other run the model invalidated a fact, not a
    memory, and the turn was kept. A turn that states a new fact and
-   retires an old memory is an update, not a forget request. Not fixed now:
-   the main session decides.
+   retires an old memory is an update, not a forget request. Fixed the same
+   day (the main session's decision): a turn is kept out only when the
+   user's own words ask to forget (`memory/forget_request.is_forget_request`,
+   English and Arabic: "forget ...", "can you forget ...", "delete ... from
+   your memory", "don't save this", "انسى ...", "تقدر تنسى ...", "احذف ...
+   من ذاكرتك", "لا تحفظ"; read through `own_words`, with the user's own
+   questions kept, so never a "forget" in a quote, someone else's words or
+   a text to translate; "I forget", "did I forget", "don't forget" and
+   "لا تنسى" ask nothing). Gate: `tests/test_forget_only_when_asked.py`, a
+   real supervisor graph with a scripted model calling the real memory
+   tool, closed by `close_turn`, EN/AR: an update turn whose model retires
+   the old memory (by its id) or the old fact with its source turn still
+   stores the new home and keeps its memory; "Forget that I live in
+   Lisbon" / "انسى إني ساكن في الكويت" still keeps its own turn out. Today's
+   rule, every forget keeping its turn out, is the negative control: the
+   update turn loses its new home, in both languages.

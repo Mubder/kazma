@@ -1222,14 +1222,14 @@ def _ends_reporting(sentence: str) -> bool:
     return bool(folded) and _reporting(folded[-1]) and not any(w in _SUBJECT_I for w in folded)
 
 
-def _without_reported_or_asked(body: str) -> str:
+def _without_reported_or_asked(body: str, *, questions: bool = False) -> str:
     out = []
     after_report = False
     for sentence in _sentences(body):
         if not sentence.strip():
             out.append(sentence)
             continue
-        if after_report or _asks(sentence) or _supposes_or_asks_to_say(sentence):
+        if after_report or (not questions and _asks(sentence)) or _supposes_or_asks_to_say(sentence):
             out.append("\n" if sentence.endswith("\n") else " ")
             after_report = False
             continue
@@ -1282,15 +1282,19 @@ def _without_quotes(body: str) -> str:
     return _QUOTED_SPAN_RE.sub(replace, body)
 
 
-def own_words(text: str | None) -> str:
+def own_words(text: str | None, *, questions: bool = False) -> str:
     """*text* without what the user did not say about themself: data fences,
     attachment and forward lines, a forwarded message or pasted mail, a
     pasted chat (an export's lines, a copy's headers and messages, the lines
     of a transcript), quote blocks, quoted first-person sentences, someone
     else's words after a colon or a reporting phrase, the text an
     instruction works on, and questions. At most its first ``_SCAN_MAX``
-    characters are read (``_bounded``)."""
-    return _read(_bounded(_message_body(text)))[0]
+    characters are read (``_bounded``).
+
+    With *questions* the user's own questions stay: a question states
+    nothing of the user, but it can ask something of Kazma ("Can you forget
+    what I said about Dana?", ``memory.forget_request``)."""
+    return _read(_bounded(_message_body(text)), questions=questions)[0]
 
 
 #: How much of a long message's end :func:`last_words` reads when its last
@@ -1397,9 +1401,10 @@ def _message_body(text: str | None) -> str:
     return body[:stub] if stub >= 0 else body
 
 
-def _read(body: str) -> tuple[str, bool]:
+def _read(body: str, *, questions: bool = False) -> tuple[str, bool]:
     """The user's own words of *body* (already bounded), and whether an
-    instruction's text runs to its end."""
+    instruction's text runs to its end. With *questions* the user's own
+    questions stay (:func:`own_words`)."""
     body = _strip_code_fences(body)
     body = _STUB_RE.sub(" ", body)
     body = _without_forwarded(body)
@@ -1408,7 +1413,7 @@ def _read(body: str) -> tuple[str, bool]:
     body = _without_quote_lines(body)
     body = _without_quotes(body)
     cut, runs_to_the_end = _cut_open(body)
-    return _without_reported_or_asked(cut).strip(), runs_to_the_end
+    return _without_reported_or_asked(cut, questions=questions).strip(), runs_to_the_end
 
 
 def _strip_code_fences(body: str) -> str:
