@@ -162,6 +162,13 @@ def _flat(text: str | None) -> str:
     return " ".join((text or "").split())
 
 
+def _flat_at(text: str, pos: int) -> int:
+    """Where *text*'s offset *pos* falls in :func:`_flat` (*text*)."""
+    head = text[: max(0, pos)]
+    flat = len(_flat(head))
+    return flat + 1 if flat and head[-1:].isspace() and _flat(text[pos:]) else flat
+
+
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
@@ -305,14 +312,20 @@ def _with_opening(text: str, spans: tuple[tuple[int, int, str], ...], room: int,
     return shown, max(0, len(text) - len(head) - len(core)) + beyond
 
 
-def _focus(text: str, limit: int, terms: frozenset[str], beyond: int = 0) -> tuple[str, int]:
+def _focus(text: str, limit: int, terms: frozenset[str], beyond: int = 0,
+           anchor: tuple[int, int] | None = None) -> tuple[str, int]:
     """:func:`focused`'s text and how many characters it leaves out. *beyond*:
     how many more characters the memory holds past *text* (the part of it
-    that was read, ``limits.RECALL_FOCUS_READ``); they are left out."""
+    that was read, ``limits.RECALL_FOCUS_READ``); they are left out.
+    *anchor*: the stretch ``(start, stop)`` of the passage that matched the
+    question by meaning (the memory plan's W1b): shown, around the question's
+    words inside it when it holds any."""
     if not beyond and len(text) <= limit:
         return text, 0
     if len(text) < limit:  # only what lies past the part read is left out
         return text + "…", beyond
+    if anchor is not None and 0 <= anchor[0] < min(len(text), anchor[1]) and limit >= 3:
+        return _at_anchor(text, limit, terms, beyond, anchor)
     if not terms or limit < 3:
         return _clip(text, limit), _hidden(text, limit) + beyond
     room = limit - 2  # the two ellipses
@@ -332,27 +345,55 @@ def _focus(text: str, limit: int, terms: frozenset[str], beyond: int = 0) -> tup
     return shown, max(0, len(text) - len(core)) + beyond
 
 
+def _at_anchor(text: str, limit: int, terms: frozenset[str], beyond: int,
+               anchor: tuple[int, int]) -> tuple[str, int]:
+    """*text* in *limit* characters around the passage at *anchor*: the
+    stretch of it holding the most of the question's words when it holds
+    any, else its start (W1b)."""
+    room = limit - 2  # the two ellipses
+    start_at, stop_at = anchor[0], min(len(text), anchor[1])
+    inside = (tuple(s for s in _spans_of(text[:RECALL_FOCUS_READ], terms) if start_at <= s[0] < stop_at)
+              if terms else ())
+    best, best_at, best_end = _best_stretch(inside, room)
+    if best == 0:
+        best_at, best_end = start_at, min(stop_at, start_at + room)
+    start, stop = _window(text, best_at, best_end, room, limit // 5 if best else 0)
+    core = text[start:stop].strip()
+    shown = ("…" if start > 0 else "") + core + ("…" if stop < len(text) or beyond else "")
+    return shown, max(0, len(text) - len(core)) + beyond
+
+
 def display_at(user_text: str | None, assistant_text: str | None, summary_text: str | None,
                room: int, terms: frozenset[str] | set[str],
-               beyond: tuple[int, int, int] = (0, 0, 0)) -> tuple[str, int]:
+               beyond: tuple[int, int, int] = (0, 0, 0),
+               anchor: tuple[str, int, int] | None = None) -> tuple[str, int]:
     """An episode's display in *room* characters, and how many of its
     characters it leaves out (the memory plan's W1a): each side cut around
     the question's words (:func:`focused`); a short side gives its room to
     the other, the question keeping at least two fifths when both are long.
     Labelled as :func:`display_parts` labels. *beyond*: how many characters
     each side (question, answer, summary) holds past the text given (recall
-    reads ``limits.RECALL_FOCUS_READ`` of each)."""
+    reads ``limits.RECALL_FOCUS_READ`` of each). *anchor*: ``(side, start,
+    stop)`` of the passage that matched the question by meaning (W1b): that
+    side shows that stretch."""
     terms = frozenset(terms)
     question, answer = _flat(user_text), _flat(assistant_text)
+    marks: dict[str, tuple[int, int] | None] = {"question": None, "answer": None}
+    if anchor is not None and anchor[0] in marks:
+        # The passage's offsets are the stored text's; the side is shown flattened.
+        side = (user_text if anchor[0] == "question" else assistant_text) or ""
+        marks[anchor[0]] = (_flat_at(side, int(anchor[1])), _flat_at(side, int(anchor[2])))
     if question and answer:
         whole_q, whole_a = len(question) + beyond[0], len(answer) + beyond[1]
         q_room = max(1, min(whole_q, max(room * 2 // 5, room - whole_a)))
         a_room = max(1, room - q_room)
-        (shown_q, hidden_q), (shown_a, hidden_a) = (_focus(question, q_room, terms, beyond[0]),
-                                                    _focus(answer, a_room, terms, beyond[1]))
+        (shown_q, hidden_q), (shown_a, hidden_a) = (
+            _focus(question, q_room, terms, beyond[0], marks["question"]),
+            _focus(answer, a_room, terms, beyond[1], marks["answer"]))
         return f"User: {shown_q} / Assistant: {shown_a}", hidden_q + hidden_a
     if question or answer:
-        return _focus(question or answer, room, terms, beyond[0] if question else beyond[1])
+        return _focus(question or answer, room, terms, beyond[0] if question else beyond[1],
+                      marks["question" if question else "answer"])
     return _focus(_flat(summary_text), room, terms, beyond[2])
 
 

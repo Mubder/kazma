@@ -224,6 +224,21 @@ MEMORY_TABLES: tuple[MemoryStore, ...] = (
         retention="kept while its vector is", bound="one per memory or fact with a vector",
     ),
     MemoryStore(
+        "episode_passages", "state", "forget", "ids_only",
+        forget="triggers (passages.ensure_passages_schema): a memory's passages go with its row, its "
+               "forget (tier forgotten), a change of its text and its move to another space; a passage "
+               "holds no text, only where it stands in its memory and its vector (the memory plan's W5)",
+        export="", excluded="vectors rebuilt from the memories' own text: what each memory's own vector misses",
+        retention="kept while its memory's text is", bound="about one per 256 tokens of what a memory's "
+                                                          "own vector misses",
+    ),
+    MemoryStore(
+        "episode_passage_state", "state", "no_turn_text", "ids_only",
+        forget="triggers: goes with its memory's passages (a memory id, the model, a count, a time)",
+        export="", excluded="the repair sweep's record of which memories have passages",
+        bound="one row per memory with passages written",
+    ),
+    MemoryStore(
         "memory_change_seq", "state", "no_turn_text", "ids_only",
         forget="nothing a turn said: one counter of the changes the memory sweeps act on "
                "(sweep_cursors.py, part H)",

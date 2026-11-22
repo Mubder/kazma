@@ -1,0 +1,138 @@
+{
+ "what": "Kazma's benchmark with passages off (today) and on, today's thresholds, the same commit; ids and scores only.",
+ "stores": {
+  "main": {
+   "off": {
+    "questions": 131,
+    "hit_rate": 0.9005,
+    "mrr": 0.7487,
+    "precision": 0.4872,
+    "abstain_hit_rate": 0.0
+   },
+   "on": {
+    "questions": 131,
+    "hit_rate": 0.9005,
+    "mrr": 0.7469,
+    "precision": 0.4818,
+    "abstain_hit_rate": 0.0
+   },
+   "answers_lost": [],
+   "answers_gained": [],
+   "empty_lost": [],
+   "empty_gained": []
+  },
+  "second": {
+   "off": {
+    "questions": 52,
+    "hit_rate": 0.8625,
+    "mrr": 0.7574,
+    "precision": 0.4042,
+    "abstain_hit_rate": 0.0
+   },
+   "on": {
+    "questions": 52,
+    "hit_rate": 0.8625,
+    "mrr": 0.7574,
+    "precision": 0.4417,
+    "abstain_hit_rate": 0.0
+   },
+   "answers_lost": [],
+   "answers_gained": [],
+   "empty_lost": [],
+   "empty_gained": []
+  },
+  "scale": {
+   "off": {
+    "questions": 131,
+    "hit_rate": 0.897,
+    "mrr": 0.7364,
+    "precision": 0.4379,
+    "abstain_hit_rate": 0.0556
+   },
+   "on": {
+    "questions": 131,
+    "hit_rate": 0.8892,
+    "mrr": 0.7287,
+    "precision": 0.4337,
+    "abstain_hit_rate": 0.0556
+   },
+   "answers_lost": [
+    "q107"
+   ],
+   "answers_gained": [],
+   "empty_lost": [],
+   "empty_gained": []
+  },
+  "scale_second": {
+   "off": {
+    "questions": 52,
+    "hit_rate": 0.8417,
+    "mrr": 0.7305,
+    "precision": 0.3641,
+    "abstain_hit_rate": 0.0
+   },
+   "on": {
+    "questions": 52,
+    "hit_rate": 0.8625,
+    "mrr": 0.7351,
+    "precision": 0.3874,
+    "abstain_hit_rate": 0.0
+   },
+   "answers_lost": [],
+   "answers_gained": [
+    "h009"
+   ],
+   "empty_lost": [],
+   "empty_gained": []
+  },
+  "small": {
+   "off": {
+    "questions": 164,
+    "answered": 0.9638,
+    "precision": 0.6752,
+    "abstained": 0.0385,
+    "shown": 2.73
+   },
+   "on": {
+    "questions": 164,
+    "answered": 0.9638,
+    "precision": 0.6747,
+    "abstained": 0.0385,
+    "shown": 2.7
+   },
+   "answers_lost": [],
+   "answers_gained": [],
+   "empty_lost": [],
+   "empty_gained": []
+  },
+  "speakers": {
+   "off": {
+    "n": 35,
+    "hit_rate": 1.0,
+    "fact_hit_rate": 0.9355,
+    "mrr": 0.9479,
+    "precision": 0.6078,
+    "misattributed": 0
+   },
+   "on": {
+    "n": 35,
+    "hit_rate": 0.9714,
+    "fact_hit_rate": 0.9355,
+    "mrr": 0.9323,
+    "precision": 0.5922,
+    "misattributed": 0
+   },
+   "answers_lost": [
+    "q37"
+   ],
+   "answers_gained": [],
+   "empty_lost": [],
+   "empty_gained": [],
+   "facts_lost": []
+  }
+ },
+ "seconds_main": {
+  "off": 12.3,
+  "on": 14.4
+ }
+}
