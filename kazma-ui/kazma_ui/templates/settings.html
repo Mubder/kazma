@@ -673,12 +673,16 @@
                             <p class="form-hint">{{ t('settings.hub.tg_chat_hint') }}</p>
                         </div>
                     </div>
+                    {% if spaces_enforced is defined and spaces_enforced() %}
+                    <p class="form-hint" data-allowlist-retired>{{ t('chat_links.allowlist_retired') }}</p>
+                    {% else %}
                     <div style="margin-top:8px">
                         <label for="f-adapter-routing-tg-allowed" class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
                         <input id="f-adapter-routing-tg-allowed" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                :value="adapterRouting.tgAllowed" @input="adapterRouting.tgAllowed = $event.target.value"
                                placeholder="{{ t('settings.hub.tg_allowed_ph') }}">
                     </div>
+                    {% endif %}
                 </div>
 
                 <!-- Telegram group -->
@@ -762,12 +766,16 @@
                                    :value="adapterRouting.discordGuild" @input="adapterRouting.discordGuild = $event.target.value"
                                    placeholder="{{ t('settings.hub.discord_guild_ph') }}">
                         </div>
+                        {% if spaces_enforced is defined and spaces_enforced() %}
+                        <p class="form-hint" data-allowlist-retired>{{ t('chat_links.allowlist_retired') }}</p>
+                        {% else %}
                         <div>
                             <label for="f-adapter-routing-discord-allowed" class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
                             <input id="f-adapter-routing-discord-allowed" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.discordAllowed" @input="adapterRouting.discordAllowed = $event.target.value"
                                    placeholder="{{ t('settings.hub.discord_allowed_ph') }}">
                         </div>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -830,12 +838,16 @@
                                    placeholder="{{ t('settings.hub.slack_channel_ph') }}">
                         </div>
                     </div>
+                    {% if spaces_enforced is defined and spaces_enforced() %}
+                    <p class="form-hint" data-allowlist-retired>{{ t('chat_links.allowlist_retired') }}</p>
+                    {% else %}
                     <div style="margin-top:8px">
                         <label for="f-adapter-routing-slack-allowed" class="form-label">{{ t('settings.hub.allowed_user_ids') }}</label>
                         <input id="f-adapter-routing-slack-allowed" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                :value="adapterRouting.slackAllowed" @input="adapterRouting.slackAllowed = $event.target.value"
                                placeholder="{{ t('settings.hub.slack_allowed_ph') }}">
                     </div>
+                    {% endif %}
                 </div>
 
                 <!-- WhatsApp -->
@@ -911,12 +923,16 @@
                             <p class="form-hint" style="margin:0">{{ t('settings.hub.whatsapp_webhook_missing') }}</p>
                         </template>
                     </div>
+                    {% if spaces_enforced is defined and spaces_enforced() %}
+                    <p class="form-hint" data-allowlist-retired>{{ t('chat_links.allowlist_retired') }}</p>
+                    {% else %}
                     <div style="margin-top:8px">
                         <label for="wa-allowed" class="form-label">{{ t('settings.hub.whatsapp_allowed') }}</label>
                         <input id="wa-allowed" type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" translate="no"
                                :value="adapterRouting.waAllowed" @input="adapterRouting.waAllowed = $event.target.value"
                                placeholder="{{ t('settings.hub.whatsapp_allowed_ph') }}">
                     </div>
+                    {% endif %}
                 </div>
 
                 <!-- Adapters & Routes (Delivery routing) -->
@@ -2557,6 +2573,14 @@
                     <time :datetime="p.last_sign_in || null" x-text="lastSignInText(p)"></time>
                   </span>
                   <span class="account-list-meta" :data-person-sessions="p.id" x-text="sessionsText(p)"></span>
+                  <!-- Their linked chat-app accounts (Spaces stage 3). -->
+                  <span class="account-list-meta" :data-person-links="p.id">
+                    <span>{{ t('chat_links.people_links') }}</span>
+                    <template x-for="l in (p.links || [])" :key="p.id + ':link:' + l.platform + ':' + l.user_id">
+                      <span class="badge badge-secondary" translate="no" :data-person-link="l.platform + ':' + l.user_id"><bdi dir="ltr" x-text="l.platform + ' ' + l.user_id"></bdi></span>
+                    </template>
+                    <span x-show="peopleLoaded && !(p.links || []).length">{{ t('chat_links.people_no_links') }}</span>
+                  </span>
                   <button type="button" class="btn btn-sm btn-ghost" data-person-end-sessions x-show="!p.owner && p.sessions > 0" x-cloak
                           @click="endPersonSessions(p)" :aria-label="window.t('settings.people_end_sessions_of', {name: p.name})">{{ t('settings.people_end_sessions') }}</button>
                 </div>

@@ -399,6 +399,11 @@ class KazmaAppBuilder:
 
             identity.move_platform_users()
             identity.watch_enforcement()
+            # The chat apps' sender rule once Spaces is on (S3-02): the links
+            # in memory, and every later write of the registry followed.
+            from kazma_core.spaces import chat_links
+
+            chat_links.refresh_links()
         except (identity.IdentityUnavailable, identity.IdentityError, OSError,
                 RuntimeError, ValueError, _sqlite3.Error) as e:
             logger.warning(

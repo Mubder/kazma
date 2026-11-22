@@ -64,6 +64,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Accounts cannot be read right now. Try again.",
         "ar": "تعذّرت قراءة الحسابات الآن. حاول مرة أخرى.",
     },
+    "chat_links.allowlist_retired": {
+        "en": "Spaces is on: this bot answers the people who linked their own account here "
+              "(each in My account → Chat apps). Allowed IDs are no longer read.",
+        "ar": "المساحات مفعّلة: يرد هذا البوت على من ربط حسابه هنا (كلٌّ من حسابي ← تطبيقات "
+              "الدردشة). لم تعد المعرّفات المسموح لها تُقرأ.",
+    },
+    "chat_links.people_links": {"en": "Chat apps:", "ar": "تطبيقات الدردشة:"},
+    "chat_links.people_no_links": {"en": "none linked", "ar": "لا شيء مربوط"},
     "chat_links.err_code": {
         "en": "Could not get a code. Try again.",
         "ar": "تعذّر الحصول على رمز. حاول مرة أخرى.",

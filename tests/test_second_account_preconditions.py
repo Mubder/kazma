@@ -490,7 +490,7 @@ def test_the_move_settles_copies_makes_the_token_and_copies_the_vault_first(vaul
         assert {k: v["state"] for k, v in journal.items()} == {"vault_copies": "done", "owner_token": "done"}
         again = preconditions.apply()
         assert again == {"backup": "", "vault_copies": [], "space_keys": {"keyed": [], "sealed": {}},
-                         "owner_token": False}
+                         "chat_links": [], "owner_token": False}
         assert len(store.get("account.tokens")) == 1
     finally:
         preconditions.owner_token_path().unlink(missing_ok=True)

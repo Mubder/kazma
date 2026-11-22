@@ -108,6 +108,8 @@ def _migrate(options: argparse.Namespace) -> int:
             print(f"Keys made for: {', '.join(done['space_keys']['keyed'])}")
         for space, count in done["space_keys"]["sealed"].items():
             print(f"Sealed {count} secret(s) of space {space} with its key")
+        for item in done.get("chat_links") or ():
+            print(f"The owner's {item['platform']} account {item['user_id']} is the owner's link now")
         if done["owner_token"]:
             print(f"The owner's API token for the deploy check is in {preconditions.owner_token_path()}")
         print()

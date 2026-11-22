@@ -472,7 +472,37 @@ def notes() -> list[str]:
             )
     except (sqlite3.Error, OSError, KeyError, ValueError) as exc:  # a note, never a refusal
         out.append(f"Memory outside every space could not be counted ({type(exc).__name__}).")
+    out.extend(_listed_senders_note())
     return out
+
+
+def _listed_senders_note() -> list[str]:
+    """The senders on a chat app's allowlist who are neither the owner's
+    known ids nor linked: once Spaces is on they are refused until they link
+    their own account (stage 3). A note, never a refusal."""
+    from kazma_core.spaces import chat_links, identity
+
+    try:
+        store = _store()
+        held = {(str(link.get("platform")), str(link.get("user_id")))
+                for link in identity.read_registry()["links"] if isinstance(link, dict)}
+        left: list[str] = []
+        for plat in chat_links.PLATFORMS:
+            raw = store.get(f"connectors.{plat}.allowed_users", "") or ""
+            known = {uid for uid, _source in chat_links.known_owner_ids(store, plat)}
+            for part in str(raw).split(","):
+                uid = chat_links.platform_user_id(plat, part)
+                if uid and uid not in known and (plat, uid) not in held:
+                    left.append(f"{chat_links.PLATFORM_LABELS[plat]} {uid}")
+    except (*_check_errors(),) as exc:
+        return [f"The chat apps' allowlists could not be read ({type(exc).__name__})."]
+    if not left:
+        return []
+    return [
+        f"{len(left)} sender(s) on a chat app's allowlist are not linked ({', '.join(left)}): "
+        "once Spaces is on the allowlists retire, and each is refused until they link their own "
+        "account (Settings → My account → Chat apps)."
+    ]
 
 
 # ── The switch ──────────────────────────────────────────────────────────
@@ -486,6 +516,12 @@ def switch_on(*, by: str) -> None:
     from kazma_core.spaces import identity
 
     require(for_switch=True)
+    # The allowlists retire with the switch (stage 3): the owner's chat-app
+    # accounts Kazma already knows become the owner's links first, so the
+    # owner's chats keep working with no step from them.
+    from kazma_core.spaces import chat_links
+
+    chat_links.adopt_owner_ids(by=by)
     _store().set(identity.ENFORCED_KEY, True, category="identity")
     identity.prime_enforcement()
     logger.warning("[spaces] Spaces was switched on by %s", by)
@@ -525,6 +561,17 @@ def plan() -> list[dict[str, Any]]:
                 for s, n in sorted(keys["unsealed"].items()) if n]
     steps.append({"step": "space_keys", "what": "A key for every space, and its secrets sealed with it",
                   "changes": changes})
+    from kazma_core.spaces import chat_links
+
+    steps.append({
+        "step": "chat_links",
+        "what": "The owner's chat-app accounts Kazma knows become the owner's links",
+        "changes": [
+            f"link {chat_links.PLATFORM_LABELS[item['platform']]} account {item['user_id']} "
+            f"(from {item['source']}) to the owner"
+            for item in chat_links.owner_links_to_adopt()
+        ],
+    })
     token = _owner_token_state()
     steps.append({
         "step": "owner_token",
@@ -573,7 +620,7 @@ def apply() -> dict[str, Any]:
 
     todo = {s["step"]: s["changes"] for s in plan()}
     done: dict[str, Any] = {"backup": "", "vault_copies": [], "space_keys": {"keyed": [], "sealed": {}},
-                            "owner_token": False}
+                            "chat_links": [], "owner_token": False}
     vault = _vault()
     if vault is not None and (todo["vault_copies"] or todo["space_keys"]):
         done["backup"] = _back_up_vault()
@@ -589,6 +636,12 @@ def apply() -> dict[str, Any]:
             if count:
                 done["space_keys"]["sealed"][space] = vault.seal_space(space)
         _record("space_keys", "done")
+    if todo["chat_links"]:
+        from kazma_core.spaces import chat_links
+
+        _record("chat_links", "started")
+        done["chat_links"] = chat_links.adopt_owner_ids(by=OWNER_ACCOUNT_ID)
+        _record("chat_links", "done")
     if todo["owner_token"]:
         _record("owner_token", "started")
         _make_owner_token()

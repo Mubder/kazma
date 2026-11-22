@@ -36,6 +36,22 @@ Links live in the identity store's ``links`` table (``identity`` registry):
 ``{"platform", "user_id", "account", "linked_at"}``, unique per chat-app
 account; every link is an event of the People record (``chat_linked``).
 
+**The sender rule (S3-02).** Once Spaces is enforced a chat app answers a
+linked, enabled account and no one else (:func:`link_refusal`, asked by
+``sender_rule.SenderGate.sender_refusal``): the allowlists retire. It reads
+the links from memory (the adapter's loop); every write of the registry in
+this process updates them in the writer's thread, after its commit (a link,
+an unlink, a person disabled or deleted counts at once), and they are read
+again in a thread when older than :data:`LINKS_TTL_S` (another process).
+Before the first read a sender is refused as :data:`LINKS_UNKNOWN`, never
+let in. The owner's chat-app accounts Kazma already knows
+(:func:`known_owner_ids`: the private Telegram chat the guard pages, the
+chat-app delivery chat, ``platform:id`` entries of ``KAZMA_GATEWAY_ADMINS``)
+become the owner's links when Spaces is switched on, with no step from the
+owner (:func:`adopt_owner_ids`, from ``preconditions.apply`` and
+``preconditions.switch_on``); a sender who was only on an allowlist links
+their own account with a code.
+
 Every function here that reads or writes the settings store blocks: call it
 off the event loop. :func:`code_in` and :func:`take_attempt` touch memory
 only.
@@ -57,8 +73,20 @@ from kazma_core.spaces import identity
 from kazma_core.spaces.scope import spaces_enforced
 
 __all__ = [
-    "CODES_KEY",
+    "ACCOUNT_OFF",
     "ATTEMPT_WINDOW_S",
+    "CODES_KEY",
+    "GATEWAY_ADMINS_ENV",
+    "LINKS_TTL_S",
+    "LINKS_UNKNOWN",
+    "NOT_LINKED",
+    "OWNER_ID_KEYS",
+    "adopt_owner_ids",
+    "known_owner_ids",
+    "link_refusal",
+    "linked_count",
+    "owner_links_to_adopt",
+    "refresh_links",
     "CODE_TTL_S",
     "LINK_OUTCOMES",
     "LinkRefused",
@@ -448,6 +476,8 @@ def redeem(platform: str, user_id: Any, code: str, *, direct: bool) -> Redemptio
         return Redemption("unavailable", plat, language=taken.language)
     logger.warning("[spaces] %s %s: %s to account %s",
                    PLATFORM_LABELS[plat], uid, outcome.replace("_", " "), taken.account)
+    if outcome == "linked":
+        refresh_links()  # the sender's next message is theirs at once
     return Redemption(outcome, plat, account=taken.account, language=taken.language,
                       account_name=name)
 
@@ -524,3 +554,280 @@ def reply_text(redemption: Redemption, user_text: str | None = None) -> str:
     from kazma_core.language_lock import in_their_language
 
     return in_their_language(user_text, en, ar)
+
+
+# ── The sender rule (S3-02) ─────────────────────────────────────────────
+
+#: Why a sender is refused once Spaces is enforced.
+NOT_LINKED = "not_linked"          # no Kazma account linked to this chat-app account
+ACCOUNT_OFF = "account_disabled"   # linked to an account that is disabled
+LINKS_UNKNOWN = "links_unknown"    # the links were not read yet (a retry works)
+#: How old the links in memory may be before they are read again (another
+#: process -- ``kazma spaces migrate``, a second worker -- may have changed
+#: them; this process's own writes are seen at once).
+LINKS_TTL_S = 30.0
+
+
+class _Links:
+    """The links and who is enabled, as of the last read of the registry."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.read_at = 0.0
+        self.links: dict[tuple[str, str], str] = {}
+        self.enabled: frozenset[str] = frozenset()
+        self.refreshing = False
+
+
+_snapshot = _Links()
+_watched: list[Any] = []
+_watch_lock = threading.Lock()
+
+
+def _remember(reg: dict[str, Any]) -> None:
+    links: dict[tuple[str, str], str] = {}
+    for link in reg.get("links") or ():
+        if isinstance(link, dict):
+            links[(str(link.get("platform") or ""), str(link.get("user_id") or ""))] = str(
+                link.get("account") or "")
+    enabled = frozenset(
+        str(account_id) for account_id, account in (reg.get("accounts") or {}).items()
+        if isinstance(account, dict) and account.get("enabled", True)
+    )
+    with _snapshot.lock:
+        _snapshot.links = links
+        _snapshot.enabled = enabled
+        _snapshot.read_at = _now()
+
+
+def refresh_links() -> bool:
+    """Read the links again (and follow every later write to the registry
+    in this process). Returns whether they were read. Blocking."""
+    store = _store()
+    _follow(store)
+    try:
+        _remember(identity.read_registry())
+    except identity.IdentityUnavailable:
+        logger.warning("[spaces] the chat-app links could not be read; senders wait for them")
+        return False
+    return True
+
+
+def _follow(store: Any) -> None:
+    """Read the links again after every write of the registry to *store*
+    (in the writer's thread, after its commit): a link, an unlink, a person
+    disabled or deleted is the sender rule's at once."""
+    with _watch_lock:
+        if any(seen is store for seen in _watched):
+            return
+        _watched.append(store)
+
+    def _on_change(keys: Any) -> None:
+        if keys is None or identity.REGISTRY_KEY in keys:
+            try:
+                _remember(identity.read_registry())
+            except identity.IdentityUnavailable:
+                with _snapshot.lock:
+                    _snapshot.read_at = 0.0  # unknown until read again
+
+    add = getattr(store, "add_change_listener", None)
+    if callable(add):
+        add(_on_change)
+
+
+def _refresh_soon() -> None:
+    with _snapshot.lock:
+        if _snapshot.refreshing:
+            return
+        _snapshot.refreshing = True
+
+    def run() -> None:
+        try:
+            refresh_links()
+        except (*_store_errors(), OSError, RuntimeError, ValueError, TypeError):
+            # A thread of its own: said, never lost; the next sender asks again.
+            logger.warning("[spaces] reading the chat-app links failed", exc_info=True)
+        finally:
+            with _snapshot.lock:
+                _snapshot.refreshing = False
+
+    global _refresher
+    _refresher = threading.Thread(target=run, name="kazma-chat-links", daemon=True)
+    _refresher.start()
+
+
+_refresher: threading.Thread | None = None
+
+
+def _drain_links_refresh(timeout: float = 5.0) -> bool:
+    """Wait for a read of the links running in its thread to end; True when
+    none runs (shutdown, tests)."""
+    worker = _refresher
+    if worker is None:
+        return True
+    worker.join(timeout)
+    return not worker.is_alive()
+
+
+def _linked_account(platform: str, user_id: Any) -> str | None:
+    """The enabled account a chat-app account is linked to, from memory, or
+    None. Asked on the adapter's loop."""
+    plat = (platform or "").strip().lower()
+    uid = platform_user_id(plat, user_id)
+    with _snapshot.lock:
+        account = _snapshot.links.get((plat, uid))
+        return account if account and account in _snapshot.enabled else None
+
+
+def linked_count(platform: str) -> int:
+    """How many chat-app accounts of *platform* are linked to an enabled
+    account, from memory (an adapter's diagnostics)."""
+    plat = (platform or "").strip().lower()
+    with _snapshot.lock:
+        return sum(1 for (p, _uid), account in _snapshot.links.items()
+                   if p == plat and account in _snapshot.enabled)
+
+
+def link_refusal(platform: str, user_id: Any) -> str:
+    """Why this sender may not message Kazma once Spaces is enforced, or
+    "": a linked, enabled account (S3-02). Memory only (the adapter's
+    loop); the links are read again in a thread when they are older than
+    :data:`LINKS_TTL_S`, and every write of the registry in this process
+    updates them at once."""
+    plat = (platform or "").strip().lower()
+    uid = platform_user_id(plat, user_id)
+    with _snapshot.lock:
+        read_at = _snapshot.read_at
+        account = _snapshot.links.get((plat, uid)) if uid else None
+        enabled = bool(account) and account in _snapshot.enabled
+    if not read_at:
+        _refresh_soon()
+        return LINKS_UNKNOWN
+    if _now() - read_at > LINKS_TTL_S:
+        _refresh_soon()
+    if not account:
+        return NOT_LINKED
+    return "" if enabled else ACCOUNT_OFF
+
+
+def _forget_links_for_tests() -> None:
+    with _snapshot.lock:
+        _snapshot.links = {}
+        _snapshot.enabled = frozenset()
+        _snapshot.read_at = 0.0
+
+
+# ── The owner's known ids (S3-02) ───────────────────────────────────────
+
+#: Settings that hold a Telegram chat Kazma already uses to reach its owner
+#: (the guard's pager, the chat-app delivery chat). Only a PRIVATE chat is the
+#: owner's account: its id is the user's id and is positive.
+OWNER_ID_KEYS: dict[str, tuple[str, ...]] = {
+    "telegram": ("guard.telegram.chat_id", "connectors.telegram.swarm_chat_id"),
+    "discord": (),
+    "slack": (),
+    "whatsapp": (),
+}
+#: The environment list of the owner's chat-app accounts, ``platform:id``.
+GATEWAY_ADMINS_ENV = "KAZMA_GATEWAY_ADMINS"
+
+
+def _private_telegram_chat(raw: Any) -> str:
+    text = str(raw if raw is not None else "").strip()
+    if not text.isdigit() or int(text) <= 0:
+        return ""
+    return str(int(text))
+
+
+def known_owner_ids(config_store: Any, platform: str) -> list[tuple[str, str]]:
+    """The owner's own accounts on *platform* that Kazma already holds, as
+    ``(user_id, where it was read)``: on Telegram a private chat in
+    :data:`OWNER_ID_KEYS`; on any platform a ``platform:id`` entry of
+    ``KAZMA_GATEWAY_ADMINS`` (an unqualified entry does not say which
+    platform it is on). Blocking: settings reads."""
+    import os
+
+    plat = (platform or "").strip().lower()
+    found: list[tuple[str, str]] = []
+    if config_store is not None:
+        for key in OWNER_ID_KEYS.get(plat, ()):
+            try:
+                raw = config_store.get(key, "")
+            except _store_errors():
+                logger.debug("[spaces] %s could not be read", key, exc_info=True)
+                continue
+            uid = _private_telegram_chat(raw)
+            if uid:
+                found.append((uid, key))
+    for part in str(os.environ.get(GATEWAY_ADMINS_ENV, "") or "").split(","):
+        part = part.strip()
+        if ":" not in part:
+            continue
+        entry_plat, entry_id = (x.strip() for x in part.split(":", 1))
+        if entry_plat.lower() != plat or not entry_id:
+            continue
+        uid = platform_user_id(plat, entry_id)
+        if uid:
+            found.append((uid, GATEWAY_ADMINS_ENV))
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for uid, source in found:
+        if uid not in seen:
+            seen.add(uid)
+            out.append((uid, source))
+    return out
+
+
+def owner_links_to_adopt() -> list[dict[str, str]]:
+    """The owner's known chat-app accounts that are no one's link yet:
+    ``{"platform", "user_id", "source"}``. A known id linked to someone else
+    is left to them (said by :func:`adopt_owner_ids`). Blocking."""
+    store = _store()
+    reg = identity.read_registry()
+    held = {(str(link.get("platform")), str(link.get("user_id"))) for link in reg["links"]
+            if isinstance(link, dict)}
+    out: list[dict[str, str]] = []
+    for plat in PLATFORMS:
+        for uid, source in known_owner_ids(store, plat):
+            if (plat, uid) not in held:
+                out.append({"platform": plat, "user_id": uid, "source": source})
+    return out
+
+
+def adopt_owner_ids(*, by: str = "") -> list[dict[str, str]]:
+    """Make the owner's known chat-app accounts the owner's links (S3-02),
+    in one step: the allowlists retire once Spaces is on, and these were
+    the owner's own words that the bot was theirs. Never a known id another
+    account linked. Returns what was linked. Idempotent. Blocking."""
+    from kazma_core.spaces import people
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    todo = owner_links_to_adopt()
+    if not todo:
+        return []
+    made: list[dict[str, str]] = []
+
+    def change(reg: dict[str, Any]) -> None:
+        made.clear()
+        held = {(str(link.get("platform")), str(link.get("user_id"))) for link in reg["links"]
+                if isinstance(link, dict)}
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        for item in todo:
+            pair = (item["platform"], item["user_id"])
+            if pair in held:
+                continue
+            reg["links"].append({"platform": pair[0], "user_id": pair[1],
+                                 "account": OWNER_ACCOUNT_ID, "linked_at": now,
+                                 "adopted_from": item["source"]})
+            held.add(pair)
+            people.record_event(reg, "chat_linked", OWNER_ACCOUNT_ID, by or OWNER_ACCOUNT_ID,
+                                detail=pair[0])
+            made.append(item)
+
+    identity.update_registry(change)
+    for item in made:
+        logger.warning("[spaces] the owner's %s account %s (from %s) is the owner's link now",
+                       PLATFORM_LABELS[item["platform"]], item["user_id"], item["source"])
+    if made:
+        refresh_links()
+    return made

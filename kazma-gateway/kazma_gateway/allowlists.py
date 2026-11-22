@@ -22,6 +22,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from kazma_core.spaces.chat_links import OWNER_ID_KEYS
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -40,18 +42,12 @@ __all__ = [
 #: user allowlist no longer grants admin on its own.
 GATEWAY_ADMINS_ENV = "KAZMA_GATEWAY_ADMINS"
 
-#: Settings that hold a Telegram chat Kazma already uses to reach its owner:
-#: the guard's pager (Settings -> Alerts) and the chat-app delivery chat
-#: (Settings -> Adapters & Routes -> Telegram, the reminders' and status
-#: messages' address). Only a PRIVATE chat counts as the owner's account: on
-#: Telegram its id is the user's id and is positive; a group or channel id is
-#: negative, an ``@name`` is a public channel.
-OWNER_ID_KEYS: dict[str, tuple[str, ...]] = {
-    "telegram": ("guard.telegram.chat_id", "connectors.telegram.swarm_chat_id"),
-    "discord": (),
-    "slack": (),
-    "whatsapp": (),
-}
+# OWNER_ID_KEYS (kazma_core.spaces.chat_links): the settings that hold a
+# Telegram chat Kazma already uses to reach its owner -- the guard's pager
+# (Settings -> Alerts) and the chat-app delivery chat. Only a PRIVATE chat
+# counts as the owner's account: on Telegram its id is the user's id and is
+# positive; a group or channel id is negative, an ``@name`` is a public
+# channel.
 
 
 @dataclass(frozen=True)
@@ -96,20 +92,12 @@ def _candidate_tokens(sender_id: str) -> set[str]:
     return tokens
 
 
-def _private_telegram_chat(raw: Any) -> str:
-    """The user id a Telegram chat id names, or "" for a group, a channel, an
-    ``@name`` or anything else."""
-    text = str(raw if raw is not None else "").strip()
-    if not text.isdigit() or int(text) <= 0:
-        return ""
-    return str(int(text))
-
-
 def known_owner_ids(config_store: Any, platform: str) -> list[OwnerId]:
     """The owner's own accounts on *platform* that Kazma already holds.
 
     A chat app whose allowlist is empty answers these and no one else
-    (``sender_rule``); they grant admin there too (:func:`is_gateway_admin`).
+    (``sender_rule``); they grant admin there too (:func:`is_gateway_admin`),
+    and they become the owner's links when Spaces is switched on (stage 3).
     Two sources, both the operator's own words:
 
     * on Telegram, a private chat in :data:`OWNER_ID_KEYS` -- the chat the
@@ -119,32 +107,12 @@ def known_owner_ids(config_store: Any, platform: str) -> list[OwnerId]:
 
     Discord and Slack store no owner's user id anywhere else: with an empty
     allowlist and no admin entry, they answer nobody until the owner adds
-    themselves. Blocking: settings reads.
+    themselves. One answer, ``kazma_core.spaces.chat_links.known_owner_ids``.
+    Blocking: settings reads.
     """
-    plat = (platform or "").strip().lower()
-    found: list[OwnerId] = []
-    if config_store is not None:
-        for key in OWNER_ID_KEYS.get(plat, ()):
-            uid = _private_telegram_chat(_cs_get(config_store, key, ""))
-            if uid:
-                found.append(OwnerId(uid, key))
-    for part in split_ids(os.environ.get(GATEWAY_ADMINS_ENV, "")):
-        if ":" not in part:
-            continue
-        entry_plat, entry_id = (x.strip() for x in part.split(":", 1))
-        if entry_plat.lower() != plat or not entry_id:
-            continue
-        # A full Discord sender id is discord:<user>:<channel>; the user is first.
-        uid = entry_id.split(":", 1)[0] if plat == "discord" else _platform_user_id(plat, entry_id)
-        if uid:
-            found.append(OwnerId(uid, GATEWAY_ADMINS_ENV))
-    seen: set[str] = set()
-    unique: list[OwnerId] = []
-    for owner in found:
-        if owner.user_id not in seen:
-            seen.add(owner.user_id)
-            unique.append(owner)
-    return unique
+    from kazma_core.spaces.chat_links import known_owner_ids as _known
+
+    return [OwnerId(uid, source) for uid, source in _known(config_store, platform)]
 
 
 def is_gateway_admin(sender_id: str, platform: str = "") -> bool:

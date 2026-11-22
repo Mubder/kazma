@@ -118,7 +118,23 @@ def allowlist_check(
     """Who the chat app answers (``sender_rule``), and the fix when its
     allowlist is empty: private is a problem to fix too -- the owner's own
     account Kazma knows passes, or no one does. *open_to_everyone* None reads
-    the running adapter's (``live``)."""
+    the running adapter's (``live``). Once Spaces is enforced the allowlist
+    is not read: the people who linked their own account are (stage 3)."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if spaces_enforced():
+        from kazma_core.spaces import chat_links
+
+        linked = chat_links.linked_count(platform.lower())
+        if linked:
+            return True, (
+                f"Spaces is on: it answers the {linked} {platform} account(s) people linked to their "
+                "Kazma accounts, and no one else."
+            )
+        return False, (
+            f"Spaces is on and no one has linked a {platform} account yet, so every message is "
+            f"refused. Each person links theirs: Settings → My account → Chat apps → Link {platform}."
+        )
     if allowed:
         return True, f"{len(allowed)} allowed user(s): {', '.join(allowed)}."
     if open_to_everyone is None:

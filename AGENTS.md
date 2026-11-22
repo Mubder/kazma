@@ -16110,6 +16110,37 @@ an install with one account behaves as before.
     negative control), `tests/e2e/test_chat_link_browser.py` (by the
     sidebar, EN/AR: the code shown, sent to the real Telegram adapter, the
     page says linked).
+- **The sender rule is a linked, enabled account (S3-02, 2026-11-23).** Only
+  where Spaces is enforced; an install that does not enforce it keeps the
+  allowlist rule exactly (`sender_rule.refusal`).
+  - `SenderGate.sender_refusal` asks `chat_links.link_refusal` once
+    enforced: the allowlists, the owner's known ids and the open switch
+    retire. Refusals: `not_linked` (told once a day, in a direct chat, how to
+    link: Settings -> My account -> Chat apps), `account_disabled` (told so),
+    `links_unknown` (before the links were first read: never let in, not
+    told). Buttons ask the same rule (`actor_allowed`).
+  - The links are read from memory on the adapter's loop. Every write of the
+    registry in this process updates them in the writer's thread after its
+    commit (a store change listener `chat_links.refresh_links` registers), so
+    a link, an unlink, a person disabled or deleted counts at once; older
+    than `chat_links.LINKS_TTL_S` they are read again in a thread (another
+    process). The app reads them at start.
+  - The owner's chat-app accounts Kazma already knows (`chat_links.known_owner_ids`,
+    the one copy: `allowlists.known_owner_ids` asks it; the guard's Telegram
+    chat, the delivery chat, `platform:id` entries of `KAZMA_GATEWAY_ADMINS`)
+    become the owner's links with no step from the owner:
+    `chat_links.adopt_owner_ids`, a step of `kazma spaces migrate`
+    (`preconditions.plan`/`apply`) and of `preconditions.switch_on`; never a
+    known id someone else linked. `--check` names each allowlisted sender who
+    is not linked (`preconditions.notes`): they link with a code.
+  - Settings -> Adapters & Routes shows no allowlist field once enforced (a
+    note says who the bot answers); People lists each person's links
+    (`list_people` `links`); the chat apps' Test says how many are linked
+    (`connector_test.allowlist_check`).
+  - Gates: `tests/test_chat_senders_are_linked.py` (every adapter's accept
+    paths and buttons; the allowlist rule letting a listed stranger act as
+    the owner as the negative control), `tests/e2e/test_chat_links_listed_browser.py`
+    (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

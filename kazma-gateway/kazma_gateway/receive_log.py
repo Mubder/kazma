@@ -27,6 +27,11 @@ COMMON_REASONS: dict[str, str] = {
     # account Kazma knows.
     "no_allowlist": "was refused: Allowed User IDs is empty and its author is not the owner's account Kazma knows",
     "user_not_allowed": "was refused: its author is not in Allowed User IDs",
+    # Once Spaces is enforced (S3-02): the sender rule is a linked, enabled
+    # account (kazma_core.spaces.chat_links.link_refusal).
+    "not_linked": "was refused: its author has not linked this chat-app account to a Kazma account",
+    "account_disabled": "was refused: its author's Kazma account is disabled",
+    "links_unknown": "was refused: Kazma had not read the chat-app links yet (it reads them again)",
     # A code to link a chat-app account to a Kazma account (Spaces S3-01):
     # answered by the link flow, never handed to the agent.
     "link_code": "was a code to link a Kazma account: answered by the link flow, not the agent",

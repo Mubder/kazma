@@ -31,6 +31,15 @@ and logged by its rule (``ReceiveLog.log_drop``), as before.
 Every adapter's accept path asks :meth:`SenderGate.sender_refusal`; nothing
 reads the allowlist itself (``tests/test_chat_apps_private_by_default.py``).
 
+**Once Spaces is enforced (S3-02)** the rule is "a linked, enabled
+account" (``kazma_core.spaces.chat_links.link_refusal``, read from memory):
+the allowlists, the owner's known ids and the open switch retire. A sender
+with no link is refused (``not_linked``) and told, in a direct chat, how to
+link; one whose account is disabled is refused (``account_disabled``) and
+told so; before the links were first read a sender waits
+(``links_unknown``), never let in. The owner's known ids became the owner's
+links when Spaces was switched on (``chat_links.adopt_owner_ids``).
+
 **Linking (Spaces S3-01).** Before the sender rule, every message accept
 path asks :meth:`SenderGate.link_attempted`: where Spaces is enforced, a
 message that is a link code (``spaces.chat_links.code_in``) is never handed
@@ -48,10 +57,15 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
+from kazma_core.spaces.chat_links import ACCOUNT_OFF, LINKS_UNKNOWN, NOT_LINKED
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ACCOUNT_OFF",
     "LINK_CODE",
+    "LINKS_UNKNOWN",
+    "NOT_LINKED",
     "NOTICE_KEY",
     "NO_ALLOWLIST",
     "NOT_LISTED",
@@ -69,7 +83,12 @@ __all__ = [
 NO_ALLOWLIST = "no_allowlist"
 #: The sender is refused: the allowlist is set and does not name them.
 NOT_LISTED = "user_not_allowed"
-REFUSALS: frozenset[str] = frozenset({NO_ALLOWLIST, NOT_LISTED})
+# Once Spaces is enforced (S3-02), the refusals of chat_links.link_refusal:
+# NOT_LINKED (no Kazma account is linked to the sender), ACCOUNT_OFF (their
+# account is disabled), LINKS_UNKNOWN (the links were not read yet).
+#: The refusals a sender is told about (once a day, in a direct chat). Not
+#: LINKS_UNKNOWN: that is Kazma's, and passes in a moment.
+REFUSALS: frozenset[str] = frozenset({NO_ALLOWLIST, NOT_LISTED, NOT_LINKED, ACCOUNT_OFF})
 
 #: Lets everyone in when a chat app's allowlist is empty (the posture before
 #: 2026-11-11). A security switch: read only through ``boot_guard.env_flag``.
@@ -131,12 +150,32 @@ def refusal(
     return NO_ALLOWLIST
 
 
-def private_notice(platform: str, user_id: Any, user_text: str | None) -> str:
+def private_notice(platform: str, user_id: Any, user_text: str | None, reason: str = "") -> str:
     """What a refused sender is told, in the language they wrote in."""
     from kazma_core.language_lock import in_their_language
 
     label = _LABELS.get(platform, platform)
     uid = _norm(user_id)
+    if reason == ACCOUNT_OFF:
+        return in_their_language(
+            user_text,
+            "Kazma here. Your Kazma account is disabled, so I cannot answer you. "
+            "Ask whoever runs this Kazma.",
+            "هنا Kazma. حسابك في Kazma معطّل، فلا أستطيع الرد عليك. اسأل من يدير Kazma هذا.",
+        )
+    if reason == NOT_LINKED:
+        send = "/link" if platform == "telegram" else ""
+        return in_their_language(
+            user_text,
+            "Kazma here. This bot answers the people of this Kazma, each from their own linked "
+            f"account, and this {label} account is not linked. If you have a Kazma account here: "
+            f"Settings → My account → Chat apps → Link {label}, then send me the code"
+            + (f" ({send} and the code)." if send else "."),
+            "هنا Kazma. هذا البوت يرد على أصحاب الحسابات في Kazma هذا، كلٌّ من حسابه المربوط، "
+            f"وحساب {label} هذا غير مربوط. إن كان لك حساب هنا: الإعدادات ← حسابي ← تطبيقات الدردشة "
+            f"← اربط {label}، ثم أرسل إليّ الرمز"
+            + (f" ({send} ثم الرمز)." if send else "."),
+        )
     if platform == "whatsapp":
         # A WhatsApp id is the person's phone number, and the card asks for numbers.
         mine_en, mine_ar = f"Your WhatsApp number is +{uid}.", f"رقمك في WhatsApp هو \u200e+{uid}."
@@ -236,7 +275,15 @@ class SenderGate:
         return self._owner_ids
 
     def sender_refusal(self, user_id: Any) -> str:
-        """Why *user_id* may not message Kazma here, or ``""``."""
+        """Why *user_id* may not message Kazma here, or ``""``. Once Spaces
+        is enforced: a linked, enabled account (S3-02); before, the
+        allowlist rule above. Memory only (the adapter's loop)."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if spaces_enforced():
+            from kazma_core.spaces import chat_links
+
+            return chat_links.link_refusal(self.name, user_id)
         return refusal(
             user_id,
             allowed=self._allowed_users or (),
@@ -249,7 +296,15 @@ class SenderGate:
         return not self.sender_refusal(user_id)
 
     def admission(self) -> dict[str, Any]:
-        """Who this adapter admits, for its diagnostics (plain data)."""
+        """Who this adapter admits, for its diagnostics (plain data). Once
+        Spaces is enforced: how many accounts are linked here (``linked``)."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if spaces_enforced():
+            from kazma_core.spaces import chat_links
+
+            return {"linked": chat_links.linked_count(self.name), "allowed_users": 0,
+                    "allow_all": False, "owner_ids": []}
         return {
             "allowed_users": len(self._allowed_users or ()),
             "allow_all": self._allow_all,
@@ -357,7 +412,7 @@ class SenderGate:
             return False
         from kazma_core.background import spawn_background
 
-        text = private_notice(self.name, uid, user_text)
+        text = private_notice(self.name, uid, user_text, reason)
         spawn_background(
             self._send_private_notice(key, now, uid, target_id, dict(context_metadata or {}), text),
             name=f"{self.name}-private-notice",

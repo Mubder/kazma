@@ -255,6 +255,23 @@ def _outbox_notices(text: str) -> bool:
                for notice in (_earlier_reply_notice, _late_reply_notice))
 
 
+def _link_code(text: str) -> str | None:
+    """A code sent to link a chat-app account (Spaces S3-01): "link" and
+    "ربط" before it name the same request."""
+    from kazma_core.spaces.chat_links import code_in
+
+    return code_in(text)
+
+
+def _linked_notice(text: str) -> bool:
+    """A sender with no linked account is told how to link, in their
+    language (Spaces S3-02)."""
+    from kazma_gateway.sender_rule import NOT_LINKED, private_notice
+
+    notice = private_notice("telegram", "12345", text, NOT_LINKED)
+    return detect_user_language(notice) == detect_user_language(text) and "/link" in notice
+
+
 def _private_notice(text: str) -> bool:
     """A sender a private chat app refuses is told so, and their id, in
     their language (kazma_gateway.sender_rule, 2026-11-11)."""
@@ -569,6 +586,10 @@ PAIRS: list[Pair] = [
          "hello, are you there?", "مرحبا، أنت موجود؟", _read_only_notice, True),
     Pair("private_notice", ("kazma-gateway/kazma_gateway/sender_rule.py",),
          "hello, who are you?", "مرحبا، من أنت؟", _private_notice, True),
+    Pair("not_linked_notice", ("kazma-gateway/kazma_gateway/sender_rule.py",),
+         "hello, who are you?", "مرحبا، من أنت؟", _linked_notice, True),
+    Pair("link_code", (M + "spaces/chat_links.py",),
+         "link ABCD-2345", "ربط ABCD-2345", _link_code, "ABCD2345"),
     # Who a question in a shared space is about (Spaces S1-11): the asker,
     # in either language, or a member it names.
     Pair("asker_possessive", (M + "memory/speakers.py",),

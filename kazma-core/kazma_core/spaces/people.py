@@ -228,6 +228,11 @@ def list_people() -> list[dict[str, Any]]:
             "personal_space": personal.get(account_id, ""),
             "owner": account_id == OWNER_ACCOUNT_ID,
             "spaces": _spaces_of(reg, account_id),
+            # Their linked chat-app accounts (stage 3): a chat app and an id.
+            "links": [{"platform": str(link.get("platform") or ""),
+                       "user_id": str(link.get("user_id") or "")}
+                      for link in reg.get("links") or () if isinstance(link, dict)
+                      and link.get("account") == account_id],
             **signed_in.get(account_id, {"sessions": 0, "last_sign_in": ""}),
             **_limits_of(reg, account_id, limit_of),
         }
