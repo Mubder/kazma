@@ -342,3 +342,41 @@ def test_the_mirror_searches_name_their_tenant() -> None:
     for fn in (state_backend.search_state_episodes, state_backend.search_state_beliefs,
                state_backend.backfill_state_mirror, graph_backend.clear_tenant_edges):
         assert inspect.signature(fn).parameters["tenant_id"].default is inspect.Parameter.empty, fn
+
+
+# ── memory: forget ──────────────────────────────────────────────────────
+
+
+def _journal_tenant(seq: int) -> str:
+    from kazma_core.memory import forget_journal
+
+    conn = forget_journal._connect()
+    try:
+        return conn.execute("SELECT tenant_id FROM forget_journal WHERE seq = ?", (seq,)).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_a_forget_entry_naming_no_tenant_is_today_s_until_enforced(monkeypatch) -> None:
+    from kazma_core.memory import forget_journal
+
+    with bind_scope("family", "layla"):
+        seq = forget_journal.append("turn", tenant_id=None, session_key="s-1", turn_number=1)
+    assert _journal_tenant(seq) == scope.OWNER_SPACE_ID  # Spaces off: nothing moves
+    monkeypatch.setattr(scope, "_enforced", True)
+    with bind_scope("family", "layla"):
+        seq = forget_journal.append("turn", tenant_id=None, session_key="s-2", turn_number=1)
+    assert _journal_tenant(seq) == "family"
+    with pytest.raises(NoSpaceBound):
+        forget_journal.append("turn", tenant_id=None, session_key="s-3", turn_number=1)
+
+
+def test_a_forget_by_the_memory_tool_with_no_space_is_refused_once_enforced(enforced) -> None:
+    """The memory tool hands forget_mentions and keep_turn_out the request's
+    tenant, which is None with nothing bound: they acted as the owner's."""
+    from kazma_core.memory.forget import forget_mentions, keep_turn_out
+
+    with pytest.raises(NoSpaceBound):
+        forget_mentions("a codeword-123", tenant_id=None)
+    with pytest.raises(NoSpaceBound):
+        keep_turn_out("s-4", 1, "what is the codeword?", tenant_id=None)

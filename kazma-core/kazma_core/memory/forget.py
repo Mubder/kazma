@@ -42,6 +42,7 @@ from kazma_core.db.fts5_purge import purge_deleted_rows
 from kazma_core.memory.memory_stores import MEMORY_TABLES
 
 from kazma_core.memory.tenant_view import ledger_reach, narrowed_to, sees_every_tenant
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +232,7 @@ def set_chat_remembered(
     keys = list(dict.fromkeys([*(keys or []), *chat_keys(key)]))
     if not keys:
         return {"ok": False, "error": "chat required"}
-    tid = tenant_id or "default"
+    tid = space_named_or_bound(tenant_id)
     from kazma_core.memory import forget_journal
 
     seq = (forget_journal.append("remember" if remembered else "keep_out", tenant_id=tid, session_key=key,
@@ -297,17 +298,17 @@ def forget_episode(
     own = conn is None
     conn = conn or _open()
     try:
-        caller = tenant_id or "default"
+        caller = space_named_or_bound(tenant_id)
         only = narrowed_to(caller)  # the caller's own memory, in the statement (Spaces S1-35)
         row = conn.execute(
             "SELECT id, tenant_id, session_id, turn_number, user_text, tier, metadata_json "
             "FROM episodes WHERE id = ? AND (? IS NULL OR tenant_id = ?)",
             (eid, only, only),
         ).fetchone()
-        if row is None or (not sees_every_tenant(caller) and str(row["tenant_id"] or "default") != caller):
+        if row is None or (not sees_every_tenant(caller) and space_of_record(row["tenant_id"]) != caller):
             return {"ok": False, "error": "not_found"}
 
-        owner = str(row["tenant_id"] or "default")
+        owner = space_of_record(row["tenant_id"])
         turn = int(row["turn_number"] or 0)
         session = str(row["session_id"] or "")
         keys = chat_keys(session)
@@ -471,7 +472,7 @@ def replay_turn(conn: sqlite3.Connection, entry: Any) -> None:
     from kazma_core.memory import forget_journal
 
     keys = forget_journal.entry_keys(entry)
-    owner = entry.tenant_id or "default"
+    owner = space_of_record(entry.tenant_id)
     turn = int(entry.turn_number or 0)
     if keys and turn > 0 and entry.question_sha:
         conn.executemany(
@@ -553,7 +554,7 @@ def retire_copy(
         from kazma_core.memory.state_backend import remirror_episode_by_id
 
         remirror_episode_by_id(conn, copy_id)
-        remote = _delete_remote_vector(conn, copy_id, str(copy["tenant_id"] or "default"))
+        remote = _delete_remote_vector(conn, copy_id, space_of_record(copy["tenant_id"]))
         return {"ok": True, "episode_id": copy_id, "duplicate_of": original_id,
                 "summaries_emptied": len(summaries), "remote_vector_deleted": remote}
     finally:
@@ -712,7 +713,7 @@ def _forget_fact_rows(conn: sqlite3.Connection, rows: list[Any], *, now: float) 
 
     changed: list[str] = []
     for r in rows:
-        tenant_id = str(r["tenant_id"] or "default")
+        tenant_id = space_of_record(r["tenant_id"])
         try:
             meta = json.loads(r["metadata_json"] or "{}")
         except (TypeError, ValueError):
@@ -1037,12 +1038,12 @@ def _after_facts(
     _remirror_facts(conn, changed)
     every = _source_fact_ids(conn, tenant_id=owner, keys=keys, turn=turn)
     tenants = {
-        str(r[0]): str(r[1] or "default")
+        str(r[0]): space_of_record(r[1])
         for r in conn.execute(
             f"SELECT id, tenant_id FROM beliefs WHERE id IN ({','.join('?' for _ in every)})", every
         )
     } if every else {}
-    remote = [_delete_remote_vector(conn, bid, tenants.get(bid, owner or "default")) for bid in every]
+    remote = [_delete_remote_vector(conn, bid, tenants.get(bid, space_of_record(owner))) for bid in every]
     _scrub_ops(every, keys=keys, turn=turn)
     return remote
 
@@ -1093,7 +1094,7 @@ def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
     bid = (belief_id or "").strip()
     if not bid:
         return {"ok": False, "error": "belief_id required"}
-    caller = tenant_id or "default"
+    caller = space_named_or_bound(tenant_id)
     conn = _open()
     try:
         only = narrowed_to(caller)  # the caller's own fact, in the statement (Spaces S1-35)
@@ -1101,9 +1102,9 @@ def forget_belief_source(belief_id: str, *, tenant_id: str) -> dict[str, Any]:
             "SELECT tenant_id, source_session, source_turn, object FROM beliefs "
             "WHERE id = ? AND (? IS NULL OR tenant_id = ?)", (bid, only, only),
         ).fetchone()
-        if row is None or (not sees_every_tenant(caller) and str(row["tenant_id"] or "default") != caller):
+        if row is None or (not sees_every_tenant(caller) and space_of_record(row["tenant_id"]) != caller):
             return {"ok": False, "error": "not_found"}
-        owner = str(row["tenant_id"] or "default")
+        owner = space_of_record(row["tenant_id"])
         session, turn = str(row["source_session"] or ""), row["source_turn"]
         source: list[str] = []
         if session and turn is not None:
@@ -1159,7 +1160,7 @@ def inherit_ledger(source_key: str, new_key: str) -> dict[str, Any]:
         whole = turns = 0
         now = time.time()
         for tenant, turn, sha in rows:
-            tid, turn, sha = str(tenant or "default"), int(turn or 0), str(sha or "")
+            tid, turn, sha = space_of_record(tenant), int(turn or 0), str(sha or "")
             if turn == 0 and not sha:
                 seq = forget_journal.append("keep_out", tenant_id=tid, session_key=new_key,
                                             detail=forget_journal.keys_detail(targets))
@@ -1201,7 +1202,7 @@ def keep_turn_out(session_key: str, turn: int, question: str, *, tenant_id: str)
     from kazma_core.memory import forget_journal
 
     keys = chat_keys(session_key) or [session_key]
-    owner = tenant_id or "default"
+    owner = space_named_or_bound(tenant_id)
     seq = forget_journal.append("turn", tenant_id=owner, session_key=session_key, turn_number=int(turn),
                                 question_sha=sha, detail=forget_journal.keys_detail(keys))
     conn = _open()
@@ -1249,7 +1250,7 @@ def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
     needle = Needle.of(text)
     if len(needle.text) < MENTION_MIN_CHARS or not needle.folded:
         return {"ok": False, "error": "text_too_short", "min_chars": MENTION_MIN_CHARS}
-    caller = tenant_id or "default"
+    caller = space_named_or_bound(tenant_id)
     conn = _open()
     try:
         found = _mentions_found(conn, needle, tenant=caller)
@@ -1716,12 +1717,12 @@ def forget_chat(
     if journal:
         from kazma_core.memory import forget_journal
 
-        seq = forget_journal.append("chat", tenant_id=tenant_id or "default", session_key=key,
+        seq = forget_journal.append("chat", tenant_id=space_named_or_bound(tenant_id), session_key=key,
                                     detail=forget_journal.keys_detail(keys))
     own = conn is None
     conn = conn or _open()
     try:
-        caller = tenant_id or "default"
+        caller = space_named_or_bound(tenant_id)
         marks = ",".join("?" for _ in keys)
         every = sees_every_tenant(caller)
         scope = "" if every else " AND tenant_id = ?"
@@ -1807,7 +1808,7 @@ def _first_rewound_turn(messages: list[Any]) -> int:
 
 
 def _forget_rewound_turns(
-    thread_id: str, old_messages: list[Any], *, from_turn: int, tenant_id: str = "default",
+    thread_id: str, old_messages: list[Any], *, from_turn: int, tenant_id: str,
 ) -> dict[str, Any]:
     """Forget what memory holds of a chat's turns from *from_turn* on: undo,
     edit, a replay restore and abort took them back (Memory audit M09).
@@ -1841,10 +1842,10 @@ def _forget_rewound_turns(
     # the journal cannot write: a rewind that starts without its entry is one
     # a restore undoes.
     seq = forget_journal.append(
-        "rewind", tenant_id=tenant_id or "default", session_key=thread_id, turn_number=from_turn,
+        "rewind", tenant_id=tenant_id, session_key=thread_id, turn_number=from_turn,
         detail=json.dumps({str(t): s for t, s in questions.items()}),
     )
-    entry = forget_journal.Entry(seq, time.time(), "rewind", tenant_id or "default", thread_id, from_turn,
+    entry = forget_journal.Entry(seq, time.time(), "rewind", tenant_id, thread_id, from_turn,
                                  "", "", "", json.dumps({str(t): s for t, s in questions.items()}))
     try:
         conn = _open()
@@ -1890,7 +1891,7 @@ def replay_rewind(conn: sqlite3.Connection, entry: Any) -> int:
     token = _TAKEN_BEFORE.set(before)
     try:
         marks = ",".join("?" for _ in keys)
-        tenants = {entry.tenant_id or "default"} | {
+        tenants = {space_of_record(entry.tenant_id)} | {
             str(r[0] or "default") for r in conn.execute(
                 f"SELECT DISTINCT tenant_id FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ? "
                 "AND created_at <= ?",
@@ -1928,7 +1929,7 @@ def replay_rewind(conn: sqlite3.Connection, entry: Any) -> int:
 
 async def rewind_memory(
     thread_id: str, old_messages: list[Any], new_messages: list[Any], *,
-    tenant_id: str = "default", from_turn: int | None = None,
+    tenant_id: str | None = None, from_turn: int | None = None,
 ) -> dict[str, Any]:
     """What every chat-state rewrite (undo, edit, replay restore, abort) calls
     after it writes: the turns it took back leave memory too
@@ -1940,7 +1941,7 @@ async def rewind_memory(
     turn = from_turn if from_turn is not None else _first_rewound_turn(new_messages)
     try:
         return await asyncio.to_thread(_forget_rewound_turns, thread_id, list(old_messages or []),
-                                       from_turn=turn, tenant_id=tenant_id or "default")
+                                       from_turn=turn, tenant_id=space_named_or_bound(tenant_id))
     except (sqlite3.Error, OSError, RuntimeError, ValueError, TypeError):
         # The journal itself could not be written: nothing will apply it.
         logger.warning("[forget] the rewind of %s could not be journaled; its turns stay in "
@@ -1974,14 +1975,14 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
         (FORGOTTEN_TIER,),
     ).fetchall():
         if question_sha(text) == sha:
-            targets[str(eid)] = str(tenant or "default")
+            targets[str(eid)] = space_of_record(tenant)
     for eid, tenant in conn.execute(
         "SELECT e.id, e.tenant_id FROM memory_forgotten f JOIN episodes e ON e.tenant_id = f.tenant_id "
         "AND e.session_id = f.session_key WHERE f.turn_number = 0 AND f.question_sha = '' "
         "AND e.tier != ? AND e.created_at >= f.forgotten_at",
         (FORGOTTEN_TIER,),
     ).fetchall():
-        targets.setdefault(str(eid), str(tenant or "default"))
+        targets.setdefault(str(eid), space_of_record(tenant))
     for entry in forget_journal.recent_chat_forgets():
         keys = forget_journal.entry_keys(entry)
         marks = ",".join("?" for _ in keys)
@@ -2007,7 +2008,7 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
     ).fetchall():
         keys = list(dict.fromkeys([str(key), *chat_keys(str(key))]))
         facts += len(_forget_turn_facts(
-            conn, tenant_id=str(tenant or "default"), keys=keys, turn=int(turn), now=time.time(),
+            conn, tenant_id=space_of_record(tenant), keys=keys, turn=int(turn), now=time.time(),
         ))
     stale = [str(r[0]) for r in conn.execute(
         "SELECT DISTINCT src.episode_id FROM memory_summaries s JOIN memory_summary_sources src "
