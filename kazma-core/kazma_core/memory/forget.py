@@ -1741,10 +1741,14 @@ def forget_chat(
             lessons += int(one.get("lessons_removed") or 0)
         # What the agent noted during the chat in turns that left no memory of
         # their own, and every fact naming the chat whatever its turn.
+        # Declared: None follows sees_every_tenant. Before Spaces is enforced the
+        # owner's forget sweeps this chat's rows in every tenant (the helpers
+        # read None as every tenant); once it is, `every` is False and this is
+        # the caller's space. Never a refusal here.
         owner = None if every else caller
         notes = _chat_notes(conn, tenant_id=owner, keys=keys)
         note_tenants = {
-            str(r[0]): str(r[1] or "default")
+            str(r[0]): space_of_record(r[1])
             for r in conn.execute(
                 f"SELECT id, tenant_id FROM episodes WHERE id IN ({','.join('?' for _ in notes)})", notes
             )
@@ -1891,8 +1895,11 @@ def replay_rewind(conn: sqlite3.Connection, entry: Any) -> int:
     token = _TAKEN_BEFORE.set(before)
     try:
         marks = ",".join("?" for _ in keys)
+        # Install work, declared: a rewind follows its chat into every tenant
+        # that holds the chat's rows (each forget below names its row's tenant);
+        # the entry's own tenant is a record's (N19).
         tenants = {space_of_record(entry.tenant_id)} | {
-            str(r[0] or "default") for r in conn.execute(
+            space_of_record(r[0]) for r in conn.execute(
                 f"SELECT DISTINCT tenant_id FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ? "
                 "AND created_at <= ?",
                 (*keys, from_turn, before),
