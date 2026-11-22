@@ -13847,7 +13847,11 @@ an install with one account behaves as before.
   `tenant_isolation.require_tenant_id` asks them. Never catch `NoSpaceBound`
   to fall back to `default`, and never write a new `or "default"` for a
   tenant: the ratchet in `tests/test_no_space_no_data.py` counts the ones
-  left and only goes down. Enforcement is one stored switch
+  left and only goes down (every one left is in `kazma_core/memory/` since
+  2026-11-22). A stored record that names no space is read with
+  `scope.space_of_record` (written before Spaces: the owner's, N19); work
+  of the install or the machine that needs the owner's space names
+  `OWNER_SPACE_ID` and says why. Enforcement is one stored switch
   (`identity.ENFORCED_KEY`) kept in memory (`scope.spaces_enforced`): asking
   for a space reads no settings.
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
