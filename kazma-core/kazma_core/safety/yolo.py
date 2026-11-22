@@ -3,6 +3,11 @@
 YOLO remains available (``/yolo`` / ``/yolo off``) but is no longer a silent
 permanent flag: every enable is logged, optional expiry applies, and status
 is inspectable.
+
+A window is kept under ``yolo.{holder}``: the chat's thread id, and once
+Spaces is enforced the thread and the person (``safety.grant_holder``,
+S2-06). One member's YOLO in a shared chat never skips another member's
+cards; every function takes *person* (the person bound now when None).
 """
 
 from __future__ import annotations
@@ -70,7 +75,17 @@ def yolo_block_reason() -> str:
     )
 
 
-def try_enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]:
+def _yolo_key(thread_id: str | None, person: str | None) -> str:
+    """The settings key of *thread_id*'s window for *person*; ``""`` for
+    none (Spaces enforced and nobody bound: no window is made or read)."""
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id, person)
+    return f"yolo.{key_holder}" if key_holder else ""
+
+
+def try_enable_yolo(thread_id: str, *, actor: str = "unknown",
+                    person: str | None = None) -> dict[str, Any]:
     """Enable session YOLO from a HITL card click.
 
     The operator is already on an approval card — that is consent for
@@ -84,7 +99,7 @@ def try_enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]
     """
     if not yolo_allowed():
         return {"active": False, "downgraded": True, "reason": yolo_block_reason()}
-    st = enable_yolo(thread_id, actor=actor, force=True)
+    st = enable_yolo(thread_id, actor=actor, force=True, person=person)
     st["downgraded"] = False
     return st
 
@@ -105,7 +120,7 @@ def _ttl_seconds() -> int:
 
 def enable_yolo(
     thread_id: str, *, actor: str = "unknown", force: bool = False,
-    ttl_seconds: int | None = None,
+    ttl_seconds: int | None = None, person: str | None = None,
 ) -> dict[str, Any]:
     """Enable YOLO for *thread_id*. Returns status dict for the user message.
 
@@ -127,6 +142,9 @@ def enable_yolo(
         )
         raise YoloDisabledError(reason)
 
+    key = _yolo_key(thread_id, person)
+    if not key:
+        return {"active": False, "thread_id": thread_id, "error": "no person to grant it to"}
     from kazma_core.config_store import get_config_store
 
     cs = get_config_store()
@@ -143,7 +161,7 @@ def enable_yolo(
         "expires_at": (now + ttl) if ttl > 0 else None,
         "unified": ttl_seconds is not None,
     }
-    cs.set(f"yolo.{thread_id}", payload, category="safety")
+    cs.set(key, payload, category="safety")
     logger.warning(
         "[SECURITY] YOLO ENABLED thread=%s actor=%s ttl=%ss%s",
         thread_id,
@@ -151,41 +169,44 @@ def enable_yolo(
         ttl or "none",
         " (unified clock)" if ttl_seconds is not None else "",
     )
-    return yolo_status(thread_id)
+    return yolo_status(thread_id, person)
 
 
-def slide_yolo_expiry(thread_id: str, expires_at: float) -> None:
+def slide_yolo_expiry(thread_id: str, expires_at: float, person: str | None = None) -> None:
     """Move a unified YOLO grant's expiry (quiet refresh — no log spam).
 
     Called from long_task.consume_long_task_turn so the YOLO window and the
     mission budget always expire as ONE clock under /unrestricted. No-op for
     missing/non-unified grants (a standalone /yolo keeps its own TTL).
     """
-    if not thread_id:
+    key = _yolo_key(thread_id, person)
+    if not key:
         return
     try:
         from kazma_core.config_store import get_config_store
 
         cs = get_config_store()
-        raw = cs.get(f"yolo.{thread_id}")
+        raw = cs.get(key)
         if not isinstance(raw, dict) or not raw.get("enabled") or not raw.get("unified"):
             return
         raw["expires_at"] = float(expires_at)
-        cs.set(f"yolo.{thread_id}", raw, category="safety")
+        cs.set(key, raw, category="safety")
     except Exception:
         logger.debug("[yolo] slide_yolo_expiry failed", exc_info=True)
 
 
-def disable_yolo(thread_id: str, *, actor: str = "unknown") -> None:
+def disable_yolo(thread_id: str, *, actor: str = "unknown", person: str | None = None) -> None:
     from kazma_core.config_store import get_config_store
 
     cs = get_config_store()
-    cs.delete(f"yolo.{thread_id}")
+    key = _yolo_key(thread_id, person)
+    if key:
+        cs.delete(key)
     # Also drop per-tool grants so /yolo off fully restores HITL.
     try:
         from kazma_core.safety.hitl_grants import clear_grants
 
-        clear_grants(thread_id, actor=actor)
+        clear_grants(thread_id, actor=actor, person=person)
     except Exception:
         # NOT safe to ignore silently (audit O3): if the per-tool grants
         # survive, `/yolo off` reports HITL restored while approvals are still
@@ -203,8 +224,9 @@ def disable_yolo(thread_id: str, *, actor: str = "unknown") -> None:
     )
 
 
-def is_yolo_active(thread_id: str | None) -> bool:
-    """True if this thread has a live YOLO grant (any danger tool).
+def is_yolo_active(thread_id: str | None, person: str | None = None) -> bool:
+    """True if this thread has a live YOLO grant (any danger tool) -- for
+    *person* once Spaces is enforced (the person bound now when None).
 
     Does not re-check ``yolo_allowed()``. A card-enabled session stays
     YOLO until ``/yolo off`` or TTL — otherwise MCP/native tools keep
@@ -212,7 +234,7 @@ def is_yolo_active(thread_id: str | None) -> bool:
     """
     if not thread_id:
         return False
-    st = yolo_status(thread_id)
+    st = yolo_status(thread_id, person)
     return bool(st.get("active"))
 
 
@@ -265,12 +287,16 @@ def purge_expired_yolo(now: float | None = None) -> int:
     return removed
 
 
-def yolo_status(thread_id: str) -> dict[str, Any]:
-    """Return structured YOLO status; auto-disables on expiry."""
+def yolo_status(thread_id: str, person: str | None = None) -> dict[str, Any]:
+    """Return structured YOLO status; auto-disables on expiry. *person*'s
+    window once Spaces is enforced (the person bound now when None)."""
+    key = _yolo_key(thread_id, person)
+    if not key:
+        return {"active": False, "thread_id": thread_id}
     from kazma_core.config_store import get_config_store
 
     cs = get_config_store()
-    raw = cs.get(f"yolo.{thread_id}")
+    raw = cs.get(key)
     if not raw:
         return {"active": False, "thread_id": thread_id}
 
@@ -280,7 +306,7 @@ def yolo_status(thread_id: str) -> dict[str, Any]:
     # of the live install still skipped approvals under a flag set on
     # 2026-07-19. A window with no end time of its own is over.
     if _is_legacy_flag(raw):
-        cs.delete(f"yolo.{thread_id}")
+        cs.delete(key)
         logger.warning(
             "[SECURITY] YOLO legacy flag without an end time removed thread=%s",
             thread_id,
@@ -294,7 +320,7 @@ def yolo_status(thread_id: str) -> dict[str, Any]:
     if expires is not None:
         try:
             if time.time() > float(expires):
-                cs.delete(f"yolo.{thread_id}")
+                cs.delete(key)
                 logger.warning(
                     "[SECURITY] YOLO EXPIRED thread=%s (auto-disabled)",
                     thread_id,

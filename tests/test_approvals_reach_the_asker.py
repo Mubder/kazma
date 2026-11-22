@@ -167,9 +167,9 @@ def _state(gates: Any, gate_id: str) -> str:
     return row.state if row is not None else "missing"
 
 
-def _approve(world: Any, team: Any, who: str) -> Any:
+def _approve(world: Any, team: Any, who: str, scope: str = "once") -> Any:
     return world.client.post(f"/api/approve/{world.thread}",
-                             json={"action": "approve", "interrupt_id": world.gate},
+                             json={"action": "approve", "interrupt_id": world.gate, "scope": scope},
                              headers=_as(team, who))
 
 

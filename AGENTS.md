@@ -15653,6 +15653,30 @@ an install with one account behaves as before.
     `tests/e2e/test_approval_card_reaches_the_asker.py` (by the sidebar,
     EN/AR: the member sees the card waiting with no button, is refused, the
     owner answers).
+- **A standing approval belongs to the person and the chat (S2-06,
+  2026-11-22).** Only where Spaces is enforced; an install that does not
+  enforce it keys every grant by its chat's thread, as before (nothing
+  moves).
+  - "Allow tool" (`safety.hitl_grants`), "Approve for task"
+    (`safety.task_grants`) and a YOLO window (`safety.yolo`) are kept under
+    `safety/grant_holder.holder`: the thread id, and once enforced the
+    thread and the person (`<thread>~<account>`; an account id holds no `.`
+    or `~`, so one person's prefix never matches another's). Every function
+    of the three takes `person`; with none it is the person bound now -- the
+    turn's asker in the chat graph, the task's in a swarm worker -- so
+    `hitl.standing_approval`, the one answer every gate asks (the chat
+    graph, the swarm bus, the MCP gate), reads the asker's own. Work with no
+    person bound is granted nothing and skips nothing.
+  - A grant made from a card is the card's asker's, whoever answered it
+    (`routes_direct.misc._apply_scope_grants(person=)`, from S2-05's
+    `whose_card`); `/yolo off` ends the person's own window and grants. A
+    space's erase finds a chat's grants by the thread before the `~`
+    (`space_data._settings_keys`, `grant_holder.thread_of`). Log lines keep
+    `thread=` the chat's thread.
+  - Gate: `tests/test_grants_per_person.py` (a grant, a task grant and a
+    YOLO window of one person never skip another's card; the real approve
+    route grants to the card's asker; the per-thread grant as the control;
+    with Spaces off the keys are the thread's).
 
 ## UI Conventions (Web)
 

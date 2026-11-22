@@ -378,6 +378,7 @@ def _settings_keys(space: str, threads: list[str]) -> list[str]:
     chats' state (a key that names one of its threads). Read through the
     settings store's own listing."""
     from kazma_core.config_store import get_config_store
+    from kazma_core.safety.grant_holder import thread_of
 
     wanted = set(threads)
     keys: list[str] = []
@@ -386,7 +387,9 @@ def _settings_keys(space: str, threads: list[str]) -> list[str]:
             if key.startswith(f"tenant.{space}."):
                 keys.append(key)
             elif key.startswith(_CHAT_STATE_PREFIXES) and wanted and any(
-                    part in wanted for part in key.split(".")):
+                    thread_of(part) in wanted for part in key.split(".")):
+                # A standing approval names its chat and its person
+                # (``<thread>~<account>``, S2-06): the chat decides.
                 keys.append(key)
             elif (key.startswith(_SPACE_RECORDING_PREFIXES) and isinstance(value, dict)
                   and str(value.get("space") or "") == space):

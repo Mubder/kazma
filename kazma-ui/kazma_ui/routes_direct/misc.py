@@ -320,11 +320,14 @@ def _live_hitl_interrupt(snapshot: Any) -> tuple[str, dict[str, Any] | None, int
 def _apply_scope_grants(
     thread_id: str, approved: bool, scope: str, actor: str,
     pending_tools: list[Any], pending_tool_name: str, requested_tool: str,
+    person: str | None = None,
 ) -> str:
     """Apply longer-lived grants only after a durable claim; run off the loop.
 
     The card's own calls then run under the grant just made: they were
-    asked, and are not "ran without asking" (``safety.unasked``).
+    asked, and are not "ran without asking" (``safety.unasked``). Once Spaces
+    is enforced the grant is *person*'s -- the card's asker, whose cards it
+    skips, whoever answered (S2-06) -- and nobody else's in the chat.
     """
     from kazma_core.safety.unasked import card_answered
 
@@ -332,7 +335,7 @@ def _apply_scope_grants(
         try:
             from kazma_core.safety.yolo import try_enable_yolo
 
-            result = try_enable_yolo(thread_id, actor=actor)
+            result = try_enable_yolo(thread_id, actor=actor, person=person)
             if result.get("downgraded"):
                 return "once"
         except Exception:
@@ -344,7 +347,7 @@ def _apply_scope_grants(
             from kazma_core.safety.hitl_grants import grant_tool, tools_to_grant
 
             for name in tools_to_grant(pending_tools, pending_tool_name, requested_tool):
-                grant_tool(thread_id, name, actor=actor)
+                grant_tool(thread_id, name, actor=actor, person=person)
         except Exception:
             logger.exception("[HITL] failed to apply tool grant")
             return "once"
@@ -1226,6 +1229,7 @@ def register_misc_routes(self: Any) -> None:
                 scope = await asyncio.to_thread(
                     _apply_scope_grants, thread_id, approved, scope, actor,
                     pending_tools, pending_tool_name, body.get("tool") or body.get("grant_tool") or "",
+                    _whose.asker if _whose is not None and _whose.asker else None,
                 )
                 if isinstance(resume_cmd.resume, dict) and "scope" in resume_cmd.resume:
                     resume_cmd.resume["scope"] = scope

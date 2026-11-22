@@ -6,7 +6,10 @@ When the user approves a danger tool they can choose:
 * ``tool``  — allow *this tool name* for the thread until TTL expires
 * ``yolo``  — full session bypass (delegates to :mod:`kazma_core.safety.yolo`)
 
-Grants are stored in ConfigStore under ``hitl_grant.{thread_id}.{tool}``.
+Grants are stored in ConfigStore under ``hitl_grant.{holder}.{tool}``:
+the holder is the chat's thread id, and once Spaces is enforced the thread
+and the person (``safety.grant_holder``, S2-06): a grant one member of a
+shared chat made never skips another member's card.
 """
 
 from __future__ import annotations
@@ -97,8 +100,8 @@ def _ttl_seconds() -> int:
     return _DEFAULT_GRANT_TTL
 
 
-def _key(thread_id: str, tool: str) -> str:
-    return f"hitl_grant.{thread_id}.{tool}"
+def _key(holder: str, tool: str) -> str:
+    return f"hitl_grant.{holder}.{tool}"
 
 
 def grant_tool(
@@ -107,12 +110,18 @@ def grant_tool(
     *,
     actor: str = "unknown",
     ttl_seconds: int | None = None,
+    person: str | None = None,
 ) -> dict[str, Any]:
-    """Grant *tool* for *thread_id*. Returns status dict."""
+    """Grant *tool* for *thread_id* -- for *person* once Spaces is enforced
+    (the person bound now when None; never for no one). Returns status dict."""
     from kazma_core.config_store import get_config_store
+    from kazma_core.safety.grant_holder import holder
 
     if not thread_id or not tool:
         return {"active": False, "error": "thread_id and tool required"}
+    key_holder = holder(thread_id, person)
+    if not key_holder:
+        return {"active": False, "error": "no person to grant it to"}
     from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
 
     if tool in ALWAYS_HITL_TOOLS:
@@ -134,7 +143,7 @@ def grant_tool(
         "ttl_seconds": ttl,
         "expires_at": (now + ttl) if ttl > 0 else None,
     }
-    cs.set(_key(thread_id, tool), payload, category="safety")
+    cs.set(_key(key_holder, tool), payload, category="safety")
     logger.warning(
         "[SECURITY] HITL GRANT tool=%s thread=%s actor=%s ttl=%ss",
         tool,
@@ -152,14 +161,18 @@ def grant_tool(
     }
 
 
-def has_tool_grant(thread_id: str | None, tool: str) -> bool:
-    """True if *tool* is granted and not expired for this thread."""
-    if not thread_id or not tool:
+def has_tool_grant(thread_id: str | None, tool: str, person: str | None = None) -> bool:
+    """True if *tool* is granted and not expired for this thread -- and,
+    once Spaces is enforced, for *person* (the person bound now when None)."""
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id, person)
+    if not key_holder or not tool:
         return False
     from kazma_core.config_store import get_config_store
 
     cs = get_config_store()
-    raw = cs.get(_key(thread_id, tool))
+    raw = cs.get(_key(key_holder, tool))
     if not raw:
         return False
 
@@ -173,7 +186,7 @@ def has_tool_grant(thread_id: str | None, tool: str) -> bool:
     if expires is not None:
         try:
             if time.time() > float(expires):
-                cs.delete(_key(thread_id, tool))
+                cs.delete(_key(key_holder, tool))
                 logger.info(
                     "[SECURITY] HITL GRANT EXPIRED tool=%s thread=%s",
                     tool,
@@ -185,9 +198,9 @@ def has_tool_grant(thread_id: str | None, tool: str) -> bool:
     return True
 
 
-def _grant_keys(cs: Any, thread_id: str) -> list[str]:
-    """Return ConfigStore keys for grants on *thread_id*."""
-    prefix = f"hitl_grant.{thread_id}."
+def _grant_keys(cs: Any, key_holder: str) -> list[str]:
+    """Return ConfigStore keys for grants of *key_holder*."""
+    prefix = f"hitl_grant.{key_holder}."
     keys: list[str] = []
     try:
         cat = cs.get_category("safety") if hasattr(cs, "get_category") else None
@@ -207,15 +220,19 @@ def _grant_keys(cs: Any, thread_id: str) -> list[str]:
     return keys
 
 
-def clear_grants(thread_id: str, *, actor: str = "unknown") -> int:
-    """Remove all tool grants for *thread_id*. Returns count cleared."""
-    if not thread_id:
+def clear_grants(thread_id: str, *, actor: str = "unknown", person: str | None = None) -> int:
+    """Remove all tool grants for *thread_id* (*person*'s once Spaces is
+    enforced: the person bound now when None). Returns count cleared."""
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id, person)
+    if not key_holder:
         return 0
     from kazma_core.config_store import get_config_store
 
     cs = get_config_store()
     cleared = 0
-    for key in _grant_keys(cs, thread_id):
+    for key in _grant_keys(cs, key_holder):
         try:
             cs.delete(key)
             cleared += 1
@@ -241,18 +258,22 @@ def clear_grants(thread_id: str, *, actor: str = "unknown") -> int:
     return cleared
 
 
-def list_grants(thread_id: str) -> list[dict[str, Any]]:
-    """List active (non-expired) grants for a thread."""
-    if not thread_id:
+def list_grants(thread_id: str, person: str | None = None) -> list[dict[str, Any]]:
+    """List active (non-expired) grants for a thread (*person*'s once Spaces
+    is enforced: the person bound now when None)."""
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id, person)
+    if not key_holder:
         return []
     from kazma_core.config_store import get_config_store
 
     cs = get_config_store()
-    prefix = f"hitl_grant.{thread_id}."
+    prefix = f"hitl_grant.{key_holder}."
     out: list[dict[str, Any]] = []
-    for key in _grant_keys(cs, thread_id):
+    for key in _grant_keys(cs, key_holder):
         tool = str(key)[len(prefix) :]
-        if not has_tool_grant(thread_id, tool):
+        if not has_tool_grant(thread_id, tool, person):
             continue
         raw = cs.get(key) or {}
         rem = None
