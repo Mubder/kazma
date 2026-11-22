@@ -889,6 +889,19 @@ button { cursor: pointer; font-family: inherit; }
   gap: 6px;
   flex-shrink: 0;
 }
+/* The space this tab is in (Spaces S2-12): its name when there is no
+   switcher, its kind, and "New private chat" in a shared space. */
+.header-space-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.header-space-name[hidden],
+.header-space-kind[hidden],
+.header-private-chat[hidden] { display: none; }
 /* Round 40px icon buttons (the bell, the search on a phone); the New Chat
    button keeps its label as a soft accent pill. */
 .header-btn,

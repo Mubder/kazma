@@ -21,6 +21,17 @@ from tests.e2e._unified_turn_harness import Script, unified_turn_server  # noqa:
 from tests.e2e.test_people_page_browser import _settings_loaded, _soft_nav, _t  # noqa: E402
 
 
+def _threads_of(space: str, account: str) -> dict[str, str]:
+    """title -> thread id of every chat *space* holds, read from the store."""
+    from kazma_core.spaces import scope
+    from kazma_ui.session_manager import get_session_manager
+
+    with scope.bind_scope(space, account):
+        sessions = get_session_manager().list_all(include_archived=True, include_empty=True,
+                                                  prune_empty=False)
+        return {" ".join(str(m.get("content") or "") for m in s.messages): s.thread_id for s in sessions}
+
+
 def _created(pg, before: int) -> list[dict]:
     pg.wait_for_function(
         "(n) => { const el = document.querySelector('#settings-root');"
@@ -156,3 +167,83 @@ def test_turning_development_on_for_someone_says_what_it_means(lang):
         finally:
             browser.close()
             scope.set_enforced(False)
+
+
+@pytest.mark.parametrize("lang", ["en", "ar"])
+def test_the_header_says_which_space_and_opens_a_private_chat(lang):
+    """S2-12, piece 4: in a shared space the header says its name and kind
+    and offers "New private chat", which opens an empty chat in the person's
+    own space; there, the header says it is personal and offers none."""
+    from kazma_core.security import web_sessions
+    from kazma_core.spaces import scope, threads
+    from playwright.sync_api import sync_playwright
+
+    from tests.e2e.test_two_tabs_two_spaces import ANSWER, _ask
+
+    asked = f"a private question ({lang})"
+    with unified_turn_server(Script(steps=[], final=ANSWER)) as h, sync_playwright() as p:
+        os.environ["KAZMA_SECRET"] = "space-header-test-secret-" + "x" * 24
+        scope.set_enforced(True)
+        browser = p.chromium.launch()
+        try:
+            admin = browser.new_context()
+            pg = admin.new_page()
+            pg.goto(f"{h.base}/chat?space=default", wait_until="domcontentloaded")
+            pg.wait_for_function("() => !!window.kazmaSpace", timeout=20000)
+            person = pg.evaluate(
+                "() => fetch('/api/people', {method: 'POST', credentials: 'same-origin',"
+                " headers: {'Content-Type': 'application/json'},"
+                " body: JSON.stringify({name: 'reem', password: 'a-long-enough-password'})}).then(r => r.json())"
+            )["person"]
+            space = pg.evaluate(
+                "() => fetch('/api/people/spaces', {method: 'POST', credentials: 'same-origin',"
+                " headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: 'Family'})})"
+                ".then(r => r.json())")["space"]["id"]
+            added = pg.evaluate(
+                "([space, id]) => fetch('/api/spaces/' + space + '/members', {method: 'POST',"
+                " credentials: 'same-origin', headers: {'Content-Type': 'application/json'},"
+                " body: JSON.stringify({account_id: id})}).then(r => r.status)", [space, person["id"]])
+            assert added == 201
+
+            session = web_sessions.create_session(role="operator", actor="login", username="reem",
+                                                  user_id=person["id"])
+            theirs = browser.new_context()
+            theirs.add_cookies([{"name": "kazma-lang", "value": lang, "url": h.base},
+                                {"name": "kazma-session", "value": session, "url": h.base}])
+            page = theirs.new_page()
+            # The added notice comes first; answer it, then look at the header.
+            page.goto(f"{h.base}/chat?space={space}", wait_until="load")
+            page.locator("#modal-title").wait_for(state="visible", timeout=20000)
+            from tests.e2e.test_people_page_browser import _modal_action
+
+            _modal_action(page, _t("common.ok", lang))
+            kind = page.locator("#space-kind")
+            kind.wait_for(state="visible", timeout=20000)
+            assert kind.inner_text().strip() == _t("spaces.kind_shared", lang)
+            assert page.locator("#space-switcher").is_visible()  # two spaces: the switcher names it
+            private = page.locator("#new-private-chat")
+            assert private.is_visible() and private.inner_text().strip() == _t("spaces.new_private_chat", lang)
+
+            with page.expect_navigation():
+                private.click()
+            page.wait_for_function("() => !!window.kazmaSpace", timeout=20000)
+            assert page.evaluate("() => window.kazmaSpace.id") == person["personal_space"]
+            # The chat page opened its new chat (it takes ?new=1 off the address).
+            assert page.evaluate("() => location.pathname") == "/chat"
+            kind.wait_for(state="visible", timeout=20000)
+            assert kind.inner_text().strip() == _t("spaces.kind_personal", lang)
+            assert not page.locator("#new-private-chat").is_visible()
+
+            # A message there is a chat of the person's own space, recorded
+            # there; the shared space does not hold it.
+            page.locator("#chat-input").wait_for(state="visible", timeout=30000)
+            page.wait_for_function("() => !!window.KazmaChat", timeout=20000)
+            _ask(page, asked)
+        finally:
+            browser.close()
+            scope.set_enforced(False)
+        own = _threads_of(person["personal_space"], person["id"])
+        assert any(asked in text for text in own), own
+        assert not any(asked in text for text in _threads_of(space, person["id"]))
+        thread = next(thread for text, thread in own.items() if asked in text)
+        assert threads.record_of(thread).space_id == person["personal_space"]

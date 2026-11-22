@@ -269,4 +269,55 @@ function makeTab(pageSpace, href, sharedStorage, enforced) {
   assert("choosing a space asks to switch to it", chosen.length === 1 && chosen[0] === "default", chosen);
 }
 
+// ── The header says which space and which kind (Spaces S2-12) ────────────
+{
+  const WORDS = { "data-personal": "Personal", "data-shared": "Shared", "data-project": "Shared, with a project",
+    "data-personal-label": "My space" };
+  function fakeDoc(switcherShown) {
+    const els = {};
+    for (const id of ["space-kind", "space-name", "new-private-chat", "space-switcher"]) {
+      els[id] = {
+        hidden: id === "space-switcher" ? !switcherShown : true,
+        textContent: "",
+        attrs: {},
+        getAttribute(name) { return WORDS[name] || this.attrs[name] || null; },
+        setAttribute(name, value) { this.attrs[name] = value; },
+      };
+    }
+    return { els, getElementById: (id) => els[id] || null };
+  }
+  const SPACES = [
+    { id: "layla-own", name: "", personal: true, kind: "sandboxed" },
+    { id: "family", name: "Family", personal: false, kind: "sandboxed" },
+    { id: "dev", name: "<b>Dev</b>", personal: false, kind: "host" },
+  ];
+
+  const own = fakeDoc(true);
+  const mine = scope.showSpace(own, SPACES, "layla-own");
+  assert("in the personal space the kind is personal",
+    own.els["space-kind"].textContent === "Personal" && own.els["space-kind"].hidden === false);
+  assert("no private chat offered in the personal space", own.els["new-private-chat"].hidden === true);
+  assert("the personal space is found", mine && mine.id === "layla-own");
+  assert("with a switcher, the name is the switcher's to show", own.els["space-name"].hidden === true);
+
+  const family = fakeDoc(true);
+  scope.showSpace(family, SPACES, "family");
+  assert("a plain shared space says shared", family.els["space-kind"].textContent === "Shared"
+    && family.els["space-kind"].attrs["data-kind"] === "shared");
+  assert("a shared space offers a new private chat", family.els["new-private-chat"].hidden === false);
+
+  const dev = fakeDoc(false);
+  scope.showSpace(dev, [SPACES[0], SPACES[2]].slice(1), "dev");
+  assert("a shared space with a project folder says so",
+    dev.els["space-kind"].textContent === "Shared, with a project");
+  assert("with no switcher the name is shown, as text",
+    dev.els["space-name"].hidden === false && dev.els["space-name"].textContent === "<b>Dev</b>");
+  assert("no personal space known: no private chat offered", dev.els["new-private-chat"].hidden === true);
+
+  const lone = fakeDoc(false);
+  scope.showSpace(lone, [SPACES[0]], "layla-own");
+  assert("one personal space with no name takes the page's word",
+    lone.els["space-name"].textContent === "My space" && lone.els["space-name"].hidden === false);
+}
+
 process.exit(fail ? 1 : 0);

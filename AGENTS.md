@@ -15286,6 +15286,14 @@ an install with one account behaves as before.
     flow without the interim refusal as the controls),
     `tests/test_host_tools_absent.py` (re-pointed), the People confirm in
     `tests/e2e/test_shared_spaces_browser.py` (EN/AR).
+  - **The header says where the tab is (piece 4).** `space_scope.js`
+    (`showSpace`, from the spaces it already reads) shows the space's kind
+    (`#space-kind`: personal, shared, shared with a project), its name when
+    there is no switcher, and in a shared space "New private chat"
+    (`#new-private-chat`, `kazmaSpace.newPrivateChat`: the tab moves to the
+    person's own space with an empty chat, whose thread is recorded there).
+    Gates: `tests/js/test_space_scope.js`, the header test in
+    `tests/e2e/test_shared_spaces_browser.py` (EN/AR).
 
 ## UI Conventions (Web)
 

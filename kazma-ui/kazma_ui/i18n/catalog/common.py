@@ -12,6 +12,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     # The header's space switcher (space_scope.js, Spaces S1-06).
     "spaces.switcher": {"en": "Space", "ar": "المساحة"},
     "spaces.personal": {"en": "My space", "ar": "مساحتي"},
+    # The space's kind and "New private chat" in the header (Spaces S2-12).
+    "spaces.kind_personal": {"en": "Personal", "ar": "شخصية"},
+    "spaces.kind_shared": {"en": "Shared", "ar": "مشتركة"},
+    "spaces.kind_project": {"en": "Shared, with a project", "ar": "مشتركة، بمشروع"},
+    "spaces.new_private_chat": {"en": "New private chat", "ar": "محادثة خاصة جديدة"},
+    "spaces.new_private_chat_title": {
+        "en": "A new chat in your own space: only you see it.",
+        "ar": "محادثة جديدة في مساحتك الخاصة: لا يراها غيرك.",
+    },
     # OAuth sign-ins (GitHub, Google, Microsoft): auth-guard.js kazmaSignInProblem
     # and kazmaSignInFailed word what the start and the callback answer.
     "oauth.sign_in_from": {
