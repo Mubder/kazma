@@ -15677,6 +15677,36 @@ an install with one account behaves as before.
     YOLO window of one person never skip another's card; the real approve
     route grants to the card's asker; the per-thread grant as the control;
     with Spaces off the keys are the thread's).
+- **A tool list per person (S2-01, 2026-11-22; plan 4.8: "X Studio on, but
+  posting off").** Only where Spaces is enforced; an install that does not
+  enforce it refuses nothing, and People refuses the switch (`spaces_off`).
+  - Inside the features a person has, the admin switches single tools off
+    for them: `identity` `policies[account]["tools_off"]`
+    (`features.TOOLS_OFF_POLICY`), read into `Grants.tools_off`.
+    `features.tool_refusal` refuses such a tool, so it is neither offered
+    nor callable wherever a feature's tools are refused (S2-11: the chat
+    offer, the registry, a scheduled job's executor, a swarm worker, the
+    MCP branch). No new place asks: a tool's own check covers it.
+  - Only a tool a person can have is switched (`features._switchable_tools`:
+    each feature's tools and the always-on ones, chat and memory;
+    `checked_tools` refuses `unknown_tool`, `bad_tools`, and
+    `admin_has_every_tool`). People sends the whole list
+    (`people.set_tools`, `PUT /api/people/{account_id}/tools`, each change a
+    `tools_set` event of the identity record); `GET /api/people` lists each
+    person's switchable tools by where they come from
+    (`features.listed_tools`: a feature that is off for them has none).
+    S1-33's check of the features holds while every stored list is a list.
+  - Settings -> People -> Tools: a box per tool for each person but the
+    admin, EN/AR. **A Settings mixin member is defined once**: the first
+    draft named its handler `toggleTool`, the Tools tab's own switch, and
+    the box sent `PUT /api/settings/tools/[object Object]/toggle`
+    (`tests/js/test_settings_mixins.js` now fails a name defined twice
+    across the mixins, the planted second `toggleTool` as its control).
+  - Gates: `tests/test_person_tool_policy.py` (a tool off for a person is
+    neither offered nor called in chat, a scheduled job and a real swarm
+    worker, another person keeps it; hiding it from the offer only as the
+    control; the switch's refusals, the route, the precondition),
+    `tests/e2e/test_person_tools_browser.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

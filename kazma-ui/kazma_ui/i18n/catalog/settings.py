@@ -2795,6 +2795,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.feature_off_back": {"en": "Back to chat", "ar": "العودة إلى المحادثة"},
     "settings.people_features_saved": {"en": "Features saved.", "ar": "حُفظت الميزات."},
+    # Spaces S2-01: inside a feature, single tools per person.
+    "settings.people_tools_title": {"en": "Tools", "ar": "الأدوات"},
+    "settings.people_tools_help": {
+        "en": "Inside the features a person has, switch single tools off: for example X Studio on, but "
+              "posting off. A tool that is off is neither offered nor run for them, in chat, a scheduled job "
+              "or a swarm worker. You have every tool.",
+        "ar": "داخل الميزات التي لدى الشخص، عطّل أدوات بعينها: مثلًا استوديو X مفعّل والنشر معطّل. الأداة "
+              "المعطّلة لا تُعرض عليه ولا تعمل له، في المحادثة أو مهمة مجدولة أو عامل في السرب. لديك أنت كل الأدوات.",
+    },
+    "settings.people_tools_saved": {"en": "Tools saved.", "ar": "حُفظت الأدوات."},
+    "settings.people_tool_of": {"en": "{tool} for {name}", "ar": "{tool} لـ {name}"},
+    "settings.people_tools_from_chat": {"en": "Chat", "ar": "المحادثة"},
+    "settings.people_tools_from_memory": {"en": "Memory", "ar": "الذاكرة"},
+    "settings.people_err.unknown_tool": {"en": "There is no such tool a person can have.",
+                                         "ar": "لا توجد أداة بهذا الاسم يمكن أن تكون لشخص."},
+    "settings.people_err.bad_tools": {"en": "Name the tools to switch off, as a list.",
+                                      "ar": "حدّد الأدوات المراد تعطيلها في قائمة."},
+    "settings.people_err.admin_has_every_tool": {"en": "The admin has every tool.",
+                                                 "ar": "لدى المسؤول كل الأدوات."},
     "settings.people_err.unknown_feature": {"en": "There is no such feature.", "ar": "لا توجد ميزة بهذا الاسم."},
     "settings.people_err.bad_switch": {"en": "A feature is switched on or off.", "ar": "الميزة إما مفعّلة أو معطّلة."},
     "settings.people_err.bad_features": {"en": "Name the features to switch.", "ar": "حدّد الميزات المراد تبديلها."},

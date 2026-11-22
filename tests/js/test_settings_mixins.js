@@ -89,4 +89,48 @@ ok("conflictLine reads the conflict", app.conflictLine({ action1: "a", action2: 
   ok("negative control: Object.assign leaves no getter", !frozen || !(d && d.get), d);
 }
 
+// ── Every member is defined once across the mixins (Spaces S2-01) ──────
+// A second definition of a name wins silently: in one object literal the
+// last key wins, across mixins the later mixin does. People's per-person
+// tool box was named `toggleTool`, the Tools tab's switch's name: the box
+// called the Tools tab's switch with a person object, and the PUT went to
+// /api/settings/tools/[object Object]/toggle.
+const KEYWORDS = new Set(["if", "for", "while", "switch", "return", "catch", "function", "else",
+  "try", "do", "new", "var", "let", "const", "await", "throw", "typeof", "case", "default"]);
+
+/** Every member a mixin defines, read from its source: a name at the
+ * mixin object's own indentation (eight spaces), followed by `(` or `:`. */
+function memberDefinitions(sources) {
+  const seen = new Map();
+  for (const [file, text] of sources) {
+    text.split(/\r?\n/).forEach((line, i) => {
+      const m = /^ {8}(?:async\s+)?(?:get\s+|set\s+)?([A-Za-z_$][\w$]*)\s*(?:\(|:)/.exec(line);
+      if (!m || KEYWORDS.has(m[1]) || /^ {8}(?:\/\/|\*|\/\*)/.test(line)) return;
+      const accessor = /^ {8}(?:get|set)\s/.test(line) ? line.trim().slice(0, 3) : "";
+      const key = m[1] + (accessor ? " " + accessor : "");
+      if (!seen.has(key)) seen.set(key, []);
+      seen.get(key).push(`${file}:${i + 1}`);
+    });
+  }
+  return seen;
+}
+
+function twice(seen) {
+  return [...seen.entries()].filter(([, where]) => where.length > 1);
+}
+
+const sources = MIXINS.map((f) => [f, fs.readFileSync(path.join(jsDir, f), "utf8")]);
+const defined = memberDefinitions(sources);
+ok("the scan finds the mixins' members", defined.has("togglePersonTool") && defined.has("toggleTool")
+  && defined.size > 300, defined.size);
+ok("no member of the Settings mixins is defined twice", twice(defined).length === 0, twice(defined));
+{
+  // Negative control: the S2-01 draft, a second `toggleTool` in settings_ops.js.
+  const planted = sources.map(([f, text]) => [f, f === "settings_ops.js"
+    ? text.replace("        async togglePersonTool(person, tool, on) {", "        async toggleTool(person, tool, on) {")
+    : text]);
+  const found = twice(memberDefinitions(planted)).map(([name]) => name);
+  ok("negative control: a planted second toggleTool is found", found.length === 1 && found[0] === "toggleTool", found);
+}
+
 process.exit(fail ? 1 : 0);

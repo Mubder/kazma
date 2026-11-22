@@ -23,6 +23,13 @@ Who has what
 * A grant never passes the group rule (S1-20): Development's tools exist
   only in a host space (``spaces.tools.host_allowance``), whatever a grant
   says.
+* **Inside a feature the admin can still switch single tools off for a
+  person** (S2-01, plan 4.8: "X Studio on, but posting off"): the person's
+  ``policies[account]["tools_off"]`` (:data:`TOOLS_OFF_POLICY`). A tool
+  switched off is neither offered nor callable for them, at the same places
+  a feature's tools are refused (:func:`tool_refusal`): chat, a scheduled
+  job's executor, a swarm worker, the MCP gate. Only tools a person can
+  have are switched (:func:`checked_tools`); the admin's own set is not.
 
 A feature that is off is gone for the person: no menu entry, its pages and
 routes refuse (the tenant middleware, its live sockets at the handshake),
@@ -60,6 +67,7 @@ __all__ = [
     "INTENT_HANDLERS",
     "NAMES",
     "NO_ADMISSION",
+    "TOOLS_OFF_POLICY",
     "AlwaysOn",
     "Feature",
     "FeatureOff",
@@ -509,13 +517,19 @@ class FeatureRefused(ValueError):
         self.code = code
 
 
+#: The policy key of the tools the admin switched off for a person (S2-01).
+TOOLS_OFF_POLICY = "tools_off"
+
+
 @dataclass(frozen=True)
 class Grants:
-    """The features one person has (``on``), and whose they are."""
+    """The features one person has (``on``), the single tools switched off
+    for them inside those features (``tools_off``, S2-01), and whose they are."""
 
     account: str
     on: frozenset[str]
     admin: bool = False
+    tools_off: frozenset[str] = frozenset()
 
     def has(self, feature: str) -> bool:
         return feature in self.on
@@ -546,7 +560,9 @@ def grants_of(registry: dict[str, Any], account_id: str) -> Grants:
         value = stored.get(fid)
         if (value if isinstance(value, bool) else feature.new_member):
             on.add(fid)
-    return Grants(account_id, frozenset(on))
+    off = policy.get(TOOLS_OFF_POLICY)
+    tools_off = frozenset(str(t) for t in off if t) if isinstance(off, (list, tuple)) else frozenset()
+    return Grants(account_id, frozenset(on), tools_off=tools_off)
 
 
 def grants_here() -> Grants | None:
@@ -592,6 +608,10 @@ def tool_refusal(name: str, grants: Grants | None = None) -> str | None:
         if not grants.has(feature):
             return (f"Tool '{name}' is not available to this person: {_english(feature)} is off for "
                     "them. Tell the user the admin turns it on in Settings → People.")
+    if name in grants.tools_off:
+        # A single tool the admin switched off for them (S2-01).
+        return (f"Tool '{name}' is switched off for this person. Tell the user the admin turns it "
+                "on in Settings → People.")
     return None
 
 
@@ -712,6 +732,56 @@ def apply_change(registry: dict[str, Any], account_id: str, changes: dict[str, b
     registry["policies"][account_id] = policy
 
 
+def _switchable_tools() -> dict[str, frozenset[str]]:
+    """The tools the admin may switch off for a person, by where they come
+    from: each feature's tools, and the always-on ones (chat, memory), a
+    person may have (S2-01). The admin's own tools and Kazma's own are not
+    a person's to have, so not theirs to switch. No I/O."""
+    out: dict[str, frozenset[str]] = {fid: f.tools for fid, f in FEATURES.items() if f.tools}
+    for key, always in ALWAYS_ON.items():
+        if always.tools:
+            out[key] = always.tools
+    return out
+
+
+def checked_tools(account_id: str, off: Any, registry: dict[str, Any]) -> list[str]:
+    """*off* (a list of tool names) as the tools switched off for a person,
+    each once, refused (:class:`FeatureRefused`): not a list of names, a
+    tool no person can have, or the admin (who has every tool)."""
+    if not isinstance(off, (list, tuple)) or not all(isinstance(t, str) for t in off):
+        raise FeatureRefused("bad_tools", "Name the tools to switch off, as a list.")
+    if grants_of(registry, account_id).admin:
+        raise FeatureRefused("admin_has_every_tool", "The admin has every tool.")
+    known = frozenset().union(*_switchable_tools().values())
+    unknown = sorted({t for t in off if t not in known})
+    if unknown:
+        raise FeatureRefused("unknown_tool", f"There is no tool a person can have named {unknown[0]!r}.")
+    return sorted(set(off))
+
+
+def apply_tools(registry: dict[str, Any], account_id: str, off: list[str]) -> None:
+    """Write checked tools *off* into *registry*'s policies (in place)."""
+    policy = dict(registry["policies"].get(account_id) or {})
+    if off:
+        policy[TOOLS_OFF_POLICY] = list(off)
+    else:
+        policy.pop(TOOLS_OFF_POLICY, None)
+    registry["policies"][account_id] = policy
+
+
+def listed_tools(grants: Grants) -> list[dict[str, Any]]:
+    """The switchable tools of what *grants* holds (a feature that is off
+    has none to switch), each with whether it is on for them: ``[{"from":
+    feature or always-on key, "tools": [{"name", "on"}]}]``."""
+    out: list[dict[str, Any]] = []
+    for key, tools in _switchable_tools().items():
+        if key in FEATURES and not grants.has(key):
+            continue
+        out.append({"from": key, "tools": [{"name": name, "on": name not in grants.tools_off}
+                                           for name in sorted(tools)]})
+    return out
+
+
 def listed(grants: Grants) -> list[dict[str, Any]]:
     """Every feature with whether *grants* holds it, in the table's order."""
     return [{"id": fid, "group": f.group, "on": grants.has(fid),
@@ -734,8 +804,11 @@ def precondition() -> tuple[bool, str]:
         stored = (policy or {}).get("features") if isinstance(policy, dict) else None
         if isinstance(stored, dict):
             unknown += [f"{account_id}: {fid}" for fid in stored if fid not in FEATURES]
+        off = (policy or {}).get(TOOLS_OFF_POLICY) if isinstance(policy, dict) else None
+        if off is not None and not isinstance(off, (list, tuple)):
+            unknown.append(f"{account_id}: {TOOLS_OFF_POLICY} is not a list")
     if unknown:
-        return False, "switches name features that do not exist: " + ", ".join(sorted(unknown))
+        return False, "switches name features that do not exist, or cannot be read: " + ", ".join(sorted(unknown))
     defaults = ", ".join(fid for fid, f in FEATURES.items() if f.new_member)
     return True, (f"every person has the features the admin gave them; a new person starts with "
                   f"chat and its memory, and {defaults}")

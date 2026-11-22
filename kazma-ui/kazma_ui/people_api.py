@@ -17,6 +17,9 @@ people; each person reads the changes made to their account.
 * ``PUT /api/people/{account_id}/features`` -- switch a person's features
   (``{"features": {id: on}}``, S2-11); ``GET /api/people`` lists each
   person's features.
+* ``PUT /api/people/{account_id}/tools`` -- the single tools switched off
+  for a person inside their features (``{"off": [tool, ...]}``, S2-01);
+  ``GET /api/people`` lists each person's switchable tools, each on or off.
 * ``GET /api/account/notices``, ``POST /api/account/notices/seen`` -- the
   signed-in person's own notices: a reset of their password someone else
   made.
@@ -258,6 +261,30 @@ def create_people_router() -> APIRouter:
         if not isinstance(body, dict):
             return invalid_json_response()
         return await asyncio.to_thread(_set_features, request, account_id, body)
+
+    def _set_tools(request: Request, account_id: str, body: dict[str, Any]) -> JSONResponse:
+        try:
+            off = people.set_tools(account_id, body.get("off"), by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True, "off": off})
+
+    @router.put("/api/people/{account_id}/tools")
+    async def set_tools(account_id: str, request: Request) -> JSONResponse:
+        """The single tools switched off for a person (Spaces S2-01):
+        ``{"off": [tool, ...]}``, the whole list."""
+        denied = await asyncio.to_thread(_not_admin, request)
+        if denied:
+            return denied
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_set_tools, request, account_id, body)
 
     @router.get("/api/account/notices")
     def my_notices(request: Request) -> JSONResponse:

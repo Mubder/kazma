@@ -580,6 +580,32 @@
             await this.loadPeople();
         },
 
+        // ── Tools (Spaces S2-01): single tools per person ──
+        personToolGroupLabel(key) {
+            if (key === 'chat' || key === 'memory') {
+                return _t('settings.people_tools_from_' + key, key === 'chat' ? 'Chat' : 'Memory');
+            }
+            return _t('settings.feature.' + key, key);
+        },
+
+        async togglePersonTool(person, tool, on) {
+            const off = [];
+            (person.tools || []).forEach((g) => (g.tools || []).forEach((t) => {
+                const isOn = t.name === tool.name ? !!on : !!t.on;
+                if (!isOn) off.push(t.name);
+            }));
+            try {
+                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/tools',
+                    { method: 'PUT', body: { off: off } });
+            } catch (e) {
+                showToast(this._peopleError(e && e.body), 'error');
+                await this.loadPeople();
+                return;
+            }
+            showToast(_t('settings.people_tools_saved', 'Tools saved.'), 'success');
+            await this.loadPeople();
+        },
+
         async clearPersonLimit(person) {
             const done = await this._putLimit('/api/people/' + encodeURIComponent(person.id) + '/daily-limit', null);
             if (done) this.limitEditing = '';

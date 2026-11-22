@@ -80,14 +80,15 @@ __all__ = [
     "set_daily_limit",
     "set_default_daily_limit",
     "set_features",
+    "set_tools",
 ]
 
 logger = logging.getLogger(__name__)
 
 #: What the record holds.
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
-          "daily_limit_set", "default_daily_limit_set", "features_set", "space_created",
-          "member_added", "member_left", "member_removed")
+          "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
+          "space_created", "member_added", "member_left", "member_removed")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset", "member_added", "member_removed")
 _NAME_MAX = 64
@@ -216,7 +217,9 @@ def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str,
     limit, source = limit_of(reg, account_id)
     return {"daily_limit": own if isinstance(own, dict) else None,
             "limit": limit.as_dict() if limit else None, "limit_source": source,
-            "features": features.listed(features.grants_of(reg, account_id))}
+            "features": features.listed(features.grants_of(reg, account_id)),
+            # The single tools of what they hold, each on or off (S2-01).
+            "tools": features.listed_tools(features.grants_of(reg, account_id))}
 
 
 def limits_for_people() -> dict[str, Any]:
@@ -809,6 +812,38 @@ def set_features(account_id: str, changes: dict[str, Any], *, by: str) -> None:
             raise PeopleRefused(exc.code, 400, str(exc)) from exc
         raise
     logger.info("[people] features set id=%s by=%s", account_id, by)
+
+
+def set_tools(account_id: str, off: Any, *, by: str) -> list[str]:
+    """Switch single tools off for a person (S2-01, plan 4.8: "X Studio on,
+    but posting off"): *off* is the whole list of their tools that are off.
+    One step, recorded. Refused: the admin (who has every tool), a tool no
+    person can have, a value that is not a list of names. Returns the list
+    kept."""
+    _require_enforced()
+    from kazma_core.spaces import features
+
+    kept: list[str] = []
+
+    def _change(reg: dict[str, Any]) -> None:
+        if account_id not in reg["accounts"]:
+            raise identity.IdentityError("no_such_account", "There is no such person.")
+        try:
+            checked = features.checked_tools(account_id, off, reg)
+        except features.FeatureRefused as exc:
+            raise identity.IdentityError(exc.code, str(exc)) from exc
+        features.apply_tools(reg, account_id, checked)
+        kept[:] = checked
+        _record(reg, "tools_set", account_id, by)
+
+    try:
+        _changed(_change)
+    except PeopleRefused as exc:
+        if exc.code in ("unknown_tool", "bad_tools"):
+            raise PeopleRefused(exc.code, 400, str(exc)) from exc
+        raise
+    logger.info("[people] tools set id=%s off=%d by=%s", account_id, len(kept), by)
+    return kept
 
 
 def _end_sessions(reg: dict[str, Any], account_id: str) -> None:

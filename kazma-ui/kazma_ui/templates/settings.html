@@ -2626,6 +2626,34 @@
               </template>
             </div>
         </div>
+        <!-- Tools (Spaces S2-01): inside the features a person has, single
+             tools switched off for them. The admin has every tool. -->
+        <div class="settings-group mb-6" id="people-tools" x-show="peopleLoaded && !peopleFailed" x-cloak>
+            <h3>{{ t('settings.people_tools_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_tools_help') }}</p>
+            <div class="account-list-table">
+              <template x-for="p in people.filter((q) => !q.owner)" :key="'tools-' + p.id">
+                <details class="people-tools-row" :data-person-tools="p.id">
+                  <summary><bdi translate="no" x-text="p.name"></bdi></summary>
+                  <template x-for="g in (p.tools || [])" :key="p.id + '-tools-' + g.from">
+                    <div class="people-tools-group">
+                      <span class="people-tools-from" x-text="personToolGroupLabel(g.from)"></span>
+                      <span class="people-features-list">
+                        <template x-for="tool in g.tools" :key="p.id + '-' + tool.name">
+                          <span class="people-feature">
+                            <input type="checkbox" :checked="tool.on" :data-tool="tool.name"
+                                   :aria-label="window.t('settings.people_tool_of', {tool: tool.name, name: p.name})"
+                                   @change="togglePersonTool(p, tool, $event.target.checked)">
+                            <code aria-hidden="true" translate="no" x-text="tool.name"></code>
+                          </span>
+                        </template>
+                      </span>
+                    </div>
+                  </template>
+                </details>
+              </template>
+            </div>
+        </div>
         <!-- The closed spaces of deleted people (S1-27): the admin erases
              them; their contents are never shown here. -->
         <div class="settings-group mb-6" id="people-closed-spaces" x-show="peopleLoaded && closedSpaces.length > 0" x-cloak>
