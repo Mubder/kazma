@@ -26,7 +26,7 @@ THEIRS = {"document_id": "doc-theirs-0001", "title": "Their list", "state": "rea
 
 
 def _plain(text: str) -> str:
-    return " ".join(text.replace("⁨", "").replace("⁩", "").split())
+    return " ".join(text.replace("\u2068", "").replace("\u2069", "").split())
 
 
 @pytest.mark.parametrize("lang", ["en", "ar"])
