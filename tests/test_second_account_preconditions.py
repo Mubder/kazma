@@ -259,6 +259,9 @@ def test_control_with_no_check_the_second_account_is_made_with_everything_missin
     with no question asked."""
     store = get_config_store()
     store.delete(identity.REGISTRY_KEY)
+    # The four fallbacks recall.py kept until 2026-11-22: work with no space
+    # is not yet refused everywhere, beside the owner token this test lacks.
+    monkeypatch.setattr(preconditions, "TENANT_FALLBACKS_LEFT", 4)
     assert len(preconditions.missing(for_switch=True)) >= 2
     monkeypatch.setattr(people, "_require_preconditions", lambda: None)
     store.set(identity.ENFORCED_KEY, True, category="identity")  # the switch with no check
@@ -527,12 +530,14 @@ def test_check_names_what_is_missing_and_writes_nothing(vault, capsys) -> None:
     _plant_two_rows(vault)
     assert run(["migrate", "--check"]) == 1
     said = capsys.readouterr().out
-    for pid in ("unbound_work", "vault_copies", "owner_token"):
+    for pid in ("vault_copies", "owner_token"):
         title = preconditions.PRECONDITIONS[pid][0]
         assert f"[MISSING] {title}" in said, pid
     # S2-02 and S2-11 are built: every person has a daily limit (the limit
     # for people) and the features the admin gave them (N18's for the rest).
-    for pid in ("daily_limits", "feature_grants"):
+    # S1-02's last fallbacks are gone (2026-11-22): work with no space is
+    # refused everywhere it is asked.
+    for pid in ("daily_limits", "feature_grants", "unbound_work"):
         assert f"[ok] {preconditions.PRECONDITIONS[pid][0]}" in said, pid
     assert "[ok] Copies that leave the machine are encrypted" in said and GITHUB in said
     assert "the-july-token" not in said and "the-september-token" not in said
