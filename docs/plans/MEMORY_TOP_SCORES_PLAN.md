@@ -451,6 +451,26 @@ session and fixed in two commits.
   "until" ("لحد الحين", so far) stays a content word (q1008's answer says
   "وإلى الحين").
 
+The real-use suite on both sides (22 Nov, qwen3.7-plus, judge qwen3.8-flash,
+two runs each; `docs/audits/evidence/memory_real_use/f10_*_qwen*.json`, and
+what recall showed at each step, counts only,
+`docs/audits/evidence/memory_findings/finding10_real_use_recall.json`):
+before (48975ac04) 18/18 and 15/18, after (5fc4150b7) 18/18 and 16/18. The
+step the fix is about, the changed fact asked ("وين أسكن الحين؟", "Where do
+I live now?"), failed in one of two runs before, in both languages, and in
+neither after. Why, from the server logs: before, the quick pass wrote no
+home in either language (the time word voided it), so the fact was the deep
+pass's reading, written after the turn, and a question asked before it
+landed found nothing; after, the quick pass writes the user's own statement
+at once, in every run, and a memory tool's later write of the same fact is
+refused ("user fact stands"). Left, on both sides: the Arabic question in
+other words ("أي مدينة صارت بيتي هالفترة؟") reaches no fact in any run --
+"city" and "home" are not ask-words of `lives_in` in either language, and
+English finds it by meaning alone; adding them needs its own precision
+rows -- and the forgotten fact asked (step 8) fails once on each side
+(finding 1). Spend: 149 model calls, 3.99M prompt tokens, 20,210
+completion tokens.
+
 1. **A fact told once is kept twice, and forgetting one copy leaves it
    known.** In the real-use suite (`scripts/memory_real_use.py`, 22 Nov)
    "My sister Noura works as a dentist." became two memories: the turn, and
@@ -612,3 +632,15 @@ session and fixed in two commits.
    either. The update is in the change log with Undo, so the user can take
    it back; a list of product names the pass would refuse is the fix if it
    is seen in use. Not fixed now.
+16. **A forget the model makes in an update turn keeps the update out.**
+   Found in finding 10's real-use runs (22 Nov, after, run 2, Arabic): told
+   "انتقلت إلى بورتو الشهر الماضي", the model called `memory_invalidate` on
+   two older memories by memory id (each approved). A forget keeps its own
+   turn out of memory (`forget.keep_turn_out`, meant for "forget X"
+   requests), so the move itself was kept out: the quick pass wrote no new
+   home ("no facts from ... turn 1: kept out of memory"), and recall showed
+   no fact for "وين أسكن الحين؟" (the step still passed, from the turn's
+   own memory). In the other run the model invalidated a fact, not a
+   memory, and the turn was kept. A turn that states a new fact and
+   retires an old memory is an update, not a forget request. Not fixed now:
+   the main session decides.
