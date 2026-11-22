@@ -39,6 +39,10 @@ __all__ = ["PROBLEMS", "check_at_use", "problem"]
 
 logger = logging.getLogger(__name__)
 
+#: What a source of Kazma's folders raises when it cannot be read: the
+#: folder is then "unreachable", never taken for one that overlaps nothing.
+_CANNOT_ASK = (OSError, ValueError, RuntimeError)
+
 #: Every code :func:`problem` answers, in the order it asks; the People page
 #: words each (``settings.people_err.folder_<code>``).
 PROBLEMS = (
@@ -48,29 +52,26 @@ PROBLEMS = (
 
 
 def _kazma_folders() -> list[Path]:
-    """Kazma's install folder, its data folder and the Kazma home, as set."""
-    from kazma_core.paths import data_dir, installed_project_root
+    """Every folder and store of Kazma's: ``store_registry.kazma_owned_paths``
+    (the S2-12 review, finding 9)."""
+    from kazma_core.store_registry import kazma_owned_paths
 
-    folders = [data_dir(create=False)]
-    install = installed_project_root()
-    if install is None:
-        # A wheel install: the folder holding Kazma's packages.
-        install = Path(__file__).resolve().parents[2]
-    folders.append(install)
-    home = (os.environ.get("KAZMA_USER_HOME") or "").strip()
-    if home:
-        folders.append(Path(home).expanduser())
-    return folders
+    return kazma_owned_paths()
 
 
 def _roots_of_spaces(space_id: str) -> tuple[list[Path], list[Path]]:
-    """The owner's machine workspace and every other space's root, apart."""
+    """The owner's machine workspace and every other space's root, apart. A
+    row of a space the identity store does not hold (a create a stop cut off,
+    :func:`spaces.people.create_shared_space`) is no space's: it is dropped
+    there and never blocks a folder here."""
+    from kazma_core.spaces import identity
     from kazma_core.stores import get_workspace_store
 
+    known = set(identity.read_registry()["spaces"]) | {OWNER_SPACE_ID, ""}
     owners: list[Path] = []
     others: list[Path] = []
     for space, root in get_workspace_store().roots_by_space():
-        if not root or space == space_id:
+        if not root or space == space_id or space not in known:
             continue
         (owners if space == OWNER_SPACE_ID else others).append(Path(root))
     machine = (os.environ.get("KAZMA_WORKSPACE") or "").strip()
@@ -117,7 +118,11 @@ def problem(path: str, *, space_id: str = "") -> str | None:
         return "unreachable"
     if not folder.is_dir():
         return "not_a_folder"
-    return _overlap(folder, space_id)
+    try:
+        return _overlap(folder, space_id)
+    except _CANNOT_ASK as exc:
+        logger.warning("[spaces] Kazma's own folders could not all be read: %s", type(exc).__name__)
+        return "unreachable"
 
 
 def check_at_use(root: Path, *, space_id: str) -> None:
@@ -128,7 +133,7 @@ def check_at_use(root: Path, *, space_id: str) -> None:
     asked is refused too."""
     try:
         found = _overlap(root, space_id)
-    except OSError:
+    except _CANNOT_ASK:
         found = "unreachable"
     if found is None:
         return

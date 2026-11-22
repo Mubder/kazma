@@ -157,7 +157,10 @@ def test_the_owner_s_machine_workspace_and_another_space_s_folder_are_refused(en
     people.create_shared_space("First", kind="host", project_folder=str(first), by=OWNER_ACCOUNT_ID)
     assert _refusal(str(first)) == "folder_another_space"
     assert _refusal(str(first / "nested")) == "folder_another_space"
-    assert _refusal(str(tmp_path)) in ("folder_another_space", "folder_machine_workspace")
+    # A folder holding them all: the suite keeps this test's memory stores in
+    # it too, which Kazma's own folders name since the review (finding 9).
+    assert _refusal(str(tmp_path)) in ("folder_another_space", "folder_machine_workspace",
+                                       "folder_kazma_folder")
 
 
 def test_a_failed_record_leaves_no_folder_behind(enforced, tmp_path, monkeypatch) -> None:

@@ -15239,7 +15239,25 @@ an install with one account behaves as before.
     `project_folder.check_at_use` for a shared host space's active row every
     time, never swallowed; a folder that became a junction or link into
     Kazma's data after the space was made raises `RefusedBeforeEffect`
-    before anything reads or writes through it.
+    before anything reads or writes through it. The per-task rung too (the
+    S2-12 review, finding 10): a swarm task's workspace row and an approval
+    resume's root, so another space's root is refused there.
+  - **Kazma's folders come from one list** (finding 9):
+    `store_registry.kazma_owned_paths` -- the data folder, the install,
+    Kazma's home, every store wherever its own variable puts it, the vector
+    store, the document store, an absolute research folder, what the setup
+    record names (the data folder, Postgres's data, archive and base
+    backups, before and after an upgrade), the engine's disk, the backup
+    folder copy and the admin's extra folders. A source that cannot be read
+    makes the folder `unreachable`, never one that overlaps nothing.
+  - **A create is atomic** (finding 10): one at a time from the folder check
+    to the record (`people._CREATE_LOCK`), so two creates never take one
+    folder; a workspace row of a space the identity store does not hold (a
+    create a stop cut off) is dropped before the next create
+    (`WorkspaceStore.drop_rows_of_unknown_spaces`) and never counts as a
+    space's root (`project_folder._roots_of_spaces`). Gate:
+    `tests/test_project_folder_owned_paths.py` (the list, the per-task rung
+    and the creates of before as the controls).
   - Gates: `tests/test_shared_spaces.py` (each refusal; the junction made
     after creation, with the check taken out as the control; a loopback name
     of Kazma's data, with the identity taken out as the control; a failed

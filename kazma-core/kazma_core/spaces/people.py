@@ -51,6 +51,7 @@ import json
 import logging
 import secrets
 import sqlite3
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -90,6 +91,8 @@ _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased"
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset", "member_added", "member_removed")
 _NAME_MAX = 64
+#: One shared-space create at a time in this process (the review, finding 10).
+_CREATE_LOCK = threading.Lock()
 _PASSWORD_MIN = 8
 
 
@@ -299,11 +302,23 @@ def create_shared_space(name: str, *, kind: str = "sandboxed", project_folder: s
         raise PeopleRefused("bad_kind", 400, f"A shared space is one of {', '.join(SHARED_KINDS)}.")
     space_id = f"s{secrets.token_hex(6)}"
     workspace_id = ""
-    if kind == "host":
-        found = folder_rules.problem(project_folder)
-        if found:
-            raise PeopleRefused(f"folder_{found}", 400, "That folder cannot be this space's project folder.")
-        workspace_id = _make_project_workspace(space_id, name, project_folder, by)
+    # One create at a time from the folder check to the record (the S2-12
+    # review, finding 10): two creates never take one folder.
+    with _CREATE_LOCK:
+        if kind == "host":
+            _drop_orphan_rows()
+            found = folder_rules.problem(project_folder)
+            if found:
+                raise PeopleRefused(f"folder_{found}", 400, "That folder cannot be this space's project folder.")
+            workspace_id = _make_project_workspace(space_id, name, project_folder, by)
+        _record_shared_space(space_id, name, kind, by, workspace_id)
+    logger.info("[people] shared space created id=%s kind=%s by=%s", space_id, kind, by)
+    return next(space for space in list_shared_spaces() if space["id"] == space_id)
+
+
+def _record_shared_space(space_id: str, name: str, kind: str, by: str, workspace_id: str) -> None:
+    """Record the new shared space; its project workspace goes if it is not
+    recorded."""
 
     def _change(reg: dict[str, Any]) -> None:
         if by not in reg["accounts"]:
@@ -322,8 +337,17 @@ def create_shared_space(name: str, *, kind: str = "sandboxed", project_folder: s
     finally:
         if workspace_id and not recorded:
             _drop_project_workspace(space_id, workspace_id)
-    logger.info("[people] shared space created id=%s kind=%s by=%s", space_id, kind, by)
-    return next(space for space in list_shared_spaces() if space["id"] == space_id)
+
+
+def _drop_orphan_rows() -> None:
+    """A workspace row of a space the identity store does not hold -- a
+    create a stop cut off between its row and its record -- is dropped
+    before the next create: no orphan root is ever left to block a folder."""
+    from kazma_core.stores import get_workspace_store
+
+    dropped = get_workspace_store().drop_rows_of_unknown_spaces(set(identity.read_registry()["spaces"]))
+    if dropped:
+        logger.warning("[people] %d workspace row(s) of no space were dropped (a create cut off)", dropped)
 
 
 def _make_project_workspace(space_id: str, name: str, folder: str, by: str) -> str:

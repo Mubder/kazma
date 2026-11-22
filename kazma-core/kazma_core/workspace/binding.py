@@ -118,15 +118,26 @@ def resolve_active_root() -> Path:
     if space_root is not None:
         return space_root
 
-    # 1. Per-task scope
+    # 1. Per-task scope: a swarm task's workspace row, an approval resume's
+    #    root. In a host space other than the owner's it is checked as the
+    #    space's project folder is (the S2-12 review, finding 10): another
+    #    space's row, or a folder that now leads into Kazma's, is refused.
+    scoped: Path | None = None
     try:
         from kazma_core.ide.workspace_scope import resolve_workspace_root
 
         scoped = resolve_workspace_root()
-        if scoped is not None:
-            return scoped
     except Exception:
-        pass
+        scoped = None
+    if scoped is not None:
+        from kazma_core.spaces.files import host_space_root
+
+        if host_space_root() is not None:
+            from kazma_core.spaces import project_folder
+            from kazma_core.spaces.scope import require_space_id
+
+            project_folder.check_at_use(scoped, space_id=require_space_id())
+        return scoped
 
     # 2. Active WorkspaceStore -- the bound space's own (Spaces S1-34). Only
     #    the owner's space (the machine's workspace) sets the process pin.

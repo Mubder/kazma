@@ -354,6 +354,21 @@ class WorkspaceStore:
             rows = conn.execute("SELECT space_id, root_path FROM workspaces").fetchall()
         return [(str(row["space_id"] or ""), str(row["root_path"] or "")) for row in rows]
 
+    def drop_rows_of_unknown_spaces(self, known: set[str]) -> int:
+        """Delete every row of a space *known* does not hold -- a shared
+        space whose create a stop cut off after its row was written (Spaces
+        S2-12 review, finding 10) -- never the owner's (no space, or
+        ``default``). The count dropped."""
+        keep = sorted(set(known) | {"", "default"})
+        marks = ",".join("?" for _ in keep)
+        with self._lock:
+            conn = self._get_conn()
+            dropped = conn.execute(
+                f"DELETE FROM workspaces WHERE COALESCE(space_id, '') NOT IN ({marks})", keep
+            ).rowcount
+            conn.commit()
+        return int(dropped or 0)
+
     def get_active_workspace(self) -> dict[str, Any] | None:
         """Return the currently active workspace dictionary or None."""
         where, args = self._where_space(self._space())

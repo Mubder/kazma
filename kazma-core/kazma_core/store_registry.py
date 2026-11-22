@@ -1517,6 +1517,71 @@ def _kazma_folders() -> list[Path]:
     return folders
 
 
+#: Every store file, wherever its own variable puts it (``kazma_core.paths``).
+_STORE_FILE_GETTERS = (
+    "primary_memory_db", "memory_ops_db", "memory_forget_journal_db", "knowledge_graph_db",
+    "vector_db", "vault_db_path", "checkpoints_db", "settings_db", "knowledge_db",
+    "snapshots_db", "swarm_tasks_db", "audit_db", "rbac_db", "fts5_memory_path",
+)
+
+
+def kazma_owned_paths() -> list[Path]:
+    """Every folder and store file of Kazma's that a person's folder (a
+    shared space's project folder, Spaces S2-12) is never inside and never
+    holds (the S2-12 review, finding 9): the data folder, the install and
+    Kazma's home; every store wherever its own variable puts it; the vector
+    store, the document store and an absolute research folder; what the
+    setup record names (the data folder of section 21 G3, Postgres's data,
+    WAL archive and base backups, before and after an upgrade) and the
+    container engine's disk; the backup folder copy; the admin's extra
+    folders. Blocking (the settings store, the setup record). Raises when a
+    source cannot be read: a list with a gap is never answered."""
+    import os
+
+    from kazma_core import paths as _paths
+
+    found: list[Path] = []
+
+    def add(value: object) -> None:
+        text = str(value or "").strip()
+        if text:
+            path = Path(text).expanduser()
+            if path.is_absolute() and path not in found:
+                found.append(path)
+
+    add(_paths.data_dir(create=False))
+    add(_paths.user_home())
+    add(_paths.installed_project_root() or Path(__file__).resolve().parents[1])
+    add(os.environ.get("KAZMA_USER_HOME"))
+    for getter in _STORE_FILE_GETTERS:
+        add(getattr(_paths, getter)())
+    for variable in ("KAZMA_VECTOR_PATH", "KAZMA_RESEARCH_DIR"):
+        add(os.environ.get(variable))
+    from kazma_core.documents.config import get_document_storage_root
+
+    add(get_document_storage_root())
+    from kazma_core import data_folder, postgres_service
+
+    add(data_folder.chosen())
+    record = postgres_service.read_record().get("postgres")
+    for server in (record, (record or {}).get("previous") if isinstance(record, dict) else None):
+        if isinstance(server, dict):
+            for key in ("data_dir", "wal_archive_dir", "base_backup_dir"):
+                add(server.get(key))
+    from kazma_core.docker_cli import kazma_engine_disk_dir
+
+    add(kazma_engine_disk_dir())
+    from kazma_core.backup.folder_copy import PATH_KEY
+    from kazma_core.config_store import get_config_store
+
+    add(get_config_store().get(PATH_KEY))
+    from kazma_core.workspace.path_grants import list_durable_roots
+
+    for grant in list_durable_roots():
+        add(grant.path)
+    return found
+
+
 #: Folders a search for stray copies never enters (the same list every walk
 #: of a project skips, plus git's own folder).
 _STRAY_WALK_SKIP = frozenset({".git"})
