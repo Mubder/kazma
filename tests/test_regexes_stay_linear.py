@@ -189,13 +189,37 @@ def _grows_faster_than_linear(fn, make, small: int, factor: int = 2) -> bool:
     return first if first == second else once()
 
 
+#: The time the smaller input must take before a "stays linear" reading
+#: means anything. outside_fences reads 400 fence openings (16 KB) in about a
+#: microsecond, and at that size a fixed cost alone made four times the input
+#: take seven times as long: CI read the linear reader as growing (2026-11-22).
+_LINEAR_FLOOR_S = 0.0005
+
+
+def _stays_linear(fn, make, small: int, factor: int = 4) -> bool:
+    """The opposite claim to ``_grows_faster_than_linear``, made where it can hold.
+
+    The input grows (doubling, at most 2**12 times) until the smaller size
+    takes ``_LINEAR_FLOOR_S``; only then is the growth compared. The
+    controls that a function DOES grow faster never use this: doubling an
+    exponential pattern's input would run for minutes.
+    """
+    size = small
+    for _ in range(12):
+        fn(make(size))  # warm
+        if min(_timed(fn, make(size)) for _ in range(3)) >= _LINEAR_FLOOR_S:
+            break
+        size *= 2
+    return not _grows_faster_than_linear(fn, make, size, factor)
+
+
 def test_control_a_token_shape_without_its_run_start_grows_faster_than_the_input():
     """Why the JWT shape (and the others not led by a literal) starts at a
     run's start: without the lookbehind, every "eyJ" inside a run of them
     scans to the run's end and fails."""
     unanchored = re.compile(r"eyJ[A-Za-z0-9_\-]{8,}+\.eyJ")
     assert _grows_faster_than_linear(lambda s: unanchored.sub("x", s), lambda n: "eyJ" * n, 1500, 4)
-    assert not _grows_faster_than_linear(token_shapes.mask_tokens, lambda n: "eyJ" * n, 1500, 4)
+    assert _stays_linear(token_shapes.mask_tokens, lambda n: "eyJ" * n, 1500, 4)
 
 
 def test_control_the_old_patterns_grow_faster_than_the_input():
@@ -206,4 +230,4 @@ def test_control_the_old_patterns_grow_faster_than_the_input():
     assert _grows_faster_than_linear(lambda s: OLD_SENTINEL.sub("x", s), lambda n: "-" * n, 1500, 4)
     opening = '<kazma:data source="x" untrusted="true">\n'
     assert _grows_faster_than_linear(lambda s: OLD_FENCED_BLOCK.sub(" ", s), lambda n: opening * n, 400, 4)
-    assert not _grows_faster_than_linear(prompt_fence.outside_fences, lambda n: opening * n, 400, 4)
+    assert _stays_linear(prompt_fence.outside_fences, lambda n: opening * n, 400, 4)

@@ -86,7 +86,9 @@ async def test_the_final_answer_writes_its_ledger_row(monkeypatch) -> None:
     final = rows[-1]
     assert final["thread_id"] == rows[0]["thread_id"] and final["thread_id"].startswith("swarm-aud119-")
     assert final["iteration"] == CAP + 1
-    assert final["prompt_tokens"] == 100 and final["cost_usd"] == pytest.approx(0.25)
+    # The recorder takes the provider's usage whole (cached tokens included,
+    # read by kazma_core.token_usage), not two counts picked out of it.
+    assert final["usage"]["prompt_tokens"] == 100 and final["cost_usd"] == pytest.approx(0.25)
     assert result["cost"] == pytest.approx(0.25)
 
 
