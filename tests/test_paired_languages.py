@@ -742,6 +742,14 @@ DECLARED: dict[str, str] = {
                                            "(English, Arabic) pair chosen by the page's language "
                                            "(current_language); nothing is decided by Arabic text; "
                                            "tests/test_approvals_reach_the_asker.py",
+    "kazma-ui/kazma_ui/hitl_timeout.py": "the line a turn ends with when its card's asker left the space, "
+                                         "two fixed strings that language_lock.in_their_language chooses "
+                                         "between; nothing is decided by Arabic text; "
+                                         "tests/test_approvals_review_fixes.py",
+    "kazma-ui/kazma_ui/sse_chat/__init__.py": "the refusal of a message while a card waits on another member, "
+                                              "two fixed strings that language_lock.in_their_language "
+                                              "chooses between; nothing is decided by Arabic text; "
+                                              "tests/test_approvals_review_fixes.py",
     "kazma-ui/kazma_ui/config_errors.py": "a settings-save error in the PAGE's language (current_language), "
                                           "English otherwise; tests/test_durable_config_outage.py",
     M + "cron/scheduler.py": "a job's refusal when its person lacks the Scheduled feature, an (English, "

@@ -180,6 +180,19 @@ def apply_capacity_command(
                 ),
                 **_flags(thread_id),
             ))
+        if action == "on" and parsed.get("unified"):
+            # /unrestricted turns the person's approval cards off with the
+            # mission: a person whose cards go to approvers does not (Spaces
+            # S2-05, N4). Refused whole, nothing changed.
+            from kazma_core.safety.yolo import standing_grant_reason
+            from kazma_core.spaces.approvals import standing_grant_refusal
+
+            refused = standing_grant_refusal()
+            if refused:
+                return CapacityCommandResult(
+                    handled=True, action="error",
+                    reply=f"🛡️ /unrestricted is not available: {standing_grant_reason(refused)}.",
+                )
         if action == "on":
             return _out(_enable(
                 thread_id,

@@ -405,6 +405,11 @@ def _granters(sources: dict[str, str]) -> dict[str, bool]:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name not in _GRANTERS:
                 called = {getattr(s.func, "attr", None) or getattr(s.func, "id", "")
                           for s in ast.walk(node) if isinstance(s, ast.Call)}
+                # A grant run in a thread (``asyncio.to_thread(grant_task, ...)``:
+                # the chat apps' "Approve for task" since the S2-05 review).
+                called |= {getattr(s.args[0], "attr", None) or getattr(s.args[0], "id", "")
+                           for s in ast.walk(node) if isinstance(s, ast.Call) and s.args
+                           and (getattr(s.func, "attr", None) or getattr(s.func, "id", "")) == "to_thread"}
                 if called & _GRANTERS:
                     found[f"{name}:{node.name}"] = "card_answered" in called
     return found

@@ -552,10 +552,16 @@ def register_gate(gate: GateRow, *, ttl_seconds: float | None = None) -> GateRow
             r = cur.fetchone()
             if r is not None:
                 existing = _row_to_gate(r)
-                if existing.is_live:
+                if existing.is_live and not _askers_differ(existing, gate):
                     conn.commit()
                     return existing
-                if gate.gate_id.startswith("gate-"):
+                if existing.is_live:
+                    # Another person's live card under this id (a hash id is
+                    # the same for both): a row of its own, which no lookup
+                    # by the other person's id lands on.
+                    gate.alias_id = ""
+                    gate.gate_id = f"{gate.gate_id}-r{int(now * 1000) % 1_000_000}"
+                elif gate.gate_id.startswith("gate-"):
                     gate.alias_id = gate.gate_id
                     gate.gate_id = f"{gate.gate_id}-r{int(now * 1000) % 1_000_000}"
                 else:
@@ -621,8 +627,20 @@ def _same_pause_args(a: GateRow, b: GateRow) -> bool:
     return _row_digest(a) == _row_digest(b)
 
 
+def _askers_differ(a: GateRow, b: GateRow) -> bool:
+    """True when the two rows name different people (Spaces S2-05): their
+    cards are two questions, whatever else they share. The hash id
+    (``make_gate_id``: thread, tool, arguments) is the same for two members
+    of a shared chat asking for the same call, and matched as one pause the
+    second person's card was recorded on the first one's row -- answered by
+    the wrong person, and resumed as them. A row that names nobody is the
+    same pause registered again from a context with no person bound."""
+    return bool(a.asker and b.asker and a.asker != b.asker)
+
+
 def _lookup_live_gate(conn: sqlite3.Connection, gate: GateRow) -> GateRow | None:
-    """Find an already-live row for this pause (id, alias, or same args)."""
+    """Find an already-live row for this pause (id, alias, or same args), of
+    the same person (:func:`_askers_differ`)."""
     candidates = [x for x in (gate.alias_id, gate.gate_id) if x]
     for cid in candidates:
         cur = conn.execute(
@@ -631,10 +649,9 @@ def _lookup_live_gate(conn: sqlite3.Connection, gate: GateRow) -> GateRow | None
             "created_at DESC",
             (cid, cid),
         )
-        r = cur.fetchone()
-        if r is not None:
+        for r in cur.fetchall():
             existing = _row_to_gate(r)
-            if existing.is_live:
+            if existing.is_live and not _askers_differ(existing, gate):
                 return existing
     if not (gate.thread_id and gate.tool):
         return None
@@ -653,6 +670,8 @@ def _lookup_live_gate(conn: sqlite3.Connection, gate: GateRow) -> GateRow | None
     )
     for r in cur.fetchall():
         existing = _row_to_gate(r)
+        if _askers_differ(existing, gate):
+            continue
         if gate.gate_id and existing.gate_id == gate.gate_id:
             return existing
         if gate.alias_id and existing.gate_id == gate.alias_id:

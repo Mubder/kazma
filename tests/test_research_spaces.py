@@ -413,7 +413,7 @@ def test_control_each_page_with_its_own_rule_as_before(matrix, shared, monkeypat
     from kazma_core.spaces.shared_work import may_change
     from kazma_core.swarm.single_operator import task_answered_by_caller
 
-    def by_page(task: Any) -> bool:
+    def by_page(task: Any, *, answering: bool = False) -> bool:
         import inspect
 
         on_the_research_page = any("research_panel" in frame.filename for frame in inspect.stack())

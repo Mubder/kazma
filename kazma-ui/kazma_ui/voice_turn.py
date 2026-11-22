@@ -155,6 +155,15 @@ async def run_voice_user_turn(
         except Exception:
             logger.debug("[voice] cost breaker check skipped", exc_info=True)
 
+    # A card waiting on another member (Spaces S2-05 review): the utterance
+    # would drop it. Refused, nothing saved, as the typed message is.
+    from kazma_ui.sse_chat import _card_waits_on_someone_else, _waiting_text
+
+    waiting_on = await _card_waits_on_someone_else(thread_id, graph)
+    if waiting_on is not None:
+        result.error = _waiting_text(user_text, waiting_on)
+        return result
+
     try:
         from kazma_core.sessions.directory import stamp_last_platform
 

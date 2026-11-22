@@ -31,6 +31,7 @@ __all__ = [
     "swarm_refusal",
     "swarm_write_refusal",
     "task_answered_by_caller",
+    "task_is_callers",
     "task_of_this_space",
     "wait_for_owner_answer",
 ]
@@ -118,7 +119,8 @@ def _acts_for(space: str, asker: str | None) -> str:
     return found[1] if found is not None else ""
 
 
-def answered_by_caller(space: str, asker: str | None, tools: tuple[str, ...] = ()) -> bool:
+def answered_by_caller(space: str, asker: str | None, tools: tuple[str, ...] = (), *,
+                       caller: str | None = None) -> bool:
     """Whether the work this call is bound to may answer work of *space*
     asked by *asker* about *tools* (decision N4, Spaces S1-15 review): always
     while Spaces is not enforced; once it is, only the people the one rule of
@@ -134,7 +136,7 @@ def answered_by_caller(space: str, asker: str | None, tools: tuple[str, ...] = (
 
     if not spaces_enforced():
         return True
-    caller = bound_asker() or ""
+    caller = caller or bound_asker() or ""
     if not caller:
         return False
     return answer_refusal(space, _acts_for(space, asker), tools, caller=caller) is None
@@ -144,6 +146,26 @@ def task_answered_by_caller(task: object) -> bool:
     """:func:`answered_by_caller` for *task* (a ``SwarmTask`` or its dict)."""
     meta = _metadata(task)
     return answered_by_caller(str(meta.get("tenant_id") or ""), meta.get("asker"))
+
+
+def task_is_callers(task: object) -> bool:
+    """Whether *task* (a ``SwarmTask`` or its dict) acts for the person this
+    call is bound to: the person who asked for it while still a member, else
+    the account the space's own work acts for (a departed asker's task,
+    ``_acts_for``). Cancel and Retry of one's own task ask this, never the
+    rule of who answers approvals (the S2-05 review): approvers answer a
+    person's approval cards (N4), they do not take the person's tasks from
+    them. Always True while Spaces is not enforced. Blocking (the identity
+    store)."""
+    from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+    if not spaces_enforced():
+        return True
+    caller = bound_asker() or ""
+    if not caller:
+        return False
+    meta = _metadata(task)
+    return _acts_for(str(meta.get("tenant_id") or ""), meta.get("asker")) == caller
 
 
 def for_the_owner(space: str, asker: str | None) -> bool:

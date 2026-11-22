@@ -95,6 +95,65 @@ def _forget_thread_record(thread_id: str) -> None:
         logger.warning("[chat] the space record of thread %s was not removed", thread_id, exc_info=True)
 
 
+async def _card_waits_on_someone_else(thread_id: str, graph: Any) -> str | None:
+    """The name of the member *thread_id*'s pending card waits on, when that
+    is not the person sending now (``hitl_answerers.waiting_for_someone_else``),
+    else None. Reads nothing while the install does not enforce Spaces."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    from kazma_core.safety.commitment.resume import pending_interrupt
+
+    from kazma_ui.hitl_answerers import waiting_for_someone_else
+
+    if graph is None:
+        return None
+    card, interrupt_id = await pending_interrupt(
+        graph, {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}})
+    if card is None:
+        return None
+    return await asyncio.to_thread(waiting_for_someone_else, thread_id, card, interrupt_id)
+
+
+async def _hard_steer_whose(thread_id: str) -> Any:
+    """Whose turn a hard steer resumes (``hitl_answerers.whose_turn``), or the
+    route's refusal (a dict) when the caller is not its asker or who it is
+    cannot be read. None while the install does not enforce Spaces."""
+    from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    import sqlite3
+
+    from kazma_ui.hitl_answerers import whose_turn
+
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    try:
+        whose = await asyncio.to_thread(whose_turn, thread_id)
+    except (sqlite3.Error, OSError, IdentityUnavailable):
+        logger.warning("[SSE] whose turn thread=%s is cannot be read; hard steer refused",
+                       thread_id[:12], exc_info=True)
+        return {"ok": False, "reason": "identity_unavailable"}
+    if not whose.asker or whose.asker != (bound_asker() or ""):
+        return {"ok": False, "reason": "not_your_turn"}
+    return whose
+
+
+def _waiting_text(user_text: str, name: str) -> str:
+    """The refusal of a new message while a card waits on *name*."""
+    from kazma_core.language_lock import in_their_language
+
+    return in_their_language(
+        user_text,
+        f"This chat is waiting for {name if name != '?' else 'another member'} to answer an "
+        "approval, so your message was not sent. Send it after they answer.",
+        f"هذه المحادثة بانتظار أن يجيب {name if name != '?' else 'عضو آخر'} على طلب موافقة، "
+        "فلم تُرسل رسالتك. أرسلها بعد أن يجيب.",
+    )
+
+
 def _author_of_row(row: dict[str, Any]) -> dict[str, str]:
     """What a ``user_message`` frame says about who wrote *row*: the account
     (``author``) and, on an install that enforces Spaces, its name
@@ -823,6 +882,18 @@ def create_sse_chat_router(
                 logger.info("SSE chat: turn-model pin=%s (not process-wide)", requested_model)
             except Exception as exc:
                 logger.warning("SSE chat: turn-model pin failed: %s", exc)
+
+        # ── A card waiting on another member (Spaces S2-05 review): a new
+        # message would start a new turn and drop it, unanswered by the
+        # person it asks. Refused, nothing saved; the same person's new
+        # message goes on as before.
+        _waiting_on = await _card_waits_on_someone_else(thread_id, _get_graph())
+        if _waiting_on is not None:
+            return StreamingResponse(
+                iter([_sse_frame("error", {"content": _waiting_text(user_message, _waiting_on)})]),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
         # Live LLM for key validation (getter, not mount snapshot).
         #
@@ -2380,6 +2451,13 @@ def create_sse_chat_router(
             }
 
         # ── hard steer: queue, wait for the interrupt, then resume ──
+        # Only the turn's own asker hard-steers it (Spaces S2-05 review): the
+        # resume below runs the turn on, and another member's steer would run
+        # it as them. Refused before anything is queued; the turn goes on as
+        # its asker.
+        _steer_whose = await _hard_steer_whose(thread_id)
+        if isinstance(_steer_whose, dict):
+            return _steer_whose
         push_hard_steer(thread_id, text)
         graph_inst = _get_graph()
         try:
@@ -2434,16 +2512,19 @@ def create_sse_chat_router(
 
         resume_input = build_resume_command(action="apply")
         _steer_turn = await asyncio.to_thread(_resolve_steer_turn, thread_id, session_id)
-        _steer_task = asyncio.create_task(
-            _drive_graph_to_journal(
-                graph_inst,
-                resume_input,
-                config,
-                thread_id=thread_id,
-                session_id=session_id,
-                reply_turn_id=_steer_turn,
+        from kazma_ui.hitl_answerers import as_the_asker
+
+        with as_the_asker(_steer_whose):
+            _steer_task = asyncio.create_task(
+                _drive_graph_to_journal(
+                    graph_inst,
+                    resume_input,
+                    config,
+                    thread_id=thread_id,
+                    session_id=session_id,
+                    reply_turn_id=_steer_turn,
+                )
             )
-        )
         register_turn(thread_id, _steer_task)
         mark_thread_unpaused(thread_id)
         return {

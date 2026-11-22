@@ -567,7 +567,10 @@ def test_in_a_shared_space_only_the_asker_answers_a_task(verb, status, matrix, s
 def test_control_any_member_answers_a_task(verb, status, matrix, shared, monkeypatch) -> None:
     import kazma_core.swarm.single_operator as single_operator
 
-    monkeypatch.setattr(single_operator, "answered_by_caller", lambda space, asker, tools=(): True)
+    monkeypatch.setattr(single_operator, "answered_by_caller", lambda space, asker, tools=(), **_k: True)
+    # Cancel and Retry ask whose task it is (the S2-05 review), Approve and
+    # Reject who answers it: the control lets any member through both.
+    monkeypatch.setattr(single_operator, "task_is_callers", lambda task: True)
     _seen, theirs, _own, _untouched = _b_answers_as(verb, status, matrix, shared)
     assert theirs.json().get("code") != "not_yours", theirs.text
 

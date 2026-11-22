@@ -41,12 +41,14 @@ from typing import Any
 from kazma_core.spaces.scope import OWNER_SPACE_ID, bound_asker, spaces_enforced
 
 __all__ = [
+    "APPROVERS_DECIDE",
     "APPROVERS_POLICY",
     "IDENTITY_UNAVAILABLE",
     "NOT_YOURS",
     "Answerers",
     "answer_refusal",
     "card_fields",
+    "standing_grant_refusal",
     "tool_names",
 ]
 
@@ -57,6 +59,9 @@ APPROVERS_POLICY = "approvers"
 NOT_YOURS = "not_yours"
 #: The refusal code when who answers cannot be read.
 IDENTITY_UNAVAILABLE = "identity_unavailable"
+#: The refusal code for a person whose cards go to approvers asking to skip
+#: their own cards (N4).
+APPROVERS_DECIDE = "approvers_decide"
 
 
 @dataclass(frozen=True)
@@ -203,3 +208,31 @@ def card_fields(space_id: str, asker: str | None, tools: Iterable[str] = ()) -> 
     out["answered_by"] = list(found.ordered)
     out["answered_by_names"] = list(found.names)
     return out
+
+
+def standing_grant_refusal(person: str | None = None) -> str | None:
+    """Why the person bound now may not give *person* (themself when None)
+    a standing approval -- YOLO, ``/unrestricted``, "Allow tool", a task
+    grant -- or None when they may (decision N4).
+
+    A person whose cards the admin sent to approvers does not approve their
+    own cards, so they cannot turn the cards off for themself either:
+    ``approvers_decide``. An approver's grant for the card's asker, made from
+    the card they answered, is theirs to make (the card was checked when it
+    was answered): only a grant for oneself is asked about here.
+    ``identity_unavailable`` when the identity store cannot answer (never a
+    grant on a guess). None always while the install does not enforce
+    Spaces. Blocking (the identity store)."""
+    if not spaces_enforced():
+        return None
+    caller = bound_asker() or ""
+    who = str(person or caller)
+    if not who or who != caller:
+        return None
+    from kazma_core.spaces.identity import IdentityUnavailable, read_registry
+
+    try:
+        registry = read_registry()
+    except IdentityUnavailable:
+        return IDENTITY_UNAVAILABLE
+    return APPROVERS_DECIDE if _approvers(registry, who) else None

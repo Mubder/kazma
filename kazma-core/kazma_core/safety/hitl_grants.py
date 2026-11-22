@@ -122,6 +122,14 @@ def grant_tool(
     key_holder = holder(thread_id, person)
     if not key_holder:
         return {"active": False, "error": "no person to grant it to"}
+    from kazma_core.spaces.approvals import standing_grant_refusal
+
+    refused = standing_grant_refusal(person)
+    if refused:
+        # A person whose cards go to approvers does not skip them (Spaces
+        # S2-05, N4); an approver's grant from the card they answered passes.
+        logger.warning("[SECURITY] grant refused thread=%s actor=%s: %s", thread_id, actor, refused)
+        return {"active": False, "error": refused}
     from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
 
     if tool in ALWAYS_HITL_TOOLS:

@@ -99,7 +99,7 @@ class _PausedGraph:
 
 
 @contextmanager
-def chat_paused(team: Any, *, asker: str = "reem") -> Iterator[SimpleNamespace]:
+def chat_paused(team: Any, *, asker: str = "reem", tool: str = "file_write") -> Iterator[SimpleNamespace]:
     """The approval routes over the real gate registry and chat store, with
     *asker*'s turn paused at a card in a chat of the shared space. The
     resumed drive is recorded with the scope it runs in."""
@@ -112,7 +112,7 @@ def chat_paused(team: Any, *, asker: str = "reem") -> Iterator[SimpleNamespace]:
 
     account = team.accounts[asker]
     thread_id, session_id = f"t{secrets.token_hex(8)}", f"s{secrets.token_hex(8)}"
-    card = _card(team.space, account)
+    card = _card(team.space, account, tool)
     card["thread_id"] = thread_id
     card["interrupt_id"] = f"i{secrets.token_hex(6)}"
     resumed: list[tuple[str, str] | None] = []
@@ -155,7 +155,7 @@ def chat_paused(team: Any, *, asker: str = "reem") -> Iterator[SimpleNamespace]:
         with TestClient(holder.app) as client:
             yield SimpleNamespace(client=client, thread=thread_id, session=session_id, card=card,
                                   gate=card["interrupt_id"], gates=hitl_gates, resumed=resumed,
-                                  hitl_state=holder._hitl_state)
+                                  hitl_state=holder._hitl_state, holder=holder)
 
 
 def _as(team: Any, who: str) -> dict[str, str]:

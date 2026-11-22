@@ -297,6 +297,19 @@ async def _write_reply(graph: Any, config: dict[str, Any], thread_id: str,
             await graph.aupdate_state(config, update)
 
 
+async def write_turn_end(graph: Any, config: dict[str, Any], thread_id: str, text: str) -> dict[str, Any]:
+    """End a paused or cut turn with *text* as its reply, in the checkpoint:
+    the turn's history with nothing pending, *text* last, ``turn_failed``
+    (no synthesis runs over it), written as the ``respond`` node so nothing
+    resumes it. Returns the values written. Raises when the checkpoint cannot
+    be read or written (the caller decides). Used for a turn that must not
+    go on: one whose asker left its space (Spaces S2-05)."""
+    values = await _stored_values(graph, config)
+    update = _reply_update(values, None, text)
+    await _write_reply(graph, config, thread_id, update)
+    return {**values, **update}
+
+
 async def _end_timed_out_segment(
     graph: Any,
     config: dict[str, Any],

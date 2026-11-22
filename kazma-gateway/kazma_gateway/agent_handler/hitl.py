@@ -1195,7 +1195,9 @@ async def _handle_hitl_resume(
                     # empty (caught by the surrounding try, silently dropping
                     # the actor from the grant audit) (audit finding).
                     actor = msg.sender_id or "unknown"
-                    grant_task(target_thread, actor=actor)
+                    # A settings write and the identity store (N4's grant
+                    # rule): off the loop.
+                    await asyncio.to_thread(grant_task, target_thread, actor=actor)
                     logger.info(
                         "[HITL] Task grant activated for thread=%s actor=%s",
                         target_thread, actor,

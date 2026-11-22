@@ -215,7 +215,7 @@ def _task_to_change(task_id: str) -> tuple[Any, Any, str]:
     if task is None:
         return store, None, "not_found"
     try:
-        allowed = caller_may_act_on(task)
+        allowed = caller_may_act_on(task, answering=False)
     except IdentityUnavailable:
         logger.warning("[research] who may change task %s cannot be read; refused", task_id)
         return store, None, "identity_unavailable"

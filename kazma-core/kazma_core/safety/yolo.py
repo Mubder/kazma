@@ -20,6 +20,7 @@ from typing import Any
 __all__ = [
     "disable_yolo",
     "enable_yolo",
+    "standing_grant_reason",
     "is_yolo_active",
     "slide_yolo_expiry",
     "try_enable_yolo",
@@ -84,6 +85,15 @@ def _yolo_key(thread_id: str | None, person: str | None) -> str:
     return f"yolo.{key_holder}" if key_holder else ""
 
 
+def standing_grant_reason(code: str) -> str:
+    """The sentence for a standing approval refused by
+    ``spaces.approvals.standing_grant_refusal``."""
+    if code == "approvers_decide":
+        return ("your approval cards go to the people set to approve for you, "
+                "so you cannot turn them off for yourself")
+    return "who answers your approval cards cannot be read right now; try again"
+
+
 def try_enable_yolo(thread_id: str, *, actor: str = "unknown",
                     person: str | None = None) -> dict[str, Any]:
     """Enable session YOLO from a HITL card click.
@@ -142,6 +152,14 @@ def enable_yolo(
         )
         raise YoloDisabledError(reason)
 
+    from kazma_core.spaces.approvals import standing_grant_refusal
+
+    refused = standing_grant_refusal(person)
+    if refused:
+        # A person whose cards go to approvers does not skip them (Spaces
+        # S2-05, N4), card click or not.
+        logger.warning("[SECURITY] YOLO refused thread=%s actor=%s: %s", thread_id, actor, refused)
+        raise YoloDisabledError(standing_grant_reason(refused))
     key = _yolo_key(thread_id, person)
     if not key:
         return {"active": False, "thread_id": thread_id, "error": "no person to grant it to"}

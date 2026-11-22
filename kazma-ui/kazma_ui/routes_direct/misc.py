@@ -779,9 +779,20 @@ def register_misc_routes(self: Any) -> None:
                 )
 
             try:
-                from kazma_core.mcp.spec_client import resolve_sampling_hitl
+                from kazma_core.mcp.spec_client import pending_sampling_card, resolve_sampling_hitl
 
-                if resolve_sampling_hitl(thread_id, approved):
+                # An MCP server's sampling request is a card like any other
+                # (Spaces S2-05): who may answer it is asked first, and the
+                # request stays waiting for the person it asks.
+                _sampling_card = pending_sampling_card(thread_id)
+                if _sampling_card is not None:
+                    from kazma_ui.hitl_answerers import refusal_for_card
+
+                    _not_theirs, _ = await asyncio.to_thread(
+                        refusal_for_card, thread_id, "", _sampling_card)
+                    if _not_theirs:
+                        return _not_yours_response(thread_id, _not_theirs, _sampling_card)
+                if _sampling_card is not None and resolve_sampling_hitl(thread_id, approved):
                     return _JSONResponse(
                         {
                             "status": "ok",
@@ -899,8 +910,11 @@ def register_misc_routes(self: Any) -> None:
             # that does not enforce Spaces.
             from kazma_ui.hitl_answerers import refusal_for_card
 
+            # Whose card it is comes from the LIVE interrupt alone -- its id
+            # and its payload -- never an id the request names: a client could
+            # name another person's row.
             _not_yours, _whose = await asyncio.to_thread(
-                refusal_for_card, thread_id, _body_interrupt_id(body) or _live_iid, _live_payload)
+                refusal_for_card, thread_id, _live_iid, _live_payload)
             if _not_yours:
                 return _not_yours_response(thread_id, _not_yours, _live_payload)
 
@@ -1314,6 +1328,12 @@ def register_misc_routes(self: Any) -> None:
             # MCP servers, Development): once Spaces is enforced it is shown
             # where Development is, never in another space (S1-21).
             sampling = []
+        if sampling:
+            # The requests are kept process-wide: once Spaces is enforced the
+            # list holds only this space's that the caller may answer (S2-05).
+            from kazma_ui.hitl_answerers import cards_of_this_space
+
+            sampling = await asyncio.to_thread(cards_of_this_space, sampling)
         if graph is None or checkpointer is None:
             return _JSONResponse(
                 {

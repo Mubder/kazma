@@ -136,7 +136,19 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
     except Exception:
         pass
     _iid = str((_intr_payload or {}).get("interrupt_id") or "")
+    # What the timeout acts on is read BEFORE anything is recorded (Spaces
+    # S2-05): whose card it is, from the live interrupt, and the chat app it
+    # goes back to. A read that fails leaves the card pending and claimed by
+    # nobody, and the next pass tries again; recorded first, a failure here
+    # left the gate claimed and the turn stuck.
+    recorded = False
     try:
+        whose, departed = await _whose_and_departed(thread_id, _intr_id or _iid, _intr_payload)
+        route = None if departed else await _chat_app_route(graph, config)
+        if departed:
+            recorded = True
+            await _close_turn_of_departed(graph, config, thread_id, whose, _intr_payload, _intr_id or _iid)
+            return
         from kazma_ui.active_turns import register_turn
         from kazma_ui.reply_sink import resolve_reply_turn
         from kazma_ui.sse_chat._streaming import (
@@ -163,6 +175,7 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
 
         # The id the card is keyed by: the checkpoint payload has none, and a
         # timeout recorded without it became a second, stray row.
+        recorded = True
         _iid = await record_gate_decision(
             thread_id,
             decision="timeout",
@@ -198,8 +211,7 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         # card); any other is resumed into the journal -- not awaited on the
         # watchdog tick. invoke_turn still runs inside the streamer so
         # SessionStore gets the continuation (2026-08-31 silent turn
-        # b1cb7994e22a).
-        route = await _chat_app_route(graph, config)
+        # b1cb7994e22a). The route was read before the timeout was recorded.
         if route is not None and _chat_app_resumer is not None:
             task = asyncio.create_task(
                 _chat_app_resumer[1](
@@ -214,14 +226,11 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
             )
         else:
             # The turn goes on as its asker (Spaces S2-05): the card's own,
-            # not the chat's opener whom a resume with nothing bound would
-            # run as. Nothing is bound on an install that does not enforce
-            # Spaces.
-            from kazma_core.spaces.scope import spaces_enforced
-            from kazma_ui.hitl_answerers import as_the_asker, whose_card
+            # read from the live interrupt before anything was recorded, not
+            # the chat's opener whom a resume with nothing bound would run as.
+            # Nothing is bound on an install that does not enforce Spaces.
+            from kazma_ui.hitl_answerers import as_the_asker
 
-            whose = (await asyncio.to_thread(whose_card, thread_id, _iid, dict(_intr_payload or {}))
-                     if spaces_enforced() else None)
             with as_the_asker(whose):
                 task = asyncio.create_task(
                     _drive_graph_to_journal(
@@ -238,7 +247,126 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         register_turn(thread_id, task)
         mark_thread_unpaused(thread_id)
     except Exception:
-        logger.exception("[HITL-WD] auto-deny resume failed for thread=%s", thread_id)
+        if not recorded:
+            # Nothing recorded yet: the card stays pending, claimed by
+            # nobody, and the next pass tries again.
+            logger.warning("[HITL-WD] thread=%s: the expired card could not be read; tried again next pass",
+                           str(thread_id)[:12], exc_info=True)
+        else:
+            logger.exception("[HITL-WD] auto-deny resume failed for thread=%s", thread_id)
+
+
+async def _whose_and_departed(thread_id: str, interrupt_id: str,
+                              payload: dict[str, Any] | None) -> tuple[Any, bool]:
+    """Whose the expired card is (``hitl_answerers.whose_card``, from the
+    live interrupt's id and payload), and whether its asker has left the
+    card's space since (``identity.asker_left``). ``(None, False)`` while the
+    install does not enforce Spaces. Raises when either cannot be read."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return None, False
+
+    def _read() -> tuple[Any, bool]:
+        from kazma_core.spaces.identity import asker_left
+        from kazma_ui.hitl_answerers import whose_card
+
+        whose = whose_card(thread_id, interrupt_id, dict(payload or {}))
+        return whose, asker_left(whose.space_id, whose.asker)
+
+    return await asyncio.to_thread(_read)
+
+
+#: The line a turn ends with when the card it waited on belongs to someone
+#: no longer in its space (Spaces S2-05): it is not resumed as anyone.
+_DEPARTED_EN = ("⚠️ This turn was stopped: {name} is no longer a member of this space, "
+                "so the turn they started does not go on.")
+_DEPARTED_AR = "⚠️ توقف هذا الدور: {name} لم يعد عضواً في هذه المساحة، فلا يستمر الدور الذي بدأه."
+
+
+def _departed_text(asker: str, values: dict[str, Any]) -> str:
+    """The departed line in the language of the turn's question. Blocking
+    (the identity store, for the person's name)."""
+    from kazma_core.language_lock import in_their_language
+
+    from kazma_core.spaces.identity import IdentityUnavailable, read_registry
+
+    name = ""
+    try:
+        account = (read_registry().get("accounts") or {}).get(asker) or {}
+        name = str(account.get("name") or "").strip()
+    except IdentityUnavailable:
+        # The line still says why, without the name.
+        logger.debug("[HITL-WD] the departed person's name could not be read", exc_info=True)
+    asked = ""
+    for message in reversed(list(values.get("messages") or [])):
+        if isinstance(message, dict) and message.get("role") == "user":
+            asked = str(message.get("content") or "")
+            break
+    return in_their_language(asked,
+                             _DEPARTED_EN.format(name=name or "the person who asked"),
+                             _DEPARTED_AR.format(name=name or "صاحب الطلب"))
+
+
+async def _close_turn_of_departed(graph: Any, config: dict[str, Any], thread_id: str, whose: Any,
+                                  payload: dict[str, Any] | None, interrupt_id: str) -> None:
+    """End a turn whose card expired after its asker left the card's space:
+    the card is recorded as timed out and settled, the turn ends with a line
+    saying why (``turn_budget.write_turn_end``), and nothing is resumed --
+    not as the asker, who is gone, and not as anyone else. A step that fails
+    raises to the watchdog's handler, which logs it; the next pass sees what
+    is left. Kazma's own work for the card's space: it runs bound to that
+    space and the account its own work acts for (the chat store is each
+    space's; the person who left is not bound)."""
+    from kazma_core.spaces.identity import acting_account
+    from kazma_core.spaces.scope import bind_scope
+
+    space = str(getattr(whose, "space_id", "") or "")
+    with bind_scope(space, await asyncio.to_thread(acting_account, space)):
+        await _close_the_turn(graph, config, thread_id, whose, payload, interrupt_id)
+
+
+async def _close_the_turn(graph: Any, config: dict[str, Any], thread_id: str, whose: Any,
+                          payload: dict[str, Any] | None, interrupt_id: str) -> None:
+    """:func:`_close_turn_of_departed`'s steps, in the space's scope."""
+    from kazma_core.agent.turn_budget import write_turn_end
+    from kazma_core.safety.hitl_gates import TIMEOUT_ACTOR
+    from kazma_ui.delivery import get_turn_broker
+    from kazma_ui.hitl_decision import record_gate_decision
+    from kazma_ui.hitl_gate_bridge import settle_thread_gates
+    from kazma_ui.reply_sink import resolve_reply_turn
+    from kazma_ui.sse_chat._streaming import mark_thread_unpaused
+    from kazma_ui.turn_runtime import close_turn, ensure_session_for_thread, resolve_session_id
+
+    session_id = await asyncio.to_thread(resolve_session_id, thread_id)
+    if not session_id:
+        session_id = await asyncio.to_thread(ensure_session_for_thread, thread_id)
+    turn_id = await asyncio.to_thread(resolve_reply_turn, thread_id, session_id)
+    snapshot = await graph.aget_state(config)
+    values = dict(getattr(snapshot, "values", None) or {})
+    text = await asyncio.to_thread(_departed_text, str(getattr(whose, "asker", "") or ""), values)
+    await record_gate_decision(
+        thread_id, decision="timeout", actor=TIMEOUT_ACTOR,
+        tool=str((payload or {}).get("tool") or ""), payload=dict(payload or {}),
+        interrupt_id=interrupt_id, session_id=session_id, turn_id=turn_id, require_durable=True,
+    )
+    await write_turn_end(graph, config, thread_id, text)
+    await settle_thread_gates(thread_id, outcome="asker_left")
+    mark_thread_unpaused(thread_id)
+    await close_turn(graph, config, session_id=session_id, thread_id=thread_id, turn_id=turn_id)
+    logger.info("[HITL-WD] thread=%s: the card's asker left its space; the turn was closed, not resumed",
+                str(thread_id)[:12])
+    # The page's frame last: the turn is closed whether or not it is heard.
+    await get_turn_broker().emit(thread_id, {
+        "type": "approval_timeout",
+        "data": {
+            "thread_id": thread_id,
+            "interrupt_id": interrupt_id,
+            "tool": str((payload or {}).get("tool") or ""),
+            "turn_id": turn_id,
+            "message": text,
+        },
+    })
 
 
 async def _watchdog_loop(

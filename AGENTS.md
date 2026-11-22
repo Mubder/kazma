@@ -15728,6 +15728,53 @@ an install with one account behaves as before.
     YOLO window of one person never skip another's card; the real approve
     route grants to the card's asker; the per-thread grant as the control;
     with Spaces off the keys are the thread's).
+- **The S2-05/06 review's fixes (2026-11-22).** Only where Spaces is
+  enforced.
+  - **Whose card it is comes from the live interrupt**: the approve route
+    and the timeout watchdog ask `whose_card` with the live interrupt's id
+    and payload, never an id the request names, and the card's `asker`
+    wins over a row's. Two people's identical cards are two gate rows
+    (`hitl_gates._askers_differ`: the hash id and the arguments' twin match
+    never merge across askers). A clarify or confirm card's tools are its
+    `items[].tool` (N21 holds when it is answered).
+  - **An MCP server's sampling request is a card**: it names its asker
+    (`spec_client._sampling_card_who`), the approve route asks the rule
+    before `resolve_sampling_hitl`, and the pending list keeps the
+    process-wide requests to the space and the person who may answer
+    (`hitl_answerers.cards_of_this_space`).
+  - **N4: nobody skips their own cards for their approvers**
+    (`spaces.approvals.standing_grant_refusal`, asked by `enable_yolo`,
+    `grant_tool`, `grant_task` and `/unrestricted`): a person whose cards
+    the admin sent to approvers gets `approvers_decide`; an approver's
+    grant from the card they answered passes. A chat app's swarm button
+    asks the whole rule for the owner (`shared_approvals._a_chat_button_may_decide`).
+    Cancel and Retry of one's own swarm task ask whose task it is
+    (`single_operator.task_is_callers`), Approve and Reject who answers it
+    (`task_actions.caller_may_act_on(answering=)`). With Spaces off the
+    Swarm decide route reads no request before deciding.
+  - **The watchdog**: whose card it is and its chat-app route are read
+    before the timeout is recorded (a read that fails leaves the card
+    pending and claimed by nobody; the next pass tries again). A card whose
+    asker left its space ends the turn with a line saying why
+    (`turn_budget.write_turn_end`), resumed as nobody.
+  - **Every resume runs as the turn's asker**: a turn a restart cut off
+    continues as the author of the chat's newest message
+    (`hitl_answerers.whose_turn`, read in the chat's own space), not at all
+    when they left; only the turn's asker hard-steers it. Gate: every
+    product function that builds a resume command or continues a turn binds
+    the asker or is declared (`tests/test_resumes_run_as_the_asker.py`, a
+    planted unbound resume as the control).
+  - **Another member's message never drops a card**: a new message or
+    voice utterance in a chat whose pending card waits on someone else is
+    refused with a line naming them (`sse_chat._card_waits_on_someone_else`),
+    nothing saved; the asker's own message goes on as before.
+  - **The long-task record is each person's** (`long_task._record_key`,
+    `grant_holder.holder`): one member's `/long` or `/unrestricted`, and the
+    YOLO clock it slides, never reach another's turns.
+  - Gate: `tests/test_approvals_review_fixes.py` (each with today's code as
+    its control; also the bridge-gate branch, the gateway's `/hitl`, the
+    identity-unavailable 503, the push wiring, the bell's route, N21 through
+    the route with the resume as the holder).
 - **A tool list per person (S2-01, 2026-11-22; plan 4.8: "X Studio on, but
   posting off").** Only where Spaces is enforced; an install that does not
   enforce it refuses nothing, and People refuses the switch (`spaces_off`).
