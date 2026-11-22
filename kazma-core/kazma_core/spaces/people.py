@@ -412,9 +412,9 @@ def leave_space(space_id: str, *, by: str) -> dict[str, Any]:
         _take_out(reg, space_id, by)
         _record(reg, "member_left", by, by, space=space_id)
 
-    _changed(_change)
+    seq = _journal_then(_change, space_id, by)
     logger.info("[people] member left space=%s id=%s", space_id, by)
-    return _after_leaving(space_id, by)
+    return _after_leaving(space_id, by, seq)
 
 
 def remove_member(space_id: str, account_id: str, *, by: str) -> dict[str, Any]:
@@ -436,16 +436,56 @@ def remove_member(space_id: str, account_id: str, *, by: str) -> dict[str, Any]:
         _record(reg, "member_removed", account_id, by, space=space_id)
 
     try:
-        _changed(_change)
+        seq = _journal_then(_change, space_id, account_id)
     except PeopleRefused as exc:
         if exc.code == "not_yours":
             raise PeopleRefused(exc.code, 403, str(exc)) from exc
         raise
     logger.info("[people] member removed space=%s id=%s by=%s", space_id, account_id, by)
-    return _after_leaving(space_id, account_id)
+    return _after_leaving(space_id, account_id, seq)
 
 
-def _after_leaving(space_id: str, account_id: str) -> dict[str, Any]:
+def _journal_then(change: Any, space_id: str, account_id: str) -> int:
+    """Journal the forget of *account_id*'s entry in *space_id*, then make
+    the membership *change* (the S2-12 review, finding 4): a stop between
+    the two leaves an entry the forget convergence applies, so the facts go
+    whatever happens next. The change is tried on a copy first, so a
+    refused one journals nothing; a replay of an entry whose person is
+    still a member forgets nothing (``forget_journal._still_a_member``).
+    Returns the entry's sequence number."""
+    import copy
+
+    _changed_on(change, copy.deepcopy(identity.read_registry()))
+    seq = _journal_entry_forget(space_id, account_id)
+    _changed(change)
+    return seq
+
+
+def _changed_on(change: Any, reg: dict[str, Any]) -> None:
+    """*change*'s refusal, on a copy of the registry (nothing written)."""
+    try:
+        change(reg)
+    except identity.IdentityError as exc:
+        status = 404 if exc.code == "no_such_account" else 409
+        raise PeopleRefused(exc.code, status, str(exc)) from exc
+
+
+def _journal_entry_forget(space_id: str, account_id: str) -> int:
+    from kazma_core.memory import forget_journal
+    from kazma_core.memory.speakers import entry_id
+
+    try:
+        return forget_journal.append("entry", tenant_id=space_id, session_key=entry_id(account_id))
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[people] the forget of %s in %s could not be journaled: %s",
+                       account_id, space_id, type(exc).__name__)
+        raise PeopleRefused(
+            "memory_unavailable", 503,
+            "Memory cannot record this change right now, so nothing changed. Try again.",
+        ) from exc
+
+
+def _after_leaving(space_id: str, account_id: str, seq: int | None = None) -> dict[str, Any]:
     """What goes with a member who is no longer in *space_id*: every fact
     filed under their own memory entry there (N36), through memory's own
     forget step (journaled first, so the ledger, the mirror and the graph
@@ -459,7 +499,7 @@ def _after_leaving(space_id: str, account_id: str) -> dict[str, Any]:
     from kazma_core.memory.speakers import entry_id
 
     try:
-        forgotten = forget.forget_entry(entry_id(account_id), tenant_id=space_id)
+        forgotten = forget.forget_entry(entry_id(account_id), tenant_id=space_id, journal_seq=seq)
     except (sqlite3.Error, OSError) as exc:
         logger.warning("[people] the facts of %s in %s could not be forgotten: %s",
                        account_id, space_id, type(exc).__name__, exc_info=True)
@@ -490,8 +530,23 @@ def notices_for(account_id: str) -> list[dict[str, Any]]:
             # The space they were added to or taken out of: its name only.
             space = reg["spaces"].get(str(event["space"])) or {}
             notice["space_name"] = str(space.get("name") or "")
+        if event["kind"] == "member_removed":
+            # Said only once it is true (the S2-12 review, finding 4).
+            notice["forgotten"] = _entry_forgotten(account_id, str(event.get("space") or ""))
         told.append(notice)
     return told
+
+
+def _entry_forgotten(account_id: str, space_id: str) -> bool:
+    from kazma_core.memory import forget
+    from kazma_core.memory.speakers import entry_id
+
+    try:
+        return forget.entry_forgotten(entry_id(account_id), tenant_id=space_id)
+    except (sqlite3.Error, OSError):
+        logger.warning("[people] whether %s's facts in %s were forgotten could not be read",
+                       account_id, space_id, exc_info=True)
+        return False
 
 
 def mark_seen(account_id: str, through: int) -> None:
@@ -634,6 +689,12 @@ def delete_person(account_id: str, *, by: str) -> None:
         reg["events_seen"].pop(account_id, None)
         _record(reg, "account_deleted", account_id, by)
 
+    import copy
+
+    _changed_on(_change, copy.deepcopy(identity.read_registry()))
+    # Journaled before the account goes (the S2-12 review, finding 4); the
+    # forget convergence also forgets any entry of an account that is gone.
+    seqs = {space_id: _journal_entry_forget(space_id, account_id) for space_id in shared}
     _changed(_change)
     _end_sessions_of(legacy[0] if legacy else account_id)
     logger.warning("[people] account deleted id=%s by=%s", account_id, by)
@@ -642,7 +703,7 @@ def delete_person(account_id: str, *, by: str) -> None:
     failed = None
     for space_id in shared:
         try:
-            _after_leaving(space_id, account_id)
+            _after_leaving(space_id, account_id, seqs.get(space_id))
         except PeopleRefused as exc:
             failed = exc
     if failed is not None:

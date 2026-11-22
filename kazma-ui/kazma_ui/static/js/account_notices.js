@@ -45,9 +45,15 @@
         if (notice.kind === 'member_removed') {
             return {
                 title: say('account.notice_removed_title', 'You were taken out of a space'),
-                message: say('account.notice_removed_body',
-                    'You were taken out of {space} on {when}. Kazma forgot the facts it filed under you there; your messages stay in its chats.',
-                    { space: space, when: when }),
+                // The facts are said forgotten only once they were (the
+                // server reads it: notice.forgotten).
+                message: notice.forgotten
+                    ? say('account.notice_removed_body',
+                        'You were taken out of {space} on {when}. Kazma forgot the facts it filed under you there; your messages stay in its chats.',
+                        { space: space, when: when })
+                    : say('account.notice_removed_body_pending',
+                        'You were taken out of {space} on {when}. Kazma is forgetting the facts it filed under you there; your messages stay in its chats.',
+                        { space: space, when: when }),
             };
         }
         return null;

@@ -1584,7 +1584,7 @@ def finish_old_tombstones(conn: sqlite3.Connection, *, limit: int = 500) -> int:
 
 
 def forget_entry(entry_id: str, *, tenant_id: str, conn: sqlite3.Connection | None = None,
-                 journal: bool = True) -> dict[str, Any]:
+                 journal: bool = True, journal_seq: int | None = None) -> dict[str, Any]:
     """Forget every fact filed under a member's entry in a shared space, then
     the entry itself (Spaces S1-11, decision N36): what the member said about
     themself and what others said about them. Their turns stay -- the
@@ -1596,7 +1596,9 @@ def forget_entry(entry_id: str, *, tenant_id: str, conn: sqlite3.Connection | No
     them again; each fact goes as a forgotten turn's facts go (no value, no
     vector, no edit history; the change log's rows too); after the commit the
     mirror and the remote vectors follow, and the graph copy through its
-    outbox. Idempotent."""
+    outbox. Idempotent. *journal_seq*: the entry the caller journaled
+    before it changed the membership (the S2-12 review, finding 4), marked
+    applied here instead of a second one."""
     from kazma_core.memory import forget_journal
     from kazma_core.memory.speakers import account_of_entry
 
@@ -1606,7 +1608,10 @@ def forget_entry(entry_id: str, *, tenant_id: str, conn: sqlite3.Connection | No
         # An entry is one space's: never forgotten for no one.
         return {"ok": False, "error": "no_space"}
     owner = tenant_id
-    seq = forget_journal.append("entry", tenant_id=owner, session_key=entry_id) if journal else None
+    if journal_seq is not None:
+        seq: int | None = journal_seq
+    else:
+        seq = forget_journal.append("entry", tenant_id=owner, session_key=entry_id) if journal else None
     own = conn is None
     conn = conn or _open()
     try:
@@ -1633,6 +1638,61 @@ def forget_entry(entry_id: str, *, tenant_id: str, conn: sqlite3.Connection | No
         logger.info("[forget] entry %s of %s: %d fact(s) forgotten", entry_id, owner, len(rows))
         return {"ok": True, "facts": [str(r["id"]) for r in rows], "archived": int(archived or 0),
                 "remote_pending": not all(remote)}
+    finally:
+        if own:
+            conn.close()
+
+
+def entry_forgotten(entry_id: str, *, tenant_id: str) -> bool:
+    """Whether nothing is filed under the member's entry *entry_id* in
+    *tenant_id* any more and no forget of it waits in the journal: what the
+    removed member's notice reads before it says their facts were forgotten
+    (the S2-12 review, finding 4). Read-only; blocking."""
+    from kazma_core.memory import forget_journal
+
+    conn = _open()
+    try:
+        live = conn.execute(
+            "SELECT 1 FROM beliefs WHERE tenant_id = ? AND subject = ? LIMIT 1", (tenant_id, entry_id)
+        ).fetchone()
+        waiting = any(e.kind == "entry" and e.session_key == entry_id and e.tenant_id == tenant_id
+                      for e in forget_journal.pending(conn))
+    finally:
+        conn.close()
+    return live is None and not waiting
+
+
+def _forget_departed_entries(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """Forget every member's entry in a space whose account is no longer a
+    member of it (the S2-12 review, finding 4): a leave or a removal whose
+    forget failed or was cut off, and a deleted account. Part of "forget
+    convergence". Only once Spaces is enforced (no entry is filed before);
+    an identity store that cannot be read forgets nothing (it raises, and
+    the pass is tried again)."""
+    from kazma_core.memory.speakers import MEMBER_PREFIX, account_of_entry
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return {"forgotten": 0}
+    from kazma_core.spaces import identity
+
+    registry = identity.read_registry()
+    members = {(str(m.get("account")), str(m.get("space"))) for m in registry["memberships"]}
+    own = conn is None
+    conn = conn or _open()
+    try:
+        pattern = MEMBER_PREFIX.replace("_", "\\_") + "%"
+        held = conn.execute(
+            "SELECT DISTINCT tenant_id, subject FROM beliefs WHERE subject LIKE ? ESCAPE '\\' "
+            "UNION SELECT DISTINCT tenant_id, id FROM entities WHERE id LIKE ? ESCAPE '\\'",
+            (pattern, pattern),
+        ).fetchall()
+        gone = [(str(t), str(s)) for t, s in held
+                if account_of_entry(s) is not None and t and (account_of_entry(s), str(t)) not in members]
+        for tenant, subject in gone:
+            forget_entry(subject, tenant_id=tenant, conn=conn)
+            logger.info("[forget] the entry %s of a person no longer in %s was forgotten", subject, tenant)
+        return {"forgotten": len(gone)}
     finally:
         if own:
             conn.close()
@@ -2042,8 +2102,10 @@ def converge(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
         journal = forget_journal.apply_pending(conn)
         ledger = enforce_ledger(conn)
         tombstones = finish_old_tombstones(conn)
+        departed = _forget_departed_entries(conn)
         remote = forget_journal.retry_remote_deletes(conn)
-        return {"journal": journal, "ledger": ledger, "tombstones": tombstones, "remote": remote}
+        return {"journal": journal, "ledger": ledger, "tombstones": tombstones, "departed": departed,
+                "remote": remote}
     finally:
         if own:
             conn.close()

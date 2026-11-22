@@ -3017,6 +3017,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
               "your messages stay in its chats.",
         "ar": "أُخرجت من {space} في {when}. نسي Kazma الحقائق التي سجّلها عنك هناك، وتبقى رسائلك في محادثاتها.",
     },
+    "account.notice_removed_body_pending": {
+        "en": "You were taken out of {space} on {when}. Kazma is forgetting the facts it filed under you there; "
+              "your messages stay in its chats.",
+        "ar": "أُخرجت من {space} في {when}. ينسى Kazma الحقائق التي سجّلها عنك هناك، وتبقى رسائلك في محادثاتها.",
+    },
     "account.notice_reset_title": {"en": "Your password was reset", "ar": "أُعيد تعيين كلمة مرورك"},
     "account.notice_reset_body": {
         "en": "The admin reset your password on {when}. If you did not ask for this, tell them.",

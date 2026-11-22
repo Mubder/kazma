@@ -98,7 +98,7 @@ def test_control_without_the_forget_the_leavers_fact_is_still_recalled(team, mon
     from kazma_core.memory import forget
 
     _both_said_where_they_live(team)
-    monkeypatch.setattr(forget, "forget_entry", lambda entry, *, tenant_id: {"ok": True, "facts": []})
+    monkeypatch.setattr(forget, "forget_entry", lambda entry, *, tenant_id, **_kw: {"ok": True, "facts": []})
     people.leave_space(TEAM, by=SARA)
     assert _entry_facts(team.db, SARA) == 1
     facts, _turns = _shown(OMAR, "Where does Sara live?")
@@ -110,7 +110,7 @@ def test_a_forget_that_fails_is_said_not_hidden(team, monkeypatch) -> None:
 
     from kazma_core.memory import forget
 
-    def broken(entry: str, *, tenant_id: str) -> dict[str, Any]:
+    def broken(entry: str, *, tenant_id: str, **_kw: Any) -> dict[str, Any]:
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(forget, "forget_entry", broken)

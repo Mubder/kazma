@@ -15261,6 +15261,19 @@ an install with one account behaves as before.
     `revoke_member_access` on both document stores, audited `revoke_member`;
     their own documents stay theirs). A forget that fails is `forget_failed`
     (503), never silent. The confirm dialogs say this first, EN/AR.
+  - **The forget is never left unfinished** (the S2-12 review, finding 4).
+    It is journaled BEFORE the membership changes (`people._journal_then`:
+    the change tried on a copy first, so a refused one journals nothing;
+    `forget_entry(journal_seq=)` marks that entry applied), so a stop or a
+    failure after the change leaves an entry the forget convergence applies.
+    The convergence also forgets every `member_*` entry whose account is no
+    longer a member of its space (`forget._forget_departed_entries`: a forget
+    never journaled, a deleted account), and a replay never forgets a current
+    member's entry (`forget_journal._still_a_member`). The removed member's
+    notice says the facts were forgotten only once they were
+    (`notices_for` `forgotten`, `forget.entry_forgotten`; else the pending
+    wording). Gate: `tests/test_member_forget_converges.py` (the flow of
+    before as the control).
   - Gates: `tests/test_space_membership.py` (through the real memory store
     and recall; the flow without the forget call as the control),
     `tests/test_document_listing_queries_are_joined.py` (the take-back on

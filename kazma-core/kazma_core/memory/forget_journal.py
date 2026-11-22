@@ -240,6 +240,11 @@ def _apply(conn: sqlite3.Connection, e: Entry) -> None:
     elif e.kind == "mentions":
         forget.replay_mentions(conn, e)
     elif e.kind == "entry":
+        if _still_a_member(e):
+            # Journaled before a membership change that did not happen (it
+            # was refused, or the store went away), or the person is back:
+            # a current member's facts are theirs (the S2-12 review).
+            return
         out = forget.forget_entry(e.session_key, tenant_id=e.tenant_id, conn=conn, journal=False)
         if not out.get("ok"):
             raise RuntimeError(f"forget of entry {e.session_key} failed: {out}")
@@ -249,6 +254,19 @@ def _apply(conn: sqlite3.Connection, e: Entry) -> None:
         out = forget_summary(e.summary_id, tenant_id=e.tenant_id, conn=conn, journal=False)
         if not out.get("ok") and out.get("error") != "not_found":
             raise RuntimeError(f"forget of summary {e.summary_id} failed: {out}")
+
+
+def _still_a_member(e: Entry) -> bool:
+    """Whether the account of the entry *e* forgets is a member of its space
+    now. Raises when accounts cannot be read: the entry stays pending."""
+    from kazma_core.memory.speakers import account_of_entry
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import spaces_enforced
+
+    account = account_of_entry(e.session_key)
+    if account is None or not spaces_enforced():
+        return False
+    return identity.is_member(account, e.tenant_id)
 
 
 #: This process's last failure of each entry still pending: its sequence
