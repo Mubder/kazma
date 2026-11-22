@@ -25,6 +25,15 @@ a person ends their sessions and takes them out of every space; their
 personal space stays, with no member, marked ``account_deleted_at``, until
 its data is erased (S1-27).
 
+Shared spaces (S2-12): the admin makes one, plain or with a project folder,
+and adds people to it; the person is told at their next page load. A member
+leaves when they choose; the space's owner or the admin removes one. When a
+member goes -- leaving, removed, or deleted -- every fact filed under their
+own memory entry in that space is forgotten (decision N36,
+``memory.forget.forget_entry``): what they said about themself and what
+others said about them. Their messages stay, as the conversation's history.
+The share of the space's documents they were given is taken back.
+
 Only once Spaces is enforced: before that, a second account changes how the
 whole install behaves, and the switch that turns Spaces on checks its
 preconditions first (``spaces.preconditions``, S1-33). A new account asks
@@ -41,6 +50,7 @@ import hashlib
 import json
 import logging
 import secrets
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -50,6 +60,7 @@ from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, spaces_enf
 
 __all__ = [
     "PeopleRefused",
+    "add_member",
     "broken_at",
     "close_space",
     "closed_spaces",
@@ -57,11 +68,13 @@ __all__ = [
     "create_shared_space",
     "forget_space",
     "delete_person",
+    "leave_space",
     "limits_for_people",
     "list_people",
     "list_shared_spaces",
     "mark_seen",
     "notices_for",
+    "remove_member",
     "reset_password",
     "set_daily_limit",
     "set_default_daily_limit",
@@ -72,9 +85,10 @@ logger = logging.getLogger(__name__)
 
 #: What the record holds.
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
-          "daily_limit_set", "default_daily_limit_set", "features_set", "space_created")
+          "daily_limit_set", "default_daily_limit_set", "features_set", "space_created",
+          "member_added", "member_left", "member_removed")
 #: The events a person is told about, when someone else made them.
-_TOLD = ("password_reset",)
+_TOLD = ("password_reset", "member_added", "member_removed")
 _NAME_MAX = 64
 _PASSWORD_MIN = 8
 
@@ -335,18 +349,149 @@ def _drop_project_workspace(space_id: str, workspace_id: str) -> None:
         get_workspace_store().delete_workspace(workspace_id)
 
 
+def _shared(reg: dict[str, Any], space_id: str) -> dict[str, Any]:
+    """The shared space *space_id*, or the store's refusal: a personal space,
+    one being erased and one that does not exist are no shared space."""
+    space = reg["spaces"].get(space_id)
+    if (space is None or space.get("personal_of") or space_id == OWNER_SPACE_ID
+            or space.get("erasing_at") or space.get("account_deleted_at")):
+        raise identity.IdentityError("not_shared", "That is not a shared space.")
+    return space
+
+
+def _role_in(reg: dict[str, Any], space_id: str, account_id: str) -> str | None:
+    for membership in reg["memberships"]:
+        if membership.get("account") == account_id and membership.get("space") == space_id:
+            return str(membership.get("role") or "member")
+    return None
+
+
+def _take_out(reg: dict[str, Any], space_id: str, account_id: str) -> None:
+    """Take *account_id* out of *space_id*; never its last owner."""
+    role = _role_in(reg, space_id, account_id)
+    if role is None:
+        raise identity.IdentityError("not_a_member", "That person is not in this space.")
+    owners = [m for m in reg["memberships"] if m.get("space") == space_id and m.get("role") == "owner"]
+    if role == "owner" and len(owners) <= 1:
+        raise identity.IdentityError("last_owner", "A shared space keeps its owner.")
+    reg["memberships"] = [
+        m for m in reg["memberships"]
+        if not (m.get("account") == account_id and m.get("space") == space_id)
+    ]
+
+
+def add_member(space_id: str, account_id: str, *, by: str) -> None:
+    """Add a person to a shared space (plan 4.11): the admin adds them
+    directly; they are told at their next page load (``member_added``)."""
+    _require_enforced()
+    if not identity.is_admin_account(by):
+        raise PeopleRefused("admin_only", 403, "Only the admin adds people to a shared space.")
+
+    def _change(reg: dict[str, Any]) -> None:
+        _shared(reg, space_id)
+        if account_id not in reg["accounts"]:
+            raise identity.IdentityError("no_such_account", "There is no such person.")
+        if _role_in(reg, space_id, account_id) is not None:
+            raise identity.IdentityError("already_member", "That person is already in this space.")
+        reg["memberships"].append({"account": account_id, "space": space_id, "role": "member"})
+        _record(reg, "member_added", account_id, by, space=space_id)
+
+    _changed(_change)
+    logger.info("[people] member added space=%s id=%s by=%s", space_id, account_id, by)
+
+
+def leave_space(space_id: str, *, by: str) -> dict[str, Any]:
+    """*by* leaves the shared space *space_id* (``member_left``). Every fact
+    under their own memory entry there is forgotten, their messages stay
+    (N36), and their share of its documents is taken back. A space's last
+    owner does not leave it. Returns what went (:func:`_after_leaving`)."""
+    _require_enforced()
+
+    def _change(reg: dict[str, Any]) -> None:
+        _shared(reg, space_id)
+        _take_out(reg, space_id, by)
+        _record(reg, "member_left", by, by, space=space_id)
+
+    _changed(_change)
+    logger.info("[people] member left space=%s id=%s", space_id, by)
+    return _after_leaving(space_id, by)
+
+
+def remove_member(space_id: str, account_id: str, *, by: str) -> dict[str, Any]:
+    """Take a member out of a shared space: its owner or the admin does
+    (``member_removed``; the person is told at their next page load). The
+    same as leaving for what goes (N36): every fact under their own memory
+    entry there, and their share of its documents; their messages stay."""
+    _require_enforced()
+    if account_id == by:
+        return leave_space(space_id, by=by)
+    admin = identity.is_admin_account(by)
+
+    def _change(reg: dict[str, Any]) -> None:
+        _shared(reg, space_id)
+        if not admin and _role_in(reg, space_id, by) != "owner":
+            raise identity.IdentityError(
+                "not_yours", "Only the space's owner or the admin takes a member out.")
+        _take_out(reg, space_id, account_id)
+        _record(reg, "member_removed", account_id, by, space=space_id)
+
+    try:
+        _changed(_change)
+    except PeopleRefused as exc:
+        if exc.code == "not_yours":
+            raise PeopleRefused(exc.code, 403, str(exc)) from exc
+        raise
+    logger.info("[people] member removed space=%s id=%s by=%s", space_id, account_id, by)
+    return _after_leaving(space_id, account_id)
+
+
+def _after_leaving(space_id: str, account_id: str) -> dict[str, Any]:
+    """What goes with a member who is no longer in *space_id*: every fact
+    filed under their own memory entry there (N36), through memory's own
+    forget step (journaled first, so the ledger, the mirror and the graph
+    copy follow), and their share of its documents. Their messages stay.
+
+    Run after the membership is gone, so no turn of theirs files a fact
+    there meanwhile. A forget that fails is ``forget_failed`` (503): the
+    membership has changed, and the facts are still there."""
+    from kazma_core.documents.principal import take_back_access
+    from kazma_core.memory import forget
+    from kazma_core.memory.speakers import entry_id
+
+    try:
+        forgotten = forget.forget_entry(entry_id(account_id), tenant_id=space_id)
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[people] the facts of %s in %s could not be forgotten: %s",
+                       account_id, space_id, type(exc).__name__, exc_info=True)
+        raise PeopleRefused(
+            "forget_failed", 503,
+            "The person is out of the space, but the facts under their entry there "
+            "could not be forgotten yet.",
+        ) from exc
+    if not forgotten.get("ok"):
+        raise PeopleRefused("forget_failed", 503, "The facts under their entry could not be forgotten.")
+    documents = take_back_access(space_id, account_id)
+    return {"facts": len(forgotten.get("facts") or []), "documents": documents}
+
+
 def notices_for(account_id: str) -> list[dict[str, Any]]:
     """The changes someone else made to *account_id* that its person has not
     read yet, oldest first: ``seq``, ``kind``, ``at``."""
     reg = identity.read_registry()
     seen = int(reg["events_seen"].get(account_id) or 0)
-    return [
-        {"seq": int(event["seq"]), "kind": event["kind"], "at": event["at"]}
-        for event in reg["events"]
-        if isinstance(event, dict) and event.get("account") == account_id
-        and event.get("kind") in _TOLD and event.get("by") != account_id
-        and int(event.get("seq") or 0) > seen
-    ]
+    told = []
+    for event in reg["events"]:
+        if not (isinstance(event, dict) and event.get("account") == account_id
+                and event.get("kind") in _TOLD and event.get("by") != account_id
+                and int(event.get("seq") or 0) > seen):
+            continue
+        notice = {"seq": int(event["seq"]), "kind": event["kind"], "at": event["at"]}
+        if event.get("space"):
+            # The space they were added to or taken out of: its name only.
+            space = reg["spaces"].get(str(event["space"])) or {}
+            notice["space_name"] = str(space.get("name") or "")
+        told.append(notice)
+    return told
 
 
 def mark_seen(account_id: str, through: int) -> None:
@@ -465,13 +610,20 @@ def reset_password(account_id: str, password: str, *, by: str) -> None:
 def delete_person(account_id: str, *, by: str) -> None:
     """Delete a person: their account and every membership go, their sessions
     end, and their personal space stays with no member until it is erased
-    (S1-27). Recorded."""
+    (S1-27). Recorded. Every shared space they were in forgets the facts
+    under their entry, as if they had left it (N36)."""
     _require_enforced()
     legacy: list[str] = []
+    shared: list[str] = []
 
     def _change(reg: dict[str, Any]) -> None:
         account = _person(reg, account_id)
         legacy[:] = [str(account.get("legacy_user_id") or account_id)]
+        shared[:] = [
+            str(m.get("space")) for m in reg["memberships"]
+            if m.get("account") == account_id
+            and not (reg["spaces"].get(str(m.get("space"))) or {}).get("personal_of")
+        ]
         del reg["accounts"][account_id]
         reg["policies"].pop(account_id, None)
         reg["memberships"] = [m for m in reg["memberships"] if m.get("account") != account_id]
@@ -485,6 +637,16 @@ def delete_person(account_id: str, *, by: str) -> None:
     _changed(_change)
     _end_sessions_of(legacy[0] if legacy else account_id)
     logger.warning("[people] account deleted id=%s by=%s", account_id, by)
+    # Every shared space they were in forgets the facts under their entry,
+    # as if they had left it (N36); all are tried before a failure is said.
+    failed = None
+    for space_id in shared:
+        try:
+            _after_leaving(space_id, account_id)
+        except PeopleRefused as exc:
+            failed = exc
+    if failed is not None:
+        raise failed
 
 
 def _checked_limit(raw: Any) -> Any:

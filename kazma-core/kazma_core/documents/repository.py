@@ -667,6 +667,27 @@ class DocumentRepository:
                 (tenant, str(identifier), principal, permission, actor, _now()),
             )
 
+    def revoke_member_access(self, *, tenant_id: str, principal_id: str) -> list[str]:
+        """Take back *principal_id*'s ACL rows on the tenant's documents it
+        does not own (Spaces S2-12: a member who leaves a shared space, or is
+        removed). Its own documents stay its own. One statement; returns the
+        documents whose row went."""
+        tenant = _required(tenant_id, "tenant_id")
+        principal = _required(principal_id, "principal_id")
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                DELETE FROM document_acl
+                WHERE tenant_id = ? AND principal_id = ?
+                  AND document_id IN (
+                      SELECT id FROM documents WHERE tenant_id = ? AND owner_id != ?
+                  )
+                RETURNING document_id
+                """,
+                (tenant, principal, tenant, principal),
+            ).fetchall()
+        return [str(row["document_id"]) for row in rows]
+
     def register_blob(
         self,
         *,

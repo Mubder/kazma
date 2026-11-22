@@ -127,6 +127,28 @@ def test_the_joined_listing_follows_the_access_rule(stores):
         repo.list_documents_by_access(tenant_id="t", actor_id="alice", permission="admin")
 
 
+def test_a_members_share_is_taken_back_and_their_own_documents_stay(stores):
+    """Spaces S2-12: a member who leaves a shared space loses the ACL rows
+    they were given on the space's documents; the documents they own stay
+    theirs; another space's rows and another member's are untouched."""
+    repo, _jobs, _clock = stores
+    theirs = repo.create_document(tenant_id="t", owner_id="bob", title="the owner's")
+    own = repo.create_document(tenant_id="t", owner_id="alice", title="alice's own")
+    elsewhere = repo.create_document(tenant_id="other", owner_id="bob", title="another space")
+    for tenant, doc in (("t", theirs), ("other", elsewhere)):
+        repo.grant_access(tenant_id=tenant, document_id=doc.id, actor_id="bob", principal_id="alice",
+                          permission="owner")
+    repo.grant_access(tenant_id="t", document_id=theirs.id, actor_id="bob", principal_id="carol",
+                      permission="owner")
+    taken = repo.revoke_member_access(tenant_id="t", principal_id="alice")
+    assert taken == [str(theirs.id)]
+    assert not repo.has_access(tenant_id="t", document_id=theirs.id, actor_id="alice")
+    assert repo.has_access(tenant_id="t", document_id=own.id, actor_id="alice", permission="owner")
+    assert repo.has_access(tenant_id="other", document_id=elsewhere.id, actor_id="alice")
+    assert repo.has_access(tenant_id="t", document_id=theirs.id, actor_id="carol")
+    assert repo.revoke_member_access(tenant_id="t", principal_id="alice") == []
+
+
 def test_the_newest_job_of_each_document_in_one_query(stores):
     repo, jobs, clock = stores
     a = repo.create_document(tenant_id="t", owner_id="alice", title="a")

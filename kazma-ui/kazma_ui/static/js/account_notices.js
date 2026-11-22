@@ -21,6 +21,38 @@
         return typeof window.kazmaT === 'function' ? window.kazmaT(key, english, vars) : english;
     }
 
+    // Each kind of notice, in the page's language: a reset of their password
+    // (S1-25), being added to a shared space or taken out of one (S2-12).
+    function wording(notice) {
+        const when = window.KazmaFormat ? window.KazmaFormat.dateTime(notice.at) : notice.at;
+        const space = '⁨' + (notice.space_name || '') + '⁩';
+        if (notice.kind === 'password_reset') {
+            return {
+                title: say('account.notice_reset_title', 'Your password was reset'),
+                message: say('account.notice_reset_body',
+                    'The admin reset your password on {when}. If you did not ask for this, tell them.',
+                    { when: when }),
+            };
+        }
+        if (notice.kind === 'member_added') {
+            return {
+                title: say('account.notice_added_title', 'You were added to a space'),
+                message: say('account.notice_added_body',
+                    'The admin added you to {space} on {when}. Switch to it from the space menu at the top of the page.',
+                    { space: space, when: when }),
+            };
+        }
+        if (notice.kind === 'member_removed') {
+            return {
+                title: say('account.notice_removed_title', 'You were taken out of a space'),
+                message: say('account.notice_removed_body',
+                    'You were taken out of {space} on {when}. Kazma forgot the facts it filed under you there; your messages stay in its chats.',
+                    { space: space, when: when }),
+            };
+        }
+        return null;
+    }
+
     async function tell() {
         if (!meta('kazma-spaces-enforced') || !meta('kazma-account')) return;
         if (typeof window.kazmaGetJson !== 'function') return;
@@ -30,14 +62,10 @@
         let through = 0;
         for (const notice of notices) {
             through = Math.max(through, Number(notice.seq) || 0);
-            if (notice.kind !== 'password_reset') continue;
-            const when = window.KazmaFormat ? window.KazmaFormat.dateTime(notice.at) : notice.at;
-            const message = say('account.notice_reset_body',
-                'The admin reset your password on {when}. If you did not ask for this, tell them.',
-                { when: when });
-            const title = say('account.notice_reset_title', 'Your password was reset');
+            const text = wording(notice);
+            if (!text) continue;
             if (typeof window.kazmaAlert === 'function') {
-                await window.kazmaAlert({ title: title, message: message });
+                await window.kazmaAlert({ title: text.title, message: text.message });
             }
         }
         // Not marked read (refused, or no network): shown again at the next

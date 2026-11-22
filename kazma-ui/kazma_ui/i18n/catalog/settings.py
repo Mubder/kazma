@@ -2915,7 +2915,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.people_space_members.few": {"en": "{n} members", "ar": "{n} أعضاء"},
     "settings.people_space_members.many": {"en": "{n} members", "ar": "{n} عضوًا"},
     "settings.people_space_members.other": {"en": "{n} members", "ar": "{n} عضو"},
-    "settings.people_err.admin_only": {"en": "Only the admin makes a shared space.", "ar": "المسؤول وحده يُنشئ مساحة مشتركة."},
+    "settings.people_err.admin_only": {"en": "Only the admin can do that.", "ar": "المسؤول وحده يستطيع ذلك."},
     "settings.people_err.bad_kind": {"en": "Choose the kind of space.", "ar": "اختر نوع المساحة."},
     "settings.people_err.folder_empty": {"en": "Name the project folder.", "ar": "حدّد مجلد المشروع."},
     "settings.people_err.folder_network": {
@@ -2937,6 +2937,70 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.people_err.folder_another_space": {
         "en": "That folder is, or overlaps, another space's folder. Choose another.",
         "ar": "هذا المجلد هو مجلد مساحة أخرى أو يتداخل معه. اختر غيره.",
+    },
+    "settings.people_err.not_shared": {"en": "That is not a shared space.", "ar": "هذه ليست مساحة مشتركة."},
+    "settings.people_err.already_member": {"en": "That person is already in this space.", "ar": "هذا الشخص موجود في هذه المساحة بالفعل."},
+    "settings.people_err.not_a_member": {"en": "That person is not in this space.", "ar": "هذا الشخص ليس في هذه المساحة."},
+    "settings.people_err.last_owner": {
+        "en": "A shared space keeps its owner: the owner does not leave it.",
+        "ar": "تبقى المساحة المشتركة مع مالكها: المالك لا يغادرها.",
+    },
+    "settings.people_err.not_yours": {"en": "That is not yours to do in this space.", "ar": "ليس لك أن تفعل ذلك في هذه المساحة."},
+    "settings.people_err.forget_failed": {
+        "en": "The person is out of the space, but the facts Kazma filed under them there could not be "
+              "forgotten yet. Tell the admin.",
+        "ar": "خرج الشخص من المساحة، لكن تعذّر حتى الآن نسيان الحقائق التي سجّلها Kazma عنه فيها. أبلغ المسؤول.",
+    },
+    "settings.space_members_title": {"en": "Who is in this space", "ar": "من في هذه المساحة"},
+    "settings.space_members_help": {
+        "en": "Everyone here sees the space's chats, memory and documents. The admin adds people.",
+        "ar": "يرى كل من هنا محادثات المساحة وذاكرتها ومستنداتها. المسؤول هو من يضيف الأشخاص.",
+    },
+    "settings.space_members_failed": {"en": "The members could not be read. Try again.", "ar": "تعذّرت قراءة الأعضاء. حاول مجددًا."},
+    "settings.space_member_admin": {"en": "The admin", "ar": "المسؤول"},
+    "settings.space_role_owner": {"en": "Owner", "ar": "المالك"},
+    "settings.space_role_member": {"en": "Member", "ar": "عضو"},
+    "settings.space_add_person": {"en": "Add a person", "ar": "إضافة شخص"},
+    "settings.space_choose_person": {"en": "Choose a person", "ar": "اختر شخصًا"},
+    "settings.space_add": {"en": "Add", "ar": "إضافة"},
+    "settings.space_added": {
+        "en": "{name} was added. They are told at their next page load.",
+        "ar": "أُضيف {name}. سيُبلَّغ عند تحميل صفحته التالية.",
+    },
+    "settings.space_remove": {"en": "Take out", "ar": "إخراج"},
+    "settings.space_remove_title": {"en": "Take {name} out of {space}?", "ar": "إخراج {name} من {space}؟"},
+    "settings.space_remove_confirm": {
+        "en": "Kazma forgets every fact it filed under them in this space: what they said about themself and "
+              "what others said about them. Their messages stay in its chats. They are told at their next "
+              "page load.",
+        "ar": "ينسى Kazma كل حقيقة سجّلها عنه في هذه المساحة: ما قاله عن نفسه وما قاله الآخرون عنه. تبقى "
+              "رسائله في محادثاتها. سيُبلَّغ عند تحميل صفحته التالية.",
+    },
+    "settings.space_removed": {"en": "{name} was taken out.", "ar": "أُخرج {name}."},
+    "settings.space_leave": {"en": "Leave this space", "ar": "مغادرة هذه المساحة"},
+    "settings.space_leave_title": {"en": "Leave {name}?", "ar": "مغادرة {name}؟"},
+    "settings.space_leave_confirm": {
+        "en": "When you leave, Kazma forgets every fact it filed under you in this space: what you said about "
+              "yourself and what others said about you. Your messages stay in its chats, as the "
+              "conversation's history. To come back, the admin adds you again.",
+        "ar": "عند مغادرتك ينسى Kazma كل حقيقة سجّلها عنك في هذه المساحة: ما قلته عن نفسك وما قاله الآخرون "
+              "عنك. تبقى رسائلك في محادثاتها، جزءًا من تاريخ المحادثة. وللعودة يضيفك المسؤول من جديد.",
+    },
+    "settings.space_left": {"en": "You left {name}.", "ar": "غادرت {name}."},
+    "settings.space_owner_stays": {
+        "en": "You own this space, so you stay in it. To end it, delete it above.",
+        "ar": "أنت مالك هذه المساحة، لذا تبقى فيها. لإنهائها احذفها من الأعلى.",
+    },
+    "account.notice_added_title": {"en": "You were added to a space", "ar": "أُضفت إلى مساحة"},
+    "account.notice_added_body": {
+        "en": "The admin added you to {space} on {when}. Switch to it from the space menu at the top of the page.",
+        "ar": "أضافك المسؤول إلى {space} في {when}. انتقل إليها من قائمة المساحات أعلى الصفحة.",
+    },
+    "account.notice_removed_title": {"en": "You were taken out of a space", "ar": "أُخرجت من مساحة"},
+    "account.notice_removed_body": {
+        "en": "You were taken out of {space} on {when}. Kazma forgot the facts it filed under you there; "
+              "your messages stay in its chats.",
+        "ar": "أُخرجت من {space} في {when}. نسي Kazma الحقائق التي سجّلها عنك هناك، وتبقى رسائلك في محادثاتها.",
     },
     "account.notice_reset_title": {"en": "Your password was reset", "ar": "أُعيد تعيين كلمة مرورك"},
     "account.notice_reset_body": {

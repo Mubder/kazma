@@ -1573,6 +1573,28 @@ class DocumentIngestionService:
             logger.info("[documents] shared %d document(s) of space %s with a member", granted, tenant)
         return granted
 
+    def revoke_member_access(self, *, tenant_id: str, member: str) -> int:
+        """Take back the share :meth:`grant_member_access` gave *member* in
+        the space *tenant_id*: its ACL rows on the documents it does not own
+        (Spaces S2-12, a member who left or was removed). The documents it
+        owns stay its own. Audited (``revoke_member``) per document. Returns
+        how many went. Blocking."""
+        tenant = _clean(tenant_id, "tenant_id")
+        principal = _clean(member, "member")
+        taken = self.repository.revoke_member_access(tenant_id=tenant, principal_id=principal)
+        for document_id in taken:
+            self.audit.record(
+                tenant_id=tenant, event_type="access", action="revoke_member",
+                outcome="success", actor_id=principal, document_id=document_id,
+                detail={"member": principal},
+            )
+        with self._member_lock:
+            self._member_checked.pop((tenant, principal), None)
+        if taken:
+            logger.info("[documents] took back %d document share(s) of a member of space %s",
+                        len(taken), tenant)
+        return len(taken)
+
     def _forget_member_checks(self, tenant: str) -> None:
         """A document was added to *tenant*: its members are looked over
         again at their next call, not a minute later."""

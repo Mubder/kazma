@@ -606,6 +606,119 @@
             } catch (e) {
                 this.spaceDataError = this._spaceDataError(null);
             }
+            if (this.spaceDataLoaded && !this.spaceData.personal) await this.loadSpaceMembers();
+        },
+
+        // ── Who is in a shared space (Spaces S2-12) ──
+        spaceMembers: [],
+        spaceMembersLoaded: false,
+        spaceMembersFailed: false,
+        spaceAddChoice: {},
+
+        async loadSpaceMembers() {
+            const space = this._thisSpace();
+            this.spaceMembersFailed = false;
+            const data = typeof window.kazmaGetJson === 'function'
+                ? await window.kazmaGetJson('/api/spaces/' + encodeURIComponent(space) + '/members') : null;
+            if (!data || !Array.isArray(data.members)) {
+                this.spaceMembersFailed = true;
+                return;
+            }
+            this.spaceMembers = data.members;
+            this.spaceMembersLoaded = true;
+        },
+
+        async _memberRequest(url, method, body) {
+            const resp = await fetch(url, {
+                method: method, credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: body === undefined ? undefined : JSON.stringify(body),
+            });
+            const data = await resp.json().catch(() => ({}));
+            return { ok: resp.ok, data: data };
+        },
+
+        async leaveThisSpace() {
+            const space = this._thisSpace();
+            const name = this.spaceData.name || space;
+            // What goes and what stays is said before they leave (N36).
+            const answer = await window.kazmaConfirm({
+                title: _t('settings.space_leave_title', 'Leave {name}?', { name: _iso(name) }),
+                message: _t('settings.space_leave_confirm',
+                    'When you leave, Kazma forgets every fact it filed under you in this space: what you said about yourself and what others said about you. Your messages stay in its chats, as the conversation\'s history. To come back, the admin adds you again.'),
+                danger: true,
+                confirmText: _t('settings.space_leave', 'Leave this space'),
+            });
+            if (!answer) return;
+            this.spaceDataBusy = true;
+            try {
+                const done = await this._memberRequest('/api/spaces/' + encodeURIComponent(space) + '/leave', 'POST');
+                if (!done.ok) {
+                    showToast(this._peopleError(done.data), 'error');
+                    return;
+                }
+                showToast(_t('settings.space_left', 'You left {name}.', { name: _iso(name) }), 'success');
+                const mine = await window.kazmaGetJson('/api/account/spaces');
+                const next = mine && Array.isArray(mine.spaces) ? mine.spaces.find((s) => s.id !== space) : null;
+                if (next && window.kazmaSpace) window.kazmaSpace.switchTo(next.id);
+                else window.location.assign('/');
+            } catch (e) {
+                showToast(this._peopleError(null), 'error');
+            } finally {
+                this.spaceDataBusy = false;
+            }
+        },
+
+        async removeFromSpace(spaceId, spaceName, member) {
+            const answer = await window.kazmaConfirm({
+                title: _t('settings.space_remove_title', 'Take {name} out of {space}?',
+                    { name: _iso(member.name), space: _iso(spaceName) }),
+                message: _t('settings.space_remove_confirm',
+                    'Kazma forgets every fact it filed under them in this space: what they said about themself and what others said about them. Their messages stay in its chats. They are told at their next page load.'),
+                danger: true,
+                confirmText: _t('settings.space_remove', 'Take out'),
+            });
+            if (!answer) return;
+            try {
+                const done = await this._memberRequest('/api/spaces/' + encodeURIComponent(spaceId)
+                    + '/members/' + encodeURIComponent(member.id), 'DELETE');
+                if (!done.ok) {
+                    showToast(this._peopleError(done.data), 'error');
+                    return;
+                }
+                showToast(_t('settings.space_removed', '{name} was taken out.', { name: _iso(member.name) }), 'success');
+            } catch (e) {
+                showToast(this._peopleError(null), 'error');
+                return;
+            }
+            if (this.tab === 'people') await this.loadPeople();
+            else await this.loadSpaceMembers();
+        },
+
+        peopleOutside(space) {
+            const inside = new Set((space.members || []).map((m) => m.id));
+            return (this.people || []).filter((p) => !inside.has(p.id));
+        },
+
+        async addToSpace(space) {
+            const chosen = this.spaceAddChoice[space.id] || '';
+            if (!chosen) return;
+            try {
+                const done = await this._memberRequest('/api/spaces/' + encodeURIComponent(space.id) + '/members',
+                    'POST', { account_id: chosen });
+                if (!done.ok) {
+                    showToast(this._peopleError(done.data), 'error');
+                    return;
+                }
+                const person = (this.people || []).find((p) => p.id === chosen);
+                showToast(_t('settings.space_added', '{name} was added. They are told at their next page load.',
+                    { name: _iso(person ? person.name : chosen) }), 'success');
+                this.spaceAddChoice[space.id] = '';
+            } catch (e) {
+                showToast(this._peopleError(null), 'error');
+                return;
+            }
+            await this.loadPeople();
         },
 
         async exportThisSpace() {

@@ -15243,6 +15243,28 @@ an install with one account behaves as before.
     of Kazma's data, with the identity taken out as the control; a failed
     record leaves no workspace row), `tests/e2e/test_shared_spaces_browser.py`
     (by the sidebar, EN/AR).
+  - **Who is in one (piece 2).** The admin adds a person
+    (`people.add_member`, `POST /api/spaces/{space_id}/members`, People);
+    they are told at their next page load (`member_added`, with the space's
+    name). A member leaves (`people.leave_space`, `POST .../leave`, Settings
+    -> This space's data -> Who is in this space); its owner or the admin
+    takes one out (`people.remove_member`, `DELETE .../members/{account_id}`;
+    told, `member_removed`); the last owner stays (`last_owner`). Each is an
+    event of the People record.
+  - **What goes with a member (N36)**, leaving, taken out, or their account
+    deleted (`delete_person`, every shared space they were in): after the
+    membership is gone, `memory.forget.forget_entry` forgets every fact under
+    their own entry there (journaled first; their messages stay, the others'
+    entries and the space's shared facts too), and their share of its
+    documents is taken back (`documents.principal.take_back_access`,
+    `revoke_member_access` on both document stores, audited `revoke_member`;
+    their own documents stay theirs). A forget that fails is `forget_failed`
+    (503), never silent. The confirm dialogs say this first, EN/AR.
+  - Gates: `tests/test_space_membership.py` (through the real memory store
+    and recall; the flow without the forget call as the control),
+    `tests/test_document_listing_queries_are_joined.py` (the take-back on
+    SQLite and Postgres), `tests/e2e/test_space_membership_browser.py` (by
+    the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 
