@@ -60,6 +60,8 @@ __all__ = [
     "MEMORY_SHOW_MAX",
     "MEMORY_SHOW_QUESTION",
     "NAME_MAX",
+    "PASSAGE_OVERLAP_TOKENS",
+    "PASSAGE_TOKENS",
     "OBJECT_MAX",
     "PREDICATE_MAX",
     "RECALL_FOCUS_READ",
@@ -114,6 +116,14 @@ LEGACY_BRIDGE_CUT = 8000
 #: always was (the question was cut at 4,000), so no vector changes and a
 #: very long message costs the embedder no more than before.
 EMBED_TEXT_CHARS = 4000
+
+#: A passage (the memory plan's W5, ``memory/passages.py``): a stretch of
+#: what a memory's own vector misses -- its answer, a question past
+#: EMBED_TEXT_CHARS -- of about this many tokens (counted as the context
+#: trim counts them), cut at sentence breaks, each starting about
+#: PASSAGE_OVERLAP_TOKENS before the one before it ended.
+PASSAGE_TOKENS = 256
+PASSAGE_OVERLAP_TOKENS = 32
 
 #: What recall compares a memory by (``episode_text.match_text``: de-duplication,
 #: the graph walk's seeds): its first 400 characters, as always.

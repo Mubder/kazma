@@ -51,6 +51,10 @@ SPEAKER_VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "speakers_vecto
 #: by another session, scored only by ``sealed --look "why"``.
 SEALED = REPO / "tests" / "fixtures" / "memory_bench" / "sealed_questions.json"
 SEALED_VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "sealed_vectors.npz"
+#: The passages' vectors (the memory plan's W5): every passage of the stores
+#: the benchmark, the scale run, the product measures' long store and the
+#: speakers set seed, recorded by ``passage-vectors``.
+PASSAGE_VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "passage_vectors.npz"
 
 SEED = 20260926
 
@@ -2492,6 +2496,54 @@ def _cmd_vectors(fresh: bool = False) -> int:
     return 0
 
 
+def _cmd_passage_vectors() -> int:
+    """Record the real model's vector for every passage the benchmark's
+    stores hold with passages on (W5): the store, the scale run's store, the
+    product measures' long store (each conversation lengthened to live's
+    lengths) and the speakers set. The stores are seeded from the recorded
+    vectors; only a text no recording holds goes to the model, and only
+    those are saved (``PASSAGE_VECTORS``, a file of its own, kept beside the
+    others: replay layers it with ``SpeakerReplay``)."""
+    from kazma_core.memory import benchmark, passages
+    from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
+
+    _limit_cpu_threads()
+    real = get_embedder()
+    if real is None:
+        print("no embedder is configured: install the rag extra (bge-m3)", file=sys.stderr)
+        return 2
+    model = get_embedding_model_name()
+    held = benchmark.SpeakerReplay(VECTORS, SPEAKER_VECTORS)
+    if held.model != model:
+        print(f"the recordings are {held.model}'s, the embedder is {model}'s", file=sys.stderr)
+        return 2
+    before = (benchmark.ReplayEmbedder(PASSAGE_VECTORS)
+              if PASSAGE_VECTORS.is_file() and benchmark.ReplayEmbedder(PASSAGE_VECTORS).model == model else None)
+    recorder = benchmark.RecordingEmbedder(_Reused(real, before) if before is not None else real)
+    source = _Reused(recorder, held)
+    sys.path.insert(0, str(REPO / "scripts"))
+    import memory_product_measures as measures
+
+    data = benchmark.load_dataset()
+    a, b = _patched(source, model)
+    written: dict[str, int] = {}
+    with a, b, passages.used(True):
+        with benchmark._seeded_store(data) as (conn, _refs, _covers):
+            written["store"] = conn.execute("SELECT COUNT(*) FROM episode_passages").fetchone()[0]
+            measures.lengthen(conn, json.loads(measures.LIVE_LENGTHS.read_text(encoding="utf-8")),
+                              tenant_id=benchmark.BENCH_TENANT)
+            written["long"] = benchmark.fill_passages_whole(conn)
+        scaled = benchmark._scaled_dataset(data)
+        if scaled:
+            with benchmark._seeded_store(scaled) as (conn, _refs, _covers):
+                written["scale"] = conn.execute("SELECT COUNT(*) FROM episode_passages").fetchone()[0]
+        written["speakers"] = len(benchmark.run_speaker_benchmark(keep_results=True)["results"])
+    n = recorder.save(PASSAGE_VECTORS, model=model)
+    asked = f", {recorder.inner.asked} embedded now" if isinstance(recorder.inner, _Reused) else ""
+    print(f"{PASSAGE_VECTORS}: {n} vectors from {model}{asked}; passages {json.dumps(written)}")
+    return 0
+
+
 def _cmd_fact_languages_vectors() -> int:
     """Record bge-m3's vectors for ``benchmark.run_fact_languages`` (the
     memory plan's finding 10): every text its stores and questions embed,
@@ -3299,6 +3351,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("writes")
     sub.add_parser("fact-languages-vectors",
                    help="record the vectors of the facts-across-languages gate (the real model)")
+    sub.add_parser("passage-vectors", help="record the vectors of every passage the benchmark's stores hold (W5)")
     run = sub.add_parser("run")
     run.add_argument("--real", action="store_true", help="load the real embedder")
     run.add_argument("--json", action="store_true")
@@ -3321,6 +3374,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_writes()
     if args.cmd == "fact-languages-vectors":
         return _cmd_fact_languages_vectors()
+    if args.cmd == "passage-vectors":
+        return _cmd_passage_vectors()
     return _cmd_run(args.real, args.json, args.details)
 
 

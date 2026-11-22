@@ -530,8 +530,12 @@ def run_vector_repair_pass(*, time_budget_s: float = 20.0) -> dict[str, int]:
         out = repair_unsearchable_vectors(conn, time_budget_s=time_budget_s)
         if out.get("remaining", 0) != -1:  # an embedder is there
             from kazma_core.memory.entity_resolution import repair_entity_name_vectors
+            from kazma_core.memory.passages import fill_passages
 
             out["entities"] = repair_entity_name_vectors(conn)
+            # Passages for memories written before them, or before a model
+            # switch (the memory plan's W5), newest first, bounded.
+            out["passages"] = fill_passages(conn)["filled"]
         return out
     except sqlite3.OperationalError as exc:
         if "no such" not in str(exc).lower():

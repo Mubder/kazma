@@ -148,6 +148,7 @@ def _seed(conn: sqlite3.Connection, dataset: dict[str, Any]) -> dict[str, str]:
             )
             refs[f"{session['id']}#{i}"] = row["id"]
     conn.commit()
+    fill_passages_whole(conn)
     for fact in dataset.get("facts", []):
         stated = BASE_TIME + fact["day"] * 86400 + (fact["turn"] or 0) * 60 + 30
         result = mutate_belief(
@@ -171,6 +172,33 @@ def _seed(conn: sqlite3.Connection, dataset: dict[str, Any]) -> dict[str, str]:
     _seed_summaries(conn, dataset, refs)
     _seed_rollups(conn, dataset, refs)
     return refs
+
+
+def fill_passages_whole(conn: sqlite3.Connection) -> int:
+    """Every seeded memory's passages while passages are in use (the memory
+    plan's W5): the seeding inserts rows itself, so it fills them as the
+    repair sweep would, all at once. Raises when a memory with something to
+    cover got none -- a replayed recording without its passage texts, never
+    a store measured with passages missing (``encode_vector`` answers a
+    missing vector with None). Returns the passages written."""
+    from kazma_core.memory import passages
+    from kazma_core.memory.vector_engine import RECALLABLE_TIERS
+
+    if not passages.in_use():
+        return 0
+    written = passages.fill_passages(conn, budget=10**9, seconds=float("inf"))["passages"]
+    tiers = ",".join("?" for _ in RECALLABLE_TIERS)
+    missing = [
+        str(row[0]) for row in conn.execute(
+            "SELECT e.id, e.user_text, e.assistant_text, e.summary_text FROM episodes e "
+            "LEFT JOIN episode_passage_state s ON s.episode_id = e.id WHERE s.episode_id IS NULL "
+            f"AND e.tier IN ({tiers})", tuple(RECALLABLE_TIERS)).fetchall()  # nosec B608 - '?' placeholders only
+        if passages.missed_spans(row[1], row[2], row[3])
+    ]
+    if missing:
+        raise RuntimeError(f"{len(missing)} memories got no passages (first {missing[0]}): the recording "
+                           "lacks their texts; run: python scripts/memory_bench.py passage-vectors")
+    return written
 
 
 def _seed_summaries(conn: sqlite3.Connection, dataset: dict[str, Any], refs: dict[str, str]) -> None:
@@ -1989,6 +2017,7 @@ def _seed_speakers(conn: sqlite3.Connection, cases: dict[str, Any], people: Any)
             )
             refs[f"{session['id']}#{i}"] = row["id"]
     conn.commit()
+    fill_passages_whole(conn)
     for fact in cases["facts"]:
         speaker = members[fact["by"]]["account"]
         about = fact["about"]

@@ -333,7 +333,26 @@ def _seed_history(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> dict[
         )
         back[row["id"]] = entry
     conn.commit()
+    from kazma_core.memory.benchmark import fill_passages_whole
+
+    fill_passages_whole(conn)  # passages (the memory plan's W5), while they are in use
     return back
+
+
+def passage_texts(rows: list[dict[str, Any]]) -> list[str]:
+    """Every passage text *rows* hold (W5), as the passage writer embeds it,
+    for :meth:`CachedEmbedder.fill` to embed in batches first."""
+    from kazma_core.memory.passages import missed_spans
+
+    out = []
+    for entry in rows:
+        row = entry["row"]
+        texts = {"question": row["user_text"] or "", "answer": row["assistant_text"] or ""}
+        for side, start, stop in missed_spans(row["user_text"], row["assistant_text"], row["summary_text"]):
+            body = texts[side][start:stop].strip()
+            if body:
+                out.append(body)
+    return out
 
 
 def _words(text: Any) -> str:

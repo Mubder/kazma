@@ -70,6 +70,9 @@ from unittest import mock
 REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "tests" / "fixtures" / "memory_bench"
 VECTORS = FIXTURES / "vectors.npz"
+#: The passages' vectors (W5, ``scripts/memory_bench.py passage-vectors``):
+#: replayed beside VECTORS when ``measure --passages`` turns passages on.
+PASSAGE_VECTORS = FIXTURES / "passage_vectors.npz"
 RECORD = FIXTURES / "product_measures.json"
 LIVE_LENGTHS = FIXTURES / "live_lengths.json"
 STORES = ("store", "scale", "long")
@@ -303,14 +306,20 @@ def embedding_seconds(questions: list[dict[str, Any]]) -> list[float]:
 
 
 def measure(*, real_embedder: bool = False, small: bool = True, scale: bool = True,
-            long: bool = True) -> dict[str, Any]:
-    from kazma_core.memory import benchmark
+            long: bool = True, with_passages: bool = False) -> dict[str, Any]:
+    """Every measure; *with_passages* turns passages on (the memory plan's
+    W5: every store seeded with them, recall reading them), the same
+    stores and questions, for the with-and-without comparison."""
+    from kazma_core.memory import benchmark, passages
 
     data = benchmark.load_dataset()
     questions = _questions(data)
-    replay = benchmark.ReplayEmbedder(VECTORS)
+    replay = (benchmark.SpeakerReplay(VECTORS, PASSAGE_VECTORS) if with_passages
+              else benchmark.ReplayEmbedder(VECTORS))
     report: dict[str, Any] = {"dataset_version": data.get("version"), "questions": len(questions)}
-    with _replayed(replay):
+    if with_passages:
+        report["passages"] = True
+    with _replayed(replay), passages.used(with_passages):
         with benchmark._seeded_store(data) as (conn, refs, covers):
             report["benchmark"] = scores_by_language(conn, refs, covers, questions)
             by_evidence: dict[str, list[int]] = {}
@@ -329,6 +338,7 @@ def measure(*, real_embedder: bool = False, small: bool = True, scale: bool = Tr
         if long:
             with benchmark._seeded_store(data) as (conn, _refs, _covers):
                 lengthen(conn, json.loads(LIVE_LENGTHS.read_text(encoding="utf-8")), tenant_id=benchmark.BENCH_TENANT)
+                benchmark.fill_passages_whole(conn)  # the lengthened text's own passages (W5)
                 by_evidence = {}
                 tokens, _seconds = block_tokens(conn, questions, by_evidence=by_evidence)
                 report["block_tokens"]["long"] = token_summary(tokens)
@@ -354,8 +364,10 @@ def changed_tokens(record: dict[str, Any], today: dict[str, Any]) -> list[str]:
     return problems
 
 
-def _cmd_measure(write: bool, real_embedder: bool) -> int:
-    report = measure(real_embedder=real_embedder)
+def _cmd_measure(write: bool, real_embedder: bool, with_passages: bool = False, out: Path | None = None) -> int:
+    report = measure(real_embedder=real_embedder, with_passages=with_passages)
+    if out is not None:
+        out.write_text(json.dumps(report, indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
     old = json.loads(RECORD.read_text(encoding="utf-8")) if RECORD.is_file() else {}
     print(json.dumps(report, indent=1))
     if write:
@@ -384,6 +396,8 @@ def main(argv: list[str] | None = None) -> int:
     m = sub.add_parser("measure")
     m.add_argument("--write", action="store_true", help="record it in tests/fixtures/memory_bench")
     m.add_argument("--real-embedder", action="store_true", help="also time the embedding model on this machine")
+    m.add_argument("--passages", action="store_true", help="passages on (W5): the with-and-without comparison")
+    m.add_argument("--out", type=Path, default=None, help="also write the report to this file")
     sub.add_parser("check")
     live = sub.add_parser("live-lengths", help="record live's episode lengths from a native backup")
     live.add_argument("backup", type=Path, help="a memory_state_<ts>.db native backup (opened immutable)")
@@ -391,7 +405,9 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     random.seed(0)
     if args.cmd == "measure":
-        return _cmd_measure(args.write, args.real_embedder)
+        if args.write and args.passages:
+            p.error("--write records the product as it ships; measure passages without it")
+        return _cmd_measure(args.write, args.real_embedder, args.passages, args.out)
     if args.cmd == "live-lengths":
         report = live_lengths(args.backup)
         LIVE_LENGTHS.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8", newline="\n")

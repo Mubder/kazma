@@ -285,6 +285,94 @@ its memory so a forget follows it. It serves three things built once: the
 stretch that matched shown in the block (W1b), the reranker's input (W3),
 and meaning search over a long memory's middle (W5).
 
+**Built 22 Nov (`memory/passages.py`), behind a switch until accepted**
+(`passages.in_use()`, off). The main session's choices: coverage (a),
+counting max().
+
+- *What gets passages.* Only what the memory's own vector misses. That
+  vector is made from the first 4,000 characters of the summary, else the
+  question, else the answer (`episode_text.embed_text`), so every other side
+  gets passages (the answer, as a rule) and the vector's own side gets them
+  past its first 4,000 characters. A passage is about 256 tokens
+  (`limits.PASSAGE_TOKENS`, counted as the context trim counts, Arabic at
+  about 2.5 characters a token) of whole sentences, about 32 tokens of whole
+  sentences overlapping the one before (`PASSAGE_OVERLAP_TOKENS`); a
+  sentence longer than a passage is cut at spaces. A passage holds no text:
+  its memory's id and space, the side, where it stands in that side, its
+  vector and the model that made it (`episode_passages`);
+  `episode_passage_state` records which memories the current model has
+  filled.
+- *What a forget takes.* Triggers on `episodes` delete a memory's passages
+  and its fill record when its row is deleted, when it becomes `forgotten`,
+  when its question, answer or summary changes (the repair writes them again
+  from the new text) and when it moves to another space. Every forget path
+  goes through one of those (a memory's, a turn's or a chat's forget, a
+  rewind, a forget by mention, a space's erase), so none needs a call of its
+  own. Passages are not exported (they are rebuilt from the text), the
+  Postgres mirror and a remote vector index hold none (recall reads them
+  from this install's own database on both paths), and the memory store
+  registry declares both tables.
+- *How older memories get theirs.* The vector repair sweep
+  (`reembed.run_vector_repair_pass`, every 15 minutes) ends with
+  `passages.fill_passages`: up to 200 recallable memories a pass, newest
+  first, about 20 seconds, those with no fill record of the current model; a
+  model switch makes every memory due again. A memory's vectors are made with
+  no lock held and no transaction open, then written in one short
+  transaction that checks the memory still holds the text they were cut from
+  (a forget or an edit in between wins). A memory the writer stores
+  (`dual_write.mirror_episode`) gets its passages right after its own vector.
+  The benchmark's and the product measures' stores fill theirs at seeding
+  (`benchmark.fill_passages_whole`, which refuses a store missing any).
+- *Counting.* A memory's meaning similarity is the better of its vector and
+  its best passage (`recall._with_passages`), before the background and the
+  evidence rules, on the local and the Postgres-primary path alike; a memory
+  only a passage found enters the dense pool as any other. When a passage
+  won, the block shows that stretch (`episode_text.display_at(anchor=)`, W1b)
+  instead of the stretch around the question's words.
+- *Measured* with and without on the same commit (`memory_threshold_sweep.py
+  sweep|judge --passages`, `memory_product_measures.py measure --passages`;
+  the passages' vectors recorded by `memory_bench.py passage-vectors`: 5,457
+  texts, bge-m3; evidence in `docs/audits/evidence/memory_passages/`).
+
+  **Not accepted: max() costs answers and precision** (22 Nov; the main
+  session's fallback rule). At today's thresholds:
+
+  | store | answers lost / gained | precision off → on |
+  |---|---|---|
+  | the store, first set | none | 0.4872 → 0.4818 |
+  | the store, second set | none | 0.4042 → 0.4417 |
+  | four times its chat, first set | q107 lost | 0.4379 → 0.4337 |
+  | four times its chat, second set | h009 gained | 0.3641 → 0.3874 |
+  | small stores | none | 0.6752 → 0.6747 |
+  | the speakers' space | q37 lost | 0.6078 → 0.5922 |
+
+  Both losses have one cause. A memory's meaning becomes the better of its
+  vector and its passages, so the dense pool's similarities rise and the
+  question's background (dense ranks 4-15) with them; a memory whose answer
+  is not what matched keeps its own similarity and loses lift (q107's gold
+  turn 0.044 → 0.026, q37's 0.051 → 0.028, under the 0.04 floor). Taking the
+  background from the memories' own vectors instead keeps every answer
+  (h009 gained) but lowers precision on the store (0.4872 → 0.4678), at four
+  times its chat (0.4379 → 0.4233), in small stores (0.6752 → 0.6715) and in
+  the speakers' space (0.6078 → 0.5922): every passage that clears the floor
+  is one more memory shown. The block's tokens hold (store p50 675 → 674,
+  p95 1,030 → 989; four times the chat p50 710 → 701, p95 1,111 → 1,198;
+  live's lengths p50 1,073 → 1,059, p95 1,484 → 1,486); recall takes 20 ms
+  more on the store (p50 53 → 73 ms) and 75 ms more at four times its chat
+  (133 → 208 ms), every passage compared exactly. The sweep under the plan's
+  rule (`--by sets`, passages on, against today's product without them,
+  `sweep_first_set.json`) chose nothing at its first stage: of the 57 turn
+  floors and gaps, the only ones that keep every first-set answer on all four
+  stores have the floor at 0.02, the grid's edge (rule 5), and they lower
+  precision further (the store 0.4872 → 0.4584, four times its chat 0.4379 →
+  0.4117, the speakers' space 0.6255 → 0.6000 on the first set). Nothing was
+  judged or logged (`log_choice` records only a judged choice). The table,
+  the writer, the forget triggers, the repair and W1b's stretch stay, off:
+  the main session's fallback is a lane of their own (a passage hit judged
+  on its own evidence beside the memories' vectors, not mixed into them).
+  The passages' vectors (4.4 MB) are not committed;
+  `memory_bench.py passage-vectors` records them again (about 14 minutes).
+
 ### W3 + W2. Rank by relevance, and say nothing when nothing fits (M)
 
 A local cross-encoder rescoring the top 20 passages, anytime inside the

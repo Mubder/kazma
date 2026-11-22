@@ -77,6 +77,9 @@ DECLARED: dict[tuple[str, str], tuple[int, str]] = {
             "holds (an episode's id carries its space, S1-09)"),
     (f"{_MEMORY}dual_write.py", "_still_held"):
         (1, "after the commit: whether the memory this writer wrote was forgotten meanwhile"),
+    (f"{_MEMORY}passages.py", "write_passages"):
+        (1, "reads the memory it is handed for its passages: the id the writer just stored, or one the "
+            "repair sweep chose by tenant; the write that follows names the tenant it read"),
     (f"{_MEMORY}entity_repair.py", "repair_collapsed"): (1, _OPERATOR),
     (f"{_MEMORY}forget.py", "_after_facts"): (1, _FORGET_OWN),
     (f"{_MEMORY}forget.py", "_scrub_archived_rows"):

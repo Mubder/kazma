@@ -1,0 +1,3347 @@
+{
+ "dataset_version": 8,
+ "speakers_version": 1,
+ "split_by": "sets",
+ "split": {
+  "bench": {
+   "tune": [
+    "q001",
+    "q002",
+    "q003",
+    "q004",
+    "q005",
+    "q006",
+    "q007",
+    "q008",
+    "q009",
+    "q010",
+    "q011",
+    "q012",
+    "q013",
+    "q014",
+    "q015",
+    "q016",
+    "q017",
+    "q018",
+    "q101",
+    "q102",
+    "q103",
+    "q104",
+    "q105",
+    "q106",
+    "q107",
+    "q108",
+    "q201",
+    "q202",
+    "q203",
+    "q204",
+    "q205",
+    "q206",
+    "q301",
+    "q302",
+    "q303",
+    "q304",
+    "q401",
+    "q402",
+    "q403",
+    "q404",
+    "q405",
+    "q406",
+    "q501",
+    "q502",
+    "q503",
+    "q504",
+    "q601",
+    "q602",
+    "q603",
+    "q701",
+    "q702",
+    "q703",
+    "q704",
+    "q705",
+    "q706",
+    "q707",
+    "q708",
+    "q801",
+    "q802",
+    "q803",
+    "q804",
+    "q805",
+    "q806",
+    "q807",
+    "q808",
+    "q809",
+    "q810",
+    "q811",
+    "q812",
+    "q813",
+    "q814",
+    "q815",
+    "q816",
+    "q817",
+    "q818",
+    "q901",
+    "q902",
+    "q903",
+    "q904",
+    "q951",
+    "q952",
+    "q953",
+    "q954",
+    "q955",
+    "q956",
+    "q957",
+    "q960",
+    "q958",
+    "q959",
+    "q1001",
+    "q1002",
+    "q1003",
+    "q1004",
+    "q1005",
+    "q1006",
+    "q1007",
+    "q1008",
+    "q1011",
+    "q1012",
+    "q1013",
+    "q1014",
+    "q1015",
+    "q1016",
+    "q1101",
+    "q1102",
+    "q1103",
+    "q1104",
+    "q1105",
+    "q1106",
+    "q1107",
+    "q1108",
+    "q1109",
+    "q1201",
+    "q1202",
+    "q1203",
+    "q1204",
+    "q1205",
+    "q1206",
+    "q1301",
+    "q1302",
+    "q1303",
+    "q1305",
+    "q1306",
+    "q1307",
+    "q1308",
+    "q1309",
+    "q1310",
+    "q1401",
+    "q1402",
+    "q1403",
+    "q1404"
+   ],
+   "held": [
+    "h001",
+    "h002",
+    "h003",
+    "h004",
+    "h005",
+    "h006",
+    "h007",
+    "h008",
+    "h009",
+    "h010",
+    "h011",
+    "h012",
+    "h013",
+    "h014",
+    "h015",
+    "h016",
+    "h017",
+    "h018",
+    "h019",
+    "h020",
+    "h021",
+    "h022",
+    "h023",
+    "h024",
+    "h025",
+    "h026",
+    "h027",
+    "h028",
+    "h029",
+    "h030",
+    "h031",
+    "h032",
+    "h033",
+    "h034",
+    "h035",
+    "h036",
+    "h037",
+    "h038",
+    "h039",
+    "h040",
+    "h041",
+    "h042",
+    "h043",
+    "h044",
+    "h045",
+    "h046",
+    "h047",
+    "h048",
+    "h049",
+    "h050",
+    "h051",
+    "h052"
+   ]
+  },
+  "speakers": {
+   "tune": [
+    "q28",
+    "q14",
+    "q13",
+    "q24",
+    "q22",
+    "q25",
+    "q26",
+    "q04",
+    "q08",
+    "q09",
+    "q05",
+    "q03",
+    "q31",
+    "q34",
+    "q32",
+    "q11",
+    "q15",
+    "q17"
+   ],
+   "held": [
+    "q29",
+    "q12",
+    "q37",
+    "q20",
+    "q23",
+    "q21",
+    "q07",
+    "q01",
+    "q02",
+    "q10",
+    "q06",
+    "q35",
+    "q30",
+    "q33",
+    "q27",
+    "q36",
+    "q16"
+   ]
+  }
+ },
+ "today": {
+  "episode_floor": 0.04,
+  "episode_gap": 0.15,
+  "episode_coverage": 0.12,
+  "episode_recency": 0.05,
+  "belief_floor": 0.06,
+  "belief_gap": 0.08,
+  "belief_coverage": 0.06,
+  "belief_recency": 0.02,
+  "summary_floor": 0.21,
+  "summary_gap": 0.1,
+  "summary_coverage": 0.12
+ },
+ "stages": [
+  {
+   "stage": "turns",
+   "axes": {
+    "episode_floor": [
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06,
+     0.07,
+     0.08
+    ],
+    "episode_gap": [
+     0.06,
+     0.08,
+     0.1,
+     0.12,
+     0.14,
+     0.16,
+     0.18,
+     0.2
+    ]
+   },
+   "chosen": null,
+   "rows": [
+    {
+     "values": {
+      "episode_floor": 0.02,
+      "episode_gap": 0.06
+     },
+     "lost": 4,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.5183,
+       "shown": 4.2
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7302,
+       "precision": 0.486,
+       "shown": 4.46
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6917,
+       "shown": 2.56
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6412,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3929
+    },
+    {
+     "values": {
+      "episode_floor": 0.02,
+      "episode_gap": 0.08
+     },
+     "lost": 4,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.5,
+       "shown": 4.51
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7351,
+       "precision": 0.4561,
+       "shown": 4.88
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6868,
+       "shown": 2.58
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6294,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3779
+    },
+    {
+     "values": {
+      "episode_floor": 0.02,
+      "episode_gap": 0.1
+     },
+     "lost": 2,
+     "lost_ids": [
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.4825,
+       "shown": 4.8
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7381,
+       "precision": 0.4446,
+       "shown": 5.23
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6775,
+       "shown": 2.66
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6059,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3632
+    },
+    {
+     "values": {
+      "episode_floor": 0.02,
+      "episode_gap": 0.12
+     },
+     "lost": 2,
+     "lost_ids": [
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7454,
+       "precision": 0.4715,
+       "shown": 5.01
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7381,
+       "precision": 0.4295,
+       "shown": 5.48
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.67,
+       "shown": 2.73
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6059,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3547
+    },
+    {
+     "values": {
+      "episode_floor": 0.02,
+      "episode_gap": 0.14
+     },
+     "lost": 0,
+     "lost_ids": [],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.4584,
+       "shown": 5.21
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7381,
+       "precision": 0.4117,
+       "shown": 5.69
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6675,
+       "shown": 2.8
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3458
+    },
+    {
+     "values": {
+      "episode_floor": 0.02,
+      "episode_gap": 0.16
+     },
+     "lost": 0,
+     "lost_ids": [],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.4427,
+       "shown": 5.39
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7381,
+       "precision": 0.4039,
+       "shown": 5.79
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6658,
+       "shown": 2.81
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.5961,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3386
+    },
+    {
+     "values": {
+      "episode_floor": 0.02,
+      "episode_gap": 0.18
+     },
+     "lost": 0,
+     "lost_ids": [],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.43,
+       "shown": 5.53
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7381,
+       "precision": 0.3871,
+       "shown": 5.97
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6658,
+       "shown": 2.83
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.5961,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3312
+    },
+    {
+     "values": {
+      "episode_floor": 0.02,
+      "episode_gap": 0.2
+     },
+     "lost": 0,
+     "lost_ids": [],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.4153,
+       "shown": 5.68
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7381,
+       "precision": 0.3678,
+       "shown": 6.15
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.665,
+       "shown": 2.84
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.5961,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3225
+    },
+    {
+     "values": {
+      "episode_floor": 0.03,
+      "episode_gap": 0.06
+     },
+     "lost": 4,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.5313,
+       "shown": 4.01
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7319,
+       "precision": 0.4957,
+       "shown": 4.34
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.69,
+       "shown": 2.54
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6412,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3986
+    },
+    {
+     "values": {
+      "episode_floor": 0.03,
+      "episode_gap": 0.08
+     },
+     "lost": 4,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.5134,
+       "shown": 4.28
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7334,
+       "precision": 0.4673,
+       "shown": 4.7
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6851,
+       "shown": 2.57
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6353,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3847
+    },
+    {
+     "values": {
+      "episode_floor": 0.03,
+      "episode_gap": 0.1
+     },
+     "lost": 3,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.496,
+       "shown": 4.56
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7334,
+       "precision": 0.4566,
+       "shown": 5.01
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6768,
+       "shown": 2.63
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6118,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3697
+    },
+    {
+     "values": {
+      "episode_floor": 0.03,
+      "episode_gap": 0.12
+     },
+     "lost": 3,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7454,
+       "precision": 0.4872,
+       "shown": 4.74
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7334,
+       "precision": 0.4435,
+       "shown": 5.23
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6719,
+       "shown": 2.69
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6118,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3629
+    },
+    {
+     "values": {
+      "episode_floor": 0.03,
+      "episode_gap": 0.14
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.4769,
+       "shown": 4.91
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7334,
+       "precision": 0.4263,
+       "shown": 5.4
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6713,
+       "shown": 2.72
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6059,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3554
+    },
+    {
+     "values": {
+      "episode_floor": 0.03,
+      "episode_gap": 0.16
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.4616,
+       "shown": 5.07
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7334,
+       "precision": 0.4191,
+       "shown": 5.5
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6696,
+       "shown": 2.73
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.602,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3483
+    },
+    {
+     "values": {
+      "episode_floor": 0.03,
+      "episode_gap": 0.18
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.4504,
+       "shown": 5.19
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7334,
+       "precision": 0.4023,
+       "shown": 5.67
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6713,
+       "shown": 2.75
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.602,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3418
+    },
+    {
+     "values": {
+      "episode_floor": 0.03,
+      "episode_gap": 0.2
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7459,
+       "precision": 0.4372,
+       "shown": 5.32
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7334,
+       "precision": 0.3878,
+       "shown": 5.81
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6704,
+       "shown": 2.76
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.602,
+       "shown": 0.0
+      }
+     },
+     "abstained": 1,
+     "quality": 1.3346
+    },
+    {
+     "values": {
+      "episode_floor": 0.04,
+      "episode_gap": 0.06
+     },
+     "lost": 4,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7466,
+       "precision": 0.5408,
+       "shown": 3.89
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.728,
+       "precision": 0.5008,
+       "shown": 4.14
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.69,
+       "shown": 2.52
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.4088
+    },
+    {
+     "values": {
+      "episode_floor": 0.04,
+      "episode_gap": 0.08
+     },
+     "lost": 4,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7473,
+       "precision": 0.5244,
+       "shown": 4.11
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7287,
+       "precision": 0.475,
+       "shown": 4.46
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6851,
+       "shown": 2.55
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6647,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.3959
+    },
+    {
+     "values": {
+      "episode_floor": 0.04,
+      "episode_gap": 0.1
+     },
+     "lost": 3,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7473,
+       "precision": 0.5072,
+       "shown": 4.37
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7287,
+       "precision": 0.4652,
+       "shown": 4.72
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6768,
+       "shown": 2.61
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6412,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.3812
+    },
+    {
+     "values": {
+      "episode_floor": 0.04,
+      "episode_gap": 0.12
+     },
+     "lost": 3,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7469,
+       "precision": 0.4988,
+       "shown": 4.53
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7287,
+       "precision": 0.4544,
+       "shown": 4.9
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6729,
+       "shown": 2.66
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6412,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.3753
+    },
+    {
+     "values": {
+      "episode_floor": 0.04,
+      "episode_gap": 0.14
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7469,
+       "precision": 0.4902,
+       "shown": 4.66
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7287,
+       "precision": 0.4395,
+       "shown": 5.04
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6729,
+       "shown": 2.69
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6353,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.3688
+    },
+    {
+     "values": {
+      "episode_floor": 0.04,
+      "episode_gap": 0.16
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7469,
+       "precision": 0.4763,
+       "shown": 4.8
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7287,
+       "precision": 0.433,
+       "shown": 5.12
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6712,
+       "shown": 2.7
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6353,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.3633
+    },
+    {
+     "values": {
+      "episode_floor": 0.04,
+      "episode_gap": 0.18
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7469,
+       "precision": 0.4678,
+       "shown": 4.89
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7287,
+       "precision": 0.4175,
+       "shown": 5.26
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6729,
+       "shown": 2.71
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6353,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.3577
+    },
+    {
+     "values": {
+      "episode_floor": 0.04,
+      "episode_gap": 0.2
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7469,
+       "precision": 0.4555,
+       "shown": 5.02
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7287,
+       "precision": 0.4039,
+       "shown": 5.38
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.672,
+       "shown": 2.72
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6353,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.351
+    },
+    {
+     "values": {
+      "episode_floor": 0.05,
+      "episode_gap": 0.06
+     },
+     "lost": 4,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7466,
+       "precision": 0.5521,
+       "shown": 3.79
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7292,
+       "precision": 0.5102,
+       "shown": 4.01
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6934,
+       "shown": 2.5
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6804,
+       "shown": 0.0
+      }
+     },
+     "abstained": 3,
+     "quality": 1.4176
+    },
+    {
+     "values": {
+      "episode_floor": 0.05,
+      "episode_gap": 0.08
+     },
+     "lost": 4,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7473,
+       "precision": 0.5382,
+       "shown": 3.98
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7299,
+       "precision": 0.4903,
+       "shown": 4.25
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6885,
+       "shown": 2.52
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6745,
+       "shown": 0.0
+      }
+     },
+     "abstained": 3,
+     "quality": 1.4068
+    },
+    {
+     "values": {
+      "episode_floor": 0.05,
+      "episode_gap": 0.1
+     },
+     "lost": 3,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7473,
+       "precision": 0.5224,
+       "shown": 4.19
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7299,
+       "precision": 0.4807,
+       "shown": 4.45
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6818,
+       "shown": 2.57
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 3,
+     "quality": 1.3929
+    },
+    {
+     "values": {
+      "episode_floor": 0.05,
+      "episode_gap": 0.12
+     },
+     "lost": 3,
+     "lost_ids": [
+      "scale:q107",
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7469,
+       "precision": 0.5153,
+       "shown": 4.32
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7299,
+       "precision": 0.471,
+       "shown": 4.61
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6824,
+       "shown": 2.6
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 3,
+     "quality": 1.3887
+    },
+    {
+     "values": {
+      "episode_floor": 0.05,
+      "episode_gap": 0.14
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7469,
+       "precision": 0.5084,
+       "shown": 4.42
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7299,
+       "precision": 0.4606,
+       "shown": 4.69
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6824,
+       "shown": 2.63
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 3,
+     "quality": 1.3853
+    },
+    {
+     "values": {
+      "episode_floor": 0.05,
+      "episode_gap": 0.16
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7469,
+       "precision": 0.4948,
+       "shown": 4.55
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7299,
+       "precision": 0.4547,
+       "shown": 4.77
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6806,
+       "shown": 2.63
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 3,
+     "quality": 1.3799
+    },
+    {
+     "values": {
+      "episode_floor": 0.05,
+      "episode_gap": 0.18
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7469,
+       "precision": 0.4872,
+       "shown": 4.63
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7299,
+       "precision": 0.4417,
+       "shown": 4.87
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6824,
+       "shown": 2.65
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 3,
+     "quality": 1.3752
+    },
+    {
+     "values": {
+      "episode_floor": 0.05,
+      "episode_gap": 0.2
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7469,
+       "precision": 0.4766,
+       "shown": 4.73
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7299,
+       "precision": 0.4313,
+       "shown": 4.96
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6815,
+       "shown": 2.66
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 3,
+     "quality": 1.3698
+    },
+    {
+     "values": {
+      "episode_floor": 0.06,
+      "episode_gap": 0.06
+     },
+     "lost": 6,
+     "lost_ids": [
+      "main:q107",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 2,
+       "mrr": 0.7392,
+       "precision": 0.549,
+       "shown": 3.63
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7248,
+       "precision": 0.5157,
+       "shown": 3.85
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6986,
+       "shown": 2.49
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6804,
+       "shown": 0.0
+      }
+     },
+     "abstained": 4,
+     "quality": 1.4165
+    },
+    {
+     "values": {
+      "episode_floor": 0.06,
+      "episode_gap": 0.08
+     },
+     "lost": 6,
+     "lost_ids": [
+      "main:q107",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 2,
+       "mrr": 0.74,
+       "precision": 0.5356,
+       "shown": 3.8
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.5003,
+       "shown": 4.04
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6937,
+       "shown": 2.51
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6745,
+       "shown": 0.0
+      }
+     },
+     "abstained": 4,
+     "quality": 1.407
+    },
+    {
+     "values": {
+      "episode_floor": 0.06,
+      "episode_gap": 0.1
+     },
+     "lost": 5,
+     "lost_ids": [
+      "main:q107",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 2,
+       "mrr": 0.74,
+       "precision": 0.5235,
+       "shown": 3.96
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.4932,
+       "shown": 4.19
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6921,
+       "shown": 2.56
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 4,
+     "quality": 1.3959
+    },
+    {
+     "values": {
+      "episode_floor": 0.06,
+      "episode_gap": 0.12
+     },
+     "lost": 5,
+     "lost_ids": [
+      "main:q107",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 2,
+       "mrr": 0.74,
+       "precision": 0.5197,
+       "shown": 4.02
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.4865,
+       "shown": 4.31
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6921,
+       "shown": 2.56
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 4,
+     "quality": 1.3933
+    },
+    {
+     "values": {
+      "episode_floor": 0.06,
+      "episode_gap": 0.14
+     },
+     "lost": 3,
+     "lost_ids": [
+      "main:q107",
+      "scale:q107",
+      "scale:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 2,
+       "mrr": 0.74,
+       "precision": 0.5142,
+       "shown": 4.1
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.4776,
+       "shown": 4.38
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6921,
+       "shown": 2.58
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 4,
+     "quality": 1.3905
+    },
+    {
+     "values": {
+      "episode_floor": 0.06,
+      "episode_gap": 0.16
+     },
+     "lost": 3,
+     "lost_ids": [
+      "main:q107",
+      "scale:q107",
+      "scale:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 2,
+       "mrr": 0.74,
+       "precision": 0.502,
+       "shown": 4.21
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.4726,
+       "shown": 4.45
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6904,
+       "shown": 2.59
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 4,
+     "quality": 1.3858
+    },
+    {
+     "values": {
+      "episode_floor": 0.06,
+      "episode_gap": 0.18
+     },
+     "lost": 3,
+     "lost_ids": [
+      "main:q107",
+      "scale:q107",
+      "scale:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 2,
+       "mrr": 0.74,
+       "precision": 0.4955,
+       "shown": 4.28
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.4659,
+       "shown": 4.52
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6921,
+       "shown": 2.61
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 4,
+     "quality": 1.383
+    },
+    {
+     "values": {
+      "episode_floor": 0.06,
+      "episode_gap": 0.2
+     },
+     "lost": 3,
+     "lost_ids": [
+      "main:q107",
+      "scale:q107",
+      "scale:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 106,
+       "unanswerable": 18,
+       "abstained": 2,
+       "mrr": 0.74,
+       "precision": 0.4895,
+       "shown": 4.35
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.456,
+       "shown": 4.6
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6913,
+       "shown": 2.62
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.651,
+       "shown": 0.0
+      }
+     },
+     "abstained": 4,
+     "quality": 1.3788
+    },
+    {
+     "values": {
+      "episode_floor": 0.07,
+      "episode_gap": 0.06
+     },
+     "lost": 7,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7348,
+       "precision": 0.5544,
+       "shown": 3.54
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7248,
+       "precision": 0.5203,
+       "shown": 3.76
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6986,
+       "shown": 2.49
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.4228
+    },
+    {
+     "values": {
+      "episode_floor": 0.07,
+      "episode_gap": 0.08
+     },
+     "lost": 7,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.542,
+       "shown": 3.7
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.5091,
+       "shown": 3.91
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6937,
+       "shown": 2.51
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6941,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.4146
+    },
+    {
+     "values": {
+      "episode_floor": 0.07,
+      "episode_gap": 0.1
+     },
+     "lost": 6,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.5296,
+       "shown": 3.83
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.5046,
+       "shown": 3.99
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6921,
+       "shown": 2.56
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.4041
+    },
+    {
+     "values": {
+      "episode_floor": 0.07,
+      "episode_gap": 0.12
+     },
+     "lost": 6,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.5257,
+       "shown": 3.89
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.5003,
+       "shown": 4.07
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 92,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7878,
+       "precision": 0.6921,
+       "shown": 2.56
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.402
+    },
+    {
+     "values": {
+      "episode_floor": 0.07,
+      "episode_gap": 0.14
+     },
+     "lost": 4,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.5213,
+       "shown": 3.94
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.4915,
+       "shown": 4.15
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6921,
+       "shown": 2.58
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.3996
+    },
+    {
+     "values": {
+      "episode_floor": 0.07,
+      "episode_gap": 0.16
+     },
+     "lost": 4,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.5112,
+       "shown": 4.03
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.491,
+       "shown": 4.18
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6904,
+       "shown": 2.59
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.3965
+    },
+    {
+     "values": {
+      "episode_floor": 0.07,
+      "episode_gap": 0.18
+     },
+     "lost": 4,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.5084,
+       "shown": 4.08
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.487,
+       "shown": 4.23
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6921,
+       "shown": 2.61
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.3952
+    },
+    {
+     "values": {
+      "episode_floor": 0.07,
+      "episode_gap": 0.2
+     },
+     "lost": 4,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.5024,
+       "shown": 4.15
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7255,
+       "precision": 0.482,
+       "shown": 4.29
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6913,
+       "shown": 2.62
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.3923
+    },
+    {
+     "values": {
+      "episode_floor": 0.08,
+      "episode_gap": 0.06
+     },
+     "lost": 8,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7348,
+       "precision": 0.5625,
+       "shown": 3.44
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7215,
+       "precision": 0.5231,
+       "shown": 3.59
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6865,
+       "shown": 2.45
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.7,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.4191
+    },
+    {
+     "values": {
+      "episode_floor": 0.08,
+      "episode_gap": 0.08
+     },
+     "lost": 8,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q1203",
+      "small:q1307",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.5527,
+       "shown": 3.57
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7208,
+       "precision": 0.5173,
+       "shown": 3.7
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 90,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6816,
+       "shown": 2.48
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6941,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.4125
+    },
+    {
+     "values": {
+      "episode_floor": 0.08,
+      "episode_gap": 0.1
+     },
+     "lost": 7,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q1307",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.5408,
+       "shown": 3.66
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7208,
+       "precision": 0.5133,
+       "shown": 3.76
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6818,
+       "shown": 2.51
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.4027
+    },
+    {
+     "values": {
+      "episode_floor": 0.08,
+      "episode_gap": 0.12
+     },
+     "lost": 7,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q007",
+      "small:q1307",
+      "small:q303"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.537,
+       "shown": 3.73
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7208,
+       "precision": 0.5091,
+       "shown": 3.83
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 91,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7775,
+       "precision": 0.6818,
+       "shown": 2.51
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.4007
+    },
+    {
+     "values": {
+      "episode_floor": 0.08,
+      "episode_gap": 0.14
+     },
+     "lost": 5,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q1307"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.5326,
+       "shown": 3.77
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7208,
+       "precision": 0.5002,
+       "shown": 3.91
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 93,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7809,
+       "precision": 0.6818,
+       "shown": 2.54
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.3982
+    },
+    {
+     "values": {
+      "episode_floor": 0.08,
+      "episode_gap": 0.16
+     },
+     "lost": 5,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q1307"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.525,
+       "shown": 3.83
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7208,
+       "precision": 0.5,
+       "shown": 3.93
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 93,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7809,
+       "precision": 0.6801,
+       "shown": 2.55
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.3959
+    },
+    {
+     "values": {
+      "episode_floor": 0.08,
+      "episode_gap": 0.18
+     },
+     "lost": 5,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q1307"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.5222,
+       "shown": 3.88
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7208,
+       "precision": 0.4966,
+       "shown": 3.98
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 93,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7809,
+       "precision": 0.6818,
+       "shown": 2.57
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.3947
+    },
+    {
+     "values": {
+      "episode_floor": 0.08,
+      "episode_gap": 0.2
+     },
+     "lost": 5,
+     "lost_ids": [
+      "main:q107",
+      "main:q1307",
+      "scale:q107",
+      "scale:q707",
+      "small:q1307"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 3,
+       "mrr": 0.7355,
+       "precision": 0.518,
+       "shown": 3.93
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 104,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7208,
+       "precision": 0.4922,
+       "shown": 4.02
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 93,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7809,
+       "precision": 0.681,
+       "shown": 2.57
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6706,
+       "shown": 0.0
+      }
+     },
+     "abstained": 5,
+     "quality": 1.3924
+    },
+    {
+     "values": {
+      "episode_floor": 0.04,
+      "episode_gap": 0.15
+     },
+     "lost": 1,
+     "lost_ids": [
+      "scale:q107"
+     ],
+     "stores": {
+      "main": {
+       "answerable": 113,
+       "answered": 107,
+       "unanswerable": 18,
+       "abstained": 0,
+       "mrr": 0.7469,
+       "precision": 0.4818,
+       "shown": 4.73
+      },
+      "scale": {
+       "answerable": 113,
+       "answered": 105,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7287,
+       "precision": 0.4337,
+       "shown": 5.08
+      },
+      "small": {
+       "answerable": 97,
+       "answered": 94,
+       "unanswerable": 18,
+       "abstained": 1,
+       "mrr": 0.7912,
+       "precision": 0.6729,
+       "shown": 2.69
+      },
+      "speakers": {
+       "answerable": 17,
+       "answered": 17,
+       "unanswerable": 1,
+       "abstained": 1,
+       "mrr": 0.9706,
+       "precision": 0.6353,
+       "shown": 0.0
+      }
+     },
+     "abstained": 2,
+     "quality": 1.3653
+    }
+   ]
+  }
+ ],
+ "passages": true,
+ "today_tune": {
+  "stores": {
+   "main": {
+    "answerable": 113,
+    "answered": 107,
+    "unanswerable": 18,
+    "abstained": 0,
+    "mrr": 0.7487,
+    "precision": 0.4872,
+    "shown": 4.76
+   },
+   "scale": {
+    "answerable": 113,
+    "answered": 106,
+    "unanswerable": 18,
+    "abstained": 1,
+    "mrr": 0.7364,
+    "precision": 0.4379,
+    "shown": 5.08
+   },
+   "small": {
+    "answerable": 97,
+    "answered": 94,
+    "unanswerable": 18,
+    "abstained": 1,
+    "mrr": 0.7912,
+    "precision": 0.6722,
+    "shown": 2.73
+   },
+   "speakers": {
+    "answerable": 17,
+    "answered": 17,
+    "unanswerable": 1,
+    "abstained": 1,
+    "mrr": 0.9706,
+    "precision": 0.6255,
+    "shown": 0.0
+   }
+  },
+  "abstained": 2,
+  "quality": 1.3674
+ },
+ "passages_tune": {
+  "stores": {
+   "main": {
+    "answerable": 113,
+    "answered": 107,
+    "unanswerable": 18,
+    "abstained": 0,
+    "mrr": 0.7469,
+    "precision": 0.4818,
+    "shown": 4.73
+   },
+   "scale": {
+    "answerable": 113,
+    "answered": 105,
+    "unanswerable": 18,
+    "abstained": 1,
+    "mrr": 0.7287,
+    "precision": 0.4337,
+    "shown": 5.08
+   },
+   "small": {
+    "answerable": 97,
+    "answered": 94,
+    "unanswerable": 18,
+    "abstained": 1,
+    "mrr": 0.7912,
+    "precision": 0.6729,
+    "shown": 2.69
+   },
+   "speakers": {
+    "answerable": 17,
+    "answered": 17,
+    "unanswerable": 1,
+    "abstained": 1,
+    "mrr": 0.9706,
+    "precision": 0.6353,
+    "shown": 0.0
+   }
+  },
+  "abstained": 2,
+  "quality": 1.3653
+ },
+ "chosen": null
+}

@@ -203,6 +203,89 @@ class VectorEngine:
         where = [f"id IN ({','.join('?' for _ in wanted)})"]
         return dict(self._exact(table, where, wanted, query_vec, len(wanted)))
 
+    def best_passages(
+        self,
+        query_vec: list[float] | None,
+        *,
+        tenant_id: str | None = None,
+        tier: list[str] | tuple[str, ...] = RECALLABLE_TIERS,
+        limit: int = 10,
+        episode_ids: list[str] | None = None,
+    ) -> dict[str, tuple[float, str, int, int]]:
+        """Each memory's best passage for the question (the memory plan's W5,
+        ``memory.passages``): ``{episode id: (similarity, side, start,
+        stop)}``, the best *limit* memories (or exactly *episode_ids*), every
+        passage of the space's recallable memories compared, comparable
+        vectors only. Empty when the memory has no passage table."""
+        if not query_vec or limit <= 0 or not self.available:
+            return {}
+        tenant_id = space_named_or_bound(tenant_id)
+        tiers = [str(t) for t in tier if t]
+        where = ["p.tenant_id = ?", "e.id = p.episode_id", f"e.tier IN ({','.join('?' for _ in tiers)})",
+                 "length(p.embedding) = ?"]
+        params: list[Any] = [tenant_id, *tiers, len(query_vec) * 4]
+        if self.model:
+            where.append("(p.embedding_model_version = '' OR p.embedding_model_version = ?)")
+            params.append(self.model)
+        if episode_ids is not None:
+            wanted = list(dict.fromkeys(str(i) for i in episode_ids if i))
+            if not wanted:
+                return {}
+            where.append(f"p.episode_id IN ({','.join('?' for _ in wanted)})")
+            params.extend(wanted)
+            limit = len(wanted)
+        predicate = " AND ".join(where)
+        try:
+            rows = (self._passages_sqlite_vec(predicate, params, query_vec, limit) if self.has_sqlite_vec
+                    else self._passages_numpy(predicate, params, query_vec, limit))
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc):
+                return {}
+            raise
+        return {eid: (sim, side, start, stop) for eid, sim, side, start, stop in rows}
+
+    def _passages_sqlite_vec(self, predicate: str, params: list[Any], query_vec: list[float],
+                             limit: int) -> list[tuple[str, float, str, int, int]]:
+        # MIN() with bare columns: SQLite reads them from the row holding the
+        # minimum, the memory's best passage. A zero vector's NULL is skipped.
+        sql = (
+            "SELECT p.episode_id, MIN(vec_distance_cosine(p.embedding, ?)) AS d, p.side, p.start, p.stop "
+            f"FROM episode_passages p, episodes e WHERE {predicate} "  # nosec B608 - '?' placeholders and fixed text
+            "GROUP BY p.episode_id HAVING d IS NOT NULL ORDER BY d ASC LIMIT ?"
+        )
+        rows = self.conn.execute(sql, [self._query_blob(query_vec), *params, int(limit)]).fetchall()
+        return [(str(r[0]), 1.0 - float(r[1]), str(r[2]), int(r[3]), int(r[4])) for r in rows]
+
+    def _passages_numpy(self, predicate: str, params: list[Any], query_vec: list[float],
+                        limit: int) -> list[tuple[str, float, str, int, int]]:
+        np = self._numpy
+        if np is None:
+            return []
+        q = np.asarray(query_vec, dtype=np.float32)
+        qn = float(np.linalg.norm(q))
+        if qn == 0.0:
+            return []
+        q = q / qn
+        best: dict[str, tuple[float, str, int, int]] = {}
+        cur = self.conn.execute(
+            f"SELECT p.episode_id, p.side, p.start, p.stop, p.embedding FROM episode_passages p, episodes e "  # nosec B608 - '?' placeholders and fixed text
+            f"WHERE {predicate}", params)
+        while True:
+            chunk = cur.fetchmany(_NUMPY_CHUNK)
+            if not chunk:
+                break
+            mat = np.frombuffer(b"".join(bytes(r[4]) for r in chunk), dtype=np.float32).reshape(len(chunk), q.shape[0])
+            norms = np.linalg.norm(mat, axis=1)
+            sims = np.divide(mat @ q, norms, out=np.full(len(chunk), np.nan, dtype=np.float32), where=norms > 0)
+            for r, sim in zip(chunk, sims.tolist()):
+                if sim != sim:
+                    continue
+                eid = str(r[0])
+                if eid not in best or sim > best[eid][0]:
+                    best[eid] = (float(sim), str(r[1]), int(r[2]), int(r[3]))
+        ranked = sorted(best.items(), key=lambda kv: kv[1][0], reverse=True)[:limit]
+        return [(eid, sim, side, start, stop) for eid, (sim, side, start, stop) in ranked]
+
     def comparable_clause(self, dim: int) -> tuple[str, list[Any]]:
         """SQL predicate for rows whose vector can be compared with a *dim* query."""
         sql = "embedding IS NOT NULL AND length(embedding) = ?"
