@@ -432,3 +432,12 @@ the benchmarks page regenerated.
    `tests/test_recall_block_is_what_is_measured.py`. W0's runs are measured
    on this block: the dev runs' block conditions were already built so, and
    Kazma's turn and the real-use suite run after the fix.
+9. **The per-call ledger keeps no count of the cache's share.** Found moving
+   W0 to Qwen (22 Nov): `llm_calls` (`observability/llm_ledger.py`) has
+   prompt, completion and total tokens and no column for the prompt tokens
+   the provider served from its cache (DeepSeek's `prompt_cache_hit_tokens`,
+   Qwen's and OpenAI's `prompt_tokens_details.cached_tokens`), so Kazma's
+   spend reports and the real-use suite's "spent" cannot show it (the
+   suite now counts its judge's own, `judge_spent`). It belongs to the same
+   ledger fix as finding 6, after W0: one column, filled from either shape,
+   summed beside the prompt tokens. Not fixed now.
