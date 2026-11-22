@@ -348,6 +348,16 @@ def test_the_second_judge_is_compared_with_the_first(lme):
     assert lme.judges_agree([_row("a", {"kazma": True})]) == {}
 
 
+def test_the_second_judge_is_compared_on_every_condition_it_read(lme):
+    """Kazma's turn and another build's block are judged twice too: the
+    agreement names them (it read only the six base conditions)."""
+    rows = [_row("a", {lme.TURN: True, "kazma_before": True}, {lme.TURN: False, "kazma_before": True})]
+    agree = lme.judges_agree(rows)
+    assert agree == {lme.TURN: 0.0, "kazma_before": 1.0, "overall": 0.5, "n": 2}
+    # Control: the base conditions alone find nothing in this run.
+    assert not [c for c in lme.CONDITIONS if f"{c}_judge2" in rows[0]]
+
+
 def test_the_noise_run_counts_the_answers_that_flip(lme):
     a = {"results": [_row("a", {"kazma": True}), _row("b", {"kazma": False}), _row("c", {"kazma": True})]}
     b = {"results": [_row("a", {"kazma": True}), _row("b", {"kazma": True}), _row("c", {"kazma": False})]}
@@ -357,6 +367,21 @@ def test_the_noise_run_counts_the_answers_that_flip(lme):
     assert report["conditions"]["kazma"]["flipped"] == ["b", "c"]
     # Control: a run compared with itself flips nothing.
     assert lme.noise(a, a)["conditions"]["kazma"]["flips"] == 0
+
+
+def test_the_noise_run_counts_another_builds_block_too(lme):
+    """The block another build made (``--blocks``) flips like any condition:
+    W1a's before-and-after is read against both sides' noise."""
+    a = {"conditions": ["kazma"], "blocks_from": {"kazma_before": "abc"},
+         "results": [_row("a", {"kazma": True, "kazma_before": True}),
+                     _row("b", {"kazma": True, "kazma_before": False})]}
+    b = {"conditions": ["kazma"], "blocks_from": {"kazma_before": "abc"},
+         "results": [_row("a", {"kazma": True, "kazma_before": False}),
+                     _row("b", {"kazma": True, "kazma_before": False})]}
+    report = lme.noise(a, b)
+    assert report["conditions"]["kazma_before"]["flipped"] == ["a"]
+    # Control: a run that did not ask for that block compares none.
+    assert "kazma_before" not in lme.noise(a, {**b, "blocks_from": {}})["conditions"]
 
 
 def test_the_answers_read_by_hand_start_with_the_judges_disagreements(lme):

@@ -1149,11 +1149,15 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
 
 def judges_agree(results: list[dict[str, Any]]) -> dict[str, Any]:
     """How often the second judge gives the first judge's verdict, per
-    condition and overall (the memory plan's W0: the judge is checked)."""
+    condition and overall (the memory plan's W0: the judge is checked).
+
+    Every condition the second judge read: the base ones, Kazma's turn and a
+    block another build made (``--blocks``), whichever the run asked."""
     out: dict[str, Any] = {}
     pairs_all = 0
     same_all = 0
-    for c in CONDITIONS:
+    judged = sorted({k[: -len("_judge2")] for r in results for k in r if k.endswith("_judge2")})
+    for c in judged:
         pairs = [(r[c], r[f"{c}_judge2"]) for r in results if f"{c}_judge2" in r]
         if pairs:
             same = sum(1 for a, b in pairs if a == b)
@@ -1174,7 +1178,12 @@ def noise(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     rows_b = {r["id"]: r for r in b["results"]}
     common = sorted(set(rows_a) & set(rows_b))
     out: dict[str, Any] = {"questions": len(common), "conditions": {}}
-    both = [c for c in (a.get("conditions") or CONDITIONS) if c in (b.get("conditions") or CONDITIONS)]
+    def asked(run: dict[str, Any]) -> list[str]:
+        # The base conditions, and a block another build made (``--blocks``):
+        # the before-and-after of a change is judged against its own flips.
+        return [*(run.get("conditions") or CONDITIONS), *(run.get("blocks_from") or {})]
+
+    both = [c for c in asked(a) if c in asked(b)]
     for c in both:
         if not all(c in rows_a[q] and c in rows_b[q] for q in common):
             continue

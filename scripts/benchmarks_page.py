@@ -444,6 +444,19 @@ def _longmemeval(folder: Path) -> list[str]:
     return lines
 
 
+def _judges_agree(results: list[dict]) -> dict[str, float]:
+    """How often the second judge gave the first judge's verdict, per
+    condition, from the per-question rows (``<condition>_judge2``): a run
+    summarised before every condition was counted (the block another build
+    made, Kazma's turn) is read the same way."""
+    out: dict[str, float] = {}
+    for c in sorted({k[: -len("_judge2")] for r in results for k in r if k.endswith("_judge2")}):
+        pairs = [(r[c], r[f"{c}_judge2"]) for r in results if c in r and f"{c}_judge2" in r]
+        if pairs:
+            out[c] = round(sum(1 for a, b in pairs if a == b) / len(pairs), 4)
+    return out
+
+
 def _longmemeval_dev(folder: Path) -> list[str]:
     """The dev split (the memory plan's W0): what recall finds beside the
     plain retrieval baselines, and the end-to-end runs -- each history
@@ -527,8 +540,18 @@ def _longmemeval_dev(folder: Path) -> list[str]:
     noise_file = folder / "noise_dev.json"
     noise = json.loads(noise_file.read_text(encoding="utf-8")) if noise_file.is_file() else {}
     flips = (noise.get("conditions") or {})
-    agree = (a.get("judges_agree") or {})
-    o = a["overall"]
+    agree = _judges_agree(a.get("results") or [])
+    o = dict(a["overall"])
+    # Kazma's own chat turn (W1c) is asked in a run of its own: its row sits
+    # beside the block it reads.
+    turn_file = folder / "answers_dev_turn.json"
+    turn = json.loads(turn_file.read_text(encoding="utf-8")) if turn_file.is_file() else None
+    if turn and turn.get("reader") == a.get("reader") and "kazma_turn" in turn["overall"]:
+        o["kazma_turn"] = turn["overall"]["kazma_turn"]
+        o.setdefault("prompt_tokens_mean", {})
+        o["prompt_tokens_mean"] = {**o["prompt_tokens_mean"],
+                                   "kazma_turn": (turn["overall"].get("prompt_tokens_mean") or {}).get("kazma_turn", 0)}
+        agree = {**agree, **_judges_agree(turn.get("results") or [])}
     lines += [
         f"**Answering from it**: reader {a['reader']} with its reasoning {a.get('reader_reasoning', 'off')}; "
         f"judges {a['judge']} and {a.get('judge2') or '–'} (LongMemEval's prompts). The same build answered "
@@ -545,8 +568,17 @@ def _longmemeval_dev(folder: Path) -> list[str]:
         f = flips.get(key) or {}
         lines.append(f"| {name} | {_pct(o[key])} | {_pct(f.get('b'))} | "
                      f"{f.get('flips', '–')} | {_pct(agree.get(key))} | {tokens.get(key, 0):,} |")
-    cut = a.get("cut_at_limit") or {}
-    unasked = a.get("unanswered") or {}
+    cut = dict(a.get("cut_at_limit") or {})
+    unasked = dict(a.get("unanswered") or {})
+    if turn and "kazma_turn" in o:
+        cut.update({k: v for k, v in (turn.get("cut_at_limit") or {}).items()})
+        unasked.update({k: v for k, v in (turn.get("unanswered") or {}).items()})
+        t = turn.get("turn") or {}
+        lines += ["", f"Kazma's own turn answers through the agent's chat turn (W1c): its base prompt, the recall "
+                      f"block a turn gets, `memory_search`, `memory_read` and `memory_list`, at most three tool "
+                      f"rounds, asked once ({t.get('calls_mean', '–')} model calls and "
+                      f"{t.get('tool_requests_mean', '–')} tool requests a question, {t.get('seconds_p50', '–')} s "
+                      f"median)."]
     if any(cut.values()) or any(unasked.values()):
         lines += ["", f"Answers cut at the reader's limit: {sum(cut.values())}; answers or verdicts the API "
                       f"refused: {sum(unasked.values())} (scored wrong)."]

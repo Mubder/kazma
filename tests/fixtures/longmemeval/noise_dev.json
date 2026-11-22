@@ -1,0 +1,100 @@
+{
+ "questions": 200,
+ "conditions": {
+  "kazma": {
+   "flips": 4,
+   "flipped": [
+    "1da05512",
+    "4d6b87c8",
+    "54026fce",
+    "gpt4_5501fe77"
+   ],
+   "a": 0.675,
+   "b": 0.675
+  },
+  "kazma_whole": {
+   "flips": 4,
+   "flipped": [
+    "54026fce",
+    "6456829e_abs",
+    "b46e15ed",
+    "gpt4_5501fe77"
+   ],
+   "a": 0.755,
+   "b": 0.755
+  },
+  "full": {
+   "flips": 13,
+   "flipped": [
+    "0a995998",
+    "195a1a1b",
+    "37f165cf",
+    "5a7937c8",
+    "6456829e_abs",
+    "830ce83f",
+    "a3838d2b",
+    "a9f6b44c",
+    "gpt4_21adecb5",
+    "gpt4_59149c78",
+    "gpt4_93159ced_abs",
+    "gpt4_a1b77f9c",
+    "gpt4_ab202e7f"
+   ],
+   "a": 0.895,
+   "b": 0.88
+  },
+  "oracle": {
+   "flips": 5,
+   "flipped": [
+    "35a27287",
+    "a11281a2",
+    "b0479f84",
+    "gpt4_5501fe77",
+    "gpt4_93159ced_abs"
+   ],
+   "a": 0.905,
+   "b": 0.91
+  },
+  "bge_top10": {
+   "flips": 6,
+   "flipped": [
+    "46a3abf7",
+    "6456829e_abs",
+    "9a707b81",
+    "a11281a2",
+    "a9f6b44c",
+    "gpt4_59149c78"
+   ],
+   "a": 0.835,
+   "b": 0.825
+  },
+  "bm25_top10": {
+   "flips": 3,
+   "flipped": [
+    "0edc2aef",
+    "gpt4_5501fe77",
+    "gpt4_93f6379c"
+   ],
+   "a": 0.745,
+   "b": 0.74
+  },
+  "kazma_before": {
+   "flips": 7,
+   "flipped": [
+    "09d032c9",
+    "1da05512",
+    "37f165cf",
+    "6456829e_abs",
+    "8550ddae",
+    "d23cf73b",
+    "gpt4_f420262d"
+   ],
+   "a": 0.46,
+   "b": 0.445
+  }
+ },
+ "runs": [
+  "answers_dev.json",
+  "answers_dev_noise.json"
+ ]
+}

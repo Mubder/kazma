@@ -93,6 +93,12 @@ class CountingClient:
         self.usage: Counter[str] = Counter()
         self.errors: list[str] = []
         self.first_messages: list[dict[str, Any]] | None = None
+        # The recall note the supervisor's call was given: the first call is
+        # not always the supervisor's (the intent classifier's refinement,
+        # ``agent/intent/classify._refine_acts_llm``, asks first on a
+        # gray-zone request, with the user's message alone: read from the
+        # first call, 16 of the first 200 dev turns had no block).
+        self.recall_block = ""
 
     def __getattr__(self, name: str) -> Any:
         if name == "inner":
@@ -100,9 +106,11 @@ class CountingClient:
         return getattr(self.inner, name)
 
     def _seen(self, kwargs: dict[str, Any], args: tuple[Any, ...]) -> None:
+        messages = kwargs.get("messages", args[0] if args else None)
         if self.first_messages is None:
-            messages = kwargs.get("messages", args[0] if args else None)
             self.first_messages = [dict(m) for m in messages or []]
+        if not self.recall_block:
+            self.recall_block = _recall_block([dict(m) for m in messages or []])
 
     def _note(self, response: Any) -> None:
         usage = getattr(response, "usage", None) or {}
@@ -334,4 +342,4 @@ async def run_turn(question: str, *, now: float, tenant: str, seed: Callable[[sq
         if result.turn_failed or result.error or not text:
             error = client.errors[-1] if client.errors else ("turn_failed" if result.turn_failed else "no_answer")
         return TurnOutcome(text="" if error else text, error=error, usage=usage,
-                           block=_recall_block(client.first_messages))
+                           block=client.recall_block)

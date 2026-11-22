@@ -37,6 +37,32 @@ def test_a_changed_score_makes_the_page_stale(tmp_path, monkeypatch) -> None:
     assert "12.3 %" in module.render()
 
 
+def test_kazma_s_turn_sits_beside_the_block_it_reads(tmp_path) -> None:
+    """The turn is asked in a run of its own (W1c): its row is on the dev
+    table, and each condition's judge agreement comes from the per-question
+    rows, so a run summarised before every condition was counted still shows
+    it. Control: without the turn's file there is no turn row."""
+    import json
+
+    module = _page_module()
+    rows = [{"id": "a", "kazma": True, "kazma_judge2": True, "kazma_before": False, "kazma_before_judge2": True}]
+    main = {"reader": "r", "judge": "j", "judge2": "j2", "reader_reasoning": "default",
+            "overall": {"n": 1, "kazma": 1.0, "kazma_before": 0.0, "prompt_tokens_mean": {"kazma": 10}},
+            "judges_agree": {"kazma": 1.0}, "results": rows}
+    (tmp_path / "answers_dev.json").write_text(json.dumps(main), encoding="utf-8")
+    text = "\n".join(module._longmemeval_dev(tmp_path))
+    assert "Kazma's own chat turn" not in text
+    assert "| Kazma's recall before the change judged (its blocks from the earlier code) | 0.0 % | – | – | 0.0 % |" \
+        in text
+    turn = {"reader": "r", "overall": {"n": 1, "kazma_turn": 1.0, "prompt_tokens_mean": {"kazma_turn": 900}},
+            "turn": {"calls_mean": 1.5, "tool_requests_mean": 0.5, "seconds_p50": 9.0},
+            "results": [{"id": "a", "kazma_turn": True, "kazma_turn_judge2": True}]}
+    (tmp_path / "answers_dev_turn.json").write_text(json.dumps(turn), encoding="utf-8")
+    text = "\n".join(module._longmemeval_dev(tmp_path))
+    assert "| Kazma's own chat turn (it reads a memory whole with memory_read) | 100.0 % | – | – | 100.0 % | 900 |" \
+        in text
+
+
 def test_every_number_comes_from_a_result_file() -> None:
     text = (ROOT / "docs" / "docs" / "reference" / "benchmarks.md").read_text(encoding="utf-8")
     for source in ("scripts/memory_bench.py", "scripts/knowledge_bench.py", "scripts/document_fidelity.py"):

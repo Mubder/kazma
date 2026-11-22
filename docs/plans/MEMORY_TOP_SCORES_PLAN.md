@@ -137,6 +137,23 @@ measures' own baseline (tokens per ordinary turn, time to first token, small
 store), plus the browser real-use suite. The R9 v8 re-tune and the W1 work
 started on 21 Nov wait for this.
 
+*Measured, 22 Nov* (dev 200; reader qwen3.7-plus at the provider's default
+reasoning, what Kazma sends Qwen; judge qwen3.7-plus, second judge
+qwen3.8-flash; the owner moved the memory work from DeepSeek to Qwen that
+day, and the partial DeepSeek answers are kept aside, labelled, as a record
+only). Answered, the main run and its noise run (the answers that flip):
+Kazma's block 0.675 / 0.675 (4); the block before W1a 0.46 / 0.445 (7); the
+same rounds read whole 0.755 / 0.755 (4); the whole history 0.895 / 0.88
+(13; three histories answered HTTP 400 in both); the oracle 0.905 / 0.91
+(5); bge-m3's ten rounds 0.835 / 0.825 (6); BM25's 0.745 / 0.74 (3).
+Judges agree on 97.8 % of 1,400 pairs. Tokens: prompt 27.8M and 27.5M,
+completion 1.04M and 1.05M (0.93M and 0.94M reasoning); Qwen served 1 % and
+0.1 % of the prompt tokens from its cache (each history is its question's
+own). Results: `tests/fixtures/longmemeval/answers_dev.json`,
+`answers_dev_noise.json`, `noise_dev.json`; the page prints them. The
+largest gaps to the whole history: multi-session 0.40 against 0.89 (W4's),
+temporal 0.60 against 0.91. Left in W0: the 50 model-read answers.
+
 ### W1a. Show the answer (M)
 
 A budget by rank (the top conversation shown whole when it fits, later ones
@@ -195,6 +212,15 @@ that settles it was set after reading that one question. Accepted only on W0's e
 the second judge and the model-read answers, all waiting for DeepSeek
 credit.
 
+*Accepted, 22 Nov* on dev, with and without W1a on one reader and judge
+(the before-block built by 064dfec3b, `longmemeval_blocks.py`): answered
+0.46 -> 0.675 in the main run (+50 / -7 questions) and 0.445 -> 0.675 in the
+noise run (+51 / -5), +51 / -7 by the second judge; 49 gains and 3 losses
+repeat in both runs, against 4 (W1a's block) and 7 (the old block) answers
+that flip between two runs of one build. The real-use suite, two runs each
+side on qwen3.7-plus: 15/18 and 17/18 before, 16/18 and 18/18 with W1a: no
+regression, too noisy to credit (every miss an Arabic step; finding 10).
+
 ### W1c. The product path as the only path (M)
 
 The benchmark answers through Kazma's real turn: base prompt, recall rules,
@@ -220,6 +246,18 @@ block was the harness's. The reader is Kazma's own DeepSeek client, so its
 temperature is the product's (ignored by DeepSeek while it reasons). Turns
 run one at a time. Left for a later piece: facts and summaries in the store
 (the harness seeds conversations only, so the turn's block has neither).
+
+Run 22 Nov on dev (qwen3.7-plus, the provider's default reasoning, one run):
+0.765 answered, nine points over the block alone (0.675), from its
+`memory_read` / `memory_list` calls; 1.76 model calls and 0.71 tool requests a
+question, 20,727 prompt tokens mean (59 % from Qwen's cache: the base prompt
+repeats), 10.4 s median; one call refused (permanent). Judges agree on 96.5 %.
+The harness reported the turn's block equal to its own for 92 %: it read the
+first model call, and on a gray-zone request the intent classifier's
+refinement (`agent/intent/classify._refine_acts_llm`) asks first, with the
+user's message alone. Read from the call that holds the recall note (fixed
+the same day), the turn saw the harness's block for 199 of 200; the one left
+is a product finding (section 7, item 11).
 
 ### W5 + W1b. One passage unit (M)
 
@@ -470,3 +508,17 @@ before building.
    suite now counts its judge's own, `judge_spent`). It belongs to the same
    ledger fix as finding 6, after W0: one column, filled from either shape,
    summed beside the prompt tokens. Not fixed now.
+11. **"Did I switch to more water" suppresses recall.** Found by W1c's run
+   (22 Nov): "For the coffee-to-water ratio in my French press, did I switch
+   to more water per tablespoon of coffee, or less?" is read by the intent
+   engine as an explicit topic shift (`intent_mode=shift_explicit`: the word
+   "switch"), and the supervisor suppresses memory recall for it. The turn
+   answered right from its tools. A question about the user's own past
+   change is not a change of subject; the shift rules belong to the intent
+   engine, not to memory. Not fixed now.
+12. **The intent classifier's refinement calls a thinking model for four
+   seconds.** Found the same day: on a gray-zone request
+   `agent/intent/classify._refine_acts_llm` asks the chat model to classify
+   the request, with a 4 s limit and no reasoning switch; qwen3.7-plus thinks
+   by default. Whether it answers in time, and what it costs a turn, is not
+   measured yet. Not fixed now.

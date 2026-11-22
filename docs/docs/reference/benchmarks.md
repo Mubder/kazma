@@ -143,6 +143,23 @@ Of the 129 answerable questions whose answer is a word or a phrase, its text is 
 
 **The 6 questions with no answer**: Kazma shows nothing for 0.0 % of them; it shows 4.67 memories (982 tokens, median), ten rounds show ten (4,825). Kazma showed nothing for 1.0 % of all the questions.
 
+**Answering from it**: reader qwen3.7-plus with its reasoning default; judges qwen3.7-plus and qwen3.8-flash (LongMemEval's prompts). The same build answered every question twice: an answer that flips between the two runs is the noise, and no change is accepted on a difference smaller than it.
+
+| History | Answered | Second run | Answers that flipped | Judges agree | Tokens a question |
+|---|---|---|---|---|---|
+| Kazma's recall | 67.5 % | 67.5 % | 4 | 97.5 % | 1,322 |
+| Kazma's recall before the change judged (its blocks from the earlier code) | 46.0 % | 44.5 % | 7 | 98.0 % | 1,126 |
+| Kazma's own chat turn (it reads a memory whole with memory_read) | 76.5 % | – | – | 96.5 % | 20,727 |
+| The same conversations read whole | 75.5 % | 75.5 % | 4 | 98.5 % | 2,395 |
+| The whole history | 89.5 % | 88.0 % | 13 | 97.5 % | 114,326 |
+| Only the answering conversations (oracle) | 90.5 % | 91.0 % | 5 | 97.5 % | 6,495 |
+| bge-m3's 10 nearest rounds (plain retrieval) | 83.5 % | 82.5 % | 6 | 97.5 % | 4,790 |
+| BM25's 10 best rounds (plain retrieval) | 74.5 % | 74.0 % | 3 | 98.0 % | 5,196 |
+
+Kazma's own turn answers through the agent's chat turn (W1c): its base prompt, the recall block a turn gets, `memory_search`, `memory_read` and `memory_list`, at most three tool rounds, asked once (1.76 model calls and 0.71 tool requests a question, 10.43 s median).
+
+Answers cut at the reader's limit: 0; answers or verdicts the API refused: 4 (scored wrong).
+
 Reproduce: download LongMemEval into a folder of its own, then `python scripts/longmemeval_bench.py retrieve --data DIR` (and `answer`, `translate`, `parallel`; those call a model).
 
 ## Knowledge Library: does search find the right page? {#knowledge}

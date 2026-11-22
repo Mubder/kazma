@@ -67,6 +67,29 @@ def _item(question: str, evidence: str, *, evidence_date: str = "2023/05/10 (Wed
             "answer_session_ids": ["s0"]}
 
 
+def test_the_block_is_read_from_the_call_that_holds_it(scripts):
+    """The intent classifier's refinement can ask first, with the user's
+    message alone: the turn's block is the one the supervisor's call held
+    (16 of the first 200 dev turns read no block from the first call)."""
+    import asyncio
+
+    _bench, turn = scripts
+    CountingClient, _recall_block = turn.CountingClient, turn._recall_block
+
+    class Any_:
+        async def chat(self, *args, **kwargs):
+            return type("R", (), {"usage": {}, "tool_calls": None, "finish_reason": "stop"})()
+
+    note = {"role": "system", "content": "## Memory recall rules\n- one\n\n## Relevant History\n- a memory"}
+    client = CountingClient(Any_())
+    client.reset()
+    asyncio.run(client.chat([{"role": "user", "content": "Where do I live?"}], tools=None))
+    asyncio.run(client.chat(messages=[note, {"role": "user", "content": "Where do I live?"}]))
+    assert client.recall_block == note["content"]
+    # Control: the first call's messages hold no block.
+    assert _recall_block(client.first_messages) == ""
+
+
 class Scripted:
     """A stand-in model: answers each call from *script* (a function of the
     call's messages and offered tools), records what it was sent."""
