@@ -322,3 +322,26 @@ the benchmarks page regenerated.
    split (4.8 memories, 1,089 tokens); on Kazma's own benchmark 0 of 22
    English and 0 of 4 Arabic (`tests/fixtures/memory_bench/product_measures.json`).
    W3 + W2's to fix: saying nothing when nothing fits.
+6. **Memory's own model calls are not in the per-call ledger.** Found by
+   the Spaces builder's review of every model call (22 Nov) and checked in
+   the code: no module under `kazma_core/memory/` and not
+   `skills/self_improvement.py` calls `llm_ledger.record_llm_call` or goes
+   through `resilient_chat`. Unledgered:
+   - the deep pass (`belief_extractor._llm_extract`), a call per turn
+     that is not small talk;
+   - the weekly summaries and the month and project roll-ups
+     (`topic_summaries._default_chat`, used by `topic_rollups` too);
+   - entity disambiguation (`entity_resolution`, off by default:
+     `entity_llm_disambiguate`);
+   - the lesson refiner (`analyze_and_apply_chat_turn`, and
+     `_analyze_success` / `_analyze_failure` for the swarm worker);
+   - the V1 backfill's fact pass (`backfill_v2`).
+
+   So Kazma's spend reports never show them, the product measure "cost per
+   ordinary turn" misses them, and a person's daily limit (Spaces S2-02)
+   cannot count them. A product fix, scheduled after W0: ledger each call
+   under the person the turn was for (the asker the work's scope binds;
+   Kazma's own sweeps name nobody, as the ledger already does). Gate: every
+   memory model call is ledgered, read from the source, a planted
+   unledgered call as the negative control. The benchmark's recorded
+   replies (`benchmark.py`'s recorder) are not the product's calls.
