@@ -153,18 +153,183 @@ def test_the_installer_is_built_from_the_build_jobs_checked_archive():
     assert '--source "dist/kazma-${BASE}.tar.gz"' in runs and "--install-inno" in runs
 
 
-def test_signing_is_wired_and_checked_and_says_when_it_is_off():
-    steps = _job("windows-installer")["steps"]
-    signing = [s for s in steps if "artifact-signing-action" in str(s.get("uses") or "")]
-    login = [s for s in steps if str(s.get("uses") or "").startswith("azure/login@")]
-    assert signing and login
-    for step in (*signing, *login):
-        assert step.get("if") == "${{ vars.KAZMA_WINDOWS_SIGNING == 'artifact-signing' }}"
-    check = next(s for s in steps if s.get("name") == "Check the installer's signature")
-    assert "Get-AuthenticodeSignature" in check["run"] and "'Valid'" in check["run"]
-    assert "unsigned" in check["run"]
+#: The signing services one repository variable chooses between, and the
+#: action each signs with, in the one shared signing step. Moving from one to
+#: another is the variable and the new service's secrets and variables, all
+#: named in docs/SUPPLY_CHAIN.md.
+SIGNING_SERVICES = {
+    "signpath": "signpath/github-action-submit-signing-request@",
+    "ssl-com": "SSLcom/esigner-codesign@",
+    "artifact-signing": "azure/artifact-signing-action@",
+}
+SIGN_ACTION = ROOT / ".github" / "actions" / "sign-windows-installer" / "action.yml"
+COMPOSITE = yaml.safe_load(SIGN_ACTION.read_text(encoding="utf-8"))
+SIGNING_TEST = yaml.safe_load((ROOT / ".github" / "workflows" / "windows-signing-test.yml").read_text(encoding="utf-8"))
+_SWITCH = re.compile(r"^\$\{\{ inputs\.service == '([a-z-]+)' \}\}$")
+
+
+def _named(steps, name):
+    return next(s for s in steps if s.get("name") == name)
+
+
+def _signing_problems(steps) -> list[str]:
+    """What is wrong with the shared step's signing steps: each service's
+    steps run only when the caller names that service, every service signs,
+    and the first check knows exactly the same services."""
+    problems: list[str] = []
+    by_service: dict[str, list[dict]] = {}
+    for step in steps:
+        cond = str(step.get("if") or "")
+        if "inputs.service" not in cond:
+            continue
+        match = _SWITCH.match(cond)
+        if not match or match.group(1) not in SIGNING_SERVICES:
+            problems.append(f"{step.get('name')}: runs on {cond!r}, not one service the switch names")
+            continue
+        by_service.setdefault(match.group(1), []).append(step)
+    for service, action in SIGNING_SERVICES.items():
+        if not any(str(s.get("uses") or "").startswith(action) for s in by_service.get(service, [])):
+            problems.append(f"{service}: no step signs with {action}")
+    choose = next((s for s in steps if s.get("id") == "choose"), None)
+    listed = re.search(r"-notin @\(([^)]*)\)", choose["run"]) if choose else None
+    named = set(re.findall(r"'([a-z-]+)'", listed.group(1))) if listed else set()
+    if named != set(SIGNING_SERVICES):
+        problems.append(f"the shared step accepts {sorted(named)}, not {sorted(SIGNING_SERVICES)}")
+    return problems
+
+
+def _callers():
+    """Every step that calls the shared signing step, with its workflow."""
+    found = []
+    for workflow, doc in (("release.yml", RELEASE), ("windows-signing-test.yml", SIGNING_TEST)):
+        for job in doc["jobs"].values():
+            for step in job.get("steps", []):
+                if step.get("uses") == "./.github/actions/sign-windows-installer":
+                    found.append((workflow, step))
+    return found
+
+
+def test_one_switch_chooses_the_signing_service_and_the_check_knows_each():
+    steps = COMPOSITE["runs"]["steps"]
+    assert _signing_problems(steps) == []
+    check = _named(steps, "Check the signature")["run"]
+    assert "Get-AuthenticodeSignature" in check and "'Valid'" in check
+    assert "TimeStamperCertificate" in check, "a signature with no timestamp dies with its certificate"
+    assert "unsigned" in check
     # Azure is reached with the run's OIDC token, never a stored secret.
-    assert "client-secret" not in str(login[0].get("with"))
+    login = next(s for s in steps if str(s.get("uses") or "").startswith("azure/login@"))
+    assert "client-secret" not in str(login.get("with"))
+
+
+def test_the_release_and_the_test_sign_through_the_one_shared_step():
+    callers = _callers()
+    release = [step for workflow, step in callers if workflow == "release.yml"]
+    test = [step for workflow, step in callers if workflow == "windows-signing-test.yml"]
+    assert len(release) == 1 and len(test) == 1
+    assert release[0]["with"]["service"] == "${{ vars.KAZMA_WINDOWS_SIGNING }}"
+    assert release[0]["with"]["environment"] == "release"
+    assert test[0]["with"]["environment"] == "test"
+    # YAML reads the key `on` as true.
+    dispatch = (SIGNING_TEST.get("on") or SIGNING_TEST[True])["workflow_dispatch"]
+    assert "artifact-signing" not in dispatch["inputs"]["service"]["options"]
+    # No workflow signs on its own: a second path would be one the test never ran.
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.y*ml")):
+        text = path.read_text(encoding="utf-8")
+        for action in SIGNING_SERVICES.values():
+            assert action not in text, f"{path.name} signs outside the shared step ({action})"
+    # Every credential a caller hands in is a secret, never written in the file.
+    for workflow, step in callers:
+        for key, value in step["with"].items():
+            if any(word in key for word in ("token", "password", "username", "totp", "credential", "client-id",
+                                            "tenant-id", "subscription-id")):
+                assert str(value).startswith("${{ secrets."), (workflow, key)
+
+
+def test_the_signing_test_publishes_nothing():
+    assert SIGNING_TEST["permissions"] == {"contents": "read"}
+    for job in SIGNING_TEST["jobs"].values():
+        assert job["permissions"].get("contents") == "read" and "id-token" not in job["permissions"]
+        text = yaml.safe_dump(job)
+        assert "gh release" not in text and "kazma-dist" not in text and "installer/" not in text
+
+
+def test_control_a_service_the_check_does_not_know_is_found():
+    steps = [dict(s) for s in COMPOSITE["runs"]["steps"]]
+    planted = {"name": "Sign (Other)", "if": "${{ inputs.service == 'other-ca' }}",
+               "uses": "example/sign@0000000000000000000000000000000000000000"}
+    assert _signing_problems([*steps, planted])
+    dropped = [s for s in steps if not str(s.get("uses") or "").startswith(SIGNING_SERVICES["ssl-com"])]
+    assert any("ssl-com" in p for p in _signing_problems(dropped))
+
+
+def test_supply_chain_names_everything_each_service_needs():
+    """Moving to SSL.com (or any of the three), and testing one first, is
+    documented: every secret and variable a caller hands the shared step is
+    named in the windows-signing section, and so is every service."""
+    text = (ROOT / "docs" / "SUPPLY_CHAIN.md").read_text(encoding="utf-8")
+    section = text.split("{#windows-signing}", 1)[1].split("\n## ", 1)[0]
+    for workflow, step in _callers():
+        for name in re.findall(r"(?:secrets|vars)\.([A-Z_]+)", yaml.safe_dump(step["with"])):
+            assert f"`{name}`" in section, f"{name} ({workflow}) is not in SUPPLY_CHAIN.md"
+    for service in SIGNING_SERVICES:
+        assert f"`{service}`" in section, service
+    assert "windows-signing-test.yml" in section
+
+
+def _powershell():
+    import shutil
+
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if sys.platform != "win32" or not shell:
+        pytest.skip("Get-AuthenticodeSignature is Windows PowerShell's")
+    return shell
+
+
+def _run_step(tmp_path, name, env: dict[str, str]) -> int:
+    import os
+    import subprocess
+
+    step = _named(COMPOSITE["runs"]["steps"], name)
+    run = re.sub(r"\$\{\{[^}]*\}\}", "", step["run"])
+    done = subprocess.run([_powershell(), "-NoProfile", "-NonInteractive", "-Command", run], cwd=tmp_path,
+                          env={**os.environ, **env}, capture_output=True, text=True, timeout=120)
+    return done.returncode
+
+
+def _unsigned(tmp_path):
+    (tmp_path / "out").mkdir()
+    exe = tmp_path / "out" / "kazma-0.0.1-windows-setup.exe"
+    exe.write_bytes(b"MZ" + b"\0" * 64)
+    return exe
+
+
+@pytest.mark.parametrize("service, environment, code", [
+    ("", "release", 0), ("signpath", "release", 1), ("ssl-com", "test", 1), ("artifact-signing", "release", 1),
+])
+def test_the_check_passes_an_unsigned_file_only_when_no_service_is_chosen(tmp_path, service, environment, code):
+    """The real check on an unsigned file: no service passes with a notice; a
+    chosen service fails it, in a test as in a release."""
+    exe = _unsigned(tmp_path)
+    env = {"SERVICE": service, "ENVIRONMENT": environment, "TARGET": str(exe)}
+    assert _run_step(tmp_path, "Check the signature", env) == code
+
+
+@pytest.mark.parametrize("service, environment, extra, code", [
+    ("ssl-com", "test", False, 0), ("", "release", False, 0), ("sslcom", "release", False, 1),
+    ("ssl-com", "prod", False, 1), ("artifact-signing", "test", False, 1), ("signpath", "release", True, 1),
+])
+def test_the_shared_step_refuses_a_wrong_choice_before_anything_is_sent(tmp_path, service, environment, extra,
+                                                                        code):
+    """A misspelt service or environment, a test with no test certificate, or
+    a folder holding more than one program fails before any signing step."""
+    _unsigned(tmp_path)
+    if extra:
+        (tmp_path / "out" / "other.exe").write_bytes(b"MZ")
+    output = tmp_path / "github_output"
+    env = {"SERVICE": service, "ENVIRONMENT": environment, "FOLDER": "out", "GITHUB_OUTPUT": str(output)}
+    assert _run_step(tmp_path, "Choose the signing service", env) == code
+    if code == 0:
+        assert "name=kazma-0.0.1-windows-setup.exe" in output.read_text(encoding="utf-8")
 
 
 def test_the_installer_is_checksummed_attested_and_signed_with_the_rest():

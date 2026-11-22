@@ -230,10 +230,51 @@ The installer is built in the release workflow's `windows-installer` job from
 the source archive the `build` job made (`scripts/windows_installer/build.py`
 reads it with the updater's own rules), then checksummed, attested and
 Sigstore-signed with the other files. Windows itself checks a different
-signature (Authenticode). The job adds it with Microsoft's Artifact Signing
-(formerly Trusted Signing) once it is configured, and publishes the installer
-unsigned until then (the run says so). To switch it on, once the Artifact
-Signing account and its identity validation are done:
+signature (Authenticode). One shared step adds it,
+`.github/actions/sign-windows-installer`, with the service the repository
+variable `KAZMA_WINDOWS_SIGNING` names:
+
+| `KAZMA_WINDOWS_SIGNING` | Service | Publisher Windows shows |
+|---|---|---|
+| (unset) | none: the installer is published unsigned and the run says so | none |
+| `signpath` | SignPath Foundation (free for open-source projects) | SignPath Foundation |
+| `ssl-com` | SSL.com eSigner (a paid IV or OV certificate) | the certificate's own name |
+| `artifact-signing` | Microsoft Artifact Signing (not offered in Kuwait) | the validated name |
+
+Any other value fails the job before anything is sent. With a service set,
+the job fails unless Windows reads the signature as valid and timestamped.
+**Moving from one service to another** is that one variable and the new
+service's secrets and variables below; nothing in the workflow changes, and
+the old service's secrets can stay. Kazma's updates do not depend on any of
+it: `kazma update` checks each release by its Sigstore signature.
+
+**SignPath** (`signpath`), once the SignPath Foundation has accepted the
+project:
+
+1. In SignPath: the project (its slug), a signing policy for releases, the
+   artifact configuration that signs the one `.exe` the job uploads (or the
+   project's default), and GitHub connected as the trusted build system for
+   `Mubder/kazma`. A CI user with the *submitter* role and its API token.
+2. In the repository's settings, **Secret**: `SIGNPATH_API_TOKEN`.
+   **Variables**: `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`,
+   `SIGNPATH_SIGNING_POLICY_SLUG`, `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`
+   (empty for the project's default), and `KAZMA_WINDOWS_SIGNING` =
+   `signpath`.
+3. Signed releases carry the line SignPath Foundation's terms ask for:
+   "Free code signing provided by SignPath.io, certificate by SignPath
+   Foundation".
+
+**SSL.com** (`ssl-com`), once an IV or OV code signing certificate is
+enrolled in eSigner:
+
+1. In SSL.com: the certificate's eSigner credential ID, and the one-time-code
+   (TOTP) secret shown when eSigner is set up for automated signing.
+2. In the repository's settings, **Secrets**: `SSL_COM_USERNAME`,
+   `SSL_COM_PASSWORD`, `SSL_COM_CREDENTIAL_ID`, `SSL_COM_TOTP_SECRET`.
+   **Variable**: `KAZMA_WINDOWS_SIGNING` = `ssl-com`.
+
+**Artifact Signing** (`artifact-signing`), once the account and its identity
+validation are done:
 
 1. In Azure: an **Artifact Signing account** and a **certificate profile**
    (Public Trust), and an **app registration** given the role *Artifact
@@ -247,9 +288,21 @@ Signing account and its identity validation are done:
    `https://weu.codesigning.azure.net`), `AZURE_SIGNING_ACCOUNT`,
    `AZURE_SIGNING_PROFILE`, and `KAZMA_WINDOWS_SIGNING` = `artifact-signing`.
 
-From then on the job signs the installer, timestamps it, and fails unless
-Windows reads the signature as valid. Kazma's updates do not depend on it:
-`kazma update` checks each release by its Sigstore signature.
+**Testing a service before switching it on.** The manual workflow
+`windows-signing-test.yml` (Actions -> Windows signing test -> Run workflow)
+signs a tiny program built in the run, never a release file, with the same
+shared step in its test environment, and publishes nothing; the signed
+program is kept for three days. A test signature chains to a test root
+Windows does not trust, so the test checks that a signature and a timestamp
+are there, not that Windows trusts them.
+
+- SSL.com's eSigner sandbox: **Secrets** `SSL_COM_TEST_USERNAME`,
+  `SSL_COM_TEST_PASSWORD`, `SSL_COM_TEST_CREDENTIAL_ID`,
+  `SSL_COM_TEST_TOTP_SECRET`, from a sandbox account or SSL.com's published
+  eSigner demo credentials (the EV code signing test certificate).
+- SignPath's test-signing policy: the SignPath secret and variables above,
+  with **Variables** `SIGNPATH_TEST_SIGNING_POLICY_SLUG` and
+  `SIGNPATH_TEST_ARTIFACT_CONFIGURATION_SLUG` (empty for the default).
 
 ## What this does not prove
 

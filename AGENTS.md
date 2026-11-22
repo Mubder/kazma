@@ -6738,11 +6738,19 @@ type beside a git checkout and a wheel install.
   owner's own files, every moved file backed up first), installs the locked
   packages held (`_reinstall_via_subprocess`), and on a refused or failed
   install rolls the tree back and reinstalls its packages.
-- **Signing** is Artifact Signing, switched on by the repository variable
-  `KAZMA_WINDOWS_SIGNING` = `artifact-signing` (OIDC, no secret; the steps are
-  in `docs/SUPPLY_CHAIN.md` "The Windows installer's signature"); a signed
-  installer must read Valid or the job fails; unsigned, the run says so. The
-  installer is also checksummed, attested and Sigstore-signed with the rest.
+- **Signing** is one shared step, `.github/actions/sign-windows-installer`
+  (2026-11-22), with the service the repository variable
+  `KAZMA_WINDOWS_SIGNING` names: `signpath` (SignPath Foundation), `ssl-com`
+  (SSL.com eSigner) or `artifact-signing` (Microsoft, OIDC). Changing service
+  is that variable and the new service's secrets (`docs/SUPPLY_CHAIN.md` "The
+  Windows installer's signature"); any other value fails before anything is
+  sent; a signed installer must read Valid and timestamped or the job fails;
+  unset, the run says it is unsigned. The manual workflow
+  `windows-signing-test.yml` signs a program it builds, never a release file,
+  through the same step in its test environment (SSL.com's sandbox,
+  SignPath's test-signing policy) and publishes nothing. No workflow names a
+  signing action outside the shared step. The installer is also checksummed,
+  attested and Sigstore-signed with the rest.
 - Gates: `tests/test_release_install.py` (a failure half way and each refusal
   leave the tree as it was; without `KEPT` an archive replaces `.env`, the
   control), `tests/test_windows_installer.py`, the release gates reading the

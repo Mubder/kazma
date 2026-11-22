@@ -1,0 +1,202 @@
+# Sign one Windows program with the service the caller names, then check the
+# signature Windows reads (Authenticode).
+#
+# One place signs for the release (the installer) and for the manual signing
+# test (.github/workflows/windows-signing-test.yml), so a test run exercises
+# the release's own steps. The services: "signpath" (SignPath Foundation),
+# "ssl-com" (SSL.com eSigner) and "artifact-signing" (Microsoft). Moving from
+# one to another is the repository variable KAZMA_WINDOWS_SIGNING and the new
+# service's secrets and variables (docs/SUPPLY_CHAIN.md, "The Windows
+# installer's signature"). An empty service leaves the file unsigned and says
+# so; any other value fails before anything is sent.
+#
+# environment "test" signs with the service's test setup (SSL.com's eSigner
+# sandbox, SignPath's test-signing policy): such a signature chains to a test
+# root Windows does not trust, so the check asks for a signature and a
+# timestamp, not for trust. The release signs with "release" and must read
+# Valid. Gate: tests/test_windows_installer.py.
+name: Sign a Windows program
+description: Sign one .exe with SignPath, SSL.com eSigner or Artifact Signing, and check the signature.
+inputs:
+  service:
+    description: signpath, ssl-com, artifact-signing, or empty for unsigned.
+    required: false
+    default: ""
+  environment:
+    description: release (a signature Windows trusts) or test (a test certificate).
+    required: false
+    default: release
+  folder:
+    description: The folder holding exactly one .exe to sign, relative to the workspace.
+    required: true
+  signpath-api-token:
+    required: false
+    default: ""
+  signpath-organization-id:
+    required: false
+    default: ""
+  signpath-project-slug:
+    required: false
+    default: ""
+  signpath-signing-policy-slug:
+    required: false
+    default: ""
+  signpath-artifact-configuration-slug:
+    required: false
+    default: ""
+  ssl-com-username:
+    required: false
+    default: ""
+  ssl-com-password:
+    required: false
+    default: ""
+  ssl-com-credential-id:
+    required: false
+    default: ""
+  ssl-com-totp-secret:
+    required: false
+    default: ""
+  azure-client-id:
+    required: false
+    default: ""
+  azure-tenant-id:
+    required: false
+    default: ""
+  azure-subscription-id:
+    required: false
+    default: ""
+  azure-endpoint:
+    required: false
+    default: ""
+  azure-account:
+    required: false
+    default: ""
+  azure-profile:
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Choose the signing service
+      id: choose
+      shell: pwsh
+      env:
+        SERVICE: ${{ inputs.service }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        FOLDER: ${{ inputs.folder }}
+      run: |
+        if (-not [string]::IsNullOrEmpty($env:SERVICE) -and $env:SERVICE -notin @('signpath', 'ssl-com', 'artifact-signing')) {
+          Write-Error "the signing service is '$env:SERVICE'; it must be signpath, ssl-com, artifact-signing or empty"
+          exit 1
+        }
+        if ($env:ENVIRONMENT -notin @('release', 'test')) {
+          Write-Error "the signing environment is '$env:ENVIRONMENT'; it must be release or test"
+          exit 1
+        }
+        if ($env:ENVIRONMENT -eq 'test' -and $env:SERVICE -eq 'artifact-signing') {
+          Write-Error 'Artifact Signing has no test certificate here; test with signpath or ssl-com'
+          exit 1
+        }
+        $exe = @(Get-ChildItem -LiteralPath $env:FOLDER -Filter '*.exe' -File)
+        if ($exe.Count -ne 1) { Write-Error "$env:FOLDER holds $($exe.Count) programs, not one"; exit 1 }
+        # UTF-8 without a byte-order mark, whichever PowerShell runs this.
+        [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "path=$($exe[0].FullName)`nname=$($exe[0].Name)`n",
+          [Text.UTF8Encoding]::new($false))
+
+    - name: Sign in to Azure for signing
+      if: ${{ inputs.service == 'artifact-signing' }}
+      uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+      with:
+        client-id: ${{ inputs.azure-client-id }}
+        tenant-id: ${{ inputs.azure-tenant-id }}
+        subscription-id: ${{ inputs.azure-subscription-id }}
+
+    - name: Sign (Artifact Signing)
+      if: ${{ inputs.service == 'artifact-signing' }}
+      uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+      with:
+        endpoint: ${{ inputs.azure-endpoint }}
+        signing-account-name: ${{ inputs.azure-account }}
+        certificate-profile-name: ${{ inputs.azure-profile }}
+        files-folder: ${{ github.workspace }}\${{ inputs.folder }}
+        files-folder-filter: exe
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
+        description: Kazma setup
+        description-url: https://kazma.ai
+
+    # SignPath signs what the run uploads as an artifact: the unsigned file
+    # goes up, SignPath's signing policy decides (an approval in SignPath when
+    # the policy asks for one), and the signed file comes back.
+    - name: Hand the unsigned file to SignPath
+      id: unsigned
+      if: ${{ inputs.service == 'signpath' }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      with:
+        name: unsigned-${{ steps.choose.outputs.name }}
+        path: ${{ steps.choose.outputs.path }}
+        if-no-files-found: error
+        retention-days: 1
+
+    - name: Sign (SignPath)
+      if: ${{ inputs.service == 'signpath' }}
+      uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+      with:
+        api-token: ${{ inputs.signpath-api-token }}
+        organization-id: ${{ inputs.signpath-organization-id }}
+        project-slug: ${{ inputs.signpath-project-slug }}
+        signing-policy-slug: ${{ inputs.signpath-signing-policy-slug }}
+        artifact-configuration-slug: ${{ inputs.signpath-artifact-configuration-slug }}
+        github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+        wait-for-completion: true
+        output-artifact-directory: ${{ runner.temp }}\signpath-signed
+
+    - name: Take the signed file back (SignPath)
+      if: ${{ inputs.service == 'signpath' }}
+      shell: pwsh
+      env:
+        NAME: ${{ steps.choose.outputs.name }}
+        TARGET: ${{ steps.choose.outputs.path }}
+        SIGNED: ${{ runner.temp }}\signpath-signed
+      run: |
+        $signed = @(Get-ChildItem -LiteralPath $env:SIGNED -Recurse -Filter $env:NAME -File)
+        if ($signed.Count -ne 1) { Write-Error "SignPath returned $($signed.Count) copies of $env:NAME, not one"; exit 1 }
+        Copy-Item -LiteralPath $signed[0].FullName -Destination $env:TARGET -Force
+
+    # SSL.com's eSigner signs the file in place with CodeSignTool; "TEST" is
+    # its sandbox, with SSL.com's test certificates.
+    - name: Sign (SSL.com eSigner)
+      if: ${{ inputs.service == 'ssl-com' }}
+      uses: SSLcom/esigner-codesign@cf5f6c1d38ad10f47e3ed9aca873f429b1a8d85b # v1.3.2
+      with:
+        command: sign
+        username: ${{ inputs.ssl-com-username }}
+        password: ${{ inputs.ssl-com-password }}
+        credential_id: ${{ inputs.ssl-com-credential-id }}
+        totp_secret: ${{ inputs.ssl-com-totp-secret }}
+        file_path: ${{ steps.choose.outputs.path }}
+        override: true
+        malware_block: false
+        environment_name: ${{ inputs.environment == 'test' && 'TEST' || 'PROD' }}
+
+    - name: Check the signature
+      shell: pwsh
+      env:
+        SERVICE: ${{ inputs.service }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        TARGET: ${{ steps.choose.outputs.path }}
+      run: |
+        $sig = Get-AuthenticodeSignature -LiteralPath $env:TARGET
+        if ([string]::IsNullOrEmpty($env:SERVICE)) {
+          Write-Host "::notice::$([IO.Path]::GetFileName($env:TARGET)) is unsigned: no signing service is configured (KAZMA_WINDOWS_SIGNING)."
+          exit 0
+        }
+        if (-not $sig.SignerCertificate -or $sig.Status -in @('NotSigned', 'HashMismatch')) {
+          Write-Error "$env:SERVICE did not sign the file: it reads $($sig.Status)"; exit 1
+        }
+        if (-not $sig.TimeStamperCertificate) { Write-Error 'the file is signed with no timestamp'; exit 1 }
+        if ($env:ENVIRONMENT -eq 'release' -and $sig.Status -ne 'Valid') {
+          Write-Error "the release signature is $($sig.Status), not Valid"; exit 1
+        }
+        Write-Host "Signed by $($sig.SignerCertificate.Subject) ($env:SERVICE, $env:ENVIRONMENT): $($sig.Status)"
