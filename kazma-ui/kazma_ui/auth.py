@@ -1820,7 +1820,7 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
     present (audit H11 + SaaS residual). Single-tenant default is ``default``.
     """
     from kazma_core.spaces.identity import IdentityUnavailable
-    from kazma_core.spaces.scope import reset_scope, set_scope, spaces_enforced, valid_space_id
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, reset_scope, set_scope, spaces_enforced, valid_space_id
     from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
     from kazma_core.tenant_isolation import (
         client_tenant_spoof_allowed,
@@ -1895,12 +1895,13 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                 )
             if tenant_id:
                 explicit_tenant = True
-        elif not tenant_id:
-            # Hardened mode — never trust client header
-            tenant_id = "default"
 
         if not tenant_id:
-            tenant_id = "default"
+            # Hardened mode never trusts a client header. A request with no
+            # tenant runs in the owner's space while Spaces is not enforced;
+            # once it is, space_for_request below binds the space the page
+            # names and checks membership (Spaces S1-04, S1-06).
+            tenant_id = OWNER_SPACE_ID
 
         if tenant_id:
             logger.debug("[TENANT] Inbound request scoped to tenant_id: %s", tenant_id)

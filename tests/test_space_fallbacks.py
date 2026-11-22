@@ -234,3 +234,39 @@ def test_a_legacy_x_post_with_no_tenant(tmp_path, enforced) -> None:
     # A row stored before Spaces is the owner's (N19).
     [older] = [post for post in store.list_due(now=5_000_000_000.0) if post.id == unnamed]
     assert older.tenant_id == scope.OWNER_SPACE_ID
+
+
+# ── the web UI and the rest of core ─────────────────────────────────────
+
+
+def test_a_request_s_approvals_are_its_space_s(monkeypatch) -> None:
+    """The pending approvals of `kazma mcp` are listed by the request's
+    space; with none bound once Spaces is enforced, none is matched."""
+    from kazma_ui.routes_direct.misc import _current_tenant, _is_own_bridge_gate
+
+    gate = {"mechanism": "bus_bridge", "tenant_id": "family"}
+    older = {"mechanism": "bus_bridge", "tenant_id": ""}
+    with bind_scope("family", "layla"):
+        assert _current_tenant() == "family"
+        assert _is_own_bridge_gate(gate) and not _is_own_bridge_gate(older)
+    assert _current_tenant() == scope.OWNER_SPACE_ID  # one operator, as before
+    assert _is_own_bridge_gate(older)  # a row from before Spaces is the owner's
+    monkeypatch.setattr(scope, "_enforced", True)
+    assert _current_tenant() == ""
+    assert not _is_own_bridge_gate(gate) and not _is_own_bridge_gate(older)
+
+
+def test_control_the_old_request_tenant_was_the_owners(enforced) -> None:
+    from kazma_core.tenant_context import get_current_tenant_id
+
+    old = (get_current_tenant_id() or "default").strip() or "default"
+    assert old == scope.OWNER_SPACE_ID
+
+
+def test_a_tenant_key_named_empty_is_the_bound_space_s() -> None:
+    from kazma_core.tenant_isolation import tenant_key
+
+    with bind_scope("family", "layla"):
+        assert tenant_key("x.y", tenant_id="") == "tenant.family.x.y"
+        assert tenant_key("x.y", tenant_id=" ") == "tenant.family.x.y"
+    assert tenant_key("x.y", tenant_id="") == "x.y"

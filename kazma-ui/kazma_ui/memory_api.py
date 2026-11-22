@@ -158,7 +158,9 @@ def _consume_undo(token: str) -> dict[str, Any] | None:
         return None
     if time.time() > float(entry.get("expires_at") or 0):
         return None
-    if str(entry.get("tenant") or "default") != _memory_tenant_id():
+    from kazma_core.spaces.scope import space_of_record
+
+    if space_of_record(entry.get("tenant")) != _memory_tenant_id():
         return None
     return entry
 
@@ -1536,6 +1538,8 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
 
 def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
     """Blocking half of :func:`edit_belief` -- runs off the event loop."""
+    from kazma_core.spaces.scope import space_of_record  # a fact naming no tenant: the owner's (N19)
+
     bid = (belief_id or "").strip()
     if not bid:
         return {"ok": False, "error": "belief_id required"}
@@ -1658,7 +1662,7 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
                 str(subject), str(obj),
             }
             recompute_entity_counts(
-                conn, [a for a in affected if a], tenant_id=str(row["tenant_id"] or "default")
+                conn, [a for a in affected if a], tenant_id=space_of_record(row["tenant_id"])
             )
         except Exception:
             logger.debug("[memory_api] edit count recompute failed", exc_info=True)
@@ -1684,7 +1688,7 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
                 obj=str(row["object"]),
                 # The fact's own tenant: the edge is found under its subject's
                 # node, which is the tenant's (it went to "default").
-                tenant_id=str(row["tenant_id"] or "default"),
+                tenant_id=space_of_record(row["tenant_id"]),
             )
         except Exception:
             logger.debug("[memory_api] neo4j edge cleanup after an edit skipped", exc_info=True)
