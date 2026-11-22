@@ -1686,7 +1686,21 @@ came up short, and archiving had erased 76 memories.
   is what it always was), **keyword search all of it**; a passage vector per
   stretch of a long memory is a later step (`docs/plans/MEMORY_REMAINING.md`).
   **Shown bounded, read whole**: the recall block shows a memory with its
-  own bounds (`RECALL_SHOW_*`) and, when it leaves some out, a note in the
+  own bounds -- **room by rank** (the memory plan's W1a, 2026-11-22,
+  `recall._room_by_rank`, `episode_text.display_at`): the best recalled
+  conversation up to `RECALL_LEAD_SHOW` (1,500) characters, every other
+  `RECALL_OTHER_SHOW` (500), each side cut around the stretch holding the
+  most of the question's words (`query_terms.word_term`: search's reading,
+  folded, the article and one-letter prefixes, a light plural); when the
+  block's budget would leave a line out the others give way first (to
+  `RECALL_OTHER_LEAST`), then the best (to `RECALL_LEAD_LEAST`). Recall
+  keeps each conversation's first `RECALL_FOCUS_READ` characters a side
+  and how much more it holds (`_keep_sides`, in the asker's tenant); a
+  follow-up joined to its turn and another member's turn keep recall's
+  line (`_roomy`), and a hit with no sides is shown at `RECALL_SHOW_*` as
+  before. Gate: `tests/test_recall_room_by_rank.py` (the fixed bounds, the
+  block without the ladder and a raw word reading as negative controls) --
+  and, when it leaves some out, a note in the
   memory's language naming how many characters and `memory_read("<id>")`
   (`episode_text.more_note`); `memory_search` and the probe show up to
   `MEMORY_SHOW_MAX` (1,500); `memory_read` (read tier, fenced, the caller's
@@ -2350,11 +2364,21 @@ four injected were noise.
   rows are written one line each (`dump_result`, `compact_row`). Most missed answers were
   shown but cut by the block's per-memory bounds (`limits.RECALL_SHOW_*`).
   The bounds measured (`scripts/recall_block_bounds.py`, evidence in
-  `docs/audits/evidence/recall_block_bounds/`; a proposal, not built):
-  0.48 today; every round shown whole 0.59, the budget raised to 4,000
-  tokens 0.58; the best round at up to 1,500 characters around the
-  question's words and the others at 500 (250 when the 1,500-token budget
-  needs it), list answers too, 0.74, no line left out.
+  `docs/audits/evidence/recall_block_bounds/`): 0.48 with the fixed
+  bounds; every round shown whole 0.59, the budget raised to 4,000 tokens
+  0.58; the best round at up to 1,500 characters around the question's
+  words and the others at 500 (250 when the 1,500-token budget needs it),
+  list answers too, 0.74, no line left out. That shape is built as W1a
+  (room by rank, §15F, 2026-11-22) and **not yet accepted**: acceptance
+  waits for W0's end-to-end dev answering and its noise run. With and
+  without it on one commit, no model call: on dev 200 the answer's text is
+  in the block for 0.434 of the 129 questions with a worded answer (0.302
+  with the fixed bounds; 0.450 have it in the rounds shown), 18 gained and
+  one lost (a name at a memory's start, the question's other words further
+  on); the block's tokens p50 1,075 -> 1,350, p95 1,317 -> 1,907; making
+  the block 0.34 -> 2.7 ms p50, 10.5 ms at most. Kazma's benchmark EN/AR,
+  an ordinary turn's block (675 / 1,030 tokens), the small store and the
+  speakers set are unchanged (no memory there passes the fixed bounds).
   Gate: `tests/test_longmemeval_harness.py` (a history without its evidence
   round finds nothing: the control; the page's refusal with its control; no
   dataset text in a result file).

@@ -145,6 +145,21 @@ moved with it, and a conversation's neighbouring rounds when they continue
 it. Tuned on the free proxies and dev, gated on the tokens it adds to an
 ordinary turn: the block stays small when the evidence is weak.
 
+*State, 22 Nov (built on the side branch, not accepted).* Room by rank as
+the bounds proposal shaped it: the best conversation up to 1,500
+characters, the others 500, each side cut around the stretch holding the
+question's words, the others giving way first (to 250) and then the best
+(to 500) when the 1,500-token budget would leave a line out; the cap stays.
+Neighbouring rounds are not added (recall's joined follow-ups keep their
+own line). With and without it on one commit, no model call: on dev the
+answer's text is in the block for 0.434 of the worded questions (0.302
+without; 0.450 in the rounds shown), 18 gained and one lost; the block's
+tokens p50 1,075 -> 1,350 and p95 1,317 -> 1,907 there; an ordinary turn's
+block, Kazma's benchmark EN/AR, the small store and the speakers set
+unchanged. Accepted only on W0's end-to-end dev answering, its noise run,
+the second judge and the model-read answers, all waiting for DeepSeek
+credit.
+
 ### W1c. The product path as the only path (M)
 
 The benchmark answers through Kazma's real turn: base prompt, recall rules,

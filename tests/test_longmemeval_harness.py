@@ -124,15 +124,17 @@ def test_a_question_finds_its_evidence_among_unrelated_rounds(lme, monkeypatch, 
 
 def test_the_free_proxies_tell_a_cut_answer_from_a_shown_one(lme, monkeypatch, tmp_path):
     """The memory plan's W0: "the answer's text is in the block" beside "in
-    the rounds shown". An answer at the end of a long message is shown (its
-    round is recalled) and cut from the block; a short one is in both."""
+    the rounds shown". An answer at the end of a long message, far from the
+    question's words, is shown (its round is recalled) and cut from the block
+    (the block cuts a long memory around the question's words, W1a, and here
+    those are at its start); a short one is in both."""
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)
     others = ["How do I boil an egg?", "Recommend a film about space.", "What is the capital of Peru?"]
     short = {**_item("q3", "single-session-user", "Which degree did I graduate with?",
                      "I graduated with a degree in Business Administration last year.", others),
              "answer": "Business Administration"}
-    filler = "We also talked about the weather and the long drive to work that morning. " * 8
+    filler = "We also talked about the weather and the long drive to work that morning. " * 40
     long = {**_item("q4", "single-session-user", "Which degree did I graduate with?",
                     "About my degree: " + filler + "I graduated in Business Administration.", others),
             "answer": "Business Administration"}

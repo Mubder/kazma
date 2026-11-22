@@ -255,10 +255,16 @@ it, and a text past it keeps its start with a warning in the log.
   so a question about something deep inside a long memory is found by its
   words, not its meaning. Searching the whole of a long memory by meaning
   (a vector per stretch of it) is a later step.
-- **Showing.** The memory block a turn gets shows each memory bounded (a
-  little of the question and of the answer: five memories must fit). When
-  it leaves part out, the memory ends with how many characters are not
-  shown and `memory_read("<id>")`, in the memory's language. The
+- **Showing.** The memory block a turn gets shows each memory bounded, by
+  rank: the best one up to 1,500 characters, every other one up to 500,
+  each cut around the stretch that holds the question's words (read the
+  way search reads them, in English and Arabic), so the part that answers
+  is the part shown. When the block's budget would leave a memory out, the
+  others give way first (down to 250 characters each), then the best (down
+  to 500). A follow-up joined to its turn and another member's turn keep
+  their own line. When it leaves part out, the memory ends with how many
+  characters are not shown and `memory_read("<id>")`, in the memory's
+  language. The
   `memory_search` tool and the Memory page's probe show up to 1,500
   characters of one memory the same way.
 - **Reading one whole.** `memory_read` (a read tool: no approval) reads one

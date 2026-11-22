@@ -43,13 +43,20 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from kazma_core.memory.episode_text import display_parts, is_small_talk, match_text, more_note
+from kazma_core.memory.episode_text import display_at, display_parts, is_small_talk, match_text, more_note
 from kazma_core.memory.limits import (
     KEYWORD_HIT_CHARS,
     LIST_LIMIT,
     LIST_SHOW_ANSWER,
     LIST_SHOW_ONE,
     LIST_SHOW_QUESTION,
+    RECALL_FOCUS_READ,
+    RECALL_LEAD_LEAST,
+    RECALL_LEAD_SHOW,
+    RECALL_LEAD_STEP,
+    RECALL_OTHER_LEAST,
+    RECALL_OTHER_SHOW,
+    RECALL_OTHER_STEP,
 )
 from kazma_core.memory.vector_engine import BELIEF_ACTIVE_SQL, RECALLABLE_TIERS
 
@@ -104,6 +111,9 @@ class RecallResult:
     listing: bool = False
     #: The time words the question named ("in August", "before"), as read.
     time_named: str = ""
+    #: The question's content words (``query_terms.content_terms``, its time
+    #: words left out): what the block cuts each long memory around (W1a).
+    focus_terms: frozenset[str] = frozenset()
 
     @property
     def empty(self) -> bool:
@@ -297,8 +307,97 @@ def recall(
     result.listing = listing
     result.time_named = ask.named if ask is not None else ""
     if not result.failed and not result.empty:
+        _keep_sides(result, query, conn=conn, tenant_id=tenant_id)
         _date_hits(result, conn=conn, tenant_id=tenant_id)
     return result
+
+
+def _roomy(hit: RecallHit) -> bool:
+    """Whether the block may give *hit* room by rank (W1a): a conversation
+    shown as recall made it. Follow-ups joined to their turn and another
+    member's turn under their name keep the line recall made."""
+    meta = hit.metadata or {}
+    if meta.get("joined"):
+        return False
+    shown = str(meta.get("display") or "")
+    return shown.startswith("User: ") or " / Assistant: " not in shown
+
+
+def _keep_sides(result: RecallResult, query: str, *, conn: sqlite3.Connection | None, tenant_id: str) -> None:
+    """What room by rank needs (the memory plan's W1a): the question's words,
+    and each recalled conversation's question, answer and summary, read from
+    this install's copy: the first ``RECALL_FOCUS_READ`` characters of each
+    (``metadata["sides"]``) and how many it holds past them
+    (``metadata["beyond"]``). A conversation this copy does not hold
+    (another install's, on the Postgres-primary path) keeps the line recall
+    made. A read that fails keeps every line as recall made it, with a
+    WARNING."""
+    from kazma_core.memory.query_terms import content_terms
+    from kazma_core.memory.tenant_view import narrowed_to
+
+    result.focus_terms = frozenset(_without_time_words(content_terms(query)))
+    ids = [h.id for h in result.episodes if h.id and _roomy(h)]
+    if not ids:
+        return
+    own = conn is None
+    rows: list[Any] = []
+    try:
+        if own:
+            from kazma_core.paths import primary_memory_db
+
+            conn = _connect_existing(primary_memory_db())
+            if conn is None:
+                return
+        only = narrowed_to(tenant_id)  # the asker's own turns, in the statement (Spaces S1-35)
+        read = RECALL_FOCUS_READ
+        rows = conn.execute(
+            "SELECT id, substr(user_text, 1, ?), length(user_text), substr(assistant_text, 1, ?), "
+            "length(assistant_text), substr(summary_text, 1, ?), length(summary_text) FROM episodes "
+            f"WHERE id IN ({','.join('?' * len(ids))}) AND (? IS NULL OR tenant_id = ?)",
+            (read, read, read, *ids, only, only),
+        ).fetchall()
+    except sqlite3.Error:
+        logger.warning("[recall] could not read the recalled conversations' text", exc_info=True)
+        return
+    finally:
+        if own and conn is not None:
+            conn.close()
+    for row in rows:
+        heads = (str(row[1] or ""), str(row[3] or ""), str(row[5] or ""))
+        whole = (int(row[2] or 0), int(row[4] or 0), int(row[6] or 0))
+        for hit in result.episodes:
+            if hit.id == str(row[0]) and _roomy(hit):
+                hit.metadata["sides"] = heads
+                hit.metadata["beyond"] = tuple(max(0, w - len(h)) for w, h in zip(whole, heads, strict=True))
+
+
+def _room_by_rank(result: RecallResult, fits: Any) -> dict[str, tuple[str, int]]:
+    """Each roomy conversation's line (display, characters left out) at its
+    room by rank (the memory plan's W1a): the best one at
+    ``RECALL_LEAD_SHOW`` characters, every other at ``RECALL_OTHER_SHOW``,
+    each cut around the question's words. When *fits* says the block would
+    leave a line out, the others give way first, in steps, down to
+    ``RECALL_OTHER_LEAST``, then the best, down to ``RECALL_LEAD_LEAST``.
+    Measured on LongMemEval's dev questions: 0.48 answered with the fixed
+    200 + 300 bounds, 0.74 with this shape
+    (docs/plans/RECALL_BLOCK_BOUNDS_PROPOSAL.md). Empty when no line is
+    roomy: the block is made as before."""
+    roomy = [h for h in result.episodes if (h.metadata or {}).get("sides") is not None]
+    if not roomy:
+        return {}
+    terms = result.focus_terms
+    steps = [(RECALL_LEAD_SHOW, other)
+             for other in range(RECALL_OTHER_SHOW, RECALL_OTHER_LEAST - 1, -RECALL_OTHER_STEP)]
+    steps += [(lead, RECALL_OTHER_LEAST)
+              for lead in range(RECALL_LEAD_SHOW - RECALL_LEAD_STEP, RECALL_LEAD_LEAST - 1, -RECALL_LEAD_STEP)]
+    shown: dict[str, tuple[str, int]] = {}
+    for lead, other in steps:
+        shown = {h.id: display_at(*h.metadata["sides"], lead if i == 0 else other, terms,
+                                  h.metadata.get("beyond") or (0, 0, 0))
+                 for i, h in enumerate(roomy)}
+        if fits(shown):
+            break
+    return shown
 
 
 #: What this recall's question asks (part F), for this recall only: its time
@@ -3631,9 +3730,16 @@ def format_recall_block(
         except Exception:
             do_explain = False
 
+    # Each roomy conversation's line at its room by rank (W1a), set below.
+    room: dict[str, tuple[str, int]] = {}
+
     def _line(h: RecallHit) -> str:
-        shown = _one_line(shown_text(h))
-        more = int((h.metadata or {}).get("more") or 0)
+        if h.id in room:
+            shown, more = room[h.id]
+            shown = _one_line(shown)
+        else:
+            shown = _one_line(shown_text(h))
+            more = int((h.metadata or {}).get("more") or 0)
         if more:
             # A memory is kept whole and shown bounded: how much is left out,
             # and the tool that reads it (memory/limits.py).
@@ -3661,64 +3767,79 @@ def format_recall_block(
 
     # ~4 chars per token is the standard heuristic estimate
     char_budget = max_tokens * 4
-    parts: list[str] = []
-    used = 0
-
-    n_beliefs = 0
-    n_episodes = 0
-    n_summaries = 0
 
     # What recall returned (it bounds it: five of each, more for a question
     # asking for every memory of a kind), unless the caller asks for less.
     max_beliefs = len(result.beliefs) if max_beliefs is None else max_beliefs
     max_episodes = len(result.episodes) if max_episodes is None else max_episodes
     max_summaries = len(result.summaries) if max_summaries is None else max_summaries
-    if result.beliefs:
-        lines: list[str] = []
-        for h in result.beliefs[:max_beliefs]:
-            line = _line(h)
-            if used + len(line) + 1 > char_budget:
-                break
-            lines.append(line)
-            used += len(line) + 1
-            n_beliefs += 1
-        if lines:
-            header = "## Known Facts\n"
-            parts.append(header + "\n".join(lines))
-            used += len(header)
+    wanted = (len(result.beliefs[:max_beliefs]) + len(result.episodes[:max_episodes])
+              + len(result.summaries[:max_summaries]))
 
-    if result.episodes and used < char_budget:
-        lines = []
-        for h in result.episodes[:max_episodes]:
-            line = _line(h)
-            if used + len(line) + 1 > char_budget:
-                break
-            lines.append(line)
-            used += len(line) + 1
-            n_episodes += 1
-        if lines:
-            header = "## Relevant History\n"
-            parts.append(header + "\n".join(lines))
-            used += len(header)
+    def _sections() -> tuple[list[str], int, int, int]:
+        """The block's sections inside the budget: whole lines, in order,
+        until the next would not fit; and how many of each were shown."""
+        parts: list[str] = []
+        used = 0
+        n_beliefs = n_episodes = n_summaries = 0
+        if result.beliefs:
+            lines: list[str] = []
+            for h in result.beliefs[:max_beliefs]:
+                line = _line(h)
+                if used + len(line) + 1 > char_budget:
+                    break
+                lines.append(line)
+                used += len(line) + 1
+                n_beliefs += 1
+            if lines:
+                header = "## Known Facts\n"
+                parts.append(header + "\n".join(lines))
+                used += len(header)
 
-    if result.summaries and used < char_budget:
-        lines = []
-        for h in result.summaries[:max_summaries]:
-            line = _line(h)
-            if used + len(line) + 1 > char_budget:
-                break
-            lines.append(line)
-            used += len(line) + 1
-            n_summaries += 1
-        if lines:
-            # What a week of conversations said about a topic, written by Kazma
-            # afterwards (plan C2): the gist, after the turns themselves -- on
-            # the benchmark, summaries above the history pushed answering
-            # turns down (MRR 0.875 -> 0.868) and added nothing there.
-            # A month or project roll-up among them (part G): "Summaries".
-            weekly = all(h.metadata.get("level", "week") == "week" for h in result.summaries[:max_summaries])
-            header = "## Weekly Summaries\n" if weekly else "## Summaries\n"
-            parts.append(header + "\n".join(lines))
+        if result.episodes and used < char_budget:
+            lines = []
+            for h in result.episodes[:max_episodes]:
+                line = _line(h)
+                if used + len(line) + 1 > char_budget:
+                    break
+                lines.append(line)
+                used += len(line) + 1
+                n_episodes += 1
+            if lines:
+                header = "## Relevant History\n"
+                parts.append(header + "\n".join(lines))
+                used += len(header)
+
+        if result.summaries and used < char_budget:
+            lines = []
+            for h in result.summaries[:max_summaries]:
+                line = _line(h)
+                if used + len(line) + 1 > char_budget:
+                    break
+                lines.append(line)
+                used += len(line) + 1
+                n_summaries += 1
+            if lines:
+                # What a week of conversations said about a topic, written by Kazma
+                # afterwards (plan C2): the gist, after the turns themselves -- on
+                # the benchmark, summaries above the history pushed answering
+                # turns down (MRR 0.875 -> 0.868) and added nothing there.
+                # A month or project roll-up among them (part G): "Summaries".
+                weekly = all(h.metadata.get("level", "week") == "week" for h in result.summaries[:max_summaries])
+                header = "## Weekly Summaries\n" if weekly else "## Summaries\n"
+                parts.append(header + "\n".join(lines))
+        return parts, n_beliefs, n_episodes, n_summaries
+
+    def _fits(shown: dict[str, tuple[str, int]]) -> bool:
+        room.clear()
+        room.update(shown)
+        _parts, nb, ne, ns = _sections()
+        return nb + ne + ns == wanted
+
+    # Room by rank (W1a): the widest that leaves no line out; when even the
+    # least leaves one out, lines are left out as before.
+    room.update(_room_by_rank(result, _fits))
+    parts, n_beliefs, n_episodes, n_summaries = _sections()
 
     if not parts:
         return ""
