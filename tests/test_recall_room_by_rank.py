@@ -197,8 +197,10 @@ def _overrun() -> RecallResult:
     return RecallResult(beliefs=facts, episodes=_five(), focus_terms=_terms("Which orchid code for room 0?"))
 
 
-#: A budget the first room overruns and the ladder fits.
-_TIGHT = 900
+#: A whole-block budget (rules and fence included) the first room overruns
+#: and the ladder fits: at 1,300 tokens the ladder shows all five, the first
+#: room alone two.
+_TIGHT = 1300
 
 
 def test_no_line_is_left_out_the_others_give_way_first():

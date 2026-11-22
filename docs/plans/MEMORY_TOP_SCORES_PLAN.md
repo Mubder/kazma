@@ -162,9 +162,15 @@ unchanged. Where memories are as long as live's (the product measures'
 `long` store, live's episode lengths: answers a median 1,351 characters,
 4,088 at the 95th) an ordinary turn's block grows from 872 / 1,352 tokens
 (p50 / p95; 1,644 the largest) to 1,146 / 1,659 (1,922): about 275 tokens
-a turn on the median, 310 at the 95th. The cap bounds the lines'
-characters (a quarter of them counted as tokens), not the estimate: the
-rules, the fence and Arabic's shorter tokens are outside it. The opening was chosen against the stretch alone on dev: one
+a turn on the median, 310 at the 95th. The cap bounded the lines'
+characters (a quarter of them counted as tokens), not the block: the rules,
+the fence and Arabic's shorter tokens were outside it, with or without W1a.
+Fixed 22 Nov (a bug from before W1a): the cap is the whole block's, counted
+as the context trim counts. On the long store the block is then 1,146 /
+1,494 tokens (1,499 the largest) with W1a and 872 / 1,350 (1,497) without;
+on dev the answer's text in the block is unchanged (0.442 with W1a, 0.302
+without), the largest block 1,946 -> 1,498 with W1a and 1,620 -> 1,424
+without. The opening was chosen against the stretch alone on dev: one
 answer gained (a name in a memory's first sentence), none lost, 8 tokens
 a question on average; a plain "opening first" rule tied (one gained, one
 lost, the opening spending room the stretch nearly showed), and the rule

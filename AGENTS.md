@@ -1697,7 +1697,14 @@ came up short, and archiving had erased 76 memories.
   then " … " and the stretch -- a memory often names its subject first --
   unless the stretch shown alone would begin inside the opening; when the
   block's budget would leave a line out the others give way first (to
-  `RECALL_OTHER_LEAST`), then the best (to `RECALL_LEAD_LEAST`). Recall
+  `RECALL_OTHER_LEAST`), then the best (to `RECALL_LEAD_LEAST`). **The
+  budget is the whole block's** (`max_tokens`, 1,500 from the supervisor):
+  rules, speakers note, fence and lines, counted as the context trim counts
+  (`summarizer.estimate_text_tokens`, Arabic at about 2.5 characters a
+  token). Until 2026-11-22 it bounded a quarter of the lines' characters,
+  so the frame and Arabic's shorter tokens fell outside it and a block
+  passed 1,500 (`tests/test_recall_block_budget.py`, Arabic counted as Latin
+  as the negative control). Recall
   keeps each conversation's first `RECALL_FOCUS_READ` characters a side
   and how much more it holds (`_keep_sides`, in the asker's tenant); a
   follow-up joined to its turn and another member's turn keep recall's
@@ -2415,9 +2422,11 @@ four injected were noise.
   96 ms, the embedding 76 ms, Kazma's first-token share 0.115 s. Where
   memories are as long as live's (answers a median 1,351 characters, 4,088
   at the 95th): 1,146 / 1,659, the largest 1,922, with W1a (872 / 1,352 /
-  1,644 with the fixed bounds). The block's 1,500-token cap is counted as
-  a quarter of its lines' characters; the rules, the fence and Arabic's
-  shorter tokens are outside it, so the estimate passes 1,500.
+  1,644 with the fixed bounds). The block's 1,500-token cap then bounded a
+  quarter of its lines' characters, so the rules, the fence and Arabic's
+  shorter tokens fell outside it and the estimate passed 1,500; since
+  2026-11-22 it bounds the whole block (§15F): 1,146 / 1,494, at most
+  1,499, with W1a; 872 / 1,350, at most 1,497, with the fixed bounds.
   `scripts/memory_real_use.py` is the browser real-use suite, run by hand at
   every stage (it needs DeepSeek and the embedding model): a private Kazma
   from this checkout (`kazma serve`, the environment scrubbed of every Kazma
