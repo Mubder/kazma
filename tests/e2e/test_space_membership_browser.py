@@ -103,7 +103,11 @@ def test_people_are_added_one_leaves_and_one_is_taken_out(lang):
             theirs.locator(".settings-tab", has_text=_t("settings.tab_space_data", lang)).click()
             members = theirs.locator("#space-members")
             members.wait_for(state="visible", timeout=20000)
-            assert taken["name"] in members.inner_text()
+            # The box shows once the space has loaded; its rows come with the
+            # members' own read, later (CI's Linux runner read the box empty).
+            listed = members.locator(f"[data-space-member='{taken['id']}']")
+            listed.wait_for(state="visible", timeout=20000)
+            assert taken["name"] in listed.inner_text()
             theirs.click("#space-leave")
             warning = _told(theirs, _plain(_t("settings.space_leave_title", lang, name="Family")))
             assert _plain(_t("settings.space_leave_confirm", lang)) in warning
