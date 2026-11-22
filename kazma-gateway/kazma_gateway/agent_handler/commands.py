@@ -390,9 +390,12 @@ def _get_visible_providers() -> list[dict[str, Any]]:
     try:
         from kazma_core.model_registry import get_model_registry
         from kazma_core.models.options import model_options
+        from kazma_core.spaces.person_models import offered
 
         groups: dict[str, dict[str, Any]] = {}
-        for o in model_options(get_model_registry(), details=False)["options"]:
+        # The models the person of this chat may use (Spaces S2-03): one not
+        # listed is not found, so /model cannot choose it.
+        for o in offered(model_options(get_model_registry(), details=False))["options"]:
             g = groups.setdefault(o["provider"], {
                 "name": o["provider"], "display_name": o["provider_label"], "models": [], "refs": []})
             g["models"].append(o["model"])

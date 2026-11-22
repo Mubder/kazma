@@ -180,6 +180,7 @@ class BedrockProvider(LLMProvider):
     ) -> LLMResponse:
         import asyncio
 
+        await self._refuse_a_model_not_allowed(model)
         _ = response_format  # OpenAI-shaped; Bedrock Converse has no equivalent
         model_id = model or self.config.model
         system, convo = self._build_messages(messages)
@@ -337,6 +338,7 @@ class BedrockProvider(LLMProvider):
         """
         import asyncio
 
+        await self._refuse_a_model_not_allowed(model)
         _ = response_format
         model_id = model or self.config.model
         system, convo = self._build_messages(messages)

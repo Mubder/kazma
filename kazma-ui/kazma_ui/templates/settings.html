@@ -2654,6 +2654,50 @@
               </template>
             </div>
         </div>
+        <!-- Models (Spaces S2-03): which models a person may use, and their
+             default. The admin has every model. -->
+        <div class="settings-group mb-6" id="people-models" x-show="peopleLoaded && !peopleFailed" x-cloak>
+            <h3>{{ t('settings.people_models_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_models_help') }}</p>
+            <div class="account-list-table">
+              <template x-for="p in people.filter((q) => !q.owner)" :key="'models-' + p.id">
+                <details class="people-tools-row" :data-person-models="p.id">
+                  <summary><bdi translate="no" x-text="p.name"></bdi></summary>
+                  <div class="people-tools-group">
+                    <label class="people-feature">
+                      <input type="checkbox" data-models-every
+                             :checked="personModels(p).allowed === null"
+                             :aria-label="window.t('settings.people_models_every_of', {name: p.name})"
+                             @change="setPersonModelsEvery(p, $event.target.checked)">
+                      <span>{{ t('settings.people_models_every') }}</span>
+                    </label>
+                  </div>
+                  <div class="people-tools-group" x-show="personModels(p).allowed !== null">
+                    <span class="people-features-list">
+                      <template x-for="ref in peopleModelOptions" :key="p.id + '-model-' + ref">
+                        <span class="people-feature">
+                          <input type="checkbox" :checked="personModelOn(p, ref)" :data-model="ref"
+                                 :aria-label="window.t('settings.people_model_of', {model: ref, name: p.name})"
+                                 @change="togglePersonModel(p, ref, $event.target.checked)">
+                          <code aria-hidden="true" translate="no" x-text="ref"></code>
+                        </span>
+                      </template>
+                    </span>
+                  </div>
+                  <div class="people-tools-group">
+                    <label class="form-label" :for="'people-model-default-' + p.id">{{ t('settings.people_models_default') }}</label>
+                    <select class="form-input" :id="'people-model-default-' + p.id" data-models-default
+                            @change="setPersonModelDefault(p, $event.target.value)">
+                      <option value="" :selected="!personModels(p).default">{{ t('settings.people_models_default_install') }}</option>
+                      <template x-for="ref in personModelChoices(p)" :key="p.id + '-default-' + ref">
+                        <option :value="ref" :selected="personModels(p).default === ref" x-text="ref" translate="no"></option>
+                      </template>
+                    </select>
+                  </div>
+                </details>
+              </template>
+            </div>
+        </div>
         <!-- The closed spaces of deleted people (S1-27): the admin erases
              them; their contents are never shown here. -->
         <div class="settings-group mb-6" id="people-closed-spaces" x-show="peopleLoaded && closedSpaces.length > 0" x-cloak>

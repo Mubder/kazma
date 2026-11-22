@@ -444,14 +444,21 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         return providers
 
     @router.get("/api/models/options")
-    def model_choice_options() -> dict[str, Any]:
+    def model_choice_options(request: Request) -> dict[str, Any]:
         """Every model a person can choose, named ``provider:model``, with
         what is known about it, and the default (kazma_core.models.options,
         providers stage 3): the one list the chat's picker, the sidebar's,
-        the chat apps' /model menu and the terminal app read."""
+        the chat apps' /model menu and the terminal app read. Where Spaces
+        is enforced, the models the signed-in person may use and their
+        default (S2-03, ``spaces.person_models.offered``)."""
         from kazma_core.models.options import model_options
+        from kazma_core.spaces.person_models import offered
 
-        return model_options(get_model_registry())
+        from kazma_ui import auth, space_binding
+
+        listed = model_options(get_model_registry())
+        account = space_binding.account_of(auth.get_request_principal(request))
+        return offered(listed, person=account) if account else listed
 
     @router.get("/api/providers/catalog")
     def provider_catalog() -> list[dict[str, Any]]:

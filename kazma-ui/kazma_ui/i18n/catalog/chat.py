@@ -1270,6 +1270,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "بانتظار ردّ {names}",
         "en": "Waiting for {names} to answer",
     },
+    # Spaces S2-03: a model the person may not use is refused before the
+    # turn runs.
+    "chat.model_not_allowed": {
+        "ar": "⚠️ النموذج {model} ليس من النماذج المتاحة لك، فلم يُرسل شيء. اختر نموذجًا آخر من قائمة النماذج، أو اطلب من المسؤول، فهو يختار نماذج كل شخص في الإعدادات > الأشخاص.",
+        "en": "⚠️ The model {model} is not one you may use, so nothing was sent. Choose another model in the model picker, or ask the admin, who chooses each person's models in Settings > People.",
+    },
     "chat.hitl_tip_always": {
         "ar": "هذه الأداة <strong>تتطلب الموافقة دائمًا</strong> (حماية أمان) — لا يتخطاها YOLO ولا أذونات الجلسة.",
         "en": "This tool <strong>always requires approval</strong> (safety fail-safe) — YOLO and session grants cannot skip it.",

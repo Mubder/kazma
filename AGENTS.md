@@ -47,6 +47,11 @@ V2 memory lives in `kazma_core.memory`).
 - A provider with no usable key is replaced by one that has a key in
   `get_client()` — and that is announced, never silent; provider keys are
   install-scoped so it does not happen for a key that is there. Both in §38.
+- **Where Spaces is enforced, a model is also the person's** (S2-03, §70):
+  `get_client(None)` and `resolve_live_client` give work for a person their
+  own model (`spaces.person_models.model_for_work`), and every provider
+  class's `chat`/`chat_stream` asks `_refuse_a_model_not_allowed` first. A
+  new provider class asks it too (or hands the call to `super()`).
 
 ### 2. Platform Isolation (`kazma-gateway/kazma_gateway/agent_handler/`)
 - The LangGraph state NEVER contains `chat_id`, `user_id`, or `message_id`
@@ -15707,6 +15712,43 @@ an install with one account behaves as before.
     worker, another person keeps it; hiding it from the offer only as the
     control; the switch's refusals, the route, the precondition),
     `tests/e2e/test_person_tools_browser.py` (by the sidebar, EN/AR).
+- **Models per person (S2-03, 2026-11-22).** Only where Spaces is enforced;
+  an install that does not enforce it, the admin, and Kazma's own work (no
+  person bound) use every model the install offers, and read nothing more.
+  - `kazma_core/spaces/person_models.py` is the one rule: a person's
+    `policies[account]["models"]` (`MODELS_POLICY`), `{"allowed": [ref],
+    "default": ref}` in `provider:model` references; no `allowed` is the
+    install's list, no `default` the install's when they may use it, else
+    their first.
+  - **Refused at the call**: every `chat` and `chat_stream` of every provider
+    class asks `LLMProvider._refuse_a_model_not_allowed` first (the identity
+    store read off the loop, only with a person bound), which raises
+    `LLMError(kind="model_not_allowed")` before any request:
+    `friendly_llm_error` words it. `provider_adapters.build_client` names a
+    client's provider row (its `provider_name` attribute), so a call is judged by
+    `provider:model`; a model already naming its provider is judged as it
+    is. Whatever chose the model -- a chat, a scheduled job, a swarm worker,
+    research -- the person's call of a model they may not use never leaves.
+  - **Their model where none was chosen**: `ModelRegistry.get_client(None)`
+    and the supervisor's `resolve_live_client` ask `model_for_work`; a
+    stored model they may no longer use gives way to theirs; swarm model
+    selection (`select_provider_for_task`) never picks one they may not use.
+    Async callers of `get_client` call it in a thread.
+  - **The pickers list only theirs** (`offered`): `/api/models/options` for
+    the signed-in person, the chat apps' `/model` (a model not listed is "not
+    offered"). The chat stream refuses a model the person names before
+    anything runs (an `error` frame, `chat.model_not_allowed`, EN/AR).
+  - People: `people.set_models`, `PUT /api/people/{account_id}/models`, a
+    `models_set` event; `GET /api/people` gives each person's; Settings ->
+    People -> Models (Every model, a box per model, their default), EN/AR.
+    A change to one person's list (tools, models) waits for the one before
+    it (`settings_ops.js` `_personChange`): two quick clicks built the second
+    list from the state before the first.
+  - Gates: `tests/test_person_models.py` (the picker, its route, `/model`,
+    the chat stream, the call on both paths, a real swarm worker with a model
+    the person may not use and one with none, every provider class asking
+    with a planted class as control; the install's list as the control),
+    `tests/e2e/test_person_models_browser.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

@@ -80,6 +80,7 @@ __all__ = [
     "set_daily_limit",
     "set_default_daily_limit",
     "set_features",
+    "set_models",
     "set_tools",
 ]
 
@@ -88,7 +89,7 @@ logger = logging.getLogger(__name__)
 #: What the record holds.
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
           "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
-          "space_created", "member_added", "member_left", "member_removed")
+          "models_set", "space_created", "member_added", "member_left", "member_removed")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset", "member_added", "member_removed")
 _NAME_MAX = 64
@@ -210,7 +211,7 @@ def list_people() -> list[dict[str, Any]]:
 
 
 def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str, Any]:
-    from kazma_core.spaces import features
+    from kazma_core.spaces import features, person_models
 
     policy = reg["policies"].get(account_id) or {}
     own = policy.get("daily_limit") if isinstance(policy, dict) else None
@@ -219,7 +220,9 @@ def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str,
             "limit": limit.as_dict() if limit else None, "limit_source": source,
             "features": features.listed(features.grants_of(reg, account_id)),
             # The single tools of what they hold, each on or off (S2-01).
-            "tools": features.listed_tools(features.grants_of(reg, account_id))}
+            "tools": features.listed_tools(features.grants_of(reg, account_id)),
+            # The models they may use and their default (S2-03).
+            "models": person_models.listed_models(reg, account_id)}
 
 
 def limits_for_people() -> dict[str, Any]:
@@ -843,6 +846,41 @@ def set_tools(account_id: str, off: Any, *, by: str) -> list[str]:
             raise PeopleRefused(exc.code, 400, str(exc)) from exc
         raise
     logger.info("[people] tools set id=%s off=%d by=%s", account_id, len(kept), by)
+    return kept
+
+
+def set_models(account_id: str, allowed: Any, default: Any, *, by: str) -> dict[str, Any]:
+    """Choose the models a person may use and their default (S2-03):
+    *allowed* is the whole list of ``provider:model`` references (None:
+    every model the install offers), *default* one of them (empty: the
+    install's when they may use it, else their first). One step, recorded.
+    Refused: the admin (who has every model), a value that is not a list of
+    references, a default they may not use, no model at all. Returns what
+    was kept: ``{"allowed", "default"}``."""
+    _require_enforced()
+    from kazma_core.spaces import person_models
+
+    kept: dict[str, Any] = {}
+
+    def _change(reg: dict[str, Any]) -> None:
+        if account_id not in reg["accounts"]:
+            raise identity.IdentityError("no_such_account", "There is no such person.")
+        try:
+            clean, chosen = person_models.checked_models(account_id, allowed, default, reg)
+        except person_models.ModelsRefused as exc:
+            raise identity.IdentityError(exc.code, str(exc)) from exc
+        person_models.apply_models(reg, account_id, clean, chosen)
+        kept.update({"allowed": clean, "default": chosen})
+        _record(reg, "models_set", account_id, by)
+
+    try:
+        _changed(_change)
+    except PeopleRefused as exc:
+        if exc.code in ("bad_models", "default_not_allowed", "no_models"):
+            raise PeopleRefused(exc.code, 400, str(exc)) from exc
+        raise
+    logger.info("[people] models set id=%s allowed=%s by=%s", account_id,
+                "every" if kept.get("allowed") is None else len(kept["allowed"]), by)
     return kept
 
 

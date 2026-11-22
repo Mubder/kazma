@@ -127,7 +127,7 @@ ok("no member of the Settings mixins is defined twice", twice(defined).length ==
 {
   // Negative control: the S2-01 draft, a second `toggleTool` in settings_ops.js.
   const planted = sources.map(([f, text]) => [f, f === "settings_ops.js"
-    ? text.replace("        async togglePersonTool(person, tool, on) {", "        async toggleTool(person, tool, on) {")
+    ? text.replace(/^( {8}(?:async\s+)?)togglePersonTool\(/m, "$1toggleTool(")
     : text]);
   const found = twice(memberDefinitions(planted)).map(([name]) => name);
   ok("negative control: a planted second toggleTool is found", found.length === 1 && found[0] === "toggleTool", found);

@@ -20,6 +20,9 @@ people; each person reads the changes made to their account.
 * ``PUT /api/people/{account_id}/tools`` -- the single tools switched off
   for a person inside their features (``{"off": [tool, ...]}``, S2-01);
   ``GET /api/people`` lists each person's switchable tools, each on or off.
+* ``PUT /api/people/{account_id}/models`` -- the models a person may use
+  and their default (``{"allowed": [ref, ...] or null, "default": ref}``,
+  S2-03); ``GET /api/people`` lists each person's.
 * ``GET /api/account/notices``, ``POST /api/account/notices/seen`` -- the
   signed-in person's own notices: a reset of their password someone else
   made.
@@ -285,6 +288,31 @@ def create_people_router() -> APIRouter:
         if not isinstance(body, dict):
             return invalid_json_response()
         return await asyncio.to_thread(_set_tools, request, account_id, body)
+
+    def _set_models(request: Request, account_id: str, body: dict[str, Any]) -> JSONResponse:
+        try:
+            kept = people.set_models(account_id, body.get("allowed"), body.get("default"),
+                                     by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True, **kept})
+
+    @router.put("/api/people/{account_id}/models")
+    async def set_models(account_id: str, request: Request) -> JSONResponse:
+        """The models a person may use and their default (Spaces S2-03):
+        ``{"allowed": [ref, ...] or null, "default": ref}``."""
+        denied = await asyncio.to_thread(_not_admin, request)
+        if denied:
+            return denied
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_set_models, request, account_id, body)
 
     @router.get("/api/account/notices")
     def my_notices(request: Request) -> JSONResponse:

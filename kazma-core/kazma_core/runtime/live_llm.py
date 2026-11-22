@@ -245,6 +245,13 @@ def resolve_live_client(
         or _clean_model((state or {}).get("last_model"))
         or _clean_model(model)
     )
+    # A person's work runs on a model they may use (Spaces S2-03): a model
+    # they may not (one checkpointed before the admin changed their list, a
+    # router's hint) gives way to their choice. The chat refused one they
+    # named before the turn began; the call itself refuses whatever is left.
+    from kazma_core.spaces.person_models import model_for_work
+
+    pinned = model_for_work(pinned)
 
     registry_client = None
     # The model id the provider is asked for. A pin may be a ``provider:model``

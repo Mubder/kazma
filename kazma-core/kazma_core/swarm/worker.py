@@ -422,7 +422,9 @@ class InProcessWorker(SwarmWorker):
                         self.name, exc_info=True,
                     )
             if provider is None:
-                provider = registry.get_client()
+                # The person's own model when they have one (Spaces S2-03):
+                # an identity read, off the loop.
+                provider = await asyncio.to_thread(registry.get_client)
 
             if provider is None:
                 return {"worker": self.name, "task_id": task_id, "status": "error", "output": "", "error": "No provider available"}

@@ -790,6 +790,31 @@ def create_sse_chat_router(
                         break
             except Exception:
                 pass
+        # ── A person's models (Spaces S2-03): a model they name that is not
+        # one they may use is refused before anything runs; one a stored turn
+        # ran with gives way to their choice, and so does no model at all.
+        # In memory when Spaces is not enforced or no person is bound.
+        from kazma_core.spaces.scope import bound_asker as _bound_asker
+        from kazma_core.spaces.scope import spaces_enforced as _spaces_enforced
+
+        if _spaces_enforced() and _bound_asker():
+            from kazma_core.spaces import person_models as _person_models
+
+            _named_model = (body.get("model") or "").strip()
+            if _named_model and await asyncio.to_thread(_person_models.refusal, _named_model):
+                from kazma_ui.i18n import current_language
+                from kazma_ui.i18n import t as _t_model
+
+                return StreamingResponse(
+                    iter([_sse_frame("error", {
+                        "content": _t_model("chat.model_not_allowed", current_language(), model=_named_model),
+                    })]),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            requested_model = (
+                await asyncio.to_thread(_person_models.model_for_work, requested_model or None) or ""
+            )
         if requested_model:
             try:
                 from kazma_core.runtime.turn_model import pin_turn_model
@@ -849,7 +874,9 @@ def create_sse_chat_router(
             try:
                 from kazma_core.model_registry import get_model_registry
 
-                _client = get_model_registry().get_client(requested_model or None)
+                # Off the loop: the registry reads its stores, and the
+                # person's models (Spaces S2-03).
+                _client = await asyncio.to_thread(get_model_registry().get_client, requested_model or None)
                 if _client is not None:
                     llm_provider = _client
             except Exception as exc:

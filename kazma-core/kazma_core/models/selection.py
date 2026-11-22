@@ -310,6 +310,14 @@ def select_provider_for_task(
     provider_name, model_id = hit
     if not model_id:
         return None
+    from kazma_core.model_refs import format_ref
+    from kazma_core.spaces.person_models import refusal
+
+    if refusal(format_ref(provider_name, model_id)):
+        # Not one the person this work is for may use (Spaces S2-03): the
+        # caller falls back to the registry's client, their own choice.
+        logger.info("[model_selection] %s is not the person's to use; their own model instead", model_id)
+        return None
     try:
         if provider_name:
             client = registry.get_client_by_provider(provider_name, model=model_id)

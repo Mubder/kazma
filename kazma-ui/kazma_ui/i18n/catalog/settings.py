@@ -2814,6 +2814,31 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
                                       "ar": "حدّد الأدوات المراد تعطيلها في قائمة."},
     "settings.people_err.admin_has_every_tool": {"en": "The admin has every tool.",
                                                  "ar": "لدى المسؤول كل الأدوات."},
+    # Spaces S2-03: the models a person may use, and their default.
+    "settings.people_models_title": {"en": "Models", "ar": "النماذج"},
+    "settings.people_models_help": {
+        "en": "Which models each person may use, and their default. A model they may not use is not in "
+              "their model picker, and is never called for them: not in chat, a scheduled job or a swarm "
+              "worker. You have every model.",
+        "ar": "النماذج التي يمكن لكل شخص استخدامها، ونموذجه الافتراضي. النموذج غير المتاح له لا يظهر في قائمة "
+              "نماذجه، ولا يُستدعى له أبدًا: لا في المحادثة ولا في مهمة مجدولة ولا في عامل في السرب. لديك أنت كل النماذج.",
+    },
+    "settings.people_models_every": {"en": "Every model this install offers",
+                                      "ar": "كل النماذج التي يتيحها هذا التثبيت"},
+    "settings.people_models_every_of": {"en": "Every model for {name}", "ar": "كل النماذج لـ {name}"},
+    "settings.people_model_of": {"en": "{model} for {name}", "ar": "{model} لـ {name}"},
+    "settings.people_models_default": {"en": "Their default model", "ar": "نموذجه الافتراضي"},
+    "settings.people_models_default_install": {"en": "This install's default, when they may use it",
+                                               "ar": "النموذج الافتراضي لهذا التثبيت، إن كان متاحًا له"},
+    "settings.people_models_saved": {"en": "Models saved.", "ar": "حُفظت النماذج."},
+    "settings.people_err.bad_models": {"en": "Name the models as provider:model references.",
+                                       "ar": "حدّد النماذج بصيغة المزوّد:النموذج."},
+    "settings.people_err.default_not_allowed": {"en": "The default must be one of the models they may use.",
+                                                "ar": "يجب أن يكون النموذج الافتراضي من النماذج المتاحة له."},
+    "settings.people_err.no_models": {"en": "Leave a person at least one model.",
+                                      "ar": "اترك للشخص نموذجًا واحدًا على الأقل."},
+    "settings.people_err.admin_has_every_model": {"en": "The admin has every model.",
+                                                  "ar": "لدى المسؤول كل النماذج."},
     "settings.people_err.unknown_feature": {"en": "There is no such feature.", "ar": "لا توجد ميزة بهذا الاسم."},
     "settings.people_err.bad_switch": {"en": "A feature is switched on or off.", "ar": "الميزة إما مفعّلة أو معطّلة."},
     "settings.people_err.bad_features": {"en": "Name the features to switch.", "ar": "حدّد الميزات المراد تبديلها."},

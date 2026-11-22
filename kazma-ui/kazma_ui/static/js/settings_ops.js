@@ -454,6 +454,8 @@
         limitDraftForPeople: { tokens: '', usd: '' },
         limitEditing: '',
         limitDraft: { tokens: '', usd: '' },
+        // Models per person (Spaces S2-03): every model the install offers.
+        peopleModelOptions: [],
 
         _peopleError(data) {
             const code = (data && data.error) || 'failed';
@@ -479,6 +481,10 @@
                     usd: String(data.limit_for_people.limit.usd || 0),
                 };
             }
+            const models = typeof window.kazmaGetJson === 'function'
+                ? await window.kazmaGetJson('/api/models/options') : null;
+            this.peopleModelOptions = models && Array.isArray(models.options)
+                ? models.options.map((o) => o.ref) : [];
             this.peopleLoaded = true;
         },
 
@@ -588,22 +594,91 @@
             return _t('settings.feature.' + key, key);
         },
 
-        async togglePersonTool(person, tool, on) {
-            const off = [];
-            (person.tools || []).forEach((g) => (g.tools || []).forEach((t) => {
-                const isOn = t.name === tool.name ? !!on : !!t.on;
-                if (!isOn) off.push(t.name);
-            }));
+        // A change to one person's list (tools, models) sends the whole list,
+        // computed from what People shows: one change at a time, each after
+        // the last one's save and reload, so two quick clicks never build the
+        // second list from the state before the first (Spaces S2-03).
+        _personChange(person, work) {
+            const run = async () => {
+                const now = (this.people || []).find((q) => q.id === person.id) || person;
+                await work(now);
+            };
+            this._personChanges = (this._personChanges || Promise.resolve()).then(run, run);
+            return this._personChanges;
+        },
+
+        togglePersonTool(person, tool, on) {
+            return this._personChange(person, async (now) => {
+                const off = [];
+                (now.tools || []).forEach((g) => (g.tools || []).forEach((t) => {
+                    const isOn = t.name === tool.name ? !!on : !!t.on;
+                    if (!isOn) off.push(t.name);
+                }));
+                try {
+                    await window.kazmaSave('/api/people/' + encodeURIComponent(now.id) + '/tools',
+                        { method: 'PUT', body: { off: off } });
+                } catch (e) {
+                    showToast(this._peopleError(e && e.body), 'error');
+                    await this.loadPeople();
+                    return;
+                }
+                showToast(_t('settings.people_tools_saved', 'Tools saved.'), 'success');
+                await this.loadPeople();
+            });
+        },
+
+        // ── Models (Spaces S2-03): which a person may use, and their default ──
+        personModels(person) {
+            return (person && person.models) || { allowed: null, default: '' };
+        },
+
+        personModelOn(person, ref) {
+            const m = this.personModels(person);
+            return m.allowed === null || m.allowed === undefined || m.allowed.indexOf(ref) >= 0;
+        },
+
+        personModelChoices(person) {
+            const m = this.personModels(person);
+            return m.allowed === null || m.allowed === undefined ? this.peopleModelOptions : m.allowed;
+        },
+
+        async _putModels(person, allowed, chosen) {
             try {
-                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/tools',
-                    { method: 'PUT', body: { off: off } });
+                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/models',
+                    { method: 'PUT', body: { allowed: allowed, default: chosen || '' } });
             } catch (e) {
                 showToast(this._peopleError(e && e.body), 'error');
                 await this.loadPeople();
                 return;
             }
-            showToast(_t('settings.people_tools_saved', 'Tools saved.'), 'success');
+            showToast(_t('settings.people_models_saved', 'Models saved.'), 'success');
             await this.loadPeople();
+        },
+
+        setPersonModelsEvery(person, every) {
+            return this._personChange(person, async (now) => {
+                const m = this.personModels(now);
+                await this._putModels(now, every ? null : this.peopleModelOptions.slice(),
+                    every ? m.default : (this.peopleModelOptions.indexOf(m.default) >= 0 ? m.default : ''));
+            });
+        },
+
+        togglePersonModel(person, ref, on) {
+            return this._personChange(person, async (now) => {
+                const m = this.personModels(now);
+                const held = (m.allowed === null || m.allowed === undefined)
+                    ? this.peopleModelOptions.slice() : m.allowed.slice();
+                const allowed = on ? Array.from(new Set(held.concat([ref])))
+                    : held.filter((r) => r !== ref);
+                await this._putModels(now, allowed, allowed.indexOf(m.default) >= 0 ? m.default : '');
+            });
+        },
+
+        setPersonModelDefault(person, ref) {
+            return this._personChange(person, async (now) => {
+                const m = this.personModels(now);
+                await this._putModels(now, m.allowed === undefined ? null : m.allowed, ref);
+            });
         },
 
         async clearPersonLimit(person) {
