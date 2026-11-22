@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from kazma_ui.i18n.catalog import activity as _activity
 from kazma_ui.i18n.catalog import agents as _agents
 from kazma_ui.i18n.catalog import alerts as _alerts
 from kazma_ui.i18n.catalog import chat as _chat
@@ -30,6 +31,7 @@ from kazma_ui.i18n.catalog import x_dataset as _x_dataset
 __all__ = ["CATALOG_MODULES", "merged"]
 
 CATALOG_MODULES = (
+    _activity,
     _agents,
     _alerts,
     _chat,

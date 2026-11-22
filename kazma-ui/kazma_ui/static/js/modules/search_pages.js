@@ -12,6 +12,7 @@ export const KAZMA_SEARCH_PAGES = [
     { href: "/swarm", title: "Swarm", key: "nav.swarm" },
     { href: "/knowledge", title: "Knowledge", key: "nav.knowledge" },
     { href: "/replay", title: "Time Travel", key: "nav.replay" },
+    { href: "/activity", title: "Activity", key: "nav.activity" },
     { href: "/scheduled", title: "Scheduled", key: "nav.scheduled" },
     { href: "/skills", title: "Skills", key: "nav.skills" },
     { href: "/mcp", title: "MCP", key: "nav.mcp" },

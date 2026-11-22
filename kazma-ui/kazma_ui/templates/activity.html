@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% set active_page = "activity" %}
+{% block title %}Kazma — {{ t('activity.title') }}{% endblock %}
+{% block page_title %}
+  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-inline-end:6px;">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+  </svg>
+  {{ t('activity.title') }}
+{% endblock %}
+
+{# What was done in this space, under each person's name (Spaces S2-09):
+   every change a member made, newest first. Script: static/js/activity.js;
+   route: kazma_ui/activity.py (/api/activity). Ids and routes only, never
+   what was sent. #}
+{% block content %}
+<div class="activity-page" id="activity-root" x-data="activityPage()" style="max-width:1040px;margin:0 auto;padding:0 0.75rem 2.5rem;">
+  <p class="form-hint" style="margin:0 0 1rem;">{{ t('activity.intro') }}</p>
+
+  <p class="notice tone-info" role="status" id="activity-loading" x-show="!loaded && !failed">{{ t('activity.loading') }}</p>
+  <p class="notice tone-danger" role="alert" id="activity-failed" x-show="failed" x-cloak>{{ t('activity.failed') }}</p>
+  <div class="empty-state" id="activity-empty" x-show="loaded && !failed && actions.length === 0" x-cloak>
+    <p>{{ t('activity.empty') }}</p>
+  </div>
+
+  <div class="card" id="activity-list" x-show="loaded && actions.length > 0" x-cloak>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th scope="col">{{ t('activity.when') }}</th>
+          <th scope="col">{{ t('activity.who') }}</th>
+          <th scope="col">{{ t('activity.what') }}</th>
+          <th scope="col">{{ t('activity.answer') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="a in actions" :key="a.id">
+          <tr :data-activity-id="a.id" :data-activity-who="a.who">
+            <td><time :datetime="isoOf(a.at)" x-text="whenOf(a.at)"></time></td>
+            <td><bdi translate="no" x-text="a.name || a.who"></bdi></td>
+            <td><code dir="ltr" translate="no" x-text="a.action"></code></td>
+            <td><span class="badge" :class="badgeOf(a.status)" x-text="answerOf(a.status)"></span></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:1rem;" x-show="more" x-cloak>
+    <button type="button" class="btn btn-secondary" id="activity-more" @click="loadMore()" :disabled="busy">{{ t('activity.more') }}</button>
+  </p>
+</div>
+<script src="/static/js/activity.js?v={{ js_version() }}"></script>
+{% endblock %}

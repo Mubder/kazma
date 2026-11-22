@@ -164,6 +164,14 @@ Settings → People shows each space's usage beside its limits (counts and
 sizes, never what it holds), and sets the limits for spaces and, for any
 space, limits of its own. Each change is recorded.
 
+## Activity
+
+Every change made in a space -- a message sent, a document moved, a
+setting saved, an approval answered -- is recorded under the name of the
+person who made it: when, who, which action and whether it was done.
+What was sent is never kept there. The members of a space see its record on
+the Activity page; nobody else does, you included. It is kept for 90 days.
+
 A feature that is off is gone for that person: no menu entry, its pages
 say it is off, its routes and live voice refuse, its chat commands refuse,
 its tools are neither offered to the model nor run, and a request that

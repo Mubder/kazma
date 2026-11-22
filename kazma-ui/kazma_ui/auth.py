@@ -1946,10 +1946,12 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
 
         scope_tokens = None
         token = None
-        # The space this request acts in, for a layer outside this one that
-        # records what was done (the memory operator trail): the context
-        # bound below is not visible out there, the ASGI scope is.
+        # The space this request acts in and the account it acts as, for a
+        # layer outside this one that records what was done (the activity
+        # recorder, the memory operator trail): the context bound below is
+        # not visible out there, the ASGI scope is.
         request.scope["kazma_space"] = tenant_id
+        request.scope["kazma_asker"] = asker or ""
         if asker is not None and valid_space_id(tenant_id):
             scope_tokens = set_scope(tenant_id, asker)
         else:

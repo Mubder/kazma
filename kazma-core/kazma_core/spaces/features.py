@@ -403,6 +403,12 @@ ALWAYS_ON: dict[str, AlwaysOn] = {
             "kazma-core/kazma_core/memory/worker_bootstrap.py::_start_session_purge_scheduler._loop",
         ),
     ),
+    "activity": AlwaysOn(
+        "Activity: what was done in a person's space, under each member's name (S2-09); its "
+        "members' own record, which nothing could take away from them.",
+        pages=("/activity",),
+        routes=("/activity$", "/api/activity$"),
+    ),
     "account": AlwaysOn(
         "My account: a person's own sign-in, sessions, appearance, notifications and alerts.",
         routes=("/api/auth/me$", "/api/account", "/api/settings/account", "/api/settings/appearance$",

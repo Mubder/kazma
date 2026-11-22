@@ -15919,6 +15919,33 @@ an install with one account behaves as before.
     install and the other is refused; each byte limit taken out as its
     control; the routes and refusals; nothing read without Spaces),
     `tests/e2e/test_space_limits_browser.py` (by the sidebar, EN/AR).
+- **Every action under the person's name (S2-09, 2026-11-22).** Only where
+  Spaces is enforced; an install that does not enforce it records nothing
+  more (the memory operator trail and the logs as before).
+  - `kazma_ui/activity.py` `ActivityRecorder`, an ASGI middleware outside
+    the tenant middleware: every request that changes something (`POST`,
+    `PUT`, `PATCH`, `DELETE`) and reached a route is one row of the space's
+    activity (`kazma_core/spaces/activity.py`, `activity.db`): when, the space
+    it acted in, the account the tenant middleware bound (`kazma_asker` and
+    `kazma_space` in the request: never a session label, a body or a header
+    the client chose), the route's method and template, the ids in its path,
+    the answer's status. Never a body or a query value. A request no person
+    made writes nothing. One middleware: a route added later is recorded the
+    day it is added.
+  - The memory operator trail names the account too (`account:<id>`), the
+    session's label only where no account was bound.
+  - **The Activity page** (`/activity`, `GET /api/activity`; sidebar and
+    palette only where Spaces is enforced): the space's actions to its
+    members, newest first, with each person's name; the membership check
+    every request passes is its only door, the admin's included (S1-25).
+    Kept 90 days, at most `activity.MAX_ROWS_PER_SPACE` a space, pruned as
+    they are written; a space's rows go with its erase and are in its export
+    (the `space` column).
+  - Gates: `tests/test_actions_name_the_person.py` (every mutating route of
+    the built app, enumerated, called through the real tenant middleware and
+    the recorder, names the person; a recorder writing the session label as
+    the control), `tests/e2e/test_activity_page_browser.py` (by the sidebar,
+    EN/AR).
 
 ## UI Conventions (Web)
 

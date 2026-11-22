@@ -226,6 +226,9 @@ ROUTE_SCOPE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/voice/livekit/status$", INSTALL),
 
     # ── A space ───────────────────────────────────────────────────────────
+    # What was done in the space, under each person's name (S2-09).
+    ("/activity$", SPACE),
+    ("/api/activity$", SPACE),
     # Chats, their approvals and their saved steps.
     ("/chat$", SPACE),
     ("/api/chat", SPACE),
