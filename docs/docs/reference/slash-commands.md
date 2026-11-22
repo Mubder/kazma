@@ -87,6 +87,21 @@ conversation begun on Telegram can be continued on the Web or in Slack.
 A new season keeps the old one: it stays in the list and in the Web UI
 sidebar, and what it held in working memory moves to long-term memory.
 
+### `/space` {#space}
+
+Once Spaces is on, each chat-app account is linked to one person's Kazma
+account (My account → Chat apps), and a chat works in one space:
+
+| Command | Description |
+|:---|:---|
+| `/space` | Where this chat works, and (in a direct chat) your spaces, numbered |
+| `/space <#, name>` | A direct chat: move it to that space of yours. A group: bind it to that shared space (you must be a member; to move a bound group, a member of both) |
+| `/space none` | A group: unbind it |
+
+A direct chat works in your personal space until you move it. A group works
+in the one shared space a member bound it to: its members are answered
+there, and anyone else is not. Each space keeps its own chats and memory.
+
 **Usage:**
 ```
 /sessions
@@ -594,6 +609,7 @@ Lists all available commands grouped by category.
 • `/sessions` (`/seasons`) — List every season (Web + Telegram + Discord + Slack)
 • `/session 2` (`/season`, `/switch`) — Continue that season here (take over)
 • `/session new [name]` — Start a fresh season (`/new` still works)
+• `/space [name]` — Which space this chat works in; a name or number moves it
 • `/research deep <topic>` — deep research via the same agent
 • `/swarm <task>` — dispatch workers via the same agent
 • `/reset` — Clear the conversation history and start fresh

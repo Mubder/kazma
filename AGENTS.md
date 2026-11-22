@@ -16141,6 +16141,39 @@ an install with one account behaves as before.
     paths and buttons; the allowlist rule letting a listed stranger act as
     the owner as the negative control), `tests/e2e/test_chat_links_listed_browser.py`
     (by the sidebar, EN/AR).
+- **A chat-app chat works in its space (S3-03, 2026-11-23).** Only where
+  Spaces is enforced (`chat_apps.chat_place`, asked by the gateway's handler
+  before it finds the chat's thread); an install that does not enforce it
+  runs every message as before. It replaces "a chat app works in the owner's
+  space" for linked senders.
+  - **A direct chat** works in the space its person chose with `/space`
+    (`chat_apps.space_command`: a list numbered from their spaces, then a
+    number, a name, or "personal"/"شخصي"), their personal space at first, as
+    them. **A group** (a Telegram group, a Discord server channel, a Slack
+    channel: `chat_apps._is_direct`) works in the one shared space a member
+    bound it to (`/space <name>`; never a personal space; a bound group moved
+    or unbound -- "none"/"لا شيء" -- only by a member of its space); a sender
+    who is not a member of it is ignored there, told nothing; an unbound group
+    answers `/space` only and says how at most every ten minutes. A binding
+    to a space the person left, or that is gone or being erased, counts as
+    none.
+  - **Each space keeps its own chats**: the chat's sender key
+    (`ChatPlace.sender_key`, `chat_apps._key_for`) is the platform sender in
+    the owner's space -- the owner's chats stay on the threads they had --
+    and carries `--in-<space>` in any other; a group's is
+    `<platform>:grp<chat>--in-<space>`, one chat for the group. The thread
+    record (`chat_app_scope(thread_id, place)`) refuses a chat of another
+    space than the place's.
+  - The bindings are the settings key `chat_apps.BINDINGS_KEY`
+    ("identity.chat_spaces", a CREDENTIAL: a restore never moves a chat into
+    another space). `/space` is in the command catalog, `/help` and the
+    slash-command reference, and is an always-on chat command.
+  - Gates: `tests/test_chat_space_binding.py` (the real handler: a direct
+    chat in its personal space, the owner's thread unchanged, `/space 2`
+    moving it, a group's member run in its space and a non-member ignored;
+    the sender's thread with no space as the control),
+    `tests/test_chat_apps_once_enforced.py` (re-pointed: the owner's linked
+    accounts).
 
 ## UI Conventions (Web)
 

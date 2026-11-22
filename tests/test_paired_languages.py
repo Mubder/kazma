@@ -263,6 +263,15 @@ def _link_code(text: str) -> str | None:
     return code_in(text)
 
 
+def _space_word(text: str) -> str:
+    """``/space`` reads "personal" and "none" in either language (Spaces
+    S3-03)."""
+    from kazma_core.spaces.chat_apps import _SPACE_COMMAND, _space_word as word
+
+    match = _SPACE_COMMAND.fullmatch(text.strip())
+    return word((match.group(1) or "") if match else "")
+
+
 def _linked_notice(text: str) -> bool:
     """A sender with no linked account is told how to link, in their
     language (Spaces S3-02)."""
@@ -590,6 +599,10 @@ PAIRS: list[Pair] = [
          "hello, who are you?", "مرحبا، من أنت؟", _linked_notice, True),
     Pair("link_code", (M + "spaces/chat_links.py",),
          "link ABCD-2345", "ربط ABCD-2345", _link_code, "ABCD2345"),
+    Pair("space_personal", (M + "spaces/chat_apps.py",),
+         "/space personal", "/space شخصي", _space_word, "personal"),
+    Pair("space_none", (M + "spaces/chat_apps.py",),
+         "/space none", "/space لا شيء", _space_word, "none"),
     # Who a question in a shared space is about (Spaces S1-11): the asker,
     # in either language, or a member it names.
     Pair("asker_possessive", (M + "memory/speakers.py",),

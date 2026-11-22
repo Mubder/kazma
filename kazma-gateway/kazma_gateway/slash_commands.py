@@ -294,6 +294,7 @@ def _cmd_help() -> str:
         "• `/sessions` (`/seasons`) — List every season (Web + Telegram + Discord + Slack)\n"
         "• `/session 2` (`/season`, `/switch`) — Continue that season here (take over)\n"
         "• `/session new [name]` — Start a fresh season (`/new` still works)\n"
+        "• `/space [name]` — Which space this chat works in; a name or number moves it\n"
         "• `/research deep <topic>` — deep research via the same agent\n"
         "• `/swarm <task>` — dispatch workers via the same agent\n"
         "• `/reset` — Clear the conversation history and start fresh\n"

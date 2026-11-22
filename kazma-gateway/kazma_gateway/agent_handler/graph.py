@@ -8,12 +8,15 @@ import re
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kazma_core import language_lock
 from kazma_gateway.gateway import Attachment, IncomingMessage, OutboundMessage, SessionStore
 from kazma_gateway.telegram_format import md_to_tg_html
 from kazma_gateway.slash_commands import changes_global_config, is_slash_command, resolve_slash_command
+
+if TYPE_CHECKING:
+    from kazma_core.spaces.chat_apps import ChatPlace
 from . import hitl as _hitl
 from .store import (
     _InMemoryStore,
@@ -83,6 +86,25 @@ def _prepare_outbound(
     out_ctx = dict(ctx)
     out_ctx["parse_mode"] = "HTML"
     return md_to_tg_html(text), out_ctx
+
+
+#: A message the handler answered (or left) before any thread was found.
+_ANSWERED = object()
+
+
+def _resolve_thread_in_place(msg: IncomingMessage, sender_key: str) -> str:
+    """The thread of *msg* as it is found by *sender_key* (S3-03): the
+    platform sender for the owner's space, as before; a key that carries a
+    space finds that space's own chat, a native thread (a forum topic, a
+    Slack or Discord thread) included. Blocking (the sessions directory)."""
+    if sender_key == msg.sender_id:
+        return _resolve_thread(msg)
+    from dataclasses import replace
+
+    found = _resolve_thread(replace(msg, sender_id=sender_key, context_metadata={
+        **(msg.context_metadata or {}), "username": "", "display_name": ""}))
+    suffix = "--in-" + sender_key.rsplit("--in-", 1)[-1]
+    return found if found.endswith(suffix) else found + suffix
 
 
 def _sender_is_gateway_admin(msg: Any) -> bool:
@@ -778,6 +800,17 @@ def create_graph_handler(
             msg.text = normalized
         sender = msg.sender_id
 
+        # Where the message works once Spaces is enforced (S3-03): the
+        # sender's linked account, in the space their direct chat chose or the
+        # shared space the group is bound to. Its chat is that space's alone
+        # (a sender key that carries the space), so the thread is found by it.
+        place = await _chat_place_or_answer(msg)
+        if place is _ANSWERED:
+            return
+        if place is not None:
+            sender = place.sender_key
+        qualified = sender != msg.sender_id
+
         # Resolve thread_id using standardized resolver (synchronized).
         # ConfigStore / existing seasons win over the in-memory cache so a
         # /session take-over (or a restart) cannot mint a twin Telegram row.
@@ -787,11 +820,13 @@ def create_graph_handler(
                 from kazma_core.sessions.directory import find_mouth_thread
 
                 # The sessions directory is a settings read (audit 2026-10-26 AUD-111).
+                # A space's own chat is never found by the person's name: the
+                # newest season of that name may be another space's.
                 found = await asyncio.to_thread(
                     find_mouth_thread,
                     sender,
                     platform=msg.platform,
-                    username=str(
+                    username="" if qualified else str(
                         (msg.context_metadata or {}).get("username")
                         or (msg.context_metadata or {}).get("display_name")
                         or ""
@@ -807,7 +842,7 @@ def create_graph_handler(
                 _sessions.move_to_end(sender)
                 thread_id = _sessions[sender]
             else:
-                _sessions[sender] = await asyncio.to_thread(_resolve_thread, msg)
+                _sessions[sender] = await asyncio.to_thread(_resolve_thread_in_place, msg, sender)
                 while len(_sessions) > _MAX_DICT_ENTRIES:
                     _sessions.popitem(last=False)
                 thread_id = _sessions[sender]
@@ -855,7 +890,7 @@ def create_graph_handler(
             logger.debug("[agent-handler] delivery-target bind skipped", exc_info=True)
 
         try:
-            await _handler_body_in_its_space(msg, thread_id)
+            await _handler_body_in_its_space(msg, thread_id, place)
         finally:
             try:
                 from kazma_gateway.typing_keepalive import get_typing_keepalive
@@ -873,11 +908,57 @@ def create_graph_handler(
                 except Exception:
                     pass
 
-    async def _handler_body_in_its_space(msg: IncomingMessage, thread_id: str) -> None:
+    async def _chat_place_or_answer(msg: IncomingMessage) -> Any:
+        """Once Spaces is enforced (S3-03): ``/space`` is answered here
+        (:data:`_ANSWERED`), and every other message gets its place
+        (``chat_apps.chat_place``) -- or is answered or left when it has none
+        (an unbound group, a sender who is not a member of the group's space,
+        a sender with no link). None before Spaces: nothing changes."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if not spaces_enforced():
+            return None
+        from kazma_core.spaces import chat_apps
+        from kazma_core.spaces.identity import IdentityUnavailable
+
+        meta = dict(msg.context_metadata or {})
+        target = _build_target_id(msg.platform, msg.context_metadata)
+        try:
+            if chat_apps.is_space_command(msg.text):
+                said = await asyncio.to_thread(
+                    chat_apps.space_command, msg.platform, meta, msg.sender_id or "", msg.text or "")
+                if said:
+                    await manager.send(OutboundMessage(target_id=target, text=said,
+                                                       context_metadata=msg.context_metadata))
+                return _ANSWERED
+            place = await asyncio.to_thread(
+                chat_apps.chat_place, msg.platform, meta, msg.sender_id or "", msg.text)
+        except IdentityUnavailable:
+            logger.warning("[agent-handler] a %s message was not run: accounts cannot be read",
+                           msg.platform)
+            await manager.send(OutboundMessage(
+                target_id=target,
+                text=language_lock.in_their_language(
+                    msg.text, "Kazma cannot read its accounts right now, so the message was not run. "
+                    "Send it again in a moment.",
+                    "لا يستطيع Kazma قراءة حساباته الآن، فلم تُنفَّذ الرسالة. أرسلها مرة أخرى بعد قليل."),
+                context_metadata=msg.context_metadata,
+            ))
+            return _ANSWERED
+        if place.scope is None:
+            logger.info("[agent-handler] a %s message was not run: %s", msg.platform, place.refusal)
+            if place.reply:
+                await manager.send(OutboundMessage(target_id=target, text=place.reply,
+                                                   context_metadata=msg.context_metadata))
+            return _ANSWERED
+        return place
+
+    async def _handler_body_in_its_space(msg: IncomingMessage, thread_id: str,
+                                         place: ChatPlace | None = None) -> None:
         """Run the message in the space a chat app works in
         (``kazma_core.spaces.chat_apps``): nothing bound before Spaces; once
-        enforced, as the owner in the owner's space until each person links
-        their own chat app, and a chat of another space is refused with a
+        enforced, as the sender's linked account in the place the message
+        works in (S3-03), and a chat of another space is refused with a
         reply -- before anything of the chat is read or built."""
         from kazma_core.spaces.chat_apps import (
             ChatInAnotherSpace,
@@ -888,7 +969,7 @@ def create_graph_handler(
 
         try:
             # The thread record store, on a first asking (off the loop).
-            bound = await asyncio.to_thread(chat_app_scope, thread_id)
+            bound = await asyncio.to_thread(chat_app_scope, thread_id, place)
         except ChatInAnotherSpace as exc:
             unreadable = isinstance(exc, ChatRecordUnreadable)
             logger.info("[agent-handler] a %s message refused: %s", msg.platform,
@@ -908,10 +989,10 @@ def create_graph_handler(
             else:
                 reply = language_lock.in_their_language(
                     msg.text,
-                    "This chat belongs to another space. Chat apps work in the owner's space "
-                    "only for now: send /new to start a chat here.",
-                    "هذه المحادثة تخص مساحة أخرى. تعمل تطبيقات المحادثة حالياً في مساحة المالك "
-                    "فقط: أرسل /new لبدء محادثة هنا.",
+                    "This chat belongs to another space than the one this chat works in: send /new "
+                    "to start a chat here, or /space to see where it works.",
+                    "هذه المحادثة تخص مساحة غير التي تعمل فيها هذه الدردشة: أرسل /new لبدء محادثة هنا، "
+                    "أو /space لترى أين تعمل.",
                 )
             await manager.send(OutboundMessage(
                 target_id=_build_target_id(msg.platform, msg.context_metadata),

@@ -209,6 +209,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
             "never switches it off"),
     KeyRule("identity.link_codes", CREDENTIAL, "the codes that link a chat-app account (their "
             "hashes, ten minutes each): a restore never brings back a used one"),
+    KeyRule("identity.chat_spaces", CREDENTIAL, "the space each chat-app chat works in, and who "
+            "bound a group to its space: a restore never moves a chat into another space"),
     KeyRule("notifications.push.vapid_private_key", CREDENTIAL, "the key push messages are signed with"),
     KeyRule("notifications.push.vapid_public_key", CREDENTIAL, "the browsers' half of that key"),
     KeyRule("notifications.push.subscriptions", CREDENTIAL, "the browsers' push addresses, bound to "
