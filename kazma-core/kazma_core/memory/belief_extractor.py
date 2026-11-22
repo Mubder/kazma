@@ -26,6 +26,7 @@ import sqlite3
 from typing import Any
 
 from kazma_core.memory.own_words import own_words
+from kazma_core.spaces.scope import space_named_or_bound
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +53,12 @@ _CONSERVATIVE_CONF_THRESHOLD = 0.7
 _RESOLVED_ONTO_EXISTING = frozenset({"exact_match", "auto_merge", "llm_merge"})
 
 
-def _names_an_entity(conn: Any, text: str, *, tenant_id: str = "default") -> bool:
+def _names_an_entity(conn: Any, text: str, *, tenant_id: str) -> bool:
     """True when one of *tenant_id*'s entities has *text* as its id or display name."""
     try:
         return conn.execute(
             "SELECT 1 FROM entities WHERE tenant_id = ? AND (id = ? OR name = ?) LIMIT 1",
-            (tenant_id or "default", text, text),
+            (tenant_id, text, text),
         ).fetchone() is not None
     except sqlite3.Error:
         logger.warning("[belief_extract] entity name lookup failed", exc_info=True)
@@ -779,7 +780,7 @@ async def extract_and_apply_beliefs(
     *,
     session_id: str | None = None,
     turn: int | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     cfg: dict[str, Any] | None = None,
     use_llm: bool = True,
     extraction_method: str | None = None,
@@ -802,6 +803,7 @@ async def extract_and_apply_beliefs(
     thread raises ``sqlite3.ProgrammingError`` here -- ``mutate_belief`` would
     otherwise turn that into a quiet "nothing applied".
     """
+    tenant_id = space_named_or_bound(tenant_id)
     raw_beliefs, stats = await extract_beliefs_for_turn(
         user_text, assistant_text, use_llm=use_llm, ignore_filler=ignore_filler
     )
@@ -955,7 +957,7 @@ def _apply_beliefs_to_v2(
     stats: dict[str, Any] | None = None,
     session_id: str | None = None,
     turn: int | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     cfg: dict[str, Any] | None = None,
     extraction_method: str | None = None,
     now: float | None = None,
@@ -1000,6 +1002,7 @@ def _apply_beliefs_to_v2(
 
     Mutates ``stats`` in place and returns it.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     from kazma_core.memory.belief_mutation import mutate_belief
     from kazma_core.memory.entity_resolution import resolve_entity
     from kazma_core.memory.speakers import is_member_entry
@@ -1224,7 +1227,7 @@ def extract_and_apply_beliefs_sync(
     *,
     session_id: str | None = None,
     turn: int | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     cfg: dict[str, Any] | None = None,
     extraction_method: str | None = None,
     now: float | None = None,
@@ -1240,6 +1243,7 @@ def extract_and_apply_beliefs_sync(
 
     Returns the same stats shape as :func:`extract_and_apply_beliefs`.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     stats: dict[str, Any] = {
         "skipped_filler": False,
         "source": "none",

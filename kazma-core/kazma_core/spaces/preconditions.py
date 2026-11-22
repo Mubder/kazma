@@ -83,7 +83,7 @@ logger = logging.getLogger(__name__)
 #: number ``tests/test_no_space_no_data.py`` counts (S1-02's ratchet, held
 #: equal to this). It only goes down; at zero the precondition's second half
 #: holds.
-TENANT_FALLBACKS_LEFT = 56
+TENANT_FALLBACKS_LEFT = 35
 
 #: The owner's API token for the deploy check, in Kazma's home
 #: (``<install>/.kazma``): one of Kazma's secret files.

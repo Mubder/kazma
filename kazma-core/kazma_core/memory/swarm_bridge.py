@@ -29,6 +29,7 @@ import time
 from typing import Any
 
 from kazma_core.memory.limits import episode_text
+from kazma_core.spaces.scope import space_named_or_bound
 
 logger = logging.getLogger(__name__)
 
@@ -101,13 +102,14 @@ def _insert_episode(
     importance: int,
     metadata: dict[str, Any],
     eid: str | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     chat: str | None = None,
 ) -> str:
     """Insert one V2 episode row. Caller owns the connection.
 
     *chat*: the conversation the row came from (a swarm task's), asked of
     the forget ledger as well: a chat kept out of memory keeps it out."""
+    tenant_id = space_named_or_bound(tenant_id)
     now = time.time()
     if eid is None:
         eid = bridge_episode_id(

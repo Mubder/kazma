@@ -410,3 +410,37 @@ def test_entity_writes_name_their_tenant() -> None:
     for fn in (entity_resolution.preserve_merge_ledger, entity_retire.retire_empty_entities,
                self_hub.collect_self_entity_ids, self_hub.resolve_hub_display_name, self_hub.ensure_user_hub):
         assert inspect.signature(fn).parameters["tenant_id"].default is inspect.Parameter.empty, fn
+
+
+# ── memory: writing a turn ──────────────────────────────────────────────
+
+
+def test_a_fact_written_with_no_space_is_refused_once_enforced(enforced) -> None:
+    import sqlite3
+
+    from kazma_core.memory.belief_mutation import mutate_belief
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(NoSpaceBound):
+            mutate_belief(conn, "user", "lives_in", "Porto")
+    finally:
+        conn.close()
+
+
+def test_turn_writers_that_every_caller_names_take_no_default() -> None:
+    import inspect
+
+    from kazma_core.memory import belief_extractor, consolidator
+
+    for fn in (consolidator._v2_extract_sync, belief_extractor._names_an_entity):
+        assert inspect.signature(fn).parameters["tenant_id"].default is inspect.Parameter.empty, fn
+
+
+def test_the_v1_backfill_writes_the_owners_facts() -> None:
+    """V1 memory predates tenants: the backfill names the owner's space."""
+    import inspect
+
+    from kazma_core.memory import backfill_v2
+
+    assert "tenant_id=OWNER_SPACE_ID" in inspect.getsource(backfill_v2)

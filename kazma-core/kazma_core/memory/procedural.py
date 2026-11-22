@@ -28,6 +28,8 @@ import time
 import uuid
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -119,7 +121,7 @@ def record_procedural_outcome(
     dag_steps: list[dict[str, Any]],
     postconditions: dict[str, Any],
     success: bool,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Record a tool-execution outcome against a (possibly new) procedural DAG.
@@ -133,6 +135,7 @@ def record_procedural_outcome(
         {"dag_id": str, "action": "created"|"updated", "confidence": float,
          "quarantined": bool}
     """
+    tenant_id = space_named_or_bound(tenant_id)
     sig = _signature_hash(preconditions)
     now = time.time()
     try:
@@ -196,7 +199,7 @@ def match_procedural_dags(
     conn: sqlite3.Connection,
     query: str,
     *,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     limit: int = 3,
     min_confidence: float = 0.45,
 ) -> list[dict[str, Any]]:
@@ -206,6 +209,7 @@ def match_procedural_dags(
     precondition JSON. Only ``status='active'`` rows above
     ``min_confidence`` are considered. Best-effort — never raises.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     q = (query or "").strip().lower()
     if not q:
         return []

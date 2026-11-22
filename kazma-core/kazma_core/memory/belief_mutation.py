@@ -47,6 +47,7 @@ from typing import Any
 
 # The one id rule (Memory audit M02): a copy here kept a-z0-9 only.
 from kazma_core.memory.entity_resolution import slug as _slug
+from kazma_core.spaces.scope import space_named_or_bound
 
 logger = logging.getLogger(__name__)
 
@@ -434,7 +435,7 @@ def mutate_belief(
     confidence: float = 0.5,
     importance: int = 1,
     extraction_method: str = "llm_inferred",
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     source_session: str | None = None,
     source_turn: int | None = None,
     cfg: dict[str, Any] | None = None,
@@ -496,6 +497,7 @@ def mutate_belief(
     ``{"action": "noop", ..., "error": <type>}``; a failure after the write
     committed returns the write's result.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     # One set of limits for every writer (memory/limits.py, Memory audit
     # M36): refused, never cut -- a cut value is a different fact.
     from kazma_core.memory.limits import too_long
