@@ -301,6 +301,9 @@ def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, p
     server = Server(Path(sys.executable), server_env(home, data, port, checkout), home,
                     workdir / f"{language.lang}.log", port)
     steps: list[dict[str, Any]] = []
+    # The judge's own calls (the install's are in its ledger, which keeps no
+    # count of the cache's share): calls, tokens, the cache's share.
+    judged = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0}
     browser = None
     try:
         server.wait_live()
@@ -326,7 +329,10 @@ def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, p
                 if step.action == "tell":
                     row["passed"] = phase == "completed" and browser.wait_for_memory(step.words)
                 else:
-                    verdict, _usage = judge.ask(lme.judge_prompt(judge_item(step, n), answer), max_tokens=10)
+                    verdict, usage = judge.ask(lme.judge_prompt(judge_item(step, n), answer), max_tokens=10)
+                    judged["calls"] += 1
+                    for k in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens"):
+                        judged[k] += int(usage.get(k, 0))
                     row["passed"] = phase == "completed" and verdict.strip().lower().startswith("yes")
             steps.append(row)
             if transcript is not None:
@@ -339,7 +345,7 @@ def run_language(language: Language, *, model: str, key: str, judge: lme.Chat, p
             browser.close()
         server.stop()
     return {"lang": language.lang, "steps": steps, "passed": all(s["passed"] for s in steps),
-            "page_errors": len(page_errors), "spent": spent_tokens(data)}
+            "page_errors": len(page_errors), "spent": spent_tokens(data), "judge_spent": judged}
 
 
 def suite_covers_every_kind() -> list[str]:
