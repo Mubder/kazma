@@ -158,7 +158,13 @@ the answer's text is in the block for 0.442 of the worded questions (0.302
 without; 0.450 in the rounds shown), 19 gained and none lost; the block's
 tokens p50 1,075 -> 1,372 and p95 1,317 -> 1,894 there; an ordinary turn's
 block, Kazma's benchmark EN/AR, the small store and the speakers set
-unchanged. The opening was chosen against the stretch alone on dev: one
+unchanged. Where memories are as long as live's (the product measures'
+`long` store, live's episode lengths: answers a median 1,351 characters,
+4,088 at the 95th) an ordinary turn's block grows from 872 / 1,352 tokens
+(p50 / p95; 1,644 the largest) to 1,146 / 1,659 (1,922): about 275 tokens
+a turn on the median, 310 at the 95th. The cap bounds the lines'
+characters (a quarter of them counted as tokens), not the estimate: the
+rules, the fence and Arabic's shorter tokens are outside it. The opening was chosen against the stretch alone on dev: one
 answer gained (a name in a memory's first sentence), none lost, 8 tokens
 a question on average; a plain "opening first" rule tied (one gained, one
 lost, the opening spending room the stretch nearly showed), and the rule

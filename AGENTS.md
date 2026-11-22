@@ -2396,8 +2396,14 @@ four injected were noise.
   retrieval benchmark's store with its recorded vectors: Kazma's benchmark
   in English and Arabic apart; the tokens the recall block adds to a turn
   (`format_recall_block` as the supervisor adds it, counted by
-  `summarizer.estimate_tokens`), on the store and at four times its
-  unrelated chat; recall's time; the embedding model's time
+  `summarizer.estimate_tokens`), on the store, at four times its
+  unrelated chat, and where memories are as long as live's (`long`, since
+  2026-11-22: the store, each conversation lengthened to a length drawn
+  from live's episode lengths, `tests/fixtures/memory_bench/live_lengths.json`
+  -- percentiles only, read by the script's `live-lengths` from a native
+  backup of live's memory database opened immutable, never the live file --
+  and padded with stopwords after its own text, so recall chooses as on the
+  store); recall's time; the embedding model's time
   (`--real-embedder`); the small store. Kept in
   `tests/fixtures/memory_bench/product_measures.json` with Kazma's own share
   of the first token (`tests/e2e/test_first_token_latency.py`), shown on the
@@ -2406,7 +2412,12 @@ four injected were noise.
   control): a change to the block records its new numbers in the same
   commit. Baseline: a median 675 tokens a turn (711 English, 590 Arabic),
   1,030 at the 95th; no question without an answer shows nothing; recall
-  96 ms, the embedding 76 ms, Kazma's first-token share 0.115 s.
+  96 ms, the embedding 76 ms, Kazma's first-token share 0.115 s. Where
+  memories are as long as live's (answers a median 1,351 characters, 4,088
+  at the 95th): 1,146 / 1,659, the largest 1,922, with W1a (872 / 1,352 /
+  1,644 with the fixed bounds). The block's 1,500-token cap is counted as
+  a quarter of its lines' characters; the rules, the fence and Arabic's
+  shorter tokens are outside it, so the estimate passes 1,500.
   `scripts/memory_real_use.py` is the browser real-use suite, run by hand at
   every stage (it needs DeepSeek and the embedding model): a private Kazma
   from this checkout (`kazma serve`, the environment scrubbed of every Kazma
