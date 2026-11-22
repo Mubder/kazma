@@ -15752,15 +15752,22 @@ an install with one account behaves as before.
     (`single_operator.task_is_callers`), Approve and Reject who answers it
     (`task_actions.caller_may_act_on(answering=)`). With Spaces off the
     Swarm decide route reads no request before deciding.
-  - **The watchdog**: whose card it is and its chat-app route are read
-    before the timeout is recorded (a read that fails leaves the card
-    pending and claimed by nobody; the next pass tries again). A card whose
-    asker left its space ends the turn with a line saying why
+  - **The watchdog**: once enforced, whose card it is and its chat-app
+    route are read before the timeout is recorded (a read that fails leaves
+    the card pending and claimed by nobody; the next pass tries again). The
+    third pass that cannot read it records the timeout anyway and closes the
+    turn with a line, resumed as nobody (`hitl_timeout._close_turn_unread`,
+    `_READS_BEFORE_GIVING_UP`): a card never stays pending for good. With
+    Spaces off the watchdog records first and reads the route after, as
+    before (the full suite's three watchdog tests). A card whose asker left
+    its space ends the turn with a line saying why
     (`turn_budget.write_turn_end`), resumed as nobody.
   - **Every resume runs as the turn's asker**: a turn a restart cut off
-    continues as the author of the chat's newest message
-    (`hitl_answerers.whose_turn`, read in the chat's own space), not at all
-    when they left; only the turn's asker hard-steers it. Gate: every
+    continues as the author of the message that OPENED the turn
+    (`hitl_answerers.whose_turn`, `_turn_author`: the newest user row before
+    the open turn's reply row, never a steer's row -- marked `steer` -- nor a
+    later row; read in the chat's own space), not at all when they left.
+    Gate: every
     product function that builds a resume command or continues a turn binds
     the asker or is declared (`tests/test_resumes_run_as_the_asker.py`, a
     planted unbound resume as the control).
@@ -15768,6 +15775,21 @@ an install with one account behaves as before.
     voice utterance in a chat whose pending card waits on someone else is
     refused with a line naming them (`sse_chat._card_waits_on_someone_else`),
     nothing saved; the asker's own message goes on as before.
+  - **Nobody else ends or steers a member's turn** (the second review): one
+    rule, `hitl_answerers.turn_control_refusal`, asked by the routes through
+    `sse_chat._turn_control` before anything is saved, queued or cancelled.
+    A steer (`/api/chat/steer`, soft or hard, running or paused) is its
+    asker's only; stop and abort (`/api/chat/stop`, `/api/chat/abort`) its
+    asker's or an owner of the space; `/reset` and `/compact` the chat's
+    opener's or an owner's, never while another member's turn runs or
+    waits; a new message or voice utterance while another member's turn
+    runs is refused with a line saying the chat is answering them (it would
+    cancel the turn; the same person's message supersedes as before). Each
+    refusal is a line in the person's language (`sse_chat._TURN_LINES`) the
+    page shows; who it is that cannot be read refuses
+    (`identity_unavailable`). Gate: `tests/test_turn_control_per_person.py`
+    (through the real routes; the routes without the check, and the
+    newest-row rule, as the controls).
   - **The long-task record is each person's** (`long_task._record_key`,
     `grant_holder.holder`): one member's `/long` or `/unrestricted`, and the
     YOLO clock it slides, never reach another's turns.

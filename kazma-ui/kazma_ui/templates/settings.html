@@ -2484,8 +2484,8 @@
                     <template x-if="!p.owner">
                       <span style="display:inline-flex;gap:6px">
                         <button type="button" class="btn btn-sm btn-secondary" @click="resetPerson(p)" :aria-label="window.t('settings.people_reset_of', {name: p.name})">{{ t('settings.people_reset') }}</button>
-                        <button type="button" class="btn btn-sm btn-secondary" data-person-enable x-show="p.enabled === false" @click="setPersonEnabled(p, true)" :aria-label="window.t('settings.people_enable_of', {name: p.name})">{{ t('settings.people_enable') }}</button>
-                        <button type="button" class="btn btn-sm btn-warning" data-person-disable x-show="p.enabled !== false" @click="setPersonEnabled(p, false)" :aria-label="window.t('settings.people_disable_of', {name: p.name})">{{ t('settings.people_disable') }}</button>
+                        <button type="button" class="btn btn-sm btn-secondary" data-person-enable x-cloak x-show="p.enabled === false" @click="setPersonEnabled(p, true)" :aria-label="window.t('settings.people_enable_of', {name: p.name})">{{ t('settings.people_enable') }}</button>
+                        <button type="button" class="btn btn-sm btn-warning" data-person-disable x-cloak x-show="p.enabled !== false" @click="setPersonEnabled(p, false)" :aria-label="window.t('settings.people_disable_of', {name: p.name})">{{ t('settings.people_disable') }}</button>
                         <button type="button" class="btn btn-sm btn-danger" @click="deletePerson(p)" :aria-label="window.t('settings.people_delete_of', {name: p.name})">{{ t('settings.delete') }}</button>
                       </span>
                     </template>
@@ -2748,7 +2748,7 @@
                       <span>{{ t('settings.people_models_every') }}</span>
                     </label>
                   </div>
-                  <div class="people-tools-group" x-show="personModels(p).allowed !== null">
+                  <div class="people-tools-group" x-cloak x-show="personModels(p).allowed !== null">
                     <span class="people-features-list">
                       <template x-for="ref in peopleModelOptions" :key="p.id + '-model-' + ref">
                         <span class="people-feature">

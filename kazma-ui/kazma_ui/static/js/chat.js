@@ -2341,7 +2341,14 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: chatSessionId }),
           credentials: 'same-origin',
-        }).then(function() {}).catch(function() { /* best-effort */ });
+        }).then(function(r) {
+          return r.ok ? r.json() : null;
+        }).then(function(body) {
+          // Another member's turn: the server says whose (Spaces).
+          if (body && body.refused && body.message && window.showToast) {
+            window.showToast(String(body.message), 'error', 5000);
+          }
+        }).catch(function() { /* best-effort */ });
       }
     } catch (e) { /* best-effort */ }
     forceEndTurn();
@@ -2896,6 +2903,13 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: chatSessionId || '' }),
           credentials: 'same-origin',
+        }).then(function(r) {
+          return r.ok ? r.json() : null;
+        }).then(function(body) {
+          // Another member's turn: the server says whose (Spaces).
+          if (body && body.ok === false && body.message && window.showToast) {
+            window.showToast(String(body.message), 'error', 5000);
+          }
         }).catch(function() { /* best-effort */ });
         forceEndTurn();
         return;
@@ -2960,7 +2974,10 @@
             }
             return;
           }
-          if (body.reason && window.showToast) {
+          // A refusal carries its own line (whose turn it is, Spaces).
+          if (body.message && window.showToast) {
+            window.showToast(String(body.message), 'error', 5000);
+          } else if (body.reason && window.showToast) {
             window.showToast(tiFmt('steer_failed', 'Steer failed: {reason}', { reason: body.reason }), 'error', 3500);
           }
           return;

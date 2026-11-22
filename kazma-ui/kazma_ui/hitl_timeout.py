@@ -136,19 +136,33 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
     except Exception:
         pass
     _iid = str((_intr_payload or {}).get("interrupt_id") or "")
-    # What the timeout acts on is read BEFORE anything is recorded (Spaces
-    # S2-05): whose card it is, from the live interrupt, and the chat app it
-    # goes back to. A read that fails leaves the card pending and claimed by
-    # nobody, and the next pass tries again; recorded first, a failure here
-    # left the gate claimed and the turn stuck.
+    from kazma_core.spaces.scope import spaces_enforced
+
+    # Once Spaces is enforced, what the timeout acts on is read BEFORE
+    # anything is recorded (S2-05): whose card it is, from the live
+    # interrupt, and the chat app it goes back to. A read that fails leaves
+    # the card pending and the next pass tries again -- three times; then the
+    # timeout is recorded and the turn closed with a line, resumed as nobody
+    # (a card never stays pending for good). An install that does not
+    # enforce Spaces records first and reads the route after, as before.
+    enforced = spaces_enforced()
+    card = (thread_id, _intr_id or _iid)
     recorded = False
     try:
-        whose, departed = await _whose_and_departed(thread_id, _intr_id or _iid, _intr_payload)
-        route = None if departed else await _chat_app_route(graph, config)
-        if departed:
-            recorded = True
-            await _close_turn_of_departed(graph, config, thread_id, whose, _intr_payload, _intr_id or _iid)
-            return
+        whose, route = None, None
+        if enforced:
+            if _read_failures.get(card, 0) >= _READS_BEFORE_GIVING_UP:
+                recorded = True
+                await _close_turn_unread(graph, config, thread_id, _intr_payload, _intr_id or _iid)
+                _read_failures.pop(card, None)
+                return
+            whose, departed = await _whose_and_departed(thread_id, _intr_id or _iid, _intr_payload)
+            route = None if departed else await _chat_app_route(graph, config)
+            _read_failures.pop(card, None)
+            if departed:
+                recorded = True
+                await _close_turn_of_departed(graph, config, thread_id, whose, _intr_payload, _intr_id or _iid)
+                return
         from kazma_ui.active_turns import register_turn
         from kazma_ui.reply_sink import resolve_reply_turn
         from kazma_ui.sse_chat._streaming import (
@@ -211,7 +225,10 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         # card); any other is resumed into the journal -- not awaited on the
         # watchdog tick. invoke_turn still runs inside the streamer so
         # SessionStore gets the continuation (2026-08-31 silent turn
-        # b1cb7994e22a). The route was read before the timeout was recorded.
+        # b1cb7994e22a). Once Spaces is enforced the route was read before
+        # the timeout was recorded.
+        if not enforced:
+            route = await _chat_app_route(graph, config)
         if route is not None and _chat_app_resumer is not None:
             task = asyncio.create_task(
                 _chat_app_resumer[1](
@@ -247,13 +264,23 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         register_turn(thread_id, task)
         mark_thread_unpaused(thread_id)
     except Exception:
-        if not recorded:
+        if enforced and not recorded:
             # Nothing recorded yet: the card stays pending, claimed by
-            # nobody, and the next pass tries again.
-            logger.warning("[HITL-WD] thread=%s: the expired card could not be read; tried again next pass",
-                           str(thread_id)[:12], exc_info=True)
+            # nobody, and the next pass tries again (at most three passes).
+            if len(_read_failures) >= _READ_FAILURES_KEPT:
+                _read_failures.pop(next(iter(_read_failures)))
+            _read_failures[card] = _read_failures.get(card, 0) + 1
+            logger.warning("[HITL-WD] thread=%s: the expired card could not be read (pass %d of %d)",
+                           str(thread_id)[:12], _read_failures[card], _READS_BEFORE_GIVING_UP, exc_info=True)
         else:
             logger.exception("[HITL-WD] auto-deny resume failed for thread=%s", thread_id)
+
+
+#: Passes the watchdog reads an expired card that cannot be read before it
+#: records the timeout anyway and closes the turn (Spaces S2-05).
+_READS_BEFORE_GIVING_UP = 3
+_READ_FAILURES_KEPT = 500
+_read_failures: dict[tuple[str, str], int] = {}
 
 
 async def _whose_and_departed(thread_id: str, interrupt_id: str,
@@ -284,6 +311,14 @@ _DEPARTED_EN = ("⚠️ This turn was stopped: {name} is no longer a member of t
 _DEPARTED_AR = "⚠️ توقف هذا الدور: {name} لم يعد عضواً في هذه المساحة، فلا يستمر الدور الذي بدأه."
 
 
+def _asked(values: dict[str, Any]) -> str:
+    """The turn's question, for the language of a line about it."""
+    for message in reversed(list(values.get("messages") or [])):
+        if isinstance(message, dict) and message.get("role") == "user":
+            return str(message.get("content") or "")
+    return ""
+
+
 def _departed_text(asker: str, values: dict[str, Any]) -> str:
     """The departed line in the language of the turn's question. Blocking
     (the identity store, for the person's name)."""
@@ -298,14 +333,44 @@ def _departed_text(asker: str, values: dict[str, Any]) -> str:
     except IdentityUnavailable:
         # The line still says why, without the name.
         logger.debug("[HITL-WD] the departed person's name could not be read", exc_info=True)
-    asked = ""
-    for message in reversed(list(values.get("messages") or [])):
-        if isinstance(message, dict) and message.get("role") == "user":
-            asked = str(message.get("content") or "")
-            break
-    return in_their_language(asked,
+    return in_their_language(_asked(values),
                              _DEPARTED_EN.format(name=name or "the person who asked"),
                              _DEPARTED_AR.format(name=name or "صاحب الطلب"))
+
+
+_UNREAD_EN = ("⚠️ This turn was stopped: its approval expired, and Kazma could not tell whose it was, "
+              "so it does not go on as anyone.")
+_UNREAD_AR = "⚠️ توقف هذا الدور: انتهت مهلة الموافقة، ولم يتبيّن Kazma صاحبها، فلا يستمر باسم أحد."
+
+
+def _unread_text(values: dict[str, Any]) -> str:
+    from kazma_core.language_lock import in_their_language
+
+    return in_their_language(_asked(values), _UNREAD_EN, _UNREAD_AR)
+
+
+async def _close_turn_unread(graph: Any, config: dict[str, Any], thread_id: str,
+                             payload: dict[str, Any] | None, interrupt_id: str) -> None:
+    """End a turn whose expired card could not be read for three passes:
+    the timeout is recorded, the turn ends with a line saying why, and
+    nothing is resumed as anyone. Kazma's own work for the chat's space
+    (its thread record), bound to the account its own work acts for -- or,
+    while the identity store cannot say who that is, to the admin's: closing
+    the turn writes its line and records the timeout, and runs no model and
+    no tool as anyone."""
+    from kazma_core.spaces.identity import IdentityUnavailable, acting_account
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, bind_scope
+    from kazma_core.spaces.threads import thread_home
+
+    space = await asyncio.to_thread(thread_home, thread_id)
+    try:
+        acting = await asyncio.to_thread(acting_account, space)
+    except IdentityUnavailable:
+        logger.warning("[HITL-WD] thread=%s: the identity store is away; the turn is closed with its line",
+                       str(thread_id)[:12])
+        acting = OWNER_ACCOUNT_ID
+    with bind_scope(space, acting):
+        await _close_the_turn(graph, config, thread_id, None, payload, interrupt_id)
 
 
 async def _close_turn_of_departed(graph: Any, config: dict[str, Any], thread_id: str, whose: Any,
@@ -344,18 +409,19 @@ async def _close_the_turn(graph: Any, config: dict[str, Any], thread_id: str, wh
     turn_id = await asyncio.to_thread(resolve_reply_turn, thread_id, session_id)
     snapshot = await graph.aget_state(config)
     values = dict(getattr(snapshot, "values", None) or {})
-    text = await asyncio.to_thread(_departed_text, str(getattr(whose, "asker", "") or ""), values)
+    text = (await asyncio.to_thread(_departed_text, str(getattr(whose, "asker", "") or ""), values)
+            if whose is not None else _unread_text(values))
     await record_gate_decision(
         thread_id, decision="timeout", actor=TIMEOUT_ACTOR,
         tool=str((payload or {}).get("tool") or ""), payload=dict(payload or {}),
         interrupt_id=interrupt_id, session_id=session_id, turn_id=turn_id, require_durable=True,
     )
     await write_turn_end(graph, config, thread_id, text)
-    await settle_thread_gates(thread_id, outcome="asker_left")
+    await settle_thread_gates(thread_id, outcome="asker_left" if whose is not None else "unreadable")
     mark_thread_unpaused(thread_id)
     await close_turn(graph, config, session_id=session_id, thread_id=thread_id, turn_id=turn_id)
-    logger.info("[HITL-WD] thread=%s: the card's asker left its space; the turn was closed, not resumed",
-                str(thread_id)[:12])
+    logger.info("[HITL-WD] thread=%s: %s; the turn was closed, not resumed", str(thread_id)[:12],
+                "the card's asker left its space" if whose is not None else "the expired card could not be read")
     # The page's frame last: the turn is closed whether or not it is heard.
     await get_turn_broker().emit(thread_id, {
         "type": "approval_timeout",

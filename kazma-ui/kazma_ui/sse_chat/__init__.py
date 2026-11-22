@@ -116,29 +116,112 @@ async def _card_waits_on_someone_else(thread_id: str, graph: Any) -> str | None:
     return await asyncio.to_thread(waiting_for_someone_else, thread_id, card, interrupt_id)
 
 
-async def _hard_steer_whose(thread_id: str) -> Any:
-    """Whose turn a hard steer resumes (``hitl_answerers.whose_turn``), or the
-    route's refusal (a dict) when the caller is not its asker or who it is
-    cannot be read. None while the install does not enforce Spaces."""
-    from kazma_core.spaces.scope import bound_asker, spaces_enforced
+#: The line refusing an action on another member's turn (Spaces S2-05
+#: second review): ``(action, code) -> (English, Arabic)``; ``{name}`` is the
+#: person the turn or chat is.
+_TURN_LINES: dict[tuple[str, str], tuple[str, str]] = {
+    ("message", "answering_someone_else"): (
+        "This chat is answering {name} right now, so your message was not sent. "
+        "Send it once their turn ends.",
+        "هذه المحادثة تجيب {name} الآن، فلم تُرسل رسالتك. أرسلها بعد أن ينتهي دوره."),
+    ("steer", "not_your_turn"): (
+        "Only {name} can steer this turn: it is theirs. Your note was not sent.",
+        "لا يوجّه هذا الدور إلا {name}، فهو دوره. لم تُرسل ملاحظتك."),
+    ("stop", "not_your_turn"): (
+        "This turn is {name}'s: only they or an owner of this space can stop it.",
+        "هذا الدور لـ{name}: لا يوقفه إلا هو أو مالك هذه المساحة."),
+    ("reset", "another_members_turn"): (
+        "This chat is busy with {name}'s turn, so it was not cleared or compacted. "
+        "Try again once it ends.",
+        "هذه المحادثة مشغولة بدور {name}، فلم تُمسح ولم تُضغط. حاول بعد أن ينتهي."),
+    ("reset", "not_your_chat"): (
+        "Only {name}, who started this chat, or an owner of this space can clear or compact it.",
+        "لا يمسح هذه المحادثة أو يضغطها إلا {name} الذي بدأها، أو مالك هذه المساحة."),
+}
+_TURN_UNREADABLE = (
+    "Kazma could not check whose turn this is right now, so nothing was done. Try again in a moment.",
+    "لم يتمكن Kazma الآن من معرفة صاحب هذا الدور، فلم يُنفّذ شيء. حاول بعد قليل.")
 
-    if not spaces_enforced():
+
+def _turn_line(user_text: str, action: str, code: str, name: str) -> str:
+    """A turn refusal's line: in the language of the person's own words when
+    there are some, else the page's."""
+    english, arabic = _TURN_LINES.get((action, code), _TURN_UNREADABLE)
+    english = english.format(name=name if name not in ("", "?") else "another member")
+    arabic = arabic.format(name=name if name not in ("", "?") else "عضو آخر")
+    if user_text and not user_text.startswith("/"):
+        from kazma_core.language_lock import in_their_language
+
+        return in_their_language(user_text, english, arabic)
+    from kazma_ui.i18n import current_language
+
+    return arabic if current_language() == "ar" else english
+
+
+async def _turn_control(thread_id: str, graph: Any, action: str, user_text: str = "",
+                        *, active: bool | None = None) -> dict[str, str] | None:
+    """The refusal of *action* on *thread_id*'s chat by the person sending
+    now (``hitl_answerers.turn_control_refusal``): ``{"reason": code,
+    "message": line}``, or None when they may. *active* (a turn runs or
+    waits) is read here when not given: a running turn, or a card waiting.
+    Who it is that cannot be read refuses (``identity_unavailable``). Reads
+    nothing while the install does not enforce Spaces."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced() or not thread_id:
         return None
     import sqlite3
 
-    from kazma_ui.hitl_answerers import whose_turn
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_ui.hitl_answerers import turn_control_refusal
+
+    if active is None:
+        active = is_turn_running(thread_id)
+        if not active and action != "message" and graph is not None:
+            from kazma_core.safety.commitment.resume import pending_interrupt
+
+            card, _ = await pending_interrupt(graph, {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}})
+            active = card is not None
+    try:
+        refusal = await asyncio.to_thread(turn_control_refusal, thread_id, action, active=bool(active))
+    except (sqlite3.Error, OSError, IdentityUnavailable):
+        logger.warning("[SSE] whose turn thread=%s is cannot be read; %s refused",
+                       thread_id[:12], action, exc_info=True)
+        refusal = ("identity_unavailable", "")
+    if refusal is None:
+        return None
+    code, name = refusal
+    logger.info("[SSE] %s on thread=%s refused: %s", action, thread_id[:12], code)
+    return {"reason": code, "message": _turn_line(user_text, action, code, name)}
+
+
+async def _hard_steer_whose(thread_id: str, text: str = "") -> Any:
+    """Whose turn a steer goes into (``hitl_answerers.whose_turn``; a hard
+    steer's resume binds it), or the route's refusal (a dict with its line)
+    when the caller is not the turn's asker or who it is cannot be read.
+    Asked before the steer is saved, soft or hard, running or paused (the
+    S2-05 second review: a soft steer had no check, and the steer's own row
+    made the turn the steerer's). None while the install does not enforce
+    Spaces."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    refused = await _turn_control(thread_id, None, "steer", text, active=True)
+    if refused is not None:
+        return {"ok": False, **refused}
+    import sqlite3
 
     from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_ui.hitl_answerers import whose_turn
 
     try:
-        whose = await asyncio.to_thread(whose_turn, thread_id)
+        return await asyncio.to_thread(whose_turn, thread_id)
     except (sqlite3.Error, OSError, IdentityUnavailable):
-        logger.warning("[SSE] whose turn thread=%s is cannot be read; hard steer refused",
+        logger.warning("[SSE] whose turn thread=%s is cannot be read; steer refused",
                        thread_id[:12], exc_info=True)
-        return {"ok": False, "reason": "identity_unavailable"}
-    if not whose.asker or whose.asker != (bound_asker() or ""):
-        return {"ok": False, "reason": "not_your_turn"}
-    return whose
+        return {"ok": False, "reason": "identity_unavailable",
+                "message": _turn_line(text, "steer", "identity_unavailable", "")}
 
 
 def _waiting_text(user_text: str, name: str) -> str:
@@ -706,6 +789,18 @@ def create_sse_chat_router(
             raw_msg = _cap_rewrite
             user_message = _cap_rewrite
 
+        # ── /reset and /compact in a shared chat (Spaces S2-05 second
+        # review): only the chat's opener or an owner of the space, and never
+        # while another member's turn runs or waits; anyone else is told why.
+        if raw_msg.lower() in ("/reset", "/compact"):
+            _clear_refused = await _turn_control(thread_id, _get_graph(), "reset", raw_msg)
+            if _clear_refused is not None:
+                return StreamingResponse(
+                    iter([_sse_frame("error", {"content": _clear_refused["message"]})]),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+
         # ── Intercept RESET command ────────────────────────────────
         if raw_msg.lower() == "/reset":
             live_graph = _get_graph()
@@ -891,6 +986,18 @@ def create_sse_chat_router(
         if _waiting_on is not None:
             return StreamingResponse(
                 iter([_sse_frame("error", {"content": _waiting_text(user_message, _waiting_on)})]),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+        # ── Another member's turn running (Spaces S2-05 second review): a
+        # new message would cancel it (the supersede below). Refused, nothing
+        # saved, with a line saying whom the chat is answering; the same
+        # person's new message supersedes as before.
+        _answering = await _turn_control(thread_id, _get_graph(), "message", user_message)
+        if _answering is not None:
+            return StreamingResponse(
+                iter([_sse_frame("error", {"content": _answering["message"]})]),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
@@ -2337,6 +2444,11 @@ def create_sse_chat_router(
         thread_id = await resolve_caller_thread(
             session_id, str(payload.get("thread_id") or ""), store=_get_store()
         )
+        # Only the turn's asker or an owner of the space stops it (Spaces
+        # S2-05 second review); anyone else is told whose turn it is.
+        _stop_refused = await _turn_control(thread_id, _get_graph(), "stop")
+        if _stop_refused is not None:
+            return {"cancelled": False, "refused": True, **_stop_refused}
         task = cancel_turn(thread_id) if thread_id else None
         logger.info(
             "[SSE] Stop requested for thread=%s -> %s",
@@ -2423,11 +2535,21 @@ def create_sse_chat_router(
             push_soft_steer,
         )
 
+        # Only the turn's own asker steers it, soft or hard, running or paused
+        # (Spaces S2-05 second review): refused before anything is saved or
+        # queued, with a line saying whose turn it is. A hard steer's resume
+        # below runs the turn on as this asker.
+        _steer_whose = await _hard_steer_whose(thread_id, text)
+        if isinstance(_steer_whose, dict):
+            return _steer_whose
+
         # Durable transcript so the user can see / edit the steer after refresh.
+        # Marked a steer: it never opens a turn (whose turn it is reads the
+        # row that did, ``hitl_answerers._turn_author``).
         try:
             if session_id:
                 _label = "/steer! " if mode == "hard" else "/steer "
-                _steer_row = _reply_sink.authored({"role": "user", "content": _label + text})
+                _steer_row = _reply_sink.authored({"role": "user", "content": _label + text, "steer": True})
                 # AUD-052: read, append and write under the session's
                 # transaction (and off the loop: the read was on it).
                 await asyncio.to_thread(
@@ -2451,13 +2573,7 @@ def create_sse_chat_router(
             }
 
         # ── hard steer: queue, wait for the interrupt, then resume ──
-        # Only the turn's own asker hard-steers it (Spaces S2-05 review): the
-        # resume below runs the turn on, and another member's steer would run
-        # it as them. Refused before anything is queued; the turn goes on as
-        # its asker.
-        _steer_whose = await _hard_steer_whose(thread_id)
-        if isinstance(_steer_whose, dict):
-            return _steer_whose
+        # The turn goes on as its asker (checked above, before the save).
         push_hard_steer(thread_id, text)
         graph_inst = _get_graph()
         try:
@@ -2562,6 +2678,11 @@ def create_sse_chat_router(
         if not thread_id:
             return {"ok": False, "reason": "missing_session"}
 
+        # Only the turn's asker or an owner of the space (Spaces S2-05 second
+        # review); anyone else is told whose turn it is.
+        _abort_refused = await _turn_control(thread_id, _get_graph(), "stop")
+        if _abort_refused is not None:
+            return {"ok": False, **_abort_refused}
         from kazma_ui.turn_abort import abort_turn
 
         return await abort_turn(thread_id, _get_graph(), session_id=session_id)

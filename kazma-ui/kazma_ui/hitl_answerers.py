@@ -235,18 +235,49 @@ def bell_items(language: str = "en") -> list[dict[str, Any]]:
     return out
 
 
+def _is_steer_row(row: dict[str, Any]) -> bool:
+    """A steer's row (``/steer``, ``/steer!``): a note to a running turn,
+    never the message that opened one."""
+    return bool(row.get("steer")) or str(row.get("content") or "").startswith(("/steer ", "/steer! "))
+
+
+def _open_turn_id(rows: list[dict[str, Any]], thread_id: str) -> str:
+    """The id of the turn running or waiting on the chat: this process's open
+    reply turn, else a trailing assistant row still marked open (a pause that
+    outlived a restart)."""
+    from kazma_ui.reply_sink import current_reply_turn
+
+    turn = current_reply_turn(thread_id)
+    if turn:
+        return turn
+    for row in reversed(rows):
+        if row.get("role") == "assistant":
+            return str(row.get("turn_id") or "") if row.get("lifecycle") == "open" or row.get("open") else ""
+    return ""
+
+
 def _turn_author(thread_id: str, space_id: str, reader: str) -> str:
-    """The author of the newest user message of *thread_id*'s chat (the
-    chat store stamps it, ``reply_sink.authored``), or ``""``. Read in the
-    chat's own space (the chat store is each space's), as *reader*: a resume
-    at start has nothing bound. Blocking."""
+    """The author of the message that OPENED the turn running or waiting on
+    *thread_id*'s chat (the chat store stamps it, ``reply_sink.authored``),
+    or ``""``: the newest user message before that turn's reply row -- never
+    a steer's row, nor a message after it (the S2-05 second review: the
+    newest row was a steer, so another member's steer made the turn theirs).
+    With no turn open, the newest user message that is not a steer. Read in
+    the chat's own space (the chat store is each space's), as *reader*: a
+    resume at start has nothing bound. Blocking."""
     from kazma_core.spaces.scope import bind_scope
     from kazma_ui.session_manager import get_session_manager
 
     with bind_scope(space_id, reader):
         session = get_session_manager().get_by_thread_id(thread_id)
-    for row in reversed(list(getattr(session, "messages", None) or [])):
-        if isinstance(row, dict) and row.get("role") == "user":
+    rows = [row for row in (getattr(session, "messages", None) or []) if isinstance(row, dict)]
+    turn = _open_turn_id(rows, thread_id)
+    end = len(rows)
+    if turn:
+        end = next((i for i, row in enumerate(rows)
+                    if row.get("role") == "assistant" and str(row.get("turn_id") or "") == turn), end)
+    for row in reversed(rows[:end]):
+        if row.get("role") == "user" and not _is_steer_row(row):
             return str(row.get("author") or "")
     return ""
 
@@ -254,7 +285,7 @@ def _turn_author(thread_id: str, space_id: str, reader: str) -> str:
 def whose_turn(thread_id: str) -> GateWhose:
     """Whose turn on *thread_id* is (the one running, paused or cut off): the
     thread's space (its record) and the turn's asker -- the author of the
-    chat's newest user message, else the chat's opener. What a resume that
+    message that opened the turn (``_turn_author``), else the chat's opener. What a resume that
     is not an answer to a card binds (S2-05 review): a cut turn continued
     after a restart, a hard steer's resume. Blocking (the thread record, the
     chat store)."""
@@ -290,13 +321,70 @@ def waiting_for_someone_else(thread_id: str, card: dict[str, Any] | None, interr
         return "?"
     if not asker or asker == person:
         return None
+    return _account_name(asker)
+
+
+#: What a person may do to a chat's turn (Spaces S2-05 second review).
+TURN_ACTIONS = ("message", "steer", "stop", "reset")
+
+
+def _account_name(account_id: str) -> str:
+    """An account's name for a refusal's line; ``"?"`` when it cannot be read."""
     from kazma_core.spaces.identity import IdentityUnavailable, read_registry
 
     try:
-        account = (read_registry().get("accounts") or {}).get(asker) or {}
+        account = (read_registry().get("accounts") or {}).get(account_id) or {}
     except IdentityUnavailable:
         return "?"
     return str(account.get("name") or "").strip() or "?"
+
+
+def turn_control_refusal(thread_id: str, action: str, *, active: bool,
+                         caller: str | None = None) -> tuple[str, str] | None:
+    """Why the caller (the account bound now when None) may not do *action*
+    to *thread_id*'s chat, as ``(code, name)``, or None when they may. Once
+    Spaces is enforced (else None, nothing read); *active* says a turn runs
+    or waits on the chat. The turn's asker is ``whose_turn``'s.
+
+    * ``message`` -- a new message while a turn runs (it would cancel it):
+      only its asker; anyone else is told the chat is answering them.
+    * ``steer`` -- only the turn's asker, running or paused.
+    * ``stop`` (and abort) -- its asker or an owner of the space
+      (``shared_work.may_change``).
+    * ``reset`` (and compact) -- the chat's opener or an owner of the space,
+      and never while another member's turn runs or waits.
+
+    A turn whose asker is not recorded (a chat from before Spaces, in a
+    personal space) refuses nobody. Blocking (the thread record, the chat
+    store, the identity store); ``IdentityUnavailable`` or a store error when
+    it cannot say."""
+    from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+    if action not in TURN_ACTIONS:
+        raise ValueError(f"not a turn action: {action!r}")
+    if not spaces_enforced():
+        return None
+    person = caller or bound_asker() or ""
+    whose = whose_turn(thread_id) if active else None
+    asker = whose.asker if whose is not None else ""
+    if action == "reset":
+        if asker and asker != person:
+            return "another_members_turn", _account_name(asker)
+        from kazma_core.spaces import threads
+        from kazma_core.spaces.identity import owns_space
+
+        record = threads.record_of(thread_id)
+        opener = record.opener if record is not None else ""
+        if opener and opener != person and not owns_space(person, record.space_id):
+            return "not_your_chat", _account_name(opener)
+        return None
+    if not asker or asker == person:
+        return None
+    if action == "stop":
+        from kazma_core.spaces.identity import owns_space
+
+        return None if person and owns_space(person, whose.space_id) else ("not_your_turn", _account_name(asker))
+    return ("answering_someone_else" if action == "message" else "not_your_turn"), _account_name(asker)
 
 
 @contextmanager

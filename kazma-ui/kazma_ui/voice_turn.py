@@ -157,11 +157,18 @@ async def run_voice_user_turn(
 
     # A card waiting on another member (Spaces S2-05 review): the utterance
     # would drop it. Refused, nothing saved, as the typed message is.
-    from kazma_ui.sse_chat import _card_waits_on_someone_else, _waiting_text
+    from kazma_ui.sse_chat import _card_waits_on_someone_else, _turn_control, _waiting_text
 
     waiting_on = await _card_waits_on_someone_else(thread_id, graph)
     if waiting_on is not None:
         result.error = _waiting_text(user_text, waiting_on)
+        return result
+    # Another member's turn running: the utterance would cancel it (the
+    # supersede below). Refused, nothing saved, as the typed message is
+    # (Spaces S2-05 second review); the same person's utterance supersedes.
+    answering = await _turn_control(thread_id, graph, "message", user_text)
+    if answering is not None:
+        result.error = answering["message"]
         return result
 
     try:

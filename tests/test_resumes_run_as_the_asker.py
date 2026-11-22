@@ -233,7 +233,8 @@ def _steer_whose(team: Any, who: str) -> Any:
 
 
 def test_only_the_turns_asker_hard_steers_it(team) -> None:
-    assert _steer_whose(team, "omar") == {"ok": False, "reason": "not_your_turn"}
+    refused = _steer_whose(team, "omar")
+    assert refused["ok"] is False and refused["reason"] == "not_your_turn" and "omar" not in refused["message"]
     from kazma_ui.hitl_answerers import GateWhose
 
     whose = _steer_whose(team, "reem")
@@ -245,5 +246,5 @@ def test_the_steer_route_binds_the_turns_asker_for_its_resume() -> None:
     reads it); the refusal comes before anything is queued."""
     text = (REPO / "kazma-ui/kazma_ui/sse_chat/__init__.py").read_text(encoding="utf-8")
     steer = text[text.index("async def steer_chat_turn"):text.index("async def abort_chat_turn")]
-    assert steer.index("_hard_steer_whose(thread_id)") < steer.index("push_hard_steer(thread_id, text)")
+    assert steer.index("_hard_steer_whose(thread_id, text)") < steer.index("push_hard_steer(thread_id, text)")
     assert "with as_the_asker(_steer_whose):" in steer

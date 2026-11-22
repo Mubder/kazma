@@ -449,6 +449,52 @@ def test_the_watchdog_claims_nothing_when_whose_card_cannot_be_read(team, monkey
         assert _state(world.gates, world.gate) != "pending"
 
 
+def _unread_passes(team: Any, passes: int) -> tuple[list[Any], list[dict[str, Any]], str]:
+    """The watchdog's passes over Reem's expired card while the identity
+    store cannot be read; what it resumed, what it wrote, the gate's state."""
+    from kazma_ui import hitl_timeout
+
+    with chat_paused(team) as world:
+        graph = _ClosableGraph(world.hitl_state["graph"])
+
+        def unreadable() -> dict[str, Any]:
+            raise identity.IdentityUnavailable("the identity store could not be read")
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(identity, "read_registry", unreadable)
+            for _ in range(passes):
+                asyncio.run(hitl_timeout._auto_deny(graph, world.thread, 300.0))
+        return list(world.resumed), graph.written, _state(world.gates, world.gate)
+
+
+def test_a_card_unread_for_three_passes_is_recorded_and_its_turn_closed(team, monkeypatch) -> None:
+    """A card whose asker cannot be read stays pending for three passes; the
+    fourth records the timeout and closes the turn with a line, resumed as
+    nobody: a card never stays pending for good."""
+    from kazma_ui import hitl_timeout
+
+    monkeypatch.setattr(hitl_timeout, "_read_failures", {})
+    resumed, written, gate = _unread_passes(team, hitl_timeout._READS_BEFORE_GIVING_UP)
+    assert gate == "pending" and resumed == [] and written == []
+    monkeypatch.setattr(hitl_timeout, "_read_failures", {})
+    resumed, written, gate = _unread_passes(team, hitl_timeout._READS_BEFORE_GIVING_UP + 1)
+    assert resumed == [], "an unread card's turn is resumed as nobody"
+    [end] = written
+    text = end["messages"][-1]["content"]
+    assert "could not tell whose" in text and end["turn_failed"], text
+    assert gate == "settled"
+    assert hitl_timeout._read_failures == {}
+
+
+def test_control_a_watchdog_that_only_retries_leaves_the_card_pending(team, monkeypatch) -> None:
+    from kazma_ui import hitl_timeout
+
+    monkeypatch.setattr(hitl_timeout, "_read_failures", {})
+    monkeypatch.setattr(hitl_timeout, "_READS_BEFORE_GIVING_UP", 10**6)
+    resumed, written, gate = _unread_passes(team, 4)
+    assert gate == "pending" and resumed == [] and written == []
+
+
 def test_control_recorded_before_the_read_the_gate_is_left_claimed(team, monkeypatch) -> None:
     """Today's order: the timeout recorded, then the read that fails -- the
     gate is no longer pending and nothing resumes it."""
