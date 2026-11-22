@@ -53,6 +53,20 @@ async def run_research_deep(decision: TurnDecision, state: dict[str, Any], **ctx
             message="no_research_topic",
         )
 
+    # The person's tool switch (Spaces S2-01): start_deep_research switched
+    # off for them is off here too; the turn goes on without it.
+    import asyncio
+
+    from kazma_core.spaces.features import tool_door_refusal
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    try:
+        refused = await asyncio.to_thread(tool_door_refusal, "start_deep_research", topic)
+    except IdentityUnavailable:
+        refused = "identity_unavailable"
+    if refused:
+        return HandlerResult(ok=False, escalate=True, message="tool_off")
+
     try:
         from kazma_core.tools.research_session import start_deep_research
 

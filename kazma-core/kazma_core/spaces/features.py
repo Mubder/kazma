@@ -74,12 +74,16 @@ __all__ = [
     "INTENT_HANDLERS",
     "NAMES",
     "NO_ADMISSION",
+    "NOT_A_TOOL_DOOR",
     "TOOLS_OFF_POLICY",
+    "TOOL_ROUTE_DOORS",
+    "TOOL_WORK_DOORS",
     "AlwaysOn",
     "Feature",
     "FeatureOff",
     "FeatureRefused",
     "Grants",
+    "ToolOff",
     "command_refusal",
     "feature_here",
     "feature_refusal",
@@ -89,7 +93,10 @@ __all__ = [
     "intent_refusal",
     "precondition",
     "remember_page_grants",
+    "tool_door_refusal",
+    "tool_off_text",
     "tool_refusal",
+    "tool_work_refusal",
     "work_refusal",
 ]
 
@@ -336,6 +343,182 @@ NO_ADMISSION: dict[str, str] = {
     "chat_apps": "nothing of it exists until stage 3 links chat apps to accounts",
     "development": "host tools and routes (S1-20's group rule, checked at the offer, the call and the route)",
 }
+
+
+#: The doors to a tool's effect that are not a call of the tool (Spaces
+#: S2-01, the second review). A tool the admin switched off for a person
+#: (``tools_off``) -- or whose feature they lack, or whose account is
+#: disabled -- is refused at each of them as at its call: switched off, the
+#: effect is off for them, never only the agent's way to it.
+#:
+#: A route door: ``(METHOD, pattern)`` (``kazma_ui.route_scopes``' grammar)
+#: and the tools whose work it does; the tenant middleware refuses it (403
+#: ``tool_off``) when any of them is off for the person.
+TOOL_ROUTE_DOORS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("POST", "/api/documents$"): ("document_import",),
+    ("POST", "/api/documents/import$"): ("document_import",),
+    ("POST", "/api/documents/jobs/{job_id}/retry$"): ("document_import",),
+    ("POST", "/api/documents/jobs/{job_id}/cancel$"): ("document_cancel",),
+    ("POST", "/api/documents/merge$"): ("pdf_merge",),
+    ("POST", "/api/documents/search$"): ("document_search",),
+    ("POST", "/api/documents/{document_id}/convert$"): ("document_convert",),
+    ("POST", "/api/documents/{document_id}/fill-form$"): ("pdf_fill_form",),
+    ("POST", "/api/documents/{document_id}/index$"): ("document_index",),
+    ("POST", "/api/documents/{document_id}/redact$"): ("document_redact",),
+    ("POST", "/api/documents/{document_id}/split$"): ("pdf_split",),
+    ("POST", "/api/kb/libraries$"): ("knowledge_create_library",),
+    ("POST", "/api/kb/libraries/{library_id}/refresh$"): ("knowledge_ingest_site",),
+    ("POST", "/api/kb/jobs/{job_id}/resume$"): ("knowledge_ingest_site",),
+    ("POST", "/api/kb/preview$"): ("knowledge_ingest_site",),
+    ("POST", "/api/kb/search$"): ("knowledge_search",),
+    ("POST", "/api/research/sessions$"): ("start_deep_research",),
+    ("POST", "/api/research/sessions/{session_id}/resume$"): ("start_deep_research",),
+    ("POST", "/api/research/sessions/{session_id}/cancel$"): ("cancel_research_session",),
+    ("POST", "/api/scheduled/cron$"): ("schedule_task",),
+    ("PUT", "/api/scheduled/cron/{job_id}$"): ("edit_scheduled",),
+    ("DELETE", "/api/scheduled/cron/{job_id}$"): ("cancel_scheduled",),
+    ("POST", "/api/scheduled/cron/{job_id}/restore$"): ("schedule_task",),
+    ("POST", "/api/scheduled/recipes/{recipe_id}$"): ("schedule_task",),
+    ("POST", "/api/swarm/dispatch$"): ("dispatch_swarm",),
+    ("POST", "/api/swarm/tasks/{task_id}/retry$"): ("dispatch_swarm",),
+    ("POST", "/api/x/generate$"): ("x_draft_posts",),
+    ("POST", "/api/x/drafts/discard$"): ("discard_proposal",),
+    ("POST", "/api/ide/write$"): ("file_write",),
+    ("POST", "/api/ide/apply_patch$"): ("file_apply_patch",),
+    ("POST", "/api/ide/apply_patch_set$"): ("file_apply_patch_set",),
+    ("POST", "/api/ide/delete$"): ("file_delete",),
+    ("POST", "/api/ide/swarm$"): ("dispatch_swarm",),
+}
+
+#: A work door (``path::qualified.name``): a function every way to a tool's
+#: effect passes that is not a call of the tool -- a choke point a page, the
+#: chat apps and the tool share (asked again on the tool's path: harmless),
+#: a page's action whose tool depends on what it is asked (a document's
+#: format, a crawl's kind), work that runs later for the person it is for
+#: (a booked post when it fires), the intent engine. Each asks
+#: :func:`tool_work_refusal` or :func:`tool_door_refusal`, or names the tool
+#: to ``x_api.ownership.x_work_scope``.
+TOOL_WORK_DOORS: dict[str, tuple[str, ...]] = {
+    "x_post": (
+        "kazma-core/kazma_core/x_api/booking.py::publish_x_post",
+        "kazma-core/kazma_core/x_api/threads.py::publish_thread",
+    ),
+    "x_delete_post": ("kazma-core/kazma_core/x_api/booking.py::delete_x_post",),
+    "x_schedule_post": (
+        "kazma-core/kazma_core/x_api/booking.py::book_x_post",
+        "kazma-core/kazma_core/x_api/publication_service.py::fire_due_operations",
+        "kazma-core/kazma_core/x_api/scheduled_fire.py::_fire_post",
+        "kazma-ui/kazma_ui/x_api.py::x_queue_action",
+    ),
+    "x_cancel_scheduled_post": ("kazma-ui/kazma_ui/x_api.py::x_queue_action",),
+    "start_deep_research": ("kazma-core/kazma_core/agent/intent/handlers/research.py::run_research_deep",),
+    "knowledge_ingest_url": ("kazma-ui/kazma_ui/kb_api.py::create_kb_router.ingest",),
+    "knowledge_ingest_site": ("kazma-ui/kazma_ui/kb_api.py::create_kb_router.ingest",),
+    "generate_pdf": ("kazma-ui/kazma_ui/documents_api.py::create_documents_router.generate",),
+    "generate_docx": ("kazma-ui/kazma_ui/documents_api.py::create_documents_router.generate",),
+    "generate_pptx": ("kazma-ui/kazma_ui/documents_api.py::create_documents_router.generate",),
+    "generate_xlsx": ("kazma-ui/kazma_ui/documents_api.py::create_documents_router.generate",),
+    "generate_markdown_doc": ("kazma-ui/kazma_ui/documents_api.py::create_documents_router.generate",),
+}
+
+#: The routes that change something in a space and are no tool's door, and
+#: why. Every such route is a door above or here (a gate reads the app).
+NOT_A_TOOL_DOOR: dict[tuple[str | None, str], str] = {
+    (None, "/api/chat"): "the chat itself: tools are asked at their calls; the rest is a chat's own housekeeping",
+    (None, "/api/memory"): ("the person's own memory on the Memory page: a switch is what Kazma's agent may do "
+                            "for them; Forget and the page's edits stay theirs (the user decides what is kept)"),
+    (None, "/api/replay"): "Time Travel over the person's own chats",
+    (None, "/api/sessions"): "the person's own chats",
+    (None, "/api/approve"): "answering an approval card",
+    (None, "/api/pending-approvals"): "clearing one's own waiting cards",
+    (None, "/api/commitment"): "confirming or rejecting a held lesson",
+    (None, "/api/runs"): "deciding on one's own run: each kind's own control",
+    (None, "/api/a2a$"): "another agent's read-only turn: its tools are asked at their calls",
+    (None, "/api/import/history"): "bringing one's own chat history in; no tool does it",
+    (None, "/api/bookmarks"): "the Workspace's bookmarks; no tool keeps them",
+    (None, "/api/github"): "GitHub's sign-in, issues and pull requests: Development's, no switchable tool",
+    (None, "/api/workspace"): "the Workspace's folder choice: Development's, no switchable tool",
+    (None, "/api/workspaces"): "the Workspace's folder choice: Development's, no switchable tool",
+    ("POST", "/api/ide/checkpoints"): "putting files back as a checkpoint had them; no tool does it",
+    ("POST", "/api/ide/diff$"): "a read",
+    ("POST", "/api/ide/lsp$"): "a language server's answer: a read",
+    ("POST", "/api/ide/git$"): "Development's host git (S1-20's group rule), no switchable tool",
+    ("POST", "/api/ide/run$"): "Development's host run (S1-20's group rule), no switchable tool",
+    ("POST", "/api/ide/runfile$"): "Development's host run (S1-20's group rule), no switchable tool",
+    ("POST", "/api/ide/skill$"): "Development's skill run (S1-20's group rule), no switchable tool",
+    ("DELETE", "/api/documents/{document_id}$"): "deleting one's document; no tool deletes one",
+    ("POST", "/api/documents/{document_id}/delete$"): "deleting one's document; no tool deletes one",
+    ("POST", "/api/documents/{document_id}/move$"): "the person's own move between their spaces (S2-12)",
+    ("POST", "/api/documents/{document_id}/unindex$"): "taking a document out of a library; no tool does it",
+    ("POST", "/api/documents/generate$"): "a work door: its handler asks the format's tool",
+    (None, "/api/documents/ops"): "the admin's document maintenance",
+    (None, "/api/email"): "connecting a mailbox: the tools send and read",
+    (None, "/api/calendar"): "connecting a calendar: the tools change events",
+    (None, "/api/voice"): "speech in and out; no switchable tool",
+    ("DELETE", "/api/kb/libraries/{library_id}$"): "deleting one's library; no tool does it",
+    ("PATCH", "/api/kb/libraries/{library_id}$"): "renaming one's library; no tool does it",
+    ("POST", "/api/kb/libraries/{library_id}/archive$"): "archiving one's library; no tool does it",
+    ("POST", "/api/kb/libraries/{library_id}/unarchive$"): "restoring one's library; no tool does it",
+    ("POST", "/api/kb/ingest$"): "a work door: its handler asks the crawl's or the page's tool",
+    ("POST", "/api/kb/services"): "a service's credit balance, read on request",
+    ("DELETE", "/api/research/sessions/{session_id}$"): "deleting one's research; no tool does it",
+    ("DELETE", "/api/research/tasks/{task_id}$"): "deleting one's research; no tool does it",
+    ("POST", "/api/research/sessions/{session_id}/archive$"): "archiving one's research",
+    ("POST", "/api/research/sessions/{session_id}/unarchive$"): "restoring one's research",
+    ("POST", "/api/research/tasks/{task_id}/archive$"): "archiving one's research",
+    ("POST", "/api/research/tasks/{task_id}/unarchive$"): "restoring one's research",
+    ("POST", "/api/research/sessions/{session_id}/export$"): "exporting one's research: a read",
+    ("POST", "/api/research/{task_id}/export$"): "exporting one's research: a read",
+    ("POST", "/api/research/papers/export$"): "exporting one's papers: a read",
+    ("POST", "/api/research/compare$"): "comparing two reports: a read",
+    ("POST", "/api/research/acquisition/credits$"): "a service's credit balance, read on request",
+    ("POST", "/api/swarm/approvals/{approval_id}/decide$"): "answering a worker's approval",
+    ("POST", "/api/swarm/tasks/{task_id}/approve$"): "answering one's task's checkpoint",
+    ("POST", "/api/swarm/tasks/{task_id}/reject$"): "answering one's task's checkpoint",
+    ("POST", "/api/swarm/tasks/{task_id}/cancel$"): "cancelling one's own task",
+    ("POST", "/api/scheduled/x$"): "a work door: x_api.booking.book_x_post asks x_schedule_post",
+    ("POST", "/api/x/post$"): "a work door: x_api.booking.publish_x_post asks x_post",
+    ("POST", "/api/x/delete$"): "a work door: x_api.booking.delete_x_post asks x_delete_post",
+    ("POST", "/api/x/reply/approve$"): "a work door: the reply goes out through x_api.booking.publish_x_post",
+    ("POST", "/api/x/reply/retry$"): "a work door: a reply goes out through x_api.booking.publish_x_post",
+    ("POST", "/api/x/reply/delete$"): "a work door: x_api.booking.delete_x_post asks x_delete_post",
+    ("POST", "/api/x/threads/{ident}/{action}$"): "a work door: x_api.threads.publish_thread asks x_post",
+    ("POST", "/api/x/queue/{operation_id}/{action}$"): "a work door: its handler asks the action's tool",
+    ("POST", "/api/x/threads$"): "saving a thread's draft for review",
+    ("POST", "/api/x/preview$"): "a preview: nothing is sent",
+    ("POST", "/api/x/reply/preview$"): "a preview: nothing is sent",
+    ("POST", "/api/x/reply/deny$"): "declining a reply",
+    ("POST", "/api/x/reply/poll$"): "reading new mentions now",
+    ("POST", "/api/x/reply/model-test$"): "testing the reply model",
+    ("POST", "/api/x/reply/policy/validate$"): "checking a reply policy",
+    ("PUT", "/api/x/reply$"): "the reply bot's settings",
+    ("PUT", "/api/x/reply/qualification$"): "the reply bot's settings",
+    ("PUT", "/api/x/composer$"): "the composer's settings",
+    ("POST", "/api/x/operations/{operation_id}/check$"): "checking a post's receipt: a read",
+    ("POST", "/api/x/datasets$"): "drafting datasets; no tool keeps them",
+    ("POST", "/api/x/datasets/{ident}/collect$"): "collecting a drafting dataset; no tool does it",
+    ("PUT", "/api/x/datasets/{ident}/case$"): "drafting datasets; no tool keeps them",
+    ("POST", "/api/x/credentials$"): "connecting the X account",
+    ("POST", "/api/x/api-access$"): "connecting the X account",
+    ("POST", "/api/x/disconnect$"): "disconnecting the X account",
+    ("POST", "/api/x/oauth2/start$"): "connecting the X account",
+    ("POST", "/api/x/oauth2/sign-out$"): "disconnecting the X account",
+    ("POST", "/api/x/resume$"): "the admin's resume of X after a stop",
+    ("POST", "/api/x/test$"): "testing the X connection",
+}
+
+
+class ToolOff(PermissionError):
+    """Work of a tool switched off for the person it is for, reached by a
+    door that is not a call of the tool (Spaces S2-01). Like
+    :class:`FeatureOff` it waits: nothing failed or changed, and it goes on
+    once the admin turns the tool on again. ``str()`` is the refusal."""
+
+    code = "tool_off"
+
+    def __init__(self, tool: str, message: str) -> None:
+        super().__init__(message)
+        self.tool = tool
 
 
 class FeatureOff(PermissionError):
@@ -697,6 +880,48 @@ def work_refusal(feature: str, account: str | None) -> str | None:
     if grants.has(feature):
         return None
     return _disabled_refusal() if grants.disabled else _refusal(feature, "both")
+
+
+def tool_off_text(tool: str, lang: str = "both") -> str:
+    """The refusal of a tool switched off for the person (S2-01), in *lang*
+    ("en", "ar", or "both": Arabic first), said to the person."""
+    ar = f"غير متاح لك: أداة «{tool}» مطفأة لك. يشغّلها المسؤول من الإعدادات ← الأشخاص."
+    en = f"Not available to you: the tool {tool} is switched off for you. The admin turns it on in Settings → People."
+    return ar if lang == "ar" else en if lang == "en" else f"{ar}\n{en}"
+
+
+def tool_work_refusal(tool: str, account: str | None, lang: str = "both") -> str | None:
+    """Whether the work of the tool *tool* may run for *account* now, at a
+    door that is not a call of the tool (:data:`TOOL_ROUTE_DOORS`,
+    :data:`TOOL_WORK_DOORS`): None when it may, else the refusal -- the
+    account disabled, the tool's feature off, or the tool switched off for
+    them (S2-01). Asked when the work runs: a booked post asks again when it
+    fires. Raises ``identity.IdentityUnavailable`` when the store cannot be
+    read: the caller holds the work. None always while Spaces is not
+    enforced, and for an account that is no person (Kazma's own work).
+    Blocking."""
+    if not spaces_enforced() or not account:
+        return None
+    from kazma_core.spaces import identity
+
+    registry = identity.read_registry()
+    if str(account) not in (registry.get("accounts") or {}):
+        return None
+    grants = grants_of(registry, account)
+    if grants.disabled:
+        return _disabled_refusal(lang)
+    for feature in _features_of_tool(tool):
+        if not grants.has(feature):
+            return _refusal(feature, lang)
+    return tool_off_text(tool, lang) if tool in grants.tools_off else None
+
+
+def tool_door_refusal(tool: str, user_text: str | None = None) -> str | None:
+    """:func:`tool_work_refusal` for the person bound now (a request, a
+    turn), in the language of *user_text* (both when none). Blocking."""
+    from kazma_core.spaces.scope import bound_asker
+
+    return tool_work_refusal(tool, bound_asker() or "", _lang_of(user_text))
 
 
 # ── The page being drawn ────────────────────────────────────────────────

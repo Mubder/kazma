@@ -15833,7 +15833,30 @@ an install with one account behaves as before.
     `features.tool_refusal` refuses such a tool, so it is neither offered
     nor callable wherever a feature's tools are refused (S2-11: the chat
     offer, the registry, a scheduled job's executor, a swarm worker, the
-    MCP branch). No new place asks: a tool's own check covers it.
+    MCP branch).
+  - **Off at every door, not only at the call** (the second review: X
+    Studio's Post now and Delete, a Scheduled booking, a booked post when it
+    fired, the intent engine's deep research and the Swarm, Research and
+    Documents pages reached the same effects). Every door that is not a
+    call of the tool is declared in `spaces.features`: a route door
+    (`TOOL_ROUTE_DOORS`, `route_scopes.tools_of_route`; the tenant
+    middleware answers 403 `tool_off` with a line, `features.tool_off_text`)
+    or a work door (`TOOL_WORK_DOORS`: the X choke points
+    `x_api.booking.publish_x_post`, `delete_x_post`, `book_x_post` and
+    `x_api.threads.publish_thread`; a booked post when it fires, through
+    `x_api.ownership.x_work_scope(tool=)`, which waits as `ToolOff`; the
+    intent engine's research handler; the Documents page's generate by
+    format and the Knowledge page's ingest by kind; X Studio's queue). Each
+    asks `features.tool_work_refusal` (or `tool_door_refusal` for the person
+    bound now): the account disabled, the tool's feature off, or the tool
+    switched off. Every route that changes something in a space is a door
+    or declared not one with why (`NOT_A_TOOL_DOOR`: the Memory page's
+    edits stay the person's, the chat itself, answering a card...). A new
+    page action reaching a tool's effect is a door or a reason.
+  - **N4 in X Studio**: a person whose cards go to approvers posts and
+    deletes on X only through the chat's card; their own click (Post now,
+    Delete) is refused with a line naming the approvers
+    (`spaces.approvals.own_click_refusal`, 403 `approvers_decide`).
   - Only a tool a person can have is switched (`features._switchable_tools`:
     each feature's tools and the always-on ones, chat and memory;
     `checked_tools` refuses `unknown_tool`, `bad_tools`, and
@@ -15853,7 +15876,13 @@ an install with one account behaves as before.
     neither offered nor called in chat, a scheduled job and a real swarm
     worker, another person keeps it; hiding it from the offer only as the
     control; the switch's refusals, the route, the precondition),
-    `tests/e2e/test_person_tools_browser.py` (by the sidebar, EN/AR).
+    `tests/e2e/test_person_tools_browser.py` (by the sidebar, EN/AR),
+    `tests/test_tool_doors.py` (the doors both ways: every changing route of
+    the built app is a door or a reason, every work door asks, every asking
+    function is declared, each with a planted control; the route door
+    through the real tenant middleware, the X choke points, a booked post
+    waiting, the intent engine, N4 through X Studio's routes; the middleware
+    without its doors and X Studio without the rule as controls).
 - **Models per person (S2-03, 2026-11-22).** Only where Spaces is enforced;
   an install that does not enforce it, the admin, and Kazma's own work (no
   person bound) use every model the install offers, and read nothing more.

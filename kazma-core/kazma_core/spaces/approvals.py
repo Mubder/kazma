@@ -48,6 +48,7 @@ __all__ = [
     "Answerers",
     "answer_refusal",
     "card_fields",
+    "own_click_refusal",
     "standing_grant_refusal",
     "tool_names",
 ]
@@ -236,3 +237,30 @@ def standing_grant_refusal(person: str | None = None) -> str | None:
     except IdentityUnavailable:
         return IDENTITY_UNAVAILABLE
     return APPROVERS_DECIDE if _approvers(registry, who) else None
+
+
+def own_click_refusal(lang: str = "en") -> str | None:
+    """Why the person bound now may not act on X with their own click in X
+    Studio -- Post now, Delete (decision N4): the admin sent their cards to
+    approvers, so a post of theirs needs an approver's yes on the chat's
+    card, never their own click. The line names the approvers, in *lang*
+    ("en" or "ar"). None when they may (no approvers; Spaces off). Raises
+    ``identity.IdentityUnavailable`` when the store cannot be read. Blocking."""
+    if not spaces_enforced():
+        return None
+    who = bound_asker() or ""
+    if not who:
+        return None
+    from kazma_core.spaces.identity import read_registry
+
+    registry = read_registry()
+    approvers = _approvers(registry, who)
+    if not approvers:
+        return None
+    names = "، ".join(_name(registry, a) for a in approvers) if lang == "ar" else ", ".join(
+        _name(registry, a) for a in approvers)
+    if lang == "ar":
+        return (f"منشوراتك على X تحتاج موافقة {names}: اطلب من Kazma في المحادثة أن ينشر أو يحذف، "
+                f"فيجيب {names} على البطاقة.")
+    return (f"Your posts on X need {names}'s approval: ask Kazma in chat to post or delete it, "
+            f"and {names} answers the card.")

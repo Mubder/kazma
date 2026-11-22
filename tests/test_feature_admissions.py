@@ -223,6 +223,8 @@ def test_the_intent_engine_starts_no_research_for_a_person_without_it(y_and_g, m
 def test_control_without_the_intent_check_g_s_message_starts_research(y_and_g, monkeypatch) -> None:
     _off(y_and_g, "research")
     monkeypatch.setattr(features, "intent_refusal", lambda handler: None)
+    # The handler's own door (the S2-01 second review) asks the feature too.
+    monkeypatch.setattr(features, "tool_door_refusal", lambda *_a, **_k: None)
     started, _calls, _said = _deep_research_turn(Matrix.SPACE_B, y_and_g.account_b, monkeypatch)
     assert started  # the review's finding: deep research ran with Research off
 
@@ -289,6 +291,8 @@ def test_control_without_its_check_g_books_an_x_post(y_and_g, booking, monkeypat
     from kazma_core.x_api.booking import book_x_post
 
     monkeypatch.setattr(features, "work_refusal", lambda feature, account: None)
+    # The tool's door (the S2-01 second review) asks the feature too.
+    monkeypatch.setattr(features, "tool_work_refusal", lambda *_a, **_k: None)
     with y_and_g.as_b():
         ok, _payload = book_x_post(text="tides", when="2h", tenant_id=Matrix.SPACE_B)
     assert ok  # the review's finding
@@ -352,7 +356,7 @@ def test_control_x_work_scope_of_before_held_the_post_as_no_space(y_and_g, monke
 
     real = ownership.x_work_scope
 
-    def before(tenant, booker=None):
+    def before(tenant, booker=None, **_tool):
         try:
             return real(tenant, booker)
         except features.FeatureOff as exc:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import time
@@ -745,7 +746,7 @@ def _booker_of(row: dict[str, Any]) -> str:
     return booker if isinstance(booker, str) else ""
 
 
-async def _work_scope(tenant: str, booker: str = "") -> Any:
+async def _work_scope(tenant: str, booker: str = "", *, tool: str = "") -> Any:
     """What X work of *tenant* (booked by *booker*) runs in (Spaces S1-17
     part b, S2-11), resolved off the loop (the identity store): a scope to
     call and enter; ``_WAIT`` when whose it is cannot be read for now (the
@@ -754,21 +755,21 @@ async def _work_scope(tenant: str, booker: str = "") -> Any:
     held or failed, and goes once the feature is on again; else the reason it
     does not run (a tenant no space of the install holds, an identity store
     that cannot be read), said once."""
-    from kazma_core.spaces.features import FeatureOff
+    from kazma_core.spaces.features import FeatureOff, ToolOff
     from kazma_core.spaces.identity import IdentityUnavailable
     from kazma_core.spaces.scope import NoSpaceBound
     from kazma_core.x_api.ownership import identity_failure_passes, x_work_scope
 
     try:
-        scope = await asyncio.to_thread(x_work_scope, tenant, booker or None)
-    except FeatureOff:
+        scope = await asyncio.to_thread(functools.partial(x_work_scope, tenant, booker or None, tool=tool))
+    except (FeatureOff, ToolOff):
         said = f"{tenant} for {booker}"
         if said not in _SAID_NOT_RUN:
             if len(_SAID_NOT_RUN) >= _SAID_NOT_RUN_MAX:
                 _SAID_NOT_RUN.clear()
             _SAID_NOT_RUN.add(said)
-            logger.info("[x-publication] X work of %r waits: X Studio is off for the person it is for",
-                        tenant)
+            logger.info("[x-publication] X work of %r waits: X Studio or its tool is off for the person "
+                        "it is for", tenant)
         return _WAIT
     except NoSpaceBound:
         why = _NO_SPACE
@@ -819,7 +820,9 @@ async def fire_due_operations() -> None:
         return
     due = await asyncio.to_thread(store.due)
     for row in due:
-        scope = await _work_scope(row["tenant_id"], _booker_of(row))
+        # A booked post is x_schedule_post's work: switched off for the
+        # person who booked it (Spaces S2-01), it waits like X Studio off.
+        scope = await _work_scope(row["tenant_id"], _booker_of(row), tool="x_schedule_post")
         if scope is _WAIT:
             continue  # due again at the next pass
         if not callable(scope):

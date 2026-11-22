@@ -81,7 +81,7 @@ KB_ERROR_CODES = (
     "kb_single_operator", "invalid_request", "invalid_json", "request_too_large",
     "not_found", "library_exists", "url_refused", "kb_storage_full", "kb_library_limit", "library_busy",
     "crawl_owns_library", "documents_unavailable", "page_not_ingested", "no_seed",
-    "resume_refused", "internal_error",
+    "resume_refused", "internal_error", "tool_off", "identity_unavailable",
 )
 
 #: How each acquisition refusal is answered: (HTTP status, log level).
@@ -536,6 +536,19 @@ def create_kb_router() -> APIRouter:
             return data
         # The id in the caller's space: a crawl into "docs" from a second
         # space wrote into the first space's "docs" (Spaces S1-13).
+        # The person's tool switch (Spaces S2-01): a page is
+        # knowledge_ingest_url's work, a crawl knowledge_ingest_site's.
+        from kazma_core.spaces.features import tool_door_refusal
+        from kazma_core.spaces.identity import IdentityUnavailable
+
+        tool = "knowledge_ingest_url" if data.mode == "page" else "knowledge_ingest_site"
+        try:
+            refused = await asyncio.to_thread(tool_door_refusal, tool)
+        except IdentityUnavailable:
+            return _fail("identity_unavailable", "Accounts cannot be read right now. Try again.", 503,
+                         transient=True)
+        if refused:
+            return _fail("tool_off", refused, 403)
         lib_id = await asyncio.to_thread(lambda: _store().library_id_for(data.library_id))
         if data.mode == "page":
             return await _ingest_page(lib_id, data.url, name=data.name)

@@ -43,7 +43,8 @@ def x_config_key(key: str) -> str:
     return key if tenant == "default" else f"tenant.{tenant}.{key}"
 
 
-def x_work_scope(tenant: str, booker: str | None = None) -> Callable[[], AbstractContextManager[object]]:
+def x_work_scope(tenant: str, booker: str | None = None, *,
+                 tool: str = "") -> Callable[[], AbstractContextManager[object]]:
     """What background X work for a row of *tenant* runs in: call the answer
     and enter it (``with x_work_scope(tenant, booker)():``).
 
@@ -53,15 +54,17 @@ def x_work_scope(tenant: str, booker: str | None = None) -> Callable[[], Abstrac
     work acts for (``identity.work_scope``); ``NoSpaceBound`` for a tenant
     that is no space of the install -- its work does not run; ``FeatureOff``
     when that person no longer has X Studio (Spaces S2-11) -- its work waits,
-    nothing failed, and goes on once the feature is on again. Blocking (the
-    identity store): async callers resolve it in a thread and enter it on the
-    loop."""
+    nothing failed, and goes on once the feature is on again; ``ToolOff``
+    when the work is *tool*'s (a booked post's publishing is
+    ``x_schedule_post``'s) and that tool is switched off for the person
+    (S2-01) -- it waits the same way. Blocking (the identity store): async
+    callers resolve it in a thread and enter it on the loop."""
     from kazma_core.spaces.scope import NoSpaceBound, bind_scope, spaces_enforced
     from kazma_core.tenant_context import tenant_scope
 
     if not spaces_enforced():
         return functools.partial(tenant_scope, tenant)
-    from kazma_core.spaces.features import FeatureOff, work_refusal
+    from kazma_core.spaces.features import FeatureOff, ToolOff, tool_work_refusal, work_refusal
     from kazma_core.spaces.identity import AskerLeft, work_scope
 
     try:
@@ -75,6 +78,9 @@ def x_work_scope(tenant: str, booker: str | None = None) -> Callable[[], Abstrac
     refused = work_refusal("x_studio", found[1])
     if refused:
         raise FeatureOff("x_studio", refused)
+    off = tool_work_refusal(tool, found[1]) if tool else None
+    if off:
+        raise ToolOff(tool, off)
     return functools.partial(bind_scope, *found)
 
 

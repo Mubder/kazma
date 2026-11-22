@@ -484,6 +484,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Kazma holds as many libraries as it can. Delete a library you no longer need to add another.",
         "ar": "بلغ كازما الحد الأقصى لعدد المكتبات. احذف مكتبة لم تعد تحتاجها لتضيف أخرى.",
     },
+    "knowledge.err.tool_off": {
+        "en": "The admin switched this tool off for you; ask them to turn it on in Settings → People.",
+        "ar": "أطفأ المسؤول هذه الأداة لك؛ اطلب منه تشغيلها من الإعدادات ← الأشخاص.",
+    },
+    "knowledge.err.identity_unavailable": {
+        "en": "Kazma could not read the accounts just now. Try again in a moment.",
+        "ar": "تعذّر على Kazma قراءة الحسابات الآن. حاول بعد قليل.",
+    },
     "knowledge.err.library_busy": {
         "en": "A crawl of this library is already running; wait for it to finish.",
         "ar": "يجري زحف لهذه المكتبة بالفعل؛ انتظر حتى ينتهي.",

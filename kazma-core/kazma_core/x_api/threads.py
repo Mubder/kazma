@@ -58,6 +58,17 @@ def prepare_thread(segments: list[str], *, intent_key: str, actor: str = "operat
 
 
 async def publish_thread(ident: str, *, revision: int, token: str, actor: str) -> dict[str, Any]:
+    # The person's tool switch (Spaces S2-01): a thread is posts, x_post's
+    # work; switched off for the person, nothing is sent.
+    from kazma_core.spaces.features import tool_door_refusal
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    try:
+        refused = await asyncio.to_thread(tool_door_refusal, "x_post")
+    except IdentityUnavailable as exc:
+        raise ValueError("Accounts cannot be read right now; nothing was sent.") from exc
+    if refused:
+        raise ValueError(refused)
     cfg = await asyncio.to_thread(publications._config)
     if not cfg.can_post():
         raise ValueError("X publishing is disabled or paused. Review the connector before sending.")

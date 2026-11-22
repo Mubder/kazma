@@ -431,6 +431,21 @@ def create_documents_router() -> APIRouter:
                 status_code=400,
                 content={"ok": False, "error": "'payload' must be an object", "code": "invalid_request"},
             )
+        # The person's tool switch (Spaces S2-01): each format is its
+        # generator tool's work.
+        from kazma_core.spaces.features import tool_door_refusal
+        from kazma_core.spaces.identity import IdentityUnavailable
+
+        tool = {"pdf": "generate_pdf", "docx": "generate_docx", "pptx": "generate_pptx",
+                "xlsx": "generate_xlsx", "md": "generate_markdown_doc",
+                "markdown": "generate_markdown_doc"}.get(target_format.lower().lstrip("."), "")
+        try:
+            refused = await asyncio.to_thread(tool_door_refusal, tool) if tool else None
+        except IdentityUnavailable:
+            return JSONResponse(status_code=503, headers={"Retry-After": "5"}, content={
+                "ok": False, "error": "Accounts cannot be read right now. Try again.", "code": "identity_unavailable"})
+        if refused:
+            return JSONResponse(status_code=403, content={"ok": False, "error": refused, "code": "tool_off"})
         output_name = _opt_str(payload.get("output_name"))
         title = _opt_str(payload.get("title"))
         try:

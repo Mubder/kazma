@@ -298,7 +298,7 @@ def test_control_a_set_that_only_grows(matrix, enforced, monkeypatch) -> None:
     assert "matrix-late" in said
 
 
-async def _tenant_alone(tenant: str, booker: str = "") -> Any:
+async def _tenant_alone(tenant: str, booker: str = "", **_tool: Any) -> Any:
     """The binding as before part b: the tenant alone (who booked it unread)."""
     from kazma_core.tenant_context import tenant_scope
 

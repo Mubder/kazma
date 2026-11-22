@@ -758,6 +758,9 @@ DECLARED: dict[str, str] = {
     M + "spaces/daily_limits.py": "the daily-limit refusal as two fixed strings that "
                                   "language_lock.in_their_language chooses between; nothing is decided "
                                   "by Arabic text; tests/test_person_daily_limit.py",
+    M + "spaces/approvals.py": "X Studio's refusal of a person's own click when approvers decide their "
+                               "cards, an (English, Arabic) pair chosen by the page's language; nothing "
+                               "is decided by Arabic text; tests/test_tool_doors.py",
     M + "spaces/features.py": "each feature's name and its refusal in both languages (NAMES, held equal "
                               "to the catalog); nothing is decided by Arabic text; "
                               "tests/test_feature_grants.py",
