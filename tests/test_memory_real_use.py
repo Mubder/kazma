@@ -81,3 +81,34 @@ def test_a_kept_result_holds_no_reply_text():
 
         walk(data)
         assert keys <= allowed, (path.name, keys - allowed)
+
+
+def test_another_provider_and_another_checkout(suite, monkeypatch, tmp_path):
+    """Qwen's key stays out of the private install, which may run another
+    checkout's code; a model at the provider's own address is saved as
+    Settings saves it, then set up by the guide, which keeps the address."""
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-not-for-the-install")
+    other = tmp_path / "before-the-change"
+    env = suite.server_env(tmp_path / "home", tmp_path / "data", 12345, other)
+    assert "DASHSCOPE_API_KEY" not in env
+    assert env["PYTHONPATH"].split(";" if ";" in env["PYTHONPATH"] else ":")[0] == str(other / "kazma-core")
+
+    class Browser:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, dict]] = []
+
+        def api(self, method, path, data=None):
+            self.calls.append((method, path, data))
+            return {"ready": True}
+
+    browser = Browser()
+    suite.set_up_model(browser, provider="dashscope", model="qwen3.7-plus", key="k",
+                       base_url="https://example.invalid/compatible-mode/v1")
+    assert [(m, p) for m, p, _ in browser.calls] == [("POST", "/api/providers"), ("POST", "/api/setup/bootstrap")]
+    assert browser.calls[0][2]["base_url"] == "https://example.invalid/compatible-mode/v1"
+    assert browser.calls[1][2] == {"provider": "dashscope", "api_key": "", "model": "qwen3.7-plus"}
+    # At the preset's own address: the guide alone, with the key.
+    browser = Browser()
+    suite.set_up_model(browser, provider="deepseek", model="deepseek-flash", key="k", base_url=None)
+    assert browser.calls == [("POST", "/api/setup/bootstrap",
+                              {"provider": "deepseek", "api_key": "k", "model": "deepseek-flash"})]

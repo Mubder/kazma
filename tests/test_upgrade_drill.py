@@ -68,6 +68,23 @@ def test_the_drill_sees_nothing_of_an_install_on_this_machine(monkeypatch, tmp_p
     assert "PATH" in env or "Path" in env
 
 
+def test_a_credential_of_a_provider_the_list_does_not_name_is_scrubbed_too(monkeypatch, tmp_path) -> None:
+    """2026-11-22: Qwen's key (DASHSCOPE_API_KEY) passed the list of prefixes
+    and reached the private install the memory real-use suite drives."""
+    d = _drill()
+    for name in ("DASHSCOPE_API_KEY", "MISTRAL_API_KEY", "SOME_SERVICE_TOKEN", "X_CLIENT_SECRET", "DB_PASSWORD"):
+        monkeypatch.setenv(name, "secret")
+    monkeypatch.setenv("KAZMA_UNRELATED_PLAIN", "x")
+    monkeypatch.setenv("PROCESSOR_ARCHITECTURE", "AMD64")
+    env = d.scrubbed_env(tmp_path / "home", tmp_path / "data", 9876)
+    for name in ("DASHSCOPE_API_KEY", "MISTRAL_API_KEY", "SOME_SERVICE_TOKEN", "X_CLIENT_SECRET", "DB_PASSWORD"):
+        assert name not in env, name
+    assert env.get("PROCESSOR_ARCHITECTURE") == "AMD64"
+    # Control: the list of prefixes alone keeps them.
+    kept = {k for k in ("MISTRAL_API_KEY", "SOME_SERVICE_TOKEN", "X_CLIENT_SECRET") if not d._SCRUB.match(k)}
+    assert kept == {"MISTRAL_API_KEY", "SOME_SERVICE_TOKEN", "X_CLIENT_SECRET"}
+
+
 def test_a_release_is_never_upgraded_from_itself_unless_ci_asks(monkeypatch) -> None:
     from kazma_cli import update
 

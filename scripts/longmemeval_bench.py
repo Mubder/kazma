@@ -31,8 +31,13 @@ scores only (``tests/fixtures/longmemeval/*.json``).
         # each question asked in both languages of one shared store
 
 ``answer`` asks a model (``--model``, ``deepseek-flash`` by default, on
-DeepSeek's API; the key from ``DEEPSEEK_API_KEY``, never written): a reader
-and a judge call a question and history. The replies are kept in ``DIR`` (a
+DeepSeek's API, ``--base-url`` for another OpenAI-shaped one; the key from
+the variable ``--key-env`` names, ``DEEPSEEK_API_KEY`` by default, never
+written): a reader and a judge call a question and history (``--judge`` a
+judge model of its own, ``--judge2`` a second one). ``--blocks NAME=FILE``
+answers, as condition NAME, the blocks another checkout built
+(``scripts/longmemeval_blocks.py``): a memory change answered with and
+without itself by one reader in one run. The replies are kept in ``DIR`` (a
 run that stops goes on where it stopped); the result file holds the scores
 and the tokens each call used. ``--conditions kazma_turn`` also asks each
 question through Kazma's own chat turn (``scripts/longmemeval_turn.py``, the
@@ -765,10 +770,17 @@ def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str
             {"shown": len(result.episodes), "facts": len(result.beliefs), "as_sent": as_sent})
 
 
-#: Reasoning a reader may be asked for: ``off``, or an effort DeepSeek's API
-#: takes (``reasoning_effort``), as Kazma sends its chat's own level
-#: (``agent/chat_reasoning.py``; the product ships ``low``).
-READER_REASONING = ("off", "low", "high")
+#: Reasoning a reader may be asked for: ``off``; ``default``, nothing sent
+#: (the provider's own choice: what Kazma sends a provider whose switch it
+#: does not know, ``LLMProvider.can_turn_off_reasoning``; Qwen thinks by
+#: default); or an effort DeepSeek's API takes (``reasoning_effort``), as
+#: Kazma sends its chat's own level there (``agent/chat_reasoning.py``; the
+#: live install runs ``low``).
+READER_REASONING = ("off", "default", "low", "high")
+#: Room for the reader's answer: hidden reasoning counts against it. With
+#: ``default`` the provider decides how long it thinks, so the reader gets
+#: Kazma's own output limit (``LLMConfig.max_tokens``).
+READER_TOKENS = {"off": 800, "default": 16384, "low": 4000, "high": 4000}
 
 
 class Chat:
@@ -789,7 +801,7 @@ class Chat:
     def ask(self, prompt: str, *, max_tokens: int) -> tuple[str, dict[str, int]]:
         body: dict[str, Any] = {"model": self.model, "temperature": 0, "max_tokens": max_tokens,
                                 "messages": [{"role": "user", "content": prompt}]}
-        if self.reasoning != "off":
+        if self.reasoning in ("low", "high"):
             body["reasoning_effort"] = self.reasoning
         for attempt in range(5):
             if self.thinking_off:
@@ -811,6 +823,11 @@ class Chat:
             details = raw.get("completion_tokens_details") or {}
             if isinstance(details.get("reasoning_tokens"), int):
                 usage["reasoning_tokens"] = int(details["reasoning_tokens"])
+            # The cache's share under one name: DeepSeek's own field, or the
+            # OpenAI shape Qwen answers in (prompt_tokens_details.cached_tokens).
+            cached = (raw.get("prompt_tokens_details") or {}).get("cached_tokens")
+            if "prompt_cache_hit_tokens" not in usage and isinstance(cached, int):
+                usage["prompt_cache_hit_tokens"] = int(cached)
             choice = data["choices"][0]
             # An answer cut at max_tokens (hidden reasoning counts against it)
             # is said, never taken for the reader's whole answer.
@@ -864,6 +881,28 @@ def judge_entry(entry: dict[str, Any], item: dict[str, Any], *, judge: Any, seco
             entry.update({"verdict2": verdict, "judge2_usage": usage})
 
 
+def load_blocks(path: Path, ids: list[str]) -> dict[str, Any]:
+    """A block file ``scripts/longmemeval_blocks.py`` wrote (each question's
+    recall block as another checkout builds it), refused unless it holds
+    every question asked."""
+    held = json.loads(path.read_text(encoding="utf-8"))
+    blocks = held.get("blocks") or {}
+    missing = [q for q in ids if q not in blocks]
+    if missing:
+        raise SystemExit(f"{path.name}: no block for {len(missing)} of the questions asked (e.g. {missing[0]})")
+    return {"commit": str(held.get("commit") or ""), "blocks": {q: str(blocks[q]) for q in ids}}
+
+
+def pair_changes(results: list[dict[str, Any]], new: str, old: str) -> dict[str, Any]:
+    """A change judged question by question (*new* against *old*, the same
+    reader and judges): the answers it gained and lost."""
+    rows = [r for r in results if new in r and old in r]
+    gained = [r["id"] for r in rows if r[new] and not r[old]]
+    lost = [r["id"] for r in rows if r[old] and not r[new]]
+    return {"questions": len(rows), "gained": len(gained), "lost": len(lost), "net": len(gained) - len(lost),
+            "gained_ids": gained, "lost_ids": lost}
+
+
 def turn_identity(item: dict[str, Any], block: str, *, model: str, reasoning: str, system_prompt: str) -> str:
     """What Kazma's turn for *item* is asked from: a cached answer stands
     while this is unchanged (the base prompt, the question, its date, the
@@ -903,7 +942,7 @@ def _turn_reader(model: str, base_url: str, key: str) -> tuple[Any, str]:
     # environment note describes it, never the checkout the run starts in.
     os.environ["KAZMA_WORKSPACE"] = tempfile.mkdtemp(prefix="workspace-", dir=os.environ.get("KAZMA_DATA_DIR"))
     agent = KazmaAgent(load_config())
-    return CountingClient(reader_client(model=model, base_url=base_url, key=key)), agent.system_prompt
+    return (CountingClient(reader_client(model=model, base_url=base_url, key=key)), agent.system_prompt)
 
 
 def _answer_turns(items: list[dict[str, Any]], histories: dict[str, dict[str, Any]], cache: dict[str, Any],
@@ -974,14 +1013,20 @@ def summarise_turns(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, workers: int,
                 split: str = "sample", look: str | None = None, reasoning: str = "low",
-                judge2: str | None = None, run: str = "", conditions: tuple[str, ...] = CONDITIONS) -> int:
-    log_look(split, look, f"answer --model {model} --reasoning {reasoning}" + (f" --run {run}" if run else ""))
+                judge2: str | None = None, run: str = "", conditions: tuple[str, ...] = CONDITIONS,
+                judge_model: str | None = None, key_env: str = "DEEPSEEK_API_KEY",
+                blocks: dict[str, Path] | None = None) -> int:
+    judge_model = judge_model or model
+    log_look(split, look, f"answer --model {model} --judge {judge_model} --reasoning {reasoning}"
+                          + (f" --run {run}" if run else ""))
     _private_data_folder()
     _limit_cpu_threads()
-    key = os.environ.get("DEEPSEEK_API_KEY", "")
+    key = os.environ.get(key_env, "")
     if not key:
-        print("set DEEPSEEK_API_KEY", file=sys.stderr)
+        print(f"set {key_env}", file=sys.stderr)
         return 2
+    blocks = blocks or {}
+    conditions = (*conditions, *(name for name in blocks if name not in conditions))
     from concurrent.futures import ThreadPoolExecutor
     from unittest import mock
 
@@ -989,6 +1034,7 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
 
     by_id = {str(x["question_id"]): x for x in load(data)}
     items = [by_id[q] for q in question_ids(split)[: limit or None]]
+    extra = {name: load_blocks(path, [str(i["question_id"]) for i in items]) for name, path in blocks.items()}
     # One cache a reader, reasoning level and run label: a second run (the
     # noise run) asks every question again.
     # Reasoning off with no label keeps the first runs' file (21 Nov).
@@ -1008,7 +1054,8 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
             plain = {f"{how}_top10": read_whole(plain_top(str(item["question"]), rows, how, embedder=embedder))
                      or NO_MEMORIES for how in ("bge", "bm25")}
             histories[qid] = {"kazma": block, "kazma_whole": whole, "full": full, "oracle": oracle, **plain,
-                              "dropped": dropped, **shown}
+                              "dropped": dropped, **shown,
+                              **{name: held["blocks"][qid] for name, held in extra.items()}}
         # Kazma's own turns, one at a time, on the same embedder (W1c).
         if TURN in conditions:
             _answer_turns(items, histories, cache, cache_path, model=model, base_url=base_url, key=key,
@@ -1016,10 +1063,9 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
     reader = Chat(model=model, base_url=base_url, key=key, reasoning=reasoning)
-    judge = Chat(model=model, base_url=base_url, key=key)
+    judge = Chat(model=judge_model, base_url=base_url, key=key)
     second = Chat(model=judge2, base_url=base_url, key=key) if judge2 else None
-    # Hidden reasoning counts against max_tokens: room for it beside the answer.
-    reader_tokens = 800 if reasoning == "off" else 4000
+    reader_tokens = READER_TOKENS[reasoning]
 
     def ask_one(qid: str, condition: str) -> None:
         item = by_id[qid]
@@ -1060,6 +1106,9 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
     summary = summarise_answers(results, conditions)
     if TURN in conditions:
         summary["turn"] = summarise_turns(results)
+    for name in extra:
+        if "kazma" in conditions:
+            summary[f"kazma_vs_{name}"] = pair_changes(results, "kazma", name)
     usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0,
              "reasoning_tokens": 0}
     for qid in (str(i["question_id"]) for i in items):
@@ -1082,7 +1131,8 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
         out = out.with_name(f"{out.stem}_{run}{out.suffix}")
     out.write_text(json.dumps({
         "source": SOURCE, "split": split, "run": run, "sample": len(items), "reader": model,
-        "reader_reasoning": reasoning, "judge": model, "judge2": judge2, "conditions": list(conditions),
+        "reader_reasoning": reasoning, "judge": judge_model, "judge2": judge2, "conditions": list(conditions),
+        "blocks_from": {name: held["commit"] for name, held in extra.items()},
         "provider": base_url.split("//")[-1],
         "made_on": datetime.now(UTC).date().isoformat(), "limit": LIMIT, "full_max_chars": FULL_MAX_CHARS,
         "what": "One reader answers each question from Kazma's recall block, from the same recalled rounds read "
@@ -1126,7 +1176,8 @@ def noise(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     rows_b = {r["id"]: r for r in b["results"]}
     common = sorted(set(rows_a) & set(rows_b))
     out: dict[str, Any] = {"questions": len(common), "conditions": {}}
-    for c in CONDITIONS:
+    both = [c for c in (a.get("conditions") or CONDITIONS) if c in (b.get("conditions") or CONDITIONS)]
+    for c in both:
         if not all(c in rows_a[q] and c in rows_b[q] for q in common):
             continue
         flipped = [q for q in common if rows_a[q][c] != rows_b[q][c]]
@@ -1287,10 +1338,10 @@ def _json_reply(text: str) -> dict[str, Any]:
     return json.loads(body[body.find("{"): body.rfind("}") + 1])
 
 
-def _cmd_translate(data: Path, model: str, base_url: str, workers: int) -> int:
-    key = os.environ.get("DEEPSEEK_API_KEY", "")
+def _cmd_translate(data: Path, model: str, base_url: str, workers: int, key_env: str = "DEEPSEEK_API_KEY") -> int:
+    key = os.environ.get(key_env, "")
     if not key:
-        print("set DEEPSEEK_API_KEY", file=sys.stderr)
+        print(f"set {key_env}", file=sys.stderr)
         return 2
     from concurrent.futures import ThreadPoolExecutor
 
@@ -1588,9 +1639,15 @@ def main(argv: list[str] | None = None) -> int:
             s.add_argument("--conditions", default=",".join(CONDITIONS),
                            help="the histories to answer from, comma-separated; kazma_turn asks through "
                                 "Kazma's own chat turn")
+            s.add_argument("--judge", default=None, help="the judge model (the reader's model unless named)")
+            s.add_argument("--blocks", action="append", default=[], metavar="NAME=FILE",
+                           help="each question's block from another checkout (scripts/longmemeval_blocks.py), "
+                                "answered as condition NAME")
         if name in ("answer", "translate"):
             s.add_argument("--model", default="deepseek-flash")
             s.add_argument("--base-url", default="https://api.deepseek.com")
+            s.add_argument("--key-env", default="DEEPSEEK_API_KEY",
+                           help="the environment variable holding the provider's key (never written)")
             s.add_argument("--workers", type=int, default=4)
     args = p.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1605,11 +1662,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "split":
         return _cmd_split(args.data)
     if args.cmd == "answer":
+        blocks = {}
+        for spec in args.blocks:
+            name, _, path = spec.partition("=")
+            if not name or not path or name in ALL_CONDITIONS:
+                p.error(f"--blocks {spec!r}: NAME=FILE, a name of its own")
+            blocks[name] = Path(path)
         return _cmd_answer(args.data, args.limit, args.model, args.base_url, args.workers, args.split, args.look,
                            args.reasoning, args.judge2, args.run,
-                           tuple(c for c in args.conditions.split(",") if c in ALL_CONDITIONS))
+                           tuple(c for c in args.conditions.split(",") if c in ALL_CONDITIONS),
+                           judge_model=args.judge, key_env=args.key_env, blocks=blocks)
     if args.cmd == "translate":
-        return _cmd_translate(args.data, args.model, args.base_url, args.workers)
+        return _cmd_translate(args.data, args.model, args.base_url, args.workers, args.key_env)
     if args.cmd == "parallel":
         return _cmd_parallel(args.data)
     return _cmd_retrieve(args.data, args.limit, args.split, args.look)

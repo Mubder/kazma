@@ -54,8 +54,12 @@ START_TIMEOUT_S = 180.0
 STOP_TIMEOUT_S = 60.0
 MARKER_KEY = "drill.upgrade_marker"
 #: Variables an install here may have that the drill's installs must not see.
-_SCRUB = re.compile(r"^(KAZMA_|OPENAI_|ANTHROPIC_|DEEPSEEK_|GROQ_|GEMINI_|GOOGLE_|AZURE_|AWS_|TELEGRAM_|"
-                    r"DISCORD_|SLACK_|DATABASE_URL|PG|HF_TOKEN|GITHUB_TOKEN|GH_TOKEN)", re.I)
+_SCRUB = re.compile(r"^(KAZMA_|OPENAI_|ANTHROPIC_|DEEPSEEK_|DASHSCOPE_|QWEN_|GROQ_|GEMINI_|GOOGLE_|AZURE_|AWS_|"
+                    r"TELEGRAM_|DISCORD_|SLACK_|DATABASE_URL|PG|HF_TOKEN|GITHUB_TOKEN|GH_TOKEN)", re.I)
+#: And any variable named as a credential, whatever its provider: a key of a
+#: provider the list above does not name (2026-11-22: Qwen's) reached the
+#: private install.
+_CREDENTIAL_NAME = re.compile(r"(^|_)(API_?KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)(_|$)", re.I)
 _ERROR_LINE = re.compile(r'"level":\s*"(ERROR|CRITICAL)"|\b(ERROR|CRITICAL)\b|Traceback \(most recent call last\)')
 
 
@@ -66,7 +70,7 @@ def say(text: str) -> None:
 def scrubbed_env(home: Path, data: Path, port: int) -> dict[str, str]:
     """The drill's environment: this machine's minus anything of a Kazma install
     or a credential, plus the drill's own home, data folder and port."""
-    env = {k: v for k, v in os.environ.items() if not _SCRUB.match(k)}
+    env = {k: v for k, v in os.environ.items() if not _SCRUB.match(k) and not _CREDENTIAL_NAME.search(k)}
     env.update({
         "KAZMA_USER_HOME": str(home),
         "KAZMA_DATA_DIR": str(data),

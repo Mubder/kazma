@@ -110,6 +110,10 @@ class CountingClient:
         for key in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens"):
             if isinstance(usage.get(key), int):
                 self.usage[key] += int(usage[key])
+        # Qwen's (OpenAI's) shape of the cache's share.
+        cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+        if not isinstance(usage.get("prompt_cache_hit_tokens"), int) and isinstance(cached, int):
+            self.usage["prompt_cache_hit_tokens"] += int(cached)
         details = usage.get("completion_tokens_details") or {}
         if isinstance(details, dict) and isinstance(details.get("reasoning_tokens"), int):
             self.usage["reasoning_tokens"] += int(details["reasoning_tokens"])
@@ -168,14 +172,29 @@ class MemoryTools:
         return await self.registry.execute(tool_name, arguments)
 
 
-def reader_client(*, model: str, base_url: str, key: str) -> Any:
+def preset_for(base_url: str) -> str:
+    """The provider preset an address belongs to: DeepSeek's API, Qwen's
+    (Alibaba Cloud Model Studio, any of its regions' addresses), else an
+    OpenAI-shaped server of its own."""
+    from urllib.parse import urlparse
+
+    host = (urlparse(base_url).hostname or "").lower()
+    if host == "api.deepseek.com" or host.endswith(".deepseek.com"):
+        return "deepseek"
+    if any(part in host for part in ("dashscope", "qwencloudapi", "aliyuncs")):
+        return "dashscope"
+    return "custom"
+
+
+def reader_client(*, model: str, base_url: str, key: str, preset: str | None = None) -> Any:
     """The reader as Kazma builds a provider's client (``build_client``, the
-    DeepSeek preset): the key is passed in, never stored."""
+    address's preset): the key is passed in, never stored."""
     from kazma_core.llm_provider import LLMConfig
     from kazma_core.provider_adapters import build_client
 
+    preset = preset or preset_for(base_url)
     config = LLMConfig.from_dict({"base_url": base_url, "api_key": key, "model": model})
-    return build_client("deepseek", config, {"preset": "deepseek"})
+    return build_client(preset, config, {"preset": preset})
 
 
 @contextlib.contextmanager

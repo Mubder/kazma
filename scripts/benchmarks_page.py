@@ -35,6 +35,8 @@ PRODUCT_MEASURES = ROOT / "tests" / "fixtures" / "memory_bench" / "product_measu
 #: LongMemEval's histories in the dev runs, in the order the page shows them.
 _LME_CONDITIONS = {
     "kazma": "Kazma's recall",
+    "kazma_before": "Kazma's recall before the change judged (its blocks from the earlier code)",
+    "kazma_turn": "Kazma's own chat turn (it reads a memory whole with memory_read)",
     "kazma_whole": "The same conversations read whole",
     "full": "The whole history",
     "oracle": "Only the answering conversations (oracle)",
@@ -395,7 +397,8 @@ def _longmemeval(folder: Path) -> list[str]:
         full_what = (f"history cut to {cut_at:,} characters (its oldest conversations left out)" if cut_at
                      else "whole history, uncut")
         lines += [
-            f"**Answering from it** ({a['sample']} questions; reader and judge {a['reader']}, LongMemEval's own "
+            f"**Answering from it** ({a['sample']} questions; reader {a['reader']}, judge "
+            f"{a.get('judge') or a['reader']}, LongMemEval's own "
             "judge prompts): the share of answers the judge called correct, from Kazma's recall as the model is "
             "shown it, from the same recalled conversations read whole (what the model gets when it opens them "
             "with `memory_read`, which this one-shot reader cannot call), from the whole history (the "

@@ -98,7 +98,7 @@ What differs from a live turn: a private store, a fixed "now", recorded vectors.
 
 Recall took 26.0 ms (median) on these stores.
 
-**Answering from it** (100 questions; reader and judge deepseek-flash, LongMemEval's own judge prompts): the share of answers the judge called correct, from Kazma's recall as the model is shown it, from the same recalled conversations read whole (what the model gets when it opens them with `memory_read`, which this one-shot reader cannot call), from the whole history (the full-context baseline) and from the conversations holding the answer alone (the oracle).
+**Answering from it** (100 questions; reader deepseek-flash, judge deepseek-flash, LongMemEval's own judge prompts): the share of answers the judge called correct, from Kazma's recall as the model is shown it, from the same recalled conversations read whole (what the model gets when it opens them with `memory_read`, which this one-shot reader cannot call), from the whole history (the full-context baseline) and from the conversations holding the answer alone (the oracle).
 
 | Question | Kazma's recall | Read whole | History cut to fit | Oracle |
 |---|---|---|---|---|

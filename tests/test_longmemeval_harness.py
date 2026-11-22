@@ -480,3 +480,68 @@ def test_a_result_file_keeps_each_row_on_one_line(lme):
     text = lme.dump_result({"what": "x", "overall": {"n": 2}, "results": [compact, compact]})
     assert json.loads(text)["results"] == [compact, compact]
     assert text.count("\n") < 12  # one line a row, not one a value
+
+
+# ── Another provider (Qwen), its judges, and a change judged in one run ────
+
+
+_QWEN_ANSWER = {"choices": [{"message": {"content": "In May.", "reasoning_content": "thinking..."},
+                             "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 11909, "completion_tokens": 120,
+                          "prompt_tokens_details": {"cached_tokens": 11520, "text_tokens": 11909},
+                          "completion_tokens_details": {"reasoning_tokens": 93, "text_tokens": 120}}}
+
+
+def test_the_default_level_sends_nothing_and_qwens_cache_is_counted(lme):
+    """Kazma sends a provider whose reasoning switch it does not know nothing
+    (Qwen then thinks by its own default): ``default`` does the same. Qwen
+    says the cache's share the OpenAI way; it is counted under one name."""
+    chat, sent = _chat(lme, "default", _QWEN_ANSWER)
+    text, usage = chat.ask("q", max_tokens=lme.READER_TOKENS["default"])
+    assert "reasoning_effort" not in sent[0] and "thinking" not in sent[0]
+    assert sent[0]["max_tokens"] == 16384 and text == "In May."
+    assert usage["prompt_cache_hit_tokens"] == 11520 and usage["reasoning_tokens"] == 93
+    # DeepSeek's own field, when there, is kept as it is.
+    chat, _ = _chat(lme, "off", {**_ANSWER, "usage": {**_ANSWER["usage"], "prompt_cache_hit_tokens": 7}})
+    assert chat.ask("q", max_tokens=10)[1]["prompt_cache_hit_tokens"] == 7
+
+
+def test_blocks_from_another_checkout_cover_every_question(lme, tmp_path):
+    path = tmp_path / "blocks.json"
+    path.write_text(json.dumps({"commit": "064dfec3b", "blocks": {"q1": "block one", "q2": "block two"}}),
+                    encoding="utf-8")
+    held = lme.load_blocks(path, ["q1", "q2"])
+    assert held == {"commit": "064dfec3b", "blocks": {"q1": "block one", "q2": "block two"}}
+    with pytest.raises(SystemExit):
+        lme.load_blocks(path, ["q1", "q3"])
+
+
+def test_a_change_is_judged_question_by_question_and_against_the_noise(lme):
+    rows = [_row("a", {"kazma": True, "kazma_before": False}), _row("b", {"kazma": False, "kazma_before": True}),
+            _row("c", {"kazma": True, "kazma_before": True}), _row("d", {"kazma": True, "kazma_before": False})]
+    pair = lme.pair_changes(rows, "kazma", "kazma_before")
+    assert (pair["gained"], pair["lost"], pair["net"]) == (2, 1, 1)
+    assert pair["gained_ids"] == ["a", "d"] and pair["lost_ids"] == ["b"]
+    # The noise run reads every condition both runs answered, the blocks'
+    # and the turn's too.
+    a = {"conditions": ["kazma", "kazma_before", "kazma_turn"], "results": rows}
+    b = {"conditions": ["kazma", "kazma_before"], "results": [{**r, "kazma_before": not r["kazma_before"]}
+                                                              for r in rows]}
+    out = lme.noise(a, b)
+    assert set(out["conditions"]) == {"kazma", "kazma_before"}
+    assert out["conditions"]["kazma_before"]["flips"] == 4 and out["conditions"]["kazma"]["flips"] == 0
+
+
+def test_the_blocks_are_built_by_the_checkout_named(tmp_path):
+    """The export loads the named checkout's harness and memory code, and
+    refuses to write the dataset's text into a checkout."""
+    sys.path.insert(0, str(REPO / "scripts"))
+    try:
+        import longmemeval_blocks
+    finally:
+        sys.path.pop(0)
+    bench = longmemeval_blocks.use_checkout(REPO)
+    assert Path(bench.__file__).resolve().parent == REPO / "scripts"
+    assert longmemeval_blocks.main(["--checkout", str(REPO), "--data", str(tmp_path),
+                                    "--out", str(REPO / "blocks.json")]) == 2
+    assert not (REPO / "blocks.json").exists()

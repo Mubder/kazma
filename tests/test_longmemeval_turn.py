@@ -350,3 +350,16 @@ def test_the_runs_reader_and_base_prompt_are_kazmas(scripts, quiet):
     # The turn's workspace is the run's own empty folder, never the checkout.
     workspace = Path(os.environ["KAZMA_WORKSPACE"])
     assert workspace.is_dir() and not any(workspace.iterdir()) and REPO not in workspace.parents
+
+
+def test_the_turns_reader_follows_the_provider(scripts):
+    _lme, turn = scripts
+    assert turn.preset_for("https://api.deepseek.com") == "deepseek"
+    assert turn.preset_for("https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1") == "dashscope"
+    assert turn.preset_for("https://dashscope-intl.aliyuncs.com/compatible-mode/v1") == "dashscope"
+    assert turn.preset_for("http://127.0.0.1:1234/v1") == "custom"
+    client = turn.reader_client(model="qwen3.7-plus", key="k",
+                                base_url="https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1")
+    # Kazma's reasoning switch reaches DeepSeek's API only: Qwen is sent nothing.
+    assert client.config.model == "qwen3.7-plus" and client.can_turn_off_reasoning() is False
+    assert client.config.base_url == "https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1"

@@ -267,6 +267,14 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "measures recall on LongMemEval in private temp databases and a temp data folder; "
         "it reads no install"
     ),
+    "scripts/memory_real_use.py": (
+        "drives a private install (a temp data folder, a scrubbed environment) in a browser; the "
+        "provider's key comes from the shell's variable, never an install's .env"
+    ),
+    "scripts/longmemeval_blocks.py": (
+        "builds LongMemEval's recall blocks with another checkout's code in a temp data folder; "
+        "it reads no install"
+    ),
     "scripts/small_store_offsets.py": "reads the benchmark's recorded vectors only; no store, no setting",
     "scripts/memory_threshold_sweep.py": (
         "asks the retrieval benchmark's private temp stores with recorded vectors; reads no install"
