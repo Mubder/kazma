@@ -59,5 +59,16 @@ ok("English by default", api.html("Reem").indexOf("Waiting for") !== -1);
 const ar = load({ hitl_waiting_for: "بانتظار ردّ {names}" });
 ok("Arabic from the page's catalog", ar.html("ريم").indexOf("بانتظار ردّ") !== -1
    && ar.html("ريم").indexOf("ريم") !== -1);
+// The base catalog wins when it is there: a sidebar navigation runs chat.js
+// before the page's CHAT_I18N, so a card painted from history at once read
+// English on an Arabic page.
+const base = load({});
+global.window.kazmaT = function (key, fallback, vars) {
+  let text = key === "chat.hitl_waiting_for" ? "بانتظار ردّ {names}" : fallback;
+  for (const k in vars || {}) text = text.split("{" + k + "}").join(String(vars[k]));
+  return text;
+};
+ok("the base catalog's Arabic before the page's bridge", base.html("ريم").indexOf("بانتظار ردّ") !== -1,
+   base.html("ريم"));
 
 process.exit(fail ? 1 : 0);

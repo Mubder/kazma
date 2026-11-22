@@ -5930,11 +5930,17 @@
     return names.length ? names.join(', ') : '\u2026';
   }
 
-  /** The line a waiting card shows instead of its buttons. */
+  /** The line a waiting card shows instead of its buttons. The base
+   *  catalog (window.kazmaT) first: it is there from the tab's first page,
+   *  and a sidebar navigation runs chat.js before the page's CHAT_I18N, so
+   *  a card painted from history at once read English on an Arabic page. */
   function _hitlWaitingHtml(names) {
+    var english = 'Waiting for {names} to answer';
+    var line = (typeof window !== 'undefined' && typeof window.kazmaT === 'function')
+      ? window.kazmaT('chat.hitl_waiting_for', english, { names: '\u0001' })
+      : tiFmt('hitl_waiting_for', english, { names: '\u0001' });
     return '<span class="hitl-status hitl-waiting-for">' +
-      escapeHtml(tiFmt('hitl_waiting_for', 'Waiting for {names} to answer', { names: '\u0001' }))
-        .replace('\u0001', '<bdi translate="no">' + escapeHtml(names) + '</bdi>') +
+      escapeHtml(line).replace('\u0001', '<bdi translate="no">' + escapeHtml(names) + '</bdi>') +
       '</span>';
   }
 
