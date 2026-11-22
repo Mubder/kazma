@@ -335,16 +335,23 @@ the benchmarks page regenerated.
 
 ## 7. Found while measuring, to fix (not inside W0)
 
-**First: finding 10, an Arabic question recalls no fact.** Found by the
-real-use suite on qwen3.7-plus (22 Nov), the owner's own language. In every
-Arabic turn of both runs, before and with W1a, recall showed no fact
-("V2 recall: 0 beliefs"), while in English "Where do I live now?" recalled
-the fact. So after "انتقلت إلى بورتو الشهر الماضي" ("I moved to Porto last
-month"), "وين أسكن الحين؟" ("where do I live now?") reached only the two
-conversations, both dated the same day, and the model answered with the
-older city (Lisbon). On deepseek-flash the same step passed, by the model
-reading the turns; the fact never reached the block in either. The product
-cost: an Arabic user's changed facts do not reach the answer. Scheduled
+**First: finding 10, an Arabic user's facts often do not reach the
+answer.** Found by the real-use suite on qwen3.7-plus (22 Nov), the owner's
+own language; four runs (two before W1a, two with it), read from the
+private installs' logs:
+* "أسكن في لشبونة هالأيام." ("I live in Lisbon these days") gave no fact
+  from the quick pass in any run; only the model's deep pass stored one,
+  in some runs. "وين أسكن؟" ("where do I live?") recalled a fact exactly in
+  those runs.
+* "انتقلت إلى بورتو الشهر الماضي." ("I moved to Porto last month") gave a
+  quick-pass fact in every run, and "وين أسكن الحين؟" ("where do I live
+  now?") recalled it in 1 of 4: three times the block held only the two
+  conversations, both dated the same day, and the model answered with the
+  older city (Lisbon) in all three.
+In English every step passed in all four. The product cost: an Arabic
+user's changed facts do not reach the answer. It may be two causes (the
+quick pass reading the first statement; the second statement's fact not
+found by the question); the diagnosis says, before anything is built. Scheduled
 next after W1a's acceptance, before W1c's runs or anything else (the main
 session's decision): diagnose it with no model call, step by step through
 `_recall_beliefs` as an English-Arabic pair (what the passes stored for the
