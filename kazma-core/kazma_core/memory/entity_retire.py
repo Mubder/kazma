@@ -31,6 +31,8 @@ import logging
 import sqlite3
 from collections.abc import Collection, Iterable
 
+from kazma_core.spaces.scope import space_of_record
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["plain_empty_shells", "retire_empty_entities"]
@@ -112,7 +114,7 @@ def plain_empty_shells(
     found: list[tuple[str, str]] = []
     self_ids_of: dict[str, set[str]] = {}
     for rtenant, rid in (tuple(r) for r in rows):
-        tenant = str(rtenant or "default")
+        tenant = space_of_record(rtenant)
         if tenant not in self_ids_of:
             self_ids_of[tenant] = collect_self_entity_ids(conn, tenant)
         if _is_plain_empty_shell(conn, str(rid), tenant_id=tenant, self_ids=self_ids_of[tenant]):
@@ -123,7 +125,7 @@ def plain_empty_shells(
 
 
 def retire_empty_entities(
-    conn: sqlite3.Connection, entity_ids: Iterable[str], *, tenant_id: str = "default"
+    conn: sqlite3.Connection, entity_ids: Iterable[str], *, tenant_id: str
 ) -> list[str]:
     """Delete each of *entity_ids* that :func:`_is_plain_empty_shell` accepts.
 

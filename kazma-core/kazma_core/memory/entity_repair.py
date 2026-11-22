@@ -36,6 +36,8 @@ import sqlite3
 import time
 from typing import Any
 
+from kazma_core.spaces.scope import space_of_record
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["COLLAPSED_ID", "repair_collapsed", "size_collapsed"]
@@ -108,7 +110,7 @@ def size_collapsed(conn: sqlite3.Connection) -> dict[str, Any]:
     tenants: dict[str, dict[str, int]] = {}
     for kind, items in groups.items():
         for row, _ep in items:
-            t = tenants.setdefault(str(row["tenant_id"] or "default"), {k: 0 for k in groups})
+            t = tenants.setdefault(space_of_record(row["tenant_id"]), {k: 0 for k in groups})
             t[kind] += 1
     node = conn.execute("SELECT tenant_id FROM entities WHERE id = ?", (COLLAPSED_ID,)).fetchall()
     return {
@@ -144,11 +146,11 @@ def repair_collapsed(
             meta = {}
         meta["quarantined"] = {"reason": _REASON, "at": ts}
         if row["invalidated_at"] is None and row["valid_until"] is None:
-            invalidate_belief(str(row["id"]), conn=conn, now=ts, tenant_id=str(row["tenant_id"] or "default"))
+            invalidate_belief(str(row["id"]), conn=conn, now=ts, tenant_id=space_of_record(row["tenant_id"]))
         conn.execute("UPDATE beliefs SET metadata_json = ? WHERE id = ?",
                      (json.dumps(meta, ensure_ascii=False), row["id"]))
         quarantined += 1
-    tenants = {str(r["tenant_id"] or "default") for r, _e in groups["rederivable"] + groups["unrecoverable"]}
+    tenants = {space_of_record(r["tenant_id"]) for r, _e in groups["rederivable"] + groups["unrecoverable"]}
     retired = [eid for t in sorted(tenants) for eid in retire_empty_entities(conn, [COLLAPSED_ID], tenant_id=t)]
     conn.commit()
     queued = 0

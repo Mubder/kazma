@@ -380,3 +380,33 @@ def test_a_forget_by_the_memory_tool_with_no_space_is_refused_once_enforced(enfo
         forget_mentions("a codeword-123", tenant_id=None)
     with pytest.raises(NoSpaceBound):
         keep_turn_out("s-4", 1, "what is the codeword?", tenant_id=None)
+
+
+# ── memory: entities ────────────────────────────────────────────────────
+
+
+def test_entity_reads_with_no_space_are_refused_once_enforced(enforced) -> None:
+    import sqlite3
+
+    from kazma_core.memory.ego_anchor import object_should_mint_entity
+    from kazma_core.memory.entity_resolution import canonical_entity_id
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(NoSpaceBound):
+            canonical_entity_id(conn, "acme")
+        with pytest.raises(NoSpaceBound):
+            object_should_mint_entity(conn, "acme", predicate="works_at")
+    finally:
+        conn.close()
+
+
+def test_entity_writes_name_their_tenant() -> None:
+    """Every caller names it: a caller that names none does not run."""
+    import inspect
+
+    from kazma_core.memory import entity_resolution, entity_retire, self_hub
+
+    for fn in (entity_resolution.preserve_merge_ledger, entity_retire.retire_empty_entities,
+               self_hub.collect_self_entity_ids, self_hub.resolve_hub_display_name, self_hub.ensure_user_hub):
+        assert inspect.signature(fn).parameters["tenant_id"].default is inspect.Parameter.empty, fn

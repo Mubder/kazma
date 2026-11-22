@@ -22,6 +22,8 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Collection
 
+from kazma_core.spaces.scope import space_named_or_bound
+
 __all__ = ["is_core_entity", "merge_refusal", "protection"]
 
 _CORE_IDS = frozenset({"user", "assistant", "kazma"})
@@ -58,7 +60,7 @@ def protection(
         return None
     if is_core_entity(eid):
         return "core"
-    tenant = str(tenant_id or "default")
+    tenant = space_named_or_bound(tenant_id)
     row = conn.execute(
         "SELECT is_protected FROM entities WHERE id = ? AND tenant_id = ?", (eid, tenant)
     ).fetchone()

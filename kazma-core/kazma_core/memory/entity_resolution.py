@@ -23,6 +23,8 @@ import sqlite3
 import time
 from typing import Any
 
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -74,7 +76,7 @@ def slug(text: str) -> str:
     return s
 
 
-def canonical_entity_id(conn, eid: str, *, tenant_id: str = "default", _max_chain: int = 8) -> str:
+def canonical_entity_id(conn, eid: str, *, tenant_id: str | None = None, _max_chain: int = 8) -> str:
     """Follow ``metadata_json.merged_into`` to the terminal canonical id, among
     *tenant_id*'s entities (keyed by ``(tenant_id, id)``, Memory audit M21).
 
@@ -89,6 +91,7 @@ def canonical_entity_id(conn, eid: str, *, tenant_id: str = "default", _max_chai
     if the row is missing, or if the chain is longer than _max_chain (cycle
     guard). Best-effort: never raises.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     if not eid:
         return eid
     cur = eid
@@ -99,7 +102,7 @@ def canonical_entity_id(conn, eid: str, *, tenant_id: str = "default", _max_chai
         seen.add(cur)
         try:
             row = conn.execute(
-                "SELECT metadata_json FROM entities WHERE id=? AND tenant_id=?", (cur, tenant_id or "default")
+                "SELECT metadata_json FROM entities WHERE id=? AND tenant_id=?", (cur, tenant_id)
             ).fetchone()
         except Exception:
             break
@@ -125,7 +128,7 @@ def entity_vocabulary(conn, *, tenant_id: str, limit: int = 60) -> list[str]:
             "AND COALESCE(json_extract(CASE WHEN json_valid(metadata_json) "
             "THEN metadata_json END, '$.merged_into'), '') = '' "
             "ORDER BY belief_count DESC, id LIMIT ?",
-            (tenant_id or "default", int(limit)),
+            (space_named_or_bound(tenant_id), int(limit)),
         ).fetchall()
     except sqlite3.Error:
         logger.warning("[entity_resolve] entity vocabulary unavailable", exc_info=True)
@@ -151,7 +154,7 @@ def resolve_entity(
     name: str,
     *,
     entity_type: str = "concept",
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     cfg: dict[str, Any] | None = None,
     candidate_vectors: dict[str, bytes] | None = None,
     query_vector: bytes | None = None,
@@ -164,6 +167,7 @@ def resolve_entity(
 
     Never raises — logs and creates a fresh entity on any failure.
     """
+    tenant_id = space_named_or_bound(tenant_id)
     if not (name or "").strip():
         return {"canonical_id": "", "action": "noop"}
     norm_name = " ".join(name.strip().split())
@@ -290,7 +294,7 @@ def _store_name_vector(conn: sqlite3.Connection, eid: str, tenant_id: str, vecto
     conn.execute(
         "UPDATE entities SET embedding = ?, embedding_model_version = ? "
         "WHERE id = ? AND tenant_id = ? AND embedding IS NULL",
-        (vector, get_embedding_model_name() or "", eid, tenant_id or "default"),
+        (vector, get_embedding_model_name() or "", eid, tenant_id),
     )
     if began and conn.in_transaction:
         conn.commit()
@@ -310,7 +314,7 @@ def repair_entity_name_vectors(conn: sqlite3.Connection, *, limit: int = 200) ->
         vec = encode_text_to_blob(str(name).replace("_", " "))
         if vec is None:
             break  # the embedder is down: the next pass tries again
-        _store_name_vector(conn, str(eid), str(tenant or "default"), vec)
+        _store_name_vector(conn, str(eid), space_of_record(tenant), vec)
         stored += 1
     return stored
 
@@ -401,7 +405,7 @@ def _create_entity(
     vector: bytes | None = None,
 ) -> None:
     aliases = [name]
-    tenant = tenant_id or "default"
+    tenant = tenant_id
     cur = conn.execute(
         """INSERT OR IGNORE INTO entities
            (id, tenant_id, type, name, aliases_json, is_high_stakes)
@@ -631,7 +635,7 @@ def decide_entity_merge(
         ).fetchone()
         if not row:
             return {"ok": False, "error": "not_found_or_resolved"}
-        merge_tenant = str(row["tenant_id"] or "default")
+        merge_tenant = space_of_record(row["tenant_id"])
         # M-13: explicit self-merge guard (API/tool layers had one; this
         # decision path did not).
         if str(row["source_entity_id"] or "") == str(row["target_entity_id"] or ""):
@@ -723,7 +727,7 @@ def preserve_merge_ledger(
     conn: sqlite3.Connection,
     entity_id: str,
     *,
-    tenant_id: str = "default",
+    tenant_id: str,
     reason: str = "entity_delete",
 ) -> int:
     """Copy *tenant_id*'s ``entity_merges`` rows for ``entity_id`` into the
@@ -750,7 +754,7 @@ def preserve_merge_ledger(
             FROM entity_merges
             WHERE tenant_id=? AND (source_entity_id=? OR target_entity_id=?)
             """,
-            (now, reason, tenant_id or "default", eid, eid),
+            (now, reason, tenant_id, eid, eid),
         )
         return int(cur.rowcount or 0)
     except Exception:

@@ -30,6 +30,7 @@ import sqlite3
 from typing import Any
 
 from kazma_core.memory.provenance import USER_SOURCES
+from kazma_core.spaces.scope import space_named_or_bound
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ def canonical_predicate(
     for name, ptype, count in conn.execute(
         "SELECT predicate, predicate_type, COUNT(*) FROM beliefs "
         "WHERE tenant_id = ? AND subject = ? GROUP BY predicate, predicate_type",
-        (tenant_id or "default", subject),
+        (space_named_or_bound(tenant_id), subject),
     ).fetchall():
         if name == predicate:
             return predicate
@@ -97,7 +98,7 @@ def predicate_vocabulary(conn: sqlite3.Connection, *, tenant_id: str, limit: int
             "SELECT predicate, COUNT(*) AS n FROM beliefs WHERE tenant_id = ? "
             "AND valid_until IS NULL AND invalidated_at IS NULL "
             "GROUP BY predicate ORDER BY n DESC, predicate LIMIT ?",
-            (tenant_id or "default", int(limit)),
+            (space_named_or_bound(tenant_id), int(limit)),
         ).fetchall()
         if row[0]
     ]
@@ -125,7 +126,7 @@ def merge_same_word_predicates(
     for bid, subject, predicate, ptype, obj, valid_from, method in conn.execute(
         "SELECT id, subject, predicate, predicate_type, object, valid_from, extraction_method "
         "FROM beliefs WHERE tenant_id = ? AND valid_until IS NULL AND invalidated_at IS NULL",
-        (tenant_id or "default",),
+        (space_named_or_bound(tenant_id),),
     ).fetchall():
         key = _predicate_key(predicate)
         if key:

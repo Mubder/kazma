@@ -32,6 +32,7 @@ import uuid
 from typing import Any
 
 from kazma_core.memory.belief_mutation import kazma_classifies
+from kazma_core.spaces.scope import space_of_record
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ def find_closed_entries(conn: sqlite3.Connection, *, written_after: float = 0.0)
         ).fetchall()]
         if closed:
             groups.append({
-                "write": str(wid), "tenant": str(tenant or "default"), "subject": str(subject),
+                "write": str(wid), "tenant": space_of_record(tenant), "subject": str(subject),
                 "predicate": str(predicate), "written_at": float(at or 0.0), "closed": closed,
             })
     return groups

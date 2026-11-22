@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 from kazma_core.memory.tenant_view import narrowed_to
+from kazma_core.spaces.scope import space_of_record
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +255,7 @@ def invalidate_belief(
                 recompute_entity_counts(
                     conn,
                     [str(sub or ""), str(obj or "")],
-                    tenant_id=str(tid or "default"),
+                    tenant_id=space_of_record(tid),
                 )
                 conn.commit()
             except Exception:
@@ -267,7 +268,7 @@ def invalidate_belief(
                 if retire_empty_entities(
                     conn,
                     [str(_col("subject", 1) or ""), str(_col("object", 3) or "")],
-                    tenant_id=str(_col("tenant_id", 4) or "default"),
+                    tenant_id=space_of_record(_col("tenant_id", 4)),
                 ):
                     conn.commit()
             except sqlite3.Error:
@@ -297,7 +298,7 @@ def invalidate_belief(
                         subject=str(sub or ""),
                         predicate=str(pred or ""),
                         obj=str(obj or ""),
-                        tenant_id=str(tid or "default"),
+                        tenant_id=space_of_record(tid),
                     )
                 )
             except Exception:
