@@ -917,6 +917,18 @@ class KazmaAppBuilder:
 
         self.templates.env.globals["spaces_enforced"] = _spaces_enforced
 
+        def _install_settings_here() -> bool:
+            # Whether the page shell reads the install's settings (the
+            # appearance, the active model, the providers, the voice
+            # settings): never on a page drawn for someone the server would
+            # refuse them (<meta name="kazma-install-settings">). No I/O: the
+            # tenant middleware recorded who is viewing.
+            from kazma_ui.auth import install_settings_here
+
+            return install_settings_here()
+
+        self.templates.env.globals["install_settings_here"] = _install_settings_here
+
         def _development_here() -> bool:
             # Whether the sidebar shows the Workspace and IDE entries (Spaces
             # S1-20): no I/O, the tenant middleware worked it out.

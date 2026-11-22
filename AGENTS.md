@@ -16123,6 +16123,26 @@ an install with one account behaves as before.
     "Use the install's key" forgets it; the admin's page as the control).
     Left: a person over their daily limit is still refused before a turn,
     even when the turn would run on their own key.
+- **A member's page asks nothing the server refuses (2026-11-23).** The
+  page shell read the install's settings on every page -- the appearance
+  (and a `PUT` on a theme switch), `/api/provider/active`, `/api/providers`
+  and `/api/settings/voice` -- the admin's, so a member's page was refused
+  four times a load. The tenant middleware records who views the page from
+  the principal it already read (`auth._PAGE_VIEWER`), and
+  `auth.install_settings_here` asks the role rule for the install's settings
+  (no I/O); the page carries it (`<meta name="kazma-install-settings">`,
+  `window.kazmaInstallSettings` in `auth-guard.js`), and every shell read of
+  them asks first (`components.js`, `stores.js`, `voice.js`). A member's
+  theme stays in their browser; the sidebar's default-model picker (it sets
+  the install's default) is drawn only where the page may. This space's
+  Settings tabs of a feature the person lacks (email and calendar, X Studio)
+  are neither drawn nor opened (`#settings-root`'s `data-tabs-off`,
+  `_tabShown`): the X panel's `x-init` asked X's routes whatever the tab.
+  A shell read of an install route goes behind `kazmaInstallSettings`. Gate:
+  `tests/e2e/test_member_settings_asks_nothing_refused.py` (a member with a
+  new person's features, by the sidebar, EN/AR, every tab shown and a theme
+  switch: no request refused; today's shell and the tabs drawn whatever the
+  features as controls).
 
 ## UI Conventions (Web)
 

@@ -6,8 +6,13 @@
 
 {% block content %}
 {# data-tab: the tab this page was asked for. A soft navigation runs the
-   page script before it pushes the new address (settings_core.js). #}
-<div id="settings-root" data-tab="{{ request.query_params.get('tab', '') | e }}" data-areas="{{ (settings_areas if settings_areas is defined else ['account', 'space', 'install']) | join(',') }}" x-data="settingsApp()">
+   page script before it pushes the new address (settings_core.js).
+   data-tabs-off: This space's tabs of a feature the person does not have
+   (Spaces S2-11): neither drawn nor loaded, so the page asks no route the
+   server would refuse them. #}
+{% set email_here = feature_here is not defined or feature_here('email_calendar') %}
+{% set x_here = feature_here is not defined or feature_here('x_studio') %}
+<div id="settings-root" data-tab="{{ request.query_params.get('tab', '') | e }}" data-tabs-off="{{ ((['email'] if not email_here else []) + (['x'] if not x_here else [])) | join(',') }}" data-areas="{{ (settings_areas if settings_areas is defined else ['account', 'space', 'install']) | join(',') }}" x-data="settingsApp()">
 
     <!-- ═══ Settings Navigation ═══ -->
     {# Three areas (Spaces S1-23): My account and This space are each person's,
@@ -24,8 +29,12 @@
         <div class="settings-area" data-area="space">
           <span class="settings-area-label" id="settings-area-space">{{ t('settings.area_space') }}</span>
           <div class="tabs settings-area-tabs" role="tablist" aria-labelledby="settings-area-space">
+            {% if email_here %}
             <button class="settings-tab tab" role="tab" :aria-selected="tab === 'email' ? 'true' : 'false'" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
+            {% endif %}
+            {% if x_here %}
             <button class="settings-tab tab" role="tab" :aria-selected="tab === 'x' ? 'true' : 'false'" :class="{ active: tab === 'x' }" @click="onTabChange('x')">{{ t('settings.tab_x') }}</button>
+            {% endif %}
             {% if spaces_enforced is defined and spaces_enforced() %}
             <button class="settings-tab tab" role="tab" :aria-selected="tab === 'space_data' ? 'true' : 'false'" :class="{ active: tab === 'space_data' }" @click="onTabChange('space_data')">{{ t('settings.tab_space_data') }}</button>
             {% endif %}
@@ -3931,6 +3940,7 @@
     </div>
     {% endif %}
 
+    {% if email_here %}{# drawn only for a person with email and calendar #}
     <div x-show="tab === 'email'" x-transition x-cloak>
         <div class="settings-group mb-6">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
@@ -4283,10 +4293,12 @@
             </p>
         </div>
     </div>
+    {% endif %}
 
     <!-- ═══════════════════════════════════════════════════════════════
          TAB: X (official API)
          ═══════════════════════════════════════════════════════════════ -->
+    {% if x_here %}{# drawn only for a person with X Studio: its x-init asks X's routes #}
     <div class="x-controls" x-show="tab === 'x'" x-transition x-cloak>
         <nav aria-label="{{ t('settings.xt.setup_sections') }}" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
             <a class="btn btn-sm btn-secondary" href="#xr-connection-section">{{ t('settings.xt.connection_section') }}</a>
@@ -5125,6 +5137,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
     {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════

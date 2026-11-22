@@ -21,6 +21,10 @@
     <meta name="kazma-space" content="{{ kazma_space() if kazma_space is defined else '' }}">
     <meta name="kazma-spaces-enforced" content="{{ '1' if (spaces_enforced is defined and spaces_enforced()) else '' }}">
     <meta name="kazma-account" content="{{ kazma_account() if kazma_account is defined else '' }}">
+    {# Whether this page may read the install's settings (the appearance, the
+       active model, the providers, the voice settings): a member's page never
+       asks a route the server refuses them. #}
+    <meta name="kazma-install-settings" content="{{ '1' if (install_settings_here is not defined or install_settings_here()) else '' }}">
     {# Critical inline theme CSS — in the FIRST HTML bytes so iOS Safari
        paints a correctly-colored canvas before kazma.css downloads+parses.
        Per the CSS spec the canvas takes its color from the root element
