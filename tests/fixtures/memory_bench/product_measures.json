@@ -71,23 +71,23 @@
   "long": {
    "en": {
     "n": 137,
-    "p50": 1153,
-    "p95": 1495,
-    "max": 1499,
+    "p50": 1085,
+    "p95": 1483,
+    "max": 1498,
     "none": 0.0
    },
    "ar": {
     "n": 46,
-    "p50": 1080,
-    "p95": 1477,
-    "max": 1496,
+    "p50": 1067,
+    "p95": 1486,
+    "max": 1498,
     "none": 0.0
    },
    "all": {
     "n": 183,
-    "p50": 1146,
-    "p95": 1494,
-    "max": 1499,
+    "p50": 1073,
+    "p95": 1484,
+    "max": 1498,
     "none": 0.0
    }
   }
@@ -117,5 +117,53 @@
   "turns": 12,
   "measured_by": "tests/e2e/test_first_token_latency.py (run with -s), 2026-11-22"
  },
- "times_measured_while": "a below-normal embedding job (LongMemEval's dev vectors) ran on the same PC"
+ "times_measured_while": "a below-normal embedding job (LongMemEval's dev vectors) ran on the same PC",
+ "block_tokens_by_evidence": {
+  "store": {
+   "strong": {
+    "n": 129,
+    "p50": 685,
+    "p95": 1035,
+    "max": 1315,
+    "mean": 704.4
+   },
+   "weak": {
+    "n": 28,
+    "p50": 662,
+    "p95": 1018,
+    "max": 1341,
+    "mean": 695.4
+   },
+   "no_answer": {
+    "n": 26,
+    "p50": 652,
+    "p95": 973,
+    "max": 1075,
+    "mean": 686.4
+   }
+  },
+  "long": {
+   "strong": {
+    "n": 129,
+    "p50": 1133,
+    "p95": 1486,
+    "max": 1498,
+    "mean": 1108.8
+   },
+   "weak": {
+    "n": 28,
+    "p50": 881,
+    "p95": 1403,
+    "max": 1431,
+    "mean": 885.2
+   },
+   "no_answer": {
+    "n": 26,
+    "p50": 1027,
+    "p95": 1494,
+    "max": 1497,
+    "mean": 1017.9
+   }
+  }
+ }
 }

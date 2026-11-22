@@ -230,6 +230,30 @@ def test_negative_control_without_the_ladder_a_line_is_left_out(monkeypatch):
     assert len(lines) < 5
 
 
+def test_a_possibly_related_memory_keeps_the_fixed_bounds(monkeypatch):
+    """Room by rank goes only to memories recall rates strong; a "possibly
+    related" one (``strength`` weak) keeps the fixed bounds, so an ordinary
+    turn whose memories are loosely related stays as small as before (the
+    W1a review). Negative control: the rule without the strength check gives
+    the weak memory room too, and the block grows."""
+    hits = _five()
+    for h in hits[1:]:
+        h.metadata["strength"] = "weak"
+    result = RecallResult(beliefs=[], episodes=hits, focus_terms=_terms("Which orchid code for room 0?"))
+    lines = _history_lines(format_recall_block(result, max_tokens=4000))
+    assert len(lines) == 5
+    assert "The ORCHID code for room 0 is 000" in lines[0]  # strong: its stretch
+    fixed = {h.id: _shown(h.metadata["sides"][0], h.metadata["sides"][1], "")["display"] for h in hits}
+    for i, line in enumerate(lines[1:], 1):
+        assert line.startswith("- (possibly related) User: ")
+        assert fixed[f"e_{i}"] in line and f"The ORCHID code for room {i}" not in line
+    weak_only = RecallResult(beliefs=[], episodes=hits[1:], focus_terms=result.focus_terms)
+    small = format_recall_block(weak_only, max_tokens=4000)
+    monkeypatch.setattr(recall_module, "_roomy", lambda h: not (h.metadata or {}).get("joined"))
+    grown = format_recall_block(weak_only, max_tokens=4000)
+    assert len(grown) > len(small) + 400
+
+
 def test_joined_and_another_member_s_lines_keep_recall_s_line():
     joined = _hit("e_j", "And then?", FILLER_EN * 30, sides=False)
     joined.metadata["joined"] = ["e_x"]

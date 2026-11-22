@@ -71,11 +71,29 @@ def test_the_record_holds_every_product_measure():
     assert set(record["benchmark"]) == {"en", "ar"}
     for store in ("store", "scale", "long"):
         assert {"en", "ar", "all"} <= set(record["block_tokens"][store])
+    # The same tokens split three ways (the W1a review), on the store and
+    # the long store.
+    for store in ("store", "long"):
+        assert set(record["block_tokens_by_evidence"][store]) == {"strong", "weak", "no_answer"}
     assert {"answered", "precision", "abstained"} <= set(record["small_store"])
     assert record["recall_ms"]["p50"] > 0
     # Time to the first token: Kazma's own share (tests/e2e) and the
     # embedding model's, recorded on this PC.
     assert record["first_token"]["p50_s"] > 0 and record["embed_ms"]["p50"] > 0
+
+
+def test_the_split_reads_the_top_hit_and_keeps_unanswerable_questions_apart(measures):
+    from kazma_core.memory.recall import RecallHit, RecallResult
+
+    def hit(strength):
+        return RecallHit(id="e", content="x", score=1.0, metadata={"strength": strength} if strength else {})
+
+    weak_fact_strong_turn = RecallResult(beliefs=[hit("weak")], episodes=[hit("strong")])
+    assert measures.evidence_group(weak_fact_strong_turn, False) == "strong"  # the first conversation
+    assert measures.evidence_group(RecallResult(beliefs=[], episodes=[hit("weak"), hit("strong")]), False) == "weak"
+    assert measures.evidence_group(RecallResult(beliefs=[hit(None)], episodes=[]), False) == "strong"
+    assert measures.evidence_group(RecallResult(beliefs=[], episodes=[]), False) == "weak"
+    assert measures.evidence_group(weak_fact_strong_turn, True) == "no_answer"
 
 
 def test_the_long_store_s_padding_holds_no_content_word(measures):

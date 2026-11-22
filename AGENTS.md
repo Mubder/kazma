@@ -1687,9 +1687,12 @@ came up short, and archiving had erased 76 memories.
   stretch of a long memory is a later step (`docs/plans/MEMORY_REMAINING.md`).
   **Shown bounded, read whole**: the recall block shows a memory with its
   own bounds -- **room by rank** (the memory plan's W1a, 2026-11-22,
-  `recall._room_by_rank`, `episode_text.display_at`): the best recalled
-  conversation up to `RECALL_LEAD_SHOW` (1,500) characters, every other
-  `RECALL_OTHER_SHOW` (500), each side cut around the stretch holding the
+  `recall._room_by_rank`, `episode_text.display_at`), **for the
+  conversations recall rates strong only** (a "possibly related" one keeps
+  the fixed bounds, `_roomy`: the block grows only where recall is fairly
+  sure it holds the answer): the best of them up to `RECALL_LEAD_SHOW`
+  (1,500) characters, every other `RECALL_OTHER_SHOW` (500), each side cut
+  around the stretch holding the
   most of the question's words (`query_terms.word_term`: search's reading,
   folded, the article and one-letter prefixes, a light plural); when that
   stretch is not the side's start, the side's opening sentence comes first
@@ -2384,10 +2387,12 @@ four injected were noise.
   (room by rank, §15F, 2026-11-22) and **not yet accepted**: acceptance
   waits for W0's end-to-end dev answering and its noise run. With and
   without it on one commit, no model call: on dev 200 the answer's text is
-  in the block for 0.442 of the 129 questions with a worded answer (0.302
-  with the fixed bounds; 0.450 have it in the rounds shown), 19 gained and
-  none lost; the block's tokens p50 1,075 -> 1,372, p95 1,317 -> 1,894;
-  making the block 0.34 -> 2.5 ms p50, 9.5 ms at most. The opening kept
+  in the block for 0.434 of the 129 questions with a worded answer (0.302
+  with the fixed bounds; 0.450 have it in the rounds shown), 17 gained and
+  none lost; the block's tokens p50 1,080 -> 1,337, p95 1,317 -> 1,489,
+  with the whole-block budget and room for strong hits only; making the
+  block 0.34 -> 2.5 ms p50, 9.5 ms at most. Room for every hit had 0.442
+  (one more answer, held by a possibly related hit) for p50 1,373. The opening kept
   (W1a's second piece) gained the one answer the stretch alone lost (a
   name in a memory's first sentence) for 8 tokens a question on average;
   its rule (no opening when the stretch alone starts inside it) was set
@@ -2425,8 +2430,11 @@ four injected were noise.
   1,644 with the fixed bounds). The block's 1,500-token cap then bounded a
   quarter of its lines' characters, so the rules, the fence and Arabic's
   shorter tokens fell outside it and the estimate passed 1,500; since
-  2026-11-22 it bounds the whole block (§15F): 1,146 / 1,494, at most
-  1,499, with W1a; 872 / 1,350, at most 1,497, with the fixed bounds.
+  2026-11-22 it bounds the whole block (§15F). With room for strong hits
+  only: 1,073 / 1,484 with W1a, 872 / 1,350 with the fixed bounds; split by
+  the question's top hit (`block_tokens_by_evidence`), p50 strong 1,133
+  against 869, weak 881 against 881, no answer 1,027 against 892 (an
+  unanswerable question's top hit is often rated strong: W3 + W2's).
   `scripts/memory_real_use.py` is the browser real-use suite, run by hand at
   every stage (it needs DeepSeek and the embedding model): a private Kazma
   from this checkout (`kazma serve`, the environment scrubbed of every Kazma

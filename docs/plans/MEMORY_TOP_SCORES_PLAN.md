@@ -166,7 +166,24 @@ a turn on the median, 310 at the 95th. The cap bounded the lines'
 characters (a quarter of them counted as tokens), not the block: the rules,
 the fence and Arabic's shorter tokens were outside it, with or without W1a.
 Fixed 22 Nov (a bug from before W1a): the cap is the whole block's, counted
-as the context trim counts. On the long store the block is then 1,146 /
+as the context trim counts. Then (the same review) room by rank goes to hits
+recall rates strong only; a "possibly related" one keeps the fixed bounds.
+With and without W1a on one commit, split by the question's top hit (the
+long store; p50 / p95 / mean tokens):
+
+| Top hit | Questions | With W1a | Without | Growth (p50) |
+|---|---|---|---|---|
+| Strong | 129 | 1,133 / 1,486 / 1,109 | 869 / 1,348 / 904 | +264 |
+| Possibly related | 28 | 881 / 1,403 / 885 | 881 / 1,403 / 875 | 0 |
+| No answer | 26 | 1,027 / 1,494 / 1,018 | 892 / 1,352 / 915 | +135 |
+| All | 183 | 1,073 / 1,484 / 1,062 | 872 / 1,350 / 901 | +201 |
+
+The growth sits in the strong group; the no-answer group grows because recall
+still rates a wrong memory strong for a question memory cannot answer (item 5
+of section 7, W3 + W2's to fix). On dev: the answer's text in the block for
+0.434 of the worded questions (17 gained, none lost against the fixed bounds;
+room for every hit had 0.442, one more answer held by a possibly related
+hit), tokens p50 1,080 -> 1,337 and p95 1,317 -> 1,489. On the long store the block is then 1,146 /
 1,494 tokens (1,499 the largest) with W1a and 872 / 1,350 (1,497) without;
 on dev the answer's text in the block is unchanged (0.442 with W1a, 0.302
 without), the largest block 1,946 -> 1,498 with W1a and 1,620 -> 1,424

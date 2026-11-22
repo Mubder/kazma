@@ -314,10 +314,14 @@ def recall(
 
 def _roomy(hit: RecallHit) -> bool:
     """Whether the block may give *hit* room by rank (W1a): a conversation
-    shown as recall made it. Follow-ups joined to their turn and another
-    member's turn under their name keep the line recall made."""
+    recall rated strong, shown as recall made it. A "possibly related" one
+    (``strength`` weak) keeps the fixed bounds, so the block grows only where
+    recall is fairly sure it holds the answer and an ordinary turn whose
+    memories are loosely related stays as small as before (the W1a review).
+    Follow-ups joined to their turn and another member's turn under their
+    name keep the line recall made."""
     meta = hit.metadata or {}
-    if meta.get("joined"):
+    if meta.get("joined") or meta.get("strength") == "weak":
         return False
     shown = str(meta.get("display") or "")
     return shown.startswith("User: ") or " / Assistant: " not in shown
@@ -382,7 +386,7 @@ def _room_by_rank(result: RecallResult, fits: Any) -> dict[str, tuple[str, int]]
     200 + 300 bounds, 0.74 with this shape
     (docs/plans/RECALL_BLOCK_BOUNDS_PROPOSAL.md). Empty when no line is
     roomy: the block is made as before."""
-    roomy = [h for h in result.episodes if (h.metadata or {}).get("sides") is not None]
+    roomy = [h for h in result.episodes if (h.metadata or {}).get("sides") is not None and _roomy(h)]
     if not roomy:
         return {}
     terms = result.focus_terms

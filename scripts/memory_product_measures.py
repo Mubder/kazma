@@ -26,6 +26,11 @@ recorded vectors (no model is loaded unless ``--real-embedder``):
   ``check`` command and ``tests/test_memory_product_measures.py`` hold it to
   the record, so a change to the block's size records its new numbers in the
   same commit (its before and after).
+* **The same tokens split three ways** (``block_tokens_by_evidence``, on
+  the store and the long store): questions whose top hit recall rates
+  strong, those it rates "possibly related", and those memory holds no
+  answer to. Room by rank (W1a) is given to strong hits only, so its growth
+  belongs in the first.
 * **The same block where memories are as long as live's** (``long``): the
   store, each conversation lengthened to a length drawn from live's episode
   lengths (``tests/fixtures/memory_bench/live_lengths.json``: percentiles
@@ -93,9 +98,28 @@ def _pct(values: list[float], share: float) -> float:
     return ordered[min(len(ordered) - 1, round(share * (len(ordered) - 1)))] if ordered else 0.0
 
 
-def block_tokens(conn: Any, questions: list[dict[str, Any]]) -> tuple[dict[str, list[int]], list[float]]:
+#: The three ways the block's tokens are split (the W1a review): the
+#: question's top hit rated strong, rated "possibly related", or a question
+#: memory holds no answer to (the benchmark's ``abstain``).
+EVIDENCE_GROUPS = ("strong", "weak", "no_answer")
+
+
+def evidence_group(result: Any, unanswerable: bool) -> str:
+    """Which of :data:`EVIDENCE_GROUPS` a question's recall falls in: its
+    top hit -- the first conversation, else the first fact, else the first
+    summary -- strong or weak (``strength``); an unanswerable question apart,
+    whatever it shows. A question that shows nothing counts as weak."""
+    if unanswerable:
+        return "no_answer"
+    top = next(iter(result.episodes or result.beliefs or result.summaries or []), None)
+    return "strong" if top is not None and (top.metadata or {}).get("strength") != "weak" else "weak"
+
+
+def block_tokens(conn: Any, questions: list[dict[str, Any]], *,
+                 by_evidence: dict[str, list[int]] | None = None) -> tuple[dict[str, list[int]], list[float]]:
     """Each question's recall block as the supervisor adds it, in tokens, by
-    language; and recall's time per question."""
+    language; and recall's time per question. *by_evidence*, when given, is
+    filled with the same tokens by :func:`evidence_group`."""
     from kazma_core.memory import benchmark
     from kazma_core.memory.question_shape import standalone_query
     from kazma_core.memory.recall import format_recall_block, recall
@@ -113,6 +137,8 @@ def block_tokens(conn: Any, questions: list[dict[str, Any]]) -> tuple[dict[str, 
         block = "" if res.empty else format_recall_block(res, explain=False)
         n = estimate_tokens([{"role": "system", "content": block}]) if block else 0
         tokens["ar" if _arabic(q["text"]) else "en"].append(n)
+        if by_evidence is not None:
+            by_evidence.setdefault(evidence_group(res, q.get("category") == "abstain"), []).append(n)
     return tokens, seconds
 
 
@@ -203,6 +229,18 @@ def live_lengths(backup: Path) -> dict[str, Any]:
     }
 
 
+def evidence_summary(by_evidence: dict[str, list[int]]) -> dict[str, Any]:
+    """:data:`EVIDENCE_GROUPS`' tokens: how many questions, p50, p95, the
+    largest and the mean."""
+    out: dict[str, Any] = {}
+    for group in EVIDENCE_GROUPS:
+        values = by_evidence.get(group) or []
+        out[group] = {"n": len(values), "p50": _pct(values, 0.5), "p95": _pct(values, 0.95),
+                      "max": max(values, default=0),
+                      "mean": round(statistics.fmean(values), 1) if values else 0.0}
+    return out
+
+
 def token_summary(tokens: dict[str, list[int]]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for lang, values in [*tokens.items(), ("all", [v for vs in tokens.values() for v in vs])]:
@@ -265,8 +303,10 @@ def measure(*, real_embedder: bool = False, small: bool = True, scale: bool = Tr
     with _replayed(replay):
         with benchmark._seeded_store(data) as (conn, refs, covers):
             report["benchmark"] = scores_by_language(conn, refs, covers, questions)
-            tokens, seconds = block_tokens(conn, questions)
+            by_evidence: dict[str, list[int]] = {}
+            tokens, seconds = block_tokens(conn, questions, by_evidence=by_evidence)
             report["block_tokens"] = {"store": token_summary(tokens)}
+            report["block_tokens_by_evidence"] = {"store": evidence_summary(by_evidence)}
             report["recall_ms"] = {"p50": round(_pct(seconds, 0.5) * 1000, 1),
                                    "p95": round(_pct(seconds, 0.95) * 1000, 1)}
         scaled = benchmark._scaled_dataset(data) if scale else None
@@ -279,8 +319,10 @@ def measure(*, real_embedder: bool = False, small: bool = True, scale: bool = Tr
         if long:
             with benchmark._seeded_store(data) as (conn, _refs, _covers):
                 lengthen(conn, json.loads(LIVE_LENGTHS.read_text(encoding="utf-8")), tenant_id=benchmark.BENCH_TENANT)
-                tokens, _seconds = block_tokens(conn, questions)
+                by_evidence = {}
+                tokens, _seconds = block_tokens(conn, questions, by_evidence=by_evidence)
                 report["block_tokens"]["long"] = token_summary(tokens)
+                report["block_tokens_by_evidence"]["long"] = evidence_summary(by_evidence)
         if small:
             report["small_store"] = benchmark.run_small_store_benchmark(data)["overall"]
     if real_embedder:
