@@ -32,7 +32,7 @@ import httpx
 
 from kazma_core.background import spawn_background
 from kazma_gateway.adapters.discord_receive import DiscordReceiveLog
-from kazma_gateway.sender_rule import SenderGate
+from kazma_gateway.sender_rule import LINK_CODE, SenderGate
 from kazma_gateway.gateway import (
     Attachment,
     BaseAdapter,
@@ -508,6 +508,16 @@ class DiscordAdapter(SenderGate, BaseAdapter):
             if gid and gid not in self._allowed_guilds:
                 self._note_drop("server_not_allowed", data)
                 return None
+        # A link code (Spaces S3-01) is answered by the link flow, before the
+        # sender rule: its sender is not linked yet.
+        if self.link_attempted(
+            meta.get("user_id"), parsed.text,
+            direct=not meta.get("guild_id"),
+            target_id=f"discord:{meta.get('channel_id')}",
+            context_metadata={"channel_id": meta.get("channel_id")},
+        ):
+            self._note_drop(LINK_CODE, data)
+            return None
         # The one sender rule (sender_rule): a stranger writing in a direct
         # message is told once a day that this bot is private.
         refusal = self.sender_refusal(meta.get("user_id"))

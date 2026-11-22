@@ -30,6 +30,13 @@ and logged by its rule (``ReceiveLog.log_drop``), as before.
 
 Every adapter's accept path asks :meth:`SenderGate.sender_refusal`; nothing
 reads the allowlist itself (``tests/test_chat_apps_private_by_default.py``).
+
+**Linking (Spaces S3-01).** Before the sender rule, every message accept
+path asks :meth:`SenderGate.link_attempted`: where Spaces is enforced, a
+message that is a link code (``spaces.chat_links.code_in``) is never handed
+on -- it links the sender's account (``chat_links.redeem``, in a thread) and
+the sender is answered. Recorded as ``link_code``. An install that does not
+enforce Spaces looks at no code (``tests/test_chat_link_flow.py``).
 """
 
 from __future__ import annotations
@@ -44,6 +51,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "LINK_CODE",
     "NOTICE_KEY",
     "NO_ALLOWLIST",
     "NOT_LISTED",
@@ -69,6 +77,10 @@ OPEN_SWITCH = "KAZMA_GATEWAY_OPEN_TO_EVERYONE"
 #: The old opt-in to refuse on an empty allowlist. Private is the default now;
 #: set, it only wins over :data:`OPEN_SWITCH`.
 STRICT_SWITCH = "KAZMA_GATEWAY_STRICT_ALLOWLIST"
+
+#: The receive-log reason of a message that was a link code (S3-01): it is
+#: answered by the link flow, never handed to the agent.
+LINK_CODE = "link_code"
 
 #: The settings key that says which refused senders were told, and when
 #: (``{"<platform>:<user id>": epoch}``): a restart does not tell them again.
@@ -243,6 +255,77 @@ class SenderGate:
             "allow_all": self._allow_all,
             "owner_ids": sorted(self._owner_ids),
         }
+
+    def link_attempted(
+        self,
+        user_id: Any,
+        text: Any,
+        *,
+        direct: bool,
+        target_id: str,
+        context_metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Whether this message is a link code (Spaces S3-01), and so is not
+        handed on: the caller records it as :data:`LINK_CODE` and stops.
+
+        Only where Spaces is enforced; read from memory, so it is asked on
+        the adapter's loop. The code is redeemed in a thread and the sender
+        answered in the background (a group hears only that a live code was
+        burned there; a sender past their guesses hears nothing).
+        """
+        from kazma_core.spaces import chat_links
+
+        if not chat_links.linking_on():
+            return False
+        code = chat_links.code_in(text)
+        if code is None:
+            return False
+        uid = chat_links.platform_user_id(self.name, user_id)
+        if not uid:
+            return True  # a code with no sender is no one's: never the agent's
+        if not chat_links.take_attempt(self.name, uid):
+            logger.info("[%s] A link code from %s was not looked at: too many codes from them",
+                        self.name, uid)
+            return True
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("[%s] A link code from %s arrived off the adapter's loop; ignored",
+                           self.name, uid)
+            return True
+        from kazma_core.background import spawn_background
+
+        spawn_background(
+            self._redeem_and_reply(uid, code, direct, target_id, dict(context_metadata or {}),
+                                   text if isinstance(text, str) else None),
+            name=f"{self.name}-chat-link",
+        )
+        return True
+
+    async def _redeem_and_reply(
+        self, uid: str, code: str, direct: bool, target_id: str, meta: dict[str, Any],
+        user_text: str | None,
+    ) -> None:
+        from kazma_core.spaces import chat_links
+
+        result = await asyncio.to_thread(chat_links.redeem, self.name, uid, code, direct=direct)
+        if not direct and not result.reply_in_group():
+            return
+        import httpx
+
+        from kazma_gateway.gateway import OutboundMessage
+
+        try:
+            sent = await self.send(  # type: ignore[attr-defined]
+                OutboundMessage(target_id=target_id, text=chat_links.reply_text(result, user_text),
+                                context_metadata=meta, durable=False)
+            )
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError, TypeError) as exc:
+            sent = False
+            logger.warning("[%s] Answering a link code from %s failed (%s)",
+                           self.name, uid, type(exc).__name__)
+        logger.info("[%s] A link code from %s: %s (answer %s)", self.name, uid, result.outcome,
+                    "sent" if sent else "not sent")
 
     def tell_refused_sender(
         self,

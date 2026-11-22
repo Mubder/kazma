@@ -16075,6 +16075,41 @@ an install with one account behaves as before.
   real login route), `tests/e2e/test_people_page_each_person_browser.py` (by
   the sidebar, EN/AR: a person signed in from a second browser, every part
   of their row, their sessions ended and the second browser signed out).
+- **A person links their own chat-app account with a code (S3-01,
+  2026-11-23).** Only where Spaces is enforced (`chat_links.linking_on`): an
+  install with one account issues no code, and every message, code-shaped or
+  not, goes where it always went.
+  - `kazma_core/spaces/chat_links.py` is the one home. My account (Settings
+    -> My account -> Chat apps, `static/js/chat_links.js`, catalog slice
+    `chat_links.*`) asks `POST /api/account/chat-links/code` for a code
+    (`chat_links.issue_code`: eight letters of an alphabet with no I, L, O, 0
+    or 1, shown once, one use, ten minutes; a new one replaces the person's
+    earlier code for that chat app). Only its hash is kept, in the
+    CREDENTIAL settings key `chat_links.CODES_KEY`.
+  - The person sends it to the bot in a direct chat (`/link ABCD-2345` on
+    Telegram, the code alone elsewhere: `chat_links.send_text`). Every
+    message accept path asks `SenderGate.link_attempted` BEFORE the sender
+    rule (an unlinked sender is not refused first): a message that is a code
+    (`chat_links.code_in`, pure, read on the loop) is never handed on,
+    recorded as `link_code`, redeemed in a thread (`chat_links.redeem`) and
+    answered, naming the account it is linked to. Never a forwarded message,
+    nor a Telegram command for another bot.
+  - The code is spent by the first message that reaches it, in the same
+    atomic step that reads it (`chat_links._take`). A live code typed in a
+    group, server channel or Slack channel, or sent on another chat app, is
+    burned and links nothing (a group is told only that). A chat-app account
+    linked to someone is never moved by another's code. A sender's codes are
+    counted as they arrive (`chat_links.take_attempt`: five in ten minutes,
+    a flood at once too).
+  - Links are the identity store's `links` table (`identity._check_links`:
+    a chat app, a user id, an account that is there, one account per
+    chat-app account), each an event of the People record (`chat_linked`,
+    `people.record_event`); deleting a person takes their links.
+  - Gates: `tests/test_chat_link_flow.py` (the real Telegram, Discord,
+    Slack and WhatsApp accept paths; a code that can be used twice as the
+    negative control), `tests/e2e/test_chat_link_browser.py` (by the
+    sidebar, EN/AR: the code shown, sent to the real Telegram adapter, the
+    page says linked).
 
 ## UI Conventions (Web)
 

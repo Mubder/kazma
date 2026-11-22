@@ -16,8 +16,10 @@ What it holds:
 * ``memberships`` -- account, space, role in the space (``owner`` or
   ``member``).
 * ``links``, ``policies`` -- ``policies`` holds what the admin set for one
-  account (its Development switch, its daily limit, S2-02); ``links`` is
-  stage 3's.
+  account (its Development switch, its daily limit, S2-02); ``links`` holds
+  each person's chat-app accounts (stage 3, ``spaces.chat_links``): a
+  platform, a user id there and the account, one account per chat-app
+  account.
 * ``defaults`` -- what the admin set for every person who has no setting of
   their own (the daily limit people get, S2-02).
   (A space's key is not here: it lives in the vault's own file, beside the
@@ -415,6 +417,28 @@ def _check(reg: dict[str, Any]) -> None:
                 "personal_space_is_private",
                 f"the personal space {space_id!r} has one member: {personal_of!r}",
             )
+    _check_links(reg)
+
+
+#: The chat apps a link names (``spaces.chat_links.PLATFORMS``).
+_LINK_PLATFORMS = ("telegram", "discord", "slack", "whatsapp")
+
+
+def _check_links(reg: dict[str, Any]) -> None:
+    """Every chat-app link (stage 3) names a chat app, a user id and an
+    account that is there, and a chat-app account is one account's."""
+    seen: set[tuple[str, str]] = set()
+    for link in reg["links"]:
+        if not isinstance(link, dict):
+            raise IdentityError("bad_link", "a chat-app link is a mapping")
+        pair = (str(link.get("platform") or ""), str(link.get("user_id") or ""))
+        if pair[0] not in _LINK_PLATFORMS or not pair[1]:
+            raise IdentityError("bad_link", f"not a chat-app link: {pair[0]!r}")
+        if link.get("account") not in reg["accounts"]:
+            raise IdentityError("no_such_account", f"no account {link.get('account')!r}")
+        if pair in seen:
+            raise IdentityError("linked_elsewhere", f"{pair[0]} {pair[1]} is linked twice")
+        seen.add(pair)
 
 
 # ── Reading ─────────────────────────────────────────────────────────────

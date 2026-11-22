@@ -27,6 +27,9 @@ COMMON_REASONS: dict[str, str] = {
     # account Kazma knows.
     "no_allowlist": "was refused: Allowed User IDs is empty and its author is not the owner's account Kazma knows",
     "user_not_allowed": "was refused: its author is not in Allowed User IDs",
+    # A code to link a chat-app account to a Kazma account (Spaces S3-01):
+    # answered by the link flow, never handed to the agent.
+    "link_code": "was a code to link a Kazma account: answered by the link flow, not the agent",
     "queue_full": "was dropped: Kazma's message queue was full",
     "processing_failed": "failed while being prepared (a voice note or file that could not be read?)",
     # Left by the gateway after the adapter handed it on (its flood guard).

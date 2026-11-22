@@ -49,7 +49,7 @@ from kazma_gateway.gateway import (
 )
 from kazma_gateway.adapters.telegram_receive import TELEGRAM_REASONS, message_of, update_kind, where_of
 from kazma_gateway.receive_log import ReceiveLog
-from kazma_gateway.sender_rule import SenderGate
+from kazma_gateway.sender_rule import LINK_CODE, SenderGate
 from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
@@ -230,6 +230,29 @@ class TelegramAdapter(SenderGate, BaseAdapter):
         runs before any download or transcription.
         """
         return self.sender_refusal((message.get("from") or {}).get("id", 0))
+
+    def _link_code(self, message: dict[str, Any]) -> bool:
+        """Whether *message* was a code to link a Kazma account (S3-01), now
+        handed to the link flow and recorded. Never a forwarded message
+        (someone else's words), nor a command addressed to another bot."""
+        from kazma_core.agent.command_catalog import normalize_telegram_command
+
+        from kazma_gateway.forwarded import telegram_forward_origin
+
+        said = message.get("text")
+        if not isinstance(said, str) or telegram_forward_origin(message) is not None:
+            return False
+        said = normalize_telegram_command(said, getattr(self, "_bot_username", ""))
+        chat = message.get("chat") or {}
+        if not self.link_attempted(
+            (message.get("from") or {}).get("id"), said,
+            direct=chat.get("type") == "private",
+            target_id=f"telegram:{chat.get('id')}",
+            context_metadata={"chat_id": chat.get("id"), "parse_mode": ""},
+        ):
+            return False
+        self._note_drop(LINK_CODE, message)
+        return True
 
     def _refuse(self, reason: str, message: dict[str, Any], text: str | None = None) -> None:
         """Record why *message* was left and, for a stranger in a private
@@ -639,6 +662,10 @@ class TelegramAdapter(SenderGate, BaseAdapter):
             # audit 2026-11-10). The sender is the message's own `from`, the
             # id the check after the read uses too.
             if message is not None:
+                # A link code (Spaces S3-01) is answered by the link flow,
+                # before the sender rule: its sender is not linked yet.
+                if self._link_code(message):
+                    return
                 refusal = self._sender_refusal(message)
                 if refusal:
                     self._refuse(refusal, message)

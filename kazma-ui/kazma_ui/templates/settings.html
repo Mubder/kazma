@@ -2311,6 +2311,54 @@
             <button class="btn btn-primary" @click="changePassword()">{{ t('settings.change_password') }}</button>
         </div>
 
+        {% if spaces_enforced is defined and spaces_enforced() %}
+        <!-- Chat apps (Spaces stage 3): this person's own Telegram, Discord,
+             Slack and WhatsApp accounts. chat_links.js. -->
+        <div class="settings-group mb-6" id="chat-links" x-data="chatLinksPanel()">
+            <h3>{{ t('chat_links.title') }}</h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">{{ t('chat_links.intro') }}</p>
+            <div x-show="failed" x-cloak class="notice tone-danger" style="margin-bottom:12px">{{ t('chat_links.load_failed') }}</div>
+            <div class="account-list-table" x-show="links.length > 0" x-cloak data-chat-links>
+              <div class="account-list-head">
+                <span>{{ t('chat_links.col_app') }}</span>
+                <span>{{ t('chat_links.col_account') }}</span>
+                <span>{{ t('chat_links.col_linked') }}</span>
+                <span></span>
+              </div>
+              <template x-for="link in links" :key="link.platform + ':' + link.user_id">
+                <div class="account-list-row" :data-chat-link="link.platform + ':' + link.user_id">
+                  <span class="account-list-name" translate="no" x-text="link.label || link.platform"></span>
+                  <span class="account-list-mono" translate="no"><bdi dir="ltr" x-text="link.user_id"></bdi></span>
+                  <span class="account-list-meta" x-text="linkedAt(link)"></span>
+                  <span class="account-list-actions"></span>
+                </div>
+              </template>
+            </div>
+            <div x-show="linksLoaded && !failed && links.length === 0" x-cloak class="empty-state" style="padding:12px">{{ t('chat_links.none') }}</div>
+            <div x-show="justLinked" x-cloak class="notice tone-success" style="margin:12px 0" data-chat-link-done x-text="justLinked"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" x-show="linksLoaded && platforms.length > 0" x-cloak>
+              <template x-for="p in platforms" :key="p.id">
+                <button type="button" class="btn btn-secondary btn-sm" :data-link-platform="p.id" :disabled="busy" @click="getCode(p.id)" x-text="linkLabel(p)"></button>
+              </template>
+            </div>
+            <div x-show="linksLoaded && !failed && platforms.length === 0" x-cloak class="empty-state" style="padding:12px">{{ t('chat_links.no_platforms') }}</div>
+            <div x-show="codeProblem" x-cloak class="notice tone-warning" style="margin-top:12px" data-chat-link-error x-text="codeProblem"></div>
+            <div x-show="code" x-cloak class="notice tone-info" style="margin-top:12px" data-chat-link-code-box>
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:0.8rem;font-weight:600;margin-bottom:6px;" x-text="sendHint()"></div>
+                <code style="display:inline-block;font-size:1.1rem;letter-spacing:0.06em;margin-bottom:8px;" translate="no" dir="ltr" data-chat-link-code x-text="sendText"></code>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:8px;"><span x-text="remaining()"></span> · {{ t('chat_links.code_hint') }}</div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:8px;">{{ t('chat_links.waiting') }}</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <button type="button" class="btn btn-sm btn-primary" @click="copy()">{{ t('chat_links.copy') }}</button>
+                  <a class="btn btn-sm btn-secondary" x-show="botUrl" x-cloak :href="botUrl" target="_blank" rel="noopener noreferrer">{{ t('chat_links.open_bot') }}</a>
+                  <button type="button" class="btn btn-sm btn-secondary" @click="clearCode()">{{ t('common.dismiss') }}</button>
+                </div>
+              </div>
+            </div>
+        </div>
+        {% endif %}
+
         {% if install_area %}
         <!-- API Tokens: the owner's account's (an API token is the owner's, S1-03) -->
         <div class="settings-group mb-6">
@@ -5686,5 +5734,6 @@
 <script src="/static/js/settings_integrations.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings_ops.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings_alerts.js?v={{ js_version() }}"></script>
+<script src="/static/js/chat_links.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings.js?v={{ js_version() }}"></script>
 {% endblock %}

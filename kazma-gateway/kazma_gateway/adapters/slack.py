@@ -46,7 +46,7 @@ from kazma_gateway.gateway import (
 )
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.receive_log import ReceiveLog, iso
-from kazma_gateway.sender_rule import SenderGate
+from kazma_gateway.sender_rule import LINK_CODE, SenderGate
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +310,10 @@ class SlackAdapter(SenderGate, BaseAdapter):
         if self._allowed_channels and cid not in self._allowed_channels:
             self._note_drop("channel_not_allowed", event)
             return None
+        # A link code (Spaces S3-01) is answered by the link flow, before the
+        # sender rule: its sender is not linked yet.
+        if self._link_code(event, uid, cid, incoming.text):
+            return None
         # The one sender rule (sender_rule): never the whole workspace by
         # default (audit finding); a stranger writing in a direct message is
         # told once a day that this bot is private.
@@ -318,6 +322,19 @@ class SlackAdapter(SenderGate, BaseAdapter):
             self._refuse(refusal, event, uid, cid, incoming.text)
             return None
         return incoming
+
+    def _link_code(self, event: dict[str, Any], uid: Any, channel: Any, text: str | None) -> bool:
+        """Whether *event* was a code to link a Kazma account (S3-01), now
+        handed to the link flow and recorded as ``link_code``."""
+        if not self.link_attempted(
+            uid, text,
+            direct=str(channel or "").startswith("D") or event.get("channel_type") == "im",
+            target_id=f"slack:{channel}",
+            context_metadata={"channel_id": channel},
+        ):
+            return False
+        self._note_drop(LINK_CODE, event)
+        return True
 
     def _refuse(self, reason: str, event: dict[str, Any], uid: Any, channel: Any, text: str | None) -> None:
         """Record why *event* was left and, for a stranger in a direct
@@ -1224,6 +1241,8 @@ class SlackAdapter(SenderGate, BaseAdapter):
         # Enforce channel whitelist if configured
         if self._allowed_channels and channel_id not in self._allowed_channels:
             self._note_drop("channel_not_allowed", event)
+            return
+        if self._link_code(event, user_id, channel_id, msg.get("text")):
             return
         # The USER allowlist on the polling path too (audit H-2): this path
         # once checked channels only, and any workspace member posting in a

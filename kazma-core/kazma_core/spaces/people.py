@@ -88,6 +88,7 @@ __all__ = [
     "spaces_usage",
     "end_sessions",
     "note_sign_in",
+    "record_event",
 ]
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,8 @@ _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased"
           "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
           "models_set", "account_disabled", "account_enabled", "space_created", "member_added", "member_left", "member_removed",
           "space_limits_set", "default_space_limits_set", "sessions_ended")
+#: A person's chat-app accounts (Spaces stage 3, ``spaces.chat_links``).
+_KINDS += ("chat_linked", "chat_unlinked")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended")
 _NAME_MAX = 64
@@ -154,7 +157,16 @@ def _event_hash(event: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(fields, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _record(reg: dict[str, Any], kind: str, account: str, by: str, *, space: str = "") -> None:
+def record_event(reg: dict[str, Any], kind: str, account: str, by: str, *, detail: str = "") -> None:
+    """Append one event to *reg*'s record, for a change another module makes
+    inside its own ``identity.update_registry`` step (a chat-app link,
+    ``spaces.chat_links``). *detail* is a short word (the chat app), never a
+    person's data."""
+    _record(reg, kind, account, by, detail=detail)
+
+
+def _record(reg: dict[str, Any], kind: str, account: str, by: str, *, space: str = "",
+            detail: str = "") -> None:
     """Append one event to *reg*'s record, chained to the one before."""
     if kind not in _KINDS:
         raise ValueError(f"not an event of the record: {kind!r}")
@@ -169,6 +181,8 @@ def _record(reg: dict[str, Any], kind: str, account: str, by: str, *, space: str
     }
     if space:
         event["space"] = space
+    if detail:
+        event["detail"] = detail
     event["hash"] = _event_hash(event)
     events.append(event)
 
@@ -843,6 +857,8 @@ def delete_person(account_id: str, *, by: str) -> None:
         del reg["accounts"][account_id]
         reg["policies"].pop(account_id, None)
         reg["memberships"] = [m for m in reg["memberships"] if m.get("account") != account_id]
+        # Their chat-app accounts are nobody's now (stage 3): refused at once.
+        reg["links"] = [link for link in reg["links"] if link.get("account") != account_id]
         now = _now()
         for space in reg["spaces"].values():
             if space.get("personal_of") == account_id:
