@@ -291,12 +291,29 @@ def current_x_usage() -> dict[str, Any]:
 
 
 async def x_chat(role: str, messages: list[dict[str, Any]], *, max_tokens: int, **kwargs: Any) -> Any:
-    """Budgeted call through the selected provider's existing chat implementation."""
-    from kazma_core.x_api.ai_budget import CALL_SLOTS, XBudgetUnavailable, read_limits, reserve_daily
+    """Budgeted call through the selected provider's existing chat implementation.
+
+    The person the work is for is held to their daily limit before anything
+    is spent (Spaces S2-02: X Studio's drafts, replies, checks and
+    classifications made for a member), and every answered call is a row of
+    the per-call ledger, which that limit counts.
+    """
+    from kazma_core.spaces import daily_limits
+    from kazma_core.x_api.ai_budget import (
+        CALL_SLOTS,
+        XBudgetUnavailable,
+        XDailyLimitReached,
+        read_limits,
+        reserve_daily,
+    )
 
     session = _session.get()
     if session is None:
         raise RuntimeError("X chat requires a model scope")
+    if daily_limits.may_apply():
+        refused = await asyncio.to_thread(daily_limits.call_refusal)
+        if refused:
+            raise XDailyLimitReached(f"Not sent: {refused}.")
     client = await get_x_client(role)
     if client is None:
         raise XModelUnavailableError("No X model is available for this role.")
@@ -339,6 +356,7 @@ async def x_chat(role: str, messages: list[dict[str, Any]], *, max_tokens: int, 
     if not acquired:
         raise XBudgetUnavailable("X AI concurrency limit reached. Work is held for retry or review.")
     completed = False
+    started = time.monotonic()
     try:
         remaining = limits["deadline_seconds"] - (time.monotonic() - session.started)
         if remaining <= 0:
@@ -358,11 +376,43 @@ async def x_chat(role: str, messages: list[dict[str, Any]], *, max_tokens: int, 
             session.output_tokens += output
         else:
             session.missing_usage += 1
+        await _ledger_row(role, client, response, started=started)
         return response
     finally:
         if not completed:
             session.failed_calls += 1
         CALL_SLOTS.release()
+
+
+async def _ledger_row(role: str, client: Any, response: Any, *, started: float) -> None:
+    """The answered call's row in the per-call ledger, written off the loop
+    (``arecord_llm_call``: whose call it is comes from the bound scope). X's
+    own daily budget (``ai_budget``) bounds X; the ledger is what a person's
+    daily limit and the Dashboard count. Never raises."""
+    from kazma_core.observability.llm_ledger import arecord_llm_call, provider_of
+    from kazma_core.safety.hitl import get_current_thread_id
+
+    usage = getattr(response, "usage", None)
+    usage = usage if isinstance(usage, dict) else {}
+
+    def _count(*keys: str) -> int:
+        for key in keys:
+            value = usage.get(key)
+            if type(value) is int and value >= 0:
+                return value
+        return 0
+
+    await arecord_llm_call(
+        thread_id=get_current_thread_id() or f"x:{role}",
+        provider=provider_of(client),
+        model=str(getattr(response, "model", "") or getattr(getattr(client, "config", None), "model", "") or ""),
+        prompt_tokens=_count("prompt_tokens", "input_tokens"),
+        completion_tokens=_count("completion_tokens", "output_tokens"),
+        cost_usd=float(getattr(response, "cost_usd", 0.0) or 0.0),
+        duration_ms=(time.monotonic() - started) * 1000,
+        status="ok",
+        priced=bool(getattr(response, "cost_known", True)),
+    )
 
 
 def x_model_call(function: Callable[_P, Awaitable[Any]]) -> Callable[_P, Awaitable[Any]]:

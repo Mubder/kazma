@@ -122,6 +122,13 @@ def _worker_scope(tenant_id: str | None, asker: str | None) -> Callable[[], Any]
     found = work_scope(str(tenant_id or ""), asker)
     if found is None:
         raise _TaskOfNoSpace("this task belongs to no space of this install, so its worker does not run")
+    # The person no longer has the feature Swarm (Spaces S2-11): the check
+    # made again when the work runs.
+    from kazma_core.spaces.features import work_refusal
+
+    if work_refusal("swarm", found[1]):
+        raise _TaskOfNoSpace("Swarm is off for the person this task is for (Settings → People), "
+                             "so its worker does not run")
     return functools.partial(bind_scope, *found)
 
 

@@ -19,6 +19,12 @@ class XBudgetUnavailable(ValueError):
     """Hold work without weakening checks when budget is exhausted or unreadable."""
 
 
+class XDailyLimitReached(XBudgetUnavailable):
+    """The person this X work is for reached their daily limit (Spaces S2-02):
+    the call was not sent, and the work is held like any spent budget. Its
+    text is Kazma's own sentence, shown as it is."""
+
+
 def _current_usage(current: Any, today: str) -> dict[str, Any]:
     if current is None:
         return {"day": today, "calls": 0, "reserved_output_tokens": 0}

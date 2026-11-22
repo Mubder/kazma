@@ -34,6 +34,9 @@ The rule is applied where a model is offered tools (``skills.switches.offered``,
 a swarm worker's list) and again where a tool is called
 (``LocalToolRegistry._execute_inner``, the MCP branch of
 ``UnifiedToolExecutor``): hiding a tool from the list alone is never enough.
+The person's features (S2-11, ``spaces.features``) are asked at the same
+places, by :func:`tool_refusal`: a tool of a feature that is off for the
+person is neither offered nor run.
 The host pages and routes follow the same rule (the tenant middleware,
 ``kazma_ui.route_scopes.is_development_route``).
 
@@ -58,9 +61,10 @@ __all__ = [
     "development_here",
     "forget_allowance",
     "host_allowance",
-    "host_refusal",
     "offered_here",
     "remember_allowance",
+    "tool_grants",
+    "tool_refusal",
 ]
 
 #: The feature "Development" (plan 4.8): host tools of a host space.
@@ -213,7 +217,7 @@ def host_allowance() -> HostAllowance:
     )
 
 
-def host_refusal(name: str, allowance: HostAllowance | None = None) -> str | None:
+def _host_refusal(name: str, allowance: HostAllowance | None = None) -> str | None:
     """Why the tool *name* is neither offered nor run in the bound space, or
     None when it may be. Only host tools are ever refused here."""
     group = _tool_group(name)
@@ -229,15 +233,43 @@ def host_refusal(name: str, allowance: HostAllowance | None = None) -> str | Non
     )
 
 
+def tool_grants() -> Any:
+    """The bound person's features (S2-11), or None when no rule applies;
+    nothing when they cannot be read (never guessed)."""
+    from kazma_core.spaces import features, identity
+
+    try:
+        return features.grants_here()
+    except identity.IdentityUnavailable:
+        bound = current_scope()
+        return features.Grants(bound.asker if bound else "", frozenset())
+
+
+def tool_refusal(name: str, allowance: HostAllowance | None = None, grants: Any = ...) -> str | None:
+    """Why the tool *name* is neither offered nor run for the work bound now:
+    a host tool the space may not have (S1-20), or a tool of a feature that
+    is off for the person (S2-11). None when it may be. Blocking."""
+    host = _host_refusal(name, allowance)
+    if host is not None:
+        return host
+    if not spaces_enforced():
+        return None
+    from kazma_core.spaces import features
+
+    return features.tool_refusal(name, tool_grants() if grants is ... else grants)
+
+
 def offered_here(definitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """*definitions* without the host tools the bound space may not have.
-    One identity read for the whole list (a thread for async callers)."""
+    """*definitions* without the host tools the bound space may not have and
+    the tools of features the person does not have. One identity read for
+    the whole list (a thread for async callers)."""
     if not spaces_enforced():
         return list(definitions or [])
     allowance = host_allowance()
+    grants = tool_grants()
     return [
         d for d in definitions or []
-        if host_refusal(str(((d or {}).get("function") or {}).get("name") or ""), allowance) is None
+        if tool_refusal(str(((d or {}).get("function") or {}).get("name") or ""), allowance, grants) is None
     ]
 
 

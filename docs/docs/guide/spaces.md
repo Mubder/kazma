@@ -34,8 +34,8 @@ kazma spaces migrate --check
 
 It changes nothing and lists each one as holding or missing, with what
 closes it. While one is missing, adding a second person is refused and the
-refusal names it. Today the daily limits and the per-person features are
-not built yet, so the list is never empty. The plan, with every step and
+refusal names it. Today some of Kazma's own code still falls back to the
+owner's space when no space is named, so the list is never empty. The plan, with every step and
 its state, is `docs/plans/SPACES_PLAN.md`.
 
 This page describes what Spaces does once it is on.
@@ -94,6 +94,56 @@ space's folder.
 A password reset is never silent: it is recorded in the identity store's
 record, which cannot be edited without the edit showing, and the person is
 told the next time they open Kazma.
+
+## A daily limit per person
+
+Your friends use your model keys, so each person but you has a daily
+limit, counted from midnight: a number of tokens, which every model call
+made for their requests counts -- chat, research, the swarm, X Studio --
+and an amount in dollars, which the calls of known price count (0 for
+none). A model whose price Kazma does not know is still covered by the
+tokens. The memory work Kazma does after a turn (learning facts and
+lessons from it) is not counted yet. When a person reaches their limit, their requests stop until
+midnight and they are told; a request that had already started finishes.
+Your own use is covered by the install's limit (Settings → System).
+
+Settings → People sets the limit for people and, for any person, a limit
+of their own, and shows what each person used today: counts and money,
+never what they asked. Each change is recorded. The limit counts what the
+per-call ledger records, so with the ledger off a person's requests are
+refused.
+
+Kazma's own limit for people is 3,000,000 tokens and $1.00 a day. Every
+model call sends the instructions, the turn's notes and the conversation
+again, so a turn costs more than its words: on Kazma's own install in
+November 2026 a turn used about 72,000 tokens in the middle of the range,
+and one in ten used more than 189,000. 3,000,000 tokens is about 40
+ordinary turns a day; the dollar amount binds only a model whose price
+Kazma knows. Raise or lower it for everyone, or for one person.
+
+## Features per person
+
+What each person may use is a switch per feature, on Settings → People:
+X Studio, email and calendar, documents, knowledge, research, the swarm,
+scheduled tasks, code, the web, the browser, images and voice, and
+Development. A new person starts with chat and its memory, documents,
+knowledge, the web, research, and images and voice; the rest is off until
+you turn it on. Grants are per person, in a shared space too, and only you
+make them.
+
+A feature that is off is gone for that person: no menu entry, its pages
+say it is off, its routes and live voice refuse, its chat commands refuse,
+its tools are neither offered to the model nor run, and a request that
+would start its work (asking for a deep research, booking an X post from
+Scheduled) starts nothing. Work they started before it was switched off
+waits: a booked X post stays booked and goes once the feature is on again,
+a Knowledge crawl stops before its next page and finishes on Resume, a
+scheduled job does not fire, a swarm worker does not run, and a document
+job stops and can be retried. A research run already going finishes. Their
+data stays, and turning the feature on again brings it back. Putting a
+document into a library, or searching libraries through Documents, needs
+Knowledge too. You have every feature; Development is the one you can
+switch off for yourself.
 
 ## Taking your space with you, and deleting it
 

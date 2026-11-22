@@ -100,16 +100,16 @@ def test_a_sandboxed_space_is_offered_no_host_tool_and_runs_none(matrix, enforce
 
 def test_control_a_policy_that_only_hides_the_tool_lets_its_call_run(matrix, enforced, monkeypatch) -> None:
     """The plan's control: the offer filtered, the call not checked."""
-    first = host_tools.host_refusal
+    first = host_tools._host_refusal
     monkeypatch.setattr(host_tools, "offered_here", lambda defs: [
         d for d in defs if first(d["function"]["name"]) is None])
-    monkeypatch.setattr(host_tools, "host_refusal", lambda *_a, **_k: None)
+    monkeypatch.setattr(host_tools, "_host_refusal", lambda *_a, **_k: None)
     # A read-tier host tool: no approval card stands in front of it.
     assert "get_system_stats" not in cases.offered_to(matrix)  # hidden ...
     _answer, entered = cases.call_through_the_registry(matrix, "get_system_stats")
     assert entered == ["get_system_stats"]  # ... and it ran
     # (With the rule in place the same call never enters the tool.)
-    monkeypatch.setattr(host_tools, "host_refusal", first)
+    monkeypatch.setattr(host_tools, "_host_refusal", first)
     _answer, entered = cases.call_through_the_registry(matrix, "get_system_stats")
     assert entered == []
 
@@ -181,18 +181,18 @@ def test_the_owners_space_has_every_host_tool_while_development_is_on(matrix, en
     with as_owner():
         allowance = host_tools.host_allowance()
         assert allowance.development and allowance.admin
-        assert all(host_tools.host_refusal(name) is None for name in _host_names())
+        assert all(host_tools._host_refusal(name) is None for name in _host_names())
 
 
 def test_with_development_off_the_owner_keeps_the_admin_tools_only(matrix, enforced) -> None:
     identity._set_development(OWNER_ACCOUNT_ID, False)
     try:
         with as_owner():
-            assert host_tools.host_refusal("shell_exec") is not None
-            assert host_tools.host_refusal("git_push") is not None
-            assert host_tools.host_refusal("config_read") is None  # admin tools stay
-            assert host_tools.host_refusal("install_python_packages") is None
-            assert host_tools.host_refusal("memory_search") is None
+            assert host_tools._host_refusal("shell_exec") is not None
+            assert host_tools._host_refusal("git_push") is not None
+            assert host_tools._host_refusal("config_read") is None  # admin tools stay
+            assert host_tools._host_refusal("install_python_packages") is None
+            assert host_tools._host_refusal("memory_search") is None
     finally:
         identity._set_development(OWNER_ACCOUNT_ID, True)
     # Control: today's "always" (Spaces not enforced) ignores the switch.
@@ -200,7 +200,7 @@ def test_with_development_off_the_owner_keeps_the_admin_tools_only(matrix, enfor
     try:
         scope.set_enforced(False)
         with as_owner():
-            assert host_tools.host_refusal("shell_exec") is None
+            assert host_tools._host_refusal("shell_exec") is None
     finally:
         scope.set_enforced(True)
         identity._set_development(OWNER_ACCOUNT_ID, True)
@@ -221,8 +221,8 @@ def test_a_second_host_space_has_no_host_tool_until_its_own_folder(matrix, enfor
 
 def test_work_with_no_space_bound_has_no_host_tool(matrix, enforced) -> None:
     assert not host_tools.host_allowance().development
-    assert host_tools.host_refusal("shell_exec") is not None
-    assert host_tools.host_refusal("memory_search") is None  # its own rules refuse it
+    assert host_tools._host_refusal("shell_exec") is not None
+    assert host_tools._host_refusal("memory_search") is None  # its own rules refuse it
 
 
 def test_an_unreadable_identity_store_gives_no_host_tool(matrix, enforced, monkeypatch) -> None:

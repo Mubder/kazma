@@ -40,6 +40,7 @@ __all__ = [
     "record_llm_call",
     "spend_by_person",
     "thread_usage",
+    "usage_of",
     "turn_usage",
     "usage_series",
     "usage_since",
@@ -121,6 +122,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
                             ("space", "TEXT DEFAULT ''"), ("asker", "TEXT DEFAULT ''")),
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_turn ON llm_calls(turn_id)")
+    # One person's day (Spaces S2-02): a person's limit is checked when their
+    # turn starts, by account and time.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_asker_ts ON llm_calls(asker, ts)")
     if "priced" in added:
         conn.execute(
             f"UPDATE llm_calls SET cost_usd = 0.0 WHERE lower(provider) IN ({_marks(_LOCAL_PROVIDERS)})",
@@ -404,6 +408,25 @@ def spend_by_person(since: datetime) -> list[dict[str, Any]] | None:
         logger.warning("[llm-ledger] spend per person could not be read: %s", exc)
         return None
     return [{"asker": str(row[0] or ""), **_usage(*row[1:5]), "spaces": int(row[5] or 0)} for row in rows]
+
+
+def usage_of(asker: str, since: datetime) -> dict[str, Any] | None:
+    """Tokens, cost and call count of the model calls made for *asker* since
+    *since*: what a person's daily limit counts (``spaces.daily_limits``,
+    S2-02). ``cost`` holds only the calls of known price, ``unpriced`` counts
+    the rest; their tokens are in ``tokens``. None when the ledger cannot be
+    read. Blocking (SQLite)."""
+    stamp = (since if since.tzinfo else since.replace(tzinfo=UTC)).astimezone(UTC).isoformat()
+    try:
+        with _lock:
+            conn = _get_conn()
+            row = conn.execute(
+                f"SELECT {_SUMS} FROM llm_calls WHERE asker = ? AND ts >= ?", (str(asker), stamp),
+            ).fetchone()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[llm-ledger] a person's usage is unreadable: %s", exc)
+        return None
+    return _usage(*row)
 
 
 def usage_since(since: datetime) -> dict[str, Any] | None:

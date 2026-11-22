@@ -773,6 +773,12 @@ export function initSoftNav() {
         navInFlight = (navInFlight || Promise.resolve()).then(run, run);
     });
 
+    // Whether the sidebar offers a page here (search_pages.js sets the rule
+    // on window: a feature that is off, Spaces S2-11; the Development pages,
+    // S1-20). Kept off an import so this module runs on its own.
+    const pageOffered = (href) => (typeof window.kazmaPageOffered === 'function'
+        ? window.kazmaPageOffered(href) : true);
+
     const NAV_SHORTCUTS = {
         '1': '/workspace',
         '2': '/chat',
@@ -794,7 +800,7 @@ export function initSoftNav() {
             window.location.href = '/settings';
             return;
         }
-        if ((e.key === 'i' || e.key === 'I') && e.shiftKey) {
+        if ((e.key === 'i' || e.key === 'I') && e.shiftKey && pageOffered('/ide')) {
             e.preventDefault();
             window.location.href = '/ide';
             return;
@@ -815,7 +821,9 @@ export function initSoftNav() {
             return;
         }
         const target = NAV_SHORTCUTS[e.key];
-        if (target) {
+        // A page the sidebar does not offer here (a feature that is off,
+        // Spaces S2-11; the Development pages, S1-20) has no shortcut.
+        if (target && pageOffered(target)) {
             e.preventDefault();
             if (needsHardReload(location.pathname, target)) {
                 window.location.href = target;

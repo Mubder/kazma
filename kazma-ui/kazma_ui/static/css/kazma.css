@@ -1256,6 +1256,29 @@ button { cursor: pointer; font-family: inherit; }
   min-height: 44px;
 }
 .account-list-row:last-child { border-bottom: none; }
+/* Features per person (Spaces S2-11): the person's name, then a switch per feature. */
+.people-features-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.85rem;
+}
+.people-features-row:last-child { border-bottom: none; }
+.people-features-row .account-list-name { min-width: 120px; }
+.people-features-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.people-feature {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
 .account-list-name {
   font-weight: 500;
   color: var(--text-primary);

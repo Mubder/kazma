@@ -192,6 +192,14 @@ async def resilient_chat(
     primary and all failover models fail.
     """
     from kazma_core.llm_provider import LLMError
+    from kazma_core.spaces import daily_limits
+
+    if daily_limits.may_apply():
+        # The person this work is for has a daily limit (Spaces S2-02): a
+        # call they reached it before is refused here, before any provider.
+        refused = await asyncio.to_thread(daily_limits.call_refusal)
+        if refused:
+            raise LLMError(f"Not sent: {refused}.", transient=False, kind="daily_limit")
 
     retryable = _retryable()
     _ChaosInjectionError = _chaos_error()

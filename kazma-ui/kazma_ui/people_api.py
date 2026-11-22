@@ -9,6 +9,14 @@ people; each person reads the changes made to their account.
   end and they are told at their next sign-in.
 * ``DELETE /api/people/{account_id}`` -- the person goes; their personal
   space waits, with no member, to be erased (S1-27).
+* ``PUT /api/people/{account_id}/daily-limit`` -- a person's own daily limit
+  (``{"tokens", "usd"}``; no tokens: none of their own), and
+  ``PUT /api/people/default-limit`` -- the limit for people who have none of
+  their own (S2-02). ``GET /api/people`` says each person's limit and what
+  they spent today (counts and money, never a word of what they asked, N11).
+* ``PUT /api/people/{account_id}/features`` -- switch a person's features
+  (``{"features": {id: on}}``, S2-11); ``GET /api/people`` lists each
+  person's features.
 * ``GET /api/account/notices``, ``POST /api/account/notices/seen`` -- the
   signed-in person's own notices: a reset of their password someone else
   made.
@@ -67,6 +75,52 @@ def _caller(request: Request) -> str | None:
     return space_binding.account_of(auth.get_request_principal(request))
 
 
+_NOTHING_SPENT = {"calls": 0, "tokens": 0, "cost": 0.0, "unpriced": 0}
+
+
+def _spent_today() -> tuple[dict[str, dict[str, Any]] | None, str]:
+    """What each person spent today, by account (None: the ledger cannot be
+    read), and today's date. Blocking."""
+    from kazma_core.observability.llm_ledger import spend_by_person
+    from kazma_core.spaces.daily_limits import today_start
+
+    since, _zone = today_start()
+    rows = spend_by_person(since)
+    if rows is None:
+        return None, since.date().isoformat()
+    return ({row["asker"]: {key: row[key] for key in _NOTHING_SPENT} for row in rows if row["asker"]},
+            since.date().isoformat())
+
+
+def _set_limit(request: Request, account_id: str | None, body: dict[str, Any]) -> JSONResponse:
+    raw = body.get("limit")
+    if raw is not None and not isinstance(raw, dict):
+        return JSONResponse({"ok": False, "error": "bad_limit"}, status_code=400)
+    try:
+        if account_id is None:
+            people.set_default_daily_limit(raw, by=_caller(request) or "")
+        else:
+            people.set_daily_limit(account_id, raw, by=_caller(request) or "")
+    except people.PeopleRefused as exc:
+        return _refused(exc)
+    except IdentityUnavailable:
+        return _unavailable()
+    return JSONResponse({"ok": True})
+
+
+async def _limit_route(request: Request, account_id: str | None) -> JSONResponse:
+    denied = await asyncio.to_thread(_not_admin, request)
+    if denied:
+        return denied
+    try:
+        body = await read_json(request)
+    except InvalidJsonBody:
+        return invalid_json_response()
+    if not isinstance(body, dict):
+        return invalid_json_response()
+    return await asyncio.to_thread(_set_limit, request, account_id, body)
+
+
 def create_people_router() -> APIRouter:
     router = APIRouter(tags=["people"])
 
@@ -79,10 +133,15 @@ def create_people_router() -> APIRouter:
             listed = people.list_people()
             closed = people.closed_spaces()
             broken = people.broken_at()
+            limits = people.limits_for_people()
         except IdentityUnavailable:
             return _unavailable()
+        spent, today = _spent_today()
+        for person in listed:
+            person["spent_today"] = (spent.get(person["id"], _NOTHING_SPENT)
+                                     if spent is not None else None)
         return JSONResponse({"ok": True, "enforced": spaces_enforced(), "people": listed,
-                             "closed_spaces": closed,
+                             "closed_spaces": closed, "limit_for_people": limits, "today": today,
                              "record_whole": broken is None, "record_broken_at": broken})
 
     def _create(request: Request, body: dict[str, Any]) -> JSONResponse:
@@ -142,6 +201,36 @@ def create_people_router() -> APIRouter:
         except IdentityUnavailable:
             return _unavailable()
         return JSONResponse({"ok": True})
+
+    @router.put("/api/people/default-limit")
+    async def set_default_limit(request: Request) -> JSONResponse:
+        return await _limit_route(request, None)
+
+    @router.put("/api/people/{account_id}/daily-limit")
+    async def set_daily_limit(account_id: str, request: Request) -> JSONResponse:
+        return await _limit_route(request, account_id)
+
+    def _set_features(request: Request, account_id: str, body: dict[str, Any]) -> JSONResponse:
+        try:
+            people.set_features(account_id, body.get("features") or {}, by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True})
+
+    @router.put("/api/people/{account_id}/features")
+    async def set_features(account_id: str, request: Request) -> JSONResponse:
+        denied = await asyncio.to_thread(_not_admin, request)
+        if denied:
+            return denied
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_set_features, request, account_id, body)
 
     @router.get("/api/account/notices")
     def my_notices(request: Request) -> JSONResponse:

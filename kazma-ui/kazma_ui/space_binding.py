@@ -87,6 +87,12 @@ class SpaceRefused(Exception):
         self.status = status
         self.message = message
 
+    @property
+    def close_code(self) -> int:
+        """The code a refused socket closes with: 4403 for a feature that is
+        off for the person (Spaces S2-11), 4003 for every other refusal."""
+        return 4403 if self.code == "feature_off" else 4003
+
 
 @dataclass(frozen=True)
 class Binding:
@@ -151,7 +157,13 @@ def space_for_socket(principal: dict[str, Any] | None, websocket: Any) -> Bindin
     legacy = principal_tenant_id(principal) or OWNER_SPACE_ID
     named = named_space(websocket.headers, websocket.query_params)
     try:
-        return space_for_request(principal, named, legacy_tenant=legacy, needs_space=True)
+        binding = space_for_request(principal, named, legacy_tenant=legacy, needs_space=True)
+        # The tenant middleware is HTTP only: a socket of a feature the
+        # person has not got is refused here (Spaces S2-11).
+        refused = _socket_feature_refusal(str(websocket.url.path), binding)
+        if refused:
+            raise SpaceRefused("feature_off", 403, refused)
+        return binding
     except identity.IdentityUnavailable:
         if spaces_enforced() or (named is not None and named != legacy):
             # Membership cannot be checked: never guessed.
@@ -160,6 +172,25 @@ def space_for_socket(principal: dict[str, Any] | None, websocket: Any) -> Bindin
             ) from None
         logger.warning("[spaces] the identity store is unreadable; the socket runs with no asker bound")
         return Binding(space_id=legacy, asker=None)
+
+
+def _socket_feature_refusal(path: str, binding: Binding) -> str | None:
+    """Why the socket at *path* is not for *binding*'s person: a feature of
+    the socket (``route_scopes.features_of_route``, method ``WEBSOCKET``)
+    they have not got, or None. Images and voice's admission for live voice
+    (``features.ADMISSIONS``). No read unless Spaces is enforced and the
+    socket has a feature. Blocking (the identity store)."""
+    if not spaces_enforced() or not binding.asker:
+        return None
+    from kazma_core.spaces.features import work_refusal
+
+    from kazma_ui.route_scopes import features_of_route
+
+    for feature in features_of_route(path, "WEBSOCKET"):
+        refused = work_refusal(feature, binding.asker)
+        if refused:
+            return refused
+    return None
 
 
 @contextmanager

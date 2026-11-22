@@ -345,15 +345,17 @@ def _writes_of_the_switch() -> list[str]:
 def test_nothing_in_the_product_switches_spaces_on():
     """The pages say Spaces is not switched on in any release: the one
     product code that writes the switch (``preconditions.switch_on``, S1-33)
-    is refused in this build -- the daily limits and per-person features it
-    waits for are not built -- and Settings' writers and the agent refuse
-    the key."""
+    is refused in this build -- work with no space still falls back to the
+    owner's in places (S1-02) -- and Settings' writers and the agent refuse
+    the key. A daily limit per person (S2-02) and features per person
+    (S2-11) hold."""
     from kazma_core.settings_scope import install_writer_refusal
     from kazma_core.spaces import identity, preconditions
 
     assert _writes_of_the_switch() == ["kazma_core/spaces/preconditions.py"]
     left = {f.id for f in preconditions.missing(for_switch=True)}
-    assert {"daily_limits", "feature_grants"} <= left
+    assert "unbound_work" in left
+    assert not {"daily_limits", "feature_grants"} & left
     with pytest.raises(preconditions.PreconditionsMissing):
         preconditions.switch_on(by="test")
     assert not preconditions._store().get(identity.ENFORCED_KEY, False)

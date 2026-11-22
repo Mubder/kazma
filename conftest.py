@@ -337,6 +337,31 @@ def _second_account_preconditions_hold(request, monkeypatch):
     yield
 
 
+# A person holds only the features the admin gave them (Spaces S2-11), and a
+# new person starts without X Studio, mail, swarm, scheduled tasks or code
+# (N18). The tests of every other part make people who use those parts, so
+# a test's people hold every feature -- the admin's own switch (Development,
+# N28) is kept -- and a test of the features themselves is marked
+# ``real_features``.
+@_pytest.fixture(autouse=True)
+def _people_hold_every_feature(request, monkeypatch):
+    if request.node.get_closest_marker("real_features") is None:
+        from kazma_core.spaces import features
+
+        real = features.grants_of
+
+        def every(registry, account_id):
+            held = real(registry, account_id)
+            # Only a real account holds features, as in production: an asker
+            # that is no account of the install gets nothing.
+            if held.admin or str(account_id or "") not in (registry.get("accounts") or {}):
+                return held
+            return features.Grants(held.account, frozenset(features.FEATURES))
+
+        monkeypatch.setattr(features, "grants_of", every)
+    yield
+
+
 @_pytest.fixture(autouse=True)
 def _reset_database_availability(monkeypatch):
     from kazma_core.db import availability

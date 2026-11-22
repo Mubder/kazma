@@ -2719,7 +2719,93 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يُمسح كل ما في مساحته نهائيًا. لا ترى أبدًا ما فيها.",
     },
     "settings.people_erased": {"en": "The space of {name} was erased.", "ar": "مُسحت مساحة {name}."},
-    "settings.tab_space_data": {"en": "This space's data", "ar": "بيانات هذه المساحة"},
+    # Daily limits per person (Spaces S2-02).
+    "settings.people_limits_title": {"en": "Daily limits", "ar": "الحدود اليومية"},
+    "settings.people_limits_help": {
+        "en": "What each person's model use may reach in a day, counted from midnight. Tokens count every "
+              "call; dollars count the calls whose price is known. At their limit a person's requests stop "
+              "until midnight, and they are told. You have no limit here: the install's own limit "
+              "(Settings → System) covers your use.",
+        "ar": "ما يمكن أن يبلغه استخدام كل شخص للنماذج في اليوم، محسوبًا من منتصف الليل. تُحسب الرموز لكل "
+              "طلب، والدولارات للطلبات المعروف سعرها. عند بلوغ حده تتوقف طلبات الشخص حتى منتصف الليل، "
+              "ويُبلَّغ بذلك. ليس لك حد هنا: حد التثبيت نفسه (الإعدادات ← النظام) يغطي استخدامك.",
+    },
+    "settings.people_limit_for_people": {"en": "The limit for people", "ar": "الحد للأشخاص"},
+    "settings.people_limit_for_people_help": {
+        "en": "For everyone who has no limit of their own. Kazma's own is {limit}.",
+        "ar": "لكل من ليس له حد خاص. حد Kazma نفسه: {limit}.",
+    },
+    "settings.people_limit_tokens": {"en": "Tokens a day", "ar": "الرموز في اليوم"},
+    "settings.people_limit_usd": {"en": "Dollars a day (0: none)", "ar": "الدولارات في اليوم (0: بلا حد)"},
+    "settings.people_limit_save": {"en": "Save limit", "ar": "حفظ الحد"},
+    "settings.people_limit_shipped": {"en": "Use Kazma's own", "ar": "استخدام حد Kazma"},
+    "settings.people_limit_saved": {"en": "Limit saved.", "ar": "حُفظ الحد."},
+    "settings.people_limit_col": {"en": "Limit", "ar": "الحد"},
+    "settings.people_today_col": {"en": "Used today", "ar": "المستخدم اليوم"},
+    "settings.people_limit_edit": {"en": "Change limit", "ar": "تغيير الحد"},
+    "settings.people_limit_edit_of": {"en": "Change the limit of {name}", "ar": "تغيير حد {name}"},
+    "settings.people_limit_tokens_of": {"en": "Tokens a day for {name}", "ar": "الرموز في اليوم لـ {name}"},
+    "settings.people_limit_usd_of": {"en": "Dollars a day for {name}", "ar": "الدولارات في اليوم لـ {name}"},
+    "settings.people_limit_clear": {"en": "Use the limit for people", "ar": "استخدام الحد للأشخاص"},
+    "settings.people_limit_clear_admin": {"en": "No limit", "ar": "بلا حد"},
+    "settings.people_limit_cancel": {"en": "Cancel", "ar": "إلغاء"},
+    "settings.people_limit_none": {"en": "None: the install's own limit", "ar": "لا شيء: حد التثبيت نفسه"},
+    "settings.people_limit_own": {"en": "Their own", "ar": "حده الخاص"},
+    "settings.people_limit_from_default": {"en": "The limit for people", "ar": "الحد للأشخاص"},
+    "settings.people_limit_text": {"en": "{tokens} and {usd} a day", "ar": "{tokens} و{usd} في اليوم"},
+    "settings.people_limit_text_tokens": {"en": "{tokens} a day", "ar": "{tokens} في اليوم"},
+    "settings.people_spent_text": {"en": "{tokens}, {usd}", "ar": "{tokens}، {usd}"},
+    "settings.people_spent_unknown": {"en": "Not counted", "ar": "غير محسوب"},
+    "settings.people_tokens.zero": {"en": "no tokens", "ar": "لا رموز"},
+    "settings.people_tokens.one": {"en": "1 token", "ar": "رمز واحد"},
+    "settings.people_tokens.two": {"en": "{n} tokens", "ar": "رمزان"},
+    "settings.people_tokens.few": {"en": "{n} tokens", "ar": "{n} رموز"},
+    "settings.people_tokens.many": {"en": "{n} tokens", "ar": "{n} رمزًا"},
+    "settings.people_tokens.other": {"en": "{n} tokens", "ar": "{n} رمز"},
+    # Features per person (Spaces S2-11).
+    "settings.people_features_title": {"en": "Features", "ar": "الميزات"},
+    "settings.people_features_help": {
+        "en": "What each person may use. A new person starts with chat and its memory, documents, knowledge, "
+              "web, research, and images and voice; the rest is off until you turn it on. A feature that is "
+              "off is gone for them: no menu entry, its pages and commands refuse, and its tools are not "
+              "offered. Their data stays. You have every feature; only Development is yours to switch off.",
+        "ar": "ما يمكن لكل شخص استخدامه. يبدأ الشخص الجديد بالمحادثة وذاكرتها والمستندات والمعرفة والويب "
+              "والبحث والصور والصوت؛ والباقي معطّل حتى تفعّله. الميزة المعطّلة تختفي عنده: لا مدخل لها في "
+              "القائمة، وترفض صفحاتها وأوامرها، ولا تُعرض أدواتها. وتبقى بياناته. لديك كل الميزات؛ والتطوير "
+              "وحده يمكنك تعطيله لنفسك.",
+    },
+    "settings.feature.x_studio": {"en": "X Studio", "ar": "استوديو X"},
+    "settings.feature.email_calendar": {"en": "Email and calendar", "ar": "البريد والتقويم"},
+    "settings.feature.documents": {"en": "Documents", "ar": "المستندات"},
+    "settings.feature.knowledge": {"en": "Knowledge", "ar": "المعرفة"},
+    "settings.feature.research": {"en": "Research", "ar": "البحث"},
+    "settings.feature.swarm": {"en": "Swarm", "ar": "السرب"},
+    "settings.feature.scheduled": {"en": "Scheduled", "ar": "المجدولة"},
+    "settings.feature.code": {"en": "Code", "ar": "الكود"},
+    "settings.feature.web": {"en": "Web", "ar": "الويب"},
+    "settings.feature.browser": {"en": "Browser", "ar": "المتصفح"},
+    "settings.feature.images_voice": {"en": "Images and voice", "ar": "الصور والصوت"},
+    "settings.feature.chat_apps": {"en": "Chat apps", "ar": "تطبيقات المحادثة"},
+    "settings.feature.development": {"en": "Development", "ar": "التطوير"},
+    "settings.people_feature_of": {"en": "{feature} for {name}", "ar": "{feature} لـ {name}"},
+    "settings.feature_off_title": {"en": "Not available to you", "ar": "غير متاح لك"},
+    "settings.feature_off_body": {
+        "en": "{feature} is off for you. The admin turns it on in Settings → People.",
+        "ar": "ميزة {feature} غير مفعّلة لك. يفعّلها المسؤول من الإعدادات ← الأشخاص.",
+    },
+    "settings.feature_off_back": {"en": "Back to chat", "ar": "العودة إلى المحادثة"},
+    "settings.people_features_saved": {"en": "Features saved.", "ar": "حُفظت الميزات."},
+    "settings.people_err.unknown_feature": {"en": "There is no such feature.", "ar": "لا توجد ميزة بهذا الاسم."},
+    "settings.people_err.bad_switch": {"en": "A feature is switched on or off.", "ar": "الميزة إما مفعّلة أو معطّلة."},
+    "settings.people_err.bad_features": {"en": "Name the features to switch.", "ar": "حدّد الميزات المراد تبديلها."},
+    "settings.people_err.admin_has_every_feature": {
+        "en": "The admin has every feature; only Development can be switched off.",
+        "ar": "لدى المسؤول كل الميزات؛ والتطوير وحده يمكن تعطيله.",
+    },
+    "settings.people_err.bad_tokens":{"en": "Tokens a day is a whole number above zero.", "ar": "الرموز في اليوم عدد صحيح أكبر من صفر."},
+    "settings.people_err.bad_usd": {"en": "Dollars a day is a number, 0 or more.", "ar": "الدولارات في اليوم رقم، صفر أو أكثر."},
+    "settings.people_err.bad_limit": {"en": "That is not a limit.", "ar": "هذا ليس حدًّا."},
+    "settings.tab_space_data":{"en": "This space's data", "ar": "بيانات هذه المساحة"},
     "settings.space_data_title": {"en": "This space's data", "ar": "بيانات هذه المساحة"},
     "settings.space_data_help": {
         "en": "How much this space holds. Its owner can export everything in it, and delete a shared space.",
