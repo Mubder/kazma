@@ -167,17 +167,50 @@ def test_the_project_space_works_in_its_own_folder(spaces) -> None:
 # ── N21, until S2-05 ────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("name", ["x_post", "request_path_access"])
+def _always_ask() -> list[str]:
+    """Every always-ask tool, from the product's own list (the S2-12 review,
+    finding 11: N21 over the whole set, never a sample of it)."""
+    from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
+
+    return sorted({*ALWAYS_HITL_TOOLS, "request_path_access"})
+
+
+def test_the_preflight_asks_for_every_always_ask_tool() -> None:
+    from kazma_core.safety.call_preflight import ALWAYS_ASK_TOOLS
+
+    assert set(_always_ask()) <= ALWAYS_ASK_TOOLS
+    # Control: an always-ask tool the preflight did not know would be found.
+    assert not set([*_always_ask(), "x_planted_act"]) <= ALWAYS_ASK_TOOLS
+
+
+@pytest.mark.parametrize("name", _always_ask())
 def test_a_holders_always_ask_action_is_refused_before_its_card(spaces, name) -> None:
+    from kazma_core.agent.graph_tool_worker import _refuse_unrunnable_calls
     from kazma_core.safety.call_preflight import call_refusal
 
     with bind_scope(spaces["dev"], CODER):
-        english = asyncio.run(call_refusal(name, {}, user_text="Please post this for me"))
-        arabic = asyncio.run(call_refusal(name, {}, user_text="انشر هذا لو سمحت"))
+        english = asyncio.run(call_refusal(name, {}, user_text="Please do this for me"))
+        arabic = asyncio.run(call_refusal(name, {}, user_text="سوّ هذا لو سمحت"))
+        kept, refused = asyncio.run(_refuse_unrunnable_calls(
+            [{"id": "c1", "name": name, "arguments": {}}], user_text="do it"))
     assert english and "admin's approval" in english and "later update" in english
     assert arabic and "موافقة المسؤول" in arabic and "تحديث لاحق" in arabic
+    assert kept == [] and [r["outcome"] for r in refused] == ["policy"], (name, refused)
     answer, entered = _call(spaces["dev"], CODER, name)
-    assert entered == [] and answer.get("refused") and "admin's approval" in str(answer["content"]), answer
+    # The registry refuses it with no effect: N21's refusal, or a stricter one
+    # first -- the vault tools are the admin's own, which no shared space has.
+    content = str(answer["content"])
+    assert entered == [] and answer.get("refused"), answer
+    assert "admin's approval" in content or (name in host_tools.ADMIN and "does not exist" in content), answer
+
+
+@pytest.mark.parametrize("name", _always_ask())
+def test_control_without_the_interim_refusal_every_card_is_the_holders(spaces, monkeypatch, name) -> None:
+    from kazma_core.safety.call_preflight import call_refusal
+
+    monkeypatch.setattr(host_tools, "approval_refusal", lambda *_a, **_k: None)
+    with bind_scope(spaces["dev"], CODER):
+        assert asyncio.run(call_refusal(name, {}, user_text="do it")) is None
 
 
 def test_the_graph_refuses_it_with_no_card(spaces) -> None:
@@ -210,7 +243,8 @@ def test_the_interim_refusal_is_only_for_a_non_admin_holder_in_a_project_space(s
                            (spaces["plain"], CODER)):          # a plain space: no Development there
         with bind_scope(space, account):
             assert asyncio.run(call_refusal("x_post", {}, user_text="post it")) is None, (space, account)
-    # Their shell and git cards stay their own: never refused here.
+    # Their git cards stay their own: never refused here (the shell is not
+    # theirs at all, the review's finding 1).
     with bind_scope(spaces["dev"], CODER):
         assert host_tools.approval_refusal("shell_exec") is None
         assert host_tools.approval_refusal("git_push") is None

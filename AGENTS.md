@@ -15368,7 +15368,9 @@ an install with one account behaves as before.
     (planted tools and the allowance of before as controls; real hooks on a
     real repository, the admin's hooks running as the control).
   - Gates: `tests/test_development_per_person.py` (S1-20's rule and the
-    flow without the interim refusal as the controls),
+    flow without the interim refusal as the controls; N21 over every
+    always-ask tool, enumerated from `safety.hitl.ALWAYS_HITL_TOOLS`, at the
+    preflight, the graph and the registry: the review's finding 11),
     `tests/test_host_tools_absent.py` (re-pointed), the People confirm in
     `tests/e2e/test_shared_spaces_browser.py` (EN/AR).
   - **The header says where the tab is (piece 4).** `space_scope.js`
