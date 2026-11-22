@@ -98,7 +98,12 @@ def test_the_runs_card_shows_an_incident_and_acts_on_it(language: str) -> None:
                         status = conn.execute("SELECT status FROM memory_task_queue WHERE id='t-dead'").fetchone()[0]
                     finally:
                         conn.close()
-                    assert status == "pending", "the Memory page's own retry ran"
+                    # The retry puts the dead letter back on the queue; the
+                    # queue's own worker runs under pytest too and may already
+                    # have taken it (CI's Arabic run read "processing",
+                    # 2026-11-22). Either is the retry having run; "failed"
+                    # would not be.
+                    assert status in ("pending", "processing"), "the Memory page's own retry ran"
 
                     # The bell's link to an incident focuses it on the card.
                     page.goto(h.base + f"/dashboard?incident={incident}", wait_until="domcontentloaded")
