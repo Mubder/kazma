@@ -482,8 +482,9 @@ def _run_turn_memory(
             if enqueue_task(
                 "micro_consolidation",
                 # The handler reads the tenant from the episode ROW
-                # (authoritative), and runs bound to it (task_queue._task_space).
-                {"episode_id": written},
+                # (authoritative), and runs bound to it (task_queue._task_space),
+                # as the person the turn was for (Spaces S2-07 second review).
+                {"episode_id": written, **({"asker": said_by} if said_by else {})},
             ) is None:
                 logger.warning("[post_turn] the deep pass of %s was not queued", written)
                 _metric_fail("enqueue", RuntimeError("queue refused"))

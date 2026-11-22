@@ -14388,7 +14388,18 @@ an install with one account behaves as before.
     task type goes in exactly one of `TENANT_TASKS`, `ROW_NAMED_TASKS`,
     `INSTALL_TASKS`. A memory sweep names the tenant of each row it touches
     and asks for no scope. The deep pass is queued for the id the writer
-    returned, never a recomputed one.
+    returned, never a recomputed one. **A turn's tasks run as the person the
+    turn was for** (the S2-05/S2-07 second review: they ran as the space's
+    maker): `post_turn_memory` and `micro_consolidation` (`_PERSON_TASKS`)
+    bind `identity.work_scope(space, person)` -- the payload's `asker` (the
+    deep pass carries it), else `said_by`, else the episode row's
+    `metadata.said_by` (`task_queue._person_of`) -- so the person's models
+    and limit apply. The deep pass (`_PERSON_MODEL_TASKS`) waits, put back
+    with no attempt spent (`_MemoryWorker._put_back`), while they are
+    disabled or past their daily limit, and is not run for a person who
+    left the space (their message is still written, as Kazma's own work).
+    Gate: `tests/test_memory_tasks_bind_their_person.py` (the maker's
+    binding as the control).
   - **No row under the "no tenant" sentinel** (`schema_v2.NO_TENANT`,
     triggers on every table with a tenant column, both files). The operator
     trail records the space the request acted in (`request.scope["kazma_space"]`,
