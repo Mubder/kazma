@@ -503,23 +503,62 @@ def acting_account(space_id: str) -> str:
     return str(space.get("personal_of") or space.get("created_by") or "") or OWNER_ACCOUNT_ID
 
 
+class AskerLeft(Exception):  # noqa: N818 -- named for what happened
+    """Work a person asked for in a space they are no longer a member of: it
+    is refused, never run as the space's acting account (the S2-12 review,
+    finding 6)."""
+
+    code = "asker_left"
+
+
 def work_scope(space_id: str, asker: str | None) -> tuple[str, str] | None:
     """The scope work queued for *space_id* by *asker* runs as, or None when
     *space_id* is no space of this install (such work does not run).
 
-    The asker while they are still a member of the space; else the account
-    Kazma's own work for that space acts for (:func:`acting_account`). The
-    one answer for every job that runs later -- a scheduled fire (S1-14), a
-    swarm task's worker (S1-15). Blocking (the settings store)."""
+    The asker, while they are still a member of the space; with no asker
+    (work no person asked for), the account Kazma's own work for that space
+    acts for (:func:`acting_account`). Raises :class:`AskerLeft` when the
+    asker is a person who is no longer a member: their work does not run as
+    anyone else (the S2-12 review, finding 6). The one answer for every job that runs later
+    -- a scheduled fire (S1-14), a swarm task's worker (S1-15), a booked X
+    post, a resumed crawl. Blocking (the settings store)."""
     space = str(space_id or "")
     registry = read_registry()
     if space not in (registry.get("spaces") or {}):
         return None
     who = str(asker or "")
-    member = any(
-        m.get("account") == who and m.get("space") == space for m in registry.get("memberships") or ()
-    )
-    return space, (who if who and member else acting_account(space))
+    if who and any(m.get("account") == who and m.get("space") == space
+                   for m in registry.get("memberships") or ()):
+        return space, who
+    if who and _was_a_person(registry, who):
+        raise AskerLeft("the person who asked for this work is no longer in its space, so it does not run")
+    # No asker, or a principal that never was a person (work from before
+    # Spaces: "operator", "agent"): Kazma's own work for the space.
+    return space, acting_account(space)
+
+
+def _was_a_person(registry: dict[str, Any], who: str) -> bool:
+    """Whether *who* is, or was, a person of this install: an account now,
+    or one the record of account changes names (a deleted account)."""
+    if who in (registry.get("accounts") or {}):
+        return True
+    return any(isinstance(e, dict) and e.get("account") == who for e in registry.get("events") or ())
+
+
+def asker_left(space_id: str, asker: str | None) -> bool:
+    """Whether work *asker* asked for in *space_id* is refused because they
+    are no longer a member of it (:class:`AskerLeft`): once Spaces is
+    enforced, in a space of the install other than the owner's (whose work
+    from before Spaces names principals that are no accounts). Blocking."""
+    from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
+
+    space = str(space_id or "")
+    if not spaces_enforced() or not asker or space == OWNER_SPACE_ID:
+        return False
+    try:
+        return work_scope(space, asker) is None
+    except AskerLeft:
+        return True
 
 
 def is_admin_account(account_id: str) -> bool:

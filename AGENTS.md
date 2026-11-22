@@ -14285,8 +14285,9 @@ an install with one account behaves as before.
     answers as an unknown one.
   - **A worker runs as its task's person**: `worker_dispatch._worker_scope`
     binds `identity.work_scope(space, asker)` (the asker while still a
-    member, else the space's acting account; a task of no space runs
-    nothing). A worker usually inherits the dispatching request's scope;
+    member; a task whose asker left is refused, `identity.AskerLeft`, never
+    run as the space's acting account, the S2-12 review; a task of no space
+    runs nothing). A worker usually inherits the dispatching request's scope;
     the binding is what holds for a task run with nothing bound (a pipeline
     resumed after a restart, the durable path), a hand-off target and its
     approval's resume. A sub-agent runs in its spawner's scope. The scope is
@@ -15279,6 +15280,21 @@ an install with one account behaves as before.
     `tests/test_document_listing_queries_are_joined.py` (the take-back on
     SQLite and Postgres), `tests/e2e/test_space_membership_browser.py` (by
     the sidebar, EN/AR).
+  - **A departed person's queued work is refused** (the S2-12 review,
+    finding 6). `identity.work_scope` raises `identity.AskerLeft` for work a
+    person asked for in a space they are no longer a member of (a deleted
+    account too: `_was_a_person` reads the accounts and the record); it
+    never runs as the space's acting account, which stays for work no person
+    asked for and for a principal that never was a person (work from before
+    Spaces). A scheduled fire is refused `asker_left` (EN/AR), a swarm
+    task's worker does not run, a booked X post is refused as work of no
+    space, a crawl is not resumed (`asker_left`), and a document job's stage
+    fails `asker_left` (`identity.asker_left`; the owner's own space never,
+    whose older jobs name principals that are no accounts). The space's own
+    account may still cancel or reject such a task
+    (`single_operator._acts_for`). Gate:
+    `tests/test_departed_members_work_refused.py` (the rule of before, which
+    ran their work as the admin, as the control).
   - **Development per person (piece 3).** In a shared space with a project
     folder `spaces.tools.host_allowance` gives Development to each person
     who holds it (`identity.holds_development`, turned on per person on

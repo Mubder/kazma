@@ -107,9 +107,14 @@ def _acts_for(space: str, asker: str | None) -> str:
     """The account work of *space* asked by *asker* acts for: the asker while
     still a member, else the account the space's own work acts for
     (``identity.work_scope``); ``""`` for a space of no install. Blocking."""
-    from kazma_core.spaces.identity import work_scope
+    from kazma_core.spaces.identity import AskerLeft, acting_account, work_scope
 
-    found = work_scope(str(space or ""), asker)
+    try:
+        found = work_scope(str(space or ""), asker)
+    except AskerLeft:
+        # Their task runs for no one (the S2-12 review, finding 6); the
+        # space's own account may still cancel or reject it.
+        return acting_account(str(space or ""))
     return found[1] if found is not None else ""
 
 

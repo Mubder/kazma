@@ -248,14 +248,19 @@ async def _in_the_crawls_space(row: dict[str, Any], route: Any) -> Any:
     if not spaces_enforced():
         return await route(row["job_id"])
 
-    def where() -> tuple[str, str] | None:
-        from kazma_core.spaces.identity import work_scope
+    def where() -> tuple[str, str] | None | str:
+        from kazma_core.spaces.identity import AskerLeft, work_scope
         from kazma_core.stores.knowledge import get_knowledge_store
 
         space = get_knowledge_store().library_space(row["library_id"])
-        return None if space is None else work_scope(space, row.get("asker") or None)
+        try:
+            return None if space is None else work_scope(space, row.get("asker") or None)
+        except AskerLeft:
+            return "asker_left"  # never resumed as anyone else (the S2-12 review)
 
     found = await asyncio.to_thread(where)
+    if found == "asker_left":
+        return {"ok": False, "code": "asker_left"}
     if found is None:
         return {"ok": False, "code": "not_found"}
     # The person it is for no longer has Knowledge (Spaces S2-11): the crawl

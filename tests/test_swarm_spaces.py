@@ -209,12 +209,18 @@ def test_a_task_of_no_space_runs_no_worker(matrix, enforced) -> None:
         _worker_scope("no-such-space", matrix.account_a)
 
 
-def test_a_task_whose_asker_left_runs_as_the_spaces_own_work(matrix, enforced) -> None:
+def test_a_task_whose_asker_left_is_refused_never_run_as_anyone_else(matrix, enforced) -> None:
+    """The S2-12 review, finding 6, reversed S1-15's rule: a departed
+    person's task is refused, never run as the space's acting account
+    (tests/test_departed_members_work_refused.py). Work no person asked for
+    still runs as the space's own."""
     identity.create_space("Shared", created_by=OWNER_ACCOUNT_ID, space_id="swarm-shared")
     identity.add_member("swarm-shared", matrix.account_a)
     assert identity.work_scope("swarm-shared", matrix.account_a) == ("swarm-shared", matrix.account_a)
     identity.remove_member("swarm-shared", matrix.account_a)
-    assert identity.work_scope("swarm-shared", matrix.account_a) == (
+    with pytest.raises(identity.AskerLeft):
+        identity.work_scope("swarm-shared", matrix.account_a)
+    assert identity.work_scope("swarm-shared", None) == (
         "swarm-shared", identity.acting_account("swarm-shared"))
     assert identity.work_scope("no-such-space", matrix.account_a) is None
 

@@ -1468,12 +1468,15 @@ _FIRE_REFUSALS = {
                              "acts for is unknown and it does not fire."),
     "feature_off": ("Error: Scheduled is off for the person this job acts for (Settings → "
                     "People), so it does not fire."),
+    "asker_left": ("Error: the person who booked this job is no longer in its space, so it "
+                   "does not fire."),
 }
 
 #: The refusals said in Arabic too, for a job written in Arabic.
 _FIRE_REFUSALS_AR = {
     "feature_off": ("خطأ: ميزة المجدولة غير مفعّلة للشخص الذي تعمل له هذه المهمة (الإعدادات ← "
                     "الأشخاص)، فلا تعمل."),
+    "asker_left": "خطأ: الشخص الذي حجز هذه المهمة لم يعد في مساحتها، فلا تعمل.",
 }
 
 
@@ -1549,7 +1552,11 @@ def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
 
     if not spaces_enforced():
         return None
-    found = identity.work_scope(str(job.tenant_id or ""), job.creator)
+    try:
+        found = identity.work_scope(str(job.tenant_id or ""), job.creator)
+    except identity.AskerLeft:
+        # Never fired as someone else (the S2-12 review, finding 6).
+        return _FireBinding(space=str(job.tenant_id or ""), asker="", refusal="asker_left")
     if found is None:
         return _FireBinding(space="", asker="", refusal="no_space")
     space, asker = found
