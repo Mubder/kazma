@@ -180,6 +180,14 @@ def variant_display(variant: dict[str, Any], query: str) -> Callable[..., tuple[
     return display
 
 
+def _row_texts(conn: sqlite3.Connection, episode_id: str) -> Any:
+    """A recalled memory's question, answer and summary from the benchmark's
+    private store (one tenant: every tenant is named, ``None``, in the
+    statement, as the id-only statement gate asks)."""
+    return conn.execute("SELECT user_text, assistant_text, summary_text FROM episodes "
+                        "WHERE id = ? AND (? IS NULL OR tenant_id = ?)", (episode_id, None, None)).fetchone()
+
+
 def render(result: Any, variant: dict[str, Any], query: str, conn: sqlite3.Connection) -> str:
     """The recall block for *result* under *variant*."""
     from kazma_core.memory import recall as rm
@@ -188,8 +196,7 @@ def render(result: Any, variant: dict[str, Any], query: str, conn: sqlite3.Conne
         # The best memory at the wider bounds (focused or not), the rest as today.
         top_cut = "focus" if "focus" in variant["cut"] else "start"
         for i, hit in enumerate(result.episodes):
-            row = conn.execute("SELECT user_text, assistant_text, summary_text FROM episodes WHERE id = ?",
-                               (hit.id,)).fetchone()
+            row = _row_texts(conn, hit.id)
             if row is None or (hit.metadata or {}).get("joined"):
                 continue
             v = {**variant, "cut": top_cut} if i == 0 else {**TODAY, "cut": top_cut if "focus" in variant["cut"] else "start"}
@@ -205,7 +212,8 @@ def render(result: Any, variant: dict[str, Any], query: str, conn: sqlite3.Conne
         _lead(result, variant, query, conn)
     if variant.get("order") == "oldest" and result.episodes:
         # A diagnostic, not a bound: the same lines in the order they were said.
-        when = {h.id: (conn.execute("SELECT created_at FROM episodes WHERE id = ?", (h.id,)).fetchone() or [0])[0]
+        when = {h.id: (conn.execute("SELECT created_at FROM episodes WHERE id = ? AND (? IS NULL OR tenant_id = ?)",
+                                  (h.id, None, None)).fetchone() or [0])[0]
                 for h in result.episodes}
         result.episodes.sort(key=lambda h: float(when[h.id] or 0))
     return rm.format_recall_block(result, explain=False, max_tokens=variant["budget"]) if not result.empty else ""
@@ -233,8 +241,7 @@ def _lead(result: Any, variant: dict[str, Any], query: str, conn: sqlite3.Connec
     from kazma_core.memory import recall as rm
 
     turns = [h for h in result.episodes if not (h.metadata or {}).get("joined")]
-    rows = {h.id: conn.execute("SELECT user_text, assistant_text, summary_text FROM episodes WHERE id = ?",
-                               (h.id,)).fetchone() for h in turns}
+    rows = {h.id: _row_texts(conn, h.id) for h in turns}
     cut = "focus" if "focus" in variant["cut"] else "start"
     every = len(result.beliefs) + len(result.episodes) + len(result.summaries)
     shares = [(variant["lead"], rest) for rest in range(500, variant["rest_min"] - 1, -50)]
@@ -256,8 +263,7 @@ def _fit(result: Any, variant: dict[str, Any], query: str, conn: sqlite3.Connect
     from kazma_core.memory import recall as rm
 
     turns = [h for h in result.episodes if not (h.metadata or {}).get("joined")]
-    rows = {h.id: conn.execute("SELECT user_text, assistant_text, summary_text FROM episodes WHERE id = ?",
-                               (h.id,)).fetchone() for h in turns}
+    rows = {h.id: _row_texts(conn, h.id) for h in turns}
     cut = "focus" if "focus" in variant["cut"] else "start"
     every = len(result.beliefs) + len(result.episodes) + len(result.summaries)
     for share in range(variant["share_max"], variant["share_min"] - 1, -50):

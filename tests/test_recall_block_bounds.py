@@ -49,12 +49,12 @@ def test_focus_cuts_from_the_start_when_no_word_is_there(bounds):
 def _store(n: int = 5) -> tuple[sqlite3.Connection, list[str]]:
     conn = sqlite3.connect(":memory:")
     conn.execute("CREATE TABLE episodes (id TEXT, user_text TEXT, assistant_text TEXT, summary_text TEXT, "
-                 "created_at REAL)")
+                 "created_at REAL, tenant_id TEXT)")
     ids = []
     for i in range(n):
         ids.append(f"e_{i:04d}")
-        conn.execute("INSERT INTO episodes VALUES (?,?,?,?,?)",
-                     (ids[-1], FILLER + f" question {i}", FILLER * 2 + f" answer {i}", "", float(i)))
+        conn.execute("INSERT INTO episodes VALUES (?,?,?,?,?,?)",
+                     (ids[-1], FILLER + f" question {i}", FILLER * 2 + f" answer {i}", "", float(i), "bench"))
     return conn, ids
 
 
@@ -77,8 +77,7 @@ def test_fit_fills_the_budget_and_leaves_no_line_out(bounds):
     wide = _result(ids2)
     display = bounds.variant_display({"q": 600, "a": 900, "one": 1500, "cut": "start"}, "question")
     for h in wide.episodes:
-        row = conn2.execute("SELECT user_text, assistant_text, summary_text FROM episodes WHERE id = ?",
-                            (h.id,)).fetchone()
+        row = bounds._row_texts(conn2, h.id)
         h.metadata["display"], h.metadata["more"] = display(*row)
     from kazma_core.memory.recall import format_recall_block
 
