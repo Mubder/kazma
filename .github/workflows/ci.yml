@@ -197,6 +197,18 @@ jobs:
         run: python scripts/fast_test.py --chunks 4
         env:
           KAZMA_DB_BACKEND: sqlite
+          # Each "[fast-test]" line reaches the log as it is printed: piped,
+          # Python buffers it, and on 2026-11-22 two runs ended by a SIGTERM
+          # (exit 143) 37 minutes in left nothing to say which chunk ran.
+          PYTHONUNBUFFERED: "1"
+      - name: What the runner saw (only when the tests failed)
+        # Memory, open-file limit and the kernel's last words, so a run ended
+        # from outside (exit 143 or 137) says why. Never fails the job itself.
+        if: failure()
+        run: |
+          free -m || true
+          echo "open files: $(ulimit -n)"
+          sudo dmesg -T 2>/dev/null | tail -40 || true
       - name: README metrics gate
         # README carries "Metrics auto-verified from METRICS.md" above a
         # table nothing verified — on 2026-09-16 it advertised 7,346 tests /
