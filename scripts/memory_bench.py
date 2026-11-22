@@ -1981,22 +1981,37 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
     # turn) makes the change (the review of the memory framework audit's F1,
     # 2026-11-18; v3). "We moved to Rotterdam" was the model's alone until
     # v8: the English quick pass did not read a move its Arabic twin read
-    # (the memory plan's finding 10, 2026-11-22).
+    # (the memory plan's finding 10, 2026-11-22). Since v9 a move to a name
+    # no word calls a place asks, in both languages ("We moved to Slack" is a
+    # tool: finding 15); answered Yes it updates, with Undo. A move that says
+    # it is a home ("moved house to", "نقلنا بيتنا إلى") updates at once.
     {"id": "update-en-moved", "category": "update", "lang": "en", "turns": [
         ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
-        ("We moved to Rotterdam last month.", ("recorded", "e06"))],
+        ("We moved to Rotterdam last month.", ("recorded", "e06")),
+        ("", ("answer", "confirm"))],
      "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Paris")],
      "updates": [_update("user", "Rotterdam", "Paris")]},
     {"id": "update-en-moved-undone", "category": "update", "lang": "en", "turns": [
         ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
         ("We moved to Rotterdam last month.", ("recorded", "e06")),
+        ("", ("answer", "confirm")),
         ("", ("answer", "undo"))],
      "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Rotterdam")], "updates": []},
-    {"id": "update-en-moved-confirmed", "category": "update", "lang": "en", "turns": [
+    {"id": "update-en-moved-asked", "category": "update", "lang": "en", "turns": [
         ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
-        ("We moved to Rotterdam last month.", ("recorded", "e06")),
-        ("", ("answer", "confirm"))],
-     "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Paris")]},
+        ("We moved to Rotterdam last month.", ("recorded", "e06"))],
+     "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Rotterdam")],
+     "pending": [_now("user", "Rotterdam")], "updates": []},
+    {"id": "update-en-moved-to-a-tool", "category": "update", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("We moved to Slack.", ("written", []))],
+     "current": [_now("user", "Paris", "user")], "not_current": [_now("user", "Slack")],
+     "pending": [_now("user", "Slack")], "updates": []},
+    {"id": "update-en-moved-house", "category": "update", "lang": "en", "turns": [
+        ("I live in Paris.", ("written", [_said("user", "lives_in", "functional", "Paris")])),
+        ("We moved house to Rotterdam.", ("written", [_said("user", "lives_in", "functional", "Rotterdam")]))],
+     "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Paris")],
+     "updates": [_update("user", "Rotterdam", "Paris")]},
     {"id": "update-en-new-job", "category": "update", "lang": "en", "turns": [
         ("I work at Google.", ("written", [_said("user", "works_at", "functional", "Google")])),
         ("I left Google, I am at Meta now.", ("written", [_said("user", "works_at", "functional", "Meta")]))],
@@ -2008,14 +2023,31 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
      "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Paris")]},
     {"id": "update-ar-moved", "category": "update", "lang": "ar", "turns": [
         ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
-        ("انتقلنا إلى الرياض الشهر الماضي.", ("recorded", "a05"))],
+        ("انتقلنا إلى الرياض الشهر الماضي.", ("recorded", "a05")),
+        ("", ("answer", "confirm"))],
      "current": [_now("user", "الرياض", "user")], "not_current": [_now("user", "الكويت")],
      "updates": [_update("user", "الرياض", "الكويت")]},
     {"id": "update-ar-moved-undone", "category": "update", "lang": "ar", "turns": [
         ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
         ("انتقلنا إلى الرياض الشهر الماضي.", ("recorded", "a05")),
+        ("", ("answer", "confirm")),
         ("", ("answer", "undo"))],
      "current": [_now("user", "الكويت", "user")], "not_current": [_now("user", "الرياض")], "updates": []},
+    {"id": "update-ar-moved-asked", "category": "update", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("انتقلنا إلى الرياض الشهر الماضي.", ("recorded", "a05"))],
+     "current": [_now("user", "الكويت", "user")], "not_current": [_now("user", "الرياض")],
+     "pending": [_now("user", "الرياض")], "updates": []},
+    {"id": "update-ar-moved-to-a-tool", "category": "update", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("انتقلنا إلى سلاك.", ("written", []))],
+     "current": [_now("user", "الكويت", "user")], "not_current": [_now("user", "سلاك")],
+     "pending": [_now("user", "سلاك")], "updates": []},
+    {"id": "update-ar-moved-house", "category": "update", "lang": "ar", "turns": [
+        ("ساكن في الكويت.", ("written", [_said("user", "lives_in", "functional", "الكويت")])),
+        ("نقلنا بيتنا إلى الرياض.", ("written", [_said("user", "lives_in", "functional", "الرياض")]))],
+     "current": [_now("user", "الرياض", "user")], "not_current": [_now("user", "الكويت")],
+     "updates": [_update("user", "الرياض", "الكويت")]},
     {"id": "update-ar-new-job", "category": "update", "lang": "ar", "turns": [
         ("أشتغل في شركة زين.", ("written", [_said("user", "works_at", "functional", "شركة زين")])),
         ("تركت زين، أشتغل الحين في أريدُو.", ("written", [_said("user", "works_at", "functional", "أريدو")]))],
@@ -2028,7 +2060,8 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
      "current": [_now("user", "أريدو", "user")], "not_current": [_now("user", "زين")]},
     {"id": "update-mixed-moved", "category": "update", "lang": "mixed", "turns": [
         ("My name is Omar وساكن في Kuwait City.", ("recorded", "m01")),
-        ("We moved to Rotterdam last month.", ("recorded", "e06"))],
+        ("We moved to Rotterdam last month.", ("recorded", "e06")),
+        ("", ("answer", "confirm"))],
      "current": [_now("user", "Rotterdam", "user")], "not_current": [_now("user", "Kuwait City")],
      "updates": [_update("user", "Rotterdam", "Kuwait City")]},
     # A word that also introduces a text to work on, said with no text named:
@@ -2297,8 +2330,11 @@ WRITE_SCENARIOS: list[dict[str, Any]] = [
 #: layer). 7: ``retraction`` (C2). 8: English moved-to statements read as
 #: the Arabic twin's; the two scenarios locked the old difference between the
 #: languages (the memory plan's finding 10, 2026-11-22); the change log's
-#: update in the expected outcome (``updates``) and an ``undo`` turn.
-WRITES_VERSION = 8
+#: update in the expected outcome (``updates``) and an ``undo`` turn. 9: a
+#: move to a name no word calls a place asks, in both languages ("We moved
+#: to Slack": finding 15, 2026-11-22); the moved scenarios are answered Yes,
+#: and a move that says it is a home updates at once.
+WRITES_VERSION = 9
 
 
 def build_writes() -> dict[str, Any]:

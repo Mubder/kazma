@@ -693,10 +693,31 @@ def _value_end_en() -> str:
     return rf"(?:\s+(?:too|also|{TIME_AFTER_EN})\b|[.,!]|\s+and\s|\s+[Ii]\s|\s+(?=[\u0621-\u064a])|$)"
 
 
-#: "I moved to Porto" / "We moved to Porto": where the user lives now, as
-#: the Arabic pass reads "انتقلت إلى بورتو" (it kept nothing in English).
-#: A capitalised name that ends where a value ends, like "I live in".
+#: "I moved to Porto" / "We moved to Porto", as the Arabic pass reads
+#: "انتقلت إلى بورتو" (it kept nothing in English). A capitalised name that
+#: ends where a value ends, like "I live in". No word says the name is a
+#: place -- "We moved to Slack" is a tool, "to Notion" a notes app -- so it is
+#: Kazma's reading, never the user's own statement (:func:`_kazmas_reading`):
+#: a question over a home the user stated, Kazma's reading when none is held
+#: (the memory plan's finding 15, 2026-11-22).
 _MOVED_EN = r"\b(?:[Ii]|[Ww]e) (?:moved|relocated) to\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})"
+#: A move the statement itself says is a home or a place: "I moved home to
+#: Porto", "we moved house to Porto", "we moved our flat to Porto", "I moved
+#: to the city of Porto". The user's own statement, written at once.
+_MOVED_HOME_EN = (r"\b(?:[Ii]|[Ww]e) (?:moved|relocated)(?: back)?(?: (?:my|our))? (?:home|house|flat|apartment)"
+                  r" to\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})")
+_MOVED_PLACE_EN = (r"\b(?:[Ii]|[Ww]e) (?:moved|relocated) to (?:the )?(?:city|town|country|village|island|state"
+                   r"|province) of\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})")
+
+
+def _kazmas_reading(belief: dict[str, Any]) -> bool:
+    """Whether the quick pass read *belief* without the words saying what it
+    is: a move to a name no word calls a place ("We moved to Slack",
+    "انتقلنا إلى سلاك"). It is written as Kazma's reading, never at the
+    user's trust: a question over a fact the user stated
+    (``changes.record_pending``), Kazma's reading when it is the first of
+    its kind (the memory plan's finding 15)."""
+    return bool(belief.get("reading"))
 
 
 def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
@@ -728,6 +749,8 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
         # one pattern with "I live in" and stored the employer as lives_in.
         # "I work in X" names a place or a field -- too ambiguous to store.
         (re.compile(r"\b[Ii] work (?:at|for)\s+([A-Z][a-zA-Z0-9&]+(?:\s+[A-Z][a-zA-Z0-9&]+){0,2})" + end), "employer"),
+        (re.compile(_MOVED_HOME_EN + end), "moved_home"),
+        (re.compile(_MOVED_PLACE_EN + end), "moved_home"),
         (re.compile(_MOVED_EN + end), "moved"),
         (re.compile(r"\b[Mm]y (?:favorite|favourite)\s+(\w+)\s+is\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "favorite"),
         # Not "need": "I need to finish this report" is no preference.
@@ -747,12 +770,15 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
             val = m.group(1).strip().rstrip(".,!")
             beliefs.append({"subject": "user", "predicate": "lives_in", "predicate_type": "functional",
                             "object": val, "confidence": 0.85, "importance": 4})
-        elif kind == "moved":
+        elif kind in ("moved_home", "moved"):
             if any(b["predicate"] == "lives_in" for b in beliefs):
                 continue  # "I live in Braga" said in the same message wins
             val = m.group(1).strip().rstrip(".,!")
-            beliefs.append({"subject": "user", "predicate": "lives_in", "predicate_type": "functional",
-                            "object": val, "confidence": 0.8, "importance": 4})
+            belief = {"subject": "user", "predicate": "lives_in", "predicate_type": "functional",
+                      "object": val, "confidence": 0.85 if kind == "moved_home" else 0.8, "importance": 4}
+            if kind == "moved":
+                belief["reading"] = True  # no word says it is a place: Kazma's reading
+            beliefs.append(belief)
         elif kind == "employer":
             val = m.group(1).strip().rstrip(".,!")
             beliefs.append({"subject": "user", "predicate": "works_at", "predicate_type": "functional",
@@ -1027,6 +1053,7 @@ def _apply_beliefs_to_v2(
     """
     from kazma_core.memory.belief_mutation import mutate_belief
     from kazma_core.memory.entity_resolution import resolve_entity
+    from kazma_core.memory.provenance import LLM_INFERRED, USER_SOURCES
     from kazma_core.memory.speakers import is_member_entry
     from kazma_core.memory.speakers import room as speakers_room
 
@@ -1061,6 +1088,10 @@ def _apply_beliefs_to_v2(
         # dialogue). User_explicit stores are NEVER throttled; the functional-
         # supersede-of-user-fact case is the mutate_belief source-trust gate.
         _method = extraction_method or _default_method(stats)
+        if _kazmas_reading(b) and _method in USER_SOURCES:
+            # A move the words do not call a place ("We moved to Slack"):
+            # Kazma's reading, put to the user below (finding 15).
+            _method = LLM_INFERRED
         # A model's reading never gets the user's trust by itself: whether
         # its name fits the words ("I'm visiting Dubai next week" as
         # lives_in, "I met Dana" as name_is) only the user can say (the

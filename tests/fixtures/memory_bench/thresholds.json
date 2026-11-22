@@ -498,12 +498,17 @@
   ]
  },
  "writes": {
-  "version": 8,
+  "version": 9,
   "versions": [
    {
     "version": 8,
     "date": "2026-11-22",
     "reason": "English moved-to statements read as the Arabic twin's; the two scenarios locked the old difference between the languages"
+   },
+   {
+    "version": 9,
+    "date": "2026-11-22",
+    "reason": "moved to X names no home by itself (We moved to Slack): a move no word calls a place asks in both languages, and the update-*-moved scenarios are answered Yes; a question costs one click, a wrong home is wrong in every later answer"
    }
   ],
   "recording": {
@@ -721,7 +726,7 @@
    "abstain.hit_rate": 0.0556,
    "second.overall.hit_rate": 0.8417,
    "second.overall.mrr": 0.7305,
-   "second.overall.precision": 0.3603,
+   "second.overall.precision": 0.3641,
    "second.abstain.hit_rate": 0.0
   }
  },

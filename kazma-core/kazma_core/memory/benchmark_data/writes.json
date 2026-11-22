@@ -1,5 +1,5 @@
 {
- "version": 8,
+ "version": 9,
  "scenarios": [
   {
    "id": "update-en-moved",
@@ -21,6 +21,9 @@
     {
      "user": "We moved to Rotterdam last month.",
      "recorded": "e06"
+    },
+    {
+     "answer": "confirm"
     }
    ],
    "current": [
@@ -66,6 +69,9 @@
      "recorded": "e06"
     },
     {
+     "answer": "confirm"
+    },
+    {
      "answer": "undo"
     }
    ],
@@ -85,7 +91,7 @@
    "updates": []
   },
   {
-   "id": "update-en-moved-confirmed",
+   "id": "update-en-moved-asked",
    "category": "update",
    "lang": "en",
    "turns": [
@@ -104,9 +110,100 @@
     {
      "user": "We moved to Rotterdam last month.",
      "recorded": "e06"
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Paris",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Rotterdam"
+    }
+   ],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "Rotterdam"
+    }
+   ],
+   "updates": []
+  },
+  {
+   "id": "update-en-moved-to-a-tool",
+   "category": "update",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
     },
     {
-     "answer": "confirm"
+     "user": "We moved to Slack.",
+     "written": []
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "Paris",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "Slack"
+    }
+   ],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "Slack"
+    }
+   ],
+   "updates": []
+  },
+  {
+   "id": "update-en-moved-house",
+   "category": "update",
+   "lang": "en",
+   "turns": [
+    {
+     "user": "I live in Paris.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Paris",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "We moved house to Rotterdam.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "Rotterdam",
+       "confidence": 0.9
+      }
+     ]
     }
    ],
    "current": [
@@ -120,6 +217,13 @@
     {
      "subject": "user",
      "object": "Paris"
+    }
+   ],
+   "updates": [
+    {
+     "subject": "user",
+     "object": "Rotterdam",
+     "replaced": "Paris"
     }
    ]
   },
@@ -237,6 +341,9 @@
     {
      "user": "انتقلنا إلى الرياض الشهر الماضي.",
      "recorded": "a05"
+    },
+    {
+     "answer": "confirm"
     }
    ],
    "current": [
@@ -282,6 +389,9 @@
      "recorded": "a05"
     },
     {
+     "answer": "confirm"
+    },
+    {
      "answer": "undo"
     }
    ],
@@ -299,6 +409,143 @@
     }
    ],
    "updates": []
+  },
+  {
+   "id": "update-ar-moved-asked",
+   "category": "update",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "انتقلنا إلى الرياض الشهر الماضي.",
+     "recorded": "a05"
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "الرياض"
+    }
+   ],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "الرياض"
+    }
+   ],
+   "updates": []
+  },
+  {
+   "id": "update-ar-moved-to-a-tool",
+   "category": "update",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "انتقلنا إلى سلاك.",
+     "written": []
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الكويت",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "سلاك"
+    }
+   ],
+   "pending": [
+    {
+     "subject": "user",
+     "object": "سلاك"
+    }
+   ],
+   "updates": []
+  },
+  {
+   "id": "update-ar-moved-house",
+   "category": "update",
+   "lang": "ar",
+   "turns": [
+    {
+     "user": "ساكن في الكويت.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الكويت",
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "user": "نقلنا بيتنا إلى الرياض.",
+     "written": [
+      {
+       "subject": "user",
+       "predicate": "lives_in",
+       "predicate_type": "functional",
+       "object": "الرياض",
+       "confidence": 0.9
+      }
+     ]
+    }
+   ],
+   "current": [
+    {
+     "subject": "user",
+     "object": "الرياض",
+     "trust": "user"
+    }
+   ],
+   "not_current": [
+    {
+     "subject": "user",
+     "object": "الكويت"
+    }
+   ],
+   "updates": [
+    {
+     "subject": "user",
+     "object": "الرياض",
+     "replaced": "الكويت"
+    }
+   ]
   },
   {
    "id": "update-ar-new-job",
@@ -409,6 +656,9 @@
     {
      "user": "We moved to Rotterdam last month.",
      "recorded": "e06"
+    },
+    {
+     "answer": "confirm"
     }
    ],
    "current": [

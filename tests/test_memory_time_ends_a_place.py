@@ -152,8 +152,11 @@ def test_the_scenarios_version_is_locked_with_its_reason():
     locked = json.loads((REPO / "tests" / "fixtures" / "memory_bench" / "thresholds.json")
                         .read_text(encoding="utf-8"))["writes"]
     assert locked["version"] == bench.WRITES_VERSION
-    record = locked["versions"][-1]
-    assert record["version"] == bench.WRITES_VERSION and "Arabic twin" in record["reason"]
+    reasons = {record["version"]: record["reason"] for record in locked["versions"]}
+    assert bench.WRITES_VERSION in reasons
+    # v8: English moves read as the Arabic twin's (finding 10); v9: a move
+    # no word calls a place asks, in both languages (finding 15).
+    assert "Arabic twin" in reasons[8] and "Slack" in reasons[9]
 
 
 def test_a_new_scenarios_version_needs_its_reason():

@@ -2685,11 +2685,26 @@ four injected were noise.
   named from today, "N units ago") ends the English pass's place and
   employer (`belief_extractor._value_end_en`), `present_ar_words()` the
   Arabic pass's (`arabic_facts._ends`). "I moved to Porto." / "We moved to
-  ..." is the user's home as "انتقلت إلى بورتو" is (`_MOVED_EN`; "I live in"
-  in the same message wins). Gate: `tests/test_memory_time_ends_a_place.py`
-  (each statement stored by the real quick pass, EN/AR, with and without a
-  time word; not-a-place and someone else's move keep nothing; today's rules
-  as the negative control).
+  ..." is read as "انتقلت إلى بورتو" is (`_MOVED_EN`; "I live in" in the same
+  message wins). Gate: `tests/test_memory_time_ends_a_place.py` (each
+  statement stored by the real quick pass, EN/AR, with and without a time
+  word; not-a-place and someone else's move keep nothing; today's rules as
+  the negative control).
+- **A move to a name no word calls a place asks; it never replaces the
+  home** (2026-11-22, the memory plan's finding 15, equal in both
+  languages): "We moved to Slack" is a tool. A bare "moved to X" /
+  "انتقلت/انتقلنا إلى X" is Kazma's reading
+  (`belief_extractor._kazmas_reading`, the belief's `reading` flag): a
+  question over a home the user stated (`changes.record_pending`, "Yes,
+  change it" updates with Undo), Kazma's reading when none is held. It
+  updates at once only when the statement says it is a home or a place:
+  `_MOVED_HOME_EN` ("moved home / house / our flat to"), `_MOVED_PLACE_EN`
+  ("to the city of"), `arabic_facts._SETTLE_TRIGGERS` ("سكنت في"),
+  `_MOVE_HOME_TRIGGERS` + `_HOME_NOUNS` ("نقلنا بيتنا إلى"), a place head
+  (`_PLACE_HEADS`, "مدينة"). "I live in" / "أسكن في" stays an update. Gate:
+  `tests/test_memory_moved_to_asks.py` (through the quick pass into a
+  private database, the change log read back; every move the user's own
+  statement as the negative control), the write scenarios (v9).
 - **A fact about someone else is never the user's** (2026-11, the memory
   framework audit's speaker rule, `memory/clause_subject.py`). `subjects` says, for
   each word, who the words before it last named: the speaker ("أنا", "I",

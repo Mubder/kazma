@@ -172,6 +172,7 @@ def test_a_fact_about_the_user_is_kept(text, expected):
 
 def _triggers() -> set[str]:
     return (arabic_facts._NAME_TRIGGERS | arabic_facts._HOME_TRIGGERS | arabic_facts._MOVE_TRIGGERS
+            | arabic_facts._SETTLE_TRIGGERS | arabic_facts._MOVE_HOME_TRIGGERS
             | arabic_facts._WORK_TRIGGERS | arabic_facts._LIKE_TRIGGERS | arabic_facts._USE_TRIGGERS
             | arabic_facts._HAVE | {"افضل"})
 
@@ -198,6 +199,8 @@ def test_the_declaration_gate_sees_a_new_trigger(monkeypatch):
 def _complement(trigger: str) -> str:
     if trigger in arabic_facts._MOVE_TRIGGERS:
         return "إلى دبي"
+    if trigger in arabic_facts._MOVE_HOME_TRIGGERS:
+        return "بيتي إلى دبي"
     if trigger in arabic_facts._WORK_TRIGGERS:
         return "في شركة زين"
     return "في دبي"

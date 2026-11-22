@@ -631,7 +631,18 @@ completion tokens.
    Python 3.12", "to the next item", "to a new office" store nothing in
    either. The update is in the change log with Undo, so the user can take
    it back; a list of product names the pass would refuse is the fix if it
-   is seen in use. Not fixed now.
+   is seen in use. Fixed the same day, before finding 10 reached main (the
+   main session's condition, equal in both languages): a move to a name no
+   word calls a place is Kazma's reading (`belief_extractor._kazmas_reading`):
+   a question over a home the user stated, Kazma's reading when none is
+   held. It updates at once only when the statement says it is a home or a
+   place ("moved house to", "the city of", "سكنت في", "نقلنا بيتنا إلى", a
+   place head such as "مدينة"); "I live in" / "أسكن في" stays an update.
+   Slack, Teams and their Arabic twins ask; Python 3.12, the next item, a
+   new office and the Dubai office store nothing. "moved to" is ambiguous: a
+   question costs one click, a wrong home is wrong in every later answer.
+   The write scenarios are v9 (the moved ones asked, answered Yes, undone).
+   Gate: `tests/test_memory_moved_to_asks.py`.
 16. **A forget the model makes in an update turn keeps the update out.**
    Found in finding 10's real-use runs (22 Nov, after, run 2, Arabic): told
    "انتقلت إلى بورتو الشهر الماضي", the model called `memory_invalidate` on

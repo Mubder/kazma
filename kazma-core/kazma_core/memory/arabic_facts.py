@@ -67,6 +67,14 @@ _NAME_HEADS = {"عبد", "ابو", "ام", "بن", "بنت", "ال"}
 _HOME_TRIGGERS = {"ساكن", "ساكنه", "ساكنين", "اسكن", "نسكن", "اعيش", "نعيش", "عايش", "عايشه",
                   "عايشين", "مقيم", "مقيمه", "اقيم", "نقيم"}
 _MOVE_TRIGGERS = {"انتقلت", "انتقلنا"}
+#: A home the statement names itself: "سكنت في الرياض" (settled in),
+#: "نقلنا بيتنا إلى الرياض" (moved our home to). The user's own statement,
+#: written at once; a bare "انتقلت إلى X" names no home, and is Kazma's
+#: reading unless X begins with a place head ("مدينة", "جزيرة": the memory
+#: plan's finding 15, 2026-11-22).
+_SETTLE_TRIGGERS = {"سكنت", "سكنا"}
+_MOVE_HOME_TRIGGERS = {"نقلت", "نقلنا"}
+_HOME_NOUNS = {"بيتي", "بيتنا", "البيت", "سكني", "سكننا", "شقتي", "شقتنا"}
 _IN = {"في", "فى"}
 _TO = {"الي"}
 _PLACE_HEADS = {"ابو", "ام", "راس", "مدينه", "شرم", "خميس", "حفر", "جزيره"}
@@ -80,11 +88,11 @@ _WORK_TRIGGERS = {"اشتغل", "نشتغل", "اعمل", "نعمل", "شغال"
 #: in the user's own clause (or after a time phrase that opens it), with no
 #: one else named before them.
 _UNMARKED = {"ساكن", "ساكنه", "ساكنين", "عايش", "عايشه", "عايشين", "مقيم", "مقيمه",
-             "شغال", "شغاله", "موظف", "موظفه", "انتقلت"}
+             "شغال", "شغاله", "موظف", "موظفه", "انتقلت", "سكنت", "نقلت"}
 #: Triggers whose form says the user is their subject: a first-person prefix
 #: or ending ("أسكن", "نسكن", "انتقلنا", "اسمي", "عندي"), or the imperative
 #: "call me". Every trigger is in exactly one of the two.
-_MARKED = {"اسمي", "ناديني", "نادني", "اسكن", "نسكن", "اعيش", "نعيش", "اقيم", "نقيم", "انتقلنا",
+_MARKED = {"اسمي", "ناديني", "نادني", "اسكن", "نسكن", "اعيش", "نعيش", "اقيم", "نقيم", "انتقلنا", "سكنا", "نقلنا",
            "اشتغل", "نشتغل", "اعمل", "نعمل", "اداوم", "احب", "اعشق", "استخدم", "استعمل", "افضل",
            "عندي", "لدي"}
 #: Verbs that read as an imperative without their hamza ("اشتغل على الملف").
@@ -325,12 +333,20 @@ def extract_arabic_facts(text: str) -> list[dict[str, Any]]:
         nxt = words[i + 1] if i + 1 < len(words) else None
         if _is(w, _NAME_TRIGGERS):
             keep(_fact("name_is", _name(words, i + 1), "functional", 0.9, 5))
-        elif _is(w, _HOME_TRIGGERS) and nxt is not None and nxt.folded in _IN:
+        elif _is(w, _HOME_TRIGGERS | _SETTLE_TRIGGERS) and nxt is not None and nxt.folded in _IN:
             keep(_fact("lives_in", _place(words, i + 2), "functional", 0.85, 4))
+        elif (_is(w, _MOVE_HOME_TRIGGERS) and nxt is not None and nxt.folded in _HOME_NOUNS
+              and i + 2 < len(words) and words[i + 2].folded in _TO):
+            place = _place(words, i + 3)
+            if place and _ARABIC_LETTER.search(place):
+                keep(_fact("lives_in", place, "functional", 0.85, 4))
         elif _is(w, _MOVE_TRIGGERS) and nxt is not None and nxt.folded in _TO:
             place = _place(words, i + 2)
             if place and _ARABIC_LETTER.search(place):  # "انتقلنا إلى Slack" is a tool
-                keep(_fact("lives_in", place, "functional", 0.8, 4))
+                fact = _fact("lives_in", place, "functional", 0.8, 4)
+                if words[i + 2].folded not in _PLACE_HEADS:
+                    fact["reading"] = True  # no word says it is a place: Kazma's reading
+                keep(fact)
         elif _is(w, _WORK_TRIGGERS):
             keep(_fact("works_at", _employer(words, i + 1), "functional", 0.85, 4))
         elif nxt is not None and nxt.folded in _FAVOURITE:

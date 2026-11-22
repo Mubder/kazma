@@ -110,7 +110,9 @@ def _quick(mem, then: str, *, turn: int = 2, session: str = "s1") -> None:
 
 @pytest.mark.parametrize(("first", "then", "new"), [
     ("Paris", "I live in Rotterdam now.", "Rotterdam"),
-    ("جدة", "انتقلنا إلى الرياض الشهر الماضي.", "الرياض"),
+    # A move that names the home itself: a bare "انتقلنا إلى الرياض" asks
+    # (the memory plan's finding 15, tests/test_memory_moved_to_asks.py).
+    ("جدة", "نقلنا بيتنا إلى الرياض الشهر الماضي.", "الرياض"),
 ])
 def test_a_replaced_user_fact_is_an_update_the_user_can_undo(mem, monkeypatch, first, then, new):
     mutate_belief(mem.db, "user", "lives_in", first, now=time.time() - 1200, extraction_method="user_stated",
