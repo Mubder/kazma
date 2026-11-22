@@ -374,6 +374,12 @@
         apiTokensLoaded: false,
         sessions: [],
         sessionsLoaded: false,
+        // A member's own model keys (Spaces S2-04): never the keys themselves.
+        ownKeys: [],
+        ownKeysLoaded: false,
+        ownKeysFailed: false,
+        ownKeyDraft: {},
+        ownKeyBusy: {},
         passwordForm: { old_password: '', new_password: '', confirm_password: '' },
         tokenName: '',
         // The role a new API token acts with; the server's default too.

@@ -855,6 +855,7 @@ jobs:
             tests/e2e/test_feature_grants_browser.py \
             tests/e2e/test_person_tools_browser.py \
             tests/e2e/test_person_models_browser.py \
+            tests/e2e/test_member_own_keys_browser.py \
             tests/e2e/test_person_disable_browser.py \
             tests/e2e/test_space_limits_browser.py \
             tests/e2e/test_activity_page_browser.py \

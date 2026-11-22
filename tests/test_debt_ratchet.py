@@ -116,7 +116,7 @@ STRUCTURAL_BASELINE = {
     # 521 since 2026-11-21 (S1-26): vault.SpaceKeyMissing, what a sealed row
     # whose space key is lost raises. Its callers catch it as the ValueError
     # it is; the switch-on check (S1-33) names it.
-    "module_local_public_symbols": 519,
+    "module_local_public_symbols": 518,
     "patched_value_imports": 71,
     "sleep_then_assert": 51,
     "bare_module_attr_assignments": 0,

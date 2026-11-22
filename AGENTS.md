@@ -50,8 +50,11 @@ V2 memory lives in `kazma_core.memory`).
 - **Where Spaces is enforced, a model is also the person's** (S2-03, §70):
   `get_client(None)` and `resolve_live_client` give work for a person their
   own model (`spaces.person_models.model_for_work`), and every provider
-  class's `chat`/`chat_stream` asks `_refuse_a_model_not_allowed` first. A
-  new provider class asks it too (or hands the call to `super()`).
+  class's `chat`/`chat_stream` asks `_person_call` first: it refuses a model
+  the person may not use (`_refuse_a_model_not_allowed`) and returns the
+  client carrying the person's own key, when they keep one (S2-04), to
+  which the method hands the whole call. A new provider class does the
+  same (or hands the call to `super()`).
 
 ### 2. Platform Isolation (`kazma-gateway/kazma_gateway/agent_handler/`)
 - The LangGraph state NEVER contains `chat_id`, `user_id`, or `message_id`
@@ -16075,6 +16078,51 @@ an install with one account behaves as before.
   real login route), `tests/e2e/test_people_page_each_person_browser.py` (by
   the sidebar, EN/AR: a person signed in from a second browser, every part
   of their row, their sessions ended and the second browser signed out).
+- **A member's own model keys (S2-04, 2026-11-23; plan O2, 4.9).** Only
+  where Spaces is enforced, and never the admin's (the install's keys are
+  theirs, under Providers); an install that does not enforce it reads
+  nothing more.
+  - **Kept in their personal space, sealed with its key**
+    (`kazma_core/spaces/own_keys.py`): the vault name
+    `space:<personal space>:model_key.<provider>` (`own_keys._secret_name`),
+    a space's secret, so S1-26 seals it and S1-27's count, export and erase
+    of that space reach it. Read through `SecretVault.for_space`, only for
+    the person bound now (`own_keys.key_for_call`): their work in a shared
+    space uses it too, nobody else's. Only a provider signed in with a plain
+    key (`own_keys._takes_own_key`: a Bearer, `x-api-key` or `api-key`
+    header; not a server on this network, AWS or Google's sign-in).
+  - **Used at the call**: every `chat` and `chat_stream` of every provider
+    class asks `LLMProvider._person_call` first -- S2-03's model check
+    (`_refuse_a_model_not_allowed`), then the person's own key -- and hands
+    the whole call to the client it returns
+    (`LLMProvider._own_key_client`: the row's model and prices, their key,
+    no switch to the install's other keys, none of the row's secret headers,
+    never through the install's egress proxy). Their key refused, the call
+    fails as theirs (`_switch_key_after`), never the install's key in its
+    place; a store that cannot say whether they have one refuses the call
+    (`own_key_unreadable`). A client built with a typed key (the providers'
+    check) is marked `_key_is_given` and never swapped. A new provider class
+    asks `_person_call` and hands the call on, or the gate fails.
+  - **Their spend on it is theirs**: the ledger marks the call (`own_key`,
+    `own_keys.uses_own_key`, the answer the call was given), and neither
+    `llm_ledger.usage_of` (their daily limit), `usage_since` (the install's)
+    nor `spend_by_person` counts it.
+  - **The routes** (`kazma_ui/own_keys_api.py`, `/api/account/model-keys`):
+    GET lists the providers they may bring a key for, each with `own`, never
+    a key; PUT keeps a key only once one short message through it answered
+    (`provider_check.check_model`); DELETE forgets it. Settings -> My account
+    -> "Use my own key" (`#own-model-keys`, a member's page only), EN/AR.
+  - Gates: `tests/test_member_own_keys.py` (her key in the header and never
+    the install's, on the OpenAI-shaped and Anthropic classes, chat and
+    stream, from a shared space too; refused as hers with nothing else
+    tried; nobody else's calls changed; her own-key spend outside her limit;
+    the admin's work cannot read it and no GET route answers it to the
+    admin; the install-scoped row as the control),
+    `tests/e2e/test_member_own_keys_browser.py` (by the sidebar, EN/AR: a
+    refused key keeps nothing, a good one is kept sealed and never shown,
+    "Use the install's key" forgets it; the admin's page as the control).
+    Left: a person over their daily limit is still refused before a turn,
+    even when the turn would run on their own key.
 
 ## UI Conventions (Web)
 
@@ -16300,6 +16348,11 @@ an install with one account behaves as before.
   an inline `style` on an `x-show` element — the inline declaration wins
   over Alpine's `display:none` toggle; put flex layout in a CSS class
   instead (see `.system-alerts-banner`).
+- **A boolean binding is a boolean** (2026-11-23, found building S2-04):
+  with the vendored Alpine (3.14.8) `:disabled="busy[key]"` that evaluates to
+  `undefined` leaves the button DISABLED (measured in Chromium: `false`
+  enables it, `undefined` does not). Bind `!!busy[key]`, or a value that is
+  always `true` or `false`.
 - **Responsive grids:** use `class="two-col-grid"` (collapses to one column
   ≤768px via `kazma.css`) on any inline `grid-template-columns:1fr 1fr;` —
   bare inline 2-col grids don't collapse and crush on mobile.

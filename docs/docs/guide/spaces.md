@@ -137,6 +137,24 @@ and one in ten used more than 189,000. 3,000,000 tokens is about 40
 ordinary turns a day; the dollar amount binds only a model whose price
 Kazma knows. Raise or lower it for everyone, or for one person.
 
+## A person's own model key
+
+A person may use a key of their own for a provider your install has,
+instead of yours: Settings → My account → Use my own key, on their own
+page (you have none: your keys are the install's, under Providers). Kazma
+first sends one short message through the key; a key the provider refuses
+is not kept. The key is kept sealed in their personal space, with that
+space's own key. Nobody else's work reads it, you included, and no page
+shows it, theirs included: they see only that one is kept.
+
+Every model call made for them to that provider then goes with their key
+alone, from any of their spaces. If the provider refuses it, the call
+fails and says so; Kazma never falls back to your key. What they spend
+with their own key is theirs: it does not count against their daily limit,
+nor against the install's. A person who has already reached their daily
+limit is still stopped, even when their next request would run on their
+own key. Use the install's key, beside it, forgets their key.
+
 ## Features per person
 
 What each person may use is a switch per feature, on Settings → People:

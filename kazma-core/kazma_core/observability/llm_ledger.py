@@ -93,7 +93,8 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     priced INTEGER DEFAULT 1,
     space TEXT DEFAULT '',
     asker TEXT DEFAULT '',
-    cached_tokens INTEGER DEFAULT 0
+    cached_tokens INTEGER DEFAULT 0,
+    own_key INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_llm_calls_ts ON llm_calls(ts);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_thread ON llm_calls(thread_id);
@@ -129,7 +130,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """Columns added after the ledger was first made: ``turn_id``
     (2026-09-26), ``priced`` (2026-11-08), ``space`` and ``asker``
     (2026-11-20, Spaces S1-22: a row from before names nobody),
-    ``cached_tokens`` (2026-11-22: a row from before counts none).
+    ``cached_tokens`` (2026-11-22: a row from before counts none),
+    ``own_key`` (2026-11-23, Spaces S2-04: a call made with the person's own
+    key; a row from before was made with the install's).
 
     Rows written before ``priced`` existed were priced at gpt-4o-mini's
     $0.15 / $0.60 whatever the model (kazma_core.model_prices). Once, as the
@@ -142,7 +145,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     added = add_missing_columns(
         conn, "llm_calls", (("turn_id", "TEXT DEFAULT ''"), ("priced", "INTEGER DEFAULT 1"),
                             ("space", "TEXT DEFAULT ''"), ("asker", "TEXT DEFAULT ''"),
-                            ("cached_tokens", "INTEGER DEFAULT 0")),
+                            ("cached_tokens", "INTEGER DEFAULT 0"), ("own_key", "INTEGER DEFAULT 0")),
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_turn ON llm_calls(turn_id)")
     # One person's day (Spaces S2-02): a person's limit is checked when their
@@ -218,6 +221,7 @@ def record_llm_call(
     asker: str | None = None,
     cached_tokens: int = 0,
     usage: Mapping[str, Any] | None = None,
+    own_key: bool | None = None,
 ) -> None:
     """Record one LLM call. Best-effort: never raises, never blocks the turn.
 
@@ -232,6 +236,11 @@ def record_llm_call(
     (``observability.correlation``): the SSE path binds the reply turn id,
     which survives an approval pause, so every segment's calls sum to one
     turn (:func:`turn_usage`).
+
+    ``own_key`` defaults to whether the call was made with the person's own
+    key for its provider (Spaces S2-04, ``spaces.own_keys.uses_own_key``:
+    the answer the call itself was given). Such a call is the person's to
+    pay: no limit counts it (:func:`usage_of`, :func:`usage_since`).
     """
     try:
         if usage is not None:
@@ -248,6 +257,10 @@ def record_llm_call(
             bound_space, bound_asker = _whose()
             space = bound_space if space is None else space
             asker = bound_asker if asker is None else asker
+        if own_key is None:
+            from kazma_core.spaces.own_keys import uses_own_key
+
+            own_key = uses_own_key(str(asker or ""), str(provider or ""))
         with _lock:
             conn = _get_conn()
             # Commits, or rolls back when the insert raises: an open
@@ -259,8 +272,8 @@ def record_llm_call(
                        (ts, thread_id, iteration, provider, model,
                         prompt_tokens, completion_tokens, total_tokens,
                         cost_usd, duration_ms, status, error_kind, failover_from,
-                        turn_id, priced, space, asker, cached_tokens)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        turn_id, priced, space, asker, cached_tokens, own_key)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         datetime.now(UTC).isoformat(),
                         thread_id,
@@ -280,6 +293,7 @@ def record_llm_call(
                         str(space or "")[:120],
                         str(asker or "")[:120],
                         cached_tokens,
+                        1 if own_key else 0,
                     ),
                 )
     except Exception as exc:  # noqa: BLE001 — observability must be invisible
@@ -487,14 +501,15 @@ def spend_by_person(since: datetime) -> list[dict[str, Any]] | None:
     dollars and the calls of unknown price, the most first. The calls that
     name nobody -- Kazma's own work, and rows from before Spaces S1-22 --
     are the entry with an empty ``asker``. Spend and counts only, never a
-    chat or a model's text (N11). None when the ledger cannot be read.
-    Blocking (SQLite)."""
+    chat or a model's text (N11). A call made with the person's own key
+    (Spaces S2-04) is theirs to pay and is not in it. None when the ledger
+    cannot be read. Blocking (SQLite)."""
     stamp = (since if since.tzinfo else since.replace(tzinfo=UTC)).astimezone(UTC).isoformat()
     try:
         with _lock:
             conn = _get_conn()
             rows = conn.execute(
-                f"SELECT asker, {_SUMS}, COUNT(DISTINCT space) FROM llm_calls WHERE ts >= ? "
+                f"SELECT asker, {_SUMS}, COUNT(DISTINCT space) FROM llm_calls WHERE ts >= ? AND own_key = 0 "
                 "GROUP BY asker ORDER BY SUM(cost_usd) DESC, SUM(total_tokens) DESC",
                 (stamp,),
             ).fetchall()
@@ -509,14 +524,15 @@ def usage_of(asker: str, since: datetime) -> dict[str, Any] | None:
     """Tokens, cost and call count of the model calls made for *asker* since
     *since*: what a person's daily limit counts (``spaces.daily_limits``,
     S2-02). ``cost`` holds only the calls of known price, ``unpriced`` counts
-    the rest; their tokens are in ``tokens``. None when the ledger cannot be
-    read. Blocking (SQLite)."""
+    the rest; their tokens are in ``tokens``. A call made with the person's
+    own key (Spaces S2-04) is not counted: it is theirs to pay. None when the
+    ledger cannot be read. Blocking (SQLite)."""
     stamp = (since if since.tzinfo else since.replace(tzinfo=UTC)).astimezone(UTC).isoformat()
     try:
         with _lock:
             conn = _get_conn()
             row = conn.execute(
-                f"SELECT {_SUMS} FROM llm_calls WHERE asker = ? AND ts >= ?", (str(asker), stamp),
+                f"SELECT {_SUMS} FROM llm_calls WHERE asker = ? AND ts >= ? AND own_key = 0", (str(asker), stamp),
             ).fetchone()
     except (sqlite3.Error, OSError) as exc:
         logger.warning("[llm-ledger] a person's usage is unreadable: %s", exc)
@@ -530,14 +546,15 @@ def usage_since(since: datetime) -> dict[str, Any] | None:
     What the daily cost limit counts (``agent.turn_token_budget``'s module,
     plan E1): *since* is the operator's local midnight, compared in UTC as
     the rows store it. ``None`` when the ledger cannot be read, so an
-    unreadable ledger is never taken for nothing spent. Blocking: callers
-    run it off the loop.
+    unreadable ledger is never taken for nothing spent. A call made with a
+    person's own key (Spaces S2-04) is not the install's to pay and is not
+    counted. Blocking: callers run it off the loop.
     """
     stamp = (since if since.tzinfo else since.replace(tzinfo=UTC)).astimezone(UTC).isoformat()
     try:
         with _lock:
             conn = _get_conn()
-            row = conn.execute(f"SELECT {_SUMS} FROM llm_calls WHERE ts >= ?", (stamp,)).fetchone()
+            row = conn.execute(f"SELECT {_SUMS} FROM llm_calls WHERE ts >= ? AND own_key = 0", (stamp,)).fetchone()
     except (sqlite3.Error, OSError) as exc:
         logger.warning("[llm-ledger] today's usage is unreadable: %s", exc)
         return None

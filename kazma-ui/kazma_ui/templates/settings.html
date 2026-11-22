@@ -2363,6 +2363,29 @@
         </div>
         {% endif %}
 
+        {% if not install_area %}
+        <!-- A member's own model keys (Spaces S2-04): kept sealed in their
+             personal space; the route never answers a key back. -->
+        <div class="settings-group mb-6" id="own-model-keys">
+            <h3>{{ t('settings.own_keys_title') }}</h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">{{ t('settings.own_keys_help') }}</p>
+            <div x-show="ownKeysFailed" x-cloak class="notice tone-danger" style="margin-bottom:12px;">{{ t('settings.own_keys_unreadable') }}</div>
+            <div class="account-list-table own-keys-table" x-show="ownKeys.length > 0" x-cloak>
+              <template x-for="p in ownKeys" :key="p.provider">
+                <div class="account-list-row own-key-row" :data-provider="p.provider">
+                  <span class="account-list-name"><span translate="no" x-text="p.label"></span> <span class="badge" :class="p.own ? 'badge-success' : 'badge-neutral'" x-text="ownKeyState(p)"></span></span>
+                  <span><input type="password" class="form-input" autocomplete="off" x-model="ownKeyDraft[p.provider]" aria-label="{{ t('settings.own_keys_input') }}" placeholder="{{ t('settings.own_keys_input') }}"></span>
+                  <span class="account-list-actions">
+                    <button type="button" class="btn btn-primary btn-sm" @click="saveOwnKey(p)" :disabled="!!ownKeyBusy[p.provider]">{{ t('settings.own_keys_use') }}</button>
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="p.own" x-cloak @click="removeOwnKey(p)">{{ t('settings.own_keys_remove') }}</button>
+                  </span>
+                </div>
+              </template>
+            </div>
+            <div x-show="ownKeysLoaded && ownKeys.length === 0 && !ownKeysFailed" class="empty-state" style="padding:16px" x-cloak>{{ t('settings.own_keys_none') }}</div>
+        </div>
+        {% endif %}
+
         <!-- Sessions -->
         <div class="settings-group mb-6">
             <h3>{{ t('settings.active_sessions') }}</h3>

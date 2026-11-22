@@ -327,6 +327,9 @@ async def check_model(entry: dict[str, Any], model: str, *, timeout: float = CHE
     })
     # A Google client may read Application Default Credentials: off the loop.
     client = await asyncio.to_thread(build_client, str(entry["name"]), config, entry)
+    # The key checked is the one typed: never a person's kept key in its
+    # place (Spaces S2-04, ``LLMProvider._person_call``).
+    client._key_is_given = True
     kwargs: dict[str, Any] = {"max_tokens": CHECK_MAX_TOKENS, "model": model}
     can_off = getattr(client, "can_turn_off_reasoning", None)
     if callable(can_off) and can_off():

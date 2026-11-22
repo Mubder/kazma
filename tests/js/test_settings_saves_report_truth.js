@@ -38,6 +38,7 @@ const VALIDATES = {
   saveGmailOAuthClient: "needs a Google client id and secret",
   saveGmail: "needs an email and an app password",
   saveMsClient: "needs an Azure client id",
+  saveOwnKey: "needs a provider and a key typed for it (Spaces S2-04)",
 };
 
 let fail = 0;

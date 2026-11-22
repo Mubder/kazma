@@ -180,7 +180,10 @@ class BedrockProvider(LLMProvider):
     ) -> LLMResponse:
         import asyncio
 
-        await self._refuse_a_model_not_allowed(model)
+        own = await self._person_call(model)
+        if own is not None:
+            # Their own key (Spaces S2-04): the whole call is theirs.
+            return await BedrockProvider.chat(own, messages, tools, max_tokens, temperature, model, response_format)
         _ = response_format  # OpenAI-shaped; Bedrock Converse has no equivalent
         model_id = model or self.config.model
         system, convo = self._build_messages(messages)
@@ -338,7 +341,14 @@ class BedrockProvider(LLMProvider):
         """
         import asyncio
 
-        await self._refuse_a_model_not_allowed(model)
+        own = await self._person_call(model)
+        if own is not None:
+            # Their own key (Spaces S2-04): the whole call is theirs.
+            async for delta in BedrockProvider.chat_stream(
+                own, messages, tools, max_tokens, temperature, model, response_format,
+            ):
+                yield delta
+            return
         _ = response_format
         model_id = model or self.config.model
         system, convo = self._build_messages(messages)

@@ -11,9 +11,10 @@ install's list (every model it offers); the install's default is
   nothing (the provider's ``chat`` refuses before any request); one with no
   model runs on Y's (``ModelRegistry.get_client``), never the install's.
 * **The call** is the truth: every provider class's ``chat`` and
-  ``chat_stream`` asks ``_refuse_a_model_not_allowed`` first (a source gate,
-  a planted provider class as its control), so whatever chose the model, Y's
-  call of it never leaves.
+  ``chat_stream`` asks ``_refuse_a_model_not_allowed`` first -- itself, or
+  through ``_person_call``, which asks it before it hands a call to a
+  person's own key (S2-04) -- (a source gate, a planted provider class as
+  its control), so whatever chose the model, Y's call of it never leaves.
 
 Control: the install's list in place of Y's (``person_models`` asked with
 no rule for Y) offers and calls ``model-c`` for Y.
@@ -380,12 +381,16 @@ def test_without_spaces_nothing_is_read_or_refused(y_with_one_model, monkeypatch
 # ── every provider class asks ───────────────────────────────────────────
 
 _ASK = "_refuse_a_model_not_allowed"
+#: What a class asks that asks :data:`_ASK` first (Spaces S2-04): held to it
+#: by ``test_the_persons_call_asks_the_refusal_first``.
+_ASKS_IT = "_person_call"
 
 
 def _provider_classes(sources: dict[str, str]) -> list[str]:
     """``file:Class.method`` for each ``chat``/``chat_stream`` of a provider
     class (``LLMProvider`` and every class deriving from it) that neither
-    asks the refusal first nor hands the call to ``super()``."""
+    asks the refusal first (itself, or through ``_person_call``) nor hands
+    the call to ``super()``."""
     missing: list[str] = []
     for rel, text in sources.items():
         tree = ast.parse(text)
@@ -402,7 +407,7 @@ def _provider_classes(sources: dict[str, str]) -> list[str]:
                     and c.func.attr == fn.name and isinstance(c.func.value, ast.Call)
                     and getattr(c.func.value.func, "id", "") == "super"
                     for c in ast.walk(fn))
-                if _ASK not in calls and not delegates:
+                if _ASK not in calls and _ASKS_IT not in calls and not delegates:
                     missing.append(f"{rel}:{cls.name}.{fn.name}")
     return sorted(missing)
 
@@ -421,6 +426,17 @@ def test_every_provider_class_asks_before_it_calls() -> None:
     sources = _product_provider_sources()
     assert any("anthropic_llm.py" in r for r in sources) and any("bedrock_llm.py" in r for r in sources)
     assert _provider_classes(sources) == []
+
+
+def test_the_persons_call_asks_the_refusal_first() -> None:
+    """``_person_call`` -- what the classes ask -- asks the refusal before
+    anything else it does."""
+    source = (REPO / "kazma-core" / "kazma_core" / "llm_provider.py").read_text(encoding="utf-8")
+    cls = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef) and n.name == "LLMProvider")
+    fn = next(f for f in cls.body if isinstance(f, ast.AsyncFunctionDef) and f.name == _ASKS_IT)
+    first = next(s for s in fn.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant)))
+    assert isinstance(first, ast.Expr) and isinstance(first.value, ast.Await)
+    assert getattr(first.value.value.func, "attr", "") == _ASK
 
 
 def test_control_a_provider_class_that_does_not_ask_is_found() -> None:

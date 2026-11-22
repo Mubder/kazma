@@ -72,6 +72,9 @@ NOT_INSTALL_WIDE: dict[tuple[str, str], str] = {
     ("POST", "/api/spaces/{space_id}/export"): "reads the password the export is sealed with; "
     "one zip of the caller's own space (its owner only) is written to a temporary folder and "
     "sent back: nothing install-wide changes",
+    ("PUT", "/api/account/model-keys/{provider}"): "a member's own model key (Spaces S2-04): kept in "
+    "their personal space, used only for their own calls; the install's provider rows and keys are "
+    "not touched",
 }
 
 _BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
