@@ -25,7 +25,7 @@
     // (S1-25), being added to a shared space or taken out of one (S2-12).
     function wording(notice) {
         const when = window.KazmaFormat ? window.KazmaFormat.dateTime(notice.at) : notice.at;
-        const space = '⁨' + (notice.space_name || '') + '⁩';
+        const space = '\u2068' + (notice.space_name || '') + '\u2069';
         if (notice.kind === 'password_reset') {
             return {
                 title: say('account.notice_reset_title', 'Your password was reset'),

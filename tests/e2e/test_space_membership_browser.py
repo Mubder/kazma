@@ -23,7 +23,7 @@ from tests.e2e.test_people_page_browser import _modal_action, _settings_loaded, 
 
 
 def _plain(text: str) -> str:
-    return " ".join(text.replace("⁨", "").replace("⁩", "").split())
+    return " ".join(text.replace("\u2068", "").replace("\u2069", "").split())
 
 
 def _person(pg, name: str) -> dict:
