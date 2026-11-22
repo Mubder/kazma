@@ -774,6 +774,11 @@ def _supersede_pending_twins(claimed: GateRow) -> None:
     finally:
         conn.close()
     for other in twins:
+        if _askers_differ(other, claimed):
+            # Another person's identical card in the same chat is their own
+            # question (the S2-05 second review: claiming one member's card
+            # superseded the other's, unanswered).
+            continue
         same_id = bool(
             (claimed.alias_id and other.gate_id == claimed.alias_id)
             or (other.alias_id and other.alias_id in (claimed.gate_id, claimed.alias_id))

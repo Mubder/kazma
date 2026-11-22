@@ -143,11 +143,14 @@ def grant_tool(
     cs = get_config_store()
     now = time.time()
     ttl = _ttl_seconds() if ttl_seconds is None else max(0, int(ttl_seconds))
+    from kazma_core.spaces.approvals import made_by_a_person
+
     payload = {
         "enabled": True,
         "tool": tool,
         "since": now,
         "actor": actor,
+        "granted_by": made_by_a_person(),
         "ttl_seconds": ttl,
         "expires_at": (now + ttl) if ttl > 0 else None,
     }
@@ -204,6 +207,17 @@ def has_tool_grant(thread_id: str | None, tool: str, person: str | None = None) 
         except (TypeError, ValueError):
             pass
     return True
+
+
+def tool_grant_by(thread_id: str | None, tool: str, person: str | None = None) -> str:
+    """Who made the tool grant (``granted_by``), "" when nobody is recorded
+    (a grant made before the field, a bare flag)."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id, person)
+    raw = get_config_store().get(_key(key_holder, tool)) if key_holder and tool else None
+    return str(raw.get("granted_by") or "") if isinstance(raw, dict) else ""
 
 
 def _grant_keys(cs: Any, key_holder: str) -> list[str]:

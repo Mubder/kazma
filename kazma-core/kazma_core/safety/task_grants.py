@@ -78,10 +78,13 @@ def grant_task(
 
     ttl = ttl_seconds if ttl_seconds is not None else _DEFAULT_GRANT_TTL
     now = time.time()
+    from kazma_core.spaces.approvals import made_by_a_person
+
     payload = {
         "enabled": True,
         "since": now,
         "actor": actor,
+        "granted_by": made_by_a_person(),
         "ttl_seconds": ttl,
         "expires_at": (now + ttl) if ttl else None,
     }
@@ -105,6 +108,15 @@ def has_task_grant(thread_id: str | None, person: str | None = None) -> bool:
         return False
     status = task_grant_status(thread_id, person)
     return bool(status.get("active"))
+
+
+def task_grant_by(thread_id: str | None, person: str | None = None) -> str:
+    """Who made the task grant (``granted_by``), "" when nobody is recorded."""
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id, person)
+    raw = _cs().get(f"task_grant.{key_holder}") if key_holder else None
+    return str(raw.get("granted_by") or "") if isinstance(raw, dict) else ""
 
 
 def clear_task_grant(thread_id: str, person: str | None = None) -> bool:

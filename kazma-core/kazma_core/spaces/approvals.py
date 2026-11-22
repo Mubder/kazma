@@ -47,6 +47,7 @@ __all__ = [
     "NOT_YOURS",
     "Answerers",
     "answer_refusal",
+    "approvers_now",
     "card_fields",
     "own_click_refusal",
     "standing_grant_refusal",
@@ -264,3 +265,33 @@ def own_click_refusal(lang: str = "en") -> str | None:
                 f"فيجيب {names} على البطاقة.")
     return (f"Your posts on X need {names}'s approval: ask Kazma in chat to post or delete it, "
             f"and {names} answers the card.")
+
+
+def approvers_now(person: str | None = None) -> frozenset[str] | None:
+    """The approvers of *person* (the person bound now when None), read when
+    a standing approval is used (the S2-05 second review: YOLO or a grant
+    made before the admin set approvers kept skipping the person's cards).
+    None when no approvers apply (Spaces off, no person, none set): every
+    standing approval holds. Otherwise only one an approver made holds; an
+    identity store that cannot be read answers an empty set (none holds).
+    Blocking."""
+    if not spaces_enforced():
+        return None
+    who = str(person or bound_asker() or "")
+    if not who:
+        return None
+    from kazma_core.spaces.identity import IdentityUnavailable, read_registry
+
+    try:
+        registry = read_registry()
+    except IdentityUnavailable:
+        return frozenset()
+    found = _approvers(registry, who)
+    return frozenset(found) if found else None
+
+
+def made_by_a_person() -> str:
+    """Who is making a standing approval now: the account bound, recorded on
+    the grant (``granted_by``) so :func:`approvers_now` can tell an
+    approver's from the person's own."""
+    return bound_asker() or ""

@@ -577,17 +577,21 @@ export function initSoftNav() {
     }
 
     /** An inline script soft navigation runs again: JavaScript with a
-     *  body, never the shell's i18n bootstrap (KAZMA_I18N is refreshed
-     *  from its inert JSON instead). */
+     *  body, never the shell's i18n bootstrap (marked
+     *  ``data-kazma-i18n-bootstrap``: KAZMA_I18N is refreshed from its inert
+     *  JSON instead). A page's own merge into KAZMA_I18N runs again, after
+     *  the refresh (research.html's words: excluded by its text, it never
+     *  ran again and the refresh wiped it, so the Research page reached by
+     *  the sidebar fell back to English). */
     function isRunnableInline(s) {
         if (s.getAttribute('src')) return false;
+        if (s.getAttribute('data-kazma-i18n-bootstrap') !== null) return false;
         const type = (s.getAttribute('type') || '').toLowerCase();
         if (type && type !== 'text/javascript' && type !== 'application/javascript') {
             return false;
         }
         const text = (s.textContent || '').trim();
         if (!text) return false;
-        if (text.includes('window.KAZMA_I18N')) return false;
         return true;
     }
 

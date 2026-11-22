@@ -171,10 +171,13 @@ def enable_yolo(
         ttl = _ttl_seconds()
     else:
         ttl = max(0, int(ttl_seconds))
+    from kazma_core.spaces.approvals import made_by_a_person
+
     payload = {
         "enabled": True,
         "since": now,
         "actor": actor,
+        "granted_by": made_by_a_person(),
         "ttl_seconds": ttl,
         "expires_at": (now + ttl) if ttl > 0 else None,
         "unified": ttl_seconds is not None,
@@ -254,6 +257,17 @@ def is_yolo_active(thread_id: str | None, person: str | None = None) -> bool:
         return False
     st = yolo_status(thread_id, person)
     return bool(st.get("active"))
+
+
+def yolo_by(thread_id: str | None, person: str | None = None) -> str:
+    """Who opened the YOLO window (``granted_by``), "" when nobody is recorded."""
+    key = _yolo_key(thread_id, person) if thread_id else ""
+    if not key:
+        return ""
+    from kazma_core.config_store import get_config_store
+
+    raw = get_config_store().get(key)
+    return str(raw.get("granted_by") or "") if isinstance(raw, dict) else ""
 
 
 def _is_legacy_flag(raw: Any) -> bool:

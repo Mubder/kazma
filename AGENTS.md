@@ -15773,8 +15773,10 @@ an install with one account behaves as before.
     and payload, never an id the request names, and the card's `asker`
     wins over a row's. Two people's identical cards are two gate rows
     (`hitl_gates._askers_differ`: the hash id and the arguments' twin match
-    never merge across askers). A clarify or confirm card's tools are its
-    `items[].tool` (N21 holds when it is answered).
+    never merge across askers), and claiming one never supersedes the other
+    (`_supersede_pending_twins`, the second review: Omar's identical card
+    was dropped unanswered when Reem's was claimed). A clarify or confirm
+    card's tools are its `items[].tool` (N21 holds when it is answered).
   - **An MCP server's sampling request is a card**: it names its asker
     (`spec_client._sampling_card_who`), the approve route asks the rule
     before `resolve_sampling_hitl`, and the pending list keeps the
@@ -15789,7 +15791,15 @@ an install with one account behaves as before.
     Cancel and Retry of one's own swarm task ask whose task it is
     (`single_operator.task_is_callers`), Approve and Reject who answers it
     (`task_actions.caller_may_act_on(answering=)`). With Spaces off the
-    Swarm decide route reads no request before deciding.
+    Swarm decide route reads no request before deciding. **A standing
+    approval reads the approvers when it is used** (the second review: YOLO
+    or a grant a person made before the admin set approvers kept skipping
+    their cards): every grant records who made it (`granted_by`,
+    `approvals.made_by_a_person`), and `hitl.standing_approval` lets one
+    hold for a person with approvers only when an approver made it
+    (`approvals.approvers_now`; an identity store that cannot be read holds
+    none). Gate: `tests/test_standing_approvals_read_approvers.py` (the
+    supersede by arguments and the grant read alone as the controls).
   - **The watchdog**: once enforced, whose card it is and its chat-app
     route are read before the timeout is recorded (a read that fails leaves
     the card pending and claimed by nobody; the next pass tries again). The
@@ -16394,7 +16404,14 @@ an install with one account behaves as before.
   `tests/e2e/test_soft_nav_page_data_first.py` (Arabic, a tab opened on
   Memory, Chat by the sidebar with the script after `chat.js` held back:
   every text the turn header shows; the words moved after the page's last
-  script, today's order, as the control).
+  script, today's order, as the control). **A page's own merge into
+  `KAZMA_I18N` runs again** (the second review): soft navigation skipped
+  every inline script naming `window.KAZMA_I18N` -- meant for the shell's
+  bootstrap -- so research.html's merge never ran again, the refresh wiped
+  it and the Research page reached by the sidebar was English. The shell's
+  bootstrap is marked `data-kazma-i18n-bootstrap` and skipped by that mark
+  alone. Gate: `tests/e2e/test_research_words_on_soft_nav.py` (nav.js's
+  text rule put back as the control).
 - **Every `KazmaX.member` a page reads exists** (2026-09-28). The Swarm
   Templates tab called `KazmaUtils.esc` (the helper is `escapeHtml`), the
   render threw, and its fetch's `catch` showed "Failed to load templates"
