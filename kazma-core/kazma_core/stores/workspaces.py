@@ -345,6 +345,15 @@ class WorkspaceStore:
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
+    def roots_by_space(self) -> list[tuple[str, str]]:
+        """Every workspace's ``(space_id, root_path)``, of every space: the
+        install's own read, for the rule that a shared space's project folder
+        is no other space's root (Spaces S2-12). Never a space's content."""
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute("SELECT space_id, root_path FROM workspaces").fetchall()
+        return [(str(row["space_id"] or ""), str(row["root_path"] or "")) for row in rows]
+
     def get_active_workspace(self) -> dict[str, Any] | None:
         """Return the currently active workspace dictionary or None."""
         where, args = self._where_space(self._space())

@@ -15217,6 +15217,32 @@ an install with one account behaves as before.
     refusals in both languages; Knowledge through Documents -- each with
     its control), `tests/test_feature_grants_in_tests.py`,
     `tests/e2e/test_feature_grants_browser.py` (by the sidebar, EN/AR).
+- **Shared spaces come in two kinds (S2-12, piece 1, 2026-11-22; plan 4.11,
+  N29).** Only once Spaces is enforced (`spaces_off` otherwise), and only
+  the admin makes one (`people.create_shared_space`, `POST
+  /api/people/spaces`, Settings -> People -> Shared spaces; recorded
+  `space_created`, the admin its owner). A plain space (`sandboxed`, the
+  default) never has a host tool, for anyone, the admin too. A space with a
+  project folder (`host`) works in that folder (its first workspace row,
+  made before the space is recorded and dropped if the record fails).
+  - **The folder's rules are one module** (`kazma_core/spaces/project_folder.py`,
+    codes `PROBLEMS`, worded `settings.people_err.folder_<code>`): an
+    existing absolute local folder (a share or device path refused on its
+    text); never Kazma's install folder, data folder or home, the owner's
+    machine workspace (the owner's rows, `KAZMA_WORKSPACE`) or another
+    space's root, nor inside or holding one. Compared by real path AND by
+    identity (`kazma_core/workspace/folder_identity.py`, the backup folder's
+    rule, now one home: `backup.folder_copy` aliases it).
+  - **Checked again at use**: `resolve_active_root` asks
+    `project_folder.check_at_use` for a shared host space's active row every
+    time, never swallowed; a folder that became a junction or link into
+    Kazma's data after the space was made raises `RefusedBeforeEffect`
+    before anything reads or writes through it.
+  - Gates: `tests/test_shared_spaces.py` (each refusal; the junction made
+    after creation, with the check taken out as the control; a loopback name
+    of Kazma's data, with the identity taken out as the control; a failed
+    record leaves no workspace row), `tests/e2e/test_shared_spaces_browser.py`
+    (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

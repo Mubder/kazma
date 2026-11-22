@@ -133,17 +133,28 @@ def resolve_active_root() -> Path:
     from kazma_core.spaces.files import host_space_root
 
     own_root = host_space_root()
+    active_path: Path | None = None
     try:
         from kazma_core.stores import get_workspace_store
 
         active = get_workspace_store().get_active_workspace()
         if active and active.get("root_path"):
             active_path = Path(active["root_path"]).expanduser().resolve()
-            if own_root is None and (_WORKSPACE_ROOT is None or _WORKSPACE_ROOT.resolve() != active_path):
-                _WORKSPACE_ROOT = active_path
-            return active_path
     except Exception:
-        pass
+        active_path = None
+    if active_path is not None:
+        if own_root is not None:
+            # A shared space's project folder is checked again every time it
+            # is used (Spaces S2-12): a folder that became a junction into
+            # Kazma's data after the space was made is refused here, before
+            # anything reads or writes through it. Never swallowed.
+            from kazma_core.spaces import project_folder
+            from kazma_core.spaces.scope import require_space_id
+
+            project_folder.check_at_use(active_path, space_id=require_space_id())
+        elif _WORKSPACE_ROOT is None or _WORKSPACE_ROOT.resolve() != active_path:
+            _WORKSPACE_ROOT = active_path
+        return active_path
     # 2b. A host space other than the owner's with no workspace of its own
     #     works in its own folder, never the machine's (pin, variable, sandbox).
     if own_root is not None:

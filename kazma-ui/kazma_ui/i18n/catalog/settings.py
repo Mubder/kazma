@@ -2878,6 +2878,66 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.people_err.is_the_owner": {"en": "Your own sign-in is changed in My account.", "ar": "تُغيَّر بيانات دخولك من «حسابي»."},
     "settings.people_err.no_such_account": {"en": "That person is not there any more.", "ar": "هذا الشخص لم يعد موجودًا."},
     "settings.people_err.identity_unavailable": {"en": "Accounts cannot be read right now. Try again.", "ar": "تتعذّر قراءة الحسابات الآن. حاول مجددًا."},
+    # Shared spaces (Spaces S2-12, plan 4.11, N29).
+    "settings.people_spaces_title": {"en": "Shared spaces", "ar": "المساحات المشتركة"},
+    "settings.people_spaces_help": {
+        "en": "A space you share with people you add to it. Everyone also keeps a personal space for what "
+              "they do not share.",
+        "ar": "مساحة تشاركها مع من تضيفهم إليها. ويحتفظ كل شخص أيضًا بمساحة شخصية لما لا يشاركه.",
+    },
+    "settings.people_spaces_none": {"en": "No shared space yet.", "ar": "لا توجد مساحة مشتركة بعد."},
+    "settings.people_space_new": {"en": "New shared space", "ar": "مساحة مشتركة جديدة"},
+    "settings.people_space_name": {"en": "Name", "ar": "الاسم"},
+    "settings.people_space_kind": {"en": "Kind", "ar": "النوع"},
+    "settings.people_space_kind_plain": {"en": "Plain shared space", "ar": "مساحة مشتركة عادية"},
+    "settings.people_space_kind_plain_help": {
+        "en": "For family and friends: shared chats, memory, documents and schedules. No project folder, no "
+              "Development, no GitHub.",
+        "ar": "للعائلة والأصدقاء: محادثات وذاكرة ومستندات وجداول مشتركة. دون مجلد مشروع، ودون التطوير، ودون GitHub.",
+    },
+    "settings.people_space_kind_project": {"en": "Shared space with a project folder", "ar": "مساحة مشتركة بمجلد مشروع"},
+    "settings.people_space_kind_project_help": {
+        "en": "For development. Only this kind can ever have Development or GitHub, and only for the people "
+              "you turn it on for.",
+        "ar": "للتطوير. هذا النوع وحده يمكن أن يكون فيه التطوير أو GitHub، ولمن تفعّله لهم فقط.",
+    },
+    "settings.people_space_folder": {"en": "Project folder", "ar": "مجلد المشروع"},
+    "settings.people_space_folder_help": {
+        "en": "A folder on this computer that the space works in. Never Kazma's own folders, and never "
+              "another space's folder.",
+        "ar": "مجلد على هذا الحاسوب تعمل فيه المساحة. ليس أحد مجلدات Kazma نفسه، ولا مجلد مساحة أخرى.",
+    },
+    "settings.people_space_create": {"en": "Make the space", "ar": "إنشاء المساحة"},
+    "settings.people_space_created": {"en": "{name} is made.", "ar": "أُنشئت {name}."},
+    "settings.people_space_members.zero": {"en": "no members", "ar": "لا أعضاء"},
+    "settings.people_space_members.one": {"en": "1 member", "ar": "عضو واحد"},
+    "settings.people_space_members.two": {"en": "{n} members", "ar": "عضوان"},
+    "settings.people_space_members.few": {"en": "{n} members", "ar": "{n} أعضاء"},
+    "settings.people_space_members.many": {"en": "{n} members", "ar": "{n} عضوًا"},
+    "settings.people_space_members.other": {"en": "{n} members", "ar": "{n} عضو"},
+    "settings.people_err.admin_only": {"en": "Only the admin makes a shared space.", "ar": "المسؤول وحده يُنشئ مساحة مشتركة."},
+    "settings.people_err.bad_kind": {"en": "Choose the kind of space.", "ar": "اختر نوع المساحة."},
+    "settings.people_err.folder_empty": {"en": "Name the project folder.", "ar": "حدّد مجلد المشروع."},
+    "settings.people_err.folder_network": {
+        "en": "Choose a folder on this computer, not a network or device path.",
+        "ar": "اختر مجلدًا على هذا الحاسوب، لا مسارًا شبكيًا أو مسار جهاز.",
+    },
+    "settings.people_err.folder_relative": {"en": "Give the folder's full path.", "ar": "اكتب المسار الكامل للمجلد."},
+    "settings.people_err.folder_missing": {"en": "That folder does not exist.", "ar": "هذا المجلد غير موجود."},
+    "settings.people_err.folder_not_a_folder": {"en": "That is a file, not a folder.", "ar": "هذا ملف وليس مجلدًا."},
+    "settings.people_err.folder_unreachable": {"en": "That folder cannot be read right now.", "ar": "تتعذّر قراءة هذا المجلد الآن."},
+    "settings.people_err.folder_kazma_folder": {
+        "en": "That folder is one of Kazma's own, inside one, or holds one. Choose another.",
+        "ar": "هذا المجلد من مجلدات Kazma، أو داخل أحدها، أو يحتوي أحدها. اختر غيره.",
+    },
+    "settings.people_err.folder_machine_workspace": {
+        "en": "That folder is, or overlaps, your own workspace on this computer. Choose another.",
+        "ar": "هذا المجلد هو مساحة عملك على هذا الحاسوب أو يتداخل معها. اختر غيره.",
+    },
+    "settings.people_err.folder_another_space": {
+        "en": "That folder is, or overlaps, another space's folder. Choose another.",
+        "ar": "هذا المجلد هو مجلد مساحة أخرى أو يتداخل معه. اختر غيره.",
+    },
     "account.notice_reset_title": {"en": "Your password was reset", "ar": "أُعيد تعيين كلمة مرورك"},
     "account.notice_reset_body": {
         "en": "The admin reset your password on {when}. If you did not ask for this, tell them.",

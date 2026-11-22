@@ -446,6 +446,9 @@
         peopleRecordWhole: true,
         closedSpaces: [],
         newPerson: { name: '', password: '' },
+        // Shared spaces (Spaces S2-12): a plain one by default.
+        sharedSpaces: [],
+        newSpace: { name: '', kind: 'sandboxed', folder: '' },
         // Daily limits (Spaces S2-02).
         limitForPeople: { limit: null, set: false, shipped: null },
         limitDraftForPeople: { tokens: '', usd: '' },
@@ -467,6 +470,7 @@
             }
             this.people = data.people;
             this.closedSpaces = Array.isArray(data.closed_spaces) ? data.closed_spaces : [];
+            this.sharedSpaces = Array.isArray(data.shared_spaces) ? data.shared_spaces : [];
             this.peopleRecordWhole = data.record_whole !== false;
             if (data.limit_for_people && data.limit_for_people.limit) {
                 this.limitForPeople = data.limit_for_people;
@@ -714,6 +718,31 @@
                 showToast(_t('settings.people_erased', 'The space of {name} was erased.', { name: _iso(closed.name) }), 'success');
             } catch (e) {
                 showToast(this._spaceDataError(null), 'error');
+                return;
+            }
+            await this.loadPeople();
+        },
+
+        async createSharedSpace() {
+            const draft = this.newSpace;
+            try {
+                const resp = await fetch('/api/people/spaces', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: draft.name, kind: draft.kind,
+                        project_folder: draft.kind === 'host' ? draft.folder : '',
+                    }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    showToast(this._peopleError(data), 'error');
+                    return;
+                }
+                showToast(_t('settings.people_space_created', '{name} is made.', { name: _iso(draft.name) }), 'success');
+                this.newSpace = { name: '', kind: 'sandboxed', folder: '' };
+            } catch (e) {
+                showToast(this._peopleError(null), 'error');
                 return;
             }
             await this.loadPeople();

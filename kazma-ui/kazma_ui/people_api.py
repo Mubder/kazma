@@ -131,6 +131,7 @@ def create_people_router() -> APIRouter:
             return denied
         try:
             listed = people.list_people()
+            shared = people.list_shared_spaces()
             closed = people.closed_spaces()
             broken = people.broken_at()
             limits = people.limits_for_people()
@@ -141,7 +142,7 @@ def create_people_router() -> APIRouter:
             person["spent_today"] = (spent.get(person["id"], _NOTHING_SPENT)
                                      if spent is not None else None)
         return JSONResponse({"ok": True, "enforced": spaces_enforced(), "people": listed,
-                             "closed_spaces": closed, "limit_for_people": limits, "today": today,
+                             "shared_spaces": shared, "closed_spaces": closed, "limit_for_people": limits, "today": today,
                              "record_whole": broken is None, "record_broken_at": broken})
 
     def _create(request: Request, body: dict[str, Any]) -> JSONResponse:
@@ -166,6 +167,32 @@ def create_people_router() -> APIRouter:
         if not isinstance(body, dict):
             return invalid_json_response()
         return await asyncio.to_thread(_create, request, body)
+
+    def _create_space(request: Request, body: dict[str, Any]) -> JSONResponse:
+        try:
+            space = people.create_shared_space(
+                str(body.get("name") or ""), kind=str(body.get("kind") or "sandboxed"),
+                project_folder=str(body.get("project_folder") or ""), by=_caller(request) or "",
+            )
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True, "space": space}, status_code=201)
+
+    @router.post("/api/people/spaces")
+    async def create_shared_space(request: Request) -> JSONResponse:
+        """A new shared space (Spaces S2-12): plain, or with a project folder."""
+        denied = await asyncio.to_thread(_not_admin, request)
+        if denied:
+            return denied
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_create_space, request, body)
 
     def _reset(request: Request, account_id: str, body: dict[str, Any]) -> JSONResponse:
         try:

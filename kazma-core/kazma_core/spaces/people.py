@@ -42,10 +42,11 @@ import json
 import logging
 import secrets
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from kazma_core.spaces import identity
-from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, spaces_enforced
+from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, spaces_enforced
 
 __all__ = [
     "PeopleRefused",
@@ -53,10 +54,12 @@ __all__ = [
     "close_space",
     "closed_spaces",
     "create_person",
+    "create_shared_space",
     "forget_space",
     "delete_person",
     "limits_for_people",
     "list_people",
+    "list_shared_spaces",
     "mark_seen",
     "notices_for",
     "reset_password",
@@ -69,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 #: What the record holds.
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
-          "daily_limit_set", "default_daily_limit_set", "features_set")
+          "daily_limit_set", "default_daily_limit_set", "features_set", "space_created")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset",)
 _NAME_MAX = 64
@@ -221,6 +224,115 @@ def closed_spaces() -> list[dict[str, Any]]:
         if space.get("personal_of") and space.get("account_deleted_at")
     ]
     return sorted(closed, key=lambda space: space["deleted_at"])
+
+
+#: The two kinds of shared space (plan 4.11, N29): a plain one, sandboxed,
+#: the default; one with a project folder, the host kind, for development.
+SHARED_KINDS = ("sandboxed", "host")
+
+
+def list_shared_spaces() -> list[dict[str, Any]]:
+    """Every shared space, oldest first: id, name, kind, when made and by
+    whom, its members (id, name, role) and, for one with a project folder,
+    the folder it works in. Never a word of what it holds."""
+    reg = identity.read_registry()
+    roots = _project_roots()
+    names = {account_id: str(account.get("name") or "") for account_id, account in reg["accounts"].items()}
+    spaces = []
+    for space_id, space in reg["spaces"].items():
+        if space.get("personal_of") or space_id == OWNER_SPACE_ID or space.get("erasing_at"):
+            continue
+        members = [
+            {"id": str(m.get("account")), "name": names.get(str(m.get("account")), ""),
+             "role": str(m.get("role") or "member")}
+            for m in reg["memberships"] if m.get("space") == space_id
+        ]
+        spaces.append({
+            "id": space_id, "name": str(space.get("name") or ""), "kind": str(space.get("kind") or ""),
+            "created_at": str(space.get("created_at") or ""), "created_by": str(space.get("created_by") or ""),
+            "members": sorted(members, key=lambda m: (m["role"] != "owner", m["name"].lower())),
+            "project_folder": roots.get(space_id, "") if space.get("kind") == "host" else "",
+        })
+    return sorted(spaces, key=lambda space: space["created_at"])
+
+
+def _project_roots() -> dict[str, str]:
+    """Each space's first workspace root, by space (the project folder it
+    was made with, unless its people switched it)."""
+    from kazma_core.stores import get_workspace_store
+
+    roots: dict[str, str] = {}
+    for space_id, root in get_workspace_store().roots_by_space():
+        roots.setdefault(space_id, root)
+    return roots
+
+
+def create_shared_space(name: str, *, kind: str = "sandboxed", project_folder: str = "",
+                        by: str) -> dict[str, Any]:
+    """A new shared space, made by the admin (plan 4.11, N29), with the admin
+    as its owner. *kind*: ``sandboxed`` (a plain shared space: its own space
+    folder, no Development, no GitHub; the default) or ``host`` (one with a
+    project folder, for development: *project_folder* must pass
+    ``spaces.project_folder``'s rules). Recorded (``space_created``).
+    Returns the space as :func:`list_shared_spaces` lists it."""
+    from kazma_core.spaces import project_folder as folder_rules
+
+    _require_enforced()
+    if not identity.is_admin_account(by):
+        raise PeopleRefused("admin_only", 403, "Only the admin makes a shared space.")
+    name = _checked_name(name)
+    if kind not in SHARED_KINDS:
+        raise PeopleRefused("bad_kind", 400, f"A shared space is one of {', '.join(SHARED_KINDS)}.")
+    space_id = f"s{secrets.token_hex(6)}"
+    workspace_id = ""
+    if kind == "host":
+        found = folder_rules.problem(project_folder)
+        if found:
+            raise PeopleRefused(f"folder_{found}", 400, "That folder cannot be this space's project folder.")
+        workspace_id = _make_project_workspace(space_id, name, project_folder, by)
+
+    def _change(reg: dict[str, Any]) -> None:
+        if by not in reg["accounts"]:
+            raise identity.IdentityError("no_such_account", f"no account {by!r}")
+        reg["spaces"][space_id] = {
+            "id": space_id, "name": name, "kind": kind, "personal_of": None,
+            "created_by": by, "created_at": _now(),
+        }
+        reg["memberships"].append({"account": by, "space": space_id, "role": "owner"})
+        _record(reg, "space_created", "", by, space=space_id)
+
+    recorded = False
+    try:
+        _changed(_change)
+        recorded = True
+    finally:
+        if workspace_id and not recorded:
+            _drop_project_workspace(space_id, workspace_id)
+    logger.info("[people] shared space created id=%s kind=%s by=%s", space_id, kind, by)
+    return next(space for space in list_shared_spaces() if space["id"] == space_id)
+
+
+def _make_project_workspace(space_id: str, name: str, folder: str, by: str) -> str:
+    """The new space's first workspace: its project folder, active. Written
+    before the space itself, so a space is never there without its folder."""
+    from kazma_core.spaces.scope import bind_scope
+    from kazma_core.stores import get_workspace_store
+
+    store = get_workspace_store()
+    with bind_scope(space_id, by):
+        made = store.create_workspace(name, str(Path(folder).expanduser()))
+        if not store.set_active_workspace(made["id"]):
+            store.delete_workspace(made["id"])
+            raise PeopleRefused("folder_unreachable", 400, "That folder could not be made the space's folder.")
+    return str(made["id"])
+
+
+def _drop_project_workspace(space_id: str, workspace_id: str) -> None:
+    from kazma_core.spaces.scope import bind_scope
+    from kazma_core.stores import get_workspace_store
+
+    with bind_scope(space_id, OWNER_ACCOUNT_ID):
+        get_workspace_store().delete_workspace(workspace_id)
 
 
 def notices_for(account_id: str) -> list[dict[str, Any]]:
