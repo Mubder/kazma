@@ -46,6 +46,13 @@ memory read tools, the reasoning level ``--reasoning`` names, at most three
 tool rounds; its calls, tokens, tool rounds and time are reported. Those
 turns run one at a time.
 
+A verdict is kept in the cache under the model that gave it, so the judges
+can be named in either order without asking either again: ``rejudge``
+rebuilds a result file from its cache with the judges in the order given (no
+model call). A cache from before that keeps its verdicts by place
+(first, second) is refused until ``tag-judges`` names the models that gave
+them.
+
 ``retrieve`` loads the configured embedder (bge-m3) and embeds every turn
 of the sample's histories once, into a cache in ``DIR``; it makes no other
 model call. Each question gets a private database holding its own history,
@@ -864,18 +871,87 @@ def answer_entry(entry: dict[str, Any], item: dict[str, Any], prompt: str, *, re
     judge_entry(entry, item, judge=judge, second=second)
 
 
+#: The keys a cache from before kept its verdicts under, by place: the
+#: first judge's and the second's, naming neither model.
+UNTAGGED_VERDICTS = {"verdict": "judge_usage", "verdict2": "judge2_usage"}
+
+
+def untagged(entry: dict[str, Any]) -> bool:
+    """Whether *entry* keeps a verdict by place, naming no model."""
+    return any(key in entry for key in UNTAGGED_VERDICTS)
+
+
+def verdict_of(entry: dict[str, Any], model: str | None) -> str | None:
+    """The verdict *model* gave the answer *entry* holds, or None."""
+    held = (entry.get("judged") or {}).get(model or "")
+    return None if held is None else str(held.get("verdict", ""))
+
+
 def judge_entry(entry: dict[str, Any], item: dict[str, Any], *, judge: Any, second: Any = None) -> None:
-    """Judge the answer *entry* holds, asking only the verdicts it lacks."""
+    """Judge the answer *entry* holds, asking only the verdicts it lacks. A
+    verdict is kept under the model that gave it: a run naming the same
+    judges in another order asks nothing again, and never hands one judge's
+    verdict to the other."""
     if not entry.get("hypothesis"):
         return
-    if "verdict" not in entry:
-        verdict, usage = judge.ask(judge_prompt(item, entry["hypothesis"]), max_tokens=10)
+    if untagged(entry):
+        raise ValueError("a verdict kept by place names no judge: run tag-judges on this cache first")
+    judged = entry.setdefault("judged", {})
+    for chat in (judge, second):
+        if chat is None or chat.model in judged:
+            continue
+        verdict, usage = chat.ask(judge_prompt(item, entry["hypothesis"]), max_tokens=10)
         if "error" not in usage:
-            entry.update({"verdict": verdict, "judge_usage": usage})
-    if second is not None and "verdict2" not in entry and entry["hypothesis"]:
-        verdict, usage = second.ask(judge_prompt(item, entry["hypothesis"]), max_tokens=10)
-        if "error" not in usage:
-            entry.update({"verdict2": verdict, "judge2_usage": usage})
+            judged[chat.model] = {"verdict": verdict, "usage": usage}
+
+
+def tag_judges(cache: dict[str, Any], judge: str, judge2: str | None) -> int:
+    """Name the models that gave a cache's verdicts kept by place (the first
+    judge's and the second's, from before verdicts were kept by model):
+    each moves under its model. Returns how many verdicts moved. A model
+    already holding another verdict for the same answer is refused."""
+    if judge == judge2:
+        raise ValueError("the two judges must be two models")
+    moved = 0
+    for qid, conditions in cache.items():
+        for condition, entry in conditions.items():
+            for key, model in (("verdict", judge), ("verdict2", judge2)):
+                if key not in entry:
+                    continue
+                if model is None:
+                    raise ValueError(f"{qid}/{condition}: a second judge's verdict, and no second judge named")
+                verdict = entry.pop(key)
+                usage = entry.pop(UNTAGGED_VERDICTS[key], {})
+                held = entry.setdefault("judged", {})
+                if model in held and held[model].get("verdict") != verdict:
+                    raise ValueError(f"{qid}/{condition}: {model} already holds another verdict")
+                held[model] = {"verdict": verdict, "usage": usage}
+                moved += 1
+    return moved
+
+
+def _says_yes(verdict: str | None) -> bool:
+    return str(verdict or "").strip().lower().startswith("yes")
+
+
+def condition_columns(entry: dict[str, Any], condition: str, judge: str, judge2: str | None) -> dict[str, Any]:
+    """A result row's columns for one history, from its cache *entry*: the
+    first judge's verdict, the tokens the reader was sent, the answer
+    counted unasked (no answer, or an answer and no verdict of the first
+    judge) or cut at the reader's limit, the second judge's verdict when
+    one is named, and a turn's own counts."""
+    first = verdict_of(entry, judge)
+    out: dict[str, Any] = {condition: _says_yes(first),
+                           f"{condition}_prompt_tokens": int((entry.get("reader_usage") or {}).get("prompt_tokens", 0))}
+    if "hypothesis" not in entry or (entry["hypothesis"] and first is None):
+        out[f"{condition}_unasked"] = True
+    elif (entry.get("reader_usage") or {}).get("cut_at_limit"):
+        out[f"{condition}_cut"] = True
+    if judge2:
+        out[f"{condition}_judge2"] = _says_yes(verdict_of(entry, judge2))
+    if condition == TURN and entry.get("reader_usage"):
+        out.update(turn_row(entry))
+    return out
 
 
 def load_blocks(path: Path, ids: list[str]) -> dict[str, Any]:
@@ -1039,6 +1115,10 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
     stem = f"answers-{model}" if reasoning == "off" else f"answers-{model}-{reasoning}"
     cache_path = data / "cache" / f"{stem}{'-' + run if run else ''}.json"
     cache: dict[str, Any] = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else {}
+    if _untagged_in(cache):
+        print(f"{cache_path.name} keeps verdicts by place, naming no judge: run tag-judges on it first",
+              file=sys.stderr)
+        return 2
     embedder = CachedEmbedder(get_embedder(), data / "cache" / "kazma_vectors.npz", get_embedding_model_name())
     histories: dict[str, dict[str, Any]] = {}
     with mock.patch("kazma_core.memory.embedder.get_embedder", lambda: embedder), \
@@ -1089,41 +1169,10 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
         row: dict[str, Any] = {"id": qid, "type": str(item["question_type"]), "abstention": is_abstention(item),
                                "kazma_shown": histories[qid]["shown"], "full_sessions_dropped": histories[qid]["dropped"]}
         for c in conditions:
-            entry = cache[qid][c]
-            row[c] = str(entry.get("verdict", "")).strip().lower().startswith("yes")
-            row[f"{c}_prompt_tokens"] = int((entry.get("reader_usage") or {}).get("prompt_tokens", 0))
-            if "hypothesis" not in entry or (entry["hypothesis"] and "verdict" not in entry):
-                row[f"{c}_unasked"] = True
-            elif (entry.get("reader_usage") or {}).get("cut_at_limit"):
-                row[f"{c}_cut"] = True
-            if second is not None:
-                row[f"{c}_judge2"] = str(entry.get("verdict2", "")).strip().lower().startswith("yes")
-            if c == TURN and entry.get("reader_usage"):
-                row.update(turn_row(entry))
+            row.update(condition_columns(cache[qid][c], c, judge_model, judge2))
         results.append(row)
-    summary = summarise_answers(results, conditions)
-    if TURN in conditions:
-        summary["turn"] = summarise_turns(results)
-    for name in extra:
-        if "kazma" in conditions:
-            summary[f"kazma_vs_{name}"] = pair_changes(results, "kazma", name)
-    usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0,
-             "reasoning_tokens": 0}
-    for qid in (str(i["question_id"]) for i in items):
-        for c in conditions:
-            for part in ("reader_usage", "judge_usage", "judge2_usage"):
-                u = cache[qid][c].get(part) or {}
-                if u:
-                    # Kazma's turn counts its own calls (several a question).
-                    usage["calls"] += int(u.get("calls", 1))
-                    for k in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens", "reasoning_tokens"):
-                        usage[k] += int(u.get(k, 0))
-    if second is not None:
-        summary["judges_agree"] = judges_agree(results)
-    # Answers the reader never gave (a refused call) or gave cut at its limit:
-    # a score with any of these is not the reader's.
-    summary["unanswered"] = {c: sum(1 for r in results if r.get(f"{c}_unasked")) for c in conditions}
-    summary["cut_at_limit"] = {c: sum(1 for r in results if r.get(f"{c}_cut")) for c in conditions}
+    summary = run_summary(results, conditions, judge2=judge2, block_names=tuple(extra))
+    usage = run_usage(cache, [str(i["question_id"]) for i in items], conditions, (judge_model, judge2))
     out = result_path(ANSWERS, split)
     if run:
         out = out.with_name(f"{out.stem}_{run}{out.suffix}")
@@ -1144,6 +1193,156 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
     for t, row in summary["types"].items():
         print(f"  {t:<26} {row}")
     print("usage", usage)
+    return 0
+
+
+def run_summary(results: list[dict[str, Any]], conditions: tuple[str, ...], *, judge2: str | None,
+                block_names: tuple[str, ...] = ()) -> dict[str, Any]:
+    """A run's scores from its rows: per history and type, Kazma's turn,
+    each block another build made against Kazma's, the judges' agreement,
+    and the answers left unasked or cut."""
+    summary = summarise_answers(results, conditions)
+    if TURN in conditions:
+        summary["turn"] = summarise_turns(results)
+    for name in block_names:
+        if "kazma" in conditions:
+            summary[f"kazma_vs_{name}"] = pair_changes(results, "kazma", name)
+    if judge2:
+        summary["judges_agree"] = judges_agree(results)
+    # Answers the reader never gave (a refused call) or gave cut at its limit:
+    # a score with any of these is not the reader's.
+    summary["unanswered"] = {c: sum(1 for r in results if r.get(f"{c}_unasked")) for c in conditions}
+    summary["cut_at_limit"] = {c: sum(1 for r in results if r.get(f"{c}_cut")) for c in conditions}
+    return summary
+
+
+def run_usage(cache: dict[str, Any], ids: list[str], conditions: tuple[str, ...],
+              judges: tuple[str | None, ...]) -> dict[str, int]:
+    """The calls and tokens a run's answers and the named judges' verdicts
+    took, from its cache."""
+    usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0,
+             "reasoning_tokens": 0}
+    for qid in ids:
+        for c in conditions:
+            entry = cache[qid][c]
+            parts = [entry.get("reader_usage") or {}]
+            parts += [((entry.get("judged") or {}).get(m) or {}).get("usage") or {} for m in judges if m]
+            for u in parts:
+                if u:
+                    # Kazma's turn counts its own calls (several a question).
+                    usage["calls"] += int(u.get("calls", 1))
+                    for k in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens", "reasoning_tokens"):
+                        usage[k] += int(u.get(k, 0))
+    return usage
+
+
+def _untagged_in(cache: dict[str, Any]) -> int:
+    return sum(1 for conditions in cache.values() for entry in conditions.values() if untagged(entry))
+
+
+def _cmd_tag_judges(cache_path: Path, judge: str, judge2: str | None) -> int:
+    """Name the models that gave a cache's verdicts kept by place. The cache
+    is kept beside it as it was (``.by-place.json``) before it is rewritten."""
+    cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    backup = cache_path.with_name(f"{cache_path.stem}.by-place.json")
+    if not backup.exists():
+        backup.write_bytes(cache_path.read_bytes())
+    moved = tag_judges(cache, judge, judge2)
+    tmp = cache_path.with_name(f"{cache_path.name}.tmp")
+    tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(cache_path)
+    print(f"{cache_path.name}: {moved} verdicts named ({judge} first, {judge2 or 'no'} second)")
+    return 0
+
+
+def rejudge(run: dict[str, Any], cache: dict[str, Any], judge: str, judge2: str | None) -> dict[str, Any]:
+    """*run* (a result file's content) rebuilt from its *cache* with the
+    judges in the order given, asking no model: every verdict comes from the
+    cache, under the model that gave it. Only the judges the run had may be
+    named. The run's other columns (what Kazma showed, a history cut to fit)
+    are kept as they were. Every judge named must hold a verdict on every
+    answer of the run (``judge`` asks for the ones it lacks): a verdict
+    missing is never counted as a wrong answer."""
+    if _untagged_in(cache):
+        raise ValueError("a verdict kept by place names no judge: run tag-judges on this cache first")
+    for model in (judge, judge2):
+        lacking = _lacking_verdicts(cache, run, model) if model else 0
+        if lacking:
+            raise ValueError(f"{model} holds no verdict on {lacking} of the run's answers: run judge first")
+    conditions = tuple(run["conditions"])
+    own = set(conditions)
+    results = []
+    for old in run["results"]:
+        row = {k: v for k, v in old.items() if not _condition_column(k, own)}
+        for c in conditions:
+            row.update(condition_columns(cache[old["id"]][c], c, judge, judge2))
+        results.append(row)
+    ids = [r["id"] for r in run["results"]]
+    summary = run_summary(results, conditions, judge2=judge2, block_names=tuple(run.get("blocks_from") or {}))
+    out = {k: v for k, v in run.items() if k not in summary and k != "results"}
+    out.update({"judge": judge, "judge2": judge2, "usage": run_usage(cache, ids, conditions, (judge, judge2))})
+    if (judge, judge2) != (run.get("judge"), run.get("judge2")):
+        out["rejudged"] = {"on": datetime.now(UTC).date().isoformat(),
+                           "judges_before": [run.get("judge"), run.get("judge2")]}
+    return {**out, **summary, "results": results}
+
+
+def _condition_column(key: str, conditions: set[str]) -> bool:
+    """Whether *key* is one of a row's per-history columns (rebuilt by
+    ``condition_columns``), not one of its own (id, type, what was shown)."""
+    per_history = ("", "_prompt_tokens", "_unasked", "_cut", "_judge2")
+    if any(key == f"{c}{suffix}" for c in conditions for suffix in per_history):
+        return True
+    return TURN in conditions and key in turn_row({})
+
+
+def _lacking_verdicts(cache: dict[str, Any], run: dict[str, Any], model: str) -> int:
+    """How many of *run*'s answers *model* holds no verdict on."""
+    return sum(1 for r in run["results"] for c in run["conditions"]
+               if (cache[r["id"]][c].get("hypothesis") and verdict_of(cache[r["id"]][c], model) is None))
+
+
+def _cmd_judge(data: Path, answers: Path, cache_path: Path, judge_model: str, judge2: str | None, base_url: str,
+               key_env: str, workers: int) -> int:
+    """Ask the named judges for the verdicts a run's cache lacks, on the
+    answers it already holds: no reader is asked and no history rebuilt (a
+    judge added to a run after it was answered)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    key = os.environ.get(key_env, "")
+    if not key:
+        print(f"set {key_env}", file=sys.stderr)
+        return 2
+    run = json.loads(answers.read_text(encoding="utf-8"))
+    cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    if _untagged_in(cache):
+        print(f"{cache_path.name} keeps verdicts by place, naming no judge: run tag-judges on it first",
+              file=sys.stderr)
+        return 2
+    by_id = {str(x["question_id"]): x for x in load(data)}
+    judge = Chat(model=judge_model, base_url=base_url, key=key)
+    second = Chat(model=judge2, base_url=base_url, key=key) if judge2 else None
+    jobs = [(str(r["id"]), c) for r in run["results"] for c in run["conditions"]]
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(lambda job: judge_entry(cache[job[0]][job[1]], by_id[job[0]], judge=judge, second=second),
+                          jobs))
+    finally:
+        tmp = cache_path.with_name(f"{cache_path.name}.tmp")
+        tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(cache_path)
+    for model in (judge_model, judge2):
+        if model:
+            print(f"{model}: no verdict on {_lacking_verdicts(cache, run, model)} of the run's answers")
+    return 0
+
+
+def _cmd_rejudge(answers: Path, cache_path: Path, judge: str, judge2: str | None) -> int:
+    run = json.loads(answers.read_text(encoding="utf-8"))
+    cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    out = rejudge(run, cache, judge, judge2)
+    answers.write_text(json.dumps(out, indent=1) + "\n", encoding="utf-8", newline="\n")
+    print(json.dumps(out["overall"], indent=1))
     return 0
 
 
@@ -1253,11 +1452,12 @@ def _cmd_reading_sheet(data: Path, answers: Path, cache: Path, out: Path) -> int
     return 0
 
 
-def _cmd_model_read(answers: Path, labels: Path) -> int:
+def _cmd_model_read(answers: Path, labels: Path, found: str = "") -> int:
     """Keep the reading's labels beside the judges' verdicts in
     ``MODEL_READ``: ids, verdicts and labels only. *labels* is a local file
     (outside the repository) mapping ``"<id>|<condition>"`` to the reading's
-    verdict, true or false."""
+    verdict, true or false; *found* is what the reading found, in a
+    sentence of the reader's own (never the dataset's text)."""
     run = json.loads(answers.read_text(encoding="utf-8"))
     read = json.loads(labels.read_text(encoding="utf-8"))
     rows = {r["id"]: r for r in run["results"]}
@@ -1275,6 +1475,7 @@ def _cmd_model_read(answers: Path, labels: Path) -> int:
         "read_by": "Claude (a model), labelled model-read until the owner has checked them by hand",
         "what": "The answers read beside the two judges: every answer the judges disagree on first, then a fixed "
                 "draw. Ids, verdicts and the reading's label only.",
+        **({"found": found} if found else {}),
         "summary": model_read_summary(out), "labels": out,
     }, indent=1) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps(model_read_summary(out), indent=1))
@@ -1631,6 +1832,27 @@ def main(argv: list[str] | None = None) -> int:
     read_p = sub.add_parser("model-read", help="keep the reading's labels beside the judges' verdicts")
     read_p.add_argument("--answers", required=True, type=Path)
     read_p.add_argument("--labels", required=True, type=Path, help="a local file: {\"id|condition\": true}")
+    read_p.add_argument("--found", default="", help="what the reading found, in a sentence (kept beside the labels)")
+    tag_p = sub.add_parser("tag-judges", help="name the models that gave a cache's verdicts kept by place")
+    tag_p.add_argument("--cache", required=True, type=Path)
+    tag_p.add_argument("--judge", required=True, help="the model that judged first in that cache's runs")
+    tag_p.add_argument("--judge2", default=None, help="the model that judged second")
+    rejudge_p = sub.add_parser("rejudge", help="rebuild a result file from its cache with the judges in another "
+                                               "order (no model call)")
+    rejudge_p.add_argument("--answers", required=True, type=Path)
+    rejudge_p.add_argument("--cache", required=True, type=Path)
+    rejudge_p.add_argument("--judge", required=True)
+    rejudge_p.add_argument("--judge2", default=None)
+    judge_p = sub.add_parser("judge", help="ask the named judges for the verdicts a run's cache lacks "
+                                           "(no reader asked)")
+    judge_p.add_argument("--data", required=True, type=Path)
+    judge_p.add_argument("--answers", required=True, type=Path)
+    judge_p.add_argument("--cache", required=True, type=Path)
+    judge_p.add_argument("--judge", required=True)
+    judge_p.add_argument("--judge2", default=None)
+    judge_p.add_argument("--base-url", default="https://api.deepseek.com")
+    judge_p.add_argument("--key-env", default="DEEPSEEK_API_KEY")
+    judge_p.add_argument("--workers", type=int, default=4)
     for name in ("sample", "split", "retrieve", "answer", "translate", "parallel"):
         s = sub.add_parser(name)
         s.add_argument("--data", required=True, type=Path, help="the folder LongMemEval was downloaded into")
@@ -1663,7 +1885,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "reading-sheet":
         return _cmd_reading_sheet(args.data, args.answers, args.cache, args.out)
     if args.cmd == "model-read":
-        return _cmd_model_read(args.answers, args.labels)
+        return _cmd_model_read(args.answers, args.labels, args.found)
+    if args.cmd == "tag-judges":
+        return _cmd_tag_judges(args.cache, args.judge, args.judge2)
+    if args.cmd == "rejudge":
+        return _cmd_rejudge(args.answers, args.cache, args.judge, args.judge2)
+    if args.cmd == "judge":
+        return _cmd_judge(args.data, args.answers, args.cache, args.judge, args.judge2, args.base_url,
+                          args.key_env, args.workers)
     if args.cmd == "sample":
         return _cmd_sample(args.data)
     if args.cmd == "split":

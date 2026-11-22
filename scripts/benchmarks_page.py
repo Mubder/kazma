@@ -579,7 +579,10 @@ def _longmemeval_dev(folder: Path) -> list[str]:
         agree = {**agree, **_judges_agree(turn.get("results") or [])}
     lines += [
         f"**Answering from it**: reader {a['reader']} with its reasoning {a.get('reader_reasoning', 'off')}; "
-        f"judges {a['judge']} and {a.get('judge2') or '–'} (LongMemEval's prompts). The same build answered "
+        f"judges {a['judge']} and {a.get('judge2') or '–'} (LongMemEval's prompts"
+        + (f"; the judges swapped on {a['rejudged']['on']}: each verdict is kept with the model that gave it, "
+           "and no answer was asked again" if a.get("rejudged") else "")
+        + "). The same build answered "
         "every question twice: an answer that flips between the two runs is the noise, and no change is accepted "
         "on a difference smaller than it.",
         "",
@@ -622,13 +625,25 @@ def _longmemeval_dev(folder: Path) -> list[str]:
                   *rows]
     read_file = folder / "model_read.json"
     if read_file.is_file():
-        s = json.loads(read_file.read_text(encoding="utf-8"))["summary"]
-        lines += ["", f"**The judges, read beside**: {s['n']} answers read by Claude (labelled model-read until "
-                      f"the owner checks them), the {s['disagreements']} the two judges disagree on first. The "
-                      f"first judge gave the reading's verdict on {_pct(s['judge'])} of them, the second on "
-                      f"{_pct(s['judge2'])}; on the disagreements {_pct(s['judge_on_disagreements'])} and "
-                      f"{_pct(s['judge2_on_disagreements'])}."]
+        lines += _judges_read_beside(json.loads(read_file.read_text(encoding="utf-8")), a)
     return lines + [""]
+
+
+def _judges_read_beside(read: dict, run: dict) -> list[str]:
+    """The answers read beside the judges, each judge named with how often
+    it gave the reading's verdict; and why the run's first judge judges
+    first, said only when the reading backs that order (the main session's
+    rule, 22 Nov: every number from the stronger judge, and the page says
+    why)."""
+    s = read["summary"]
+    first, second = read.get("judge") or "the first judge", read.get("judge2") or "the second"
+    out = [f"**The judges, read beside**: {s['n']} answers read by Claude (labelled model-read until the owner "
+           f"checks them), the {s['disagreements']} the two judges disagree on first. {first} gave the "
+           f"reading's verdict on {_pct(s['judge'])} of them, {second} on {_pct(s['judge2'])}; on the "
+           f"disagreements {_pct(s['judge_on_disagreements'])} and {_pct(s['judge2_on_disagreements'])}."]
+    if read.get("judge") == run.get("judge") and s["judge"] > s["judge2"]:
+        out[0] += f" That is why {first} judges first" + (f": {read['found']}" if read.get("found") else ".")
+    return ["", out[0]]
 
 
 def _ordinary_turn(path: Path) -> list[str]:

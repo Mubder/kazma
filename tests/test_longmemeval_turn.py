@@ -273,6 +273,8 @@ def test_a_tool_not_offered_is_refused(scripts, quiet):
 
 
 class _Judge:
+    model = "judge"
+
     def __init__(self) -> None:
         self.asked = 0
 
@@ -311,7 +313,7 @@ def test_the_harness_keeps_the_turns_answer_and_judges_it_once(scripts, quiet, m
     judge = _Judge()
     lme.judge_entry(entry, items[0], judge=judge)
     lme.judge_entry(entry, items[0], judge=judge)
-    assert entry["verdict"] == "yes" and judge.asked == 1
+    assert lme.verdict_of(entry, "judge") == "yes" and judge.asked == 1
     row = lme.turn_row(entry)
     assert row == {"kazma_turn_calls": 1, "kazma_turn_tool_requests": 0, "kazma_turn_tools": 0,
                    "kazma_turn_cache_hit_tokens": 60, "kazma_turn_seconds": row["kazma_turn_seconds"],
@@ -320,11 +322,11 @@ def test_the_harness_keeps_the_turns_answer_and_judges_it_once(scripts, quiet, m
     assert summary["calls_mean"] == 1 and summary["same_block"] == 1.0 and summary["tool_requests"] == {"0": 1}
     # A second run asks nothing it has.
     run()
-    assert len(model.calls) == 2 and cache["q1"][lme.TURN]["verdict"] == "yes"
+    assert len(model.calls) == 2 and lme.verdict_of(cache["q1"][lme.TURN], "judge") == "yes"
     # Another block for the question (recall changed) is another question.
     histories["q1"]["kazma"] += "\n(changed)"
     run()
-    assert len(model.calls) == 3 and "verdict" not in cache["q1"][lme.TURN]
+    assert len(model.calls) == 3 and lme.verdict_of(cache["q1"][lme.TURN], "judge") is None
 
 
 def test_a_turn_that_failed_is_asked_again_never_judged(scripts, quiet, monkeypatch, tmp_path):
@@ -352,7 +354,7 @@ def test_a_turn_that_failed_is_asked_again_never_judged(scripts, quiet, monkeypa
     assert "hypothesis" not in entry and entry["reader_error"]
     judge = _Judge()
     lme.judge_entry(entry, item, judge=judge)
-    assert judge.asked == 0 and "verdict" not in entry
+    assert judge.asked == 0 and lme.verdict_of(entry, "judge") is None
     refused["on"] = False
     run()
     assert cache["q1"][lme.TURN]["hypothesis"] == "Business Administration."

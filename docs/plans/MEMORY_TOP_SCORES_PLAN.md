@@ -138,31 +138,38 @@ store), plus the browser real-use suite. The R9 v8 re-tune and the W1 work
 started on 21 Nov wait for this.
 
 *Measured, 22 Nov* (dev 200; reader qwen3.7-plus at the provider's default
-reasoning, what Kazma sends Qwen; judge qwen3.7-plus, second judge
-qwen3.8-flash; the owner moved the memory work from DeepSeek to Qwen that
+reasoning, what Kazma sends Qwen; judge qwen3.8-flash, second judge
+qwen3.7-plus; the owner moved the memory work from DeepSeek to Qwen that
 day, and the partial DeepSeek answers are kept aside, labelled, as a record
-only). Answered, the main run and its noise run (the answers that flip):
-Kazma's block 0.675 / 0.675 (4); the block before W1a 0.46 / 0.445 (7); the
-same rounds read whole 0.755 / 0.755 (4); the whole history 0.895 / 0.88
-(13; three histories answered HTTP 400 in both); the oracle 0.905 / 0.91
-(5); bge-m3's ten rounds 0.835 / 0.825 (6); BM25's 0.745 / 0.74 (3).
-Judges agree on 97.8 % of 1,400 pairs. Tokens: prompt 27.8M and 27.5M,
+only). The runs were judged first by qwen3.7-plus; the model-read answers
+below found qwen3.8-flash the stronger judge, so the main session swapped
+them the same day, from the cached verdicts (each verdict now kept with the
+model that gave it, `rejudge`; the noise run, which had no second judge,
+got qwen3.8-flash's verdicts on its answers, no answer asked again).
+Answered, the main run and its noise run (the answers that flip): Kazma's
+block 0.69 / 0.69 (2); the block before W1a 0.47 / 0.455 (5); the same
+rounds read whole 0.75 / 0.76 (4); the whole history 0.91 / 0.885 (13;
+three histories answered HTTP 400 in both); the oracle 0.92 / 0.925 (9);
+bge-m3's ten rounds 0.85 / 0.84 (8); BM25's 0.765 / 0.755 (2). With
+qwen3.7-plus first they read 0.675, 0.46, 0.755, 0.895, 0.905, 0.835 and
+0.745. Judges agree on 97.8 % of 1,400 pairs. Tokens: prompt 27.8M and 27.5M,
 completion 1.04M and 1.05M (0.93M and 0.94M reasoning); Qwen served 1 % and
 0.1 % of the prompt tokens from its cache (each history is its question's
 own). Results: `tests/fixtures/longmemeval/answers_dev.json`,
 `answers_dev_noise.json`, `noise_dev.json`; the page prints them. The
-largest gaps to the whole history: multi-session 0.40 against 0.89 (W4's),
+largest gaps to the whole history: multi-session 0.40 against 0.92 (W4's),
 temporal 0.60 against 0.91 (W2's). Said plainly (the page says it too): from
-its block alone Kazma answers 0.675, against 0.835 for plain top-10
-retrieval at 3.6 times the tokens and 0.895 for the whole history; its own
-turn reaches 0.765 (W1c). The 50 answers read beside the judges
+its block alone Kazma answers 0.69, against 0.85 for plain top-10
+retrieval at 3.6 times the tokens and 0.91 for the whole history; its own
+turn reaches 0.79 (W1c). The 50 answers read beside the judges
 (`model_read.json`, Claude's reading, labelled model-read until the owner
-checks them; the 27 the judges disagree on first): the first judge gave the
-reading's verdict on 60 % of them, the second on 86 %; on the disagreements
-26 % and 74 %. The first judge (qwen3.7-plus) says no to a right answer that
+checks them; the 27 the judges disagree on first): qwen3.8-flash gave the
+reading's verdict on 86 % of them, qwen3.7-plus on 60 %; on the
+disagreements 74 % and 26 %. qwen3.7-plus says no to a right answer that
 adds a detail ("a yellow dress and a pair of earrings") or names the missing
-information and then estimates; the disagreements are 2 % of the 1,400
-pairs, so a score moves a point or two at most. W0 is complete.
+information and then estimates (17 of its 20 wrong verdicts are such
+refusals); the disagreements are 2 % of the 1,400 pairs, so the swap moved
+a score by up to two and a half points. W0 is complete.
 
 ### W1a. Show the answer (M)
 
@@ -224,10 +231,10 @@ credit.
 
 *Accepted, 22 Nov* on dev, with and without W1a on one reader and judge
 (the before-block built by 064dfec3b, `longmemeval_blocks.py`): answered
-0.46 -> 0.675 in the main run (+50 / -7 questions) and 0.445 -> 0.675 in the
-noise run (+51 / -5), +51 / -7 by the second judge; 49 gains and 3 losses
-repeat in both runs, against 4 (W1a's block) and 7 (the old block) answers
-that flip between two runs of one build. The real-use suite, two runs each
+0.47 -> 0.69 in the main run (+51 / -7 questions) and 0.455 -> 0.69 in the
+noise run (+54 / -7), +50 / -7 by the second judge (qwen3.7-plus); 51 gains
+and 5 losses repeat in both runs, against 2 (W1a's block) and 5 (the old
+block) answers that flip between two runs of one build. The real-use suite, two runs each
 side on qwen3.7-plus: 15/18 and 17/18 before, 16/18 and 18/18 with W1a: no
 regression, too noisy to credit (every miss an Arabic step; finding 10).
 
@@ -258,8 +265,9 @@ run one at a time. Left for a later piece: facts and summaries in the store
 (the harness seeds conversations only, so the turn's block has neither).
 
 Run 22 Nov on dev (qwen3.7-plus, the provider's default reasoning, one run):
-0.765 answered, nine points over the block alone (0.675), from its
-`memory_read` / `memory_list` calls; 1.76 model calls and 0.71 tool requests a
+0.79 answered (0.765 by qwen3.7-plus), ten points over the block alone
+(0.69), from its `memory_read` / `memory_list` calls; 1.76 model calls and
+0.71 tool requests a
 question, 20,727 prompt tokens mean (59 % from Qwen's cache: the base prompt
 repeats), 10.4 s median; one call refused (permanent). Judges agree on 96.5 %.
 The harness reported the turn's block equal to its own for 92 %: it read the

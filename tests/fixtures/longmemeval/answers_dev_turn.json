@@ -12,8 +12,8 @@
  "sample": 200,
  "reader": "qwen3.7-plus",
  "reader_reasoning": "default",
- "judge": "qwen3.7-plus",
- "judge2": "qwen3.8-flash",
+ "judge": "qwen3.8-flash",
+ "judge2": "qwen3.7-plus",
  "conditions": [
   "kazma_turn"
  ],
@@ -30,9 +30,16 @@
   "prompt_cache_hit_tokens": 2503680,
   "reasoning_tokens": 99546
  },
+ "rejudged": {
+  "on": "2026-11-22",
+  "judges_before": [
+   "qwen3.7-plus",
+   "qwen3.8-flash"
+  ]
+ },
  "overall": {
   "n": 200,
-  "kazma_turn": 0.765,
+  "kazma_turn": 0.79,
   "prompt_tokens_mean": {
    "kazma_turn": 20727
   }
@@ -40,11 +47,11 @@
  "types": {
   "knowledge-update": {
    "n": 31,
-   "kazma_turn": 0.871
+   "kazma_turn": 0.9032
   },
   "multi-session": {
    "n": 53,
-   "kazma_turn": 0.6792
+   "kazma_turn": 0.6981
   },
   "single-session-assistant": {
    "n": 23,
@@ -52,7 +59,7 @@
   },
   "single-session-preference": {
    "n": 12,
-   "kazma_turn": 0.3333
+   "kazma_turn": 0.5833
   },
   "single-session-user": {
    "n": 28,
@@ -79,7 +86,11 @@
   "seconds_max": 89.54,
   "same_block": 0.92
  },
- "judges_agree": {},
+ "judges_agree": {
+  "kazma_turn": 0.965,
+  "overall": 0.965,
+  "n": 200
+ },
  "unanswered": {
   "kazma_turn": 1
  },
@@ -557,9 +568,9 @@
    "abstention": false,
    "kazma_shown": 5,
    "full_sessions_dropped": 0,
-   "kazma_turn": false,
+   "kazma_turn": true,
    "kazma_turn_prompt_tokens": 9884,
-   "kazma_turn_judge2": true,
+   "kazma_turn_judge2": false,
    "kazma_turn_calls": 1,
    "kazma_turn_tool_requests": 0,
    "kazma_turn_tools": 0,
@@ -733,9 +744,9 @@
    "abstention": false,
    "kazma_shown": 2,
    "full_sessions_dropped": 0,
-   "kazma_turn": false,
+   "kazma_turn": true,
    "kazma_turn_prompt_tokens": 42566,
-   "kazma_turn_judge2": true,
+   "kazma_turn_judge2": false,
    "kazma_turn_calls": 3,
    "kazma_turn_tool_requests": 2,
    "kazma_turn_tools": 4,
@@ -861,9 +872,9 @@
    "abstention": false,
    "kazma_shown": 5,
    "full_sessions_dropped": 0,
-   "kazma_turn": true,
+   "kazma_turn": false,
    "kazma_turn_prompt_tokens": 9896,
-   "kazma_turn_judge2": false,
+   "kazma_turn_judge2": true,
    "kazma_turn_calls": 1,
    "kazma_turn_tool_requests": 0,
    "kazma_turn_tools": 0,
@@ -1085,9 +1096,9 @@
    "abstention": false,
    "kazma_shown": 5,
    "full_sessions_dropped": 0,
-   "kazma_turn": false,
+   "kazma_turn": true,
    "kazma_turn_prompt_tokens": 10071,
-   "kazma_turn_judge2": true,
+   "kazma_turn_judge2": false,
    "kazma_turn_calls": 1,
    "kazma_turn_tool_requests": 0,
    "kazma_turn_tools": 0,
@@ -2510,9 +2521,9 @@
    "abstention": false,
    "kazma_shown": 8,
    "full_sessions_dropped": 0,
-   "kazma_turn": false,
+   "kazma_turn": true,
    "kazma_turn_prompt_tokens": 10047,
-   "kazma_turn_judge2": true,
+   "kazma_turn_judge2": false,
    "kazma_turn_calls": 1,
    "kazma_turn_tool_requests": 0,
    "kazma_turn_tools": 0,
@@ -2814,9 +2825,9 @@
    "abstention": false,
    "kazma_shown": 5,
    "full_sessions_dropped": 0,
-   "kazma_turn": false,
+   "kazma_turn": true,
    "kazma_turn_prompt_tokens": 9991,
-   "kazma_turn_judge2": true,
+   "kazma_turn_judge2": false,
    "kazma_turn_calls": 1,
    "kazma_turn_tool_requests": 0,
    "kazma_turn_tools": 0,
@@ -2862,9 +2873,9 @@
    "abstention": false,
    "kazma_shown": 5,
    "full_sessions_dropped": 0,
-   "kazma_turn": false,
+   "kazma_turn": true,
    "kazma_turn_prompt_tokens": 9883,
-   "kazma_turn_judge2": true,
+   "kazma_turn_judge2": false,
    "kazma_turn_calls": 1,
    "kazma_turn_tool_requests": 0,
    "kazma_turn_tools": 0,

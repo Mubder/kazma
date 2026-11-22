@@ -2348,7 +2348,13 @@ four injected were noise.
   prompts; the reader at the reasoning Kazma's chat runs, `--reasoning
   low` by default, with room for it, an answer cut at its limit counted;
   `--judge2` a second judge on every answer, its agreement in the result;
-  `--run` a run's own cache and result file; `--conditions`; a call the API
+  a verdict kept with the model that gave it (`verdict_of`), so `rejudge`
+  puts the judges in another order from the cache with no model call
+  (qwen3.8-flash judges first since 22 Nov: it gave the model-read answers'
+  verdict on 86 % against 60 %), `judge` asks a judge added later for the
+  verdicts it lacks, and a cache keeping verdicts by place is refused until
+  `tag-judges` names them; `--run` a run's own cache and result file;
+  `--conditions`; a call the API
   refuses is asked again on the next run, never kept as an answer or a
   verdict, `answer_entry`; `--conditions kazma_turn` also asks each question
   through Kazma's own chat turn, `scripts/longmemeval_turn.py`, the memory

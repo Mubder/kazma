@@ -77,6 +77,23 @@ def test_the_dev_table_says_where_kazma_stands() -> None:
     assert module._where_kazma_stands({"kazma": 0.6}, {}, types) == []
 
 
+def test_the_page_says_why_the_first_judge_judges_first() -> None:
+    """The main session's rule (22 Nov): every number comes from the judge
+    the reading found stronger, and the page says why, from the reading's
+    own file. Control: a run whose first judge the reading did not back
+    gets the numbers and no reason."""
+    module = _page_module()
+    read = {"judge": "flash", "judge2": "plus", "found": "plus refuses right answers that add a detail.",
+            "summary": {"n": 50, "disagreements": 27, "judge": 0.86, "judge2": 0.6,
+                        "judge_on_disagreements": 0.7407, "judge2_on_disagreements": 0.2593}}
+    text = "\n".join(module._judges_read_beside(read, {"judge": "flash"}))
+    assert "flash gave the reading's verdict on 86.0 % of them, plus on 60.0 %" in text
+    assert "That is why flash judges first: plus refuses right answers that add a detail." in text
+    assert "That is why" not in "\n".join(module._judges_read_beside(read, {"judge": "plus"}))
+    weaker = {**read, "summary": {**read["summary"], "judge": 0.5}}
+    assert "That is why" not in "\n".join(module._judges_read_beside(weaker, {"judge": "flash"}))
+
+
 def test_every_number_comes_from_a_result_file() -> None:
     text = (ROOT / "docs" / "docs" / "reference" / "benchmarks.md").read_text(encoding="utf-8")
     for source in ("scripts/memory_bench.py", "scripts/knowledge_bench.py", "scripts/document_fidelity.py"):
