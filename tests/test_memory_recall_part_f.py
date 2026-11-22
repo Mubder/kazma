@@ -441,7 +441,7 @@ _STATUS_ATTRS = {"degraded", "failed"}
 
 #: Callers of recall that need not read whether it was whole, with why.
 _DECLARED_CALLERS = {
-    "kazma-core/kazma_core/memory/benchmark.py::ask":
+    "kazma-core/kazma_core/memory/benchmark.py::_ask_questions":
         "the benchmark scores a recall that failed as a miss, on every question",
     "kazma-core/kazma_core/memory/benchmark.py::run_speaker_benchmark":
         "the speakers benchmark scores a recall that failed as a miss",
