@@ -69,12 +69,21 @@ def _chat_reasoning_level() -> str:
     return level
 
 
-def provider_takes_level(base_url: str) -> bool:
-    """Whether a provider at *base_url* takes the level, for the Settings page
-    (the model call itself asks the client, ``can_turn_off_reasoning``)."""
-    from kazma_core.llm_provider import is_deepseek_api
+def levels_taken(base_url: str) -> str:
+    """What a provider at *base_url* takes of the level, for the Settings page
+    (the model call itself asks the client, ``can_turn_off_reasoning``):
+    ``all`` (DeepSeek's own API), ``off_only`` (Qwen on Model Studio, as
+    ``enable_thinking``; the memory plan's finding 12) or ``none``."""
+    from kazma_core.llm_provider import _is_qwen_api, is_deepseek_api
 
-    return is_deepseek_api(base_url)
+    if is_deepseek_api(base_url):
+        return "all"
+    return "off_only" if _is_qwen_api(base_url) else "none"
+
+
+def level_applies(level: str, takes: str) -> bool:
+    """Whether *level* reaches a provider that takes *takes* of it."""
+    return takes == "all" or (takes == "off_only" and level == "off")
 
 
 def _reasoning_kwargs_for(client: Any, level: str) -> dict[str, Any]:

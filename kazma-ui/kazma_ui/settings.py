@@ -573,17 +573,20 @@ class SettingsRouterBuilder:
         @router.get("/api/settings/chat-reasoning")
         def api_get_chat_reasoning() -> dict[str, Any]:
             """How much the model reasons before a chat answer
-            (``agent/chat_reasoning.py``), the levels the page offers, and
-            whether the active provider takes the setting at all."""
+            (``agent/chat_reasoning.py``), the levels the page offers, what
+            the active provider takes of it (``takes``: every level, Off
+            only, or nothing) and whether the chosen level reaches it
+            (``applies``)."""
             from kazma_core.agent.chat_reasoning import (
                 CHAT_REASONING_KEY,
                 LEVELS,
+                level_applies,
+                levels_taken,
                 parse_level,
-                provider_takes_level,
             )
 
             level = parse_level(config_store.get(CHAT_REASONING_KEY, "default")) or "default"
-            provider, applies = "", False
+            provider, takes = "", "none"
             try:
                 from kazma_core.model_registry import get_model_registry
 
@@ -591,13 +594,14 @@ class SettingsRouterBuilder:
                 provider = str((registry.get_active_profile() or {}).get("provider") or "")
                 for entry in registry.list_providers() or []:
                     if str(entry.get("name") or "") == provider:
-                        applies = provider_takes_level(str(entry.get("base_url") or ""))
+                        takes = levels_taken(str(entry.get("base_url") or ""))
                         break
             except (ImportError, AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
                 logger.warning("[settings] chat reasoning: cannot read the active provider (%s)",
                                type(exc).__name__)
-                return {"level": level, "levels": list(LEVELS), "provider": "", "applies": None}
-            return {"level": level, "levels": list(LEVELS), "provider": provider, "applies": applies}
+                return {"level": level, "levels": list(LEVELS), "provider": "", "applies": None, "takes": None}
+            return {"level": level, "levels": list(LEVELS), "provider": provider,
+                    "applies": level_applies(level, takes), "takes": takes}
 
         @router.get("/api/settings/containers")
         def api_get_containers() -> dict[str, Any]:

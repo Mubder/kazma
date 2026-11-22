@@ -600,9 +600,14 @@ alone as the negative controls.
    `memory:<work>` when none is bound; whose call from the bound scope;
    a failed call an `error` row), so it counts toward the person's daily
    limit too. Entity disambiguation's call never reached a provider: its
-   `client.chat(` is a coroutine it never awaits, so the reply it reads is
-   the coroutine's text and every answer was "skip" (off by default; whether
-   to make it work or remove it is the main session's call). Gate:
+   `client.chat(` was a coroutine it never awaited, so the reply it read
+   was the coroutine's text and every answer was "skip" (off by default).
+   Removed (the main session's decision): a high-stakes near match is
+   quarantined for review, as it always was in fact, and no product code
+   calls a client's chat without awaiting it
+   (`tests/test_coroutines_are_awaited.py`, the old line as the control).
+   Its setting `memory.v2.entity_llm_disambiguate` was never in kazma.yaml,
+   so nothing is retired; a stored value is read by nothing. Gate:
    `tests/test_memory_calls_ledgered.py` (the deep pass in English and
    Arabic, the summaries' chat and the refiner through the real code,
    today's direct calls as the control; a planted unledgered call found).
@@ -694,9 +699,11 @@ alone as the negative controls.
    "off" wherever the client takes it (DeepSeek too). Gate:
    `tests/test_qwen_reasoning_off.py` (each level on both hosts, look-alike
    hosts as the control, the refusal, the classifier in English and Arabic
-   with today's classifier as the control). Not changed: Settings' chat
-   reasoning card says the level does not apply on Qwen (true of
-   `low` / `high` / `max`, not of `off`). Measured the same day on 4c5939b23
+   with today's classifier as the control). Settings' chat reasoning card
+   said the level did not apply on Qwen (true of `low` / `high` / `max`,
+   not of `off`); it now says Qwen takes Off only, in English and Arabic
+   (`chat_reasoning.levels_taken`, the API's `takes`; the main session's
+   item 3). Measured the same day on 4c5939b23
    (`_refine_acts_llm` as a turn calls it, 8 gray-zone requests, 4 English
    and 4 Gulf Arabic, qwen3.7-plus, with and without the switch): with it,
    8 of 8 answered in time (1.4-3.4 s, median 1.8 s; 0 reasoning tokens;

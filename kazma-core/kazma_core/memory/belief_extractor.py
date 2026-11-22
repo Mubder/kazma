@@ -50,7 +50,7 @@ __all__ = [
 _CONSERVATIVE_CONF_THRESHOLD = 0.7
 
 # resolve_entity outcomes that mean "this name is an existing entity".
-_RESOLVED_ONTO_EXISTING = frozenset({"exact_match", "auto_merge", "llm_merge"})
+_RESOLVED_ONTO_EXISTING = frozenset({"exact_match", "auto_merge"})
 
 
 def _names_an_entity(conn: Any, text: str, *, tenant_id: str) -> bool:

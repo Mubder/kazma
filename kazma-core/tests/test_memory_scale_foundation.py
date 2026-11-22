@@ -124,48 +124,10 @@ def test_graph_capability_neo4j_needs_url():
     assert cap["status"] == "needs_url"
 
 
-def test_tier3_llm_gated_off():
-    from kazma_core.memory.entity_resolution import _tier3_llm_disambiguate
-
-    assert (
-        _tier3_llm_disambiguate(
-            "John", "john_smith", entity_type="person", distance=0.05, cfg={"v2": {}}
-        )
-        == "skip"
-    )
-    assert (
-        _tier3_llm_disambiguate(
-            "John",
-            "john_smith",
-            entity_type="person",
-            distance=0.05,
-            cfg={"v2": {"entity_llm_disambiguate": False}},
-        )
-        == "skip"
-    )
-
-
-def test_tier3_llm_merge_when_enabled(monkeypatch):
+def test_a_high_stakes_near_match_is_quarantined_with_no_model_call():
+    """Entity resolution's tier 3 (a model deciding the merge) was removed on
+    2026-11-22: it never reached a provider. A high-stakes near match is
+    quarantined for review, as it always was in fact."""
     from kazma_core.memory import entity_resolution as er
 
-    class _FakeClient:
-        def chat(self, messages=None, temperature=0, max_tokens=8):
-            return {"choices": [{"message": {"content": "MERGE"}}]}
-
-    class _FakeReg:
-        def get_client(self, model=None):
-            return _FakeClient()
-
-    monkeypatch.setattr(
-        "kazma_core.model_registry.get_model_registry", lambda: _FakeReg()
-    )
-    assert (
-        er._tier3_llm_disambiguate(
-            "J Smith",
-            "john_smith",
-            entity_type="person",
-            distance=0.05,
-            cfg={"v2": {"entity_llm_disambiguate": True}},
-        )
-        == "merge"
-    )
+    assert not hasattr(er, "_tier3_llm_disambiguate")

@@ -1314,6 +1314,8 @@
                         level: data.level,
                         applies: typeof data.applies === 'boolean' ? data.applies : null,
                         provider: data.provider || '',
+                        // What the provider takes of the level: 'all', 'off_only' (Qwen) or 'none'.
+                        takes: typeof data.takes === 'string' ? data.takes : null,
                     };
                 }
             } catch (e) { /* keep defaults */ }

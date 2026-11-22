@@ -160,7 +160,7 @@
         turnTimeoutSaving: false,
         turnSpending: { tokens: 500000, tokensMax: 100000000, dailyUsd: 0, dailyMax: 1000000 },
         turnSpendingSaving: false,
-        chatReasoning: { level: 'default', applies: null, provider: '' },
+        chatReasoning: { level: 'default', applies: null, provider: '', takes: null },
         chatReasoningSaving: false,
         // Which container engine Kazma uses (containers.engine).
         containerEngine: { engine: '', effective: '', loaded: false, installed: { kazma: false, desktop: false } },

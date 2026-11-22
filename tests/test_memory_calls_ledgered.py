@@ -51,9 +51,6 @@ _MEMORY_PLACES = ("kazma-core/kazma_core/memory/", "kazma-core/kazma_core/skills
 
 #: Memory model calls that are not ledgered, (file, function) -> (sites, why).
 NOT_LEDGERED: dict[tuple[str, str], tuple[int, str]] = {
-    ("kazma-core/kazma_core/memory/entity_resolution.py", "_tier3_llm_disambiguate"): (
-        1, "tier 3 is off by default, and its client.chat( here is a coroutine never awaited: no call "
-           "reaches a provider (said to the main session, 22 Nov)"),
     ("kazma-core/kazma_core/memory/benchmark.py", "_CapturingClient.chat"): (
         1, "the benchmark's recorder, which wraps the client it records: not the product's calls"),
 }

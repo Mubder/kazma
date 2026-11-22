@@ -258,7 +258,17 @@ def test_the_page_reads_the_level_and_whether_the_provider_takes_it(tmp_path, mo
     monkeypatch.setattr("kazma_core.model_registry.get_model_registry", lambda: Registry(DEEPSEEK))
     assert client.get("/api/settings/chat-reasoning").json() == {
         "level": "low", "levels": ["default", "off", "low", "high", "max"],
-        "provider": "deepseek", "applies": True}
+        "provider": "deepseek", "applies": True, "takes": "all"}
     monkeypatch.setattr("kazma_core.model_registry.get_model_registry",
                         lambda: Registry("https://api.example.org/v1"))
-    assert client.get("/api/settings/chat-reasoning").json()["applies"] is False
+    answer = client.get("/api/settings/chat-reasoning").json()
+    assert (answer["applies"], answer["takes"]) == (False, "none")
+    # Qwen on Model Studio takes Off alone (the memory plan's finding 12): the
+    # chosen "low" sends nothing, "off" reaches it.
+    monkeypatch.setattr("kazma_core.model_registry.get_model_registry",
+                        lambda: Registry("https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1"))
+    answer = client.get("/api/settings/chat-reasoning").json()
+    assert (answer["applies"], answer["takes"]) == (False, "off_only")
+    store.set("agent.chat_reasoning", "off", category="agent")
+    answer = client.get("/api/settings/chat-reasoning").json()
+    assert (answer["applies"], answer["takes"]) == (True, "off_only")

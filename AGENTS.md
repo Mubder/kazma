@@ -8167,8 +8167,10 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   `cache_read_input_tokens` beside an `input_tokens` that leaves it out --
   read raw, an Anthropic row's prompt counted none) into `cached_tokens`;
   every sum gives `prompt_tokens` and `cached_tokens` beside each other.
-  Entity resolution's tier 3 is declared: its `client.chat(` is a coroutine
-  never awaited, so it reaches no provider. Gate:
+  Entity resolution's tier 3 (a model deciding a merge) is removed: its
+  `client.chat(` was a coroutine never awaited, so it never reached a
+  provider; no product code calls a client's chat without awaiting it
+  (`tests/test_coroutines_are_awaited.py`). Gate:
   `tests/test_memory_calls_ledgered.py` (the deep pass EN/AR, the summaries'
   chat and the refiner through the real code; today's calls, today's rows
   and planted sites as the controls).
@@ -12599,7 +12601,9 @@ is the reasoning setting below plus the tool count per turn (open).
   every field of `llm_provider._REASONING_FIELDS`; the stream's 4xx falls
   back to it). X drafting, research and the intent classifier's refinement
   (`intent/classify._refine_acts_llm`: a thinking model spent its whole 4 s
-  reasoning) keep `reasoning="off"`. Gates: `tests/test_chat_reasoning.py`
+  reasoning) keep `reasoning="off"`. Settings' card says what the active
+  provider takes (`chat_reasoning.levels_taken`: every level, Off only, or
+  nothing; the API's `takes`). Gates: `tests/test_chat_reasoning.py`
   (each level on the wire, the refusal, the stream, a real turn through the
   supervisor graph with the call before the setting as the negative
   control, every `invoke_llm_chat` call in the chat turn's modules carrying

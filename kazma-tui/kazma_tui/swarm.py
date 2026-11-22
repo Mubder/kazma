@@ -164,8 +164,10 @@ class SwarmTasksTable(DataTable):
                 logger.debug("Task duration calc failed: %s", exc)
         return "—"
 
-    def on_show(self) -> None:
-        self._refresh()
+    async def on_show(self) -> None:
+        # Awaited: called from a plain method, the coroutine was never run
+        # and the table never refreshed when shown (tests/test_coroutines_are_awaited.py).
+        await self._refresh()
 
 
 class ActiveTasksLog(RichLog):

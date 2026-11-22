@@ -83,9 +83,6 @@ DECLARED: dict[tuple[str, str], tuple[int, str]] = {
         1, TOOL + " (email_analyze)"),
     # ── Kazma's own work after a turn ──
     ("kazma-core/kazma_core/memory/belief_extractor.py", "_llm_extract"): (1, KAZMA_OWN + " (the deep pass)"),
-    ("kazma-core/kazma_core/memory/entity_resolution.py", "_tier3_llm_disambiguate"): (
-        1, "entity resolution's tier 3 (off by default): the client's chat is a coroutine never "
-           "awaited here, so no call reaches a provider (tests/test_memory_calls_ledgered.py)"),
     ("kazma-core/kazma_core/memory/topic_summaries.py", "_default_chat._chat"): (
         1, KAZMA_OWN + " (weekly summaries and roll-ups: the chat handed to the writer)"),
     ("kazma-core/kazma_core/skills/self_improvement.py", "SelfImprovementSkill._analyze_success"): (
