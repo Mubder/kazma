@@ -303,6 +303,12 @@ def _score(
     return out
 
 
+#: The margin of a memory the question names by its words of the user
+#: ("What is my city?": ``recall._named_facts``): it is shown whatever its
+#: evidence, so it is never at the edge. Larger than any evidence distance.
+NAMED_MARGIN = 1.0
+
+
 def _margin(
     question: dict[str, Any], refs: dict[str, str], covers: dict[str, set[str]],
     trace: list[dict[str, Any]],
@@ -321,7 +327,9 @@ def _margin(
     dist: dict[str, float] = {}
     for row in trace:
         for mid, ev in row["evidence"].items():
-            d = ev - row["cut"]
+            # A memory the question names by its words (``recall._named_facts``)
+            # clears no cut: no rounding of a vector moves it.
+            d = NAMED_MARGIN if mid in row.get("named", ()) else ev - row["cut"]
             dist[mid] = max(d, dist.get(mid, d))
     pieces = [{refs.get(a, a) for a in piece.split("|")} for piece in question["gold"]]
     if not pieces:
@@ -2165,6 +2173,12 @@ FACT_LANGUAGES: dict[str, Any] = {
         ("en", "name_is", "What is my name?"), ("ar", "name_is", "شنو اسمي؟"),
         ("en", "allergic_to", "What am I allergic to?"), ("ar", "allergic_to", "عندي حساسية من شنو؟"),
         ("en", "favorite_color", "What is my favorite color?"), ("ar", "favorite_color", "شنو لوني المفضل؟"),
+        # City and home said of the user (``fact_names.ASKED_AS_MINE``); the
+        # last of each language is the real-use suite's "other words" step.
+        ("en", "lives_in", "What is my city?"), ("en", "lives_in", "Where is my home these days?"),
+        ("en", "lives_in", "Which city is home for me at the moment?"),
+        ("ar", "lives_in", "شنو مدينتي؟"), ("ar", "lives_in", "وين بيتي الحين؟"), ("ar", "lives_in", "وين ديرتي؟"),
+        ("ar", "lives_in", "أي مدينة صارت بيتي هالفترة؟"),
     ],
     # (language, question): a fact's word in another sense, asked of the
     # store of all five facts.
@@ -2172,6 +2186,9 @@ FACT_LANGUAGES: dict[str, Any] = {
         ("en", "What is the name of this song?"), ("en", "Which animals live in the forest?"),
         ("en", "Is the concert live tonight?"),
         ("ar", "شنو اسم هالأغنية؟"), ("ar", "أي حيوان يعيش في الغابة؟"),
+        # City and home not said of the user: nothing of the user's.
+        ("en", "Which city is the capital?"), ("en", "How do I open the home page?"),
+        ("ar", "وين مدينة الملاهي؟"), ("ar", "شنو بيت الشعر؟"),
     ],
 }
 FACT_LANGUAGES_VECTORS = "fact_languages_vectors.npz"

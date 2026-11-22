@@ -287,6 +287,7 @@ def recall(
     token = _QUERY_MEMO.set(memo)
     names = _ENTRY_NAMES.set(people.ranking_names() if people.shared else None)
     keeps = _BELIEF_KEEP.set(_whose_facts(people, asker, query) if people.shared else None)
+    entry = _ASKER_ENTRY.set(people.entry_for(asker) if people.shared else "user")
     asked = _ASK.set(ask)
     lists = _LISTING.set(listing)
     seen = _IN_CONTEXT.set((session_id, in_context) if session_id and in_context else None)
@@ -299,6 +300,7 @@ def recall(
         _IN_CONTEXT.reset(seen)
         _LISTING.reset(lists)
         _ASK.reset(asked)
+        _ASKER_ENTRY.reset(entry)
         _BELIEF_KEEP.reset(keeps)
         _ENTRY_NAMES.reset(names)
         _QUERY_MEMO.reset(token)
@@ -568,6 +570,26 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
 #: Which facts a shared space's question is about (``_whose_facts``): a
 #: subject -> keep? test, for this recall only.
 _BELIEF_KEEP: contextvars.ContextVar[Any] = contextvars.ContextVar("kazma_recall_belief_keep", default=None)
+#: The subject the asker's own facts are filed under, for this recall:
+#: ``user``, or their member entry in a shared space (None there: no speaker).
+_ASKER_ENTRY: contextvars.ContextVar[str | None] = contextvars.ContextVar("kazma_recall_asker_entry",
+                                                                          default=None)
+
+
+def _named_facts(query: str, rows: dict[str, Any]) -> frozenset[str]:
+    """The facts among *rows* that *query* asks by saying their words of the
+    user ("What is my city?", "وين بيتي؟": ``fact_names.kinds_said_of_the_user``):
+    the asker's own, of the kind it names. Recall keeps them whatever their
+    meaning score (``_rank_by_evidence``'s ``named``)."""
+    from kazma_core.memory.fact_names import kinds_said_of_the_user
+
+    entry = _ASKER_ENTRY.get()
+    kinds = kinds_said_of_the_user(query) if entry else ()
+    if not kinds:
+        return frozenset()
+    return frozenset(bid for bid, row in rows.items()
+                     if str(_field(row, "predicate") or "") in kinds
+                     and str(_field(row, "subject") or "") == entry)
 
 
 def _whose_facts(people: Any, asker: str | None, query: str) -> Any:
@@ -1311,7 +1333,7 @@ def _pg_primary_beliefs(
     ]
     ranked = _rank_by_evidence(
         query, candidates, _question_background([sim for _b, sim in dense_pairs], kind="belief"),
-        kind="belief"
+        kind="belief", named=_named_facts(query, rows),
     )
     ranked = _primary_beliefs_as_local(ranked, rows, local, tenant_id, limit)
     sources = {
@@ -1723,7 +1745,8 @@ def _recall_beliefs(
         _belief_candidate(bid, row, sims.get(bid), bid in by_meaning) for bid, row in rows.items()
     ]
     ranked = _rank_by_evidence(
-        q, candidates, _question_background([sim for _bid, sim in dense], kind="belief"), kind="belief"
+        q, candidates, _question_background([sim for _bid, sim in dense], kind="belief"), kind="belief",
+        named=_named_facts(q, rows),
     )
     ranked = _facts_in_time(ranked, rows, ask)
     if _LISTING.get():
@@ -2505,6 +2528,7 @@ def _rank_by_evidence(
     background: float,
     *,
     kind: str = "episode",
+    named: frozenset[str] = frozenset(),
 ) -> list[RecallHit]:
     """The candidates that are about the question, best first; [] when none is.
 
@@ -2534,6 +2558,12 @@ def _rank_by_evidence(
     # A one-digit number counts ("week 4"): it tells near-identical memories
     # apart, and dropped, "week 4" matched "week 14" as well (part F).
     terms = _without_time_words(content_terms(query, digits=True))
+    if kind == "belief":
+        # A fact's words: "my city" / "مدينتي" read as asking where the user
+        # lives, said of the user only (``fact_names.asked_as_mine``).
+        from kazma_core.memory.fact_names import asked_as_mine
+
+        terms = asked_as_mine(query, terms)
     scored: list[tuple[_Candidate, float, float, float]] = []
     for cand in candidates:
         lift = (cand.similarity - background) if cand.similarity is not None else 0.0
@@ -2541,18 +2571,26 @@ def _rank_by_evidence(
         scored.append((cand, lift + cov_weight * cov, lift, cov))
     passing = [row for row in scored if row[1] >= floor]
     best = max((row[1] for row in passing), default=None)
+    # A fact the question asks by saying its words of the user ("What is my
+    # city?", "وين بيتي؟": ``_named_facts``) is kept whatever its evidence:
+    # the wording asks it, and meaning alone put such questions below an
+    # unrelated question's background.
+    said = [row for row in scored if row[0].id in named]
     trace = _EVIDENCE_TRACE.get()
     if trace is not None:
         # The cut a memory must clear to be shown: the floor, or, behind the
-        # best, the gap (the benchmark's edge margin, ``trace_evidence``).
+        # best, the gap (the benchmark's edge margin, ``trace_evidence``). A
+        # named memory clears no cut: it stands by the question's words.
         trace.append({
             "kind": kind,
             "cut": floor if best is None else max(floor, best - gap),
             "evidence": {cand.id: ev for cand, ev, _lift, _cov in scored},
+            "named": sorted(cand.id for cand, *_rest in said),
         })
-    if best is None:
+    if best is None and not said:
         return []
-    kept = [row for row in passing if row[1] >= best - gap]
+    kept = [row for row in passing if best is not None and row[1] >= best - gap]
+    kept += [row for row in said if row not in kept]
     # Rank by time, equal times sharing a rank: the facts one turn yielded were
     # all stated at once, and list position is not newer.
     times = sorted({row[0].created_at for row in kept})
@@ -2579,7 +2617,7 @@ def _rank_by_evidence(
                 "lift": round(lift, 4),
                 "coverage": round(cov, 3),
                 "evidence": round(ev, 4),
-                "strength": "strong" if ev >= strong else "weak",
+                "strength": "strong" if ev >= strong or cand.id in named else "weak",
                 # When it was said (a turn) or became true (a fact): the date
                 # the block shows (``_date_hits``, framework audit F2).
                 "at": cand.created_at,
@@ -2972,10 +3010,12 @@ def _belief_search_words(query: str) -> list[str]:
     English name, and an Arabic question's own found no fact (the memory
     plan's finding 10). The kinds come first: the words are cut at
     :data:`_QUESTION_MAX_TERMS`."""
-    from kazma_core.memory.fact_names import kinds_asked
+    from kazma_core.memory.fact_names import asked_as_mine, kinds_asked
     from kazma_core.memory.query_terms import content_terms
 
-    kinds = list(kinds_asked(_without_time_words(content_terms(query))))
+    # "my city", "وين بيتي" ask where the user lives; "the home page" and
+    # "بيت الشعر" ask nothing of the user (``fact_names.asked_as_mine``).
+    kinds = list(kinds_asked(asked_as_mine(query, _without_time_words(content_terms(query)))))
     return [*kinds, *(w for w in _search_words(query) if w not in kinds)]
 
 

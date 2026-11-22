@@ -323,6 +323,14 @@ def _kinds_asked(text: str) -> tuple[str, ...]:
     return kinds_asked(content_terms(text))
 
 
+def _said_of_the_user(text: str) -> tuple[str, ...]:
+    """The fact kinds a question asks by saying "city" or "home" of the
+    user ("my city", "مدينتي"): never "home" describing another thing."""
+    from kazma_core.memory.fact_names import kinds_said_of_the_user
+
+    return kinds_said_of_the_user(text)
+
+
 def _follow_up(text: str) -> bool:
     from kazma_core.memory.question_shape import is_follow_up
 
@@ -442,6 +450,11 @@ PAIRS: list[Pair] = [
          "What is my name?", "شنو اسمي؟", _kinds_asked, ("name_is", "preferred_name")),
     Pair("asked_nothing_of_the_user", (M + "memory/fact_names.py",),
          "What time is it in Tokyo?", "كم الساعة في طوكيو؟", _kinds_asked, ()),
+    Pair("said_of_the_user", (M + "memory/fact_names.py",),
+         "Which city is home for me at the moment?", "أي مدينة صارت بيتي هالفترة؟", _said_of_the_user,
+         ("lives_in",)),
+    Pair("not_said_of_the_user", (M + "memory/fact_names.py",),
+         "What is my home Wi-Fi network called?", "شنو اسم شبكة الواي فاي في بيتي؟", _said_of_the_user, ()),
     Pair("fact_lives_in", (M + "memory/belief_extractor.py", M + "memory/arabic_facts.py"),
          "I live in Dubai.", "أنا ساكن في دبي.", _facts, [("user", "lives_in")]),
     Pair("fact_name", (M + "memory/belief_extractor.py", M + "memory/arabic_facts.py"),

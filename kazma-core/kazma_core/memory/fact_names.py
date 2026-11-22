@@ -26,8 +26,8 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 
-__all__ = ["ASKED_WITH", "KINDS", "NOT_ASKED_BY_WORDS", "asked_words", "kinds_asked", "plural_of_a_kind",
-           "users_names", "users_predicate"]
+__all__ = ["ASKED_AS_MINE", "ASKED_WITH", "KINDS", "NOT_ASKED_BY_WORDS", "asked_as_mine", "asked_words",
+           "kinds_asked", "kinds_said_of_the_user", "plural_of_a_kind", "users_names", "users_predicate"]
 
 #: Kazma's name -> the names a model gives the same fact about a person.
 KINDS: dict[str, tuple[str, ...]] = {
@@ -80,6 +80,118 @@ ASKED_WITH: dict[str, tuple[str, ...]] = {
 NOT_ASKED_BY_WORDS: dict[str, str] = {
     "prefers": "like, love, use, أحب, أستخدم are said of anything; a table would cover every question",
 }
+
+#: Words that ask a fact only when they are said of the user: "my city",
+#: "home for me", "مدينتي", "وين بيتي" ask where the user lives, while "which
+#: city is the capital", "the home page", "مدينة الملاهي" and "بيت الشعر"
+#: ask nothing of the user (the main session's decision, 22 Nov, after the
+#: real-use suite's Arabic "أي مدينة صارت بيتي هالفترة؟" found no fact). Per
+#: kind: the words, as written, and how each language says they are the
+#: user's -- English in the phrase (its "my" is no content word), Arabic in
+#: the word itself (the possessive suffix) -- and the kind's own word they
+#: are read as (one of :data:`ASKED_WITH`'s).
+#:
+#: The word must be the thing asked, in both languages: never a word that
+#: describes another ("my home Wi-Fi", "my home address", "my home town";
+#: "شبكة بيتي", "عنوان بيتي"), never a place something is in ("in my home",
+#: "في بيتي"), never another kind of city ("my favourite city", "مدينتي
+#: المفضلة", "مدينتي الأصلية"). The small store's abstain question q805, "What
+#: is my home Wi-Fi network called?", showed the home before this rule.
+ASKED_AS_MINE: dict[str, dict[str, object]] = {
+    "lives_in": {
+        "words": ("city", "home", "town", "مدينة", "بيت", "ديرة"),
+        "en": re.compile(
+            r"(?<!\bin )(?<!\bat )(?<!\bof )(?<!\bfrom )(?<!\bto )(?<!\bnear )(?<!\binside )"
+            r"\bmy (?:city|town|home)(?='s\b|\s*(?:$|[?.!,;:])|\s+(?:is|was|now|these|this|at|in|right"
+            r"|currently|nowadays|today|then|lately)\b)"
+            r"|\b(?:city|town|home) (?:for|to) (?:me|us)\b"
+            r"|\b(?:i|we) call home\b"),
+        "ar": ("مدينتي", "بيتي", "ديرتي", "مدينتنا", "بيتنا", "ديرتنا"),
+        # The word an Arabic first-person word may follow (folded): a question
+        # word, "it is", a verb of becoming -- else it is another noun's
+        # ("عنوان بيتي") or a place something is in ("في بيتي").
+        "ar_after": ("وين", "فين", "شنو", "وش", "ايش", "شو", "اي", "هي", "هو", "ماهي", "وينها",
+                     "صار", "صارت", "يصير", "تصير", "كان", "كانت"),
+        # Words after it that make it another city ("المفضلة", "الأصلية").
+        "ar_not_before": ("المفضله", "المفضل", "الاصليه", "الاصلي"),
+        "as": "live",
+    },
+}
+
+
+@lru_cache(maxsize=1)
+def _mine_sets() -> dict[str, tuple[frozenset[str], frozenset[str], str]]:
+    """Per kind of :data:`ASKED_AS_MINE`: its words and its Arabic
+    first-person words, folded (``query_terms.content_terms``), and the
+    kind's word, folded."""
+    from kazma_core.memory.query_terms import content_terms
+
+    out = {}
+    for key, rule in ASKED_AS_MINE.items():
+        mine = frozenset(content_terms(" ".join(rule["ar"])))  # type: ignore[arg-type]
+        words = frozenset(content_terms(" ".join(rule["words"]))) | mine  # type: ignore[arg-type]
+        out[key] = (words, mine, content_terms(str(rule["as"]))[0])
+    return out
+
+
+@lru_cache(maxsize=1)
+def _arabic_neighbours() -> dict[str, tuple[frozenset[str], frozenset[str]]]:
+    """Per kind: the words an Arabic first-person word may follow, and the
+    words it may not come before, folded as search folds them."""
+    from kazma_core.documents.arabic import fold_for_search
+
+    return {key: (frozenset(fold_for_search(w) for w in rule["ar_after"]),  # type: ignore[union-attr]
+                  frozenset(fold_for_search(w) for w in rule["ar_not_before"]))  # type: ignore[union-attr]
+            for key, rule in ASKED_AS_MINE.items()}
+
+
+_WORD_RE = re.compile(r"[^\W_]+")
+
+
+def _said_of_the_user_ar(question: str, mine: frozenset[str], after: frozenset[str],
+                         not_before: frozenset[str]) -> bool:
+    """Whether an Arabic first-person word of *mine* is the thing asked: the
+    question's first word or after one of *after*, and not before one of
+    *not_before*."""
+    from kazma_core.documents.arabic import fold_for_search
+
+    words = _WORD_RE.findall(fold_for_search(question or ""))
+    for i, word in enumerate(words):
+        if word not in mine:
+            continue
+        if (i == 0 or words[i - 1] in after) and (i + 1 == len(words) or words[i + 1] not in not_before):
+            return True
+    return False
+
+
+def kinds_said_of_the_user(question: str) -> tuple[str, ...]:
+    """The kinds of :data:`ASKED_AS_MINE` *question* asks by saying their
+    words of the user ("What is my city?", "وين بيتي؟" -> ``lives_in``). Such
+    a question asks that fact by its wording, whatever meaning makes of it:
+    bge-m3 puts "What is my city?" below an unrelated question's background
+    for "user lives in Porto", so recall shows the asker's own fact of that
+    kind (``recall._rank_by_evidence``'s ``named``)."""
+    lowered = " ".join(str(question or "").lower().replace("’", "'").split())
+    neighbours = _arabic_neighbours()
+    return tuple(key for key, (_words, mine, _word) in _mine_sets().items()
+                 if ASKED_AS_MINE[key]["en"].search(lowered)  # type: ignore[union-attr]
+                 or _said_of_the_user_ar(question, mine, *neighbours[key]))
+
+
+def asked_as_mine(question: str, terms: list[str]) -> list[str]:
+    """*terms* (a question's content words) with the words :data:`ASKED_AS_MINE`
+    names read as their fact's own word ("live") when the question says them
+    of the user, in either language; else *terms* unchanged. Recall's fact
+    lane asks it before it looks up the kinds a question names and before it
+    measures a fact's word coverage (``recall._belief_search_words``,
+    ``recall._rank_by_evidence``): never the other lanes, where "city" in a
+    turn is a word like any other."""
+    out = list(terms)
+    sets = _mine_sets()
+    for key in kinds_said_of_the_user(question):
+        words, _mine, word = sets[key]
+        out = [word if term in words else term for term in out]
+    return list(dict.fromkeys(out))
 
 
 def _favourite_kind_words(kind: str) -> tuple[str, ...]:

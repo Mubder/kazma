@@ -471,6 +471,33 @@ rows -- and the forgotten fact asked (step 8) fails once on each side
 (finding 1). Spend: 149 model calls, 3.99M prompt tokens, 20,210
 completion tokens.
 
+City and home, the main session's decision the same day: first-person
+forms only, in both languages, and precision rows that find no fact.
+`fact_names.ASKED_AS_MINE` / `kinds_said_of_the_user`: "my city", "my home",
+"home for me", "I call home"; "مدينتي", "بيتي", "ديرتي" after a question word
+or a verb of becoming ("وين بيتي", "صارت بيتي"). The word must be the thing
+asked, in both languages: "my home Wi-Fi", "my home address", "in my home",
+"my favourite city" and "شبكة بيتي", "عنوان بيتي", "في بيتي", "مدينتي
+المفضلة" ask nothing, nor do "which city is the capital", "the home page",
+"مدينة الملاهي" and "بيت الشعر". The words alone were not enough. bge-m3 puts
+"What is my city?" below an unrelated question's background for "user lives
+in Porto" (lift -0.10; the Arabic other-words question -0.23), and a fact's
+word coverage weighs 0.06. So a question that says a fact's words of the
+user keeps the asker's own fact of that kind, whatever its evidence
+(`recall._named_facts`, both fact lanes). Measured with bge-m3's recorded
+vectors on the fact-languages set: the 28 city/home rows (seven questions,
+told in each language, stores of one and five) hold 28/28 with the rule,
+7/28 with the words alone, 3/28 with today's code; the real-use suite's
+Arabic other-words question is lost in every store without the rule and
+found in every store with it. The precision rows show no fact. Kazma's
+benchmark, the speakers set and the small store: no question moves, with
+and without the rule on one tree. The first version moved one: the small
+store's abstain question q805, "What is my home Wi-Fi network called?",
+showed the home. That is why "my home" must be the thing asked, and q805's
+Arabic twin is a precision row too. Gate:
+`tests/test_memory_fact_languages.py`, with today's code and the words
+alone as the negative controls.
+
 1. **A fact told once is kept twice, and forgetting one copy leaves it
    known.** In the real-use suite (`scripts/memory_real_use.py`, 22 Nov)
    "My sister Noura works as a dentist." became two memories: the turn, and

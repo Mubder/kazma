@@ -220,7 +220,7 @@ def test_negative_control_rank_fusion_brings_the_junk_back(store, monkeypatch, p
     an unrelated question with filler again."""
     _passport_world(store)
 
-    def _every_candidate(query, candidates, background, *, kind="episode"):
+    def _every_candidate(query, candidates, background, *, kind="episode", named=frozenset()):
         return [recall_mod.RecallHit(id=c.id, content=c.content, score=1.0 / (60 + i),
                                      kind=kind, source="dense")
                 for i, c in enumerate(candidates)]

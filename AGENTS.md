@@ -2096,7 +2096,30 @@ four injected were noise.
   vectors, `scripts/memory_bench.py fact-languages-vectors`; a word in
   another sense shows none; every predicate a quick pass writes has words in
   both languages or a reason; today's rules as the negative control, which
-  lose Arabic questions only).
+  lose Arabic questions only). **City and home ask where the user lives
+  only when said of the user** (2026-11-22, the main session's decision
+  after the real-use suite's "أي مدينة صارت بيتي هالفترة؟" found no fact):
+  `fact_names.ASKED_AS_MINE`, `kinds_said_of_the_user`. English says it in
+  the phrase ("my city", "my home", "home for me", "I call home"), Arabic in
+  the word ("مدينتي", "بيتي", "ديرتي" after a question word or a verb of
+  becoming). The word must be the thing asked, in both languages: never a
+  word describing another ("my home Wi-Fi", "عنوان بيتي"), a place
+  something is in ("in my home", "في بيتي") or another kind of city ("my
+  favourite city", "مدينتي المفضلة"). "Which city is the capital", "the home
+  page", "مدينة الملاهي" and "بيت الشعر" ask nothing. Such a question reads
+  those words as "live" in the fact lane (`asked_as_mine`, for its kinds
+  and its word coverage), and the asker's own fact of that kind is kept
+  whatever its evidence (`recall._named_facts`, `_rank_by_evidence`'s
+  `named`, both fact lanes; `_ASKER_ENTRY` is `user` or the member's
+  entry). Words alone were not enough: bge-m3 puts "What is my city?" below
+  an unrelated question's background for "user lives in Porto", and a
+  fact's coverage weighs 0.06. A named fact clears no cut, so the
+  benchmark's edge margin counts it as `benchmark.NAMED_MARGIN`. Measured:
+  the 28 city/home rows of the fact-languages set 3/28 -> 28/28 (words alone
+  7/28), the precision rows show no fact; Kazma's benchmark, the speakers
+  set and the small store do not move (a first version showed the home for
+  the small store's abstain question q805, "What is my home Wi-Fi network
+  called?": hence the rule that the word is the thing asked).
 - **One fact, one predicate name (W6, `memory/predicates.py`).** The
   extractor names predicates freely; under two names a single-valued fact is
   never superseded (live 2026-09-27: "daily_tweet_cap" 16 and
