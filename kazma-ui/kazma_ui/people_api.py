@@ -315,6 +315,21 @@ def create_people_router() -> APIRouter:
             return invalid_json_response()
         return await asyncio.to_thread(_set_enabled, request, account_id, body)
 
+    @router.post("/api/people/{account_id}/sessions/end")
+    def end_sessions(account_id: str, request: Request) -> JSONResponse:
+        """End every open session of a person (Spaces S2-10): they sign in
+        again; recorded, and they are told."""
+        denied = _not_admin(request)
+        if denied:
+            return denied
+        try:
+            ended = people.end_sessions(account_id, by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True, "ended": ended})
+
     def _set_models(request: Request, account_id: str, body: dict[str, Any]) -> JSONResponse:
         try:
             kept = people.set_models(account_id, body.get("allowed"), body.get("default"),

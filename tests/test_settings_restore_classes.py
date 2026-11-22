@@ -49,6 +49,18 @@ _SKIP_FILES = frozenset({
 DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     # The one writer of the Spaces switch (S1-33), by its constant.
     "kazma-core/kazma_core/spaces/preconditions.py::switch_on": ("identity.enforced",),
+    # A long task and a YOLO window are each a chat's and, once Spaces is
+    # enforced, a person's in it (S2-06, the review's fixes): the key is
+    # built by _record_key / the window's key from safety.grant_holder.
+    "kazma-core/kazma_core/agent/long_task.py::consume_long_task_turn": ("long_task.",),
+    "kazma-core/kazma_core/agent/long_task.py::disable_long_task": ("long_task.",),
+    "kazma-core/kazma_core/agent/long_task.py::enable_long_task": ("long_task.",),
+    "kazma-core/kazma_core/agent/long_task.py::long_task_status": ("long_task.",),
+    "kazma-core/kazma_core/agent/long_task.py::pause_long_task": ("long_task.",),
+    "kazma-core/kazma_core/safety/yolo.py::disable_yolo": ("yolo.",),
+    "kazma-core/kazma_core/safety/yolo.py::enable_yolo": ("yolo.",),
+    "kazma-core/kazma_core/safety/yolo.py::slide_yolo_expiry": ("yolo.",),
+    "kazma-core/kazma_core/safety/yolo.py::yolo_status": ("yolo.",),
     # The papers index of the space the work is in (papers_index_key):
     # research.papers_index, under tenant.<id>. for every space but the owner's.
     "kazma-core/kazma_core/tools/research_final_paper.py::keep_final_paper": ("research.papers_index",),

@@ -106,6 +106,11 @@ A password reset is never silent: it is recorded in the identity store's
 record, which cannot be edited without the edit showing, and the person is
 told the next time they open Kazma.
 
+People shows each person whole: their features, tools, daily limit and
+models, the spaces they are a member of, when they last signed in and how
+many sessions they have open. Ending their sessions signs them out on every
+device; it is recorded, and they are told the next time they sign in.
+
 ## A daily limit per person
 
 Your friends use your model keys, so each person but you has a daily

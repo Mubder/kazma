@@ -304,6 +304,14 @@ def list_sessions(*, user_id: str = "", username: str = "", current: str | None 
     return sorted(rows, key=lambda r: r["started_at"], reverse=True)
 
 
+def session_starts() -> list[dict[str, Any]]:
+    """Every live web session: whose (``user_id``, ``actor``: who minted it)
+    and when it began. Never a session id or its hash: for the People page,
+    which counts each person's sessions and their newest (Spaces S2-10)."""
+    return [{"user_id": str(payload.get("user_id") or ""), "actor": str(payload.get("actor") or ""),
+             "started_at": float(payload.get("created_at") or 0)} for _key, payload in _live_records()]
+
+
 def revoke_user_sessions(*, user_id: str = "", username: str = "", keep: str | None = None) -> int:
     """End every live session of one person but *keep* (the raw cookie value
     of the session asking): after a password change the old one must not

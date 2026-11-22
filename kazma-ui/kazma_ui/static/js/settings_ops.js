@@ -1166,6 +1166,39 @@
             await this.loadPeople();
         },
 
+        // When a person last signed in (Spaces S2-10): a date in the page's
+        // language, or "never".
+        lastSignInText(person) {
+            if (!person || !person.last_sign_in) return _t('settings.people_never_signed_in', 'Never');
+            return window.KazmaFormat ? window.KazmaFormat.dateTime(person.last_sign_in) : person.last_sign_in;
+        },
+
+        sessionsText(person) {
+            const n = Number((person && person.sessions) || 0);
+            return window.kazmaCount('settings.people_sessions_open', n,
+                { n: window.KazmaFormat ? window.KazmaFormat.number(n) : String(n) });
+        },
+
+        async endPersonSessions(person) {
+            if (!person) return;
+            const ok = await window.kazmaConfirm({
+                title: _t('settings.people_end_sessions_title', 'Sign {name} out everywhere?', { name: _iso(person.name) }),
+                message: _t('settings.people_end_sessions_confirm',
+                    'Every session they have open ends, and they sign in again on each device. They are told the next time they sign in.'),
+                confirmText: _t('settings.people_end_sessions', 'End sessions'),
+            });
+            if (!ok) return;
+            try {
+                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/sessions/end', { method: 'POST' });
+            } catch (e) {
+                showToast(this._peopleError(e && e.body), 'error');
+                return;
+            }
+            showToast(_t('settings.people_sessions_ended', '{name} is signed out everywhere.', { name: _iso(person.name) }),
+                'success');
+            await this.loadPeople();
+        },
+
         async deletePerson(person) {
             const ok = await window.kazmaConfirm({
                 title: _t('settings.people_delete_title', 'Delete {name}?', { name: _iso(person.name) }),

@@ -2475,6 +2475,7 @@
                 <span></span>
               </div>
               <template x-for="p in people" :key="p.id">
+                <div :data-person-block="p.id">
                 <div class="account-list-row" :data-person="p.id">
                   <span class="account-list-name"><bdi translate="no" x-text="p.name || window.t('settings.people_owner')"></bdi>
                     <span class="badge badge-warning" x-show="p.enabled === false" x-cloak data-person-disabled>{{ t('settings.people_disabled') }}</span></span>
@@ -2489,6 +2490,28 @@
                       </span>
                     </template>
                   </span>
+                </div>
+                <!-- Their spaces, last sign-in and open sessions (Spaces S2-10):
+                     names and counts, never a session id. -->
+                <div class="account-list-row" style="flex-wrap:wrap;gap:6px 16px" :data-person-details="p.id">
+                  <span class="account-list-meta" :data-person-spaces="p.id">
+                    <span>{{ t('settings.people_spaces_of') }}</span>
+                    <template x-for="s in (p.spaces || [])" :key="p.id + ':space:' + s.id">
+                      <span class="badge badge-secondary" :data-person-space="s.id">
+                        <template x-if="s.kind === 'personal'"><span>{{ t('settings.people_space_usage_personal') }}</span></template>
+                        <template x-if="s.kind !== 'personal'"><bdi translate="no" x-text="s.name"></bdi></template>
+                        <template x-if="s.role === 'owner'"><span>{{ t('settings.people_space_owner_mark') }}</span></template>
+                      </span>
+                    </template>
+                  </span>
+                  <span class="account-list-meta" :data-person-last-sign-in="p.id">
+                    <span>{{ t('settings.people_last_sign_in') }}</span>
+                    <time :datetime="p.last_sign_in || null" x-text="lastSignInText(p)"></time>
+                  </span>
+                  <span class="account-list-meta" :data-person-sessions="p.id" x-text="sessionsText(p)"></span>
+                  <button type="button" class="btn btn-sm btn-ghost" data-person-end-sessions x-show="!p.owner && p.sessions > 0" x-cloak
+                          @click="endPersonSessions(p)" :aria-label="window.t('settings.people_end_sessions_of', {name: p.name})">{{ t('settings.people_end_sessions') }}</button>
+                </div>
                 </div>
               </template>
             </div>

@@ -22,7 +22,8 @@
     }
 
     // Each kind of notice, in the page's language: a reset of their password
-    // (S1-25), being added to a shared space or taken out of one (S2-12).
+    // (S1-25), their sessions ended (S2-10), being added to a shared space or
+    // taken out of one (S2-12).
     function wording(notice) {
         const when = window.KazmaFormat ? window.KazmaFormat.dateTime(notice.at) : notice.at;
         const space = '\u2068' + (notice.space_name || '') + '\u2069';
@@ -31,6 +32,14 @@
                 title: say('account.notice_reset_title', 'Your password was reset'),
                 message: say('account.notice_reset_body',
                     'The admin reset your password on {when}. If you did not ask for this, tell them.',
+                    { when: when }),
+            };
+        }
+        if (notice.kind === 'sessions_ended') {
+            return {
+                title: say('account.notice_signed_out_title', 'You were signed out everywhere'),
+                message: say('account.notice_signed_out_body',
+                    'The admin ended your sessions on {when}: you sign in again on each device. If you did not expect this, tell them.',
                     { when: when }),
             };
         }

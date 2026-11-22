@@ -86,6 +86,8 @@ __all__ = [
     "set_space_limits",
     "set_tools",
     "spaces_usage",
+    "end_sessions",
+    "note_sign_in",
 ]
 
 logger = logging.getLogger(__name__)
@@ -94,9 +96,9 @@ logger = logging.getLogger(__name__)
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
           "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
           "models_set", "account_disabled", "account_enabled", "space_created", "member_added", "member_left", "member_removed",
-          "space_limits_set", "default_space_limits_set")
+          "space_limits_set", "default_space_limits_set", "sessions_ended")
 #: The events a person is told about, when someone else made them.
-_TOLD = ("password_reset", "member_added", "member_removed")
+_TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended")
 _NAME_MAX = 64
 #: One shared-space create at a time in this process (the review, finding 10).
 _CREATE_LOCK = threading.Lock()
@@ -192,13 +194,16 @@ def broken_at(events: list[dict[str, Any]] | None = None) -> int | None:
 def list_people() -> list[dict[str, Any]]:
     """Every account, the owner first: id, name, install role, enabled,
     when made, its personal space, its daily limit (its own, ``None`` for
-    none, and the one it has: ``limit``, ``limit_source``). Never a password
-    hash, never a word of a space's data."""
+    none, and the one it has: ``limit``, ``limit_source``), the spaces it is
+    a member of (``spaces``), when it last signed in (``last_sign_in``) and
+    how many sessions it has open (``sessions``). Never a password hash, a
+    session id, or a word of a space's data."""
     from kazma_core.spaces.daily_limits import limit_of
 
     reg = identity.read_registry()
     personal = {space.get("personal_of"): space_id for space_id, space in reg["spaces"].items()
                 if space.get("personal_of") and not space.get("account_deleted_at")}
+    signed_in = _sign_ins(reg)
     people = [
         {
             "id": account_id,
@@ -208,11 +213,132 @@ def list_people() -> list[dict[str, Any]]:
             "created_at": str(account.get("created_at") or ""),
             "personal_space": personal.get(account_id, ""),
             "owner": account_id == OWNER_ACCOUNT_ID,
+            "spaces": _spaces_of(reg, account_id),
+            **signed_in.get(account_id, {"sessions": 0, "last_sign_in": ""}),
             **_limits_of(reg, account_id, limit_of),
         }
         for account_id, account in reg["accounts"].items()
     ]
     return sorted(people, key=lambda p: (not p["owner"], p["name"].lower()))
+
+
+def _spaces_of(reg: dict[str, Any], account_id: str) -> list[dict[str, Any]]:
+    """The spaces *account_id* is a member of, its personal one first: id,
+    name (a personal space's is its person's), personal or shared, and its
+    role there. A space being erased is left out."""
+    out = []
+    for membership in reg["memberships"]:
+        if membership.get("account") != account_id:
+            continue
+        space_id = str(membership.get("space") or "")
+        space = reg["spaces"].get(space_id) or {}
+        if not space or space.get("erasing_at"):
+            continue
+        personal = bool(space.get("personal_of")) or space_id == OWNER_SPACE_ID
+        out.append({"id": space_id, "name": "" if personal else str(space.get("name") or ""),
+                    "kind": "personal" if personal else "shared",
+                    "role": str(membership.get("role") or "member")})
+    return sorted(out, key=lambda s: (s["kind"] != "personal", s["name"].lower()))
+
+
+# ── Sign-ins and sessions (S2-10) ───────────────────────────────────────
+
+#: When each person last signed in, by account: runtime state (``system.``,
+#: never carried by a backup or a restore), written at a sign-in with a
+#: name and password. A session's own start is read beside it.
+LAST_SIGN_IN_KEY = "system.people.last_sign_in"
+_LAST_SIGN_IN_MAX = 2000
+#: The user id a sign-in with the install's shared secret is given, and the
+#: actor of the loopback auto-login: both are the owner's sessions.
+_OWNER_SESSION_USER = "shared-secret"
+_OWNER_SESSION_ACTOR = "auto-cookie"
+
+
+def _account_of_session(reg: dict[str, Any], user_id: str, actor: str) -> str:
+    """The account a session or a sign-in is, or ``""`` for none (an OIDC
+    session, one of an account deleted since)."""
+    if actor == _OWNER_SESSION_ACTOR or user_id == _OWNER_SESSION_USER:
+        return OWNER_ACCOUNT_ID
+    if not user_id or actor == "oidc":
+        return ""
+    for account_id, account in reg["accounts"].items():
+        if str(account.get("legacy_user_id") or "") == user_id:
+            return account_id
+    return ""
+
+
+def note_sign_in(user_id: str, actor: str = "login") -> None:
+    """Record that the person behind *user_id* signed in now, for the People
+    page. Only where Spaces is enforced; nothing else depends on it, so a
+    store that cannot answer is said and the sign-in goes on. Blocking."""
+    if not spaces_enforced():
+        return
+    from kazma_core.config_store import get_config_store
+
+    try:
+        account = _account_of_session(identity.read_registry(), str(user_id or ""), str(actor or ""))
+        if not account:
+            return
+        now = _now()
+
+        def _update(current: Any) -> dict[str, str]:
+            held = {str(k): str(v) for k, v in current.items()} if isinstance(current, dict) else {}
+            held[account] = now
+            if len(held) > _LAST_SIGN_IN_MAX:
+                held = dict(sorted(held.items(), key=lambda kv: kv[1])[-_LAST_SIGN_IN_MAX:])
+            return held
+
+        get_config_store().atomic_update(LAST_SIGN_IN_KEY, _update, category="system")
+    except (sqlite3.Error, OSError, RuntimeError, ValueError, TypeError, LookupError):
+        # The store away, locked or refusing (RuntimeError covers an
+        # unreadable identity store and a store that is unavailable): the
+        # sign-in is never refused for it.
+        logger.warning("[people] a sign-in was not recorded on People", exc_info=True)
+
+
+def _sign_ins(reg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """By account: how many sessions it has open and when it last signed in
+    (the newer of the recorded sign-in and its newest session's start)."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.security.web_sessions import session_starts
+
+    recorded = get_config_store().get(LAST_SIGN_IN_KEY) or {}
+    out: dict[str, dict[str, Any]] = {}
+    for session in session_starts():
+        account = _account_of_session(reg, session["user_id"], session["actor"])
+        if not account:
+            continue
+        held = out.setdefault(account, {"sessions": 0, "last_sign_in": ""})
+        held["sessions"] += 1
+        began = datetime.fromtimestamp(session["started_at"], UTC).isoformat(timespec="seconds") if session["started_at"] else ""
+        held["last_sign_in"] = max(held["last_sign_in"], began)
+    if isinstance(recorded, dict):
+        for account, at in recorded.items():
+            held = out.setdefault(str(account), {"sessions": 0, "last_sign_in": ""})
+            held["last_sign_in"] = max(held["last_sign_in"], str(at or ""))
+    return out
+
+
+def end_sessions(account_id: str, *, by: str) -> int:
+    """End every open session of a person: they sign in again on each
+    device. Recorded, and the person is told at their next sign-in. Refused:
+    the owner (their own sessions are ended in My account). Returns how
+    many were ended."""
+    _require_enforced()
+    if account_id == OWNER_ACCOUNT_ID:
+        raise PeopleRefused("owner_in_my_account", 409, "Your own sessions are ended in My account.")
+
+    def _change(reg: dict[str, Any]) -> None:
+        _person(reg, account_id)
+        _record(reg, "sessions_ended", account_id, by)
+
+    reg = _changed(_change)
+    account = reg["accounts"].get(account_id) or {}
+    from kazma_core.security.web_sessions import revoke_user_sessions
+
+    ended = revoke_user_sessions(user_id=str(account.get("legacy_user_id") or account_id))
+    logger.warning("[people] sessions ended id=%s count=%d by=%s", account_id, ended, by)
+    return ended
 
 
 def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str, Any]:

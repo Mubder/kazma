@@ -15946,6 +15946,22 @@ an install with one account behaves as before.
     the recorder, names the person; a recorder writing the session label as
     the control), `tests/e2e/test_activity_page_browser.py` (by the sidebar,
     EN/AR).
+- **The People page shows each person whole (S2-10, 2026-11-22).** Only
+  where Spaces is enforced (People is the admin's, S1-25). Beside each
+  person's features, tools, daily limit and models (S2-11, S2-01, S2-02,
+  S2-03): the spaces they are a member of with their role
+  (`people._spaces_of`), how many sessions they have open and when they last
+  signed in (`people._sign_ins`: the newer of the sign-in recorded at the
+  login route, `people.note_sign_in`, runtime key `people.LAST_SIGN_IN_KEY`,
+  and their newest session's start, `web_sessions.session_starts`; never a
+  session id). The admin ends a person's sessions (`people.end_sessions`,
+  `POST /api/people/{account_id}/sessions/end`, event `sessions_ended`, told
+  at their next sign-in); the owner's own are ended in My account
+  (`owner_in_my_account`). A sign-in that cannot be recorded is never
+  refused for it. Gates: `tests/test_people_sign_ins_and_sessions.py` (the
+  real login route), `tests/e2e/test_people_page_each_person_browser.py` (by
+  the sidebar, EN/AR: a person signed in from a second browser, every part
+  of their row, their sessions ended and the second browser signed out).
 
 ## UI Conventions (Web)
 

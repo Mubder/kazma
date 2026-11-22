@@ -284,6 +284,10 @@ def register_auth_routes(self: Any) -> None:
                 user_id=session_uid,
                 tenant_id=session_tenant,
             )
+            # When the person last signed in, for People (Spaces S2-10).
+            from kazma_core.spaces.people import note_sign_in
+
+            await _asyncio.to_thread(note_sign_in, session_uid or "", "login")
             resp.set_cookie(
                 key=SESSION_COOKIE,
                 value=sid,

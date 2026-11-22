@@ -2767,6 +2767,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.people_space_limits_clear": {"en": "Use the limits for spaces", "ar": "استخدم حدود المساحات"},
     "settings.people_space_limits_saved": {"en": "Limits saved.", "ar": "حُفظت الحدود."},
     "settings.people_space_mib": {"en": "{size} MiB", "ar": "{size} ميبيبايت"},
+    # Each person's spaces, last sign-in and sessions (Spaces S2-10).
+    "settings.people_spaces_of": {"en": "Spaces:", "ar": "المساحات:"},
+    "settings.people_space_owner_mark": {"en": "(owner)", "ar": "(مالك)"},
+    "settings.people_last_sign_in": {"en": "Last sign-in:", "ar": "آخر تسجيل دخول:"},
+    "settings.people_never_signed_in": {"en": "Never", "ar": "لم يسجّل الدخول بعد"},
+    "settings.people_sessions_open.zero": {"en": "No session open", "ar": "لا جلسات مفتوحة"},
+    "settings.people_sessions_open.one": {"en": "1 session open", "ar": "جلسة واحدة مفتوحة"},
+    "settings.people_sessions_open.two": {"en": "{n} sessions open", "ar": "جلستان مفتوحتان"},
+    "settings.people_sessions_open.few": {"en": "{n} sessions open", "ar": "{n} جلسات مفتوحة"},
+    "settings.people_sessions_open.many": {"en": "{n} sessions open", "ar": "{n} جلسة مفتوحة"},
+    "settings.people_sessions_open.other": {"en": "{n} sessions open", "ar": "{n} جلسة مفتوحة"},
+    "settings.people_end_sessions": {"en": "End sessions", "ar": "إنهاء الجلسات"},
+    "settings.people_end_sessions_of": {"en": "End the sessions of {name}", "ar": "إنهاء جلسات {name}"},
+    "settings.people_end_sessions_title": {"en": "Sign {name} out everywhere?", "ar": "تسجيل خروج {name} من كل مكان؟"},
+    "settings.people_end_sessions_confirm": {
+        "en": "Every session they have open ends, and they sign in again on each device. "
+              "They are told the next time they sign in.",
+        "ar": "تنتهي كل جلسة مفتوحة لهم، ويسجّلون الدخول من جديد على كل جهاز. ويُبلَّغون عند تسجيل دخولهم التالي.",
+    },
+    "settings.people_sessions_ended": {"en": "{name} is signed out everywhere.", "ar": "سُجّل خروج {name} من كل مكان."},
+    "settings.people_err.owner_in_my_account": {
+        "en": "Your own sessions are ended in My account.",
+        "ar": "تُنهى جلساتك أنت من «حسابي».",
+    },
     "settings.people_space_usage_of": {"en": "{used} of {limit}", "ar": "{used} من {limit}"},
     "settings.people_space_usage_unknown": {"en": "Not counted", "ar": "غير محسوب"},
     "settings.people_space_usage_install_files": {"en": "The install's own folders", "ar": "مجلدات التثبيت نفسها"},
@@ -3113,6 +3137,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أُخرجت من {space} في {when}. ينسى Kazma الحقائق التي سجّلها عنك هناك، وتبقى رسائلك في محادثاتها.",
     },
     "account.notice_reset_title": {"en": "Your password was reset", "ar": "أُعيد تعيين كلمة مرورك"},
+    "account.notice_signed_out_title": {"en": "You were signed out everywhere", "ar": "سُجّل خروجك من كل مكان"},
+    "account.notice_signed_out_body": {
+        "en": "The admin ended your sessions on {when}: you sign in again on each device. "
+              "If you did not expect this, tell them.",
+        "ar": "أنهى المسؤول جلساتك في {when}: تسجّل الدخول من جديد على كل جهاز. إن لم تتوقع ذلك، فأبلغه.",
+    },
     "account.notice_reset_body": {
         "en": "The admin reset your password on {when}. If you did not ask for this, tell them.",
         "ar": "أعاد المسؤول تعيين كلمة مرورك في {when}. إن لم تطلب ذلك، فأبلغه.",
