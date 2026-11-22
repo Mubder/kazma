@@ -165,20 +165,38 @@ def is_short_continuation(text: str) -> bool:
 # Explicit topic pivots — user is abandoning / suspending the open task.
 # Keep patterns exclusive enough that "continue with the other step" still
 # routes through is_short_continuation, not shift.
+#
+# A pivot names the subject it leaves ("new topic", "let's switch topics",
+# "خلنا نغير الموضوع"), anywhere, or opens the message with a word that drops
+# it ("never mind, ...", "forget that.", "anyway, ...", "مو مهم، ..."). The
+# same words inside a question about the user's own past are no pivot: "Did
+# I switch to more water?", "Did I forget it at the office?", "Was the
+# meeting unrelated to the budget?", "كان الاجتماع مو مهم؟". Until
+# 2026-11-22 "switch to", "anyway", "unrelated", "forget it" and "مو مهم"
+# anywhere were pivots, and memory recall was suppressed for a question
+# about the user's own coffee (the memory plan's finding 11).
 _TOPIC_SHIFT_RE = re.compile(
     r"(?is)"
     r"("
-    r"\b(?:new\s+topic|different\s+(?:topic|question|subject)|change\s+(?:of\s+)?subject)\b"
-    r"|"
-    r"\b(?:forget\s+(?:that|this|it)|never\s*mind|nvm|unrelated|anyway)\b"
-    r"|"
-    r"\b(?:switch(?:ing)?\s+(?:to|topics?)|moving\s+on|side\s+question)\b"
+    # A subject named as left, anywhere in the message.
+    r"\b(?:new\s+topic|different\s+(?:topic|question|subject)|change\s+(?:of\s+|the\s+)?subject"
+    r"|switch(?:ing)?\s+(?:the\s+)?(?:topics?|subjects?)"
+    r"|switch(?:ing)?\s+to\s+(?:something\s+else|(?:a\s+(?:different|new)|another)\s+(?:topic|subject|question))"
+    r"|side\s+question|unrelated\s+(?:question|topic|note))\b"
     r"|"
     r"\b(?:by\s+the\s+way|btw)\b.{0,20}\b(?:unrelated|different|new)\b"
     r"|"
-    # Arabic pivots (common Gulf/Levantine chat)
-    r"(?:موضوع\s*ثاني|موضوع\s*جديد|غير\s*موضوع|خلنا\s*نغير|نغير\s*الموضوع|"
-    r"اسأل\s*سؤال\s*ثاني|سؤال\s*ثاني|مو\s*مهم|خلاص\s*غير\s*هالموضوع)"
+    # A word that drops the open subject, opening the message.
+    r"^\s*(?:(?:ok(?:ay)?|so|well|alright),?\s+)?"
+    r"(?:forget\s+(?:that|this|it|about\s+it)|never\s*mind|nvm|anyway|moving\s+on|unrelated)\b"
+    r"|"
+    # Arabic pivots (common Gulf/Levantine chat): the subject named as left.
+    r"(?:موضوع\s*ثاني|موضوع\s*جديد|غير\s*موضوع|خلنا\s*نغير\s*(?:ال)?(?:موضوع|سالفة|سالفه)|"
+    r"نغير\s*(?:الموضوع|السالفة|السالفه)|"
+    r"اسأل\s*سؤال\s*ثاني|سؤال\s*ثاني|خلاص\s*غير\s*هالموضوع)"
+    r"|"
+    # ... and the word that drops it, opening the message.
+    r"^\s*مو\s*مهم"
     r")"
 )
 

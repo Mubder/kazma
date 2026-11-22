@@ -8503,7 +8503,15 @@ erase the thing being asked about. Interrogative check-ins
 (`is_interrogative_checkin`, EN + Arabic شنو/وش/ليش/شفيه/وين/متى/شلون/شصار)
 are gated BEFORE the embedder and can never classify as drift;
 `_MIN_CHARS` is 25 plus a content-word requirement (length alone was never
-the right signal).
+the right signal). **An explicit pivot names the subject it leaves** ("new
+topic", "let's switch topics", "خلنا نغير الموضوع") **or opens the message
+with a word that drops it** ("never mind, ...", "مو مهم، ...")
+(`turn_input._TOPIC_SHIFT_RE`, 2026-11-22, the memory plan's finding 11):
+"switch to", "anyway", "unrelated", "forget it" and "مو مهم" anywhere were
+pivots, and recall was suppressed for "did I switch to more water per
+tablespoon?", a question about the user's own memory. Gate:
+`tests/test_topic_shift_own_past.py` (EN/AR through `classify_turn_intent`,
+the old rule as the negative control).
 
 **F. A recovery attempt never re-streams content (the duplicated-prefix
 invariant).** The SSE/WS bubble APPENDS token deltas; only `turn_complete`
