@@ -37,6 +37,18 @@ holds Development is refused their always-ask actions and folder grants in a
 shared space with a project folder (:func:`approval_refusal`, decision N21:
 the admin approves those): before any card, with no effect.
 
+**A person other than the admin runs no project code on the host** (the
+S2-12 review; the owner's decision 3, plan 4.8: members' code runs only in a
+container, S4-05). Their Development there is the tools of
+:data:`MEMBER_DEVELOPMENT`, each declared with why it starts no host process
+that runs the project's code: the shell, the test runner, the linter and
+formatter, Kazma's own metrics, and every MCP server the admin set up are
+refused (a server may be opted in per space later). Their git runs with
+hooks and the repository's programs off (``security.git_auth.git_command_env``)
+and they write nothing under ``.git``. The filesystem MCP server is refused
+in a shared space for everyone (N27). The admin's own Development is
+unchanged.
+
 The rule is applied where a model is offered tools (``skills.switches.offered``,
 a swarm worker's list) and again where a tool is called
 (``LocalToolRegistry._execute_inner``, the MCP branch of
@@ -62,6 +74,7 @@ __all__ = [
     "ADMIN",
     "DEVELOPMENT",
     "GROUPS",
+    "MEMBER_DEVELOPMENT",
     "OUTSIDE",
     "SPACE",
     "HostAllowance",
@@ -88,6 +101,33 @@ DEVELOPMENT = frozenset({
     "request_path_access",
     "list_agent_skills", "search_agent_skills", "activate_skill",
 })
+
+#: The Development tools a person other than the admin may use in a shared
+#: space with a project folder, each with why it starts no host process that
+#: runs the project's code (the S2-12 review, decision 3). Every other
+#: Development tool -- and every MCP server's -- is refused to them until
+#: members' code runs in a container (S4-05).
+MEMBER_DEVELOPMENT: dict[str, str] = {
+    "git_status": "git with hooks and the repository's programs off (git_auth.git_command_env)",
+    "git_log": "git with hooks and the repository's programs off",
+    "git_diff": "git with hooks and the repository's programs off",
+    "git_commit": "git with hooks and the repository's programs off, --no-verify",
+    "git_checkout": "git with hooks and the repository's programs off",
+    "git_merge": "git with hooks and the repository's programs off",
+    "git_pull": "git with hooks and the repository's programs off, none of the machine's credentials",
+    "git_push": "git with hooks and the repository's programs off, --no-verify, none of the machine's credentials",
+    "github_list_issues": "GitHub's API with the space's own connection",
+    "github_create_issue": "GitHub's API with the space's own connection",
+    "github_comment_issue": "GitHub's API with the space's own connection",
+    "github_create_pr": "GitHub's API with the space's own connection",
+    "github_merge_pr": "GitHub's API with the space's own connection",
+    "codebase_search": "Kazma's own code index, read in Kazma's process",
+    "codebase_status": "Kazma's own code index, read in Kazma's process",
+    "request_path_access": "a folder grant, which the admin approves (N21): refused until S2-05",
+    "list_agent_skills": "lists skill folders; runs nothing",
+    "search_agent_skills": "searches the skills marketplace; runs nothing",
+    "activate_skill": "adds a skill's text to the turn; runs nothing",
+}
 
 #: The admin's own tools (plan 4.11: "Admin tools are not Development"): in
 #: the admin's personal space only, whatever the Development switch says.
@@ -171,6 +211,12 @@ class HostAllowance:
     #: Why the admin's tools are not here, when that differs from *why_not*
     #: (a shared space with a project folder: Development, never them).
     why_not_admin: str = ""
+    #: A shared space with a project folder (S2-12): no filesystem MCP
+    #: server (N27), whoever asks.
+    shared: bool = False
+    #: A person other than the admin holding Development there: only
+    #: :data:`MEMBER_DEVELOPMENT`, no project code on the host (the review).
+    member: bool = False
 
     def allows(self, group: str) -> bool:
         if group == "development":
@@ -215,6 +261,7 @@ def host_allowance() -> HostAllowance:
         # tools stay in the admin's personal space.
         try:
             development = identity.holds_development(bound.asker)
+            admin = identity.is_admin_account(bound.asker)
         except (identity.IdentityUnavailable, identity.IdentityError) as exc:
             return _none(f"the account could not be read: {exc}")
         return HostAllowance(
@@ -222,6 +269,8 @@ def host_allowance() -> HostAllowance:
             admin=False,
             why_not="" if development else "Development is not switched on for this person",
             why_not_admin="the admin's own tools are only in the admin's personal space",
+            shared=True,
+            member=development and not admin,
         )
     try:
         admin = identity.is_admin_account(bound.asker)
@@ -245,6 +294,13 @@ def _host_refusal(name: str, allowance: HostAllowance | None = None) -> str | No
         return None
     allowed = allowance if allowance is not None else host_allowance()
     if allowed.allows(group):
+        if allowed.member and name not in MEMBER_DEVELOPMENT:
+            return (f"Tool '{name}' does not exist for this person here: it runs the project's code "
+                    "or a server on the machine Kazma runs on, which only the admin may until a "
+                    "person's code runs in a container. Tell the user what you would have used it for.")
+        if allowed.shared and _filesystem_server_tool(name):
+            return (f"Tool '{name}' does not exist in this space: the filesystem server serves the "
+                    "admin's own space (N27). Use Kazma's own file tools here.")
         return None
     why = allowed.why_not_admin if group == "admin" and allowed.why_not_admin else allowed.why_not
     return (
@@ -297,6 +353,24 @@ def approval_refusal(name: str, user_text: str | None = None) -> str | None:
         f"تحتاج «{name}» هنا إلى موافقة المسؤول، وهذه تأتي في تحديث لاحق لـ Kazma. "
         "لم يُنفَّذ شيء. أخبر المستخدم بذلك.",
     )
+
+
+def _filesystem_server_tool(name: str) -> bool:
+    """True for a tool of the filesystem MCP server -- the one Kazma ships,
+    or any server bound to the machine's workspace (``workspace_bound``) --
+    named ``mcp__<server>__...``."""
+    if not name.startswith("mcp__"):
+        return False
+    server = name[len("mcp__"):].split("__", 1)[0]
+    if server == "filesystem":
+        return True
+    from kazma_core.mcp_servers_store import list_mcp_servers
+
+    try:
+        servers = list_mcp_servers()
+    except (OSError, ValueError, RuntimeError):
+        return True  # a store that cannot say: refused, never guessed safe
+    return any(str(s.get("name")) == server and s.get("workspace_bound") for s in servers)
 
 
 def tool_grants() -> Any:

@@ -636,6 +636,10 @@ def test_negative_control_a_pair_catches_an_english_only_rule(monkeypatch):
 
 #: Product modules with Arabic in their code that need no pair here, and why.
 DECLARED: dict[str, str] = {
+    "kazma-core/kazma_core/spaces/tools.py":
+        "N21's interim refusal (S2-12) is one sentence written in both languages; "
+        "approval_refusal passes the pair to language_lock.in_their_language, which picks by "
+        "what the person wrote (tests/test_development_per_person.py runs it in both)",
     "kazma-gateway/kazma_gateway/adapters/whatsapp.py":
         "two short notes (a file it could not download, an approval only the owner may answer) "
         "written in both languages; WhatsAppAdapter._say passes the pair to "

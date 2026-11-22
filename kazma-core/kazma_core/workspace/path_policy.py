@@ -297,7 +297,7 @@ class PathAccessResult:
     allowed: bool
     reason: str
     mode: AccessMode
-    via: str  # workspace | durable | session | absolute | denied
+    via: str  # workspace | durable | session | absolute | denied | store | git
     resolved: str
     workspace: str
     grant_path: str | None = None
@@ -332,7 +332,7 @@ def denied_message(
             f"  this space's files: {res.workspace}\n"
             "Use a path inside this space's files (a relative path means that folder)."
         )
-    if res.via == "store":
+    if res.via in ("store", "git"):
         # A path grant cannot open a Kazma store (rule 0 sits before the
         # grants), so offering request_path_access here would only buy a
         # useless approval. Say what the store is and which tool reads it.
@@ -382,6 +382,18 @@ def _space_home() -> Path | str | None:
     home = space_files.space_dir(space)
     home.mkdir(parents=True, exist_ok=True)
     return home.resolve()
+
+
+def _a_member_here() -> bool:
+    """Whether the work bound is a person other than the admin's, holding
+    Development in a shared space (``spaces.tools.HostAllowance.member``)."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    from kazma_core.spaces.tools import host_allowance
+
+    return host_allowance().member
 
 
 async def resolve_and_check(
@@ -445,6 +457,23 @@ def check_path_access(
             resolved=str(path),
             workspace=str(workspace),
         )
+
+    # A person other than the admin in a shared space writes nothing in a
+    # repository's own folder: hooks and the configuration there name the
+    # programs git runs (S2-12 review, finding 1).
+    if need == "write" and _a_member_here():
+        from kazma_core.security.git_auth import under_git_folder
+
+        if under_git_folder(resolved):
+            return PathAccessResult(
+                allowed=False,
+                reason=("a repository's own .git folder is written only by git, and "
+                        "only the admin changes it here; no grant changes that"),
+                mode=need,
+                via="git",
+                resolved=str(resolved),
+                workspace=str(workspace),
+            )
 
     # 0) Kazma's own databases are never opened by file tools. Checked
     #    BEFORE the allow ladder so no workspace, grant or escape hatch can

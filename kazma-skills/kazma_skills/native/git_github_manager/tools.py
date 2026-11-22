@@ -226,14 +226,16 @@ def _kazma_file_to_stage(cwd: Any, files: list[str] | None) -> str | None:
     from pathlib import Path
 
     from kazma_core.security.child_env import tool_child_env
+    from kazma_core.security.git_auth import git_command_env
     from kazma_core.store_registry import is_kazma_store, store_refusal
 
     root = Path(str(cwd))
     argv = ["git", "-c", "core.fsmonitor=false", "-c", "core.quotePath=false",
             "add", "--dry-run", "--", *(files or ["."])]
+    env = git_command_env(tool_child_env(), root)
     try:
         res = subprocess.run(  # noqa: S603 -- git, a fixed argv; nothing is staged
-            argv, cwd=str(root), env=tool_child_env(), capture_output=True, text=True,
+            argv, cwd=str(root), env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=30, stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
@@ -255,6 +257,8 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
     ``GIT_AUTHOR_*`` / ``GIT_COMMITTER_*`` env vars — without mutating the
     repo's ``.git/config``.
     """
+    from kazma_core.security import git_auth
+
     cwd = await asyncio.to_thread(_get_workspace)
     # Before anything is staged: git add would put one of Kazma's own files
     # (restic.pass is not in Kazma's .gitignore) into the index and the
@@ -267,6 +271,7 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
         from kazma_core.git_identity import get_commit_env
 
         commit_env = await asyncio.to_thread(get_commit_env)  # settings and a token lookup (audit 2026-10-26 AUD-111)
+        commit_env = await asyncio.to_thread(git_auth.git_command_env, commit_env, cwd)
 
         # Stage files
         # "--": a file named like an option ("--pathspec-from-file=...") is
@@ -274,15 +279,18 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
         add_args = ["git", "add", "."] if not files else ["git", "add", "--", *files]
         await run_off_loop(add_args, cwd=cwd, check=True, env=commit_env)
 
-        # Commit
+        # Commit. A person other than the admin's commit runs no hook
+        # (S2-12 review, finding 1): --no-verify, besides the empty hooks folder.
         res = await run_off_loop(
-            ["git", "commit", "-m", message],
+            ["git", "commit", *git_auth.no_verify(commit_env), "-m", message],
             cwd=cwd,
             capture_output=True,
             text=True,
             env=commit_env,
         )
         return res.stdout.strip() or res.stderr.strip()
+    except RefusedBeforeEffect:
+        raise
     except Exception as e:
         return f"Error committing changes: {e}"
 
@@ -373,13 +381,22 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
 
     cmd = ["git"]
     token = await _git_token()
+    from kazma_core.security import git_auth
+    from kazma_core.security.child_env import tool_child_env
+
+    # Every git command here runs in the space's own environment: outside
+    # the owner's space none of the machine's credentials (S2-12 review,
+    # finding 2), and a person other than the admin's with every program the
+    # repository names switched off (finding 1).
+    env = await asyncio.to_thread(
+        git_auth.git_command_env, tool_child_env(git_auth.clone_auth_env(token)), cwd)
 
     target_branch = branch
     if action == "push":
         # Resolve active branch if not explicitly given
         if not target_branch:
             try:
-                b_res = await run_off_loop(["git", "branch", "--show-current"], cwd=cwd, capture_output=True, text=True, timeout=5)
+                b_res = await run_off_loop(["git", "branch", "--show-current"], cwd=cwd, env=env, capture_output=True, text=True, timeout=5)
                 target_branch = b_res.stdout.strip()
             except Exception:
                 target_branch = ""
@@ -387,7 +404,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         # Check if upstream tracking branch exists
         has_upstream = False
         try:
-            u_res = await run_off_loop(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=cwd, capture_output=True, text=True, timeout=5)
+            u_res = await run_off_loop(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=cwd, env=env, capture_output=True, text=True, timeout=5)
             has_upstream = (u_res.returncode == 0 and bool(u_res.stdout.strip()))
         except Exception:
             has_upstream = False
@@ -395,7 +412,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
     # Retrieve the remote URL (used to push the URL directly so the auth
     # http.extraheader applies to exactly this target — see auth note below).
     try:
-        remote_res = await run_off_loop(["git", "config", "--get", f"remote.{remote}.url"], cwd=cwd, capture_output=True, text=True, timeout=5)
+        remote_res = await run_off_loop(["git", "config", "--get", f"remote.{remote}.url"], cwd=cwd, env=env, capture_output=True, text=True, timeout=5)
         remote_url = remote_res.stdout.strip()
     except Exception:
         remote_url = ""
@@ -411,13 +428,13 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
     # Authorization header, gets 401, and git never recovers (confirmed via
     # GIT_CURL_VERBOSE). http.extraheader attaches the header from the first
     # request, so it works cross-platform.
-    from kazma_core.security import git_auth
-
     cmd.extend(["-c", "credential.helper="])
 
     # A pull fetches here; the merge comes after the files it would write are
     # checked (_merge_upstream).
     cmd.append(_git_verb(action))
+    if action == "push":
+        cmd.extend(git_auth.no_verify(env))
 
     if action == "push":
         # Push the URL directly when resolved (extraheader auth applies to it).
@@ -430,11 +447,8 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         elif target_branch:
             cmd.extend(["--", push_target, target_branch])
 
-    from kazma_core.security.child_env import tool_child_env
-
-    # The server's environment without its secrets: a push or pull runs the
-    # repository's hooks, which have no business with the vault key.
-    env = tool_child_env(git_auth.clone_auth_env(token))
+    # The server's environment without its secrets (above): a push or pull
+    # runs the repository's hooks, which have no business with the vault key.
     env["GIT_TERMINAL_PROMPT"] = "0"
     # The App token is sent via http.extraheader. A globally-configured
     # credential helper (Git Credential Manager, osxkeychain, wincred) would
@@ -468,8 +482,11 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
     def _safe_output(text: str) -> str:
         from kazma_core.errors import redact_secrets
 
-        encoded = env.get("GIT_CONFIG_VALUE_0", "").rsplit(" ", 1)[-1]
-        for value in (token, encoded):
+        encoded = [
+            value.rsplit(" ", 1)[-1] for key, value in env.items()
+            if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("AUTHORIZATION:")
+        ]
+        for value in (token, *encoded):
             if value:
                 text = text.replace(value, "[REDACTED_TOKEN]")
         return redact_secrets(text)
@@ -547,9 +564,11 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
 
             # Refresh the URL-scoped header in the same child environment.
             token = fresh
-            env.update(git_auth.clone_auth_env(token))
+            git_auth.set_token_header(env, token)
             new_cmd = ["git", "-c", "credential.helper="]
             new_cmd.append(_git_verb(action))
+            if action == "push":
+                new_cmd.extend(git_auth.no_verify(env))
             if action == "push":
                 push_target = remote_url if remote_url else remote
                 if not has_upstream and target_branch:
@@ -573,7 +592,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
                     if target_branch:
                         try:
                             head_sha = (await run_off_loop(
-                                ["git", "rev-parse", "HEAD"], cwd=cwd,
+                                ["git", "rev-parse", "HEAD"], cwd=cwd, env=env,
                                 capture_output=True, text=True, timeout=5,
                             )).stdout.strip()
                             if head_sha and await _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
@@ -597,12 +616,12 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             looks_noop = ("up-to-date" in output.lower()) or ("already up to date" in output.lower())
             try:
                 head_sha = (await run_off_loop(
-                    ["git", "rev-parse", "HEAD"], cwd=cwd,
+                    ["git", "rev-parse", "HEAD"], cwd=cwd, env=env,
                     capture_output=True, text=True, timeout=5,
                 )).stdout.strip()
                 ahead = (await run_off_loop(
                     ["git", "rev-list", "--count", f"origin/{target_branch}..HEAD"],
-                    cwd=cwd, capture_output=True, text=True, timeout=5,
+                    cwd=cwd, env=env, capture_output=True, text=True, timeout=5,
                 )).stdout.strip()
             except Exception:
                 head_sha, ahead = "", ""
@@ -688,8 +707,10 @@ async def _rebase_onto_remote(cwd: str, token: str, remote: str, branch: str) ->
 
     remote = _checked_ref(remote, "remote")
     branch = _checked_ref(branch, "branch")
-    # As the push's own: no secrets, the token as a header, no helper.
-    env = tool_child_env(git_auth.clone_auth_env(token))
+    # As the push's own: no secrets, the token as a header, no helper; the
+    # space's own environment (S2-12 review, findings 1 and 2).
+    env = await asyncio.to_thread(
+        git_auth.git_command_env, tool_child_env(git_auth.clone_auth_env(token)), cwd)
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_SYSTEM"] = os.devnull
@@ -701,7 +722,8 @@ async def _rebase_onto_remote(cwd: str, token: str, remote: str, branch: str) ->
     refused = await asyncio.to_thread(switch_refusal, cwd, fetched, tool="git_push", rebase=True)
     if refused:
         return "\n[Kazma] Did not rebase onto the remote: " + refused
-    await run_off_loop(["git", "rebase", fetched], cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
+    await run_off_loop(["git", "rebase", *git_auth.no_verify(env), fetched],
+                       cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
     return None
 
 
@@ -751,9 +773,12 @@ async def _merge_upstream(cwd: str, fetch_output: str) -> str:
     if refused:
         raise KnownEffectError(f"Fetched from the remote, but did not merge: {refused}")
     message = f"Merge remote-tracking branch '{name.strip() or sha[:12]}'"
+    from kazma_core.security.git_auth import git_command_env, no_verify
+
+    env = await asyncio.to_thread(git_command_env, tool_child_env(), cwd)
     res = await run_off_loop(
-        ["git", "merge", "--no-edit", "-m", message, sha],
-        cwd=cwd, env=tool_child_env(), capture_output=True, text=True, timeout=30,
+        ["git", "merge", "--no-edit", *no_verify(env), "-m", message, sha],
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=30,
     )
     merged = (res.stdout or "").strip() or (res.stderr or "").strip()
     return "\n".join(part for part in (fetch_output, merged) if part)
@@ -842,8 +867,14 @@ async def git_checkout(branch: str, create: bool = False) -> str:
         if refused:
             raise RefusedBeforeEffect(refused)
     cmd = ["git", "checkout", "-b", branch, "--"] if create else ["git", "checkout", branch, "--"]
+    # The space's own environment: a person other than the admin's checkout
+    # runs no post-checkout hook and no filter (S2-12 review, finding 1).
+    from kazma_core.security.child_env import tool_child_env
+    from kazma_core.security.git_auth import git_command_env
+
+    env = await asyncio.to_thread(git_command_env, tool_child_env(), cwd)
     try:
-        res = await run_off_loop(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
+        res = await run_off_loop(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=10)
         return res.stdout.strip() or res.stderr.strip()
     except Exception as e:
         return f"Error running git checkout: {e}"
@@ -858,8 +889,13 @@ async def git_merge(source_branch: str) -> str:
     refused = await asyncio.to_thread(git_command_refusal, ["merge", "--", source_branch], cwd)
     if refused:
         raise RefusedBeforeEffect(refused)
+    from kazma_core.security.child_env import tool_child_env
+    from kazma_core.security.git_auth import git_command_env, no_verify
+
+    env = await asyncio.to_thread(git_command_env, tool_child_env(), cwd)
+    argv = ["git", "merge", "--no-edit", *no_verify(env), "--", source_branch]
     try:
-        res = await run_off_loop(["git", "merge", "--", source_branch], cwd=cwd, capture_output=True, text=True, timeout=15)
+        res = await run_off_loop(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=15)
         return res.stdout.strip() or res.stderr.strip()
     except Exception as e:
         return f"Error merging branch {source_branch}: {e}"

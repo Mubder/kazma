@@ -230,7 +230,16 @@ def restricted_child_env(*, cwd: str) -> dict[str, str]:
         "PATHEXT": os.environ.get("PATHEXT") or "",
         "WINDIR": os.environ.get("WINDIR") or "",
     }
-    return {k: v for k, v in env.items() if v}
+    env = {k: v for k, v in env.items() if v}
+    # Outside the owner's space a shell's git signs in with none of the
+    # machine's credentials (S2-12 review, finding 2): ssh reads its keys
+    # from the account's own home whatever HOME says, Windows' agent needs no
+    # variable, and Git for Windows' own configuration names a helper.
+    from kazma_core.security import git_auth
+
+    if not git_auth.machine_credentials_kept():
+        git_auth.drop_machine_credentials(env)
+    return env
 
 
 def _root_owned(target: Path) -> bool:

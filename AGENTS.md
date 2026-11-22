@@ -15280,8 +15280,32 @@ an install with one account behaves as before.
     (`safety.call_preflight.call_refusal`, `ALWAYS_ASK_TOOLS`, with the
     person's latest message for the language) and at the registry's own
     call, with no effect: "this needs the admin's approval, which comes in a
-    later update", in their language. Their shell, file and git cards stay
+    later update", in their language. Their file and git cards stay
     their own. S2-05's row names lifting it.
+  - **A person other than the admin runs no project code on the host** (the
+    S2-12 review, findings 1, 2 and 8; decision 3: members' code runs only
+    in a container, S4-05). `HostAllowance.member` (a holder who is not the
+    admin, in a shared space) gets only `spaces.tools.MEMBER_DEVELOPMENT`,
+    each tool declared with why it starts no host process that runs the
+    project's code; the shell, the test runner, the linter and formatter,
+    the metrics and every MCP server are refused, offered or called
+    (`_host_refusal`). Their git (`security.git_auth.git_command_env`, every
+    git command of the git skill) runs with an empty hooks folder,
+    `--no-verify` (`git_auth.no_verify`, read from the environment), no
+    fsmonitor, pager, editor, signing, `ext::` or `file://` transport, and
+    is refused before anything runs when the repository's own configuration
+    names a filter or merge driver, a diff program or an include
+    (`git_auth._member_git_refusal`). They write nothing under `.git`
+    (`path_policy.check_path_access`, `via="git"`, which no grant opens).
+    Outside the owner's space every git command -- the git tools' and the
+    shell's (`post_hitl.restricted_child_env`) -- gets none of the machine's
+    credentials (`git_auth.drop_machine_credentials`: no agent or askpass,
+    every credential helper reset, `NO_KEY_SSH`: no ssh configuration file,
+    no key). The filesystem MCP server is refused in a shared space to
+    anyone (N27). A new Development tool is refused to members until it is
+    declared there. Gate: `tests/test_member_runs_no_project_code.py`
+    (planted tools and the allowance of before as controls; real hooks on a
+    real repository, the admin's hooks running as the control).
   - Gates: `tests/test_development_per_person.py` (S1-20's rule and the
     flow without the interim refusal as the controls),
     `tests/test_host_tools_absent.py` (re-pointed), the People confirm in

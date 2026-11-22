@@ -2,14 +2,15 @@
 project folder (plan 4.11, decisions N1, N21, N28, N29).
 
 * In a shared space with a project folder, each person who holds
-  Development has its tools (the shell, git, GitHub, the project's files),
+  Development has its tools (git, GitHub, the project's files; the shell and
+  the test runner only for the admin, the S2-12 review),
   working in that space's own folder; someone without it has none. The
   admin holds it as anyone does (N28: on at first). The admin's own tools
   are never there.
 * A plain shared space has no Development, for anyone who holds it.
 * N21, until S2-05: a person other than the admin who holds Development is
   refused their always-ask actions and folder grants there, before any card
-  and with no effect, in their language. Their shell and git cards are
+  and with no effect, in their language. Their file and git cards are
   their own, as before.
 
 Controls: S1-20's rule (no host tool in another host space) refuses the
@@ -103,7 +104,10 @@ def test_a_development_holder_has_its_tools_in_the_project_space(spaces) -> None
     allowance = _allowance(spaces["dev"], CODER)
     assert allowance.development and not allowance.admin
     offered = _offered(spaces["dev"], CODER)
-    assert {"shell_exec", "git_status", "codebase_status"} <= offered
+    assert {"git_status", "git_commit", "codebase_status"} <= offered
+    # The S2-12 review: a person other than the admin runs no project code on
+    # the host -- no shell, no tests (tests/test_member_runs_no_project_code.py).
+    assert not offered & {"shell_exec", "run_unit_tests"}
     assert not offered & host_tools.ADMIN, "the admin's own tools are never in a shared space"
     # A read-tier Development tool runs (no card stands in front of it).
     answer, entered = _call(spaces["dev"], CODER, "codebase_status")

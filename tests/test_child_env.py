@@ -243,6 +243,10 @@ _BUILDERS = {
     # security/git_auth.py: tool_child_env plus the clone's token, and no machine
     # credential outside the owner's space (Spaces S1-20).
     "clone_env",
+    # security/git_auth.py: an environment it is given, with the space's
+    # rules added: no machine credential outside the owner's space, and no
+    # program for a person other than the admin (S2-12 review).
+    "git_command_env",
 }
 # Spawns whose env reaches them some other way, each with how.
 _ENV_BY_OTHER_ROUTE = {
