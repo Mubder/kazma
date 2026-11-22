@@ -66,7 +66,7 @@ def test_a_kept_result_holds_no_reply_text():
     allowed = {"made_on", "commit", "model", "reasoning", "what", "passed", "languages", "lang", "steps",
                "page_errors", "spent", "n", "kind", "action", "phase", "answered", "calls", "prompt_tokens",
                "completion_tokens", "approval_tools", "forgotten", "provider", "judge", "judge_spent",
-               "prompt_cache_hit_tokens", "turn_failed"}
+               "prompt_cache_hit_tokens", "cached_tokens", "turn_failed"}
     for path in EVIDENCE.glob("*.json"):
         data = json.loads(path.read_text(encoding="utf-8"))
         keys: set[str] = set()

@@ -3332,7 +3332,8 @@
                     <option value="max">{{ t('settings.chat_reasoning_max') }}</option>
                 </select>
                 <div class="form-hint">{{ t('settings.chat_reasoning_hint') }}</div>
-                <div class="form-hint" x-show="chatReasoning.applies === false" x-cloak>{{ t('settings.chat_reasoning_not_applied') }}</div>
+                <div class="form-hint" x-show="chatReasoning.takes === 'none'" x-cloak>{{ t('settings.chat_reasoning_not_applied') }}</div>
+                <div class="form-hint" x-show="chatReasoning.takes === 'off_only'" x-cloak data-reasoning-off-only>{{ t('settings.chat_reasoning_off_only') }}</div>
             </div>
             <button class="btn btn-primary" @click="saveChatReasoning()" :disabled="chatReasoningSaving">{{ t('settings.save_chat_reasoning') }}</button>
         </div>

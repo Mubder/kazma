@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.config_store import get_config_store
+from kazma_core.observability.llm_ledger import ledgered_chat
 
 __all__ = [
     "SelfImprovementSkill", "forget_text", "get_self_improvement", "learn_from_finished_turn", "worker_lessons",
@@ -279,10 +280,10 @@ Output ONLY the delta text (or NOTHING), no preamble."""
         try:
             provider = await asyncio.to_thread(_llm_for_delta)  # the registry's settings
             if provider is not None:
-                response = await provider.chat([
+                response = await ledgered_chat(provider, [
                     {"role": "system", "content": "You are a concise meta-learning expert."},
                     {"role": "user", "content": refiner_prompt},
-                ])
+                ], work="lessons")
                 # Prompt-injection guard (audit C1): the Meta-Refiner reads
                 # untrusted conversation/tool text, so a malicious input can
                 # ask it to emit an override directive. Reject any delta that
@@ -377,10 +378,10 @@ Output ONLY the delta text (or NOTHING), no preamble."""
         try:
             provider = await asyncio.to_thread(_llm_for_delta)  # the registry's settings
             if provider is not None:
-                response = await provider.chat([
+                response = await ledgered_chat(provider, [
                     {"role": "system", "content": "You are a concise meta-learning expert."},
                     {"role": "user", "content": refiner_prompt},
-                ])
+                ], work="lessons")
                 # Prompt-injection guard (audit C1) — see _analyze_success.
                 from kazma_core.safety.prompt_fence import is_override_delta
 
@@ -1408,7 +1409,8 @@ async def analyze_and_apply_chat_turn(
         provider = await asyncio.to_thread(_llm_for_delta)  # the registry's settings
         if provider is None:
             return {"action": "skip", "reason": "refiner unavailable"}
-        response = await provider.chat(_refiner_prompt(signal, msg, output_snippet, previous_answer, lessons))
+        response = await ledgered_chat(provider, _refiner_prompt(signal, msg, output_snippet, previous_answer, lessons),
+                                       work="lessons")
     except Exception as exc:
         # No refiner, no lesson: a template line said nothing and took a
         # place among the twelve in every later prompt (FA-212).

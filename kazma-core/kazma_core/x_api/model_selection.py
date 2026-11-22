@@ -393,21 +393,12 @@ async def _ledger_row(role: str, client: Any, response: Any, *, started: float) 
     from kazma_core.safety.hitl import get_current_thread_id
 
     usage = getattr(response, "usage", None)
-    usage = usage if isinstance(usage, dict) else {}
-
-    def _count(*keys: str) -> int:
-        for key in keys:
-            value = usage.get(key)
-            if type(value) is int and value >= 0:
-                return value
-        return 0
 
     await arecord_llm_call(
         thread_id=get_current_thread_id() or f"x:{role}",
         provider=provider_of(client),
         model=str(getattr(response, "model", "") or getattr(getattr(client, "config", None), "model", "") or ""),
-        prompt_tokens=_count("prompt_tokens", "input_tokens"),
-        completion_tokens=_count("completion_tokens", "output_tokens"),
+        usage=usage if isinstance(usage, dict) else {},
         cost_usd=float(getattr(response, "cost_usd", 0.0) or 0.0),
         duration_ms=(time.monotonic() - started) * 1000,
         status="ok",

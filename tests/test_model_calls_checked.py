@@ -19,9 +19,10 @@ here with why:
   worker whose every model call ``resilient_chat`` checks;
 * ``KAZMA_OWN``: Kazma's own work after a turn that was allowed (the deep
   pass, entity resolution, the lessons, weekly summaries). Not refused
-  until S2-07, which makes background work use its person's limit. These
-  calls are not in the per-call ledger today, so they do not count toward
-  the person's limit either;
+  until S2-07, which makes background work use its person's limit. Since
+  the memory plan's finding 6 they go through the per-call ledger
+  (``llm_ledger.ledgered_chat``), so they count toward the person's limit
+  the next time it is asked;
 * ``ADMIN``: the admin's own work, never a person's;
 * ``CLIENT``: a client's own retries, fallbacks or delegation to the client
   it wraps; whoever calls the client is in this list;
@@ -47,8 +48,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 #: A client's methods that call a model.
 _METHODS = frozenset({"chat", "chat_stream"})
-#: Helpers that call a model.
-_HELPERS = frozenset({"invoke_llm_chat"})
+#: Helpers that call a model: the streaming helper, and the ledger's
+#: wrapper memory's own calls go through (finding 6).
+_HELPERS = frozenset({"invoke_llm_chat", "ledgered_chat"})
 #: The asks of the person's limit (``kazma_core.spaces.daily_limits``).
 _CHECKS = frozenset({"call_refusal", "verdict"})
 _LIMITS = "kazma_core.spaces.daily_limits"
@@ -58,7 +60,7 @@ TURN = ("runs in a turn whose first step asked the person's limit (the superviso
 TOOL = ("a tool's own model call: a tool runs in a turn the supervisor checked, or in a "
         "swarm worker whose every model call resilient_chat checks")
 KAZMA_OWN = ("Kazma's own work after a turn that was allowed; not refused until S2-07; "
-             "not in the per-call ledger today, so not counted toward the person's limit")
+             "in the per-call ledger (ledgered_chat, finding 6), so counted toward the person's limit")
 ADMIN = "the admin's own work, never a person's"
 CLIENT = "a client's own call: its retries and fallbacks, or the client it wraps; its caller is listed here"
 
@@ -81,10 +83,8 @@ DECLARED: dict[tuple[str, str], tuple[int, str]] = {
         1, TOOL + " (email_analyze)"),
     # ── Kazma's own work after a turn ──
     ("kazma-core/kazma_core/memory/belief_extractor.py", "_llm_extract"): (1, KAZMA_OWN + " (the deep pass)"),
-    ("kazma-core/kazma_core/memory/entity_resolution.py", "_tier3_llm_disambiguate"): (
-        1, KAZMA_OWN + " (entity resolution)"),
-    ("kazma-core/kazma_core/memory/topic_summaries.py", "_default_chat"): (
-        1, KAZMA_OWN + " (weekly summaries and roll-ups: the client's chat handed to the writer)"),
+    ("kazma-core/kazma_core/memory/topic_summaries.py", "_default_chat._chat"): (
+        1, KAZMA_OWN + " (weekly summaries and roll-ups: the chat handed to the writer)"),
     ("kazma-core/kazma_core/skills/self_improvement.py", "SelfImprovementSkill._analyze_success"): (
         1, KAZMA_OWN + " (a swarm worker's lessons)"),
     ("kazma-core/kazma_core/skills/self_improvement.py", "SelfImprovementSkill._analyze_failure"): (
@@ -105,6 +105,8 @@ DECLARED: dict[tuple[str, str], tuple[int, str]] = {
         1, ADMIN + ": scripts/live_eval.py, a wrapper the real graph calls"),
     # ── a client's own ──
     ("kazma-core/kazma_core/llm_stream.py", "invoke_llm_chat"): (3, CLIENT + " (the streaming helper itself)"),
+    ("kazma-core/kazma_core/observability/llm_ledger.py", "ledgered_chat"): (
+        1, CLIENT + " (the ledger's wrapper: one call and its row)"),
     ("kazma-core/kazma_core/llm_stream.py", "_has_chat_stream"): (1, CLIENT + " (asks whether it streams)"),
     ("kazma-core/kazma_core/llm_provider.py", "LLMProvider._chat_stream_once"): (3, CLIENT),
     ("kazma-core/kazma_core/llm_provider.py", "LLMProvider.can_turn_off_reasoning"): (

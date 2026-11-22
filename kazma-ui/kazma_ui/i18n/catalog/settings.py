@@ -2553,8 +2553,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "High: DeepSeek's usual depth",
     },
     "settings.chat_reasoning_hint": {
-        "ar": "ينطبق على كل دور محادثة في كل الواجهات. التفكير الأقل يجيب أسرع ويكلف أقل، والأكثر يخطط للأعمال متعددة الخطوات بشكل أفضل. يصل إلى واجهة DeepSeek نفسها؛ المزوّدون الآخرون يستخدمون إعدادهم. مسودات X والبحث يبقى التفكير فيها متوقفًا.",
-        "en": "Every chat turn on every surface uses it. Less thinking answers sooner and costs less; more plans multi-step work better. It reaches DeepSeek's own API; other providers use their own setting. X drafting and research keep thinking off.",
+        "ar": "ينطبق على كل دور محادثة في كل الواجهات. التفكير الأقل يجيب أسرع ويكلف أقل، والأكثر يخطط للأعمال متعددة الخطوات بشكل أفضل. يصل بكل مستوياته إلى واجهة DeepSeek نفسها، ويصل «إيقاف» وحده إلى Qwen على Model Studio؛ المزوّدون الآخرون يستخدمون إعدادهم. مسودات X والبحث يبقى التفكير فيها متوقفًا.",
+        "en": "Every chat turn on every surface uses it. Less thinking answers sooner and costs less; more plans multi-step work better. Every level reaches DeepSeek's own API, and Off alone reaches Qwen on Model Studio; other providers use their own setting. X drafting and research keep thinking off.",
     },
     "settings.chat_reasoning_label": {
         "ar": "مقدار تفكير النموذج قبل أن يجيب",
@@ -2575,6 +2575,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.chat_reasoning_off": {
         "ar": "إيقاف: يجيب فورًا (الأسرع)",
         "en": "Off: answer at once (fastest)",
+    },
+    "settings.chat_reasoning_off_only": {
+        "ar": "المزوّد النشط يأخذ «إيقاف» وحده: «إيقاف» يوقف تفكيره، والمستويات الأخرى لا ترسل شيئًا فيجيب بإعداده الافتراضي.",
+        "en": "Your active provider takes Off only: Off turns its thinking off; the other levels send nothing, so it answers with its own default.",
     },
     "settings.chat_reasoning_saved": {
         "ar": "تم حفظ مستوى التفكير",

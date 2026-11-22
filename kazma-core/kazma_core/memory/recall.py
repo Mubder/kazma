@@ -59,6 +59,7 @@ from kazma_core.memory.limits import (
     RECALL_OTHER_STEP,
 )
 from kazma_core.memory.vector_engine import BELIEF_ACTIVE_SQL, RECALLABLE_TIERS
+from kazma_core.spaces.scope import space_named_or_bound
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,7 @@ def recall(
     *,
     conn: sqlite3.Connection | None = None,
     vector_engine: Any | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
     limit: int = 5,
     session_id: str | None = None,
     explain: bool | None = None,
@@ -266,11 +267,16 @@ def recall(
     .asks_for_all``). *in_context* is the chat's turns the model reads in
     the conversation itself (``turn_key`` of each user message): the chat's
     own memories of them are left out, never boosted into the block a
-    second time."""
+    second time.
+
+    *tenant_id* is the space recalled from; a caller that names none recalls
+    from the space of the work bound now (``scope.space_named_or_bound``:
+    the owner's while Spaces is not enforced, as before)."""
     from kazma_core.memory import speakers
     from kazma_core.memory.question_shape import asks_for_all
     from kazma_core.spaces.identity import IdentityUnavailable
 
+    tenant_id = space_named_or_bound(tenant_id)
     query = _bounded_question(query)
     try:
         people = speakers.room(tenant_id)
@@ -734,7 +740,7 @@ def _recall(
     *,
     conn: sqlite3.Connection | None = None,
     vector_engine: Any | None = None,
-    tenant_id: str = "default",
+    tenant_id: str,
     limit: int = 5,
     session_id: str | None = None,
     explain: bool | None = None,
@@ -1637,7 +1643,7 @@ def search_with_status(
     query: str,
     limit: int = 5,
     *,
-    tenant_id: str,
+    tenant_id: str | None,
     session_id: str | None = None,
     kind: str | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
@@ -1669,7 +1675,7 @@ def search(
     *,
     session_id: str | None = None,
     kind: str | None = None,
-    tenant_id: str = "default",
+    tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """V2-native search returning ``list[dict]`` — the shape callers of the
     legacy ``adapter.search()`` consume.
@@ -1688,6 +1694,8 @@ def search(
             per-turn RAG path uses.
         kind: Optional — restrict to one hit kind (``"belief"`` or
             ``"episode"``). ``None`` returns both, beliefs first.
+        tenant_id: The space searched; none named, the space of the work
+            bound now (:func:`recall`).
 
     Best-effort: never raises; returns ``[]`` on any failure. Context for
     Kazma's own work only: a surface that shows hits to a person uses
@@ -2824,7 +2832,7 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
         rows = conn.execute(
             "SELECT id, period_start, period_end, level, title, summary_text, embedding, embedding_model_version "
             "FROM memory_summaries WHERE tenant_id = ? AND status = 'active'",
-            (tenant_id or "default",),
+            (space_named_or_bound(tenant_id),),
         ).fetchall()
     except sqlite3.OperationalError:
         return []  # a database from before summaries

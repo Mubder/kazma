@@ -50,7 +50,7 @@ __all__ = [
 _CONSERVATIVE_CONF_THRESHOLD = 0.7
 
 # resolve_entity outcomes that mean "this name is an existing entity".
-_RESOLVED_ONTO_EXISTING = frozenset({"exact_match", "auto_merge", "llm_merge"})
+_RESOLVED_ONTO_EXISTING = frozenset({"exact_match", "auto_merge"})
 
 
 def _names_an_entity(conn: Any, text: str, *, tenant_id: str) -> bool:
@@ -358,6 +358,7 @@ async def _llm_extract(
     later); None with False when it answered with nothing usable (Memory audit
     M12: the two were one None, and an outage counted as "nothing to learn")."""
     from kazma_core.model_registry import get_model_registry
+    from kazma_core.observability.llm_ledger import ledgered_chat
 
     try:
         client = get_model_registry().get_client()
@@ -369,7 +370,7 @@ async def _llm_extract(
                                                      entities=entities, said_on=said_on, previous=previous,
                                                      held=held)},
         ]
-        raw = await client.chat(messages)
+        raw = await ledgered_chat(client, messages, work="deep_pass")
     except Exception as exc:  # noqa: BLE001 - no client, or no answer: retry later
         logger.warning("[belief_extract] LLM extraction call failed: %s", exc)
         return None, True

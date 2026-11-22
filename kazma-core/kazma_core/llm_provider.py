@@ -47,15 +47,30 @@ logger = logging.getLogger(__name__)
 #: takes them (DeepSeek's own API: ``reasoning_effort``, its default "high").
 #: ``"off"`` is the other value: thinking turned off.
 REASONING_EFFORTS = ("low", "high", "max")
+#: The body fields a reasoning switch adds: DeepSeek's ``thinking`` and
+#: ``reasoning_effort``, Qwen's ``enable_thinking``.
+_REASONING_FIELDS = ("thinking", "reasoning_effort", "enable_thinking")
 
 
 def is_deepseek_api(base_url: str) -> bool:
-    """True for DeepSeek's own API: the one endpoint whose reasoning switch
-    Kazma knows (``thinking`` / ``reasoning_effort``)."""
+    """True for DeepSeek's own API, whose reasoning switch Kazma knows
+    (``thinking`` / ``reasoning_effort``)."""
     from urllib.parse import urlparse
 
     host = (urlparse(str(base_url or "")).hostname or "").lower()
     return host == "deepseek.com" or host.endswith(".deepseek.com")
+
+
+def _is_qwen_api(base_url: str) -> bool:
+    """True for Qwen's API on Alibaba Cloud Model Studio, any region's address
+    (``dashscope*.aliyuncs.com``, ``*.qwencloudapi.com``): its switch is
+    ``enable_thinking`` (the memory plan's finding 12). It has no effort
+    level Kazma knows: only ``"off"`` reaches it."""
+    from urllib.parse import urlparse
+
+    host = (urlparse(str(base_url or "")).hostname or "").lower()
+    return ((host.startswith("dashscope") and host.endswith(".aliyuncs.com"))
+            or host == "qwencloudapi.com" or host.endswith(".qwencloudapi.com"))
 
 
 def _is_openai_api(base_url: str) -> bool:
@@ -1346,17 +1361,18 @@ class LLMProvider:
 
             # ── Reasoning switch fallback ───────────────────────────────
             # A DeepSeek model without the thinking switch, or without an
-            # effort level, may refuse the field: answer as before, with the
-            # model's own default.
-            if (("thinking" in payload or "reasoning_effort" in payload)
+            # effort level, may refuse the field, and so may a Qwen model
+            # that only thinks, or only streams with it set: answer as
+            # before, with the model's own default.
+            if (any(field in payload for field in _REASONING_FIELDS)
                     and status_code in (400, 422)
                     and ("thinking" in detail_lower or "reasoning" in detail_lower)):
                 logger.warning(
                     "Provider rejected the reasoning switch (HTTP %s) — retrying without it.",
                     status_code,
                 )
-                payload.pop("thinking", None)
-                payload.pop("reasoning_effort", None)
+                for field in _REASONING_FIELDS:
+                    payload.pop(field, None)
                 try:
                     resp = await client.post("/chat/completions", json=payload)
                     resp.raise_for_status()
@@ -1613,6 +1629,13 @@ class LLMProvider:
             # its answer got 1,800 tokens of reasoning and no answer (live,
             # 2026-10-26). https://api-docs.deepseek.com/guides/thinking_mode/
             payload["thinking"] = {"type": "disabled"}
+        elif reasoning == "off" and _is_qwen_api(str(self.config.base_url or "")):
+            # Qwen 3.5-plus and newer think by default: the intent
+            # classifier's 4 s refinement waited the whole 4 s for
+            # qwen3.7-plus on every gray-zone turn (the memory plan's finding
+            # 12). Model Studio's switch, a top-level field of the body:
+            # https://www.alibabacloud.com/help/en/model-studio/deep-thinking
+            payload["enable_thinking"] = False
         elif reasoning in REASONING_EFFORTS and self._is_deepseek_endpoint():
             # Thinking stays on, at the effort asked (DeepSeek's OpenAI-format
             # field; its default is "high"): the chat's own level, chosen in
@@ -1627,13 +1650,15 @@ class LLMProvider:
         """Whether ``chat(reasoning=...)`` reaches this endpoint as a switch:
         ``"off"``, or an effort of :data:`REASONING_EFFORTS`.
 
-        True only for DeepSeek's own API through this class's ``chat``: the
-        providers with their own ``chat`` take no such argument, and no other
-        OpenAI-compatible endpoint has a switch Kazma knows (an unknown field
-        can be refused).
+        True for DeepSeek's own API (``"off"`` and every effort) and Qwen's
+        (``"off"`` only: an effort is sent as nothing, the model's default),
+        through this class's ``chat``: the providers with their own ``chat``
+        take no such argument, and no other OpenAI-compatible endpoint has a
+        switch Kazma knows (an unknown field can be refused).
         """
+        base_url = str(self.config.base_url or "")
         return (type(self).chat is LLMProvider.chat and not self._via_gateway
-                and self._is_deepseek_endpoint())
+                and (self._is_deepseek_endpoint() or _is_qwen_api(base_url)))
 
     @staticmethod
     def _delta_text(delta: Any) -> str:

@@ -158,7 +158,8 @@ def ledger(tmp_path, monkeypatch):
 def test_every_sum_counts_the_calls_with_no_known_price(ledger):
     ledger.record_llm_call(thread_id="t", turn_id="u", provider="deepseek", prompt_tokens=10, cost_usd=0.0, priced=False)
     ledger.record_llm_call(thread_id="t", turn_id="u", provider="anthropic", prompt_tokens=10, cost_usd=0.5)
-    assert ledger.turn_usage("u") == {"calls": 2, "tokens": 20, "cost": 0.5, "unpriced": 1}
+    assert ledger.turn_usage("u") == {"calls": 2, "tokens": 20, "cost": 0.5, "unpriced": 1,
+                                      "prompt_tokens": 20, "cached_tokens": 0}
     assert ledger.thread_usage("t")["unpriced"] == 1
     from datetime import UTC, datetime, timedelta
 

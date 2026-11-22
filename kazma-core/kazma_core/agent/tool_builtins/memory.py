@@ -123,6 +123,29 @@ def _agent_write(*texts: str, value: str | None = None) -> tuple[str | None, str
     return None, agent_write_source(judged, latest)
 
 
+#: What memory_store answers when the user's own words did not ask to
+#: remember (the memory plan's finding 1, 2026-11-22).
+_NOT_ASKED_TO_REMEMBER = (
+    "Not stored: memory_store writes a note only when the user's own words ask to remember "
+    "something. This turn is already remembered -- Kazma keeps every turn and learns the facts "
+    "the user states from it -- so nothing is lost, and a second copy is not kept."
+)
+
+
+def _asked_to_remember() -> bool:
+    """Whether the running turn's latest user message, in the user's own
+    words, asks Kazma to remember something (``remember_request``, English
+    and Arabic). memory_store wrote a note whenever the model chose to, so a
+    fact the user simply told was kept twice -- the turn and the note -- and
+    forgetting one left the other (the memory plan's finding 1). Work with no
+    user message (a swarm worker, no turn) asks nothing."""
+    from kazma_core.memory.provenance import latest_user_message
+    from kazma_core.memory.remember_request import is_remember_request
+    from kazma_core.tools.export_session import get_current_session_messages
+
+    return is_remember_request(latest_user_message(get_current_session_messages() or []))
+
+
 #: What a memory tool answers when its write would replace the user's own fact.
 _USER_FACT_STANDS = (
     "The user's own fact stands: a memory tool cannot replace what the user said. "
@@ -819,6 +842,10 @@ def register_memory_tools(registry: Any) -> None:
             logger.warning("[memory_purge_empty_entities] failed: %s", exc)
             return f"Error: memory_purge_empty_entities failed — {exc}"
     def _memory_store_sync(text: str, metadata: str = "{}") -> str:
+        # Only when the user's own words ask to remember: before anything
+        # opens, so nothing is written (the memory plan's finding 1).
+        if not _asked_to_remember():
+            raise RefusedBeforeEffect(_NOT_ASKED_TO_REMEMBER)
         try:
             meta = json.loads(metadata) if isinstance(metadata, str) else metadata
         except json.JSONDecodeError:
@@ -1210,7 +1237,7 @@ def register_memory_tools(registry: Any) -> None:
             "WRITE: Link two entities with a belief edge subject--predicate-->object. "
             "Use for graph hierarchy e.g. user has_project kazma; kazma has_part "
             "kazma_file_index. Creates missing entity rows. Not for free-text notes "
-            "(use memory_store for notes)."
+            "(memory_store keeps a note when the user asks to remember)."
         ),
         category="memory",
     )
@@ -1236,12 +1263,16 @@ def register_memory_tools(registry: Any) -> None:
     @registry.register(
         description=(
             "WRITE: Soft-invalidate one belief by id (from memory_list_beliefs). "
-            "Removes stale/duplicate facts. Also: memory_admin action=invalidate id=… "
+            "Use it ONLY when the user asks you to forget something or says a fact is "
+            "wrong. NEVER call it to record a change the user told you (a move, a new "
+            "job, a new name): Kazma updates the fact from their own words, or asks them "
+            "to confirm the change, and retiring the old fact yourself loses it. "
+            "Also: memory_admin action=invalidate id=… "
             "When the USER asks you to forget something they told you, pass "
             "forget_source_turn=true: the conversation turn the fact came from is "
             "forgotten too (as the Memory page's Forget does), so it is neither "
-            "recalled nor learned again. Leave it false for clean-up of stale or "
-            "duplicate facts. A memory id (e_..., from memory_search) forgets that "
+            "recalled nor learned again. Leave it false when the user only says a fact "
+            "is wrong. A memory id (e_..., from memory_search) forgets that "
             "conversation memory and the facts its turn produced (the user's Forget)."
         ),
         category="memory",
@@ -1295,9 +1326,12 @@ def register_memory_tools(registry: Any) -> None:
         return await asyncio.to_thread(_mem_purge_empty_entities, confirm=bool(confirm))
     @registry.register(
         description=(
-            "Store a fact, preference, or conversation fragment in long-term memory. "
-            "Use when the user shares personal info, preferences, or important context "
-            "that should be remembered across sessions. "
+            "Store a note in long-term memory, ONLY when the user's own words ask you to "
+            "remember something (\"remember that ...\", \"don't forget ...\", \"note that ...\", "
+            "\"تذكر ...\", \"احفظ ...\"); any other call is refused and stores nothing. "
+            "Every turn is already remembered and the facts the user states are learned "
+            "from it, so a fact the user simply tells you needs no note: storing it would "
+            "keep it twice. "
             "DO NOT use this to restructure/clean the entity graph — for merge shells, "
             "link user→kazma→parts, or delete junk nodes (true/false) use "
             "memory_merge_entities / memory_link_entities / memory_admin / memory_delete_entity. "
@@ -1307,10 +1341,9 @@ def register_memory_tools(registry: Any) -> None:
             '{"service":"grok","next_reset":"<when>"} so the new value SUPERSEDES '
             "the previous one instead of stacking duplicates. Free text that mentions "
             "a product next/weekly reset is auto-classified the same way. "
-            "To remove stale beliefs use memory_invalidate — never raw SQL. "
-            "Only use this tool when the user EXPLICITLY asks to save/remember "
-            "something — never because a reply you are writing should mention "
-            "or reference memory."
+            "To remove beliefs use memory_invalidate — never raw SQL. "
+            "Never call it because a reply you are writing should mention or "
+            "reference memory."
         ),
         category="memory",
     )

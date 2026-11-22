@@ -22,6 +22,20 @@ turn's, a scheduled fire's, a swarm worker's -- read in the caller's own
 context. Kazma's own work (``install_work``) and a call with nothing bound
 name nobody. :func:`spend_by_person` is the admin's view (N11: spend, never
 text).
+
+Every row also counts the prompt tokens the provider served from its cache
+(``cached_tokens``, 2026-11-22, the memory plan's finding 9), read from the
+call's own usage whatever its shape (:func:`token_counts`): DeepSeek's
+``prompt_cache_hit_tokens``, OpenAI's and Qwen's
+``prompt_tokens_details.cached_tokens``, Anthropic's
+``cache_read_input_tokens``. A caller hands the usage over (``usage=``) and
+the ledger reads it; every sum gives the prompt tokens and their cached
+share beside each other.
+
+Memory's own model calls -- the deep pass, the weekly summaries and
+roll-ups, the lesson refiner, the V1 backfill -- go through
+:func:`ledgered_chat` (finding 6): they were in no ledger, so no spend
+report, product measure or person's daily limit counted them.
 """
 
 from __future__ import annotations
@@ -29,13 +43,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import sys
 import threading
+import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
+
+from kazma_core.token_usage import token_counts
 
 __all__ = [
     "arecord_llm_call",
     "close_llm_ledger",
+    "ledgered_chat",
     "query_recent",
     "record_llm_call",
     "spend_by_person",
@@ -72,7 +92,8 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     turn_id TEXT DEFAULT '',
     priced INTEGER DEFAULT 1,
     space TEXT DEFAULT '',
-    asker TEXT DEFAULT ''
+    asker TEXT DEFAULT '',
+    cached_tokens INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_llm_calls_ts ON llm_calls(ts);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_thread ON llm_calls(thread_id);
@@ -107,7 +128,8 @@ _LOCAL_PROVIDERS = ("ollama", "lm-studio", "lmstudio", "local")
 def _migrate(conn: sqlite3.Connection) -> None:
     """Columns added after the ledger was first made: ``turn_id``
     (2026-09-26), ``priced`` (2026-11-08), ``space`` and ``asker``
-    (2026-11-20, Spaces S1-22: a row from before names nobody).
+    (2026-11-20, Spaces S1-22: a row from before names nobody),
+    ``cached_tokens`` (2026-11-22: a row from before counts none).
 
     Rows written before ``priced`` existed were priced at gpt-4o-mini's
     $0.15 / $0.60 whatever the model (kazma_core.model_prices). Once, as the
@@ -119,7 +141,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
     added = add_missing_columns(
         conn, "llm_calls", (("turn_id", "TEXT DEFAULT ''"), ("priced", "INTEGER DEFAULT 1"),
-                            ("space", "TEXT DEFAULT ''"), ("asker", "TEXT DEFAULT ''")),
+                            ("space", "TEXT DEFAULT ''"), ("asker", "TEXT DEFAULT ''"),
+                            ("cached_tokens", "INTEGER DEFAULT 0")),
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_turn ON llm_calls(turn_id)")
     # One person's day (Spaces S2-02): a person's limit is checked when their
@@ -159,15 +182,21 @@ def _marks(values: tuple[str, ...]) -> str:
     return ", ".join("?" for _ in values)
 
 
-#: The SELECT list every sum reads: calls, tokens, dollars, and how many of
-#: the calls had no known price (their dollars are not in the sum).
+#: The SELECT list every sum reads: calls, tokens, dollars, how many of the
+#: calls had no known price (their dollars are not in the sum), and the
+#: prompt tokens with the share of them the provider served from its cache.
 _SUMS = ("COUNT(*), COALESCE(SUM(total_tokens), 0), COALESCE(SUM(cost_usd), 0.0), "
-         "COALESCE(SUM(CASE WHEN priced = 0 THEN 1 ELSE 0 END), 0)")
+         "COALESCE(SUM(CASE WHEN priced = 0 THEN 1 ELSE 0 END), 0), "
+         "COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(cached_tokens), 0)")
+#: How many columns :data:`_SUMS` reads.
+_SUMS_WIDTH = 6
 
 
-def _usage(calls: Any, tokens: Any, cost: Any, unpriced: Any) -> dict[str, Any]:
+def _usage(calls: Any, tokens: Any, cost: Any, unpriced: Any, prompt: Any = 0,
+           cached: Any = 0) -> dict[str, Any]:
     return {"calls": int(calls or 0), "tokens": int(tokens or 0), "cost": float(cost or 0.0),
-            "unpriced": int(unpriced or 0)}
+            "unpriced": int(unpriced or 0), "prompt_tokens": int(prompt or 0),
+            "cached_tokens": int(cached or 0)}
 
 
 def record_llm_call(
@@ -187,8 +216,14 @@ def record_llm_call(
     priced: bool = True,
     space: str | None = None,
     asker: str | None = None,
+    cached_tokens: int = 0,
+    usage: Mapping[str, Any] | None = None,
 ) -> None:
     """Record one LLM call. Best-effort: never raises, never blocks the turn.
+
+    ``usage``: the provider's usage of an answered call, read with
+    :func:`token_counts` for the prompt, completion and cached tokens a
+    caller did not give (finding 9: the cache's share was in no row).
 
     ``priced`` False: no price was known for the call (``LLMResponse.
     cost_known``); its ``cost_usd`` is 0.0 and every sum counts it apart.
@@ -199,6 +234,12 @@ def record_llm_call(
     turn (:func:`turn_usage`).
     """
     try:
+        if usage is not None:
+            counts = token_counts(usage)
+            prompt_tokens = int(prompt_tokens or 0) or counts.prompt
+            completion_tokens = int(completion_tokens or 0) or counts.completion
+            cached_tokens = int(cached_tokens or 0) or counts.cached
+        cached_tokens = min(max(0, int(cached_tokens or 0)), max(0, int(prompt_tokens or 0)))
         if turn_id is None:
             from kazma_core.observability.correlation import current_turn_id
 
@@ -218,8 +259,8 @@ def record_llm_call(
                        (ts, thread_id, iteration, provider, model,
                         prompt_tokens, completion_tokens, total_tokens,
                         cost_usd, duration_ms, status, error_kind, failover_from,
-                        turn_id, priced, space, asker)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        turn_id, priced, space, asker, cached_tokens)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         datetime.now(UTC).isoformat(),
                         thread_id,
@@ -238,6 +279,7 @@ def record_llm_call(
                         1 if priced else 0,
                         str(space or "")[:120],
                         str(asker or "")[:120],
+                        cached_tokens,
                     ),
                 )
     except Exception as exc:  # noqa: BLE001 — observability must be invisible
@@ -320,6 +362,58 @@ async def arecord_llm_call(**fields: Any) -> None:
         raise
     except RuntimeError as exc:  # the thread pool is shut down (interpreter exit)
         logger.debug("[llm-ledger] record not written (non-fatal): %s", exc)
+
+
+async def ledgered_chat(client: Any, messages: Any, *, work: str, **kwargs: Any) -> Any:
+    """``client.chat(messages, **kwargs)`` with its row in this ledger.
+
+    For model calls made outside a turn's supervisor and outside
+    ``resilient_chat`` -- memory's own work (the deep pass, the weekly
+    summaries and roll-ups, the lesson refiner, the V1 backfill): none of
+    them was in the ledger (the memory plan's finding 6), so no spend
+    report, product measure or person's daily limit counted them. Whose
+    call it is comes from the scope bound where it is made
+    (:func:`arecord_llm_call`): the person the work acts for, nobody for
+    Kazma's own sweeps. ``work`` names the call in ``thread_id`` when no
+    thread is bound (``memory:<work>``).
+
+    An answered call's row carries its usage (prompt, completion and the
+    cache's share, :func:`token_counts`); a call that raised gets an
+    ``error`` row and its exception goes on. A cancelled call writes no row
+    (nothing is known of it).
+    """
+    from kazma_core.safety.hitl import get_current_thread_id
+
+    thread_id = get_current_thread_id() or f"memory:{work}"
+    started = time.monotonic()
+    answered = False
+    try:
+        response = await client.chat(messages, **kwargs)
+        answered = True
+    finally:
+        # The failure's row, while the exception goes on (no handler
+        # catches it here); a cancellation writes none.
+        failure = None if answered else sys.exc_info()[1]
+        if failure is not None and not isinstance(failure, asyncio.CancelledError):
+            await arecord_llm_call(
+                thread_id=thread_id, provider=provider_of(client), model=_model_of(client, None),
+                duration_ms=(time.monotonic() - started) * 1000, status="error",
+                error_kind=str(getattr(failure, "kind", "") or type(failure).__name__),
+            )
+    usage = getattr(response, "usage", None)
+    await arecord_llm_call(
+        thread_id=thread_id, provider=provider_of(client), model=_model_of(client, response),
+        cost_usd=float(getattr(response, "cost_usd", 0.0) or 0.0),
+        duration_ms=(time.monotonic() - started) * 1000, status="ok",
+        priced=bool(getattr(response, "cost_known", False)),
+        usage=usage if isinstance(usage, Mapping) else {},
+    )
+    return response
+
+
+def _model_of(client: Any, response: Any) -> str:
+    """The model that answered, else the one the client asks for."""
+    return str(getattr(response, "model", "") or getattr(getattr(client, "config", None), "model", "") or "")
 
 
 def query_recent(limit: int = 100, thread_id: str | None = None) -> list[dict[str, Any]]:
@@ -407,7 +501,8 @@ def spend_by_person(since: datetime) -> list[dict[str, Any]] | None:
     except (sqlite3.Error, OSError) as exc:
         logger.warning("[llm-ledger] spend per person could not be read: %s", exc)
         return None
-    return [{"asker": str(row[0] or ""), **_usage(*row[1:5]), "spaces": int(row[5] or 0)} for row in rows]
+    return [{"asker": str(row[0] or ""), **_usage(*row[1:1 + _SUMS_WIDTH]),
+             "spaces": int(row[1 + _SUMS_WIDTH] or 0)} for row in rows]
 
 
 def usage_of(asker: str, since: datetime) -> dict[str, Any] | None:

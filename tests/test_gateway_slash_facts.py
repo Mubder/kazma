@@ -67,8 +67,10 @@ def test_thread_usage_sums_one_chats_calls(ledger):
     ledger.record_llm_call(thread_id="chat-a", prompt_tokens=900, completion_tokens=100, cost_usd=0.01)
     ledger.record_llm_call(thread_id="chat-b", prompt_tokens=5000, completion_tokens=5000, cost_usd=1.0)
 
-    assert ledger.thread_usage("chat-a") == {"calls": 2, "tokens": 2500, "cost": pytest.approx(0.03), "unpriced": 0}
-    assert ledger.thread_usage("chat-c") == {"calls": 0, "tokens": 0, "cost": 0.0, "unpriced": 0}
+    assert ledger.thread_usage("chat-a") == {"calls": 2, "tokens": 2500, "cost": pytest.approx(0.03), "unpriced": 0,
+                                             "prompt_tokens": 2100, "cached_tokens": 0}
+    assert ledger.thread_usage("chat-c") == {"calls": 0, "tokens": 0, "cost": 0.0, "unpriced": 0,
+                                             "prompt_tokens": 0, "cached_tokens": 0}
 
 
 def test_an_unreadable_ledger_is_unknown_not_zero(ledger, monkeypatch):

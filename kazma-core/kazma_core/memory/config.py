@@ -75,8 +75,6 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         "mirror_verify_hours": 24,
         # Working-tier TTL (hours) — macro_sleep demotes stale working → episodic
         "working_ttl_hours": 24,
-        # Tier-3 LLM entity disambiguation (opt-in; costs tokens)
-        "entity_llm_disambiguate": False,
         # Merge Knowledge Library into chat path (inject labeled KB + memory)
         "merge_knowledge_into_chat": True,
         # Source trust weights (memory.provenance: a fact the user stated
@@ -193,7 +191,6 @@ def _read_store_overlay() -> dict[str, Any]:
             "recall_deadline_s",
             "mirror_verify_hours",
             "working_ttl_hours",
-            "entity_llm_disambiguate",
             "merge_knowledge_into_chat",
             "trust_weight_user",
             "trust_weight_user_stated",
@@ -286,7 +283,6 @@ _V2_BOOL_KEYS = (
     "skip_llm_if_heuristic_extracted",
     "access_bump_enabled",
     "explain_recall",
-    "entity_llm_disambiguate",
     "merge_knowledge_into_chat",
 )
 # Floats (trust weights, thresholds)

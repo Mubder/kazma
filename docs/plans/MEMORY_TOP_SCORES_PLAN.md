@@ -514,10 +514,44 @@ alone as the negative controls.
    the repository) shows `memory_store` called on the telling turns. To
    decide: whether a note that restates the turn is written at all, and
    whether Forget offers the memories that say the same thing.
+   Diagnosed (22 Nov, no model call): `memory_store`'s description
+   contradicted itself -- it opened "Use when the user shares personal
+   info" and ended "Only use this tool when the user EXPLICITLY asks" --
+   and the model followed the opening. Forgetting a turn already takes the
+   notes written in it (`forget._chat_notes`); forgetting a note alone
+   leaves its turn. The main session's decision (A): `memory_store` writes
+   only when the running turn's latest user message, in the user's own
+   words, asks to remember (`remember_request.is_remember_request` through
+   `own_words`, English and Arabic, finding 16's shape); any other call is
+   refused before anything opens (`RefusedBeforeEffect`, "this turn is
+   already remembered"), and the description says so, its opening gone.
+   Notes stored before are not touched. What each caller that is not a
+   chat turn now gets: a swarm worker has no user message, so its
+   `memory_store` is refused (`memory_link_entities` still writes a fact
+   in the asker's space); a scheduled task (offered it only under
+   `read_write`) stores only when its stored prompt, which is its turn's
+   user message, asks to remember; an A2A request is offered no write tool;
+   a sub-agent's turn reads its goal, the model's words, as its user
+   message (as finding 16's forget rule does: said, not changed). A
+   rotating fact (a Grok reset) the user mentions without "remember" is no
+   longer noted by the model. Gate: `tests/test_memory_store_only_when_asked.py`
+   (English and Arabic: a told fact kept once; "remember that" still stored;
+   a quoted "remember" not the user's asking; no user message stores
+   nothing; today's tool, which keeps the told fact twice, as the control).
+   Later work, not built: forgetting a note whose turn is still remembered
+   should offer that turn too (the Memory page's Forget, and
+   `memory_invalidate` on a note's fact).
 2. **Telling Kazma about a move asks for an approval.** "I moved to Porto
    last month." made the model call `memory_invalidate` (danger tier) to
    retire the old city; the turn waited on an approval card. Seen in one of
    the two English runs. Evidence: the trial result's `approval_tools`.
+   The main session's decision (A, 22 Nov): the description now says to use
+   it only when the user asks to forget something or says a fact is wrong,
+   and never to record a change the user told (Kazma updates the fact from
+   their words, or asks them since findings 15 and 17); the approval card
+   stays as the safety. To measure in the next real-use runs: if a move
+   still raises the card, a refusal before the card (B) is the main
+   session's next decision.
 3. **An Arabic question about "my sister" was read as Kazma's sister.**
    "شنو تشتغل أختي؟" after the fact was forgotten was answered "I don't have a
    sister, I'm Kazma". LongMemEval's abstention judge passed it (it said no
@@ -561,6 +595,22 @@ alone as the negative controls.
    memory model call is ledgered, read from the source, a planted
    unledgered call as the negative control. The benchmark's recorded
    replies (`benchmark.py`'s recorder) are not the product's calls.
+   Fixed with finding 9 (22 Nov): every call above goes through
+   `llm_ledger.ledgered_chat`, one call and its row (thread
+   `memory:<work>` when none is bound; whose call from the bound scope;
+   a failed call an `error` row), so it counts toward the person's daily
+   limit too. Entity disambiguation's call never reached a provider: its
+   `client.chat(` was a coroutine it never awaited, so the reply it read
+   was the coroutine's text and every answer was "skip" (off by default).
+   Removed (the main session's decision): a high-stakes near match is
+   quarantined for review, as it always was in fact, and no product code
+   calls a client's chat without awaiting it
+   (`tests/test_coroutines_are_awaited.py`, the old line as the control).
+   Its setting `memory.v2.entity_llm_disambiguate` was never in kazma.yaml,
+   so nothing is retired; a stored value is read by nothing. Gate:
+   `tests/test_memory_calls_ledgered.py` (the deep pass in English and
+   Arabic, the summaries' chat and the refiner through the real code,
+   today's direct calls as the control; a planted unledgered call found).
 7. **Two token estimators disagree on Arabic.** Found fixing the recall
    block's budget (22 Nov). The context trim (`turn_input`), the recall
    block's budget and the product measures count with
@@ -603,7 +653,19 @@ alone as the negative controls.
    spend reports and the real-use suite's "spent" cannot show it (the
    suite now counts its judge's own, `judge_spent`). It belongs to the same
    ledger fix as finding 6, after W0: one column, filled from either shape,
-   summed beside the prompt tokens. Not fixed now.
+   summed beside the prompt tokens. Fixed with finding 6 (22 Nov): the
+   column `cached_tokens`, read from the call's own usage by one reader
+   (`kazma_core.token_usage.token_counts`: DeepSeek's, OpenAI's and Qwen's,
+   Anthropic's and the Responses API's shapes); every answered row hands its
+   usage over, and every sum gives `prompt_tokens` and `cached_tokens`
+   beside each other. Read raw, an Anthropic row's prompt counted none (its
+   `input_tokens` leaves the cache out): it counts the whole prompt now.
+   The real-use suite's `spent` reads the column, its judge the same reader.
+   Not changed: `cost_from_usage` still reads the cached share from
+   `prompt_tokens_details` only, so a DeepSeek call the owner prices is
+   priced as if nothing came from the cache (main's call). Gate: the same
+   file (each shape; today's rows and a planted row with no usage as the
+   controls).
 11. **"Did I switch to more water" suppresses recall.** Found by W1c's run
    (22 Nov): "For the coffee-to-water ratio in my French press, did I switch
    to more water per tablespoon of coffee, or less?" is read by the intent
@@ -627,6 +689,31 @@ alone as the negative controls.
    (`enable_thinking`), on the owner's list. Also seen: 15 of the 16 were
    gray because the heuristics read "Can you remind me what you said..." as
    a `remind` act (a reminder to book): a memory question, not a reminder.
+   Fixed (22 Nov): Kazma's "off" reaches Qwen on Model Studio (any region's
+   address, `dashscope*.aliyuncs.com` and `*.qwencloudapi.com`) as
+   `enable_thinking: false`, the top-level field Model Studio documents
+   (https://www.alibabacloud.com/help/en/model-studio/deep-thinking); no
+   effort level is documented for Qwen, so `low` / `high` / `max` are sent
+   as nothing and the chat's level on Qwen does what it did. A model that
+   refuses the field is asked again without it. The classifier asks for
+   "off" wherever the client takes it (DeepSeek too). Gate:
+   `tests/test_qwen_reasoning_off.py` (each level on both hosts, look-alike
+   hosts as the control, the refusal, the classifier in English and Arabic
+   with today's classifier as the control). Settings' chat reasoning card
+   said the level did not apply on Qwen (true of `low` / `high` / `max`,
+   not of `off`); it now says Qwen takes Off only, in English and Arabic
+   (`chat_reasoning.levels_taken`, the API's `takes`; the main session's
+   item 3). Measured the same day on 4c5939b23
+   (`_refine_acts_llm` as a turn calls it, 8 gray-zone requests, 4 English
+   and 4 Gulf Arabic, qwen3.7-plus, with and without the switch): with it,
+   8 of 8 answered in time (1.4-3.4 s, median 1.8 s; 0 reasoning tokens;
+   274 prompt and 24-69 completion tokens each); without it, 0 of 8, each
+   abandoned at 4.0 s. Spend: the 8 answered calls 2,190 prompt and 300
+   completion tokens; the 8 abandoned calls' tokens are not reported (a
+   request cut off at its limit may still be billed: up to about 1,240
+   completion tokens each, from the first measurement). Evidence:
+   `docs/audits/evidence/memory_findings/finding12_classifier_qwen.json`
+   (ids, timings and token counts only), the script beside it.
 13. **"Remind me what you said" is read as a reminder to book.** Found by
    finding 12's measurement (22 Nov): the heuristics' remind rule
    (`agent/intent/heuristics._REMIND_RE`) matches "remind me" and
@@ -650,7 +737,17 @@ alone as the negative controls.
    in both languages (English by the word "work" in the fact's own name,
    Arabic by meaning: lift 0.09). A request, not a question about the user.
    The fix's table neither adds nor removes it. For W3 + W2 (relevance) to
-   judge; not fixed now.
+   judge; not fixed now. Diagnosed (22 Nov, no model call; the
+   fact-languages store with bge-m3 on this machine, both told languages):
+   meaning decides, not the words. "Can you work on this report?" shows
+   `works_at` on a lift of 0.047-0.063 above the background plus the word
+   coverage's 0.03 (0.06 x 0.5: "work"); "اشتغل على هالتقرير" on a lift of
+   0.092-0.095 alone, over the floor of 0.06 with no word counted. "Keep
+   working on the draft." shows it too; "Please work on the slides tonight."
+   and the Arabic "ممكن تشتغل على العرض الليلة؟" and "كمل شغلك على المسودة"
+   show it in some stores or none. A word rule ("work on", "اشتغل على")
+   would take 0.03 off the English and nothing off the Arabic: unequal, and
+   short of the floor in neither. The fix is the evidence rule's (W3 + W2).
 15. **A move to a product named alone reads as a home.** Found the same
    day: "We moved to Slack." and "انتقلنا إلى سلاك." store `lives_in` in
    both languages (the Arabic pass refuses only a Latin name after

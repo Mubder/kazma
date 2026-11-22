@@ -50,7 +50,7 @@ Full execution plan: session plan / this file. Backlog SoT: `MEMORY_REMAINING.md
 |----|--------|
 | P2-2 Postgres state dual-mirror | **Done** — episodes/beliefs mirror; recall remains SQLite |
 | P2-3 Neo4j GraphBackend | **Done** — dual-write when driver+URL available |
-| P2-5 LLM entity tier-3 | **Done** — opt-in `entity_llm_disambiguate` |
+| P2-5 LLM entity tier-3 | **Removed** (2026-11-22) — it never reached a provider (its client's chat was never awaited) and a model call per resolution is cost not taken; high-stakes near matches are quarantined for review |
 
 ## SaaS / multi-replica assist (follow-on)
 
