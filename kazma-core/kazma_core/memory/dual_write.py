@@ -418,6 +418,19 @@ class DualWriteMirror:
                                meta={"kind": "episode", "tier": effective_tier, "session_id": session_id},
                                still_held=_still_held)
 
+            # Its passages (the memory plan's W5): vectors of what its own
+            # vector misses, made outside the lock, written under it while
+            # the memory still holds their text. A failure leaves them to
+            # the repair sweep.
+            from kazma_core.memory import passages
+
+            if passages.in_use():
+                try:
+                    passages.write_passages(self._primary, eid, lock=self._lock)
+                except sqlite3.Error:
+                    logger.warning("[dual_write] passages not written for %s; the repair sweep "
+                                   "writes them", eid, exc_info=True)
+
             # Optional multi-replica state dual-mirror (Postgres) — outside lock.
             # The row as it is now, never this call's arguments: a forget that
             # ran meanwhile reaches the mirror as the tombstone it is (M08).

@@ -761,6 +761,9 @@ DECLARED: dict[str, str] = {
     M + "spaces/features.py": "each feature's name and its refusal in both languages (NAMES, held equal "
                               "to the catalog); nothing is decided by Arabic text; "
                               "tests/test_feature_grants.py",
+    M + "memory/passages.py": "one sentence-end pattern holds both languages' marks (. ! ? and the Arabic "
+                              "question mark and semicolon), so a passage is cut at sentence breaks the "
+                              "same way in either; nothing is decided by which language the text is in",
 }
 
 _ARABIC = re.compile("[؀-ۿ]")

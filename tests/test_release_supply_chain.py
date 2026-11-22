@@ -257,8 +257,11 @@ def test_negative_control_the_old_publish_step_fails() -> None:
 
 
 def test_third_party_actions_are_pinned_to_a_version(steps: list[dict[str, Any]]) -> None:
-    """A bare `uses: org/action` floats on that action's default branch."""
-    unpinned = [u for u in _uses(steps) if "@" not in u]
+    """A bare `uses: org/action` floats on that action's default branch. The
+    repository's own composite actions (``./.github/actions/...``) are this
+    commit's files; the actions they use are pinned there
+    (tests/test_actions_pinned_by_sha.py reads them)."""
+    unpinned = [u for u in _uses(steps) if "@" not in u and not u.startswith("./.github/actions/")]
     assert not unpinned, f"unpinned actions: {unpinned}"
 
 

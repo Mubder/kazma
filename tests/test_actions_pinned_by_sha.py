@@ -35,11 +35,17 @@ def _unpinned(text: str) -> list[str]:
 
 
 def test_every_action_is_pinned_to_a_commit():
+    """Workflows and the repository's own composite actions alike: an action
+    a composite step uses runs in every job that calls it (the shared Windows
+    signing step holds the signing services' actions, 2026-11-22)."""
     found = {}
-    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.y*ml")):
-        refs = _unpinned(workflow.read_text(encoding="utf-8"))
+    files = sorted((ROOT / ".github" / "workflows").glob("*.y*ml"))
+    files += sorted((ROOT / ".github" / "actions").glob("*/action.y*ml"))
+    assert any(f.parent.name == "sign-windows-installer" for f in files), "the composite actions are read"
+    for path in files:
+        refs = _unpinned(path.read_text(encoding="utf-8"))
         if refs:
-            found[workflow.name] = refs
+            found[path.relative_to(ROOT).as_posix()] = refs
     assert not found, f"pin these by commit SHA (keep the tag as a comment): {found}"
 
 

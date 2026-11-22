@@ -75,6 +75,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "vectors.npz"
 SPEAKER_VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "speakers_vectors.npz"
+#: The passages' vectors (the memory plan's W5, ``memory_bench.py passage-vectors``).
+PASSAGE_VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "passage_vectors.npz"
 #: Every judged sweep allowed to set recall's thresholds (``log_choice``).
 CHOICES = ROOT / "docs" / "audits" / "evidence" / "memory_thresholds_v8" / "choices.json"
 
@@ -198,16 +200,21 @@ def _replayed(embedder: Any) -> contextlib.ExitStack:
 
 class Stores:
     """The four stores, seeded once; :meth:`ask` asks one half of the
-    questions with one configuration on each."""
+    questions with one configuration on each. *with_passages* seeds them with
+    passages (the memory plan's W5); :meth:`ask` then reads them unless told
+    not to, so passages off and on are asked of the same stores."""
 
     def __init__(self, data: dict[str, Any], speakers: dict[str, Any], halves: dict[str, dict[str, list[str]]],
-                 stack: contextlib.ExitStack) -> None:
-        from kazma_core.memory import benchmark
+                 stack: contextlib.ExitStack, *, with_passages: bool = False) -> None:
+        from kazma_core.memory import benchmark, passages
 
         self.data, self.speakers, self.halves = data, speakers, halves
-        self.replay = benchmark.ReplayEmbedder(VECTORS)
-        self.speaker_replay = benchmark.SpeakerReplay(VECTORS, SPEAKER_VECTORS)
+        self.with_passages = with_passages
+        extra = [PASSAGE_VECTORS] if with_passages else []
+        self.replay = benchmark.SpeakerReplay(VECTORS, *extra) if extra else benchmark.ReplayEmbedder(VECTORS)
+        self.speaker_replay = benchmark.SpeakerReplay(VECTORS, SPEAKER_VECTORS, *extra)
         stack.enter_context(_replayed(self.replay))
+        stack.enter_context(passages.used(with_passages))
         self.main = stack.enter_context(benchmark._seeded_store(data))
         scaled = benchmark._scaled_dataset(data)
         self.scale = stack.enter_context(benchmark._seeded_store(scaled)) if scaled else None
@@ -217,13 +224,15 @@ class Stores:
             if sub is not None:
                 self.small[q["id"]] = (q, stack.enter_context(benchmark._seeded_store(sub)))
 
-    def ask(self, config: dict[str, float], half: str) -> dict[str, list[dict[str, Any]]]:
-        from kazma_core.memory import benchmark
+    def ask(self, config: dict[str, float], half: str, *,
+            passages_on: bool | None = None) -> dict[str, list[dict[str, Any]]]:
+        from kazma_core.memory import benchmark, passages
 
         ids = set(self.halves["bench"][half])
         questions = [q for q in _questions(self.data) if q["id"] in ids]
         out: dict[str, list[dict[str, Any]]] = {}
-        with _thresholds(config):
+        on = self.with_passages if passages_on is None else passages_on
+        with _thresholds(config), passages.used(on):
             out["main"] = benchmark._ask_questions(*self.main, questions)[0]
             out["scale"] = benchmark._ask_questions(*self.scale, questions)[0] if self.scale else []
             out["small"] = [benchmark._ask_questions(*store, [q])[0][0]
@@ -294,10 +303,15 @@ def robust(row: dict[str, Any], rows: list[dict[str, Any]], axes: dict[str, list
 
 
 def choose(rows: list[dict[str, Any]], base: dict[str, float],
-           axes: dict[str, list[float]] | None = None) -> dict[str, Any]:
+           axes: dict[str, list[float]] | None = None) -> dict[str, Any] | None:
     """The rule (module docstring) over evaluated configurations, each
-    ``{"config", "lost", "m"}``; today's configuration is always among them."""
+    ``{"config", "lost", "m"}``; today's configuration is always among them.
+    None when no configuration keeps every answer today's product shows
+    (possible only with ``--passages``: there "today" is the product without
+    them, which no configuration with them may be)."""
     feasible = [r for r in rows if r["lost"] == 0 and (axes is None or robust(r, rows, axes, base))]
+    if not feasible:
+        return None
     best_empty = max(r["m"]["abstained"] for r in feasible)
     band = [r for r in feasible if r["m"]["abstained"] >= best_empty - ONE_QUESTION]
     best_quality = max(r["m"]["quality"] for r in band)
@@ -337,23 +351,31 @@ def _short(m: dict[str, Any]) -> str:
                        for s, x in m["stores"].items()})
 
 
-def _cmd_sweep(out: Path, by: str = "halves") -> int:
+def _cmd_sweep(out: Path, by: str = "halves", with_passages: bool = False) -> int:
+    """The sweep. *with_passages* (W5) asks every configuration with passages
+    on, against today's product: no answer lost means none lost against
+    today's thresholds with passages off."""
     data, speakers = _load()
     halves = split(data, speakers, by)
     base = today()
     record: dict[str, Any] = {"dataset_version": data["version"], "speakers_version": speakers.get("version"),
                               "split_by": by, "split": halves, "today": base, "stages": []}
+    if with_passages:
+        record["passages"] = True
     with contextlib.ExitStack() as stack:
         started = time.perf_counter()
-        stores = Stores(data, speakers, halves, stack)
+        stores = Stores(data, speakers, halves, stack, with_passages=with_passages)
         print(f"stores seeded in {time.perf_counter() - started:.0f} s", flush=True)
-        first = stores.ask(base, "tune")
-        if first != stores.ask(base, "tune"):
+        first = stores.ask(base, "tune", passages_on=False)
+        if first != stores.ask(base, "tune", passages_on=False):
             print("a store answers differently when asked twice: refusing to sweep", file=sys.stderr)
             return 1
         shown_today = shown_answers(first)
         record["today_tune"] = summarise(first)
         print("today, tuning half:", _short(record["today_tune"]), flush=True)
+        if with_passages:
+            record["passages_tune"] = summarise(stores.ask(base, "tune"))
+            print("today with passages, tuning half:", _short(record["passages_tune"]), flush=True)
         point = dict(base)
         asked: dict[tuple[tuple[str, float], ...], dict[str, list[dict[str, Any]]]] = {}
 
@@ -374,6 +396,17 @@ def _cmd_sweep(out: Path, by: str = "halves") -> int:
                 lost = sorted(shown_today - shown_answers(results))
                 rows.append({"config": config, "lost": len(lost), "lost_ids": lost, "m": summarise(results)})
             chosen = choose(rows, base, axes)
+            if chosen is None:
+                record["stages"].append({
+                    "stage": name, "axes": axes, "chosen": None,
+                    "rows": [{"values": {k: r["config"][k] for k in axes}, "lost": r["lost"],
+                              "lost_ids": r["lost_ids"], **r["m"]} for r in rows],
+                })
+                record["chosen"] = None
+                out.write_text(json.dumps(record, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+                print(f"{name}: none of {len(rows)} configurations keeps every answer today's product shows "
+                      f"(rule 1) with its grid neighbours (rule 5): nothing chosen", flush=True)
+                return 2
             point = dict(chosen["config"])
             record["stages"].append({
                 "stage": name,
@@ -393,16 +426,22 @@ def _cmd_sweep(out: Path, by: str = "halves") -> int:
     return 0
 
 
-def _cmd_judge(chosen_path: Path, out: Path, by: str = "halves", reason: str | None = None) -> int:
+def _cmd_judge(chosen_path: Path, out: Path, by: str = "halves", reason: str | None = None,
+               with_passages: bool = False) -> int:
+    """Both halves with today's thresholds and the chosen ones; with
+    *with_passages* (W5), today's as the product is (passages off) against
+    the chosen ones with passages on."""
     data, speakers = _load()
     halves = split(data, speakers, by)
     chosen = json.loads(chosen_path.read_text(encoding="utf-8"))["chosen"]
     base = today()
     record: dict[str, Any] = {"dataset_version": data["version"], "split_by": by, "today": base, "chosen": chosen}
+    if with_passages:
+        record["passages"] = True
     with contextlib.ExitStack() as stack:
-        stores = Stores(data, speakers, halves, stack)
+        stores = Stores(data, speakers, halves, stack, with_passages=with_passages)
         for half in ("tune", "held"):
-            was, now = stores.ask(base, half), stores.ask(chosen, half)
+            was, now = stores.ask(base, half, passages_on=False), stores.ask(chosen, half)
             lost = sorted(shown_answers(was) - shown_answers(now))
             gained = sorted(shown_answers(now) - shown_answers(was))
             record[half] = {"today": summarise(was), "chosen": summarise(now), "lost": lost, "gained": gained}
@@ -427,6 +466,7 @@ def log_choice(record: dict[str, Any], reason: str, evidence: Path) -> dict[str,
              if abs(float(v) - float(record["today"][k])) > 1e-9}
     entry = {"date": time.strftime("%Y-%m-%d"), "commit": commit, "reason": reason,
              "dataset_version": record["dataset_version"], "split_by": record.get("split_by", "halves"),
+             **({"passages": True} if record.get("passages") else {}),
              "moved": moved, "evidence": evidence.name,
              "lost": {half: record[half]["lost"] for half in ("tune", "held") if half in record},
              "gained": {half: record[half]["gained"] for half in ("tune", "held") if half in record}}
@@ -451,12 +491,15 @@ def main(argv: list[str] | None = None) -> int:
                        help="why this run may set the thresholds: logged in the choice log")
     for s in (split_p, sweep, judge):
         s.add_argument("--by", choices=SPLIT_BY, default="halves")
+    for s in (sweep, judge):
+        s.add_argument("--passages", action="store_true",
+                       help="passages on (the memory plan's W5), judged against today's product without them")
     args = parser.parse_args(argv)
     if args.cmd == "split":
         return _cmd_split(args.by)
     if args.cmd == "sweep":
-        return _cmd_sweep(args.out, args.by)
-    return _cmd_judge(args.chosen, args.out, args.by, args.record)
+        return _cmd_sweep(args.out, args.by, args.passages)
+    return _cmd_judge(args.chosen, args.out, args.by, args.record, args.passages)
 
 
 if __name__ == "__main__":

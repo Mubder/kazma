@@ -616,6 +616,11 @@ def ensure_primary_schema(conn: Any) -> None:
     from kazma_core.memory.vector_codes import ensure_codes_schema
 
     ensure_codes_schema(conn)
+    # A memory's passages: vectors of what its own vector misses (the memory
+    # plan's W5), taken with it by triggers.
+    from kazma_core.memory.passages import ensure_passages_schema
+
+    ensure_passages_schema(conn)
     # What the memory sweeps act on changed, or not (part H, F15): a pass
     # with nothing new reads nothing (memory/sweep_cursors.py).
     from kazma_core.memory.sweep_cursors import ensure_cursor_schema

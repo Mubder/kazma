@@ -1,0 +1,72 @@
+# A manual test of Windows signing, before a service is bought or switched on.
+#
+# It signs a tiny program built here (never a release file) with the shared
+# step the release signs with (.github/actions/sign-windows-installer), in its
+# "test" environment: SSL.com's eSigner sandbox, or SignPath's test-signing
+# policy. Such a signature chains to a test root Windows does not trust, so
+# the check asks for a signature and a timestamp, not for trust. Nothing is
+# published; the signed test program is kept for three days to look at.
+# docs/SUPPLY_CHAIN.md says which secrets each test reads.
+name: Windows signing test
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: The service to test
+        type: choice
+        options: [ssl-com, signpath]
+        default: ssl-com
+
+permissions:
+  contents: read
+
+jobs:
+  sign-a-test-program:
+    name: Sign a test program
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      # SignPath's connector reads this job and downloads the unsigned
+      # program from its artifact with the run's token.
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Build an unsigned test program
+        shell: pwsh
+        run: |
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          New-Item -ItemType Directory -Force signing-test | Out-Null
+          Set-Content -LiteralPath signing-test.cs -Value 'class P { static void Main() { System.Console.WriteLine("Kazma signing test"); } }'
+          & $csc /nologo /target:exe /out:signing-test\kazma-signing-test.exe signing-test.cs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $sig = Get-AuthenticodeSignature -LiteralPath signing-test\kazma-signing-test.exe
+          if ($sig.Status -ne 'NotSigned') { Write-Error "the test program starts $($sig.Status)"; exit 1 }
+
+      - name: Sign it with the test setup
+        uses: ./.github/actions/sign-windows-installer
+        with:
+          service: ${{ inputs.service }}
+          environment: test
+          folder: signing-test
+          signpath-api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          signpath-organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          signpath-project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signpath-signing-policy-slug: ${{ vars.SIGNPATH_TEST_SIGNING_POLICY_SLUG }}
+          signpath-artifact-configuration-slug: ${{ vars.SIGNPATH_TEST_ARTIFACT_CONFIGURATION_SLUG }}
+          ssl-com-username: ${{ secrets.SSL_COM_TEST_USERNAME }}
+          ssl-com-password: ${{ secrets.SSL_COM_TEST_PASSWORD }}
+          ssl-com-credential-id: ${{ secrets.SSL_COM_TEST_CREDENTIAL_ID }}
+          ssl-com-totp-secret: ${{ secrets.SSL_COM_TEST_TOTP_SECRET }}
+
+      - name: Keep the signed test program to look at
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: kazma-signing-test-${{ inputs.service }}
+          path: signing-test/kazma-signing-test.exe
+          if-no-files-found: error
+          retention-days: 3

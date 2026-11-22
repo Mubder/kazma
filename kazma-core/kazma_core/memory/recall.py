@@ -405,7 +405,7 @@ def _room_by_rank(result: RecallResult, fits: Any) -> dict[str, tuple[str, int]]
     shown: dict[str, tuple[str, int]] = {}
     for lead, other in steps:
         shown = {h.id: display_at(*h.metadata["sides"], lead if i == 0 else other, terms,
-                                  h.metadata.get("beyond") or (0, 0, 0))
+                                  h.metadata.get("beyond") or (0, 0, 0), anchor=h.metadata.get("passage"))
                  for i, h in enumerate(roomy)}
         if fits(shown):
             break
@@ -1167,6 +1167,16 @@ def _pg_primary_episodes(
         if backend is not None and qvec
         else []
     )
+    # A memory's meaning is the better of its vector and its best passage
+    # (W5), as on the local path: passages are this install's, read from its
+    # own database; a memory only a passage found is fetched with the rest.
+    won: dict[str, tuple[str, int, int]] = {}
+    if local is not None and qvec:
+        pool = max(_DENSE_POOL, limit * 3)
+        merged, won = _with_passages(
+            [RecallHit(id=str(eid), content="", score=float(sim), source="dense") for eid, sim in dense_pairs],
+            _episode_passages(local, query, tenant_id, pool), pool)
+        dense_pairs = [(h.id, h.score) for h in merged]
     sims = {str(eid): float(sim) for eid, sim in dense_pairs}
     rows: dict[str, dict[str, Any]] = {}
     # Strict: on this path the mirror is memory, and a failed search is a
@@ -1199,6 +1209,12 @@ def _pg_primary_episodes(
             sims.update(lookup(qvec, unscored, tenant_id=tenant_id, kind="episode") or {})
         except Exception:
             logger.debug("[recall] vector index similarity lookup failed", exc_info=True)
+    if unscored and qvec and local is not None:
+        for eid, (sim, side, start, stop) in _episode_passages(local, query, tenant_id, len(unscored),
+                                                                 ids=unscored).items():
+            if eid not in sims or sim > sims[eid]:
+                sims[eid] = sim
+                won[eid] = (side, start, stop)
     by_meaning = {str(eid) for eid, _sim in dense_pairs}
     candidates: list[_Candidate] = []
     for eid in dict.fromkeys([*(str(e) for e, _s in dense_pairs), *rows]):
@@ -1226,6 +1242,7 @@ def _pg_primary_episodes(
     ranked = _rank_by_evidence(
         query, candidates, _question_background([sim for _e, sim in dense_pairs])
     )
+    _mark_passages(ranked, won)
     weight = _archived_weight()
     for hit in ranked:
         tier = (rows.get(hit.id) or {}).get("tier")
@@ -2128,9 +2145,13 @@ def _recall_episodes(
         sources.setdefault(h.id, []).append(h.source or "fts5")
 
     # ── Dense: the question's nearest memories by meaning, every tier ──
-    dense = _episode_dense(conn, q, vector_engine, tenant_id, max(_DENSE_POOL, limit * 3))
+    pool = max(_DENSE_POOL, limit * 3)
+    dense = _episode_dense(conn, q, vector_engine, tenant_id, pool)
+    # A memory's meaning is the better of its vector and its best passage
+    # (the memory plan's W5): what its own vector misses, its answer above all.
+    dense, won = _with_passages(dense, _episode_passages(conn, q, tenant_id, pool), pool)
     for h in dense:
-        sources.setdefault(h.id, []).append("dense")
+        sources.setdefault(h.id, []).append("passage" if h.id in won else "dense")
 
     # Everything below reads a candidate by its id alone. Whatever channel
     # found it (a remote vector index answers here too), a candidate that is
@@ -2138,7 +2159,7 @@ def _recall_episodes(
     sparse, dense = _own_episodes(conn, tenant_id, sparse), _own_episodes(conn, tenant_id, dense)
 
     # ── Evidence, not ranks: what is about the question, best first ──
-    ranked = _rank_episodes_by_evidence(conn, q, sparse, dense)
+    ranked = _rank_episodes_by_evidence(conn, q, sparse, dense, tenant_id=tenant_id, won=won)
     # The chat's own turns the model reads in the conversation are not shown
     # again (part F), and the question's time decides what comes first.
     fused = _turns_in_time(_not_in_context(conn, ranked, tenant_id), ask)[: limit * 2]
@@ -2727,17 +2748,31 @@ def _rank_episodes_by_evidence(
     query: str,
     sparse: list[RecallHit],
     dense: list[RecallHit],
+    *,
+    tenant_id: str | None = None,
+    won: dict[str, tuple[str, int, int]] | None = None,
 ) -> list[RecallHit]:
-    """Local episodes that are about the question, best first; [] when none is."""
+    """Local episodes that are about the question, best first; [] when none is.
+
+    *won*: the memories whose best passage beat their own vector (W5), the
+    stretch it covers; a candidate only its words found is measured the
+    same way, and each ranked memory a passage won carries its stretch
+    (``metadata["passage"]``) for the block (W1b)."""
     ids = list(dict.fromkeys([h.id for h in dense] + [h.id for h in sparse]))
     if not ids:
         return []
+    won = dict(won or {})
     sims = {h.id: h.score for h in dense}
     missing = [i for i in ids if i not in sims]
     if missing:
         qvec = _encode_query(query)
         if qvec:
             sims.update(_similarities(conn, missing, qvec))
+            for eid, (sim, side, start, stop) in _episode_passages(conn, query, tenant_id, len(missing),
+                                                                     ids=missing).items():
+                if eid not in sims or sim > sims[eid]:
+                    sims[eid] = sim
+                    won[eid] = (side, start, stop)
     rows = {
         str(r[0]): r
         for r in conn.execute(
@@ -2758,7 +2793,60 @@ def _rank_episodes_by_evidence(
         for eid in ids
         if (row := rows.get(eid)) is not None and not is_small_talk(row[1], row[2])
     ]
-    return _rank_by_evidence(query, candidates, _question_background([h.score for h in dense]))
+    ranked = _rank_by_evidence(query, candidates, _question_background([h.score for h in dense]))
+    _mark_passages(ranked, won)
+    return ranked
+
+
+def _mark_passages(ranked: list[RecallHit], won: dict[str, tuple[str, int, int]]) -> None:
+    """Each ranked memory a passage won carries its stretch for the block (W1b)."""
+    for hit in ranked:
+        if hit.id in won:
+            hit.metadata["passage"] = won[hit.id]
+
+
+def _episode_passages(conn: sqlite3.Connection, query: str, tenant_id: str | None, limit: int, *,
+                      ids: list[str] | None = None) -> dict[str, tuple[float, str, int, int]]:
+    """Each memory's best passage for the question (the memory plan's W5,
+    ``memory/passages.py``): ``{id: (similarity, side, start, stop)}``, the
+    best *limit* (or exactly *ids*); {} while passages are off. Passages are
+    this install's, read from the local database on every path."""
+    from kazma_core.memory import passages
+
+    if not passages.in_use():
+        return {}
+    qvec = _encode_query(query)
+    if not qvec:
+        return {}
+    from kazma_core.memory.vector_engine import VectorEngine
+
+    try:
+        return VectorEngine(conn).best_passages(qvec, tenant_id=tenant_id, tier=RECALLABLE_TIERS,
+                                                limit=limit, episode_ids=ids)
+    except sqlite3.Error:
+        logger.warning("[recall] passages could not be searched; memories are judged by their own "
+                       "vectors", exc_info=True)
+        return {}
+
+
+def _with_passages(dense: list[RecallHit], best: dict[str, tuple[float, str, int, int]],
+                   pool: int) -> tuple[list[RecallHit], dict[str, tuple[str, int, int]]]:
+    """*dense* with each memory's meaning the better of its vector and its
+    best passage, best first, cut to *pool*; and the memories a passage won,
+    with the stretch it covers (W1b shows it)."""
+    if not best:
+        return dense, {}
+    scores = {h.id: h.score for h in dense}
+    won: dict[str, tuple[str, int, int]] = {}
+    for eid, (sim, side, start, stop) in best.items():
+        if eid not in scores or sim > scores[eid]:
+            scores[eid] = sim
+            won[eid] = (side, start, stop)
+    order = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:pool]
+    merged = [RecallHit(id=eid, content="", score=float(sim), source="passage" if eid in won else "dense")
+              for eid, sim in order]
+    kept = {h.id for h in merged}
+    return merged, {eid: stretch for eid, stretch in won.items() if eid in kept}
 
 
 # ── Weekly topic summaries (plan C2b) ──────────────────────────────────────

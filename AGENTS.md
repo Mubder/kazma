@@ -1688,8 +1688,27 @@ came up short, and archiving had erased 76 memories.
   whole, unavailable) and memory health counts them (`findability.cut_text`,
   with the swarm results and summaries no chat can fill). **Meaning search
   covers the start of a long memory** (`EMBED_TEXT_CHARS`, 4,000: the vector
-  is what it always was), **keyword search all of it**; a passage vector per
-  stretch of a long memory is a later step (`docs/plans/MEMORY_REMAINING.md`).
+  is what it always was), **keyword search all of it**. **Passages** (the
+  memory plan's W5 + W1b, 2026-11-22, `memory/passages.py`, behind
+  `passages.in_use()`, off: counted as max(vector, best passage) they lost
+  answers and precision on Kazma's benchmark and no threshold the plan's
+  rule allows recovered them -- `docs/plans/MEMORY_TOP_SCORES_PLAN.md` W5 has
+  the numbers; a lane of their own is next):
+  vectors of about 256 tokens (`limits.PASSAGE_TOKENS`, whole sentences, 32
+  overlapping) of what a memory's own vector misses -- every side but the
+  vector's, and the vector's own past `EMBED_TEXT_CHARS` -- in
+  `episode_passages` (memory id, space, side, offsets, vector, model; no
+  text). Triggers on `episodes` take them with a row's delete, a forget, a
+  text change and a move of space; the writer fills them after its own
+  vector (`write_passages`: vectors first, then a compare-and-set on the
+  text), the vector repair sweep fills older memories (`fill_passages`, 200
+  a pass), the benchmark's seeding fills its stores
+  (`benchmark.fill_passages_whole`, refusing a store missing any). Recall
+  takes the better of a memory's vector and its best passage
+  (`recall._with_passages`, both paths, the local database's passages) and
+  the block shows the stretch a passage won (`display_at(anchor=)`). Gate:
+  `tests/test_memory_passages.py` (EN/AR; the writer off, a stale write and
+  a forget as controls).
   **Shown bounded, read whole**: the recall block shows a memory with its
   own bounds -- **room by rank** (the memory plan's W1a, 2026-11-22,
   `recall._room_by_rank`, `episode_text.display_at`), **for the
@@ -6743,11 +6762,19 @@ type beside a git checkout and a wheel install.
   owner's own files, every moved file backed up first), installs the locked
   packages held (`_reinstall_via_subprocess`), and on a refused or failed
   install rolls the tree back and reinstalls its packages.
-- **Signing** is Artifact Signing, switched on by the repository variable
-  `KAZMA_WINDOWS_SIGNING` = `artifact-signing` (OIDC, no secret; the steps are
-  in `docs/SUPPLY_CHAIN.md` "The Windows installer's signature"); a signed
-  installer must read Valid or the job fails; unsigned, the run says so. The
-  installer is also checksummed, attested and Sigstore-signed with the rest.
+- **Signing** is one shared step, `.github/actions/sign-windows-installer`
+  (2026-11-22), with the service the repository variable
+  `KAZMA_WINDOWS_SIGNING` names: `signpath` (SignPath Foundation), `ssl-com`
+  (SSL.com eSigner) or `artifact-signing` (Microsoft, OIDC). Changing service
+  is that variable and the new service's secrets (`docs/SUPPLY_CHAIN.md` "The
+  Windows installer's signature"); any other value fails before anything is
+  sent; a signed installer must read Valid and timestamped or the job fails;
+  unset, the run says it is unsigned. The manual workflow
+  `windows-signing-test.yml` signs a program it builds, never a release file,
+  through the same step in its test environment (SSL.com's sandbox,
+  SignPath's test-signing policy) and publishes nothing. No workflow names a
+  signing action outside the shared step. The installer is also checksummed,
+  attested and Sigstore-signed with the rest.
 - Gates: `tests/test_release_install.py` (a failure half way and each refusal
   leave the tree as it was; without `KEPT` an archive replaces `.env`, the
   control), `tests/test_windows_installer.py`, the release gates reading the

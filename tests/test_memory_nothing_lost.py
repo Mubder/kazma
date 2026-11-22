@@ -438,7 +438,8 @@ def test_repair_pass_runs_on_the_primary_database(conn, fresh_dims, monkeypatch)
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: _Embedder())
     _episode(conn, "missing", user="alpha")
     conn.commit()
-    assert fresh_dims.run_vector_repair_pass() == {"episodes": 1, "beliefs": 0, "remaining": 0, "entities": 0}
+    assert fresh_dims.run_vector_repair_pass() == {"episodes": 1, "beliefs": 0, "remaining": 0, "entities": 0,
+                                                   "passages": 0}
 
 
 def test_reconsolidation_repairs_through_the_same_function(conn, fresh_dims, monkeypatch):
