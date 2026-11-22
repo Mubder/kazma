@@ -1092,8 +1092,7 @@ prompts; the share the judge called correct):
 | All questions | 0.47 | 0.77 | 0.72 | 0.94 |
 | Tokens sent a question | 1,017 | 2,214 | 96,356 | 6,306 |
 
-"Kazma's recall" is the block as a chat turn's model is shown it, without
-the sources a turn adds after each memory ("via fts5"). It shows
+"Kazma's recall" is the block as a chat turn's model is shown it. It shows
 each memory with 200 characters of the question and 300 of the reply, and
 points the model at `memory_read` for the rest; a one-shot reader cannot call it.
 For 44 of the 51 answerable questions it missed, the round holding the

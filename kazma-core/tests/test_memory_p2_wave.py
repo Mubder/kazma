@@ -182,6 +182,13 @@ def test_format_recall_explain():
         ],
         episodes=[],
     )
-    block = format_recall_block(r, explain=True)
+    # The model's block never carries the channels (the memory plan's
+    # finding 8): explain_recall shows them to a person, in the "Memory used"
+    # payload, which still names them.
+    block = format_recall_block(r)
     assert "teal" in block
-    assert "via" in block or "belief_fts" in block
+    assert "_(via" not in block and "belief_fts" not in block
+    from kazma_core.memory.recall import build_memory_explain_payload
+
+    payload = build_memory_explain_payload(query="colour", result=r, kb_hits=[], explain=True)
+    assert "belief_fts" in str(payload)

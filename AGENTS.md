@@ -2419,7 +2419,13 @@ four injected were noise.
   retrieval benchmark's store with its recorded vectors: Kazma's benchmark
   in English and Arabic apart; the tokens the recall block adds to a turn
   (`format_recall_block` as the supervisor adds it, counted by
-  `summarizer.estimate_tokens`), on the store, at four times its
+  `summarizer.estimate_tokens`; **the block the model gets is the block
+  every measure builds**, 2026-11-22, the plan's finding 8: no line
+  carries the channels a memory was found by -- `memory.v2.explain_recall`
+  shows them in the turn's "Memory used" row -- and `format_recall_block`
+  has no option that changes a line; gate
+  `tests/test_recall_block_is_what_is_measured.py`, the real supervisor
+  against the measures, today's tags-in-block as the control), on the store, at four times its
   unrelated chat, and where memories are as long as live's (`long`, since
   2026-11-22: the store, each conversation lengthened to a length drawn
   from live's episode lengths, `tests/fixtures/memory_bench/live_lengths.json`

@@ -158,19 +158,17 @@ def test_recall_returns_them_and_the_block_shows_them_after_the_history(mem):
                       local_only=True)
     assert _ids(result.summaries)[:1] == ["s0"] and not result.empty
     hit = R.RecallHit(id="e1", content="x", score=1.0, metadata={"display": "User: ShipX? / Assistant: Phase 9."})
-    block = R.format_recall_block(R.RecallResult(beliefs=[], episodes=[hit], summaries=result.summaries),
-                                  explain=False)
+    block = R.format_recall_block(R.RecallResult(beliefs=[], episodes=[hit], summaries=result.summaries))
     assert block.index("## Relevant History") < block.index("## Weekly Summaries")
     assert "weekly summar" in block.split("## Weekly Summaries", 1)[1]  # counted in the footer
-    only = R.format_recall_block(R.RecallResult(beliefs=[], episodes=[], summaries=result.summaries),
-                                 explain=False)
+    only = R.format_recall_block(R.RecallResult(beliefs=[], episodes=[], summaries=result.summaries))
     assert "## Weekly Summaries" in only and "Week of " in only
 
 
 def test_without_summaries_the_block_is_as_before(mem):
     """Negative control for the section: no summaries, no section."""
     hit = R.RecallHit(id="e1", content="x", score=1.0, metadata={"display": "User: q / Assistant: a"})
-    block = R.format_recall_block(R.RecallResult(beliefs=[], episodes=[hit]), explain=False)
+    block = R.format_recall_block(R.RecallResult(beliefs=[], episodes=[hit]))
     assert "## Weekly Summaries" not in block and "## Relevant History" in block
 
 

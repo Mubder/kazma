@@ -418,6 +418,17 @@ the benchmarks page regenerated.
    p95 675 / 1,030 tokens without, 698 / 1,068 with; the long store 1,073 /
    1,484 without, 1,096 / 1,485 with, and in 3 of its blocks the budget
    leaves a memory out. The sources are the operator's view (the "Memory
-   used" row has its own payload, `build_memory_explain_payload`); whether
-   the model's block should carry them, or the measures should, is a
-   decision for later. Not changed now: W1a's acceptance is measured one way.
+   used" row has its own payload, `build_memory_explain_payload`).
+   Decided and fixed the same day (the main session): the tags explain
+   retrieval to a person, help no answer, cost tokens and push memories out
+   of the budget. The model's block never carries them;
+   `memory.v2.explain_recall` keeps feeding the "Memory used" row;
+   `format_recall_block` has no option that changes a line, so every
+   measure builds the block the model gets. Before and after on one store,
+   no model call: the block a turn sent, p50 / p95 698 / 1,068 tokens on
+   the product store and 1,096 / 1,485 on the long store; now 675 / 1,030
+   and 1,073 / 1,484, and the 3 long blocks keep their memory. The measures'
+   own numbers do not move (they always built it so). Gate:
+   `tests/test_recall_block_is_what_is_measured.py`. W0's runs are measured
+   on this block: the dev runs' block conditions were already built so, and
+   Kazma's turn and the real-use suite run after the fix.

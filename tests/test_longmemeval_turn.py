@@ -281,10 +281,9 @@ def test_the_harness_keeps_the_turns_answer_and_judges_it_once(scripts, quiet, m
     entry = cache["q1"][lme.TURN]
     assert entry["hypothesis"] == "Business Administration." and entry["same_block"] is True
     assert entry["reader_usage"]["calls"] == 1 and len(model.calls) == 2
-    # The turn's block is the harness's block as a turn sends it, with each
-    # memory's sources (the shipped memory.v2.explain_recall); the block the
-    # one-shot readers are given has none (the memory plan's finding 8).
-    assert "_(via " in histories["q1"]["as_sent"] and "_(via " not in histories["q1"]["kazma"]
+    # The turn's block is the block the one-shot readers are given: neither
+    # carries the channels a memory was found by (the plan's finding 8).
+    assert "_(via " not in histories["q1"]["kazma"]
     # Judged by the pool like any answer, and never asked of a reader there.
     judge = _Judge()
     lme.judge_entry(entry, items[0], judge=judge)

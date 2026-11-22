@@ -115,6 +115,20 @@ def evidence_group(result: Any, unanswerable: bool) -> str:
     return "strong" if top is not None and (top.metadata or {}).get("strength") != "weak" else "weak"
 
 
+def recall_block(conn: Any, query: str, *, tenant_id: str, now: float) -> tuple[Any, str, float]:
+    """Recall for *query* on *conn* at *now*, the block a chat turn's model
+    is given for it (what every measure here counts:
+    ``tests/test_recall_block_is_what_is_measured.py`` holds it to the block
+    the supervisor injects), and recall's own seconds."""
+    from kazma_core.memory.recall import format_recall_block, recall
+
+    with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
+        started = time.perf_counter()
+        res = recall(query, conn=conn, tenant_id=tenant_id, limit=5, local_only=True, now=now)
+        seconds = time.perf_counter() - started
+    return res, ("" if res.empty else format_recall_block(res)), seconds
+
+
 def block_tokens(conn: Any, questions: list[dict[str, Any]], *,
                  by_evidence: dict[str, list[int]] | None = None) -> tuple[dict[str, list[int]], list[float]]:
     """Each question's recall block as the supervisor adds it, in tokens, by
@@ -122,7 +136,6 @@ def block_tokens(conn: Any, questions: list[dict[str, Any]], *,
     filled with the same tokens by :func:`evidence_group`."""
     from kazma_core.memory import benchmark
     from kazma_core.memory.question_shape import standalone_query
-    from kazma_core.memory.recall import format_recall_block, recall
     from kazma_core.summarizer import estimate_tokens
 
     tokens: dict[str, list[int]] = {lang: [] for lang in LANGS}
@@ -130,11 +143,8 @@ def block_tokens(conn: Any, questions: list[dict[str, Any]], *,
     for q in questions:
         query = standalone_query(q["text"], q.get("context"))
         now = benchmark.BASE_TIME + float(q.get("now_day", benchmark._ASKED_ON_DAY)) * 86400
-        with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
-            started = time.perf_counter()
-            res = recall(query, conn=conn, tenant_id=benchmark.BENCH_TENANT, limit=5, local_only=True, now=now)
-            seconds.append(time.perf_counter() - started)
-        block = "" if res.empty else format_recall_block(res, explain=False)
+        res, block, took = recall_block(conn, query, tenant_id=benchmark.BENCH_TENANT, now=now)
+        seconds.append(took)
         n = estimate_tokens([{"role": "system", "content": block}]) if block else 0
         tokens["ar" if _arabic(q["text"]) else "en"].append(n)
         if by_evidence is not None:

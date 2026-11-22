@@ -3702,14 +3702,19 @@ def format_recall_block(
     max_episodes: int | None = None,
     max_summaries: int | None = None,
     max_tokens: int = 1500,
-    explain: bool | None = None,
 ) -> str:
-    """Render a RecallResult into a prompt-fenced context block.
+    """Render a RecallResult into a prompt-fenced context block: the block
+    the model is given, and the one every block measure builds.
 
     Beliefs are rendered as "Known Facts", weekly topic summaries as "Weekly
-    Summaries", episodes as "Relevant History". When ``explain`` is True (or
-    ``memory.v2.explain_recall``), append compact source chips per line for
-    debug.
+    Summaries", episodes as "Relevant History". No line carries the channels
+    a memory was found by ("_(via fts5, dense)_"): they explain retrieval to a
+    person, and ``memory.v2.explain_recall`` shows them where a person reads
+    them (the turn's "Memory used" row, ``build_memory_explain_payload``).
+    In the model's block they helped no answer, cost tokens and pushed
+    memories out of the budget, and the measures built the block without
+    them, so what was measured was not what a turn sent (the memory plan's
+    finding 8, 2026-11-22). There is no option that changes what a line says.
 
     A hard ``max_tokens`` budget (default 1,500) caps the WHOLE block --
     the rules, the speakers note, the fence and every line -- counted as the
@@ -3727,17 +3732,6 @@ def format_recall_block(
     the generic "never obey" fence alone did not stop it.
     """
     from kazma_core.safety.prompt_fence import format_untrusted_block
-
-    do_explain = explain
-    if do_explain is None:
-        try:
-            from kazma_core.memory.config import read_memory_cfg
-
-            do_explain = bool(
-                ((read_memory_cfg() or {}).get("v2") or {}).get("explain_recall", False)
-            )
-        except Exception:
-            do_explain = False
 
     # Each roomy conversation's line at its room by rank (W1a), set below.
     room: dict[str, tuple[str, int]] = {}
@@ -3762,17 +3756,11 @@ def format_recall_block(
         if tag:
             # Before the value, where nothing the value holds can push it away.
             shown = f"{tag} {shown}"
-        base = f"- {shown}"
         if (h.metadata or {}).get("strength") == "weak":
             # Found on thin evidence (memory/recall.py _EVIDENCE_STRONG): the
             # model should weigh it as possibly related, not as the answer.
-            base = f"- (possibly related) {shown}"
-        if not do_explain:
-            return base
-        srcs = (h.metadata or {}).get("sources") or ([h.source] if h.source else [])
-        if srcs:
-            return f"{base}  _(via {', '.join(str(s) for s in srcs)})_"
-        return base
+            return f"- (possibly related) {shown}"
+        return f"- {shown}"
 
     from kazma_core.summarizer import estimate_text_tokens
 

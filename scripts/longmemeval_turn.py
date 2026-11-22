@@ -55,7 +55,7 @@ TOOLS = ("memory_search", "memory_read", "memory_list")
 #: and answers from what it has.
 TOOL_ROUNDS = 3
 #: Bumped when what a turn is asked changes, so a cached answer is asked again.
-TURN_VERSION = 1
+TURN_VERSION = 2
 
 _ONE_TURN = asyncio.Lock()
 

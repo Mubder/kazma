@@ -1673,8 +1673,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "For model rebuild and vector-space composition, open Embedder.",
     },
     "settings.memory_explain_recall": {
-        "ar": "شرح الاستدعاء — وسم النتائج بقنوات الاسترجاع (fts5 / dense / ppr / session)",
-        "en": "Explain recall — tag hits with retrieval channels (fts5 / dense / ppr / session)",
+        "ar": "شرح الاستدعاء — عرض قناة الاسترجاع لكل ذكرى في صف «الذاكرة المستخدمة» (fts5 / dense / ppr / session)",
+        "en": "Explain recall — show each memory's retrieval channel in the Memory used row (fts5 / dense / ppr / session)",
     },
     "settings.memory_failover": {
         "ar": "التراجع عند تعطل البعيد",

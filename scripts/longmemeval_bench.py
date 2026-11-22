@@ -368,7 +368,7 @@ def ask(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
             result = recall(str(item["question"]), conn=conn, tenant_id=TENANT, limit=LIMIT,
                             local_only=True, now=parse_date(item["question_date"]))
             latency = time.perf_counter() - started
-            block = format_recall_block(result, explain=False) if not result.empty else ""
+            block = format_recall_block(result) if not result.empty else ""
     finally:
         conn.close()
         for suffix in ("", "-wal", "-shm"):
@@ -753,11 +753,8 @@ def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str
         with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
             result = recall(str(item["question"]), conn=conn, tenant_id=TENANT, limit=LIMIT,
                             local_only=True, now=parse_date(item["question_date"]))
-            block = format_recall_block(result, explain=False) if not result.empty else ""
-            # As a chat turn sends it: the shipped setting adds each memory's
-            # sources ("_(via fts5)_", memory.v2.explain_recall). Compared with
-            # what Kazma's turn showed (W1c), never sent to a reader here.
-            as_sent = format_recall_block(result) if not result.empty else ""
+            # The block a chat turn's model is given (the one function).
+            block = format_recall_block(result) if not result.empty else ""
         whole = read_whole([back[h.id] for h in result.episodes if h.id in back])
     finally:
         conn.close()
@@ -767,7 +764,7 @@ def kazma_history(item: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[str
             except OSError:
                 pass
     return (block or NO_MEMORIES, whole or NO_MEMORIES,
-            {"shown": len(result.episodes), "facts": len(result.beliefs), "as_sent": as_sent})
+            {"shown": len(result.episodes), "facts": len(result.beliefs)})
 
 
 #: Reasoning a reader may be asked for: ``off``; ``default``, nothing sent
@@ -971,8 +968,9 @@ def _answer_turns(items: list[dict[str, Any]], histories: dict[str, dict[str, An
                 system_prompt=system_prompt, thread_id=f"lme-turn-{qid}", reasoning=reasoning)
             turn_entry(entry, identity, lambda outcome=outcome: outcome)
             # Whether the turn's own recall showed the block the harness
-            # builds for its question, as a turn sends it.
-            entry["same_block"] = outcome.block.strip() == str(histories[qid].get("as_sent") or "").strip()
+            # builds for its question.
+            block = histories[qid]["kazma"]
+            entry["same_block"] = outcome.block.strip() == ("" if block == NO_MEMORIES else block.strip())
             if n % 5 == 0:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")

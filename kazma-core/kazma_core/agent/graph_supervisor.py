@@ -1316,7 +1316,9 @@ async def supervisor_node(
                     # INFO: the embedder's own breaker says the outage once.
                     logger.info("[Supervisor] memory search incomplete this turn: %s", result.degraded)
                 if not result.empty:
-                    mem_block = await asyncio.to_thread(format_recall_block, result, explain=_explain)
+                    # The model's block: no channel tags (finding 8); the
+                    # explanation goes to the "Memory used" row below.
+                    mem_block = await asyncio.to_thread(format_recall_block, result)
                     if mem_block:
                         messages.insert(1, {"role": "system", "content": mem_block})
                         logger.info(
