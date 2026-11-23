@@ -19,6 +19,8 @@ import struct
 import time
 from urllib.parse import quote, urlencode
 
+from kazma_core.security.secret_compare import same_secret
+
 __all__ = ["DIGITS", "PERIOD", "WINDOW", "new_secret", "provisioning_uri", "verify"]
 
 DIGITS = 6
@@ -57,7 +59,7 @@ def verify(secret: str, code: str, *, now: float | None = None, after_step: int 
     for step in range(current - WINDOW, current + WINDOW + 1):
         if step <= after_step:
             continue
-        if hmac.compare_digest(_code_at(secret, step), typed) and found is None:
+        if same_secret(_code_at(secret, step), typed) and found is None:
             found = step
     return found
 

@@ -18,13 +18,13 @@ Only where Spaces is enforced (the People routes refuse otherwise).
 from __future__ import annotations
 
 import hashlib
-import hmac
 import logging
 import secrets
 import threading
 import time
 from typing import Any
 
+from kazma_core.security.secret_compare import same_secret
 from kazma_core.spaces import identity
 from kazma_core.spaces.people import PeopleRefused, create_person, record_event
 
@@ -141,7 +141,7 @@ def _live(token: str, now: float) -> tuple[str, dict[str, Any]] | None:
         return None
     digest = _digest(token)
     for key, entry in held.items():
-        if hmac.compare_digest(str(key), digest) and isinstance(entry, dict):
+        if same_secret(str(key), digest) and isinstance(entry, dict):
             if _public(key, entry, now)["status"] == "open":
                 return key, entry
     return None
@@ -174,7 +174,7 @@ def accept(token: str, name: str, password: str) -> dict[str, Any]:
         held = dict(current) if isinstance(current, dict) else {}
         claimed.clear()
         for key, entry in held.items():
-            if hmac.compare_digest(str(key), digest) and isinstance(entry, dict)                     and _public(key, entry, now)["status"] == "open":
+            if same_secret(str(key), digest) and isinstance(entry, dict)                     and _public(key, entry, now)["status"] == "open":
                 held[key] = {**entry, "claimed_at": now}
                 claimed.update(held[key])
         return held

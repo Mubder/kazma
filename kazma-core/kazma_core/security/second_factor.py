@@ -40,7 +40,6 @@ to the person); deleting a person forgets it (:func:`forget`).
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import logging
 import secrets
@@ -50,6 +49,7 @@ import time
 from typing import Any
 
 from kazma_core.security import totp
+from kazma_core.security.secret_compare import same_secret
 
 __all__ = [
     "ON_KEY",
@@ -493,7 +493,7 @@ def _matches(account_id: str, held: dict[str, Any], typed: str) -> bool:
         return True
     digest = _digest(typed)
     left = [str(d) for d in held.get("recovery") or []]
-    matched = [d for d in left if hmac.compare_digest(d, digest)]
+    matched = [d for d in left if same_secret(d, digest)]
     if not matched:
         return False
     held["recovery"] = [d for d in left if d != matched[0]]
