@@ -208,6 +208,13 @@ class SupervisorState(TypedDict, total=False):
     turn_token_budget_granted: int
     """The limit a continued turn runs under (0: the configured budget)."""
 
+    own_keys_only: bool
+    """The turn started past its person's daily limit on a model they hold a
+    key of their own for (Spaces S2-04, ``spaces/daily_limits.py``): every
+    model call of the turn uses their own keys, and one that would use the
+    install's is refused. Set by the supervisor at a turn's first step, read
+    by every node (``hold_to_own_keys``)."""
+
     _last_finish_reason: str
     """finish_reason of the most recent LLM call. ``"length"`` means the
     provider truncated the completion at max_tokens — tool-call JSON may be
@@ -472,6 +479,7 @@ def initial_supervisor_state(
         turn_tokens=0,
         turn_budget_stopped=False,
         turn_token_budget_granted=0,
+        own_keys_only=False,
         thread_id=thread_id or str(uuid.uuid4()),
         # A state made with no tenant is in the space of the work bound now
         # (Spaces S1-02): the owner's while Spaces is not enforced, a refusal

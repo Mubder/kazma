@@ -1007,6 +1007,16 @@ class LLMProvider:
         except OwnKeyUnreadable as exc:
             raise LLMError(f"Not sent: {exc}", kind="own_key_unreadable", transient=True) from exc
         if found is None:
+            from kazma_core.spaces.daily_limits import own_keys_only
+
+            if own_keys_only():
+                # A turn let in past the person's daily limit on their own
+                # key: the install's key is never used for it.
+                raise LLMError(
+                    f"Not sent: the person this turn is for reached their daily limit, and "
+                    f"{getattr(self, 'provider_name', '') or 'this provider'} is not one they hold a key for",
+                    kind="daily_limit", transient=False,
+                )
             return None
         account, key, entry = found
         return await self._own_key_client(account, key, entry)

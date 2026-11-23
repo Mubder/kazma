@@ -791,6 +791,14 @@ DECLARED: dict[str, str] = {
     M + "cron/scheduler.py": "a job's refusal when its person lacks the Scheduled feature, an (English, "
                              "Arabic) pair chosen by the job's language; nothing is decided by Arabic "
                              "text; tests/test_feature_grants.py",
+    M + "agent/turn_budget.py": "the honest end of a turn refused before it started (its space's or "
+                                "person's share of turns in use, S4-04), two fixed strings that "
+                                "language_lock.in_their_language chooses between; nothing is decided "
+                                "by Arabic text; tests/test_space_fairness.py",
+    M + "spaces/install_paid.py": "the refusal of a paid tool in a turn on the person's own key, two "
+                                  "fixed strings that language_lock.in_their_language chooses between "
+                                  "(both without the person's words); nothing is decided by Arabic "
+                                  "text; tests/test_install_paid_tools.py",
     M + "spaces/daily_limits.py": "the daily-limit refusal as two fixed strings that "
                                   "language_lock.in_their_language chooses between; nothing is decided "
                                   "by Arabic text; tests/test_person_daily_limit.py",

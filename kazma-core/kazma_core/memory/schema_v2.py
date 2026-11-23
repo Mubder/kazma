@@ -985,7 +985,11 @@ def ensure_ops_schema(conn: Any) -> None:
     # served it -- a forgotten fact or a deleted library stayed findable.
     # Recall and the Knowledge index already search their own sources.
     conn.execute("DROP TABLE IF EXISTS unified_items")
-    add_missing_columns(conn, "memory_task_queue", (("lease_token", "TEXT"), ("next_attempt_at", "REAL")))
+    # claim_space (Spaces S4-04, N37): the space the memory lane takes turns
+    # by; never a reading of whose data a task is (the space walk reads the
+    # payload's tenant).
+    add_missing_columns(conn, "memory_task_queue", (("lease_token", "TEXT"), ("next_attempt_at", "REAL"),
+                                                    ("claim_space", "TEXT")))
     _refuse_rows_with_no_tenant(conn)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()

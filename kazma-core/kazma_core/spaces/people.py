@@ -74,6 +74,7 @@ __all__ = [
     "list_people",
     "list_shared_spaces",
     "mark_seen",
+    "note_key_changed",
     "notices_for",
     "remove_member",
     "reset_password",
@@ -97,7 +98,7 @@ logger = logging.getLogger(__name__)
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
           "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
           "models_set", "account_disabled", "account_enabled", "space_created", "member_added", "member_left", "member_removed",
-          "space_limits_set", "default_space_limits_set", "sessions_ended")
+          "space_limits_set", "default_space_limits_set", "sessions_ended", "space_key_changed", "code_network_set")
 #: A person's chat-app accounts (Spaces stage 3, ``spaces.chat_links``).
 _KINDS += ("chat_linked", "chat_unlinked")
 #: Stronger sign-in (S4-02): a second factor (``security.second_factor``),
@@ -381,7 +382,7 @@ def end_sessions(account_id: str, *, by: str) -> int:
 
 
 def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str, Any]:
-    from kazma_core.spaces import features, person_models
+    from kazma_core.spaces import features, member_code, person_models
 
     policy = reg["policies"].get(account_id) or {}
     own = policy.get("daily_limit") if isinstance(policy, dict) else None
@@ -392,7 +393,12 @@ def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str,
             # The single tools of what they hold, each on or off (S2-01).
             "tools": features.listed_tools(features.grants_of(reg, account_id)),
             # The models they may use and their default (S2-03).
-            "models": person_models.listed_models(reg, account_id)}
+            "models": person_models.listed_models(reg, account_id),
+            # Whether their code may use the network (S4-05): never until
+            # S4-05b, whatever is stored; the admin's code keeps its own
+            # rules (None).
+            "code_network": (None if account_id == OWNER_ACCOUNT_ID
+                             else member_code.allowed_network(reg, account_id))}
 
 
 def limits_for_people() -> dict[str, Any]:
@@ -1121,6 +1127,37 @@ def set_tools(account_id: str, off: Any, *, by: str) -> list[str]:
     return kept
 
 
+def set_code_network(account_id: str, allowed: Any, *, by: str) -> None:
+    """A person's code and the network (Spaces S4-05): their code runs only
+    in a container, with no network. Turning the network on is refused
+    (``code_network_not_yet``) until S4-05b can limit a container to the
+    public internet: the engine's default network reaches this computer, the
+    LAN and cloud metadata (the review of S4-05). Turning it off is taken,
+    recorded, and clears what a first build of S4-05 stored. Refused too: the
+    admin, whose code keeps its own rules; a value that is not true or false."""
+    _require_enforced()
+    from kazma_core.spaces.member_code import CODE_NETWORK_POLICY
+
+    if not isinstance(allowed, bool):
+        raise PeopleRefused("bad_code_network", 400, "The network is allowed or not.")
+    if account_id == OWNER_ACCOUNT_ID:
+        raise PeopleRefused("admin_code_rules", 400, "The admin's code keeps its own rules.")
+    if allowed:
+        raise PeopleRefused(
+            "code_network_not_yet", 409,
+            "Network for members' code comes once Kazma can limit it to the public internet; "
+            "until then their code runs with no network.")
+
+    def _change(reg: dict[str, Any]) -> None:
+        _person(reg, account_id)
+        policy = reg["policies"].setdefault(account_id, {})
+        policy.pop(CODE_NETWORK_POLICY, None)
+        _record(reg, "code_network_set", account_id, by)
+
+    _changed(_change)
+    logger.info("[people] code network off id=%s by=%s", account_id, by)
+
+
 def set_enabled(account_id: str, enabled: Any, *, by: str) -> None:
     """Disable or enable a person (S2-07). Disabled, they cannot sign in,
     their sessions end, and their work waits -- a scheduled job is held at
@@ -1202,6 +1239,18 @@ def close_space(space_id: str, *, by: str) -> None:
             raise identity.IdentityError("no_such_space", f"no space {space_id!r}")
         space.setdefault("erasing_at", _now())
         space.setdefault("erasing_by", by)
+
+    _changed(_change)
+
+
+def note_key_changed(space_id: str, *, by: str) -> None:
+    """Record that a space's key was changed (``space_key_changed``, Spaces
+    S4-07; ``space_keys.change_key`` changes it). No key and no secret is
+    in the record."""
+    def _change(reg: dict[str, Any]) -> None:
+        if space_id not in reg["spaces"]:
+            raise identity.IdentityError("no_such_space", "There is no such space.")
+        _record(reg, "space_key_changed", "", by, space=space_id)
 
     _changed(_change)
 

@@ -326,6 +326,10 @@ def test_control_the_local_runner_is_what_a_lab_switch_allows(matrix, enforced, 
         assert code_exec.local_exec_forbidden() is False  # the owner's lab switch, as before
     monkeypatch.setattr(space_files, "in_sandboxed_space", lambda: False)
     monkeypatch.setattr(code_exec, "_outside_the_owners_space", lambda: False)
+    from kazma_core.spaces import member_code
+
+    # And without S4-05's rule (a person's code only in a container).
+    monkeypatch.setattr(member_code, "code_rule", lambda: member_code._AS_BEFORE)
     with matrix.as_a():
         assert code_exec.local_exec_forbidden() is False  # the control
 

@@ -65,15 +65,34 @@ def fair_claim_order() -> tuple[str, str]:
     tenant's failing jobs no longer return to the front of the queue. One
     tenant's backlog of hundreds no longer makes every other tenant wait
     behind all of it.
+
+    And, once Spaces is enforced, across the people of a tenant (Spaces
+    S4-04: a space is a tenant): among one tenant's jobs, the person with the
+    fewest running goes first, so one member's backlog never makes the
+    space's other members wait behind it. On both backends; the callers join
+    ``running r`` as before. With Spaces off the order is exactly the one
+    before S4-04 (the switch is read per claim, in memory).
     """
+    from kazma_core.spaces.scope import spaces_enforced
+
     active = ",".join(f"'{s}'" for s in _ACTIVE_STATE_VALUES)
-    with_clause = f"""
+    running = f"""
         WITH running AS (
             SELECT tenant_id, COUNT(*) AS n FROM document_jobs
             WHERE state IN ({active}) AND lease_owner IS NOT NULL
             GROUP BY tenant_id
         )"""
-    order = "ORDER BY COALESCE(r.n, 0), COALESCE(j.retry_at, j.created_at), j.id"
+    if not spaces_enforced():
+        return running, "ORDER BY COALESCE(r.n, 0), COALESCE(j.retry_at, j.created_at), j.id"
+    with_clause = running + f""", running_actor AS (
+            SELECT tenant_id, actor_id, COUNT(*) AS n FROM document_jobs
+            WHERE state IN ({active}) AND lease_owner IS NOT NULL
+            GROUP BY tenant_id, actor_id
+        )"""
+    order = ("ORDER BY COALESCE(r.n, 0), "
+             "COALESCE((SELECT ra.n FROM running_actor ra WHERE ra.tenant_id = j.tenant_id "
+             "AND ra.actor_id = j.actor_id), 0), "
+             "COALESCE(j.retry_at, j.created_at), j.id")
     return with_clause, order
 
 _ACTIVE_STATES = frozenset(

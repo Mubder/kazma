@@ -1557,7 +1557,7 @@ scheduler needs a case there.
   watch (§39), the document worker broker (§19 E1), guard dependencies
   (§39), malware signatures
   (§19 E), dependency advisories (§57), model failover drill (§38), provider
-  health (§60), forget convergence (§15I), memory vector repair, memory recovery,
+  health (§60), erased space keys (§70, S4-07), forget convergence (§15I), memory vector repair, memory recovery,
   retired knowledge promotions and memory turn reconcile (§15F), memory
   text fill (§15F), memory mirror sync (§15K), memory graph sync (§15K2), weekly topic summaries (§15J), entity count repair
   (§15L) and knowledge vector repair (§24F, last), run by ONE isolated
@@ -15149,6 +15149,29 @@ an install with one account behaves as before.
     drill's `vault:space_keys` check fails a backup whose sealed rows name a
     key it does not hold. The export is unchanged (N10's password seal;
     secret names only, never a key).
+  - **Key care (S4-07, 2026-11-23).** A space's key can be changed
+    (`space_keys.change_key`; `kazma spaces keys change SPACE` / `--all`,
+    and `kazma spaces keys` lists key ids, never a key): its sealed secrets
+    are sealed again with the new key, read back first, in one transaction
+    (`SecretVault.rotate_space_key`), and its old keys are destroyed --
+    deleted there, zeroed, and the write-ahead log emptied
+    (`SecretVault._empty_the_log`, the erase's too; a reader that holds the
+    log is said at WARNING). **A change never loses a secret** (the review
+    of S4-07): it is refused, naming the rows (`SpaceKeyStillNamed`,
+    `rows_elsewhere`), while a row that is not the space's own -- a name a
+    later build classes elsewhere -- is sealed with one of its keys, and a
+    key some row still names is never deleted; a row of the space that does
+    not open refuses it too (`rows_damaged`), and `--all` reports that space
+    and goes on. Recorded (`space_key_changed`). Refused for the owner's
+    space, a space not held or erasing, the vault off. A deleted
+    space's key is destroyed: the erase takes it, and the maintenance sweep
+    "erased space keys" (`space_keys.destroy_erased_keys`) destroys again
+    what an older vault file restored over the identity store brings back,
+    for a space the record says was erased (`space_erased`) only. A running
+    Kazma keeps an old key it unwrapped in memory until it reloads. Gate:
+    `tests/test_space_key_rotation.py` (a change under the old key, a change
+    that leaves the log, the change of before losing a real secret under a
+    drifted name, and no sweep as controls).
   - What it does not do: the vault key wraps every space's key, so this
     keeps one space's secret from another's key, not from the person who
     runs the machine. Rotating the install's vault key is stage 4.
@@ -15449,6 +15472,50 @@ an install with one account behaves as before.
     (`XDailyLimitReached`, the work held), which also writes each answered
     call to the ledger the limit counts. A turn that started under the limit
     runs to its end; its own token budget bounds how far past.
+  - **Past the limit, a turn still runs on the person's own key** (S2-04's
+    follow-up, 2026-11-23): the supervisor resolves the client the turn's
+    call will go to (`graph_supervisor._turn_client`, the one answer for the
+    call and the admission) and lets the turn in when they hold a key of
+    their own for its provider (`daily_limits.on_own_key`; a store that
+    cannot say is no). In that turn every model call goes on their own
+    keys: the state's `own_keys_only`, read by every graph node first
+    (`hold_to_own_keys`: LangGraph runs a node in a copy of its caller's
+    context, and only turns the rule on, so a sub-agent keeps it), and
+    `LLMProvider._person_call` refuses a call that would go on the install's
+    key (`LLMError` kind `daily_limit`, worded by `friendly_llm_error`) -- a
+    respond synthesis on another provider, a failover. A call outside a turn
+    stays refused by `call_refusal`. Gate: `tests/test_member_own_keys.py`
+    (a real turn on her own key past her limit, one on the install's
+    refused, today's refusal and the failover under the limit as the
+    controls; every graph node holds the rule, a planted node as the
+    control).
+  - **A tool that pays another API with the install's key keeps off it in
+    such a turn** (the review of de6874f3f, `kazma_core/spaces/install_paid.py`):
+    `generate_image`'s paid backends (`INSTALL_PAID_TOOLS`; asked by name,
+    refused before the card by `call_preflight` in the person's language and
+    at the call; `auto` and the install's default, `KAZMA_IMAGE_PROVIDER`,
+    draw with the keyless pollinations: only a paid backend the call names
+    is refused), the acquisition policy's remote providers (Tavily, Jina,
+    Firecrawl, the proxy: `AcquisitionPolicy.permits` answers no) and E2B
+    (`e2b_enabled`). A Knowledge crawl started in such a turn records the
+    rule on its journal row (`own_keys_only`), and every resume binds it
+    (`kb_api.resume_job`, `daily_limits.own_keys_scope`): auto-resumed after
+    a restart it lost it. A document job's remote parse (LlamaParse,
+    Reducto: outside any turn) is refused for a job whose asker is past their
+    daily limit (`daily_limits.call_refusal(asker)`, read in the stage's
+    thread; `extract_salvage.salvage_audit_scope(remote_refusal=)`), and the
+    local reading is kept. `PAID_KEY_READERS` declares every tool-reachable
+    module that reads an API key from the environment -- by its literal name,
+    or from a table (a read whose name is not a literal, in a module whose
+    tuple, list or mapping holds a key's name) -- with how such a turn keeps
+    off what it pays; a new one fails `tests/test_install_paid_tools.py` (a
+    planted tool and a planted table read as controls; outside such a turn
+    every path is as before). **The one
+    accepted exception**: the remote embedder (`memory/embedder.py`, when the
+    owner chose a remote embedding model) embeds the turn's question for
+    recall on the install's key -- it costs very little. Speech in and out
+    of a turn (`voice/stt.py`, `voice/tts.py`) is outside the turn and was
+    never counted by a daily limit.
   - **Every model call is checked or declared**
     (`tests/test_model_calls_checked.py`): each product `.chat(`,
     `.chat_stream(`, `invoke_llm_chat(`, `ledgered_chat(` and each `.chat`
@@ -16072,6 +16139,96 @@ an install with one account behaves as before.
     install and the other is refused; each byte limit taken out as its
     control; the routes and refusals; nothing read without Spaces),
     `tests/e2e/test_space_limits_browser.py` (by the sidebar, EN/AR).
+- **Fairness between spaces and between people (S4-04, 2026-11-23).** Only
+  where Spaces is enforced: an install that does not enforce it reads
+  nothing more, counts nothing, and every queue keeps its order.
+  `kazma_core/spaces/fairness.py` is the one rule.
+  - **A person's share** (`person_share`): in a shared space with more than
+    one member, each person holds at most half of any of the space's
+    shares, rounded up; in a personal space, or one with a single member,
+    the space's. `shares(kind, space)` answers both;
+    `space_limits.running_refusal(..., person=, person_running=)` refuses
+    for either, and crawls (`crawl_jobs.start`, the journal row's `asker`),
+    research runs (`research_runtime._take_space_share`) and swarm tasks
+    (`engine._running_ahead_of`, the task's `asker`) ask it.
+  - **Turns and scheduled jobs have shares** (`SpaceLimits.turns`, 8;
+    `scheduled`, 2; both on the People page), counted in this process
+    (`fairness.turn_slots`, `fairness.scheduled_slots`). A new turn takes its
+    slot in `turn_segment_budget`, waiting up to `TURN_WAIT_S`; past it the
+    turn is refused before it starts (`TurnSegment.refused`, `expired` too,
+    the honest end written in the person's language, never recorded as
+    failed: `turn_failed` False, as the daily-limit refusal) and the caller
+    runs no graph: every caller of the budget checks `segment.refused` (a
+    gate).
+    An approval's resume is let in and counted; a turn inside one that
+    holds a slot -- a sub-agent's, a scheduled task's -- takes none
+    (`fairness.held`). A due job takes its slot in
+    `CronScheduler._execute_bounded` before the scheduler's own semaphore,
+    waiting up to one poll and holding nothing while it waits; one still
+    beyond its share is left pending, unclaimed. A reminder (no model call)
+    takes no slot (`CronScheduler._takes_a_slot`): behind a running task
+    fire it would ring minutes late, or past its catch-up window. With
+    Spaces off a slot is not even asked (no thread hop).
+  - **Queues take turns**: the scheduler's due list by space, then by
+    person (`SQLiteCronStore.due_jobs(fair=True)`); document claims, within
+    a tenant, by the person with the fewest running (`fair_claim_order`'s
+    `running_actor`, both backends; with Spaces off the order is the one
+    before S4-04); the memory lane by space (N37:
+    `memory_task_queue.claim_space`, filled at enqueue -- `enqueue_task(
+    space=)`, else the payload's tenant, else the bound scope -- read by
+    `_claim_batch`; never whose data a task is, which the space walk reads
+    from the payload).
+  - **Uploads and paid endpoints**: a space's documents are bounded by its
+    queue and rate budgets (`documents.admission`, per tenant); every rate
+    window (`kazma_ui.rate_limit`) is keyed by the person the tenant
+    middleware bound, wherever they sign in from, and each request also
+    counts in its space's window of `SPACE_WINDOW_FACTOR` (2) people's
+    worth: both admit it or neither counts it.
+  - Gates: `tests/test_space_fairness.py` (turns through the real
+    `run_agent_turn` and graph, the scheduler's real poll on a real store,
+    real document claims, the real memory claim, the real rate dependency;
+    one queue for all as each control: one space's turns, jobs, claims or
+    tasks first and another space's waiting; a caller of the budget that
+    runs the graph anyway as the gate's control; the People page's limits
+    in both languages).
+- **A member's code runs only in a container, with no network (S4-05,
+  2026-11-23, and its review).** Only where Spaces is enforced: an install
+  that does not enforce it reads nothing more, and the admin's code keeps
+  the rules it had. `kazma_core/spaces/member_code.py` `code_rule()` is the
+  one answer for the work running now: anyone but the admin, in any space,
+  runs `python_exec` in the Docker jail or not at all -- never the host
+  fallback, whatever `KAZMA_CODE_EXEC_ALLOW_LOCAL` says
+  (`code_exec.local_exec_forbidden` asks it first), and never E2B, which
+  always has the internet (`sandbox.e2b.e2b_enabled`). Work no person asked
+  for likewise. A chat-app turn runs as the person whose linked account
+  sent it (stage 3, `chat_apps.chat_place`), so their code is held there
+  too.
+  - **No network for members' code, until S4-05b.** The first build let the
+    admin allow it per person, and the jail then ran `--network bridge`: the
+    review reached a host service through the LAN and WSL addresses, and the
+    router's admin page, from the jail; cloud metadata (169.254.169.254) was
+    open, and on Docker Desktop `host.docker.internal` reaches the host's
+    loopback. Now every jail run is `--network none` with the network
+    modules blocked, `allowed_network` answers False whatever is stored (a
+    first-build allowance reads as not allowed), and People refuses turning
+    it on (`people.set_code_network`: 409 `code_network_not_yet`, worded in
+    both languages; off is taken and clears a stored value). The People page
+    shows the switch off, disabled, "Not yet". S4-05b brings filtered egress
+    on Kazma's own engine. Never give a member's container the engine's
+    default network.
+  - S2-12's member rules (`spaces.tools.MEMBER_DEVELOPMENT`) keep a member
+    off every host process that runs a project's code; this holds the one
+    code runner they keep.
+  - Gates: `tests/test_member_code_in_containers.py` (the rule; per-space
+    runs with no Docker refused, the local fallback reading a host file as
+    the control; the refusal, a first-build allowance read as not allowed,
+    today's allowance as the control; `--network none` for every container;
+    E2B never; a chat-app turn of a linked person through the real gateway
+    handler, the owner's own link as the control; a real Docker run where
+    the sandbox image is present, `real_docker`: no network and no host file
+    in the container, the local fallback reading it as the control),
+    `tests/e2e/test_person_code_network_browser.py` (by the sidebar, EN/AR:
+    the switch off, disabled, "Not yet", a stored allowance shown off).
 - **Every action under the person's name (S2-09, 2026-11-22).** Only where
   Spaces is enforced; an install that does not enforce it records nothing
   more (the memory operator trail and the logs as before).
@@ -16182,8 +16339,8 @@ an install with one account behaves as before.
     nothing, a good one is kept sealed and never shown, "Use the install's
     key" forgets it; the admin's page, and the check sent through the
     proxy keeping a refused key, as the controls).
-    Left: a person over their daily limit is still refused before a turn,
-    even when the turn would run on their own key.
+    Past their daily limit a turn on their own key still runs, on their own
+    keys only (S2-02's entry above).
 - **A member's page asks nothing the server refuses (2026-11-23).** The
   page shell read the install's settings on every page -- the appearance
   (and a `PUT` on a theme switch), `/api/provider/active`, `/api/providers`
@@ -16204,6 +16361,38 @@ an install with one account behaves as before.
   new person's features, by the sidebar, EN/AR, every tab shown and a theme
   switch: no request refused; today's shell and the tabs drawn whatever the
   features as controls).
+- **The cloud profile (S4-08, 2026-11-23).** An install the operator
+  declares public (`KAZMA_CLOUD_PROFILE`, one of `boot_guard.SECURITY_SWITCHES`,
+  read through `env_flag`) runs the checks of
+  `kazma_core/security/cloud_profile.py` at boot; with it off nothing there
+  runs or is read. `CHECKS` is the one table, each check declaring what a
+  missing piece does: **refuse** (Kazma does not start, and prints what is
+  missing and the fix) for an `https` `KAZMA_PUBLIC_URL` on a public host
+  (`ssrf.public_host_problem`, ssrf's own rules with no DNS: never a private
+  address, `.local`, `.internal` or a name with no dot), a proxy named in
+  `KAZMA_TRUSTED_PROXIES` (`*` is no proxy; a range of prefix length 0, or
+  wider than the widest private block, /8 or /7, is refused: every peer in
+  it could name its own client address), nobody in without signing in (no
+  open switch: `boot_guard.OPEN_SWITCHES`, the ONE list -- sign-in off,
+  demo, the socket bypass, loopback and LAN auto-login, the chat apps open
+  to everyone, an open season takeover -- which S4-03 reads too; no hand-set
+  `KAZMA_SECRET` under `WEAK_SECRET_CHARS`) and code only in containers
+  (`security.execution.container_required`, which no Settings write turns
+  off while the profile is on: `cloud_profile.container_requirement_refusal`,
+  asked by `settings_validation`); **warn** (said at WARNING) for
+  `KAZMA_PRODUCTION`, a loopback bind, a container engine installed and a
+  backup copy off the machine. A check that cannot be made is a missing
+  piece. Two stages: the environment's checks in `create_app` before the app
+  is built (before it waits for its database), the settings' in the builder
+  once the store answers (`boot_refusal(settings=...)`). A new piece is a
+  row of `CHECKS` and a way to break it in the test's `BREAKS`. `kazma
+  doctor` shows every check: on, a missing refuse piece fails it; off, each
+  is shown (`[info]`) and counts for nothing. Gate:
+  `tests/test_cloud_profile.py` (each piece missing on its own, through the
+  real `create_app` for both stages; the profile off and every piece in
+  place as controls; a check with no way to break it fails the gate; the
+  shipped proxy, sign-in and TLS rules as controls for the review's cases,
+  and the Settings save refusing the container switch).
 - **A person links their own chat-app account with a code (S3-01,
   2026-11-23).** Only where Spaces is enforced (`chat_links.linking_on`): an
   install with one account issues no code, and every message, code-shaped or
@@ -16590,10 +16779,11 @@ an install with one account behaves as before.
   rule already ends it, so a lab is told at start), demo mode
   (`KAZMA_DEMO_MODE`) and the chat apps' open switch
   (`KAZMA_GATEWAY_OPEN_TO_EVERYONE`, unless
-  `KAZMA_GATEWAY_STRICT_ALLOWLIST` overrides it). One list,
-  `boot_guard.OPEN_SWITCHES` (its sign-in part, `SIGN_IN_OFF_SWITCHES`, is
-  the cloud profile's too, S4-08): a new switch that lets anyone in goes
-  there. `boot_guard.open_switches_refusal` is asked by
+  `KAZMA_GATEWAY_STRICT_ALLOWLIST` overrides it) and the open season
+  take-over (`KAZMA_SESSION_OPEN_TAKEOVER`). One list,
+  `boot_guard.OPEN_SWITCHES`, read through `boot_guard.open_switches_on`
+  (the strict override is there) by this refusal and by the cloud profile
+  (S4-08) alike: a new switch that lets anyone in goes there. `boot_guard.open_switches_refusal` is asked by
   `KazmaAppBuilder._bootstrap_services` once the settings store answers:
   exit 1 before anything serves, the refusal on stderr and in the log,
   naming the accounts it counted. It counts accounts, not Spaces: an install
@@ -16916,11 +17106,20 @@ an install with one account behaves as before.
   an inline `style` on an `x-show` element — the inline declaration wins
   over Alpine's `display:none` toggle; put flex layout in a CSS class
   instead (see `.system-alerts-banner`).
-- **A boolean binding is a boolean** (2026-11-23, found building S2-04):
-  with the vendored Alpine (3.14.8) `:disabled="busy[key]"` that evaluates to
-  `undefined` leaves the button DISABLED (measured in Chromium: `false`
-  enables it, `undefined` does not). Bind `!!busy[key]`, or a value that is
-  always `true` or `false`.
+- **A boolean binding is a boolean** (2026-11-23, found building S2-04;
+  corrected the same day). The vendored Alpine (3.14.8) sets a boolean
+  attribute (`disabled`, `hidden`, `required`, `readonly`, `open`...) for
+  every value but `null`, `undefined` and `false` (`0` and `""` set it), and
+  turns an `undefined` into `""` when the expression's text holds a `.`
+  (measured in Chromium): `:disabled="busy[p.provider]"` or
+  `:disabled="e.protected"` DISABLES the control while the value is missing,
+  and a bare `:disabled="busy"` does not. Bind `!!value`, a comparison or a
+  value that is always `true` or `false`. Gate:
+  `tests/test_alpine_boolean_bindings.py` (every dotted binding of an
+  attribute on Alpine's own list, read from the vendored file, is provably a
+  boolean or declared; 20 were not, all latent; planted shapes as controls),
+  `tests/e2e/test_alpine_boolean_binding_trap.py` (the gate flags exactly
+  what the browser disables).
 - **Responsive grids:** use `class="two-col-grid"` (collapses to one column
   ≤768px via `kazma.css`) on any inline `grid-template-columns:1fr 1fr;` —
   bare inline 2-col grids don't collapse and crush on mobile.

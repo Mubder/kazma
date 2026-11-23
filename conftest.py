@@ -815,8 +815,37 @@ def _isolate_process_singletons(tmp_path):
     except Exception:
         _prev_install_lang = None
 
+    # The document platform's coordinator: ``get_ingestion_service()`` builds
+    # the process's one on first use, over the session data folder's document
+    # store, and keeps it. A chat-app ``/documents`` command, a document tool
+    # or a library delete in one test left it installed, and every later
+    # test that asks where the installed store is (``peek_ingestion_service``:
+    # the migration export, the document backup) read that store instead of
+    # its own -- test_document_export_deleted_blobs exported the session's
+    # empty store, "0 blobs", whenever test_chat_commands_act_as_the_account's
+    # /docs case ran before it in a fast_test chunk (CI, 2026-11-23). The one a
+    # test leaves is parked, never closed (see _PARKED).
+    try:
+        from kazma_core.documents.ingestion import peek_ingestion_service as _peek_documents
+
+        _prev_documents = _peek_documents()
+    except Exception:
+        _peek_documents = None
+        _prev_documents = None
+
     # ---- teardown: restore + park (never close/GC — see _PARKED) ---------
     yield
+
+    if _peek_documents is not None:
+        try:
+            from kazma_core.documents.ingestion import set_ingestion_service
+
+            _left_documents = _peek_documents()
+            if _left_documents is not _prev_documents:
+                set_ingestion_service(_prev_documents)
+                _park(_left_documents)
+        except Exception:
+            pass
 
     if _prev_container is not None:
         try:

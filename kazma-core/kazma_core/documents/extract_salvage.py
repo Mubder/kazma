@@ -52,15 +52,22 @@ SALVAGE_SCORE = 0.55
 # The durable operation supplies attribution. A missing recorder refuses egress.
 AuditHook = Callable[[str, Path, int, str], None]
 _audit_hook: ContextVar[AuditHook | None] = ContextVar("document_egress_audit", default=None)
+#: Why this operation's remote parse is refused, or None: the person the job
+#: is for reached their daily limit (Spaces S2-02; the review of 3faf46175 --
+#: a remote parser is paid with the install's key). Local parsing goes on.
+_remote_refusal: ContextVar[str | None] = ContextVar("document_remote_parse_refusal", default=None)
 
 
 @contextmanager
-def salvage_audit_scope(hook: AuditHook):
-    """Bind the immutable operation's recorder; restore the prior scope."""
+def salvage_audit_scope(hook: AuditHook, *, remote_refusal: str | None = None):
+    """Bind the immutable operation's recorder, and why its remote parse is
+    refused (*remote_refusal*, None: allowed); restore the prior scope."""
     token = _audit_hook.set(hook)
+    refusal = _remote_refusal.set(remote_refusal)
     try:
         yield
     finally:
+        _remote_refusal.reset(refusal)
         _audit_hook.reset(token)
 
 
@@ -277,6 +284,11 @@ def try_remote_parse(path: Path, document: DocumentIR) -> DocumentIR | None:
         # boundary. A job snapshot or API key cannot override live denial.
         live = _resolve_config(None)
         if not getattr(live, "security_remote_parse", False) or _env_veto("KAZMA_REMOTE_PARSE"):
+            return None
+        refused = _remote_refusal.get()
+        if refused:
+            # No upload, no audit row: nothing left the machine.
+            logger.info("[extract] remote parse not run: %s; the local reading is kept", refused)
             return None
         key = os.environ.get(key_name, "").strip()
         if not key:

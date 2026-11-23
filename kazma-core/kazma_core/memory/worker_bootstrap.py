@@ -1406,6 +1406,15 @@ def _settings_snapshot() -> None:
     snapshot_sweep()
 
 
+def _destroy_erased_space_keys() -> None:
+    # Spaces S4-07: a deleted space's key is destroyed. An erase takes it
+    # itself; an older vault file restored over an identity store that
+    # recorded the erase brings it back, and this destroys it again.
+    from kazma_core.spaces.space_keys import destroy_erased_keys
+
+    destroy_erased_keys()
+
+
 def _provider_health() -> None:
     # Providers stage 4: once an hour every switched-on chat provider is
     # asked for its model list (no tokens); unreachable twice is said, a
@@ -1486,6 +1495,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("model failover drill", _model_failover_drill),
     ("provider health", _provider_health),
     ("settings snapshot", _settings_snapshot),
+    ("erased space keys", _destroy_erased_space_keys),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
     ("memory vector codes", _fill_vector_codes),

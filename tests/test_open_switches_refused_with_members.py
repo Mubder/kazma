@@ -2,14 +2,15 @@
 
 With people on an install who do not all trust each other, sign-in off
 (``KAZMA_AUTH_DISABLED``, ``KAZMA_DEV_WS_BYPASS``,
-``KAZMA_LOOPBACK_AUTOLOGIN``), demo mode (``KAZMA_DEMO_MODE``) or the chat
-apps' open switch (``KAZMA_GATEWAY_OPEN_TO_EVERYONE``) hands every one of
-them -- and anyone who reaches the install -- what the owner's sign-in
-guards. The boot refuses them (``boot_guard.open_switches_refusal``, asked by
+``KAZMA_LOOPBACK_AUTOLOGIN``, ``KAZMA_TRUST_LAN``), demo mode
+(``KAZMA_DEMO_MODE``), the chat apps' open switch
+(``KAZMA_GATEWAY_OPEN_TO_EVERYONE``) or the open season take-over
+(``KAZMA_SESSION_OPEN_TAKEOVER``) hands every one of them -- and anyone who
+reaches the install -- what the owner's sign-in guards. The boot refuses them (``boot_guard.open_switches_refusal``, asked by
 the builder once the settings store answers): the process exits before
 anything serves, saying which switch and how to turn it off. One list of the
-switches (``boot_guard.OPEN_SWITCHES``; the sign-in ones are
-``SIGN_IN_OFF_SWITCHES``, which the cloud profile reads too).
+switches (``boot_guard.OPEN_SWITCHES``, read through
+``boot_guard.open_switches_on``, which the cloud profile reads too).
 
 Each switch through the real ``create_app``, on a loopback bind (the bind
 check, ``factory_exposure_refusal``, passes there: this test is about the
@@ -92,7 +93,7 @@ def test_the_strict_allowlist_overrides_the_chat_apps_open_switch(
 ) -> None:
     switches_off.setenv(boot_guard.CHAT_APPS_OPEN_SWITCH, "1")
     switches_off.setenv("KAZMA_GATEWAY_STRICT_ALLOWLIST", "1")
-    assert boot_guard._open_switches_on() == []
+    assert boot_guard.open_switches_on() == []
     assert boot_guard.open_switches_refusal() == ""
 
 
@@ -125,3 +126,60 @@ def test_negative_control_the_boot_guard_without_the_rule_starts(
     with pytest.raises(AssertionError, match="Kazma started with"):
         test_a_switch_that_opens_the_install_is_refused_once_a_second_account_exists(
             switches_off, None, switch, capsys)
+
+
+# ── One list: the cloud profile (S4-08) refuses exactly these switches ─────
+#: The two lists as each builder shipped them before the merge: S4-08's
+#: (main, 9a2fa6b13) without ``KAZMA_TRUST_LAN`` and with no strict override,
+#: S4-03's without the open take-over.
+_CLOUD_LIST_BEFORE = ("KAZMA_AUTH_DISABLED", "KAZMA_DEMO_MODE", "KAZMA_DEV_WS_BYPASS",
+                      "KAZMA_LOOPBACK_AUTOLOGIN", "KAZMA_GATEWAY_OPEN_TO_EVERYONE",
+                      "KAZMA_SESSION_OPEN_TAKEOVER")
+
+
+def _cloud_refuses(switch: str) -> bool:
+    from kazma_core.security import cloud_profile
+
+    ok, detail = cloud_profile._sign_in()
+    return not ok and f"{switch} is on" in detail
+
+
+@pytest.mark.parametrize("switch", boot_guard.OPEN_SWITCHES)
+def test_the_cloud_profile_and_the_boot_refuse_the_same_switches(
+    switches_off: pytest.MonkeyPatch, two_people: None, switch: str
+) -> None:
+    switches_off.delenv("KAZMA_SECRET", raising=False)
+    switches_off.setenv(switch, "1")
+    assert switch in boot_guard.open_switches_refusal(), f"the boot let {switch} through"
+    assert _cloud_refuses(switch), f"the cloud profile let {switch} through"
+
+
+def test_the_strict_allowlist_overrides_the_chat_apps_switch_for_both(
+    switches_off: pytest.MonkeyPatch, two_people: None
+) -> None:
+    switches_off.delenv("KAZMA_SECRET", raising=False)
+    switches_off.setenv(boot_guard.CHAT_APPS_OPEN_SWITCH, "1")
+    switches_off.setenv("KAZMA_GATEWAY_STRICT_ALLOWLIST", "1")
+    assert boot_guard.open_switches_refusal() == ""
+    assert not _cloud_refuses(boot_guard.CHAT_APPS_OPEN_SWITCH), (
+        "the cloud profile refused a chat apps' open switch the strict allowlist overrides")
+
+
+def test_the_session_take_over_switch_is_read_as_every_switch_is(switches_off: pytest.MonkeyPatch) -> None:
+    from kazma_core.sessions import directory
+
+    switches_off.setenv("KAZMA_SESSION_OPEN_TAKEOVER", "Yes")
+    assert directory._open_takeover_enabled() and "KAZMA_SESSION_OPEN_TAKEOVER" in boot_guard.open_switches_on()
+    switches_off.setenv("KAZMA_SESSION_OPEN_TAKEOVER", "no")
+    assert not directory._open_takeover_enabled() and boot_guard.open_switches_on() == []
+
+
+def test_negative_control_two_lists_disagree(switches_off: pytest.MonkeyPatch, two_people: None) -> None:
+    """Planted: the cloud profile reading S4-08's own list, as before the
+    merge. ``KAZMA_TRUST_LAN`` passes it while the boot refuses it."""
+    from kazma_core.security import cloud_profile
+
+    switches_off.setattr(cloud_profile, "open_switches_on",
+                         lambda: [n for n in _CLOUD_LIST_BEFORE if boot_guard.env_flag(n)])
+    with pytest.raises(AssertionError, match="the cloud profile let KAZMA_TRUST_LAN through"):
+        test_the_cloud_profile_and_the_boot_refuse_the_same_switches(switches_off, None, "KAZMA_TRUST_LAN")

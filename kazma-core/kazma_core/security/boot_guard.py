@@ -50,12 +50,12 @@ __all__ = [
     "LOOPBACK_HOSTS",
     "OPEN_SWITCHES",
     "SECURITY_SWITCHES",
-    "SIGN_IN_OFF_SWITCHES",
     "open_switches_refusal",
     "WEAK_SECRET_CHARS",
     "env_flag",
     "exposure",
     "is_loopback",
+    "open_switches_on",
     "check_exposure_posture",
     "note_launcher_checked",
     "factory_exposure_refusal",
@@ -87,34 +87,49 @@ SECURITY_SWITCHES: frozenset[str] = frozenset({
     "KAZMA_GATEWAY_STRICT_ALLOWLIST",
     "KAZMA_LOOPBACK_AUTOLOGIN",
     "KAZMA_TRUST_LAN",
+    "KAZMA_SESSION_OPEN_TAKEOVER",
+    # Spaces S4-08: the install is public, and the cloud profile's checks
+    # run at boot (``kazma_core.security.cloud_profile``).
+    "KAZMA_CLOUD_PROFILE",
 })
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
-#: The switches that turn sign-in off, or let a visitor in without it. The
-#: one list of them: the cloud profile's sign-in check (Spaces S4-08) and the
-#: refusal once a second account exists (S4-03) both read it.
-#: ``KAZMA_TRUST_LAN`` hands any private-network peer -- a Docker bridge
-#: included -- the owner's auto-login, as ``KAZMA_LOOPBACK_AUTOLOGIN`` hands a
-#: proxied loopback peer. Once a second person has an account both already
-#: do nothing (``kazma_ui.auth.everyone_signs_in`` ends every peer trust); they
-#: are refused anyway, so a lab that relied on one is told at start rather
-#: than finding its auto-login gone, and so a fault in that one rule never
-#: reopens either.
-SIGN_IN_OFF_SWITCHES: tuple[str, ...] = (
+#: The chat apps' switch that lets anyone message a bot whose allowlist is
+#: empty (``kazma_gateway.sender_rule``); ``KAZMA_GATEWAY_STRICT_ALLOWLIST``
+#: set too wins over it, so it does nothing then.
+CHAT_APPS_OPEN_SWITCH = "KAZMA_GATEWAY_OPEN_TO_EVERYONE"
+#: The open switches: each lets someone in who has not signed in as
+#: themselves -- sign-in off, a visitor taken for the owner, a chat app open
+#: to anyone who can message its bot, a chat season anyone allowed may take
+#: over. The one list, read through :func:`open_switches_on`: the cloud
+#: profile refuses every one (Spaces S4-08, ``cloud_profile``), and so does a
+#: boot once a second account exists (S4-03, :func:`open_switches_refusal`).
+#: ``KAZMA_LOOPBACK_AUTOLOGIN`` hands a proxied loopback peer the owner's
+#: auto-login, ``KAZMA_TRUST_LAN`` any private-network peer (a Docker bridge
+#: included). Once a second person has an account both already do nothing
+#: (``kazma_ui.auth.everyone_signs_in`` ends every peer trust); they are
+#: refused anyway, so a lab that relied on one is told at start rather than
+#: finding its auto-login gone, and so a fault in that one rule never reopens
+#: either.
+OPEN_SWITCHES: tuple[str, ...] = (
     "KAZMA_AUTH_DISABLED",
     "KAZMA_DEMO_MODE",
     "KAZMA_DEV_WS_BYPASS",
     "KAZMA_LOOPBACK_AUTOLOGIN",
     "KAZMA_TRUST_LAN",
+    CHAT_APPS_OPEN_SWITCH,
+    "KAZMA_SESSION_OPEN_TAKEOVER",
 )
-#: The chat apps' switch that lets anyone message a bot whose allowlist is
-#: empty (``kazma_gateway.sender_rule``); ``KAZMA_GATEWAY_STRICT_ALLOWLIST``
-#: set too wins over it.
-CHAT_APPS_OPEN_SWITCH = "KAZMA_GATEWAY_OPEN_TO_EVERYONE"
-#: Every switch that opens an install to people it has not signed in:
-#: refused at boot once a second account exists (Spaces S4-03).
-OPEN_SWITCHES: tuple[str, ...] = (*SIGN_IN_OFF_SWITCHES, CHAT_APPS_OPEN_SWITCH)
+
+
+def open_switches_on() -> list[str]:
+    """The :data:`OPEN_SWITCHES` that are on, in their order. The chat apps'
+    open switch counts only while the strict allowlist does not override
+    it, as the sender rule reads them. In memory."""
+    return [name for name in OPEN_SWITCHES
+            if env_flag(name) and not (name == CHAT_APPS_OPEN_SWITCH
+                                       and env_flag("KAZMA_GATEWAY_STRICT_ALLOWLIST"))]
 
 
 def env_flag(name: str) -> bool:
@@ -126,16 +141,6 @@ def env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in _TRUTHY
 
 
-def _open_switches_on() -> list[str]:
-    """The switches of :data:`OPEN_SWITCHES` that are on, in that order. The
-    chat apps' open switch counts only while the strict allowlist does not
-    override it, as the sender rule reads them. In memory."""
-    on = [name for name in SIGN_IN_OFF_SWITCHES if env_flag(name)]
-    if env_flag(CHAT_APPS_OPEN_SWITCH) and not env_flag("KAZMA_GATEWAY_STRICT_ALLOWLIST"):
-        on.append(CHAT_APPS_OPEN_SWITCH)
-    return on
-
-
 def open_switches_refusal() -> str:
     """Why Kazma refuses to start, or ``""``: once a second account exists,
     no switch of :data:`OPEN_SWITCHES` may be on (Spaces S4-03). With people
@@ -145,7 +150,7 @@ def open_switches_refusal() -> str:
     read; with one on, the accounts are read from the identity store
     (blocking: call it once the settings store answers). An identity store
     that cannot answer is a refusal: unknown is never a pass."""
-    on = _open_switches_on()
+    on = open_switches_on()
     if not on:
         return ""
     from kazma_core.spaces import identity

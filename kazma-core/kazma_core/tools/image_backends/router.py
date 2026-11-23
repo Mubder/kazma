@@ -16,8 +16,22 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+#: The backends paid with the install's key (Spaces S2-04: never in a turn
+#: that runs on the person's own key only, ``spaces.install_paid``).
+PAID_BACKENDS = frozenset({"dall-e", "stability", "flux"})
+
+
+def _own_keys_only() -> bool:
+    from kazma_core.spaces.daily_limits import own_keys_only
+
+    return own_keys_only()
+
+
 def detect_available_provider() -> str:
-    """Return first credentialed provider, else the keyless default."""
+    """Return first credentialed provider, else the keyless default. In a
+    turn that runs on the person's own key only, the keyless default."""
+    if _own_keys_only():
+        return "pollinations"
     if os.getenv("OPENAI_API_KEY"):
         return "dall-e"
     if os.getenv("STABILITY_API_KEY"):
@@ -42,6 +56,12 @@ def get_backend(provider: str | None = None) -> Any:
     lacks credentials, so callers always get a usable backend.
     """
     name = resolve_provider(provider)
+    if name in PAID_BACKENDS and _own_keys_only():
+        # The tool refuses a paid backend asked by name first
+        # (``spaces.install_paid``); this keeps any other caller off it.
+        logger.info("[image] %s is paid with the install's key; this turn runs on the person's own key only "
+                    "-- using pollinations", name)
+        name = "pollinations"
 
     if name == "dall-e":
         if os.getenv("OPENAI_API_KEY"):

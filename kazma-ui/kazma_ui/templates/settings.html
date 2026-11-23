@@ -1045,7 +1045,7 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="provider-name">{{ t('settings.name_id') }}</label>
-                        <input type="text" class="form-input" id="provider-name" x-model="hubEditingProvider.name" translate="no" placeholder="openai" :disabled="hubEditingProvider._existing">
+                        <input type="text" class="form-input" id="provider-name" x-model="hubEditingProvider.name" translate="no" placeholder="openai" :disabled="!!hubEditingProvider._existing">
                     </div>
                     <div class="form-group">
                         <label for="f-hub-editing-provider-display-name">{{ t('settings.display_name') }}</label>
@@ -1219,7 +1219,7 @@
                 <h2 x-text="hubEditingConnector.name ? '{{ t('settings.edit_connector') }}' : '{{ t('settings.add_connector') }}'"></h2>
                 <div class="form-group">
                     <label for="f-hub-editing-connector-name">{{ t('settings.connector_name') }}</label>
-                    <select id="f-hub-editing-connector-name" class="form-select" x-model="hubEditingConnector.name" :disabled="hubEditingConnector._existing" @change="onHubConnectorPlatformChange()">
+                    <select id="f-hub-editing-connector-name" class="form-select" x-model="hubEditingConnector.name" :disabled="!!hubEditingConnector._existing" @change="onHubConnectorPlatformChange()">
                         <option value="">{{ t('settings.select_connector') }}</option>
                         <!-- Telegram/Discord/Slack live in Platform Adapters —
                              this dialog only manages the integrations that
@@ -1324,7 +1324,7 @@
                 <h2 x-text="hubEditingProfile._existing ? '{{ t('settings.edit_profile') }}' : '{{ t('settings.save_profile') }}'"></h2>
                 <div class="form-group">
                     <label for="f-hub-editing-profile-name">{{ t('settings.profile_name') }}</label>
-                    <input id="f-hub-editing-profile-name" type="text" class="form-input" x-model="hubEditingProfile.name" translate="no" placeholder="my-gpt4o" :disabled="hubEditingProfile._existing">
+                    <input id="f-hub-editing-profile-name" type="text" class="form-input" x-model="hubEditingProfile.name" translate="no" placeholder="my-gpt4o" :disabled="!!hubEditingProfile._existing">
                 </div>
                 <div class="form-group">
                     <label for="f-hub-editing-profile-provider">{{ t('settings.provider') }}</label>
@@ -2910,13 +2910,35 @@
                   <span class="people-features-list">
                     <template x-for="f in (p.features || [])" :key="p.id + '-' + f.id">
                       <span class="people-feature">
-                        <input type="checkbox" :checked="f.on" :disabled="f.fixed" :data-feature="f.id"
+                        <input type="checkbox" :checked="f.on" :disabled="!!f.fixed" :data-feature="f.id"
                                :aria-label="window.t('settings.people_feature_of', {feature: window.t('settings.feature.' + f.id), name: p.name || window.t('settings.people_owner')})"
                                @change="toggleFeature(p, f, $event.target.checked)">
                         <span aria-hidden="true" x-text="window.t('settings.feature.' + f.id)"></span>
                       </span>
                     </template>
                   </span>
+                </div>
+              </template>
+            </div>
+        </div>
+        <!-- Code (Spaces S4-05): a person's code runs only in a container,
+             with no network unless the admin allows it here. The admin's code
+             keeps its own rules. -->
+        <div class="settings-group mb-6" id="people-code" x-show="peopleLoaded && !peopleFailed" x-cloak>
+            <h3>{{ t('settings.people_code_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_code_help') }}</p>
+            <div class="account-list-table">
+              <template x-for="p in people.filter((q) => !q.owner)" :key="'code-' + p.id">
+                <div class="people-features-row" :data-person-code="p.id">
+                  <span class="account-list-name"><bdi translate="no" x-text="p.name"></bdi></span>
+                  <!-- Off and not offered until S4-05b limits a container to
+                       the public internet (the review of S4-05). -->
+                  <label class="people-feature">
+                    <input type="checkbox" data-network-switch disabled
+                           :aria-label="window.t('settings.people_code_network_of', {name: p.name})">
+                    <span>{{ t('settings.people_code_network') }}</span>
+                    <span class="badge badge-secondary" data-network-not-yet>{{ t('settings.people_code_network_not_yet') }}</span>
+                  </label>
                 </div>
               </template>
             </div>
@@ -3183,7 +3205,7 @@
                     <div class="form-hint">{{ t('settings.alerts.group_chat_hint') }}</div>
                 </div>
                 <div class="alerts-actions">
-                    <button class="btn btn-secondary" type="button" id="alerts-test-alert" @click="sendTestAlert()" :disabled="opsTestAlert.sending"
+                    <button class="btn btn-secondary" type="button" id="alerts-test-alert" @click="sendTestAlert()" :disabled="!!opsTestAlert.sending"
                             x-text="opsTestAlert.sending ? t('settings.hub.test_alert_sending') : t('settings.hub.test_alert')"></button>
                 </div>
                 <p class="form-hint">{{ t('settings.hub.test_alert_hint') }}</p>
@@ -3345,8 +3367,8 @@
         </div>
 
         <div class="alerts-save">
-            <button class="btn btn-danger" type="button" @click="resetAlerts()" :disabled="!alertsDirty || alerts.saving">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary" type="button" id="alerts-save" @click="saveAlerts()" :disabled="!alertsDirty || alerts.saving"
+            <button class="btn btn-danger" type="button" @click="resetAlerts()" :disabled="!alertsDirty || !!alerts.saving">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary" type="button" id="alerts-save" @click="saveAlerts()" :disabled="!alertsDirty || !!alerts.saving"
                     x-text="alerts.saving ? t('settings.saving') : t('settings.save')"></button>
         </div>
 
@@ -3357,7 +3379,7 @@
                     <h3 class="card-title" id="alerts-recent-title">{{ t('settings.alerts.recent_title') }}</h3>
                     <p class="card-sub">{{ t('settings.alerts.recent_sub') }}</p>
                 </div>
-                <button class="btn btn-secondary btn-sm" type="button" @click="loadRecentAlerts()" :disabled="recentAlerts.loading">{{ t('settings.alerts.refresh') }}</button>
+                <button class="btn btn-secondary btn-sm" type="button" @click="loadRecentAlerts()" :disabled="!!recentAlerts.loading">{{ t('settings.alerts.refresh') }}</button>
             </div>
             <div class="notice tone-warning mb-3" x-show="recentAlerts.loaded && recentAlerts.errors.length" x-cloak>
                 <span class="ki" data-icon="alert-circle" aria-hidden="true"></span>
@@ -4616,7 +4638,7 @@
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
                     <button class="btn btn-sm btn-primary" type="button" @click="saveXApiAccess({ bearer_token: xApiForm.bearer_token })" :disabled="xApiSaving || !xApiForm.bearer_token">{{ t('settings.xapi.save') }}</button>
-                    <button class="btn btn-sm btn-secondary" type="button" @click="saveXApiAccess({ remove_bearer: true })" :disabled="xApiSaving || !xApi.bearer_set || xApi.bearer_from_env">{{ t('settings.xapi.remove_bearer') }}</button>
+                    <button class="btn btn-sm btn-secondary" type="button" @click="saveXApiAccess({ remove_bearer: true })" :disabled="xApiSaving || !xApi.bearer_set || !!xApi.bearer_from_env">{{ t('settings.xapi.remove_bearer') }}</button>
                 </div>
 
                 <div class="form-row two-col-grid">
@@ -4779,7 +4801,7 @@
                                 <label :for="'xr-role-provider-' + role">{{ t('settings.xt.ai_provider') }}</label>
                                 <select :id="'xr-role-provider-' + role" class="form-input" x-model="xReplyRoleBindings[role].provider">
                                     <option value="">{{ t('settings.xt.ai_choose') }}</option>
-                                    <template x-for="p in xReply.ai_options" :key="p.provider"><option :value="p.provider" :disabled="xReply.ai.local_only && !p.local_capable" x-text="p.provider"></option></template>
+                                    <template x-for="p in xReply.ai_options" :key="p.provider"><option :value="p.provider" :disabled="!!xReply.ai.local_only && !p.local_capable" x-text="p.provider"></option></template>
                                 </select>
                                 <label :for="'xr-role-model-' + role">{{ t('settings.xt.ai_model') }}</label>
                                 <input :id="'xr-role-model-' + role" class="form-input" x-model="xReplyRoleBindings[role].model" autocomplete="off" translate="no">
@@ -5236,9 +5258,9 @@
                             </select>
                         </div>
                     </div>
-                    <button class="btn btn-secondary" @click="runXReplyPreview()" :disabled="xReplyPreview.busy"
+                    <button class="btn btn-secondary" @click="runXReplyPreview()" :disabled="!!xReplyPreview.busy"
                             x-text="xReplyPreview.busy ? t('settings.xt.drafting') : t('settings.xt.draft_reply')"></button>
-                    <button class="btn btn-secondary" @click="runXReplyPreview(true)" :disabled="xReplyPreview.busy">{{ t('settings.xt.compare_saved') }}</button>
+                    <button class="btn btn-secondary" @click="runXReplyPreview(true)" :disabled="!!xReplyPreview.busy">{{ t('settings.xt.compare_saved') }}</button>
 
                     <template x-if="xReplyPreview.result">
                         <div style="margin-top:12px;">

@@ -605,7 +605,9 @@ def test_not_enforced_nothing_is_read_and_the_install_s_values_apply(monkeypatch
         raise AssertionError("the identity store was read")
 
     monkeypatch.setattr(identity, "read_registry", no_reading)
-    assert space_limits.share_of("swarm", A) is None
+    from kazma_core.spaces import fairness
+
+    assert fairness.shares("swarm", A) is None
     assert space_limits.running_refusal("crawls", A, 99) is None
     assert space_limits.disk_refusal(A, 10**12) is None
     assert space_limits.documents_bytes(A, 123) == 123

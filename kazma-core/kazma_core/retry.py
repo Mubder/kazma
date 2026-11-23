@@ -172,6 +172,16 @@ def friendly_llm_error(
             "chooses each person's models in Settings > People."
         )
 
+    if getattr(exc, "kind", "") == "daily_limit":
+        # Spaces S2-02/S2-04: past the person's daily limit only their own
+        # keys are used, and this call would have gone out on the install's.
+        where = f" ({model.strip()})" if model.strip() else ""
+        return (
+            f"⚠️ You reached your daily limit, and this model{where} is not one you hold a "
+            "key of your own for, so Kazma did not call it. Choose a model you added your "
+            "own key for (Settings > My account), or wait until after midnight."
+        )
+
     if getattr(exc, "kind", "") == "stream_truncated":
         return (
             "⚠️ The model's answer was cut off before it finished: its connection "

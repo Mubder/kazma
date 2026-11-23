@@ -41,8 +41,8 @@ the machine is restic's encrypted one. Once a second person has an account,
 everyone signs in, the operator too, on the install's own machine as
 anywhere: the loopback auto-login and the local network's
 (`KAZMA_TRUST_LAN`) are off, and the switches that let anyone
-in without signing in (sign-in off, demo mode, the chat apps' open switch)
-stop Kazma from starting. A second factor (a code from an authenticator
+in without signing in (sign-in off, demo mode, the chat apps' open switch,
+the open take-over of another person's chat) stop Kazma from starting. A second factor (a code from an authenticator
 app) can be turned on for any account. It does not cover the install's
 secret (`KAZMA_SECRET`), which stays a full key for programs: once the
 owner has a second factor the secret no longer signs a browser in, nor

@@ -15,8 +15,10 @@ from kazma_core.web_acquire.robots import crawl_policy
 
 _DEADLINE_SECONDS = 1800
 
-#: Research runs each space holds now, in this process (Spaces S2-08).
+#: Research runs each space holds now, in this process (Spaces S2-08), and
+#: each person of a space (S4-04).
 _space_runs: dict[str, int] = {}
+_person_runs: dict[tuple[str, str], int] = {}
 _space_lock = threading.Lock()
 #: Set inside a background session's own work: its pipeline is the run the
 #: session already counts, never a second one.
@@ -30,35 +32,40 @@ def research_running_in(space_id: str) -> int:
 
 
 async def _take_space_share():
-    """Count one research run for the bound space, or refuse it: a space
-    holds at most its share of the install's research slots
-    (``spaces.space_limits``), asked before a slot is taken so a space at
-    its share never waits in the install's queue, nor holds a place in it.
-    Returns the release, or None while the install does not enforce Spaces
-    (or the run is already counted)."""
+    """Count one research run for the bound space and person, or refuse it:
+    a space holds at most its share of the install's research slots
+    (``spaces.space_limits``), and a person of a shared space at most half
+    of the space's (S4-04, ``spaces.fairness``), asked before a slot is
+    taken so a space at its share never waits in the install's queue, nor
+    holds a place in it. Returns the release, or None while the install
+    does not enforce Spaces (or the run is already counted)."""
+    from kazma_core.spaces.fairness import shares
     from kazma_core.spaces.identity import IdentityUnavailable
     from kazma_core.spaces.scope import current_scope, spaces_enforced
-    from kazma_core.spaces.space_limits import share_of
+    from kazma_core.spaces.space_limits import share_refusal
     from kazma_core.web_acquire.crawl_jobs import call
 
     if not spaces_enforced() or _counted.get():
         return None
     bound = current_scope()
     space = bound.space_id if bound is not None else ""
+    person = str(bound.asker or "") if bound is not None else ""
     try:
-        share = await call(share_of, "research", space)
+        cap = await call(shares, "research", space)
     except IdentityUnavailable as exc:
         raise AcquisitionError(FetchErrorCode.UNAVAILABLE,
                                "Accounts cannot be read right now; no research was started.",
                                transient=True) from exc
     with _space_lock:
         held = _space_runs.get(space, 0)
-        if share is not None and held >= share:
-            raise AcquisitionError(
-                FetchErrorCode.LIMIT,
-                f"This space already runs {share} research runs at once, its share; "
-                "try again when one ends.", transient=True)
+        mine = _person_runs.get((space, person), 0)
+        refused = share_refusal("research", held, cap, person=person,
+                                person_running=mine) if cap is not None else None
+        if refused:
+            raise AcquisitionError(FetchErrorCode.LIMIT, refused, transient=True)
         _space_runs[space] = held + 1
+        if person:
+            _person_runs[(space, person)] = mine + 1
     released = threading.Event()
 
     def release() -> None:
@@ -71,6 +78,12 @@ async def _take_space_share():
                 _space_runs[space] = left
             else:
                 _space_runs.pop(space, None)
+            if person:
+                left = _person_runs.get((space, person), 0) - 1
+                if left > 0:
+                    _person_runs[(space, person)] = left
+                else:
+                    _person_runs.pop((space, person), None)
 
     return release
 

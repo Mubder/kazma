@@ -2836,8 +2836,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     # Limits per space (Spaces S2-08).
     "settings.people_space_limits_title": {"en": "Limits per space", "ar": "حدود كل مساحة"},
     "settings.people_space_limits_help": {
-        "en": "Each space has its own limits beside the install's, so one space at its limit never slows or stops another. Work running at once is a space's share of the install's slots. Only counts and sizes are shown, never what a space holds.",
-        "ar": "لكل مساحة حدودها الخاصة إلى جانب حدود التثبيت، فلا تُبطئ مساحة بلغت حدها مساحةً أخرى ولا توقفها. العمل الجاري في آن واحد هو حصة المساحة من خانات التثبيت. تُعرض الأعداد والأحجام فقط، لا محتوى المساحة.",
+        "en": "Each space has its own limits beside the install's, so one space at its limit never slows or stops another. Work running at once is a space's share of the install's slots; in a shared space each person may use at most half of it. Only counts and sizes are shown, never what a space holds.",
+        "ar": "لكل مساحة حدودها الخاصة إلى جانب حدود التثبيت، فلا تُبطئ مساحة بلغت حدها مساحةً أخرى ولا توقفها. العمل الجاري في آن واحد هو حصة المساحة من خانات التثبيت، وفي المساحة المشتركة لا يستخدم الشخص الواحد أكثر من نصفها. تُعرض الأعداد والأحجام فقط، لا محتوى المساحة.",
     },
     "settings.people_space_limits_default": {"en": "The limits for spaces", "ar": "حدود المساحات"},
     "settings.people_space_usage_shared": {"en": "Shared", "ar": "مشتركة"},
@@ -2880,6 +2880,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.space_limit.crawls": {"en": "Crawls at once", "ar": "عمليات الزحف في آن واحد"},
     "settings.space_limit.research": {"en": "Research at once", "ar": "الأبحاث في آن واحد"},
     "settings.space_limit.swarm": {"en": "Swarm tasks at once", "ar": "مهام السرب في آن واحد"},
+    "settings.space_limit.turns": {"en": "Turns at once", "ar": "الطلبات في آن واحد"},
+    "settings.people_code_title": {"en": "Code", "ar": "الشيفرة"},
+    "settings.people_code_help": {
+        "en": "Code Kazma runs for someone other than you runs only in a container, never on this machine, and with no network. Network for their code comes once Kazma can limit it to the public internet: a container on the network today could reach this computer, your local network and a cloud machine's metadata. Your own code keeps its rules.",
+        "ar": "الشيفرة التي يشغّلها Kazma لغيرك تعمل في حاوية فقط، لا على هذا الجهاز، ومن دون شبكة. تأتي الشبكة لشيفرتهم حين يستطيع Kazma حصرها في الإنترنت العام: فالحاوية المتصلة بالشبكة اليوم قد تصل إلى هذا الجهاز وشبكتك المحلية وبيانات الجهاز السحابي. شيفرتك أنت تبقى على قواعدها.",
+    },
+    "settings.people_code_network": {"en": "Code may use the network", "ar": "يمكن للشيفرة استخدام الشبكة"},
+    "settings.people_code_network_of": {"en": "Code of {name} may use the network", "ar": "يمكن لشيفرة {name} استخدام الشبكة"},
+    "settings.people_code_network_not_yet": {"en": "Not yet", "ar": "ليس بعد"},
+    "settings.people_err.bad_code_network": {"en": "The network is allowed or not.", "ar": "الشبكة إما مسموحة أو لا."},
+    "settings.people_err.admin_code_rules": {"en": "Your own code keeps its own rules.", "ar": "شيفرتك أنت تبقى على قواعدها."},
+    "settings.people_err.code_network_not_yet": {
+        "en": "Network for members' code comes once Kazma can limit it to the public internet; until then their code runs with no network.",
+        "ar": "تأتي الشبكة لشيفرة الأعضاء حين يستطيع Kazma حصرها في الإنترنت العام؛ وحتى ذلك الحين تعمل شيفرتهم من دون شبكة.",
+    },
+    "settings.space_limit.scheduled": {"en": "Scheduled jobs at once", "ar": "المهام المجدولة في آن واحد"},
     "settings.people_err.unknown_limit": {"en": "There is no such limit.", "ar": "لا يوجد حد بهذا الاسم."},
     "settings.people_err.bad_limits": {"en": "Limits are a number for each limit.", "ar": "الحدود عدد لكل حد."},
     "settings.people_err.no_such_space": {"en": "There is no such space.", "ar": "لا توجد مساحة كهذه."},

@@ -43,6 +43,7 @@ __all__ = [
     "INSTALL_SCOPED_SECRETS",
     "SecretVault",
     "SpaceKeyMissing",
+    "SpaceKeyStillNamed",
     "VaultScopeError",
     "consolidate_install_scoped_secrets",
     "get_vault",
@@ -240,6 +241,21 @@ class SpaceKeyMissing(ValueError):
     """A sealed row names a space key that is gone, does not unwrap with this
     install's vault key, or is another space's than the row's. The row is
     refused: never opened with another key (Spaces S1-26)."""
+
+
+class SpaceKeyStillNamed(ValueError):
+    """A space's key cannot be changed: rows that are not the space's own
+    (``sealing_space`` now classes them elsewhere) are sealed with one of its
+    keys. Changing it would leave them sealed with a key that no longer
+    exists, for good (the review of S4-07). ``names`` are the rows' names,
+    never a value. Nothing was changed."""
+
+    def __init__(self, space: str, names: list[str]) -> None:
+        super().__init__(
+            f"{len(names)} secret(s) outside space {space} are sealed with its key "
+            f"({', '.join(sorted(names)[:10])}); the key was not changed")
+        self.space = space
+        self.names = sorted(names)
 
 
 def secret_scope(name: str) -> tuple[str, str | None]:
@@ -695,12 +711,30 @@ class SecretVault:
         return moved
 
     def rotate_space_key(self, space: str) -> str:
-        """Give *space* a new key: the old one is retired, every sealed row
-        is sealed again with the new one (read back first), and a retired key
-        no row names any more is deleted. One transaction. Returns the new
-        key's id."""
+        """Give *space* a new key (Spaces S4-07): every sealed row of it is
+        sealed again with the new one (read back first), and its old keys
+        are destroyed -- deleted in the same transaction, their bytes zeroed
+        in the file (``secure_delete``) and the write-ahead log that still
+        holds them emptied (:meth:`_empty_the_log`). Refused
+        (:class:`SpaceKeyStillNamed`, nothing changed) while a row that is
+        not the space's own is sealed with one of its keys, and a key some
+        row still names is never deleted. Returns the new key's id."""
         def _work() -> str:
             rows = [r for r in self._space_rows(space) if r["key_id"]]
+            # A row sealed with one of the space's keys whose name is now
+            # classed elsewhere (a later build's rule) is not among its own
+            # rows: it is not sealed again, and deleting the key would lose
+            # it for good. Refused, naming the rows (the review of S4-07).
+            own = {r["id"] for r in rows}
+            keys = {r["key_id"] for r in self._conn.execute(
+                "SELECT key_id FROM space_keys WHERE space_id = ?", (space,))}
+            elsewhere = [
+                str(r["name"]) for r in self._conn.execute(
+                    "SELECT id, name, key_id FROM secrets WHERE key_id IS NOT NULL")
+                if r["key_id"] in keys and r["id"] not in own
+            ]
+            if elsewhere:
+                raise SpaceKeyStillNamed(space, elsewhere)
             old = self._active_key_id(space, make=False)
             if old is not None:
                 self._conn.execute(
@@ -709,6 +743,7 @@ class SecretVault:
                 )
             new = str(self._active_key_id(space, make=True))
             self._reseal(space, rows, new)
+            # Never a key some row still names.
             self._conn.execute(
                 "DELETE FROM space_keys WHERE space_id = ? AND state = 'retired' AND key_id NOT IN "
                 "(SELECT key_id FROM secrets WHERE key_id IS NOT NULL)",
@@ -719,8 +754,38 @@ class SecretVault:
         new = self._in_one_step(space, _work)
         with self._lock:
             self._space_keys.clear()
-        logger.info("[Vault] Space %s has the new key %s", space, new)
+            self._empty_the_log(f"the key of space {space} was changed")
+        logger.info("[Vault] Space %s has the new key %s; its old keys are destroyed", space, new)
         return new
+
+    def _empty_the_log(self, after: str) -> None:
+        """Empty the write-ahead log after a destroying change (*after* says
+        which): the deleted pages were zeroed in the file (``secure_delete``),
+        and the log still holds their old bytes until a checkpoint writes the
+        zeroed pages over them. Waits for readers within the busy timeout. A
+        log that could not be emptied (another connection still reads an
+        older snapshot; the next checkpoint does it) is said here, at
+        WARNING: the change itself stands. Caller holds the lock."""
+        try:
+            busy = self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        except sqlite3.Error:
+            logger.warning("[Vault] the write-ahead log could not be emptied after %s", after, exc_info=True)
+            return
+        if busy is not None and int(busy[0] or 0):
+            logger.warning("[Vault] the write-ahead log could not be emptied after %s: another connection "
+                           "still reads it; the next checkpoint empties it", after)
+
+    def held_spaces(self) -> set[str]:
+        """Every space this file holds anything of: a key, or a secret
+        (sealed or not). Never the owner's: its secrets are the install's
+        vault key's (N22)."""
+        with self._lock:
+            held = {str(r["space_id"]) for r in self._conn.execute("SELECT DISTINCT space_id FROM space_keys")}
+            for row in self._conn.execute("SELECT name, tenant_id FROM secrets"):
+                space = sealing_space(row["name"], row["tenant_id"])
+                if space:
+                    held.add(space)
+        return held
 
     def key_report(self) -> dict[str, Any]:
         """What the space keys and the rows that name them look like, with
@@ -1510,12 +1575,7 @@ class SecretVault:
                 if not erased:
                     self._conn.execute("ROLLBACK")
             self._space_keys.clear()
-            try:
-                # The deleted pages were zeroed (secure_delete); the log that
-                # still holds their old bytes is emptied.
-                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
-            except sqlite3.Error:
-                logger.warning("[Vault] the write-ahead log could not be emptied after an erase", exc_info=True)
+            self._empty_the_log(f"the erase of space {space_id}")
         if cur.rowcount > 0:
             logger.info("[Vault] Erased the secrets of space %s (%d row(s))", space_id, cur.rowcount)
         return cur.rowcount

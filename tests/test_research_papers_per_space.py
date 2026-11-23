@@ -173,10 +173,13 @@ def test_only_the_owners_space_runs_code_on_the_machine(world, local_allowed) ->
 
 
 def test_control_the_local_run_rule_of_before_let_a_host_space_run(world, local_allowed, monkeypatch) -> None:
+    # The rule of before asked only whether the space was sandboxed (and
+    # held no person's code to a container: Spaces S4-05).
+    from kazma_core.spaces import member_code
     from kazma_core.tools import code_exec
 
-    # The rule of before asked only whether the space was sandboxed.
     monkeypatch.setattr(code_exec, "_outside_the_owners_space", lambda: False)
+    monkeypatch.setattr(member_code, "code_rule", lambda: member_code._AS_BEFORE)
     with scope.bind_scope(world["host"], world["person"]["id"]):
         assert code_exec.local_exec_forbidden() is False
 

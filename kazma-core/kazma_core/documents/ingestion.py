@@ -1403,7 +1403,14 @@ class DocumentIngestionService:
                 detail={"provider": provider, "bytes": int(size)}, required=True,
             )
 
-        with salvage_audit_scope(audit_egress):
+        # A remote parser is paid with the install's key: a job for a person
+        # past their daily limit parses locally only (Spaces S2-02, the review
+        # of 3faf46175). Read in this stage's own thread; nothing read while
+        # Spaces is not enforced.
+        from kazma_core.spaces.daily_limits import call_refusal
+
+        past_limit = call_refusal(actor) if isinstance(actor, str) and actor.strip() else None
+        with salvage_audit_scope(audit_egress, remote_refusal=past_limit):
             # Its status says the stage is running before a page is read.
             ocr_progress.start(str(job.id))
             try:

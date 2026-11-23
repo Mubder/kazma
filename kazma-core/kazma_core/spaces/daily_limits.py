@@ -20,6 +20,23 @@ starts once their spend has reached it is refused before any model call
 under the limit runs to its own end: its own token budget
 (``agent.turn_token_budget``) bounds how far past.
 
+Past the limit, on their own key
+--------------------------------
+A member's own model keys (S2-04) are not the install's, and what they
+spend on them is not counted against the limit. So a turn that starts past
+the limit is let in when the model it will use is one they hold a key for
+(:func:`on_own_key`, asked by the supervisor for the client the turn's call
+will go to), and every model call of the turn then goes on their own keys
+(:func:`own_keys_only`): the turn's state carries ``own_keys_only``, every
+node binds it (:func:`hold_to_own_keys`), and a call that would go out on
+the install's key -- another provider for the respond synthesis, a router's
+model, a failover -- is refused before it is sent
+(``LLMProvider._person_call``, ``kind="daily_limit"``). A tool that pays
+another API with the install's key keeps off it too
+(``spaces.install_paid``); the remote embedder is the one accepted
+exception. A call outside a turn (``resilient_chat``, ``x_chat``) stays
+refused by :func:`call_refusal`.
+
 Whose limit
 -----------
 * A person's own (``identity`` ``policies[account]["daily_limit"]``), set by
@@ -41,6 +58,9 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -55,8 +75,12 @@ __all__ = [
     "LimitRefused",
     "call_refusal",
     "default_limit",
+    "hold_to_own_keys",
     "limit_of",
     "may_apply",
+    "on_own_key",
+    "own_keys_only",
+    "own_keys_scope",
     "parse_limit",
     "precondition",
     "refusal_text",
@@ -65,6 +89,11 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+#: True while the work running now is a turn that started past its person's
+#: limit on their own key: only their own keys may be used. Set by the
+#: supervisor and by :func:`hold_to_own_keys`; never cleared inside a turn.
+_OWN_KEYS_ONLY: ContextVar[bool] = ContextVar("kazma_own_keys_only", default=False)
 
 MAX_TOKENS = 10_000_000_000
 MAX_USD = 1_000_000.0
@@ -266,10 +295,57 @@ def refusal_text(user_text: str | None, found: dict[str, Any]) -> str:
     )
 
 
-def call_refusal() -> str | None:
-    """For a model call outside a turn (``resilient_chat``, ``x_chat``): the
+def on_own_key(provider: str) -> bool:
+    """Whether the person bound now holds a key of their own for *provider*:
+    a turn past their limit whose call goes to it may start. A store that
+    cannot say is no: the turn is refused, as at the limit. Blocking."""
+    from kazma_core.spaces.own_keys import OwnKeyUnreadable, key_for_call
+
+    try:
+        return key_for_call(str(provider or "")) is not None
+    except OwnKeyUnreadable:
+        logger.warning("[daily-limits] whether %s has a key of their own cannot be read: "
+                       "the turn past their limit is refused", bound_asker())
+        return False
+
+
+def own_keys_only() -> bool:
+    """Whether only the person's own keys may be used now (a turn let in
+    past their limit, :func:`on_own_key`). In memory."""
+    return _OWN_KEYS_ONLY.get()
+
+
+def hold_to_own_keys(state: Mapping[str, Any] | None) -> None:
+    """Binds the turn's rule from its state (``own_keys_only``) for this
+    node. LangGraph runs each node in a copy of its caller's context, so a
+    value the supervisor set does not reach the next node: each node calls
+    this first. Only ever turns the rule on -- a graph run inside such a
+    turn (a sub-agent) keeps it whatever its own state says."""
+    if state and bool(state.get("own_keys_only")):
+        _OWN_KEYS_ONLY.set(True)
+
+
+@contextmanager
+def own_keys_scope(on: bool) -> Iterator[None]:
+    """Bind the own-key rule for the block when *on* (work recorded as
+    started in a turn past its person's limit, resumed later: a Knowledge
+    crawl after a restart, the review of 3faf46175); nothing when off. Only
+    ever turns the rule on: a block inside such a turn keeps it."""
+    if not on:
+        yield
+        return
+    token = _OWN_KEYS_ONLY.set(True)
+    try:
+        yield
+    finally:
+        _OWN_KEYS_ONLY.reset(token)
+
+
+def call_refusal(asker: str | None = None) -> str | None:
+    """For a model call outside a turn (``resilient_chat``, ``x_chat``), or
+    paid work done later for *asker* (a document job's remote parse): the
     reason it is refused, or None. Blocking."""
-    found = verdict()
+    found = verdict(asker)
     if not found or not found["over"]:
         return None
     if not found["measured"] or not found["limit"]:

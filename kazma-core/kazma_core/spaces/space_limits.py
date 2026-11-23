@@ -15,7 +15,9 @@ limits, beside the install's own (which still bound the whole install):
   active chunks. Until one is set, the share S1-13 shipped (256 MiB);
 * **work running at once**: Knowledge crawls (``crawls``), research runs
   (``research``) and swarm tasks (``swarm``) -- a space's share of the
-  install's slots, so one space's work never takes them all.
+  install's slots, so one space's work never takes them all -- and its
+  turns (``turns``) and scheduled jobs (``scheduled``, S4-04). In a shared
+  space each person holds at most half its share (``spaces.fairness``).
 
 Whose limits
 ------------
@@ -57,7 +59,7 @@ __all__ = [
     "parse_limits",
     "refuse_write_for_disk",
     "running_refusal",
-    "share_of",
+    "share_refusal",
     "usage_of",
 ]
 
@@ -78,6 +80,10 @@ class SpaceLimits:
     crawls: int
     research: int
     swarm: int
+    #: Turns running at once (Spaces S4-04, ``spaces.fairness.turn_slots``).
+    turns: int
+    #: Scheduled jobs firing at once (S4-04, ``fairness.scheduled_slots``).
+    scheduled: int
 
     def as_dict(self) -> dict[str, int]:
         return {f.name: int(getattr(self, f.name)) for f in fields(self)}
@@ -86,21 +92,23 @@ class SpaceLimits:
 #: The names of the limits, in the order the People page shows them.
 LIMIT_NAMES: tuple[str, ...] = tuple(f.name for f in fields(SpaceLimits))
 #: The kinds of work a space runs at once, each a share of the install's.
-RUNNING_KINDS: tuple[str, ...] = ("crawls", "research", "swarm")
+RUNNING_KINDS: tuple[str, ...] = ("crawls", "research", "swarm", "turns", "scheduled")
 
 
 def _shipped() -> SpaceLimits:
     """Kazma's own limits for a space: 2 GiB of files, and half of each of
     the install's slots -- two of its four crawls, two of its four research
-    runs, five of its ten swarm tasks -- so two spaces at their limit still
-    leave none waiting on the other. Documents and knowledge follow the
+    runs, five of its ten swarm tasks, two of the scheduler's four fires --
+    so two spaces at their limit still leave none waiting on the other; and
+    eight turns at once (the install has no cap of its own on turns: a
+    space's is what keeps one from crowding the model provider for all). Documents and knowledge follow the
     install's own values until a limit is set for a space or for every space
     (:func:`documents_bytes`, :func:`knowledge_bytes`): the documents value
     for each tenant (``documents.quotas.tenant_bytes``, 10 GiB unless
     changed) and the knowledge share S1-13 shipped (256 MiB), which are the
     numbers here."""
     return SpaceLimits(disk_bytes=2 * _GIB, documents_bytes=10 * _GIB, knowledge_bytes=256 * _MIB,
-                       crawls=2, research=2, swarm=5)
+                       crawls=2, research=2, swarm=5, turns=8, scheduled=2)
 
 
 #: The limits for a space when the admin has set none.
@@ -108,7 +116,7 @@ SHIPPED = _shipped()
 
 #: The most each limit may be set to: bytes up to 1 TiB, work up to 100 at once.
 _MAX = {"disk_bytes": 1024 * _GIB, "documents_bytes": 1024 * _GIB, "knowledge_bytes": 1024 * _GIB,
-        "crawls": 100, "research": 100, "swarm": 100}
+        "crawls": 100, "research": 100, "swarm": 100, "turns": 100, "scheduled": 100}
 
 
 class LimitsRefused(ValueError):
@@ -291,29 +299,41 @@ def refuse_write_for_disk(incoming: int = 0) -> None:
 # ── work running at once ───────────────────────────────────────────────
 
 
-def share_of(kind: str, space_id: str) -> int | None:
-    """How many of *kind* *space_id* may run at once, or None while the
-    install does not enforce Spaces (no share: the install's slots only)."""
-    if kind not in RUNNING_KINDS:
-        raise ValueError(f"not a kind of work a space runs: {kind!r}")
-    if not spaces_enforced() or not space_id:
+def running_refusal(kind: str, space_id: str, running: int, *, person: str = "",
+                    person_running: int = 0, shares: tuple[int, int] | None = None) -> str | None:
+    """Why one more of *kind* (:data:`RUNNING_KINDS`) in *space_id* is
+    refused when the space already runs *running* of them and *person*
+    *person_running*, or None: the space holds its share of the install's
+    slots, or the person holds theirs of the space's (S4-04,
+    ``spaces.fairness.person_share``). *shares* is ``(space's, person's)``
+    when the caller has read them. None while the install does not enforce
+    Spaces. Blocking when *shares* is not given (the identity store)."""
+    if shares is None:
+        from kazma_core.spaces.fairness import shares as read_shares
+
+        shares = read_shares(kind, space_id)
+    if shares is None:
         return None
-    return int(getattr(_limits_of(space_id), kind))
+    return share_refusal(kind, running, shares, person=person, person_running=person_running)
 
 
-def running_refusal(kind: str, space_id: str, running: int) -> str | None:
-    """Why one more of *kind* (``crawls``, ``research``, ``swarm``) in
-    *space_id* is refused when it already runs *running* of them, or None:
-    the space holds its share of the install's slots. None while the
-    install does not enforce Spaces."""
-    share = share_of(kind, space_id)
-    if share is None or running < share:
-        return None
-    return (f"This space already runs {share} {_KIND_WORDS[kind]} at once, its share; "
-            "try again when one ends.")
+def share_refusal(kind: str, running: int, shares: tuple[int, int], *, person: str = "",
+                  person_running: int = 0) -> str | None:
+    """:func:`running_refusal` for *shares* already read (``(space's,
+    person's)``, ``spaces.fairness.shares``). Reads nothing."""
+    space_share, person_share = shares
+    if running >= space_share:
+        return (f"This space already runs {space_share} {_KIND_WORDS[kind]} at once, its share; "
+                "try again when one ends.")
+    if person and person_running >= person_share:
+        from kazma_core.spaces.fairness import person_refusal_text
+
+        return person_refusal_text(kind, person_share)
+    return None
 
 
-_KIND_WORDS = {"crawls": "Knowledge crawls", "research": "research runs", "swarm": "swarm tasks"}
+_KIND_WORDS = {"crawls": "Knowledge crawls", "research": "research runs", "swarm": "swarm tasks",
+               "turns": "turns", "scheduled": "scheduled jobs"}
 
 
 def _size_words(size: int) -> str:
@@ -390,8 +410,10 @@ def _knowledge_used(space_id: str) -> int:
 
 
 def _running_of(space_id: str) -> dict[str, int | None]:
-    """The space's crawls, research runs and swarm tasks running now (the
-    swarm's None when no engine runs in this process)."""
+    """The space's crawls, research runs, swarm tasks, turns and scheduled
+    jobs running now (the swarm's None when no engine runs in this
+    process; turns and scheduled jobs this process counts)."""
+    from kazma_core.spaces.fairness import scheduled_slots, turn_slots
     from kazma_core.swarm import get_swarm_engine
     from kazma_core.web_acquire import crawl_jobs
     from kazma_core.web_acquire.research_runtime import research_running_in
@@ -399,4 +421,6 @@ def _running_of(space_id: str) -> dict[str, int | None]:
     engine = get_swarm_engine()
     return {"crawls": crawl_jobs.running_in(space_id),
             "research": research_running_in(space_id),
-            "swarm": engine.running_in(space_id) if engine is not None else None}
+            "swarm": engine.running_in(space_id) if engine is not None else None,
+            "turns": turn_slots.running(space_id),
+            "scheduled": scheduled_slots.running(space_id)}

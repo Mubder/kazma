@@ -115,12 +115,12 @@ class ThreadOwnerUnavailable(RuntimeError):
 
 
 def _open_takeover_enabled() -> bool:
-    """Shared-team opt-in: any allowlisted sender may take over any season."""
-    import os
+    """Shared-team opt-in: any allowlisted sender may take over any season.
+    One of the open switches (``boot_guard.OPEN_SWITCHES``), read as they
+    all are."""
+    from kazma_core.security.boot_guard import env_flag
 
-    return (os.environ.get(_OPEN_TAKEOVER_ENV) or "").strip().lower() in (
-        "1", "true", "on", "yes",
-    )
+    return env_flag(_OPEN_TAKEOVER_ENV)
 
 
 def record_thread_owner(thread_id: str, sender_id: str) -> bool:

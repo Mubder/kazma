@@ -13,8 +13,15 @@
 ``kazma spaces migrate --switch-on``
     The same, then turns Spaces on -- only when every precondition holds;
     otherwise it says which do not and changes nothing more.
+``kazma spaces keys``
+    Each space's key (S1-26): its id, and how many of its secrets it seals.
+    Never a key. Reads only.
+``kazma spaces keys change SPACE`` / ``--all``
+    Gives a space a new key (S4-07): its secrets are sealed again with it and
+    its old keys are destroyed, recorded. Asks first (``--yes`` does not).
 
-The checks are ``kazma_core.spaces.preconditions``.
+The checks are ``kazma_core.spaces.preconditions``; the keys are
+``kazma_core.spaces.space_keys``.
 """
 
 from __future__ import annotations
@@ -136,6 +143,75 @@ def _migrate(options: argparse.Namespace) -> int:
     return 0
 
 
+def _list_keys() -> int:
+    from kazma_core.diagnostic_scope import read_only_diagnostic
+    from kazma_core.security.vault import get_vault
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    with read_only_diagnostic("kazma spaces keys"):
+        spaces = identity.read_registry()["spaces"]
+        vault = get_vault()
+        if vault is None:
+            print("The vault is off (KAZMA_VAULT_KEY is not set): no space has a key.")
+            return 1
+        found = vault.key_report()
+    print("The key of each space (the owner's space has none: its secrets are the install's vault key's):")
+    print()
+    for space_id in sorted(s for s in spaces if s != OWNER_SPACE_ID):
+        name = str((spaces[space_id] or {}).get("name") or space_id)
+        key = found["keys"].get(space_id) or "none yet (made with its first sealed secret)"
+        sealed = found["sealed"].get(space_id, 0)
+        under_vault = found["unsealed"].get(space_id, 0)
+        print(f"  {name} ({space_id}): key {key}, {sealed} secret(s) sealed with it"
+              + (f", {under_vault} still under the install's vault key" if under_vault else ""))
+    if found["broken"]:
+        print()
+        print(f"{found['broken']} secret(s) name a key this vault does not hold: they cannot be opened.")
+    return 0
+
+
+def _change_keys(options: argparse.Namespace) -> int:
+    from kazma_core.spaces import identity, space_keys
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    if options.all:
+        chosen = sorted(s for s, space in identity.read_registry()["spaces"].items()
+                        if s != OWNER_SPACE_ID and not (space or {}).get("erasing_at"))
+    elif options.space:
+        chosen = [options.space]
+    else:
+        print("Name a space (kazma spaces keys change SPACE), or --all.")
+        return 2
+    if not chosen:
+        print("No space has a key of its own yet.")
+        return 0
+    if not options.yes:
+        print(f"The key of {', '.join(chosen)} will be changed: each space's secrets are sealed again with")
+        print("its new key, and its old keys are destroyed. Type yes to go on: ", end="", flush=True)
+        try:
+            answer = input().strip().lower()
+        except EOFError:
+            answer = ""
+        if answer != "yes":
+            print("Nothing was changed.")
+            return 1
+    refused = 0
+    for space_id in chosen:
+        try:
+            done = space_keys.change_key(space_id, by="kazma spaces keys change")
+        except space_keys.KeyChangeRefused as exc:
+            refused += 1
+            print(f"  {space_id}: not changed. {exc}")
+            continue
+        print(f"  {space_id}: new key {done['key_id']}, {done['sealed']} secret(s) sealed with it")
+    if refused < len(chosen):
+        print()
+        print("A running Kazma keeps the old key in its memory until it reloads: reload it when idle")
+        print("(kazma_guard.py --reload --when-idle).")
+    return 1 if refused else 0
+
+
 def run(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="kazma spaces", description="Several people on one Kazma.")
     sub = parser.add_subparsers(dest="command")
@@ -145,7 +221,14 @@ def run(argv: list[str]) -> int:
     migrate.add_argument("--yes", "-y", action="store_true", help="Make the changes without asking")
     migrate.add_argument("--switch-on", action="store_true",
                          help="Turn Spaces on once every precondition holds")
+    keys = sub.add_parser("keys", help="Each space's key: list them, or change one")
+    keys.add_argument("action", nargs="?", choices=["list", "change"], default="list")
+    keys.add_argument("space", nargs="?", help="The space whose key is changed")
+    keys.add_argument("--all", action="store_true", help="Change the key of every space")
+    keys.add_argument("--yes", "-y", action="store_true", help="Change it without asking")
     options = parser.parse_args(argv)
+    if options.command == "keys":
+        return _change_keys(options) if options.action == "change" else _list_keys()
     if options.command != "migrate":
         parser.print_help()
         return 2

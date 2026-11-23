@@ -696,6 +696,11 @@ async def tool_worker_node(
     from langgraph.types import interrupt
 
     from kazma_core.safety.hitl import approval_need
+    from kazma_core.spaces.daily_limits import hold_to_own_keys
+
+    # A turn let in past its person's daily limit on their own key: a tool's
+    # model call uses their own keys only too (Spaces S2-04).
+    hold_to_own_keys(state)
     from kazma_core.safety.unasked import BY_YOLO, note_ran_without_asking
 
     pending = state.get("tool_calls_pending", [])

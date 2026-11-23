@@ -125,6 +125,17 @@ async def generate_image(
     # ── Determine description ───────────────────────────────────────
     desc = description if description else prompt[:120]
 
+    # ── A turn on the person's own key only (Spaces S2-04) ──────────
+    # A paid backend asked by name would use the install's key: refused
+    # before anything is made (the card's preflight refuses it first).
+    from kazma_core.spaces.install_paid import own_key_refusal
+
+    refused = own_key_refusal("generate_image", {"provider": provider})
+    if refused:
+        from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+        raise RefusedBeforeEffect(refused)
+
     # ── Resolve backend ─────────────────────────────────────────────
     try:
         from kazma_core.tools.image_backends.router import get_backend, resolve_provider

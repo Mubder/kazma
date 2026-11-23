@@ -175,6 +175,66 @@ async def _record_turn_recall(key: str | None, state: Any, result: Any, started:
         result=result, latency_ms=(time.perf_counter() - started) * 1000.0, error=error)
 
 
+async def _turn_client(
+    llm: Any, state: Any, query: str, model_router: Any | None,
+) -> tuple[Any, str | None]:
+    """``(client, model)`` the turn's model call goes to: the route for
+    *query* (``models.defaults.<kind>`` win over keywords), then the live
+    client (the turn's pin, the checkpointed model, the route). The one
+    answer for the call and for the daily limit's admission (a turn past
+    the limit starts only on the person's own key, Spaces S2-04). Never
+    raises: a failure keeps *llm*."""
+    routed_model = None
+    routed_client = None
+    if query:
+        try:
+            from kazma_core.models.selection import resolve_supervisor_route
+
+            # The model defaults and the registry: settings reads (audit 2026-10-26 AUD-111).
+            routed_model, routed_client, _profile = await asyncio.to_thread(
+                resolve_supervisor_route,
+                query,
+                model_router=model_router,
+            )
+            if routed_model:
+                logger.info(
+                    "[Supervisor] Routed profile=%s model=%s (defaults win over keywords)",
+                    _profile,
+                    routed_model,
+                )
+        except Exception:
+            logger.debug("[Supervisor] route resolve failed", exc_info=True)
+            if model_router is not None:
+                from kazma_core.models.router import ModelRouter
+
+                profile = ModelRouter.classify(query)
+                model_spec = model_router.route(profile)
+                routed_model = model_spec.model
+
+    # Call-time client: never use the compile-time captured ``llm`` when
+    # the registry has current credentials. The turn pin is a ContextVar
+    # and evaporates on later ReAct iterations of the same turn; checkpointed
+    # ``last_model`` is the durable fallback (2026-09-11 DeepSeek 401).
+    turn_llm = llm
+    try:
+        from kazma_core.runtime.live_llm import resolve_live_client
+
+        turn_llm, _chosen = await asyncio.to_thread(
+            resolve_live_client, llm, state=state, model=routed_model,
+        )
+        if _chosen:
+            routed_model = _chosen
+            routed_client = None
+            logger.info("[Supervisor] live client model=%s", _chosen)
+        elif routed_client is not None:
+            turn_llm = routed_client
+    except Exception:
+        turn_llm = llm
+        if routed_client is not None:
+            turn_llm = routed_client
+    return turn_llm, routed_model
+
+
 async def supervisor_node(
     state: SupervisorState,
     *,
@@ -198,6 +258,12 @@ async def supervisor_node(
     """
     iteration = state.get("iteration", 0)
     messages = [_normalize_msg(m) for m in state.get("messages", [])]
+    if iteration > 0:
+        # A turn let in past its person's daily limit on their own key keeps
+        # to their own keys (S2-04); its first step decides, below.
+        from kazma_core.spaces.daily_limits import hold_to_own_keys
+
+        hold_to_own_keys(state)
 
     logger.info("[Supervisor] iteration=%d messages=%d", iteration, len(messages))
 
@@ -420,6 +486,9 @@ async def supervisor_node(
         _turn_start = _ttb.start_of_turn(state, _turn_user_text, _token_base)
         breaker_reset = {**breaker_reset, **_turn_start}
         _turn_view = {**state, **_turn_start}
+        # The own-key rule (S2-04) starts afresh: a checkpoint keeps the last turn's.
+        breaker_reset = {**breaker_reset, "own_keys_only": False}
+        _turn_view = {**_turn_view, "own_keys_only": False}
         _daily = await asyncio.to_thread(_ttb.daily_limit_check)
         if _daily.get("over"):
             logger.warning(
@@ -445,7 +514,25 @@ async def supervisor_node(
 
         if _person_limits.may_apply():
             _mine = await asyncio.to_thread(_person_limits.verdict)
+            # Past the limit the turn still starts when the model its call
+            # goes to is one they hold a key of their own for (S2-04): their
+            # own-key spend is not counted, and the whole turn then uses
+            # their own keys only (LLMProvider._person_call refuses the rest).
+            _own_key_turn = False
             if _mine and _mine.get("over"):
+                _first_client, _first_model = await _turn_client(
+                    llm, state, _turn_user_text, model_router,
+                )
+                _own_key_turn = await asyncio.to_thread(
+                    _person_limits.on_own_key, str(getattr(_first_client, "provider_name", "") or ""),
+                )
+            if _own_key_turn:
+                logger.info("[Supervisor] a person past their daily limit: the turn runs on "
+                            "their own key (%s)", _first_model or "")
+                _person_limits.hold_to_own_keys({"own_keys_only": True})
+                breaker_reset = {**breaker_reset, "own_keys_only": True}
+                _turn_view = {**_turn_view, "own_keys_only": True}
+            elif _mine and _mine.get("over"):
                 logger.warning("[Supervisor] a person's daily limit is reached -- turn refused")
                 return {
                     **breaker_reset,
@@ -1189,54 +1276,9 @@ async def supervisor_node(
         effective_tool_definitions = []
 
     # Classify as a hint; models.defaults.<kind> wins over keywords / YAML.
-    routed_model = None
-    routed_client = None
-    if last_user_content:
-        try:
-            from kazma_core.models.selection import resolve_supervisor_route
-
-            # The model defaults and the registry: settings reads (audit 2026-10-26 AUD-111).
-            routed_model, routed_client, _profile = await asyncio.to_thread(
-                resolve_supervisor_route,
-                _recall_query or last_user_content,
-                model_router=model_router,
-            )
-            if routed_model:
-                logger.info(
-                    "[Supervisor] Routed profile=%s model=%s (defaults win over keywords)",
-                    _profile,
-                    routed_model,
-                )
-        except Exception:
-            logger.debug("[Supervisor] route resolve failed", exc_info=True)
-            if model_router is not None:
-                from kazma_core.models.router import ModelRouter
-
-                profile = ModelRouter.classify(_recall_query or last_user_content)
-                model_spec = model_router.route(profile)
-                routed_model = model_spec.model
-
-    # Call-time client: never use the compile-time captured ``llm`` when
-    # the registry has current credentials. The turn pin is a ContextVar
-    # and evaporates on later ReAct iterations of the same turn; checkpointed
-    # ``last_model`` is the durable fallback (2026-09-11 DeepSeek 401).
-    turn_llm = llm
-    try:
-        from kazma_core.runtime.live_llm import resolve_live_client
-
-        turn_llm, _chosen = await asyncio.to_thread(
-            resolve_live_client, llm, state=state, model=routed_model,
-        )
-        if _chosen:
-            routed_model = _chosen
-            routed_client = None
-            logger.info("[Supervisor] live client model=%s", _chosen)
-        elif routed_client is not None:
-            turn_llm = routed_client
-    except Exception:
-        turn_llm = llm
-        if routed_client is not None:
-            turn_llm = routed_client
+    turn_llm, routed_model = await _turn_client(
+        llm, state, (_recall_query or last_user_content) if last_user_content else "", model_router,
+    )
 
     # ── Per-turn memory retrieval (RAG) ──────────────────────────
     # Retrieve relevant memories for the current user message and inject

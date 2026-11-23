@@ -620,7 +620,15 @@ def validate_setting(key: str, value: Any) -> tuple[Any, str | None]:
         if name == WORKSPACE_ROOTS_KEY:
             return normalize_workspace_roots(value), "security"
         if name == CONTAINER_REQUIRED_KEY:
-            return normalize_container_required(value), "security"
+            required = normalize_container_required(value)
+            # The cloud profile (Spaces S4-08): code runs only in containers
+            # on a public install, and no write turns that off while it is on.
+            from kazma_core.security.cloud_profile import container_requirement_refusal
+
+            refused = container_requirement_refusal(required)
+            if refused:
+                raise ValueError(refused)
+            return required, "security"
         if name == DOCUMENT_WORKER_ISOLATION_KEY:
             return normalize_document_worker_isolation(value), "security"
         # A parent mapping save or backup restore must enforce the same rules.

@@ -10,6 +10,12 @@ Runs user-provided Python snippets with layered isolation:
 2. **Local subprocess** fallback — ``python -I``, import blocklist, scrubbed
    env, resource limits (POSIX) / Job Object (Windows).
 
+A person's code (Spaces S4-05, ``spaces.member_code.code_rule``): anyone but
+the admin, once Spaces is enforced, runs only in a container -- never the
+local fallback -- with no network (``--network none``, as every jail run),
+and never on E2B, which always has the internet. Network for members' code
+waits for S4-05b (a network limited to the public internet).
+
 Usage::
 
     from kazma_core.tools.code_exec import python_exec
@@ -247,7 +253,12 @@ def local_exec_forbidden() -> bool:
     production (not recommended).
     """
     from kazma_core.safety.deployment_policy import container_required, policy_read_failures
+    from kazma_core.spaces.member_code import code_rule
 
+    # A person's code, anyone but the admin's, runs only in a container
+    # (Spaces S4-05), wherever it runs and whatever the lab switch says.
+    if code_rule().container_only:
+        return True
     # Once Spaces is enforced, only the owner's space runs code on the
     # machine itself: every other space -- sandboxed, or a host space with a
     # root of its own (S1-34) -- a container or nothing, whatever the lab

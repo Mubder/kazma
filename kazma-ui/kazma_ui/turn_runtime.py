@@ -593,10 +593,14 @@ async def invoke_turn(
         async with turn_segment_budget(
             graph, config, thread_id=thread_id, input_state=input_state, enforce=budget,
         ) as segment:
-            async with turn_workspace(graph, input_state, config) as prepared:
-                return await graph.ainvoke(prepared, config)
-        # Only when the budget cut the run: the checkpoint ends with the
-        # honest reply, which close_turn below projects.
+            # A turn refused for its space's or person's share of turns runs
+            # no graph (Spaces S4-04).
+            if not segment.refused:
+                async with turn_workspace(graph, input_state, config) as prepared:
+                    return await graph.ainvoke(prepared, config)
+        # Only when the budget cut the run, or the turn was refused before
+        # it started: the checkpoint ends with the honest reply, which
+        # close_turn below projects.
         return segment.state
     finally:
         try:

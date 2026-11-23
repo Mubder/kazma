@@ -332,17 +332,47 @@ def failed_because(reason: str) -> bool:
 # ── Enqueue ───────────────────────────────────────────────────────────────
 
 
+def _spaces_take_turns() -> bool:
+    """Whether the memory lane claims in turn by space: once Spaces is
+    enforced (S4-04, N37). An install that does not enforce it claims oldest
+    first, as before. In memory."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    return spaces_enforced()
+
+
+def _claim_space_of(payload: dict[str, Any], space: str | None) -> str:
+    """The space a task is claimed in turn by (Spaces S4-04, N37): *space*
+    when the caller names it, else the payload's tenant, else the bound
+    scope's or tenant's, else none."""
+    if space:
+        return str(space)
+    tenant = str(payload.get("tenant_id") or "") if isinstance(payload, dict) else ""
+    if tenant:
+        return tenant
+    from kazma_core.spaces.scope import current_scope
+    from kazma_core.tenant_context import get_current_tenant_id
+
+    bound = current_scope()
+    return str(bound.space_id if bound is not None else (get_current_tenant_id() or ""))
+
+
 def enqueue_task(
     task_type: str,
     payload: dict[str, Any],
     *,
     max_attempts: int | None = None,
+    space: str | None = None,
 ) -> str | None:
     """Enqueue a durable task. Returns the task id, or None on failure.
 
     *max_attempts* defaults to 6 for a memory write (``MEMORY_LANE``: with the
     backoff, about an hour and forty minutes of outage before it is a dead
     letter) and 3 for maintenance.
+
+    *space* is the space the memory lane takes turns by (Spaces S4-04, N37:
+    :func:`_claim_space_of`) -- a deep pass names its episode alone, so the
+    writer that queues it names its space.
 
     Best-effort: never raises — a queue failure logs and returns None so
     the caller (post-turn hook) is never blocked.
@@ -362,9 +392,10 @@ def enqueue_task(
                 max_attempts = 6 if task_type in MEMORY_LANE else 3
             conn.execute(
                 """INSERT INTO memory_task_queue
-                   (id, task_type, payload_json, status, max_attempts, created_at, updated_at)
-                   VALUES (?, ?, ?, 'pending', ?, ?, ?)""",
-                (tid, task_type, json.dumps(payload, ensure_ascii=False), max_attempts, now, now),
+                   (id, task_type, payload_json, status, max_attempts, created_at, updated_at, claim_space)
+                   VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)""",
+                (tid, task_type, json.dumps(payload, ensure_ascii=False), max_attempts, now, now,
+                 _claim_space_of(payload, space)),
             )
             conn.commit()
             # Nudge the worker to wake up and poll. enqueue_task may be called
@@ -575,14 +606,29 @@ class _MemoryWorker:
                            RETURNING task_type""",
                         (now, stuck_cutoff),
                     ).fetchall()]
-                    rows = conn.execute(
-                        f"""SELECT * FROM memory_task_queue
+                    claimable = f"""
                            WHERE ((status = 'pending'
                                    AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
-                              OR (status = 'processing' AND updated_at < ?)){lane_sql}
-                           ORDER BY created_at ASC LIMIT ?""",
-                        (now, stuck_cutoff, *lane_args, max(0, int(batch_size))),
-                    ).fetchall()
+                              OR (status = 'processing' AND updated_at < ?)){lane_sql}"""
+                    if lane == "memory" and _spaces_take_turns():
+                        # The memory lane claims in turn by space (Spaces
+                        # S4-04, N37): each space's oldest task, then each
+                        # space's next, so one space's hundreds of deep
+                        # passes never hold up another's memory of its turns.
+                        rows = conn.execute(
+                            f"""SELECT * FROM (
+                                  SELECT q.*, ROW_NUMBER() OVER (
+                                      PARTITION BY COALESCE(q.claim_space, '') ORDER BY q.created_at
+                                  ) AS fair_turn
+                                  FROM memory_task_queue q {claimable})
+                               ORDER BY fair_turn, created_at ASC LIMIT ?""",
+                            (now, stuck_cutoff, *lane_args, max(0, int(batch_size))),
+                        ).fetchall()
+                    else:
+                        rows = conn.execute(
+                            f"SELECT * FROM memory_task_queue {claimable} ORDER BY created_at ASC LIMIT ?",
+                            (now, stuck_cutoff, *lane_args, max(0, int(batch_size))),
+                        ).fetchall()
                     claimed_ids = [r["id"] for r in rows]
                     if not claimed_ids:
                         # COMMIT (not ROLLBACK): the dead-letter pass above
@@ -619,6 +665,7 @@ class _MemoryWorker:
                     raise
                 claimed = [dict(r) for r in rows]
                 for row in claimed:
+                    row.pop("fair_turn", None)
                     row["lease_token"] = lease_token
                 return claimed
             finally:
