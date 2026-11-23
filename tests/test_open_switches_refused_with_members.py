@@ -183,3 +183,22 @@ def test_negative_control_two_lists_disagree(switches_off: pytest.MonkeyPatch, t
                          lambda: [n for n in _CLOUD_LIST_BEFORE if boot_guard.env_flag(n)])
     with pytest.raises(AssertionError, match="the cloud profile let KAZMA_TRUST_LAN through"):
         test_the_cloud_profile_and_the_boot_refuse_the_same_switches(switches_off, None, "KAZMA_TRUST_LAN")
+
+
+def test_a_switch_added_to_the_one_list_reaches_both_refusals(
+    switches_off: pytest.MonkeyPatch, two_people: None
+) -> None:
+    """Planted: a new switch on ``OPEN_SWITCHES``. The boot with a second
+    account and the cloud profile both refuse it, with no change elsewhere."""
+    switches_off.delenv("KAZMA_SECRET", raising=False)
+    switches_off.setattr(boot_guard, "OPEN_SWITCHES", (*boot_guard.OPEN_SWITCHES, "KAZMA_PLANTED_OPEN"))
+    switches_off.setenv("KAZMA_PLANTED_OPEN", "1")
+    assert "KAZMA_PLANTED_OPEN" in boot_guard.open_switches_refusal()
+    assert _cloud_refuses("KAZMA_PLANTED_OPEN")
+
+
+def test_every_open_switch_is_read_as_a_security_switch() -> None:
+    """Each switch of the one list is read through ``env_flag``
+    (``SECURITY_SWITCHES``, held by ``tests/test_security_switch_spelling.py``)."""
+    assert set(boot_guard.OPEN_SWITCHES) <= boot_guard.SECURITY_SWITCHES, (
+        set(boot_guard.OPEN_SWITCHES) - boot_guard.SECURITY_SWITCHES)
