@@ -47,11 +47,13 @@ import os
 
 __all__ = [
     "LOOPBACK_HOSTS",
+    "OPEN_SWITCHES",
     "SECURITY_SWITCHES",
     "WEAK_SECRET_CHARS",
     "env_flag",
     "exposure",
     "is_loopback",
+    "open_switches_on",
     "check_exposure_posture",
     "note_launcher_checked",
     "factory_exposure_refusal",
@@ -86,7 +88,27 @@ SECURITY_SWITCHES: frozenset[str] = frozenset({
     "KAZMA_CLOUD_PROFILE",
 })
 
+#: The open switches: each lets someone in who has not signed in as
+#: themselves -- sign-in off, a visitor taken for the owner, a chat app open
+#: to anyone who can message its bot, a chat season anyone allowed may take
+#: over. The one list: the cloud profile refuses every one (Spaces S4-08,
+#: ``cloud_profile``), and so does a boot once a second account exists
+#: (S4-03). Each is read through :func:`env_flag`.
+OPEN_SWITCHES: tuple[str, ...] = (
+    "KAZMA_AUTH_DISABLED",
+    "KAZMA_DEMO_MODE",
+    "KAZMA_DEV_WS_BYPASS",
+    "KAZMA_LOOPBACK_AUTOLOGIN",
+    "KAZMA_GATEWAY_OPEN_TO_EVERYONE",
+    "KAZMA_SESSION_OPEN_TAKEOVER",
+)
+
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def open_switches_on() -> list[str]:
+    """The :data:`OPEN_SWITCHES` that are on, in their order. In memory."""
+    return [name for name in OPEN_SWITCHES if env_flag(name)]
 
 
 def env_flag(name: str) -> bool:

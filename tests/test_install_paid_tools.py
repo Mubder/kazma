@@ -34,6 +34,8 @@ from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 from kazma_core.spaces import daily_limits, install_paid
 from kazma_core.spaces.install_paid import INSTALL_PAID_TOOLS, PAID_KEY_READERS, own_key_refusal
 
+from tests.test_crawl_auto_resume import journal, library  # noqa: F401 -- fixtures the crawl cases use
+
 REPO = Path(__file__).resolve().parents[1]
 
 #: Where a tool's code lives: the tools, the agent's built-in tools, the
@@ -51,22 +53,55 @@ _KAZMA_OWN = frozenset({"KAZMA_SECRET", "KAZMA_VAULT_KEY"})
 _PROVIDER_KEY_READERS = ("_get_provider_api_key_from_db",)
 
 
+def _env_read_argument(node: ast.AST) -> ast.AST | None:
+    """The name argument of an environment read (``os.getenv(x)``,
+    ``os.environ.get(x)``, ``os.environ[x]``), or None."""
+    if isinstance(node, ast.Call) and node.args:
+        fn = node.func
+        if ((isinstance(fn, ast.Attribute) and (fn.attr == "getenv" or (
+                fn.attr == "get" and getattr(fn.value, "attr", "") == "environ")))
+                or (isinstance(fn, ast.Name) and fn.id == "getenv")):
+            return node.args[0]
+    if isinstance(node, ast.Subscript) and getattr(node.value, "attr", "") == "environ":
+        return node.slice
+    return None
+
+
+def _key_names(tree: ast.AST) -> set[str]:
+    """The string constants of the module's tables (a tuple, list, set or
+    mapping literal; ``__all__`` is no table) shaped like an API key's
+    name."""
+    exports = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Assign)
+               and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets)}
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Tuple, ast.List, ast.Set, ast.Dict)) or id(node) in exports:
+            continue
+        items = [*node.keys, *node.values] if isinstance(node, ast.Dict) else node.elts
+        found |= {item.value for item in items if isinstance(item, ast.Constant)
+                  and isinstance(item.value, str) and _KEY_NAME.match(item.value)
+                  and item.value not in _KAZMA_OWN}
+    return found
+
+
 def _reads_a_key(source: str) -> bool:
-    for node in ast.walk(ast.parse(source)):
-        name = None
-        if isinstance(node, ast.Call):
-            fn = node.func
-            if isinstance(fn, ast.Name) and fn.id in _PROVIDER_KEY_READERS:
+    """A module reads an API key: by its literal name, or from a table -- a
+    read whose name is not a literal, in a module that holds a key's name
+    (``documents/extract_salvage.py`` reads ``os.environ.get(key_name)`` from
+    its providers' table; the review of 3faf46175)."""
+    tree = ast.parse(source)
+    tabled = bool(_key_names(tree))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in _PROVIDER_KEY_READERS):
+            return True
+        argument = _env_read_argument(node)
+        if argument is None:
+            continue
+        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+            if _KEY_NAME.match(argument.value) and argument.value not in _KAZMA_OWN:
                 return True
-            if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str) and (
-                    (isinstance(fn, ast.Attribute) and (fn.attr == "getenv" or (
-                        fn.attr == "get" and getattr(fn.value, "attr", "") == "environ")))
-                    or (isinstance(fn, ast.Name) and fn.id == "getenv")):
-                name = node.args[0].value
-        elif (isinstance(node, ast.Subscript) and getattr(node.value, "attr", "") == "environ"
-              and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str)):
-            name = node.slice.value
-        if name and _KEY_NAME.match(name) and name not in _KAZMA_OWN:
+        elif tabled:
             return True
     return False
 
@@ -100,6 +135,22 @@ def test_control_a_planted_tool_that_reads_a_paid_key_is_found() -> None:
         "    return httpx.post('https://api.planted.invalid', headers={'Authorization': key})\n")}
     assert key_readers(planted) == {"kazma-core/kazma_core/tools/planted.py"}
     assert key_readers({"x.py": "import os\nos.environ.get('KAZMA_SECRET')\n"}) == set()
+
+
+def test_control_a_planted_table_read_is_found() -> None:
+    """A key read from a table, as ``extract_salvage`` reads its providers'
+    keys: the name is not a literal at the read. The first gate saw only
+    literal names, so that module passed it."""
+    planted = {"kazma-core/kazma_core/documents/planted.py": (
+        "import os\n"
+        "PROVIDERS = (('parser', 'PLANTED_PARSE_API_KEY'),)\n"
+        "def parse(path):\n"
+        "    for provider, key_name in PROVIDERS:\n"
+        "        key = os.environ.get(key_name, '')\n")}
+    assert key_readers(planted) == {"kazma-core/kazma_core/documents/planted.py"}
+    # A read from a variable in a module that names no key is not a key read.
+    assert key_readers({"y.py": "import os\ndef f(name):\n    return os.environ.get(name)\n"}) == set()
+    assert "kazma-core/kazma_core/documents/extract_salvage.py" in key_readers(_sources())
 
 
 def test_every_install_paid_tool_is_asked_before_its_card() -> None:
@@ -216,3 +267,164 @@ def test_every_install_paid_tool_has_a_refusal_case() -> None:
     (``install_paid._paid_path``) and a case here."""
     assert set(INSTALL_PAID_TOOLS) == {"generate_image"}
     assert install_paid._paid_path("generate_image", {"provider": "dall-e"}) is True
+
+
+# ── the review of 3faf46175 ─────────────────────────────────────────────
+
+
+def _shipped_paid_path(name: str, arguments: dict) -> bool:
+    """The rule as 3faf46175 shipped it: the backend the call RESOLVES to."""
+    from kazma_core.tools.image_backends.router import PAID_BACKENDS, resolve_provider
+
+    return resolve_provider(arguments.get("provider")) in PAID_BACKENDS
+
+
+@pytest.fixture
+def install_default_dall_e(paid_image_keys, monkeypatch):
+    monkeypatch.setenv("KAZMA_IMAGE_PROVIDER", "dall-e")
+
+
+def test_an_install_default_paid_backend_draws_with_the_keyless_one(install_default_dall_e, monkeypatch) -> None:
+    from kazma_core.agent.graph_tool_worker import _refuse_unrunnable_calls
+    from kazma_core.tools.image_gen import generate_image
+
+    made = _no_paid_backend(monkeypatch)
+    for arguments in ({"prompt": "a poster"}, {"prompt": "a poster", "provider": "auto"}):
+        call = {"id": "c1", "name": "generate_image", "arguments": arguments}
+        kept, refused = _own_key_turn(lambda c=call: _refuse_unrunnable_calls([c], user_text="draw me a poster"))
+        assert kept == [call] and refused == []
+    _own_key_turn(lambda: generate_image("a poster"))
+    assert made == ["pollinations"]
+    # The paid backend the call names is still refused.
+    with pytest.raises(RefusedBeforeEffect, match="daily limit"):
+        _own_key_turn(lambda: generate_image("a poster", provider="dall-e"))
+
+
+def test_control_the_shipped_rule_refused_every_image_of_such_a_turn(install_default_dall_e) -> None:
+    assert _own_key_turn(lambda: asyncio.sleep(0, _shipped_paid_path("generate_image", {}))) is True
+    assert install_paid._paid_path("generate_image", {}) is False
+
+
+# A document job's remote parse, for a person past their daily limit.
+
+
+@pytest.fixture
+def past_her_limit(monkeypatch):
+    """Spaces enforced, Reem past her daily limit by the ledger's count."""
+    from kazma_core.observability import llm_ledger
+    from kazma_core.spaces import scope
+
+    monkeypatch.setattr(scope, "_enforced", True)
+    monkeypatch.setattr(daily_limits, "_ledger_on", lambda: True)
+    spent = {"reem": 10**12}
+    monkeypatch.setattr(llm_ledger, "usage_of", lambda person, since: {
+        "tokens": spent.get(person, 0), "cost": 0.0, "unpriced": 0})
+    return spent
+
+
+def _remote_parse_job(tmp_path, monkeypatch, actor):
+    from kazma_core.documents import extract_salvage as salvage
+
+    from tests.test_document_egress_hardening import _enable_remote, _job, _svc
+    from tests.test_extract_salvage import _ir
+
+    _enable_remote(monkeypatch, "LLAMAPARSE_API_KEY")
+    uploaded: list[str] = []
+    monkeypatch.setattr(salvage, "_llamaparse", lambda *a: uploaded.append("llamaparse") or "## Remote\n\ntext")
+    svc = _svc(tmp_path / "store")
+    job = _job(svc, "space-r", actor)
+    path = tmp_path / "x.pdf"
+    path.write_bytes(b"inert bytes")
+    seen: list[Any] = []
+    monkeypatch.setattr(svc, "_parse_to_manifest_impl",
+                        lambda *a, **k: seen.append(salvage.try_remote_parse(path, _ir("", 0))))
+    try:
+        svc._parse_to_manifest(job, force_ocr=False)
+        egress = [e for e in svc.audit.list_events(tenant_id="space-r")["events"] if e["event_type"] == "egress"]
+    finally:
+        svc.close()
+    return uploaded, seen, egress
+
+
+def test_a_document_job_past_its_persons_limit_parses_locally(tmp_path, monkeypatch, past_her_limit) -> None:
+    uploaded, seen, egress = _remote_parse_job(tmp_path, monkeypatch, "reem")
+    assert uploaded == [] and seen == [None] and egress == []  # nothing left the machine
+
+
+def test_control_under_the_limit_the_remote_parser_reads_it(tmp_path, monkeypatch, past_her_limit) -> None:
+    past_her_limit["reem"] = 0
+    uploaded, seen, egress = _remote_parse_job(tmp_path, monkeypatch, "reem")
+    assert uploaded == ["llamaparse"] and seen[0] is not None
+    assert {e["action"] for e in egress} == {"remote_parse_attempt", "remote_parse_success"}
+
+
+def test_control_without_the_refusal_her_document_went_to_the_paid_parser(tmp_path, monkeypatch,
+                                                                         past_her_limit) -> None:
+    from kazma_core.documents import ingestion
+
+    # The stage as it was: no limit read before the remote parse.
+    monkeypatch.setattr(daily_limits, "call_refusal", lambda asker=None: None)
+    assert ingestion is not None
+    uploaded, _seen, _egress = _remote_parse_job(tmp_path, monkeypatch, "reem")
+    assert uploaded == ["llamaparse"]
+
+
+# A crawl started in an own-key turn, resumed after a restart.
+
+#: The binding the turn uses, kept from before a control replaces the resume's.
+_REAL_OWN_KEYS_SCOPE = daily_limits.own_keys_scope
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("journal", "library")
+async def test_a_crawl_started_in_an_own_key_turn_resumes_under_the_rule(monkeypatch) -> None:
+    seen = await _crawl_cut_off_and_resumed(monkeypatch, started_in_rule=True)
+    assert seen and all(seen), seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("journal", "library")
+async def test_control_a_crawl_started_outside_the_rule_resumes_without_it(monkeypatch) -> None:
+    seen = await _crawl_cut_off_and_resumed(monkeypatch, started_in_rule=False)
+    assert seen and not any(seen), seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("journal", "library")
+async def test_control_the_resume_as_it_was_lost_the_rule(monkeypatch) -> None:
+    import contextlib
+
+    monkeypatch.setattr(daily_limits, "own_keys_scope", lambda on: contextlib.nullcontext())
+    seen = await _crawl_cut_off_and_resumed(monkeypatch, started_in_rule=True)
+    assert seen and not any(seen), seen
+
+
+async def _crawl_cut_off_and_resumed(monkeypatch, *, started_in_rule: bool) -> list[bool]:
+    """Start a crawl (in an own-key turn or not), cut it off by a restart,
+    resume it the product's way; returns, per page fetched after the resume,
+    whether the own-key rule held there."""
+    from kazma_core.stores import knowledge_ingest as ki
+    from kazma_core.web_acquire import crawl_jobs
+    from kazma_ui import kb_api
+
+    from tests.test_crawl_auto_resume import SEED, _settled
+
+    with _REAL_OWN_KEYS_SCOPE(started_in_rule):  # the turn the crawl starts in
+        job, *_ = await ki._prepare_ingest_site("docs", SEED, job_id="j-own")
+    await crawl_jobs.call(job.update, lambda row: row.update(kind="site"))
+    assert bool(crawl_jobs.inspect_jobs("j-own").get("own_keys_only")) is started_in_rule
+    with monkeypatch.context() as m:
+        m.setattr(crawl_jobs, "_owner_gone", lambda row, now: True)
+        crawl_jobs.recover()
+    held: list[bool] = []
+    fetch = ki._web_fetch_text
+
+    async def fetch_and_look(url, **kwargs):
+        held.append(daily_limits.own_keys_only())
+        return await fetch(url, **kwargs)
+
+    monkeypatch.setattr(ki, "_web_fetch_text", fetch_and_look)
+    kb_api.create_kb_router()
+    assert await kb_api.resume_interrupted_crawls() == ["j-own"]
+    await _settled("j-own")
+    return held

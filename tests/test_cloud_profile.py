@@ -26,6 +26,7 @@ import pytest
 from kazma_core.config_store import get_config_store
 from kazma_core.safety import deployment_policy
 from kazma_core.security import cloud_profile
+from kazma_core.security.boot_guard import OPEN_SWITCHES
 from kazma_core.security.cloud_profile import CHECKS, PROFILE_SWITCH, REFUSE, WARN
 
 SECRET = "s" * 32
@@ -37,7 +38,8 @@ _ENV = {
     "KAZMA_PRODUCTION": "1",
     "KAZMA_SECRET": SECRET,
 }
-_OFF = ("KAZMA_AUTH_DISABLED", "KAZMA_DEMO_MODE", "KAZMA_DEV_WS_BYPASS", "KAZMA_LOOPBACK_AUTOLOGIN")
+#: The open switches, one list (boot_guard.OPEN_SWITCHES, which S4-03 reads too).
+_OFF = OPEN_SWITCHES
 _SETTINGS = {deployment_policy.CONTAINER_REQUIRED_KEY: True,
              "backups.restic.remote": "s3:https://s3.example.invalid/kazma"}
 
@@ -73,10 +75,19 @@ BREAKS: dict[str, list[tuple[Callable[[Any], None], str]]] = {
         (lambda mp: mp.delenv("KAZMA_PUBLIC_URL"), "not set"),
         (lambda mp: mp.setenv("KAZMA_PUBLIC_URL", "http://kazma.example.org"), "http"),
         (lambda mp: mp.setenv("KAZMA_PUBLIC_URL", "https://127.0.0.1"), "this machine"),
+        # The review of S4-08: a private host passed (ssrf's own rules now).
+        (lambda mp: mp.setenv("KAZMA_PUBLIC_URL", "https://192.168.1.20"), "private or reserved"),
+        (lambda mp: mp.setenv("KAZMA_PUBLIC_URL", "https://kazma.local"), "local name"),
+        (lambda mp: mp.setenv("KAZMA_PUBLIC_URL", "https://intranet"), "no dot"),
     ],
     "proxy": [
         (lambda mp: mp.delenv("KAZMA_TRUSTED_PROXIES"), "not set"),
         (lambda mp: mp.setenv("KAZMA_TRUSTED_PROXIES", "*"), "never trusts"),
+        # The review of S4-08: every peer the proxy, free to forge its address.
+        (lambda mp: mp.setenv("KAZMA_TRUSTED_PROXIES", "0.0.0.0/0"), "every address"),
+        (lambda mp: mp.setenv("KAZMA_TRUSTED_PROXIES", "::/0"), "every address"),
+        (lambda mp: mp.setenv("KAZMA_TRUSTED_PROXIES", "127.0.0.1, 10.0.0.0/7"), "wider than a private block"),
+        (lambda mp: mp.setenv("KAZMA_TRUSTED_PROXIES", "fc00::/6"), "wider than a private block"),
     ],
     "sign_in": [
         *[(lambda mp, n=name: mp.setenv(n, "1"), f"{name} is on") for name in _OFF],
@@ -246,3 +257,126 @@ def test_doctor_with_the_profile_off_shows_every_check_and_counts_none(monkeypat
     code, out = _doctor(monkeypatch, capsys)
     assert code == 0 and "the cloud profile is off" in out
     assert "[info] The public address is https: no" in out and "[FAIL]" not in out
+
+
+# ── the review of S4-08 ─────────────────────────────────────────────────
+
+
+def _old_proxy_rule() -> tuple[bool, str]:
+    """The proxy check as S4-08 shipped it: any entry but ``*``."""
+    named = [p for p in cloud_profile._proxies() if p != "*"]
+    return (True, "declared") if named else (False, "not set")
+
+
+@pytest.mark.parametrize("entry", ["0.0.0.0/0", "::/0", "10.0.0.0/7"])
+def test_control_the_shipped_proxy_rule_let_every_peer_be_the_proxy(ready, monkeypatch, entry) -> None:
+    from kazma_ui import auth
+
+    monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", entry)
+    assert _old_proxy_rule()[0] is True  # it started
+    some_visitor = "203.0.113.9" if "." in entry else "2001:db8::9"
+    if entry != "10.0.0.0/7":
+        assert auth._is_trusted_proxy(some_visitor)  # and any visitor could forge its address
+    assert cloud_profile._proxy()[0] is False
+
+
+@pytest.mark.parametrize("entries", ["10.0.0.0/8", "172.16.0.0/12", "173.245.48.0/20", "127.0.0.1",
+                                     "fd00::/8", "127.0.0.1, 192.168.0.0/16"])
+def test_a_proxy_no_wider_than_a_private_block_passes(ready, monkeypatch, entries) -> None:
+    monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", entries)
+    assert cloud_profile._proxy()[0] is True
+
+
+def test_the_open_switches_are_one_list_the_profile_refuses(ready, monkeypatch) -> None:
+    from kazma_core.security import boot_guard
+
+    assert {"KAZMA_GATEWAY_OPEN_TO_EVERYONE", "KAZMA_SESSION_OPEN_TAKEOVER"} <= set(OPEN_SWITCHES)
+    fix = next(c.fix for c in CHECKS if c.key == "sign_in")
+    assert all(name in fix for name in OPEN_SWITCHES)
+    # A switch added to the one list is refused with no change here.
+    monkeypatch.setattr(boot_guard, "OPEN_SWITCHES", (*OPEN_SWITCHES, "KAZMA_PLANTED_OPEN"))
+    monkeypatch.setenv("KAZMA_PLANTED_OPEN", "1")
+    ok, detail = cloud_profile._sign_in()
+    assert not ok and "KAZMA_PLANTED_OPEN is on" in detail
+
+
+def test_control_the_shipped_sign_in_rule_let_the_chat_apps_open(ready, monkeypatch) -> None:
+    shipped = ("KAZMA_AUTH_DISABLED", "KAZMA_DEMO_MODE", "KAZMA_DEV_WS_BYPASS", "KAZMA_LOOPBACK_AUTOLOGIN")
+    from kazma_core.security.boot_guard import env_flag
+
+    for name in ("KAZMA_GATEWAY_OPEN_TO_EVERYONE", "KAZMA_SESSION_OPEN_TAKEOVER"):
+        monkeypatch.setenv(name, "1")
+        assert not [n for n in shipped if env_flag(n)]  # the shipped check saw nothing
+        assert f"{name} is on" in cloud_profile._sign_in()[1]
+        monkeypatch.delenv(name)
+
+
+def test_create_app_refuses_the_chat_apps_open_to_everyone(ready, monkeypatch, capsys) -> None:
+    from kazma_ui import app as app_mod
+
+    monkeypatch.setenv("KAZMA_GATEWAY_OPEN_TO_EVERYONE", "1")
+    monkeypatch.setattr(app_mod.KazmaAppBuilder, "build", lambda self: pytest.fail("the app was built"))
+    with pytest.raises(SystemExit):
+        app_mod.create_app()
+    assert "KAZMA_GATEWAY_OPEN_TO_EVERYONE is on" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("host", "problem"), [
+    ("kazma.example.org", None), ("1.1.1.1", None), ("2001:4860::1", None),
+    ("192.168.1.20", "private"), ("10.1.2.3", "private"), ("100.64.0.1", "private"),
+    ("127.0.0.1", "this machine"), ("localhost", "this machine"), ("kazma.localhost", "this machine"),
+    ("fe80::1", "private"), ("kazma.local", "local name"), ("x.internal", "local name"),
+    ("intranet", "no dot"),
+])
+def test_a_public_host_by_ssrfs_own_rules(host, problem) -> None:
+    from kazma_core.security.ssrf import public_host_problem
+
+    found = public_host_problem(host)
+    assert (found is None) if problem is None else (problem in found), found
+
+
+def test_control_the_shipped_tls_rule_passed_a_private_host(ready, monkeypatch) -> None:
+    from urllib.parse import urlparse
+
+    from kazma_core.security.boot_guard import is_loopback
+
+    monkeypatch.setenv("KAZMA_PUBLIC_URL", "https://192.168.1.20")
+    assert not is_loopback(urlparse("https://192.168.1.20").hostname)  # the shipped rule passed it
+    assert cloud_profile._tls()[0] is False
+
+
+def test_with_the_profile_on_no_write_turns_containers_off(ready, monkeypatch) -> None:
+    from kazma_core.settings_validation import SettingRejected, validate_setting
+
+    key = deployment_policy.CONTAINER_REQUIRED_KEY
+    for name, value in ((key, False), ("security.execution", {"container_required": False}),
+                        ("security", {"execution": {"container_required": False}})):
+        with pytest.raises(SettingRejected, match=PROFILE_SWITCH):
+            validate_setting(name, value)
+    assert validate_setting(key, True) == (True, "security")
+
+
+def test_control_with_the_profile_off_the_write_goes_through(monkeypatch) -> None:
+    from kazma_core.settings_validation import validate_setting
+
+    monkeypatch.delenv(PROFILE_SWITCH, raising=False)
+    assert validate_setting(deployment_policy.CONTAINER_REQUIRED_KEY, False) == (False, "security")
+
+
+def test_the_settings_route_refuses_it_with_the_reason(ready, monkeypatch, tmp_path) -> None:
+    """Through the Settings API's own save (``PUT /api/settings/single``)."""
+    from unittest.mock import MagicMock
+
+    from fastapi import FastAPI
+    from fastapi.templating import Jinja2Templates
+    from fastapi.testclient import TestClient
+    from kazma_ui.settings import create_settings_router
+
+    app = FastAPI()
+    app.include_router(create_settings_router(MagicMock(), get_config_store(),
+                                              Jinja2Templates(directory=str(tmp_path))))
+    with TestClient(app) as client:
+        answer = client.put("/api/settings/single", json={
+            "key": deployment_policy.CONTAINER_REQUIRED_KEY, "value": False})
+    assert answer.status_code == 400 and PROFILE_SWITCH in answer.text
+    assert get_config_store().get(deployment_policy.CONTAINER_REQUIRED_KEY) is True

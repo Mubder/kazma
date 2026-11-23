@@ -15493,13 +15493,24 @@ an install with one account behaves as before.
     such a turn** (the review of de6874f3f, `kazma_core/spaces/install_paid.py`):
     `generate_image`'s paid backends (`INSTALL_PAID_TOOLS`; asked by name,
     refused before the card by `call_preflight` in the person's language and
-    at the call; `auto` resolves to the keyless pollinations), the
-    acquisition policy's remote providers (Tavily, Jina, Firecrawl, the
-    proxy: `AcquisitionPolicy.permits` answers no) and E2B (`e2b_enabled`).
-    `PAID_KEY_READERS` declares every tool-reachable module that reads an
-    API key from the environment with how such a turn keeps off what it
-    pays; a new one fails `tests/test_install_paid_tools.py` (a planted tool
-    as the control; outside such a turn every path is as before). **The one
+    at the call; `auto` and the install's default, `KAZMA_IMAGE_PROVIDER`,
+    draw with the keyless pollinations: only a paid backend the call names
+    is refused), the acquisition policy's remote providers (Tavily, Jina,
+    Firecrawl, the proxy: `AcquisitionPolicy.permits` answers no) and E2B
+    (`e2b_enabled`). A Knowledge crawl started in such a turn records the
+    rule on its journal row (`own_keys_only`), and every resume binds it
+    (`kb_api.resume_job`, `daily_limits.own_keys_scope`): auto-resumed after
+    a restart it lost it. A document job's remote parse (LlamaParse,
+    Reducto: outside any turn) is refused for a job whose asker is past their
+    daily limit (`daily_limits.call_refusal(asker)`, read in the stage's
+    thread; `extract_salvage.salvage_audit_scope(remote_refusal=)`), and the
+    local reading is kept. `PAID_KEY_READERS` declares every tool-reachable
+    module that reads an API key from the environment -- by its literal name,
+    or from a table (a read whose name is not a literal, in a module whose
+    tuple, list or mapping holds a key's name) -- with how such a turn keeps
+    off what it pays; a new one fails `tests/test_install_paid_tools.py` (a
+    planted tool and a planted table read as controls; outside such a turn
+    every path is as before). **The one
     accepted exception**: the remote embedder (`memory/embedder.py`, when the
     owner chose a remote embedding model) embeds the turn's question for
     recall on the install's key -- it costs very little. Speech in and out
@@ -16266,12 +16277,19 @@ an install with one account behaves as before.
   `kazma_core/security/cloud_profile.py` at boot; with it off nothing there
   runs or is read. `CHECKS` is the one table, each check declaring what a
   missing piece does: **refuse** (Kazma does not start, and prints what is
-  missing and the fix) for an `https` `KAZMA_PUBLIC_URL`, a proxy named in
-  `KAZMA_TRUSTED_PROXIES` (`*` is no proxy), sign-in on (no
-  `KAZMA_AUTH_DISABLED`, `KAZMA_DEMO_MODE`, `KAZMA_DEV_WS_BYPASS`,
-  `KAZMA_LOOPBACK_AUTOLOGIN`; no hand-set `KAZMA_SECRET` under
-  `WEAK_SECRET_CHARS`) and code only in containers
-  (`security.execution.container_required`); **warn** (said at WARNING) for
+  missing and the fix) for an `https` `KAZMA_PUBLIC_URL` on a public host
+  (`ssrf.public_host_problem`, ssrf's own rules with no DNS: never a private
+  address, `.local`, `.internal` or a name with no dot), a proxy named in
+  `KAZMA_TRUSTED_PROXIES` (`*` is no proxy; a range of prefix length 0, or
+  wider than the widest private block, /8 or /7, is refused: every peer in
+  it could name its own client address), nobody in without signing in (no
+  open switch: `boot_guard.OPEN_SWITCHES`, the ONE list -- sign-in off,
+  demo, the socket bypass, loopback auto-login, the chat apps open to
+  everyone, an open season takeover -- which S4-03 reads too; no hand-set
+  `KAZMA_SECRET` under `WEAK_SECRET_CHARS`) and code only in containers
+  (`security.execution.container_required`, which no Settings write turns
+  off while the profile is on: `cloud_profile.container_requirement_refusal`,
+  asked by `settings_validation`); **warn** (said at WARNING) for
   `KAZMA_PRODUCTION`, a loopback bind, a container engine installed and a
   backup copy off the machine. A check that cannot be made is a missing
   piece. Two stages: the environment's checks in `create_app` before the app
@@ -16282,7 +16300,9 @@ an install with one account behaves as before.
   is shown (`[info]`) and counts for nothing. Gate:
   `tests/test_cloud_profile.py` (each piece missing on its own, through the
   real `create_app` for both stages; the profile off and every piece in
-  place as controls; a check with no way to break it fails the gate).
+  place as controls; a check with no way to break it fails the gate; the
+  shipped proxy, sign-in and TLS rules as controls for the review's cases,
+  and the Settings save refusing the container switch).
 
 ## UI Conventions (Web)
 

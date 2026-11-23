@@ -188,6 +188,39 @@ def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
     )
 
 
+#: Names that are this machine whatever DNS says.
+_INTERNAL_HOSTS = frozenset({"localhost", "0.0.0.0", "::1"})
+#: Suffixes no public DNS answers for.
+_UNRESOLVABLE_SUFFIXES = (".local", ".internal")
+
+
+def public_host_problem(host: str) -> str | None:
+    """Why *host* is not a public name, or None, by this module's own rules
+    and with no DNS: a name that is this machine, a suffix no public DNS
+    answers for (``.local``, ``.internal``, ``.localhost``), a name with no
+    dot (an intranet name), or an address :func:`_is_blocked_ip` blocks
+    (private, loopback, link-local, reserved, the shared space). For a name
+    an operator declares public (the cloud profile's ``KAZMA_PUBLIC_URL``)."""
+    name = str(host or "").strip().lower().rstrip(".").strip("[]")
+    if not name:
+        return "no host"
+    try:
+        ip = ipaddress.ip_address(name.split("%")[0])
+    except ValueError:
+        ip = None
+    if ip is not None:
+        if ip.is_loopback or ip.is_unspecified:
+            return f"{name} is this machine"
+        return f"{name} is a private or reserved address" if _is_blocked_ip(ip) else None
+    if name in _INTERNAL_HOSTS or name.endswith(".localhost"):
+        return f"{name} is this machine"
+    if name.endswith(_UNRESOLVABLE_SUFFIXES):
+        return f"{name} is a local name no public DNS answers for"
+    if "." not in name:
+        return f"{name} has no dot: an intranet name, not a public one"
+    return None
+
+
 def _resolve_host_ips(host: str) -> list[str]:
     """Resolve *host* to a list of IP address strings (A + AAAA records).
 
@@ -254,9 +287,9 @@ def validate_url(url: str, *, block_unresolved: bool = False, allow_private: boo
         raise SSRFError("Blocked URL: embedded credentials are not allowed for public acquisition.")
 
     # Fast textual rejects for common internal hostnames.
-    if host_lower in ("localhost", "0.0.0.0", "::1"):
+    if host_lower in _INTERNAL_HOSTS:
         raise SSRFError(f"Blocked URL '{url}': hostname '{host}' is not allowed.")
-    if host_lower.endswith(".local") or host_lower.endswith(".internal"):
+    if host_lower.endswith(_UNRESOLVABLE_SUFFIXES):
         raise SSRFError(
             f"Blocked URL '{url}': hostname '{host}' is not publicly resolvable."
         )
@@ -465,4 +498,5 @@ __all__: list[str] = [
     "MAX_REDIRECT_HOPS",
     "peer_ip_from_response",
     "assert_peer_public",
+    "public_host_problem",
 ]

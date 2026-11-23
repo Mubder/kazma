@@ -569,6 +569,9 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
     from kazma_core.spaces.scope import bound_asker
 
     asker = str(bound_asker() or '')[:120]
+    from kazma_core.spaces.daily_limits import own_keys_only
+
+    own_keys = own_keys_only()
     space, share = _space_share()
     def change(jobs):
         _recover(jobs)
@@ -613,6 +616,11 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
             if space:
                 # Whose share it runs in (S2-08).
                 row['space'] = space
+            if own_keys:
+                # Started in a turn past its person's daily limit (S2-04): a
+                # resume after a restart is held to the same rule
+                # (kb_api.resume_job binds it), never the install's paid keys.
+                row['own_keys_only'] = True
             jobs[job_id] = row
         elif (row.get('kind', 'site') in _KB_KINDS):
             row.pop('interrupted_by', None)

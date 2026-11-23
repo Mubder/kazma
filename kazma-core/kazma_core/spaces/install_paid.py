@@ -12,8 +12,9 @@ from a turn the limit had stopped before. Each such path is kept off here:
   install's key; :func:`own_key_refusal` refuses the paid path in an own-key
   turn, before the card (``safety.call_preflight``) and at the call (the
   tool raises ``RefusedBeforeEffect``). ``generate_image`` keeps its keyless
-  backend (pollinations): ``auto`` resolves to it in an own-key turn
-  (``image_backends.router``), and a paid backend asked by name is refused.
+  backend (pollinations): ``auto`` and the install's default
+  (``KAZMA_IMAGE_PROVIDER``) draw with it in an own-key turn
+  (``image_backends.router``), and a paid backend the call names is refused.
 * the acquisition policy's remote providers (Tavily, Jina, Firecrawl, the
   scraping proxy): ``AcquisitionPolicy.permits`` answers no in an own-key
   turn, so search and reading go on locally (``web_acquire.policy``).
@@ -57,15 +58,31 @@ PAID_KEY_READERS: dict[str, str] = {
     "kazma-core/kazma_core/voice/tts.py": "a reply read aloud after its turn: no tool",
     "kazma-core/kazma_core/voice/livekit.py": "a live voice room's sign-in; no model API",
     "kazma-core/kazma_core/x_api/auth_tokens.py": "the owner's space's own X account (S1-17b); not the install's",
+    "kazma-core/kazma_core/x_api/config.py": "the owner's space's own X account (S1-17b); not the install's",
+    "kazma-core/kazma_core/documents/extract_salvage.py": (
+        "a remote document parser (LlamaParse, Reducto), outside any turn: a job for a person past their "
+        "daily limit parses locally only (documents.ingestion, daily_limits.call_refusal)"),
+    "kazma-core/kazma_core/memory/embedder.py": (
+        "the remote embedder: the one accepted exception (a turn's question embedded for recall)"),
+    "kazma-core/kazma_core/web_acquire/research_pipeline_job.py": (
+        "fingerprints the configuration (a digest of these variables); spends nothing"),
+    "kazma-skills/kazma_skills/native/email_manager/credentials.py": (
+        "a space's own mail and calendar account (S1-17a); the install's app registration pays for nothing"),
 }
 
 
 def _paid_path(name: str, arguments: dict) -> bool:
-    """Whether this call of *name* would pay with the install's key."""
+    """Whether this call of *name* asks for a path paid with the install's
+    key. For ``generate_image``, only a paid backend the call names: one that
+    comes from the install's default (``KAZMA_IMAGE_PROVIDER``, ``auto``) is
+    not refused -- the router draws with the keyless backend in an own-key
+    turn (the review of 3faf46175: with ``KAZMA_IMAGE_PROVIDER=dall-e``
+    every image in such a turn was refused)."""
     if name == "generate_image":
-        from kazma_core.tools.image_backends.router import PAID_BACKENDS, resolve_provider
+        from kazma_core.tools.image_backends.router import PAID_BACKENDS
 
-        return resolve_provider(arguments.get("provider")) in PAID_BACKENDS
+        asked = str(arguments.get("provider") or "").strip().lower()
+        return asked in PAID_BACKENDS
     return name in INSTALL_PAID_TOOLS
 
 

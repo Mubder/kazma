@@ -58,7 +58,8 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
@@ -79,6 +80,7 @@ __all__ = [
     "may_apply",
     "on_own_key",
     "own_keys_only",
+    "own_keys_scope",
     "parse_limit",
     "precondition",
     "refusal_text",
@@ -323,10 +325,27 @@ def hold_to_own_keys(state: Mapping[str, Any] | None) -> None:
         _OWN_KEYS_ONLY.set(True)
 
 
-def call_refusal() -> str | None:
-    """For a model call outside a turn (``resilient_chat``, ``x_chat``): the
+@contextmanager
+def own_keys_scope(on: bool) -> Iterator[None]:
+    """Bind the own-key rule for the block when *on* (work recorded as
+    started in a turn past its person's limit, resumed later: a Knowledge
+    crawl after a restart, the review of 3faf46175); nothing when off. Only
+    ever turns the rule on: a block inside such a turn keeps it."""
+    if not on:
+        yield
+        return
+    token = _OWN_KEYS_ONLY.set(True)
+    try:
+        yield
+    finally:
+        _OWN_KEYS_ONLY.reset(token)
+
+
+def call_refusal(asker: str | None = None) -> str | None:
+    """For a model call outside a turn (``resilient_chat``, ``x_chat``), or
+    paid work done later for *asker* (a document job's remote parse): the
     reason it is refused, or None. Blocking."""
-    found = verdict()
+    found = verdict(asker)
     if not found or not found["over"]:
         return None
     if not found["measured"] or not found["limit"]:

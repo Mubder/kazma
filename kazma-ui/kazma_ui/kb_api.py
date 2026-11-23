@@ -743,8 +743,14 @@ def create_kb_router() -> APIRouter:
             return _fail("not_found", "Unknown crawl job.", 404)
         if not await asyncio.to_thread(lambda: _store().get_library(row['library_id'])):
             return _fail("not_found", 'The crawl library no longer exists.', 404)
-        return await _start_site(row['library_id'], row['seed'], max_pages=row['policy']['max_pages'],
-                                 kind=row.get('kind', 'site'), resume_job_id=job_id)
+        from kazma_core.spaces.daily_limits import own_keys_scope
+
+        # A crawl started in a turn past its person's daily limit resumes
+        # under the same rule (the review of 3faf46175): its background run,
+        # spawned inside this block, keeps off the install's paid readers.
+        with own_keys_scope(bool(row.get('own_keys_only'))):
+            return await _start_site(row['library_id'], row['seed'], max_pages=row['policy']['max_pages'],
+                                     kind=row.get('kind', 'site'), resume_job_id=job_id)
 
     _RESUME_ROUTE["resume"] = resume_job
 

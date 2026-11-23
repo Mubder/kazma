@@ -9,9 +9,12 @@ missing piece does:
 
 * **refuse** -- Kazma does not start, and says what is missing and how to fix
   it: the piece keeps a stranger out of the data, and an install without it
-  must not serve. TLS (the public address is ``https``), a declared reverse
-  proxy, sign-in on (no switch that turns it off, no hand-set secret that is
-  guessable), and code that runs only in containers.
+  must not serve. TLS (the public address is ``https``, on a public host by
+  ``ssrf``'s own rules), a declared reverse proxy no wider than a private
+  block, nobody in without signing in (no open switch,
+  ``boot_guard.OPEN_SWITCHES``; no hand-set secret that is guessable), and
+  code that runs only in containers -- which a later Settings write cannot
+  turn off while the profile is on (:func:`container_requirement_refusal`).
 * **warn** -- Kazma starts and says it at WARNING: the piece costs resilience,
   not a boundary. A copy of the backups that leaves the machine, the
   production label, a bind reachable without the proxy, and a container
@@ -34,9 +37,9 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from kazma_core.security.boot_guard import WEAK_SECRET_CHARS, env_flag, is_loopback
+from kazma_core.security.boot_guard import OPEN_SWITCHES, WEAK_SECRET_CHARS, env_flag, is_loopback, open_switches_on
 
-__all__ = ["CHECKS", "PROFILE_SWITCH", "REFUSE", "WARN", "Finding", "boot_refusal", "findings", "profile_on"]
+__all__ = ["CHECKS", "PROFILE_SWITCH", "REFUSE", "WARN", "Finding", "boot_refusal", "container_requirement_refusal", "findings", "profile_on"]
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +92,13 @@ def _tls() -> tuple[bool, str]:
     parsed = urlparse(url)
     if parsed.scheme != "https" or not parsed.hostname:
         return False, f"KAZMA_PUBLIC_URL is {parsed.scheme or 'not'} an https address"
-    if is_loopback(parsed.hostname):
-        return False, "KAZMA_PUBLIC_URL names this machine, not a public name"
+    from kazma_core.security.ssrf import public_host_problem
+
+    # ssrf's own rules, with no DNS (the review of S4-08: a private address
+    # or a ``.local`` name passed): the address people open is a public one.
+    problem = public_host_problem(parsed.hostname)
+    if problem:
+        return False, f"KAZMA_PUBLIC_URL does not name a public host: {problem}"
     return True, f"the public address is https://{parsed.hostname}"
 
 
@@ -98,8 +106,39 @@ def _proxies() -> list[str]:
     return [p.strip() for p in os.environ.get("KAZMA_TRUSTED_PROXIES", "").split(",") if p.strip()]
 
 
+#: The widest range a declared proxy may be, per address family: the widest
+#: private block (10.0.0.0/8; fc00::/7). A wider one -- ``0.0.0.0/0`` above
+#: all -- makes every peer the proxy, free to name any client address and
+#: scheme (``auth._is_trusted_proxy`` honours ranges), which undoes the rate
+#: limits and the TLS this profile declares (the review of S4-08).
+_WIDEST_PROXY_PREFIX = {4: 8, 6: 7}
+
+
+def _too_wide(entry: str) -> str | None:
+    """Why the declared proxy *entry* is too wide, or None (an address, or
+    a range no wider than a private block). An entry that is not a range is
+    left to the proxy check's own rules."""
+    import ipaddress
+
+    if "/" not in entry:
+        return None
+    try:
+        net = ipaddress.ip_network(entry, strict=False)
+    except ValueError:
+        return None
+    if net.prefixlen == 0:
+        return f"{entry} is every address"
+    if net.prefixlen < _WIDEST_PROXY_PREFIX[net.version]:
+        return f"{entry} is wider than a private block (/{_WIDEST_PROXY_PREFIX[net.version]})"
+    return None
+
+
 def _proxy() -> tuple[bool, str]:
     named = [p for p in _proxies() if p != "*"]
+    wide = [why for why in map(_too_wide, named) if why]
+    if wide:
+        return False, ("KAZMA_TRUSTED_PROXIES trusts too many peers: " + "; ".join(wide)
+                       + " -- any of them could name its own client address")
     if named:
         return True, f"the reverse proxy is declared ({', '.join(named)})"
     if _proxies():
@@ -121,24 +160,36 @@ def _bind() -> tuple[bool, str]:
                    "(fine inside a container whose only published port is the proxy's)")
 
 
-#: The switches that turn sign-in off, or let a visitor in without it.
-_SIGN_IN_OFF = ("KAZMA_AUTH_DISABLED", "KAZMA_DEMO_MODE", "KAZMA_DEV_WS_BYPASS", "KAZMA_LOOPBACK_AUTOLOGIN")
-
-
 def _sign_in() -> tuple[bool, str]:
-    problems = [f"{name} is on" for name in _SIGN_IN_OFF if env_flag(name)]
+    # The open switches are one list (boot_guard.OPEN_SWITCHES), which S4-03
+    # refuses too once a second account exists: sign-in off, a visitor taken
+    # for the owner, the chat apps open to anyone, a chat anyone may take over.
+    problems = [f"{name} is on" for name in open_switches_on()]
     secret = (os.environ.get("KAZMA_SECRET") or "").strip()
     if secret and len(secret) < WEAK_SECRET_CHARS:
         problems.append(f"KAZMA_SECRET is shorter than {WEAK_SECRET_CHARS} characters")
     if problems:
         return False, "; ".join(problems)
-    return True, "sign-in is on (no switch turns it off; the secret is not a short hand-set one)"
+    return True, "nobody gets in without signing in (no open switch is on; the secret is not a short hand-set one)"
 
 
 def _production() -> tuple[bool, str]:
     if env_flag("KAZMA_PRODUCTION"):
         return True, "KAZMA_PRODUCTION is on"
     return False, "KAZMA_PRODUCTION is off: the production rules (the vault's default rung closed, held lessons) do not apply"
+
+
+def container_requirement_refusal(required: bool) -> str | None:
+    """Why a Settings write of ``security.execution.container_required`` to
+    *required* is refused, or None: with the profile on, code runs only in
+    containers, and the setting is not turned off while it is (the boot
+    check alone let a later write turn it off; the review of S4-08). Asked
+    by ``settings_validation``, the one check every write passes. In
+    memory."""
+    if required or not profile_on():
+        return None
+    return (f"{PROFILE_SWITCH} is on: code runs only in containers on a public install, so this setting "
+            f"stays on. Unset {PROFILE_SWITCH} first if this install is not public.")
 
 
 def _code_in_containers() -> tuple[bool, str]:
@@ -176,8 +227,8 @@ CHECKS: tuple[_Check, ...] = (
            "Set KAZMA_PUBLIC_URL to the https address people open (https://kazma.example.org)."),
     _Check("proxy", "A reverse proxy is declared", REFUSE, False, _proxy,
            "Put Kazma behind a reverse proxy that serves TLS and name its address in KAZMA_TRUSTED_PROXIES."),
-    _Check("sign_in", "Sign-in is on", REFUSE, False, _sign_in,
-           "Unset KAZMA_AUTH_DISABLED, KAZMA_DEMO_MODE, KAZMA_DEV_WS_BYPASS and KAZMA_LOOPBACK_AUTOLOGIN; "
+    _Check("sign_in", "Nobody gets in without signing in", REFUSE, False, _sign_in,
+           "Unset " + ", ".join(OPEN_SWITCHES) + "; "
            "leave KAZMA_SECRET unset (Kazma generates one) or set one of 32 characters or more."),
     _Check("code_in_containers", "Code runs only in containers", REFUSE, True, _code_in_containers,
            "Settings -> System: require the container profile for code (security.execution.container_required)."),

@@ -22,7 +22,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_ALLOW_YOLO` | (none) | `kazma_core.safety.yolo` | yes |
 | `KAZMA_API_KEY` | `""` | `kazma_core.llm_provider`, `kazma_core.model_registry`, `kazma_ui.app` | yes |
 | `KAZMA_ARTIFACTS_DB` | (none) | `kazma_core.agent.artifacts` | yes |
-| `KAZMA_AUTH_DISABLED` | (none) | `kazma_core.config_store`, `kazma_core.security.boot_guard`, `kazma_core.security.cloud_profile` +2 | yes |
+| `KAZMA_AUTH_DISABLED` | (none) | `kazma_core.config_store`, `kazma_core.security.boot_guard`, `kazma_core.security.hardening` +1 | yes |
 | `KAZMA_AUTOLOGIN_HOSTS` | (none) | `kazma_ui.auth` | yes |
 | `KAZMA_AUTO_STORE_BELIEFS` | (none) | `kazma_core.memory.belief_extractor` | yes |
 | `KAZMA_BACKUPS_DIR` | (none) | `kazma_core.paths` | yes |
@@ -63,9 +63,9 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_DB_BACKEND_SOURCE` | (none) | `kazma_core.migration.exporter` | yes |
 | `KAZMA_DB_CONTAINER` | `""` | `kazma_core.engine_move`, `kazma_core.guard_dependencies`, `kazma_core.migration.pg_bridge` +1 | yes |
 | `KAZMA_DB_INTERNAL_PORT` | `"5432"` | `kazma_core.migration.pg_bridge` | yes |
-| `KAZMA_DEMO_MODE` | (none) | `kazma_core.memory.belief_extractor`, `kazma_core.memory.health`, `kazma_core.security.boot_guard` +6 | yes |
+| `KAZMA_DEMO_MODE` | (none) | `kazma_core.memory.belief_extractor`, `kazma_core.memory.health`, `kazma_core.security.boot_guard` +5 | yes |
 | `KAZMA_DETACHED_TTL_S` | `"300"` | `kazma_ui.active_turns` | yes |
-| `KAZMA_DEV_WS_BYPASS` | (none) | `kazma_core.security.boot_guard`, `kazma_core.security.cloud_profile`, `kazma_core.security.hardening` +2 | yes |
+| `KAZMA_DEV_WS_BYPASS` | (none) | `kazma_core.security.boot_guard`, `kazma_core.security.hardening`, `kazma_ui.app` +1 | yes |
 | `KAZMA_DIGEST_INTERVAL_HOURS` | `"24"` | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_DISABLE_COST_BREAKER` | `"0"` | `kazma_core.cost_breaker` | yes |
 | `KAZMA_DISCLOSURE_KEY` | `""` | `kazma_core.config_store` | yes |
@@ -157,7 +157,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_LONG_TASK_MAX_ITER` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_LONG_TASK_MAX_RECURSION` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_LONG_TASK_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | yes |
-| `KAZMA_LOOPBACK_AUTOLOGIN` | (none) | `kazma_core.security.cloud_profile`, `kazma_ui.auth` | yes |
+| `KAZMA_LOOPBACK_AUTOLOGIN` | (none) | `kazma_core.security.boot_guard`, `kazma_ui.auth` | yes |
 | `KAZMA_LOOP_STALL_WATCHDOG` | (none) | `kazma_core.observability.loop_stall` | yes |
 | `KAZMA_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_MCP_ALLOW_UNGATED` | (none) | `kazma_core.mcp.server` | yes |
@@ -251,7 +251,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_SELF_IMPROVEMENT` | (none) | `kazma_core.skills.self_improvement` | yes |
 | `KAZMA_SEMANTIC_CACHE` | (none) | `kazma_ui.app` | yes |
 | `KAZMA_SEMANTIC_COMPACT` | (none) | `kazma_core.agent.semantic_compact` | yes |
-| `KAZMA_SESSION_OPEN_TAKEOVER` | (none) | `kazma_core.sessions.directory` | yes |
+| `KAZMA_SESSION_OPEN_TAKEOVER` | (none) | `kazma_core.security.boot_guard`, `kazma_core.sessions.directory` | yes |
 | `KAZMA_SESSION_TTL_SECONDS` | (none) | `kazma_core.security.web_sessions` | yes |
 | `KAZMA_SHARED_BREAKERS` | (none) | `kazma_core.swarm.reliability` | yes |
 | `KAZMA_SHELL_ALLOW_ARCHIVE` | (none) | `kazma_core.safety.post_hitl` | yes |
