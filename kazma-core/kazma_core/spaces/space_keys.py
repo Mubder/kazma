@@ -15,6 +15,14 @@ them); this module is what the identity store and the switch-on check ask.
 * :func:`report` -- what ``kazma spaces migrate --check`` (S1-33) reads:
   spaces with no key, secrets of a space still under the install's vault key,
   rows whose key is lost, keys of a space the install does not hold.
+* :func:`change_key` -- a space gets a new key (S4-07, ``kazma spaces keys
+  change``): its sealed secrets are sealed again with it, its old keys are
+  destroyed (``SecretVault.rotate_space_key``), and the change is recorded
+  (``space_key_changed``).
+* :func:`destroy_erased_keys` -- a deleted space's key is destroyed (S4-07):
+  an erase takes a space's keys and secrets itself (``erase_space``), and
+  this maintenance sweep destroys them again when they come back -- an older
+  vault file restored over an identity store that recorded the erase.
 
 The owner's space has no key (decision N22): its secrets stay under the
 install's vault key until stage 4. What this keeps apart is one space from
@@ -34,7 +42,7 @@ from typing import Any
 
 from kazma_core.spaces.scope import OWNER_SPACE_ID, valid_space_id
 
-__all__ = ["ensure_keys", "report"]
+__all__ = ["KeyChangeRefused", "change_key", "destroy_erased_keys", "ensure_keys", "report"]
 
 logger = logging.getLogger(__name__)
 
@@ -88,3 +96,82 @@ def report() -> dict[str, Any]:
         "broken": found["broken"],
         "unknown_spaces": sorted(s for s in found["keys"] if s not in spaces),
     }
+
+
+# ── Key care (S4-07) ────────────────────────────────────────────────────
+
+
+class KeyChangeRefused(ValueError):  # noqa: N818 -- named for what happened, as people.PeopleRefused
+    """A key change that is refused; nothing was changed."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def change_key(space_id: str, *, by: str) -> dict[str, Any]:
+    """Give *space_id* a new key: its sealed secrets are sealed again with
+    it (each read back first), its old keys are destroyed, and the change
+    is recorded. One vault transaction. Refused (:class:`KeyChangeRefused`)
+    for the owner's space (its secrets are the install's vault key's, N22),
+    a space the install does not hold or is erasing, and with the vault
+    off. Returns ``{"space", "key_id", "sealed"}`` (no key). A running
+    Kazma that unwrapped the old key keeps it in its memory until it
+    reloads; the file holds it no more. Blocking."""
+    from kazma_core.security.vault import get_vault
+    from kazma_core.spaces import identity, people
+
+    if space_id == OWNER_SPACE_ID:
+        raise KeyChangeRefused(
+            "owners_space", "The owner's space has no key of its own: its secrets are the install's vault key's.")
+    space = identity.read_registry()["spaces"].get(space_id)
+    if not isinstance(space, dict) or space.get("erasing_at"):
+        raise KeyChangeRefused("no_such_space", f"There is no space {space_id!r}.")
+    vault = get_vault()
+    if vault is None:
+        raise KeyChangeRefused("vault_off", "The vault is off (KAZMA_VAULT_KEY is not set): no space has a key.")
+    key_id = vault.rotate_space_key(space_id)
+    try:
+        people.note_key_changed(space_id, by=by)
+    except (people.PeopleRefused, identity.IdentityUnavailable) as exc:
+        # The key was changed: the record missing it is said, never the change undone.
+        logger.warning("[spaces] the key of space %s was changed but the change could not be recorded (%s)",
+                       space_id, type(exc).__name__)
+    sealed = vault.key_report()["sealed"].get(space_id, 0)
+    logger.info("[spaces] the key of space %s was changed by %s (%d sealed secret(s))", space_id, by, sealed)
+    return {"space": space_id, "key_id": key_id, "sealed": sealed}
+
+
+def destroy_erased_keys() -> list[str]:
+    """Destroy what the vault still holds of a space the identity record
+    says was erased (``space_erased``) and the install no longer holds: its
+    keys and its secrets, as the erase did (``SecretVault.erase_space``).
+    They come back when an older vault file is restored over an identity
+    store that recorded the erase. Only a space recorded erased: one merely
+    missing from the registry (a restore the other way, a stale copy) is
+    left, and :func:`report` names it. Raises when the identity store cannot
+    be read (never taken as "nothing erased"). Returns the spaces whose
+    keys were destroyed. Blocking."""
+    from kazma_core.spaces import identity
+
+    registry = identity.read_registry()
+    erased = {
+        str(e["space"]) for e in registry.get("events") or ()
+        if isinstance(e, dict) and e.get("kind") == "space_erased" and e.get("space")
+    }
+    gone = erased - set(registry["spaces"]) - {OWNER_SPACE_ID}
+    if not gone:
+        return []
+    from kazma_core.security.vault import get_vault
+
+    vault = get_vault()
+    if vault is None:
+        return []
+    destroyed: list[str] = []
+    for space in sorted(gone & vault.held_spaces()):
+        vault.erase_space(space)
+        logger.warning(
+            "[spaces] the vault held keys or secrets of space %s, which was erased; they came back "
+            "(an older vault file restored?) and are destroyed again", space)
+        destroyed.append(space)
+    return destroyed

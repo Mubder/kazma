@@ -74,6 +74,7 @@ __all__ = [
     "list_people",
     "list_shared_spaces",
     "mark_seen",
+    "note_key_changed",
     "notices_for",
     "remove_member",
     "reset_password",
@@ -96,7 +97,7 @@ logger = logging.getLogger(__name__)
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
           "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
           "models_set", "account_disabled", "account_enabled", "space_created", "member_added", "member_left", "member_removed",
-          "space_limits_set", "default_space_limits_set", "sessions_ended")
+          "space_limits_set", "default_space_limits_set", "sessions_ended", "space_key_changed")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended")
 _NAME_MAX = 64
@@ -1138,6 +1139,18 @@ def close_space(space_id: str, *, by: str) -> None:
             raise identity.IdentityError("no_such_space", f"no space {space_id!r}")
         space.setdefault("erasing_at", _now())
         space.setdefault("erasing_by", by)
+
+    _changed(_change)
+
+
+def note_key_changed(space_id: str, *, by: str) -> None:
+    """Record that a space's key was changed (``space_key_changed``, Spaces
+    S4-07; ``space_keys.change_key`` changes it). No key and no secret is
+    in the record."""
+    def _change(reg: dict[str, Any]) -> None:
+        if space_id not in reg["spaces"]:
+            raise identity.IdentityError("no_such_space", "There is no such space.")
+        _record(reg, "space_key_changed", "", by, space=space_id)
 
     _changed(_change)
 

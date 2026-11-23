@@ -1557,7 +1557,7 @@ scheduler needs a case there.
   watch (§39), the document worker broker (§19 E1), guard dependencies
   (§39), malware signatures
   (§19 E), dependency advisories (§57), model failover drill (§38), provider
-  health (§60), forget convergence (§15I), memory vector repair, memory recovery,
+  health (§60), erased space keys (§70, S4-07), forget convergence (§15I), memory vector repair, memory recovery,
   retired knowledge promotions and memory turn reconcile (§15F), memory
   text fill (§15F), memory mirror sync (§15K), memory graph sync (§15K2), weekly topic summaries (§15J), entity count repair
   (§15L) and knowledge vector repair (§24F, last), run by ONE isolated
@@ -15112,6 +15112,23 @@ an install with one account behaves as before.
     drill's `vault:space_keys` check fails a backup whose sealed rows name a
     key it does not hold. The export is unchanged (N10's password seal;
     secret names only, never a key).
+  - **Key care (S4-07, 2026-11-23).** A space's key can be changed
+    (`space_keys.change_key`; `kazma spaces keys change SPACE` / `--all`,
+    and `kazma spaces keys` lists key ids, never a key): its sealed secrets
+    are sealed again with the new key, read back first, in one transaction
+    (`SecretVault.rotate_space_key`), and its old keys are destroyed --
+    deleted there whatever row still names them (a row of another space
+    never opened with them), zeroed, and the write-ahead log emptied
+    (`SecretVault._empty_the_log`, the erase's too; a reader that holds the
+    log is said at WARNING). Recorded (`space_key_changed`). Refused for the
+    owner's space, a space not held or erasing, the vault off. A deleted
+    space's key is destroyed: the erase takes it, and the maintenance sweep
+    "erased space keys" (`space_keys.destroy_erased_keys`) destroys again
+    what an older vault file restored over the identity store brings back,
+    for a space the record says was erased (`space_erased`) only. A running
+    Kazma keeps an old key it unwrapped in memory until it reloads. Gate:
+    `tests/test_space_key_rotation.py` (a change under the old key, a change
+    that leaves the log, the statement of before and no sweep as controls).
   - What it does not do: the vault key wraps every space's key, so this
     keeps one space's secret from another's key, not from the person who
     runs the machine. Rotating the install's vault key is stage 4.
