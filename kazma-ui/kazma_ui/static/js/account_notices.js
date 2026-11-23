@@ -72,7 +72,7 @@
                 title: say('chat_links.notice_linked_title', 'A chat app was linked to your account'),
                 message: say('chat_links.notice_linked_body',
                     'On {when}, {platform} account {user} was linked to your Kazma account with a code you asked for. What it sends runs as you. If that was not you, unlink it now.',
-                    { when: when, platform: platform, user: '⁦' + (notice.chat_user || '') + '⁩' }),
+                    { when: when, platform: platform, user: '\u2066' + (notice.chat_user || '') + '\u2069' }),
                 unlink: { platform: notice.platform, user_id: notice.chat_user, label: platform },
             };
         }

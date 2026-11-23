@@ -30,6 +30,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from kazma_core.errors import validation_error
 from kazma_core.spaces import chat_links
 from kazma_core.spaces.identity import IdentityUnavailable
 from kazma_core.spaces.scope import spaces_enforced
@@ -159,7 +160,7 @@ def create_chat_links_router() -> APIRouter:
         try:
             issued = chat_links.issue_code(account, str(platform or ""), language=current_language())
         except chat_links.LinkRefused as exc:
-            return JSONResponse({"ok": False, "error": exc.code, "message": str(exc)},
+            return JSONResponse({"ok": False, "error": exc.code, "message": validation_error(exc)},
                                 status_code=exc.status)
         except IdentityUnavailable:
             return _unavailable()
@@ -174,7 +175,7 @@ def create_chat_links_router() -> APIRouter:
         try:
             taken = chat_links.unlink(account, str(platform or ""), user_id, by=account)
         except chat_links.LinkRefused as exc:
-            return JSONResponse({"ok": False, "error": exc.code, "message": str(exc)},
+            return JSONResponse({"ok": False, "error": exc.code, "message": validation_error(exc)},
                                 status_code=exc.status)
         except IdentityUnavailable:
             return _unavailable()
