@@ -16281,6 +16281,21 @@ an install with one account behaves as before.
     message, a press, a pending card's expiry; disabled, deleted, linked
     again; a waiting reply still sent as the control),
     `tests/e2e/test_chat_unlink_browser.py` (by the sidebar, EN/AR).
+- **A chat app's admin is the admin's linked account (S3-08, 2026-11-23).**
+  Once Spaces is enforced `allowlists.is_gateway_admin` -- the one admin rule
+  of the chat apps: admin-only commands (`changes_global_config`), install
+  buttons, a swarm bus card's press -- asks
+  `chat_links.linked_admin(platform, user)` (memory: a link to an enabled
+  account whose install role is admin; a Discord sender's user, never its
+  channel). `KAZMA_GATEWAY_ADMINS` and the allowlists grant nothing then
+  (its `platform:id` entries became the owner's links when Spaces was
+  switched on, S3-02); before Spaces they decide, as always
+  (`_admin_by_lists`). Every admin-only refusal says how one becomes able
+  to through `allowlists.admin_hint` (the handler's in the sender's
+  language, `graph._admin_only_text`), never the retired list once
+  enforced. Gate: `tests/test_chat_admin_is_an_account.py` (the rule, a
+  listed member refused through the real handler in English and Arabic,
+  the owner's linked chat passing; the environment list as the control).
 
 ## UI Conventions (Web)
 

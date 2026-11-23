@@ -94,6 +94,8 @@ READS = frozenset({
     "_get_visible_providers", "chat_model_for", "get_model_registry", "get_model_registry().get_active_profile",
     # Reads the person's features and replies with a refusal (Spaces S2-11).
     "_command_claimed",
+    # The words of an admin-only refusal: how one becomes able to (S3-08).
+    "_admin_hint",
 })
 
 #: Branches that act and are open to any allowed sender, with why.

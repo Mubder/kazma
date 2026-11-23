@@ -87,6 +87,7 @@ __all__ = [
     "is_their_address",
     "known_owner_ids",
     "link_refusal",
+    "linked_admin",
     "linked_count",
     "owner_links_to_adopt",
     "refresh_links",
@@ -676,6 +677,8 @@ class _Links:
         self.enabled: frozenset[str] = frozenset()
         #: The chats replies may no longer go to (S3-07).
         self.revoked: frozenset[str] = frozenset()
+        #: The enabled accounts whose install role is admin (S3-08).
+        self.admins: frozenset[str] = frozenset()
         self.refreshing = False
 
 
@@ -695,10 +698,12 @@ def _remember(reg: dict[str, Any]) -> None:
         if isinstance(account, dict) and account.get("enabled", True)
     )
     revoked = _revoked_chats(reg, enabled)
+    admins = identity.admin_accounts(reg)
     with _snapshot.lock:
         _snapshot.links = links
         _snapshot.enabled = enabled
         _snapshot.revoked = revoked
+        _snapshot.admins = admins
         _snapshot.read_at = _now()
 
 
@@ -824,6 +829,22 @@ def _linked_account(platform: str, user_id: Any) -> str | None:
         return account if account and account in _snapshot.enabled else None
 
 
+def linked_admin(platform: str, user_id: Any) -> bool:
+    """Whether a chat-app account is linked to the install's admin, enabled
+    (S3-08: the one admin rule of the chat apps once Spaces is enforced). From
+    memory; read first when the links were never read (a thread may block).
+    """
+    with _snapshot.lock:
+        never_read = _snapshot.read_at == 0.0
+    if never_read:
+        refresh_links()
+    plat = (platform or "").strip().lower()
+    uid = platform_user_id(plat, user_id)
+    with _snapshot.lock:
+        account = _snapshot.links.get((plat, uid))
+        return bool(account) and account in _snapshot.admins
+
+
 def linked_count(platform: str) -> int:
     """How many chat-app accounts of *platform* are linked to an enabled
     account, from memory (an adapter's diagnostics)."""
@@ -860,6 +881,7 @@ def _forget_links_for_tests() -> None:
         _snapshot.links = {}
         _snapshot.enabled = frozenset()
         _snapshot.revoked = frozenset()
+        _snapshot.admins = frozenset()
         _snapshot.read_at = 0.0
 
 

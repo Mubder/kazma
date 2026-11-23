@@ -696,7 +696,7 @@ class DiscordAdapter(SenderGate, BaseAdapter):
         # shipped posture (allowed_users, or the owner's own id, ⇒ admin); it
         # bites only with the open switch, where any guild member could
         # otherwise answer the operator.
-        from kazma_gateway.allowlists import press_keeps_card, press_needs_admin
+        from kazma_gateway.allowlists import admin_hint, press_keeps_card, press_needs_admin
 
         if action.kind in ("hitl", "swarm", "run") and press_needs_admin(action.kind):
             from kazma_gateway.allowlists import is_gateway_admin
@@ -710,11 +710,7 @@ class DiscordAdapter(SenderGate, BaseAdapter):
                     {
                         "type": 7,
                         "data": {
-                            "content": (
-                                "⛔ Admin privilege required to approve a danger "
-                                "tool. Set KAZMA_GATEWAY_ADMINS or the platform "
-                                "user allowlist."
-                            ),
+                            "content": "⛔ Admin privilege required to approve a danger tool. " + admin_hint(),
                             "embeds": [],
                             "components": [],
                         },

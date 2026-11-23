@@ -1470,7 +1470,7 @@ class TelegramAdapter(SenderGate, BaseAdapter):
         # changes nothing. It bites only with the open switch, where it is
         # supposed to: every member of a group chat could otherwise answer
         # the operator's approvals.
-        from kazma_gateway.allowlists import press_keeps_card, press_needs_admin
+        from kazma_gateway.allowlists import admin_hint, press_keeps_card, press_needs_admin
 
         _approver = f"telegram:{from_user.get('id', '')}"
         if action.kind in ("hitl", "swarm", "run") and press_needs_admin(action.kind):
@@ -1485,8 +1485,7 @@ class TelegramAdapter(SenderGate, BaseAdapter):
                 self._spawn(
                     self._answer_callback_query(
                         cb_id,
-                        "Not authorized: approving a danger tool requires admin. "
-                        "Set KAZMA_GATEWAY_ADMINS or the platform user allowlist.",
+                        "Not authorized: approving a danger tool requires admin. " + admin_hint(),
                     )
                 )
                 return

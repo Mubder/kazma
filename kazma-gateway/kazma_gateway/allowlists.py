@@ -30,6 +30,7 @@ __all__ = [
     "GATEWAY_ADMINS_ENV",
     "OWNER_ID_KEYS",
     "OwnerId",
+    "admin_hint",
     "apply_adapter_allowlists",
     "apply_gateway_allowlists",
     "is_gateway_admin",
@@ -149,7 +150,12 @@ def press_keeps_card(kind: str, *, direct: bool) -> bool:
 def is_gateway_admin(sender_id: str, platform: str = "") -> bool:
     """Whether this platform identity may use admin-grade gateway actions.
 
-    Sources, in order:
+    Once Spaces is enforced (S3-08): a chat-app account linked to the
+    install's admin, enabled (``chat_links.linked_admin``); the environment
+    list and the allowlists no longer grant anything (the owner's known ids
+    became the owner's links when Spaces was switched on, S3-02).
+
+    Before Spaces, the sources, in order:
 
     1. ``KAZMA_GATEWAY_ADMINS`` env (comma list of user ids or
        ``platform:id`` sender ids). When set it is authoritative.
@@ -169,6 +175,42 @@ def is_gateway_admin(sender_id: str, platform: str = "") -> bool:
     sender_id = (sender_id or "").strip()
     if not sender_id:
         return False
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if spaces_enforced():
+        return _admin_by_link(sender_id, platform)
+    return _admin_by_lists(sender_id, platform)
+
+
+def _admin_by_link(sender_id: str, platform: str) -> bool:
+    """S3-08: the sender's chat-app account is linked to the admin."""
+    from kazma_core.spaces.chat_links import linked_admin
+
+    plat = (platform or (sender_id.split(":", 1)[0] if ":" in sender_id else "")).strip().lower()
+    parts = sender_id.split(":")
+    if len(parts) >= 2 and parts[0].strip().lower() == plat:
+        user = parts[1]  # discord:<user>:<channel> -- the user, never the channel
+    else:
+        user = sender_id
+    return bool(plat and user) and linked_admin(plat, user)
+
+
+def admin_hint() -> str:
+    """How someone becomes able to run an admin-only chat command, as the
+    install decides it: once Spaces is enforced, from a chat app linked to
+    the admin's account (S3-08); before, the environment list or the
+    allowlist. English, as every chat-app refusal. No I/O."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if spaces_enforced():
+        return ("Only the admin may, from a chat app linked to the admin's Kazma account "
+                "(Settings → My account → Chat apps).")
+    return "Set `KAZMA_GATEWAY_ADMINS` or join the platform user allowlist."
+
+
+def _admin_by_lists(sender_id: str, platform: str) -> bool:
+    """Before Spaces: the environment list, else the platform's allowlist,
+    else the owner's known ids (the sources of :func:`is_gateway_admin`)."""
     candidates = _candidate_tokens(sender_id)
 
     env_raw = (os.environ.get(GATEWAY_ADMINS_ENV) or "").strip()

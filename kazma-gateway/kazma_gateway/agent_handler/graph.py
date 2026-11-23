@@ -119,6 +119,25 @@ def _resolve_thread_in_place(msg: IncomingMessage, sender_key: str) -> str:
     return found if found.endswith(suffix) else found + suffix
 
 
+def _admin_only_text(user_text: Any) -> str:
+    """What a sender who is not the admin is told for a command that changes
+    Kazma for everyone, in their language, saying how one becomes able to
+    (``allowlists.admin_hint``: once Spaces is enforced, the admin's linked
+    chat app, S3-08). No I/O."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    from kazma_gateway.allowlists import admin_hint
+
+    arabic = ("⛔ هذا يغيّر Kazma لكل المستخدمين والمنصات، فهو للمسؤول وحده"
+              + ("، من تطبيق محادثة مربوط بحساب المسؤول في Kazma (الإعدادات ← حسابي ← تطبيقات الدردشة)."
+                 if spaces_enforced() else "."))
+    return language_lock.in_their_language(
+        str(user_text or ""),
+        "⛔ This changes Kazma for every user and platform, so it is admin-only. " + admin_hint(),
+        arabic,
+    )
+
+
 def _sender_is_gateway_admin(msg: Any) -> bool:
     """Whether the inbound sender may run admin-grade gateway commands.
 
@@ -1713,12 +1732,7 @@ def create_graph_handler(
                 await manager.send(
                     OutboundMessage(
                         target_id=_build_target_id(msg.platform, ctx),
-                        text=(
-                            "⛔ This changes Kazma for every user and platform, "
-                            "so it is admin-only. Set `KAZMA_GATEWAY_ADMINS` "
-                            "(comma-separated user ids) or add yourself to the "
-                            "platform user allowlist."
-                        ),
+                        text=_admin_only_text(msg.text),
                         context_metadata=ctx,
                     )
                 )

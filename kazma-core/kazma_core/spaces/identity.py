@@ -647,6 +647,17 @@ def asker_left(space_id: str, asker: str | None) -> bool:
         return True
 
 
+def admin_accounts(reg: dict[str, Any]) -> frozenset[str]:
+    """The enabled accounts of *reg* whose stored install role is admin (the
+    registry's own rule, :func:`_is_admin_account`): the chat apps' admin
+    once Spaces is enforced (S3-08). Pure."""
+    return frozenset(
+        str(account_id) for account_id, account_ in (reg.get("accounts") or {}).items()
+        if isinstance(account_, dict) and account_.get("enabled", True) and "role" in account_
+        and _is_admin_account(account_)
+    )
+
+
 def is_admin_account(account_id: str) -> bool:
     """True when *account_id* is the install's admin (the owner). An
     unreadable store raises: "not the admin" is never guessed."""
