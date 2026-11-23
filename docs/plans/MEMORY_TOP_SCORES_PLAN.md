@@ -277,6 +277,25 @@ user's message alone. Read from the call that holds the recall note (fixed
 the same day), the turn saw the harness's block for 199 of 200; the one left
 is a product finding (section 7, item 11).
 
+Run again 23 Nov on the product of that day (d1d87f26b: findings 11 to 17
+in since), twice, each run asking every question afresh (judges
+qwen3.8-flash, then qwen3.7-plus): 0.815 and 0.79 answered (0.80 and 0.785
+by the second judge), against 0.79 on 22 Nov. 15 answers flip between the
+two runs of the same code, against 2 for the block read alone: the turn's
+own model calls and tool rounds make it the noisier path, and a change
+measured through it needs a difference beyond that. 6 questions right in
+both of the day's runs were wrong on 22 Nov, 3 the other way: inside the
+noise. The turn saw the harness's block for all 200 (finding 12's fix: the
+classifier no longer asks first on Qwen); 1.74 model calls and 0.70 tool
+requests a question, 20,908 prompt tokens mean (61 % from Qwen's cache),
+10.8 s median; no call refused. Judges agree on 97.5 % and 96.5 %. Spend:
+4.30M and 4.29M prompt tokens (2.61M and 2.53M cached), 0.13M and 0.14M
+completion (95K and 98K reasoning). The harness now tries a dropped
+connection again (a judge call's "Server disconnected" ended the second
+run's judging; its turns were cached and the rerun asked only the missing
+verdicts). Results: `docs/audits/evidence/memory_w1c/` (ids and scores
+only).
+
 ### W5 + W1b. One passage unit (M)
 
 A passage of about 256 tokens per stretch of a long memory, in a table of

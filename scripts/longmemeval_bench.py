@@ -827,11 +827,23 @@ class Chat:
                                 "messages": [{"role": "user", "content": prompt}]}
         if self.reasoning in ("low", "high"):
             body["reasoning_effort"] = self.reasoning
+        import httpx
+
         for attempt in range(5):
             if self.thinking_off:
                 body["thinking"] = {"type": "disabled"}
-            reply = self.client.post(f"{self.base_url}/chat/completions", json=body,
-                                     headers={"Authorization": f"Bearer {self.key}"})
+            try:
+                reply = self.client.post(f"{self.base_url}/chat/completions", json=body,
+                                         headers={"Authorization": f"Bearer {self.key}"})
+            except httpx.TransportError:
+                # A dropped connection ("Server disconnected without sending
+                # a response", 23 Nov) is tried again like a 5xx; past the
+                # tries it is a refused call, asked again on the next run --
+                # it ended a 200-question run in its judging.
+                if attempt < 4:
+                    time.sleep(15 * (attempt + 1))
+                    continue
+                return "", {"error": "transport"}
             if reply.status_code == 400 and self.thinking_off and "thinking" in reply.text:
                 self.thinking_off = False
                 body.pop("thinking", None)
