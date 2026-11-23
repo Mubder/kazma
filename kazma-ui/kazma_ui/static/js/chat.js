@@ -6931,6 +6931,9 @@
   }
 
   function _moveMenuItems(sid) {
+    // A chat app's chat stays in its space: its next message would find it
+    // in no space (the chat move review's H6).
+    if (String(sid || '').indexOf('gw-') === 0) return '';
     return _moveTargets().map(function(target) {
       return '<button class="session-menu-item" data-menu-action="move" data-menu-sid="' + escapeHtml(sid) +
         '" data-menu-to="' + escapeHtml(target.to) + '" data-menu-takeout="' + (target.takeOut ? '1' : '') + '">' +
@@ -6945,6 +6948,8 @@
     moves_today: ['move_err_moves_today', 'You have moved three chats in the last day. Try again tomorrow.'],
     moved_today: ['move_err_moved_today', 'This chat was moved in the last day. Try again tomorrow.'],
     not_your_chat: ['move_err_not_your_chat', 'Only the person who started a chat moves it.'],
+    chat_app_chat: ['move_err_chat_app', "This chat is a chat app's, so it stays in its space."],
+    approval_unknown: ['move_err_approval_unknown', 'Kazma could not check whether this chat waits for an approval. Try again in a moment.'],
   };
 
   function _moveRefusalText(code) {
@@ -6983,7 +6988,8 @@
       message: turns + ' ' + (takeOut
         ? ti('move_take_out_body', 'It moves to your own space, with what Kazma remembers of it. This space keeps a line saying you took it out, with its title.')
         : ti('move_share_body', 'It moves to the shared space, with what Kazma remembers of it: everyone in that space can read it.')) +
-        ' ' + ti('move_memory_note', "What the Changes card recorded about it, and its Undo, do not move. Kazma's memory of it fills in over the next hour or so."),
+        ' ' + ti('move_memory_note', "What the Changes card recorded about it, and its Undo, do not move. Kazma's memory of it fills in over the next hour or so.") +
+        ' ' + ti('move_also_note', 'Its reminders, scheduled tasks and held lessons move with it; its earlier Time Travel steps do not.'),
       confirmText: takeOut ? ti('move_take_out_ok', 'Take out') : ti('move_share_ok', 'Share'),
     });
     if (!ok) return;

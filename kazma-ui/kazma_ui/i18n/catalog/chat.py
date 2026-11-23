@@ -1712,6 +1712,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": 'ما سجّلته بطاقة التغييرات عنها، وزر التراجع فيها، لا ينتقلان. وتكتمل ذاكرة Kazma عنها خلال الساعة القادمة تقريبًا.',
         "en": "What the Changes card recorded about it, and its Undo, do not move. Kazma's memory of it fills in over the next hour or so.",
     },
+    "chat.move_also_note": {
+        "ar": 'وتنتقل معها تذكيراتها ومهامها المجدولة والدروس المعلّقة، أما خطوات السفر عبر الزمن السابقة فلا تنتقل.',
+        "en": "Its reminders, scheduled tasks and held lessons move with it; its earlier Time Travel steps do not.",
+    },
+    "chat.move_err_chat_app": {
+        "ar": 'هذه محادثة من تطبيق دردشة، فتبقى في مساحتها.',
+        "en": "This chat is a chat app's, so it stays in its space.",
+    },
+    "chat.move_err_approval_unknown": {
+        "ar": 'تعذّر التحقق مما إذا كانت المحادثة تنتظر موافقة. حاول مرة أخرى بعد قليل.',
+        "en": 'Kazma could not check whether this chat waits for an approval. Try again in a moment.',
+    },
     "chat.move_take_out_ok": {
         "ar": 'انقلها',
         "en": 'Take out',

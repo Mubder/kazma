@@ -112,6 +112,27 @@ def _handle_post_turn_memory_sync(payload: dict[str, Any]) -> bool:
 _handle_post_turn_memory = _offload(lambda payload: _handle_post_turn_memory_sync(payload))
 
 
+def _handle_chat_move_memory_sync(payload: dict[str, Any]) -> bool:
+    """What memory holds of a moved chat follows it (``memory.chat_move``):
+    queued by the move once the chat switched (``kazma_ui.chat_move``). Its
+    own steps are idempotent, so a retry finishes it."""
+    from kazma_core.memory.chat_move import move_chat_memory
+    from kazma_core.memory.task_queue import failed_because
+
+    session = str(payload.get("session") or "")
+    keys = [k for k in (session, str(payload.get("thread") or "")) if k]
+    try:
+        out = move_chat_memory(session, from_space=str(payload.get("source") or ""),
+                               to_space=str(payload.get("target") or ""), mover=str(payload.get("by") or ""),
+                               keys=keys)
+    except (sqlite3.Error, OSError, RuntimeError, ValueError) as exc:
+        return failed_because(f"the moved chat's memory did not follow it ({type(exc).__name__})")
+    return True if out.get("ok") else failed_because(f"the moved chat's memory did not follow it: {out.get('error')}")
+
+
+_handle_chat_move_memory = _offload(lambda payload: _handle_chat_move_memory_sync(payload))
+
+
 def register_v2_handlers() -> None:
     """Register all V2 task handlers on the durable queue (idempotent)."""
     global _registered
@@ -131,6 +152,8 @@ def register_v2_handlers() -> None:
     # SQLite work in threads itself.
     register_handler("topic_summaries", _handle_topic_summaries)
     register_handler("topic_summary_rebuild", _handle_topic_summary_rebuild)
+    # A moved chat's memory follows it (Spaces S2-12): queued by the move.
+    register_handler("chat_move_memory", _handle_chat_move_memory)
     _registered = True
     logger.info("[memory_worker] V2 task handlers registered")
 

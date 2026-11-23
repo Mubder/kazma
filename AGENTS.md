@@ -15851,6 +15851,37 @@ an install with one account behaves as before.
     control), `tests/test_chat_move_memory.py` (each point with the step
     taken out as its control), `tests/_chat_move_space_cases.py`,
     `tests/e2e/test_chat_moves_browser.py` (by the sidebar, EN/AR).
+  - **The chat move review's fixes (2026-11-23).** The move takes the
+    thread's lock first and checks everything again under it, and claims its
+    place in the daily bounds in one write (`chat_moves.claim_move`). A card
+    waiting refuses it, read from the checkpoint AND the gate registry's open
+    rows (`hitl_gates.live_gates`); either that cannot be read refuses too
+    (`approval_unknown`, 503). A chat app's chat (`gw-*`,
+    `chat_moves.is_chat_app_chat`) is not moved, and the menu does not offer
+    it. The checkpoints are copied without their turn notes
+    (`CheckpointManager.acopy_thread(strip_turn_notes=True)`) and the chat's
+    Time Travel steps are deleted, not moved (`forget_thread_snapshots`; the
+    dialog says so, and that its reminders, scheduled tasks and held lessons
+    move with it). A failure once the record names the target never drops
+    the journal: the move finishes. Once switched, every socket and attached
+    stream of the chat open under another space is closed or ended
+    (`live_connections.thread_moved`). Memory's part is a durable queued
+    task (`task_queue.CHAT_MOVE_MEMORY`, Kazma's own work, retried by the
+    queue), so the route answers once the chat is switched. In memory:
+    everything is carried before the source is retired; the person's own
+    statements (`user_stated`) are carried with their decisions, current or
+    ended, and a value they corrected, ended, called wrong or undid is never
+    rebuilt as current (closed again after the quick pass, and named to the
+    deep pass in `metadata.not_again`, which the extractor now reads in any
+    space); "No, keep it" moves with "Not me" (`changes._answered_no_from`);
+    a fact another chat of the source states too stays current there; what
+    the chat's facts closed is reopened only while that fact still held its
+    place; the source's ledger rows go once copied; only the tombstones the
+    move made are deleted (a stale one in the target is dropped on a move
+    back); and a busy thread-record file never fails a memory write. A swarm
+    result that finishes after the move is delivered as its task says (the
+    guide names it). Gates: the review's tests in `tests/test_chat_moves.py`
+    and `tests/test_chat_move_memory.py`, each failing on 36675f3fa.
 - **An approval card goes to the person it asks (S2-05, 2026-11-22;
   decisions N4 and N21).** Only where Spaces is enforced; an install that
   does not enforce it shows, lists, pushes and decides every card as

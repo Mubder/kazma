@@ -62,7 +62,8 @@ _BACKOFF_MAX_SEC = 3600.0
 #: Task types that write what a user said into memory. They have slots of
 #: their own: a pg_dump or a restic check never holds up a user's turn
 #: (Memory audit M13). Everything else is maintenance.
-MEMORY_LANE = frozenset({"post_turn_memory", "micro_consolidation", "entity_merge", "topic_summary_rebuild"})
+MEMORY_LANE = frozenset({"post_turn_memory", "micro_consolidation", "entity_merge", "topic_summary_rebuild",
+                         "chat_move_memory"})
 
 
 #: A task that failed because Postgres is away is tried again after this, its
@@ -152,10 +153,16 @@ _PERSON_MODEL_TASKS = frozenset({"micro_consolidation"})
 REBUILD_CHAT_MOVE = "chat_move"
 #: How long a person's task waits before it is asked again.
 _PERSON_WAIT_S = 900.0
-#: * it is the install's own work: whole stores, no space's content.
+#: The task a chat move queues once the chat switched (Spaces S2-12,
+#: ``kazma_ui.chat_move``): what memory holds of the chat follows it
+#: (``memory.chat_move.move_chat_memory``). It reads one space and writes
+#: another, so it is Kazma's own work, counted against no one.
+CHAT_MOVE_MEMORY = "chat_move_memory"
+#: * it is the install's own work: whole stores, no space's content -- or,
+#:   for :data:`CHAT_MOVE_MEMORY`, the two spaces a moved chat names.
 INSTALL_TASKS = frozenset({
     "native_backup", "native_pg_backup", "native_pg_offsite", "restic_maintenance",
-    "connector_health", "universal_backup",
+    "connector_health", "universal_backup", CHAT_MOVE_MEMORY,
 })
 
 

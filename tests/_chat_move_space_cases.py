@@ -47,6 +47,17 @@ def _chat(space: str, account: str, mark: str) -> tuple[str, str]:
     return session_id, thread_id
 
 
+class NoCardGraph:
+    """A graph whose checkpoint holds no card: the move asks it (and refuses
+    when it has none to ask)."""
+
+    def __init__(self, snapshot: Any = None) -> None:
+        self.snapshot = snapshot
+
+    async def aget_state(self, config: dict[str, Any]) -> Any:
+        return self.snapshot
+
+
 @contextmanager
 def moves(matrix: Matrix) -> Iterator[SimpleNamespace]:
     """Spaces enforced; A's personal space; a chat of each person's space;
@@ -79,7 +90,7 @@ def moves(matrix: Matrix) -> Iterator[SimpleNamespace]:
         app = FastAPI()
         Matrix.role_checked(app)
         app.middleware("http")(auth.create_tenant_middleware())
-        app.include_router(create_chat_move_router())
+        app.include_router(create_chat_move_router(graph_getter=NoCardGraph))
         with TestClient(app) as client:
             yield SimpleNamespace(client=client, marks=marks, a_chat=a_chat, b_chat=b_chat, followed=followed)
 

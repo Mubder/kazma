@@ -59,13 +59,15 @@ __all__ = [
     "STAYS",
     "ChatMoveRefused",
     "bound_refusal",
+    "claim_move",
+    "is_chat_app_chat",
     "move_refusal",
     "move_thread_rows",
     "moves_under_way",
     "others_wrote",
-    "record_done",
     "record_move",
     "record_taken_out",
+    "release_move",
     "settle_move",
     "taken_out_chats",
 ]
@@ -124,6 +126,12 @@ MOVED_BY_THEIR_CODE: dict[tuple[str, str], str] = {
     ("chat_sessions.db", "sessions"):
         "the chat row: copied into the target, then removed from the source (kazma_ui.chat_move)",
     ("chat_sessions_test.db", "sessions"): "the chat store's file in test mode, moved as above",
+    ("chat_sessions_spool.db", "spool"):
+        "a session the database refused, kept until its next accepted save: the session manager "
+        "writes it with the row it copies and discards it with the row it removes (kazma_ui.chat_move)",
+    ("chat_sessions_test_*.db", "spool"): "the spool's file in test mode, moved as above",
+    ("memory_state.db", "episodes"):
+        "a chat's memories: rebuilt in the space it moved to, retired where it was (memory.chat_move)",
 }
 
 _SCHEMA = """\
@@ -167,6 +175,14 @@ def move_refusal(*, from_space: str, to_space: str, by: str) -> tuple[ChatMoveRe
     if refused is not None:
         return ChatMoveRefused(refused.code, refused.status, str(refused)), False
     return None, taken_out
+
+
+def is_chat_app_chat(*ids: str) -> bool:
+    """Whether a chat is a chat app's (Telegram, Discord, Slack, WhatsApp):
+    its thread is named by the gateway (``gw-<platform>-<sender>-...``) and
+    recomputed from each message, so moved it would answer in no space and
+    lock the chat app out (the chat move review's H6). It is not moved."""
+    return any(str(i or "").startswith("gw-") for i in ids)
 
 
 def others_wrote(messages: list[Mapping[str, Any]], by: str) -> bool:
@@ -242,16 +258,11 @@ def _connection() -> sqlite3.Connection:
     return conn
 
 
-def bound_refusal(thread_id: str, by: str, *, now: float | None = None) -> ChatMoveRefused | None:
-    """Why *by* may not move the chat *thread_id* now, by the daily bounds:
-    :data:`MOVES_PER_DAY` moves of theirs in :data:`DAY_S` (``moves_today``),
-    or this chat moved in that window (``moved_today``). None when they may."""
-    since = (time.time() if now is None else float(now)) - DAY_S
-    with closing(_connection()) as conn:
-        mine = int(conn.execute("SELECT COUNT(*) FROM chat_moves_done WHERE moved_by = ? AND moved_at > ?",
-                                (by, since)).fetchone()[0])
-        this = conn.execute("SELECT 1 FROM chat_moves_done WHERE thread_id = ? AND moved_at > ? LIMIT 1",
-                            (thread_id, since)).fetchone()
+def _bound_refusal_in(conn: sqlite3.Connection, thread_id: str, by: str, since: float) -> ChatMoveRefused | None:
+    mine = int(conn.execute("SELECT COUNT(*) FROM chat_moves_done WHERE moved_by = ? AND moved_at > ?",
+                            (by, since)).fetchone()[0])
+    this = conn.execute("SELECT 1 FROM chat_moves_done WHERE thread_id = ? AND moved_at > ? LIMIT 1",
+                        (thread_id, since)).fetchone()
     if this is not None:
         return ChatMoveRefused("moved_today", 429, "This chat was moved in the last day. Try again tomorrow.")
     if mine >= MOVES_PER_DAY:
@@ -260,17 +271,49 @@ def bound_refusal(thread_id: str, by: str, *, now: float | None = None) -> ChatM
     return None
 
 
-def record_done(*, thread_id: str, by: str, from_space: str, to_space: str) -> None:
-    """A move that switched the chat: it counts toward the bounds. Rows past
-    the window are dropped."""
+def bound_refusal(thread_id: str, by: str, *, now: float | None = None) -> ChatMoveRefused | None:
+    """Why *by* may not move the chat *thread_id* now, by the daily bounds:
+    :data:`MOVES_PER_DAY` moves of theirs in :data:`DAY_S` (``moves_today``),
+    or this chat moved in that window (``moved_today``). None when they may.
+    What the dialog shows; the move itself claims its place
+    (:func:`claim_move`)."""
+    since = (time.time() if now is None else float(now)) - DAY_S
+    with closing(_connection()) as conn:
+        return _bound_refusal_in(conn, thread_id, by, since)
+
+
+def claim_move(*, thread_id: str, by: str, from_space: str, to_space: str) -> float:
+    """Count a move toward the daily bounds, checked and recorded in one
+    write transaction (the chat move review's M4: two moves at once both
+    passed a check made before either was recorded). Raises the bound's
+    :class:`ChatMoveRefused`; returns the claim's time, which
+    :func:`release_move` takes back when the move is put back."""
     now = time.time()
     with closing(_connection()) as conn:
         conn.execute("BEGIN IMMEDIATE")
-        conn.execute(
-            "INSERT INTO chat_moves_done (thread_id, moved_by, from_space, to_space, moved_at) VALUES (?, ?, ?, ?, ?)",
-            (thread_id, by, from_space, to_space, now))
-        conn.execute("DELETE FROM chat_moves_done WHERE moved_at < ?", (now - 2 * DAY_S,))
-        conn.execute("COMMIT")
+        committed = False
+        try:
+            refused = _bound_refusal_in(conn, thread_id, by, now - DAY_S)
+            if refused is not None:
+                raise refused
+            conn.execute(
+                "INSERT INTO chat_moves_done (thread_id, moved_by, from_space, to_space, moved_at) "
+                "VALUES (?, ?, ?, ?, ?)", (thread_id, by, from_space, to_space, now))
+            conn.execute("DELETE FROM chat_moves_done WHERE moved_at < ?", (now - 2 * DAY_S,))
+            conn.execute("COMMIT")
+            committed = True
+        finally:
+            if not committed:
+                conn.execute("ROLLBACK")
+    return now
+
+
+def release_move(*, thread_id: str, by: str, at: float) -> None:
+    """A claimed move that was put back (the chat stayed where it was): it
+    no longer counts toward the bounds."""
+    with closing(_connection()) as conn:
+        conn.execute("DELETE FROM chat_moves_done WHERE thread_id = ? AND moved_by = ? AND moved_at = ?",
+                     (thread_id, by, float(at)))
 
 
 def record_taken_out(*, space_id: str, thread_id: str, title: str, by: str) -> None:

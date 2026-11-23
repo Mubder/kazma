@@ -17,6 +17,13 @@
   the next hour or so. The Changes card's history of the chat does not move.
 - At most three moves a person a day, and one a chat a day. A move cut off by
   a restart is put back or finished at the next start.
+- Reviewed and fixed the same day: a fact you corrected or ended stays so
+  after the move; a fact another chat of yours also states stays where it
+  was; a stop half way through a move loses nothing; a chat from a chat app
+  is not offered for moving; anyone else's open window on a chat you took
+  out stops showing it; a move is refused while an approval waits, or when
+  Kazma cannot tell whether one does; the chat's earlier Time Travel steps
+  do not move, and its reminders, scheduled tasks and held lessons do.
 
 ## Spaces: stronger sign-in, and no open switch once two people have accounts (2026-11-23)
 

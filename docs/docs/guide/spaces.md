@@ -101,8 +101,13 @@ are in, and back out:
 
 - **A chat:** the chat list's menu offers "Share with…" in your own space and
   "Take out to my space" in a shared one. What Kazma remembers of the chat
-  follows it; it fills in over the next hour or so. The Changes card's
-  history of the chat does not move.
+  follows it; it fills in over the next hour or so, and a fact you corrected
+  or ended stays corrected. Its reminders, scheduled tasks and held lessons
+  move with it. The Changes card's history of the chat, and its earlier Time
+  Travel steps, do not move. A chat from a chat app (Telegram, Discord,
+  Slack, WhatsApp) stays in its space. A swarm task the chat started that
+  finishes after the move delivers its result where the task was told to,
+  which may be the space the chat left.
 - **A document:** the Documents page offers the same two moves.
 
 A chat someone else wrote in stays in the shared space: their words are the

@@ -254,9 +254,27 @@ def record_pending(
     subject, predicate, old_value = str(stated[0]), str(stated[1]), str(stated[2] or "")
     if _recorded(conn, tenant, PENDING, subject, predicate, new_value, ("open",)):
         return None
+    if _answered_no_from(conn, tenant, subject, predicate, new_value, session, turn):
+        return None
     return _insert(conn, kind=PENDING, tenant=tenant, subject=subject, predicate=predicate,
                    old_belief_id=refused["belief_id"], old_value=old_value, new_belief_id=None,
                    new_value=new_value, session=session, turn=turn, now=now)
+
+
+def _answered_no_from(conn: sqlite3.Connection, tenant: str, subject: str, predicate: str, value: str,
+                      session: str | None, turn: int | None) -> bool:
+    """Whether the user already answered "No, keep it" to this value from this
+    very turn: a moved chat's turns are read again in their new space
+    (Spaces S2-12, ``memory.chat_move``), and the answer moved with them."""
+    from kazma_core.memory.belief_mutation import _same_value
+
+    if session is None:
+        return False
+    return any(_same_value(found, value) for (found,) in conn.execute(
+        "SELECT new_value FROM memory_changes WHERE tenant_id = ? AND subject = ? AND predicate = ? "
+        "AND kind = ? AND state = 'dismissed' AND source_session = ? AND source_turn IS ?",
+        (tenant, subject, predicate, PENDING, session, turn),
+    ).fetchall())
 
 
 def record_pending_end(

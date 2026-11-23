@@ -181,7 +181,14 @@ def _moved_elsewhere(keys: list[str], tenant_id: str) -> bool:
     for key in keys:
         home = threads.known_space(key)
         if home is None:
-            record = threads.record_of(key)
+            try:
+                record = threads.record_of(key)
+            except sqlite3.OperationalError:
+                # The records' file is busy: no move is known for this key,
+                # and a memory write is never failed for it (the chat move
+                # review). A move records the space in memory first.
+                logger.debug("[memory] thread record of %s unreadable; taken as not moved", key[:12])
+                continue
             home = record.space_id if record is not None else None
         if home is not None:
             return home != tenant

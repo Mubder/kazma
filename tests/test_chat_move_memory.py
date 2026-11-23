@@ -195,7 +195,7 @@ def test_not_me_is_carried_and_a_waiting_change_is_dropped(moved) -> None:
 def test_control_without_carrying_not_me_the_deep_pass_may_file_it_again(moved, monkeypatch) -> None:
     from kazma_core.memory import changes
 
-    monkeypatch.setattr(chat_move, "_carry_not_me", lambda *_a, **_k: 0)
+    monkeypatch.setattr(chat_move, "_carry_answers", lambda *_a, **_k: 0)
     _record(moved.db, kind=changes.READING, state="dismissed", value="Porto")
     _move(moved, TEAM, frm=OWN)
     assert not changes.user_said_not_me(moved.db, tenant_id=TEAM, subject=ENTRY, predicate="lives_in",
@@ -416,3 +416,109 @@ def test_a_chat_moved_back_since_is_not_moved_again(moved, monkeypatch) -> None:
     forget.converge(moved.db)
     moved.db.commit()
     assert _turns(moved.db, OWN) == [q for q, _a, _t in TURNS], "it is home: the source keeps it"
+
+
+# ── the chat move review (2026-11-23): each point fails on 36675f3fa ──────
+
+
+def _home_row(db: sqlite3.Connection, tenant: str, value: str = "Lisbon") -> str:
+    row = db.execute("SELECT id FROM beliefs WHERE tenant_id = ? AND predicate = 'lives_in' AND object = ? "
+                     "AND valid_until IS NULL AND invalidated_at IS NULL", (tenant, value)).fetchone()
+    assert row is not None, f"no current {value}"
+    return str(row[0])
+
+
+def test_h1_a_stop_in_the_carry_loses_no_decision(moved, monkeypatch) -> None:
+    """Everything is carried before the source is retired: a stop in the
+    carry, then the convergence pass, and the decision is in the target."""
+    _decide(moved.db, "user", "favorite_color", "teal", tenant=OWN, at=T0 + 30)
+    _store_chat(moved.tmp, TEAM)
+    threads.move_thread(KEY, TEAM)
+    with monkeypatch.context() as patch:
+        patch.setattr(chat_move, "_carry_facts", lambda *_a, **_k: (_ for _ in ()).throw(
+            sqlite3.OperationalError("database is locked")))
+        with pytest.raises(sqlite3.OperationalError):
+            chat_move.move_chat_memory(KEY, from_space=OWN, to_space=TEAM, mover=SARA, conn=moved.db)
+    moved.db.commit()
+    forget.converge(moved.db)
+    moved.db.commit()
+    assert _current(moved.db, TEAM, "favorite_color") == {ENTRY: ("teal", "user_explicit")}
+
+
+@pytest.mark.parametrize("decision", ["ended", "called_wrong", "corrected"])
+def test_h4_a_value_the_person_corrected_or_ended_is_never_rebuilt_as_current(moved, decision) -> None:
+    from kazma_core.memory.belief_mutation import end_belief, mutate_belief
+    from kazma_core.memory.hygiene import invalidate_belief
+
+    lisbon = _home_row(moved.db, OWN)
+    if decision == "ended":
+        end_belief(moved.db, lisbon, tenant_id=OWN, extraction_method="user_explicit", now=T0 + 100)
+    elif decision == "called_wrong":
+        invalidate_belief(lisbon, conn=moved.db, now=T0 + 100, tenant_id=OWN)
+    else:  # About you -> Correct: the person's words, from no chat
+        mutate_belief(moved.db, "user", "lives_in", "Porto", extraction_method="user_explicit", tenant_id=OWN,
+                      now=T0 + 100)
+    moved.db.commit()
+    _move(moved, TEAM, frm=OWN)
+    home = _current(moved.db, TEAM, "lives_in").get(ENTRY)
+    assert home != ("Lisbon", "user_stated") and (home is None or home[0] != "Lisbon"), home
+    if decision == "corrected":
+        assert home == ("Porto", "user_explicit"), "the correction moves with the fact it corrected"
+    # The deep pass is told on the rebuilt turns (worker_bootstrap reads it).
+    held = moved.db.execute("SELECT json_extract(metadata_json, '$.not_again') FROM episodes WHERE tenant_id = ? "
+                            "AND session_id = ? AND turn_number = 1", (TEAM, KEY)).fetchone()[0]
+    assert [ENTRY, "lives_in", "lisbon"] in json.loads(held or "[]")
+
+
+def test_h4_no_keep_it_is_carried(moved) -> None:
+    from kazma_core.memory import changes
+
+    _record(moved.db, kind=changes.PENDING, state="dismissed", value="Porto")
+    _move(moved, TEAM, frm=OWN)
+    assert changes._answered_no_from(moved.db, TEAM, ENTRY, "lives_in", "Porto", KEY, 1)
+
+
+def test_h5_a_fact_another_chat_states_too_stays_current_in_the_source(moved) -> None:
+    _said_elsewhere("I live in Lisbon.", n=1, at=T0 + 300)
+    _move(moved, TEAM, frm=OWN)
+    assert _current(moved.db, OWN, "lives_in")["user"][0] == "Lisbon"
+    source = moved.db.execute("SELECT source_session FROM beliefs WHERE tenant_id = ? AND predicate = 'lives_in' "
+                              "AND object = 'Lisbon'", (OWN,)).fetchone()[0]
+    assert source == OTHER, "named by the chat that still states it"
+
+
+def test_m2_a_fact_closed_by_a_fact_the_person_ended_stays_closed(paris_first) -> None:
+    from kazma_core.memory.belief_mutation import end_belief
+
+    end_belief(paris_first.db, _home_row(paris_first.db, OWN), tenant_id=OWN, extraction_method="user_explicit",
+               now=T0 + 100)
+    paris_first.db.commit()
+    _move(paris_first, TEAM, frm=OWN)
+    assert "user" not in _current(paris_first.db, OWN, "lives_in"), "Paris is not reopened"
+
+
+def test_m3_a_keep_out_lifted_in_the_target_does_not_come_back(moved) -> None:
+    _forget_turn(moved.db, OWN, 2)
+    _move(moved, TEAM, frm=OWN)
+    assert moved.db.execute("SELECT COUNT(*) FROM memory_forgotten WHERE tenant_id = ? AND session_key = ?",
+                            (OWN, KEY)).fetchone()[0] == 0, "the source's rows went once copied"
+    moved.db.execute("DELETE FROM memory_forgotten WHERE tenant_id = ? AND session_key = ?", (TEAM, KEY))
+    moved.db.commit()
+    _move(moved, OWN, frm=TEAM)
+    assert "I work at Initech." in _turns(moved.db, OWN)
+
+
+def test_only_tombstones_the_move_made_are_deleted(moved) -> None:
+    _forget_turn(moved.db, OWN, 2)
+    _move(moved, TEAM, frm=OWN)
+    assert [tuple(r) for r in moved.db.execute(
+        "SELECT tier FROM episodes WHERE tenant_id = ? AND session_id = ? AND turn_number = 2",
+        (OWN, KEY)).fetchall()] == [("forgotten",)], "the person's own forget keeps its tombstone"
+
+
+def test_a_busy_thread_record_never_fails_a_memory_write(moved, monkeypatch) -> None:
+    from kazma_core.spaces import scope
+
+    monkeypatch.setattr(scope, "_enforced", True)
+    monkeypatch.setattr(threads, "record_of", lambda *_a: (_ for _ in ()).throw(sqlite3.OperationalError("locked")))
+    assert forget._moved_elsewhere(["never-moved"], OWN) is False

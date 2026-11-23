@@ -359,13 +359,18 @@ class CheckpointManager(BaseCheckpointSaver):
     #: The tables LangGraph's SQLite saver keeps a thread in.
     _THREAD_TABLES = ("checkpoints", "writes")
 
-    async def acopy_thread(self, thread_id: str, *, from_space: str, to_space: str) -> int:
+    async def acopy_thread(self, thread_id: str, *, from_space: str, to_space: str,
+                           strip_turn_notes: bool = False) -> int:
         """Copy every checkpoint of *thread_id* from *from_space*'s saver into
-        *to_space*'s, as they are (ids, parents, writes): the chat's history
-        moves whole (``kazma_ui.chat_move``). Nothing to do when both spaces
-        share one saver (one table on Postgres). Idempotent: a row already
-        there is kept. Returns the rows copied. The thread's record still
-        names the source while this runs, so nothing reads the copy yet."""
+        *to_space*'s (ids, parents, writes): the chat's history moves whole
+        (``kazma_ui.chat_move``). With *strip_turn_notes* each copied state's
+        messages lose their turn notes (``kazma_core.turn_notes``): they hold
+        what the source space recalled, its environment and its Knowledge,
+        which the space it moves to never had (the chat move review's M1).
+        Nothing to do when both spaces share one saver (one table on
+        Postgres). Idempotent: a row already there is kept. Returns the rows
+        copied. The thread's record still names the source while this runs,
+        so nothing reads the copy yet."""
         source = await self._saver_of(from_space)
         target = await self._saver_of(to_space)
         if source is target:
@@ -385,6 +390,8 @@ class CheckpointManager(BaseCheckpointSaver):
             ) as cur:
                 rows = await cur.fetchall()
             if rows:
+                if strip_turn_notes:
+                    rows = [self._without_turn_notes(source, target, table, columns, row) for row in rows]
                 await target.conn.executemany(
                     f'INSERT OR IGNORE INTO "{table}" ({names}) VALUES ({marks})',  # nosec B608 - the saver's own columns
                     [tuple(row) for row in rows],
@@ -392,6 +399,31 @@ class CheckpointManager(BaseCheckpointSaver):
                 copied += len(rows)
         await target.conn.commit()
         return copied
+
+    @staticmethod
+    def _without_turn_notes(source: Any, target: Any, table: str, columns: list[str], row: Any) -> tuple[Any, ...]:
+        """A checkpoint row, its messages without turn notes: a state's
+        ``messages`` channel (``checkpoints``) or a pending write to it
+        (``writes``). Anything else is copied as it is."""
+        from kazma_core.turn_notes import strip_turn_notes
+
+        values = dict(zip(columns, row, strict=False))
+        blob = "checkpoint" if table == "checkpoints" else "value"
+        if values.get(blob) is None or (table == "writes" and values.get("channel") != "messages"):
+            return tuple(row)
+        loaded = source.serde.loads_typed((values["type"], values[blob]))
+        if table == "checkpoints":
+            channels = loaded.get("channel_values") if isinstance(loaded, dict) else None
+            messages = channels.get("messages") if isinstance(channels, dict) else None
+            if not isinstance(messages, list) or len(kept := strip_turn_notes(messages)) == len(messages):
+                return tuple(row)
+            channels["messages"] = kept
+        else:
+            if not isinstance(loaded, list) or len(kept := strip_turn_notes(loaded)) == len(loaded):
+                return tuple(row)
+            loaded = kept
+        values["type"], values[blob] = target.serde.dumps_typed(loaded)
+        return tuple(values[c] for c in columns)
 
     async def adelete_thread_in(self, thread_id: str, *, space: str) -> None:
         """Delete *thread_id*'s checkpoints from *space*'s saver: the copy a

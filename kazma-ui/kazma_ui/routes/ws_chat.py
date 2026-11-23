@@ -318,8 +318,10 @@ def create_ws_chat_router(
             return
         from kazma_ui.live_connections import socket_watched
 
-        # Closed when its person leaves the space (the S2-12 review, finding 7).
-        with space_binding.bound_to(binding), socket_watched(binding.asker, binding.space_id, websocket):
+        # Closed when its person leaves the space (the S2-12 review, finding 7),
+        # and when the chat moves to another space (the chat move review's H3).
+        with space_binding.bound_to(binding), socket_watched(binding.asker, binding.space_id, websocket,
+                                                              chat=session_id):
             await _observe_session(websocket, session_id)
 
     async def _observe_session(websocket: WebSocket, session_id: str) -> None:
