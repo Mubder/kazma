@@ -1136,7 +1136,7 @@
             const go = await window.kazmaConfirm({
                 title: _t('settings.space_data_move_title', 'Move {name}?', { name: _iso(name) }),
                 message: _t('settings.space_data_move_confirm',
-                    "Kazma makes a bundle of everything in this space: its chats, memory, files, documents, libraries, schedules, settings and secrets, sealed with a password you choose. On the other install, its admin brings it in with that password and chooses who owns it there. Nothing leaves this install: the space stays here until you delete it."),
+                    "Kazma makes a bundle of this space, sealed with a password you choose: its chats, memory, files, documents, libraries, settings and secrets. Only you arrive with it: the other members are invited again there, and what Kazma remembers about them, their work and the accounts they connected stay here. Its scheduled jobs, tasks and posts arrive stopped, to be started there. A project folder's files stay on this machine. On the other install, its admin brings the bundle in with that password and chooses who owns it there. Nothing leaves this install: the space stays here until you delete it."),
                 confirmText: _t('settings.space_data_move_go', 'Make the bundle'),
             });
             if (!go) return;
@@ -1149,7 +1149,7 @@
             this.spaceDataBusy = true;
             try {
                 const done = await this._downloadSealed(
-                    '/api/spaces/' + encodeURIComponent(space) + '/move', password, 'kazma-space-' + space + '-move.zip');
+                    '/api/spaces/' + encodeURIComponent(space) + '/move', password, 'kazma-space-' + space + '.kazmaspace');
                 if (done) showToast(_t('settings.space_data_moved', 'The bundle was made. Bring it in on the other install.'), 'success');
             } catch (e) {
                 showToast(this._spaceDataError(null), 'error');

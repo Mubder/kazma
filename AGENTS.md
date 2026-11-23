@@ -16231,6 +16231,24 @@ an install with one account behaves as before.
     otherwise refusing the run -- and the snippet may import the network
     modules; everyone else's runs `--network none`. Never put a member's
     container on the engine's default network.
+  - **The rules are checked, never assumed** (the review of S4-05b,
+    2026-11-23: a stamp and a network say the filter was put in, not that
+    its rules still hold -- another distro sharing the network namespace,
+    `iptables -F` or a firewall backend change takes them out, and the
+    bridge reached everything). Docker requires them: a drop-in
+    (`docker.service.d/kazma-egress.conf`: `Requires=` and `After=`
+    `kazma-egress.service`, and the rules put in again as its
+    `ExecStartPre`), so a Docker whose rules failed does not start. Before
+    every networked run `container_engine_setup.egress_rules_in_effect` runs
+    `kazma-egress-rules ... check` in the distro as root (Docker's jump to
+    `DOCKER-USER`, the bridge's jump to `EGRESS_CHAIN`, every refused range
+    and host address there, the `INPUT` and IPv6 refusals); anything missing
+    refuses the run, never another network. Put in again, the chain is built
+    under a name of its own (`<chain>-NEW`) and swapped in (jump first, the
+    old chain out, then renamed): the bridge is never filtered by an empty
+    chain. Not refused, and said on People's confirm (EN/AR) and in the
+    guide: the network's own public address (hairpin NAT to the router's
+    public side, its forwards and its admin page if it answers there).
   - **Only a member's network needs the filter** (the main session's rule,
     2026-11-23): until the admin gives someone's code the network
     (`member_code.network_given`: a stored `code_network` of anyone but the
@@ -16270,62 +16288,109 @@ an install with one account behaves as before.
     sidebar, EN/AR: the reason and a disabled switch where Kazma cannot
     filter; where it can, a stored allowance shown on, taken back, allowed
     again after the confirmation).
-- **A space moves to another install (S4-06, 2026-11-23).** Only where
-  Spaces is enforced: an import into an install that does not enforce it is
-  refused (`spaces_off`), and so is one on Postgres (`postgres_not_yet`, as
-  S1-27). `kazma_core/spaces/space_move.py` is the one home.
-  - **"Move this space"** (This space's data, a shared space's owner, `POST
-    /api/spaces/{space_id}/move`) makes a bundle (`space_move.FORMAT`) sealed
-    with a password the person chooses (N10, `security/sealed_zip.py`):
-    S1-27's export -- the space's rows by `space_data`'s walk, its settings as
-    stored (`vault://` pointers), its files -- plus its secrets and keys. A
-    personal space stays (`personal_space_stays`). **"Bring in a space"**
+- **A space moves to another install (S4-06, 2026-11-23; reworked after its
+  review the same day).** Only where Spaces is enforced: an import into an
+  install that does not enforce it is refused (`spaces_off`), and so is one
+  on Postgres (`postgres_not_yet`, as S1-27).
+  `kazma_core/spaces/space_move.py` is the one home.
+  - **"Move this space"** (This space's data, a shared space's owner only,
+    `POST /api/spaces/{space_id}/move`, refused `not_the_owner` to anyone
+    else) makes a bundle (`space_move.FORMAT`, `kazma-space-<id>.kazmaspace`);
+    a personal space stays (`personal_space_stays`). **"Bring in a space"**
     (People -> Shared spaces, the admin, `POST /api/spaces/import`: the file,
     its password, who owns it here) takes it in.
-  - **The space's key travels under the password, never a vault key**:
+  - **One AEAD seals the whole file** (`kazma_core/security/sealed_file.py`,
+    the owner's decision): scrypt (`sealed_file.SCRYPT_N`) of a password the
+    person chooses, then AES-256-GCM over chunks of `sealed_file.CHUNK` bytes,
+    each nonce the file's prefix, the chunk's index and whether it is the
+    last, every chunk bound to the header. A chunk moved, dropped, repeated,
+    cut off or grown does not open, so neither does a renamed, added or
+    dropped entry; the header's check tells a wrong password (`wrong_password`)
+    from a changed file (`changed`). `SealedWriter` takes the zip as a
+    stream into a `.partial` file and `SealedReader` serves it by position,
+    each chunk checked again as it is read: no plain copy is written to disk.
+    Inside, `bundle.json` lists every entry and its size, and the import
+    takes exactly those. A JSON entry or a row is read up to
+    `space_move.MAX_JSON_BYTES`, rows a line at a time; an export bigger
+    than an import takes (`space_move.MAX_BUNDLE_BYTES`) is refused before it
+    is written. S1-27's own export keeps `security/sealed_zip.py` (opened
+    with 7-Zip).
+  - **The space's key travels inside the seal, never a vault key**:
     `SecretVault.export_space_sealed` seals the space's secrets with its key
     (sealing first a row still under the vault key) and hands the keys over;
-    the move seals each under a key derived from the password (scrypt,
-    AES-256-GCM bound to the format, the space and the key's id).
     `SecretVault.import_space_sealed` wraps them with the target's own vault
     key, in one transaction that opens every secret before it commits.
-    `sealed_zip.unseal` reads the bundle: its password verifier and each
-    entry's HMAC checked, every entry inflated within a bound.
+  - **Only the owner arrives** (the owner's decision): the bundle maker's
+    account becomes the person chosen; everyone else in the space leaves it,
+    as a member who leaves does (S2-12), and is invited again there. Their
+    memory entry (`member_<id>`, its facts, About me, suggestions, changes),
+    their work (scheduled jobs, swarm tasks, research sessions, X posts and
+    composers), their share of documents and the accounts they connected do
+    not travel. A space secret records who stored it (`vault.STORED_BY` in
+    its metadata, from the bound asker; a refresh with nobody bound keeps the
+    stamp): another person's stays, with its connection's settings; one with
+    no record travels only from a space nobody but its owner was ever in
+    (`_only_ever`). What they wrote stays the space's, written by
+    `identity.DEPARTED_ACCOUNT`, which is no account: work naming it is
+    refused as a departed person's (`identity.work_scope`).
+  - **Every table says how it moves** (`space_move.MOVE_RULES`, a
+    `MoveRule` each: `moves`, with the column that names its person, its
+    memory entry or grant; `stopped`; `out`, with why). A table a space keeps
+    with no rule refuses the move. **Never moved**: ledgers (`llm_calls`,
+    the forget journal, the action and audit records: a planted spend row
+    counted against the daily limit), outboxes and alerts (`cron_deliveries`
+    and `cron_alerts` would have sent and paged outside the space), the old
+    install's own state (a chat app's routing, approval cards, Time Travel's
+    steps), what is rebuilt here, and a chat's state: grants, YOLO windows
+    and pointers. A setting moves only in its space's own forms
+    (`_moved_setting`: the space's X and GitHub connection keys), each value
+    checked (`_check_settings`: `foreign_setting`, `bad_setting`,
+    `missing_secret`).
+  - **Live work arrives stopped** (the owner's decision; a move is a copy
+    and the old install still runs it, `_STOPS`): a scheduled job cancelled
+    (Restore here, to the new owner's own chat), a swarm task cancelled, a
+    research session interrupted, an X post due to publish held for approval
+    (one being sent: outcome not known), an X thread cancelled, a crawl not
+    moved. A chat paused at an approval card arrives with the card expired
+    (`_expire_waiting_cards`: a gate row timed out, the turn not resumed).
+  - **The space's checkpoints land in its own file**
+    (`paths.space_checkpoints_db`, also what the gateway's checkpoint store
+    opens): a bundle travels them under one name (`space_move.CHECKPOINTS`),
+    from `checkpoints.db` or `checkpoints_<space>.db`, and one naming any
+    other checkpoint file is refused.
   - **Refused before anything is written**, each code worded EN/AR
-    (`settings.space_data_err.<code>`): a wrong password, a changed byte,
-    no bundle, too big; anything of the space here already
-    (`space_exists`: the identity store, a row of any store, a setting, a
-    secret, a folder); a row that is not the space's by its store's rule,
-    against the space and the ids of the bundle's own rows (`foreign_row`),
-    a setting or a secret pointer that is not its own (`foreign_setting`,
-    `foreign_secret`); **an id that is here already** (`id_collides`: a
-    row's key, a thread, a setting, a secret's name, a key's id: never
-    merged; integer row ids alone are given new numbers); a table or column
-    this install lacks (never a schema from the bundle).
+    (`settings.space_data_err.<code>`): the password, a changed byte, an
+    entry not listed or listed and missing, too big; anything of the space
+    here already (`space_exists`); a row that is not the space's, a row of a
+    table that never moves (`not_moved`), another member's entry, work or
+    account (`foreign_member`, `members_work`), a person of this install
+    named by a row (`foreign_person`); an id here already (`id_collides`:
+    never merged; integer row ids alone are given new numbers); a pointer
+    to a secret not in the bundle (`foreign_secret`); a table or column this
+    install lacks.
   - **A half-done import leaves the install as it was**: every row store is
-    made by its own code first (`spaces/row_stores.py`, also the test
-    world's); the space is recorded in `space_move.JOURNAL_KEY` before
-    anything is written; a failure takes back what was written by the
-    erase's own walk; one a stop cut off is taken back by the next
-    (`settle_unfinished_imports`); the space joins the identity store last
-    (`people.record_moved_space`, event `space_imported`), so nobody reaches
-    it before. It arrives a plain shared space, its owner the person chosen:
-    the bundle maker's account id is theirs (`ACCOUNT_FIELDS`,
-    `member_<id>`); other people's ids are kept as written.
+    made by its own code first (`spaces/row_stores.py`); the space is
+    recorded in `space_move.JOURNAL_KEY` before anything is written; a
+    failure takes back what was written by the erase's own walk; one a stop
+    cut off is taken back by the next (`settle_unfinished_imports`); the
+    space joins the identity store last (`people.record_moved_space`, event
+    `space_imported`). A project folder's files stay on the old machine (the
+    guide says so).
   - **An erase leaves no activity row**: `activity.record` writes nothing
-    for a space the install no longer holds or is erasing (the move found
-    the erase's own row, written after the space was gone).
+    for a space the install no longer holds or is erasing.
   - Gates: `tests/test_space_bundle_round_trip.py` (S1-27's world exported
-    and brought into a fresh install with another vault key: every table,
-    word, count, setting, secret, file and thread record of A, none of B,
-    the key and secrets absent in the clear; the control, a bundle carrying
-    B's row refused -- and landing with the row check taken out; each
-    refusal leaving the install as it was; a half-done and a cut-off import
-    taken back, the take-back removed as the control; the routes; every
-    refusal worded; then every case of the space matrix on a copy of an
-    install whose space A was moved in), `tests/e2e/test_space_move_browser.py`
-    (by the sidebar, EN/AR: moved, deleted, a wrong password refused, brought
-    back in with a person as owner).
+    and brought into a fresh install with another vault key: every row that
+    moves, word, count, setting, secret, file and thread record of A, none
+    of B; the key and secrets absent in the clear; a bundle carrying B's row
+    refused, and landing with the row check taken out; each refusal leaving
+    the install as it was; a half-done and a cut-off import taken back; the
+    routes; every refusal worded; then every case of the space matrix on an
+    install whose space A was moved in), `tests/test_space_move_review.py`
+    (each of the four decisions and eight review findings, every one failing
+    on 052dd4be3; a table with no rule as the control),
+    `tests/e2e/test_space_move_browser.py` (by the sidebar, EN/AR: moved,
+    the file sealed whole, deleted, a wrong password refused, brought back in
+    with a person as owner).
 - **Every action under the person's name (S2-09, 2026-11-22).** Only where
   Spaces is enforced; an install that does not enforce it records nothing
   more (the memory operator trail and the logs as before).

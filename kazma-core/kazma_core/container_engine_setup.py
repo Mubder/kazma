@@ -64,6 +64,7 @@ __all__ = [
     "DISTRO",
     "DOWNLOADS",
     "EGRESS_BRIDGE",
+    "EGRESS_CHAIN",
     "EGRESS_LABEL",
     "EGRESS_NETWORK",
     "RESTART",
@@ -73,6 +74,7 @@ __all__ = [
     "check",
     "egress_installed",
     "egress_network_ok",
+    "egress_rules_in_effect",
     "install_steps",
     "preflight",
     "remove",
@@ -400,6 +402,27 @@ def egress_network_ok(run: Runner = subprocess.run) -> bool:
                          + EGRESS_LABEL + '"}}')
     lines = text.strip().splitlines()
     return code == 0 and bool(lines) and lines[-1].strip() == f"{EGRESS_BRIDGE}|1"
+
+
+#: The chain the distro's rules jump the bridge's packets to.
+EGRESS_CHAIN = "KAZMA-EGRESS"
+
+
+def egress_rules_in_effect(run: Runner = subprocess.run) -> bool:
+    """The distro's rules for the ``kz-egress`` bridge are in effect now
+    (``kazma-egress-rules ... check``: Docker's jump to ``DOCKER-USER``, the
+    jump to the filtering chain, its refusals, the ``INPUT`` and IPv6
+    refusals). Asked before every run of a member's code on the network
+    (the S4-05b review): a stamp says the filter was put in, not that its
+    rules are still there -- another distro sharing the network namespace,
+    an ``iptables -F`` or a firewall backend change takes them out, and the
+    bridge would then reach everything."""
+    code, text = _out(run, ["wsl.exe", "-d", DISTRO, "-u", "root", "--", "/usr/local/sbin/kazma-egress-rules",
+                            EGRESS_BRIDGE, EGRESS_CHAIN, "check"], timeout=30, env=_wsl_env())
+    if code == 0 and f"EGRESS_IN_EFFECT {EGRESS_BRIDGE} {EGRESS_CHAIN}" in text:
+        return True
+    logger.warning("[engine] the egress rules are not in effect (exit %s): %s", code, text.strip()[-300:])
+    return False
 
 
 def _service_state(run: Runner) -> str | None:

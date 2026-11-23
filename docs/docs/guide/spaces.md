@@ -82,6 +82,16 @@ The tools a space has follow its kind: a sandboxed space has no shell, git,
 IDE or MCP servers, and its code runs in a container that sees only the
 space's folder.
 
+Code Kazma runs for anyone but you has no network unless you allow it for
+that person on People. Allowed, on Kazma's own container engine only, it
+reaches the public internet, including this network's own public address:
+your router's public side, so anything your router forwards from the
+internet, and its admin page if the router answers there. It never reaches
+this computer, your local network or a cloud machine's metadata, and it
+names hosts through Docker's resolver. Before each such run Kazma checks
+that the rules holding it there are in effect, and refuses the run when they
+are not; Docker does not start on the engine without them.
+
 In a shared space with a project folder, a person you give Development to
 gets git, GitHub and the project's files, and nothing of the project's runs
 on this computer for them: no shell, no tests or package installs, git with
@@ -218,16 +228,29 @@ holds. Its owner can:
   choose (at least 12 characters). It opens with 7-Zip, WinZip or Keka; the
   zip tools built into Windows and macOS do not open sealed zips. Kazma
   does not keep the password.
-- **Move a shared space to another Kazma.** *Move this space* makes a
-  bundle sealed with a password you choose: everything in the space, its
-  secrets too, their key sealed under that password. On the other install,
-  its admin brings it in (Settings, *People*, *Shared spaces*, *Bring in a
-  space*) with the file and the password, and chooses who owns it there. It
-  arrives as a plain shared space. Nothing is merged: if anything of the
-  space, or any of its ids, is already on that install, nothing is brought
-  in, and an import that stops halfway is taken back. The space stays where
-  it was until you delete it. A personal space does not move; export it to
-  keep a copy.
+- **Move a shared space to another Kazma.** Only an owner moves it. *Move
+  this space* makes one file sealed whole with a password you choose:
+  scrypt, then AES-256-GCM over every byte, so nobody without the password
+  can read it, change it, or drop or rename anything in it. It holds the
+  space's chats, memory, files, documents, libraries, settings and secrets.
+  **Only you arrive with it:** the other members leave it on arrival and
+  are invited again there. What Kazma remembers about them, their scheduled
+  jobs, tasks, research and posts, and the accounts they connected stay
+  here; what they wrote stays the space's, by someone who left. **What the
+  space was running arrives stopped**, since the space keeps running here
+  too: a scheduled job arrives cancelled (restore it there, and it goes to
+  your own chat there), a swarm task cancelled, a research run interrupted,
+  an X post due to publish waits for approval, and an approval a chat was
+  waiting on arrives expired. **Records of this install never travel:**
+  model spend, the forget journal, the record of actions, approval cards,
+  Time Travel's steps. **A project folder's files stay on this machine:**
+  the space arrives as a plain shared space. On the other install, its
+  admin brings it in (Settings, *People*, *Shared spaces*, *Bring in a
+  space*) with the file and the password, and chooses who owns it there.
+  Nothing is merged: if anything of the space, or any of its ids, is
+  already on that install, nothing is brought in, and an import that stops
+  halfway is taken back. The space stays where it was until you delete it.
+  A personal space does not move; export it to keep a copy.
 - **Delete a shared space.** Everything in it is erased for good. A
   personal space is erased when its person is deleted: the admin erases it
   from People, without seeing what it holds.

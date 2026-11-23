@@ -117,6 +117,7 @@ def filtered(monkeypatch):
     monkeypatch.setattr(docker_cli, "engine_in_force", lambda: "kazma")
     monkeypatch.setattr(container_engine_setup, "egress_installed", lambda: True)
     monkeypatch.setattr(container_engine_setup, "egress_network_ok", lambda run=None: True)
+    monkeypatch.setattr(container_engine_setup, "egress_rules_in_effect", lambda run=None: True)
 
 
 def test_why_the_network_cannot_be_given_here(filtered, monkeypatch) -> None:
@@ -244,6 +245,10 @@ def test_every_refusal_is_worded_in_both_languages() -> None:
                 "settings.people_code_network_on", "settings.people_code_network_off"):
         assert TRANSLATIONS[key]["en"] and TRANSLATIONS[key]["ar"], key
     assert "public internet" in TRANSLATIONS["settings.people_code_network_means"]["en"]
+    # The S4-05b review: the network's own public address is reachable
+    # (hairpin NAT to the router's public side), said in both languages.
+    assert "own public address" in TRANSLATIONS["settings.people_code_network_means"]["en"]
+    assert "العنوان العام لهذه الشبكة" in TRANSLATIONS["settings.people_code_network_means"]["ar"]
 
 
 # ── per space, through the real python_exec ─────────────────────────────
@@ -401,6 +406,33 @@ def test_a_network_that_is_not_setups_refuses_the_run(two_people, filtered, monk
     monkeypatch.setattr(code_exec.asyncio, "create_subprocess_exec", spawn)
     out = _exec_as(A, m.account_b, "print('hi')")
     assert out.startswith("[Exit code: 1]") and "kazma setup engine" in out, out
+    assert spawned == []
+
+
+def test_rules_no_longer_in_effect_refuse_the_run(two_people, filtered, monkeypatch) -> None:
+    """The S4-05b review: the rules flushed after setup (another distro in
+    the namespace, ``iptables -F``) leave setup's network and stamp in place.
+    Asked before every run, the rules themselves refuse it: never a run on an
+    unfiltered bridge. **Control:** the checks before the review -- the
+    stamp and the network -- still pass here."""
+    from kazma_core import container_engine_setup
+
+    m = two_people
+    _stored_allowance(m.account_b)
+    monkeypatch.setattr(container_engine_setup, "egress_rules_in_effect", lambda run=None: False)
+    assert container_engine_setup.egress_installed() and container_engine_setup.egress_network_ok()
+    spawned: list[Any] = []
+
+    async def spawn(*args: Any, **kwargs: Any) -> Any:
+        spawned.append(args)
+        raise AssertionError("a container was started")
+
+    monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "1")
+    code_exec.reset_docker_probe()
+    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "docker")
+    monkeypatch.setattr(code_exec.asyncio, "create_subprocess_exec", spawn)
+    out = _exec_as(A, m.account_b, "print('hi')")
+    assert out.startswith("[Exit code: 1]") and "not in effect" in out and "kazma setup engine" in out, out
     assert spawned == []
 
 

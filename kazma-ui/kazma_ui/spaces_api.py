@@ -11,8 +11,9 @@
 
 Moving a space to another install (S4-06, ``spaces.space_move``):
 
-* ``POST /api/spaces/{space_id}/move`` -- the shared space as a bundle sealed
-  with a password the person chooses (``{"password": ...}``): its owner only.
+* ``POST /api/spaces/{space_id}/move`` -- the shared space as one file sealed
+  whole with a password the person chooses (``{"password": ...}``;
+  ``security.sealed_file``): its owner only.
 * ``POST /api/spaces/import`` -- the admin brings a bundle in: a form with
   ``bundle`` (the file), ``password`` and ``owner`` (the person who will own
   it here).
@@ -285,7 +286,7 @@ def create_spaces_router() -> APIRouter:
                                f"The bundle's password is at least {MIN_PASSWORD} characters.")
             by = space_binding.account_of(auth.get_request_principal(request)) or ""
             folder = Path(tempfile.mkdtemp(prefix="kazma-space-move-"))
-            target = folder / f"kazma-space-{space_id}-move.zip"
+            target = folder / f"kazma-space-{space_id}.kazmaspace"
             made = False
             try:
                 space_move.export_bundle(space_id, target, password, by=by)
@@ -293,7 +294,7 @@ def create_spaces_router() -> APIRouter:
             finally:
                 if not made:
                     shutil.rmtree(folder, ignore_errors=True)
-            return FileResponse(target, media_type="application/zip", filename=target.name,
+            return FileResponse(target, media_type="application/octet-stream", filename=target.name,
                                 background=BackgroundTask(shutil.rmtree, folder, ignore_errors=True))
 
         return await asyncio.to_thread(_guarded, request, space_id, "export", _run)

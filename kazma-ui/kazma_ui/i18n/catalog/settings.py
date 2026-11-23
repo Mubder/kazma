@@ -2890,8 +2890,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.people_code_network_of": {"en": "Code of {name} may use the public internet", "ar": "يمكن لشيفرة {name} استخدام الإنترنت العام"},
     "settings.people_code_network_title": {"en": "Let {name}'s code use the public internet?", "ar": "هل تسمح لشيفرة {name} باستخدام الإنترنت العام؟"},
     "settings.people_code_network_means": {
-        "en": "Their code still runs only in a container, never on this machine, and reaches the public internet only. What it reads in their spaces could leave this install.",
-        "ar": "تبقى شيفرته تعمل في حاوية فقط، لا على هذا الجهاز، ولا تصل إلا إلى الإنترنت العام. ما تقرؤه في مساحاته قد يخرج من هذا التثبيت.",
+        "en": "Their code still runs only in a container, never on this machine, and reaches the public internet only, including this network's own public address: your router's public side, so anything it forwards and its admin page if it answers there. What it reads in their spaces could leave this install.",
+        "ar": "تبقى شيفرته تعمل في حاوية فقط، لا على هذا الجهاز، ولا تصل إلا إلى الإنترنت العام، بما فيه العنوان العام لهذه الشبكة: الجهة العامة من الراوتر، أي كل ما يحوّله وصفحة إدارته إن كان يجيب عليها. ما تقرؤه في مساحاته قد يخرج من هذا التثبيت.",
     },
     "settings.people_code_network_allow": {"en": "Allow", "ar": "اسمح"},
     "settings.people_code_network_on": {"en": "{name}'s code may use the public internet.", "ar": "يمكن لشيفرة {name} استخدام الإنترنت العام."},
@@ -3065,8 +3065,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.space_data_move": {"en": "Move this space", "ar": "نقل هذه المساحة"},
     "settings.space_data_move_title": {"en": "Move {name}?", "ar": "نقل {name}؟"},
     "settings.space_data_move_confirm": {
-        "en": "Kazma makes a bundle of everything in this space: its chats, memory, files, documents, libraries, schedules, settings and secrets, sealed with a password you choose. On the other install, its admin brings it in with that password and chooses who owns it there. Nothing leaves this install: the space stays here until you delete it.",
-        "ar": "يصنع Kazma حزمة بكل ما في هذه المساحة: محادثاتها وذاكرتها وملفاتها ومستنداتها ومكتباتها ومواعيدها وإعداداتها وأسرارها، مختومة بكلمة مرور تختارها. وفي التثبيت الآخر، يُدخلها مسؤوله بكلمة المرور هذه ويختار من يملكها هناك. لا يغادر شيء هذا التثبيت: تبقى المساحة هنا حتى تحذفها.",
+        "en": "Kazma makes a bundle of this space, sealed with a password you choose: its chats, memory, files, documents, libraries, settings and secrets. Only you arrive with it: the other members are invited again there, and what Kazma remembers about them, their work and the accounts they connected stay here. Its scheduled jobs, tasks and posts arrive stopped, to be started there. A project folder's files stay on this machine. On the other install, its admin brings the bundle in with that password and chooses who owns it there. Nothing leaves this install: the space stays here until you delete it.",
+        "ar": "يصنع Kazma حزمة بهذه المساحة مختومة بكلمة مرور تختارها: محادثاتها وذاكرتها وملفاتها ومستنداتها ومكتباتها وإعداداتها وأسرارها. لا يصل معها غيرك: يُدعى الأعضاء الآخرون من جديد هناك، ويبقى هنا ما يتذكره Kazma عنهم وأعمالهم والحسابات التي ربطوها. وتصل مواعيدها ومهامها ومنشوراتها متوقفة، لتُشغَّل هناك. وتبقى ملفات مجلد المشروع على هذا الجهاز. وفي التثبيت الآخر، يُدخل مسؤوله الحزمة بكلمة المرور هذه ويختار من يملكها هناك. لا يغادر شيء هذا التثبيت: تبقى المساحة هنا حتى تحذفها.",
     },
     "settings.space_data_move_go": {"en": "Make the bundle", "ar": "إنشاء الحزمة"},
     "settings.space_data_move_password": {
@@ -3123,6 +3123,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.space_data_err.personal_space_stays": {
         "en": "A personal space stays with its person: export it to keep a copy. A shared space can move.",
         "ar": "تبقى المساحة الخاصة مع صاحبها: صدّرها لتحتفظ بنسخة. أما المساحة المشتركة فيمكن نقلها.",
+    },
+    "settings.space_data_err.not_the_owner": {
+        "en": "Only an owner of the space moves it.",
+        "ar": "لا ينقل المساحة إلا أحد مالكيها.",
+    },
+    "settings.space_data_err.not_moved": {
+        "en": "The bundle holds records that never move between installs, so nothing was brought in.",
+        "ar": "تحوي الحزمة سجلات لا تُنقل بين التثبيتات أبدًا، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.foreign_member": {
+        "en": "The bundle holds what Kazma remembers about someone who does not arrive with the space, so nothing was brought in.",
+        "ar": "تحوي الحزمة ما يتذكره Kazma عن شخص لا يصل مع المساحة، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.members_work": {
+        "en": "The bundle holds work of someone who does not arrive with the space, so nothing was brought in.",
+        "ar": "تحوي الحزمة عملًا لشخص لا يصل مع المساحة، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.foreign_person": {
+        "en": "The bundle names a person of this install, so nothing was brought in.",
+        "ar": "تذكر الحزمة شخصًا من هذا التثبيت، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.bad_setting": {
+        "en": "The bundle holds a setting this install does not take, so nothing was brought in.",
+        "ar": "تحوي الحزمة إعدادًا لا يقبله هذا التثبيت، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.missing_secret": {
+        "en": "The bundle points at a secret it does not carry, so nothing was brought in.",
+        "ar": "تشير الحزمة إلى سرّ لا تحمله، فلم يُدخل شيء.",
     },
     "settings.space_data_delete": {"en": "Delete this space", "ar": "حذف هذه المساحة"},
     "settings.space_data_delete_title": {"en": "Delete {name}?", "ar": "حذف {name}؟"},

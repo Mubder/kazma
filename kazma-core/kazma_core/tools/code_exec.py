@@ -779,11 +779,19 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
     image = (os.environ.get("KAZMA_CODE_EXEC_IMAGE") or DEFAULT_DOCKER_IMAGE).strip()
     joined = "none"
     if network:
-        from kazma_core.container_engine_setup import EGRESS_NETWORK, egress_network_ok
+        from kazma_core import container_engine_setup as engine
+        from kazma_core.container_engine_setup import EGRESS_NETWORK
 
-        if not await asyncio.to_thread(egress_network_ok):
+        if not await asyncio.to_thread(engine.egress_network_ok):
             raise RuntimeError(
                 f"the filtered network ({EGRESS_NETWORK}) is not set up on Kazma's engine: "
+                "run `kazma setup engine`")
+        # The rules themselves, now: a stamp and a network say the filter was
+        # put in, not that its rules still hold (never a run on a bridge they
+        # no longer filter).
+        if not await asyncio.to_thread(engine.egress_rules_in_effect):
+            raise RuntimeError(
+                f"the filtered network's rules ({EGRESS_NETWORK}) are not in effect on Kazma's engine: "
                 "run `kazma setup engine`")
         joined = EGRESS_NETWORK
     script = await asyncio.to_thread(code_file.read_bytes)

@@ -12,10 +12,8 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
-import re
 from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Any
@@ -175,15 +173,8 @@ class CheckpointManager(BaseCheckpointSaver):
         if tenant_id == OWNER_SPACE_ID or (self._shared_table() and spaces_enforced()):
             return self._saver
 
-        # Sanitize the tenant id for use as a FILENAME (audit M-G3): raw
-        # ids like "telegram:12345" contain ':' (illegal on Windows — every
-        # checkpoint write for that tenant failed) and could carry '/'/'..'
-        # path traversal. Hash-mangled, stable per tenant, and bounded.
-        safe_tenant = re.sub(r"[^A-Za-z0-9_-]+", "_", tenant_id).strip("_") or "x"
-        if len(safe_tenant) > 48:
-            digest = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:16]
-            safe_tenant = f"{safe_tenant[:32]}_{digest}"
-
+        # The space's own file: one rule for its name (paths.space_checkpoints_db,
+        # audit M-G3), which a moved space's chats arrive in too (S4-06).
         async with self._saver_lock:
             if tenant_id not in self._tenant_savers:
                 # Under data_dir(), not the literal "kazma-data" relative to
@@ -192,9 +183,9 @@ class CheckpointManager(BaseCheckpointSaver):
                 # (the same bug already fixed for checkpoints.db below, and in
                 # knowledge / bookmarks / documents; now a gate in
                 # tests/test_store_registry.py).
-                from kazma_core.paths import data_dir
+                from kazma_core.paths import space_checkpoints_db
 
-                db_path = data_dir() / f"checkpoints_{safe_tenant}.db"
+                db_path = space_checkpoints_db(tenant_id)
                 db_path.parent.mkdir(parents=True, exist_ok=True)
                 conn = await aiosqlite.connect(str(db_path))
                 await apply_sqlite_pragmas_async(conn)

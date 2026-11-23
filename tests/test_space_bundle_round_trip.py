@@ -10,13 +10,17 @@ Export, import into a fresh install, then the matrix:
 * **the target** is a fresh install of its own (its own data folder, settings
   store and vault, opened with another vault key) with one person, who will
   own the space there. The bundle is brought in by the admin;
-* **then**: every table holds the same rows of A, A's word is in the same
-  tables and columns, B's word is nowhere; the settings, the secrets (opened
-  with the target's own vault key: the space's key travelled under the
-  password), the files and the chats' records are there, the chats now opened
-  by the new owner; the count of A on the target equals the source's. Every
-  case of the space matrix is then run on an install whose space A was moved
-  in (``test_the_matrix_holds_for_a_moved_space``, below).
+* **then**: every table that moves holds the same rows of A (a table that
+  never moves, :data:`space_move.MOVE_RULES` ``out``, holds none here), A's
+  word is in the same tables and columns, B's word is nowhere; the settings,
+  the secrets (opened with the target's own vault key: the space's key
+  travelled inside the seal), the files and the chats' records are there,
+  the chats now opened by the new owner. Every case of the space matrix is
+  then run on an install whose space A was moved in
+  (``test_the_matrix_holds_for_a_moved_space``, below).
+
+The review's decisions and findings are held by
+``tests/test_space_move_review.py``.
 
 Refused before anything is written, each leaving the target as it was: a
 bundle carrying another space's row (**the control**), a space already here,
@@ -41,7 +45,7 @@ from uuid import uuid4
 import pytest
 from kazma_core import paths
 from kazma_core.config_store import get_config_store
-from kazma_core.security.sealed_zip import seal, unseal
+from kazma_core.security.sealed_file import SealedReader, SealedWriter
 from kazma_core.spaces import identity, people, scope, space_data, space_move, threads
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
 
@@ -122,20 +126,62 @@ def _nothing_of(space: str) -> None:
 # ── the move ────────────────────────────────────────────────────────────
 
 
+#: The columns live work's stop rewrites on arrival (space_move._STOPS).
+_STOPPED_COLUMNS = {
+    ("cron.db", "cron_jobs"): {"last_result", "pending_edit", "delivery_target", "delivery_error", "fire_due",
+                               "fire_owner"},
+    ("research_sessions.db", "research_sessions"): {"message"},
+    ("x_publications.db", "x_operations"): {"reason"},
+    ("x_publications.db", "x_threads"): {"token", "owner"},
+}
+
+
+def _moved_where(where: dict[str, int], moved_tables: dict[str, int]) -> dict[str, int]:
+    """*where* (``file:table:column``) as a move leaves it: only the tables
+    the bundle carried (a table that never moves, or whose rows were all
+    another person's, left out), not the columns a stop rewrites, not the
+    settings (checked one by one); the checkpoints under one name, the vault
+    file under one."""
+    out: dict[str, int] = {}
+    for key, n in _normalized(where).items():
+        if key.startswith("file:"):
+            out[key] = out.get(key, 0) + n
+            continue
+        name, table, column = key.split(":", 2)
+        if name == "settings.db":
+            continue
+        store = space_move.CHECKPOINTS if name.startswith("checkpoints") else name
+        if name != "vault.db" and (f"{store}:{table}" not in moved_tables
+                                   or column in _STOPPED_COLUMNS.get((store, table), ())):
+            continue
+        key = f"{store}:{table}:{column}"
+        out[key] = out.get(key, 0) + n
+    return out
+
+
 def test_a_space_moves_whole(moved, target) -> None:
     taken = _bring_in(moved["bundle"], target["person"])
     assert taken["space"] == A and taken["secrets"] == 2 and taken["files"] == 1
-    # Every table holds the same rows of A.
+    # Every table that moves holds the same rows of A; one that never moves
+    # holds none.
     _ctx, found = space_data._walk(A)
-    here = {f"{item.path.name if '*' in item.store else item.store}:{item.table}": item.rows
-            for item in found if item.rows}
+    here: dict[str, int] = {}
+    for item in found:
+        store = space_move._logical_store(item.store, item.path)
+        if item.rows and store is not None:
+            here[f"{store}:{item.table}"] = here.get(f"{store}:{item.table}", 0) + item.rows
+    # The keyword index is not carried: Knowledge's code writes it here, a
+    # row for each moved chunk.
+    assert here.pop("knowledge.db:knowledge_chunks_fts") == moved["manifest"]["tables"]["knowledge.db:knowledge_chunks"]
     assert here == moved["manifest"]["tables"], (here, moved["manifest"]["tables"])
-    # A's word is where it was; B's is nowhere.
-    assert _normalized(_where_word(moved["words"][A])) == _normalized(moved["where"])
+    assert all(space_move.MOVE_RULES[tuple(key.split(":", 1))].how != "out" for key in here)
+    # A's word is where it was, in what moves; B's is nowhere.
+    carried = moved["manifest"]["tables"]
+    assert _moved_where(_where_word(moved["words"][A]), carried) == _moved_where(moved["where"], carried)
     assert _where_word(moved["words"][B]) == {}
-    # Counted the same.
+    # Counted the same, but for what never moves.
     counts = space_data.count_space(A)
-    for key in ("rows", "settings", "secrets", "files", "libraries", "chats"):
+    for key in ("secrets", "files", "libraries", "chats"):
         assert counts[key] == moved["counts"][key], (key, counts[key], moved["counts"][key])
     # The secrets open with this install's own vault key.
     from kazma_core.security.vault import get_vault
@@ -159,22 +205,47 @@ def test_a_space_moves_whole(moved, target) -> None:
     assert not (get_config_store().get(space_move.JOURNAL_KEY) or {})
 
 
-def test_the_key_travels_under_the_password_never_a_vault_key(moved, tmp_path) -> None:
-    plain = tmp_path / "plain.zip"
-    unseal(moved["bundle"], plain, PASSWORD, max_bytes=space_move.MAX_UNPACKED_BYTES)
-    raw = plain.read_bytes()
-    with zipfile.ZipFile(plain) as zipped:
-        contents = b"".join(zipped.read(name) for name in zipped.namelist())
-        keys = json.loads(zipped.read("keys.json"))
-    # Neither the space's key nor a secret's value is in the bundle in the clear.
-    for needle in (moved["key"], base64.b64encode(moved["key"]), moved["only_here"].encode()):
-        assert needle not in raw and needle not in contents
-    assert keys["kdf"] == "scrypt" and len(keys["keys"]) == 1
-    # The keys open with the password alone.
-    assert space_move._open_keys(A, keys, PASSWORD)[0]["key"] == moved["key"]
-    with pytest.raises(space_move.SpaceMoveRefused) as wrong:
-        space_move._open_keys(A, keys, "another-long-password")
-    assert wrong.value.code == "changed"
+def entries_of(bundle: Path, password: str = PASSWORD) -> dict[str, bytes]:
+    """Every entry of *bundle*, opened with *password* (in memory)."""
+    with SealedReader(bundle, password, purpose=space_move.FORMAT,
+                      max_bytes=space_move.MAX_BUNDLE_BYTES) as reader, zipfile.ZipFile(reader) as zipped:
+        return {name: zipped.read(name) for name in zipped.namelist()}
+
+
+def sealed_again(entries: dict[str, bytes], target: Path, *, password: str = PASSWORD,
+                 relist: bool = True) -> Path:
+    """*entries* sealed as a bundle at *target*. *relist*: the manifest's
+    list of entries made to match them (else as it is)."""
+    entries = dict(entries)
+    if relist:
+        manifest = json.loads(entries["bundle.json"])
+        manifest["entries"] = {name: len(data) for name, data in entries.items() if name != "bundle.json"}
+        entries["bundle.json"] = json.dumps(manifest).encode("utf-8")
+    writer = SealedWriter(target, password, purpose=space_move.FORMAT)
+    with zipfile.ZipFile(writer, "w", compression=zipfile.ZIP_DEFLATED) as zipped:
+        for name, data in entries.items():
+            zipped.writestr(name, data)
+    writer.finish()
+    return target
+
+
+def test_the_key_travels_inside_the_seal_never_a_vault_key(moved, tmp_path) -> None:
+    raw = moved["bundle"].read_bytes()
+    entries = entries_of(moved["bundle"])
+    keys = json.loads(entries["keys.json"])
+    # Neither the space's key nor a secret's value is in the bundle in the
+    # clear, nor an entry's name: the whole file is sealed.
+    for needle in (moved["key"], base64.b64encode(moved["key"]), moved["only_here"].encode(),
+                   b"secrets.jsonl", b"keys.json", b"bundle.json", b"stores/"):
+        assert needle not in raw
+    # Inside the seal, the key the vault holds (wrapped there with this
+    # install's own vault key on import).
+    assert [base64.b64decode(k["key"]) for k in keys] == [moved["key"]]
+    from kazma_core.security.sealed_file import SealedFileRefused
+
+    with pytest.raises(SealedFileRefused) as wrong:
+        entries_of(moved["bundle"], "another-long-password")
+    assert wrong.value.code == "wrong_password"
 
 
 # ── refused, the target as it was ───────────────────────────────────────
@@ -182,18 +253,10 @@ def test_the_key_travels_under_the_password_never_a_vault_key(moved, tmp_path) -
 
 def _rebuilt(source: Path, target: Path, change: Any) -> Path:
     """*source*'s bundle opened, changed by *change(entries)* and sealed again
-    with the same password."""
-    plain = target.with_suffix(".plain.zip")
-    unseal(source, plain, PASSWORD, max_bytes=space_move.MAX_UNPACKED_BYTES)
-    with zipfile.ZipFile(plain) as zipped:
-        entries = {name: zipped.read(name) for name in zipped.namelist()}
+    with the same password (its list of entries made to match)."""
+    entries = entries_of(source)
     change(entries)
-    remade = target.with_suffix(".remade.zip")
-    with zipfile.ZipFile(remade, "w") as zipped:
-        for name, data in entries.items():
-            zipped.writestr(name, data)
-    seal(remade, target, PASSWORD)
-    return target
+    return sealed_again(entries, target)
 
 
 def _carrying_b(moved: dict[str, Any], tmp_path: Path) -> tuple[Path, str]:
@@ -273,10 +336,7 @@ def test_an_id_here_already_is_refused_never_merged(moved, target) -> None:
 
 
 def _bundle_line(moved: dict[str, Any], store: str, table: str, tmp: Path | None = None) -> str:
-    plain = (tmp or moved["folder"]) / f"read-{uuid4().hex[:6]}.zip"
-    unseal(moved["bundle"], plain, PASSWORD, max_bytes=space_move.MAX_UNPACKED_BYTES)
-    with zipfile.ZipFile(plain) as zipped:
-        return zipped.read(f"stores/{store}/{table}.jsonl").decode("utf-8").splitlines()[0]
+    return entries_of(moved["bundle"])[f"stores/{store}/{table}.jsonl"].decode("utf-8").splitlines()[0]
 
 
 def test_an_install_without_spaces_refuses(moved, target, monkeypatch) -> None:
@@ -414,11 +474,8 @@ def test_the_move_route_is_the_owners(tmp_path, monkeypatch) -> None:
             short = client.post(f"/api/spaces/{shared['id']}/move", json={"password": "short"})
             made = client.post(f"/api/spaces/{shared['id']}/move", json={"password": PASSWORD})
         assert short.status_code == 400 and short.json()["error"] == "password_too_short"
-        assert made.status_code == 200 and made.headers["content-type"] == "application/zip", made.text
-        bundle = tmp_path / "moved.zip"
-        bundle.write_bytes(made.content)
-        with zipfile.ZipFile(bundle) as zipped:
-            assert {info.compress_type for info in zipped.infolist()} == {99}  # every entry sealed
+        assert made.status_code == 200 and made.headers["content-type"] == "application/octet-stream", made.text
+        assert made.content.startswith(b"KZSEALED")  # the whole file sealed
 
 
 def _refusal_codes() -> set[str]:
@@ -431,7 +488,7 @@ def _refusal_codes() -> set[str]:
 
     source = Path(space_move.__file__).read_text(encoding="utf-8")
     codes = set(re.findall(r'SpaceMoveRefused\(\s*"([a-z_]+)"', source))
-    codes |= {"wrong_password", "too_big", "changed"}  # SealedZipRefused, as the move answers it
+    codes |= {"wrong_password", "too_big", "changed"}  # SealedFileRefused, as the move answers it
     route = Path(api.__file__).read_text(encoding="utf-8")
     block = route[route.index('@router.post("/import")'):route.index('@router.post("/{space_id}/move")')]
     codes |= set(re.findall(r'_answer\("([a-z_]+)"', block))

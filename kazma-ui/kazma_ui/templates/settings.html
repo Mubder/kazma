@@ -2801,7 +2801,7 @@
             <p class="form-hint">{{ t('settings.people_bring_in_help') }}</p>
             <div class="form-group" id="people-bring-in">
                 <label class="form-label" for="people-bring-in-file">{{ t('settings.people_bring_in_file') }}</label>
-                <input type="file" class="form-input" id="people-bring-in-file" accept=".zip,application/zip" @change="bringIn.file = $event.target.files[0] || null">
+                <input type="file" class="form-input" id="people-bring-in-file" accept=".kazmaspace" @change="bringIn.file = $event.target.files[0] || null">
                 <label class="form-label" for="people-bring-in-password">{{ t('settings.people_bring_in_password') }}</label>
                 <input type="password" class="form-input" id="people-bring-in-password" x-model="bringIn.password" autocomplete="off">
                 <label class="form-label" for="people-bring-in-owner">{{ t('settings.people_bring_in_owner') }}</label>

@@ -44,7 +44,9 @@ def code_exec() -> str:
 @pytest.mark.parametrize(
     "flag",
     [
-        '"--network", "none"',
+        # The default every container gets (S4-05b: a person the admin
+        # allowed the network joins kazma-egress instead, said on the page).
+        'joined = "none"',
         '"--memory"',
         '"--memory-swap"',
         '"--cpus", "1"',

@@ -269,6 +269,11 @@ class SpaceSecretsRefused(ValueError):
         self.code = code
 
 
+#: The metadata field naming the person who stored a space's secret (Spaces
+#: S4-06): a connection another member made stays when the space moves.
+STORED_BY = "stored_by"
+
+
 def secret_scope(name: str) -> tuple[str, str | None]:
     """Whose secret *name* is once Spaces is enforced: ``("install", None)``,
     or ``("space", <id>)`` when the name itself carries its space, or
@@ -995,9 +1000,9 @@ class SecretVault:
             tid = self._tenant_filter(tenant_id)
         now = datetime.now(UTC).isoformat()
         sid = _secrets.token_hex(16)
-        meta = json.dumps(metadata or {})
 
         with self._lock:
+            meta = self._stamped_metadata(name, metadata, tid)
             # Atomic upsert: use BEGIN/COMMIT so a crash between DELETE and
             # INSERT doesn't lose the secret.
             self._conn.execute("BEGIN")
@@ -1021,6 +1026,31 @@ class SecretVault:
                 raise
         logger.info("[Vault] Stored secret '%s' (category=%s, tenant=%s)", name, category, tid or "global")
         return sid
+
+    def _stamped_metadata(self, name: str, metadata: dict[str, Any] | None, tenant: str | None) -> str:
+        """*metadata* as stored, with who stored a space's secret
+        (:data:`STORED_BY`, the person the work is for): an account another
+        member connected does not move with the space (Spaces S4-06). Work
+        that names no person -- a token refresh -- keeps the stamp the row
+        had. Called with the vault's lock held."""
+        meta = dict(metadata or {})
+        if secret_scope(name)[0] != "install":
+            from kazma_core.spaces.scope import bound_asker
+
+            who = str(bound_asker() or "")
+            if not who:
+                prior = self._conn.execute(
+                    "SELECT metadata FROM secrets WHERE name = ? AND "
+                    "COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__') ORDER BY rowid DESC LIMIT 1",
+                    (name, tenant)).fetchone()
+                try:
+                    held = json.loads(prior["metadata"] or "{}") if prior is not None else {}
+                except ValueError:
+                    held = {}
+                who = str(held.get(STORED_BY) or "") if isinstance(held, dict) else ""
+            if who:
+                meta[STORED_BY] = who
+        return json.dumps(meta)
 
     @staticmethod
     def _space_for_write(name: str, tenant_id: str | None) -> str | None:
@@ -1088,8 +1118,8 @@ class SecretVault:
         """(rows written, id of the global row) -- see :meth:`store_install_scoped`."""
         from cryptography.exceptions import InvalidTag
 
-        meta = json.dumps(metadata or {})
         with self._lock:
+            meta = self._stamped_metadata(name, metadata, None)
             rows = self._conn.execute(
                 "SELECT id, name, tenant_id, key_id, encrypted_value, nonce FROM secrets "
                 "WHERE name = ? ORDER BY rowid DESC",

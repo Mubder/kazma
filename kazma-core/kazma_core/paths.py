@@ -269,6 +269,23 @@ def checkpoints_db() -> str:
     return str(data_dir() / "checkpoints.db")
 
 
+def space_checkpoints_db(space_id: str) -> Path:
+    """A space's own checkpoint file (``checkpoints_<space>.db``): the chats
+    of every space but the owner's are kept there on SQLite (the gateway's
+    checkpoint store), and a moved space's arrive there (Spaces S4-06). The
+    id is made a safe file name (audit M-G3: ``telegram:12345`` holds a
+    ``:``, illegal on Windows, and an id could carry ``/`` or ``..``),
+    stable per space and bounded."""
+    import hashlib
+    import re
+
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", space_id).strip("_") or "x"
+    if len(safe) > 48:
+        digest = hashlib.sha256(space_id.encode("utf-8")).hexdigest()[:16]
+        safe = f"{safe[:32]}_{digest}"
+    return data_dir() / f"checkpoints_{safe}.db"
+
+
 def chat_spool_db(sessions_db: str | Path) -> Path:
     """The spool beside a chat transcript store, where a save the store
     refused waits (``chat_sessions.db`` -> ``chat_sessions_spool.db``). The

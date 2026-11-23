@@ -74,6 +74,7 @@ from kazma_core.spaces.scope import (
 )
 
 __all__ = [
+    "DEPARTED_ACCOUNT",
     "ENFORCED_KEY",
     "REGISTRY_KEY",
     "IdentityError",
@@ -125,6 +126,13 @@ class IdentityError(ValueError):
 
 class IdentityUnavailable(RuntimeError):
     """The identity store could not be read. Never read as "no accounts"."""
+
+
+#: Who a moved space's rows name for a person who did not arrive with it
+#: (Spaces S4-06: only its owner arrives; the others leave it on arrival).
+#: No account is ever this id; work naming it is a departed person's, so it
+#: is refused (:func:`work_scope`), never run as the space's acting account.
+DEPARTED_ACCOUNT = "departed"
 
 
 def _now() -> str:
@@ -625,8 +633,9 @@ def work_scope(space_id: str, asker: str | None) -> tuple[str, str] | None:
 
 def _was_a_person(registry: dict[str, Any], who: str) -> bool:
     """Whether *who* is, or was, a person of this install: an account now,
-    or one the record of account changes names (a deleted account)."""
-    if who in (registry.get("accounts") or {}):
+    or one the record of account changes names (a deleted account), or
+    someone who left a moved space on its arrival (:data:`DEPARTED_ACCOUNT`)."""
+    if who == DEPARTED_ACCOUNT or who in (registry.get("accounts") or {}):
         return True
     return any(isinstance(e, dict) and e.get("account") == who for e in registry.get("events") or ())
 
@@ -764,7 +773,7 @@ def remove_member(space_id: str, account_id: str) -> None:
 def _account_from_local_user(user: dict[str, Any]) -> dict[str, Any]:
     name = str(user.get("username") or "").strip()
     raw_id = str(user.get("user_id") or name).strip().lower()
-    if valid_account_id(raw_id) and raw_id != OWNER_ACCOUNT_ID:
+    if valid_account_id(raw_id) and raw_id not in (OWNER_ACCOUNT_ID, DEPARTED_ACCOUNT):
         account_id = raw_id
     else:
         # The same user reads as the same account every time, before and

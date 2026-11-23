@@ -14,7 +14,7 @@ The rules are held by ``tests/test_space_bundle_round_trip.py``.
 from __future__ import annotations
 
 import os
-import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -91,10 +91,11 @@ def test_the_owner_moves_a_space_and_the_admin_brings_it_in(lang):
             field.fill(PASSWORD)
             with pg.expect_download() as download:
                 _modal_action(pg, _t("common.ok", lang))
-            assert download.value.suggested_filename == f"kazma-space-{space}-move.zip"
+            assert download.value.suggested_filename == f"kazma-space-{space}.kazmaspace"
             bundle = download.value.path()
-            with zipfile.ZipFile(bundle) as zipped:
-                assert {info.compress_type for info in zipped.infolist()} == {99}  # sealed
+            raw = Path(bundle).read_bytes()
+            assert raw[:8] == b"KZSEALED"  # sealed whole
+            assert b"secrets.jsonl" not in raw  # no entry name in the clear
 
             # The owner deletes it here.
             pg.locator("#space-data-delete").click()

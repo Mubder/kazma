@@ -74,6 +74,31 @@ elif op == "-D":
         tables[chain].remove(rest)
     else:
         code = 1
+elif op == "-S":
+    if chain not in tables:
+        code = 1
+    else:
+        print(("-P %s ACCEPT" if chain in ("INPUT", "FORWARD", "OUTPUT") else "-N %s") % chain)
+        for rule in tables[chain]:
+            print(" ".join(["-A", chain, *rule]))
+elif op == "-E":
+    # A rename keeps every jump to the chain (iptables(8): "cosmetic").
+    new = rest[0]
+    if chain not in tables or new in tables:
+        code = 1
+    else:
+        tables[new] = tables.pop(chain)
+        for rules in tables.values():
+            for rule in rules:
+                if "-j" in rule and rule[rule.index("-j") + 1] == chain:
+                    rule[rule.index("-j") + 1] = new
+log = state_file.with_name("ops.log")
+with log.open("a") as ops:
+    ops.write(json.dumps([family, *args]) + "\n")
+    if family == "v4" and "DOCKER-USER" in tables:
+        jumps = [[r[r.index("-j") + 1], len(tables.get(r[r.index("-j") + 1], []))]
+                 for r in tables["DOCKER-USER"] if "-j" in r]
+        ops.write(json.dumps(["jumps", jumps]) + "\n")
 state_file.write_text(json.dumps(state))
 sys.exit(code)
 '''
@@ -102,7 +127,7 @@ def stand_in(tmp_path):
     script = tmp_path / "kazma-egress-rules"
     script.write_bytes(_rules_script().encode("utf-8"))
 
-    def run(*args: str, hosts: list[str] | None = None) -> str:
+    def call(*args: str, hosts: list[str] | None = None, shell: str | None = None) -> subprocess.CompletedProcess:
         env = dict(os.environ)
         env["PATH"] = bin_dir.as_posix() + os.pathsep + env.get("PATH", "")
         if hosts is not None:
@@ -111,14 +136,29 @@ def stand_in(tmp_path):
             env["KAZMA_EGRESS_HOSTS"] = listed.as_posix()
         else:
             env["KAZMA_EGRESS_HOSTS"] = (tmp_path / "no-such-file").as_posix()
-        done = subprocess.run([find_bash(), "-c", f'PATH="{bin_dir.as_posix()}:$PATH" bash "{script.as_posix()}" "$@"',
-                               "bash", *args], capture_output=True, text=True, env=env, timeout=120, check=False)
-        assert done.returncode == 0, done.stderr + done.stdout
+        command = shell if shell is not None else f'bash "{script.as_posix()}" "$@"'
+        return subprocess.run([find_bash(), "-c", f'PATH="{bin_dir.as_posix()}:$PATH" {command}', "bash", *args],
+                              capture_output=True, text=True, env=env, timeout=120, check=False)
+
+    def run(*args: str, hosts: list[str] | None = None, expect_code: int = 0) -> str:
+        done = call(*args, hosts=hosts)
+        assert done.returncode == expect_code, done.stderr + done.stdout
         return done.stdout
 
     def rules() -> dict:
         return json.loads(state.read_text()) if state.exists() else {}
 
+    def save(changed: dict) -> None:
+        state.write_text(json.dumps(changed))
+
+    def jumps_seen() -> list[list[str]]:
+        log = state.with_name("ops.log")
+        lines = log.read_text().splitlines() if log.exists() else []
+        return [json.loads(line)[1] for line in lines if json.loads(line)[0] == "jumps"]
+
+    run.save = save
+    run.jumps_seen = jumps_seen
+    run.call = call
     return run, rules
 
 
@@ -198,5 +238,120 @@ def test_the_installer_keeps_only_addresses_and_starts_before_docker() -> None:
     unit = text[text.index("<<'UNIT'"):text.index("\nUNIT\n")]
     assert "Before=docker.service" in unit and "WantedBy=docker.service" in unit
     assert "Type=oneshot" in unit and "ExecStart=/usr/local/sbin/kazma-egress-rules" in unit
+    # Docker requires the rules (the S4-05b review: WantedBy alone started
+    # Docker when they failed) and puts them in again before it starts.
+    assert "/etc/systemd/system/docker.service.d/kazma-egress.conf" in text
+    drop_in = text[text.index("<<'DROPIN'"):text.index("\nDROPIN\n")]
+    assert "Requires=kazma-egress.service" in drop_in and "After=kazma-egress.service" in drop_in
+    assert "ExecStartPre=/usr/local/sbin/kazma-egress-rules" in drop_in
+    assert text.index("DROPIN") < text.index("systemctl daemon-reload")
     assert "{1,3}" in text.split("for addr in")[1].split("done")[0]  # only an IPv4 address is kept
     assert text.rstrip().endswith('echo "EGRESS_READY"')
+
+
+# ── the S4-05b review: rules in effect, checked before every run ───────────
+
+
+def _as_docker_starts(run, rules) -> dict:
+    """Docker's own jump from FORWARD to DOCKER-USER (made at its start)."""
+    state = rules()
+    state["v4"]["FORWARD"].insert(0, ["-j", "DOCKER-USER"])
+    run.save(state)
+    return state
+
+
+_TCP_RESET = ["-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"]
+
+#: Each way the rules stop being in effect after they were put in.
+_BREAKS = {
+    "the bridge's jump": lambda st: st["v4"]["DOCKER-USER"].clear(),
+    "Docker's jump": lambda st: st["v4"]["FORWARD"].remove(["-j", "DOCKER-USER"]),
+    "a refused range": lambda st: st["v4"]["KAZMA-EGRESS"].remove(["-d", "169.254.0.0/16", *_TCP_RESET]),
+    "this computer's address": lambda st: st["v4"]["KAZMA-EGRESS"].remove(["-d", HOST, *_TCP_RESET]),
+    "the chain flushed": lambda st: st["v4"]["KAZMA-EGRESS"].clear(),
+    "INPUT": lambda st: st["v4"]["INPUT"].clear(),
+    "IPv6": lambda st: st["v6"]["FORWARD"].clear(),
+    "iptables -F": lambda st: [chain.clear() for family in st.values() for chain in family.values()],
+}
+
+
+def test_check_finds_the_rules_in_effect_and_each_way_they_are_not(stand_in) -> None:
+    import copy
+
+    run, rules = stand_in
+    run(hosts=[HOST])
+    good = _as_docker_starts(run, rules)
+    assert "EGRESS_IN_EFFECT kz-egress KAZMA-EGRESS" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
+    for name, broken in _BREAKS.items():
+        state = copy.deepcopy(good)
+        broken(state)
+        run.save(state)
+        out = run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST], expect_code=3)
+        assert "EGRESS_NOT_IN_EFFECT" in out, name
+    run.save(good)
+    assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
+
+
+def test_kazma_asks_the_rules_themselves_before_a_run(stand_in) -> None:
+    """``egress_rules_in_effect`` runs the distro's check as root, and is
+    False for every break above. **Control:** a stamp and a network of the
+    name -- the checks before the review -- say nothing of any of them."""
+    import copy
+
+    run, rules = stand_in
+    run(hosts=[HOST])
+    good = _as_docker_starts(run, rules)
+    asked: list[list[str]] = []
+
+    def wsl(argv, **_kw):
+        asked.append(list(argv))
+        assert argv[:6] == ["wsl.exe", "-d", ces.DISTRO, "-u", "root", "--"], argv
+        assert argv[6] == "/usr/local/sbin/kazma-egress-rules", argv
+        done = run.call(*argv[7:], hosts=[HOST])
+        return subprocess.CompletedProcess(argv, done.returncode, done.stdout.encode(), done.stderr.encode())
+
+    assert ces.egress_rules_in_effect(wsl) is True
+    assert asked[-1][7:] == ["kz-egress", "KAZMA-EGRESS", "check"]
+    for name, broken in _BREAKS.items():
+        state = copy.deepcopy(good)
+        broken(state)
+        run.save(state)
+        assert ces.egress_rules_in_effect(wsl) is False, name
+
+
+def test_a_reapply_keeps_the_bridge_filtered_throughout(stand_in) -> None:
+    """Put in again, the new chain is built under its own name and swapped
+    in: after every iptables call, the bridge's packets jump to a chain that
+    holds all its refusals. **Control:** the re-apply before the review
+    (flush, then append) leaves them jumping to an empty chain."""
+    run, rules = stand_in
+    run(hosts=[HOST])
+    full = len(rules()["v4"]["KAZMA-EGRESS"])
+    seen = len(run.jumps_seen())
+    run(hosts=[HOST])
+    during = run.jumps_seen()[seen:]
+    assert during and full > 20
+    for snapshot in during:
+        assert any(count == full for _chain, count in snapshot), snapshot
+    assert rules()["v4"]["DOCKER-USER"] == [["-i", "kz-egress", "-j", "KAZMA-EGRESS"]]
+    assert "KAZMA-EGRESS-NEW" not in rules()["v4"]
+    # Control: the old order.
+    seen = len(run.jumps_seen())
+    done = run.call(shell="iptables -w -F KAZMA-EGRESS && iptables -w -A KAZMA-EGRESS -j RETURN")
+    assert done.returncode == 0, done.stderr
+    old = run.jumps_seen()[seen:]
+    assert any(all(count < full for _chain, count in snapshot) for snapshot in old), old
+
+
+def test_a_reapply_that_stopped_half_way_is_finished(stand_in) -> None:
+    """A run killed between its new chain's jump and the swap leaves the new
+    chain jumped and the old gone: the next run adopts it, nothing doubled."""
+    run, rules = stand_in
+    run(hosts=[HOST])
+    once = rules()
+    state = rules()
+    state["v4"]["KAZMA-EGRESS-NEW"] = state["v4"].pop("KAZMA-EGRESS")
+    state["v4"]["DOCKER-USER"] = [["-i", "kz-egress", "-j", "KAZMA-EGRESS-NEW"]]
+    run.save(state)
+    run(hosts=[HOST])
+    assert rules() == once

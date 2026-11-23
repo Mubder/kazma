@@ -138,7 +138,9 @@ def make_row_stores() -> list[str]:
     made.append("hitl_gates.db")
     from kazma_core.runs.incidents import get_incident_store
 
-    get_incident_store()
+    # Its table is made at its first use (the run supervisor's, on a running
+    # install): made here, or a world of stores would miss it.
+    get_incident_store()._connect().close()
     made.append("run_incidents.db")
     from kazma_core.observability import answer_quality, llm_ledger
 
@@ -159,7 +161,14 @@ def make_row_stores() -> list[str]:
     # append-only guards: made with it.
     catalog = DocumentRepository(root / "documents.db")
     try:
-        DocumentJobRepository(catalog)
+        jobs = DocumentJobRepository(catalog)
+        # The audit and the intake admissions share the file: made by the
+        # ingestion service at its start on a running install.
+        from kazma_core.documents.admission import IntakeAdmissionStore
+        from kazma_core.documents.audit import DocumentAuditStore
+
+        DocumentAuditStore(catalog)
+        IntakeAdmissionStore(jobs)
     finally:
         catalog.close()
     made.append("documents.db")

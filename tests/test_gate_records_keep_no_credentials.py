@@ -135,6 +135,31 @@ async def _pipeline_writer() -> None:
     )
 
 
+async def _space_move_writer(monkeypatch, folder: Path) -> None:
+    """A moved chat paused at an approval card whose call holds the secret:
+    the import expires it (Spaces S4-06)."""
+    from contextlib import closing
+
+    from langgraph.checkpoint.base import empty_checkpoint
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    from langgraph.types import Interrupt
+
+    from kazma_core import paths
+    from kazma_core.checkpoint_serde import kazma_checkpoint_serde
+    from kazma_core.spaces import space_move
+
+    file = folder / "moved_checkpoints.db"
+    monkeypatch.setattr(paths, "space_checkpoints_db", lambda _space: file)
+    with closing(sqlite3.connect(str(file), check_same_thread=False)) as conn:
+        saver = SqliteSaver(conn, serde=kazma_checkpoint_serde())
+        saver.setup()
+        config = saver.put({"configurable": {"thread_id": "moved", "checkpoint_ns": ""}}, empty_checkpoint(),
+                           {"source": "loop", "step": 1}, {})
+        card = {"tool": "http_request", "args": ARGS, "message": f"token={SECRET}"}
+        saver.put_writes(config, [("__interrupt__", (Interrupt(value=card, id="intr-moved"),))], "task-1")
+    assert await asyncio.to_thread(space_move._expire_waiting_cards, "space-a", ["moved"]) == 1
+
+
 async def _claim_create_writer() -> None:
     from kazma_ui.hitl_gate_bridge import gate_claimed
 
@@ -151,6 +176,7 @@ WRITERS = {
     ("kazma-core/kazma_core/swarm/safety.py", "_ask_the_bus"): "swarm_bus",
     ("kazma-core/kazma_core/safety/bus_bridge.py", "request_approval_via_registry"): "bus_bridge",
     ("kazma-core/kazma_core/swarm/checkpoint_manager.py", "_gate_register_pipeline"): "pipeline",
+    ("kazma-core/kazma_core/spaces/space_move.py", "_expire_waiting_cards"): "space_move",
 }
 #: Functions that build a GateRow from a row the registry already holds.
 READERS = {("kazma-core/kazma_core/safety/hitl_gates.py", "_row_to_gate")}
@@ -165,6 +191,7 @@ def test_no_writer_puts_a_credential_in_the_record(gate_db, monkeypatch, driver)
         "swarm_bus": lambda: _swarm_bus_writer(monkeypatch),
         "bus_bridge": lambda: _bus_bridge_writer(monkeypatch),
         "pipeline": lambda: _pipeline_writer(),
+        "space_move": lambda: _space_move_writer(monkeypatch, gate_db.parent),
     }[driver]
     asyncio.run(run())
     _assert_no_secret(gate_db)
