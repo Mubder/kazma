@@ -77,9 +77,16 @@ def y(monkeypatch):
 class _JobGraph:
     """A scheduled task's turn: the tools its model is offered, and its
     declared executor calling ``web_search`` (the product's own executor and
-    tool check, in the fire's scope)."""
+    tool check, in the fire's scope).
 
-    def __init__(self) -> None:
+    The registry is the one the matrix shares (``tests._chat_space_cases``),
+    so the stand-in ``web_search`` goes in through the test's monkeypatch and
+    leaves with the test. Written straight into ``_tools`` it stayed for every
+    later test of the process: the matrix's ``tool:web_search`` case, in the
+    same fast_test chunk at fae123ffd, called the stand-in and found no search
+    recorded (2026-11-22)."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from tests.test_feature_grants import _registry
 
         self.registry = _registry()
@@ -92,7 +99,7 @@ class _JobGraph:
             self.entered.append("web_search")
             return "results"
 
-        self.registry._tools["web_search"] = replace(tool, func=recorder, is_async=True)
+        monkeypatch.setitem(self.registry._tools, "web_search", replace(tool, func=recorder, is_async=True))
 
     async def ainvoke(self, state, config=None):
         from kazma_core.agent_runner import DeclaredToolExecutor
@@ -111,7 +118,7 @@ def _job_graph(matrix: Matrix) -> _JobGraph:
     """A :class:`_JobGraph`; building the tool registry reads the stored
     Spaces switch into the process and names the app's chat senders, so the
     test's switch and sender are set again."""
-    graph = _JobGraph()
+    graph = _JobGraph(matrix.monkeypatch)
     matrix.monkeypatch.setattr(scope, "_enforced", True)
     backends, backend = matrix.telegram  # the app the registry built named its own sender
     matrix.monkeypatch.setitem(backends, "telegram", backend)

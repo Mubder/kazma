@@ -46,21 +46,47 @@ def origin():
         thread.join(3)
 
 
-@pytest.fixture
-async def chromium():
-    pytest.importorskip("playwright.async_api")
+#: Whether this machine starts the bounded driver and has its Chromium: asked
+#: once per process. Every test used to start a driver of its own under ten
+#: seconds; on a loaded full run that start alone could take longer, and the
+#: whole file errored. Room for a loaded machine, and one start instead of 22.
+_READINESS: dict[str, object] = {}
+_READY_BOUND_S = 45
+#: Every render here is bounded under pytest's own 120 s (fast_test's
+#: ``--timeout=120``, thread method: it ends the whole chunk process). A render
+#: that stalls then fails its test, and its cancel ends the browser's process
+#: tree at once (the driver's watchdog stops a cancelled render's driver):
+#: the chunk goes on. The browser loop's own default is 180 s.
+_RENDER_BOUND_S = 90
+
+
+async def _driver_ready() -> bool:
     from kazma_core.playwright_loop import run_in_browser_loop
     from kazma_core.web_acquire.browser_driver import BrowserDriver
 
     async def ready():
         driver = BrowserDriver()
         try:
-            async with asyncio.timeout(10):
+            async with asyncio.timeout(_READY_BOUND_S):
                 runtime = await driver.start()
                 return Path(runtime.chromium.executable_path).is_file()
         finally:
             await driver.stop()
-    if not await run_in_browser_loop(ready(), timeout=15):
+    return await run_in_browser_loop(ready(), timeout=_READY_BOUND_S + 15)
+
+
+@pytest.fixture
+async def chromium():
+    pytest.importorskip("playwright.async_api")
+    if "answer" not in _READINESS:
+        try:
+            _READINESS["answer"] = await _driver_ready()
+        except Exception as exc:  # noqa: BLE001 -- kept and raised for every test, as each start raised
+            _READINESS["answer"] = exc
+    answer = _READINESS["answer"]
+    if isinstance(answer, Exception):
+        raise answer
+    if not answer:
         pytest.skip("Chromium executable is not installed")
 
 
@@ -135,64 +161,147 @@ async def render_fixture(url, *, scope=None, profile="generic"):
     try:
         return await run_in_browser_loop(render_document(
             url,
-            challenge=lambda html, status: False, profile=profile))
+            challenge=lambda html, status: False, profile=profile), timeout=_RENDER_BOUND_S)
     finally:
         if token is not None:
             active_scope.reset(token)
 
 
-@pytest.mark.asyncio
-async def test_real_chromium_cancel_joins_http_stream_and_owned_teardown(chromium, broker_transport, monkeypatch):
-    from kazma_core.web_acquire import resources
-    from kazma_core.web_acquire.browser import BrowserJob
+class _OwnedStream(httpx.AsyncByteStream):
+    """A response body that never ends, whose close waits to be released:
+    the render can only finish by being cancelled, and its cancellation only
+    after the test lets the close end. Released from any thread, also before
+    the body was ever read.
 
-    started, closing, closed = threading.Event(), threading.Event(), threading.Event()
-    pool = resources._CapacityPool('real fixture browsers', 1, 1)
-    monkeypatch.setattr(resources, '_BROWSERS', pool)
-    owners = []
-    original_launch = BrowserJob._launch_impl
-    async def launch(owner):
-        owners.append(owner)
-        await original_launch(owner)
-    monkeypatch.setattr(BrowserJob, '_launch_impl', launch)
+    The close runs to its end whatever cancels reach it, as a socket's close
+    does. The broker re-delivers its cancel every half second
+    (``bounded_cancel._REDELIVER_S``) for up to five; a close that a
+    re-delivered cancel ended let the render finish before the test, on a
+    loaded machine more than half a second behind, had seen the close begin.
+    """
 
-    class OwnedStream(httpx.AsyncByteStream):
-        async def __aiter__(self):
-            self.loop = asyncio.get_running_loop()
-            self.release = asyncio.Event()
-            started.set()
-            await asyncio.Event().wait()
-            yield b'unreachable'
+    def __init__(self):
+        self.started, self.closing, self.closed = threading.Event(), threading.Event(), threading.Event()
+        self.release = threading.Event()
 
-        async def aclose(self):
-            closing.set()
-            await self.release.wait()
-            closed.set()
+    async def __aiter__(self):
+        self.started.set()
+        await asyncio.Event().wait()
+        yield b'unreachable'
 
-    stream = OwnedStream()
-    broker_transport(lambda request: httpx.Response(
-        200, headers={'content-type': 'text/html'}, stream=stream))
-    task = asyncio.create_task(render_fixture('https://docs.example/owned-cancel'))
+    async def aclose(self):
+        self.closing.set()
+        while not self.release.is_set():
+            try:
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                continue  # the close is not over: it ends when released
+        self.closed.set()
+
+
+#: How long the render may take to reach the brokered response: room for a
+#: loaded machine (Chromium's start and navigation), inside pytest's 120 s.
+_STREAM_START_S = 60
+
+
+async def _cancel_owned_stream(task, stream, pool, *, start_s, end_render):
+    """Cancel a render owning a never-ending response, as the test checks it.
+
+    ``end_render`` is the test's cleanup: whatever failed, the render task is
+    cancelled and the body released, so the test ends at once. The first
+    version released the body only when it had been read and never cancelled
+    the render: when the brokered response did not start in its ten seconds
+    (a loaded machine), the failed assertion went on to wait for the render,
+    which then sat in the body until its navigation's 30-second deadline and
+    the broker's 5-second cancel bound -- on a loaded machine, each stretched.
+    """
     try:
-        assert await asyncio.to_thread(started.wait, 10), 'Brokered HTTP stream did not start'
+        assert await asyncio.to_thread(stream.started.wait, start_s), 'Brokered HTTP stream did not start'
         task.cancel()
-        assert await asyncio.to_thread(closing.wait, 5), 'Cancelled response was not closed'
+        assert await asyncio.to_thread(stream.closing.wait, 30), 'Cancelled response was not closed'
         assert not task.done(), 'Cancellation returned while the HTTP stream was still owned'
         assert pool.snapshot()['active'] == 1
         task.cancel()
         await asyncio.sleep(0)
         assert not task.done(), 'Repeated cancellation interrupted teardown'
     finally:
-        if started.is_set():
-            stream.loop.call_soon_threadsafe(stream.release.set)
+        if end_render:
+            task.cancel()
+            stream.release.set()
+        elif stream.started.is_set():
+            stream.release.set()
         result = await asyncio.gather(task, return_exceptions=True)
-    assert isinstance(result[0], asyncio.CancelledError)
-    assert closed.is_set()
+    return result
+
+
+def _owned_cancel_fixture(broker_transport, monkeypatch, *, launch_delay=0.0):
+    from kazma_core.web_acquire import resources
+    from kazma_core.web_acquire.browser import BrowserJob
+
+    pool = resources._CapacityPool('real fixture browsers', 1, 1)
+    monkeypatch.setattr(resources, '_BROWSERS', pool)
+    owners = []
+    original_launch = BrowserJob._launch_impl
+    async def launch(owner):
+        owners.append(owner)
+        await asyncio.sleep(launch_delay)  # a loaded machine's slow start
+        await original_launch(owner)
+    monkeypatch.setattr(BrowserJob, '_launch_impl', launch)
+    stream = _OwnedStream()
+    broker_transport(lambda request: httpx.Response(
+        200, headers={'content-type': 'text/html'}, stream=stream))
+    return pool, owners, stream
+
+
+def _assert_owner_cleaned(pool, owners):
     assert len(owners) == 1
     owner = owners[0]
     assert owner.context is owner.browser is owner.pw is owner._deny_server is None
     assert owner._capacity_lease is None
     assert pool.snapshot()['active'] == pool.snapshot()['waiting'] == 0
+
+
+@pytest.mark.asyncio
+async def test_real_chromium_cancel_joins_http_stream_and_owned_teardown(chromium, broker_transport, monkeypatch):
+    pool, owners, stream = _owned_cancel_fixture(broker_transport, monkeypatch)
+    task = asyncio.create_task(render_fixture('https://docs.example/owned-cancel'))
+    result = await _cancel_owned_stream(task, stream, pool, start_s=_STREAM_START_S, end_render=True)
+    assert isinstance(result[0], asyncio.CancelledError)
+    assert stream.closed.is_set()
+    _assert_owner_cleaned(pool, owners)
+
+
+@pytest.mark.asyncio
+async def test_a_response_that_never_starts_still_ends_the_test(chromium, broker_transport, monkeypatch):
+    """The start bound runs out (the render is held back past it): the test
+    fails its precondition and ends, the browser owner cleaned up."""
+    pool, owners, stream = _owned_cancel_fixture(broker_transport, monkeypatch, launch_delay=3)
+    task = asyncio.create_task(render_fixture('https://docs.example/owned-cancel'))
+    async with asyncio.timeout(60):
+        with pytest.raises(AssertionError, match='did not start'):
+            await _cancel_owned_stream(task, stream, pool, start_s=0.5, end_render=True)
+    assert task.done()
+    _assert_owner_cleaned(pool, owners)
+
+
+@pytest.mark.asyncio
+async def test_control_the_first_cleanup_waits_on_the_render_in_the_body(chromium, broker_transport, monkeypatch):
+    """The first version's cleanup on the same slow start: the precondition
+    fails, and the cleanup goes on waiting for the render, which has reached
+    the body and nothing ends (its navigation's own deadline would, 30 s
+    later); the test then ends that render itself."""
+    pool, owners, stream = _owned_cancel_fixture(broker_transport, monkeypatch, launch_delay=3)
+    task = asyncio.create_task(render_fixture('https://docs.example/owned-cancel'))
+    cleanup = asyncio.ensure_future(_cancel_owned_stream(task, stream, pool, start_s=0.5, end_render=False))
+    try:
+        assert await asyncio.to_thread(stream.started.wait, _STREAM_START_S), 'the render never reached the body'
+        done, _ = await asyncio.wait({cleanup}, timeout=2)
+        assert not done and not task.done(), 'the first cleanup waits on a render held in the body'
+    finally:
+        task.cancel()
+        stream.release.set()
+        await asyncio.gather(cleanup, return_exceptions=True)
+    _assert_owner_cleaned(pool, owners)
 
 
 @pytest.mark.asyncio
@@ -236,7 +345,7 @@ async def test_real_browser_admission_caps_independent_jobs_before_driver_launch
                 await owner._close_impl()
         assert pool.snapshot()['active'] == pool.snapshot()['quarantined'] == 0
 
-    await run_in_browser_loop(verify())
+    await run_in_browser_loop(verify(), timeout=_RENDER_BOUND_S)
 
 
 @pytest.mark.asyncio
@@ -364,16 +473,68 @@ async def test_native_websocket_cannot_contact_owned_origin(chromium, broker_tra
     assert hits == [], "Native WebSocket must not reach a destination outside the broker"
 
 
+_FANOUT_FETCHES = "<p>Fanout fixture</p><script>for(let i=0;i<50;i++)fetch('/asset'+i).catch(()=>{});</script>"
+#: Fifty parser-blocking scripts after the fetches: DOMContentLoaded, which
+#: ``page.goto`` waits for, needs every one of them, so more requests than the
+#: limit are intercepted before the page can be read, however slow the machine.
+_FANOUT_BLOCKING = _FANOUT_FETCHES + "".join(f"<script src='/script{i}.js'></script>" for i in range(50))
+
+
+def _fanout_answer(html):
+    def respond(request):
+        if request.url.path.endswith(".js"):
+            return httpx.Response(200, headers={"content-type": "application/javascript"}, text="void 0;")
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=html)
+    return respond
+
+
+def _late_interceptions(monkeypatch, seconds):
+    """Deliver every intercepted request but the document's *seconds* late: a
+    loaded machine's CDP events, reaching the broker after the page was read."""
+    from kazma_core.web_acquire.browser_network import BrowserNetwork
+
+    received = BrowserNetwork._received
+
+    def late(self, event):
+        if event.get("resourceType") == "Document":
+            received(self, event)
+        else:
+            asyncio.get_running_loop().call_later(seconds, received, self, event)
+    monkeypatch.setattr(BrowserNetwork, "_received", late)
+
+
 @pytest.mark.asyncio
-async def test_browser_request_fanout_is_bounded_before_queued_dispatch(chromium, broker_transport, monkeypatch):
+@pytest.mark.parametrize("late", [0, 3], ids=["prompt", "late-events"])
+async def test_browser_request_fanout_is_bounded_before_queued_dispatch(chromium, broker_transport, monkeypatch, late):
+    """The page cannot be read before its fan-out is intercepted: at most the
+    limit's requests reach the network and the render fails ``resource_limit``,
+    also when the interceptions arrive seconds late. With fetches alone the
+    outcome depended on how soon the interceptions reached the broker (a
+    loaded full run failed this test once, 2026-11-22; the control below
+    reads the page first when they come late)."""
     from kazma_core.web_acquire.browser_network import BrowserNetwork
 
     monkeypatch.setattr(BrowserNetwork, "MAX_REQUESTS", 3)
-    html = "<p>Fanout fixture</p><script>for(let i=0;i<50;i++)fetch('/asset'+i).catch(()=>{});</script>"
-    calls = broker_transport(lambda request: httpx.Response(200, headers={"content-type": "text/html"}, text=html))
+    if late:
+        _late_interceptions(monkeypatch, late)
+    calls = broker_transport(_fanout_answer(_FANOUT_BLOCKING))
     result = (await render_fixture("https://docs.example/article")).result
     assert not result.ok and result.error_code == "resource_limit", result.evidence()
     assert len(calls) <= 3
+
+
+@pytest.mark.asyncio
+async def test_control_fetches_alone_are_read_before_late_interceptions(chromium, broker_transport, monkeypatch):
+    """The old fixture: its fan-out does not hold the document, so when the
+    interceptions come late the page is read first and the limit is never
+    reached. What the test checked depended on the machine's load."""
+    from kazma_core.web_acquire.browser_network import BrowserNetwork
+
+    monkeypatch.setattr(BrowserNetwork, "MAX_REQUESTS", 3)
+    _late_interceptions(monkeypatch, 15)  # well past the page's reading, however slow
+    broker_transport(_fanout_answer(_FANOUT_FETCHES))
+    result = (await render_fixture("https://docs.example/article")).result
+    assert result.ok and "Fanout fixture" in result.text, result.evidence()
 
 
 @pytest.mark.asyncio
@@ -460,7 +621,7 @@ async def test_renderer_caps_parser_output_and_marks_partial(chromium, broker_tr
 
     broker_transport(lambda request: httpx.Response(200, headers={"content-type": "text/html"}, text='x' * (PAGE_TEXT_MAX + 1)))
     result = (await run_in_browser_loop(render_document("https://docs.example/article",
-        challenge=lambda html, status: False, profile='knowledge'))).result
+        challenge=lambda html, status: False, profile='knowledge'), timeout=_RENDER_BOUND_S)).result
     assert result.ok and result.truncated and "text_limit" in result.truncation_reasons
     assert len(result.text) == PAGE_TEXT_MAX
 
