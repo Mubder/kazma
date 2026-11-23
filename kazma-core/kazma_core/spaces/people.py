@@ -97,7 +97,7 @@ logger = logging.getLogger(__name__)
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
           "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
           "models_set", "account_disabled", "account_enabled", "space_created", "member_added", "member_left", "member_removed",
-          "space_limits_set", "default_space_limits_set", "sessions_ended", "space_key_changed")
+          "space_limits_set", "default_space_limits_set", "sessions_ended", "space_key_changed", "code_network_set")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended")
 _NAME_MAX = 64
@@ -343,7 +343,7 @@ def end_sessions(account_id: str, *, by: str) -> int:
 
 
 def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str, Any]:
-    from kazma_core.spaces import features, person_models
+    from kazma_core.spaces import features, member_code, person_models
 
     policy = reg["policies"].get(account_id) or {}
     own = policy.get("daily_limit") if isinstance(policy, dict) else None
@@ -354,7 +354,11 @@ def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str,
             # The single tools of what they hold, each on or off (S2-01).
             "tools": features.listed_tools(features.grants_of(reg, account_id)),
             # The models they may use and their default (S2-03).
-            "models": person_models.listed_models(reg, account_id)}
+            "models": person_models.listed_models(reg, account_id),
+            # Whether their code may use the network (S4-05); the admin's
+            # code keeps its own rules (None).
+            "code_network": (None if account_id == OWNER_ACCOUNT_ID
+                             else member_code.allowed_network(reg, account_id))}
 
 
 def limits_for_people() -> dict[str, Any]:
@@ -1056,6 +1060,32 @@ def set_tools(account_id: str, off: Any, *, by: str) -> list[str]:
         raise
     logger.info("[people] tools set id=%s off=%d by=%s", account_id, len(kept), by)
     return kept
+
+
+def set_code_network(account_id: str, allowed: Any, *, by: str) -> None:
+    """Allow or forbid a person's code the network (Spaces S4-05): their
+    code runs only in a container, with no network unless allowed
+    (``spaces.member_code``). One step, recorded. Refused: the admin, whose
+    code keeps its own rules; a value that is not true or false."""
+    _require_enforced()
+    from kazma_core.spaces.member_code import CODE_NETWORK_POLICY
+
+    if not isinstance(allowed, bool):
+        raise PeopleRefused("bad_code_network", 400, "The network is allowed or not.")
+    if account_id == OWNER_ACCOUNT_ID:
+        raise PeopleRefused("admin_code_rules", 400, "The admin's code keeps its own rules.")
+
+    def _change(reg: dict[str, Any]) -> None:
+        _person(reg, account_id)
+        policy = reg["policies"].setdefault(account_id, {})
+        if allowed:
+            policy[CODE_NETWORK_POLICY] = True
+        else:
+            policy.pop(CODE_NETWORK_POLICY, None)
+        _record(reg, "code_network_set", account_id, by)
+
+    _changed(_change)
+    logger.info("[people] code network %s id=%s by=%s", "allowed" if allowed else "off", account_id, by)
 
 
 def set_enabled(account_id: str, enabled: Any, *, by: str) -> None:

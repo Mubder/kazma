@@ -16191,6 +16191,38 @@ an install with one account behaves as before.
     tasks first and another space's waiting; a caller of the budget that
     runs the graph anyway as the gate's control; the People page's limits
     in both languages).
+- **A member's code runs only in a container (S4-05, 2026-11-23).** Only
+  where Spaces is enforced: an install that does not enforce it reads
+  nothing more, and the admin's code keeps the rules it had.
+  `kazma_core/spaces/member_code.py` `code_rule()` is the one answer for the
+  work running now: `container_only` (no host fallback, whatever
+  `KAZMA_CODE_EXEC_ALLOW_LOCAL` says) and `network`. Anyone but the admin,
+  in any space, runs `python_exec` in the Docker jail or E2B or not at all
+  (`code_exec.local_exec_forbidden` asks it first); work no person asked
+  for, and a person whose allowance cannot be read, likewise with no
+  network.
+  - **No network unless the admin allowed it** (People -> "Code may use the
+    network": `identity` `policies[account]["code_network"]`,
+    `people.set_code_network`, `PUT /api/people/{account_id}/code-network`,
+    event `code_network_set`; refused for the admin, `admin_code_rules`).
+    Allowed, the jail joins the engine's default network (`--network
+    bridge`) and the snippet may import the network modules
+    (`code_exec._NETWORK_IMPORT_ROOTS`; process, native and host escapes
+    stay blocked); not allowed, `--network none` and E2B is never used
+    (`e2b_enabled`: E2B always has the internet). The network modules are
+    unblocked only for code held to a container.
+  - S2-12's member rules (`spaces.tools.MEMBER_DEVELOPMENT`) keep a member
+    off every host process that runs a project's code; this holds the one
+    code runner they keep.
+  - Gates: `tests/test_member_code_in_containers.py` (the rule; per-space
+    runs with no Docker refused, the local fallback reading a host file as
+    the control; the jail's argv and blocklist both ways; E2B; People's
+    switch and route; a real Docker run where the sandbox image is present,
+    `real_docker`: no network and no host file in the container, the local
+    fallback reading it as the control),
+    `tests/e2e/test_person_code_network_browser.py` (by the sidebar, EN/AR:
+    asked first, Cancel changes nothing, Allow saved, unticking takes it
+    back).
 - **Every action under the person's name (S2-09, 2026-11-22).** Only where
   Spaces is enforced; an install that does not enforce it records nothing
   more (the memory operator trail and the logs as before).

@@ -23,6 +23,9 @@ people; each person reads the changes made to their account.
 * ``PUT /api/people/{account_id}/enabled`` -- disable or enable a person
   (``{"enabled": bool}``, S2-07): disabled, they cannot sign in and their
   work waits.
+* ``PUT /api/people/{account_id}/code-network`` -- whether a person's code
+  may use the network (``{"allowed": bool}``, S4-05: their code runs only in
+  a container, with none unless allowed); ``GET /api/people`` lists it.
 * ``PUT /api/people/{account_id}/models`` -- the models a person may use
   and their default (``{"allowed": [ref, ...] or null, "default": ref}``,
   S2-03); ``GET /api/people`` lists each person's.
@@ -300,6 +303,30 @@ def create_people_router() -> APIRouter:
         except IdentityUnavailable:
             return _unavailable()
         return JSONResponse({"ok": True})
+
+    def _set_code_network(request: Request, account_id: str, body: dict[str, Any]) -> JSONResponse:
+        try:
+            people.set_code_network(account_id, body.get("allowed"), by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True})
+
+    @router.put("/api/people/{account_id}/code-network")
+    async def set_code_network(account_id: str, request: Request) -> JSONResponse:
+        """Whether a person's code may use the network (Spaces S4-05):
+        ``{"allowed": bool}``."""
+        denied = await asyncio.to_thread(_not_admin, request)
+        if denied:
+            return denied
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_set_code_network, request, account_id, body)
 
     @router.put("/api/people/{account_id}/enabled")
     async def set_enabled(account_id: str, request: Request) -> JSONResponse:

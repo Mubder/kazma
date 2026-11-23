@@ -2734,6 +2734,26 @@
               </template>
             </div>
         </div>
+        <!-- Code (Spaces S4-05): a person's code runs only in a container,
+             with no network unless the admin allows it here. The admin's code
+             keeps its own rules. -->
+        <div class="settings-group mb-6" id="people-code" x-show="peopleLoaded && !peopleFailed" x-cloak>
+            <h3>{{ t('settings.people_code_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_code_help') }}</p>
+            <div class="account-list-table">
+              <template x-for="p in people.filter((q) => !q.owner)" :key="'code-' + p.id">
+                <div class="people-features-row" :data-person-code="p.id">
+                  <span class="account-list-name"><bdi translate="no" x-text="p.name"></bdi></span>
+                  <label class="people-feature">
+                    <input type="checkbox" data-code-network :checked="!!p.code_network"
+                           :aria-label="window.t('settings.people_code_network_of', {name: p.name})"
+                           @change="setPersonCodeNetwork(p, $event.target.checked, $event.target)">
+                    <span>{{ t('settings.people_code_network') }}</span>
+                  </label>
+                </div>
+              </template>
+            </div>
+        </div>
         <!-- Tools (Spaces S2-01): inside the features a person has, single
              tools switched off for them. The admin has every tool. -->
         <div class="settings-group mb-6" id="people-tools" x-show="peopleLoaded && !peopleFailed" x-cloak>

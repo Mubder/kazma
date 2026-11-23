@@ -31,11 +31,21 @@ def e2b_api_key() -> str:
 def e2b_enabled() -> bool:
     """Effective backend choice shared by execution and approval preflight.
     Never in a turn that runs on the person's own key only (Spaces S2-04,
-    ``spaces.install_paid``): E2B is paid with the install's key."""
+    ``spaces.install_paid``): E2B is paid with the install's key. Never for
+    a person whose code may not use the network (S4-05,
+    ``spaces.member_code``): E2B always has the internet. Blocking (the
+    identity store, the settings)."""
     from kazma_core.safety.deployment_policy import container_required, policy_read_failures
     from kazma_core.spaces.daily_limits import own_keys_only
 
     if own_keys_only():
+        return False
+    # E2B always has the internet: a person whose code the admin did not
+    # allow the network never runs there (Spaces S4-05).
+    from kazma_core.spaces.member_code import code_rule
+
+    rule = code_rule()
+    if rule.container_only and not rule.network:
         return False
 
     try:
