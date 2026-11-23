@@ -285,6 +285,40 @@ def _environment_restored():
             os.environ[key] = value
 
 
+# ── The tool registry the matrix shares is the same for every test ─────────
+# ``tests._chat_space_cases._registry()`` builds the product's tool registry
+# once per process and hands the same object to every test that asks (the
+# space matrix's tool cases, the feature grants, the creator-policy tests).
+# A test that wrote a stand-in straight into its ``_tools`` left it there:
+# test_background_uses_creator_policy.py's ``web_search`` recorder made the
+# matrix's ``tool:web_search`` case, 320 files later in the same fast_test
+# chunk, call the recorder and find no search recorded (fae123ffd, 2026-11-22;
+# it passed alone). After every test the registry is put back as the test
+# found it (as it was built, when the test built it), and a test that left it
+# changed fails, named, so the change is fixed where it is made. Named to set
+# up before the first fixture that takes ``monkeypatch`` (whose undo, torn
+# down earlier, has then already run). KAZMA_TEST_ISOLATION=0 turns it off
+# (tests/test_shared_registry_isolation.py, the negative control).
+@_pytest.fixture(autouse=True)
+def _helper_tool_registry_put_back(request):
+    if os.environ.get("KAZMA_TEST_ISOLATION") == "0":
+        yield
+        return
+    cases = sys.modules.get("tests._chat_space_cases")
+    before = cases.registry_state() if cases is not None else None
+    yield
+    cases = sys.modules.get("tests._chat_space_cases")
+    if cases is None:
+        return
+    left = cases.put_back_registry(before)
+    if left:
+        _pytest.fail(
+            f"{request.node.nodeid} left the shared tool registry (tests._chat_space_cases._registry) "
+            f"changed: {', '.join(left)}. It is put back; change it only through monkeypatch.",
+            pytrace=False,
+        )
+
+
 # ── Every product module is imported before the first test ─────────────────
 # Which test first imported a module used to decide what that module held for
 # the rest of the process. A module first imported while a test's patch was

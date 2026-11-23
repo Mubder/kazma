@@ -68,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--passages", action="store_true",
                    help="passages on (the memory plan's W5): their texts embedded into the cache first")
+    p.add_argument("--rerank", action="store_true",
+                   help="the reranker on (the memory plan's W3), with the passages that bring its candidates: "
+                        "the real model, read with no budget")
     args = p.parse_args(argv)
     checkout, out = args.checkout.resolve(), args.out.resolve()
     if any(folder == out or folder in out.parents for folder in (REPO, checkout)):
@@ -85,13 +88,13 @@ def main(argv: list[str] | None = None) -> int:
     by_id = {str(x["question_id"]): x for x in bench.load(args.data)}
     items = [by_id[q] for q in bench.question_ids(args.split)[: args.limit or None]]
     switch: Any = contextlib.nullcontext()
-    if args.passages:
+    if args.passages or args.rerank:
         from kazma_core.memory import passages
 
         texts = [t for item in items for t in bench.passage_texts(bench.history_rows(item))]
         print(f"{len(texts)} passages; embedding what the cache lacks", flush=True)
         embedder.fill(texts)
-        switch = passages.used(True)
+        switch = bench._rerank_switch() if args.rerank else passages.used(True)
     with mock.patch("kazma_core.memory.embedder.get_embedder", lambda: embedder), \
             mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0), switch:
         blocks = export_blocks(bench, items)
@@ -100,7 +103,8 @@ def main(argv: list[str] | None = None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(out.name + ".tmp")
     tmp.write_text(json.dumps({"commit": commit, "split": args.split, "made_on": datetime.now(UTC).isoformat(),
-                               "passages": bool(args.passages), "blocks": blocks}, ensure_ascii=False),
+                               "passages": bool(args.passages or args.rerank), "rerank": bool(args.rerank),
+                               "blocks": blocks}, ensure_ascii=False),
                    encoding="utf-8")
     os.replace(tmp, out)
     print(f"wrote {len(blocks)} blocks built at {commit}")

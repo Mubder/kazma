@@ -65,6 +65,7 @@ an install: the benchmark's data folder is a temporary one.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -1788,7 +1789,28 @@ def _limit_cpu_threads() -> None:
     torch.set_num_threads(max(1, min(4, (os.cpu_count() or 2) // 4)))
 
 
-def _cmd_retrieve(data: Path, limit: int | None, split: str = "sample", look: str | None = None) -> int:
+def _rerank_switch() -> contextlib.ExitStack:
+    """The reranker on (the memory plan's W3), with the passages that bring
+    its candidates: the real model, read with no budget (its quality; the
+    budget's share of a recall is measured by the product measures)."""
+    from unittest import mock
+
+    from kazma_core.memory import passages, reranker
+
+    stack = contextlib.ExitStack()
+    scorer = reranker.Reranker(reranker.MODEL)
+    stack.enter_context(passages.used(True))
+    stack.enter_context(reranker.used(True))
+    stack.enter_context(mock.patch("kazma_core.memory.reranker.get_reranker", lambda: scorer))
+    stack.enter_context(mock.patch("kazma_core.memory.reranker.BUDGET_S", float("inf")))
+    return stack
+
+
+def _cmd_retrieve(data: Path, limit: int | None, split: str = "sample", look: str | None = None,
+                  rerank: bool = False, out: Path | None = None) -> int:
+    if rerank and out is None:
+        print("--rerank writes its own result (--out): the recorded retrieval stays today's", file=sys.stderr)
+        return 2
     log_look(split, look, "retrieve")
     _private_data_folder()
     _limit_cpu_threads()
@@ -1804,13 +1826,16 @@ def _cmd_retrieve(data: Path, limit: int | None, split: str = "sample", look: st
     cached = CachedEmbedder(real, data / "cache" / "kazma_vectors.npz", model)
     histories = {str(item["question_id"]): history_rows(item) for item in items}
     texts = [e["row"]["embed_text"] for rows in histories.values() for e in rows] + [str(i["question"]) for i in items]
+    if rerank:
+        texts += [t for rows in histories.values() for t in passage_texts(rows)]
     print(f"{len(items)} questions, {sum(len(r) for r in histories.values())} memories; embedding what the cache lacks")
     cached.fill(texts)
     from unittest import mock
 
     results = []
     with mock.patch("kazma_core.memory.embedder.get_embedder", lambda: cached), \
-            mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0):
+            mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0), \
+            (_rerank_switch() if rerank else contextlib.nullcontext()):
         for n, item in enumerate(items, 1):
             results.append(ask(item, histories[str(item["question_id"])]))
             if n % 10 == 0:
@@ -1823,8 +1848,9 @@ def _cmd_retrieve(data: Path, limit: int | None, split: str = "sample", look: st
                                     same_count=int(row["shown"])))
     summary = summarise(results)
     summary["overall"]["budgets"] = budgets
-    result_path(RETRIEVAL, split).write_text(dump_result({
+    (out or result_path(RETRIEVAL, split)).write_text(dump_result({
         "source": SOURCE, "split": split, "sample": len(items), "embedding_model": model, "limit": LIMIT,
+        **({"rerank": True} if rerank else {}),
         "made_on": datetime.now(UTC).date().isoformat(),
         "what": "Each question's own history in a private store, one memory per round, dated; recall() as a "
                 "chat turn calls it. No facts extracted, no summaries. Scores only.",
@@ -1879,6 +1905,11 @@ def main(argv: list[str] | None = None) -> int:
             s.add_argument("--limit", type=int, default=None, help="ask only the first N of the split")
             s.add_argument("--split", choices=SPLITS, default="sample")
             s.add_argument("--look", default=None, help="why the report split is looked at (logged)")
+        if name == "retrieve":
+            s.add_argument("--rerank", action="store_true",
+                           help="the reranker on (the memory plan's W3), the real model, read with no budget")
+            s.add_argument("--out", type=Path, default=None,
+                           help="write the result here instead of the recorded retrieval (required with --rerank)")
         if name == "answer":
             s.add_argument("--reasoning", choices=READER_REASONING, default="low",
                            help="the reader's hidden reasoning (the product ships low)")
@@ -1931,7 +1962,7 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_translate(args.data, args.model, args.base_url, args.workers, args.key_env)
     if args.cmd == "parallel":
         return _cmd_parallel(args.data)
-    return _cmd_retrieve(args.data, args.limit, args.split, args.look)
+    return _cmd_retrieve(args.data, args.limit, args.split, args.look, args.rerank, args.out)
 
 
 if __name__ == "__main__":

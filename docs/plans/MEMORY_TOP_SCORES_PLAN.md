@@ -312,6 +312,15 @@ counting max().
   Postgres mirror and a remote vector index hold none (recall reads them
   from this install's own database on both paths), and the memory store
   registry declares both tables.
+- *What the triggers cost with the switch off.* The triggers are on every
+  install; the tables are empty. An insert (every turn written) fires none;
+  a tier move to anything but `forgotten` and an access bump fire nothing
+  (the trigger's condition, or a column it does not watch); a change of a
+  memory's text, a forget and a delete run two deletes by key on the empty
+  tables. Measured on this PC (2,000 statements each, six alternated rounds
+  with and without the triggers, medians, 22 Nov): an insert, a tier move,
+  an access bump and a delete within noise (under 1 µs each way); a text
+  change 6 µs and a forget 3 µs more, on statements of 25-31 µs.
 - *How older memories get theirs.* The vector repair sweep
   (`reembed.run_vector_repair_pass`, every 15 minutes) ends with
   `passages.fill_passages`: up to 200 recallable memories a pass, newest
@@ -391,6 +400,100 @@ little: a flat LongMemEval number is not a failure.
 These come before W4 under the owner's rule: precision and saying nothing
 touch every turn of every user; questions across many conversations are
 rarer.
+
+**Built 22 Nov (`memory/reranker.py`, `recall._by_relevance`), behind a
+switch until accepted** (`reranker.in_use()`, off). The main session's
+decisions: no cosine lane of its own for passages; they become the
+reranker's candidate source, and the cross-encoder's calibrated score
+decides what is shown.
+
+- *Candidates.* Today's evidence ranks every candidate as before; the
+  reranker reads the best 20 by it (40 for a question asking for every
+  memory of a kind) and every memory whose best passage is among the
+  question's 20 nearest passages, whatever its evidence. Passages no longer
+  lift a memory's meaning (`_with_passages` is gone).
+- *What it reads.* A memory's start (the text the block shows, both sides)
+  and, for a memory a passage brought, that passage's stretch cut from the
+  memory's text by its offsets: two pairs of the question and up to 256
+  tokens, the better one counting. A memory kept by its passage is shown at
+  that stretch (W1b).
+- *Calibrated (W2).* The probability that a memory answers is a logistic fit
+  of recall's evidence and the model's score together, per kind, on the
+  benchmark's first set (`scripts/memory_rerank_calibrate.py`): the model's
+  score alone ranks no better than the evidence (turns AUC 0.878 against
+  0.935 on the first set), the two together better (0.944; on the second
+  set, never fitted on, 0.949 against 0.918). Weekly summaries 0.956 / 0.971
+  against 0.937 / 0.964. Facts 0.936 / 0.946 against 0.938 / 0.945: no
+  better, so facts keep today's rule and cost no reading. A memory is shown
+  at or above the floor and within the gap of the best read.
+- *Anytime.* Read a few pairs at a time in today's order until the
+  recall's budget (`reranker.BUDGET_S`, all kinds together) ends; what was
+  not read keeps today's rule and is ranked after what was; the recall says
+  it was partial (`RecallResult.rerank`). No model on disk: today's rule,
+  said once, tried again after ten minutes.
+- *Measured* with and without on the same commit: the recorded scores
+  (`memory_bench.py rerank-scores`: 40,807 pairs of every store, 688 s on
+  this PC; `--reference` for the reference model: 35,415 pairs, 11,362 s)
+  replayed by `memory_threshold_sweep.py sweep|judge --rerank
+  [--reference]`, `memory_product_measures.py measure --rerank
+  [--real-reranker] [--reference]` and `longmemeval_bench.py retrieve
+  --rerank`, `longmemeval_blocks.py --rerank`. Evidence in
+  `docs/audits/evidence/memory_rerank/`. The recorded scores (2 MB) and the
+  passages' vectors (4.4 MB) are not committed: those commands record them
+  again.
+
+  **Not accepted (22-23 Nov): neither model passes the plan's rule, and the
+  reference does not fit the budget.** The sweep (`--by sets`, the turns'
+  floor and gap over the first set, against today's product) found no
+  configuration that keeps every answer on all four stores with its grid
+  neighbours (rules 1 and 5), for either model; it stops there
+  (`sweep_shipping_first_set.json`, `sweep_reference_first_set.json`). The
+  lowest floor, 0.03, is the grid's edge; first set, precision (answers
+  lost):
+
+  | model, floor / gap | the store | four times its chat | small stores | speakers |
+  |---|---|---|---|---|
+  | today (no reranker) | 0.4872 | 0.4379 | 0.6722 | 0.6255 |
+  | shipping, 0.03 / 0.5 | 0.5159 | 0.4718 (q204) | 0.6889 | 0.6118 |
+  | shipping, 0.12 / 0.5 | 0.5929 (4) | 0.5739 (3) | 0.6813 (4) | 0.7000 |
+  | reference, 0.03 / 0.5 | 0.5535 (q1307) | 0.5094 | 0.6907 (q1307) | 0.6569 |
+  | reference, 0.06 / 0.5 | 0.5859 (q1307) | 0.5449 (q1005) | 0.6967 (q1307) | 0.6765 |
+  | reference, 0.12 / 0.5 | 0.5960 (2) | 0.5747 (1) | 0.6855 (3) | 0.7196 |
+
+  Unanswerable questions answered with nothing, 2 today: the shipping
+  model 2 at 0.03, 10 at 0.06, 13 at 0.12; the reference 7, 9 and 12. Precision stops near 0.60 on the store whatever is
+  lost: facts, not reranked, keep their noise (107 of the 332 non-answers
+  shown on the first set). Why answers are lost: the shipping model reads
+  "Who looks after my teeth?" beside "My dentist is Dr. Marta Pires" at
+  -3.5 (calibrated 0.057), and ranks Gulf Arabic turns about car batteries
+  above the English answer about a laptop battery (q204); both models lose
+  q1307, "وش قلت لك عن مايا في يوليو؟" ("what did I tell you about Maya in
+  July?"), whose answering turn never says July: the reranker reads the
+  text, not when it was said. Speed on this PC's CPU (torch, fp32, at most
+  256 tokens a pair, 4 threads, nearly quiet under the timing flag;
+  `latency_cpu.json`): the shipping model reads 20 short memories in 85 ms
+  and 20 long ones in 610 ms (33 ms each); the reference model 1,048 ms and
+  6,434 ms (335 ms each), several times the budget (150 ms p50) even for
+  short memories (during a full suite: 105 / 641 ms and 1,141 / 7,282 ms).
+  Decision 4 ships the reference only if it fits; it does not. Nothing was judged or
+  logged; LongMemEval was not answered (the reranker's candidates need
+  every dev history's passages embedded: 83,831 texts the harness's cache
+  lacked, about 6,000 an hour on this CPU beside the other measurements;
+  30,112 are in the cache, the rest wait for a run that needs them).
+
+  **Measured and not adopted** (the main session, 23 Nov). The reranker
+  stays off, and no faster runtime is tried now: it loses an answer at every
+  floor with either model, and an int8 or ONNX runtime might bring the
+  shipping model under the budget but would not keep the answers it loses.
+  `memory/reranker.py`, its calibration and its scripts stay as they are, off,
+  so a later attempt starts from the recorded scores and the sweep. What
+  would reopen it: a model or setting that loses no answer on all four of
+  Kazma's stores (the store, four times its chat, the small stores and the
+  speakers' space, both sets, the plan's rules 1 and 5) **and** fits the
+  latency budget on this CPU (150 ms p50, 400 ms p95 added to a recall).
+  Until then W2's "say nothing when nothing fits" stays today's evidence
+  floor, and item 5 of section 7 (a wrong memory rated strong for a question
+  memory cannot answer) stays open.
 
 ### W4. Questions across many conversations (M)
 
@@ -659,7 +762,8 @@ alone as the negative controls.
    0 of 6 on dev (4.7 memories, 982 tokens) and 0 of 24 on the report
    split (4.8 memories, 1,089 tokens); on Kazma's own benchmark 0 of 22
    English and 0 of 4 Arabic (`tests/fixtures/memory_bench/product_measures.json`).
-   W3 + W2's to fix: saying nothing when nothing fits.
+   W3 + W2's to fix: saying nothing when nothing fits. Still open: the
+   reranker was measured and not adopted (23 Nov, W3 + W2).
 6. **Memory's own model calls are not in the per-call ledger.** Found by
    the Spaces builder's review of every model call (22 Nov) and checked in
    the code: no module under `kazma_core/memory/` and not

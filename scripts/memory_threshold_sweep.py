@@ -77,6 +77,10 @@ VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "vectors.npz"
 SPEAKER_VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "speakers_vectors.npz"
 #: The passages' vectors (the memory plan's W5, ``memory_bench.py passage-vectors``).
 PASSAGE_VECTORS = ROOT / "tests" / "fixtures" / "memory_bench" / "passage_vectors.npz"
+#: The cross-encoder's recorded scores (the memory plan's W3, ``memory_bench.py rerank-scores``).
+RERANK_SCORES = ROOT / "tests" / "fixtures" / "memory_bench" / "rerank_scores.npz"
+#: The quality reference's (``reranker.REFERENCE_MODEL``, ``rerank-scores --reference``): measured, not shipped.
+RERANK_REFERENCE = ROOT / "tests" / "fixtures" / "memory_bench" / "rerank_reference.npz"
 #: Every judged sweep allowed to set recall's thresholds (``log_choice``).
 CHOICES = ROOT / "docs" / "audits" / "evidence" / "memory_thresholds_v8" / "choices.json"
 
@@ -94,6 +98,13 @@ PARAMS = {
     "summary_floor": "_SUMMARY_FLOOR",
     "summary_gap": "_SUMMARY_GAP",
     "summary_coverage": "_SUMMARY_COVERAGE_WEIGHT",
+    # The reranker's (W3 + W2): calibrated probabilities, read only while it is on.
+    "rerank_episode_floor": "_RERANK_EPISODE_FLOOR",
+    "rerank_episode_gap": "_RERANK_EPISODE_GAP",
+    "rerank_belief_floor": "_RERANK_BELIEF_FLOOR",
+    "rerank_belief_gap": "_RERANK_BELIEF_GAP",
+    "rerank_summary_floor": "_RERANK_SUMMARY_FLOOR",
+    "rerank_summary_gap": "_RERANK_SUMMARY_GAP",
 }
 
 
@@ -118,6 +129,18 @@ STAGES: list[tuple[str, dict[str, list[float]]]] = [
     ("turns again", {"episode_floor": _steps(0.02, 0.08, 0.01), "episode_gap": _steps(0.06, 0.20, 0.02)}),
     ("facts again", {"belief_floor": _steps(0.04, 0.08, 0.01), "belief_gap": _steps(0.04, 0.12, 0.02)}),
     ("summaries again", {"summary_floor": _steps(0.17, 0.25, 0.02), "summary_gap": _steps(0.06, 0.14, 0.02)}),
+]
+
+#: With ``--rerank`` (W3 + W2) only the reranker's values move: today's
+#: evidence values choose the candidates it reads and stay as they are.
+#: Facts are not reranked (``recall._RERANK_KINDS``).
+RERANK_STAGES: list[tuple[str, dict[str, list[float]]]] = [
+    ("rerank turns", {"rerank_episode_floor": _steps(0.03, 0.45, 0.03),
+                      "rerank_episode_gap": [0.3, 0.5, 0.7, 1.0]}),
+    ("rerank summaries", {"rerank_summary_floor": _steps(0.03, 0.45, 0.03),
+                          "rerank_summary_gap": [0.3, 0.5, 0.7, 1.0]}),
+    ("rerank turns again", {"rerank_episode_floor": _steps(0.03, 0.45, 0.03),
+                            "rerank_episode_gap": [0.3, 0.5, 0.7, 1.0]}),
 ]
 
 SPLIT_SALT = "kazma-threshold-sweep-v8"
@@ -205,11 +228,18 @@ class Stores:
     not to, so passages off and on are asked of the same stores."""
 
     def __init__(self, data: dict[str, Any], speakers: dict[str, Any], halves: dict[str, dict[str, list[str]]],
-                 stack: contextlib.ExitStack, *, with_passages: bool = False) -> None:
+                 stack: contextlib.ExitStack, *, with_passages: bool = False, with_rerank: bool = False,
+                 reference: bool = False) -> None:
         from kazma_core.memory import benchmark, passages
 
         self.data, self.speakers, self.halves = data, speakers, halves
+        # The reranker (W3) reads the candidates passages bring: on, they are.
+        with_passages = with_passages or with_rerank
         self.with_passages = with_passages
+        self.with_rerank = with_rerank
+        if with_rerank:
+            scorer = benchmark.ReplayReranker(RERANK_REFERENCE if reference else RERANK_SCORES)
+            stack.enter_context(mock.patch("kazma_core.memory.reranker.get_reranker", lambda: scorer))
         extra = [PASSAGE_VECTORS] if with_passages else []
         self.replay = benchmark.SpeakerReplay(VECTORS, *extra) if extra else benchmark.ReplayEmbedder(VECTORS)
         self.speaker_replay = benchmark.SpeakerReplay(VECTORS, SPEAKER_VECTORS, *extra)
@@ -225,14 +255,15 @@ class Stores:
                 self.small[q["id"]] = (q, stack.enter_context(benchmark._seeded_store(sub)))
 
     def ask(self, config: dict[str, float], half: str, *,
-            passages_on: bool | None = None) -> dict[str, list[dict[str, Any]]]:
-        from kazma_core.memory import benchmark, passages
+            passages_on: bool | None = None, rerank_on: bool | None = None) -> dict[str, list[dict[str, Any]]]:
+        from kazma_core.memory import benchmark, passages, reranker
 
         ids = set(self.halves["bench"][half])
         questions = [q for q in _questions(self.data) if q["id"] in ids]
         out: dict[str, list[dict[str, Any]]] = {}
         on = self.with_passages if passages_on is None else passages_on
-        with _thresholds(config), passages.used(on):
+        reading = self.with_rerank if rerank_on is None else rerank_on
+        with _thresholds(config), passages.used(on), reranker.used(reading):
             out["main"] = benchmark._ask_questions(*self.main, questions)[0]
             out["scale"] = benchmark._ask_questions(*self.scale, questions)[0] if self.scale else []
             out["small"] = [benchmark._ask_questions(*store, [q])[0][0]
@@ -351,10 +382,13 @@ def _short(m: dict[str, Any]) -> str:
                        for s, x in m["stores"].items()})
 
 
-def _cmd_sweep(out: Path, by: str = "halves", with_passages: bool = False) -> int:
+def _cmd_sweep(out: Path, by: str = "halves", with_passages: bool = False, with_rerank: bool = False,
+               reference: bool = False) -> int:
     """The sweep. *with_passages* (W5) asks every configuration with passages
     on, against today's product: no answer lost means none lost against
-    today's thresholds with passages off."""
+    today's thresholds with passages off. *with_rerank* (W3 + W2) does the
+    same with the reranker on, moving only its own values
+    (:data:`RERANK_STAGES`)."""
     data, speakers = _load()
     halves = split(data, speakers, by)
     base = today()
@@ -362,20 +396,24 @@ def _cmd_sweep(out: Path, by: str = "halves", with_passages: bool = False) -> in
                               "split_by": by, "split": halves, "today": base, "stages": []}
     if with_passages:
         record["passages"] = True
+    if with_rerank:
+        record["rerank"] = "reference" if reference else True
     with contextlib.ExitStack() as stack:
         started = time.perf_counter()
-        stores = Stores(data, speakers, halves, stack, with_passages=with_passages)
+        stores = Stores(data, speakers, halves, stack, with_passages=with_passages, with_rerank=with_rerank,
+                        reference=reference)
         print(f"stores seeded in {time.perf_counter() - started:.0f} s", flush=True)
-        first = stores.ask(base, "tune", passages_on=False)
-        if first != stores.ask(base, "tune", passages_on=False):
+        first = stores.ask(base, "tune", passages_on=False, rerank_on=False)
+        if first != stores.ask(base, "tune", passages_on=False, rerank_on=False):
             print("a store answers differently when asked twice: refusing to sweep", file=sys.stderr)
             return 1
         shown_today = shown_answers(first)
         record["today_tune"] = summarise(first)
         print("today, tuning half:", _short(record["today_tune"]), flush=True)
-        if with_passages:
-            record["passages_tune"] = summarise(stores.ask(base, "tune"))
-            print("today with passages, tuning half:", _short(record["passages_tune"]), flush=True)
+        if with_passages or with_rerank:
+            label = "rerank_tune" if with_rerank else "passages_tune"
+            record[label] = summarise(stores.ask(base, "tune"))
+            print(f"today's values, {label}:", _short(record[label]), flush=True)
         point = dict(base)
         asked: dict[tuple[tuple[str, float], ...], dict[str, list[dict[str, Any]]]] = {}
 
@@ -385,7 +423,7 @@ def _cmd_sweep(out: Path, by: str = "halves", with_passages: bool = False) -> in
                 asked[key] = stores.ask(config, "tune")
             return asked[key]
 
-        for name, axes in STAGES:
+        for name, axes in (RERANK_STAGES if with_rerank else STAGES):
             started = time.perf_counter()
             rows = []
             configs = [{**point, **change} for change in _grid(axes)]
@@ -427,10 +465,10 @@ def _cmd_sweep(out: Path, by: str = "halves", with_passages: bool = False) -> in
 
 
 def _cmd_judge(chosen_path: Path, out: Path, by: str = "halves", reason: str | None = None,
-               with_passages: bool = False) -> int:
+               with_passages: bool = False, with_rerank: bool = False, reference: bool = False) -> int:
     """Both halves with today's thresholds and the chosen ones; with
-    *with_passages* (W5), today's as the product is (passages off) against
-    the chosen ones with passages on."""
+    *with_passages* (W5) or *with_rerank* (W3), today's as the product is
+    (both off) against the chosen ones with them on."""
     data, speakers = _load()
     halves = split(data, speakers, by)
     chosen = json.loads(chosen_path.read_text(encoding="utf-8"))["chosen"]
@@ -438,10 +476,14 @@ def _cmd_judge(chosen_path: Path, out: Path, by: str = "halves", reason: str | N
     record: dict[str, Any] = {"dataset_version": data["version"], "split_by": by, "today": base, "chosen": chosen}
     if with_passages:
         record["passages"] = True
+    if with_rerank:
+        record["rerank"] = "reference" if reference else True
     with contextlib.ExitStack() as stack:
-        stores = Stores(data, speakers, halves, stack, with_passages=with_passages)
+        stores = Stores(data, speakers, halves, stack, with_passages=with_passages, with_rerank=with_rerank,
+                        reference=reference)
         for half in ("tune", "held"):
-            was, now = stores.ask(base, half, passages_on=False), stores.ask(chosen, half)
+            was = stores.ask(base, half, passages_on=False, rerank_on=False)
+            now = stores.ask(chosen, half)
             lost = sorted(shown_answers(was) - shown_answers(now))
             gained = sorted(shown_answers(now) - shown_answers(was))
             record[half] = {"today": summarise(was), "chosen": summarise(now), "lost": lost, "gained": gained}
@@ -467,6 +509,7 @@ def log_choice(record: dict[str, Any], reason: str, evidence: Path) -> dict[str,
     entry = {"date": time.strftime("%Y-%m-%d"), "commit": commit, "reason": reason,
              "dataset_version": record["dataset_version"], "split_by": record.get("split_by", "halves"),
              **({"passages": True} if record.get("passages") else {}),
+             **({"rerank": True} if record.get("rerank") else {}),
              "moved": moved, "evidence": evidence.name,
              "lost": {half: record[half]["lost"] for half in ("tune", "held") if half in record},
              "gained": {half: record[half]["gained"] for half in ("tune", "held") if half in record}}
@@ -494,12 +537,16 @@ def main(argv: list[str] | None = None) -> int:
     for s in (sweep, judge):
         s.add_argument("--passages", action="store_true",
                        help="passages on (the memory plan's W5), judged against today's product without them")
+        s.add_argument("--rerank", action="store_true",
+                       help="the reranker on (the memory plan's W3 + W2), judged against today's product without it")
+        s.add_argument("--reference", action="store_true",
+                       help="with --rerank: the quality reference's recorded scores (measured, not shipped)")
     args = parser.parse_args(argv)
     if args.cmd == "split":
         return _cmd_split(args.by)
     if args.cmd == "sweep":
-        return _cmd_sweep(args.out, args.by, args.passages)
-    return _cmd_judge(args.chosen, args.out, args.by, args.record, args.passages)
+        return _cmd_sweep(args.out, args.by, args.passages, args.rerank, args.reference)
+    return _cmd_judge(args.chosen, args.out, args.by, args.record, args.passages, args.rerank, args.reference)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@ import json
 import os
 import random
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -55,6 +56,11 @@ SEALED_VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "sealed_vectors.
 #: the benchmark, the scale run, the product measures' long store and the
 #: speakers set seed, recorded by ``passage-vectors``.
 PASSAGE_VECTORS = REPO / "tests" / "fixtures" / "memory_bench" / "passage_vectors.npz"
+#: The cross-encoder's scores (the memory plan's W3): every (question, memory)
+#: pair the reranker reads in the benchmark's stores, the shipping model's and
+#: the quality reference's, recorded by ``rerank-scores``.
+RERANK_SCORES = REPO / "tests" / "fixtures" / "memory_bench" / "rerank_scores.npz"
+RERANK_REFERENCE = REPO / "tests" / "fixtures" / "memory_bench" / "rerank_reference.npz"
 
 SEED = 20260926
 
@@ -2544,6 +2550,53 @@ def _cmd_passage_vectors() -> int:
     return 0
 
 
+def _cmd_rerank_scores(reference: bool = False) -> int:
+    """Record the cross-encoder's score for every pair the reranker reads
+    (W3) in the stores the measurements ask: the store and four times its
+    unrelated chat (both sets), each question's small store, the speakers
+    set and the product measures' long store, with passages on (they bring
+    candidates). Vectors are replayed (passages' too: ``passage-vectors``
+    first); the model reads every pair, with no deadline. *reference*
+    records the quality reference (``reranker.REFERENCE_MODEL``) instead."""
+    from kazma_core.memory import benchmark, passages, reranker
+
+    _limit_cpu_threads()
+    name = reranker.REFERENCE_MODEL if reference else reranker.MODEL
+    out = RERANK_REFERENCE if reference else RERANK_SCORES
+    if not PASSAGE_VECTORS.is_file():
+        print(f"{PASSAGE_VECTORS} is missing: run passage-vectors first", file=sys.stderr)
+        return 2
+    real = reranker.Reranker(name)
+    try:
+        real._load()
+    except Exception as exc:
+        print(f"{name} could not be loaded ({type(exc).__name__}): is it in the Hugging Face cache?",
+              file=sys.stderr)
+        return 2
+    recorder = benchmark.RecordingReranker(real)
+    replay = benchmark.SpeakerReplay(VECTORS, SPEAKER_VECTORS, PASSAGE_VECTORS)
+    sys.path.insert(0, str(REPO / "scripts"))
+    import memory_product_measures as measures
+
+    data = benchmark.load_dataset()
+    a, b = _patched(replay, replay.model)
+    scorer = mock.patch("kazma_core.memory.reranker.get_reranker", lambda: recorder)
+    started = time.perf_counter()
+    with a, b, scorer, passages.used(True), reranker.used(True):
+        benchmark.run_benchmark(data)
+        benchmark.run_scale_benchmark(data)
+        benchmark.run_small_store_benchmark(data)
+        benchmark.run_speaker_benchmark()
+        with benchmark._seeded_store(data) as (conn, _refs, _covers):
+            measures.lengthen(conn, json.loads(measures.LIVE_LENGTHS.read_text(encoding="utf-8")),
+                              tenant_id=benchmark.BENCH_TENANT)
+            benchmark.fill_passages_whole(conn)
+            measures.block_tokens(conn, measures._questions(data))
+    n = recorder.save(out)
+    print(f"{out}: {n} scores from {name} in {time.perf_counter() - started:.0f} s")
+    return 0
+
+
 def _cmd_fact_languages_vectors() -> int:
     """Record bge-m3's vectors for ``benchmark.run_fact_languages`` (the
     memory plan's finding 10): every text its stores and questions embed,
@@ -3352,6 +3405,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("fact-languages-vectors",
                    help="record the vectors of the facts-across-languages gate (the real model)")
     sub.add_parser("passage-vectors", help="record the vectors of every passage the benchmark's stores hold (W5)")
+    rr = sub.add_parser("rerank-scores", help="record the cross-encoder's score of every pair the reranker reads (W3)")
+    rr.add_argument("--reference", action="store_true", help="the quality reference model, not the shipping one")
     run = sub.add_parser("run")
     run.add_argument("--real", action="store_true", help="load the real embedder")
     run.add_argument("--json", action="store_true")
@@ -3376,6 +3431,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_fact_languages_vectors()
     if args.cmd == "passage-vectors":
         return _cmd_passage_vectors()
+    if args.cmd == "rerank-scores":
+        return _cmd_rerank_scores(args.reference)
     return _cmd_run(args.real, args.json, args.details)
 
 

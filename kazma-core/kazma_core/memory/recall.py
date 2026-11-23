@@ -43,7 +43,14 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from kazma_core.memory.episode_text import display_at, display_parts, is_small_talk, match_text, more_note
+from kazma_core.memory.episode_text import (
+    display_at,
+    display_parts,
+    display_text,
+    is_small_talk,
+    match_text,
+    more_note,
+)
 from kazma_core.memory.limits import (
     KEYWORD_HIT_CHARS,
     LIST_LIMIT,
@@ -115,6 +122,10 @@ class RecallResult:
     #: The question's content words (``query_terms.content_terms``, its time
     #: words left out): what the block cuts each long memory around (W1a).
     focus_terms: frozenset[str] = frozenset()
+    #: Whether a cross-encoder judged the memories (W3): "" (it did not),
+    #: "whole" (it read every candidate) or "partial" (the budget ended first:
+    #: the unread kept today's rule).
+    rerank: str = ""
 
     @property
     def empty(self) -> bool:
@@ -312,6 +323,8 @@ def recall(
         _QUERY_MEMO.reset(token)
     if memo["degraded"] and result.degraded is None:
         result.degraded = memo["degraded"]
+    if "rerank_read" in memo:
+        result.rerank = "partial" if memo.get("rerank_unread") else "whole"
     result.listing = listing
     result.time_named = ask.named if ask is not None else ""
     if not result.failed and not result.empty:
@@ -1167,16 +1180,11 @@ def _pg_primary_episodes(
         if backend is not None and qvec
         else []
     )
-    # A memory's meaning is the better of its vector and its best passage
-    # (W5), as on the local path: passages are this install's, read from its
-    # own database; a memory only a passage found is fetched with the rest.
-    won: dict[str, tuple[str, int, int]] = {}
-    if local is not None and qvec:
-        pool = max(_DENSE_POOL, limit * 3)
-        merged, won = _with_passages(
-            [RecallHit(id=str(eid), content="", score=float(sim), source="dense") for eid, sim in dense_pairs],
-            _episode_passages(local, query, tenant_id, pool), pool)
-        dense_pairs = [(h.id, h.score) for h in merged]
+    # The memories a passage brings are candidates for the reranker (W3), as
+    # on the local path: passages are this install's, read from its own
+    # database; a memory only a passage found is fetched with the rest.
+    reading = _reranking()
+    brought = _episode_passages(local, query, tenant_id, _RERANK_TOP) if local is not None and qvec and reading else {}
     sims = {str(eid): float(sim) for eid, sim in dense_pairs}
     rows: dict[str, dict[str, Any]] = {}
     # Strict: on this path the mirror is memory, and a failed search is a
@@ -1188,7 +1196,7 @@ def _pg_primary_episodes(
     for row in _primary_period_rows(query, tenant_id, limit):
         rows.setdefault(str(row["id"]), row)
     fetch = getattr(state_backend, "fetch_episodes", None)
-    need = [eid for eid in sims if eid not in rows]
+    need = [eid for eid in dict.fromkeys([*sims, *brought]) if eid not in rows]
     if need and callable(fetch):
         # The mirror answers 50 ids a call.
         for start in range(0, len(need), 50):
@@ -1209,12 +1217,6 @@ def _pg_primary_episodes(
             sims.update(lookup(qvec, unscored, tenant_id=tenant_id, kind="episode") or {})
         except Exception:
             logger.debug("[recall] vector index similarity lookup failed", exc_info=True)
-    if unscored and qvec and local is not None:
-        for eid, (sim, side, start, stop) in _episode_passages(local, query, tenant_id, len(unscored),
-                                                                 ids=unscored).items():
-            if eid not in sims or sim > sims[eid]:
-                sims[eid] = sim
-                won[eid] = (side, start, stop)
     by_meaning = {str(eid) for eid, _sim in dense_pairs}
     candidates: list[_Candidate] = []
     for eid in dict.fromkeys([*(str(e) for e, _s in dense_pairs), *rows]):
@@ -1237,12 +1239,15 @@ def _pg_primary_episodes(
                                    row.get("summary_text")),
                 **_candidate_shown(row.get("user_text"), row.get("assistant_text"),
                                    row.get("summary_text")),
+                # The reranker reads what the local path gives it (W3).
+                read=display_text(row.get("user_text"), row.get("assistant_text"), row.get("summary_text"))
+                if reading else "",
+                **_stretch_of(row.get("user_text"), row.get("assistant_text"), brought.get(eid)),
             )
         )
     ranked = _rank_by_evidence(
         query, candidates, _question_background([sim for _e, sim in dense_pairs])
     )
-    _mark_passages(ranked, won)
     weight = _archived_weight()
     for hit in ranked:
         tier = (rows.get(hit.id) or {}).get("tier")
@@ -2147,19 +2152,27 @@ def _recall_episodes(
     # ── Dense: the question's nearest memories by meaning, every tier ──
     pool = max(_DENSE_POOL, limit * 3)
     dense = _episode_dense(conn, q, vector_engine, tenant_id, pool)
-    # A memory's meaning is the better of its vector and its best passage
-    # (the memory plan's W5): what its own vector misses, its answer above all.
-    dense, won = _with_passages(dense, _episode_passages(conn, q, tenant_id, pool), pool)
     for h in dense:
-        sources.setdefault(h.id, []).append("passage" if h.id in won else "dense")
+        sources.setdefault(h.id, []).append("dense")
+    # The memories whose best passage is among the question's nearest (what
+    # their own vectors miss, their answers above all) are candidates the
+    # reranker reads beside that passage (the memory plan's W3). Passages
+    # never lift a memory's meaning: counted that way they lost answers (W5).
+    brought = _episode_passages(conn, q, tenant_id, _RERANK_TOP) if _reranking() else {}
+    for eid in brought:
+        sources.setdefault(eid, []).append("passage")
 
     # Everything below reads a candidate by its id alone. Whatever channel
     # found it (a remote vector index answers here too), a candidate that is
     # not this tenant's row stops here.
     sparse, dense = _own_episodes(conn, tenant_id, sparse), _own_episodes(conn, tenant_id, dense)
+    if brought:
+        own = {h.id for h in _own_episodes(conn, tenant_id, [RecallHit(id=e, content="", score=0.0)
+                                                             for e in brought])}
+        brought = {eid: at for eid, at in brought.items() if eid in own}
 
     # ── Evidence, not ranks: what is about the question, best first ──
-    ranked = _rank_episodes_by_evidence(conn, q, sparse, dense, tenant_id=tenant_id, won=won)
+    ranked = _rank_episodes_by_evidence(conn, q, sparse, dense, tenant_id=tenant_id, brought=brought)
     # The chat's own turns the model reads in the conversation are not shown
     # again (part F), and the question's time decides what comes first.
     fused = _turns_in_time(_not_in_context(conn, ranked, tenant_id), ask)[: limit * 2]
@@ -2463,6 +2476,9 @@ class _Candidate:
     standing: float = 0.0  # a belief's importance x confidence x trust
     display: str = ""  # what the model is shown, when it differs (an episode's both sides)
     more: int = 0  # characters of an episode its display leaves out
+    read: str = ""  # what the reranker reads of it (W3), when it differs from what it is shown
+    stretch: str = ""  # a passage that brought it (W3): the reranker reads it too
+    stretch_at: tuple[str, int, int] | None = None  # (side, start, stop) of that passage
 
 
 def _question_background(dense_scores: Iterable[float], *, kind: str = "episode") -> float:
@@ -2641,21 +2657,59 @@ def _rank_by_evidence(
     # the wording asks it, and meaning alone put such questions below an
     # unrelated question's background.
     said = [row for row in scored if row[0].id in named]
-    trace = _EVIDENCE_TRACE.get()
-    if trace is not None:
-        # The cut a memory must clear to be shown: the floor, or, behind the
-        # best, the gap (the benchmark's edge margin, ``trace_evidence``). A
-        # named memory clears no cut: it stands by the question's words.
-        trace.append({
-            "kind": kind,
-            "cut": floor if best is None else max(floor, best - gap),
-            "evidence": {cand.id: ev for cand, ev, _lift, _cov in scored},
-            "named": sorted(cand.id for cand, *_rest in said),
-        })
-    if best is None and not said:
-        return []
-    kept = [row for row in passing if best is not None and row[1] >= best - gap]
+    today_cut = floor if best is None else max(floor, best - gap)
+    # The memory plan's W3 + W2: a cross-encoder reads the question beside
+    # the best candidates, and its calibrated score decides (``_by_relevance``).
+    judged = _by_relevance(query, scored, kind, today_cut) if _reranking() else None
+    if judged is not None:
+        kept, relevance, read_stretch = judged
+    else:
+        kept = [row for row in passing if best is not None and row[1] >= best - gap]
+        relevance, read_stretch = {}, set()
     kept += [row for row in said if row not in kept]
+    _trace_cut(kind, scored, said, today_cut, reranked=judged is not None)
+    if not kept:
+        return []
+    hits = _evidence_hits(kept, kind, named=named, strong=strong, recency_weight=recency_weight,
+                          standing_weight=standing_weight, relevance=relevance, read_stretch=read_stretch,
+                          reranked=judged is not None)
+    hits.sort(key=lambda h: h.score, reverse=True)
+    return hits
+
+
+def _trace_cut(kind: str, scored: list[tuple[_Candidate, float, float, float]],
+               said: list[tuple[_Candidate, float, float, float]], today_cut: float, *, reranked: bool) -> None:
+    """The cut each memory had to clear, while a caller traces it
+    (``trace_evidence``): the floor, or, behind the best, the gap (the
+    benchmark's edge margin). A named memory clears no cut: it stands by the
+    question's words. Reranked, the reranker traced its own cuts."""
+    trace = _EVIDENCE_TRACE.get()
+    if trace is None:
+        return
+    if not reranked:
+        trace.append({"kind": kind, "cut": today_cut,
+                      "evidence": {cand.id: ev for cand, ev, _lift, _cov in scored},
+                      "named": sorted(cand.id for cand, *_rest in said)})
+    elif said:
+        trace.append({"kind": kind, "cut": 0.0, "evidence": {cand.id: 1.0 for cand, *_r in said},
+                      "named": sorted(cand.id for cand, *_r in said)})
+
+
+def _evidence_hits(
+    kept: list[tuple[_Candidate, float, float, float]],
+    kind: str,
+    *,
+    named: frozenset[str],
+    strong: float,
+    recency_weight: float,
+    standing_weight: float,
+    relevance: dict[str, float],
+    read_stretch: set[str],
+    reranked: bool,
+) -> list[RecallHit]:
+    """The kept candidates as hits, best first: ordered by evidence (or the
+    reranker's probability) plus the recency tie-breaker and, for a fact,
+    its standing."""
     # Rank by time, equal times sharing a rank: the facts one turn yielded were
     # all stated at once, and list position is not newer.
     times = sorted({row[0].created_at for row in kept})
@@ -2672,28 +2726,174 @@ def _rank_by_evidence(
             id=cand.id,
             content=cand.content,
             score=round(
-                ev + recency_weight * recency[cand.id]
+                _ranked_base(cand.id, ev, relevance, reranked) + recency_weight * recency[cand.id]
                 + standing_weight * cand.standing / top_standing,
                 4,
             ),
             kind=kind,
-            source="dense" if cand.by_meaning else "fts5",
+            source="dense" if cand.by_meaning else ("passage" if cand.stretch else "fts5"),
             metadata={
                 "lift": round(lift, 4),
                 "coverage": round(cov, 3),
                 "evidence": round(ev, 4),
-                "strength": "strong" if ev >= strong or cand.id in named else "weak",
+                "strength": "strong" if cand.id in named or (
+                    relevance[cand.id] >= _RERANK_STRONG if cand.id in relevance else ev >= strong) else "weak",
                 # When it was said (a turn) or became true (a fact): the date
                 # the block shows (``_date_hits``, framework audit F2).
                 "at": cand.created_at,
                 **({"display": cand.display} if cand.display else {}),
                 **({"more": cand.more} if cand.more else {}),
+                **({"relevance": round(relevance[cand.id], 4)} if cand.id in relevance else {}),
+                # The passage the reranker read it by: the stretch the block
+                # shows (W1b).
+                **({"passage": cand.stretch_at} if cand.id in read_stretch and cand.stretch_at else {}),
             },
         )
         for cand, ev, lift, cov in kept
     ]
-    hits.sort(key=lambda h: h.score, reverse=True)
     return hits
+
+
+# ── Relevance: a cross-encoder decides what is shown (the memory plan's W3 + W2) ──
+
+#: The candidates the reranker reads, best by today's evidence first: this
+#: many, and every memory a passage brought (``_Candidate.stretch``); a
+#: question asking for every memory of a kind, twice as many.
+_RERANK_TOP = 20
+#: Per kind of memory, the calibrated probability (``reranker.calibrated``)
+#: a memory must reach to be shown, and how far behind the best it may be.
+_RERANK_EPISODE_FLOOR = 0.12
+_RERANK_EPISODE_GAP = 1.0
+_RERANK_BELIEF_FLOOR = 0.12
+_RERANK_BELIEF_GAP = 1.0
+_RERANK_SUMMARY_FLOOR = 0.12
+_RERANK_SUMMARY_GAP = 1.0
+#: At or above it a memory is shown to the model as strong ("more likely
+#: than not an answer").
+_RERANK_STRONG = 0.5
+#: The kinds the reranker judges; the others keep today's rule. Facts are
+#: not reranked: with the model's score their calibrated probability ranks
+#: them no better than the evidence alone (``reranker.CALIBRATION``), and
+#: each one read costs a recall time.
+_RERANK_KINDS: tuple[str, ...] = ("episode", "summary")
+#: Characters of a memory the reranker is given (it reads at most
+#: ``reranker.MAX_TOKENS`` tokens of the question and the memory together).
+_RERANK_TEXT_CHARS = 2000
+#: An unread memory kept by today's rule (the budget ended) is ranked after
+#: every memory read: its evidence, scaled below any probability kept.
+_UNREAD_SCALE = 0.01
+
+
+def _reranking() -> bool:
+    from kazma_core.memory import reranker
+
+    return reranker.in_use()
+
+
+def _rerank_rules(kind: str) -> tuple[float, float]:
+    """(floor, gap) in calibrated probability, read at call time (a sweep sets them)."""
+    if kind == "belief":
+        return _RERANK_BELIEF_FLOOR, _RERANK_BELIEF_GAP
+    if kind == "summary":
+        return _RERANK_SUMMARY_FLOOR, _RERANK_SUMMARY_GAP
+    return _RERANK_EPISODE_FLOOR, _RERANK_EPISODE_GAP
+
+
+def _ranked_base(mid: str, ev: float, relevance: dict[str, float], reranked: bool) -> float:
+    """What a kept memory is ordered by: its probability when read; today's
+    evidence when nothing was reranked; scaled below every read memory when
+    the budget ended before it."""
+    if mid in relevance:
+        return relevance[mid]
+    return ev * _UNREAD_SCALE if reranked else ev
+
+
+def _rerank_deadline() -> float:
+    """The recall's budget for reading (``reranker.BUDGET_S``), shared by its
+    kinds of memory; a ranking outside ``recall()`` gets its own."""
+    from kazma_core.memory import reranker
+
+    memo = _QUERY_MEMO.get()
+    if memo is None:
+        return time.monotonic() + reranker.BUDGET_S
+    if "rerank_deadline" not in memo:
+        memo["rerank_deadline"] = time.monotonic() + reranker.BUDGET_S
+    return memo["rerank_deadline"]
+
+
+def _note_rerank(read: int, unread: int) -> None:
+    memo = _QUERY_MEMO.get()
+    if memo is not None:
+        memo["rerank_read"] = memo.get("rerank_read", 0) + read
+        memo["rerank_unread"] = memo.get("rerank_unread", 0) + unread
+
+
+def _by_relevance(
+    query: str,
+    scored: list[tuple[_Candidate, float, float, float]],
+    kind: str,
+    today_cut: float,
+) -> tuple[list[tuple[_Candidate, float, float, float]], dict[str, float], set[str]] | None:
+    """The candidates the reranker keeps, their probabilities, and those it
+    kept by their passage (W1b); None when it does not judge *kind* or the
+    model is not there (today's rule stands).
+
+    It reads the best :data:`_RERANK_TOP` by today's evidence and every
+    memory a passage brought, in that order, a memory's start and its
+    passage as two pairs (the better counts), until the recall's budget
+    ends (``reranker.BUDGET_S``). A memory read is kept at or above the
+    floor and within the gap of the best read; a memory the budget left
+    unread keeps today's rule (*today_cut*). A memory past the window is
+    not shown: today's rule never reached it either, save rarely.
+    """
+    from kazma_core.memory import reranker
+
+    if kind not in _RERANK_KINDS:
+        return None
+    scorer = reranker.get_reranker()
+    if scorer is None:
+        return None
+    top = _RERANK_TOP * (2 if _LISTING.get() else 1)
+    ordered = sorted(scored, key=lambda row: row[1], reverse=True)
+    window = ordered[:top] + [row for row in ordered[top:] if row[0].stretch]
+    pairs: list[tuple[int, str, bool]] = []  # (window index, text, is the passage)
+    for i, (cand, *_rest) in enumerate(window):
+        own = (cand.read or cand.display or cand.content or cand.text)[:_RERANK_TEXT_CHARS]
+        if own.strip():
+            pairs.append((i, own, False))
+        if cand.stretch.strip():
+            pairs.append((i, cand.stretch[:_RERANK_TEXT_CHARS], True))
+    logits = scorer.score(query, [text for _i, text, _p in pairs], deadline=_rerank_deadline())
+    best_logit: dict[int, tuple[float, bool]] = {}
+    unread: set[int] = set()
+    for (i, _text, is_passage), logit in zip(pairs, logits, strict=True):
+        if logit is None:
+            unread.add(i)
+            continue
+        if i not in best_logit or logit > best_logit[i][0]:
+            best_logit[i] = (logit, is_passage)
+    model = getattr(scorer, "model", reranker.MODEL)
+    relevance = {window[i][0].id: reranker.calibrated(model, kind, logit, window[i][1])
+                 for i, (logit, _p) in best_logit.items()}
+    by_passage = {window[i][0].id for i, (_logit, is_passage) in best_logit.items() if is_passage}
+    floor, gap = _rerank_rules(kind)
+    best = max((p for p in relevance.values() if p >= floor), default=None)
+    cut = floor if best is None else max(floor, best - gap)
+    kept = [row for row in window if relevance.get(row[0].id, -1.0) >= cut]
+    # Read in part (one pair and not the other) counts as read; only a memory
+    # with no pair read is left to today's rule.
+    left = [window[i] for i in sorted(unread) if window[i][0].id not in relevance]
+    kept += [row for row in left if row[1] >= today_cut]
+    _note_rerank(len(relevance), len(left))
+    trace = _EVIDENCE_TRACE.get()
+    if trace is not None:
+        trace.append({"kind": kind, "cut": cut, "evidence": dict(relevance), "named": [], "scale": "relevance",
+                      "scores": {window[i][0].id: logit for i, (logit, _p) in best_logit.items()},
+                      "today": {window[i][0].id: window[i][1] for i in best_logit}})
+        if left:
+            trace.append({"kind": kind, "cut": today_cut, "evidence": {row[0].id: row[1] for row in left},
+                          "named": []})
+    return kept, relevance, by_passage
 
 
 def _similarities(
@@ -2750,29 +2950,24 @@ def _rank_episodes_by_evidence(
     dense: list[RecallHit],
     *,
     tenant_id: str | None = None,
-    won: dict[str, tuple[str, int, int]] | None = None,
+    brought: dict[str, tuple[float, str, int, int]] | None = None,
 ) -> list[RecallHit]:
     """Local episodes that are about the question, best first; [] when none is.
 
-    *won*: the memories whose best passage beat their own vector (W5), the
-    stretch it covers; a candidate only its words found is measured the
-    same way, and each ranked memory a passage won carries its stretch
+    *brought*: the memories a passage brought (W3, ``_episode_passages``),
+    candidates whatever their evidence, read by the reranker beside that
+    passage; a ranked memory kept by its passage carries the stretch
     (``metadata["passage"]``) for the block (W1b)."""
-    ids = list(dict.fromkeys([h.id for h in dense] + [h.id for h in sparse]))
+    brought = brought or {}
+    ids = list(dict.fromkeys([h.id for h in dense] + [h.id for h in sparse] + list(brought)))
     if not ids:
         return []
-    won = dict(won or {})
     sims = {h.id: h.score for h in dense}
     missing = [i for i in ids if i not in sims]
     if missing:
         qvec = _encode_query(query)
         if qvec:
             sims.update(_similarities(conn, missing, qvec))
-            for eid, (sim, side, start, stop) in _episode_passages(conn, query, tenant_id, len(missing),
-                                                                     ids=missing).items():
-                if eid not in sims or sim > sims[eid]:
-                    sims[eid] = sim
-                    won[eid] = (side, start, stop)
     rows = {
         str(r[0]): r
         for r in conn.execute(
@@ -2782,6 +2977,7 @@ def _rank_episodes_by_evidence(
         )
     }
     by_meaning = {h.id for h in dense}
+    reading = _reranking()
     candidates = [
         _Candidate(
             id=eid,
@@ -2789,20 +2985,26 @@ def _rank_episodes_by_evidence(
             created_at=float(row[4] or 0.0),
             similarity=sims.get(eid),
             by_meaning=eid in by_meaning,
+            read=display_text(row[1], row[2], row[3]) if reading else "",
+            **_stretch_of(row[1], row[2], brought.get(eid)),
         )
         for eid in ids
         if (row := rows.get(eid)) is not None and not is_small_talk(row[1], row[2])
     ]
-    ranked = _rank_by_evidence(query, candidates, _question_background([h.score for h in dense]))
-    _mark_passages(ranked, won)
-    return ranked
+    return _rank_by_evidence(query, candidates, _question_background([h.score for h in dense]))
 
 
-def _mark_passages(ranked: list[RecallHit], won: dict[str, tuple[str, int, int]]) -> None:
-    """Each ranked memory a passage won carries its stretch for the block (W1b)."""
-    for hit in ranked:
-        if hit.id in won:
-            hit.metadata["passage"] = won[hit.id]
+def _stretch_of(user_text: Any, assistant_text: Any,
+                at: tuple[float, str, int, int] | None) -> dict[str, Any]:
+    """The passage that brought a memory (W3): its text, cut from the side it
+    stands in by its offsets, and where it stands; {} for none."""
+    if at is None:
+        return {}
+    _sim, side, start, stop = at
+    # Cut at the passage's own offsets (``passages.missed_spans``), not a bound.
+    sides = {"question": str(user_text or ""), "answer": str(assistant_text or "")}
+    text = sides.get(side, "")[start:stop]
+    return {"stretch": text, "stretch_at": (side, start, stop)} if text.strip() else {}
 
 
 def _episode_passages(conn: sqlite3.Connection, query: str, tenant_id: str | None, limit: int, *,
@@ -2810,7 +3012,8 @@ def _episode_passages(conn: sqlite3.Connection, query: str, tenant_id: str | Non
     """Each memory's best passage for the question (the memory plan's W5,
     ``memory/passages.py``): ``{id: (similarity, side, start, stop)}``, the
     best *limit* (or exactly *ids*); {} while passages are off. Passages are
-    this install's, read from the local database on every path."""
+    this install's, read from the local database on every path; they bring
+    candidates for the reranker (W3), never lift a memory's meaning."""
     from kazma_core.memory import passages
 
     if not passages.in_use():
@@ -2827,26 +3030,6 @@ def _episode_passages(conn: sqlite3.Connection, query: str, tenant_id: str | Non
         logger.warning("[recall] passages could not be searched; memories are judged by their own "
                        "vectors", exc_info=True)
         return {}
-
-
-def _with_passages(dense: list[RecallHit], best: dict[str, tuple[float, str, int, int]],
-                   pool: int) -> tuple[list[RecallHit], dict[str, tuple[str, int, int]]]:
-    """*dense* with each memory's meaning the better of its vector and its
-    best passage, best first, cut to *pool*; and the memories a passage won,
-    with the stretch it covers (W1b shows it)."""
-    if not best:
-        return dense, {}
-    scores = {h.id: h.score for h in dense}
-    won: dict[str, tuple[str, int, int]] = {}
-    for eid, (sim, side, start, stop) in best.items():
-        if eid not in scores or sim > scores[eid]:
-            scores[eid] = sim
-            won[eid] = (side, start, stop)
-    order = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:pool]
-    merged = [RecallHit(id=eid, content="", score=float(sim), source="passage" if eid in won else "dense")
-              for eid, sim in order]
-    kept = {h.id for h in merged}
-    return merged, {eid: stretch for eid, stretch in won.items() if eid in kept}
 
 
 # ── Weekly topic summaries (plan C2b) ──────────────────────────────────────
