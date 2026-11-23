@@ -42,7 +42,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~1033K LOC** (815K Python code + 52K JS) | **28,833 tests** (2,021 test files) | **5,925+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~1033K LOC** (815K Python code + 52K JS) | **28,833 tests** (2,021 test files) | **5,932+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 

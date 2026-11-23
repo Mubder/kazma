@@ -388,18 +388,13 @@ def _recall_block(item: dict[str, Any], db: Path, *, without_events: bool) -> tu
     access counts), optionally without the dated event facts."""
     from unittest import mock
 
+    from kazma_core.db.sqlite_snapshot import snapshot_copy
     from kazma_core.memory.recall import format_recall_block, recall
 
     tmp = Path(tempfile.mkdtemp(prefix="kazma-pilot-"))
     try:
         copy = tmp / "store.db"
-        src = sqlite3.connect(str(db))
-        dst = sqlite3.connect(str(copy))
-        try:
-            src.backup(dst)
-        finally:
-            src.close()
-            dst.close()
+        snapshot_copy(db, copy)
         conn = sqlite3.connect(str(copy))
         conn.row_factory = sqlite3.Row
         try:

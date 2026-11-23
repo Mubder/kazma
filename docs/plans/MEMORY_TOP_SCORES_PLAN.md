@@ -637,7 +637,7 @@ against today, 20 gains and 5 losses in both runs; multi-session 0.40 to
 Reviewed before the merge: an event told again that already has its day left
 a write transaction open on a default-mode connection (fixed), and the cache
 marker now goes to Qwen's own models only. The extraction recording stays
-declared pending: it is taken on the model Kazma ships with.
+declared pending: it is taken on the model the last one was made on.
 
 ### W6. Ingestion the product's way (M)
 
