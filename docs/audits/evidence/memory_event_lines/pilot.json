@@ -1,0 +1,1801 @@
+{
+ "what": "The memory plan's W4 pilot of dated event lines: 50 dev questions; kazma is today's block (no facts), facts_events the block with the facts the deep pass wrote, facts_no_events the same without the dated event facts. One reader (qwen3.7-plus, default reasoning), judges qwen3.8-flash then qwen3.7-plus, twice (main and noise). Ids and scores only.",
+ "made_on": "2026-11-23",
+ "prompt": "bd40b75a",
+ "built_on": "f8fca7196 with the change (scripts/longmemeval_facts_pilot.py, ru_pilot checkout)",
+ "extraction": {
+  "model": "qwen3.8-flash, default reasoning (as the product sends it)",
+  "rounds": 12322,
+  "quick_passes": 12139,
+  "deep_passes": 11945,
+  "deep_passes_failed_after_four_tries": 144,
+  "facts": 13900,
+  "dated_event_facts": 838,
+  "dated_starts": 377,
+  "usage": {
+   "calls": 12020,
+   "prompt_tokens": 33320681,
+   "cached_tokens": 19809132,
+   "completion_tokens": 15663959,
+   "reasoning_tokens": 14458241,
+   "replies_not_json": 40
+  },
+  "money_usd_at_intl_prices": {
+   "input_0.15_per_M": 2.03,
+   "cache_hit_0.016_per_M": 0.32,
+   "output_0.47_per_M": 7.36,
+   "total": 9.71
+  }
+ },
+ "answers_main": {
+  "overall": {
+   "kazma": {
+    "answered": 0.6,
+    "answered_judge2": 0.6,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1343
+   },
+   "facts_no_events": {
+    "answered": 0.6,
+    "answered_judge2": 0.6,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1401
+   },
+   "facts_events": {
+    "answered": 0.7,
+    "answered_judge2": 0.7,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1408
+   }
+  },
+  "types": {
+   "knowledge-update": {
+    "n": 7,
+    "kazma": 0.857,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0
+   },
+   "multi-session": {
+    "n": 16,
+    "kazma": 0.375,
+    "facts_no_events": 0.375,
+    "facts_events": 0.562
+   },
+   "single-session-assistant": {
+    "n": 4,
+    "kazma": 0.5,
+    "facts_no_events": 0.5,
+    "facts_events": 0.5
+   },
+   "single-session-preference": {
+    "n": 2,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0
+   },
+   "single-session-user": {
+    "n": 5,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0
+   },
+   "temporal-reasoning": {
+    "n": 16,
+    "kazma": 0.562,
+    "facts_no_events": 0.5,
+    "facts_events": 0.625
+   }
+  }
+ },
+ "answers_noise": {
+  "overall": {
+   "kazma": {
+    "answered": 0.6,
+    "answered_judge2": 0.62,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1343
+   },
+   "facts_no_events": {
+    "answered": 0.6,
+    "answered_judge2": 0.58,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1401
+   },
+   "facts_events": {
+    "answered": 0.72,
+    "answered_judge2": 0.7,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1408
+   }
+  },
+  "types": {
+   "knowledge-update": {
+    "n": 7,
+    "kazma": 0.857,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0
+   },
+   "multi-session": {
+    "n": 16,
+    "kazma": 0.375,
+    "facts_no_events": 0.375,
+    "facts_events": 0.562
+   },
+   "single-session-assistant": {
+    "n": 4,
+    "kazma": 0.5,
+    "facts_no_events": 0.5,
+    "facts_events": 0.5
+   },
+   "single-session-preference": {
+    "n": 2,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0
+   },
+   "single-session-user": {
+    "n": 5,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0
+   },
+   "temporal-reasoning": {
+    "n": 16,
+    "kazma": 0.562,
+    "facts_no_events": 0.5,
+    "facts_events": 0.688
+   }
+  }
+ },
+ "changes": {
+  "facts_events vs kazma": {
+   "main": {
+    "gained": 7,
+    "lost": 2
+   },
+   "noise": {
+    "gained": 8,
+    "lost": 2
+   },
+   "gained_in_both": [
+    "00ca467f",
+    "10d9b85a",
+    "2a1811e2",
+    "50635ada",
+    "5a7937c8",
+    "87f22b4a",
+    "gpt4_a1b77f9c"
+   ],
+   "lost_in_both": [
+    "88432d0a_abs",
+    "gpt4_2d58bcd6"
+   ]
+  },
+  "facts_events vs facts_no_events": {
+   "main": {
+    "gained": 5,
+    "lost": 0
+   },
+   "noise": {
+    "gained": 6,
+    "lost": 0
+   },
+   "gained_in_both": [
+    "00ca467f",
+    "10d9b85a",
+    "2a1811e2",
+    "5a7937c8",
+    "gpt4_a1b77f9c"
+   ],
+   "lost_in_both": []
+  },
+  "facts_no_events vs kazma": {
+   "main": {
+    "gained": 2,
+    "lost": 2
+   },
+   "noise": {
+    "gained": 2,
+    "lost": 2
+   },
+   "gained_in_both": [
+    "50635ada",
+    "87f22b4a"
+   ],
+   "lost_in_both": [
+    "88432d0a_abs",
+    "gpt4_2d58bcd6"
+   ]
+  }
+ },
+ "flips": {
+  "kazma": 0,
+  "facts_no_events": 0,
+  "facts_events": 1
+ },
+ "blocks": {
+  "kazma": {
+   "tokens_p50": 1429.0,
+   "tokens_p95": 1494
+  },
+  "facts_no_events": {
+   "tokens_p50": 1455.5,
+   "tokens_p95": 1496
+  },
+  "facts_events": {
+   "tokens_p50": 1455.0,
+   "tokens_p95": 1496,
+   "facts_shown_mean": 4.12,
+   "dated_events_shown_mean": 0.86,
+   "questions_with_a_dated_event_shown": 17
+  }
+ },
+ "answer_usage": {
+  "main": {
+   "calls": 450,
+   "prompt_tokens": 279953,
+   "completion_tokens": 107373,
+   "prompt_cache_hit_tokens": 79744,
+   "reasoning_tokens": 95996
+  },
+  "noise": {
+   "calls": 450,
+   "prompt_tokens": 280365,
+   "completion_tokens": 106126,
+   "prompt_cache_hit_tokens": 26496,
+   "reasoning_tokens": 94543
+  }
+ },
+ "questions": [
+  {
+   "id": "gpt4_2655b836",
+   "type": "temporal-reasoning",
+   "rounds": 234,
+   "quick": 231,
+   "deep": 225,
+   "deep_failed": 5,
+   "facts": 268,
+   "current": 249,
+   "deep_pass": 265,
+   "dated_events": 13,
+   "dated_starts": 1,
+   "seconds": 9163,
+   "kazma_tokens": 1429,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1455,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 1,
+    "dated_event_facts": 1
+   },
+   "facts_no_events_tokens": 1459,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "6b7dfb22",
+   "type": "single-session-preference",
+   "rounds": 237,
+   "quick": 234,
+   "deep": 227,
+   "deep_failed": 6,
+   "facts": 303,
+   "current": 298,
+   "deep_pass": 295,
+   "dated_events": 15,
+   "dated_starts": 3,
+   "seconds": 9663,
+   "kazma_tokens": 1458,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1496,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 2,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1496,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 2,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "778164c6",
+   "type": "single-session-assistant",
+   "rounds": 274,
+   "quick": 268,
+   "deep": 266,
+   "deep_failed": 2,
+   "facts": 280,
+   "current": 263,
+   "deep_pass": 277,
+   "dated_events": 18,
+   "dated_starts": 7,
+   "seconds": 9292,
+   "kazma_tokens": 982,
+   "kazma_shown": {
+    "shown": 3,
+    "facts": 0
+   },
+   "facts_events_tokens": 1049,
+   "facts_events_shown": {
+    "turns": 3,
+    "facts": 3,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1049,
+   "facts_no_events_shown": {
+    "turns": 3,
+    "facts": 3,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "9bbe84a2",
+   "type": "knowledge-update",
+   "rounds": 231,
+   "quick": 228,
+   "deep": 224,
+   "deep_failed": 4,
+   "facts": 271,
+   "current": 256,
+   "deep_pass": 272,
+   "dated_events": 25,
+   "dated_starts": 3,
+   "seconds": 8259,
+   "kazma_tokens": 1458,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1462,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 2,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1462,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 2,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "7a87bd0c",
+   "type": "knowledge-update",
+   "rounds": 255,
+   "quick": 251,
+   "deep": 246,
+   "deep_failed": 4,
+   "facts": 274,
+   "current": 249,
+   "deep_pass": 279,
+   "dated_events": 17,
+   "dated_starts": 12,
+   "seconds": 10119,
+   "kazma_tokens": 1294,
+   "kazma_shown": {
+    "shown": 4,
+    "facts": 0
+   },
+   "facts_events_tokens": 1403,
+   "facts_events_shown": {
+    "turns": 4,
+    "facts": 3,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1403,
+   "facts_no_events_shown": {
+    "turns": 4,
+    "facts": 3,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "8752c811",
+   "type": "single-session-assistant",
+   "rounds": 247,
+   "quick": 246,
+   "deep": 237,
+   "deep_failed": 5,
+   "facts": 252,
+   "current": 245,
+   "deep_pass": 251,
+   "dated_events": 13,
+   "dated_starts": 14,
+   "seconds": 9044,
+   "kazma_tokens": 968,
+   "kazma_shown": {
+    "shown": 2,
+    "facts": 0
+   },
+   "facts_events_tokens": 968,
+   "facts_events_shown": {
+    "turns": 2,
+    "facts": 0,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 968,
+   "facts_no_events_shown": {
+    "turns": 2,
+    "facts": 0,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "6071bd76",
+   "type": "knowledge-update",
+   "rounds": 241,
+   "quick": 241,
+   "deep": 240,
+   "deep_failed": 1,
+   "facts": 301,
+   "current": 279,
+   "deep_pass": 297,
+   "dated_events": 12,
+   "dated_starts": 10,
+   "seconds": 7297,
+   "kazma_tokens": 1006,
+   "kazma_shown": {
+    "shown": 3,
+    "facts": 0
+   },
+   "facts_events_tokens": 1079,
+   "facts_events_shown": {
+    "turns": 3,
+    "facts": 1,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1079,
+   "facts_no_events_shown": {
+    "turns": 3,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_a1b77f9c",
+   "type": "temporal-reasoning",
+   "rounds": 251,
+   "quick": 247,
+   "deep": 245,
+   "deep_failed": 2,
+   "facts": 290,
+   "current": 277,
+   "deep_pass": 285,
+   "dated_events": 18,
+   "dated_starts": 5,
+   "seconds": 7456,
+   "kazma_tokens": 1475,
+   "kazma_shown": {
+    "shown": 8,
+    "facts": 0
+   },
+   "facts_events_tokens": 1485,
+   "facts_events_shown": {
+    "turns": 8,
+    "facts": 12,
+    "dated_event_facts": 6
+   },
+   "facts_no_events_tokens": 1481,
+   "facts_no_events_shown": {
+    "turns": 8,
+    "facts": 12,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_ab202e7f",
+   "type": "multi-session",
+   "rounds": 242,
+   "quick": 239,
+   "deep": 237,
+   "deep_failed": 2,
+   "facts": 302,
+   "current": 294,
+   "deep_pass": 297,
+   "dated_events": 17,
+   "dated_starts": 13,
+   "seconds": 7812,
+   "kazma_tokens": 1350,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1500,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 5,
+    "dated_event_facts": 3
+   },
+   "facts_no_events_tokens": 1429,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 2,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "a4996e51",
+   "type": "multi-session",
+   "rounds": 258,
+   "quick": 254,
+   "deep": 249,
+   "deep_failed": 5,
+   "facts": 309,
+   "current": 290,
+   "deep_pass": 306,
+   "dated_events": 21,
+   "dated_starts": 9,
+   "seconds": 9748,
+   "kazma_tokens": 1495,
+   "kazma_shown": {
+    "shown": 6,
+    "facts": 0
+   },
+   "facts_events_tokens": 1477,
+   "facts_events_shown": {
+    "turns": 6,
+    "facts": 12,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1477,
+   "facts_no_events_shown": {
+    "turns": 6,
+    "facts": 12,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "c6853660",
+   "type": "knowledge-update",
+   "rounds": 240,
+   "quick": 237,
+   "deep": 233,
+   "deep_failed": 4,
+   "facts": 302,
+   "current": 287,
+   "deep_pass": 303,
+   "dated_events": 20,
+   "dated_starts": 6,
+   "seconds": 9679,
+   "kazma_tokens": 1149,
+   "kazma_shown": {
+    "shown": 3,
+    "facts": 0
+   },
+   "facts_events_tokens": 1180,
+   "facts_events_shown": {
+    "turns": 3,
+    "facts": 1,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1180,
+   "facts_no_events_shown": {
+    "turns": 3,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "f0853d11",
+   "type": "temporal-reasoning",
+   "rounds": 252,
+   "quick": 248,
+   "deep": 243,
+   "deep_failed": 4,
+   "facts": 276,
+   "current": 260,
+   "deep_pass": 272,
+   "dated_events": 16,
+   "dated_starts": 7,
+   "seconds": 8136,
+   "kazma_tokens": 1494,
+   "kazma_shown": {
+    "shown": 7,
+    "facts": 0
+   },
+   "facts_events_tokens": 1487,
+   "facts_events_shown": {
+    "turns": 7,
+    "facts": 7,
+    "dated_event_facts": 2
+   },
+   "facts_no_events_tokens": 1494,
+   "facts_no_events_shown": {
+    "turns": 7,
+    "facts": 0,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "099778bb",
+   "type": "multi-session",
+   "rounds": 235,
+   "quick": 231,
+   "deep": 227,
+   "deep_failed": 1,
+   "facts": 262,
+   "current": 241,
+   "deep_pass": 256,
+   "dated_events": 18,
+   "dated_starts": 7,
+   "seconds": 7047,
+   "kazma_tokens": 1441,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1477,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 1,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1477,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "77eafa52",
+   "type": "multi-session",
+   "rounds": 265,
+   "quick": 262,
+   "deep": 259,
+   "deep_failed": 3,
+   "facts": 229,
+   "current": 215,
+   "deep_pass": 235,
+   "dated_events": 12,
+   "dated_starts": 5,
+   "seconds": 9197,
+   "kazma_tokens": 1370,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1433,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 2,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1433,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 2,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "eaca4986",
+   "type": "single-session-assistant",
+   "rounds": 259,
+   "quick": 254,
+   "deep": 246,
+   "deep_failed": 4,
+   "facts": 266,
+   "current": 256,
+   "deep_pass": 266,
+   "dated_events": 18,
+   "dated_starts": 8,
+   "seconds": 8364,
+   "kazma_tokens": 1068,
+   "kazma_shown": {
+    "shown": 3,
+    "facts": 0
+   },
+   "facts_events_tokens": 1068,
+   "facts_events_shown": {
+    "turns": 3,
+    "facts": 0,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1068,
+   "facts_no_events_shown": {
+    "turns": 3,
+    "facts": 0,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "8550ddae",
+   "type": "single-session-user",
+   "rounds": 229,
+   "quick": 224,
+   "deep": 218,
+   "deep_failed": 6,
+   "facts": 302,
+   "current": 286,
+   "deep_pass": 297,
+   "dated_events": 10,
+   "dated_starts": 7,
+   "seconds": 9464,
+   "kazma_tokens": 1481,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1492,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 3,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1492,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 3,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "10d9b85a",
+   "type": "multi-session",
+   "rounds": 234,
+   "quick": 232,
+   "deep": 230,
+   "deep_failed": 1,
+   "facts": 277,
+   "current": 254,
+   "deep_pass": 272,
+   "dated_events": 16,
+   "dated_starts": 11,
+   "seconds": 8563,
+   "kazma_tokens": 1088,
+   "kazma_shown": {
+    "shown": 3,
+    "facts": 0
+   },
+   "facts_events_tokens": 1196,
+   "facts_events_shown": {
+    "turns": 3,
+    "facts": 3,
+    "dated_event_facts": 2
+   },
+   "facts_no_events_tokens": 1088,
+   "facts_no_events_shown": {
+    "turns": 3,
+    "facts": 0,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "50635ada",
+   "type": "knowledge-update",
+   "rounds": 266,
+   "quick": 265,
+   "deep": 263,
+   "deep_failed": 1,
+   "facts": 298,
+   "current": 283,
+   "deep_pass": 292,
+   "dated_events": 18,
+   "dated_starts": 7,
+   "seconds": 8293,
+   "kazma_tokens": 835,
+   "kazma_shown": {
+    "shown": 1,
+    "facts": 0
+   },
+   "facts_events_tokens": 938,
+   "facts_events_shown": {
+    "turns": 1,
+    "facts": 4,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 938,
+   "facts_no_events_shown": {
+    "turns": 1,
+    "facts": 4,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "b0479f84",
+   "type": "single-session-preference",
+   "rounds": 253,
+   "quick": 249,
+   "deep": 246,
+   "deep_failed": 1,
+   "facts": 327,
+   "current": 317,
+   "deep_pass": 326,
+   "dated_events": 19,
+   "dated_starts": 9,
+   "seconds": 6916,
+   "kazma_tokens": 1418,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1483,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 3,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1483,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 3,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "29f2956b",
+   "type": "single-session-user",
+   "rounds": 249,
+   "quick": 247,
+   "deep": 246,
+   "deep_failed": 0,
+   "facts": 293,
+   "current": 275,
+   "deep_pass": 295,
+   "dated_events": 16,
+   "dated_starts": 8,
+   "seconds": 7216,
+   "kazma_tokens": 1458,
+   "kazma_shown": {
+    "shown": 6,
+    "facts": 0
+   },
+   "facts_events_tokens": 1398,
+   "facts_events_shown": {
+    "turns": 6,
+    "facts": 12,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1398,
+   "facts_no_events_shown": {
+    "turns": 6,
+    "facts": 12,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "db467c8c",
+   "type": "knowledge-update",
+   "rounds": 241,
+   "quick": 234,
+   "deep": 231,
+   "deep_failed": 2,
+   "facts": 244,
+   "current": 230,
+   "deep_pass": 243,
+   "dated_events": 13,
+   "dated_starts": 5,
+   "seconds": 7783,
+   "kazma_tokens": 1303,
+   "kazma_shown": {
+    "shown": 4,
+    "facts": 0
+   },
+   "facts_events_tokens": 1455,
+   "facts_events_shown": {
+    "turns": 4,
+    "facts": 5,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1455,
+   "facts_no_events_shown": {
+    "turns": 4,
+    "facts": 5,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "dccbc061",
+   "type": "single-session-user",
+   "rounds": 255,
+   "quick": 250,
+   "deep": 244,
+   "deep_failed": 6,
+   "facts": 281,
+   "current": 264,
+   "deep_pass": 277,
+   "dated_events": 28,
+   "dated_starts": 14,
+   "seconds": 9999,
+   "kazma_tokens": 836,
+   "kazma_shown": {
+    "shown": 1,
+    "facts": 0
+   },
+   "facts_events_tokens": 870,
+   "facts_events_shown": {
+    "turns": 1,
+    "facts": 1,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 870,
+   "facts_no_events_shown": {
+    "turns": 1,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "28dc39ac",
+   "type": "multi-session",
+   "rounds": 216,
+   "quick": 215,
+   "deep": 213,
+   "deep_failed": 2,
+   "facts": 339,
+   "current": 318,
+   "deep_pass": 335,
+   "dated_events": 21,
+   "dated_starts": 6,
+   "seconds": 8831,
+   "kazma_tokens": 1492,
+   "kazma_shown": {
+    "shown": 8,
+    "facts": 0
+   },
+   "facts_events_tokens": 1435,
+   "facts_events_shown": {
+    "turns": 8,
+    "facts": 11,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1435,
+   "facts_no_events_shown": {
+    "turns": 8,
+    "facts": 11,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "e9327a54",
+   "type": "single-session-assistant",
+   "rounds": 270,
+   "quick": 263,
+   "deep": 259,
+   "deep_failed": 4,
+   "facts": 246,
+   "current": 227,
+   "deep_pass": 243,
+   "dated_events": 20,
+   "dated_starts": 4,
+   "seconds": 8309,
+   "kazma_tokens": 1450,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1471,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 2,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1471,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 2,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "c7dc5443",
+   "type": "knowledge-update",
+   "rounds": 240,
+   "quick": 238,
+   "deep": 236,
+   "deep_failed": 1,
+   "facts": 276,
+   "current": 247,
+   "deep_pass": 274,
+   "dated_events": 20,
+   "dated_starts": 5,
+   "seconds": 8222,
+   "kazma_tokens": 1442,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1480,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 3,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1480,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 3,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "b9cfe692",
+   "type": "temporal-reasoning",
+   "rounds": 250,
+   "quick": 242,
+   "deep": 240,
+   "deep_failed": 0,
+   "facts": 275,
+   "current": 254,
+   "deep_pass": 269,
+   "dated_events": 11,
+   "dated_starts": 4,
+   "seconds": 7076,
+   "kazma_tokens": 1306,
+   "kazma_shown": {
+    "shown": 4,
+    "facts": 0
+   },
+   "facts_events_tokens": 1360,
+   "facts_events_shown": {
+    "turns": 4,
+    "facts": 2,
+    "dated_event_facts": 1
+   },
+   "facts_no_events_tokens": 1339,
+   "facts_no_events_shown": {
+    "turns": 4,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_7f6b06db",
+   "type": "temporal-reasoning",
+   "rounds": 283,
+   "quick": 275,
+   "deep": 272,
+   "deep_failed": 1,
+   "facts": 259,
+   "current": 246,
+   "deep_pass": 259,
+   "dated_events": 16,
+   "dated_starts": 11,
+   "seconds": 7877,
+   "kazma_tokens": 877,
+   "kazma_shown": {
+    "shown": 3,
+    "facts": 0
+   },
+   "facts_events_tokens": 913,
+   "facts_events_shown": {
+    "turns": 3,
+    "facts": 1,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 913,
+   "facts_no_events_shown": {
+    "turns": 3,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "37f165cf",
+   "type": "multi-session",
+   "rounds": 284,
+   "quick": 283,
+   "deep": 282,
+   "deep_failed": 1,
+   "facts": 280,
+   "current": 252,
+   "deep_pass": 280,
+   "dated_events": 10,
+   "dated_starts": 6,
+   "seconds": 7898,
+   "kazma_tokens": 1456,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1456,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 0,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1456,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 0,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "6ade9755",
+   "type": "single-session-user",
+   "rounds": 261,
+   "quick": 252,
+   "deep": 245,
+   "deep_failed": 3,
+   "facts": 238,
+   "current": 221,
+   "deep_pass": 241,
+   "dated_events": 9,
+   "dated_starts": 3,
+   "seconds": 8098,
+   "kazma_tokens": 1460,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1453,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 3,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1453,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 3,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "0bc8ad93",
+   "type": "temporal-reasoning",
+   "rounds": 246,
+   "quick": 240,
+   "deep": 235,
+   "deep_failed": 2,
+   "facts": 252,
+   "current": 237,
+   "deep_pass": 255,
+   "dated_events": 12,
+   "dated_starts": 3,
+   "seconds": 8044,
+   "kazma_tokens": 3,
+   "kazma_shown": {
+    "shown": 0,
+    "facts": 0
+   },
+   "facts_events_tokens": 3,
+   "facts_events_shown": {
+    "turns": 0,
+    "facts": 0,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 3,
+   "facts_no_events_shown": {
+    "turns": 0,
+    "facts": 0,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "0bc8ad92",
+   "type": "temporal-reasoning",
+   "rounds": 225,
+   "quick": 218,
+   "deep": 215,
+   "deep_failed": 2,
+   "facts": 266,
+   "current": 255,
+   "deep_pass": 262,
+   "dated_events": 18,
+   "dated_starts": 6,
+   "seconds": 6726,
+   "kazma_tokens": 1456,
+   "kazma_shown": {
+    "shown": 6,
+    "facts": 0
+   },
+   "facts_events_tokens": 1497,
+   "facts_events_shown": {
+    "turns": 6,
+    "facts": 6,
+    "dated_event_facts": 2
+   },
+   "facts_no_events_tokens": 1498,
+   "facts_no_events_shown": {
+    "turns": 6,
+    "facts": 12,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_18c2b244",
+   "type": "temporal-reasoning",
+   "rounds": 248,
+   "quick": 247,
+   "deep": 244,
+   "deep_failed": 3,
+   "facts": 309,
+   "current": 292,
+   "deep_pass": 312,
+   "dated_events": 11,
+   "dated_starts": 5,
+   "seconds": 8341,
+   "kazma_tokens": 1468,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1467,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 3,
+    "dated_event_facts": 3
+   },
+   "facts_no_events_tokens": 1463,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "caf9ead2",
+   "type": "single-session-user",
+   "rounds": 234,
+   "quick": 232,
+   "deep": 229,
+   "deep_failed": 3,
+   "facts": 237,
+   "current": 214,
+   "deep_pass": 240,
+   "dated_events": 15,
+   "dated_starts": 5,
+   "seconds": 7835,
+   "kazma_tokens": 871,
+   "kazma_shown": {
+    "shown": 2,
+    "facts": 0
+   },
+   "facts_events_tokens": 907,
+   "facts_events_shown": {
+    "turns": 2,
+    "facts": 1,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 907,
+   "facts_no_events_shown": {
+    "turns": 2,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "88432d0a_abs",
+   "type": "multi-session",
+   "rounds": 256,
+   "quick": 254,
+   "deep": 248,
+   "deep_failed": 5,
+   "facts": 312,
+   "current": 295,
+   "deep_pass": 307,
+   "dated_events": 26,
+   "dated_starts": 14,
+   "seconds": 9839,
+   "kazma_tokens": 1342,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1496,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 12,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1496,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 12,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "36b9f61e",
+   "type": "multi-session",
+   "rounds": 247,
+   "quick": 243,
+   "deep": 238,
+   "deep_failed": 4,
+   "facts": 296,
+   "current": 285,
+   "deep_pass": 292,
+   "dated_events": 10,
+   "dated_starts": 6,
+   "seconds": 7891,
+   "kazma_tokens": 1455,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1466,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 4,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1466,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 4,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_1d80365e",
+   "type": "temporal-reasoning",
+   "rounds": 261,
+   "quick": 256,
+   "deep": 254,
+   "deep_failed": 0,
+   "facts": 262,
+   "current": 242,
+   "deep_pass": 262,
+   "dated_events": 18,
+   "dated_starts": 6,
+   "seconds": 6799,
+   "kazma_tokens": 1454,
+   "kazma_shown": {
+    "shown": 6,
+    "facts": 0
+   },
+   "facts_events_tokens": 1480,
+   "facts_events_shown": {
+    "turns": 6,
+    "facts": 12,
+    "dated_event_facts": 2
+   },
+   "facts_no_events_tokens": 1480,
+   "facts_no_events_shown": {
+    "turns": 6,
+    "facts": 12,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_5501fe77",
+   "type": "multi-session",
+   "rounds": 258,
+   "quick": 258,
+   "deep": 254,
+   "deep_failed": 4,
+   "facts": 270,
+   "current": 249,
+   "deep_pass": 266,
+   "dated_events": 14,
+   "dated_starts": 8,
+   "seconds": 8451,
+   "kazma_tokens": 1459,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1459,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 0,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1459,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 0,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_61e13b3c",
+   "type": "temporal-reasoning",
+   "rounds": 236,
+   "quick": 231,
+   "deep": 230,
+   "deep_failed": 1,
+   "facts": 248,
+   "current": 231,
+   "deep_pass": 244,
+   "dated_events": 21,
+   "dated_starts": 10,
+   "seconds": 7193,
+   "kazma_tokens": 1469,
+   "kazma_shown": {
+    "shown": 7,
+    "facts": 0
+   },
+   "facts_events_tokens": 1486,
+   "facts_events_shown": {
+    "turns": 7,
+    "facts": 7,
+    "dated_event_facts": 3
+   },
+   "facts_no_events_tokens": 1499,
+   "facts_no_events_shown": {
+    "turns": 7,
+    "facts": 2,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_af6db32f",
+   "type": "temporal-reasoning",
+   "rounds": 240,
+   "quick": 236,
+   "deep": 234,
+   "deep_failed": 2,
+   "facts": 247,
+   "current": 233,
+   "deep_pass": 246,
+   "dated_events": 19,
+   "dated_starts": 12,
+   "seconds": 7085,
+   "kazma_tokens": 1197,
+   "kazma_shown": {
+    "shown": 4,
+    "facts": 0
+   },
+   "facts_events_tokens": 1247,
+   "facts_events_shown": {
+    "turns": 4,
+    "facts": 2,
+    "dated_event_facts": 1
+   },
+   "facts_no_events_tokens": 1490,
+   "facts_no_events_shown": {
+    "turns": 4,
+    "facts": 11,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "d905b33f",
+   "type": "multi-session",
+   "rounds": 253,
+   "quick": 251,
+   "deep": 250,
+   "deep_failed": 1,
+   "facts": 307,
+   "current": 293,
+   "deep_pass": 313,
+   "dated_events": 23,
+   "dated_starts": 7,
+   "seconds": 7755,
+   "kazma_tokens": 807,
+   "kazma_shown": {
+    "shown": 2,
+    "facts": 0
+   },
+   "facts_events_tokens": 842,
+   "facts_events_shown": {
+    "turns": 2,
+    "facts": 1,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 842,
+   "facts_no_events_shown": {
+    "turns": 2,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "2a1811e2",
+   "type": "temporal-reasoning",
+   "rounds": 242,
+   "quick": 237,
+   "deep": 228,
+   "deep_failed": 8,
+   "facts": 253,
+   "current": 227,
+   "deep_pass": 250,
+   "dated_events": 24,
+   "dated_starts": 5,
+   "seconds": 12774,
+   "kazma_tokens": 1429,
+   "kazma_shown": {
+    "shown": 7,
+    "facts": 0
+   },
+   "facts_events_tokens": 1450,
+   "facts_events_shown": {
+    "turns": 7,
+    "facts": 12,
+    "dated_event_facts": 5
+   },
+   "facts_no_events_tokens": 1417,
+   "facts_no_events_shown": {
+    "turns": 7,
+    "facts": 12,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "720133ac",
+   "type": "multi-session",
+   "rounds": 236,
+   "quick": 230,
+   "deep": 222,
+   "deep_failed": 5,
+   "facts": 288,
+   "current": 274,
+   "deep_pass": 284,
+   "dated_events": 11,
+   "dated_starts": 17,
+   "seconds": 8708,
+   "kazma_tokens": 1459,
+   "kazma_shown": {
+    "shown": 5,
+    "facts": 0
+   },
+   "facts_events_tokens": 1456,
+   "facts_events_shown": {
+    "turns": 5,
+    "facts": 4,
+    "dated_event_facts": 3
+   },
+   "facts_no_events_tokens": 1463,
+   "facts_no_events_shown": {
+    "turns": 5,
+    "facts": 2,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "87f22b4a",
+   "type": "multi-session",
+   "rounds": 238,
+   "quick": 236,
+   "deep": 231,
+   "deep_failed": 5,
+   "facts": 294,
+   "current": 272,
+   "deep_pass": 291,
+   "dated_events": 22,
+   "dated_starts": 5,
+   "seconds": 12000,
+   "kazma_tokens": 993,
+   "kazma_shown": {
+    "shown": 2,
+    "facts": 0
+   },
+   "facts_events_tokens": 1035,
+   "facts_events_shown": {
+    "turns": 2,
+    "facts": 2,
+    "dated_event_facts": 1
+   },
+   "facts_no_events_tokens": 1020,
+   "facts_no_events_shown": {
+    "turns": 2,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "00ca467f",
+   "type": "multi-session",
+   "rounds": 243,
+   "quick": 243,
+   "deep": 241,
+   "deep_failed": 2,
+   "facts": 301,
+   "current": 290,
+   "deep_pass": 313,
+   "dated_events": 14,
+   "dated_starts": 8,
+   "seconds": 6001,
+   "kazma_tokens": 1455,
+   "kazma_shown": {
+    "shown": 6,
+    "facts": 0
+   },
+   "facts_events_tokens": 1489,
+   "facts_events_shown": {
+    "turns": 6,
+    "facts": 7,
+    "dated_event_facts": 4
+   },
+   "facts_no_events_tokens": 1477,
+   "facts_no_events_shown": {
+    "turns": 6,
+    "facts": 5,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "5a7937c8",
+   "type": "multi-session",
+   "rounds": 210,
+   "quick": 209,
+   "deep": 206,
+   "deep_failed": 2,
+   "facts": 224,
+   "current": 210,
+   "deep_pass": 219,
+   "dated_events": 22,
+   "dated_starts": 7,
+   "seconds": 5583,
+   "kazma_tokens": 1489,
+   "kazma_shown": {
+    "shown": 8,
+    "facts": 0
+   },
+   "facts_events_tokens": 1475,
+   "facts_events_shown": {
+    "turns": 8,
+    "facts": 6,
+    "dated_event_facts": 3
+   },
+   "facts_no_events_tokens": 1489,
+   "facts_no_events_shown": {
+    "turns": 8,
+    "facts": 0,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_a56e767c",
+   "type": "multi-session",
+   "rounds": 241,
+   "quick": 236,
+   "deep": 235,
+   "deep_failed": 0,
+   "facts": 234,
+   "current": 222,
+   "deep_pass": 232,
+   "dated_events": 8,
+   "dated_starts": 7,
+   "seconds": 6185,
+   "kazma_tokens": 1476,
+   "kazma_shown": {
+    "shown": 9,
+    "facts": 0
+   },
+   "facts_events_tokens": 1486,
+   "facts_events_shown": {
+    "turns": 9,
+    "facts": 6,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1486,
+   "facts_no_events_shown": {
+    "turns": 9,
+    "facts": 6,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_8279ba03",
+   "type": "temporal-reasoning",
+   "rounds": 252,
+   "quick": 248,
+   "deep": 241,
+   "deep_failed": 7,
+   "facts": 329,
+   "current": 307,
+   "deep_pass": 329,
+   "dated_events": 18,
+   "dated_starts": 11,
+   "seconds": 10614,
+   "kazma_tokens": 755,
+   "kazma_shown": {
+    "shown": 2,
+    "facts": 0
+   },
+   "facts_events_tokens": 755,
+   "facts_events_shown": {
+    "turns": 2,
+    "facts": 0,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 755,
+   "facts_no_events_shown": {
+    "turns": 2,
+    "facts": 0,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "6613b389",
+   "type": "temporal-reasoning",
+   "rounds": 226,
+   "quick": 226,
+   "deep": 222,
+   "deep_failed": 4,
+   "facts": 302,
+   "current": 282,
+   "deep_pass": 298,
+   "dated_events": 20,
+   "dated_starts": 12,
+   "seconds": 8088,
+   "kazma_tokens": 1499,
+   "kazma_shown": {
+    "shown": 9,
+    "facts": 0
+   },
+   "facts_events_tokens": 1473,
+   "facts_events_shown": {
+    "turns": 9,
+    "facts": 12,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 1473,
+   "facts_no_events_shown": {
+    "turns": 9,
+    "facts": 12,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_2f56ae70",
+   "type": "temporal-reasoning",
+   "rounds": 231,
+   "quick": 227,
+   "deep": 226,
+   "deep_failed": 1,
+   "facts": 261,
+   "current": 240,
+   "deep_pass": 256,
+   "dated_events": 18,
+   "dated_starts": 8,
+   "seconds": 8361,
+   "kazma_tokens": 836,
+   "kazma_shown": {
+    "shown": 1,
+    "facts": 0
+   },
+   "facts_events_tokens": 878,
+   "facts_events_shown": {
+    "turns": 1,
+    "facts": 1,
+    "dated_event_facts": 0
+   },
+   "facts_no_events_tokens": 878,
+   "facts_no_events_shown": {
+    "turns": 1,
+    "facts": 1,
+    "dated_event_facts": 0
+   }
+  },
+  {
+   "id": "gpt4_2d58bcd6",
+   "type": "temporal-reasoning",
+   "rounds": 247,
+   "quick": 241,
+   "deep": 233,
+   "deep_failed": 2,
+   "facts": 288,
+   "current": 277,
+   "deep_pass": 285,
+   "dated_events": 14,
+   "dated_starts": 5,
+   "seconds": 7207,
+   "kazma_tokens": 991,
+   "kazma_shown": {
+    "shown": 2,
+    "facts": 0
+   },
+   "facts_events_tokens": 1097,
+   "facts_events_shown": {
+    "turns": 2,
+    "facts": 3,
+    "dated_event_facts": 1
+   },
+   "facts_no_events_tokens": 1035,
+   "facts_no_events_shown": {
+    "turns": 2,
+    "facts": 2,
+    "dated_event_facts": 0
+   }
+  }
+ ]
+}
