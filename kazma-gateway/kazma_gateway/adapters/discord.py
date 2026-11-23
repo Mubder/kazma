@@ -32,7 +32,7 @@ import httpx
 
 from kazma_core.background import spawn_background
 from kazma_gateway.adapters.discord_receive import DiscordReceiveLog
-from kazma_gateway.sender_rule import SenderGate
+from kazma_gateway.sender_rule import LINK_CODE, SenderGate
 from kazma_gateway.gateway import (
     Attachment,
     BaseAdapter,
@@ -508,6 +508,16 @@ class DiscordAdapter(SenderGate, BaseAdapter):
             if gid and gid not in self._allowed_guilds:
                 self._note_drop("server_not_allowed", data)
                 return None
+        # A link code (Spaces S3-01) is answered by the link flow, before the
+        # sender rule: its sender is not linked yet.
+        if self.link_attempted(
+            meta.get("user_id"), parsed.text,
+            direct=not meta.get("guild_id"),
+            target_id=f"discord:{meta.get('channel_id')}",
+            context_metadata={"channel_id": meta.get("channel_id")},
+        ):
+            self._note_drop(LINK_CODE, data)
+            return None
         # The one sender rule (sender_rule): a stranger writing in a direct
         # message is told once a day that this bot is private.
         refusal = self.sender_refusal(meta.get("user_id"))
@@ -686,7 +696,9 @@ class DiscordAdapter(SenderGate, BaseAdapter):
         # shipped posture (allowed_users, or the owner's own id, ⇒ admin); it
         # bites only with the open switch, where any guild member could
         # otherwise answer the operator.
-        if action.kind in ("hitl", "swarm", "run"):
+        from kazma_gateway.allowlists import admin_hint, press_keeps_card, press_needs_admin
+
+        if action.kind in ("hitl", "swarm", "run") and press_needs_admin(action.kind):
             from kazma_gateway.allowlists import is_gateway_admin
 
             if not await asyncio.to_thread(is_gateway_admin, f"discord:{_ia_user_id}", "discord"):
@@ -698,11 +710,7 @@ class DiscordAdapter(SenderGate, BaseAdapter):
                     {
                         "type": 7,
                         "data": {
-                            "content": (
-                                "⛔ Admin privilege required to approve a danger "
-                                "tool. Set KAZMA_GATEWAY_ADMINS or the platform "
-                                "user allowlist."
-                            ),
+                            "content": "⛔ Admin privilege required to approve a danger tool. " + admin_hint(),
                             "embeds": [],
                             "components": [],
                         },
@@ -784,6 +792,10 @@ class DiscordAdapter(SenderGate, BaseAdapter):
                     text=action.text,
                     context_metadata={
                         "channel_id": channel_id,
+                        # The server the card is in: a press in a server
+                        # channel is never a direct chat (the stage 3
+                        # review, M5: it bound the presser's personal space).
+                        "guild_id": str(data.get("guild_id") or "") or None,
                         "user_id": str(user.get("id", "")),
                         "username": user.get("username", ""),
                         "interaction": True,
@@ -800,8 +812,10 @@ class DiscordAdapter(SenderGate, BaseAdapter):
                 return  # Already acknowledged before enqueueing.
             from kazma_gateway.run_cards import press_keeps_buttons
 
-            if press_keeps_buttons(action):
-                # A run card's Diagnose decides nothing: leave the card as it is.
+            if press_keeps_buttons(action) or press_keeps_card(action.kind, direct=not data.get("guild_id")):
+                # A run card's Diagnose decides nothing, and in a server
+                # channel the handler says whose press counts (S3-04): leave
+                # the card as it is.
                 await _ack({"type": 6})
                 return
             await _ack({"type": 7, "data": {"content": old_content, "components": []}})

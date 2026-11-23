@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "BOT_MENU_COMMANDS",
     "changes_global_config",
+    "decided_in_the_space",
     "is_slash_command",
     "resolve_slash_command",
     "switch_model_from_chat",
@@ -230,6 +231,23 @@ def changes_global_config(text: str) -> bool:
     return False
 
 
+def decided_in_the_space(text: str) -> bool:
+    """Whether a command :func:`changes_global_config` names acts, once
+    Spaces is enforced, as the linked account in the chat's space rather
+    than for everyone (S3-06): acting on a run (``/runs act``: its asker or
+    an owner of its space, ``runs.decide``) and the changes to the space's
+    own facts (the ``/memory`` change words: the bound space's tenant). The
+    admin gate does not apply to them there. No I/O."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    parts = (text or "").strip().split()
+    head = parts[0].lower().split("@", 1)[0] if parts else ""
+    sub = parts[1].lower() if len(parts) > 1 else ""
+    return (head == "/runs" and sub == "act") or (head == "/memory" and sub in MEMORY_CHANGE_WORDS)
+
+
 #: The ``/x`` words any allowed sender may use: help and reading.
 X_OPEN_SUBCOMMANDS = frozenset({"", "help", "?", "list", "subjects"})
 
@@ -294,6 +312,7 @@ def _cmd_help() -> str:
         "• `/sessions` (`/seasons`) — List every season (Web + Telegram + Discord + Slack)\n"
         "• `/session 2` (`/season`, `/switch`) — Continue that season here (take over)\n"
         "• `/session new [name]` — Start a fresh season (`/new` still works)\n"
+        "• `/space [name]` — Which space this chat works in; a name or number moves it\n"
         "• `/research deep <topic>` — deep research via the same agent\n"
         "• `/swarm <task>` — dispatch workers via the same agent\n"
         "• `/reset` — Clear the conversation history and start fresh\n"
@@ -465,6 +484,8 @@ _CHANGE_REFUSALS = {
     "replaced_since": "🔁 That fact has changed again since. Undo the newer change first.",
     "forgotten": "🔁 The earlier value was forgotten, so it cannot come back.",
     "not_written": "🔁 Kazma could not save the value. Nothing changed.",
+    "not_theirs": "🔁 That is another member's fact: only they or an owner of this space decides on it.",
+    "identity_unavailable": "🔁 Who may decide this could not be read right now. Nothing changed; try again.",
 }
 
 
@@ -678,9 +699,17 @@ def _replay_clear(recorder, thread_id: str, ctx: dict[str, Any] | None = None) -
     from kazma_core.time_travel import SnapshotStoreError, forget_thread_snapshots
     from kazma_core.time_travel_audit import write_audit_row
 
-    try:
-        from kazma_ui.thread_rewind import chat_keys_for
+    from kazma_ui.thread_rewind import RewindRefused, _theirs_to_change, chat_keys_for
 
+    try:
+        # The chat's opener or an owner of the space deletes its steps,
+        # as on the web (``thread_rewind._theirs_to_change``).
+        _theirs_to_change(thread_id)
+    except RewindRefused as refused:
+        if refused.code == "identity_unavailable":
+            return "⚠️ Whose chat this is could not be read right now, so nothing was deleted. Try again."
+        return "⛔ Only the person who started this chat, or an owner of this space, can delete its steps."
+    try:
         count = forget_thread_snapshots(chat_keys_for(thread_id), recorder=recorder)
     except SnapshotStoreError as exc:
         logger.warning("[slash] /replay clear failed: %s", exc)

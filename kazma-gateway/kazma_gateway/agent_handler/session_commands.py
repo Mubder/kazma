@@ -44,6 +44,30 @@ def _parse(text: str) -> tuple[str, str] | None:
     return None
 
 
+def _mouth_key(sender: str, chat_key: str) -> str:
+    """The key this chat's season pointer is kept under: the chat's own key
+    in its space once Spaces is enforced (S3-06: a space other than the
+    owner's carries the space, ``chat_apps.ChatPlace.sender_key``), else the
+    platform sender, as before. No I/O."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    return chat_key if spaces_enforced() and chat_key else sender
+
+
+def _in_this_space(thread_id: str) -> tuple[bool, str]:
+    """Whether a season may be taken over from a chat working in the space
+    bound now (S3-06): a season of that space -- its chats are its members'
+    -- and never another space's. Blocking (the thread record)."""
+    from kazma_core.spaces import threads
+    from kazma_core.spaces.scope import current_scope
+
+    bound = current_scope()
+    if bound is None:
+        return False, ""
+    home = threads.thread_home(thread_id)
+    return home == bound.space_id, home
+
+
 async def try_session_command(
     msg: IncomingMessage,
     *,
@@ -53,12 +77,22 @@ async def try_session_command(
     manager: Any,
     sessions_map: dict[str, str],
     prepare_outbound: Any,
+    chat_key: str = "",
 ) -> bool:
-    """Handle /sessions /session /switch. True = consumed (skip graph)."""
+    """Handle /sessions /session /switch. True = consumed (skip graph).
+
+    Once Spaces is enforced (S3-06) they act as the linked account in the
+    space the chat works in: the list is that space's seasons (its chat
+    store), a take-over is of a season of that space, and the pointer is
+    the chat's own key in it (*chat_key*)."""
     parsed = _parse(msg.text or "")
     if parsed is None:
         return False
     verb, rest = parsed
+    from kazma_core.spaces.scope import spaces_enforced
+
+    enforced = spaces_enforced()
+    sender = _mouth_key(sender, chat_key)
 
     async def _reply(text: str) -> None:
         ctx = msg.context_metadata
@@ -89,13 +123,16 @@ async def try_session_command(
     # no owner on record) are an admin's (security audit SEC-04). The admin
     # rule reads settings, so it runs in a thread.
     admin = False
-    try:
-        from kazma_gateway.allowlists import is_gateway_admin
+    if not enforced:
+        try:
+            from kazma_gateway.allowlists import is_gateway_admin
 
-        admin = bool(await asyncio.to_thread(is_gateway_admin, sender, msg.platform))
-    except Exception:
-        logger.warning("[session-cmd] admin check failed; treating sender as not admin", exc_info=True)
-    only_for = None if admin else sender
+            admin = bool(await asyncio.to_thread(is_gateway_admin, sender, msg.platform))
+        except Exception:
+            logger.warning("[session-cmd] admin check failed; treating sender as not admin", exc_info=True)
+    # Once Spaces is enforced the chat store read is the bound space's own:
+    # its seasons are the space's members' (S3-06).
+    only_for = None if admin or enforced else sender
 
     if verb in {"list", "list_all"}:
         # The sessions directory reads the whole chat list (audit 2026-10-26 AUD-111).
@@ -173,9 +210,18 @@ async def try_session_command(
     # gates (the in-thread approve path checks no sender identity).
     from kazma_core.sessions.directory import sender_may_take_over
 
-    allowed, owner = await asyncio.to_thread(
-        sender_may_take_over, sender, hit.thread_id, admin=admin
-    )
+    if enforced:
+        allowed, home = await asyncio.to_thread(_in_this_space, hit.thread_id)
+        if not allowed:
+            await _reply("🔒 That season belongs to another space. /space shows where this chat works.")
+            logger.warning("[session-cmd] take-over of another space's season refused (thread=%s space=%s)",
+                           hit.thread_id[:12], home)
+            return True
+        owner = ""
+    else:
+        allowed, owner = await asyncio.to_thread(
+            sender_may_take_over, sender, hit.thread_id, admin=admin
+        )
     if not allowed:
         whose = f"another user (`{owner[:6]}…`)" if owner else "the operator"
         await _reply(

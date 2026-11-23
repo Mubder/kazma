@@ -14,6 +14,11 @@ the delivery waits :data:`HANDOVER_GRACE_S` for a waiting call to pick it up
 first. A result longer than :data:`INLINE_MAX_CHARS` goes as a Markdown file
 with a short message, so a long report reaches the chat whole.
 
+Once Spaces is enforced, a task that does not act for the owner is sent only
+to its asker's own chat (Spaces S3-04, ``chat_apps.chat_is_the_askers``): a
+group bound to the task's space they are a member of, or their own chat in
+that space.
+
 Only a task from a chat app (Telegram, Discord, Slack) is sent: a web turn's
 delivery target is the operator's Telegram, kept for reminders (AGENTS
 §16 B2), and the web page has the Swarm panel. A failed send is a WARNING;
@@ -24,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 import threading
 from collections import OrderedDict
 from typing import Any
@@ -130,11 +136,13 @@ async def _deliver(task: Any, result: Any, platform: str, target: str) -> None:
     if _result_was_handed(task.id):
         logger.info("[swarm] task %s: the chat's turn read the result; not sent again", task.id)
         return
-    if not await _for_the_owner(task):
-        # Every chat address Kazma has is the owner's until people link their
-        # own chat apps (stage 3): someone else's result stays in its space
-        # (Spaces S1-15 review, O1).
-        logger.info("[swarm] task %s: not the owner's; its result stays in its space", task.id)
+    if not await _for_the_owner(task) and not await asyncio.to_thread(
+            _the_askers_chat, task, platform, target):
+        # Someone else's result goes only to that person's own chat (Spaces
+        # S3-04: their linked chat, or a group bound to the task's space they
+        # are a member of); anywhere else it stays in its space (O1).
+        logger.info("[swarm] task %s: not the owner's, and the chat is not its asker's; its "
+                    "result stays in its space", task.id)
         return
     from kazma_core.tools.send_message import send_failed, send_message
 
@@ -154,6 +162,23 @@ async def _deliver(task: Any, result: Any, platform: str, target: str) -> None:
         return
     note_result_handed(task.id)
     logger.info("[swarm] task %s: result sent to %s", task.id, platform)
+
+
+def _the_askers_chat(task: Any, platform: str, target: str) -> bool:
+    """Whether *target* is the chat of the person the task acts for (Spaces
+    S3-04, ``chat_apps.chat_is_the_askers``). A store that cannot say keeps
+    the result in its space. Blocking."""
+    from kazma_core.spaces.chat_apps import chat_is_the_askers
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    meta = dict(getattr(task, "metadata", None) or {})
+    try:
+        return chat_is_the_askers(str(meta.get("tenant_id") or ""), str(meta.get("asker") or ""),
+                                  platform, target, str(meta.get("source_thread_id") or ""))
+    except (IdentityUnavailable, sqlite3.Error, OSError) as exc:
+        logger.warning("[swarm] task %s: whose chat %s is cannot be read (%s); its result stays in "
+                       "its space", getattr(task, "id", "?"), platform, type(exc).__name__)
+        return False
 
 
 async def _for_the_owner(task: Any) -> bool:

@@ -1322,13 +1322,56 @@ def install_settings_here() -> bool:
     return principal_allows(viewer, _INSTALL_SETTINGS_PROBE, "GET")
 
 
+#: The person's own routes (``route_scopes`` ACCOUNT) an API token below
+#: admin may still ask once Spaces is enforced, with why: each describes the
+#: credential that asks or the whole install, and acts for no one's account.
+TOKEN_MAY_ASK: dict[tuple[str, str], str] = {
+    ("GET", "/api/auth/me"): "describes the credential that asks: its own role and id",
+    ("GET", "/api/push/vapid-public-key"): "the install's public Web Push key, the same for everyone",
+    ("GET", "/api/notifications/turn-complete"): "the install's switch, the same for everyone",
+}
+
+
+def token_acts_for_the_owner(principal: dict[str, Any] | None, path: str, method: str = "GET") -> bool:
+    """Whether *principal* is an API token below admin asking a route of the
+    signed-in person's own account (``route_scopes`` ACCOUNT), once Spaces
+    is enforced (the stage 3 review's account-route class).
+
+    Every API token is the owner's account (``space_binding.account_of``),
+    so on these routes a token acts as the owner whatever its role: an
+    operator token -- one handed to another agent for A2A, say -- linked a
+    chat app as the admin (H1), marked the owner's notices read, subscribed
+    its own endpoint to the owner's answers and approval cards, cleared the
+    owner's bell. Only a person's own sign-in (a browser session), the
+    shared secret and an admin token act there; a route in
+    :data:`TOKEN_MAY_ASK` is excepted. Before Spaces nothing changes. Reads
+    nothing but memory."""
+    who = principal or {}
+    if who.get("source") != "api_token" or who.get("role") == "admin":
+        return False
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    from kazma_ui.route_scopes import ACCOUNT, scope_of
+
+    verb = (method or "GET").upper()
+    if scope_of(verb, path) != ACCOUNT:
+        return False
+    return (verb, path.rstrip("/") or "/") not in TOKEN_MAY_ASK
+
+
 def principal_allows(principal: dict[str, Any], path: str, method: str) -> bool:
     """Whether *principal* may do what ``method path`` does over HTTP.
 
     The shared secret and an admin pass; anyone else is judged by
     ``platform_rbac.role_allows``, the rule the HTTP middleware applies. A
-    socket that does what an HTTP route does asks with that route.
+    socket that does what an HTTP route does asks with that route. An API
+    token below admin never acts on the person's own routes once Spaces is
+    enforced (:func:`token_acts_for_the_owner`).
     """
+    if token_acts_for_the_owner(principal, path, method):
+        return False
     if principal.get("source") == "secret" or principal.get("role") == "admin":
         return True
     from kazma_core.security.platform_rbac import role_allows
@@ -1346,6 +1389,15 @@ def _role_refusal(principal: dict[str, Any] | None, path: str, method: str) -> R
     who = principal or {}
     if principal_allows(who, path, method):
         return None
+    if token_acts_for_the_owner(who, path, method):
+        logger.warning("[RBAC] an API token (role=%s) was refused on the person's own route %s %s",
+                       who.get("role") or "viewer", method, path)
+        return Response(
+            content=('{"ok":false,"error":"own_sign_in_only","message":"This is the signed-in '
+                     'person\'s own account: it answers their own sign-in, never a token."}'),
+            status_code=403,
+            media_type="application/json",
+        )
     logger.warning("[RBAC] denied role=%s %s %s", who.get("role") or "viewer", method, path)
     return Response(
         content='{"detail":"Forbidden for your role"}',

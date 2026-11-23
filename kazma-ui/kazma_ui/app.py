@@ -409,6 +409,11 @@ class KazmaAppBuilder:
 
             identity.move_platform_users()
             identity.watch_enforcement()
+            # The chat apps' sender rule once Spaces is on (S3-02): the links
+            # in memory, and every later write of the registry followed.
+            from kazma_core.spaces import chat_links
+
+            chat_links.refresh_links()
         except (identity.IdentityUnavailable, identity.IdentityError, OSError,
                 RuntimeError, ValueError, _sqlite3.Error) as e:
             logger.warning(
@@ -1445,12 +1450,14 @@ class KazmaAppBuilder:
         self.app.include_router(create_activity_router(self.templates))
         try:
             from kazma_ui.account_spaces_api import create_account_spaces_router
+            from kazma_ui.chat_links_api import create_chat_links_router
             from kazma_ui.own_keys_api import create_own_keys_router
             from kazma_ui.people_api import create_people_router
             from kazma_ui.saas_api import create_saas_router
             from kazma_ui.spaces_api import create_spaces_router
 
             self.app.include_router(create_account_spaces_router())
+            self.app.include_router(create_chat_links_router())
             self.app.include_router(create_own_keys_router())
             self.app.include_router(create_people_router())
             self.app.include_router(create_spaces_router())

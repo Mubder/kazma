@@ -55,6 +55,8 @@ COMMANDS: tuple[Command, ...] = (
         arguments="",
     ),
     Command("switch", "Take over a season (same as /session)", "استئناف موسم", web=False, page=None, arguments=""),
+    Command("space", "Which space this chat works in", "المساحة التي تعمل فيها هذه المحادثة", web=False,
+            page=None, arguments="[name]"),
     Command("new", "Create a brand new session/season", "بدء جلسة جديدة", web=True, page=None, arguments=""),
     Command("reset", "Clear conversation history", "مسح سجل المحادثة", web=True, page=None, arguments=""),
     Command("compact", "Manually trigger context compaction", "تلخيص سياق المحادثة", web=True, page=None, arguments=""),

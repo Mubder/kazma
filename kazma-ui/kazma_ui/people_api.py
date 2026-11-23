@@ -87,6 +87,18 @@ def _caller(request: Request) -> str | None:
     return space_binding.account_of(auth.get_request_principal(request))
 
 
+def _own_caller(request: Request) -> str | None:
+    """The account a route of the person's own answers: the account behind
+    the sign-in, but never an API token below admin acting as the owner
+    (``auth.token_acts_for_the_owner``, the rule the middleware applies to
+    every such route: asked here again so the routes hold it whatever mounts
+    them). None refuses. Blocking (a session read)."""
+    principal = auth.get_request_principal(request)
+    if auth.token_acts_for_the_owner(principal, request.url.path, request.method):
+        return None
+    return space_binding.account_of(principal)
+
+
 _NOTHING_SPENT = {"calls": 0, "tokens": 0, "cost": 0.0, "unpriced": 0}
 
 
@@ -436,7 +448,7 @@ def create_people_router() -> APIRouter:
 
     @router.get("/api/account/notices")
     def my_notices(request: Request) -> JSONResponse:
-        account = _caller(request)
+        account = _own_caller(request)
         if account is None or not spaces_enforced():
             return JSONResponse({"ok": True, "notices": []})
         try:
@@ -445,7 +457,7 @@ def create_people_router() -> APIRouter:
             return _unavailable()
 
     def _seen(request: Request, body: dict[str, Any]) -> JSONResponse:
-        account = _caller(request)
+        account = _own_caller(request)
         if account is None:
             return JSONResponse({"ok": False, "error": "no_account"}, status_code=403)
         try:

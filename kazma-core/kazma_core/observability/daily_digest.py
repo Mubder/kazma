@@ -120,6 +120,8 @@ _CRON_OUTCOMES = {
     "delivery_delivered": ("scheduled messages delivered", False),
     "delivery_undeliverable": ("scheduled messages not delivered", True),
     "delivery_unknown": ("scheduled messages that may not have arrived", True),
+    # Its chat's person was unlinked, deleted or disabled (Spaces S3-07): nothing owed.
+    "delivery_dropped": ("scheduled messages dropped (their chat is no longer linked)", False),
     "missed": ("scheduled jobs missed while Kazma was down", True),
     "turn_failed": ("scheduled tasks that failed", True),
     "timed_out": ("scheduled tasks that failed", True),

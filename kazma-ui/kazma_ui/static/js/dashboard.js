@@ -984,7 +984,9 @@
         await window.kazmaSave('/api/sessions/' + encodeURIComponent(threadId), { method: 'DELETE', credentials: 'same-origin' });
         loadSessions();
       } catch (e) {
-        window.kazmaAlert && window.kazmaAlert({ title: label('common.error', 'Error'), message: label('dashboard.error_deleting', 'Error deleting session'), variant: 'btn-danger' });
+        // The server's own words when it refused (another member's chat).
+        var why = (e && e.body && e.body.message) || label('dashboard.error_deleting', 'Error deleting session');
+        window.kazmaAlert && window.kazmaAlert({ title: label('common.error', 'Error'), message: why, variant: 'btn-danger' });
       }
     };
 

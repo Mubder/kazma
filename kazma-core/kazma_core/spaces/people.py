@@ -89,6 +89,7 @@ __all__ = [
     "spaces_usage",
     "end_sessions",
     "note_sign_in",
+    "record_event",
 ]
 
 logger = logging.getLogger(__name__)
@@ -98,8 +99,10 @@ _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased"
           "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
           "models_set", "account_disabled", "account_enabled", "space_created", "member_added", "member_left", "member_removed",
           "space_limits_set", "default_space_limits_set", "sessions_ended", "space_key_changed", "code_network_set")
+#: A person's chat-app accounts (Spaces stage 3, ``spaces.chat_links``).
+_KINDS += ("chat_linked", "chat_unlinked")
 #: The events a person is told about, when someone else made them.
-_TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended")
+_TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended", "chat_linked")
 _NAME_MAX = 64
 #: One shared-space create at a time in this process (the review, finding 10).
 _CREATE_LOCK = threading.Lock()
@@ -155,7 +158,16 @@ def _event_hash(event: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(fields, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _record(reg: dict[str, Any], kind: str, account: str, by: str, *, space: str = "") -> None:
+def record_event(reg: dict[str, Any], kind: str, account: str, by: str, *, detail: str = "") -> None:
+    """Append one event to *reg*'s record, for a change another module makes
+    inside its own ``identity.update_registry`` step (a chat-app link,
+    ``spaces.chat_links``). *detail* is a short word (the chat app), never a
+    person's data."""
+    _record(reg, kind, account, by, detail=detail)
+
+
+def _record(reg: dict[str, Any], kind: str, account: str, by: str, *, space: str = "",
+            detail: str = "") -> None:
     """Append one event to *reg*'s record, chained to the one before."""
     if kind not in _KINDS:
         raise ValueError(f"not an event of the record: {kind!r}")
@@ -170,6 +182,8 @@ def _record(reg: dict[str, Any], kind: str, account: str, by: str, *, space: str
     }
     if space:
         event["space"] = space
+    if detail:
+        event["detail"] = detail
     event["hash"] = _event_hash(event)
     events.append(event)
 
@@ -215,6 +229,11 @@ def list_people() -> list[dict[str, Any]]:
             "personal_space": personal.get(account_id, ""),
             "owner": account_id == OWNER_ACCOUNT_ID,
             "spaces": _spaces_of(reg, account_id),
+            # Their linked chat-app accounts (stage 3): a chat app and an id.
+            "links": [{"platform": str(link.get("platform") or ""),
+                       "user_id": str(link.get("user_id") or "")}
+                      for link in reg.get("links") or () if isinstance(link, dict)
+                      and link.get("account") == account_id],
             **signed_in.get(account_id, {"sessions": 0, "last_sign_in": ""}),
             **_limits_of(reg, account_id, limit_of),
         }
@@ -699,6 +718,15 @@ def notices_for(account_id: str) -> list[dict[str, Any]]:
         if event["kind"] == "member_removed":
             # Said only once it is true (the S2-12 review, finding 4).
             notice["forgotten"] = _entry_forgotten(account_id, str(event.get("space") or ""))
+        if event["kind"] == "chat_linked":
+            # Which chat-app account sent the code (the stage 3 review, L2):
+            # the page offers to unlink it. An adoption at the switch is the
+            # owner's own and is not told (by the account itself).
+            platform, _sep, user = str(event.get("by") or "").partition(":")
+            notice["platform"] = platform
+            notice["chat_user"] = user
+            if not user:
+                continue
         told.append(notice)
     return told
 
@@ -848,6 +876,9 @@ def delete_person(account_id: str, *, by: str) -> None:
         del reg["accounts"][account_id]
         reg["policies"].pop(account_id, None)
         reg["memberships"] = [m for m in reg["memberships"] if m.get("account") != account_id]
+        # Their chat-app accounts are nobody's now (stage 3): refused at once,
+        # and what waits for them is dropped (S3-07).
+        identity.retire_links(reg, account_id)
         now = _now()
         for space in reg["spaces"].values():
             if space.get("personal_of") == account_id:

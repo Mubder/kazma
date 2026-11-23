@@ -66,6 +66,74 @@ async def call_refusal(name: str, arguments: Any, *, user_text: str | None = Non
         return await shell_refusal(command) or await shell_target_refusal(command)
     if name in BROWSER_TOOLS:
         return await browser_refusal()
+    if name in OUTBOUND_CHECKED:
+        return await asyncio.to_thread(_outbound_refusal, name, args)
+    return None
+
+
+#: The tools that name a recipient (``side_effects.OUTBOUND_TARGET_FIELDS``)
+#: whose send is not Kazma's chat-app bot's, and why: never checked by
+#: :func:`_outbound_refusal` (the stage 3 review, M7).
+OUTBOUND_NOT_CHECKED = {
+    "email_send": "the space's own connected mailbox sends it (S1-17a), not Kazma's bot: "
+                  "whom a person mails is their mailbox's",
+    "send_file": "names no recipient: it goes to this conversation",
+}
+
+
+def _outbound_checked() -> frozenset[str]:
+    from kazma_core.safety.side_effects import OUTBOUND_TARGET_FIELDS
+
+    return frozenset(name for name in OUTBOUND_TARGET_FIELDS if name not in OUTBOUND_NOT_CHECKED)
+
+
+#: The tools whose chat-app recipient :func:`_outbound_refusal` checks.
+OUTBOUND_CHECKED = _outbound_checked()
+
+
+def _outbound_refusal(name: str, args: dict[str, Any]) -> str | None:
+    """Why a message *name* would send to a chat-app recipient is refused, or
+    None. Once Spaces is enforced, a person other than the admin sends only
+    to their own address (``chat_links.is_their_address``: one of their
+    links, or a group bound to the space they are a member of) or this
+    conversation; work that names no person sends to no one named. The
+    admin keeps today's rule. Before Spaces nothing is asked (the stage 3
+    review, M7: a member approved their own send_message to anyone and
+    Kazma's bot messaged them). Blocking (the identity store)."""
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    from kazma_core.safety.side_effects import OUTBOUND_TARGET_FIELDS
+
+    channel = str(args.get("channel") or args.get("backend") or "telegram").strip().lower()
+    targets = []
+    for field in OUTBOUND_TARGET_FIELDS.get(name, ()):
+        raw = str(args.get(field) or "").strip()
+        if raw:
+            targets.append(raw if ":" in raw else f"{channel}:{raw}")
+    if not targets:
+        return None
+    bound = current_scope()
+    person = bound.asker if bound is not None else ""
+    if not person:
+        return ("Spaces is on and this work names no person: Kazma's chat apps send it to no one "
+                "named. Nothing was sent.")
+    from kazma_core.spaces import chat_links, identity
+
+    try:
+        if person in identity.admin_accounts(identity.read_registry()):
+            return None
+        from kazma_core.tools.send_message import get_current_delivery_target
+
+        here = str(get_current_delivery_target() or "").strip()
+        for target in targets:
+            if target == here or chat_links.is_their_address(person, target, bound.space_id):
+                continue
+            return (f"Kazma's chat apps send a person's messages only to their own linked chat or "
+                    f"this conversation, never to {target}. Nothing was sent.")
+    except identity.IdentityUnavailable:
+        return "Whose chat that is cannot be read right now. Nothing was sent; try again."
     return None
 
 
@@ -75,4 +143,4 @@ async def call_refusal(name: str, arguments: Any, *, user_text: str | None = Non
 ALWAYS_ASK_TOOLS = frozenset({*ALWAYS_HITL_TOOLS, "request_path_access"})
 
 #: Every tool ``call_refusal`` answers for.
-PREFLIGHT_TOOLS = frozenset({"shell_exec", *BROWSER_TOOLS, *INSTALL_PAID_TOOLS})
+PREFLIGHT_TOOLS = frozenset({"shell_exec", *BROWSER_TOOLS, *INSTALL_PAID_TOOLS, *OUTBOUND_CHECKED})

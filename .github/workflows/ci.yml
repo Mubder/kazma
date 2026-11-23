@@ -181,6 +181,22 @@ jobs:
           fi
           echo "Noto Naskh Arabic present:"
           fc-list | grep -i naskh | head -3
+      - name: Keep the runner from being ended under memory pressure
+        # systemd-oomd ends a whole service group when memory pressure stays
+        # high, before memory runs out; on the runner that group is the
+        # runner itself, which then reports "received a shutdown signal" or
+        # "lost communication" with exit 143 and no log of why (five Tests
+        # runs on 2026-11-22/23, 30-39 minutes in). Without it, the kernel's
+        # own OOM killer, if memory truly runs out, ends the largest process
+        # -- a test chunk, which fast_test.py recovers and names.
+        run: |
+          echo "systemd-oomd: $(systemctl is-active systemd-oomd 2>/dev/null || true)"
+          sudo systemctl disable --now systemd-oomd 2>/dev/null || true
+          sudo systemctl mask systemd-oomd 2>/dev/null || true
+          echo "systemd-oomd now: $(systemctl is-active systemd-oomd 2>/dev/null || true)"
+          free -m || true
+          swapon --show || true
+          cat /proc/pressure/memory 2>/dev/null || true
       - name: Run tests (GATE — failures fail CI)
         # Industry eval pack (tests/test_eval_pack.py, marker `eval`) is in
         # tests/ and is collected by fast_test.py — do not exclude it.
@@ -202,7 +218,7 @@ jobs:
         run: |
           (
             while sleep 240; do
-              echo "[runner] $(date -u +%H:%M) $(free -m | awk '/^Mem:/{print "mem used " $3 "/" $2 " MiB, available " $7}'); $(df -h / | awk 'NR==2{print "disk / " $3 "/" $2 " (" $5 ")"}'); $(df -h /tmp | awk 'NR==2{print "/tmp " $5}'); processes $(ps -e --no-headers | wc -l)"
+              echo "[runner] $(date -u +%H:%M) $(free -m | awk '/^Mem:/{print "mem used " $3 "/" $2 " MiB, available " $7}'); $(df -h / | awk 'NR==2{print "disk / " $3 "/" $2 " (" $5 ")"}'); $(df -h /tmp | awk 'NR==2{print "/tmp " $5}'); processes $(ps -e --no-headers | wc -l); memory pressure $(awk '/^some/{print $2}' /proc/pressure/memory 2>/dev/null)"
               ps -eo rss=,etime=,args= --sort=-rss | head -4 | awk '{printf "[runner]   %d MiB %s %s\n", $1/1024, $2, substr($0, index($0,$3), 110)}'
             done
           ) &
@@ -877,6 +893,10 @@ jobs:
             tests/e2e/test_space_limits_browser.py \
             tests/e2e/test_activity_page_browser.py \
             tests/e2e/test_people_page_each_person_browser.py \
+            tests/e2e/test_chat_link_browser.py \
+            tests/e2e/test_chat_links_listed_browser.py \
+            tests/e2e/test_member_reminder_browser.py \
+            tests/e2e/test_chat_unlink_browser.py \
             tests/e2e/test_soft_nav_page_data_first.py \
             tests/e2e/test_research_words_on_soft_nav.py \
             tests/e2e/test_shared_memory_notice.py \

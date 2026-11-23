@@ -205,6 +205,8 @@ def _no_rewind_guard(monkeypatch) -> None:
     from kazma_ui import thread_rewind
 
     monkeypatch.setattr(thread_rewind, "_in_this_space", lambda thread_id, new_thread_id=None: None)
+    # The service's per-person guard (the stage 3 review) is part of it too.
+    monkeypatch.setattr(thread_rewind, "_theirs_to_change", lambda thread_id: None)
 
 
 def test_the_checkpoint_store_refuses_a_fork_and_a_restore_the_rewind_guard_let_through(

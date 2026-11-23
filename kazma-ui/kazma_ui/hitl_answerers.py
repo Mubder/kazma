@@ -325,7 +325,51 @@ def waiting_for_someone_else(thread_id: str, card: dict[str, Any] | None, interr
 
 
 #: What a person may do to a chat's turn (Spaces S2-05 second review).
-TURN_ACTIONS = ("message", "steer", "stop", "reset")
+TURN_ACTIONS = ("message", "steer", "stop", "reset", "rewind")
+
+#: The line each refusal of :func:`turn_control_refusal` is said with, as
+#: ``(English, Arabic)`` with ``{name}`` the person whose turn or chat it
+#: is: one wording for the web chat and the chat apps (S3-06 follow-up).
+_TURN_LINES: dict[tuple[str, str], tuple[str, str]] = {
+    ("message", "answering_someone_else"): (
+        "This chat is answering {name} right now, so your message was not sent. "
+        "Send it once their turn ends.",
+        "هذه المحادثة تجيب {name} الآن، فلم تُرسل رسالتك. أرسلها بعد أن ينتهي دوره."),
+    ("steer", "not_your_turn"): (
+        "Only {name} can steer this turn: it is theirs. Your note was not sent.",
+        "لا يوجّه هذا الدور إلا {name}، فهو دوره. لم تُرسل ملاحظتك."),
+    ("stop", "not_your_turn"): (
+        "This turn is {name}'s: only they or an owner of this space can stop it.",
+        "هذا الدور لـ{name}: لا يوقفه إلا هو أو مالك هذه المساحة."),
+    ("reset", "another_members_turn"): (
+        "This chat is busy with {name}'s turn, so it was not cleared or compacted. "
+        "Try again once it ends.",
+        "هذه المحادثة مشغولة بدور {name}، فلم تُمسح ولم تُضغط. حاول بعد أن ينتهي."),
+    ("reset", "not_your_chat"): (
+        "Only {name}, who started this chat, or an owner of this space can clear or compact it.",
+        "لا يمسح هذه المحادثة أو يضغطها إلا {name} الذي بدأها، أو مالك هذه المساحة."),
+    ("rewind", "another_members_turn"): (
+        "This chat is busy with {name}'s turn, so nothing was undone, edited or restored. "
+        "Try again once it ends.",
+        "هذه المحادثة مشغولة بدور {name}، فلم يُتراجع عن شيء ولم يُعدَّل أو يُستعد. حاول بعد أن ينتهي."),
+    ("rewind", "not_your_chat"): (
+        "Only {name}, who started this chat, or an owner of this space can undo, edit or "
+        "restore its turns.",
+        "لا يتراجع عن أدوار هذه المحادثة أو يعدّلها أو يستعيدها إلا {name} الذي بدأها، أو مالك هذه المساحة."),
+}
+_TURN_UNREADABLE = (
+    "Kazma could not check whose turn this is right now, so nothing was done. Try again in a moment.",
+    "لم يتمكن Kazma الآن من معرفة صاحب هذا الدور، فلم يُنفّذ شيء. حاول بعد قليل.")
+
+
+def turn_lines(action: str, code: str, name: str) -> tuple[str, str]:
+    """The ``(English, Arabic)`` line a refusal of *action* with *code* is
+    said with, naming *name* (another member when it cannot be read); any
+    code without its own line (``identity_unavailable``) says whose turn it
+    is could not be checked. The caller chooses the language. No I/O."""
+    english, arabic = _TURN_LINES.get((action, code), _TURN_UNREADABLE)
+    return (english.format(name=name if name not in ("", "?") else "another member"),
+            arabic.format(name=name if name not in ("", "?") else "عضو آخر"))
 
 
 def _account_name(account_id: str) -> str:
@@ -353,6 +397,8 @@ def turn_control_refusal(thread_id: str, action: str, *, active: bool,
       (``shared_work.may_change``).
     * ``reset`` (and compact) -- the chat's opener or an owner of the space,
       and never while another member's turn runs or waits.
+    * ``rewind`` (``/undo``, ``/edit``, ``/replay <step>`` in a chat app: the
+      stage 3 review, M4) -- the same rule as ``reset``.
 
     A turn whose asker is not recorded (a chat from before Spaces, in a
     personal space) refuses nobody. Blocking (the thread record, the chat
@@ -367,7 +413,7 @@ def turn_control_refusal(thread_id: str, action: str, *, active: bool,
     person = caller or bound_asker() or ""
     whose = whose_turn(thread_id) if active else None
     asker = whose.asker if whose is not None else ""
-    if action == "reset":
+    if action in ("reset", "rewind"):
         if asker and asker != person:
             return "another_members_turn", _account_name(asker)
         from kazma_core.spaces import threads
@@ -403,5 +449,23 @@ def as_the_asker(whose: GateWhose | None) -> Iterator[None]:
     if bound is not None and (bound.space_id, bound.asker) == (whose.space_id, whose.asker):
         yield
         return
-    with bind_scope(whose.space_id, whose.asker):
-        yield
+    from kazma_core.tools.send_message import (
+        reset_current_delivery_target,
+        reset_current_platform,
+        set_current_delivery_target,
+        set_current_platform,
+    )
+
+    # Never the presser's chat (the stage 3 review, M2): the presser's
+    # delivery target and platform are unbound for the block, so the tool
+    # worker takes the turn's own ``_gateway`` block -- the asker's send_file,
+    # send_message and a swarm task's source_delivery_target go where the
+    # asker's turn goes, never to whoever answered.
+    target_token = set_current_delivery_target(None)
+    platform_token = set_current_platform(None)
+    try:
+        with bind_scope(whose.space_id, whose.asker):
+            yield
+    finally:
+        reset_current_platform(platform_token)
+        reset_current_delivery_target(target_token)

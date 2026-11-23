@@ -8,12 +8,20 @@ import re
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kazma_core import language_lock
 from kazma_gateway.gateway import Attachment, IncomingMessage, OutboundMessage, SessionStore
 from kazma_gateway.telegram_format import md_to_tg_html
-from kazma_gateway.slash_commands import changes_global_config, is_slash_command, resolve_slash_command
+from kazma_gateway.slash_commands import (
+    changes_global_config,
+    decided_in_the_space,
+    is_slash_command,
+    resolve_slash_command,
+)
+
+if TYPE_CHECKING:
+    from kazma_core.spaces.chat_apps import ChatPlace
 from . import hitl as _hitl
 from .store import (
     _InMemoryStore,
@@ -83,6 +91,65 @@ def _prepare_outbound(
     out_ctx = dict(ctx)
     out_ctx["parse_mode"] = "HTML"
     return md_to_tg_html(text), out_ctx
+
+
+#: A message the handler answered (or left) before any thread was found.
+_ANSWERED = object()
+
+
+def _is_hitl_decision(text: Any) -> bool:
+    """Whether *text* answers an approval card (``/hitl ...``: a button press
+    or the typed command). Pure."""
+    low = str(text or "").strip().lower()
+    return low.startswith(("/hitl ", "hitl "))
+
+
+def _resolve_thread_in_place(msg: IncomingMessage, sender_key: str) -> str:
+    """The thread of *msg* as it is found by *sender_key* (S3-03): the
+    platform sender for the owner's space, as before; a key that carries a
+    space finds that space's own chat, a native thread (a forum topic, a
+    Slack or Discord thread) included. Blocking (the sessions directory)."""
+    if sender_key == msg.sender_id:
+        return _resolve_thread(msg)
+    from dataclasses import replace
+
+    ctx = {**(msg.context_metadata or {}), "username": "", "display_name": ""}
+    local = sender_key.split(":", 1)[-1].rsplit("--in-", 1)[0]
+    if local.startswith("grp"):
+        # A group's topic or thread is one chat for the group (the stage 3
+        # review, L11): the platform's hint names the member who wrote
+        # (``gw-<platform>-<user>-topic-<n>``), so two members of one topic
+        # had two chats, and one member's topic of the same number in two
+        # groups bound to one space was one. Named by the group instead.
+        hint = str(ctx.get("thread_hint") or "")
+        own = msg.sender_id.split(":", 1)[-1] if ":" in (msg.sender_id or "") else ""
+        for who in (own, str(ctx.get("user_id") or ""), str(ctx.get("chat_id") or "")):
+            prefix = f"gw-{msg.platform}-{who}-"
+            if who and hint.startswith(prefix):
+                ctx["thread_hint"] = f"gw-{msg.platform}-{local}-{hint[len(prefix):]}"
+                break
+    found = _resolve_thread(replace(msg, sender_id=sender_key, context_metadata=ctx))
+    suffix = "--in-" + sender_key.rsplit("--in-", 1)[-1]
+    return found if found.endswith(suffix) else found + suffix
+
+
+def _admin_only_text(user_text: Any) -> str:
+    """What a sender who is not the admin is told for a command that changes
+    Kazma for everyone, in their language, saying how one becomes able to
+    (``allowlists.admin_hint``: once Spaces is enforced, the admin's linked
+    chat app, S3-08). No I/O."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    from kazma_gateway.allowlists import admin_hint
+
+    arabic = ("⛔ هذا يغيّر Kazma لكل المستخدمين والمنصات، فهو للمسؤول وحده"
+              + ("، من تطبيق محادثة مربوط بحساب المسؤول في Kazma (الإعدادات ← حسابي ← تطبيقات الدردشة)."
+                 if spaces_enforced() else "."))
+    return language_lock.in_their_language(
+        str(user_text or ""),
+        "⛔ This changes Kazma for every user and platform, so it is admin-only. " + admin_hint(),
+        arabic,
+    )
 
 
 def _sender_is_gateway_admin(msg: Any) -> bool:
@@ -274,12 +341,48 @@ def _merge_transcript(existing: list, converted: list) -> list:
     return out
 
 
-def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[str, Any], messages: list) -> None:
+def _carry_authors(existing: list, out: list, author: str = "") -> list:
+    """Each user row of *out* keeps the account that sent it (``author``,
+    Spaces S1-08; ``hitl_answerers.whose_turn`` reads it to know whose turn
+    it is): the checkpoint holds no author, so a row takes the author of the
+    row it was in *existing* -- the k-th newest row of the same text, so two
+    people's identical messages keep their own -- and the newest user row
+    takes *author*, the sender of the message the turn opens with (left out
+    of the matching: it is not in *existing* yet). Mutates and returns *out*.
+    No I/O."""
+    users = [i for i, m in enumerate(out) if isinstance(m, dict) and m.get("role") == "user"]
+    newest = users[-1] if author and users else None
+    before: dict[str, list[str]] = {}
+    for m in existing or []:
+        if isinstance(m, dict) and m.get("role") == "user":
+            before.setdefault(str(m.get("content") or ""), []).append(str(m.get("author") or ""))
+    seen: dict[str, int] = {}
+    for i in reversed(users):
+        if i == newest:
+            continue
+        key = str(out[i].get("content") or "")
+        seen[key] = seen.get(key, 0) + 1
+        authors = before.get(key, [])
+        if seen[key] <= len(authors) and authors[-seen[key]] and not out[i].get("author"):
+            out[i]["author"] = authors[-seen[key]]
+    if newest is not None:
+        out[newest]["author"] = author
+    return out
+
+
+def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[str, Any], messages: list,
+                                  *, author: str = "") -> None:
     """Synchronize platform session to Web UI for seamless season takeover.
 
     The web session_id **is** the gateway thread_id (``gw-telegram-…``), so
     opening that season in the chat sidebar continues the same LangGraph
     checkpointer used by Telegram/Discord/Slack.
+
+    *author* is the account that sent the newest user message (at a turn's
+    start: the bound asker); every user row keeps its author
+    (:func:`_carry_authors`), so whose turn it is reads the same as on the
+    web (S3-06 follow-up: a group's member could steer or stop another
+    member's turn).
     """
     try:
         from kazma_core.sessions.directory import canonical_web_session
@@ -294,7 +397,7 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         # always ride over from the web row so a finished platform turn does
         # not land in the sidebar as text-only.
         if converted:
-            session.messages = _merge_transcript(existing, converted)
+            session.messages = _carry_authors(existing, _merge_transcript(existing, converted), author)
 
         username = metadata.get("username") or metadata.get("display_name") or "user"
         plat = (platform or "chat").capitalize()
@@ -778,6 +881,17 @@ def create_graph_handler(
             msg.text = normalized
         sender = msg.sender_id
 
+        # Where the message works once Spaces is enforced (S3-03): the
+        # sender's linked account, in the space their direct chat chose or the
+        # shared space the group is bound to. Its chat is that space's alone
+        # (a sender key that carries the space), so the thread is found by it.
+        place = await _chat_place_or_answer(msg)
+        if place is _ANSWERED:
+            return
+        if place is not None:
+            sender = place.sender_key
+        qualified = sender != msg.sender_id
+
         # Resolve thread_id using standardized resolver (synchronized).
         # ConfigStore / existing seasons win over the in-memory cache so a
         # /session take-over (or a restart) cannot mint a twin Telegram row.
@@ -787,11 +901,13 @@ def create_graph_handler(
                 from kazma_core.sessions.directory import find_mouth_thread
 
                 # The sessions directory is a settings read (audit 2026-10-26 AUD-111).
+                # A space's own chat is never found by the person's name: the
+                # newest season of that name may be another space's.
                 found = await asyncio.to_thread(
                     find_mouth_thread,
                     sender,
                     platform=msg.platform,
-                    username=str(
+                    username="" if qualified else str(
                         (msg.context_metadata or {}).get("username")
                         or (msg.context_metadata or {}).get("display_name")
                         or ""
@@ -807,7 +923,7 @@ def create_graph_handler(
                 _sessions.move_to_end(sender)
                 thread_id = _sessions[sender]
             else:
-                _sessions[sender] = await asyncio.to_thread(_resolve_thread, msg)
+                _sessions[sender] = await asyncio.to_thread(_resolve_thread_in_place, msg, sender)
                 while len(_sessions) > _MAX_DICT_ENTRIES:
                     _sessions.popitem(last=False)
                 thread_id = _sessions[sender]
@@ -855,7 +971,7 @@ def create_graph_handler(
             logger.debug("[agent-handler] delivery-target bind skipped", exc_info=True)
 
         try:
-            await _handler_body_in_its_space(msg, thread_id)
+            await _handler_body_in_its_space(msg, thread_id, place)
         finally:
             try:
                 from kazma_gateway.typing_keepalive import get_typing_keepalive
@@ -873,11 +989,63 @@ def create_graph_handler(
                 except Exception:
                     pass
 
-    async def _handler_body_in_its_space(msg: IncomingMessage, thread_id: str) -> None:
+    async def _chat_place_or_answer(msg: IncomingMessage) -> Any:
+        """Once Spaces is enforced (S3-03): ``/space`` is answered here
+        (:data:`_ANSWERED`), and every other message gets its place
+        (``chat_apps.chat_place``) -- or is answered or left when it has none
+        (an unbound group, a sender who is not a member of the group's space,
+        a sender with no link). None before Spaces: nothing changes."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if not spaces_enforced():
+            return None
+        from kazma_core.spaces import chat_apps
+        from kazma_core.spaces.identity import IdentityUnavailable
+
+        meta = dict(msg.context_metadata or {})
+        target = _build_target_id(msg.platform, msg.context_metadata)
+        try:
+            if chat_apps.is_space_command(msg.text):
+                said = await asyncio.to_thread(
+                    chat_apps.space_command, msg.platform, meta, msg.sender_id or "", msg.text or "")
+                if said:
+                    await manager.send(OutboundMessage(target_id=target, text=said,
+                                                       context_metadata=msg.context_metadata))
+                return _ANSWERED
+            place = await asyncio.to_thread(
+                chat_apps.chat_place, msg.platform, meta, msg.sender_id or "", msg.text)
+        except IdentityUnavailable:
+            logger.warning("[agent-handler] a %s message was not run: accounts cannot be read",
+                           msg.platform)
+            await manager.send(OutboundMessage(
+                target_id=target,
+                text=language_lock.in_their_language(
+                    msg.text, "Kazma cannot read its accounts right now, so the message was not run. "
+                    "Send it again in a moment.",
+                    "لا يستطيع Kazma قراءة حساباته الآن، فلم تُنفَّذ الرسالة. أرسلها مرة أخرى بعد قليل."),
+                context_metadata=msg.context_metadata,
+            ))
+            return _ANSWERED
+        if place.scope is None:
+            logger.info("[agent-handler] a %s message was not run: %s", msg.platform, place.refusal)
+            if place.group and place.refusal == "not_a_member" and _is_hitl_decision(msg.text):
+                # A press on a card in a group by someone outside its space
+                # (S3-04): told it is not theirs, nothing changed.
+                await manager.send(OutboundMessage(target_id=target, text=_hitl._NOT_YOURS_TEXT,
+                                                   context_metadata=msg.context_metadata))
+                return _ANSWERED
+            if place.reply:
+                await manager.send(OutboundMessage(target_id=target, text=place.reply,
+                                                   context_metadata=msg.context_metadata))
+            return _ANSWERED
+        return place
+
+    async def _handler_body_in_its_space(msg: IncomingMessage, thread_id: str,
+                                         place: ChatPlace | None = None) -> None:
         """Run the message in the space a chat app works in
         (``kazma_core.spaces.chat_apps``): nothing bound before Spaces; once
-        enforced, as the owner in the owner's space until each person links
-        their own chat app, and a chat of another space is refused with a
+        enforced, as the sender's linked account in the place the message
+        works in (S3-03), and a chat of another space is refused with a
         reply -- before anything of the chat is read or built."""
         from kazma_core.spaces.chat_apps import (
             ChatInAnotherSpace,
@@ -888,7 +1056,7 @@ def create_graph_handler(
 
         try:
             # The thread record store, on a first asking (off the loop).
-            bound = await asyncio.to_thread(chat_app_scope, thread_id)
+            bound = await asyncio.to_thread(chat_app_scope, thread_id, place)
         except ChatInAnotherSpace as exc:
             unreadable = isinstance(exc, ChatRecordUnreadable)
             logger.info("[agent-handler] a %s message refused: %s", msg.platform,
@@ -908,10 +1076,10 @@ def create_graph_handler(
             else:
                 reply = language_lock.in_their_language(
                     msg.text,
-                    "This chat belongs to another space. Chat apps work in the owner's space "
-                    "only for now: send /new to start a chat here.",
-                    "هذه المحادثة تخص مساحة أخرى. تعمل تطبيقات المحادثة حالياً في مساحة المالك "
-                    "فقط: أرسل /new لبدء محادثة هنا.",
+                    "This chat belongs to another space than the one this chat works in: send /new "
+                    "to start a chat here, or /space to see where it works.",
+                    "هذه المحادثة تخص مساحة غير التي تعمل فيها هذه الدردشة: أرسل /new لبدء محادثة هنا، "
+                    "أو /space لترى أين تعمل.",
                 )
             await manager.send(OutboundMessage(
                 target_id=_build_target_id(msg.platform, msg.context_metadata),
@@ -923,10 +1091,100 @@ def create_graph_handler(
             await _handler_body(msg, thread_id)
             return
         with bind_scope(bound.space_id, bound.asker):
-            await _handler_body(msg, thread_id)
+            if not _is_hitl_decision(msg.text):
+                # A paused card is its asker's (S3-04): another member's
+                # message -- a new request, a steer, an abort -- would
+                # discard it (LangGraph drops a pending interrupt when a new
+                # turn starts), so it waits for them. In every chat: a
+                # direct chat switched to another member's chat too (the
+                # stage 3 review, M3). Asked again under the thread lock
+                # (``_handler_body``): a message queued behind the turn that
+                # paused passed this check before the card existed.
+                waiting = await _waits_on_someone_else(thread_id)
+                if waiting:
+                    await _say_card_waits(msg, waiting)
+                    return
+            await _handler_body(msg, thread_id, place.sender_key if place is not None else "")
 
-    async def _handler_body(msg: IncomingMessage, thread_id: str) -> None:
-        """Inner handler body (typing keepalive wraps this)."""
+    async def _say_card_waits(msg: IncomingMessage, waiting: str) -> None:
+        """Tell the sender their message waits: the chat's card is *waiting*'s."""
+        logger.info("[agent-handler] a %s message waits: a card there is someone else's", msg.platform)
+        if not await manager.send(OutboundMessage(
+            target_id=_build_target_id(msg.platform, msg.context_metadata),
+            text=language_lock.in_their_language(
+                msg.text,
+                f"An approval in this chat waits for {waiting}; send your message "
+                "after they answer it.",
+                f"هناك موافقة في هذه المحادثة بانتظار {waiting}؛ أرسل رسالتك بعد أن "
+                "يجيب عليها.",
+            ),
+            context_metadata=msg.context_metadata,
+        )):
+            logger.warning("[agent-handler] the %s sender was not told their message waits", msg.platform)
+
+    async def _waits_on_someone_else(thread_id: str) -> str:
+        """The name of the person the thread's paused card waits on, when that
+        is not the sender bound now; "" when none does (or no card waits).
+        Reads nothing while the install does not enforce Spaces."""
+        from kazma_core.spaces.scope import spaces_enforced
+        from kazma_ui.hitl_answerers import waiting_for_someone_else
+
+        if not spaces_enforced():
+            return ""
+        pending = await _check_graph_interrupt(
+            graph, {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}})
+        if not isinstance(pending, dict):
+            return ""
+        name = await asyncio.to_thread(
+            waiting_for_someone_else, thread_id, pending, str(pending.get("interrupt_id") or ""))
+        return name or ""
+
+    async def _turn_control_refused(msg: IncomingMessage, thread_id: str, action: str,
+                                    *, active: bool | None = None) -> bool:
+        """Whether the sender may not do *action* to the chat's turn, and was
+        told why (S3-06 follow-up): the web chat's rule,
+        ``hitl_answerers.turn_control_refusal``, for ``/steer`` and ``/steer!``
+        (``steer``: only the turn's asker), ``/abort`` and ``/stop``
+        (``stop``: its asker or an owner of the space), ``/reset`` and
+        ``/compact`` (``reset``: the chat's opener or an owner, never while
+        another member's turn runs or waits). *active* (a turn runs or
+        waits) is read when not given. Who it is that cannot be read
+        refuses. Reads nothing while the install does not enforce Spaces."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if not spaces_enforced() or not thread_id:
+            return False
+        import sqlite3
+
+        from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_ui.active_turns import is_turn_running
+        from kazma_ui.hitl_answerers import turn_control_refusal, turn_lines
+
+        if active is None:
+            active = is_turn_running(thread_id) or isinstance(await _check_graph_interrupt(
+                graph, {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}), dict)
+        try:
+            refusal = await asyncio.to_thread(turn_control_refusal, thread_id, action, active=bool(active))
+        except (sqlite3.Error, OSError, IdentityUnavailable):
+            logger.warning("[agent-handler] whose turn thread=%s is cannot be read; %s refused",
+                           thread_id[:12], action, exc_info=True)
+            refusal = ("identity_unavailable", "")
+        if refusal is None:
+            return False
+        code, name = refusal
+        logger.info("[agent-handler] %s on thread=%s refused: %s", action, thread_id[:12], code)
+        english, arabic = turn_lines(action, code, name)
+        ctx = msg.context_metadata
+        out_text, out_ctx = _prepare_tg_outbound(
+            msg, "⛔ " + language_lock.in_their_language(msg.text or "", english, arabic), ctx)
+        await manager.send(OutboundMessage(
+            target_id=_build_target_id(msg.platform, ctx), text=out_text, context_metadata=out_ctx))
+        return True
+
+    async def _handler_body(msg: IncomingMessage, thread_id: str, chat_key: str = "") -> None:
+        """Inner handler body (typing keepalive wraps this). *chat_key* is the
+        key the chat's season pointer is kept under in its space (S3-03,
+        ``ChatPlace.sender_key``); "" before Spaces."""
         sender = msg.sender_id or "unknown"
         from kazma_core.agent.command_catalog import BY_NAME, INTERNAL_COMMANDS, command_name
 
@@ -1074,6 +1332,7 @@ def create_graph_handler(
                 manager=manager,
                 sessions_map=_sessions,
                 prepare_outbound=_prepare_tg_outbound,
+                chat_key=chat_key,
             )
         if session_handled:
             return
@@ -1090,6 +1349,8 @@ def create_graph_handler(
 
         # ── /reset: Clear conversation checkpoints and settings ───
         if msg.text and msg.text.strip().lower() == "/reset":
+            if await _turn_control_refused(msg, thread_id, "reset"):
+                return
             async with cmd_lock:
                 # 1. Delete checkpoints
                 if hasattr(graph, "checkpointer") and graph.checkpointer:
@@ -1098,16 +1359,19 @@ def create_graph_handler(
                     except Exception as exc:
                         logger.error("[agent-handler] Failed to delete checkpoints on /reset: %s", exc)
 
-                # 2. Delete ConfigStore active mapping
+                # 2. Delete ConfigStore active mapping. The chat's own key
+                # in its space (S3-03), never the platform sender's: in a
+                # space that pointer is another chat (the stage 3 review, L10).
+                pointer = chat_key or sender
                 try:
                     from kazma_core.config_store import get_config_store
-                    await asyncio.to_thread(get_config_store().delete, f"active_thread.{sender}")
+                    await asyncio.to_thread(get_config_store().delete, f"active_thread.{pointer}")
                 except Exception as exc:
                     logger.debug("[agent-handler] ConfigStore delete active_thread failed: %s", exc)
 
                 # 3. Clear in-memory session cache
                 async with _sessions_lock:
-                    _sessions.pop(sender, None)
+                    _sessions.pop(pointer, None)
 
                 # 4. Delete from Web UI SessionManager
                 try:
@@ -1141,6 +1405,8 @@ def create_graph_handler(
 
         # ── /compact: Force manually triggered context compaction ─
         if msg.text and msg.text.strip().lower() == "/compact":
+            if await _turn_control_refused(msg, thread_id, "reset"):
+                return
             async with cmd_lock:
                 try:
                     state_obj = await graph.aget_state(config)
@@ -1302,6 +1568,8 @@ def create_graph_handler(
 
         # ── /undo: Remove last assistant response ──────────────────
         if msg.text and msg.text.strip().lower() == "/undo":
+            if await _turn_control_refused(msg, thread_id, "rewind"):
+                return
             async with cmd_lock:
                 undo_result = await _handle_undo(thread_id, config)
                 ctx = await _store.get(thread_id) or msg.context_metadata
@@ -1317,6 +1585,8 @@ def create_graph_handler(
         # None = not an /edit command; "" = bare /edit (show usage)
         edit_match = _extract_edit_command(msg.text)
         if edit_match is not None:
+            if edit_match.strip() and await _turn_control_refused(msg, thread_id, "rewind"):
+                return
             async with cmd_lock:
                 corrected_text, edit_result = await _handle_edit(thread_id, config, edit_match)
                 ctx = await _store.get(thread_id) or msg.context_metadata
@@ -1331,6 +1601,8 @@ def create_graph_handler(
         # ── /replay <n>: Restore from a snapshot (rewind in-place) ──
         replay_match = _extract_replay_command(msg.text)
         if replay_match is not None:
+            if await _turn_control_refused(msg, thread_id, "rewind"):
+                return
             async with cmd_lock:
                 replay_result = await _handle_replay(thread_id, config, replay_match, msg)
                 ctx = await _store.get(thread_id) or msg.context_metadata
@@ -1395,6 +1667,10 @@ def create_graph_handler(
                     target_id=_build_target_id(msg.platform, ctx),
                     text=_u_text, context_metadata=_u_ctx,
                 ))
+                return
+
+            # Only the turn's asker steers it (S3-06 follow-up, as on the web).
+            if await _turn_control_refused(msg, thread_id, "steer", active=True):
                 return
 
             if _steer_kind == "soft":
@@ -1493,6 +1769,10 @@ def create_graph_handler(
 
         # ── /abort (or /stop): cancel + abandon the running task ────
         if msg.text and msg.text.strip().lower() in ("/abort", "/stop"):
+            # Only the turn's asker or an owner of the space stops it (S3-06
+            # follow-up, as on the web).
+            if await _turn_control_refused(msg, thread_id, "stop"):
+                return
             from kazma_core.agent.steer import abort_messages, clear_all_steers
 
             ctx = await _store.get(thread_id) or msg.context_metadata
@@ -1568,19 +1848,16 @@ def create_graph_handler(
             # personality -- must not be reachable by anyone a chat app lets
             # in (with KAZMA_GATEWAY_OPEN_TO_EVERYONE, everyone).
             # The admin allowlist is a settings read (audit 2026-10-26 AUD-111).
-            if changes_global_config(msg.text) and not await asyncio.to_thread(
+            if changes_global_config(msg.text) and not decided_in_the_space(
+                msg.text
+            ) and not await asyncio.to_thread(
                 _sender_is_gateway_admin, msg
             ):
                 ctx = await _store.get(thread_id) or msg.context_metadata
                 await manager.send(
                     OutboundMessage(
                         target_id=_build_target_id(msg.platform, ctx),
-                        text=(
-                            "⛔ This changes Kazma for every user and platform, "
-                            "so it is admin-only. Set `KAZMA_GATEWAY_ADMINS` "
-                            "(comma-separated user ids) or add yourself to the "
-                            "platform user allowlist."
-                        ),
+                        text=_admin_only_text(msg.text),
                         context_metadata=ctx,
                     )
                 )
@@ -1736,6 +2013,14 @@ def create_graph_handler(
         thread_lock = thread_mutation(thread_id)
 
         async with thread_lock:
+            # ── Someone else's card waits: never dropped (M3) ────────
+            # Asked again here: a message that waited on this lock behind
+            # the turn that paused passed the check before the card existed.
+            if msg.text and not _is_hitl_decision(msg.text):
+                waiting = await _waits_on_someone_else(thread_id)
+                if waiting:
+                    await _say_card_waits(msg, waiting)
+                    return
             # ── Cancel stale HITL if user sent a new normal message ──
             # Without this, LangGraph discards the interrupt silently and
             # incomplete tool_calls get stripped — agent amnesia.
@@ -1856,13 +2141,17 @@ def create_graph_handler(
             # turn (Knowledge audit KB-S08: this handler injected the same
             # chunks a second time).
 
-            # Sync turn start to Web UI so the session appears immediately in sidebar
+            # Sync turn start to Web UI so the session appears immediately in
+            # sidebar, the message the turn opens with naming its sender.
+            from kazma_core.spaces.scope import bound_asker
+
             await asyncio.to_thread(
                 _sync_platform_session_to_web,
                 thread_id,
                 msg.platform,
                 msg.context_metadata,
                 list(state.get("messages") or []),
+                author=bound_asker() or "",
             )
 
             # ── Invoke graph ───────────────────────────────────────
@@ -2447,6 +2736,10 @@ def create_graph_handler(
             "(the server log says why)."
         ),
         "no_space": "⚠️ This chat is not tied to a space yet, so nothing was forked.",
+        "not_your_chat": "⛔ Only the person who started this chat, or an owner of this space, "
+                         "can restore it, fork it or delete its steps.",
+        "identity_unavailable": "⚠️ Whose chat this is could not be read right now, so nothing "
+                                "was changed. Try again in a moment.",
     }
 
     def _refusal_text(refused: Any) -> str:

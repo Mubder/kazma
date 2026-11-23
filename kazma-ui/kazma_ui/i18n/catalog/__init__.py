@@ -6,6 +6,7 @@ from kazma_ui.i18n.catalog import activity as _activity
 from kazma_ui.i18n.catalog import agents as _agents
 from kazma_ui.i18n.catalog import alerts as _alerts
 from kazma_ui.i18n.catalog import chat as _chat
+from kazma_ui.i18n.catalog import chat_links as _chat_links
 from kazma_ui.i18n.catalog import common as _common
 from kazma_ui.i18n.catalog import dashboard as _dashboard
 from kazma_ui.i18n.catalog import documents as _documents
@@ -35,6 +36,7 @@ CATALOG_MODULES = (
     _agents,
     _alerts,
     _chat,
+    _chat_links,
     _common,
     _dashboard,
     _documents,

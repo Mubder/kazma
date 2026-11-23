@@ -355,13 +355,15 @@ def create_replay_router(
             return _unavailable()
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
-        from kazma_ui.thread_rewind import clear_thread_snapshots
+        from kazma_ui.thread_rewind import RewindRefused, clear_thread_snapshots
 
         try:
             count = await clear_thread_snapshots(
                 thread_id, actor=await _actor(request), surface="web", recorder=rec,
             )
             return JSONResponse({"ok": True, "cleared": count})
+        except RewindRefused as refused:
+            return JSONResponse(refused.body(), status_code=refused.status)
         except SnapshotStoreError as exc:
             return _store_unavailable(exc)
         except Exception as exc:

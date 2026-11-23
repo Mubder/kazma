@@ -332,6 +332,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "غير معروف",
         "en": "unknown",
     },
+    "scheduled.delivery_dropped": {
+        "en": "dropped: the chat is no longer linked",
+        "ar": "أُلغي: لم تعد المحادثة مربوطة",
+    },
     "scheduled.delivery_cancelled": {
         "ar": "أُلغي",
         "en": "cancelled",
@@ -398,8 +402,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The task prompt is longer than 8000 characters.",
     },
     "scheduled.err_no_own_address": {
-        "ar": "يرسل Kazma الرسائل المجدولة إلى تطبيق محادثة المالك فقط حاليًا، لذلك يحجزها المالك وحده. الإرسال إلى تطبيق محادثتك يأتي لاحقًا.",
-        "en": "Kazma can only send a scheduled message to the owner's chat app for now, so only the owner can book one. Sending to your own chat app comes later.",
+        "ar": "ليس لدى Kazma عنوان تطبيق محادثة خاص بك لإرسال رسائل هذه المهمة إليه. اربط تطبيق محادثة خاصًا بك (الإعدادات ← حسابي ← تطبيقات الدردشة)، ثم احجزها مرة أخرى.",
+        "en": "Kazma has no chat-app address of yours to send this job's messages to. Link a chat app of your own (Settings → My account → Chat apps), then book it again.",
     },
     "scheduled.err_not_yours": {
         "ar": "وحده الشخص الذي تعمل المهمة باسمه يمكنه تغيير ما تقوله أو تشغيلها مرة أخرى.",

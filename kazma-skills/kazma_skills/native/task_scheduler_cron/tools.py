@@ -86,7 +86,7 @@ async def schedule_task(timing: str, prompt: str, kind: str = "reminder", tools:
     refused = await _refused()
     if refused:
         raise RefusedBeforeEffect(refused)
-    from kazma_core.cron.scheduler import CronLimitError, get_cron_scheduler
+    from kazma_core.cron.scheduler import CronLimitError, get_cron_scheduler, needs_own_address
     from kazma_core.tools.send_message import resolve_delivery_target
 
     scheduler = get_cron_scheduler()
@@ -98,7 +98,9 @@ async def schedule_task(timing: str, prompt: str, kind: str = "reminder", tools:
     # used to stamp `_gateway.delivery_target`, so every job was born
     # `target=(none)` and UNDELIVERABLE at fire time (2026-09-02).
     delivery_target = await asyncio.to_thread(resolve_delivery_target)
-    if not delivery_target:
+    # A person with no chat app of their own linked (S3-05): the scheduler
+    # refuses it (``no_own_address``), saying how to link one.
+    if not delivery_target and not needs_own_address():
         raise RefusedBeforeEffect(_out({
             "ok": False,
             "error": (
