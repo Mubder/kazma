@@ -76,6 +76,39 @@
                 unlink: { platform: notice.platform, user_id: notice.chat_user, label: platform },
             };
         }
+        // Stronger sign-in (Spaces S4-02).
+        if (notice.kind === 'second_factor_reset') {
+            return {
+                title: say('sign_in.notice_reset_title', 'Your second factor was reset'),
+                message: say('sign_in.notice_reset_body',
+                    'The admin turned your second factor off on {when}: you sign in with your password alone until you turn a new one on in My account. If you did not ask for this, tell them.',
+                    { when: when }),
+            };
+        }
+        if (notice.kind === 'session_ended') {
+            return {
+                title: say('sign_in.notice_session_title', 'One of your sessions was ended'),
+                message: say('sign_in.notice_session_body',
+                    'The admin ended one of your sessions on {when}: you sign in again on that device. If you did not expect this, tell them.',
+                    { when: when }),
+            };
+        }
+        if (notice.kind === 'second_factor_paused') {
+            return {
+                title: say('sign_in.notice_codes_paused_title', 'Wrong codes paused your second factor'),
+                message: say('sign_in.notice_codes_paused_body',
+                    'On {when}, five wrong codes were tried for your account, so its codes were not checked for a while, from every place. Someone who tries codes has your password: if that was not you, change it now.',
+                    { when: when }),
+            };
+        }
+        if (notice.kind === 'sign_in_paused') {
+            return {
+                title: say('sign_in.notice_paused_title', 'Sign-ins to your account were paused'),
+                message: say('sign_in.notice_paused_body',
+                    'On {when}, so many wrong passwords were tried for your account that sign-ins to it were paused for a while, except from places you signed in from before. If that was not you, change your password and turn on a second factor.',
+                    { when: when }),
+            };
+        }
         return null;
     }
 

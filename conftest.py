@@ -396,6 +396,23 @@ def _people_hold_every_feature(request, monkeypatch):
     yield
 
 
+# Once a second person has an account, the loopback auto-login is off and
+# everyone signs in, the owner too (Spaces S4-02). The browser tests of every
+# other part open the admin's page on this machine after making people, as
+# the owner always could; they keep today's auto-login -- and the sessions it
+# already made, which making a person would end -- and a test of the sign-in
+# itself is marked ``real_sign_in``.
+@_pytest.fixture(autouse=True)
+def _owner_keeps_the_auto_login(request, monkeypatch):
+    if request.node.get_closest_marker("real_sign_in") is None:
+        from kazma_core.security import web_sessions
+        from kazma_ui import auth
+
+        monkeypatch.setattr(auth, "everyone_signs_in", lambda: False)
+        monkeypatch.setattr(web_sessions, "end_peer_trust_sessions", lambda: 0)
+    yield
+
+
 @_pytest.fixture(autouse=True)
 def _reset_database_availability(monkeypatch):
     from kazma_core.db import availability
@@ -798,8 +815,37 @@ def _isolate_process_singletons(tmp_path):
     except Exception:
         _prev_install_lang = None
 
+    # The document platform's coordinator: ``get_ingestion_service()`` builds
+    # the process's one on first use, over the session data folder's document
+    # store, and keeps it. A chat-app ``/documents`` command, a document tool
+    # or a library delete in one test left it installed, and every later
+    # test that asks where the installed store is (``peek_ingestion_service``:
+    # the migration export, the document backup) read that store instead of
+    # its own -- test_document_export_deleted_blobs exported the session's
+    # empty store, "0 blobs", whenever test_chat_commands_act_as_the_account's
+    # /docs case ran before it in a fast_test chunk (CI, 2026-11-23). The one a
+    # test leaves is parked, never closed (see _PARKED).
+    try:
+        from kazma_core.documents.ingestion import peek_ingestion_service as _peek_documents
+
+        _prev_documents = _peek_documents()
+    except Exception:
+        _peek_documents = None
+        _prev_documents = None
+
     # ---- teardown: restore + park (never close/GC — see _PARKED) ---------
     yield
+
+    if _peek_documents is not None:
+        try:
+            from kazma_core.documents.ingestion import set_ingestion_service
+
+            _left_documents = _peek_documents()
+            if _left_documents is not _prev_documents:
+                set_ingestion_service(_prev_documents)
+                _park(_left_documents)
+        except Exception:
+            pass
 
     if _prev_container is not None:
         try:

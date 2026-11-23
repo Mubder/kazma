@@ -354,6 +354,19 @@ class KazmaAppBuilder:
         if "pytest" not in sys.modules:
             _ensure_generated_secrets()
 
+        # Spaces S4-03: once a second account exists, no switch may open the
+        # install to people it has not signed in (``boot_guard.OPEN_SWITCHES``:
+        # sign-in off, demo mode, the chat apps' open switch, the open
+        # take-over). Refused before anything serves; reads nothing with no
+        # such switch on.
+        from kazma_core.security.boot_guard import open_switches_refusal
+
+        _open_refusal = open_switches_refusal()
+        if _open_refusal:
+            logger.error("[App] %s", _open_refusal)
+            print(_open_refusal, file=sys.stderr)
+            raise SystemExit(1)
+
         # Spaces S4-08: the cloud profile's checks that read settings (code
         # only in containers, a backup copy off the machine, a container
         # engine), once the store answers. A no-op with the profile off.
@@ -1454,12 +1467,14 @@ class KazmaAppBuilder:
             from kazma_ui.own_keys_api import create_own_keys_router
             from kazma_ui.people_api import create_people_router
             from kazma_ui.saas_api import create_saas_router
+            from kazma_ui.sign_in_api import create_sign_in_router
             from kazma_ui.spaces_api import create_spaces_router
 
             self.app.include_router(create_account_spaces_router())
             self.app.include_router(create_chat_links_router())
             self.app.include_router(create_own_keys_router())
             self.app.include_router(create_people_router())
+            self.app.include_router(create_sign_in_router())
             self.app.include_router(create_spaces_router())
 
             self.app.include_router(create_saas_router())

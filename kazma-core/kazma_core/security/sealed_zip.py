@@ -30,6 +30,8 @@ from typing import Any
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from kazma_core.security.secret_compare import same_secret
+
 __all__ = ["MIN_PASSWORD", "SealedZipRefused", "seal", "unseal"]
 
 #: The shortest password a sealed zip takes.
@@ -258,7 +260,7 @@ def unseal(source: Path, target: Path, password: str, *, max_bytes: int, max_ent
                 salt = handle.read(_SALT_BYTES)
                 verifier = handle.read(2)
                 key, auth, expected = _keys(password, salt)
-                if not hmac.compare_digest(verifier, expected):
+                if not same_secret(verifier, expected):
                     raise SealedZipRefused("wrong_password", "the password does not open this file")
                 counter = _Counter(key)
                 mac = hmac.new(auth, digestmod=hashlib.sha1)  # nosec B324 - the authentication WinZip AES fixes
@@ -289,7 +291,7 @@ def unseal(source: Path, target: Path, password: str, *, max_bytes: int, max_ent
                             raise SealedZipRefused("too_big", f"more than {max_bytes} bytes unpacked")
                         out.write(tail)
                     stored_mac = handle.read(_MAC_BYTES)
-                    if not hmac.compare_digest(stored_mac, mac.digest()[:_MAC_BYTES]):
+                    if not same_secret(stored_mac, mac.digest()[:_MAC_BYTES]):
                         raise SealedZipRefused("changed", f"{info.filename}: altered")
                 count += 1
         partial.replace(target)

@@ -56,6 +56,7 @@ __all__ = [
     "retrieve_with_tenant_ladder",
     "sealing_space",
     "secret_scope",
+    "vault_disabled",
 ]
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,9 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     # written in an admin's request, read by sign-in before any tenant is
     # bound.
     ("cfg:identity.", "newest"),
+    # A person's second factor (Spaces S4-02, ``security.second_factor``):
+    # turned on in My account, read by sign-in before any space is bound.
+    ("account.2fa.", "global"),
     # A URL whose password the settings store moved to the vault under a key
     # that is not a credential's (config_store.URL_SECRET_PREFIX:
     # ``proxy.url``, ``web.searxng_url``, 2026-11-15): read by the proxy, the
@@ -1922,6 +1926,14 @@ _vault_retry_at = 0.0
 _vault_retry_wait = 0.0
 _VAULT_RETRY_FIRST_S = 5.0
 _VAULT_RETRY_MAX_S = 300.0
+
+
+def vault_disabled() -> bool:
+    """Whether this process has no vault at all (no ``KAZMA_VAULT_KEY``):
+    decided once, unlike a vault that failed to open and is tried again
+    (:func:`get_vault` answers None for both). A second factor (Spaces
+    S4-02) is kept in the vault, so with none there is none to ask for."""
+    return _vault_init_attempted and _vault is None
 
 
 def get_vault() -> SecretVault | None:

@@ -457,11 +457,29 @@ def register_misc_routes(self: Any) -> None:
     # ── Auth bootstrap (remote clients — loopback auto-cookie is disabled) ──
     @self.app.get("/login", response_class=HTMLResponse)
     def _login_page(request: Request) -> HTMLResponse:
-        """Render the secret login form for non-loopback browsers."""
+        """Render the secret login form for non-loopback browsers. Once a
+        second person has an account, it says why the owner is asked to sign
+        in on this machine too (Spaces S4-02)."""
+        from kazma_ui.auth import everyone_signs_in
+
         return self.templates.TemplateResponse(
             request,
             "login.html",
+            {"everyone_signs_in": everyone_signs_in()},
+        )
+    @self.app.get("/invite", response_class=HTMLResponse)
+    def _invite_page(request: Request) -> HTMLResponse:
+        """An invitation link's page (Spaces S4-02): a name and a password
+        make the invited person's account. The link is ``/invite#<token>``:
+        the page reads the token after the '#' -- which a browser never sends,
+        so no access log holds it (the review of S4-02, item 6) -- asks
+        ``/api/invitations/lookup`` whether it is open, and says so (one
+        answer for a link that never was, ran out, was used or revoked)."""
+        return self.templates.TemplateResponse(
+            request,
+            "invite.html",
             {},
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
     @self.app.websocket("/ws/dashboard")
     async def ws_dashboard(websocket: WebSocket) -> None:

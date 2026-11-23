@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from typing import Any
 
 from fastapi import Request, Response
@@ -48,6 +49,139 @@ def _login_throttle_key(address: str) -> str:
             return str(ip.ipv4_mapped)
         return str(ipaddress.ip_network(f"{ip}/64", strict=False))
     return str(ip)
+
+
+#: Spaces S4-02: failures against one account from every address together
+#: (only where Spaces is enforced). Above it, sign-ins to that account are
+#: refused for the window, but from an address it signed in from before
+#: (:data:`KNOWN_ADDRESSES_KEY`), so a guess spread over many addresses
+#: cannot lock its person out.
+ACCOUNT_MAX_FAILS = 30
+ACCOUNT_WINDOW_S = 900.0
+#: The addresses each account signed in from (hashed, the newest ten),
+#: runtime state.
+KNOWN_ADDRESSES_KEY = "system.sign_in.known_addresses"
+_KNOWN_PER_ACCOUNT = 10
+_KNOWN_ACCOUNTS_MAX = 2000
+_KNOWN_FOR_S = 30 * 24 * 3600
+
+
+def _address_mark(address: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(f"kazma-sign-in:{address}".encode()).hexdigest()[:20]
+
+
+def _known_address(username: str, address: str) -> bool:
+    """Whether *username* signed in from *address* in the last 30 days.
+    Blocking (a settings read); a store that cannot answer says no."""
+    import time as _time
+
+    from kazma_core.config_store import get_config_store
+
+    try:
+        held = get_config_store().get(KNOWN_ADDRESSES_KEY) or {}
+    except (sqlite3.Error, OSError, RuntimeError):  # unknown is "not known": the limit holds
+        logger.warning("[auth] the addresses accounts signed in from cannot be read", exc_info=True)
+        return False
+    seen = (held.get(username) or {}) if isinstance(held, dict) else {}
+    try:
+        at = float(seen.get(_address_mark(address)) or 0) if isinstance(seen, dict) else 0.0
+    except (TypeError, ValueError):
+        return False
+    return _time.time() - at < _KNOWN_FOR_S
+
+
+def _remember_address(username: str, address: str) -> None:
+    """Keep *address* as one *username* signs in from. Blocking; a store that
+    cannot answer is said and the sign-in goes on."""
+    import time as _time
+
+    from kazma_core.config_store import get_config_store
+
+    mark, now = _address_mark(address), _time.time()
+
+    def _update(current: Any) -> dict[str, Any]:
+        held = dict(current) if isinstance(current, dict) else {}
+        seen = dict(held.get(username) or {}) if isinstance(held.get(username), dict) else {}
+        seen[mark] = now
+        held[username] = dict(sorted(seen.items(), key=lambda kv: float(kv[1] or 0))[-_KNOWN_PER_ACCOUNT:])
+        if len(held) > _KNOWN_ACCOUNTS_MAX:
+            newest = sorted(held.items(), key=lambda kv: max((float(v or 0) for v in kv[1].values()),
+                                                             default=0.0) if isinstance(kv[1], dict) else 0.0)
+            held = dict(newest[-_KNOWN_ACCOUNTS_MAX:])
+        return held
+
+    try:
+        get_config_store().atomic_update(KNOWN_ADDRESSES_KEY, _update, category="system")
+    except (sqlite3.Error, OSError, RuntimeError):  # never refuses a sign-in that succeeded
+        logger.warning("[auth] the address a sign-in came from was not kept", exc_info=True)
+
+
+def _note_paused(username: str) -> None:
+    """Tell the person behind *username*, at their next sign-in, that
+    sign-ins to their account were paused (the People record). Blocking."""
+    from kazma_core.security.platform_rbac import _users_for_sign_in
+    from kazma_core.security.second_factor import account_for_sign_in
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.people import record_event
+
+    try:
+        user_id = next((str(u.get("user_id") or "") for u in _users_for_sign_in()
+                        if str(u.get("username", "")).lower() == username), "")
+        account = account_for_sign_in(user_id) if user_id else ""
+        if not account:
+            return
+
+        def _change(reg: dict[str, Any]) -> None:
+            if account in reg["accounts"]:
+                record_event(reg, "sign_in_paused", account, "kazma")
+
+        identity.update_registry(_change)
+    except (sqlite3.Error, OSError, RuntimeError, ValueError, LookupError):
+        # The pause holds whether or not it is told.
+        logger.warning("[auth] a paused sign-in was not recorded for its person", exc_info=True)
+
+
+def _second_factor_verdict(user_id: str, code: str) -> str | None:
+    """None when the sign-in of *user_id* may go on; ``second_factor_required``
+    when its account has a second factor and no code came;
+    ``wrong_second_factor`` for a wrong one; ``second_factor_paused`` while
+    wrong codes paused the account's checks. Its marker, else the vault's
+    copy (``second_factor.factor_on``): a vault that cannot be read with the
+    marker off never stops an account with no second factor (the review of
+    S4-02, item 7), and a marker a restore took away never turns one off. Blocking
+    (the identity store, settings, the vault); raises when it cannot say."""
+    from kazma_core.security import second_factor
+
+    account = second_factor.account_for_sign_in(user_id)
+    if not account or not second_factor.factor_on(account):
+        return None
+    if not str(code or "").strip():
+        return "second_factor_required"
+    try:
+        return None if second_factor.check(account, code) else "wrong_second_factor"
+    except second_factor.SecondFactorPaused:
+        return "second_factor_paused"
+
+
+#: Accounts told that sign-ins to them were paused, and when: one notice per
+#: window. Keyed by names a caller chose, so bounded (the review of S4-02,
+#: item 8): entries older than the window go first, then the oldest.
+_TOLD_MAX = 1000
+
+
+def _tell_paused_once(told: dict[str, float], key: str, now: float) -> bool:
+    """Whether a pause of *key* is to be told now (not told this window),
+    noting it when so. *told* never holds more than :data:`_TOLD_MAX`."""
+    if now - told.get(key, 0.0) <= ACCOUNT_WINDOW_S:
+        return False
+    for stale in [k for k, at in told.items() if now - at > ACCOUNT_WINDOW_S]:
+        del told[stale]
+    while len(told) >= _TOLD_MAX:
+        del told[min(told, key=told.__getitem__)]
+    told[key] = now
+    return True
 
 
 def register_auth_routes(self: Any) -> None:
@@ -130,22 +264,26 @@ def register_auth_routes(self: Any) -> None:
     # one set by hand is flagged at boot (kazma_ui.auth.warn_if_weak_secret).
     _login_failures: dict[str, list[float]] = {}
     _login_failures_user: dict[str, list[float]] = {}
+    # Every address together, per account (Spaces S4-02).
+    _login_failures_account: dict[str, list[float]] = {}
+    _paused_told: dict[str, float] = {}
     _LOGIN_WINDOW_S = 300.0
     _LOGIN_MAX_FAILS = 10
 
-    def _recent_failures(table: dict[str, list[float]], key: str, now: float) -> list[float]:
+    def _recent_failures(table: dict[str, list[float]], key: str, now: float,
+                         window: float = _LOGIN_WINDOW_S) -> list[float]:
         """The failures of *key* inside the window. The table stays bounded:
         stale keys go first, then -- at :data:`LOGIN_TABLE_MAX` -- the keys
         whose last failure is oldest (never *key* itself)."""
         if len(table) > 1000:
             for k in list(table):
-                if not any(now - t < _LOGIN_WINDOW_S for t in table[k]):
+                if not any(now - t < window for t in table[k]):
                     del table[k]
         if key not in table and len(table) >= LOGIN_TABLE_MAX:
             by_age = sorted(table, key=lambda k: max(table[k], default=0.0))
             for k in by_age[: len(table) - LOGIN_TABLE_MAX + 1]:
                 del table[k]
-        kept = [t for t in table.get(key, []) if now - t < _LOGIN_WINDOW_S]
+        kept = [t for t in table.get(key, []) if now - t < window]
         table[key] = kept
         return kept
 
@@ -222,6 +360,26 @@ def register_auth_routes(self: Any) -> None:
         if user_key:
             # AUD-101: the username's slot too, before the hash is awaited.
             user_recent.append(now)
+        # Spaces S4-02: one account, every address together. Only where
+        # Spaces is enforced; an address the account signed in from before
+        # passes, so a spread guess cannot lock its person out.
+        from kazma_core.spaces.scope import spaces_enforced
+
+        account_key = username.lower()[:200] if username and spaces_enforced() else ""
+        if account_key:
+            account_recent = _recent_failures(_login_failures_account, account_key, now,
+                                              ACCOUNT_WINDOW_S)
+            if len(account_recent) >= ACCOUNT_MAX_FAILS and not await asyncio.to_thread(
+                    _known_address, account_key, client_ip):
+                logger.warning("[auth] sign-ins to one account paused after %d failures (from %s)",
+                               len(account_recent), client_ip)
+                _release(_login_failures, client_ip, now)
+                if user_key:
+                    _release(_login_failures_user, user_key, now)
+                if _tell_paused_once(_paused_told, account_key, now):
+                    await asyncio.to_thread(_note_paused, account_key)
+                return _too_many()
+            account_recent.append(now)
 
         # Path A: multi-user local username + password (Phase 4.4). Off the
         # event loop: a user-store read and PBKDF2 at 600,000 iterations
@@ -259,10 +417,42 @@ def register_auth_routes(self: Any) -> None:
                 status_code=401,
             )
 
+        # A second factor (Spaces S4-02): a right password -- or, for the
+        # owner, the install's secret -- does not sign in to an account that
+        # has one. The slots reserved above stay until a code is right.
+        try:
+            verdict = await asyncio.to_thread(_second_factor_verdict, str(session_uid or ""),
+                                              str(body.get("code") or ""))
+        except (RuntimeError, sqlite3.Error, OSError):
+            # Cannot say whether one is on (SecondFactorUnavailable and
+            # IdentityUnavailable are RuntimeErrors): refused.
+            logger.warning("[auth] whether an account has a second factor cannot be read", exc_info=True)
+            return _JSONResponse(
+                {"detail": "Sign-in cannot be checked right now. Try again.",
+                 "error": "second_factor_unavailable"},
+                status_code=503, headers={"Retry-After": "5"})
+        if verdict == "second_factor_paused":
+            return _JSONResponse(
+                {"detail": "Too many wrong codes: codes for this account are not checked for a "
+                           "while. Try again later.",
+                 "error": verdict, "second_factor_required": True},
+                status_code=429, headers={"Retry-After": "900"})
+        if verdict is not None:
+            return _JSONResponse(
+                {"detail": "Enter the code from your authenticator app."
+                 if verdict == "second_factor_required" else "That code is not right.",
+                 "error": verdict, "second_factor_required": True},
+                status_code=401)
+
         # Success — clear failures for this IP and this username
         _login_failures.pop(client_ip, None)
         if user_key:
             _login_failures_user.pop(user_key, None)
+        if account_key:
+            # This attempt did not fail; an address it signs in from passes
+            # the account's pause (S4-02).
+            _release(_login_failures_account, account_key, now)
+            await asyncio.to_thread(_remember_address, account_key, client_ip)
 
         resp = _JSONResponse({
             "status": "ok",

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="{{ lang()|default('en') }}" dir="{{ dir()|default('ltr') }}" data-theme="{{ theme()|default('light') }}"{% set _accent = accent_style() if accent_style is defined else '' %}{% if _accent %} style="{{ _accent }}"{% endif %}>
+<head>
+  <meta charset="utf-8">
+  {# Same canvas contract as base.html — single color-scheme, theme-color,
+     viewport-fit=cover. Login is a fork of the shell and used to always
+     paint the old dark indigo page, which leaked iOS gray the same way. #}
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="{{ theme()|default('light') }}">
+  <meta name="supported-color-schemes" content="{{ theme()|default('light') }}">
+  <meta name="theme-color" content="{{ '#080d18' if theme() == 'dark' else '#f4f7fd' }}">
+  {# Critical inline theme CSS — see base.html. Paints the canvas the
+     correct color from the first HTML bytes, before kazma.css (which
+     login relied on for both fonts via @import and the html background)
+     downloads + parses. #}
+  <style>
+    html { background-color: {{ '#080d18' if theme() == 'dark' else '#f4f7fd' }}; color-scheme: {{ 'only dark' if theme() == 'dark' else 'only light' }}; }
+  </style>
+  <title>{{ t('invite.page_title') }}</title>
+  <link rel="icon" href="/static/img/favicon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Kazma">
+  <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
+  {# Vendored faces, same as every authenticated page. The Google Fonts link
+     that used to sit here leaked the visitor's IP to a third party before
+     they had even signed in, and render-blocked a local-first login. #}
+  <link rel="stylesheet" href="/static/css/fonts.css?v={{ css_version() }}">
+  <link rel="stylesheet" href="/static/css/kazma.css?v={{ css_version() }}">
+  <link rel="stylesheet" href="/static/css/kazma.v5.css?v={{ css_version() }}">
+  <style>
+    html, body.login-page {
+      min-height: 100%;
+      min-height: 100dvh;
+      overflow: auto;
+      height: auto;
+      background-color: var(--bg);
+    }
+    body.login-page {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+               env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+      font-family: var(--font-sans, system-ui, sans-serif);
+    }
+    /* The card is the shared .card (the wall's own colour, the soft
+       shadow); the fields, buttons and tabs are the shared classes. Only
+       the sign-in layout is this page's. */
+    .login-card { width: min(440px, 92vw); box-sizing: border-box; }
+    .login-card h1 { margin: 0 0 6px; font-size: 1.25rem; font-weight: 600; color: var(--text-primary); }
+    .login-card p { margin: 0 0 14px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.45; }
+    .login-card label {
+      display: block; font-size: 0.85rem; font-weight: 600;
+      color: var(--text-primary); margin-bottom: 6px;
+    }
+    .login-card .form-input { width: 100%; box-sizing: border-box; margin-bottom: 14px; }
+    .login-submit { width: 100%; margin-bottom: 8px; box-sizing: border-box; }
+    /* A message, tinted in its own tone: an error is the danger tone, a
+       session that ended is the warning tone. Readable in both themes. */
+    .login-error {
+      display: none; margin-bottom: 12px; padding: 10px 12px; border-radius: 8px;
+      background: var(--danger-subtle); color: var(--danger); font-size: 0.85rem;
+    }
+    .login-error.show { display: block; }
+    .login-error.info { background: var(--warning-subtle); color: var(--warning); }
+    .login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .login-brand img { height: 32px; width: 32px; border-radius: 6px; object-fit: contain; }
+    /* The sign-in modes are the shared segmented control. */
+    .login-tabs { display: flex; width: 100%; box-sizing: border-box; margin-bottom: 16px; }
+    .login-tabs > button { flex: 1 1 0; }
+    .mode-panel { display: none; }
+    .mode-panel.active { display: block; }
+    .login-divider {
+      text-align: center; color: var(--text-muted); font-size: 0.75rem;
+      margin: 12px 0; position: relative;
+    }
+  </style>
+</head>
+<body class="login-page">
+  <div class="card login-card" id="invite-card">
+    <div class="login-brand">
+      <img src="/static/img/kazma-icon-dark-theme.png" alt="Kazma" class="brand-on-dark"><img src="/static/img/kazma-icon.png" alt="Kazma" class="brand-on-light">
+      <div><h1>{{ t('invite.title') }}</h1></div>
+    </div>
+    <div id="err" class="login-error" role="alert"></div>
+    <p id="invite-checking">{{ t('invite.checking') }}</p>
+    <div id="invite-open" hidden>
+      <p>{{ t('invite.blurb') }}</p>
+      <form id="inviteForm" autocomplete="on">
+        <label for="name">{{ t('invite.name') }}</label>
+        <input id="name" class="form-input" name="username" type="text" autocomplete="username" maxlength="64" translate="no" required>
+        <label for="password">{{ t('invite.password') }}</label>
+        <input id="password" class="form-input" name="password" type="password" autocomplete="new-password" placeholder="{{ t('invite.password_hint') }}" required>
+        <label for="confirm">{{ t('invite.confirm') }}</label>
+        <input id="confirm" class="form-input" name="confirm" type="password" autocomplete="new-password" required>
+        <button type="submit" class="btn btn-primary login-submit" id="btnInvite">{{ t('invite.create') }}</button>
+      </form>
+    </div>
+    <div id="invite-done" hidden>
+      <p>{{ t('invite.done') }}</p>
+      <a class="btn btn-primary login-submit" href="/login" id="invite-sign-in">{{ t('invite.sign_in') }}</a>
+    </div>
+    <div id="invite-closed-block" hidden>
+      <p id="invite-closed">{{ t('invite.closed') }}</p>
+      <a class="btn btn-outline login-submit" href="/login">{{ t('invite.sign_in') }}</a>
+    </div>
+  </div>
+  <script>
+    (function () {
+      // The token rides after the link's '#': a browser never sends it, so
+      // no server or access log holds it (the review of S4-02, item 6). It
+      // is read once and taken out of the address bar and the history.
+      var token = decodeURIComponent((window.location.hash || '').replace(/^#/, ''));
+      try { window.history.replaceState(null, '', '/invite'); } catch (_) {}
+      var err = document.getElementById('err');
+      var words = {
+        mismatch: {{ t('invite.err_mismatch') | tojson }},
+        invitation_closed: {{ t('invite.closed') | tojson }},
+        weak_password: {{ t('invite.err_weak_password') | tojson }},
+        bad_name: {{ t('invite.err_bad_name') | tojson }},
+        name_taken: {{ t('invite.err_name_taken') | tojson }},
+        preconditions_missing: {{ t('invite.err_not_ready') | tojson }},
+        spaces_off: {{ t('invite.closed') | tojson }},
+        failed: {{ t('invite.err_failed') | tojson }}
+      };
+      function say(text) { err.textContent = text; err.classList.add('show'); }
+      function show(id) {
+        ['invite-checking', 'invite-open', 'invite-done', 'invite-closed-block'].forEach(function (one) {
+          document.getElementById(one).hidden = one !== id;
+        });
+      }
+      async function post(url, body) {
+        var res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(body)
+        });
+        var data = {};
+        try { data = await res.json(); } catch (_) {}
+        return { ok: res.ok && !!data.ok, data: data };
+      }
+      (async function () {
+        if (!token) { show('invite-closed-block'); return; }
+        try {
+          var got = await post('/api/invitations/lookup', { token: token });
+          if (!got.ok) {
+            if (got.data.error && got.data.error !== 'invitation_closed') say(words.failed);
+            show('invite-closed-block');
+            return;
+          }
+          document.getElementById('name').value = got.data.name || '';
+          show('invite-open');
+        } catch (ex) {
+          say(words.failed);
+          show('invite-closed-block');
+        }
+      })();
+      document.getElementById('inviteForm').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        err.classList.remove('show');
+        var password = document.getElementById('password').value;
+        if (password !== document.getElementById('confirm').value) { say(words.mismatch); return; }
+        var btn = document.getElementById('btnInvite');
+        btn.disabled = true;
+        try {
+          var got = await post('/api/invitations/accept', {
+            token: token, name: document.getElementById('name').value, password: password
+          });
+          if (!got.ok) {
+            say(words[got.data.error] || words.failed);
+            btn.disabled = false;
+            return;
+          }
+          show('invite-done');
+        } catch (ex) {
+          say(words.failed);
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

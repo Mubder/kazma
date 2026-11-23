@@ -538,6 +538,12 @@ def switch_on(*, by: str) -> None:
     chat_links.adopt_owner_ids(by=by)
     _store().set(identity.ENFORCED_KEY, True, category="identity")
     identity.prime_enforcement()
+    # With an account besides the owner's, everyone signs in from now on
+    # (S4-02): the sessions the peer address made for nothing end.
+    if any(account.get("id") != OWNER_ACCOUNT_ID for account in identity.list_accounts()):
+        from kazma_core.security.web_sessions import end_peer_trust_sessions
+
+        end_peer_trust_sessions()
     logger.warning("[spaces] Spaces was switched on by %s", by)
 
 

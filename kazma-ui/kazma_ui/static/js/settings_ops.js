@@ -330,7 +330,15 @@
 
         /* How a session began, in the page's language (the route answers
          * the session's recorded origin: login, oidc, auto-cookie). */
-        sessionOrigin(origin) {
+        sessionOrigin(origin, via) {
+            // How an auto-login session came (Spaces S4-02): this computer,
+            // the local network, or a browser that sent the install's secret.
+            const byVia = {
+                this_computer: ['sign_in.via_this_computer', 'This computer (auto-login)'],
+                local_network: ['sign_in.via_local_network', 'The local network (auto-login)'],
+                secret_header: ['sign_in.via_secret_header', "A browser with the install's secret"],
+            }[via];
+            if (byVia) return _t(byVia[0], byVia[1]);
             const key = {
                 login: 'settings.session_login',
                 oidc: 'settings.session_oidc',
@@ -1490,6 +1498,26 @@
             } catch (e) {
                 showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
             }
+        },
+
+        /* End one of the person's own sessions (Spaces S4-02): another
+         * device signs in again. */
+        async endMySession(session) {
+            if (!session || !session.id) return;
+            const ok = await window.kazmaConfirm({
+                title: _t('sign_in.end_mine_title', 'End this session?'),
+                message: _t('sign_in.end_mine_confirm', 'That device signs in again.'),
+                confirmText: _t('sign_in.end', 'End'),
+            });
+            if (!ok) return;
+            try {
+                await window.kazmaSave('/api/account/sessions/' + encodeURIComponent(session.id) + '/end', { method: 'POST' });
+            } catch (e) {
+                showToast(_t('sign_in.err_failed', 'That did not work. Try again.'), 'error');
+                return;
+            }
+            showToast(_t('sign_in.session_ended', 'That session has ended.'), 'success');
+            await this.loadAccount();
         },
 
         async createToken() {

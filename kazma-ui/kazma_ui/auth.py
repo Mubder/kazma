@@ -28,6 +28,7 @@ import contextvars
 import logging
 import os
 import socket
+import sqlite3
 from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from typing import Any
@@ -394,8 +395,7 @@ def _trust_lan_enabled() -> bool:
     ``KAZMA_TRUST_LAN=1`` for WSL/LAN single-operator labs that need cookie
     auto-issue without ``/login``.
     """
-    raw = (os.environ.get("KAZMA_TRUST_LAN") or "0").strip().lower()
-    return raw in ("1", "true", "on", "yes")
+    return env_flag("KAZMA_TRUST_LAN")
 
 
 #: Extra allowed WebSocket origins (comma-separated, exact ``scheme://host[:port]``
@@ -515,8 +515,29 @@ def _loopback_auto_login_enabled() -> bool:
     credential-less loopback login alongside a proxy set
     ``KAZMA_LOOPBACK_AUTOLOGIN=1``.
     """
-    raw = (os.environ.get("KAZMA_LOOPBACK_AUTOLOGIN") or "0").strip().lower()
-    return raw in ("1", "true", "on", "yes")
+    return env_flag("KAZMA_LOOPBACK_AUTOLOGIN")
+
+
+def everyone_signs_in() -> bool:
+    """Whether every person signs in, the owner too, on this machine as
+    anywhere (Spaces S4-02): once Spaces is enforced and an account besides
+    the owner's exists. Then the loopback auto-login is off -- the peer
+    address is no credential -- and the sign-in page says why. Before
+    Spaces, or with one account, False: nothing changes. An identity store
+    that cannot answer counts as yes (unknown is never a pass). Blocking
+    (the identity store): call it in a thread."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    try:
+        return any(account.get("id") != OWNER_ACCOUNT_ID for account in identity.list_accounts())
+    except identity.IdentityUnavailable:
+        logger.warning("[auth] whether others have accounts cannot be read: no auto-login", exc_info=True)
+        return True
 
 
 def _peer_trust_allowed(request: Request) -> bool:
@@ -529,10 +550,16 @@ def _peer_trust_allowed(request: Request) -> bool:
     A proxy the operator did *not* declare also revokes peer trust, so a
     mis-set ``KAZMA_TRUSTED_PROXIES`` (the Docker bridge address is not
     ``127.0.0.1``) fails closed instead of silently leaving the bypass open.
+
+    Once a second person has an account (Spaces enforced), never: everyone
+    signs in, the owner too (:func:`everyone_signs_in`, Spaces S4-02).
+    Blocking (the identity store, when Spaces is enforced).
     """
     # Cheap when already latched; one header read per request otherwise.
     _note_forwarded_headers(request)
     if undeclared_proxy_detected():
+        return False
+    if everyone_signs_in():
         return False
     if not behind_proxy():
         return True
@@ -711,19 +738,104 @@ def _should_auto_issue_cookie(request: Request, expected: str) -> bool:
     - Loopback clients: yes, when peer trust applies (see
       :func:`_peer_trust_allowed`) AND the Host header names the local
       machine (DNS-rebinding guard, audit H-7).
-    - Private LAN when ``KAZMA_TRUST_LAN=1``: same condition.
-    - Remote clients with a valid X-Kazma-Secret header: yes.
+    - Private LAN when ``KAZMA_TRUST_LAN=1``: same condition. Both are peer
+      trust, so neither once a second person has an account
+      (:func:`everyone_signs_in`).
+    - Remote clients with a valid X-Kazma-Secret header: yes, unless the
+      owner has a second factor (:func:`_owner_second_factor_on`): then the
+      secret is a key for programs and never makes a browser session.
     - Public internet clients: no — must use /login.
     """
+    return bool(_auto_cookie_via(request, expected))
+
+
+def _auto_cookie_via(request: Request, expected: str) -> str:
+    """How a session for nothing would come to this request: ``this_computer``
+    (loopback), ``local_network`` (``KAZMA_TRUST_LAN``), ``secret_header``
+    (the install's secret sent by a browser, while the owner has no second
+    factor), or ``""``. The owner's session list says which. Blocking."""
     if not expected:
-        return False
+        return ""
     if _peer_trust_allowed(request) and _host_is_local_name(request):
         if _is_loopback_client(request):
-            return True
-        if _trust_lan_enabled() and _is_private_lan_client(request):
-            return True
+            return "this_computer"
+        if _lan_auto_login(request):
+            return "local_network"
     provided = request.headers.get(SECRET_HEADER, "")
-    return bool(provided and verify_secret(provided, expected))
+    if provided and verify_secret(provided, expected) and not _owner_second_factor_on():
+        return "secret_header"
+    return ""
+
+
+def _lan_auto_login(peer: Any) -> bool:
+    """Whether a private-network peer gets the owner's auto-login
+    (``KAZMA_TRUST_LAN``): never once the owner has a second factor -- a
+    device on the network would hold the owner's session with no code (the
+    S4-02 re-check). This computer keeps its auto-login, as My account says.
+    Blocking (a settings read)."""
+    return _trust_lan_enabled() and _is_private_lan_client(peer) and not _owner_second_factor_on()
+
+
+def _owner_second_factor_on() -> bool:
+    """Whether the owner's account has a second factor (its marker, else the
+    vault's copy: ``second_factor.factor_on``). Then the install's secret is a key for
+    programs only: it never makes a browser session, and a browser that
+    sends it is refused (the review of S4-02, item 1). Unreadable counts as
+    on. Blocking (a settings read)."""
+    from kazma_core.security.second_factor import factor_on
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    try:
+        return factor_on(OWNER_ACCOUNT_ID)
+    except (RuntimeError, OSError, sqlite3.Error):
+        logger.warning("[auth] whether the owner has a second factor cannot be read: "
+                       "the install's secret makes no browser session", exc_info=True)
+        return True
+
+
+def _browser_style(request: Any) -> bool:
+    """A request a browser made: ``Sec-Fetch-*`` headers (every request a
+    browser sends) or ``Accept: text/html`` (a navigation). A program -- the
+    CLI, the guard, a script -- sends neither."""
+    try:
+        if any(str(key).lower().startswith("sec-fetch-") for key in request.headers.keys()):
+            return True
+        return "text/html" in (request.headers.get("accept") or "").lower()
+    except (AttributeError, TypeError):
+        return False
+
+
+def _secret_refused_in_a_browser(request: Request, provided: str, expected: str) -> bool:
+    """Whether this request carries the install's secret the way a browser
+    does -- in a browser-style request, or in the legacy secret cookie --
+    while the owner has a second factor: refused, since the secret would
+    otherwise sign a browser in with no code (the review of S4-02, item 1).
+    A program's request (no ``Sec-Fetch-*``, no ``Accept: text/html``) keeps
+    the secret as its key. Blocking (a settings read)."""
+    if not provided or provided.startswith("session:") or not verify_secret(provided, expected):
+        return False
+    in_a_header = any((request.headers.get(name) or "").strip()
+                      for name in (SECRET_HEADER, "X-Api-Token", "X-Kazma-Token", "authorization"))
+    if in_a_header and not _browser_style(request):
+        return False
+    return _owner_second_factor_on()
+
+
+def _secret_in_a_browser_response(request: Request) -> Response:
+    """The refusal of the install's secret in a browser: a page goes to the
+    sign-in page (the secret and the code sign in there), an API call is a
+    401 naming why."""
+    if _wants_html_response(request):
+        return _unauthorized_response(request)
+    response = JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        content={"error": "secret_in_browser",
+                 "detail": "The install's secret is a key for programs. In a browser, sign in "
+                           "with it and the owner's second-factor code."},
+    )
+    if request.cookies.get(SECRET_COOKIE):
+        response.delete_cookie(SECRET_COOKIE, path="/")
+    return response
 
 
 def _wants_html_response(request: Request) -> bool:
@@ -837,6 +949,12 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/api/auth/status",
     "/api/auth/oidc/start",
     "/api/auth/oidc/callback",
+    # An invitation (Spaces S4-02): its page, the page's question and the
+    # acceptance, before the person has an account; the one-use token is in
+    # the body, read from the link's '#' (never in a path a log keeps).
+    "/invite",
+    "/api/invitations/lookup",
+    "/api/invitations/accept",
 }) | PUBLIC_GUIDE_PATHS
 
 #: Path prefixes that are always open (browser-redirect targets that
@@ -1196,12 +1314,12 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
         ):
             return True
 
-        # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN enabled
+        # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN
+        # is on and the owner has no second factor (_lan_auto_login).
         if (
-            _is_private_lan_client(websocket)
-            and _trust_lan_enabled()
-            and _host_is_local_name(websocket)
+            _host_is_local_name(websocket)
             and _ws_origin_allowed(websocket)
+            and _lan_auto_login(websocket)
         ):
             return True
 
@@ -1238,7 +1356,10 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
                         "[SECURITY] WebSocket session validation failed",
                         exc_info=True,
                     )
-    if not provided and _accept_legacy_secret_cookie() and _ws_origin_allowed(websocket):
+    if (not provided and _accept_legacy_secret_cookie() and _ws_origin_allowed(websocket)
+            and not _owner_second_factor_on()):
+        # The legacy secret cookie is a browser's: never once the owner has
+        # a second factor (S4-02).
         provided = (websocket.cookies.get(SECRET_COOKIE) or "").strip()
     if not provided:
         return False
@@ -1263,6 +1384,10 @@ def get_websocket_principal(websocket: Any) -> dict[str, Any] | None:
             for name in (SECRET_HEADER, "X-Api-Token", "X-Kazma-Token", "authorization")
         )
         if not header_credential and not _ws_origin_allowed(websocket):
+            return None
+        if not header_credential and not provided.startswith("session:") and _owner_second_factor_on():
+            # The legacy secret cookie is a browser's: never once the owner
+            # has a second factor, as websocket_is_authenticated says (S4-02).
             return None
         return get_request_principal(websocket)
     if websocket_is_authenticated(websocket):
@@ -1530,8 +1655,10 @@ def _looks_like_browser(request: Request) -> bool:
     return False
 
 
-def _mint_auth_cookie(response: Response, request: Request, expected: str) -> None:
-    """Set browser auth cookie — opaque session preferred (audit H1)."""
+def _mint_auth_cookie(response: Response, request: Request, expected: str, via: str = "") -> None:
+    """Set browser auth cookie — opaque session preferred (audit H1). *via*
+    says how it came (:func:`_auto_cookie_via`): the owner's session list
+    shows it."""
     # Only a browser will keep and resend the cookie. A header-authenticated
     # non-browser client gets nothing to store — no session row minted (AUD-023).
     if not _looks_like_browser(request):
@@ -1560,7 +1687,7 @@ def _mint_auth_cookie(response: Response, request: Request, expected: str) -> No
             # written out because create_session no longer guesses: when
             # sessions become per-user, this line is the one that has to be
             # revisited, and it should be visible when that happens.
-            sid = create_session(actor="auto-cookie", role="admin")
+            sid = create_session(actor="auto-cookie", role="admin", via=via or None)
             response.set_cookie(
                 key=_SC,
                 value=sid,
@@ -1740,16 +1867,16 @@ def create_auth_middleware(
         # (never mint auth cookie for anonymous remote visitors — C2 fix).
         if is_always_open(path):
             response = await call_next(request)
-            if expected and await asyncio.to_thread(_should_auto_issue_cookie, request, expected):
-                await asyncio.to_thread(_mint_auth_cookie, response, request, expected)
+            if expected and (via := await asyncio.to_thread(_auto_cookie_via, request, expected)):
+                await asyncio.to_thread(_mint_auth_cookie, response, request, expected, via)
             return response
 
         # 2. Only sensitive paths are gated (default-deny /api/* + admin shells).
         # Static assets and non-admin HTML remain open for soft-nav shells.
         if not is_sensitive_path(path):
             response = await call_next(request)
-            if expected and await asyncio.to_thread(_should_auto_issue_cookie, request, expected):
-                await asyncio.to_thread(_mint_auth_cookie, response, request, expected)
+            if expected and (via := await asyncio.to_thread(_auto_cookie_via, request, expected)):
+                await asyncio.to_thread(_mint_auth_cookie, response, request, expected, via)
             return response
 
         # 3. No secret configured → open mode UNLESS the caller presented an
@@ -1768,6 +1895,11 @@ def create_auth_middleware(
         # 4. Verify KAZMA_SECRET / opaque session / Account API token.
         if not await asyncio.to_thread(is_authenticated, request, expected):
             return _unauthorized_response(request)
+        # 4a. Once the owner has a second factor, the install's secret is a
+        # key for programs: a browser that sends it is refused (S4-02).
+        if (provided and not provided.startswith(("session:", "kazma_"))
+                and await asyncio.to_thread(_secret_refused_in_a_browser, request, provided, expected)):
+            return _secret_in_a_browser_response(request)
 
         # 4b. Platform RBAC (Phase 4.4) when multi-user is enabled.
         # Fail-closed: if we know multi-user is on and the check errors, deny.
@@ -1818,10 +1950,11 @@ def create_auth_middleware(
                 )
 
         response = await call_next(request)
-        # Refresh cookie only for secret-header auth (not API tokens)
+        # Refresh cookie only for secret-header auth (not API tokens), and
+        # never once the owner has a second factor (S4-02).
         if expected and provided and not provided.startswith("session:") and not provided.startswith("kazma_"):
-            if verify_secret(provided, expected):
-                await asyncio.to_thread(_mint_auth_cookie, response, request, expected)
+            if verify_secret(provided, expected) and not await asyncio.to_thread(_owner_second_factor_on):
+                await asyncio.to_thread(_mint_auth_cookie, response, request, expected, "secret_header")
         return response
 
     return auth_middleware_with_gate

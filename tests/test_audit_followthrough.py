@@ -169,7 +169,8 @@ def test_every_session_mint_states_its_authority():
     """
     ui = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
     auth_src = (ui / "auth.py").read_text(encoding="utf-8")
-    assert 'create_session(actor="auto-cookie", role="admin")' in auth_src
+    # How it came is said too (Spaces S4-02: the owner's session list names it).
+    assert 'create_session(actor="auto-cookie", role="admin", via=via or None)' in auth_src
 
     # Parsed, not split on ")" — the argument lists contain nested calls
     # like result.get("username"), which ends a naive slice early.

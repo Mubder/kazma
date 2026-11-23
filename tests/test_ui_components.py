@@ -292,7 +292,9 @@ class TestHeaderComponent:
         is not an English slug. error.html is the one English exception."""
         missing = []
         for path in _TEMPLATES_DIR.glob("*.html"):
-            if path.name in {"base.html", "error.html", "login.html"}:
+            # login.html and invite.html are the pages before sign-in: no
+            # header, no sidebar.
+            if path.name in {"base.html", "error.html", "login.html", "invite.html"}:
                 continue
             text = path.read_text(encoding="utf-8")
             if "{% block page_title %}" not in text:
@@ -757,8 +759,8 @@ class TestConsistency:
                 continue
             if html_file.name == "error.html":
                 continue
-            if html_file.name == "login.html":
-                continue
+            if html_file.name in ("login.html", "invite.html"):
+                continue  # the pages before sign-in: no shell to extend
             content = html_file.read_text(encoding="utf-8")
             assert 'extends "base.html"' in content or "extends 'base.html'" in content, \
                 f"{html_file.name} does not extend base.html"

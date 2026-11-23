@@ -130,6 +130,11 @@ def main() -> None:
 
         sys.exit(_run_spaces(sys.argv[2:]))
 
+    elif cmd == "account":
+        from kazma_cli.account import run as _run_account
+
+        sys.exit(_run_account(sys.argv[2:]))
+
     elif cmd == "setup":
         from kazma_cli.setup import run as _run_setup
 
@@ -220,6 +225,7 @@ def main() -> None:
         print("  acquisition  Inspect cached crawler errors, usage and credits")
         print("  observer   Kazma Watch, the outside observer (setup, pair, status, unpair)")
         print("  spaces     Several people on one Kazma (spaces migrate --check: what is missing)")
+        print("  account    What only this machine may do to an account (account second-factor off)")
         print("  setup      Set up what Kazma runs on (setup postgres: PostgreSQL as an OS service)")
         print("  restore    Restore the database to a point in time (restore postgres --to TIME)")
         print("  maintenance  An update window: begin (pause the guard when idle), end (resume and check)")

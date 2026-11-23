@@ -1738,17 +1738,26 @@ class SettingsRouterBuilder:
         @router.get("/api/settings/account/sessions")
         def api_get_sessions(request: Request) -> list[dict[str, Any]]:
             """The signed-in person's live web sessions (the session store),
-            this one marked ``current``."""
+            this one marked ``current``. The owner's are every kind it has: a
+            sign-in with the secret, the auto-login, a browser that sent the
+            secret's header (Spaces S4-02, ``sessions_of_account``)."""
             from kazma_core.security import web_sessions
             from kazma_ui.auth import get_request_principal
+            from kazma_ui.space_binding import account_of
 
             principal = get_request_principal(request) or {}
             if principal.get("source") != "session":
                 return []
+            sessions = {"user_id": str(principal.get("user_id") or ""),
+                        "username": str(principal.get("username") or "")}
+            account = account_of(principal)
+            if account:
+                try:
+                    sessions = web_sessions.sessions_of_account(account)
+                except LookupError:
+                    pass  # an account the store no longer holds: the session's own
             return web_sessions.list_sessions(
-                user_id=str(principal.get("user_id") or ""),
-                username=str(principal.get("username") or ""),
-                current=request.cookies.get(web_sessions.SESSION_COOKIE),
+                **sessions, current=request.cookies.get(web_sessions.SESSION_COOKIE),
             )
 
         @router.get("/api/settings/tools")
