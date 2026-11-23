@@ -327,8 +327,10 @@ def create_people_router() -> APIRouter:
 
     @router.put("/api/people/{account_id}/code-network")
     async def set_code_network(account_id: str, request: Request) -> JSONResponse:
-        """Whether a person's code may use the network (Spaces S4-05):
-        ``{"allowed": bool}``."""
+        """A person's code and the network (Spaces S4-05): ``{"allowed":
+        false}`` clears a stored allowance; ``true`` is refused (409
+        ``code_network_not_yet``) until S4-05b limits a container to the
+        public internet."""
         denied = await asyncio.to_thread(_not_admin, request)
         if denied:
             return denied

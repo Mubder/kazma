@@ -12,10 +12,9 @@ Runs user-provided Python snippets with layered isolation:
 
 A person's code (Spaces S4-05, ``spaces.member_code.code_rule``): anyone but
 the admin, once Spaces is enforced, runs only in a container -- never the
-local fallback -- with no network unless the admin allowed it for them;
-allowed, the jail joins the engine's default network and the snippet may
-import the network modules (:data:`_NETWORK_IMPORT_ROOTS`), and E2B (which
-always has the internet) may run it. The admin's code keeps its rules.
+local fallback -- with no network (``--network none``, as every jail run),
+and never on E2B, which always has the internet. Network for members' code
+waits for S4-05b (a network limited to the public internet).
 
 Usage::
 
@@ -86,20 +85,6 @@ _BLOCKED_IMPORT_ROOTS: frozenset[str] = frozenset({
     "pickle", "marshal", "shelve", "sqlite3",
 })
 
-#: The network modules of the blocklist: importable by a snippet whose person
-#: the admin allowed the network (Spaces S4-05), which only ever runs in a
-#: container. Process, native and host escapes stay blocked whatever.
-_NETWORK_IMPORT_ROOTS: frozenset[str] = frozenset({
-    "socket", "ssl", "select", "selectors",
-    "http", "urllib", "urllib3", "requests", "httpx", "aiohttp",
-    "ftplib", "smtplib", "poplib", "imaplib", "telnetlib", "xmlrpc",
-})
-
-
-def _blocked_roots(network: bool) -> frozenset[str]:
-    return _BLOCKED_IMPORT_ROOTS - _NETWORK_IMPORT_ROOTS if network else _BLOCKED_IMPORT_ROOTS
-
-
 #: Builtins the snippet may not call itself: the import blocklist is worthless
 #: while they stay reachable, since a snippet needs no import to run arbitrary
 #: logic through them (audit M-P10).
@@ -158,24 +143,20 @@ exec(_snippet_code, _snippet_globals)
 '''
 
 
-def _build_sandbox_script(code: str, *, network: bool = False) -> str:
+def _build_sandbox_script(code: str) -> str:
     """The file ``python_exec`` runs: the runner with *code* embedded.
-    *network*: the person's code may use the network (Spaces S4-05), so the
-    network modules are not blocked.
 
     Tracebacks name ``snippet.py`` with the snippet's own line numbers.
     """
     return _SANDBOX_RUNNER.format(
-        blocked=sorted(_blocked_roots(network)),
+        blocked=sorted(_BLOCKED_IMPORT_ROOTS),
         blocked_calls=_BLOCKED_BUILTINS,
         source=code,
     )
 
 
-def sandbox_refusal(code: str, *, network: bool | None = None) -> str | None:
-    """Why the sandbox would refuse *code*, or None. *network*: whether the
-    person's code may use the network (Spaces S4-05; None reads it for the
-    work running now -- the identity store, so off the loop).
+def sandbox_refusal(code: str) -> str | None:
+    """Why the sandbox would refuse *code*, or None.
 
     Read from the AST, so a comment or a string that merely mentions
     ``import os`` is not a refusal. Only what the snippet itself writes:
@@ -190,18 +171,13 @@ def sandbox_refusal(code: str, *, network: bool | None = None) -> str | None:
         tree = ast.parse(code)
     except SyntaxError:
         return None  # the run reports the syntax error itself
-    if network is None:
-        from kazma_core.spaces.member_code import code_rule
-
-        network = code_rule().network
-    blocked = _blocked_roots(network)
     imports: list[str] = []
     calls: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            imports += [a.name for a in node.names if a.name.split(".", 1)[0] in blocked]
+            imports += [a.name for a in node.names if a.name.split(".", 1)[0] in _BLOCKED_IMPORT_ROOTS]
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            if node.module.split(".", 1)[0] in blocked:
+            if node.module.split(".", 1)[0] in _BLOCKED_IMPORT_ROOTS:
                 imports.append(node.module)
         elif (
             isinstance(node, ast.Call)
@@ -214,7 +190,7 @@ def sandbox_refusal(code: str, *, network: bool | None = None) -> str | None:
     named = ", ".join(dict.fromkeys(imports + calls))
     return (
         f"python_exec's sandbox refuses {named}: snippets may not import "
-        f"{', '.join(sorted(blocked))} or call "
+        f"{', '.join(sorted(_BLOCKED_IMPORT_ROOTS))} or call "
         f"{', '.join(n + '()' for n in _BLOCKED_BUILTINS)}. The rest of the "
         "standard library (datetime, zoneinfo, json, re, math, statistics, "
         "decimal, collections, ...) works; for files use file_read / "
@@ -343,10 +319,6 @@ def jail_note_for_tool(tool: str) -> str:
         if use_docker_jail():
             if not local_exec_forbidden():
                 return "This attempts Docker after Approve (no network); HOST fallback is permitted if Docker fails."
-            from kazma_core.spaces.member_code import code_rule
-
-            if code_rule().network:
-                return "This runs in Docker after Approve (network allowed by the admin)."
             return "This runs in Docker after Approve (no network)."
     except Exception:
         logger.debug("[code_exec] jail note probe failed", exc_info=True)
@@ -754,10 +726,8 @@ def _workspace_mounts(ws: Path) -> list[str]:
     return args
 
 
-async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, network: bool = False) -> str:
-    """Pipe the sandbox runner into a disposable Docker container (network
-    none; the engine's default network when *network*: a person the admin
-    allowed it, Spaces S4-05).
+async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
+    """Pipe the sandbox runner into a disposable Docker container (network none).
 
     ``tmp_dir`` remains in the call contract shared with the local runner, but
     Docker never mounts it. Windows service-created private temporary folders
@@ -797,7 +767,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
 
     cmd = [
         docker, "run", "--rm", "-i",
-        "--network", "bridge" if network else "none",
+        "--network", "none",
         "--memory", f"{MEMORY_LIMIT_MB}m",
         "--memory-swap", f"{MEMORY_LIMIT_MB}m",
         "--cpus", "1",
@@ -820,9 +790,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
         "python", "-I", "-",
     ]
 
-    logger.info("[code_exec] Docker jail: image=%s timeout=%s network=%s", image, timeout,
-                "bridge" if network else "none")
-    label = f"[sandbox: docker network={'bridge' if network else 'none'} image={image}]"
+    logger.info("[code_exec] Docker jail: image=%s timeout=%s", image, timeout)
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -839,7 +807,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
 
         # Prefix so operators know isolation mode was used
         body = _format_output(proc.returncode or 0, stdout, stderr)
-        return f"{label}\n{body}"
+        return f"[sandbox: docker network=none image={image}]\n{body}"
     except NotImplementedError:
         import subprocess
 
@@ -850,7 +818,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
             try:
                 out, err = p.communicate(input=script, timeout=timeout + 15)
                 body_str = _format_output(p.returncode or 0, out, err)
-                return f"{label}\n{body_str}"
+                return f"[sandbox: docker network=none image={image}]\n{body_str}"
             except subprocess.TimeoutExpired:
                 p.kill()
                 p.wait()
@@ -868,8 +836,7 @@ PYTHON_EXEC_DESCRIPTION = (
     f"timeout: default {DEFAULT_TIMEOUT} s, at most {MAX_TIMEOUT} s. Memory: {MEMORY_LIMIT_MB} MB. "
     f"Output past {MAX_OUTPUT_CHARS:,} characters is cut and marked [truncated]. "
     "The install's own Python packages are importable (no user site-packages); no network "
-    "in the container sandbox unless the admin allowed it for the person. Use for calculations, "
-    "data processing, prototyping."
+    "in the container sandbox. Use for calculations, data processing, prototyping."
 )
 
 
@@ -936,25 +903,18 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     except Exception:
         logger.debug("[code_exec] E2B probe failed", exc_info=True)
 
-    from kazma_core.spaces.member_code import code_rule
-
-    # The person's network allowance (Spaces S4-05): only for code held to a
-    # container, so the network modules are never unblocked on the host.
-    rule = await asyncio.to_thread(code_rule)
-    network = rule.container_only and rule.network
     tmp_dir = tempfile.mkdtemp(prefix="kazma_exec_")
     code_file = Path(tmp_dir) / "snippet.py"
 
     try:
         # The runner with the snippet embedded (its blocklist applies inside
         # Docker too, where it is belt-and-braces).
-        await asyncio.to_thread(code_file.write_text, _build_sandbox_script(code, network=network),
-                                encoding="utf-8")
+        await asyncio.to_thread(code_file.write_text, _build_sandbox_script(code), encoding="utf-8")
         no_local = await asyncio.to_thread(local_exec_forbidden)
 
         if await asyncio.to_thread(use_docker_jail):
             try:
-                return await _run_docker_jail(code_file, tmp_dir, timeout, network=network)
+                return await _run_docker_jail(code_file, tmp_dir, timeout)
             except Exception as exc:
                 if no_local:
                     logger.error("[code_exec] Docker jail required but failed: %s", exc)

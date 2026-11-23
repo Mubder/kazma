@@ -2816,11 +2816,13 @@
               <template x-for="p in people.filter((q) => !q.owner)" :key="'code-' + p.id">
                 <div class="people-features-row" :data-person-code="p.id">
                   <span class="account-list-name"><bdi translate="no" x-text="p.name"></bdi></span>
+                  <!-- Off and not offered until S4-05b limits a container to
+                       the public internet (the review of S4-05). -->
                   <label class="people-feature">
-                    <input type="checkbox" data-code-network :checked="!!p.code_network"
-                           :aria-label="window.t('settings.people_code_network_of', {name: p.name})"
-                           @change="setPersonCodeNetwork(p, $event.target.checked, $event.target)">
+                    <input type="checkbox" data-network-switch disabled
+                           :aria-label="window.t('settings.people_code_network_of', {name: p.name})">
                     <span>{{ t('settings.people_code_network') }}</span>
+                    <span class="badge badge-secondary" data-network-not-yet>{{ t('settings.people_code_network_not_yet') }}</span>
                   </label>
                 </div>
               </template>

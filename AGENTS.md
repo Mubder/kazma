@@ -16191,38 +16191,44 @@ an install with one account behaves as before.
     tasks first and another space's waiting; a caller of the budget that
     runs the graph anyway as the gate's control; the People page's limits
     in both languages).
-- **A member's code runs only in a container (S4-05, 2026-11-23).** Only
-  where Spaces is enforced: an install that does not enforce it reads
-  nothing more, and the admin's code keeps the rules it had.
-  `kazma_core/spaces/member_code.py` `code_rule()` is the one answer for the
-  work running now: `container_only` (no host fallback, whatever
-  `KAZMA_CODE_EXEC_ALLOW_LOCAL` says) and `network`. Anyone but the admin,
-  in any space, runs `python_exec` in the Docker jail or E2B or not at all
-  (`code_exec.local_exec_forbidden` asks it first); work no person asked
-  for, and a person whose allowance cannot be read, likewise with no
-  network.
-  - **No network unless the admin allowed it** (People -> "Code may use the
-    network": `identity` `policies[account]["code_network"]`,
-    `people.set_code_network`, `PUT /api/people/{account_id}/code-network`,
-    event `code_network_set`; refused for the admin, `admin_code_rules`).
-    Allowed, the jail joins the engine's default network (`--network
-    bridge`) and the snippet may import the network modules
-    (`code_exec._NETWORK_IMPORT_ROOTS`; process, native and host escapes
-    stay blocked); not allowed, `--network none` and E2B is never used
-    (`e2b_enabled`: E2B always has the internet). The network modules are
-    unblocked only for code held to a container.
+- **A member's code runs only in a container, with no network (S4-05,
+  2026-11-23, and its review).** Only where Spaces is enforced: an install
+  that does not enforce it reads nothing more, and the admin's code keeps
+  the rules it had. `kazma_core/spaces/member_code.py` `code_rule()` is the
+  one answer for the work running now: anyone but the admin, in any space,
+  runs `python_exec` in the Docker jail or not at all -- never the host
+  fallback, whatever `KAZMA_CODE_EXEC_ALLOW_LOCAL` says
+  (`code_exec.local_exec_forbidden` asks it first), and never E2B, which
+  always has the internet (`sandbox.e2b.e2b_enabled`). Work no person asked
+  for likewise. A chat-app turn runs as the person whose linked account
+  sent it (stage 3, `chat_apps.chat_place`), so their code is held there
+  too.
+  - **No network for members' code, until S4-05b.** The first build let the
+    admin allow it per person, and the jail then ran `--network bridge`: the
+    review reached a host service through the LAN and WSL addresses, and the
+    router's admin page, from the jail; cloud metadata (169.254.169.254) was
+    open, and on Docker Desktop `host.docker.internal` reaches the host's
+    loopback. Now every jail run is `--network none` with the network
+    modules blocked, `allowed_network` answers False whatever is stored (a
+    first-build allowance reads as not allowed), and People refuses turning
+    it on (`people.set_code_network`: 409 `code_network_not_yet`, worded in
+    both languages; off is taken and clears a stored value). The People page
+    shows the switch off, disabled, "Not yet". S4-05b brings filtered egress
+    on Kazma's own engine. Never give a member's container the engine's
+    default network.
   - S2-12's member rules (`spaces.tools.MEMBER_DEVELOPMENT`) keep a member
     off every host process that runs a project's code; this holds the one
     code runner they keep.
   - Gates: `tests/test_member_code_in_containers.py` (the rule; per-space
     runs with no Docker refused, the local fallback reading a host file as
-    the control; the jail's argv and blocklist both ways; E2B; People's
-    switch and route; a real Docker run where the sandbox image is present,
-    `real_docker`: no network and no host file in the container, the local
-    fallback reading it as the control),
+    the control; the refusal, a first-build allowance read as not allowed,
+    today's allowance as the control; `--network none` for every container;
+    E2B never; a chat-app turn of a linked person through the real gateway
+    handler, the owner's own link as the control; a real Docker run where
+    the sandbox image is present, `real_docker`: no network and no host file
+    in the container, the local fallback reading it as the control),
     `tests/e2e/test_person_code_network_browser.py` (by the sidebar, EN/AR:
-    asked first, Cancel changes nothing, Allow saved, unticking takes it
-    back).
+    the switch off, disabled, "Not yet", a stored allowance shown off).
 - **Every action under the person's name (S2-09, 2026-11-22).** Only where
   Spaces is enforced; an install that does not enforce it records nothing
   more (the memory operator trail and the logs as before).

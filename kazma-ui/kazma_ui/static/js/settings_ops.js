@@ -1238,35 +1238,6 @@
         // ── Disable / enable (Spaces S2-07): their work waits while disabled ──
         // Whether a person's code may use the network (Spaces S4-05): their
         // code runs only in a container either way; allowing it asks first.
-        async setPersonCodeNetwork(person, allowed, box) {
-            if (allowed) {
-                const ok = await window.kazmaConfirm({
-                    title: _t('settings.people_code_network_title', "Let {name}'s code use the network?",
-                        { name: _iso(person.name) }),
-                    message: _t('settings.people_code_network_means',
-                        'Their code still runs only in a container, never on this machine. With the network, it can reach the internet: what it reads in their spaces could leave this install.'),
-                    confirmText: _t('settings.people_code_network_allow', 'Allow'),
-                });
-                if (!ok) {
-                    if (box) box.checked = false;
-                    return;
-                }
-            }
-            try {
-                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/code-network',
-                    { method: 'PUT', body: { allowed: !!allowed } });
-            } catch (e) {
-                showToast(this._peopleError(e && e.body), 'error');
-                await this.loadPeople();
-                return;
-            }
-            showToast(allowed
-                ? _t('settings.people_code_network_on', "{name}'s code may use the network.", { name: _iso(person.name) })
-                : _t('settings.people_code_network_off', "{name}'s code runs with no network.", { name: _iso(person.name) }),
-                'success');
-            await this.loadPeople();
-        },
-
         async setPersonEnabled(person, enabled) {
             if (!enabled) {
                 const ok = await window.kazmaConfirm({

@@ -374,8 +374,9 @@ def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str,
             "tools": features.listed_tools(features.grants_of(reg, account_id)),
             # The models they may use and their default (S2-03).
             "models": person_models.listed_models(reg, account_id),
-            # Whether their code may use the network (S4-05); the admin's
-            # code keeps its own rules (None).
+            # Whether their code may use the network (S4-05): never until
+            # S4-05b, whatever is stored; the admin's code keeps its own
+            # rules (None).
             "code_network": (None if account_id == OWNER_ACCOUNT_ID
                              else member_code.allowed_network(reg, account_id))}
 
@@ -1094,10 +1095,13 @@ def set_tools(account_id: str, off: Any, *, by: str) -> list[str]:
 
 
 def set_code_network(account_id: str, allowed: Any, *, by: str) -> None:
-    """Allow or forbid a person's code the network (Spaces S4-05): their
-    code runs only in a container, with no network unless allowed
-    (``spaces.member_code``). One step, recorded. Refused: the admin, whose
-    code keeps its own rules; a value that is not true or false."""
+    """A person's code and the network (Spaces S4-05): their code runs only
+    in a container, with no network. Turning the network on is refused
+    (``code_network_not_yet``) until S4-05b can limit a container to the
+    public internet: the engine's default network reaches this computer, the
+    LAN and cloud metadata (the review of S4-05). Turning it off is taken,
+    recorded, and clears what a first build of S4-05 stored. Refused too: the
+    admin, whose code keeps its own rules; a value that is not true or false."""
     _require_enforced()
     from kazma_core.spaces.member_code import CODE_NETWORK_POLICY
 
@@ -1105,18 +1109,20 @@ def set_code_network(account_id: str, allowed: Any, *, by: str) -> None:
         raise PeopleRefused("bad_code_network", 400, "The network is allowed or not.")
     if account_id == OWNER_ACCOUNT_ID:
         raise PeopleRefused("admin_code_rules", 400, "The admin's code keeps its own rules.")
+    if allowed:
+        raise PeopleRefused(
+            "code_network_not_yet", 409,
+            "Network for members' code comes once Kazma can limit it to the public internet; "
+            "until then their code runs with no network.")
 
     def _change(reg: dict[str, Any]) -> None:
         _person(reg, account_id)
         policy = reg["policies"].setdefault(account_id, {})
-        if allowed:
-            policy[CODE_NETWORK_POLICY] = True
-        else:
-            policy.pop(CODE_NETWORK_POLICY, None)
+        policy.pop(CODE_NETWORK_POLICY, None)
         _record(reg, "code_network_set", account_id, by)
 
     _changed(_change)
-    logger.info("[people] code network %s id=%s by=%s", "allowed" if allowed else "off", account_id, by)
+    logger.info("[people] code network off id=%s by=%s", account_id, by)
 
 
 def set_enabled(account_id: str, enabled: Any, *, by: str) -> None:
