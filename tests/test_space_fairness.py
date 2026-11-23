@@ -524,9 +524,15 @@ def _document_queue(tmp_path: Path) -> Any:
     from kazma_core.documents.repository import DocumentRepository
 
     meta = DocumentRepository(tmp_path / "fair.db", tenant_quota_bytes=10_000_000)
-    jobs = DocumentJobRepository(meta, jitter=lambda _b: 0, retry_base_seconds=5)
+    # Each job is queued a second after the one before: a wall clock gives
+    # jobs queued in one instant (Windows' clock moves in 15 ms steps) the
+    # same time, and their order fell to the job ids, random (the full run,
+    # 2026-11-23).
+    queued_at = {"at": datetime(2026, 11, 23, 8, 0, tzinfo=UTC)}
+    jobs = DocumentJobRepository(meta, clock=lambda: queued_at["at"], jitter=lambda _b: 0, retry_base_seconds=5)
 
     def enqueue(actor: str, key: str) -> Any:
+        queued_at["at"] += timedelta(seconds=1)
         document = meta.create_document(tenant_id=A, owner_id=actor, title="Document")
         payload = f"{actor}-{key}".encode()
         digest = hashlib.sha256(payload).hexdigest()
