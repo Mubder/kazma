@@ -2415,6 +2415,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "هذا الطلب غير مرتبط بمساحة، فلم يُنشأ فرع.",
         "en": "This request is not tied to a space, so nothing was forked.",
     },
+    # A shared space's chat is restored or forked by its opener or an owner.
+    "replay.refused_not_your_chat": {
+        "ar": "لا يستعيد هذه المحادثة أو يفرّعها أو يحذف خطواتها إلا من بدأها، أو مالك هذه المساحة.",
+        "en": "Only the person who started this chat, or an owner of this space, can restore it, fork it or delete its steps.",
+    },
+    "replay.refused_identity": {
+        "ar": "تعذّرت الآن معرفة صاحب هذه المحادثة، فلم يتغيّر شيء. حاول بعد قليل.",
+        "en": "Whose chat this is could not be read right now, so nothing was changed. Try again in a moment.",
+    },
     "replay.fork_open": {
         "ar": "افتح المحادثة الجديدة",
         "en": "Open the new chat",

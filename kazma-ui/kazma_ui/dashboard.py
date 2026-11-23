@@ -605,6 +605,20 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
         return JSONResponse(
             {"deleted": False, "thread_id": thread_id, "error": "not_found"}, status_code=404
         )
+    # The chat's opener or an owner of the space deletes it, never while
+    # another member's turn runs or waits: the rule the chat page's delete
+    # asks (the review of 3da533662). Once Spaces is enforced; an admin who is
+    # only a member of a shared space is not its owner.
+    from kazma_ui.sse_chat import _turn_control
+
+    refused = await _turn_control(thread_id, None, "reset",
+                                  active=await asyncio.to_thread(_turn_runs_or_waits, thread_id))
+    if refused is not None:
+        outage = refused["reason"] == "identity_unavailable"
+        return JSONResponse({"deleted": False, "thread_id": thread_id, "error": refused["reason"],
+                             "message": refused["message"]},
+                            status_code=503 if outage else 403,
+                            headers={"Retry-After": "5"} if outage else None)
 
     try:
         # Postgres checkpointers reject the SQLite '?' placeholder. The
@@ -681,6 +695,52 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
         return JSONResponse({"deleted": False, "error": "Internal error"}, status_code=500)
 
 
+def _turn_runs_or_waits(thread_id: str) -> bool:
+    """Whether a turn of *thread_id* runs, or waits on an approval card (a
+    live row of the gate registry: this router holds no graph). Only once
+    Spaces is enforced; a registry that cannot be read counts as waiting.
+    Blocking: the gate registry."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    from kazma_ui.sse_chat import is_turn_running
+
+    if is_turn_running(thread_id):
+        return True
+    import sqlite3
+
+    from kazma_core.safety.hitl_gates import live_gates
+
+    try:
+        return bool(live_gates(thread_id))
+    except (sqlite3.Error, OSError):
+        logger.warning("[dashboard] the approval cards of %s cannot be read", thread_id[:12], exc_info=True)
+        return True
+
+
+def _clear_all_refusal() -> JSONResponse | None:
+    """Clear-all's refusal once Spaces is enforced: an owner of the bound
+    space only (it clears every member's chats there). 503 with
+    ``Retry-After`` when that cannot be read. Blocking: the identity store."""
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import bound_asker, current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    scope = current_scope()
+    person = bound_asker() or ""
+    try:
+        owner = bool(scope and person and identity.owns_space(person, scope.space_id))
+    except identity.IdentityUnavailable:
+        logger.warning("[dashboard] who owns the space cannot be read; clear-all refused", exc_info=True)
+        return JSONResponse({"deleted": False, "error": "identity_unavailable"},
+                            status_code=503, headers={"Retry-After": "5"})
+    if owner:
+        return None
+    return JSONResponse({"deleted": False, "error": "not_an_owner"}, status_code=403)
+
+
 @router.post("/api/sessions/clear-all")
 async def clear_all_sessions(request: Request) -> JSONResponse:
     """Delete ALL checkpointed sessions.
@@ -699,7 +759,12 @@ async def clear_all_sessions(request: Request) -> JSONResponse:
         return denied
     if not _checkpoint_manager:
         return JSONResponse({"deleted": False, "error": "CheckpointManager not initialized"}, status_code=500)
-    
+    # Once Spaces is enforced this clears every chat of the bound space,
+    # every member's: only an owner of the space does (the review of
+    # 3da533662).
+    if (refused := await asyncio.to_thread(_clear_all_refusal)) is not None:
+        return refused
+
     try:
         if hasattr(_checkpoint_manager, "adelete_all_threads"):
             count = await _checkpoint_manager.adelete_all_threads()

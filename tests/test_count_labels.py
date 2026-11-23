@@ -179,8 +179,8 @@ _NOT_A_NOUN = frozenset({"is", "was", "as", "has", "does", "its", "this", "us"})
 #: language ("{name} uses tools", "{name} مُعطَّل").
 _NOT_A_COUNT = frozenset({
     "amount", "author", "boost", "bot", "d", "end", "error", "feature", "id", "library", "mb", "member", "model",
-    "name", "names", "number", "origin", "path", "protocol", "provider", "root", "s", "scanner",
-    "shown", "size", "source", "start", "target", "tool", "v", "x", "y",
+    "name", "names", "number", "origin", "path", "platform", "protocol", "provider", "root", "s",
+    "scanner", "shown", "size", "source", "start", "target", "tool", "user", "v", "when", "x", "y",
 })
 
 

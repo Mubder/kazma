@@ -53,7 +53,7 @@ from kazma_gateway.adapters.whatsapp_parse import (
 from kazma_gateway.adapters.whatsapp_receive import WHATSAPP_REASONS
 from kazma_gateway.gateway import Attachment, BaseAdapter, IncomingMessage, OutboundMessage
 from kazma_gateway.receive_log import ReceiveLog
-from kazma_gateway.sender_rule import SenderGate
+from kazma_gateway.sender_rule import LINK_CODE, SenderGate
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +287,14 @@ class WhatsAppAdapter(SenderGate, BaseAdapter):
         if self._phone_number_id and m.phone_number_id and m.phone_number_id != self._phone_number_id:
             self._note_drop("not_this_number", m)
             return
+        # A link code (Spaces S3-01) is answered by the link flow, before the
+        # sender rule: its sender is not linked yet. Never a forwarded one.
+        if not m.forwarded and self.link_attempted(
+            m.from_id, m.text, direct=True,
+            target_id=f"whatsapp:{m.from_id}", context_metadata={"chat_id": m.from_id},
+        ):
+            self._note_drop(LINK_CODE, m)
+            return
         refusal = self.sender_refusal(m.from_id)
         if refusal:
             self._refuse(refusal, m)
@@ -365,7 +373,9 @@ class WhatsAppAdapter(SenderGate, BaseAdapter):
         data = decode_callback_data(m.button_id)
         action = parse_callback_data(data)
         actor = f"whatsapp:{m.from_id}"
-        if action.kind in ("hitl", "swarm", "run"):
+        from kazma_gateway.allowlists import press_needs_admin
+
+        if action.kind in ("hitl", "swarm", "run") and press_needs_admin(action.kind):
             from kazma_gateway.allowlists import is_gateway_admin
 
             if not await asyncio.to_thread(is_gateway_admin, actor, "whatsapp"):

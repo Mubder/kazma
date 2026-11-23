@@ -234,10 +234,15 @@ def test_a_space_s_activity_is_found_by_its_count_export_and_erase(matrix, enfor
     """``activity.db`` is a row store of the data folder with a ``space``
     column: the walk a space's count, export and erase share finds its rows,
     and only its own."""
-    import sqlite3
-
     from kazma_core.spaces import space_data
 
+    def clear() -> None:
+        with activity._connection() as conn:  # makes the table on a fresh store
+            conn.execute("DELETE FROM activity WHERE space IN (?, ?)", (A, B))
+
+    # The matrix's spaces are shared by every test of the run: an earlier
+    # file's requests in them leave rows (4 counted for 2 after the matrix).
+    clear()
     activity.record(A, matrix.account_a, "POST /api/x", [], 200)
     activity.record(A, matrix.account_a, "POST /api/x", [], 200)
     activity.record(B, matrix.account_b, "POST /api/y", [], 200)
@@ -245,9 +250,4 @@ def test_a_space_s_activity_is_found_by_its_count_export_and_erase(matrix, enfor
         assert space_data.count_space(A)["stores"].get("activity.db") == 2
         assert space_data.count_space(B)["stores"].get("activity.db") == 1
     finally:
-        conn = sqlite3.connect(activity._activity_db())
-        try:
-            conn.execute("DELETE FROM activity WHERE space IN (?, ?)", (A, B))
-            conn.commit()
-        finally:
-            conn.close()
+        clear()

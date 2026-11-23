@@ -91,7 +91,7 @@ async def handle(adapter: Any, data: dict[str, Any]) -> None:
         from kazma_gateway.sender_rule import REFUSALS, private_notice
 
         said = (
-            private_notice("discord", uid, None) if reason in REFUSALS and uid
+            private_notice("discord", uid, None, reason) if reason in REFUSALS and uid
             else "Kazma refused this command: check the configured allowlists."
         )
         await ack({"type": 4, "data": {"content": said, "flags": 64}})

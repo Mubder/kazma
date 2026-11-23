@@ -52,12 +52,11 @@ DECLARED = {
     "kazma-core/kazma_core/cli/ask.py::_invoke_supervisor":
         "kazma ask on the machine, bound as the admin by spaces.machine before the turn starts",
     "kazma-gateway/kazma_gateway/agent_handler/graph.py::create_graph_handler._handler_body":
-        "a chat app's hard steer, inside the handler's own scope (the owner's until S3-04 binds "
-        "the card's asker)",
+        "a chat app's hard steer, inside the handler's own scope: the sender's linked account in "
+        "the chat's space (S3-03); a group member's steer of another's turn is S3-06's turn "
+        "control (a card that waits refuses it already, S3-04)",
     "kazma-gateway/kazma_gateway/agent_handler/hitl.py::make_continue_resumer.continue_after_restart":
         "runs in the task turn_resume.continue_turn starts inside as_the_asker(whose_turn)",
-    "kazma-gateway/kazma_gateway/agent_handler/hitl.py::_handle_hitl_resume":
-        "a chat app's /hitl decision, in the owner's scope until S3-04 binds the card's asker",
 }
 
 _BINDERS = {"as_the_asker", "bind_scope"}

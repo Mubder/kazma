@@ -255,6 +255,32 @@ def _outbox_notices(text: str) -> bool:
                for notice in (_earlier_reply_notice, _late_reply_notice))
 
 
+def _link_code(text: str) -> str | None:
+    """A code sent to link a chat-app account (Spaces S3-01): "link" and
+    "ربط" before it name the same request."""
+    from kazma_core.spaces.chat_links import code_in
+
+    return code_in(text)
+
+
+def _space_word(text: str) -> str:
+    """``/space`` reads "personal" and "none" in either language (Spaces
+    S3-03)."""
+    from kazma_core.spaces.chat_apps import _SPACE_COMMAND, _space_word as word
+
+    match = _SPACE_COMMAND.fullmatch(text.strip())
+    return word((match.group(1) or "") if match else "")
+
+
+def _linked_notice(text: str) -> bool:
+    """A sender with no linked account is told how to link, in their
+    language (Spaces S3-02)."""
+    from kazma_gateway.sender_rule import NOT_LINKED, private_notice
+
+    notice = private_notice("telegram", "12345", text, NOT_LINKED)
+    return detect_user_language(notice) == detect_user_language(text) and "/link" in notice
+
+
 def _private_notice(text: str) -> bool:
     """A sender a private chat app refuses is told so, and their id, in
     their language (kazma_gateway.sender_rule, 2026-11-11)."""
@@ -569,6 +595,14 @@ PAIRS: list[Pair] = [
          "hello, are you there?", "مرحبا، أنت موجود؟", _read_only_notice, True),
     Pair("private_notice", ("kazma-gateway/kazma_gateway/sender_rule.py",),
          "hello, who are you?", "مرحبا، من أنت؟", _private_notice, True),
+    Pair("not_linked_notice", ("kazma-gateway/kazma_gateway/sender_rule.py",),
+         "hello, who are you?", "مرحبا، من أنت؟", _linked_notice, True),
+    Pair("link_code", (M + "spaces/chat_links.py",),
+         "link ABCD-2345", "ربط ABCD-2345", _link_code, "ABCD2345"),
+    Pair("space_personal", (M + "spaces/chat_apps.py",),
+         "/space personal", "/space شخصي", _space_word, "personal"),
+    Pair("space_none", (M + "spaces/chat_apps.py",),
+         "/space none", "/space لا شيء", _space_word, "none"),
     # Who a question in a shared space is about (Spaces S1-11): the asker,
     # in either language, or a member it names.
     Pair("asker_possessive", (M + "memory/speakers.py",),
@@ -738,10 +772,12 @@ DECLARED: dict[str, str] = {
     M + "x_api/subject_policy.py": "the Arabic article rule for matching a subject's name",
     "kazma-skills/kazma_skills/native/arabic_bilingual_nlp/tools.py": "a bilingual NLP skill: Hijri dates written in Arabic",
     "kazma-skills/kazma_skills/native/email_manager/analyze.py": "the product's Arabic name in a prompt",
-    "kazma-ui/kazma_ui/hitl_answerers.py": "the bell's line for a card waiting for the person, an "
-                                           "(English, Arabic) pair chosen by the page's language "
-                                           "(current_language); nothing is decided by Arabic text; "
-                                           "tests/test_approvals_reach_the_asker.py",
+    "kazma-ui/kazma_ui/hitl_answerers.py": "the bell's line for a card waiting for the person, and the "
+                                           "lines a turn-control refusal is said with (turn_lines), "
+                                           "(English, Arabic) pairs chosen by the page's language or "
+                                           "language_lock.in_their_language; nothing is decided by "
+                                           "Arabic text; tests/test_approvals_reach_the_asker.py, "
+                                           "tests/test_chat_turn_control_per_person.py",
     "kazma-ui/kazma_ui/hitl_timeout.py": "the line a turn ends with when its card's asker left the space, "
                                          "two fixed strings that language_lock.in_their_language chooses "
                                          "between; nothing is decided by Arabic text; "

@@ -390,7 +390,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
 
     async def _book(request: Request, *, timing: str, prompt: str, kind: str, capabilities: str) -> JSONResponse:
         """Book one scheduled job for the page: its own form and a ready-made automation."""
-        from kazma_core.cron.scheduler import CronLimitError, get_cron_scheduler
+        from kazma_core.cron.scheduler import CronLimitError, get_cron_scheduler, needs_own_address
 
         sched = get_cron_scheduler()
         if sched is None:
@@ -399,7 +399,9 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             from kazma_core.tools.send_message import resolve_delivery_target
 
             delivery_target = await asyncio.to_thread(resolve_delivery_target)
-            if not delivery_target:
+            # A person with no chat app of their own linked (S3-05): the
+            # scheduler refuses it (``no_own_address``), saying how to link.
+            if not delivery_target and not needs_own_address():
                 return JSONResponse(
                     {
                         "ok": False,

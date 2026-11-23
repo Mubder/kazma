@@ -375,6 +375,14 @@ def _resolve_delivery_target(platform: str) -> str:
             return target
     except Exception:
         pass
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if spaces_enforced():
+        # The person the work is for, never the owner's chat (the stage 3
+        # review, M6).
+        from kazma_core.tools.send_message import own_address
+
+        return own_address()
     try:
         from kazma_core.config_store import get_config_store
 

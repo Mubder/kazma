@@ -6934,7 +6934,7 @@
       _memoryChoiceOff = off;
       _paintMemoryChoice();
     } catch (e) {
-      KS.toast((e && e.message) || ti('memory_setting_failed', 'Memory setting failed'), 'error', 3000);
+      KS.toast(_refusalText(e && e.body, (e && e.message) || ti('memory_setting_failed', 'Memory setting failed')), 'error', 3000);
     }
   }
 
@@ -6976,8 +6976,22 @@
       KS.toast(remembered ? ti('memory_off_done', "Kazma won't remember this chat")
                           : ti('memory_on_done', 'Kazma remembers this chat again'), 'success', 2500);
     } catch (e) {
-      KS.toast((e && e.message) || ti('memory_setting_failed', 'Memory setting failed'), 'error', 3000);
+      KS.toast(_refusalText(e && e.body, (e && e.message) || ti('memory_setting_failed', 'Memory setting failed')), 'error', 3000);
     }
+  }
+
+  // A refusal's words for the person: the server's own line when it sent
+  // one (a whole chat changed by someone else: not_your_chat), else a code
+  // the page words, else the error itself.
+  function _refusalText(body, fallback) {
+    if (body && typeof body === 'object') {
+      if (body.message) return String(body.message);
+      if (body.error === 'not_yours') {
+        return ti('memory_not_yours', "This is another member's; only they or the space's owner can forget it");
+      }
+      if (body.error) return String(body.error);
+    }
+    return fallback;
   }
 
   function pinSession(sessionId, pinned) {
@@ -6995,7 +7009,7 @@
           renderSessionList();
           refreshSessionsSoon();
         } else {
-          KS.toast(data.error || ti('pin_failed', 'Pin failed'), 'error', 3000);
+          KS.toast(_refusalText(data, ti('pin_failed', 'Pin failed')), 'error', 3000);
         }
       })
       .catch(function() { KS.toast(ti('pin_failed', 'Pin failed'), 'error', 3000); });
@@ -7010,7 +7024,7 @@
           loadSessions();
           if (sessionId === chatSessionId) newSession();
         } else {
-          KS.toast(data.error || ti('archive_failed', 'Archive failed'), 'error', 3000);
+          KS.toast(_refusalText(data, ti('archive_failed', 'Archive failed')), 'error', 3000);
         }
       })
       .catch(function() { KS.toast(ti('archive_failed', 'Archive failed'), 'error', 3000); });
@@ -7024,7 +7038,7 @@
           KS.toast(ti('session_restored', 'Session restored'), 'success', 2000);
           loadArchivedSessions();
         } else {
-          KS.toast(data.error || ti('restore_failed', 'Restore failed'), 'error', 3000);
+          KS.toast(_refusalText(data, ti('restore_failed', 'Restore failed')), 'error', 3000);
         }
       })
       .catch(function() { KS.toast(ti('restore_failed', 'Restore failed'), 'error', 3000); });
@@ -7117,7 +7131,7 @@
           KS.toast(ti('session_renamed', 'Session renamed'), 'success', 2000);
           loadSessions();
         } else {
-          KS.toast(data.error || ti('rename_failed', 'Rename failed'), 'error', 3000);
+          KS.toast(_refusalText(data, ti('rename_failed', 'Rename failed')), 'error', 3000);
         }
       })
       .catch(function() { KS.toast(ti('rename_failed', 'Rename failed'), 'error', 3000); });
@@ -7509,7 +7523,8 @@
       loadSessions();
       if (sessionId === chatSessionId) newSession();
     } catch (e) {
-      KS.toast(ti('delete_chat_failed', 'Delete failed') + ((e && e.message) ? ': ' + e.message : ''), 'error', 3500);
+      var why = _refusalText(e && e.body, (e && e.message) || '');
+      KS.toast(ti('delete_chat_failed', 'Delete failed') + (why ? ': ' + why : ''), 'error', 3500);
     }
   }
 

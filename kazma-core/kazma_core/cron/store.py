@@ -965,8 +965,13 @@ class SQLiteCronStore:
             return claimed
 
     async def finish_delivery(self, delivery_id: int, *, owner: str, delivered: bool, error: str = "",
-                              now: float | None = None) -> dict[str, Any] | None:
+                              now: float | None = None, dropped: bool = False) -> dict[str, Any] | None:
         """Acknowledge a send (``delivered``) or record a refused one.
+
+        ``dropped``: the delivery's chat is no longer its person's (unlinked,
+        deleted or disabled once Spaces is enforced): it ends ``dropped``,
+        quietly -- no retry, no alert -- and the job is done with nothing owed
+        (the stage 3 review, L8).
 
         A refusal is retried with backoff until :data:`DELIVERY_MAX_ATTEMPTS`
         or :data:`DELIVERY_DEADLINE_S`, then ends ``undeliverable``; the job
@@ -982,7 +987,17 @@ class SQLiteCronStore:
                 return None
             job_id = row["job_id"]
             purpose = row["purpose"]
-            if delivered:
+            if dropped:
+                state = "dropped"
+                await db.execute(
+                    "UPDATE cron_deliveries SET state = 'dropped', finished_at = ?, lease_owner = '', "
+                    "lease_until = 0, last_error = ? WHERE id = ?", (ts, error[:500], delivery_id))
+                await db.execute(
+                    "UPDATE cron_jobs SET status = CASE WHEN status = 'delivering' THEN 'done' ELSE status END, "
+                    "finished_at = CASE WHEN status = 'delivering' THEN ? ELSE finished_at END, "
+                    "delivery_state = 'dropped', delivery_error = ? WHERE job_id = ?",
+                    (self._now_iso(), error[:500], job_id))
+            elif delivered:
                 state = "delivered"
                 await db.execute(
                     "UPDATE cron_deliveries SET state = 'delivered', finished_at = ?, lease_owner = '', "

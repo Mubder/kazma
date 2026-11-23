@@ -24,6 +24,14 @@ from .swarm_dispatch import (
 
 logger = logging.getLogger(__name__)
 
+
+def _admin_hint() -> str:
+    """``allowlists.admin_hint``: how one becomes able to run an admin-only
+    command (S3-08). No I/O."""
+    from kazma_gateway.allowlists import admin_hint
+
+    return admin_hint()
+
 __all__: list[str] = ["safe_repo_dir_name"]
 
 # The last path segment of a repo slug becomes a directory name under
@@ -1932,8 +1940,7 @@ async def _try_skill_command(
             if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (AUD-111)
                 await _send_model_reply(
                     msg, store, manager, thread_id,
-                    "⛔ Installing skills is admin-only. Set "
-                    "`KAZMA_GATEWAY_ADMINS` or join the platform user allowlist.",
+                    "⛔ Installing skills is admin-only. " + _admin_hint(),
                 )
                 return True
             from kazma_core.agent_skills.tools import install_agent_skill
@@ -2027,8 +2034,7 @@ async def _try_skill_command(
             if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (AUD-111)
                 await _send_model_reply(
                     msg, store, manager, thread_id,
-                    "⛔ Uninstalling skills is admin-only. Set "
-                    "`KAZMA_GATEWAY_ADMINS` or join the platform user allowlist.",
+                    "⛔ Uninstalling skills is admin-only. " + _admin_hint(),
                 )
                 return True
             from kazma_core.agent_skills.tools import uninstall_agent_skill
@@ -2083,8 +2089,7 @@ async def _try_skill_command(
             if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (AUD-111)
                 await _send_model_reply(
                     msg, store, manager, thread_id,
-                    "⛔ Installing skills is admin-only. Set "
-                    "`KAZMA_GATEWAY_ADMINS` or join the platform user allowlist.",
+                    "⛔ Installing skills is admin-only. " + _admin_hint(),
                 )
                 return True
             from kazma_core.agent_skills.tools import install_agent_skill
@@ -2399,8 +2404,7 @@ async def _try_x_command(
 
         if not await asyncio.to_thread(_sender_is_gateway_admin, msg):  # a settings read (AUD-111)
             await _send(
-                f"⛔ `/x {sub}` acts on the owner's X account, so it is admin-only. Set "
-                "`KAZMA_GATEWAY_ADMINS` or join the platform user allowlist."
+                f"⛔ `/x {sub}` acts on the owner's X account, so it is admin-only. " + _admin_hint()
             )
             return True
 

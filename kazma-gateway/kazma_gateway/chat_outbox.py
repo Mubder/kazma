@@ -58,7 +58,7 @@ SETTLED_KEEP_S = 7 * 86400.0
 #: A reply bigger than this (attachments included) is not kept: sent once.
 MAX_PAYLOAD_CHARS = 12 * 1024 * 1024
 
-_SETTLED = ("sent", "partial", "unknown", "undeliverable")
+_SETTLED = ("sent", "partial", "unknown", "undeliverable", "dropped")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS outbox (
@@ -184,7 +184,9 @@ class ChatOutbox:
 
     def finish(self, row_id: str, outcome: str, now: float | None = None, error: str = "") -> str:
         """Record one try's *outcome* (``sent``, ``not_sent``, ``partial``,
-        ``unknown``). Returns the row's state now."""
+        ``unknown``), or ``dropped`` -- a reply no longer to be sent (its
+        chat's person was unlinked, S3-07; nothing owed). Returns the row's
+        state now."""
         now = time.time() if now is None else now
 
         def work(c: sqlite3.Connection) -> str:
@@ -192,8 +194,8 @@ class ChatOutbox:
                             (row_id,)).fetchone()
             if row is None or row["state"] != "sending":
                 return row["state"] if row is not None else "missing"
-            if outcome == "sent":
-                state = "sent"
+            if outcome in ("sent", "dropped"):
+                state = outcome
             elif outcome in ("partial", "unknown"):
                 state = outcome
             elif now - row["created_at"] >= GIVE_UP_AFTER_S:
@@ -208,7 +210,7 @@ class ChatOutbox:
                 "UPDATE outbox SET state = ?, payload = NULL, owner = NULL, lease_until = NULL, "
                 "settled_at = ?, last_error = ? WHERE id = ?",
                 (state, now, error[:300] or None, row_id))
-            if state != "sent":
+            if state not in ("sent", "dropped"):
                 c.execute("INSERT OR IGNORE INTO owed_notices (target_id, since) VALUES (?, ?)",
                           (row["target_id"], now))
             return state

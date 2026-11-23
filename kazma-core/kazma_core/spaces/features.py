@@ -550,7 +550,8 @@ ALWAYS_ON: dict[str, AlwaysOn] = {
             "sqlite_query",
         }),
         commands=frozenset({
-            "help", "sessions", "seasons", "session", "season", "switch", "new", "reset", "compact",
+            "help", "sessions", "seasons", "session", "season", "switch", "space", "new", "reset",
+            "compact",
             "long", "mission", "yolo", "unrestricted", "plan", "steer", "abort", "stop", "replay",
             "report", "runs", "fork", "undo", "edit", "model", "models", "context", "status", "cost",
             "hitl",

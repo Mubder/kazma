@@ -219,7 +219,16 @@ def _say_who_it_answers(
     platform: str, allowed_users: str, owners: list[OwnerId], open_switch: bool
 ) -> None:
     """One WARNING for an adapter whose allowlist is empty: who it answers
-    (sender_rule), and the fix. Nothing when an allowlist is set."""
+    (sender_rule), and the fix. Nothing when an allowlist is set. Once
+    Spaces is enforced the allowlists retire: one INFO line says so."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if spaces_enforced():
+        logger.info(
+            "[Gateway] %s answers the people who linked their own %s account (Spaces is on; "
+            "its allowlist is not read)", _LABELS[platform], _LABELS[platform],
+        )
+        return
     if split_ids(allowed_users):
         return
     label = _LABELS[platform]

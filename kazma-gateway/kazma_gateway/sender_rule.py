@@ -30,6 +30,22 @@ and logged by its rule (``ReceiveLog.log_drop``), as before.
 
 Every adapter's accept path asks :meth:`SenderGate.sender_refusal`; nothing
 reads the allowlist itself (``tests/test_chat_apps_private_by_default.py``).
+
+**Once Spaces is enforced (S3-02)** the rule is "a linked, enabled
+account" (``kazma_core.spaces.chat_links.link_refusal``, read from memory):
+the allowlists, the owner's known ids and the open switch retire. A sender
+with no link is refused (``not_linked``) and told, in a direct chat, how to
+link; one whose account is disabled is refused (``account_disabled``) and
+told so; before the links were first read a sender waits
+(``links_unknown``), never let in. The owner's known ids became the owner's
+links when Spaces was switched on (``chat_links.adopt_owner_ids``).
+
+**Linking (Spaces S3-01).** Before the sender rule, every message accept
+path asks :meth:`SenderGate.link_attempted`: where Spaces is enforced, a
+message that is a link code (``spaces.chat_links.code_in``) is never handed
+on -- it links the sender's account (``chat_links.redeem``, in a thread) and
+the sender is answered. Recorded as ``link_code``. An install that does not
+enforce Spaces looks at no code (``tests/test_chat_link_flow.py``).
 """
 
 from __future__ import annotations
@@ -41,9 +57,15 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
+from kazma_core.spaces.chat_links import ACCOUNT_OFF, LINKS_UNKNOWN, NOT_LINKED
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ACCOUNT_OFF",
+    "LINK_CODE",
+    "LINKS_UNKNOWN",
+    "NOT_LINKED",
     "NOTICE_KEY",
     "NO_ALLOWLIST",
     "NOT_LISTED",
@@ -61,7 +83,12 @@ __all__ = [
 NO_ALLOWLIST = "no_allowlist"
 #: The sender is refused: the allowlist is set and does not name them.
 NOT_LISTED = "user_not_allowed"
-REFUSALS: frozenset[str] = frozenset({NO_ALLOWLIST, NOT_LISTED})
+# Once Spaces is enforced (S3-02), the refusals of chat_links.link_refusal:
+# NOT_LINKED (no Kazma account is linked to the sender), ACCOUNT_OFF (their
+# account is disabled), LINKS_UNKNOWN (the links were not read yet).
+#: The refusals a sender is told about (once a day, in a direct chat). Not
+#: LINKS_UNKNOWN: that is Kazma's, and passes in a moment.
+REFUSALS: frozenset[str] = frozenset({NO_ALLOWLIST, NOT_LISTED, NOT_LINKED, ACCOUNT_OFF})
 
 #: Lets everyone in when a chat app's allowlist is empty (the posture before
 #: 2026-11-11). A security switch: read only through ``boot_guard.env_flag``.
@@ -69,6 +96,10 @@ OPEN_SWITCH = "KAZMA_GATEWAY_OPEN_TO_EVERYONE"
 #: The old opt-in to refuse on an empty allowlist. Private is the default now;
 #: set, it only wins over :data:`OPEN_SWITCH`.
 STRICT_SWITCH = "KAZMA_GATEWAY_STRICT_ALLOWLIST"
+
+#: The receive-log reason of a message that was a link code (S3-01): it is
+#: answered by the link flow, never handed to the agent.
+LINK_CODE = "link_code"
 
 #: The settings key that says which refused senders were told, and when
 #: (``{"<platform>:<user id>": epoch}``): a restart does not tell them again.
@@ -119,12 +150,32 @@ def refusal(
     return NO_ALLOWLIST
 
 
-def private_notice(platform: str, user_id: Any, user_text: str | None) -> str:
+def private_notice(platform: str, user_id: Any, user_text: str | None, reason: str = "") -> str:
     """What a refused sender is told, in the language they wrote in."""
     from kazma_core.language_lock import in_their_language
 
     label = _LABELS.get(platform, platform)
     uid = _norm(user_id)
+    if reason == ACCOUNT_OFF:
+        return in_their_language(
+            user_text,
+            "Kazma here. Your Kazma account is disabled, so I cannot answer you. "
+            "Ask whoever runs this Kazma.",
+            "هنا Kazma. حسابك في Kazma معطّل، فلا أستطيع الرد عليك. اسأل من يدير Kazma هذا.",
+        )
+    if reason == NOT_LINKED:
+        send = "/link" if platform == "telegram" else ""
+        return in_their_language(
+            user_text,
+            "Kazma here. This bot answers the people of this Kazma, each from their own linked "
+            f"account, and this {label} account is not linked. If you have a Kazma account here: "
+            f"Settings → My account → Chat apps → Link {label}, then send me the code"
+            + (f" ({send} and the code)." if send else "."),
+            "هنا Kazma. هذا البوت يرد على أصحاب الحسابات في Kazma هذا، كلٌّ من حسابه المربوط، "
+            f"وحساب {label} هذا غير مربوط. إن كان لك حساب هنا: الإعدادات ← حسابي ← تطبيقات الدردشة "
+            f"← اربط {label}، ثم أرسل إليّ الرمز"
+            + (f" ({send} ثم الرمز)." if send else "."),
+        )
     if platform == "whatsapp":
         # A WhatsApp id is the person's phone number, and the card asks for numbers.
         mine_en, mine_ar = f"Your WhatsApp number is +{uid}.", f"رقمك في WhatsApp هو \u200e+{uid}."
@@ -224,7 +275,15 @@ class SenderGate:
         return self._owner_ids
 
     def sender_refusal(self, user_id: Any) -> str:
-        """Why *user_id* may not message Kazma here, or ``""``."""
+        """Why *user_id* may not message Kazma here, or ``""``. Once Spaces
+        is enforced: a linked, enabled account (S3-02); before, the
+        allowlist rule above. Memory only (the adapter's loop)."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if spaces_enforced():
+            from kazma_core.spaces import chat_links
+
+            return chat_links.link_refusal(self.name, user_id)
         return refusal(
             user_id,
             allowed=self._allowed_users or (),
@@ -237,12 +296,121 @@ class SenderGate:
         return not self.sender_refusal(user_id)
 
     def admission(self) -> dict[str, Any]:
-        """Who this adapter admits, for its diagnostics (plain data)."""
+        """Who this adapter admits, for its diagnostics (plain data). Once
+        Spaces is enforced: how many accounts are linked here (``linked``)."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if spaces_enforced():
+            from kazma_core.spaces import chat_links
+
+            return {"linked": chat_links.linked_count(self.name), "allowed_users": 0,
+                    "allow_all": False, "owner_ids": []}
         return {
             "allowed_users": len(self._allowed_users or ()),
             "allow_all": self._allow_all,
             "owner_ids": sorted(self._owner_ids),
         }
+
+    def link_attempted(
+        self,
+        user_id: Any,
+        text: Any,
+        *,
+        direct: bool,
+        target_id: str,
+        context_metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Whether this message is a link code (Spaces S3-01), and so is not
+        handed on: the caller records it as :data:`LINK_CODE` and stops.
+
+        Only where Spaces is enforced; read from memory, so it is asked on
+        the adapter's loop. The code is redeemed in a thread and the sender
+        answered in the background (a group hears only that a live code was
+        burned there; a sender past their guesses hears nothing).
+
+        What counts (the stage 3 review, L1 and L2): ``/link CODE`` from
+        anyone; a code alone from a sender with no link, or when it is a
+        live code -- a linked person's "next-week" is their message, never
+        a guess counted against them -- and a live code anywhere in the
+        message, its own word ("@kazmabot ABCD-2345"): burned in a group,
+        redeemed in a direct chat, never handed to the agent. Only the
+        guesses of a sender with no link, and ``/link``, count toward the
+        limit on guesses.
+        """
+        from kazma_core.spaces import chat_links
+
+        if not chat_links.linking_on():
+            return False
+        uid = chat_links.platform_user_id(self.name, user_id)
+        linked = bool(uid) and chat_links.account_linked(self.name, uid)
+        code = chat_links.prefixed_code(text)
+        counted = code is not None
+        if code is None:
+            bare = chat_links.bare_code(text)
+            if bare is not None and (not linked or chat_links.is_live_code(bare)):
+                code, counted = bare, not linked
+        if code is None:
+            anywhere = chat_links.live_codes_in(text)
+            if not anywhere:
+                return False
+            code = anywhere[0]
+            if not direct:
+                for other in anywhere[1:]:
+                    self._spawn_redeem(uid, other, False, target_id, context_metadata, text)
+        if not uid:
+            return True  # a code with no sender is no one's: never the agent's
+        if counted and not chat_links.take_attempt(self.name, uid):
+            logger.info("[%s] A link code from %s was not looked at: too many codes from them",
+                        self.name, uid)
+            return True
+        return self._spawn_redeem(uid, code, direct, target_id, context_metadata, text)
+
+    def _spawn_redeem(self, uid: str, code: str, direct: bool, target_id: str,
+                      context_metadata: dict[str, Any] | None, text: Any) -> bool:
+        """Redeem *code* in the background and answer the sender. True: the
+        message was a link code."""
+        if not uid:
+            return True
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("[%s] A link code from %s arrived off the adapter's loop; ignored",
+                           self.name, uid)
+            return True
+        from kazma_core.background import spawn_background
+
+        spawn_background(
+            self._redeem_and_reply(uid, code, direct, target_id, dict(context_metadata or {}),
+                                   text if isinstance(text, str) else None),
+            name=f"{self.name}-chat-link",
+        )
+        return True
+
+    async def _redeem_and_reply(
+        self, uid: str, code: str, direct: bool, target_id: str, meta: dict[str, Any],
+        user_text: str | None,
+    ) -> None:
+        from kazma_core.spaces import chat_links
+
+        result = await asyncio.to_thread(chat_links.redeem, self.name, uid, code, direct=direct,
+                                         target=target_id)
+        if not direct and not result.reply_in_group():
+            return
+        import httpx
+
+        from kazma_gateway.gateway import OutboundMessage
+
+        try:
+            sent = await self.send(  # type: ignore[attr-defined]
+                OutboundMessage(target_id=target_id, text=chat_links.reply_text(result, user_text),
+                                context_metadata=meta, durable=False)
+            )
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError, TypeError) as exc:
+            sent = False
+            logger.warning("[%s] Answering a link code from %s failed (%s)",
+                           self.name, uid, type(exc).__name__)
+        logger.info("[%s] A link code from %s: %s (answer %s)", self.name, uid, result.outcome,
+                    "sent" if sent else "not sent")
 
     def tell_refused_sender(
         self,
@@ -274,7 +442,7 @@ class SenderGate:
             return False
         from kazma_core.background import spawn_background
 
-        text = private_notice(self.name, uid, user_text)
+        text = private_notice(self.name, uid, user_text, reason)
         spawn_background(
             self._send_private_notice(key, now, uid, target_id, dict(context_metadata or {}), text),
             name=f"{self.name}-private-notice",

@@ -126,6 +126,51 @@ def _new_id() -> str:
     return "mc_" + uuid.uuid4().hex[:20]
 
 
+def _not_theirs_to_decide(row: dict[str, Any], tenant_id: str) -> None:
+    """Refuse (``not_theirs``) a decision on a change of another member's
+    fact in a shared space: once Spaces is enforced, a change whose fact is
+    filed under a member's entry (``speakers``: ``member_<account>``) is
+    decided by that member or an owner of the space (the stage 3 review,
+    L13). A fact under no member's entry, a personal space and an install
+    that does not enforce Spaces are as before. Who decides is the account
+    bound now; no one bound decides no member's change. An identity store
+    that cannot answer refuses (``identity_unavailable``), never a 500.
+    Asked BEFORE the memory mutation lock (``_decided_before_the_lock``):
+    the identity store is no call to wait on under it (§15 D2; the second
+    review of the stage 3 fixes). Blocking (the identity store)."""
+    from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+    if not spaces_enforced():
+        return
+    from kazma_core.memory.speakers import account_of_entry
+
+    member = account_of_entry(row.get("subject"))
+    if member is None:
+        return
+    person = bound_asker() or ""
+    if person == member:
+        return
+    from kazma_core.spaces.identity import IdentityUnavailable, owns_space
+
+    try:
+        owner = bool(person) and owns_space(person, tenant_id)
+    except IdentityUnavailable as exc:
+        raise ChangeRefusedError("identity_unavailable") from exc
+    if not owner:
+        raise ChangeRefusedError("not_theirs")
+
+
+def _decided_before_the_lock(conn: sqlite3.Connection, change_id: str, tenant_id: str) -> None:
+    """Who may decide the change, asked before the memory mutation lock is
+    taken (:func:`_not_theirs_to_decide`): a change's subject never changes,
+    so the row read here decides it; the decision re-reads the row under the
+    lock. A change that is not there is left to the decision's own
+    ``not_found``."""
+    row = _row(conn, change_id, tenant_id)
+    if row is not None:
+        _not_theirs_to_decide(row, tenant_id)
+
+
 def _row(conn: sqlite3.Connection, change_id: str, tenant_id: str) -> dict[str, Any] | None:
     found = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM memory_changes WHERE id = ? AND tenant_id = ?",  # nosec B608 - fixed columns
@@ -353,6 +398,7 @@ def confirm(
     row = _row(conn, change_id, tenant)
     if row is None:
         raise ChangeRefusedError("not_found")
+    _not_theirs_to_decide(row, tenant)
     if row["kind"] not in (PENDING, READING) or row["state"] != "open":
         raise ChangeRefusedError("not_open")
     if row["kind"] == READING and not _current(conn, row["new_belief_id"], tenant):
@@ -417,6 +463,7 @@ def dismiss(
     from kazma_core.memory.provenance import USER_SOURCES
 
     tenant = tenant_id
+    _decided_before_the_lock(conn, change_id, tenant)
     with _mutation_lock:
         row = _row(conn, change_id, tenant)
         if row is None:
@@ -489,6 +536,7 @@ def undo(
     from kazma_core.memory.hygiene import beliefs_write
 
     tenant = tenant_id
+    _decided_before_the_lock(conn, change_id, tenant)
     with _mutation_lock:
         row = _row(conn, change_id, tenant)
         if row is None:

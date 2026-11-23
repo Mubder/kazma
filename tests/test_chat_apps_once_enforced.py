@@ -1,8 +1,9 @@
-"""A chat app's message works in the owner's space once Spaces is enforced.
+"""A chat app's message works in its sender's scope once Spaces is enforced.
 
-Every address the install's chat apps deliver to is the owner's, so until
-each person links their own chat app (stage 3) an allowlisted sender acts as
-the owner, in the owner's space (``kazma_core.spaces.chat_apps``). The
+Since stage 3 each sender is a linked account (S3-02) and the message works
+in the place ``chat_apps.chat_place`` says (S3-03; its own tests are
+``tests/test_chat_space_binding.py``): here the senders are the owner's own
+linked accounts, so the turn runs as the owner in the owner's space. The
 gateway's handler binds that scope before it reads or builds anything of
 the chat; a chat recorded in another space (a member's web chat a sender
 switched to) is refused with a reply, and the graph never runs.
@@ -53,9 +54,14 @@ class _Graph:
         return self.values
 
 
+#: The owner's own account on each chat app (linked in ``enforced``).
+OWNER_USER = "4242"
+
+
 def _message(platform: str, text: str = "hello there") -> IncomingMessage:
     return IncomingMessage(platform, f"{platform}:{uuid4().hex}", text,
-                           context_metadata={"chat_id": 42, "channel_id": "c", "user_id": "u"})
+                           context_metadata={"chat_id": 42, "channel_id": "D42", "user_id": OWNER_USER,
+                                             "chat_type": "private"})
 
 
 async def _run(platform: str, graph: _Graph, text: str = "hello there"):
@@ -70,8 +76,24 @@ async def _run(platform: str, graph: _Graph, text: str = "hello there"):
 
 @pytest.fixture
 def enforced(monkeypatch):
+    """Spaces on, and the owner's account linked on every chat app (S3-02)."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.spaces import chat_links, identity
+
     monkeypatch.setenv("KAZMA_SELF_IMPROVEMENT", "0")
     monkeypatch.setattr(scope, "_enforced", True)
+    store = get_config_store()
+    store.delete(identity.REGISTRY_KEY)
+
+    def link(reg):
+        for platform in ("telegram", "discord", "slack", "whatsapp"):
+            reg["links"].append({"platform": platform, "user_id": OWNER_USER, "account": OWNER_ACCOUNT_ID})
+
+    identity.update_registry(link)
+    chat_links.refresh_links()
+    yield
+    store.delete(identity.REGISTRY_KEY)
+    chat_links._forget_links_for_tests()
 
 
 @pytest.mark.parametrize("platform", ["telegram", "discord", "slack", "whatsapp"])
@@ -134,7 +156,7 @@ async def test_control_with_no_scope_bound_the_turn_fails(enforced, monkeypatch)
     space and gets ``NoSpaceBound``; nothing is answered."""
     from kazma_core.spaces import chat_apps
 
-    monkeypatch.setattr(chat_apps, "chat_app_scope", lambda thread_id: None)
+    monkeypatch.setattr(chat_apps, "chat_app_scope", lambda thread_id, place=None: None)
     graph = _Graph()
     with pytest.raises(NoSpaceBound):
         await _run("telegram", graph)
@@ -198,6 +220,9 @@ DECLARED = {
         "binds what kazma_core.spaces.chat_apps.chat_app_scope answers",
     ("kazma-gateway/kazma_gateway/agent_handler/commands.py", "_chat_document_scope"):
         "before Spaces only (enforced: surface_scope reads the bound scope)",
+    ("kazma-gateway/kazma_gateway/agent_handler/hitl.py", "_handle_hitl_resume"):
+        "the card's own space, as the presser the chat-app rule bound, and only when they are "
+        "a member of it (the stage 3 review, L7: hitl._card_space_for_presser)",
 }
 
 

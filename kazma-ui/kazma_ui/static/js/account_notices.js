@@ -65,7 +65,47 @@
                         { space: space, when: when }),
             };
         }
+        if (notice.kind === 'chat_linked') {
+            const labels = { telegram: 'Telegram', discord: 'Discord', slack: 'Slack', whatsapp: 'WhatsApp' };
+            const platform = labels[notice.platform] || notice.platform || '';
+            return {
+                title: say('chat_links.notice_linked_title', 'A chat app was linked to your account'),
+                message: say('chat_links.notice_linked_body',
+                    'On {when}, {platform} account {user} was linked to your Kazma account with a code you asked for. What it sends runs as you. If that was not you, unlink it now.',
+                    { when: when, platform: platform, user: '\u2066' + (notice.chat_user || '') + '\u2069' }),
+                unlink: { platform: notice.platform, user_id: notice.chat_user, label: platform },
+            };
+        }
         return null;
+    }
+
+    // A chat-app link the person did not make is undone from the notice
+    // itself (the stage 3 review, L2).
+    async function offerUnlink(text) {
+        if (typeof window.kazmaConfirm !== 'function') {
+            if (typeof window.kazmaAlert === 'function') await window.kazmaAlert({ title: text.title, message: text.message });
+            return;
+        }
+        const unlink = await window.kazmaConfirm({
+            title: text.title, message: text.message,
+            confirmText: say('chat_links.unlink', 'Unlink'),
+            cancelText: say('chat_links.notice_linked_keep', 'It was me'),
+        });
+        if (!unlink) return;
+        try {
+            const resp = await fetch('/api/account/chat-links', {
+                method: 'DELETE', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform: text.unlink.platform, user_id: text.unlink.user_id }),
+            });
+            if (window.showToast) {
+                window.showToast(resp.ok
+                    ? say('chat_links.unlinked', '{platform} is unlinked.', { platform: text.unlink.label })
+                    : say('chat_links.unlink_failed', 'Could not unlink. Try again.'), resp.ok ? 'success' : 'error');
+            }
+        } catch (e) {
+            if (window.showToast) window.showToast(say('chat_links.unlink_failed', 'Could not unlink. Try again.'), 'error');
+        }
     }
 
     async function tell() {
@@ -79,7 +119,9 @@
             through = Math.max(through, Number(notice.seq) || 0);
             const text = wording(notice);
             if (!text) continue;
-            if (typeof window.kazmaAlert === 'function') {
+            if (text.unlink) {
+                await offerUnlink(text);
+            } else if (typeof window.kazmaAlert === 'function') {
                 await window.kazmaAlert({ title: text.title, message: text.message });
             }
         }
