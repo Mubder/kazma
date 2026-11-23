@@ -146,16 +146,41 @@ def _note_paused(username: str) -> None:
 def _second_factor_verdict(user_id: str, code: str) -> str | None:
     """None when the sign-in of *user_id* may go on; ``second_factor_required``
     when its account has a second factor and no code came;
-    ``wrong_second_factor`` for a wrong one. Blocking (the identity store,
-    the vault); raises when it cannot say."""
+    ``wrong_second_factor`` for a wrong one; ``second_factor_paused`` while
+    wrong codes paused the account's checks. The marker is read first and the
+    vault only when it is on: a vault that failed to open never stops an
+    account with no second factor (the review of S4-02, item 7). Blocking
+    (the identity store, settings, the vault); raises when it cannot say."""
     from kazma_core.security import second_factor
 
     account = second_factor.account_for_sign_in(user_id)
-    if not account or not second_factor.state(account)["on"]:
+    if not account or not second_factor.is_on(account):
         return None
     if not str(code or "").strip():
         return "second_factor_required"
-    return None if second_factor.check(account, code) else "wrong_second_factor"
+    try:
+        return None if second_factor.check(account, code) else "wrong_second_factor"
+    except second_factor.SecondFactorPaused:
+        return "second_factor_paused"
+
+
+#: Accounts told that sign-ins to them were paused, and when: one notice per
+#: window. Keyed by names a caller chose, so bounded (the review of S4-02,
+#: item 8): entries older than the window go first, then the oldest.
+_TOLD_MAX = 1000
+
+
+def _tell_paused_once(told: dict[str, float], key: str, now: float) -> bool:
+    """Whether a pause of *key* is to be told now (not told this window),
+    noting it when so. *told* never holds more than :data:`_TOLD_MAX`."""
+    if now - told.get(key, 0.0) <= ACCOUNT_WINDOW_S:
+        return False
+    for stale in [k for k, at in told.items() if now - at > ACCOUNT_WINDOW_S]:
+        del told[stale]
+    while len(told) >= _TOLD_MAX:
+        del told[min(told, key=told.__getitem__)]
+    told[key] = now
+    return True
 
 
 def register_auth_routes(self: Any) -> None:
@@ -350,8 +375,7 @@ def register_auth_routes(self: Any) -> None:
                 _release(_login_failures, client_ip, now)
                 if user_key:
                     _release(_login_failures_user, user_key, now)
-                if now - _paused_told.get(account_key, 0.0) > ACCOUNT_WINDOW_S:
-                    _paused_told[account_key] = now
+                if _tell_paused_once(_paused_told, account_key, now):
                     await asyncio.to_thread(_note_paused, account_key)
                 return _too_many()
             account_recent.append(now)
@@ -406,6 +430,12 @@ def register_auth_routes(self: Any) -> None:
                 {"detail": "Sign-in cannot be checked right now. Try again.",
                  "error": "second_factor_unavailable"},
                 status_code=503, headers={"Retry-After": "5"})
+        if verdict == "second_factor_paused":
+            return _JSONResponse(
+                {"detail": "Too many wrong codes: codes for this account are not checked for a "
+                           "while. Try again later.",
+                 "error": verdict, "second_factor_required": True},
+                status_code=429, headers={"Retry-After": "900"})
         if verdict is not None:
             return _JSONResponse(
                 {"detail": "Enter the code from your authenticator app."

@@ -330,7 +330,15 @@
 
         /* How a session began, in the page's language (the route answers
          * the session's recorded origin: login, oidc, auto-cookie). */
-        sessionOrigin(origin) {
+        sessionOrigin(origin, via) {
+            // How an auto-login session came (Spaces S4-02): this computer,
+            // the local network, or a browser that sent the install's secret.
+            const byVia = {
+                this_computer: ['sign_in.via_this_computer', 'This computer (auto-login)'],
+                local_network: ['sign_in.via_local_network', 'The local network (auto-login)'],
+                secret_header: ['sign_in.via_secret_header', "A browser with the install's secret"],
+            }[via];
+            if (byVia) return _t(byVia[0], byVia[1]);
             const key = {
                 login: 'settings.session_login',
                 oidc: 'settings.session_oidc',

@@ -59,12 +59,18 @@ def _not_a_code(secret: str) -> str:
 
 @pytest.fixture
 def app(monkeypatch):
+    # The routes' rate limits count per principal in this process: each test
+    # starts with none spent (the owner's secret is one principal for all).
+    from kazma_ui import rate_limit
+
+    rate_limit._windows.clear()
     built = secured_app(monkeypatch)
     try:
         yield built
     finally:
         store = get_config_store()
-        for key in (identity.REGISTRY_KEY, second_factor.STEPS_KEY, invitations.INVITATIONS_KEY,
+        for key in (identity.REGISTRY_KEY, second_factor.STEPS_KEY, second_factor.ON_KEY,
+                    second_factor.PAUSES_KEY, invitations.INVITATIONS_KEY,
                     login_routes.KNOWN_ADDRESSES_KEY, people.LAST_SIGN_IN_KEY):
             store.delete(key)
         try:
@@ -102,6 +108,12 @@ def _turn_on(client: TestClient, headers: dict[str, str] | None = None) -> tuple
 
 def _sign_in(client: TestClient, **body: Any) -> Any:
     return client.post("/api/auth/login", json=body)
+
+
+def _token(path: str) -> str:
+    """An invitation link's token: after its '#'."""
+    assert path.startswith("/invite#"), path
+    return path.split("#", 1)[1]
 
 
 # ── RFC 6238 ──────────────────────────────────────────────────────────────
@@ -192,11 +204,15 @@ def test_an_install_with_no_vault_signs_in_as_before(app, monkeypatch) -> None:
 
 
 def test_a_vault_not_ready_refuses_never_guesses_none(app, monkeypatch) -> None:
+    """With a second factor on (its marker), a vault that is not ready
+    refuses the sign-in: the code cannot be checked, and "none" is never
+    guessed."""
     from kazma_core.security import vault
 
+    _turn_on(_client(app), OWNER)
     monkeypatch.setattr(vault, "get_vault", lambda: None)
     monkeypatch.setattr(vault, "vault_disabled", lambda: False)
-    answer = _sign_in(_client(app), secret=SECRET)
+    answer = _sign_in(_client(app), secret=SECRET, code="123456")
     assert answer.status_code == 503 and answer.headers.get("retry-after"), answer.text
 
 
@@ -219,8 +235,11 @@ def test_a_member_s_second_factor_and_the_admin_s_reset(app, enforced) -> None:
     assert alone.status_code == 401 and alone.json()["second_factor_required"]
     assert _sign_in(other, username=person["name"], password=PASSWORD,
                     code=_code(secret, step_offset=1)).status_code == 200
-    # The admin resets it: the password alone signs in again, and they are told.
-    reset = _client(app).post(f"/api/people/{person['id']}/second-factor/reset", headers=OWNER)
+    # The admin resets it, from their signed-in session: the password alone
+    # signs in again, and they are told.
+    admin = _client(app)
+    assert _sign_in(admin, secret=SECRET).status_code == 200
+    reset = admin.post(f"/api/people/{person['id']}/second-factor/reset")
     assert reset.status_code == 200, reset.text
     assert _sign_in(_client(app, "203.0.113.10"), username=person["name"], password=PASSWORD).status_code == 200
     told = [n["kind"] for n in people.notices_for(person["id"])]
@@ -308,11 +327,13 @@ def test_an_invitation_makes_one_account_then_stops(app, enforced) -> None:
     made = admin.post("/api/people/invitations", json={"name": "Huda", "hours": 2}, headers=OWNER)
     assert made.status_code == 200, made.text
     path = made.json()["path"]
-    token = path.rsplit("/", 1)[1]
+    token = _token(path)
     assert token not in repr(get_config_store().get(invitations.INVITATIONS_KEY)), "only its digest is kept"
     guest = _client(app, "192.0.2.50")
-    page = guest.get(path)
-    assert page.status_code == 200 and 'id="inviteForm"' in page.text and "Huda" in page.text
+    page = guest.get("/invite")
+    assert page.status_code == 200 and 'id="inviteForm"' in page.text and token not in page.text
+    looked = guest.post("/api/invitations/lookup", json={"token": token})
+    assert looked.status_code == 200 and looked.json()["name"] == "Huda", looked.text
     accepted = guest.post("/api/invitations/accept", json={"token": token, "name": "huda-invited",
                                                           "password": PASSWORD})
     assert accepted.status_code == 200, accepted.text
@@ -320,7 +341,7 @@ def test_an_invitation_makes_one_account_then_stops(app, enforced) -> None:
     second = guest.post("/api/invitations/accept", json={"token": token, "name": "huda-again",
                                                         "password": PASSWORD})
     assert second.status_code == 410, f"a link made a second account: {second.text}"
-    assert 'id="invite-closed"' in guest.get(path).text
+    assert guest.post("/api/invitations/lookup", json={"token": token}).status_code == 410
     statuses = [i["status"] for i in admin.get("/api/people/invitations", headers=OWNER).json()["invitations"]]
     assert statuses == ["used"]
 
@@ -346,13 +367,13 @@ def test_a_link_runs_out_and_is_revoked(app, enforced, monkeypatch) -> None:
     real_time = time.time
     monkeypatch.setattr(invitations.time, "time", lambda: real_time() + 2 * 3600)
     guest = _client(app, "192.0.2.51")
-    ran_out = guest.post("/api/invitations/accept", json={"token": soon["path"].rsplit("/", 1)[1],
+    ran_out = guest.post("/api/invitations/accept", json={"token": _token(soon["path"]),
                                                          "name": "late-one", "password": PASSWORD})
     assert ran_out.status_code == 410
     monkeypatch.setattr(invitations.time, "time", real_time)
     revoked = admin.post(f"/api/people/invitations/{later['invitation']['id']}/revoke", headers=OWNER)
     assert revoked.status_code == 200
-    closed = guest.post("/api/invitations/accept", json={"token": later["path"].rsplit("/", 1)[1],
+    closed = guest.post("/api/invitations/accept", json={"token": _token(later["path"]),
                                                         "name": "revoked-one", "password": PASSWORD})
     assert closed.status_code == 410
     assert admin.post("/api/people/invitations", json={"hours": 73}, headers=OWNER).status_code == 400

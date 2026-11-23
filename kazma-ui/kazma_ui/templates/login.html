@@ -157,14 +157,15 @@
       // The last sign-in sent: a second factor's code goes with it again.
       var lastBody = null;
       var codeWords = {
-        wrong_second_factor: {{ t('login.code_wrong') | tojson }}
+        wrong_second_factor: {{ t('login.code_wrong') | tojson }},
+        second_factor_paused: {{ t('login.code_paused') | tojson }}
       };
       function askForCode(data) {
         document.getElementById('tabs').style.display = 'none';
         document.querySelectorAll('.mode-panel').forEach(function (p) { p.classList.remove('active'); });
         document.getElementById('mode-code').classList.add('active');
-        if (data.error === 'wrong_second_factor') {
-          err.textContent = codeWords.wrong_second_factor;
+        if (codeWords[data.error]) {
+          err.textContent = codeWords[data.error];
           err.classList.add('show');
         }
         var input = document.getElementById('code');
@@ -186,7 +187,7 @@
           });
           var data = {};
           try { data = await res.json(); } catch (_) {}
-          if (res.status === 401 && data.second_factor_required) {
+          if ((res.status === 401 || res.status === 429) && data.second_factor_required) {
             if (btn) btn.disabled = false;
             askForCode(data);
             return;

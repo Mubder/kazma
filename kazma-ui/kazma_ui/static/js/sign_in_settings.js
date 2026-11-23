@@ -51,6 +51,9 @@
             own_sign_in_only: say('sign_in.err_own_sign_in', 'Set this from your own sign-in.'),
             unavailable: say('sign_in.err_unavailable', 'This cannot be read right now. Try again.'),
             no_such_session: say('sign_in.err_no_session', 'That session has ended already.'),
+            second_factor_paused: say('sign_in.err_paused', 'Too many wrong codes: codes are not checked for a while. Try again later.'),
+            session_only: say('sign_in.err_session_only', "This is done from a signed-in admin's session, never with the install's secret or a token."),
+            own_in_my_account: say('sign_in.err_own_in_my_account', 'Your own second factor is turned off in My account, with a code.'),
             bad_hours: say('sign_in.err_bad_hours', 'An invitation lasts 1 to 72 hours.'),
             spaces_off: say('sign_in.err_spaces_off', 'Invitations work once Spaces is on.'),
             preconditions_missing: say('sign_in.err_not_ready', 'This install is not ready for a second person yet.'),
@@ -72,6 +75,12 @@
             on: false,
             since: '',
             recoveryLeft: 0,
+            // On this computer the auto-login signs the owner in with no
+            // code; the install's secret is a key the second factor does not
+            // cover; a pause wrong codes made (the review of S4-02).
+            autoLoginHere: false,
+            installSecret: false,
+            lastPause: 0,
             busy: false,
             secret: '',
             uri: '',
@@ -90,6 +99,9 @@
                 this.on = !!got.body.on;
                 this.since = got.body.since || '';
                 this.recoveryLeft = Number(got.body.recovery_left || 0);
+                this.autoLoginHere = !!got.body.auto_login_here;
+                this.installSecret = !!got.body.install_secret;
+                this.lastPause = Number(got.body.last_pause || 0);
                 this.loaded = true;
             },
 
@@ -97,6 +109,14 @@
                 if (!this.since) return '';
                 const when = window.KazmaFormat ? window.KazmaFormat.date(this.since) : this.since;
                 return say('sign_in.on_since', 'On since {when}.', { when: when });
+            },
+
+            pausedText() {
+                if (!this.lastPause) return '';
+                const when = window.KazmaFormat ? window.KazmaFormat.dateTime(this.lastPause) : '';
+                return say('sign_in.paused_note',
+                    'Wrong codes paused the checks of your codes at {when}. If that was not you, change your password.',
+                    { when: when });
             },
 
             leftText() {
@@ -235,6 +255,7 @@
             person: person,
             open: false,
             sessions: [],
+            sessionsLoaded: false,
             sessionsFailed: false,
             busy: false,
 
@@ -247,10 +268,24 @@
                 const got = await call('/api/people/' + encodeURIComponent(this.person.id) + '/sessions?_=' + Date.now());
                 this.sessionsFailed = !got.ok;
                 this.sessions = got.ok && Array.isArray(got.body.sessions) ? got.body.sessions.slice() : [];
+                this.sessionsLoaded = got.ok;
             },
 
             startedText(session) {
                 return window.KazmaFormat ? window.KazmaFormat.dateTime(session.started_at) : '';
+            },
+
+            // How the session came: signed in, or one of the owner's
+            // auto-login kinds (Spaces S4-02).
+            originText(session) {
+                const words = {
+                    this_computer: say('sign_in.via_this_computer', 'This computer (auto-login)'),
+                    local_network: say('sign_in.via_local_network', 'The local network (auto-login)'),
+                    secret_header: say('sign_in.via_secret_header', "A browser with the install's secret"),
+                };
+                if (words[session.via]) return words[session.via];
+                return session.platform === 'auto-cookie'
+                    ? say('sign_in.via_auto', 'Auto-login') : say('sign_in.via_signed_in', 'Signed in');
             },
 
             async endOne(session) {

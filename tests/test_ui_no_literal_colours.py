@@ -42,6 +42,10 @@ DECLARED: dict[tuple[str, str], str] = {
         "the browser's own canvas colour, read before any stylesheet loads",
     ("templates/login.html", "html { background-color:"):
         "the first paint, before kazma.css loads (no white flash in dark)",
+    ("templates/invite.html", 'name="theme-color"'):
+        "the invitation page, before sign-in like login: the browser's own canvas colour",
+    ("templates/invite.html", "html { background-color:"):
+        "the invitation page's first paint, before kazma.css loads (no white flash in dark)",
     ("static/js/modules/components.js", "const _THEME_COLOR"):
         "the theme-color fallback when --bg cannot be read",
     ("static/js/modules/components.js", "const darkOn ="):

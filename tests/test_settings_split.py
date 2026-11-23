@@ -68,7 +68,9 @@ def test_settings_html_loads_mixins_before_composer() -> None:
         "settings_ops.js",
         "settings.js",
     ]
-    idxs = [html.index(name) for name in order]
+    # The script tags, not the first mention: a comment naming
+    # sign_in_settings.js holds "settings.js" too.
+    idxs = [html.index(f'src="/static/js/{name}?') for name in order]
     assert idxs == sorted(idxs)
     assert "window.settingsApp" in (_JS / "settings.js").read_text(encoding="utf-8")
 

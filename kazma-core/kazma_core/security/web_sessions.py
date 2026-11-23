@@ -15,6 +15,8 @@ import time
 from typing import Any
 
 __all__ = [
+    "OWNER_SESSION_ACTORS",
+    "OWNER_USER_ID",
     "SESSION_COOKIE",
     "SESSION_KEY_PREFIX",
     "create_session",
@@ -22,6 +24,7 @@ __all__ = [
     "revoke_session",
     "revoke_user_sessions",
     "end_one_session",
+    "sessions_of_account",
     "session_label",
     "validate_session",
     "use_opaque_sessions",
@@ -30,6 +33,13 @@ __all__ = [
 
 #: ConfigStore key prefix for session records.
 SESSION_KEY_PREFIX = "web_session."
+#: The user id a sign-in with the install's shared secret is given (the
+#: owner's), and the sessions of the owner's that carry none: the auto-login
+#: on this machine (or its local network) and a browser that sent the
+#: secret's header (``kazma_ui.auth._mint_auth_cookie``). A list of the
+#: owner's sessions names both (Spaces S4-02).
+OWNER_USER_ID = "shared-secret"
+OWNER_SESSION_ACTORS: tuple[str, ...] = ("auto-cookie",)
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +131,12 @@ def create_session(
     username: str | None = None,
     user_id: str | None = None,
     tenant_id: str | None = None,
+    via: str | None = None,
 ) -> str:
     """Mint a new opaque session id and persist its hash. Returns raw id for cookie.
+
+    *via* says how an auto-login session came (``this_computer``,
+    ``local_network``, ``secret_header``): the owner's session list shows it.
 
     ``role`` is REQUIRED and has no default.
 
@@ -159,6 +173,8 @@ def create_session(
         "user_id": user_id,
         "tenant_id": tenant,
     }
+    if via:
+        payload["via"] = str(via)
     key = f"web_session.{_hash(sid)}"
     get_config_store().set(key, payload, category="auth")
     _cache_put(key, dict(payload))
@@ -277,13 +293,37 @@ def _live_records() -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
-def _belongs_to(payload: dict[str, Any], *, user_id: str, username: str) -> bool:
+def _belongs_to(payload: dict[str, Any], *, user_id: str, username: str,
+               actors: tuple[str, ...] = ()) -> bool:
+    if actors and str(payload.get("actor") or "") in actors:
+        return True
     if user_id:
         return str(payload.get("user_id") or "") == user_id
     return bool(username) and str(payload.get("username") or "") == username
 
 
-def list_sessions(*, user_id: str = "", username: str = "", current: str | None = None) -> list[dict[str, Any]]:
+def sessions_of_account(account_id: str) -> dict[str, Any]:
+    """How the sessions of one account are found: ``user_id``, ``username``
+    and ``actors`` for :func:`list_sessions`, :func:`end_one_session` and
+    :func:`revoke_user_sessions`. The owner's are every kind it has -- a
+    sign-in with the secret, the auto-login, a browser that sent the
+    secret's header (Spaces S4-02); a person's are their sign-ins. Raises
+    ``LookupError`` for an account the identity store does not hold.
+    Blocking (the identity store)."""
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    if account_id == OWNER_ACCOUNT_ID:
+        return {"user_id": OWNER_USER_ID, "username": "", "actors": OWNER_SESSION_ACTORS}
+    account = identity.read_registry()["accounts"].get(account_id)
+    if not account:
+        raise LookupError("no account has that id")
+    return {"user_id": str(account.get("legacy_user_id") or account_id),
+            "username": str(account.get("name") or ""), "actors": ()}
+
+
+def list_sessions(*, user_id: str = "", username: str = "", current: str | None = None,
+                  actors: tuple[str, ...] = ()) -> list[dict[str, Any]]:
     """The live web sessions of one signed-in person, newest first: when each
     began and ends, and which is *current* (the raw cookie value).
 
@@ -295,12 +335,13 @@ def list_sessions(*, user_id: str = "", username: str = "", current: str | None 
         {
             "id": key[len(SESSION_KEY_PREFIX):][:12],
             "platform": str(payload.get("actor") or "web"),
+            "via": str(payload.get("via") or ""),
             "started_at": float(payload.get("created_at") or 0),
             "expires_at": float(payload.get("expires_at") or 0),
             "current": key == mine,
         }
         for key, payload in _live_records()
-        if _belongs_to(payload, user_id=user_id, username=username)
+        if _belongs_to(payload, user_id=user_id, username=username, actors=actors)
     ]
     return sorted(rows, key=lambda r: r["started_at"], reverse=True)
 
@@ -313,7 +354,8 @@ def session_starts() -> list[dict[str, Any]]:
              "started_at": float(payload.get("created_at") or 0)} for _key, payload in _live_records()]
 
 
-def revoke_user_sessions(*, user_id: str = "", username: str = "", keep: str | None = None) -> int:
+def revoke_user_sessions(*, user_id: str = "", username: str = "", keep: str | None = None,
+                         actors: tuple[str, ...] = ()) -> int:
     """End every live session of one person but *keep* (the raw cookie value
     of the session asking): after a password change the old one must not
     stay signed in elsewhere. Returns how many were ended."""
@@ -322,7 +364,7 @@ def revoke_user_sessions(*, user_id: str = "", username: str = "", keep: str | N
     kept = f"{SESSION_KEY_PREFIX}{_hash(str(keep).strip())}" if keep else ""
     ended = 0
     for key, payload in _live_records():
-        if key == kept or not _belongs_to(payload, user_id=user_id, username=username):
+        if key == kept or not _belongs_to(payload, user_id=user_id, username=username, actors=actors):
             continue
         _cache_evict(key, revoked=True)
         get_config_store().delete(key)
@@ -332,7 +374,8 @@ def revoke_user_sessions(*, user_id: str = "", username: str = "", keep: str | N
     return ended
 
 
-def end_one_session(session_label_: str, *, user_id: str = "", username: str = "") -> bool:
+def end_one_session(session_label_: str, *, user_id: str = "", username: str = "",
+                    actors: tuple[str, ...] = ()) -> bool:
     """End one live session of one person, named by the ``id``
     :func:`list_sessions` gives it (the start of its hash): Spaces S4-02's
     list of each person's sessions. False when that person has no such
@@ -345,7 +388,7 @@ def end_one_session(session_label_: str, *, user_id: str = "", username: str = "
     for key, payload in _live_records():
         if not key[len(SESSION_KEY_PREFIX):].startswith(wanted):
             continue
-        if not _belongs_to(payload, user_id=user_id, username=username):
+        if not _belongs_to(payload, user_id=user_id, username=username, actors=actors):
             continue
         _cache_evict(key, revoked=True)
         get_config_store().delete(key)

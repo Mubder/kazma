@@ -93,6 +93,14 @@
                     { when: when }),
             };
         }
+        if (notice.kind === 'second_factor_paused') {
+            return {
+                title: say('sign_in.notice_codes_paused_title', 'Wrong codes paused your second factor'),
+                message: say('sign_in.notice_codes_paused_body',
+                    'On {when}, five wrong codes were tried for your account, so its codes were not checked for a while, from every place. Someone who tries codes has your password: if that was not you, change it now.',
+                    { when: when }),
+            };
+        }
         if (notice.kind === 'sign_in_paused') {
             return {
                 title: say('sign_in.notice_paused_title', 'Sign-ins to your account were paused'),

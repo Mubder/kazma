@@ -43,7 +43,10 @@ anywhere: the loopback auto-login and the local network's
 (`KAZMA_TRUST_LAN`) are off, and the switches that let anyone
 in without signing in (sign-in off, demo mode, the chat apps' open switch)
 stop Kazma from starting. A second factor (a code from an authenticator
-app) can be turned on for any account. Spaces has not been reviewed
+app) can be turned on for any account. It does not cover the install's
+secret (`KAZMA_SECRET`), which stays a full key for programs: once the
+owner has a second factor the secret no longer signs a browser in, but
+whoever holds it reaches the API. Spaces has not been reviewed
 independently.
 
 - **The operator has full control.** Every safeguard below can be switched

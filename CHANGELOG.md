@@ -4,7 +4,13 @@
 
 - A second factor can be turned on in My account: after the password, a code
   from an authenticator app (or a recovery code, once). Its secret is kept in
-  the vault. The admin can reset a person's from People.
+  the vault. Turning it on signs the account out everywhere else. Five wrong
+  codes pause the account's codes for 15 minutes, longer each time, from every
+  place. The admin can reset a person's from People, signed in, but never
+  their own.
+- Once the owner has a second factor, the install's secret (`KAZMA_SECRET`) no
+  longer signs a browser in: it stays the key for programs (the CLI, scripts),
+  which the second factor does not cover. My account says so.
 - Once a second person has an account, Kazma refuses to start while a switch
   lets anyone in without signing in: sign-in off (`KAZMA_AUTH_DISABLED`,
   `KAZMA_DEV_WS_BYPASS`, `KAZMA_LOOPBACK_AUTOLOGIN`, `KAZMA_TRUST_LAN`), demo mode
@@ -19,7 +25,8 @@
 - Wrong passwords for one account from many addresses pause sign-ins to it,
   except from where its person signed in before, and they are told.
 - The admin invites a person with a link that works once and runs out, and can
-  list and end each person's sessions.
+  list and end each person's sessions, the owner's own of every kind. The
+  link's token rides after a `#`, so no log keeps it.
 
 ## Memory: the thresholds chosen on the first set alone (2026-11-22)
 

@@ -2374,12 +2374,15 @@
             <div x-show="loaded && on && recoveryCodes.length === 0" x-cloak data-second-factor-on>
                 <p style="margin:0 0 10px"><span class="badge badge-success">{{ t('sign_in.on') }}</span>
                     <span class="form-hint" x-text="sinceText()"></span> <span class="form-hint" x-text="leftText()"></span></p>
+                <p class="form-hint" x-show="autoLoginHere" x-cloak data-second-factor-auto-login>{{ t('sign_in.auto_login_note') }}</p>
                 <div class="form-group">
                     <label for="second-factor-off-code">{{ t('sign_in.off_code') }}</label>
                     <input id="second-factor-off-code" class="form-input" x-model="offCode" autocomplete="one-time-code" dir="ltr" translate="no" maxlength="16" style="max-width:200px">
                 </div>
                 <button type="button" class="btn btn-secondary" id="second-factor-turn-off" :disabled="!!busy" @click="turnOff()">{{ t('sign_in.turn_off') }}</button>
             </div>
+            <div x-show="loaded && lastPause" x-cloak class="notice tone-warning" style="margin-top:12px" data-second-factor-paused x-text="pausedText()"></div>
+            <p class="form-hint" x-show="loaded && installSecret" x-cloak style="margin-top:12px" data-install-secret-note>{{ t('sign_in.install_secret_note') }}</p>
             <div x-show="problem" x-cloak class="notice tone-warning" style="margin-top:12px" data-second-factor-problem x-text="problem"></div>
         </div>
 
@@ -2517,7 +2520,7 @@
               </div>
               <template x-for="s in sessions" :key="s.id || s.platform">
                 <div class="account-list-row account-sessions-row">
-                  <span class="account-list-name" x-text="sessionOrigin(s.platform)"></span>
+                  <span class="account-list-name" x-text="sessionOrigin(s.platform, s.via)"></span>
                   <span class="account-list-meta" x-text="window.KazmaFormat ? KazmaFormat.dateTime(s.started_at) : ''"></span>
                   <span class="account-list-actions">
                     <span class="badge badge-success" x-show="s.current" x-cloak>{{ t('settings.current') }}</span>
@@ -2672,15 +2675,16 @@
                     <span class="badge badge-success" x-show="person.second_factor === true" x-cloak>{{ t('sign_in.on') }}</span>
                     <span class="badge badge-neutral" x-show="person.second_factor === false" x-cloak>{{ t('sign_in.off') }}</span>
                   </span>
-                  <button type="button" class="btn btn-sm btn-ghost" :data-person-sessions-toggle="p.id" x-show="!p.owner" x-cloak @click="toggle()"
+                  <button type="button" class="btn btn-sm btn-ghost" :data-person-sessions-toggle="p.id" @click="toggle()"
                           :aria-expanded="open ? 'true' : 'false'" :aria-label="window.t('sign_in.people_sessions_of', {name: p.name})">{{ t('sign_in.people_sessions') }}</button>
                   <button type="button" class="btn btn-sm btn-warning" :data-person-reset-second-factor="p.id" x-show="!p.owner && person.second_factor === true" x-cloak
                           @click="resetSecondFactor()" :aria-label="window.t('sign_in.reset_of', {name: p.name})">{{ t('sign_in.reset') }}</button>
                   <div x-show="open" x-cloak style="flex-basis:100%" :data-person-session-list="p.id">
                     <div x-show="sessionsFailed" x-cloak class="notice tone-danger">{{ t('sign_in.sessions_failed') }}</div>
-                    <div x-show="!sessionsFailed && sessions.length === 0" x-cloak class="empty-state" style="padding:8px">{{ t('settings.no_active_sessions') }}</div>
+                    <div x-show="sessionsLoaded && sessions.length === 0" x-cloak class="empty-state" style="padding:8px">{{ t('settings.no_active_sessions') }}</div>
                     <template x-for="s in sessions" :key="s.id">
-                      <div class="account-list-row" :data-person-session="s.id">
+                      <div class="account-list-row" :data-person-session="s.id" :data-person-session-via="s.via || s.platform">
+                        <span class="account-list-name" x-text="originText(s)"></span>
                         <span class="account-list-meta" x-text="startedText(s)"></span>
                         <span class="account-list-actions"><button type="button" class="btn btn-ghost btn-sm" :data-end-person-session="s.id" @click="endOne(s)">{{ t('sign_in.end') }}</button></span>
                       </div>

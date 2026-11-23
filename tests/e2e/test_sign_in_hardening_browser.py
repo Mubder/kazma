@@ -7,7 +7,13 @@ sidebar, open My account and turn on a second factor: the key is shown once,
 a code from it turns it on, and the recovery codes are shown once. In a new
 browser the sign-in page then asks for a code after the password, and the
 code signs them in. Back on People, the admin opens the person's sessions
-(two: one per sign-in) and ends one.
+(two: one per sign-in) and ends one, then their own (the auto-login on this
+computer, named as such); My account tells the admin the install's secret
+is a key the second factor does not cover, and tells the person nothing of
+it.
+
+The invitation link carries its token after a '#': the page reads it and
+takes it out of the address bar (the review of S4-02, item 6).
 
 Negative control: ``tests/test_sign_in_hardening.py`` (a password alone
 signing in when a second factor is required).
@@ -99,7 +105,7 @@ def test_an_invitation_a_second_factor_and_a_session_ended(lang):
             link = pg.locator("[data-invite-link]")
             link.wait_for(state="visible", timeout=20000)
             url = link.inner_text().strip()
-            assert "/invite/" in url
+            assert "/invite#" in url and "/invite/" not in url
             pg.locator("[data-invitation-status='open']").first.wait_for(state="visible", timeout=10000)
 
             # ── The guest opens it and makes an account ──────────────────
@@ -108,6 +114,10 @@ def test_an_invitation_a_second_factor_and_a_session_ended(lang):
             gp = guest.new_page()
             gp.goto(url, wait_until="domcontentloaded")
             assert gp.locator("h1").inner_text().strip() == _t("invite.title", lang)
+            gp.locator("#inviteForm").wait_for(state="visible", timeout=20000)
+            assert gp.evaluate("() => location.pathname + location.hash") == "/invite", (
+                "the token stayed in the address bar")
+            assert gp.input_value("#name") == "Huda"
             gp.fill("#name", name)
             gp.fill("#password", PASSWORD)
             gp.fill("#confirm", PASSWORD)
@@ -150,6 +160,9 @@ def test_an_invitation_a_second_factor_and_a_session_ended(lang):
             assert gp.locator("[data-recovery-code]").count() == 10
             gp.click("#second-factor-codes-kept")
             gp.locator("[data-second-factor-on]").wait_for(state="visible", timeout=20000)
+            # Nothing of the owner's secret on a person's page.
+            assert not gp.locator("[data-install-secret-note]").is_visible()
+            assert not gp.locator("[data-second-factor-auto-login]").is_visible()
 
             # ── A new browser: the password, then the code ───────────────
             fresh = browser.new_context()
@@ -181,6 +194,17 @@ def test_an_invitation_a_second_factor_and_a_session_ended(lang):
                 "'[data-person-session-list=\"' + id + '\"] [data-person-session]').length === 1",
                 arg=person["id"], timeout=20000)
             assert pg.locator(f"[data-person-second-factor='{person['id']}'] .badge-success").is_visible()
+            # The admin's own sessions: the auto-login on this computer, by name.
+            pg.locator(f"[data-person-sessions-toggle='{scope.OWNER_ACCOUNT_ID}']").click()
+            own = pg.locator(f"[data-person-session-list='{scope.OWNER_ACCOUNT_ID}'] "
+                             "[data-person-session-via='this_computer']")
+            own.first.wait_for(state="visible", timeout=20000)
+            assert _t("sign_in.via_this_computer", lang) in own.first.inner_text()
+            # My account tells the admin what the second factor does not cover.
+            _open_tab(pg, "settings.tab_account", lang)
+            note = pg.locator("[data-install-secret-note]")
+            note.wait_for(state="visible", timeout=20000)
+            assert note.inner_text().strip() == _t("sign_in.install_secret_note", lang)
         finally:
             browser.close()
             scope.set_enforced(False)

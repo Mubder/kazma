@@ -467,28 +467,18 @@ def register_misc_routes(self: Any) -> None:
             "login.html",
             {"everyone_signs_in": everyone_signs_in()},
         )
-    @self.app.get("/invite/{token}", response_class=HTMLResponse)
-    def _invite_page(request: Request, token: str) -> HTMLResponse:
+    @self.app.get("/invite", response_class=HTMLResponse)
+    def _invite_page(request: Request) -> HTMLResponse:
         """An invitation link's page (Spaces S4-02): a name and a password
-        make the invited person's account. A link that is not open says so
-        (one page for one that never was, ran out, was used or revoked)."""
-        from kazma_core.spaces.scope import spaces_enforced
-
-        invitation = None
-        if spaces_enforced():
-            import sqlite3
-
-            from kazma_core.spaces.invitations import lookup
-
-            try:
-                invitation = lookup(token)
-            except (RuntimeError, OSError, ValueError, sqlite3.Error):
-                # The store away: the link reads as closed for now.
-                logger.warning("[invite] an invitation could not be read", exc_info=True)
+        make the invited person's account. The link is ``/invite#<token>``:
+        the page reads the token after the '#' -- which a browser never sends,
+        so no access log holds it (the review of S4-02, item 6) -- asks
+        ``/api/invitations/lookup`` whether it is open, and says so (one
+        answer for a link that never was, ran out, was used or revoked)."""
         return self.templates.TemplateResponse(
             request,
             "invite.html",
-            {"invitation": invitation, "invite_token": token if invitation else ""},
+            {},
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
     @self.app.websocket("/ws/dashboard")

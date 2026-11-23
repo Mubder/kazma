@@ -16613,10 +16613,30 @@ an install with one account behaves as before.
     (`routes_direct.auth._second_factor_verdict`), and the sign-in page
     asks for the code; a code is taken once (the last step kept per
     account, `second_factor.STEPS_KEY`), a recovery code used once. No API
-    token, whatever its role, turns it on or off. A vault that cannot be
-    read refuses sign-in (503); an install with no vault at all has none
-    (`vault.vault_disabled`). The admin resets a person's from People
-    (told); deleting a person forgets it.
+    token, whatever its role, turns it on or off. Whether an account has
+    one is a plain marker in settings (`second_factor.ON_KEY`, no secret):
+    sign-in reads the vault only when it is on, so a vault that failed to
+    open stops no account without one; with it on, a vault that cannot be
+    read refuses (503). An install with no vault at all has none
+    (`vault.vault_disabled`). Turning it on ends the account's other
+    sessions (this one stays). **Wrong codes pause** an account's code
+    checks in every mode, from every address, a known one too:
+    `second_factor.WRONG_CODES` in a row, then `PAUSE_S`, doubling to
+    `PAUSE_MAX_S` (`PAUSES_KEY`); sign-in answers 429
+    `second_factor_paused`, My account shows it, and the person is told
+    where Spaces is enforced. The admin resets a person's from People
+    (told), only from a signed-in admin's session (never the install's
+    secret or a token: `session_only`) and never their own
+    (`own_in_my_account`); deleting a person forgets it.
+  - **The install's secret is a key for programs once the owner has a
+    second factor** (`auth._owner_second_factor_on`): it never mints a
+    browser session (`auth._auto_cookie_via`), and a browser-style request
+    that sends it (`Accept: text/html` or `Sec-Fetch-*`, or the legacy
+    secret cookie) is refused 401 `secret_in_browser`
+    (`auth._secret_refused_in_a_browser`). The CLI (`local_api`), the guard
+    and `scripts/deploy_live.py` keep it. My account says the second factor
+    does not cover it, and that the auto-login on this computer asks no code
+    (by design, before Spaces or with one account).
   - **Sign-in limits per account** (only where Spaces is enforced): wrong
     passwords for one name from every address together, past
     `routes_direct.auth.ACCOUNT_MAX_FAILS` in `ACCOUNT_WINDOW_S`, pause
@@ -16625,13 +16645,19 @@ an install with one account behaves as before.
     (`sign_in_paused`).
   - **Invitation links that expire** (`kazma_core/spaces/invitations.py`):
     the admin makes one on People (one use, at most `invitations.HOURS`
-    hours, only its digest kept); `/invite/<token>` and
+    hours, only its digest kept). The link is `/invite#<token>`: the token
+    after the '#' never reaches a server or its log (the page reads it,
+    takes it out of the address bar and asks `POST /api/invitations/lookup`);
+    the access log cuts any `/invite/<x>` path
+    (`observability.log_noise.NoTokensInPaths`). `/invite`, the lookup and
     `POST /api/invitations/accept` are open before sign-in and make the
     account through `people.create_person` (S1-33's preconditions too),
     claiming the link first so it makes one account. Revoked at will.
   - **Each person's sessions**: People lists a person's and ends one
     (`web_sessions.end_one_session`, told); My account ends one of one's
-    own.
+    own. The owner's are every kind it has (`web_sessions.sessions_of_account`:
+    a sign-in with the secret, the auto-login, a browser that sent the
+    secret's header), each named by how it came (the session's `via`).
   - **No auto-login once a second person has an account**
     (`auth.everyone_signs_in`, asked by `_peer_trust_allowed`): with Spaces
     enforced and an account besides the owner's, the peer address is no
@@ -16644,6 +16670,8 @@ an install with one account behaves as before.
     auto-login for other tests; a test of sign-in is marked `real_sign_in`.
   - Gates: `tests/test_sign_in_hardening.py` (a password alone signing in,
     a link spent never, and today's auto-login as controls),
+    `tests/test_sign_in_review_fixes.py` (the review's eight items, each with
+    today's behaviour as its control),
     `tests/e2e/test_sign_in_hardening_browser.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)

@@ -102,12 +102,14 @@ _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased"
 _KINDS += ("chat_linked", "chat_unlinked")
 #: Stronger sign-in (S4-02): a second factor (``security.second_factor``),
 #: invitations (``spaces.invitations``), one session ended, and sign-ins to
-#: an account paused after too many wrong passwords.
+#: an account paused after too many wrong passwords, or its codes after too
+#: many wrong codes.
 _KINDS += ("second_factor_on", "second_factor_off", "second_factor_reset", "invitation_made",
-           "invitation_used", "invitation_revoked", "session_ended", "sign_in_paused")
+           "invitation_used", "invitation_revoked", "session_ended", "sign_in_paused",
+           "second_factor_paused")
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended", "chat_linked",
-         "second_factor_reset", "session_ended", "sign_in_paused")
+         "second_factor_reset", "session_ended", "sign_in_paused", "second_factor_paused")
 _NAME_MAX = 64
 #: One shared-space create at a time in this process (the review, finding 10).
 _CREATE_LOCK = threading.Lock()

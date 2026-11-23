@@ -13,6 +13,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "login.verify": {"en": "Sign in", "ar": "تسجيل الدخول"},
     "login.code_wrong": {"en": "That code is not right.", "ar": "هذا الرمز غير صحيح."},
+    "login.code_paused": {
+        "en": "Too many wrong codes: codes for this account are not checked for a while. Try again later.",
+        "ar": "رموز خاطئة كثيرة: لا تُفحص رموز هذا الحساب لفترة. حاول لاحقًا.",
+    },
+    "login.secret_in_browser": {
+        "en": "The install's secret is a key for programs. In a browser, sign in here with it and your code.",
+        "ar": "سرّ التثبيت مفتاح للبرامج. في المتصفح، سجّل الدخول هنا به وبرمزك.",
+    },
     "login.everyone_signs_in": {
         "en": "More than one person has an account on this Kazma, so everyone signs in, the owner too, "
               "on this computer as anywhere. The owner signs in with their password or the install's "
@@ -24,6 +32,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # ── The invitation page ───────────────────────────────────────────────
     "invite.page_title": {"en": "Invitation · Kazma", "ar": "دعوة · Kazma"},
+    "invite.checking": {"en": "Checking the link…", "ar": "جارٍ التحقق من الرابط…"},
     "invite.title": {"en": "You're invited to Kazma", "ar": "أنت مدعو إلى Kazma"},
     "invite.blurb": {
         "en": "Choose the name you sign in with and a password. Your account gets a space of its own.",
@@ -111,6 +120,40 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "هذا التثبيت غير جاهز لشخص ثانٍ بعد.",
     },
     "sign_in.err_failed": {"en": "That did not work. Try again.", "ar": "لم ينجح ذلك. حاول مرة أخرى."},
+    "sign_in.err_paused": {
+        "en": "Too many wrong codes: codes are not checked for a while. Try again later.",
+        "ar": "رموز خاطئة كثيرة: لا تُفحص الرموز لفترة. حاول لاحقًا.",
+    },
+    "sign_in.err_session_only": {
+        "en": "This is done from a signed-in admin's session, never with the install's secret or a token.",
+        "ar": "يُنفَّذ هذا من جلسة مسؤول مسجّل الدخول، لا بسرّ التثبيت ولا برمز.",
+    },
+    "sign_in.err_own_in_my_account": {
+        "en": "Your own second factor is turned off in My account, with a code.",
+        "ar": "يُوقَف عامل التحقق الثاني الخاص بك من «حسابي»، برمز.",
+    },
+    "sign_in.paused_note": {
+        "en": "Wrong codes paused the checks of your codes at {when}. If that was not you, change your password.",
+        "ar": "أوقفت رموز خاطئة فحص رموزك في {when}. إن لم تكن أنت، غيّر كلمة مرورك.",
+    },
+    "sign_in.auto_login_note": {
+        "en": "On this computer Kazma doesn't ask for the code: it signs you in by itself here "
+              "(the auto-login). Elsewhere it asks.",
+        "ar": "على هذا الحاسوب لا يطلب Kazma الرمز: يسجّل دخولك بنفسه هنا (الدخول التلقائي). "
+              "في أي مكان آخر يطلبه.",
+    },
+    "sign_in.install_secret_note": {
+        "en": "The install's secret (KAZMA_SECRET, in the install's .env) is a full key for programs: "
+              "the second factor does not cover it. Keep it as you keep a password, and never put it "
+              "in a browser.",
+        "ar": "سرّ التثبيت (KAZMA_SECRET، في ملف .env الخاص بالتثبيت) مفتاح كامل للبرامج: لا يشمله "
+              "عامل التحقق الثاني. احفظه كما تحفظ كلمة مرور، ولا تضعه في متصفح أبدًا.",
+    },
+    "sign_in.via_this_computer": {"en": "This computer (auto-login)", "ar": "هذا الحاسوب (دخول تلقائي)"},
+    "sign_in.via_local_network": {"en": "The local network (auto-login)", "ar": "الشبكة المحلية (دخول تلقائي)"},
+    "sign_in.via_secret_header": {"en": "A browser with the install's secret", "ar": "متصفح بسرّ التثبيت"},
+    "sign_in.via_auto": {"en": "Auto-login", "ar": "دخول تلقائي"},
+    "sign_in.via_signed_in": {"en": "Signed in", "ar": "تسجيل دخول"},
 
     # ── My account and People: sessions ─────────────────────────────────
     "sign_in.end": {"en": "End", "ar": "إنهاء"},
@@ -180,5 +223,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
               "turn on a second factor.",
         "ar": "في {when}، جُرّبت كلمات مرور خاطئة كثيرة لحسابك، فأُوقفت محاولات الدخول إليه لفترة، إلا من الأماكن التي "
               "سجّلت الدخول منها من قبل. إن لم يكن ذلك أنت، غيّر كلمة المرور وفعّل عامل تحقق ثانيًا.",
+    },
+    "sign_in.notice_codes_paused_title": {
+        "en": "Wrong codes paused your second factor",
+        "ar": "أوقفت رموز خاطئة عامل التحقق الثاني لديك",
+    },
+    "sign_in.notice_codes_paused_body": {
+        "en": "On {when}, five wrong codes were tried for your account, so its codes were not checked for a while, "
+              "from every place. Someone who tries codes has your password: if that was not you, change it now.",
+        "ar": "في {when}، جُرّبت خمسة رموز خاطئة لحسابك، فلم تُفحص رموزه لفترة، من كل مكان. من يجرّب الرموز يعرف "
+              "كلمة مرورك: إن لم يكن ذلك أنت، غيّرها الآن.",
     },
 }
