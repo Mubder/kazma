@@ -287,6 +287,7 @@ async def rewind_thread(
     audit = {"actor": actor, "surface": surface, "thread_id": thread_id, "snapshot_id": snapshot_id}
     async with _outcome("restore", audit):
         await asyncio.to_thread(_in_this_space, thread_id)
+        await asyncio.to_thread(_theirs_to_change, thread_id)
         record = await _load(rec, thread_id, snapshot_id)
         if thread_busy(thread_id):
             raise RewindRefused("turn_running", "A turn is running in this chat. Restore it when it ends.")
@@ -396,6 +397,39 @@ def _in_this_space(thread_id: str, new_thread_id: str | None = None) -> None:
         raise RewindRefused("not_found", "That chat was not found.", status=404)
 
 
+def _theirs_to_change(thread_id: str) -> None:
+    """Refuse a restore or a fork of a chat the person asking may not change,
+    once Spaces is enforced: the chat's opener or an owner of its space, the
+    rule a chat app's ``/replay`` asks (``hitl_answerers.turn_control_refusal``,
+    action ``rewind``; S2-05, the stage 3 review). The space check
+    (:func:`_in_this_space`) let any member of a shared space restore or
+    fork another member's chat. A chat whose opener is not recorded (from
+    before Spaces) refuses nobody; a running turn is refused on its own
+    (``turn_running``). Work with no person bound is left to
+    :func:`_in_this_space` (it acts for the thread; a fork bound to no space
+    is ``no_space`` there). Blocking: the thread record, the identity store."""
+    from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+    if not spaces_enforced() or not bound_asker():
+        return
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_ui.hitl_answerers import turn_control_refusal
+
+    try:
+        refused = turn_control_refusal(thread_id, "rewind", active=False)
+    except (sqlite3.Error, OSError, IdentityUnavailable) as exc:
+        logger.warning("[rewind] whose chat %s is could not be read (%s); nothing was changed",
+                       str(thread_id)[:12], type(exc).__name__, exc_info=True)
+        raise RewindRefused("identity_unavailable",
+                            "Whose chat this is could not be read, so nothing was changed.",
+                            status=503) from exc
+    if refused is not None:
+        code, name = refused
+        logger.info("[rewind] chat %s refused: %s", str(thread_id)[:12], code)
+        raise RewindRefused(code, f"Only {name}, who started this chat, or an owner of this space "
+                                  "can restore it, fork it or delete its saved steps.", status=403)
+
+
 def _save_fork_chat(session_id: str, title: str, messages: list[dict[str, Any]], tenant_id: str | None = None) -> None:
     """The fork's chat row, so it shows in the sidebar (blocking: a chat-store write)."""
     from kazma_ui.session_manager import ChatSession, get_session_manager
@@ -449,6 +483,7 @@ async def fork_thread(
              "target_thread_id": new_id}
     async with _outcome("fork", audit):
         await asyncio.to_thread(_in_this_space, thread_id)
+        await asyncio.to_thread(_theirs_to_change, thread_id)
         record = await _load(rec, thread_id, snapshot_id)
         if thread_busy(thread_id):
             raise RewindRefused("turn_running", "A turn is running in this chat. Fork it when it ends.")
@@ -503,9 +538,12 @@ async def clear_thread_snapshots(
     thread_id: str, *, actor: str, surface: str, recorder: Any = None,
 ) -> int:
     """Delete every saved step of a conversation, under each of its keys
-    (``/replay clear``, the page's Delete). Raises ``SnapshotStoreError``."""
+    (``/replay clear``, the page's Delete). Raises ``SnapshotStoreError``,
+    and :class:`RewindRefused` for a chat the person asking may not change
+    (:func:`_theirs_to_change`, once Spaces is enforced)."""
     from kazma_core.time_travel import forget_thread_snapshots, process_recorder
 
+    await asyncio.to_thread(_theirs_to_change, thread_id)
     rec = recorder if recorder is not None else await asyncio.to_thread(process_recorder)
     keys = await asyncio.to_thread(chat_keys_for, thread_id)
     n = await asyncio.to_thread(forget_thread_snapshots, keys, recorder=rec)

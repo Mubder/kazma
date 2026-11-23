@@ -485,6 +485,7 @@ _CHANGE_REFUSALS = {
     "forgotten": "🔁 The earlier value was forgotten, so it cannot come back.",
     "not_written": "🔁 Kazma could not save the value. Nothing changed.",
     "not_theirs": "🔁 That is another member's fact: only they or an owner of this space decides on it.",
+    "identity_unavailable": "🔁 Who may decide this could not be read right now. Nothing changed; try again.",
 }
 
 
@@ -698,9 +699,17 @@ def _replay_clear(recorder, thread_id: str, ctx: dict[str, Any] | None = None) -
     from kazma_core.time_travel import SnapshotStoreError, forget_thread_snapshots
     from kazma_core.time_travel_audit import write_audit_row
 
-    try:
-        from kazma_ui.thread_rewind import chat_keys_for
+    from kazma_ui.thread_rewind import RewindRefused, _theirs_to_change, chat_keys_for
 
+    try:
+        # The chat's opener or an owner of the space deletes its steps,
+        # as on the web (``thread_rewind._theirs_to_change``).
+        _theirs_to_change(thread_id)
+    except RewindRefused as refused:
+        if refused.code == "identity_unavailable":
+            return "⚠️ Whose chat this is could not be read right now, so nothing was deleted. Try again."
+        return "⛔ Only the person who started this chat, or an owner of this space, can delete its steps."
+    try:
         count = forget_thread_snapshots(chat_keys_for(thread_id), recorder=recorder)
     except SnapshotStoreError as exc:
         logger.warning("[slash] /replay clear failed: %s", exc)

@@ -16510,7 +16510,22 @@ an install with one account behaves as before.
     a change filed under `member_<account>` is confirmed, undone or
     dismissed only by that member or an owner of the space, on the Memory
     page and with `/memory` alike. Gate:
-    `tests/test_memory_changes_decided_by_their_person.py`.
+    `tests/test_memory_changes_decided_by_their_person.py`. Asked before
+    the memory mutation lock (`changes._decided_before_the_lock`: the
+    identity store is no call to wait on under it, §15 D2), and an identity
+    store that cannot answer is the refusal `identity_unavailable`, never a
+    500. Gate: `tests/test_memory_change_decided_before_the_lock.py`.
+  - **Time Travel restores, forks and clears a chat of its opener or an
+    owner** (`thread_rewind._theirs_to_change`, once Spaces is enforced):
+    `rewind_thread`, `fork_thread` and `clear_thread_snapshots` -- the one
+    service the page, the terminal app and the chat apps call -- and the
+    web chat's and the chat apps' `/replay clear` ask the rule a chat app's
+    `/replay` asks (`turn_control_refusal`, action `rewind`): 403
+    `not_your_chat`, worded on the page (EN/AR) and in the chats. The space
+    check alone let any member of a shared space take back, copy or delete
+    another member's turns. Gate: `tests/test_time_travel_restore_per_person.py`
+    (the real routes behind the real tenant middleware; the space-only
+    check as the control).
 
 ## UI Conventions (Web)
 

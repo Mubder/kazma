@@ -63,6 +63,8 @@
     if (code === 'memory_ledger_unavailable') return tx('replay.refused_memory_ledger', 'What this chat keeps out of memory could not be copied to the fork, so nothing was forked. The server log says why.');
     if (code === 'thread_record_unavailable') return tx('replay.refused_thread_record', 'Where this chat lives could not be read or recorded, so nothing was changed. The server log says why.');
     if (code === 'no_space') return tx('replay.refused_no_space', 'This request is not tied to a space, so nothing was forked.');
+    if (code === 'not_your_chat') return tx('replay.refused_not_your_chat', 'Only the person who started this chat, or an owner of this space, can restore it, fork it or delete its steps.');
+    if (code === 'identity_unavailable') return tx('replay.refused_identity', 'Whose chat this is could not be read right now, so nothing was changed. Try again in a moment.');
     return tx('replay.load_error', 'Could not load the steps (HTTP {status}).', { status: status });
   }
   function emptyState(html) {

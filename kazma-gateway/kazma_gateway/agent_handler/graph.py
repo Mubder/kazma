@@ -2736,6 +2736,10 @@ def create_graph_handler(
             "(the server log says why)."
         ),
         "no_space": "⚠️ This chat is not tied to a space yet, so nothing was forked.",
+        "not_your_chat": "⛔ Only the person who started this chat, or an owner of this space, "
+                         "can restore it, fork it or delete its steps.",
+        "identity_unavailable": "⚠️ Whose chat this is could not be read right now, so nothing "
+                                "was changed. Try again in a moment.",
     }
 
     def _refusal_text(refused: Any) -> str:

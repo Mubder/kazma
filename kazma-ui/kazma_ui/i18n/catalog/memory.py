@@ -1758,6 +1758,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "هذه معلومة لعضو آخر؛ لا يقرر فيها إلا هو أو مالك المساحة",
         "en": "This is another member's fact; only they or the space's owner decides on it",
     },
+    "memory.err.identity_unavailable": {
+        "ar": "تعذّرت الآن معرفة من يقرر في هذا. لم يتغيّر شيء؛ حاول مرة أخرى",
+        "en": "Who may decide this could not be read right now. Nothing changed; try again",
+    },
     "memory.shared_notice": {
         "ar": "الذاكرة هنا مشتركة مع {names}.",
         "en": "Memory here is shared with {names}.",

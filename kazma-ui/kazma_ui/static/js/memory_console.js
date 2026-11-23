@@ -67,6 +67,7 @@
     not_written: ['memory.err.not_written', 'The value could not be saved'],
     not_yours: ['memory.err.not_yours', "This is another member's; only they or the space's owner can forget it"],
     not_theirs: ['memory.err.not_theirs', "This is another member's fact; only they or the space's owner decides on it"],
+    identity_unavailable: ['memory.err.identity_unavailable', 'Who may decide this could not be read right now. Nothing changed; try again'],
     about_too_long: ['memory.err.about_too_long', 'About me would pass its limit: shorten it in Settings first'],
     no_account: ['memory.err.no_account', 'Sign in to add to your own About me'],
   };

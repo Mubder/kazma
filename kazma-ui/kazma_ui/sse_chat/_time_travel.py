@@ -55,8 +55,14 @@ def time_travel_reply(text: str, thread_id: str, recorder: Any, lang: str = "en"
     if command == "replay" and len(parts) > 1 and parts[1].lower() == "clear":
         from kazma_core.time_travel import forget_thread_snapshots
         from kazma_core.time_travel_audit import write_audit_row
-        from kazma_ui.thread_rewind import chat_keys_for
+        from kazma_ui.thread_rewind import RewindRefused, _theirs_to_change, chat_keys_for
 
+        try:
+            _theirs_to_change(thread_id)
+        except RewindRefused as refused:
+            # The chat's opener or an owner of the space deletes its steps.
+            return t("replay.refused_identity" if refused.code == "identity_unavailable"
+                     else "replay.refused_not_your_chat", lang)
         n = forget_thread_snapshots(chat_keys_for(thread_id), recorder=recorder)
         write_audit_row("clear", "ok", actor="web:chat", surface="web-chat", thread_id=thread_id,
                         detail={"deleted": n})
