@@ -396,6 +396,20 @@ def _people_hold_every_feature(request, monkeypatch):
     yield
 
 
+# Once a second person has an account, the loopback auto-login is off and
+# everyone signs in, the owner too (Spaces S4-02). The browser tests of every
+# other part open the admin's page on this machine after making people, as
+# the owner always could; they keep today's auto-login, and a test of the
+# sign-in itself is marked ``real_sign_in``.
+@_pytest.fixture(autouse=True)
+def _owner_keeps_the_auto_login(request, monkeypatch):
+    if request.node.get_closest_marker("real_sign_in") is None:
+        from kazma_ui import auth
+
+        monkeypatch.setattr(auth, "everyone_signs_in", lambda: False)
+    yield
+
+
 @_pytest.fixture(autouse=True)
 def _reset_database_availability(monkeypatch):
     from kazma_core.db import availability

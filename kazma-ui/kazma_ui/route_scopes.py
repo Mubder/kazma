@@ -106,6 +106,11 @@ ROUTE_SCOPE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/auth/status$", OPEN),
     ("/api/auth/oidc/start$", OPEN),
     ("/api/auth/oidc/callback$", OPEN),
+    # An invitation link (Spaces S4-02): its page and its acceptance, before
+    # the person has an account. The token is the credential: one use, a few
+    # days at most.
+    ("/invite/", OPEN),
+    ("/api/invitations/accept$", OPEN),
     # Each webhook checks the platform's own signature or secret.
     ("/api/webhooks", OPEN),
     # Sign-in callbacks the provider redirects the browser to. Each takes

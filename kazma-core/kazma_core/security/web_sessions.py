@@ -21,6 +21,7 @@ __all__ = [
     "list_sessions",
     "revoke_session",
     "revoke_user_sessions",
+    "end_one_session",
     "session_label",
     "validate_session",
     "use_opaque_sessions",
@@ -329,3 +330,25 @@ def revoke_user_sessions(*, user_id: str = "", username: str = "", keep: str | N
     if ended:
         logger.info("[web_sessions] ended %d other session(s) of one user", ended)
     return ended
+
+
+def end_one_session(session_label_: str, *, user_id: str = "", username: str = "") -> bool:
+    """End one live session of one person, named by the ``id``
+    :func:`list_sessions` gives it (the start of its hash): Spaces S4-02's
+    list of each person's sessions. False when that person has no such
+    session. Never another person's."""
+    from kazma_core.config_store import get_config_store
+
+    wanted = str(session_label_ or "").strip().lower()
+    if len(wanted) < 8:
+        return False
+    for key, payload in _live_records():
+        if not key[len(SESSION_KEY_PREFIX):].startswith(wanted):
+            continue
+        if not _belongs_to(payload, user_id=user_id, username=username):
+            continue
+        _cache_evict(key, revoked=True)
+        get_config_store().delete(key)
+        logger.info("[web_sessions] ended one session of one user")
+        return True
+    return False

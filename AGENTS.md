@@ -16593,11 +16593,54 @@ an install with one account behaves as before.
   the cloud profile's too, S4-08): a new switch that lets anyone in goes
   there. `boot_guard.open_switches_refusal` is asked by
   `KazmaAppBuilder._bootstrap_services` once the settings store answers:
-  exit 1 before anything serves, the refusal on stderr and in the log.
-  With no switch on it reads nothing; an identity store that cannot answer
-  refuses. Gate: `tests/test_open_switches_refused_with_members.py` (each
-  switch through the real `create_app`; the boot guard without the rule as
-  the control).
+  exit 1 before anything serves, the refusal on stderr and in the log,
+  naming the accounts it counted. It counts accounts, not Spaces: an install
+  still on the older multi-user mode refuses too. With no switch on it reads
+  nothing; an identity store that cannot answer refuses. Gate:
+  `tests/test_open_switches_refused_with_members.py` (each switch through
+  the real `create_app`; the boot guard without the rule as the control).
+- **Stronger sign-in (S4-02, 2026-11-23).**
+  - **A second factor** (`kazma_core/security/totp.py`, RFC 6238 on the
+    standard library; `kazma_core/security/second_factor.py`): turned on in
+    My account (`kazma_ui/sign_in_api.py`, `static/js/sign_in_settings.js`),
+    in every mode. The secret and the recovery codes' digests are kept in
+    the vault, install-scoped (`account.2fa.<account id>`: sign-in reads it
+    before any space is bound), never in settings. A right password -- or,
+    for the owner, the install's secret -- answers 401
+    `second_factor_required` for an account with one
+    (`routes_direct.auth._second_factor_verdict`), and the sign-in page
+    asks for the code; a code is taken once (the last step kept per
+    account, `second_factor.STEPS_KEY`), a recovery code used once. No API
+    token, whatever its role, turns it on or off. A vault that cannot be
+    read refuses sign-in (503); an install with no vault at all has none
+    (`vault.vault_disabled`). The admin resets a person's from People
+    (told); deleting a person forgets it.
+  - **Sign-in limits per account** (only where Spaces is enforced): wrong
+    passwords for one name from every address together, past
+    `routes_direct.auth.ACCOUNT_MAX_FAILS` in `ACCOUNT_WINDOW_S`, pause
+    sign-ins to it, but from an address it signed in from in the last 30
+    days (`KNOWN_ADDRESSES_KEY`, hashed); the person is told
+    (`sign_in_paused`).
+  - **Invitation links that expire** (`kazma_core/spaces/invitations.py`):
+    the admin makes one on People (one use, at most `invitations.HOURS`
+    hours, only its digest kept); `/invite/<token>` and
+    `POST /api/invitations/accept` are open before sign-in and make the
+    account through `people.create_person` (S1-33's preconditions too),
+    claiming the link first so it makes one account. Revoked at will.
+  - **Each person's sessions**: People lists a person's and ends one
+    (`web_sessions.end_one_session`, told); My account ends one of one's
+    own.
+  - **No auto-login once a second person has an account**
+    (`auth.everyone_signs_in`, asked by `_peer_trust_allowed`): with Spaces
+    enforced and an account besides the owner's, the peer address is no
+    credential, so this machine gets no session for nothing and its sockets
+    are refused; the owner signs in like anyone and the session lasts as any
+    does. The sign-in page says why (`#everyone-signs-in`). Before Spaces,
+    or with one account, nothing changes. The root conftest keeps today's
+    auto-login for other tests; a test of sign-in is marked `real_sign_in`.
+  - Gates: `tests/test_sign_in_hardening.py` (a password alone signing in,
+    a link spent never, and today's auto-login as controls),
+    `tests/e2e/test_sign_in_hardening_browser.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

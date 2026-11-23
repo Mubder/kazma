@@ -1376,6 +1376,26 @@
             }
         },
 
+        /* End one of the person's own sessions (Spaces S4-02): another
+         * device signs in again. */
+        async endMySession(session) {
+            if (!session || !session.id) return;
+            const ok = await window.kazmaConfirm({
+                title: _t('sign_in.end_mine_title', 'End this session?'),
+                message: _t('sign_in.end_mine_confirm', 'That device signs in again.'),
+                confirmText: _t('sign_in.end', 'End'),
+            });
+            if (!ok) return;
+            try {
+                await window.kazmaSave('/api/account/sessions/' + encodeURIComponent(session.id) + '/end', { method: 'POST' });
+            } catch (e) {
+                showToast(_t('sign_in.err_failed', 'That did not work. Try again.'), 'error');
+                return;
+            }
+            showToast(_t('sign_in.session_ended', 'That session has ended.'), 'success');
+            await this.loadAccount();
+        },
+
         async createToken() {
             if (!this.tokenName) { showToast(_t('settings.token_name_required', 'Token name required'), 'error'); return; }
             try {

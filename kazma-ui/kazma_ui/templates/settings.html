@@ -2336,6 +2336,53 @@
             <button class="btn btn-primary" @click="changePassword()">{{ t('settings.change_password') }}</button>
         </div>
 
+        <!-- A second factor (Spaces S4-02): a code from an authenticator app
+             after the password. sign_in_settings.js. -->
+        <div class="settings-group mb-6" id="second-factor" x-data="secondFactorPanel()" x-show="!hidden" x-cloak>
+            <h3>{{ t('sign_in.title') }}</h3>
+            <p class="form-hint">{{ t('sign_in.intro') }}</p>
+            <div x-show="failed" x-cloak class="notice tone-danger">{{ t('sign_in.load_failed') }}</div>
+            <div x-show="loaded && !on && !secret && !recoveryCodes.length" x-cloak data-second-factor-off>
+                <span class="badge badge-neutral">{{ t('sign_in.off') }}</span>
+                <button type="button" class="btn btn-primary btn-sm" id="second-factor-begin" :disabled="!!busy" @click="begin()">{{ t('sign_in.turn_on') }}</button>
+            </div>
+            <div x-show="secret" x-cloak data-second-factor-setup>
+                <p class="form-hint">{{ t('sign_in.scan_or_type') }}</p>
+                <code style="display:inline-block;font-size:1rem;letter-spacing:0.04em;margin-bottom:8px;word-break:break-all" translate="no" dir="ltr" data-second-factor-secret x-text="secret"></code>
+                <div style="margin-bottom:12px"><a class="btn btn-sm btn-secondary" :href="uri" translate="no">{{ t('sign_in.open_in_app') }}</a></div>
+                <div class="form-group">
+                    <label for="second-factor-code">{{ t('sign_in.first_code') }}</label>
+                    <input id="second-factor-code" class="form-input" x-model="code" inputmode="numeric" autocomplete="one-time-code" dir="ltr" translate="no" maxlength="8" style="max-width:200px">
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button type="button" class="btn btn-primary" id="second-factor-confirm" :disabled="!!busy" @click="confirm()">{{ t('sign_in.confirm') }}</button>
+                    <button type="button" class="btn btn-secondary" @click="cancel()">{{ t('common.cancel') }}</button>
+                </div>
+            </div>
+            <div x-show="recoveryCodes.length > 0" x-cloak class="notice tone-info" data-recovery-codes>
+                <div style="flex:1;min-width:0">
+                    <div style="font-weight:600;margin-bottom:6px">{{ t('sign_in.recovery_once') }}</div>
+                    <ul style="margin:0 0 8px;padding-inline-start:18px">
+                        <template x-for="c in recoveryCodes" :key="c"><li><code translate="no" dir="ltr" data-recovery-code x-text="c"></code></li></template>
+                    </ul>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button type="button" class="btn btn-sm btn-primary" @click="copyCodes()">{{ t('sign_in.copy_codes') }}</button>
+                        <button type="button" class="btn btn-sm btn-secondary" id="second-factor-codes-kept" @click="recoveryCodes = []">{{ t('sign_in.codes_kept') }}</button>
+                    </div>
+                </div>
+            </div>
+            <div x-show="loaded && on && recoveryCodes.length === 0" x-cloak data-second-factor-on>
+                <p style="margin:0 0 10px"><span class="badge badge-success">{{ t('sign_in.on') }}</span>
+                    <span class="form-hint" x-text="sinceText()"></span> <span class="form-hint" x-text="leftText()"></span></p>
+                <div class="form-group">
+                    <label for="second-factor-off-code">{{ t('sign_in.off_code') }}</label>
+                    <input id="second-factor-off-code" class="form-input" x-model="offCode" autocomplete="one-time-code" dir="ltr" translate="no" maxlength="16" style="max-width:200px">
+                </div>
+                <button type="button" class="btn btn-secondary" id="second-factor-turn-off" :disabled="!!busy" @click="turnOff()">{{ t('sign_in.turn_off') }}</button>
+            </div>
+            <div x-show="problem" x-cloak class="notice tone-warning" style="margin-top:12px" data-second-factor-problem x-text="problem"></div>
+        </div>
+
         {% if spaces_enforced is defined and spaces_enforced() %}
         <!-- Chat apps (Spaces stage 3): this person's own Telegram, Discord,
              Slack and WhatsApp accounts. chat_links.js. -->
@@ -2474,6 +2521,7 @@
                   <span class="account-list-meta" x-text="window.KazmaFormat ? KazmaFormat.dateTime(s.started_at) : ''"></span>
                   <span class="account-list-actions">
                     <span class="badge badge-success" x-show="s.current" x-cloak>{{ t('settings.current') }}</span>
+                    <button type="button" class="btn btn-ghost btn-sm" x-show="!s.current && s.id" x-cloak :data-end-session="s.id" @click="endMySession(s)">{{ t('sign_in.end') }}</button>
                   </span>
                 </div>
               </template>
@@ -2616,9 +2664,72 @@
                   <button type="button" class="btn btn-sm btn-ghost" data-person-end-sessions x-show="!p.owner && p.sessions > 0" x-cloak
                           @click="endPersonSessions(p)" :aria-label="window.t('settings.people_end_sessions_of', {name: p.name})">{{ t('settings.people_end_sessions') }}</button>
                 </div>
+                <!-- Their second factor and each of their sessions (Spaces
+                     S4-02). sign_in_settings.js. -->
+                <div class="account-list-row" style="flex-wrap:wrap;gap:6px 16px" x-data="personSignIn(p)" :data-person-sign-in="p.id">
+                  <span class="account-list-meta" :data-person-second-factor="p.id">
+                    <span>{{ t('sign_in.people_second_factor') }}</span>
+                    <span class="badge badge-success" x-show="person.second_factor === true" x-cloak>{{ t('sign_in.on') }}</span>
+                    <span class="badge badge-neutral" x-show="person.second_factor === false" x-cloak>{{ t('sign_in.off') }}</span>
+                  </span>
+                  <button type="button" class="btn btn-sm btn-ghost" :data-person-sessions-toggle="p.id" x-show="!p.owner" x-cloak @click="toggle()"
+                          :aria-expanded="open ? 'true' : 'false'" :aria-label="window.t('sign_in.people_sessions_of', {name: p.name})">{{ t('sign_in.people_sessions') }}</button>
+                  <button type="button" class="btn btn-sm btn-warning" :data-person-reset-second-factor="p.id" x-show="!p.owner && person.second_factor === true" x-cloak
+                          @click="resetSecondFactor()" :aria-label="window.t('sign_in.reset_of', {name: p.name})">{{ t('sign_in.reset') }}</button>
+                  <div x-show="open" x-cloak style="flex-basis:100%" :data-person-session-list="p.id">
+                    <div x-show="sessionsFailed" x-cloak class="notice tone-danger">{{ t('sign_in.sessions_failed') }}</div>
+                    <div x-show="!sessionsFailed && sessions.length === 0" x-cloak class="empty-state" style="padding:8px">{{ t('settings.no_active_sessions') }}</div>
+                    <template x-for="s in sessions" :key="s.id">
+                      <div class="account-list-row" :data-person-session="s.id">
+                        <span class="account-list-meta" x-text="startedText(s)"></span>
+                        <span class="account-list-actions"><button type="button" class="btn btn-ghost btn-sm" :data-end-person-session="s.id" @click="endOne(s)">{{ t('sign_in.end') }}</button></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
                 </div>
               </template>
             </div>
+        </div>
+        <!-- Invitations (Spaces S4-02): a link that works once, for a few
+             hours or days. sign_in_settings.js. -->
+        <div class="settings-group mb-6" id="people-invitations" x-data="invitationsPanel()">
+            <h3>{{ t('sign_in.invitations_title') }}</h3>
+            <p class="form-hint">{{ t('sign_in.invitations_help') }}</p>
+            <div class="form-row" style="align-items:flex-end">
+                <div class="form-group">
+                    <label class="form-label" for="invite-name">{{ t('sign_in.invite_name') }}</label>
+                    <input type="text" class="form-input" id="invite-name" x-model="name" maxlength="64">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="invite-hours">{{ t('sign_in.invite_hours') }}</label>
+                    <input type="number" min="1" max="72" step="1" class="form-input" id="invite-hours" x-model="hours" style="max-width:120px">
+                </div>
+                <button type="button" class="btn btn-primary" id="invite-make" :disabled="!!busy" @click="make()">{{ t('sign_in.invite_make') }}</button>
+            </div>
+            <div x-show="problem" x-cloak class="notice tone-warning" data-invite-problem x-text="problem"></div>
+            <div x-show="link" x-cloak class="notice tone-info" data-invite-link-box style="margin-top:12px">
+                <div style="flex:1;min-width:0">
+                    <div style="font-weight:600;margin-bottom:6px">{{ t('sign_in.invite_link_once') }}</div>
+                    <code style="display:block;word-break:break-all;margin-bottom:8px" translate="no" dir="ltr" data-invite-link x-text="link"></code>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button type="button" class="btn btn-sm btn-primary" @click="copy()">{{ t('sign_in.copy_link') }}</button>
+                        <button type="button" class="btn btn-sm btn-secondary" @click="link = ''">{{ t('common.dismiss') }}</button>
+                    </div>
+                </div>
+            </div>
+            <div x-show="failed" x-cloak class="notice tone-danger">{{ t('sign_in.invitations_failed') }}</div>
+            <div class="account-list-table" x-show="loaded && list.length > 0" x-cloak style="margin-top:12px">
+              <template x-for="inv in list" :key="inv.id">
+                <div class="account-list-row" :data-invitation="inv.id">
+                  <span class="account-list-name"><bdi translate="no" x-text="inv.name || '—'"></bdi></span>
+                  <span class="account-list-meta"><span class="badge" :class="inv.status === 'open' ? 'badge-success' : 'badge-neutral'" :data-invitation-status="inv.status" x-text="statusText(inv)"></span>
+                    <span x-show="inv.status === 'open'" x-cloak x-text="untilText(inv)"></span></span>
+                  <span class="account-list-actions"><button type="button" class="btn btn-sm btn-ghost" x-show="inv.status === 'open'" x-cloak :data-revoke-invitation="inv.id" @click="revoke(inv)">{{ t('sign_in.revoke') }}</button></span>
+                </div>
+              </template>
+            </div>
+            <div x-show="loaded && !failed && list.length === 0" x-cloak class="empty-state" style="padding:12px">{{ t('sign_in.invitations_none') }}</div>
         </div>
         <!-- Shared spaces (Spaces S2-12): the admin makes a plain shared
              space (the default) or one with a project folder, the one kind
@@ -5795,5 +5906,6 @@
 <script src="/static/js/settings_ops.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings_alerts.js?v={{ js_version() }}"></script>
 <script src="/static/js/chat_links.js?v={{ js_version() }}"></script>
+<script src="/static/js/sign_in_settings.js?v={{ js_version() }}"></script>
 <script src="/static/js/settings.js?v={{ js_version() }}"></script>
 {% endblock %}

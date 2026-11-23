@@ -151,13 +151,13 @@ def open_switches_refusal() -> str:
         )
     if not others:
         return ""
-    people = len(others) + 1
+    names = ", ".join(str(a.get("name") or a.get("id") or "") for a in others)
     return (
-        f"Kazma will not start: {people} people have accounts on this install, and "
-        f"{', '.join(on)} {'lets' if len(on) == 1 else 'let'} anyone in without signing in. "
-        "Once a second person has an account these switches are refused (Spaces S4-03). Turn "
-        f"{'it' if len(on) == 1 else 'them'} off in the install's .env (remove the line, or set it to 0), "
-        "then start Kazma again."
+        f"Kazma will not start: {', '.join(on)} {'lets' if len(on) == 1 else 'let'} anyone in "
+        f"without signing in, and these accounts besides the owner's exist: {names}. Once a "
+        "second person has an account these switches are refused (Spaces S4-03). Turn "
+        f"{'it' if len(on) == 1 else 'them'} off in the install's .env (remove the line, or set "
+        "it to 0), then start Kazma again."
     )
 
 

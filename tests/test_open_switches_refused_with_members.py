@@ -67,7 +67,9 @@ def test_a_switch_that_opens_the_install_is_refused_once_a_second_account_exists
     else:
         raise AssertionError(f"Kazma started with {switch} on and a second account")
     said = capsys.readouterr().err
-    assert switch in said and "people have accounts" in said and ".env" in said, said
+    # It names the switch, the accounts it counted, and how to turn it off.
+    assert switch in said and ".env" in said, said
+    assert "matrix-person-a" in said and "matrix-person-b" in said, said
 
 
 @pytest.mark.parametrize("switch", boot_guard.OPEN_SWITCHES)

@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Spaces: stronger sign-in, and no open switch once two people have accounts (2026-11-23)
+
+- A second factor can be turned on in My account: after the password, a code
+  from an authenticator app (or a recovery code, once). Its secret is kept in
+  the vault. The admin can reset a person's from People.
+- Once a second person has an account, Kazma refuses to start while a switch
+  lets anyone in without signing in: sign-in off (`KAZMA_AUTH_DISABLED`,
+  `KAZMA_DEV_WS_BYPASS`, `KAZMA_LOOPBACK_AUTOLOGIN`), demo mode
+  (`KAZMA_DEMO_MODE`) and the chat apps' open switch
+  (`KAZMA_GATEWAY_OPEN_TO_EVERYONE`). This also applies to an install still on
+  the older multi-user mode. The refusal names the accounts it counted; turn
+  the switch off in the install's `.env` and start Kazma again.
+- Once a second person has an account (Spaces on), the browser on Kazma's own
+  machine no longer signs in by itself: everyone signs in, the owner too, and
+  the sign-in page says why.
+- Wrong passwords for one account from many addresses pause sign-ins to it,
+  except from where its person signed in before, and they are told.
+- The admin invites a person with a link that works once and runs out, and can
+  list and end each person's sessions.
+
 ## Memory: the thresholds chosen on the first set alone (2026-11-22)
 
 - Recall's thresholds were swept once more by the memory plan's rule,

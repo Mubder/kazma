@@ -19,6 +19,7 @@ from kazma_ui.i18n.catalog import runs as _runs
 from kazma_ui.i18n.catalog import scheduled as _scheduled
 from kazma_ui.i18n.catalog import settings as _settings
 from kazma_ui.i18n.catalog import setup as _setup
+from kazma_ui.i18n.catalog import sign_in as _sign_in
 from kazma_ui.i18n.catalog import support as _support
 from kazma_ui.i18n.catalog import web_app as _web_app
 from kazma_ui.i18n.catalog import history_import as _history_import
@@ -37,6 +38,7 @@ CATALOG_MODULES = (
     _alerts,
     _chat,
     _chat_links,
+    _sign_in,
     _common,
     _dashboard,
     _documents,

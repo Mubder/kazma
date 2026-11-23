@@ -85,6 +85,9 @@
       <div><h1>{{ t('login.sign_in') }}</h1></div>
     </div>
     <p id="blurb">{{ t('login.blurb') }}</p>
+    {% if everyone_signs_in %}
+    <p id="everyone-signs-in">{{ t('login.everyone_signs_in') }}</p>
+    {% endif %}
     <div id="err" class="login-error" role="alert"></div>
 
     <div class="segmented login-tabs" id="tabs">
@@ -107,6 +110,17 @@
         <label for="secret">{{ t('login.server_secret') }}</label>
         <input id="secret" class="form-input" name="secret" type="password" placeholder="{{ t('login.secret_placeholder') }}" autocomplete="current-password">
         <button type="submit" class="btn btn-primary login-submit" id="btnSecret">{{ t('login.with_secret') }}</button>
+      </form>
+    </div>
+
+    <!-- A second factor (Spaces S4-02): asked after a right password, for
+         an account that has one. -->
+    <div id="mode-code" class="mode-panel">
+      <form id="codeForm" autocomplete="off">
+        <label for="code">{{ t('login.code') }}</label>
+        <p>{{ t('login.code_help') }}</p>
+        <input id="code" class="form-input" name="code" type="text" inputmode="text" autocomplete="one-time-code" translate="no" dir="ltr" maxlength="16">
+        <button type="submit" class="btn btn-primary login-submit" id="btnCode">{{ t('login.verify') }}</button>
       </form>
     </div>
 
@@ -140,9 +154,28 @@
         });
       });
 
+      // The last sign-in sent: a second factor's code goes with it again.
+      var lastBody = null;
+      var codeWords = {
+        wrong_second_factor: {{ t('login.code_wrong') | tojson }}
+      };
+      function askForCode(data) {
+        document.getElementById('tabs').style.display = 'none';
+        document.querySelectorAll('.mode-panel').forEach(function (p) { p.classList.remove('active'); });
+        document.getElementById('mode-code').classList.add('active');
+        if (data.error === 'wrong_second_factor') {
+          err.textContent = codeWords.wrong_second_factor;
+          err.classList.add('show');
+        }
+        var input = document.getElementById('code');
+        input.value = '';
+        input.focus();
+      }
+
       async function doLogin(body, btn) {
         err.classList.remove('show');
         err.textContent = '';
+        if (!body.code) lastBody = body;
         if (btn) btn.disabled = true;
         try {
           var res = await fetch('/api/auth/login', {
@@ -153,6 +186,11 @@
           });
           var data = {};
           try { data = await res.json(); } catch (_) {}
+          if (res.status === 401 && data.second_factor_required) {
+            if (btn) btn.disabled = false;
+            askForCode(data);
+            return;
+          }
           if (!res.ok) {
             err.textContent = data.detail || data.message || data.error || {{ t('login.failed') | tojson }};
             err.classList.add('show');
@@ -173,6 +211,12 @@
           username: document.getElementById('username').value,
           password: document.getElementById('password').value,
         }, document.getElementById('btnUser'));
+      });
+      document.getElementById('codeForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (!lastBody) return;
+        doLogin(Object.assign({}, lastBody, { code: document.getElementById('code').value }),
+                document.getElementById('btnCode'));
       });
       document.getElementById('secretForm').addEventListener('submit', function (e) {
         e.preventDefault();

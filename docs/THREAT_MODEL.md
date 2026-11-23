@@ -37,7 +37,12 @@ nothing from the operator.
 Encrypting a space so that only its members can open it is planned, not
 built. A person's export of their own space is sealed with a password they
 choose; once a second person exists, the only copy of a backup that leaves
-the machine is restic's encrypted one. Spaces has not been reviewed
+the machine is restic's encrypted one. Once a second person has an account,
+everyone signs in, the operator too, on the install's own machine as
+anywhere: the loopback auto-login is off, and the switches that let anyone
+in without signing in (sign-in off, demo mode, the chat apps' open switch)
+stop Kazma from starting. A second factor (a code from an authenticator
+app) can be turned on for any account. Spaces has not been reviewed
 independently.
 
 - **The operator has full control.** Every safeguard below can be switched
@@ -60,7 +65,7 @@ independently.
   section 7 says what a real boundary would take.
 
 **Reviewed 2026-09-12** against the code, not against the README; the
-Spaces paragraph on 2026-11-20.
+Spaces paragraph on 2026-11-23.
 
 ---
 

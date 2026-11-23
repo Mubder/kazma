@@ -100,8 +100,14 @@ _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased"
           "space_limits_set", "default_space_limits_set", "sessions_ended")
 #: A person's chat-app accounts (Spaces stage 3, ``spaces.chat_links``).
 _KINDS += ("chat_linked", "chat_unlinked")
+#: Stronger sign-in (S4-02): a second factor (``security.second_factor``),
+#: invitations (``spaces.invitations``), one session ended, and sign-ins to
+#: an account paused after too many wrong passwords.
+_KINDS += ("second_factor_on", "second_factor_off", "second_factor_reset", "invitation_made",
+           "invitation_used", "invitation_revoked", "session_ended", "sign_in_paused")
 #: The events a person is told about, when someone else made them.
-_TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended", "chat_linked")
+_TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended", "chat_linked",
+         "second_factor_reset", "session_ended", "sign_in_paused")
 _NAME_MAX = 64
 #: One shared-space create at a time in this process (the review, finding 10).
 _CREATE_LOCK = threading.Lock()
@@ -235,10 +241,22 @@ def list_people() -> list[dict[str, Any]]:
                       and link.get("account") == account_id],
             **signed_in.get(account_id, {"sessions": 0, "last_sign_in": ""}),
             **_limits_of(reg, account_id, limit_of),
+            # Whether they have a second factor (S4-02); None when the vault
+            # cannot say.
+            "second_factor": _second_factor_on(account_id),
         }
         for account_id, account in reg["accounts"].items()
     ]
     return sorted(people, key=lambda p: (not p["owner"], p["name"].lower()))
+
+
+def _second_factor_on(account_id: str) -> bool | None:
+    from kazma_core.security.second_factor import SecondFactorUnavailable, state
+
+    try:
+        return bool(state(account_id)["on"])
+    except SecondFactorUnavailable:
+        return None
 
 
 def _spaces_of(reg: dict[str, Any], account_id: str) -> list[dict[str, Any]]:
@@ -889,6 +907,14 @@ def delete_person(account_id: str, *, by: str) -> None:
     seqs = {space_id: _journal_entry_forget(space_id, account_id) for space_id in shared}
     _changed(_change)
     _end_sessions_of(legacy[0] if legacy else account_id)
+    # Their second factor goes with them (S4-02).
+    from kazma_core.security.second_factor import SecondFactorUnavailable, forget
+
+    try:
+        forget(account_id)
+    except (SecondFactorUnavailable, sqlite3.Error, OSError, RuntimeError):
+        logger.warning("[people] the second factor of deleted account %s was not removed",
+                       account_id, exc_info=True)
     logger.warning("[people] account deleted id=%s by=%s", account_id, by)
     # Every shared space they were in forgets the facts under their entry,
     # as if they had left it (N36); all are tried before a failure is said.

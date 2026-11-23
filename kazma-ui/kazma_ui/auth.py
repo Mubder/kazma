@@ -519,6 +519,28 @@ def _loopback_auto_login_enabled() -> bool:
     return raw in ("1", "true", "on", "yes")
 
 
+def everyone_signs_in() -> bool:
+    """Whether every person signs in, the owner too, on this machine as
+    anywhere (Spaces S4-02): once Spaces is enforced and an account besides
+    the owner's exists. Then the loopback auto-login is off -- the peer
+    address is no credential -- and the sign-in page says why. Before
+    Spaces, or with one account, False: nothing changes. An identity store
+    that cannot answer counts as yes (unknown is never a pass). Blocking
+    (the identity store): call it in a thread."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    try:
+        return any(account.get("id") != OWNER_ACCOUNT_ID for account in identity.list_accounts())
+    except identity.IdentityUnavailable:
+        logger.warning("[auth] whether others have accounts cannot be read: no auto-login", exc_info=True)
+        return True
+
+
 def _peer_trust_allowed(request: Request) -> bool:
     """Whether peer address may be treated as a credential for this request.
 
@@ -529,10 +551,16 @@ def _peer_trust_allowed(request: Request) -> bool:
     A proxy the operator did *not* declare also revokes peer trust, so a
     mis-set ``KAZMA_TRUSTED_PROXIES`` (the Docker bridge address is not
     ``127.0.0.1``) fails closed instead of silently leaving the bypass open.
+
+    Once a second person has an account (Spaces enforced), never: everyone
+    signs in, the owner too (:func:`everyone_signs_in`, Spaces S4-02).
+    Blocking (the identity store, when Spaces is enforced).
     """
     # Cheap when already latched; one header read per request otherwise.
     _note_forwarded_headers(request)
     if undeclared_proxy_detected():
+        return False
+    if everyone_signs_in():
         return False
     if not behind_proxy():
         return True
@@ -837,12 +865,18 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/api/auth/status",
     "/api/auth/oidc/start",
     "/api/auth/oidc/callback",
+    # Accepting an invitation (Spaces S4-02): before the person has an
+    # account; the one-use token in the body is the credential.
+    "/api/invitations/accept",
 }) | PUBLIC_GUIDE_PATHS
 
 #: Path prefixes that are always open (browser-redirect targets that
 #  cannot carry the X-Kazma-Secret header, e.g. the GitHub OAuth callback
 #  which GitHub redirects to with only a ?code= query param).
 ALWAYS_OPEN_PREFIXES: tuple[str, ...] = (
+    # An invitation link's page (Spaces S4-02): the token in its path is the
+    # credential; the page only asks for a name and a password.
+    "/invite/",
     # Callbacks are browser redirects with ?code= only (no secret header).
     "/api/github/oauth/callback",
     # The starts (/api/github/oauth/start, /api/email/oauth/*/start,

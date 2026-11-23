@@ -1456,12 +1456,14 @@ class KazmaAppBuilder:
             from kazma_ui.own_keys_api import create_own_keys_router
             from kazma_ui.people_api import create_people_router
             from kazma_ui.saas_api import create_saas_router
+            from kazma_ui.sign_in_api import create_sign_in_router
             from kazma_ui.spaces_api import create_spaces_router
 
             self.app.include_router(create_account_spaces_router())
             self.app.include_router(create_chat_links_router())
             self.app.include_router(create_own_keys_router())
             self.app.include_router(create_people_router())
+            self.app.include_router(create_sign_in_router())
             self.app.include_router(create_spaces_router())
 
             self.app.include_router(create_saas_router())
