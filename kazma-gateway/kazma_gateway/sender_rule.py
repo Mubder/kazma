@@ -363,7 +363,8 @@ class SenderGate:
     ) -> None:
         from kazma_core.spaces import chat_links
 
-        result = await asyncio.to_thread(chat_links.redeem, self.name, uid, code, direct=direct)
+        result = await asyncio.to_thread(chat_links.redeem, self.name, uid, code, direct=direct,
+                                         target=target_id)
         if not direct and not result.reply_in_group():
             return
         import httpx

@@ -637,10 +637,12 @@ class CronScheduler:
         creator = bound_asker() or ""
         if spaces_enforced():
             who = creator or await asyncio.to_thread(_acting_account, tenant_id)
-            if who != _owner_account():
-                # Every address Kazma can send to before people link their own
-                # chat apps (S3-05) is the owner's: a job booked by anyone else
-                # would carry their words into the owner's chat.
+            if who != _owner_account() and not await asyncio.to_thread(
+                    _their_address, who, delivery_target, tenant_id):
+                # A job of anyone but the owner sends only to that person's
+                # own chat-app address (S3-05: their linked chat, or a group
+                # of the space they are in): never carries their words into
+                # someone else's chat.
                 raise CronLimitError(NO_OWN_ADDRESS, code="no_own_address")
         settings = await asyncio.to_thread(cron_settings)
         if await self._store.count_jobs(tenant_id=tenant_id) >= settings.max_jobs_per_tenant:
@@ -1501,15 +1503,15 @@ def _parse_dt(value: Any) -> datetime | None:
 
 #: Why a booking is refused once Spaces is enforced (code ``no_own_address``).
 NO_OWN_ADDRESS = (
-    "Kazma can only send a scheduled message to the owner's chat app for now, "
-    "so only the owner can book one. Sending to your own chat app comes later."
+    "Kazma has no chat-app address of yours to send this job's messages to. Link a chat app "
+    "of your own (Settings → My account → Chat apps), then book it again."
 )
 
 #: Why a fire is refused once Spaces is enforced, by outcome.
 _FIRE_REFUSALS = {
     "no_space": "Error: this job belongs to no space of this install, so it does not fire.",
-    "no_own_address": ("Error: this job acts for someone other than the owner, and the only "
-                       "addresses Kazma has are the owner's, so it does not fire."),
+    "no_own_address": ("Error: the address this job sends to is not its person's own chat app, "
+                       "so it does not fire."),
     "identity_unavailable": ("Error: the accounts of this install cannot be read, so who this job "
                              "acts for is unknown and it does not fire."),
     "feature_off": ("Error: Scheduled is off for the person this job acts for (Settings → "
@@ -1595,9 +1597,8 @@ def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
     for a job booked with no person bound, the account Kazma's own work for
     that space acts for (``identity.acting_account``). It does not fire
     (``refusal``) when the job's tenant is no space of the install
-    (``no_space``), or when it acts for anyone but the owner
-    (``no_own_address``): until people link their own chat apps (S3-05)
-    every address a job can deliver to is the owner's. Nor when the person
+    (``no_space``), or when it acts for anyone but the owner and its address
+    is not that person's own chat app (``no_own_address``, S3-05). Nor when the person
     it acts for no longer has the feature Scheduled (``feature_off``, S2-11:
     the check made again when the work runs). A job whose person is disabled
     waits (``creator_disabled``, S2-07: a pause, never a failure).
@@ -1620,9 +1621,30 @@ def _fire_binding(job: ScheduledJob) -> _FireBinding | None:
         return _FireBinding(space=space, asker=asker, refusal="creator_disabled")
     if work_refusal("scheduled", asker):
         return _FireBinding(space=space, asker=asker, refusal="feature_off")
-    if asker != _owner_account():
+    if asker != _owner_account() and not _their_address(asker, job.delivery_target, space):
         return _FireBinding(space=space, asker=asker, refusal="no_own_address")
     return _FireBinding(space=space, asker=asker)
+
+
+def needs_own_address() -> bool:
+    """Whether a booking by the work bound now must carry its person's own
+    chat-app address (S3-05): Spaces is enforced and the person is not the
+    owner. A booking surface that found no address lets the scheduler refuse
+    it then (``no_own_address``) rather than ask for the owner's settings.
+    No I/O."""
+    from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+    person = bound_asker() or ""
+    return spaces_enforced() and bool(person) and person != _owner_account()
+
+
+def _their_address(account: str, target: str | None, space_id: str | None) -> bool:
+    """Whether *target* is *account*'s own chat-app address (S3-05,
+    ``chat_links.is_their_address``). Blocking (the identity store); raises
+    ``IdentityUnavailable`` when it cannot say."""
+    from kazma_core.spaces.chat_links import is_their_address
+
+    return is_their_address(account, target, str(space_id or ""))
 
 
 def _tenant_scope() -> tuple[bool, str | None]:

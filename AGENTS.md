@@ -16202,6 +16202,34 @@ an install with one account behaves as before.
   - Gates: `tests/test_chat_approvals_asker.py` (the real handler; the
     gateway-admin rule, and O1 keeping results off every chat, as the
     controls).
+- **A web turn's notices go to its asker's own chat (S3-05, 2026-11-23).**
+  Only where Spaces is enforced; before it every web turn stamps the
+  operator's Telegram, as always.
+  - A link keeps the direct chat it was made from (`target`, recorded by
+    `chat_links.redeem(target=)`; an adopted owner link its Telegram chat).
+    `chat_links.address_of(account)` is a person's own address (Telegram,
+    WhatsApp, Slack, Discord, in that order; a Discord or Slack link only
+    once its direct chat is recorded), and `chat_links.is_their_address`
+    says whether an address is theirs (one of their links, or a group bound
+    to the job's space they are a member of).
+  - `send_message._own_address` is the one fallback of
+    `resolve_delivery_target`: the bound person's own address; the owner's
+    falls back to the operator's Telegram; anyone else with none, and work
+    that names no person, get "" -- never the owner's address for someone
+    else. `web_gateway_block` (the web chat and live voice), the Scheduled
+    page's booking and `schedule_task` take it.
+  - **N41's refusal is lifted for a person's own address only**: a booking
+    by anyone but the owner, and its fire, pass when the job's address is
+    theirs (`scheduler._their_address`); addressed to anyone else's chat --
+    or with no address of theirs (`needs_own_address`: the page and the tool
+    let the scheduler say so) -- they are refused `no_own_address`, which now
+    says how to link a chat app (EN/AR; the ready-made automations word the
+    refusal's code too).
+  - Gates: `tests/test_web_turn_delivery_target.py` (two people, two
+    targets; a member's reminder booked and fired into their own chat; the
+    owner's Telegram stamped on every web turn as the control),
+    `tests/e2e/test_member_reminder_browser.py` (by the sidebar, EN/AR: a
+    linked member books, an unlinked one is told to link).
 
 ## UI Conventions (Web)
 

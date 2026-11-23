@@ -81,7 +81,9 @@ __all__ = [
     "LINKS_UNKNOWN",
     "NOT_LINKED",
     "OWNER_ID_KEYS",
+    "address_of",
     "adopt_owner_ids",
+    "is_their_address",
     "known_owner_ids",
     "link_refusal",
     "linked_count",
@@ -414,9 +416,11 @@ def _take(code: str, platform: str, user_id: str, *, direct: bool) -> Redemption
     return found[-1] if found else Redemption("unavailable", platform)
 
 
-def _link(platform: str, user_id: str, account_id: str) -> tuple[str, str]:
-    """Write the link. Returns the outcome -- ``linked``, ``already_linked``,
-    ``linked_elsewhere`` or ``account_gone`` -- and the account's name."""
+def _link(platform: str, user_id: str, account_id: str, target: str = "") -> tuple[str, str]:
+    """Write the link, with *target* -- the direct chat the code came from,
+    where the person's own notices go (S3-05). Returns the outcome --
+    ``linked``, ``already_linked``, ``linked_elsewhere`` or ``account_gone``
+    -- and the account's name."""
     from kazma_core.spaces import people
 
     said: list[str] = []
@@ -432,12 +436,15 @@ def _link(platform: str, user_id: str, account_id: str) -> tuple[str, str]:
                 if link.get("account") == account_id:
                     raise identity.IdentityError("already_linked", "already linked")
                 raise identity.IdentityError("linked_elsewhere", "linked to another account")
-        reg["links"].append({
+        link = {
             "platform": platform,
             "user_id": user_id,
             "account": account_id,
             "linked_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        })
+        }
+        if _own_chat(platform, target):
+            link["target"] = target
+        reg["links"].append(link)
         people.record_event(reg, "chat_linked", account_id, account_id, detail=platform)
         said.append("linked")
 
@@ -450,10 +457,12 @@ def _link(platform: str, user_id: str, account_id: str) -> tuple[str, str]:
     return (said[-1] if said else "linked"), (name[-1] if name else "")
 
 
-def redeem(platform: str, user_id: Any, code: str, *, direct: bool) -> Redemption:
+def redeem(platform: str, user_id: Any, code: str, *, direct: bool, target: str = "") -> Redemption:
     """Link the sender's *platform* account with the account that asked for
-    *code*, or say why not. One use: the code is spent by the first message
-    that reaches it whatever happens after. Blocking (the settings store)."""
+    *code*, or say why not; *target* is the direct chat it came from
+    (``<platform>:<chat>``), kept as the person's address. One use: the code
+    is spent by the first message that reaches it whatever happens after.
+    Blocking (the settings store)."""
     plat = (platform or "").strip().lower()
     uid = platform_user_id(plat, user_id)
     if plat not in PLATFORMS or not uid or not linking_on():
@@ -469,7 +478,7 @@ def redeem(platform: str, user_id: Any, code: str, *, direct: bool) -> Redemptio
                     PLATFORM_LABELS.get(plat, plat), uid, taken.outcome)
         return taken
     try:
-        outcome, name = _link(plat, uid, taken.account)
+        outcome, name = _link(plat, uid, taken.account, str(target or "") if direct else "")
     except (identity.IdentityUnavailable, identity.IdentityError, *_store_errors()) as exc:
         logger.warning("[spaces] linking %s %s failed (%s); the code is spent",
                        PLATFORM_LABELS[plat], uid, type(exc).__name__)
@@ -499,6 +508,62 @@ def _link_of(platform: str, user_id: Any) -> str | None:
         if isinstance(link, dict) and link.get("platform") == plat and str(link.get("user_id")) == uid:
             return str(link.get("account") or "") or None
     return None
+
+
+# ── A person's own address (S3-05) ──────────────────────────────────────
+
+#: The chat apps a person's notices go to, in order of preference.
+_ADDRESS_ORDER = ("telegram", "whatsapp", "slack", "discord")
+
+
+def _own_chat(platform: str, target: Any) -> bool:
+    """Whether *target* is a well-formed address on *platform*. Pure."""
+    text = str(target or "")
+    return text.startswith(f"{platform}:") and len(text) > len(platform) + 1 and not text.endswith(":unknown")
+
+
+def _address(link: dict[str, Any]) -> str:
+    """Where a link's notices go: the direct chat recorded when it was made,
+    else the chat its user id is (a Telegram user's direct chat has the
+    user's id; WhatsApp is always the number), else "" (a Discord or Slack
+    direct chat is known only once recorded)."""
+    plat = str(link.get("platform") or "")
+    if _own_chat(plat, link.get("target")):
+        return str(link["target"])
+    uid = str(link.get("user_id") or "")
+    if uid and plat in ("telegram", "whatsapp"):
+        return f"{plat}:{uid}"
+    return ""
+
+
+def address_of(account_id: str) -> str:
+    """The chat-app address *account_id*'s own notices go to -- a reminder
+    booked on the web, a web turn's notice (S3-05) -- or "" when they have
+    linked none it can reach: never anyone else's. Blocking."""
+    links = links_of(account_id) if account_id else []
+    for plat in _ADDRESS_ORDER:
+        for link in links:
+            if link.get("platform") == plat:
+                found = _address(link)
+                if found:
+                    return found
+    return ""
+
+
+def is_their_address(account_id: str, target: Any, space_id: str = "") -> bool:
+    """Whether *target* is *account_id*'s own: one of their links' direct
+    chats, or a group bound to *space_id* (S3-03) that they are a member of.
+    Blocking."""
+    text = str(target or "").strip()
+    if not account_id or ":" not in text:
+        return False
+    if any(_address(link) == text for link in links_of(account_id)):
+        return True
+    if not space_id:
+        return False
+    from kazma_core.spaces.chat_apps import chat_is_the_askers
+
+    return chat_is_the_askers(space_id, account_id, text.split(":", 1)[0], text)
 
 
 # ── What the sender is told ─────────────────────────────────────────────
@@ -816,9 +881,12 @@ def adopt_owner_ids(*, by: str = "") -> list[dict[str, str]]:
             pair = (item["platform"], item["user_id"])
             if pair in held:
                 continue
-            reg["links"].append({"platform": pair[0], "user_id": pair[1],
-                                 "account": OWNER_ACCOUNT_ID, "linked_at": now,
-                                 "adopted_from": item["source"]})
+            adopted = {"platform": pair[0], "user_id": pair[1], "account": OWNER_ACCOUNT_ID,
+                       "linked_at": now, "adopted_from": item["source"]}
+            if pair[0] == "telegram":
+                # The chat Kazma already sends the owner's notices to.
+                adopted["target"] = f"telegram:{pair[1]}"
+            reg["links"].append(adopted)
             held.add(pair)
             people.record_event(reg, "chat_linked", OWNER_ACCOUNT_ID, by or OWNER_ACCOUNT_ID,
                                 detail=pair[0])

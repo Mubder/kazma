@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -36,6 +37,8 @@ __all__ = [
     "resolve_delivery_target",
     "web_gateway_block",
 ]
+
+logger = logging.getLogger(__name__)
 
 _message_backends: dict[str, Callable] = {}
 
@@ -157,8 +160,9 @@ def resolve_delivery_target() -> str:
     """Best delivery address for a reminder booked on this turn.
 
     Order: live ContextVar (gateway/Telegram chat) → cron-parent job →
-    operator Telegram. Empty means the booking must fail closed rather
-    than persist ``target=(none)`` and drop the fire-time alert.
+    the person's own address (:func:`_own_address`). Empty means the booking
+    must fail closed rather than persist ``target=(none)`` and drop the
+    fire-time alert.
     """
     cur = str(get_current_delivery_target() or "").strip()
     if is_valid_delivery_target(cur):
@@ -173,17 +177,48 @@ def resolve_delivery_target() -> str:
                 return inherited
     except Exception:
         pass
-    return operator_telegram_target()
+    return _own_address()
+
+
+def _own_address() -> str:
+    """The chat-app address of the person the work is for, where a reminder
+    or a notice of theirs goes when no chat asked (a web turn, the Scheduled
+    page). Before Spaces: the operator's Telegram, as always. Once Spaces is
+    enforced (S3-05): the bound person's own linked chat
+    (``chat_links.address_of``) -- the owner's falls back to the operator's
+    Telegram -- and "" for anyone with none, or for work that names no
+    person: never the owner's address for someone else. Blocking."""
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, bound_asker, spaces_enforced
+
+    if not spaces_enforced():
+        return operator_telegram_target()
+    person = bound_asker() or ""
+    if not person:
+        return ""
+    from kazma_core.spaces.chat_links import address_of
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    try:
+        found = address_of(person)
+    except IdentityUnavailable:
+        logger.warning("[send_message] whose address this is cannot be read; nothing is stamped")
+        return ""
+    if found:
+        return found
+    return operator_telegram_target() if person == OWNER_ACCOUNT_ID else ""
 
 
 def web_gateway_block(thread_id: str) -> dict[str, str]:
     """Internal ``_gateway`` routing block for Web SSE/WS turns.
 
-    Web has no inbound ``telegram:<chat_id>``. Stamp the operator Telegram
-    address (same one lifecycle notifications use) so ``schedule_task``
-    captures a deliverable target. ``platform`` stays ``web`` — the
-    conversation is the Web UI; only the reminder alert goes to Telegram.
-    Does not put a raw ``chat_id`` on SupervisorState (AGENTS.md §2).
+    Web has no inbound ``telegram:<chat_id>``. Stamp the person's own
+    chat-app address (:func:`_own_address`: before Spaces the operator's
+    Telegram, the one lifecycle notifications use; once enforced, the
+    asker's linked chat, never the owner's for anyone else) so
+    ``schedule_task`` captures a deliverable target. ``platform`` stays
+    ``web`` — the conversation is the Web UI; only the reminder alert goes
+    to the chat app. Does not put a raw ``chat_id`` on SupervisorState
+    (AGENTS.md §2).
     """
     return {
         "thread_id": str(thread_id or ""),

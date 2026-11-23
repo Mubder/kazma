@@ -45,8 +45,13 @@
           }
           if (typeof this.refreshAll === 'function') this.refreshAll();
         } catch (e) {
+          // A refusal the server names by its code is said in the page's
+          // language (no_own_address: link a chat app of your own, S3-05).
+          var why = (e && e.message) || '';
+          var code = e && e.body && e.body.code;
+          if (code) why = tr('scheduled.err_' + code, why);
           if (typeof window.showToast === 'function') {
-            window.showToast(tr('scheduled.recipe_failed', 'Not set up: {why}', { why: (e && e.message) || '' }), 'error');
+            window.showToast(tr('scheduled.recipe_failed', 'Not set up: {why}', { why: why }), 'error');
           }
         } finally {
           this.booking = '';
