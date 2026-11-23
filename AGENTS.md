@@ -16409,6 +16409,41 @@ an install with one account behaves as before.
   enforced. Gate: `tests/test_chat_admin_is_an_account.py` (the rule, a
   listed member refused through the real handler in English and Arabic,
   the owner's linked chat passing; the environment list as the control).
+- **The stage 3 review's fixes (2026-11-23).** Only where Spaces is
+  enforced, unless said.
+  - **A link is made from a person's own sign-in** (H1,
+    `chat_links_api._own_sign_in`): the chat-link routes answer a browser
+    session, or a credential with the admin role (the shared secret, an
+    admin token); a token of any other role is refused, 403
+    `own_sign_in_only`. Every API token is the owner's account
+    (`space_binding.account_of`), and an operator token's code made its
+    holder the chat apps' admin. Gate: `tests/test_chat_links_own_sign_in.py`.
+  - **The switch adopts only what was the owner** (M1,
+    `chat_links.owner_link_plan`, `_was_the_owner`): a known id passes the
+    sender rule of before (on the allowlist, the allowlist empty, or the
+    open switch) and the admin rule of before (`KAZMA_GATEWAY_ADMINS` when
+    set, else the allowlist, else the known ids); a Telegram group (a
+    negative id) is never adopted; `--check` names every id adopted and
+    every one left, with why. The core restates the gateway's rules (it does
+    not import the gateway). Gate: `tests/test_switch_on_adopts_the_owner_only.py`.
+  - **Codes** (L1, L2, `sender_rule.link_attempted`, `chat_links.prefixed_code`,
+    `bare_code`, `live_codes_in`, `is_live_code`): a code alone from a
+    linked sender counts only when it is live (a "next-week" is their
+    message, never a guess counted against them); a live code anywhere in
+    a message, its own word, is burned in a group and redeemed in a direct
+    chat, never handed to the agent; the live codes are kept in memory (this
+    process's issues and uses at once, another's through the store's change
+    notice). A redemption is a `chat_linked` event by the chat-app account
+    that sent the code, told to the account at its next page load
+    (`people._TOLD`, `account_notices.js`), with Unlink and "It was me".
+  - **The links in memory fail closed** (L3, L4): a read that fails forgets
+    them (`chat_links._forget_snapshot`: no stale admin); `linked_admin`
+    reads again past `LINKS_TTL_S`; before the links were read a reply waits
+    in the outbox (`gateway._links_unknown`). A native command's unlinked
+    sender is told how to link (L5); `--check` reads a list-typed allowlist
+    as ids (`chat_links.split_ids`, L6). Gate:
+    `tests/test_chat_link_codes_review.py` (each with the rule of before as
+    its control), `tests/e2e/test_chat_unlink_browser.py` (EN/AR).
 
 ## UI Conventions (Web)
 

@@ -101,7 +101,7 @@ _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased"
 #: A person's chat-app accounts (Spaces stage 3, ``spaces.chat_links``).
 _KINDS += ("chat_linked", "chat_unlinked")
 #: The events a person is told about, when someone else made them.
-_TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended")
+_TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended", "chat_linked")
 _NAME_MAX = 64
 #: One shared-space create at a time in this process (the review, finding 10).
 _CREATE_LOCK = threading.Lock()
@@ -713,6 +713,15 @@ def notices_for(account_id: str) -> list[dict[str, Any]]:
         if event["kind"] == "member_removed":
             # Said only once it is true (the S2-12 review, finding 4).
             notice["forgotten"] = _entry_forgotten(account_id, str(event.get("space") or ""))
+        if event["kind"] == "chat_linked":
+            # Which chat-app account sent the code (the stage 3 review, L2):
+            # the page offers to unlink it. An adoption at the switch is the
+            # owner's own and is not told (by the account itself).
+            platform, _sep, user = str(event.get("by") or "").partition(":")
+            notice["platform"] = platform
+            notice["chat_user"] = user
+            if not user:
+                continue
         told.append(notice)
     return told
 

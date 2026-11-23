@@ -12,6 +12,14 @@ They answer for the caller only (an ``account`` route): every signed-in
 person reaches them once Spaces is enforced, and an install that does not
 enforce it lists nothing and issues nothing (409 ``spaces_off``). The code is
 shown once, in the answer; Kazma keeps only its hash.
+
+Only a person's own sign-in -- a browser session -- or a credential with the
+admin role (the shared secret, an admin token) reaches them: every API token
+is the owner's account (``space_binding.account_of``), and an operator token
+(one handed to another agent for A2A, say) asked for a code of the owner's
+account and its holder became the chat apps' admin (the stage 3 review,
+H1). Any other token is refused, 403 ``own_sign_in_only``
+(:func:`_own_sign_in`).
 """
 
 from __future__ import annotations
@@ -66,8 +74,42 @@ def _running_platforms() -> list[dict[str, Any]]:
     return out
 
 
-def _caller(request: Request) -> str | None:
-    return space_binding.account_of(auth.get_request_principal(request))
+#: What :func:`_caller` answers for a sign-in that is no person's own and
+#: not the admin's: a token of another role (403 ``own_sign_in_only``).
+_NOT_OWN_SIGN_IN = object()
+
+
+def _own_sign_in(request: Request, principal: dict[str, Any]) -> bool:
+    """Whether *principal* may link, list or unlink chat-app accounts of
+    the account behind it: a person's own session, or a credential the
+    admin decision passes (``auth.admin_decision``: the shared secret, an
+    admin token -- it can already change everything). An operator or
+    viewer token maps to the owner's account and is refused (H1).
+    Blocking (a session read)."""
+    if principal.get("source") == "session":
+        return True
+    return auth.admin_decision(request) == "ok"
+
+
+def _caller(request: Request) -> Any:
+    """The account the routes act for, None for a sign-in with no account,
+    or :data:`_NOT_OWN_SIGN_IN`. Blocking (a session read)."""
+    principal = auth.get_request_principal(request)
+    if principal and not _own_sign_in(request, principal):
+        return _NOT_OWN_SIGN_IN
+    return space_binding.account_of(principal)
+
+
+def _refused(account: Any) -> JSONResponse | None:
+    """The answer to a caller the routes do not serve, or None."""
+    if account is _NOT_OWN_SIGN_IN:
+        return JSONResponse(
+            {"ok": False, "error": "own_sign_in_only",
+             "message": "Chat apps are linked from a person's own sign-in, never with a token."},
+            status_code=403)
+    if account is None:
+        return JSONResponse({"ok": False, "error": "no_account"}, status_code=403)
+    return None
 
 
 def _unavailable() -> JSONResponse:
@@ -86,8 +128,9 @@ def create_chat_links_router() -> APIRouter:
     def my_chat_links(request: Request) -> JSONResponse:
         # A plain def: the identity store is read in a worker thread.
         account = _caller(request)
-        if account is None:
-            return JSONResponse({"ok": False, "error": "no_account"}, status_code=403)
+        refused = _refused(account)
+        if refused is not None:
+            return refused
         if not spaces_enforced():
             return JSONResponse({"ok": True, "enforced": False, "links": [], "platforms": []})
         try:
@@ -109,8 +152,9 @@ def create_chat_links_router() -> APIRouter:
 
     def _issue(request: Request, platform: Any) -> JSONResponse:
         account = _caller(request)
-        if account is None:
-            return JSONResponse({"ok": False, "error": "no_account"}, status_code=403)
+        refused = _refused(account)
+        if refused is not None:
+            return refused
         from kazma_ui.i18n import current_language
 
         try:
@@ -125,8 +169,9 @@ def create_chat_links_router() -> APIRouter:
 
     def _unlink(request: Request, platform: Any, user_id: Any) -> JSONResponse:
         account = _caller(request)
-        if account is None:
-            return JSONResponse({"ok": False, "error": "no_account"}, status_code=403)
+        refused = _refused(account)
+        if refused is not None:
+            return refused
         try:
             taken = chat_links.unlink(account, str(platform or ""), user_id, by=account)
         except chat_links.LinkRefused as exc:

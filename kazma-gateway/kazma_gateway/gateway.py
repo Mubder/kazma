@@ -603,6 +603,19 @@ def _dropped_for_its_person(target_id: str) -> bool:
     return True
 
 
+def _links_unknown() -> bool:
+    """Whether, once Spaces is enforced, the chat-app links were never read
+    (memory): a reply then waits in the outbox rather than go to a chat that
+    may be unlinked (the stage 3 review, L4: it failed open)."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    from kazma_core.spaces.chat_links import links_known
+
+    return not links_known()
+
+
 #: How often the outbox loop tries again what the platforms did not take.
 _OUTBOX_POLL_S = 10.0
 #: A reply sent later than this after its first try says it is late.
@@ -927,6 +940,19 @@ class GatewayManager:
             return False
 
         platform = outbound.target_id.split(":", 1)[0]
+        if _links_unknown():
+            # Not yet known whether this chat is still linked: kept for the
+            # outbox's next pass (a durable reply), never sent on a guess.
+            if self._outbox is not None and self._keeps(outbound):
+                try:
+                    row = await asyncio.to_thread(self._outbox.begin, outbound)
+                    if row is not None:
+                        await asyncio.to_thread(self._outbox.finish, row, "not_sent", None,
+                                                "waiting for the chat-app links")
+                except (sqlite3.Error, OSError) as exc:
+                    logger.warning("[Gateway] the chat outbox could not keep a reply: %s", exc)
+            logger.info("[Gateway] a %s reply waits: the chat-app links are not read yet", platform)
+            return False
         if _dropped_for_its_person(outbound.target_id):
             return False
         # No chat app shows a markdown table: rows as lines (chat_tables).
@@ -1021,6 +1047,10 @@ class GatewayManager:
             await _alert_undeliverable(row["platform"], row["error"])
         for row_id, outbound, first_tried in to_send:
             platform = outbound.target_id.split(":", 1)[0]
+            if _links_unknown():
+                await asyncio.to_thread(outbox.finish, row_id, "not_sent", None,
+                                        "waiting for the chat-app links")
+                continue
             if _dropped_for_its_person(outbound.target_id):
                 # Waiting for a chat whose person was unlinked, deleted or
                 # disabled since (S3-07): dropped, never sent.

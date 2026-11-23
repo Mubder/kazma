@@ -38,7 +38,7 @@ def _t(key: str, lang: str, **values: str) -> str:
     return t(key, lang, **values)
 
 
-def _signed_in(browser, base: str, name: str, lang: str):
+def _signed_in(browser, base: str, name: str, lang: str, *, linked: bool = False):
     ctx = browser.new_context()
     ctx.add_cookies([{"name": "kazma-lang", "value": lang, "url": base}])
     signed = ctx.request.post(f"{base}/api/auth/login", data={"username": name, "password": PASSWORD})
@@ -46,6 +46,12 @@ def _signed_in(browser, base: str, name: str, lang: str):
     pg = ctx.new_page()
     pg.goto(f"{base}/chat", wait_until="domcontentloaded")
     pg.wait_for_function("() => !!window.kazmaSpace", timeout=20000)
+    if linked:
+        # They linked their own Telegram: told so at this page load (the
+        # stage 3 review, L2), and it was them.
+        from tests.e2e.test_chat_unlink_browser import it_was_me
+
+        it_was_me(pg, lang)
     _soft_nav(pg, "/scheduled")
     pg.locator("#sched-recipes").wait_for(state="visible", timeout=20000)
     pg.wait_for_function(
@@ -78,7 +84,7 @@ def test_a_member_s_reminder_goes_to_their_own_chat(lang):
         assert get_cron_scheduler() is not None, "the scheduler runs in the harness"
         browser = p.chromium.launch()
         try:
-            pg = _signed_in(browser, h.base, dana["name"], lang)
+            pg = _signed_in(browser, h.base, dana["name"], lang, linked=True)
             pg.locator("#recipe-book-morning_briefing").click()
             said = _toast(pg)
             assert _t("scheduled.recipe_booked", lang) in said, said

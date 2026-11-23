@@ -311,7 +311,10 @@ def test_whatsapp_asks_the_link(dana) -> None:
 
 def test_the_owner_s_known_ids_become_the_owner_s_links_at_the_switch(store, monkeypatch) -> None:
     store.set("guard.telegram.chat_id", str(OWNER_TG), "guard")
-    monkeypatch.setenv("KAZMA_GATEWAY_ADMINS", "discord:4242, slack:U77, 31337")
+    # The environment list is the admin rule of before: the owner's Telegram
+    # is in it, as it was the owner (the stage 3 review, M1: only what was
+    # the owner before the switch is adopted).
+    monkeypatch.setenv("KAZMA_GATEWAY_ADMINS", f"telegram:{OWNER_TG}, discord:4242, slack:U77, 31337")
     planned = next(s for s in preconditions.plan() if s["step"] == "chat_links")
     assert len(planned["changes"]) == 3, planned
     monkeypatch.setattr(scope, "_enforced", False)

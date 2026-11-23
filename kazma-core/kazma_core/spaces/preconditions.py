@@ -477,32 +477,46 @@ def notes() -> list[str]:
 
 
 def _listed_senders_note() -> list[str]:
-    """The senders on a chat app's allowlist who are neither the owner's
-    known ids nor linked: once Spaces is on they are refused until they link
-    their own account (stage 3). A note, never a refusal."""
+    """What switching Spaces on does to the chat apps' senders, named one by
+    one (the stage 3 review, M1): the owner's known ids it makes the owner's
+    links, the known ids it does not (with why: they were not the owner
+    before), and the allowlisted senders who are neither adopted nor
+    linked -- refused until they link their own account. A note, never a
+    refusal."""
     from kazma_core.spaces import chat_links, identity
 
+    label = chat_links.PLATFORM_LABELS
     try:
         store = _store()
         held = {(str(link.get("platform")), str(link.get("user_id")))
                 for link in identity.read_registry()["links"] if isinstance(link, dict)}
+        adopt, left_known = chat_links.owner_link_plan()
+        adopted = {(item["platform"], item["user_id"]) for item in adopt}
         left: list[str] = []
         for plat in chat_links.PLATFORMS:
             raw = store.get(f"connectors.{plat}.allowed_users", "") or ""
-            known = {uid for uid, _source in chat_links.known_owner_ids(store, plat)}
-            for part in str(raw).split(","):
+            for part in chat_links.split_ids(raw):
                 uid = chat_links.platform_user_id(plat, part)
-                if uid and uid not in known and (plat, uid) not in held:
-                    left.append(f"{chat_links.PLATFORM_LABELS[plat]} {uid}")
+                if uid and (plat, uid) not in adopted and (plat, uid) not in held:
+                    left.append(f"{label[plat]} {uid}")
     except (*_check_errors(),) as exc:
         return [f"The chat apps' allowlists could not be read ({type(exc).__name__})."]
-    if not left:
-        return []
-    return [
-        f"{len(left)} sender(s) on a chat app's allowlist are not linked ({', '.join(left)}): "
-        "once Spaces is on the allowlists retire, and each is refused until they link their own "
-        "account (Settings → My account → Chat apps)."
-    ]
+    out: list[str] = []
+    if adopt:
+        out.append("Switching Spaces on makes these the owner's chat-app links: " + ", ".join(
+            f"{label[item['platform']]} {item['user_id']} (from {item['source']})" for item in adopt) + ".")
+    if left_known:
+        out.append("These chat-app ids Kazma knows are NOT made the owner's (they were not the owner "
+                   "before the switch): " + ", ".join(
+                       f"{label[item['platform']]} {item['user_id']} (from {item['source']}): {item['why']}"
+                       for item in left_known) + ".")
+    if left:
+        out.append(
+            f"{len(left)} sender(s) on a chat app's allowlist are not linked ({', '.join(left)}): "
+            "once Spaces is on the allowlists retire, and each is refused until they link their own "
+            "account (Settings → My account → Chat apps)."
+        )
+    return out
 
 
 # ── The switch ──────────────────────────────────────────────────────────

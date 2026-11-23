@@ -97,4 +97,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Could not unlink. Try again.",
         "ar": "تعذّر فكّ الربط. حاول مرة أخرى.",
     },
+    "chat_links.notice_linked_title": {
+        "en": "A chat app was linked to your account",
+        "ar": "رُبط تطبيق دردشة بحسابك",
+    },
+    "chat_links.notice_linked_body": {
+        "en": ("On {when}, {platform} account {user} was linked to your Kazma account with a code you "
+               "asked for. What it sends runs as you. If that was not you, unlink it now."),
+        "ar": ("في {when} رُبط حساب {platform} رقم {user} بحسابك في Kazma برمز طلبته. ما يرسله يُنفَّذ "
+               "باسمك. إن لم يكن ذلك أنت ففكّ ربطه الآن."),
+    },
+    "chat_links.notice_linked_keep": {
+        "en": "It was me",
+        "ar": "كنتُ أنا",
+    },
 }

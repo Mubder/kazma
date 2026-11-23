@@ -327,20 +327,49 @@ class SenderGate:
         the adapter's loop. The code is redeemed in a thread and the sender
         answered in the background (a group hears only that a live code was
         burned there; a sender past their guesses hears nothing).
+
+        What counts (the stage 3 review, L1 and L2): ``/link CODE`` from
+        anyone; a code alone from a sender with no link, or when it is a
+        live code -- a linked person's "next-week" is their message, never
+        a guess counted against them -- and a live code anywhere in the
+        message, its own word ("@kazmabot ABCD-2345"): burned in a group,
+        redeemed in a direct chat, never handed to the agent. Only the
+        guesses of a sender with no link, and ``/link``, count toward the
+        limit on guesses.
         """
         from kazma_core.spaces import chat_links
 
         if not chat_links.linking_on():
             return False
-        code = chat_links.code_in(text)
-        if code is None:
-            return False
         uid = chat_links.platform_user_id(self.name, user_id)
+        linked = bool(uid) and chat_links.account_linked(self.name, uid)
+        code = chat_links.prefixed_code(text)
+        counted = code is not None
+        if code is None:
+            bare = chat_links.bare_code(text)
+            if bare is not None and (not linked or chat_links.is_live_code(bare)):
+                code, counted = bare, not linked
+        if code is None:
+            anywhere = chat_links.live_codes_in(text)
+            if not anywhere:
+                return False
+            code = anywhere[0]
+            if not direct:
+                for other in anywhere[1:]:
+                    self._spawn_redeem(uid, other, False, target_id, context_metadata, text)
         if not uid:
             return True  # a code with no sender is no one's: never the agent's
-        if not chat_links.take_attempt(self.name, uid):
+        if counted and not chat_links.take_attempt(self.name, uid):
             logger.info("[%s] A link code from %s was not looked at: too many codes from them",
                         self.name, uid)
+            return True
+        return self._spawn_redeem(uid, code, direct, target_id, context_metadata, text)
+
+    def _spawn_redeem(self, uid: str, code: str, direct: bool, target_id: str,
+                      context_metadata: dict[str, Any] | None, text: Any) -> bool:
+        """Redeem *code* in the background and answer the sender. True: the
+        message was a link code."""
+        if not uid:
             return True
         try:
             asyncio.get_running_loop()

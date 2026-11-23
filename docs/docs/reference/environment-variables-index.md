@@ -100,8 +100,8 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_FIRECRAWL_URL` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url`, `kazma_core.web_acquire.credits` | yes |
 | `KAZMA_FTS5_PATH` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_GATEWAY_ADMINS` | (none) | `kazma_core.spaces.chat_links`, `kazma_gateway.allowlists` | yes |
-| `KAZMA_GATEWAY_OPEN_TO_EVERYONE` | (none) | `kazma_core.security.boot_guard`, `kazma_gateway.sender_rule` | yes |
-| `KAZMA_GATEWAY_STRICT_ALLOWLIST` | (none) | `kazma_core.security.boot_guard`, `kazma_gateway.sender_rule` | yes |
+| `KAZMA_GATEWAY_OPEN_TO_EVERYONE` | (none) | `kazma_core.security.boot_guard`, `kazma_core.spaces.chat_links`, `kazma_gateway.sender_rule` | yes |
+| `KAZMA_GATEWAY_STRICT_ALLOWLIST` | (none) | `kazma_core.security.boot_guard`, `kazma_core.spaces.chat_links`, `kazma_gateway.sender_rule` | yes |
 | `KAZMA_GATE_REGISTRY` | (none) | `kazma_core.safety.hitl_gates` | yes |
 | `KAZMA_GITHUB_APP_ID` | (none) | `kazma_core.git_identity` | yes |
 | `KAZMA_GITHUB_APP_INSTALLATION_ID` | (none) | `kazma_core.git_identity` | yes |

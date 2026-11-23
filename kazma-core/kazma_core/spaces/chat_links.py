@@ -164,6 +164,11 @@ _PREFIXED = re.compile(
 )
 _BARE = re.compile(r"([A-Za-z0-9]{4}-[A-Za-z0-9]{4})")
 _MAX_TEXT = 96
+#: A code anywhere in a message, its own word (the stage 3 review, L2: a
+#: code posted in a group with a mention, "@kazmabot ABCD-2345", was never
+#: burned). Read over at most :data:`_SCAN_TEXT` characters.
+_ANYWHERE = re.compile(r"(?<![A-Za-z0-9-])([A-Za-z0-9]{4}-?[A-Za-z0-9]{4})(?![A-Za-z0-9-])")
+_SCAN_TEXT = 4096
 
 
 class LinkRefused(ValueError):
@@ -236,20 +241,91 @@ def code_in(text: Any) -> str | None:
     when its code holds a letter no code has; a code alone counts only in
     its own letters and with its dash, so a date or a word is never taken
     for one."""
+    return prefixed_code(text) or bare_code(text)
+
+
+def prefixed_code(text: Any) -> str | None:
+    """The code of a message that names ``/link`` (``link``, ``ربط``), or
+    None. Pure."""
     if not isinstance(text, str):
         return None
     said = text.strip()
     if not said or len(said) > _MAX_TEXT:
         return None
     prefixed = _PREFIXED.fullmatch(said)
-    if prefixed:
-        return _normal(prefixed.group(1))
+    return _normal(prefixed.group(1)) if prefixed else None
+
+
+def bare_code(text: Any) -> str | None:
+    """The code of a message that is a code alone, in its own letters and
+    with its dash, or None. A hyphenated word is one too ("next-week",
+    "type-safe"): the caller takes it for a code only from a sender with no
+    link, or when it is a live code (:func:`is_live_code`; the stage 3
+    review, L1). Pure."""
+    if not isinstance(text, str):
+        return None
+    said = text.strip()
+    if not said or len(said) > _MAX_TEXT:
+        return None
     bare = _BARE.fullmatch(said)
     if bare:
         plain = _normal(bare.group(1))
         if len(plain) == _CODE_LEN and all(ch in _ALPHABET for ch in plain):
             return plain
     return None
+
+
+def live_codes_in(text: Any) -> list[str]:
+    """The live codes (:func:`is_live_code`) anywhere in *text*, each its
+    own word, normalized: a code posted beside a mention or other words is
+    still a code (the stage 3 review, L2). Memory only (the adapter's loop).
+    """
+    if not isinstance(text, str) or not text:
+        return []
+    found: list[str] = []
+    for match in _ANYWHERE.finditer(text[:_SCAN_TEXT]):
+        plain = _normal(match.group(1))
+        if len(plain) == _CODE_LEN and plain not in found and is_live_code(plain):
+            found.append(plain)
+    return found
+
+
+# ── The live codes, in memory ──────────────────────────────────────────
+
+
+class _LiveCodes:
+    """The hashes of the codes not used and not expired, as of the last read
+    of the code table (this process's own issues and uses at once, another
+    process's at its next write through the store's change notice)."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.expires: dict[str, float] = {}
+
+
+_live = _LiveCodes()
+
+
+def _remember_codes(table: Any) -> None:
+    live: dict[str, float] = {}
+    if isinstance(table, dict):
+        for digest, entry in table.items():
+            if isinstance(entry, dict) and not entry.get("used_at"):
+                try:
+                    live[str(digest)] = float(entry.get("expires_at") or 0)
+                except (TypeError, ValueError):
+                    continue
+    with _live.lock:
+        _live.expires = live
+
+
+def is_live_code(code: Any) -> bool:
+    """Whether *code* is a code issued, not used and not expired, from
+    memory (the adapter's loop)."""
+    digest = _hash(_normal(str(code or "")))
+    with _live.lock:
+        expires = _live.expires.get(digest)
+    return expires is not None and expires > _now()
 
 
 def platform_user_id(platform: str, raw: Any) -> str:
@@ -365,9 +441,13 @@ def issue_code(account_id: str, platform: str, *, language: str = "") -> dict[st
                        and not e.get("used_at")]:
             del table[digest]  # one live code per person and chat app
         table[_hash(code)] = entry
+        written[:] = [table]
         return table
 
+    written: list[dict[str, dict[str, Any]]] = []
     _store().atomic_update(CODES_KEY, update, category="auth")
+    if written:
+        _remember_codes(written[-1])
     logger.info("[spaces] a code to link %s was issued to account %s", PLATFORM_LABELS[plat], account_id)
     return {
         "code": _display_code(code),
@@ -416,6 +496,8 @@ def _take(code: str, platform: str, user_id: str, *, direct: bool) -> Redemption
         return table
 
     _store().atomic_update(CODES_KEY, update, category="auth")
+    with _live.lock:
+        _live.expires.pop(digest, None)
     return found[-1] if found else Redemption("unavailable", platform)
 
 
@@ -451,7 +533,10 @@ def _link(platform: str, user_id: str, account_id: str, target: str = "") -> tup
         # Linked again: what is sent to it is delivered again (S3-07).
         reg["unlinked"] = [u for u in reg["unlinked"] if isinstance(u, dict) and (
             u.get("platform"), str(u.get("user_id"))) != (platform, user_id)]
-        people.record_event(reg, "chat_linked", account_id, account_id, detail=platform)
+        # By the chat-app account that sent the code: the account's person is
+        # told at their next page load which chat was linked, with Unlink
+        # (the stage 3 review, L2: a leaked code was silent impersonation).
+        people.record_event(reg, "chat_linked", account_id, f"{platform}:{user_id}", detail=platform)
         said.append("linked")
 
     try:
@@ -737,11 +822,23 @@ def _revoked_chats(reg: dict[str, Any], enabled: frozenset[str]) -> frozenset[st
     return frozenset(gone - live)
 
 
+def links_known() -> bool:
+    """Whether the links were read (memory). Before that, once Spaces is
+    enforced, a reply waits (the outbox keeps it) rather than go to a chat
+    that may be unlinked (the stage 3 review, L4); a read is started."""
+    with _snapshot.lock:
+        known = bool(_snapshot.read_at)
+    if not known:
+        _refresh_soon()
+    return known
+
+
 def address_revoked(target: Any) -> bool:
     """Whether a reply to *target* (``<platform>:<chat>``) is to be dropped:
     once Spaces is enforced, its chat-app account was unlinked, its account
     deleted or disabled (S3-07). Memory only, any thread or loop; False
-    while the links were never read (a reply is sent as before)."""
+    while the links were never read: the caller asks :func:`links_known`
+    first and waits then."""
     from kazma_core.spaces.scope import spaces_enforced
 
     if not spaces_enforced():
@@ -756,11 +853,28 @@ def refresh_links() -> bool:
     store = _store()
     _follow(store)
     try:
+        _remember_codes(store.get(CODES_KEY, {}))
+    except _store_errors():
+        logger.warning("[spaces] the link codes could not be read", exc_info=True)
+    try:
         _remember(identity.read_registry())
     except identity.IdentityUnavailable:
+        # Fail closed (the stage 3 review, L3): no stale admin or link is
+        # trusted until the links are read again.
+        _forget_snapshot()
         logger.warning("[spaces] the chat-app links could not be read; senders wait for them")
         return False
     return True
+
+
+def _forget_snapshot() -> None:
+    """The links unknown: nothing in memory is trusted until read again."""
+    with _snapshot.lock:
+        _snapshot.links = {}
+        _snapshot.enabled = frozenset()
+        _snapshot.revoked = frozenset()
+        _snapshot.admins = frozenset()
+        _snapshot.read_at = 0.0
 
 
 def _follow(store: Any) -> None:
@@ -773,12 +887,16 @@ def _follow(store: Any) -> None:
         _watched.append(store)
 
     def _on_change(keys: Any) -> None:
+        if keys is None or CODES_KEY in keys:
+            try:
+                _remember_codes(store.get(CODES_KEY, {}))
+            except _store_errors():
+                logger.warning("[spaces] the link codes could not be read", exc_info=True)
         if keys is None or identity.REGISTRY_KEY in keys:
             try:
                 _remember(identity.read_registry())
             except identity.IdentityUnavailable:
-                with _snapshot.lock:
-                    _snapshot.read_at = 0.0  # unknown until read again
+                _forget_snapshot()  # unknown until read again (L3: fail closed)
 
     add = getattr(store, "add_change_listener", None)
     if callable(add):
@@ -819,6 +937,12 @@ def _drain_links_refresh(timeout: float = 5.0) -> bool:
     return not worker.is_alive()
 
 
+def account_linked(platform: str, user_id: Any) -> bool:
+    """Whether a chat-app account is linked to an enabled account, from
+    memory (the adapter's loop)."""
+    return _linked_account(platform, user_id) is not None
+
+
 def _linked_account(platform: str, user_id: Any) -> str | None:
     """The enabled account a chat-app account is linked to, from memory, or
     None. Asked on the adapter's loop."""
@@ -835,12 +959,16 @@ def linked_admin(platform: str, user_id: Any) -> bool:
     memory; read first when the links were never read (a thread may block).
     """
     with _snapshot.lock:
-        never_read = _snapshot.read_at == 0.0
-    if never_read:
+        read_at = _snapshot.read_at
+    if not read_at or _now() - read_at > LINKS_TTL_S:
+        # Never read, or older than another process's changes may be: read
+        # now (this is a thread); a read that fails trusts nothing (L3).
         refresh_links()
     plat = (platform or "").strip().lower()
     uid = platform_user_id(plat, user_id)
     with _snapshot.lock:
+        if not _snapshot.read_at:
+            return False
         account = _snapshot.links.get((plat, uid))
         return bool(account) and account in _snapshot.admins
 
@@ -877,6 +1005,8 @@ def link_refusal(platform: str, user_id: Any) -> str:
 
 
 def _forget_links_for_tests() -> None:
+    with _live.lock:
+        _live.expires = {}
     with _snapshot.lock:
         _snapshot.links = {}
         _snapshot.enabled = frozenset()
@@ -934,7 +1064,9 @@ def known_owner_ids(config_store: Any, platform: str) -> list[tuple[str, str]]:
         entry_plat, entry_id = (x.strip() for x in part.split(":", 1))
         if entry_plat.lower() != plat or not entry_id:
             continue
-        uid = platform_user_id(plat, entry_id)
+        # A Telegram group (a negative id) is no one's account: it would
+        # become the owner's notice address (the stage 3 review, M1).
+        uid = _private_telegram_chat(entry_id) if plat == "telegram" else platform_user_id(plat, entry_id)
         if uid:
             found.append((uid, GATEWAY_ADMINS_ENV))
     seen: set[str] = set()
@@ -946,10 +1078,61 @@ def known_owner_ids(config_store: Any, platform: str) -> list[tuple[str, str]]:
     return out
 
 
-def owner_links_to_adopt() -> list[dict[str, str]]:
-    """The owner's known chat-app accounts that are no one's link yet:
-    ``{"platform", "user_id", "source"}``. A known id linked to someone else
-    is left to them (said by :func:`adopt_owner_ids`). Blocking."""
+def split_ids(raw: Any) -> list[str]:
+    """An allowlist or a list setting as ids, a list or a comma string
+    alike (a list-typed allowlist was read as its printed list: the stage 3
+    review, L6). Pure."""
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple, set)):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    return [part.strip() for part in str(raw).split(",") if part.strip()]
+
+
+def _was_the_owner(store: Any, platform: str, uid: str) -> str:
+    """Why *uid* on *platform* was NOT the owner before Spaces, or "" when it
+    was: the sender rule of before let it chat (on the allowlist, or the
+    allowlist empty -- the known ids answer then -- or the open switch on)
+    and the admin rule of before made it admin (``KAZMA_GATEWAY_ADMINS`` when
+    set, else the allowlist, else the known ids). The gateway's own rules
+    (``sender_rule.refusal``, ``allowlists._admin_by_lists``) restated: core
+    does not import the gateway. Blocking: a settings read (the stage 3
+    review, M1: a colleague's pager was adopted as the owner)."""
+    import os
+
+    from kazma_core.security.boot_guard import env_flag
+
+    try:
+        listed = [platform_user_id(platform, x)
+                  for x in split_ids(store.get(f"connectors.{platform}.allowed_users", "") or "")]
+    except _store_errors():
+        return "its allowlist could not be read"
+    listed = [x for x in listed if x]
+    open_switch = env_flag("KAZMA_GATEWAY_OPEN_TO_EVERYONE") and not env_flag("KAZMA_GATEWAY_STRICT_ALLOWLIST")
+    if listed and uid not in listed and not open_switch:
+        return "it is not on the allowlist"
+    env_raw = str(os.environ.get(GATEWAY_ADMINS_ENV, "") or "").strip()
+    if env_raw:
+        for part in split_ids(env_raw):
+            if ":" in part:
+                entry_plat, entry_id = (x.strip() for x in part.split(":", 1))
+                if entry_plat.lower() == platform and platform_user_id(platform, entry_id) == uid:
+                    return ""
+            elif part == uid:
+                return ""
+        return f"it is not in {GATEWAY_ADMINS_ENV}"
+    if listed and uid not in listed:
+        return "it is not on the allowlist"
+    return ""
+
+
+def owner_link_plan() -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """What switching Spaces on makes the owner's links, and what it leaves:
+    ``({"platform", "user_id", "source"}, ...)`` to adopt -- the owner's known
+    chat-app accounts that were the owner before the switch
+    (:func:`_was_the_owner`) and are no one's link yet -- and
+    ``({..., "why"}, ...)`` the known ids it will not adopt. A known id
+    linked to someone else is left to them. Blocking."""
     store = _store()
     reg = identity.read_registry()
     held = {(str(link.get("platform")), str(link.get("user_id"))) for link in reg["links"]
@@ -957,12 +1140,25 @@ def owner_links_to_adopt() -> list[dict[str, str]]:
     # An account the owner unlinked is not linked again on its own (S3-07).
     held |= {(str(u.get("platform")), str(u.get("user_id"))) for u in reg.get("unlinked") or ()
              if isinstance(u, dict)}
-    out: list[dict[str, str]] = []
+    adopt: list[dict[str, str]] = []
+    left: list[dict[str, str]] = []
     for plat in PLATFORMS:
         for uid, source in known_owner_ids(store, plat):
-            if (plat, uid) not in held:
-                out.append({"platform": plat, "user_id": uid, "source": source})
-    return out
+            if (plat, uid) in held:
+                continue
+            why = _was_the_owner(store, plat, uid)
+            item = {"platform": plat, "user_id": uid, "source": source}
+            if why:
+                left.append({**item, "why": why})
+            else:
+                adopt.append(item)
+    return adopt, left
+
+
+def owner_links_to_adopt() -> list[dict[str, str]]:
+    """The owner's known chat-app accounts that switching Spaces on makes
+    the owner's links (:func:`owner_link_plan`). Blocking."""
+    return owner_link_plan()[0]
 
 
 def adopt_owner_ids(*, by: str = "") -> list[dict[str, str]]:
