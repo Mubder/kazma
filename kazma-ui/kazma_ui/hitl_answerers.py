@@ -327,6 +327,42 @@ def waiting_for_someone_else(thread_id: str, card: dict[str, Any] | None, interr
 #: What a person may do to a chat's turn (Spaces S2-05 second review).
 TURN_ACTIONS = ("message", "steer", "stop", "reset")
 
+#: The line each refusal of :func:`turn_control_refusal` is said with, as
+#: ``(English, Arabic)`` with ``{name}`` the person whose turn or chat it
+#: is: one wording for the web chat and the chat apps (S3-06 follow-up).
+_TURN_LINES: dict[tuple[str, str], tuple[str, str]] = {
+    ("message", "answering_someone_else"): (
+        "This chat is answering {name} right now, so your message was not sent. "
+        "Send it once their turn ends.",
+        "هذه المحادثة تجيب {name} الآن، فلم تُرسل رسالتك. أرسلها بعد أن ينتهي دوره."),
+    ("steer", "not_your_turn"): (
+        "Only {name} can steer this turn: it is theirs. Your note was not sent.",
+        "لا يوجّه هذا الدور إلا {name}، فهو دوره. لم تُرسل ملاحظتك."),
+    ("stop", "not_your_turn"): (
+        "This turn is {name}'s: only they or an owner of this space can stop it.",
+        "هذا الدور لـ{name}: لا يوقفه إلا هو أو مالك هذه المساحة."),
+    ("reset", "another_members_turn"): (
+        "This chat is busy with {name}'s turn, so it was not cleared or compacted. "
+        "Try again once it ends.",
+        "هذه المحادثة مشغولة بدور {name}، فلم تُمسح ولم تُضغط. حاول بعد أن ينتهي."),
+    ("reset", "not_your_chat"): (
+        "Only {name}, who started this chat, or an owner of this space can clear or compact it.",
+        "لا يمسح هذه المحادثة أو يضغطها إلا {name} الذي بدأها، أو مالك هذه المساحة."),
+}
+_TURN_UNREADABLE = (
+    "Kazma could not check whose turn this is right now, so nothing was done. Try again in a moment.",
+    "لم يتمكن Kazma الآن من معرفة صاحب هذا الدور، فلم يُنفّذ شيء. حاول بعد قليل.")
+
+
+def turn_lines(action: str, code: str, name: str) -> tuple[str, str]:
+    """The ``(English, Arabic)`` line a refusal of *action* with *code* is
+    said with, naming *name* (another member when it cannot be read); any
+    code without its own line (``identity_unavailable``) says whose turn it
+    is could not be checked. The caller chooses the language. No I/O."""
+    english, arabic = _TURN_LINES.get((action, code), _TURN_UNREADABLE)
+    return (english.format(name=name if name not in ("", "?") else "another member"),
+            arabic.format(name=name if name not in ("", "?") else "عضو آخر"))
+
 
 def _account_name(account_id: str) -> str:
     """An account's name for a refusal's line; ``"?"`` when it cannot be read."""

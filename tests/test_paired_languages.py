@@ -772,10 +772,12 @@ DECLARED: dict[str, str] = {
     M + "x_api/subject_policy.py": "the Arabic article rule for matching a subject's name",
     "kazma-skills/kazma_skills/native/arabic_bilingual_nlp/tools.py": "a bilingual NLP skill: Hijri dates written in Arabic",
     "kazma-skills/kazma_skills/native/email_manager/analyze.py": "the product's Arabic name in a prompt",
-    "kazma-ui/kazma_ui/hitl_answerers.py": "the bell's line for a card waiting for the person, an "
-                                           "(English, Arabic) pair chosen by the page's language "
-                                           "(current_language); nothing is decided by Arabic text; "
-                                           "tests/test_approvals_reach_the_asker.py",
+    "kazma-ui/kazma_ui/hitl_answerers.py": "the bell's line for a card waiting for the person, and the "
+                                           "lines a turn-control refusal is said with (turn_lines), "
+                                           "(English, Arabic) pairs chosen by the page's language or "
+                                           "language_lock.in_their_language; nothing is decided by "
+                                           "Arabic text; tests/test_approvals_reach_the_asker.py, "
+                                           "tests/test_chat_turn_control_per_person.py",
     "kazma-ui/kazma_ui/hitl_timeout.py": "the line a turn ends with when its card's asker left the space, "
                                          "two fixed strings that language_lock.in_their_language chooses "
                                          "between; nothing is decided by Arabic text; "

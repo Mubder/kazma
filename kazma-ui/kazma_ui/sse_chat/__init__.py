@@ -119,36 +119,13 @@ async def _card_waits_on_someone_else(thread_id: str, graph: Any) -> str | None:
 #: The line refusing an action on another member's turn (Spaces S2-05
 #: second review): ``(action, code) -> (English, Arabic)``; ``{name}`` is the
 #: person the turn or chat is.
-_TURN_LINES: dict[tuple[str, str], tuple[str, str]] = {
-    ("message", "answering_someone_else"): (
-        "This chat is answering {name} right now, so your message was not sent. "
-        "Send it once their turn ends.",
-        "هذه المحادثة تجيب {name} الآن، فلم تُرسل رسالتك. أرسلها بعد أن ينتهي دوره."),
-    ("steer", "not_your_turn"): (
-        "Only {name} can steer this turn: it is theirs. Your note was not sent.",
-        "لا يوجّه هذا الدور إلا {name}، فهو دوره. لم تُرسل ملاحظتك."),
-    ("stop", "not_your_turn"): (
-        "This turn is {name}'s: only they or an owner of this space can stop it.",
-        "هذا الدور لـ{name}: لا يوقفه إلا هو أو مالك هذه المساحة."),
-    ("reset", "another_members_turn"): (
-        "This chat is busy with {name}'s turn, so it was not cleared or compacted. "
-        "Try again once it ends.",
-        "هذه المحادثة مشغولة بدور {name}، فلم تُمسح ولم تُضغط. حاول بعد أن ينتهي."),
-    ("reset", "not_your_chat"): (
-        "Only {name}, who started this chat, or an owner of this space can clear or compact it.",
-        "لا يمسح هذه المحادثة أو يضغطها إلا {name} الذي بدأها، أو مالك هذه المساحة."),
-}
-_TURN_UNREADABLE = (
-    "Kazma could not check whose turn this is right now, so nothing was done. Try again in a moment.",
-    "لم يتمكن Kazma الآن من معرفة صاحب هذا الدور، فلم يُنفّذ شيء. حاول بعد قليل.")
-
-
 def _turn_line(user_text: str, action: str, code: str, name: str) -> str:
-    """A turn refusal's line: in the language of the person's own words when
-    there are some, else the page's."""
-    english, arabic = _TURN_LINES.get((action, code), _TURN_UNREADABLE)
-    english = english.format(name=name if name not in ("", "?") else "another member")
-    arabic = arabic.format(name=name if name not in ("", "?") else "عضو آخر")
+    """A turn refusal's line (``hitl_answerers.turn_lines``, the chat apps'
+    wording too): in the language of the person's own words when there are
+    some, else the page's."""
+    from kazma_ui.hitl_answerers import turn_lines
+
+    english, arabic = turn_lines(action, code, name)
     if user_text and not user_text.startswith("/"):
         from kazma_core.language_lock import in_their_language
 

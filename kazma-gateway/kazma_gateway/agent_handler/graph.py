@@ -327,12 +327,48 @@ def _merge_transcript(existing: list, converted: list) -> list:
     return out
 
 
-def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[str, Any], messages: list) -> None:
+def _carry_authors(existing: list, out: list, author: str = "") -> list:
+    """Each user row of *out* keeps the account that sent it (``author``,
+    Spaces S1-08; ``hitl_answerers.whose_turn`` reads it to know whose turn
+    it is): the checkpoint holds no author, so a row takes the author of the
+    row it was in *existing* -- the k-th newest row of the same text, so two
+    people's identical messages keep their own -- and the newest user row
+    takes *author*, the sender of the message the turn opens with (left out
+    of the matching: it is not in *existing* yet). Mutates and returns *out*.
+    No I/O."""
+    users = [i for i, m in enumerate(out) if isinstance(m, dict) and m.get("role") == "user"]
+    newest = users[-1] if author and users else None
+    before: dict[str, list[str]] = {}
+    for m in existing or []:
+        if isinstance(m, dict) and m.get("role") == "user":
+            before.setdefault(str(m.get("content") or ""), []).append(str(m.get("author") or ""))
+    seen: dict[str, int] = {}
+    for i in reversed(users):
+        if i == newest:
+            continue
+        key = str(out[i].get("content") or "")
+        seen[key] = seen.get(key, 0) + 1
+        authors = before.get(key, [])
+        if seen[key] <= len(authors) and authors[-seen[key]] and not out[i].get("author"):
+            out[i]["author"] = authors[-seen[key]]
+    if newest is not None:
+        out[newest]["author"] = author
+    return out
+
+
+def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[str, Any], messages: list,
+                                  *, author: str = "") -> None:
     """Synchronize platform session to Web UI for seamless season takeover.
 
     The web session_id **is** the gateway thread_id (``gw-telegram-…``), so
     opening that season in the chat sidebar continues the same LangGraph
     checkpointer used by Telegram/Discord/Slack.
+
+    *author* is the account that sent the newest user message (at a turn's
+    start: the bound asker); every user row keeps its author
+    (:func:`_carry_authors`), so whose turn it is reads the same as on the
+    web (S3-06 follow-up: a group's member could steer or stop another
+    member's turn).
     """
     try:
         from kazma_core.sessions.directory import canonical_web_session
@@ -347,7 +383,7 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         # always ride over from the web row so a finished platform turn does
         # not land in the sidebar as text-only.
         if converted:
-            session.messages = _merge_transcript(existing, converted)
+            session.messages = _carry_authors(existing, _merge_transcript(existing, converted), author)
 
         username = metadata.get("username") or metadata.get("display_name") or "user"
         plat = (platform or "chat").capitalize()
@@ -1077,6 +1113,48 @@ def create_graph_handler(
             waiting_for_someone_else, thread_id, pending, str(pending.get("interrupt_id") or ""))
         return name or ""
 
+    async def _turn_control_refused(msg: IncomingMessage, thread_id: str, action: str,
+                                    *, active: bool | None = None) -> bool:
+        """Whether the sender may not do *action* to the chat's turn, and was
+        told why (S3-06 follow-up): the web chat's rule,
+        ``hitl_answerers.turn_control_refusal``, for ``/steer`` and ``/steer!``
+        (``steer``: only the turn's asker), ``/abort`` and ``/stop``
+        (``stop``: its asker or an owner of the space), ``/reset`` and
+        ``/compact`` (``reset``: the chat's opener or an owner, never while
+        another member's turn runs or waits). *active* (a turn runs or
+        waits) is read when not given. Who it is that cannot be read
+        refuses. Reads nothing while the install does not enforce Spaces."""
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if not spaces_enforced() or not thread_id:
+            return False
+        import sqlite3
+
+        from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_ui.active_turns import is_turn_running
+        from kazma_ui.hitl_answerers import turn_control_refusal, turn_lines
+
+        if active is None:
+            active = is_turn_running(thread_id) or isinstance(await _check_graph_interrupt(
+                graph, {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}), dict)
+        try:
+            refusal = await asyncio.to_thread(turn_control_refusal, thread_id, action, active=bool(active))
+        except (sqlite3.Error, OSError, IdentityUnavailable):
+            logger.warning("[agent-handler] whose turn thread=%s is cannot be read; %s refused",
+                           thread_id[:12], action, exc_info=True)
+            refusal = ("identity_unavailable", "")
+        if refusal is None:
+            return False
+        code, name = refusal
+        logger.info("[agent-handler] %s on thread=%s refused: %s", action, thread_id[:12], code)
+        english, arabic = turn_lines(action, code, name)
+        ctx = msg.context_metadata
+        out_text, out_ctx = _prepare_tg_outbound(
+            msg, "⛔ " + language_lock.in_their_language(msg.text or "", english, arabic), ctx)
+        await manager.send(OutboundMessage(
+            target_id=_build_target_id(msg.platform, ctx), text=out_text, context_metadata=out_ctx))
+        return True
+
     async def _handler_body(msg: IncomingMessage, thread_id: str, chat_key: str = "") -> None:
         """Inner handler body (typing keepalive wraps this). *chat_key* is the
         key the chat's season pointer is kept under in its space (S3-03,
@@ -1245,6 +1323,8 @@ def create_graph_handler(
 
         # ── /reset: Clear conversation checkpoints and settings ───
         if msg.text and msg.text.strip().lower() == "/reset":
+            if await _turn_control_refused(msg, thread_id, "reset"):
+                return
             async with cmd_lock:
                 # 1. Delete checkpoints
                 if hasattr(graph, "checkpointer") and graph.checkpointer:
@@ -1296,6 +1376,8 @@ def create_graph_handler(
 
         # ── /compact: Force manually triggered context compaction ─
         if msg.text and msg.text.strip().lower() == "/compact":
+            if await _turn_control_refused(msg, thread_id, "reset"):
+                return
             async with cmd_lock:
                 try:
                     state_obj = await graph.aget_state(config)
@@ -1552,6 +1634,10 @@ def create_graph_handler(
                 ))
                 return
 
+            # Only the turn's asker steers it (S3-06 follow-up, as on the web).
+            if await _turn_control_refused(msg, thread_id, "steer", active=True):
+                return
+
             if _steer_kind == "soft":
                 push_soft_steer(thread_id, _steer_text)
                 logger.info("[agent-handler] /steer soft thread=%s", thread_id[:12])
@@ -1648,6 +1734,10 @@ def create_graph_handler(
 
         # ── /abort (or /stop): cancel + abandon the running task ────
         if msg.text and msg.text.strip().lower() in ("/abort", "/stop"):
+            # Only the turn's asker or an owner of the space stops it (S3-06
+            # follow-up, as on the web).
+            if await _turn_control_refused(msg, thread_id, "stop"):
+                return
             from kazma_core.agent.steer import abort_messages, clear_all_steers
 
             ctx = await _store.get(thread_id) or msg.context_metadata
@@ -2008,13 +2098,17 @@ def create_graph_handler(
             # turn (Knowledge audit KB-S08: this handler injected the same
             # chunks a second time).
 
-            # Sync turn start to Web UI so the session appears immediately in sidebar
+            # Sync turn start to Web UI so the session appears immediately in
+            # sidebar, the message the turn opens with naming its sender.
+            from kazma_core.spaces.scope import bound_asker
+
             await asyncio.to_thread(
                 _sync_platform_session_to_web,
                 thread_id,
                 msg.platform,
                 msg.context_metadata,
                 list(state.get("messages") or []),
+                author=bound_asker() or "",
             )
 
             # ── Invoke graph ───────────────────────────────────────

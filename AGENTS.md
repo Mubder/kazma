@@ -16260,6 +16260,24 @@ an install with one account behaves as before.
     `tests/test_press_gate_before_spaces.py` (before Spaces a non-admin's
     approval, swarm or run press changes nothing on Telegram, Discord and
     WhatsApp; the enforced rule applied without Spaces as the control).
+  - **A member never steers, stops or clears another member's turn** (the
+    S3-06 follow-up): `/steer` and `/steer!` (only the turn's asker),
+    `/abort` and `/stop` (its asker or an owner of the space), `/reset` and
+    `/compact` (the chat's opener or an owner, never while another member's
+    turn runs or waits) ask the web chat's rule,
+    `hitl_answerers.turn_control_refusal`, through `_turn_control_refused`
+    in the handler; a refusal is said with the web's words
+    (`hitl_answerers.turn_lines`) in the sender's language. Whose turn it is
+    reads the chat store's rows, so every user row the gateway saves names
+    its sender (`graph._carry_authors`: the k-th newest row of the same text
+    keeps its author, the message a turn opens with takes the bound asker;
+    a web row's author survives a gateway save). `/undo`, `/edit` and
+    `/replay <step>` are not asked yet. Gate:
+    `tests/test_chat_turn_control_per_person.py` (a Telegram group, a
+    Discord server channel and a Slack channel through the real handler,
+    WhatsApp's direct chat hers alone, EN/AR; the unrefused press and rows
+    without their authors -- whose turn falls back to the chat's opener --
+    as the controls).
 - **Unlinking, and a disabled or deleted account, stops everything at once
   (S3-07, 2026-11-23).** Only where Spaces is enforced.
   - My account's Unlink (`DELETE /api/account/chat-links`,

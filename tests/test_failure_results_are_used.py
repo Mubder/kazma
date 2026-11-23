@@ -637,6 +637,9 @@ DECLARED: dict[tuple[str, str, str], str] = {
      "create_graph_handler._chat_place_or_answer", "gateway.GatewayManager.send"):
         "the answer to /space, or why a message was not run (Spaces S3-03): " + _CHAT_REPLY,
     ("kazma-gateway/kazma_gateway/agent_handler/graph.py",
+     "create_graph_handler._turn_control_refused", "gateway.GatewayManager.send"):
+        "why another member's /steer, /abort or /reset was refused (S3-06 follow-up): " + _CHAT_REPLY,
+    ("kazma-gateway/kazma_gateway/agent_handler/graph.py",
      "create_graph_handler._handler_body._long_progress", "gateway.GatewayManager.send"):
         "a long task's progress line between steps: " + _CHAT_REPLY,
     ("kazma-gateway/kazma_gateway/agent_handler/hitl.py", "_deliver_resume",
