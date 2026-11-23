@@ -389,7 +389,7 @@ async def _ledger_row(role: str, client: Any, response: Any, *, started: float) 
     (``arecord_llm_call``: whose call it is comes from the bound scope). X's
     own daily budget (``ai_budget``) bounds X; the ledger is what a person's
     daily limit and the Dashboard count. Never raises."""
-    from kazma_core.observability.llm_ledger import arecord_llm_call, provider_of
+    from kazma_core.observability.llm_ledger import answered_with_own_key, arecord_llm_call, provider_of
     from kazma_core.safety.hitl import get_current_thread_id
 
     usage = getattr(response, "usage", None)
@@ -403,6 +403,7 @@ async def _ledger_row(role: str, client: Any, response: Any, *, started: float) 
         duration_ms=(time.monotonic() - started) * 1000,
         status="ok",
         priced=bool(getattr(response, "cost_known", True)),
+        own_key=answered_with_own_key(response),
     )
 
 

@@ -21,6 +21,7 @@ import re
 import threading
 import time
 import urllib.parse
+import weakref
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -388,6 +389,12 @@ class LLMResponse:
     #: answer (DeepSeek's ``reasoning_content``). Not shown, not part of
     #: ``content``; it counts against ``max_tokens``.
     reasoning_chars: int = 0
+    #: True when the call that made this answer went out on the key of the
+    #: person it was for (Spaces S2-04, ``LLMProvider._person_call``). The
+    #: ledger records it from here (``llm_ledger.answered_with_own_key``):
+    #: never from a provider's name, which may not be the client that
+    #: answered (the review of S2-04).
+    own_key: bool = False
 
     def output_detail(self) -> str:
         """What the completion's tokens went to, for a truncation warning."""
@@ -554,6 +561,31 @@ def _attribution_headers(base_url: str) -> dict[str, str]:
     if any(host == h or host.endswith("." + h) for h in _ATTRIBUTION_HOSTS):
         return dict(_ATTRIBUTION)
     return {}
+
+#: The clients that carry a person's own key (Spaces S2-04), kept with the
+#: client they stand in for: ``{client: {(account, key print): twin}}``.
+#: Changed on the event loop only; a client that goes takes its twins.
+_OWN_KEY_CLIENTS: weakref.WeakKeyDictionary[Any, dict[tuple[str, str], Any]] = weakref.WeakKeyDictionary()
+
+
+def own_key_answer(response: Any) -> Any:
+    """*response*, marked as made with the person's own key (Spaces S2-04):
+    what a provider class's ``chat`` returns when it handed the call to the
+    client carrying their key."""
+    if response is not None:
+        try:
+            response.own_key = True
+        except AttributeError:  # a stand-in answer that takes no attribute
+            logger.debug("[LLMProvider] an answer of type %s cannot be marked", type(response).__name__)
+    return response
+
+
+def own_key_delta(delta: Any) -> Any:
+    """A stream's *delta*, its final answer marked as made with the person's
+    own key (Spaces S2-04)."""
+    own_key_answer(getattr(delta, "response", None))
+    return delta
+
 
 class LLMProvider:
     """OpenAI-compatible LLM client using httpx.
@@ -949,6 +981,86 @@ class LLMProvider:
         if why:
             raise LLMError(f"Not sent: {why}", kind="model_not_allowed", transient=False)
 
+    async def _person_call(self, model: str | None) -> LLMProvider | None:
+        """What every ``chat`` and ``chat_stream`` of every provider class
+        asks first, for the person the work is for (Spaces S2-03, S2-04):
+        a model they may not use is refused
+        (:meth:`_refuse_a_model_not_allowed`), and when they have a key of
+        their own for this provider the client that carries it is returned
+        (``spaces.own_keys``): the caller hands the whole call to it, so it
+        is made with their key alone. None: this client makes the call.
+        Only where Spaces is enforced and a person is bound (in memory: an
+        install with one account reads nothing); the stores off the loop."""
+        await self._refuse_a_model_not_allowed(model)
+        if getattr(self, "_carries_own_key", "") or getattr(self, "_key_is_given", False):
+            # Already the person's own client, or a client built with a key
+            # someone typed (a check of a key before it is kept).
+            return None
+        from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+        if not spaces_enforced() or not bound_asker():
+            return None
+        from kazma_core.spaces.own_keys import OwnKeyUnreadable, key_for_call
+
+        try:
+            found = await asyncio.to_thread(key_for_call, str(getattr(self, "provider_name", "") or ""))
+        except OwnKeyUnreadable as exc:
+            raise LLMError(f"Not sent: {exc}", kind="own_key_unreadable", transient=True) from exc
+        if found is None:
+            return None
+        account, key, entry = found
+        return await self._own_key_client(account, key, entry)
+
+    async def _own_key_client(self, account: str, key: str, entry: dict[str, Any]) -> LLMProvider:
+        """This client's twin for *account*'s own *key* (Spaces S2-04), kept
+        with this client once per person and key; a twin of an earlier key
+        of theirs is closed. Built off the loop (a client's construction
+        reads its egress settings); the cache is changed on the loop."""
+        import hashlib
+
+        print_ = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+        held = _OWN_KEY_CLIENTS.setdefault(self, {})
+        twin = held.get((account, print_))
+        if twin is not None:
+            return twin
+        built = await asyncio.to_thread(self._build_own_key_client, account, key, entry)
+        twin = held.get((account, print_))
+        if twin is not None:  # another call built it meanwhile
+            await built.close()
+            return twin
+        for old in [k for k in held if k[0] == account]:
+            await held.pop(old).close()
+        held[(account, print_)] = built
+        return built
+
+    def _build_own_key_client(self, account: str, key: str, entry: dict[str, Any]) -> LLMProvider:
+        """The twin: this client's provider row, model and prices, with
+        *key*; none of the row's secret headers (the install's own sign-in
+        to a gateway or an organisation, never sent with their key); no
+        switch to the install's other keys (providers stage 4); never
+        through the install's egress proxy, whose own key would stand in for
+        theirs. Blocking."""
+        from dataclasses import replace
+
+        from kazma_core.provider_adapters import build_client
+
+        # The provider's own address, kept as a string of its own: the
+        # constructor may route the config it is given through the install's
+        # egress proxy IN PLACE (``_sync_gateway``), and a comparison with
+        # that same object then saw no change (the review of S2-04: her key
+        # went to the install's LiteLLM proxy).
+        direct = str(getattr(self, "_direct_base_url", "") or self.config.base_url or "")
+        config = replace(self.config, api_key=key, key_switch=None, base_url=direct, extra_headers={})
+        twin = build_client(str(getattr(self, "provider_name", "") or ""), config, entry)
+        twin._egress_frozen = True
+        twin._via_gateway = False
+        if str(twin.config.base_url or "") != direct or str(twin.config.api_key or "") != key:
+            # Its constructor routed it through the egress proxy: back to the
+            # provider's own address, with her key.
+            twin.reconfigure(base_url=direct, api_key=key)
+        twin._carries_own_key = account
+        return twin
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -971,7 +1083,12 @@ class LLMProvider:
         spans would report three fast calls and hide the latency that was
         actually experienced.
         """
-        await self._refuse_a_model_not_allowed(model)
+        own = await self._person_call(model)
+        if own is not None:
+            # Their own key (Spaces S2-04): the whole call is theirs.
+            return own_key_answer(await LLMProvider.chat(
+                own, messages, tools, max_tokens, temperature, model, response_format, reasoning,
+            ))
         from kazma_core.observability.genai_otel import (
             genai_chat_span,
             record_chat_response,
@@ -998,7 +1115,22 @@ class LLMProvider:
 
     async def _switch_key_after(self, exc: BaseException) -> bool:
         """True when the call failed for its KEY and the provider gave
-        another (providers stage 4): the client now holds it."""
+        another (providers stage 4): the client now holds it. A person's own
+        key (Spaces S2-04) gives way to nothing: its failure is said as
+        theirs, and the install's keys are never tried in its place."""
+        if getattr(self, "_carries_own_key", ""):
+            from kazma_core.provider_keys import key_failure
+
+            why = key_failure(exc)[0]
+            if why:
+                said = {"refused": "was refused", "no_credit": "has no credit left",
+                        "rate_limited": "is being limited by the provider"}.get(why, "failed")
+                raise LLMError(
+                    f"Your own key for {getattr(self, 'provider_name', '') or 'this provider'} {said} "
+                    f"({exc}). Change it in Settings, My account, or remove it to use the install's key.",
+                    kind=str(getattr(exc, "kind", "") or ""), transient=bool(getattr(exc, "transient", False)),
+                ) from exc
+            return False
         switch = getattr(self.config, "key_switch", None)
         if not callable(switch):
             return False
@@ -1787,7 +1919,14 @@ class LLMProvider:
         it failed for its key before any text was streamed (providers stage
         4): a key that is refused, out of credit or out of requests gives way
         to the next. Once text has been streamed, a failure is the call's."""
-        await self._refuse_a_model_not_allowed(model)
+        own = await self._person_call(model)
+        if own is not None:
+            # Their own key (Spaces S2-04): the whole call is theirs.
+            async for delta in LLMProvider.chat_stream(
+                own, messages, tools, max_tokens, temperature, model, response_format, reasoning,
+            ):
+                yield own_key_delta(delta)
+            return
         from kazma_core.provider_keys import MAX_SWITCHES
 
         for attempt in range(MAX_SWITCHES + 1):
@@ -2455,6 +2594,9 @@ class LLMError(Exception):
       daily limit (Spaces S2-02, ``spaces.daily_limits``).
     * ``"model_not_allowed"`` — not sent: the model is not one the person the
       call is for may use (Spaces S2-03, ``spaces.person_models``).
+    * ``"own_key_unreadable"`` — not sent: whether the person the call is for
+      uses a key of their own could not be read (Spaces S2-04,
+      ``spaces.own_keys``); the install's key is never used in its place.
     """
 
     def __init__(

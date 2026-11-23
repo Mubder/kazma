@@ -9,6 +9,12 @@
 // :root, is what made Light theme show a dark-gray page on a phone.
 const _THEME_COLOR = { light: '#f4f7fd', dark: '#080d18' };
 
+/** Whether this page may read the install's settings (auth-guard.js,
+ * <meta name="kazma-install-settings">): a member's page never asks them. */
+function _installSettingsHere() {
+    return typeof window.kazmaInstallSettings !== 'function' || window.kazmaInstallSettings();
+}
+
 export function syncDocumentColorScheme(theme) {
     const scheme = theme === 'dark' ? 'dark' : 'light';
     const root = document.documentElement;
@@ -183,7 +189,9 @@ export function kazmaApp() {
             // Sync from backend (authoritative — overrides the local cache).
             // Theme is server-authoritative so a user's choice persists across
             // every device/browser, not just this browser's localStorage.
-            fetch('/api/settings/appearance')
+            // The install's appearance is the admin's: a member's page keeps
+            // its own theme in this browser.
+            if (_installSettingsHere()) fetch('/api/settings/appearance')
                 .then(r => r.json())
                 .then(d => {
                     if (d && d.font_size) this.fontSize = d.font_size;
@@ -260,7 +268,7 @@ export function kazmaApp() {
         // saved Auto (or a fixed theme) since this page loaded.
         async _followSystemTheme() {
             try {
-                if (typeof window.kazmaGetJson === 'function') {
+                if (typeof window.kazmaGetJson === 'function' && _installSettingsHere()) {
                     const d = await window.kazmaGetJson('/api/settings/appearance');
                     if (d && d.theme) this.themePreference = d.theme;
                 }
@@ -280,7 +288,9 @@ export function kazmaApp() {
             this._applyTheme();
             // Persist to the account (server) so the choice travels across
             // every device/browser, not just this one. Fire-and-forget; the
-            // local apply above already gives instant feedback.
+            // local apply above already gives instant feedback. A member's
+            // choice stays in this browser: the install's is the admin's.
+            if (!_installSettingsHere()) return;
             try {
                 fetch('/api/settings/appearance', {
                     method: 'PUT',
@@ -434,6 +444,9 @@ export function sidebarComponent() {
         },
 
         async _fetchActiveModel() {
+            // The install's active model is the admin's to read: a member's
+            // picker shows their own default (/api/models/options).
+            if (!_installSettingsHere()) return;
             try {
                 const res = await fetch('/api/provider/active', {
                     headers: { 'Accept': 'application/json' },
@@ -535,6 +548,7 @@ export function sidebarModel() {
         selectedModel: '',
         providers: [],
         async init() {
+            if (!_installSettingsHere()) return;
             try {
                 const resp = await fetch('/api/providers');
                 const data = await resp.json();

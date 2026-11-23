@@ -354,6 +354,97 @@
             this.sessions = Array.isArray(sessions) ? sessions.slice() : [];
             this.sessionsLoaded = Array.isArray(sessions);
             if (installShown) await this.loadSaasAdmin();
+            else await this.loadOwnKeys();
+        },
+
+        /* A member's own model keys (Spaces S2-04): the providers they may
+         * bring a key of their own for, and whether one is kept. The route
+         * never answers a key. */
+        async loadOwnKeys() {
+            const data = await this._fetch('/api/account/model-keys?_=' + Date.now());
+            if (data && data.ok && Array.isArray(data.providers)) {
+                this.ownKeys = data.providers.slice();
+                this.ownKeysFailed = false;
+            } else {
+                this.ownKeys = [];
+                this.ownKeysFailed = true;
+            }
+            this.ownKeysLoaded = true;
+        },
+
+        ownKeyState(p) {
+            return p && p.own
+                ? _t('settings.own_keys_using_own', 'Your own key')
+                : _t('settings.own_keys_using_install', "The install's key");
+        },
+
+        /* What a refused key says, by the route's code (the provider check's
+         * codes and the own-key rules'), in the page's language. */
+        _ownKeyWords(code) {
+            const words = {
+                key_refused: _t('settings.own_keys_err_key_refused', 'The provider refused this key. Nothing was kept.'),
+                unreachable: _t('settings.own_keys_err_unreachable', 'The provider could not be reached. Nothing was kept.'),
+                rate_limited: _t('settings.own_keys_err_rate_limited', 'The provider is limiting this key right now. Nothing was kept.'),
+                timeout: _t('settings.own_keys_err_timeout', 'The provider did not answer in time. Nothing was kept.'),
+                bad_key: _t('settings.own_keys_type_key', 'Type the key to keep.'),
+                unknown_provider: _t('settings.own_keys_err_unknown_provider', 'You cannot bring a key for this provider.'),
+                identity_unavailable: _t('settings.own_keys_unreadable', 'Your keys cannot be read right now. Try again.'),
+                vault_unavailable: _t('settings.own_keys_err_vault', "Kazma's vault is not set up, so no key can be kept."),
+            };
+            return words[code] || _t('settings.own_keys_err_failed', 'The key did not work. Nothing was kept.');
+        },
+
+        async saveOwnKey(p) {
+            const key = p && p.provider ? String(this.ownKeyDraft[p.provider] || '').trim() : '';
+            if (!key) { showToast(_t('settings.own_keys_type_key', 'Type the key to keep.'), 'error'); return; }
+            this.ownKeyBusy = Object.assign({}, this.ownKeyBusy, { [p.provider]: true });
+            try {
+                const resp = await fetch('/api/account/model-keys/' + encodeURIComponent(p.provider), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ key: key }),
+                });
+                let data = {};
+                try { data = await resp.json(); } catch (e) { data = {}; }
+                if (resp.ok && data.ok) {
+                    this.ownKeyDraft = Object.assign({}, this.ownKeyDraft, { [p.provider]: '' });
+                    showToast(_t('settings.own_keys_saved', 'Your own key is kept. Your calls to {provider} use it now.', { provider: p.label }), 'success');
+                    await this.loadOwnKeys();
+                } else {
+                    showToast(this._ownKeyWords(data && data.code), 'error');
+                }
+            } catch (e) {
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', { error: e.message }), 'error');
+            } finally {
+                this.ownKeyBusy = Object.assign({}, this.ownKeyBusy, { [p.provider]: false });
+            }
+        },
+
+        async removeOwnKey(p) {
+            const ok = await window.kazmaConfirm({
+                title: _t('settings.own_keys_remove', "Use the install's key"),
+                message: _t('settings.own_keys_remove_confirm',
+                    "Forget your own key for {provider}? Your calls to it will use the install's key and count against your daily limit.",
+                    { provider: p.label }),
+                confirmText: _t('settings.own_keys_remove', "Use the install's key"),
+            });
+            if (!ok) return;
+            try {
+                const resp = await fetch('/api/account/model-keys/' + encodeURIComponent(p.provider), {
+                    method: 'DELETE',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                let data = {};
+                try { data = await resp.json(); } catch (e) { data = {}; }
+                if (resp.ok && data.ok) {
+                    showToast(_t('settings.own_keys_removed', "Your calls to {provider} use the install's key again.", { provider: p.label }), 'success');
+                    await this.loadOwnKeys();
+                } else {
+                    showToast(this._ownKeyWords(data && data.code), 'error');
+                }
+            } catch (e) {
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', { error: e.message }), 'error');
+            }
         },
 
         async loadSaasAdmin() {
