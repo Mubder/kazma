@@ -1382,8 +1382,15 @@ class CronScheduler:
             # it once its lease lapses.
             self._sending.add(int(row["id"]))
             try:
-                ok, error = await self._send(row)
-                res = await self._store.finish_delivery(row["id"], owner=self._owner, delivered=ok, error=error)
+                if _dropped_for_its_person(str(row.get("target") or "")):
+                    # Its chat's person was unlinked, deleted or disabled
+                    # (S3-07): ended quietly, recorded dropped -- never
+                    # retried for two hours and paged (the stage 3 review, L8).
+                    ok, error, dropped = False, "the chat is no longer linked", True
+                else:
+                    (ok, error), dropped = await self._send(row), False
+                res = await self._store.finish_delivery(row["id"], owner=self._owner, delivered=ok,
+                                                        error=error, dropped=dropped)
             finally:
                 self._sending.discard(int(row["id"]))
             if res is None:
@@ -1499,6 +1506,15 @@ def _parse_dt(value: Any) -> datetime | None:
     except (TypeError, ValueError):
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def _dropped_for_its_person(target: str) -> bool:
+    """Whether a delivery to *target* is dropped: once Spaces is enforced,
+    a chat whose chat-app account was unlinked, or whose account was deleted
+    or disabled (``chat_links.address_revoked``, memory only; S3-07)."""
+    from kazma_core.spaces.chat_links import address_revoked
+
+    return address_revoked(target)
 
 
 #: Why a booking is refused once Spaces is enforced (code ``no_own_address``).

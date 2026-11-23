@@ -242,9 +242,18 @@ def _searchable_text(path: Path, root: Path) -> str | None:
 def _fallback_telegram_target() -> str:
     """``telegram:<id>`` for a send with no bound chat, else ``""``.
 
-    The configured Telegram swarm chat, else the first allowed user.
-    Blocking (settings reads): ``send_file`` runs it with ``to_thread``.
+    The configured Telegram swarm chat, else the first allowed user. Once
+    Spaces is enforced: the bound person's own address
+    (``send_message.own_address``), never the owner's chat for someone else
+    (the stage 3 review, M6). Blocking (settings reads): ``send_file`` runs
+    it with ``to_thread``.
     """
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if spaces_enforced():
+        from kazma_core.tools.send_message import own_address
+
+        return own_address()
     from kazma_core.config_store import get_config_store
 
     store = get_config_store()

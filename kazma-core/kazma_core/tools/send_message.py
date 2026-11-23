@@ -160,7 +160,7 @@ def resolve_delivery_target() -> str:
     """Best delivery address for a reminder booked on this turn.
 
     Order: live ContextVar (gateway/Telegram chat) → cron-parent job →
-    the person's own address (:func:`_own_address`). Empty means the booking
+    the person's own address (:func:`own_address`). Empty means the booking
     must fail closed rather than persist ``target=(none)`` and drop the
     fire-time alert.
     """
@@ -177,10 +177,10 @@ def resolve_delivery_target() -> str:
                 return inherited
     except Exception:
         pass
-    return _own_address()
+    return own_address()
 
 
-def _own_address() -> str:
+def own_address() -> str:
     """The chat-app address of the person the work is for, where a reminder
     or a notice of theirs goes when no chat asked (a web turn, the Scheduled
     page). Before Spaces: the operator's Telegram, as always. Once Spaces is
@@ -212,7 +212,7 @@ def web_gateway_block(thread_id: str) -> dict[str, str]:
     """Internal ``_gateway`` routing block for Web SSE/WS turns.
 
     Web has no inbound ``telegram:<chat_id>``. Stamp the person's own
-    chat-app address (:func:`_own_address`: before Spaces the operator's
+    chat-app address (:func:`own_address`: before Spaces the operator's
     Telegram, the one lifecycle notifications use; once enforced, the
     asker's linked chat, never the owner's for anyone else) so
     ``schedule_task`` captures a deliverable target. ``platform`` stays

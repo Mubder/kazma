@@ -1050,13 +1050,26 @@ async def _decision_authorized(msg: IncomingMessage, target_thread: str, *,
 
 
 async def _resume_destination(manager: Any, msg: IncomingMessage, ctx: dict[str, Any],
-                              result_state: Any, *, answered_elsewhere: bool,
-                              approved: bool) -> tuple[str, str, dict[str, Any]]:
+                              result_state: Any, *, whose: Any = None, thread: str = "",
+                              answered_elsewhere: bool,
+                              approved: bool) -> tuple[str, str, dict[str, Any]] | None:
     """Where a resumed turn's answer and next card go: the chat that pressed,
     unless the card was answered from another chat (an approver's, the
     asker's other chat) -- then the chat that asked, never the one that
-    pressed, which is told so (S3-04)."""
+    pressed, which is told so (S3-04).
+
+    Once Spaces is enforced and the presser is not the card's asker (an
+    approver, the admin answering an N21 card): the asker's own chat-app
+    route when the turn has one and it is the asker's
+    (``chat_apps.chat_is_the_askers``), else nowhere -- a web or voice turn
+    keeps its answer there -- and the presser is told only that it was
+    answered (the stage 3 review, M2: Dana's web turn answered by Rami from
+    his DM sent her answer to Rami's Telegram). None: deliver nothing."""
     here = _build_target_id(msg.platform, ctx)
+    other = await _answered_for_someone_else(manager, msg, ctx, result_state, whose, here,
+                                             thread=thread, approved=approved)
+    if other is not False:
+        return other
     route = _asker_route(result_state) if answered_elsewhere else None
     if route is None or route[1] == here:
         return msg.platform, here, ctx
@@ -1068,7 +1081,97 @@ async def _resume_destination(manager: Any, msg: IncomingMessage, ctx: dict[str,
     return route[0], route[1], {}
 
 
+async def _answered_for_someone_else(manager: Any, msg: IncomingMessage, ctx: dict[str, Any],
+                                     result_state: Any, whose: Any, here: str, *,
+                                     thread: str, approved: bool) -> Any:
+    """The destination when the presser answered someone else's card once
+    Spaces is enforced (:func:`_resume_destination`), or False when they did
+    not. Never the presser's chat."""
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+    asker = str(getattr(whose, "asker", "") or "")
+    bound = current_scope()
+    if not spaces_enforced() or not asker or bound is None or bound.asker == asker:
+        return False
+    route = _asker_route(result_state)
+    deliver = None
+    if route is not None:
+        from kazma_core.spaces.chat_apps import chat_is_the_askers
+        from kazma_core.spaces.identity import IdentityUnavailable
+
+        try:
+            if await asyncio.to_thread(chat_is_the_askers, whose.space_id, asker, route[0], route[1],
+                                       thread):
+                deliver = (route[0], route[1], {} if route[1] != here else ctx)
+        except IdentityUnavailable:
+            logger.warning("[HITL] whose chat the answer goes to cannot be read; it goes nowhere")
+    if deliver is not None and deliver[1] == here:
+        return deliver
+    if not await manager.send(OutboundMessage(
+            target_id=here,
+            text=("✅ Approved" if approved else "🚫 Denied") + " -- answered. "
+            + ("The rest goes to the chat that asked." if deliver is not None
+               else "The rest stays with the person who asked, not here."),
+            context_metadata=ctx)):
+        logger.warning("[HITL] the answer's receipt did not reach %s", msg.platform)
+    return deliver
+
+
+def _named_thread(text: str, thread_id: str) -> str:
+    """The thread a ``/hitl`` decision names (its third word, or the
+    chat's own), without its gate. Pure."""
+    parts = (text or "").strip().split()
+    named = parts[2] if len(parts) >= 3 else thread_id
+    return named.partition("~")[0]
+
+
+def _card_space_for_presser(thread: str) -> str:
+    """The space *thread*'s card lives in, when it is not the space bound now
+    and the presser is a member of it; "" otherwise. Blocking (the thread
+    record, the identity store)."""
+    from kazma_core.spaces import identity, threads
+    from kazma_core.spaces.scope import current_scope
+
+    bound = current_scope()
+    if bound is None or not bound.asker or not thread:
+        return ""
+    home = threads.thread_home(thread)
+    if not home or home == bound.space_id:
+        return ""
+    try:
+        return home if identity.is_member(bound.asker, home) else ""
+    except identity.IdentityUnavailable:
+        return ""
+
+
 async def _handle_hitl_resume(
+    msg: IncomingMessage,
+    graph: Any,
+    config: dict[str, Any],
+    thread_id: str,
+    store: SessionStore,
+    manager: Any,
+    lock_getter: Any = None,
+) -> bool:
+    """Process a ``hitl approve|deny <thread_id>`` message in the space its
+    card lives in (the stage 3 review, L7): a ``/space`` switch moves the
+    chat, never the card it left waiting, so a press names a thread of the
+    space the card was asked in. When the presser is a member of that space
+    the decision is taken there, as them; whose card it is is still asked
+    on the live card (S3-04). Not a member: the space bound now, which reads
+    no such thread (the card is stale to them)."""
+    from kazma_core.spaces.scope import bind_scope, current_scope, spaces_enforced
+
+    if spaces_enforced() and current_scope() is not None:
+        home = await asyncio.to_thread(_card_space_for_presser, _named_thread(msg.text, thread_id))
+        if home:
+            with bind_scope(home, current_scope().asker):
+                return await _handle_hitl_resume_here(
+                    msg, graph, config, thread_id, store, manager, lock_getter)
+    return await _handle_hitl_resume_here(msg, graph, config, thread_id, store, manager, lock_getter)
+
+
+async def _handle_hitl_resume_here(
     msg: IncomingMessage,
     graph: Any,
     config: dict[str, Any],
@@ -1369,19 +1472,21 @@ async def _handle_hitl_resume(
                     graph, _resume_cmd, resume_config, target_thread,
                 )
 
-        deliver_platform, deliver_target, deliver_ctx = await _resume_destination(
-            manager, msg, ctx, result_state, answered_elsewhere=(
+        destination = await _resume_destination(
+            manager, msg, ctx, result_state, whose=whose, thread=target_thread, answered_elsewhere=(
                 whose is not None and target_thread != thread_id), approved=approved)
-        await _deliver_resume(
-            manager,
-            platform=deliver_platform,
-            target_id=deliver_target,
-            ctx=deliver_ctx,
-            thread_id=target_thread,
-            result_state=result_state,
-            chained=chained,
-            fallback_text="✅ Approved — continuing." if approved else "🚫 Denied.",
-        )
+        if destination is not None:
+            deliver_platform, deliver_target, deliver_ctx = destination
+            await _deliver_resume(
+                manager,
+                platform=deliver_platform,
+                target_id=deliver_target,
+                ctx=deliver_ctx,
+                thread_id=target_thread,
+                result_state=result_state,
+                chained=chained,
+                fallback_text="✅ Approved — continuing." if approved else "🚫 Denied.",
+            )
     except Exception:
         logger.exception("[HITL] Resume failed for thread=%s", target_thread)
         await manager.send(

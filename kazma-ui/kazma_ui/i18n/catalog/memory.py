@@ -1753,6 +1753,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "هذا لعضو آخر؛ لا ينساه إلا هو أو مالك المساحة",
         "en": "This is another member's; only they or the space's owner can forget it",
     },
+    # Stage 3 review, L13: a change to another member's fact in a shared space.
+    "memory.err.not_theirs": {
+        "ar": "هذه معلومة لعضو آخر؛ لا يقرر فيها إلا هو أو مالك المساحة",
+        "en": "This is another member's fact; only they or the space's owner decides on it",
+    },
     "memory.shared_notice": {
         "ar": "الذاكرة هنا مشتركة مع {names}.",
         "en": "Memory here is shared with {names}.",

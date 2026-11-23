@@ -669,6 +669,16 @@ def address_of(account_id: str) -> str:
     return ""
 
 
+def is_own_chat(account_id: str, target: Any) -> bool:
+    """Whether *target* is one of *account_id*'s own links' direct chats
+    (a link's recorded chat, or the chat its Telegram or WhatsApp id is).
+    Blocking (the identity store)."""
+    text = str(target or "").strip()
+    if not account_id or ":" not in text:
+        return False
+    return any(text in _chats_of(link) or _address(link) == text for link in links_of(account_id))
+
+
 def is_their_address(account_id: str, target: Any, space_id: str = "") -> bool:
     """Whether *target* is *account_id*'s own: one of their links' direct
     chats, or a group bound to *space_id* (S3-03) that they are a member of.
@@ -676,7 +686,7 @@ def is_their_address(account_id: str, target: Any, space_id: str = "") -> bool:
     text = str(target or "").strip()
     if not account_id or ":" not in text:
         return False
-    if any(_address(link) == text for link in links_of(account_id)):
+    if is_own_chat(account_id, text):
         return True
     if not space_id:
         return False

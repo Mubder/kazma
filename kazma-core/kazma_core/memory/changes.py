@@ -126,6 +126,33 @@ def _new_id() -> str:
     return "mc_" + uuid.uuid4().hex[:20]
 
 
+def _not_theirs_to_decide(row: dict[str, Any], tenant_id: str) -> None:
+    """Refuse (``not_theirs``) a decision on a change of another member's
+    fact in a shared space: once Spaces is enforced, a change whose fact is
+    filed under a member's entry (``speakers``: ``member_<account>``) is
+    decided by that member or an owner of the space (the stage 3 review,
+    L13). A fact under no member's entry, a personal space and an install
+    that does not enforce Spaces are as before. Who decides is the account
+    bound now; no one bound decides no member's change. Blocking (the
+    identity store)."""
+    from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+    if not spaces_enforced():
+        return
+    from kazma_core.memory.speakers import account_of_entry
+
+    member = account_of_entry(row.get("subject"))
+    if member is None:
+        return
+    person = bound_asker() or ""
+    if person == member:
+        return
+    from kazma_core.spaces.identity import owns_space
+
+    if not (person and owns_space(person, tenant_id)):
+        raise ChangeRefusedError("not_theirs")
+
+
 def _row(conn: sqlite3.Connection, change_id: str, tenant_id: str) -> dict[str, Any] | None:
     found = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM memory_changes WHERE id = ? AND tenant_id = ?",  # nosec B608 - fixed columns
@@ -353,6 +380,7 @@ def confirm(
     row = _row(conn, change_id, tenant)
     if row is None:
         raise ChangeRefusedError("not_found")
+    _not_theirs_to_decide(row, tenant)
     if row["kind"] not in (PENDING, READING) or row["state"] != "open":
         raise ChangeRefusedError("not_open")
     if row["kind"] == READING and not _current(conn, row["new_belief_id"], tenant):
@@ -421,6 +449,7 @@ def dismiss(
         row = _row(conn, change_id, tenant)
         if row is None:
             raise ChangeRefusedError("not_found")
+        _not_theirs_to_decide(row, tenant)
         if row["kind"] not in (PENDING, READING) or row["state"] != "open":
             raise ChangeRefusedError("not_open")
         now = time.time()
@@ -493,6 +522,7 @@ def undo(
         row = _row(conn, change_id, tenant)
         if row is None:
             raise ChangeRefusedError("not_found")
+        _not_theirs_to_decide(row, tenant)
         if row["kind"] != UPDATE or row["state"] != "open":
             raise ChangeRefusedError("not_open")
         conn.execute("BEGIN IMMEDIATE")

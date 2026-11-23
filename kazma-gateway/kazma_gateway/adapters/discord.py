@@ -792,6 +792,10 @@ class DiscordAdapter(SenderGate, BaseAdapter):
                     text=action.text,
                     context_metadata={
                         "channel_id": channel_id,
+                        # The server the card is in: a press in a server
+                        # channel is never a direct chat (the stage 3
+                        # review, M5: it bound the presser's personal space).
+                        "guild_id": str(data.get("guild_id") or "") or None,
                         "user_id": str(user.get("id", "")),
                         "username": user.get("username", ""),
                         "interaction": True,

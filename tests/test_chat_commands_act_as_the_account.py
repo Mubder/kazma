@@ -146,6 +146,30 @@ def test_every_command_acts_as_the_account_in_the_space(world, name: str) -> Non
     assert all(bound == here for bound in seen), (name, seen)
 
 
+GROUP = -1009914
+
+
+def _say_in_the_group(w: Any, text: str) -> None:
+    meta = {"chat_id": GROUP, "user_id": int(w.uid), "chat_type": "supergroup", "username": "dana"}
+    asyncio.run(w.handler(IncomingMessage("telegram", f"telegram:{w.uid}", text, context_metadata=meta)))
+
+
+@pytest.mark.parametrize("name", sorted(SAMPLES))
+def test_every_command_acts_as_the_account_in_a_group_s_space(world, name: str) -> None:
+    """The same matrix in a Telegram group bound to Garden (the stage 3
+    review, M4): every command acts as Dana, in Garden."""
+    _say_in_the_group(world, "/space Garden")
+    world.sent.clear()
+    world.graph.runs.clear()
+    _say_in_the_group(world, SAMPLES[name])
+    seen = [bound for bound, _text in world.sent] + [bound for bound, _tid in world.graph.runs]
+    assert seen, f"/{name} answered nothing in the group"
+    if name in BEFORE_THE_PLACE:
+        return
+    here = scope.Scope(world.garden["id"], world.dana["id"])
+    assert all(bound == here for bound in seen), (name, seen)
+
+
 # ── seasons ─────────────────────────────────────────────────────────────
 
 

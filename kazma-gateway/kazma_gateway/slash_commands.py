@@ -484,6 +484,7 @@ _CHANGE_REFUSALS = {
     "replaced_since": "🔁 That fact has changed again since. Undo the newer change first.",
     "forgotten": "🔁 The earlier value was forgotten, so it cannot come back.",
     "not_written": "🔁 Kazma could not save the value. Nothing changed.",
+    "not_theirs": "🔁 That is another member's fact: only they or an owner of this space decides on it.",
 }
 
 

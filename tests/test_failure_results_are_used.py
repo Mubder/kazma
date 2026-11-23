@@ -646,7 +646,7 @@ DECLARED: dict[tuple[str, str, str], str] = {
      "gateway.GatewayManager.send"):
         _CHAT_REPLY + "; a chained card that does not arrive stays decidable on the Web "
         "approvals panel and with /hitl, and the watchdog expires it",
-    ("kazma-gateway/kazma_gateway/agent_handler/hitl.py", "_handle_hitl_resume",
+    ("kazma-gateway/kazma_gateway/agent_handler/hitl.py", "_handle_hitl_resume_here",
      "gateway.GatewayManager.send"): _CHAT_REPLY,
     ("kazma-gateway/kazma_gateway/agent_handler/session_commands.py", "try_session_command._reply",
      "gateway.GatewayManager.send"): _CHAT_REPLY,

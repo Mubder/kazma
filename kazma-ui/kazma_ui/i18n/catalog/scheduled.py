@@ -332,6 +332,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "غير معروف",
         "en": "unknown",
     },
+    "scheduled.delivery_dropped": {
+        "en": "dropped: the chat is no longer linked",
+        "ar": "أُلغي: لم تعد المحادثة مربوطة",
+    },
     "scheduled.delivery_cancelled": {
         "ar": "أُلغي",
         "en": "cancelled",

@@ -16304,7 +16304,7 @@ an install with one account behaves as before.
     once its direct chat is recorded), and `chat_links.is_their_address`
     says whether an address is theirs (one of their links, or a group bound
     to the job's space they are a member of).
-  - `send_message._own_address` is the one fallback of
+  - `send_message.own_address` is the one fallback of
     `resolve_delivery_target`: the bound person's own address; the owner's
     falls back to the operator's Telegram; anyone else with none, and work
     that names no person, get "" -- never the owner's address for someone
@@ -16444,6 +16444,60 @@ an install with one account behaves as before.
     as ids (`chat_links.split_ids`, L6). Gate:
     `tests/test_chat_link_codes_review.py` (each with the rule of before as
     its control), `tests/e2e/test_chat_unlink_browser.py` (EN/AR).
+  - **An answer from another chat never sends the asker's work to the
+    presser** (M2): `hitl_answerers.as_the_asker` clears the delivery target
+    and platform when it binds someone else (the tool worker then takes the
+    turn's own `_gateway` route); a card answered for someone else
+    (`hitl._answered_for_someone_else`) resumes into the asker's chat only
+    when `chat_is_the_askers` says the chat is theirs -- a group of their
+    space, or their own chat (`chat_links.is_own_chat`) -- else nowhere, and
+    the presser's chat gets only a receipt. Gate:
+    `tests/test_hitl_resume_never_reaches_the_presser.py`.
+  - **A press keeps the chat it was pressed in** (M5): a Discord press
+    carries its `guild_id`, so a press in a server channel is not a direct
+    chat; each adapter's press message says which kind of chat it is in
+    (gate in `tests/test_press_keeps_its_chat.py`).
+  - **No fallback to the owner's chat for someone else's work** (M6):
+    `send_file`'s and the document handler's fallbacks answer
+    `send_message.own_address`; every product function reading a
+    configured chat id asks it or is declared (`tests/test_chat_fallbacks_ask_the_person.py`).
+  - **A member sends only to their own chat or this conversation** (M7,
+    `call_preflight._outbound_refusal`): every tool of
+    `side_effects.OUTBOUND_TARGET_FIELDS` but those `OUTBOUND_NOT_CHECKED`
+    names (the space's own mailbox; `send_file`, no recipient) is checked
+    before the card and at the call (`PREFLIGHT_TOOLS`); the admin keeps the
+    allowlist rule of before. Gate: `tests/test_member_outbound_targets.py`.
+  - **A dropped reminder ends quietly** (L8): the scheduler's delivery pass
+    asks `chat_links.address_revoked` first, and `finish_delivery(dropped=True)`
+    ends the delivery `dropped`, the job done, no retry, no alert
+    (`scheduled.delivery_dropped`; the digest counts it, not as a problem).
+    Gate: `tests/test_cron_dropped_reminder_ends_quietly.py`.
+  - **A waiting card is checked again under the thread lock, in every
+    chat** (M3): another member's message that waited on the lock behind
+    the turn that paused never drops its card (`graph._waits_on_someone_else`,
+    asked before the lock and again before `cancel_pending_hitl`). Gate:
+    `tests/test_card_wait_checked_under_the_lock.py`.
+  - **`/undo`, `/edit` and `/replay <step>` are the chat's opener's or an
+    owner's** (M4): action `rewind` of `hitl_answerers.turn_control_refusal`,
+    the rule of `reset`, in groups and direct chats; the S3-06 command
+    matrix runs in a group too. Gates: `tests/test_chat_rewind_per_person.py`,
+    `tests/test_chat_commands_act_as_the_account.py`.
+  - **A card is decided in the space it lives in** (L7,
+    `hitl._card_space_for_presser`): after a `/space` switch, a member of
+    the card's space presses it there, as themself; whose card it is is
+    still asked on the live card. Gate: `tests/test_card_press_after_a_space_switch.py`.
+  - **A group's binding holds while its binder is a member**
+    (L9, `chat_apps._group_space`); **a forum topic is the group's**, named
+    by the group, never the member who wrote (L11,
+    `graph._resolve_thread_in_place`); **`/reset` clears the chat's own
+    pointer in its space** (L10). Gate:
+    `tests/test_chat_group_bindings_and_pointers.py`.
+  - **A change to a member's fact is decided by them or an owner** (L13,
+    `changes._not_theirs_to_decide`, code `not_theirs`): in a shared space
+    a change filed under `member_<account>` is confirmed, undone or
+    dismissed only by that member or an owner of the space, on the Memory
+    page and with `/memory` alike. Gate:
+    `tests/test_memory_changes_decided_by_their_person.py`.
 
 ## UI Conventions (Web)
 

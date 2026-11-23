@@ -220,6 +220,9 @@ DECLARED = {
         "binds what kazma_core.spaces.chat_apps.chat_app_scope answers",
     ("kazma-gateway/kazma_gateway/agent_handler/commands.py", "_chat_document_scope"):
         "before Spaces only (enforced: surface_scope reads the bound scope)",
+    ("kazma-gateway/kazma_gateway/agent_handler/hitl.py", "_handle_hitl_resume"):
+        "the card's own space, as the presser the chat-app rule bound, and only when they are "
+        "a member of it (the stage 3 review, L7: hitl._card_space_for_presser)",
 }
 
 

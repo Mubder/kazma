@@ -253,6 +253,23 @@ def _unbound_reply(platform: str, group: str, user_text: str | None) -> str:
     )
 
 
+def _group_space(reg: dict[str, Any], binding: Any) -> str:
+    """The shared space a group's *binding* binds it to, or "" when it binds
+    nothing any more: the space is gone, personal or being erased, or the
+    member who bound it is no longer a member of it (the stage 3 review, L9:
+    a person who left a space keeps no group in it). Pure."""
+    if not isinstance(binding, dict):
+        return ""
+    bound = str(binding.get("space") or "")
+    space = (reg.get("spaces") or {}).get(bound) if bound else None
+    if not isinstance(space, dict) or space.get("personal_of") or space.get("erasing_at"):
+        return ""
+    binder = str(binding.get("by") or "")
+    if binder and not _member(reg, binder, bound):
+        return ""
+    return bound
+
+
 def chat_place(platform: str, meta: dict[str, Any], sender_id: str,
                user_text: str | None = None) -> ChatPlace:
     """Where a chat-app message works once Spaces is enforced (S3-03): its
@@ -280,9 +297,8 @@ def chat_place(platform: str, meta: dict[str, Any], sender_id: str,
             return ChatPlace(None, refusal="not_a_member")
         return ChatPlace(Scope(space, account), sender_key=_key_for(sender_id, space))
     group = _group_of(plat, meta)
-    bound = str((bindings["group"].get(f"{plat}:{group}") or {}).get("space") or "")
-    shared = bound and not ((reg.get("spaces") or {}).get(bound) or {}).get("personal_of")
-    if not group or not bound or not shared or (reg.get("spaces") or {}).get(bound, {}).get("erasing_at"):
+    bound = _group_space(reg, bindings["group"].get(f"{plat}:{group}"))
+    if not group or not bound:
         return ChatPlace(None, refusal="group_unbound", group=True,
                          reply=_unbound_reply(plat, group, user_text))
     if not _member(reg, account, bound):
@@ -308,11 +324,17 @@ def chat_is_the_askers(space_id: str, asker: str, platform: str, target: str,
         return False
     plat = (platform or "").strip().lower()
     chat = str(target).split(":", 1)[1]
-    bound = str((_bindings()["group"].get(f"{plat}:{chat}") or {}).get("space") or "")
-    if bound:
-        return bound == space_id
+    binding = _bindings()["group"].get(f"{plat}:{chat}")
+    if binding:
+        return _group_space(reg, binding) == space_id
     record = threads.record_of(str(source_thread or "")) if source_thread else None
-    return record is not None and record.space_id == space_id and record.opener == asker
+    if record is None or record.space_id != space_id or record.opener != asker:
+        return False
+    # The thread is theirs; the chat must be too (the stage 3 review, M2):
+    # never another person's direct chat, whatever the thread says.
+    from kazma_core.spaces.chat_links import is_own_chat
+
+    return is_own_chat(asker, str(target))
 
 
 # ── /space ──────────────────────────────────────────────────────────────
@@ -404,8 +426,8 @@ def space_command(platform: str, meta: dict[str, Any], sender_id: str, text: str
 
     group = _group_of(plat, meta)
     gkey = f"{plat}:{group}"
-    bound = str((bindings["group"].get(gkey) or {}).get("space") or "")
-    bound_ok = bool(bound) and bound in (reg.get("spaces") or {})
+    bound = _group_space(reg, bindings["group"].get(gkey))
+    bound_ok = bool(bound)
     if not wanted:
         if bound_ok:
             return _say(text, f"This group works in {_space_name(reg, bound, False)}.",

@@ -113,8 +113,22 @@ def _resolve_thread_in_place(msg: IncomingMessage, sender_key: str) -> str:
         return _resolve_thread(msg)
     from dataclasses import replace
 
-    found = _resolve_thread(replace(msg, sender_id=sender_key, context_metadata={
-        **(msg.context_metadata or {}), "username": "", "display_name": ""}))
+    ctx = {**(msg.context_metadata or {}), "username": "", "display_name": ""}
+    local = sender_key.split(":", 1)[-1].rsplit("--in-", 1)[0]
+    if local.startswith("grp"):
+        # A group's topic or thread is one chat for the group (the stage 3
+        # review, L11): the platform's hint names the member who wrote
+        # (``gw-<platform>-<user>-topic-<n>``), so two members of one topic
+        # had two chats, and one member's topic of the same number in two
+        # groups bound to one space was one. Named by the group instead.
+        hint = str(ctx.get("thread_hint") or "")
+        own = msg.sender_id.split(":", 1)[-1] if ":" in (msg.sender_id or "") else ""
+        for who in (own, str(ctx.get("user_id") or ""), str(ctx.get("chat_id") or "")):
+            prefix = f"gw-{msg.platform}-{who}-"
+            if who and hint.startswith(prefix):
+                ctx["thread_hint"] = f"gw-{msg.platform}-{local}-{hint[len(prefix):]}"
+                break
+    found = _resolve_thread(replace(msg, sender_id=sender_key, context_metadata=ctx))
     suffix = "--in-" + sender_key.rsplit("--in-", 1)[-1]
     return found if found.endswith(suffix) else found + suffix
 
@@ -1077,34 +1091,46 @@ def create_graph_handler(
             await _handler_body(msg, thread_id)
             return
         with bind_scope(bound.space_id, bound.asker):
-            if place is not None and place.group and not _is_hitl_decision(msg.text):
+            if not _is_hitl_decision(msg.text):
+                # A paused card is its asker's (S3-04): another member's
+                # message -- a new request, a steer, an abort -- would
+                # discard it (LangGraph drops a pending interrupt when a new
+                # turn starts), so it waits for them. In every chat: a
+                # direct chat switched to another member's chat too (the
+                # stage 3 review, M3). Asked again under the thread lock
+                # (``_handler_body``): a message queued behind the turn that
+                # paused passed this check before the card existed.
                 waiting = await _waits_on_someone_else(thread_id)
                 if waiting:
-                    # A group's paused card is its asker's (S3-04): another
-                    # member's message -- a new request, a steer, an abort --
-                    # would discard it (LangGraph drops a pending interrupt
-                    # when a new turn starts), so it waits for them.
-                    logger.info("[agent-handler] a %s group message waits: a card there is "
-                                "someone else's", msg.platform)
-                    await manager.send(OutboundMessage(
-                        target_id=_build_target_id(msg.platform, msg.context_metadata),
-                        text=language_lock.in_their_language(
-                            msg.text,
-                            f"An approval in this chat waits for {waiting}; send your message "
-                            "after they answer it.",
-                            f"هناك موافقة في هذه المحادثة بانتظار {waiting}؛ أرسل رسالتك بعد أن "
-                            "يجيب عليها.",
-                        ),
-                        context_metadata=msg.context_metadata,
-                    ))
+                    await _say_card_waits(msg, waiting)
                     return
             await _handler_body(msg, thread_id, place.sender_key if place is not None else "")
 
+    async def _say_card_waits(msg: IncomingMessage, waiting: str) -> None:
+        """Tell the sender their message waits: the chat's card is *waiting*'s."""
+        logger.info("[agent-handler] a %s message waits: a card there is someone else's", msg.platform)
+        if not await manager.send(OutboundMessage(
+            target_id=_build_target_id(msg.platform, msg.context_metadata),
+            text=language_lock.in_their_language(
+                msg.text,
+                f"An approval in this chat waits for {waiting}; send your message "
+                "after they answer it.",
+                f"هناك موافقة في هذه المحادثة بانتظار {waiting}؛ أرسل رسالتك بعد أن "
+                "يجيب عليها.",
+            ),
+            context_metadata=msg.context_metadata,
+        )):
+            logger.warning("[agent-handler] the %s sender was not told their message waits", msg.platform)
+
     async def _waits_on_someone_else(thread_id: str) -> str:
         """The name of the person the thread's paused card waits on, when that
-        is not the sender bound now; "" when none does (or no card waits)."""
+        is not the sender bound now; "" when none does (or no card waits).
+        Reads nothing while the install does not enforce Spaces."""
+        from kazma_core.spaces.scope import spaces_enforced
         from kazma_ui.hitl_answerers import waiting_for_someone_else
 
+        if not spaces_enforced():
+            return ""
         pending = await _check_graph_interrupt(
             graph, {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}})
         if not isinstance(pending, dict):
@@ -1333,16 +1359,19 @@ def create_graph_handler(
                     except Exception as exc:
                         logger.error("[agent-handler] Failed to delete checkpoints on /reset: %s", exc)
 
-                # 2. Delete ConfigStore active mapping
+                # 2. Delete ConfigStore active mapping. The chat's own key
+                # in its space (S3-03), never the platform sender's: in a
+                # space that pointer is another chat (the stage 3 review, L10).
+                pointer = chat_key or sender
                 try:
                     from kazma_core.config_store import get_config_store
-                    await asyncio.to_thread(get_config_store().delete, f"active_thread.{sender}")
+                    await asyncio.to_thread(get_config_store().delete, f"active_thread.{pointer}")
                 except Exception as exc:
                     logger.debug("[agent-handler] ConfigStore delete active_thread failed: %s", exc)
 
                 # 3. Clear in-memory session cache
                 async with _sessions_lock:
-                    _sessions.pop(sender, None)
+                    _sessions.pop(pointer, None)
 
                 # 4. Delete from Web UI SessionManager
                 try:
@@ -1539,6 +1568,8 @@ def create_graph_handler(
 
         # ── /undo: Remove last assistant response ──────────────────
         if msg.text and msg.text.strip().lower() == "/undo":
+            if await _turn_control_refused(msg, thread_id, "rewind"):
+                return
             async with cmd_lock:
                 undo_result = await _handle_undo(thread_id, config)
                 ctx = await _store.get(thread_id) or msg.context_metadata
@@ -1554,6 +1585,8 @@ def create_graph_handler(
         # None = not an /edit command; "" = bare /edit (show usage)
         edit_match = _extract_edit_command(msg.text)
         if edit_match is not None:
+            if edit_match.strip() and await _turn_control_refused(msg, thread_id, "rewind"):
+                return
             async with cmd_lock:
                 corrected_text, edit_result = await _handle_edit(thread_id, config, edit_match)
                 ctx = await _store.get(thread_id) or msg.context_metadata
@@ -1568,6 +1601,8 @@ def create_graph_handler(
         # ── /replay <n>: Restore from a snapshot (rewind in-place) ──
         replay_match = _extract_replay_command(msg.text)
         if replay_match is not None:
+            if await _turn_control_refused(msg, thread_id, "rewind"):
+                return
             async with cmd_lock:
                 replay_result = await _handle_replay(thread_id, config, replay_match, msg)
                 ctx = await _store.get(thread_id) or msg.context_metadata
@@ -1978,6 +2013,14 @@ def create_graph_handler(
         thread_lock = thread_mutation(thread_id)
 
         async with thread_lock:
+            # ── Someone else's card waits: never dropped (M3) ────────
+            # Asked again here: a message that waited on this lock behind
+            # the turn that paused passed the check before the card existed.
+            if msg.text and not _is_hitl_decision(msg.text):
+                waiting = await _waits_on_someone_else(thread_id)
+                if waiting:
+                    await _say_card_waits(msg, waiting)
+                    return
             # ── Cancel stale HITL if user sent a new normal message ──
             # Without this, LangGraph discards the interrupt silently and
             # incomplete tool_calls get stripped — agent amnesia.

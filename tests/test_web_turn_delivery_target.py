@@ -67,7 +67,7 @@ def _block_of(space: str, account: str) -> str:
 
 def test_two_people_two_targets(linked) -> None:
     assert _block_of(OWNER_SPACE_ID, OWNER_ACCOUNT_ID) == OWNER_CHAT
-    assert _block_of(Matrix.SPACE_A, linked.account_a) == A_CHAT
+    assert _block_of(Matrix.SPACE_A, linked.account_a) == A_CHAT, "a member's web turn stamped another chat"
 
 
 def test_the_owner_s_own_link_wins_over_the_operator_chat(linked) -> None:
@@ -165,6 +165,6 @@ def test_negative_control_the_owner_s_telegram_on_every_web_turn(linked, monkeyp
     """Planted: the address of before -- the operator's Telegram for every
     web turn. A member's web turn stamps the owner's chat: the check above
     fails on its own assertion."""
-    monkeypatch.setattr(send_message, "_own_address", lambda: send_message.operator_telegram_target())
-    with pytest.raises(AssertionError):
+    monkeypatch.setattr(send_message, "own_address", lambda: send_message.operator_telegram_target())
+    with pytest.raises(AssertionError, match="stamped another chat"):
         test_two_people_two_targets(linked)

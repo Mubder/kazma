@@ -258,7 +258,7 @@ def test_answered_from_the_approver_s_chat_the_rest_goes_to_the_group(world) -> 
     to_group = [t for t, text, _ in world.sent if t == f"telegram:{GROUP}" and "plan is written" in text]
     assert to_group, "the turn's answer goes to the group that asked"
     to_rami = [text for t, text, _ in world.sent if t == f"telegram:{world.uids['rami']}"]
-    assert any("the rest goes to the chat that asked" in text for text in to_rami), to_rami
+    assert any("the rest goes to the chat that asked" in text.lower() for text in to_rami), to_rami
     assert not any("plan is written" in text for text in to_rami), "never the approver's chat"
 
 
