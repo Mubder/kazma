@@ -515,6 +515,48 @@ an ordinary turn's block p50 675 -> 676 tokens (Arabic 590 -> 592), the long
 store's 1,073 -> 1,080. Not measurable on LongMemEval: its histories hold no
 facts until W6. Gate: `tests/test_memory_changed_value_sources.py`.
 
+*Gathering, measured and not adopted (23 Nov).* A question asking how many
+there are of a kind, or their total ("how many", "in total", "altogether",
+"كم مرة", "عدد", "المجموع", "الإجمالي"), kept every conversation more about
+it than the question's background (evidence above zero) once one cleared
+the ordinary floor; with none, nothing. Why it was tried: on dev, 71 answer
+conversations of the 125 questions with more than one were not shown; 60
+stood under the cut and 9 past the shown limit, their best round 3rd to 45th
+by evidence, most between 0.01 and 0.04 against the floor of 0.04. Each
+names one instance ("we ordered from Uber Eats", "a pottery exhibition")
+where the question names the kind ("food delivery services", "art-related
+events"). Tried first for every request for every memory, lists too:
+Kazma's list questions gained no answer and lost precision (0.507 ->
+0.385), and LongMemEval's gains came from counts and totals alone, so lists
+kept the floor. With and without on one commit (d1d87f26b and the change):
+
+| | today | gathering |
+|---|---|---|
+| dev: every answer conversation shown | 0.820 | 0.876 (+12, -0) |
+| multi-session / temporal | 0.78 / 0.615 | 0.94 / 0.673 |
+| the answer's text in the block | 0.434 | 0.434 |
+| precision; memories shown | 0.828; 4.5 | 0.786; 6.1 |
+| block tokens p50 / p95 | 1,337 / 1,489 | 1,415 / 1,487 |
+| answered, main run (second judge) | 0.69 (0.675) | 0.715 (0.70), +10 / -5 |
+| answered, noise run (second judge) | 0.69 (0.675) | 0.69 (0.68), +7 / -7 |
+| multi-session answered, main / noise | 0.396 / 0.396 | 0.453 / 0.396 |
+| answers that flip between the two runs | 2 | 11 |
+| Kazma's benchmark: answers, MRR | | unchanged on all four stores |
+| Kazma's precision (list), small store, scale | 0.4872 (0.5071), 0.6752, 0.4379 | 0.4868 (0.5002), 0.6743, 0.4378 |
+
+Not adopted: 5 gains and 3 losses repeat in both runs (two of the losses
+are unanswerable count questions answered instead of left), against 11
+answers that flip between two runs of the same gathering block. The right
+conversations are shown, but the answer's text in the block does not move:
+the gathered lines are "possibly related" ones at fixed bounds, cut from
+their start, and the instance a count needs is usually further in. A variant
+showing a count's conversations oldest first answered 0.675 (multi-session
+0.32): it takes the lead room from the best line. Ordinary turns did not
+move (Kazma's store p50 675, p95 1,030). Spend: 1.82M prompt and 0.65M
+completion tokens (0.58M reasoning), 7.4K of the prompt from Qwen's cache.
+Evidence: `docs/audits/evidence/memory_gathering/gathering.json`. What would
+reopen it: lines that hold the instance itself, the dated event lines below.
+
 ### W6. Ingestion the product's way (M)
 
 The benchmark's memories written as Kazma writes them: the deep pass on
@@ -1067,3 +1109,13 @@ alone as the negative controls.
    Spend of the six runs after finding 16: 146 model calls, 5.40M prompt
    tokens, 24,915 completion tokens; the judge 60 calls, 10,098 prompt
    tokens.
+18. **An Arabic "how many X" without "مرة" or "عدد" is not read as a
+    request for every memory.** Found building W4's gathering (23 Nov):
+    "How many guests will come?" is one (`asks_for_all`, "how many"),
+    "كم معزوم بيحضر؟" is not. "كم" with a noun is a count ("كم كتاب
+    قريت؟") or an amount ("كم سعر التذكرة؟", "كم عمري؟"), and no word list
+    tells them apart reliably; English "how many" has single-fact readings
+    too ("How many tiers is the cake?"). Kazma's benchmark holds two such
+    Arabic questions (q1004, h042), each answered by one memory. Left as it
+    is; measured before anything is built, on the parallel set's count
+    questions asked in both languages.
