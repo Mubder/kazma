@@ -73,8 +73,14 @@ def pick(items: dict[str, dict[str, Any]]) -> list[str]:
     return sorted(out, key=rank)
 
 
-def pilot_ids() -> list[str]:
-    return list(json.loads(PILOT.read_text(encoding="utf-8"))["ids"])
+def pilot_ids(questions: str = "pilot") -> list[str]:
+    """The pilot's 50 ids, or (``dev``) every dev question, the pilot's first:
+    their stores and replies are the pilot's, so the full run asks only the
+    rest."""
+    ids = list(json.loads(PILOT.read_text(encoding="utf-8"))["ids"])
+    if questions == "dev":
+        ids += [q for q in bench.question_ids("dev") if q not in set(ids)]
+    return ids
 
 
 # ── The stores, one a question ───────────────────────────────────────────────
@@ -335,7 +341,7 @@ def _embedder(data: Path, folder: Path) -> PilotEmbedder:
 
 
 def _cmd_extract(data: Path, model_name: str, base_url: str, key_env: str, workers: int,
-                 limit: int | None) -> int:
+                 limit: int | None, questions: str = "pilot") -> int:
     key = os.environ.get(key_env, "")
     if not key:
         print(f"set {key_env}", file=sys.stderr)
@@ -350,7 +356,7 @@ def _cmd_extract(data: Path, model_name: str, base_url: str, key_env: str, worke
     for sub in ("stores", "done"):
         (folder / sub).mkdir(parents=True, exist_ok=True)
     by_id = {str(x["question_id"]): x for x in bench.load(data)}
-    items = [by_id[q] for q in pilot_ids()[: limit or None]]
+    items = [by_id[q] for q in pilot_ids(questions)[: limit or None]]
     embedder = _embedder(data, folder)
     model = CachedModel(LLMProvider(LLMConfig(base_url=base_url, api_key=key, model=model_name)),
                         folder / f"replies-{model_name}.jsonl")
@@ -414,14 +420,14 @@ def _recall_block(item: dict[str, Any], db: Path, *, without_events: bool) -> tu
     return block or bench.NO_MEMORIES, shown
 
 
-def _cmd_blocks(data: Path, stats_out: Path | None) -> int:
+def _cmd_blocks(data: Path, stats_out: Path | None, questions: str = "pilot") -> int:
     bench._private_data_folder()
     bench._limit_cpu_threads()
     from unittest import mock
 
     folder = work_folder(data)
     by_id = {str(x["question_id"]): x for x in bench.load(data)}
-    ids = pilot_ids()
+    ids = pilot_ids(questions)
     missing = [q for q in ids if not (folder / "done" / f"{q}.json").is_file()]
     if missing:
         print(f"{len(missing)} questions not extracted yet (e.g. {missing[0]})", file=sys.stderr)
@@ -447,7 +453,7 @@ def _cmd_blocks(data: Path, stats_out: Path | None) -> int:
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True,
                             check=False).stdout.strip()
     for name, held in blocks.items():
-        out = data / "cache" / f"blocks-pilot-{name}-{prompt_tag()}.json"
+        out = data / "cache" / f"blocks-{questions}-{name}-{prompt_tag()}.json"
         out.write_text(json.dumps({"commit": commit, "split": "dev", "made_on": datetime.now(UTC).isoformat(),
                                    "prompt": prompt_tag(), "blocks": held}, ensure_ascii=False), encoding="utf-8")
         print(f"wrote {out}")
@@ -465,6 +471,9 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("pick", "extract", "blocks"):
         s = sub.add_parser(name)
         s.add_argument("--data", required=True, type=Path)
+        if name in ("extract", "blocks"):
+            s.add_argument("--questions", choices=("pilot", "dev"), default="pilot",
+                           help="the pilot's 50, or every dev question (the pilot's stores kept)")
         if name == "extract":
             s.add_argument("--model", default="qwen3.8-flash")
             s.add_argument("--base-url", required=True)
@@ -485,8 +494,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{PILOT}: {len(ids)} questions, {rounds} rounds")
         return 0
     if args.cmd == "extract":
-        return _cmd_extract(args.data, args.model, args.base_url, args.key_env, args.workers, args.limit)
-    return _cmd_blocks(args.data, args.stats)
+        return _cmd_extract(args.data, args.model, args.base_url, args.key_env, args.workers, args.limit,
+                            args.questions)
+    return _cmd_blocks(args.data, args.stats, args.questions)
 
 
 if __name__ == "__main__":

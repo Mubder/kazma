@@ -627,6 +627,18 @@ Evidence: `docs/audits/evidence/memory_event_lines/pilot.json`. The rest of
 dev (150 questions, 36,515 deep passes) waits for the main session's word,
 with its expected tokens.
 
+
+**The full dev run** (23 Nov, all 200 dev questions, the pilot's stores kept;
+`docs/audits/evidence/memory_event_lines/dev.json`): today's block 0.69,
+facts without the dated events 0.70 / 0.71, dated event lines 0.755 / 0.765
+(main / noise run, the second judge 0.74 / 0.75); +20 / -7 and +22 / -7
+against today, 20 gains and 5 losses in both runs; multi-session 0.40 to
+0.57 / 0.59. The block's median 1,336 to 1,424 tokens (p95 1,490 to 1,496).
+Reviewed before the merge: an event told again that already has its day left
+a write transaction open on a default-mode connection (fixed), and the cache
+marker now goes to Qwen's own models only. The extraction recording stays
+declared pending: it is taken on the model Kazma ships with.
+
 ### W6. Ingestion the product's way (M)
 
 The benchmark's memories written as Kazma writes them: the deep pass on

@@ -27,14 +27,14 @@ QWEN = "https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1"
 LONG = ("You extract durable facts. " * (_QWEN_CACHE_MIN_CHARS // 20)).strip()
 
 
-def _provider(seen: list[dict], base_url: str) -> LLMProvider:
+def _provider(seen: list[dict], base_url: str, model: str = "qwen3.8-flash") -> LLMProvider:
     def handle(request: httpx.Request) -> httpx.Response:
         seen.append(json.loads(request.content))
         return httpx.Response(200, json={
             "model": "qwen3.8-flash", "choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}})
 
-    provider = LLMProvider(LLMConfig(base_url=base_url, api_key="demo-qwen-key", model="qwen3.8-flash"))
+    provider = LLMProvider(LLMConfig(base_url=base_url, api_key="demo-qwen-key", model=model))
     client = httpx.AsyncClient(transport=httpx.MockTransport(handle), base_url=base_url)
 
     async def get_client():
@@ -83,3 +83,13 @@ def test_the_stream_builds_the_same_body() -> None:
     for method in (LLMProvider._chat_inner, LLMProvider._chat_stream_once):
         assert "self._chat_payload" in inspect.getsource(method)
     assert llm_provider._with_qwen_cache_marker([]) == []
+
+
+@pytest.mark.asyncio
+async def test_another_vendors_model_on_model_studio_is_not_marked() -> None:
+    """Model Studio also serves other vendors' models, which may refuse a
+    system message that is a list of parts; the cache was measured on Qwen."""
+    seen: list[dict] = []
+    messages = [{"role": "system", "content": LONG}, {"role": "user", "content": "hi"}]
+    await _provider(seen, QWEN, model="deepseek-v3.2").chat(messages)
+    assert seen[-1]["messages"] == messages

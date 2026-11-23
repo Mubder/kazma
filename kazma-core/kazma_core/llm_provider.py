@@ -1776,7 +1776,8 @@ class LLMProvider:
             payload["tool_choice"] = "auto"
         if response_format:
             payload["response_format"] = response_format
-        if _is_qwen_api(str(self.config.base_url or "")):
+        # Model Studio serves other vendors' models too: Qwen's only.
+        if _is_qwen_api(str(self.config.base_url or "")) and "qwen" in str(payload["model"]).lower():
             payload["messages"] = _with_qwen_cache_marker(payload["messages"])
         _apply_param_fixes(
             payload, _param_fixes_for(str(self.config.base_url or ""), payload["model"]),

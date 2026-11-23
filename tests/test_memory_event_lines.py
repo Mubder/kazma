@@ -136,3 +136,43 @@ def test_control_without_the_mark_the_day_reads_as_a_start(memory, monkeypatch):
     _apply(memory, [EXHIBITION], user_text="I went to a pottery exhibition at the craft centre last Saturday.")
     assert _marks(conn) == [("2026-05-30", None, SUNDAY_THE_31ST)]
     assert "[since 30 May 2026] user attended" in _block(conn, "When did I go to the pottery exhibition?")
+
+
+@pytest.mark.parametrize("dated", [True, False])
+def test_an_event_told_again_leaves_no_write_lock(tmp_path, dated):
+    """On a connection in Python's default mode (the fixture's is autocommit)
+    an UPDATE that matches nothing opens a transaction: an event told again
+    that already has its day left the memory database's write lock held."""
+    path = tmp_path / "default_mode.db"
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE beliefs (id TEXT, tenant_id TEXT, metadata_json TEXT)")
+    held = '{"started": "2026-05-30", "happened": true}' if dated else "{}"
+    conn.execute("INSERT INTO beliefs VALUES ('b1', 'default', ?)", (held,))
+    conn.commit()
+    tokens = belief_mutation._bind_write_context(None, "2026-05-30", True)
+    try:
+        gained = belief_mutation._add_named_start(conn, "b1", "default", began=True)
+    finally:
+        belief_mutation._unbind_write_context(tokens)
+    assert (gained is None) is dated
+    assert not conn.in_transaction
+    other = sqlite3.connect(str(path), timeout=0, isolation_level=None)
+    other.execute("BEGIN IMMEDIATE")
+    other.execute("ROLLBACK")
+    other.close()
+    conn.close()
+
+
+def test_a_callers_own_transaction_is_left_to_it(tmp_path):
+    conn = sqlite3.connect(str(tmp_path / "callers.db"))
+    conn.execute("CREATE TABLE beliefs (id TEXT, tenant_id TEXT, metadata_json TEXT)")
+    conn.execute("INSERT INTO beliefs VALUES ('b1', 'default', '{\"started\": \"2026-05-30\"}')")
+    assert conn.in_transaction
+    tokens = belief_mutation._bind_write_context(None, "2026-05-30", True)
+    try:
+        assert belief_mutation._add_named_start(conn, "b1", "default", began=False) is None
+    finally:
+        belief_mutation._unbind_write_context(tokens)
+    assert conn.in_transaction
+    assert conn.execute("SELECT COUNT(*) FROM beliefs").fetchone()[0] == 1
+    conn.close()

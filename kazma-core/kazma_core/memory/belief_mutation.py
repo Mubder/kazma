@@ -851,6 +851,7 @@ def _add_named_start(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *
         return None
     from kazma_core.memory.hygiene import beliefs_write
 
+    open_before = conn.in_transaction
     cur = beliefs_write(
         conn,
         "UPDATE beliefs SET metadata_json = CASE WHEN ? THEN json_set(COALESCE(metadata_json, '{}'), "
@@ -859,6 +860,11 @@ def _add_named_start(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *
         "WHERE id = ? AND tenant_id = ? AND json_extract(metadata_json, '$.started') IS NULL",
         (1 if _HAPPENED.get() else 0, started, started, belief_id, tenant_id))
     if not getattr(cur, "rowcount", 0):
+        # The UPDATE opened a transaction on a default-mode connection even
+        # though it matched nothing; left open it holds the write lock. A
+        # caller's own transaction stays the caller's.
+        if not open_before and conn.in_transaction:
+            conn.rollback()
         return None
     if began:
         conn.commit()
@@ -1479,7 +1485,7 @@ def _mutate_set(
         # The same entry told again with the day it happened, or the start
         # it names, gains it (W4: "I went to the pottery exhibition" then
         # "it was last Saturday"), as a single value does.
-        gained = _add_named_start(conn, str(existing_id), tenant_id, began=True)
+        gained = _add_named_start(conn, str(existing_id), tenant_id, began=not conn.in_transaction)
         if gained:
             return gained
         return {"action": "noop", "belief_id": existing_id, "superseded_id": None}
