@@ -1101,16 +1101,16 @@ def split_ids(raw: Any) -> list[str]:
 
 def _was_the_owner(store: Any, platform: str, uid: str) -> str:
     """Why *uid* on *platform* was NOT the owner before Spaces, or "" when it
-    was: the sender rule of before let it chat (on the allowlist, or the
-    allowlist empty -- the known ids answer then -- or the open switch on)
-    and the admin rule of before made it admin (``KAZMA_GATEWAY_ADMINS`` when
-    set, else the allowlist, else the known ids). The gateway's own rules
+    was: the sender rule of before let it chat (on the allowlist; the
+    allowlist empty, the known ids answer, and the open switch lets anyone
+    in -- a set allowlist decides alone, the switch ignored) and the admin
+    rule of before made it admin (``KAZMA_GATEWAY_ADMINS`` when set, else
+    the allowlist, else the known ids). The gateway's own rules
     (``sender_rule.refusal``, ``allowlists._admin_by_lists``) restated: core
     does not import the gateway. Blocking: a settings read (the stage 3
-    review, M1: a colleague's pager was adopted as the owner)."""
+    review, M1: a colleague's pager was adopted as the owner; its re-check:
+    the open switch let an id off a set allowlist through)."""
     import os
-
-    from kazma_core.security.boot_guard import env_flag
 
     try:
         listed = [platform_user_id(platform, x)
@@ -1118,8 +1118,7 @@ def _was_the_owner(store: Any, platform: str, uid: str) -> str:
     except _store_errors():
         return "its allowlist could not be read"
     listed = [x for x in listed if x]
-    open_switch = env_flag("KAZMA_GATEWAY_OPEN_TO_EVERYONE") and not env_flag("KAZMA_GATEWAY_STRICT_ALLOWLIST")
-    if listed and uid not in listed and not open_switch:
+    if listed and uid not in listed:
         return "it is not on the allowlist"
     env_raw = str(os.environ.get(GATEWAY_ADMINS_ENV, "") or "").strip()
     if env_raw:

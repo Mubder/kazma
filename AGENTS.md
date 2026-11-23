@@ -16418,10 +16418,23 @@ an install with one account behaves as before.
     `own_sign_in_only`. Every API token is the owner's account
     (`space_binding.account_of`), and an operator token's code made its
     holder the chat apps' admin. Gate: `tests/test_chat_links_own_sign_in.py`.
+  - **No API token acts as the owner on the person's own routes** (the
+    account-route class, `auth.token_acts_for_the_owner`, asked by
+    `auth.principal_allows`, the middleware's one role rule): once Spaces is
+    enforced every route `route_scopes` classes ACCOUNT refuses an API token
+    below admin (403 `own_sign_in_only`) -- My account's notices, chat links
+    and model keys, Web Push's subscribe, the bell, the problems list.
+    `auth.TOKEN_MAY_ASK` declares the few that describe the credential or
+    the install, with why; the chat-link and notices routes ask the rule
+    again (`people_api._own_caller`). An operator token read and dismissed
+    the owner's notices and could subscribe its endpoint to the owner's
+    answers. Gate: `tests/test_account_routes_own_sign_in.py` (every
+    ACCOUNT route of the built app; the rule taken out as the control).
   - **The switch adopts only what was the owner** (M1,
     `chat_links.owner_link_plan`, `_was_the_owner`): a known id passes the
-    sender rule of before (on the allowlist, the allowlist empty, or the
-    open switch) and the admin rule of before (`KAZMA_GATEWAY_ADMINS` when
+    sender rule of before (on the allowlist; with none set, the known ids
+    or the open switch -- a set allowlist decides alone) and the admin rule
+    of before (`KAZMA_GATEWAY_ADMINS` when
     set, else the allowlist, else the known ids); a Telegram group (a
     negative id) is never adopted; `--check` names every id adopted and
     every one left, with why. The core restates the gateway's rules (it does

@@ -2611,7 +2611,7 @@
                     <template x-for="l in (p.links || [])" :key="p.id + ':link:' + l.platform + ':' + l.user_id">
                       <span class="badge badge-secondary" translate="no" :data-person-link="l.platform + ':' + l.user_id"><bdi dir="ltr" x-text="l.platform + ' ' + l.user_id"></bdi></span>
                     </template>
-                    <span x-show="peopleLoaded && !(p.links || []).length">{{ t('chat_links.people_no_links') }}</span>
+                    <span x-show="peopleLoaded && !(p.links || []).length" x-cloak>{{ t('chat_links.people_no_links') }}</span>
                   </span>
                   <button type="button" class="btn btn-sm btn-ghost" data-person-end-sessions x-show="!p.owner && p.sessions > 0" x-cloak
                           @click="endPersonSessions(p)" :aria-label="window.t('settings.people_end_sessions_of', {name: p.name})">{{ t('settings.people_end_sessions') }}</button>

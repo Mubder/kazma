@@ -81,14 +81,13 @@ _NOT_OWN_SIGN_IN = object()
 
 def _own_sign_in(request: Request, principal: dict[str, Any]) -> bool:
     """Whether *principal* may link, list or unlink chat-app accounts of
-    the account behind it: a person's own session, or a credential the
-    admin decision passes (``auth.admin_decision``: the shared secret, an
-    admin token -- it can already change everything). An operator or
-    viewer token maps to the owner's account and is refused (H1).
-    Blocking (a session read)."""
-    if principal.get("source") == "session":
-        return True
-    return auth.admin_decision(request) == "ok"
+    the account behind it: a person's own session, the shared secret or an
+    admin token. An operator or viewer token maps to the owner's account
+    and is refused (H1). The one rule of the person's own routes,
+    ``auth.token_acts_for_the_owner``, which the middleware applies too
+    (the account-route class): asked here again so the routes hold it
+    whatever mounts them."""
+    return not auth.token_acts_for_the_owner(principal, request.url.path, request.method)
 
 
 def _caller(request: Request) -> Any:

@@ -111,8 +111,9 @@ def test_negative_control_the_caller_of_before(app, monkeypatch) -> None:
     """Planted: the caller of before, the account behind any sign-in. The
     operator token's code links its holder as the admin: the check above
     fails on its own assertion."""
-    from kazma_ui import chat_links_api
+    from kazma_ui import auth
 
-    monkeypatch.setattr(chat_links_api, "_own_sign_in", lambda *a, **k: True)
+    # The one rule, which the routes and the middleware both ask.
+    monkeypatch.setattr(auth, "token_acts_for_the_owner", lambda *a, **k: False)
     with pytest.raises(AssertionError, match="made its holder the chat apps' admin"):
         test_an_operator_token_s_code_never_makes_its_holder_the_admin(app)
