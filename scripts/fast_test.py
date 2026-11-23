@@ -12,12 +12,16 @@ Strategy: chunk the test FILES into N independent serial pytest processes
 (balanced round-robin). A segfaulting chunk loses only itself; its files are
 then retried one-by-one with a hard timeout, and any file that still crashes
 is reported as POISON (needs a native fix; quarantine it like
-tests/test_sqlite_search_backend.py).
+tests/test_sqlite_search_backend.py). A chunk runs its files as consecutive
+pytest processes of at most ``--files-per-process`` files, one after
+another: a long-lived test process only grows (2026-11-23, CI's runner ran
+out of memory), and each one that ends gives its memory back.
 
 Usage:
     python scripts/fast_test.py                 # default: cpu-count chunks, at most 8
     python scripts/fast_test.py --chunks 8      # explicit chunk count
-    python scripts/fast_test.py --chunk-timeout 900
+    python scripts/fast_test.py --chunk-timeout 900   # seconds per pytest process
+    python scripts/fast_test.py --files-per-process 60   # 0: one process per chunk
     python scripts/fast_test.py --foreground    # normal priority (default: lowered)
     python scripts/fast_test.py --cores 8       # use at most 8 CPU cores (0: all)
 
@@ -40,6 +44,7 @@ import subprocess
 import sys
 import time
 import tempfile
+import threading
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -570,6 +575,98 @@ def run_chunk(idx: int, files: list[Path], timeout: float) -> dict:
     }
 
 
+# ── A pytest process runs a bounded number of files (2026-11-23) ─────────
+#
+# CI's Tests job (a 4-vCPU, 16 GB runner, ``--chunks 4``: ~470 files per
+# pytest process) was ended from outside 30-40 minutes in, run after run
+# ("The runner has received a shutdown signal", exit 143). Its memory monitor
+# showed why: every chunk process grew for the whole run -- 3.8, 3.6, 3.5 and
+# 2.8 GB at 40 minutes, 14.6 of 16 GB in use; 5.1, 4.3 and 4.1 GB at 52
+# minutes on an earlier run. ``MALLOC_ARENA_MAX=2`` did not change it: what a
+# test leaves reachable (a module cache, a parked singleton, a registry entry)
+# stays until its process ends. So a process ends often: a chunk runs its
+# files as consecutive pytest processes of at most ``--files-per-process``
+# files, one after another, and the number of pytest processes at any moment
+# is still the number of chunks. Each process is a run of its own: its own
+# budget, its own tally, its own recovery when it crashes or runs out of time.
+
+#: Most test files one pytest process runs when ``--files-per-process`` is not
+#: given. Measured on 2026-11-23 (Windows, chunk 00 of the 4-chunk layout,
+#: 471 files, private bytes): one process 5.53 GB at its end; at most 120
+#: files a process 1.43-2.34 GB; at most 60 files 0.77-1.72 GB -- and the
+#: same 7,033 passed, 54 skipped either way. The worst process holds
+#: tests/test_settings_scope.py (~710 MB kept, even in a fresh process) and
+#: tests/test_static_gates.py (~400 MB); no smaller N parts those two much
+#: further. Each extra process costs ~6 s of start-up (the root conftest's
+#: pre-import); 471 files as 8 processes took 2,966 s against 2,953 s as one.
+DEFAULT_FILES_PER_PROCESS = 60
+
+
+def split_into_pieces(files: list[Path], per_process: int | None) -> list[list[Path]]:
+    """The consecutive pytest processes a chunk of ``files`` runs as.
+
+    At most ``per_process`` files each, as even as possible (471 files at 60
+    are eight processes of 59 and 58, not seven of 60 and one of 51), in the
+    chunk's own order. ``0`` or ``None``: the whole chunk in one process.
+    """
+    files = list(files)
+    if not files:
+        return []
+    if not per_process or per_process <= 0 or len(files) <= per_process:
+        return [files]
+    count = -(-len(files) // per_process)
+    size, extra = divmod(len(files), count)
+    pieces: list[list[Path]] = []
+    start = 0
+    for n in range(count):
+        end = start + size + (1 if n < extra else 0)
+        pieces.append(files[start:end])
+        start = end
+    return pieces
+
+
+_PRINT_LOCK = threading.Lock()
+
+
+def _label(r: dict) -> str:
+    """How a result is named in the log: its chunk, and its process when the
+    chunk runs as several."""
+    return r.get("label") or f"chunk {r['idx']:02d}"
+
+
+def _report(r: dict) -> None:
+    """The line a finished pytest process gets, printed as it finishes."""
+    status = "OK" if r["code"] in _BENIGN_EXIT_CODES else f"exit={r['code']}"
+    took = f", {r['seconds']:.0f} s" if "seconds" in r else ""
+    with _PRINT_LOCK:
+        print(f"[fast-test] {_label(r)}: {status} "
+              f"{r['counts'].get('passed', 0)}p/{r['counts'].get('failed', 0)}f "
+              f"({len(r['files'])} files{took})")
+
+
+def run_chunk_in_pieces(
+    idx: int, files: list[Path], per_process: int | None, explicit_timeout: float | None
+) -> list[dict]:
+    """Run one chunk as its consecutive pytest processes; one result each.
+
+    Each process ends before the next starts (``run_pytest`` returns only
+    when its process has ended, its tree reaped on Windows), and each gets
+    the budget of its own size. A process that crashes or runs out of time
+    does not stop the ones after it: its result goes to recovery on its own
+    and the others' tallies stand."""
+    pieces = split_into_pieces(files, per_process)
+    results: list[dict] = []
+    for n, piece in enumerate(pieces, 1):
+        started = time.monotonic()
+        r = run_chunk(idx, piece, chunk_timeout_for(len(piece), explicit_timeout))
+        r["seconds"] = time.monotonic() - started
+        if len(pieces) > 1:
+            r["label"] = f"chunk {idx:02d}, process {n}/{len(pieces)}"
+        _report(r)
+        results.append(r)
+    return results
+
+
 # pytest exit codes that are NOT failures/crashes:
 #   0 = green, 1 = tests failed (reported normally), 5 = NO TESTS COLLECTED
 # (module-level importorskip files, e.g. the Playwright e2e suite on a
@@ -707,7 +804,9 @@ _MIN_CHUNK_TIMEOUT = 900.0
 
 
 def chunk_timeout_for(n_files: int, explicit: float | None) -> float:
-    """The timeout of a chunk of ``n_files`` files; an explicit value wins."""
+    """The timeout of one pytest process running ``n_files`` files (a whole
+    chunk, or one of a chunk's consecutive processes); an explicit value
+    wins, and is then every process's."""
     if explicit is not None:
         return float(explicit)
     return max(_MIN_CHUNK_TIMEOUT, _SECONDS_PER_FILE * n_files) * BUDGET_FACTOR
@@ -755,8 +854,13 @@ def main() -> int:
                     help="use at most this many CPU cores, 0 for all (default: the machine's "
                          "schedule in .kazma/fast_test.json, else all)")
     ap.add_argument("--chunk-timeout", type=float, default=None,
-                    help="seconds per chunk (default: %.0f s per file, at least %.0f s)"
+                    help="seconds per pytest process (default: %.0f s per file, at least %.0f s)"
                          % (_SECONDS_PER_FILE, _MIN_CHUNK_TIMEOUT))
+    ap.add_argument("--files-per-process", type=int, default=DEFAULT_FILES_PER_PROCESS,
+                    help="most test files one pytest process runs: a chunk runs its files as "
+                         "consecutive processes of at most this many, one after another, so no "
+                         f"process lives long enough to grow without bound (default: "
+                         f"{DEFAULT_FILES_PER_PROCESS}; 0: the whole chunk in one process)")
     ap.add_argument("--file-timeout", type=float, default=None,
                     help="seconds for one file run alone during poison-file retry "
                          "(default: a one-file chunk's budget)")
@@ -764,6 +868,8 @@ def main() -> int:
                     help="run pytest at normal priority (default: below a normal program, "
                          "so a run never starves a Kazma server on the same machine)")
     args = ap.parse_args()
+    if args.files_per_process < 0:
+        ap.error("--files-per-process must be 0 (one process per chunk) or more")
     global BACKGROUND, THREADS_PER_PROCESS, BUDGET_FACTOR
     BACKGROUND = not args.foreground
     cpus = os.cpu_count() or 4
@@ -789,9 +895,14 @@ def main() -> int:
         print(f"[fast-test] removed {removed} run folder(s) earlier runs left")
     files = discover_test_files()
     chunks = chunk_files(files, args.chunks)
-    budget = max(chunk_timeout_for(len(c), args.chunk_timeout) for c in chunks)
+    plan = [split_into_pieces(c, args.files_per_process) for c in chunks]
+    processes = sum(len(p) for p in plan)
+    budget = max(chunk_timeout_for(len(piece), args.chunk_timeout) for p in plan for piece in p)
+    each = (f"at most {args.files_per_process} files each, one after another in its chunk"
+            if processes > len(chunks) else "one per chunk")
     print(f"[fast-test] {len(files)} test files in {len(chunks)} chunks "
-          f"({args.chunks} requested, timeout {budget:.0f}s/chunk)")
+          f"({args.chunks} requested): {processes} pytest processes ({each}), "
+          f"timeout {budget:.0f}s/process")
     t0 = time.time()
 
     totals: dict[str, int] = {}
@@ -800,27 +911,26 @@ def main() -> int:
     failure_logs: list[str] = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(chunks)) as pool:
-        futs = {pool.submit(run_chunk, i, c, chunk_timeout_for(len(c), args.chunk_timeout)): i
+        futs = {pool.submit(run_chunk_in_pieces, i, c, args.files_per_process, args.chunk_timeout): i
                 for i, c in enumerate(chunks)}
         for fut in concurrent.futures.as_completed(futs):
-            r = fut.result()
-            status = "OK" if r["code"] in _BENIGN_EXIT_CODES else f"exit={r['code']}"
-            print(f"[fast-test] chunk {r['idx']:02d}: {status} "
-                  f"{r['counts'].get('passed', 0)}p/{r['counts'].get('failed', 0)}f "
-                  f"({len(r['files'])} files)")
-            # A timed-out process can print pytest's terminal summary and then
-            # hang during interpreter shutdown. Its files are rerun below;
-            # counting both receipts inflates every aggregate category.
-            if not needs_recovery(r):
-                for k, v in r["counts"].items():
-                    totals[k] = totals.get(k, 0) + v
-            all_failed.extend(r["failed"])
-            if r["failed"]:
-                failure_logs.append(r["log"])
-            # A chunk that produced NO summary line lost its output (observed
-            # under heavy concurrency) — treat like a crash and retry per-file.
-            if needs_recovery(r):
-                crashed_chunks.append(r)
+            # One result per pytest process the chunk ran (its line was
+            # printed as that process ended); each is counted, or recovered,
+            # on its own: a process that crashed costs the others nothing.
+            for r in fut.result():
+                # A timed-out process can print pytest's terminal summary and
+                # then hang during interpreter shutdown. Its files are rerun
+                # below; counting both receipts inflates every aggregate.
+                if not needs_recovery(r):
+                    for k, v in r["counts"].items():
+                        totals[k] = totals.get(k, 0) + v
+                all_failed.extend(r["failed"])
+                if r["failed"]:
+                    failure_logs.append(r["log"])
+                # A process that produced NO summary line lost its output
+                # (observed under heavy concurrency) — treat like a crash.
+                if needs_recovery(r):
+                    crashed_chunks.append(r)
 
     # ── Retry crashed chunks file-by-file to isolate poison ────────────────
     poison: list[str] = []
@@ -859,7 +969,7 @@ def main() -> int:
             why = "crashed"
         else:
             why = "produced no parseable test tally"
-        print(f"[fast-test] chunk {r['idx']:02d} {why} "
+        print(f"[fast-test] {_label(r)} {why} "
               f"(exit={r['code']}) — recovering its {len(r['files'])} files")
         # Show WHY. The chunk's own log was captured and then dropped on the
         # floor, so "crashed/timed out (exit=1)" arrived with no evidence
@@ -876,16 +986,16 @@ def main() -> int:
         # against one stack because the other threads had been thrown away here.
         _tail = [ln for ln in (r["log"] or "").splitlines() if ln.strip()][-_HANG_DUMP_LINES:]
         if _tail:
-            print(f"[fast-test] --- chunk {r['idx']:02d}: last {_HANG_DUMP_LINES} lines ---")
+            print(f"[fast-test] --- {_label(r)}: last {_HANG_DUMP_LINES} lines ---")
             for _ln in _tail:
                 _safe_print(f"  | {_ln}")
         else:
-            print(f"[fast-test] --- chunk {r['idx']:02d} produced NO output at all ---")
+            print(f"[fast-test] --- {_label(r)} produced NO output at all ---")
         if r["code"] == 124 and len(r["files"]) > 1:
             # Out of TIME is not a crash: the same work in one process under
             # the same budget times out again (see split_for_retry).
             pieces = split_for_retry(r["files"], args.chunks)
-            print(f"[fast-test] chunk {r['idx']:02d} ran out of time — re-running its "
+            print(f"[fast-test] {_label(r)} ran out of time — re-running its "
                   f"{len(r['files'])} files as {len(pieces)} parallel pieces")
             jobs = [
                 (r["idx"], piece, chunk_timeout_for(len(piece), args.chunk_timeout))
@@ -893,7 +1003,8 @@ def main() -> int:
             ]
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
                 subs = list(pool.map(lambda job: run_chunk(*job), jobs))
-            for s in subs:
+            for n, s in enumerate(subs, 1):
+                s["label"] = f"{_label(r)}, part {n}/{len(subs)}"
                 all_failed.extend(s["failed"])
                 if s["failed"]:
                     failure_logs.append(s["log"])
@@ -917,7 +1028,7 @@ def main() -> int:
                 _culprit = _match[0]
                 _rest = [f for f in _retry_files if f is not _culprit]
                 print(
-                    f"[fast-test] chunk {r['idx']:02d} died in "
+                    f"[fast-test] {_label(r)} died in "
                     f"{_culprit.relative_to(REPO).as_posix()} — re-running the "
                     f"other {len(_rest)} file(s) as one process"
                 )
@@ -937,7 +1048,7 @@ def main() -> int:
                     _retry_files = [_culprit]
                 else:
                     print(
-                        f"[fast-test] chunk {r['idx']:02d} minus the suspect "
+                        f"[fast-test] {_label(r)} minus the suspect "
                         "ALSO failed to report — falling back to per-file"
                     )
 
