@@ -470,11 +470,12 @@ decides what is shown.
   q1307, "وش قلت لك عن مايا في يوليو؟" ("what did I tell you about Maya in
   July?"), whose answering turn never says July: the reranker reads the
   text, not when it was said. Speed on this PC's CPU (torch, fp32, at most
-  256 tokens a pair, another job running; `latency_cpu.json`): the shipping
-  model reads 20 short memories in 105 ms and 20 long ones in 640 ms (48 ms
-  each); the reference model 1,141 ms and 7,282 ms (370-430 ms each),
-  several times the budget (150 ms p50) even for short memories. Decision 4
-  ships the reference only if it fits; it does not. Nothing was judged or
+  256 tokens a pair, 4 threads, nearly quiet under the timing flag;
+  `latency_cpu.json`): the shipping model reads 20 short memories in 85 ms
+  and 20 long ones in 610 ms (33 ms each); the reference model 1,048 ms and
+  6,434 ms (335 ms each), several times the budget (150 ms p50) even for
+  short memories (during a full suite: 105 / 641 ms and 1,141 / 7,282 ms).
+  Decision 4 ships the reference only if it fits; it does not. Nothing was judged or
   logged; LongMemEval was not answered (the reranker's candidates need
   every dev history's passages embedded: 83,831 texts the harness's cache
   lacked, about 6,000 an hour on this CPU beside the other measurements;
