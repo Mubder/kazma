@@ -394,8 +394,9 @@ def _trust_lan_enabled() -> bool:
     ``KAZMA_TRUST_LAN=1`` for WSL/LAN single-operator labs that need cookie
     auto-issue without ``/login``.
     """
-    raw = (os.environ.get("KAZMA_TRUST_LAN") or "0").strip().lower()
-    return raw in ("1", "true", "on", "yes")
+    from kazma_core.security.boot_guard import env_flag
+
+    return env_flag("KAZMA_TRUST_LAN")
 
 
 #: Extra allowed WebSocket origins (comma-separated, exact ``scheme://host[:port]``
@@ -515,8 +516,9 @@ def _loopback_auto_login_enabled() -> bool:
     credential-less loopback login alongside a proxy set
     ``KAZMA_LOOPBACK_AUTOLOGIN=1``.
     """
-    raw = (os.environ.get("KAZMA_LOOPBACK_AUTOLOGIN") or "0").strip().lower()
-    return raw in ("1", "true", "on", "yes")
+    from kazma_core.security.boot_guard import env_flag
+
+    return env_flag("KAZMA_LOOPBACK_AUTOLOGIN")
 
 
 def everyone_signs_in() -> bool:
@@ -739,7 +741,9 @@ def _should_auto_issue_cookie(request: Request, expected: str) -> bool:
     - Loopback clients: yes, when peer trust applies (see
       :func:`_peer_trust_allowed`) AND the Host header names the local
       machine (DNS-rebinding guard, audit H-7).
-    - Private LAN when ``KAZMA_TRUST_LAN=1``: same condition.
+    - Private LAN when ``KAZMA_TRUST_LAN=1``: same condition. Both are peer
+      trust, so neither once a second person has an account
+      (:func:`everyone_signs_in`).
     - Remote clients with a valid X-Kazma-Secret header: yes.
     - Public internet clients: no — must use /login.
     """

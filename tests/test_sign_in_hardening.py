@@ -16,13 +16,14 @@
   one (they are told); a person ends one of their own.
 * **No auto-login once a second person has an account** (Spaces enforced):
   a browser on this machine gets no session for nothing, a socket from it
-  is refused, and the sign-in page says why. Before Spaces, or with one
-  account, the auto-login is as before.
+  is refused, and the sign-in page says why; nor does a peer on a private
+  network with ``KAZMA_TRUST_LAN`` (a Docker bridge address here). Before
+  Spaces, or with one account, the auto-login is as before.
 
 Negative controls: a password alone signs in when a second factor is
 required -- the sign-in route without its check (the plan's); today's
-auto-login, which hands this machine the owner's session whoever has an
-account.
+auto-login, which hands this machine -- and with ``KAZMA_TRUST_LAN`` a
+bridge peer -- the owner's session whoever has an account.
 """
 
 from __future__ import annotations
@@ -418,3 +419,50 @@ def test_negative_control_today_s_auto_login(app, enforced, monkeypatch) -> None
     monkeypatch.setattr(auth, "everyone_signs_in", lambda: False)
     with pytest.raises(AssertionError, match="got the owner's session with a second account"):
         test_a_second_account_ends_the_auto_login(app, None)
+
+
+# ── KAZMA_TRUST_LAN: a private-network peer's auto-login ends too ────────
+
+#: A peer on Docker's default bridge: private, not loopback.
+BRIDGE = "172.17.0.1"
+
+
+def _bridge(app: Any, port: int = 40000) -> TestClient:
+    """A browser reaching this machine over a Docker bridge, by a local name."""
+    return TestClient(app, base_url="http://localhost:9090", client=(BRIDGE, port))
+
+
+def _bridge_session(app: Any) -> bool:
+    answer = _bridge(app).get("/login", headers={"accept": "text/html", "sec-fetch-mode": "navigate"})
+    return "kazma-session" in answer.cookies
+
+
+def test_trust_lan_gives_a_bridge_peer_the_auto_login_with_one_account(app, enforced, monkeypatch) -> None:
+    monkeypatch.setenv("KAZMA_TRUST_LAN", "1")
+    assert _bridge_session(app), "with one account KAZMA_TRUST_LAN is as before"
+    monkeypatch.setenv("KAZMA_TRUST_LAN", "0")
+    assert not _bridge_session(app), "a bridge peer got a session with KAZMA_TRUST_LAN off"
+
+
+def test_a_second_account_ends_the_lan_auto_login(app, enforced, monkeypatch) -> None:
+    monkeypatch.setenv("KAZMA_TRUST_LAN", "1")
+    people.create_person("noor-lan", PASSWORD, by=OWNER_ACCOUNT_ID)
+    assert not _bridge_session(app), "a bridge peer got the owner's session with a second account"
+    assert _bridge(app).get("/api/account/second-factor").status_code == 401
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect) as closed, _bridge(app, 40001).websocket_connect(
+            "/ws/dashboard") as socket:
+        socket.receive_text()
+    assert closed.value.code == 4003
+
+
+def test_negative_control_today_s_lan_auto_login(app, enforced, monkeypatch) -> None:
+    """Planted: today's peer trust, whoever has an account. A bridge peer gets
+    the owner's session with a second account: the check above fails on its
+    own assertion."""
+    from kazma_ui import auth
+
+    monkeypatch.setattr(auth, "everyone_signs_in", lambda: False)
+    with pytest.raises(AssertionError, match="bridge peer got the owner's session"):
+        test_a_second_account_ends_the_lan_auto_login(app, None, monkeypatch)

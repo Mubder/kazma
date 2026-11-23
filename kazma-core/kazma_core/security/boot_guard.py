@@ -85,6 +85,8 @@ SECURITY_SWITCHES: frozenset[str] = frozenset({
     "KAZMA_DEV_WS_BYPASS",
     "KAZMA_GATEWAY_OPEN_TO_EVERYONE",
     "KAZMA_GATEWAY_STRICT_ALLOWLIST",
+    "KAZMA_LOOPBACK_AUTOLOGIN",
+    "KAZMA_TRUST_LAN",
 })
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
@@ -92,11 +94,19 @@ _TRUTHY = frozenset({"1", "true", "yes", "on"})
 #: The switches that turn sign-in off, or let a visitor in without it. The
 #: one list of them: the cloud profile's sign-in check (Spaces S4-08) and the
 #: refusal once a second account exists (S4-03) both read it.
+#: ``KAZMA_TRUST_LAN`` hands any private-network peer -- a Docker bridge
+#: included -- the owner's auto-login, as ``KAZMA_LOOPBACK_AUTOLOGIN`` hands a
+#: proxied loopback peer. Once a second person has an account both already
+#: do nothing (``kazma_ui.auth.everyone_signs_in`` ends every peer trust); they
+#: are refused anyway, so a lab that relied on one is told at start rather
+#: than finding its auto-login gone, and so a fault in that one rule never
+#: reopens either.
 SIGN_IN_OFF_SWITCHES: tuple[str, ...] = (
     "KAZMA_AUTH_DISABLED",
     "KAZMA_DEMO_MODE",
     "KAZMA_DEV_WS_BYPASS",
     "KAZMA_LOOPBACK_AUTOLOGIN",
+    "KAZMA_TRUST_LAN",
 )
 #: The chat apps' switch that lets anyone message a bot whose allowlist is
 #: empty (``kazma_gateway.sender_rule``); ``KAZMA_GATEWAY_STRICT_ALLOWLIST``

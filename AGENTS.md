@@ -16585,7 +16585,9 @@ an install with one account behaves as before.
     the control).
 - **Once a second account exists, no switch opens the install (S4-03,
   2026-11-23).** The boot refuses sign-in off (`KAZMA_AUTH_DISABLED`,
-  `KAZMA_DEV_WS_BYPASS`, `KAZMA_LOOPBACK_AUTOLOGIN`), demo mode
+  `KAZMA_DEV_WS_BYPASS`, `KAZMA_LOOPBACK_AUTOLOGIN`, `KAZMA_TRUST_LAN`:
+  the last two hand a peer the owner's auto-login, refused though S4-02's
+  rule already ends it, so a lab is told at start), demo mode
   (`KAZMA_DEMO_MODE`) and the chat apps' open switch
   (`KAZMA_GATEWAY_OPEN_TO_EVERYONE`, unless
   `KAZMA_GATEWAY_STRICT_ALLOWLIST` overrides it). One list,
@@ -16635,7 +16637,9 @@ an install with one account behaves as before.
     enforced and an account besides the owner's, the peer address is no
     credential, so this machine gets no session for nothing and its sockets
     are refused; the owner signs in like anyone and the session lasts as any
-    does. The sign-in page says why (`#everyone-signs-in`). Before Spaces,
+    does. The same rule ends `KAZMA_TRUST_LAN`'s auto-login for a private
+    network peer (a Docker bridge included): it is peer trust too, on HTTP
+    and on sockets. The sign-in page says why (`#everyone-signs-in`). Before Spaces,
     or with one account, nothing changes. The root conftest keeps today's
     auto-login for other tests; a test of sign-in is marked `real_sign_in`.
   - Gates: `tests/test_sign_in_hardening.py` (a password alone signing in,

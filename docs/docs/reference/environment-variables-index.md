@@ -281,7 +281,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_TRANSCRIPT_RECALL` | (none) | `kazma_core.memory.transcript_recall` | yes |
 | `KAZMA_TRANSLATION_REMOTE` | `""` | `kazma_skills.native.arabic_bilingual_nlp.tools` | yes |
 | `KAZMA_TRUSTED_PROXIES` | `""` | `kazma_core.security.boot_guard`, `kazma_ui.auth` | yes |
-| `KAZMA_TRUST_LAN` | (none) | `kazma_ui.auth` | yes |
+| `KAZMA_TRUST_LAN` | (none) | `kazma_core.security.boot_guard`, `kazma_ui.auth` | yes |
 | `KAZMA_TURN_DURABLE_CHARS` | `"600"` | `kazma_ui.sse_chat._streaming` | yes |
 | `KAZMA_TURN_DURABLE_INTERVAL_S` | `"2.0"` | `kazma_ui.sse_chat._streaming` | yes |
 | `KAZMA_TURN_LIVENESS_GRACE_S` | (none) | `kazma_ui.turn_liveness` | yes |

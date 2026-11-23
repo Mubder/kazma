@@ -39,7 +39,8 @@ built. A person's export of their own space is sealed with a password they
 choose; once a second person exists, the only copy of a backup that leaves
 the machine is restic's encrypted one. Once a second person has an account,
 everyone signs in, the operator too, on the install's own machine as
-anywhere: the loopback auto-login is off, and the switches that let anyone
+anywhere: the loopback auto-login and the local network's
+(`KAZMA_TRUST_LAN`) are off, and the switches that let anyone
 in without signing in (sign-in off, demo mode, the chat apps' open switch)
 stop Kazma from starting. A second factor (a code from an authenticator
 app) can be turned on for any account. Spaces has not been reviewed
