@@ -16256,7 +16256,10 @@ an install with one account behaves as before.
     every catalog command through the real handler, each reply and turn
     bound to the space as the account; a command added needs a line in
     `SAMPLES`; every adapter's press gate asks `press_needs_admin`, a planted
-    gate as its control; the sender-owner pointer as the control).
+    gate as its control; the sender-owner pointer as the control),
+    `tests/test_press_gate_before_spaces.py` (before Spaces a non-admin's
+    approval, swarm or run press changes nothing on Telegram, Discord and
+    WhatsApp; the enforced rule applied without Spaces as the control).
 - **Unlinking, and a disabled or deleted account, stops everything at once
   (S3-07, 2026-11-23).** Only where Spaces is enforced.
   - My account's Unlink (`DELETE /api/account/chat-links`,
