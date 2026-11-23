@@ -18,7 +18,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from kazma_core.errors import safe_error
 from kazma_core.memory.tenant_view import narrowed_to, sees_every_tenant
 
@@ -2764,7 +2764,7 @@ def memory_changes(state: str = "open", limit: int = 50) -> dict[str, Any]:
     return {"ok": True, "changes": rows}
 
 
-def _decide_change(change_id: str, decision: str) -> dict[str, Any]:
+def _decide_change(change_id: str, decision: str) -> Any:
     """Confirm, dismiss or undo one change of the caller's tenant. A refusal
     answers its code (``not_found``, ``not_open``, ``replaced_since``,
     ``forgotten``, ``not_written``)."""
@@ -2784,6 +2784,10 @@ def _decide_change(change_id: str, decision: str) -> dict[str, Any]:
             return changes.dismiss(conn, change_id, tenant_id=tid, actor="memory_page", ops_conn=ops)
         return changes.undo(conn, change_id, tenant_id=tid, actor="memory_page", ops_conn=ops)
     except changes.ChangeRefusedError as refused:
+        if refused.code == "identity_unavailable":
+            # An outage, answered as the others are: 503 and when to try again.
+            return JSONResponse({"ok": False, "error": refused.code, "code": refused.code},
+                                status_code=503, headers={"Retry-After": "5"})
         return {"ok": False, "error": refused.code}
     except sqlite3.Error as exc:
         logger.exception("[memory_api] change %s failed", decision)

@@ -16551,7 +16551,8 @@ an install with one account behaves as before.
     the memory mutation lock (`changes._decided_before_the_lock`: the
     identity store is no call to wait on under it, §15 D2), and an identity
     store that cannot answer is the refusal `identity_unavailable`, never a
-    500. Gate: `tests/test_memory_change_decided_before_the_lock.py`.
+    500: 503 with `Retry-After`, as the other outages are. Gate:
+    `tests/test_memory_change_decided_before_the_lock.py`.
   - **Time Travel restores, forks and clears a chat of its opener or an
     owner** (`thread_rewind._theirs_to_change`, once Spaces is enforced):
     `rewind_thread`, `fork_thread` and `clear_thread_snapshots` -- the one
@@ -16563,6 +16564,25 @@ an install with one account behaves as before.
     another member's turns. Gate: `tests/test_time_travel_restore_per_person.py`
     (the real routes behind the real tenant middleware; the space-only
     check as the control).
+  - **A whole chat is changed by its opener or an owner** (the review of
+    3da533662): once Spaces is enforced the web routes that change a whole
+    chat ask the rule `/reset` asks (`turn_control_refusal`, action
+    `reset`): delete (`DELETE /api/chat/sessions/{id}`, through
+    `sse_chat._turn_control`: never while another member's turn runs or
+    waits), rename, archive, unarchive, pin and unpin
+    (`sse_chat._whole_chat_refusal_sync`), and the Dashboard's delete
+    (`DELETE /api/sessions/{thread_id}`; whether a turn waits read from the
+    gate registry, `dashboard._turn_runs_or_waits`). 403 `not_your_chat`;
+    503 with `Retry-After` when who it is cannot be read. The Dashboard's
+    "Clear saved steps" clears every member's chats of the space: an owner
+    of the space only (`dashboard._clear_all_refusal`, 403 `not_an_owner`).
+    The space check alone let a member delete another member's whole chat,
+    its steps and its record.
+    The memory route that keeps a chat out and forgets its past asked
+    S1-11's rule already (`speakers.may_keep_chat_out`). A new web route
+    that changes a whole chat asks the same rule. Gate:
+    `tests/test_whole_chat_routes_per_person.py` (the space-only check as
+    the control).
 
 ## UI Conventions (Web)
 

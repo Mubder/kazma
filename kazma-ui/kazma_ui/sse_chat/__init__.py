@@ -172,6 +172,51 @@ async def _turn_control(thread_id: str, graph: Any, action: str, user_text: str 
     return {"reason": code, "message": _turn_line(user_text, action, code, name)}
 
 
+def _whole_chat_answer(refused: dict[str, str]) -> JSONResponse:
+    """The answer to a refused change of a whole chat: 403 with its code and
+    line, or 503 with ``Retry-After`` when who it is cannot be read."""
+    if refused["reason"] == "identity_unavailable":
+        return JSONResponse({"status": "error", "error": refused["reason"], "message": refused["message"]},
+                            status_code=503, headers={"Retry-After": "5"})
+    return JSONResponse({"status": "error", "error": refused["reason"], "message": refused["message"]},
+                        status_code=403)
+
+
+def _whole_chat_refusal_sync(session_id: str) -> JSONResponse | None:
+    """The refusal of a change to a whole chat -- rename, archive, pin -- by
+    the person sending now, once Spaces is enforced: the rule ``/reset``,
+    ``/replay clear``, restore and fork ask (``turn_control_refusal``,
+    action ``reset``: the chat's opener or an owner of the space; the review
+    of 3da533662). None when they may, when the bound space's store holds no
+    such chat (the route answers it as before) or before Spaces. Blocking:
+    the chat store, the thread record, the identity store."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    import sqlite3
+
+    from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_ui.hitl_answerers import turn_control_refusal
+    from kazma_ui.session_manager import get_session_manager
+
+    session = get_session_manager().get(session_id)
+    if session is None:
+        return None
+    thread_id = str(getattr(session, "thread_id", "") or session_id)
+    try:
+        refusal = turn_control_refusal(thread_id, "reset", active=False)
+    except (sqlite3.Error, OSError, IdentityUnavailable):
+        logger.warning("[chat] whose chat %s is cannot be read; the change was refused",
+                       thread_id[:12], exc_info=True)
+        refusal = ("identity_unavailable", "")
+    if refusal is None:
+        return None
+    code, name = refusal
+    logger.info("[chat] a change to chat %s was refused: %s", thread_id[:12], code)
+    return _whole_chat_answer({"reason": code, "message": _turn_line("", "reset", code, name)})
+
+
 async def _hard_steer_whose(thread_id: str, text: str = "") -> Any:
     """Whose turn a steer goes into (``hitl_answerers.whose_turn``; a hard
     steer's resume binds it), or the route's refusal (a dict with its line)
@@ -1804,7 +1849,7 @@ def create_sse_chat_router(
         }
 
     @r.delete("/api/chat/sessions/{session_id}")
-    async def delete_session(session_id: str) -> dict[str, str]:
+    async def delete_session(session_id: str) -> Any:
         """Delete a chat session and its associated checkpoint data."""
         try:
             store = _get_store()
@@ -1816,6 +1861,14 @@ def create_sse_chat_router(
                 # hold is another space's chat, or none. Its saved steps are
                 # kept by id alone, so nothing more is deleted under it.
                 return {"status": "ok"}
+            if session is not None:
+                # The chat's opener or an owner of the space deletes it, and
+                # never while another member's turn runs or waits: the rule
+                # /reset asks (the review of 3da533662: any member deleted
+                # another member's whole chat, its steps and its record).
+                refused = await _turn_control(thread_id or session_id, _get_graph(), "reset")
+                if refused is not None:
+                    return _whole_chat_answer(refused)
             await asyncio.to_thread(store.delete, session_id)
 
             leftovers = False
@@ -1863,12 +1916,14 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.patch("/api/chat/sessions/{session_id}")
-    def rename_session(session_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    def rename_session(session_id: str, body: dict[str, Any]) -> Any:
         """Rename a chat session (set a custom title)."""
         try:
             title = str(body.get("title") or "").strip()
             if not title:
                 return {"status": "error", "error": "Title cannot be empty"}
+            if (refused := _whole_chat_refusal_sync(session_id)) is not None:
+                return refused
             session = _get_store().rename(session_id, title)
             if session is None:
                 return {"status": "error", "error": "Session not found"}
@@ -1878,9 +1933,11 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.post("/api/chat/sessions/{session_id}/archive")
-    def archive_session(session_id: str) -> dict[str, Any]:
+    def archive_session(session_id: str) -> Any:
         """Archive a chat session (hide from sidebar without deleting)."""
         try:
+            if (refused := _whole_chat_refusal_sync(session_id)) is not None:
+                return refused
             session = _get_store().set_archived(session_id, True)
             if session is None:
                 return {"status": "error", "error": "Session not found"}
@@ -1890,9 +1947,11 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.post("/api/chat/sessions/{session_id}/unarchive")
-    def unarchive_session(session_id: str) -> dict[str, Any]:
+    def unarchive_session(session_id: str) -> Any:
         """Restore an archived chat session back to the sidebar."""
         try:
+            if (refused := _whole_chat_refusal_sync(session_id)) is not None:
+                return refused
             session = _get_store().set_archived(session_id, False)
             if session is None:
                 return {"status": "error", "error": "Session not found"}
@@ -1902,9 +1961,11 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.post("/api/chat/sessions/{session_id}/pin")
-    def pin_session(session_id: str) -> dict[str, Any]:
+    def pin_session(session_id: str) -> Any:
         """Pin a chat session (stays at the top of the sidebar)."""
         try:
+            if (refused := _whole_chat_refusal_sync(session_id)) is not None:
+                return refused
             session = _get_store().set_pinned(session_id, True)
             if session is None:
                 return {"status": "error", "error": "Session not found"}
@@ -1914,9 +1975,11 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.post("/api/chat/sessions/{session_id}/unpin")
-    def unpin_session(session_id: str) -> dict[str, Any]:
+    def unpin_session(session_id: str) -> Any:
         """Unpin a chat session (back to normal updated_at ordering)."""
         try:
+            if (refused := _whole_chat_refusal_sync(session_id)) is not None:
+                return refused
             session = _get_store().set_pinned(session_id, False)
             if session is None:
                 return {"status": "error", "error": "Session not found"}

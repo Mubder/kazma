@@ -7,14 +7,15 @@ L13 put ``changes._not_theirs_to_decide`` -- the identity store's
 identity store that could not answer escaped as a 500. Now
 ``changes._decided_before_the_lock`` asks before the lock (a change's
 subject never changes), and ``IdentityUnavailable`` is the refusal
-``identity_unavailable``.
+``identity_unavailable``, answered as the other outages are: 503 with
+``Retry-After`` (the review of 3da533662: it was a 409).
 
 Through the real memory route (``POST /api/memory/v2/changes/{id}/dismiss``)
 behind the real tenant middleware (S1-09's ``memory_world``), Spaces
 enforced: person B a member of A's space, deciding a change to A's own fact.
 
-Negative controls: today's order (the check inside the lock) and today's
-500 (``IdentityUnavailable`` escaping).
+Negative controls: today's order (the check inside the lock), today's
+500 (``IdentityUnavailable`` escaping) and the 409 of 3da533662.
 """
 
 from __future__ import annotations
@@ -93,6 +94,8 @@ def test_an_unreadable_identity_store_is_a_refusal_not_a_500(ctx, monkeypatch) -
     answer = _dismiss(ctx, change_id)
     assert answer.status_code != 500, f"an unreadable identity store was a 500: {answer.text}"
     assert answer.json().get("error") == "identity_unavailable", answer.text
+    assert answer.status_code == 503 and answer.headers.get("retry-after"), (
+        f"an outage was not a 503 with Retry-After: {answer.status_code} {answer.headers}")
 
 
 def test_negative_control_today_s_order(ctx, monkeypatch) -> None:
@@ -126,4 +129,22 @@ def test_negative_control_today_s_500(ctx, monkeypatch) -> None:
 
     monkeypatch.setattr(changes, "_not_theirs_to_decide", today)
     with pytest.raises(AssertionError, match="was a 500"):
+        test_an_unreadable_identity_store_is_a_refusal_not_a_500(ctx, monkeypatch)
+
+
+def test_negative_control_the_409_of_3da533662(ctx, monkeypatch) -> None:
+    """Planted: the route of 3da533662, which answered the outage with the
+    ``ok: false`` body the operator trail turns into a 409."""
+    from kazma_ui import memory_api
+
+    real = memory_api._decide_change
+
+    def as_before(*a, **k):
+        answer = real(*a, **k)
+        if getattr(answer, "status_code", None) == 503:
+            return {"ok": False, "error": "identity_unavailable"}
+        return answer
+
+    monkeypatch.setattr(memory_api, "_decide_change", as_before)
+    with pytest.raises(AssertionError, match="not a 503 with Retry-After"):
         test_an_unreadable_identity_store_is_a_refusal_not_a_500(ctx, monkeypatch)
