@@ -1,30 +1,35 @@
-"""A person's code runs only in a container, with no network (Spaces S4-05,
-``kazma_core/spaces/member_code.py``, and its review).
+"""A person's code runs only in a container, with the network only where Kazma
+filters it (Spaces S4-05, S4-05b; ``kazma_core/spaces/member_code.py``).
 
 * The rule (``code_rule``): once Spaces is enforced, anyone but the admin is
-  held to a container with no network; the admin, and an install that does
-  not enforce Spaces, keep the rules they had; work no person asked for, a
-  container with no network.
+  held to a container, with the network only where the admin allowed it and
+  Kazma can hold it to the public internet; the admin, and an install that
+  does not enforce Spaces, keep the rules they had; work no person asked
+  for, a container with no network.
 * Per space, through the real ``python_exec`` with Docker missing and the
   lab switch that allows the host (``KAZMA_CODE_EXEC_ALLOW_LOCAL``): the
   admin in the owner's space runs on the machine as before; a person in
   their own space, and in a space they share, is refused. **Control: the
   local fallback** -- the same person under the rules of before ran on the
   machine itself and read a file of the host.
-* **No network for members' code until S4-05b** (the review of S4-05: the
+* **The network, filtered** (S4-05b, after the review of S4-05: the
   engine's default network reached this computer, the LAN and the router's
-  admin page). People refuses turning it on (``code_network_not_yet``); a
-  stored allowance from the first build reads as not allowed; the Docker
-  jail runs every person's code with ``--network none`` and the network
-  modules blocked; E2B, which always has the internet, never runs it.
-  **Control: today's allowance** -- the first build's reading of the same
-  stored value allowed the network.
+  admin page). ``network_refusal`` says why it cannot be given -- a public
+  install, ``KAZMA_TRUST_LAN``, another engine, no filter put in -- and
+  People refuses turning it on with that code; where Kazma filters it, the
+  switch is taken and the person's jail joins ``kazma-egress`` (checked as
+  setup's before every run) with the network modules unblocked; everyone
+  else's runs with ``--network none``. A stored allowance is not used where
+  Kazma cannot filter. E2B never runs a person's code. **Control: the
+  engine's default network** -- no product code puts the jail on it.
 * A chat-app turn runs as the person whose linked account sent it (Spaces
   stage 3): their code is held to a container there too (control: the
   owner's own linked account keeps the admin's rules).
 * A real Docker run where the sandbox image is present: a snippet in the
   container reaches neither the network nor a host file; the same snippet
-  through the local fallback reads the host file (the control).
+  through the local fallback reads the host file (the control). The
+  filtered network's own real-engine test is
+  ``tests/test_member_code_egress_engine.py``.
 """
 
 from __future__ import annotations
@@ -99,16 +104,46 @@ def test_nothing_is_read_while_spaces_is_not_enforced(matrix, monkeypatch) -> No
         assert code_rule() == AS_BEFORE
 
 
-# ── no network for members' code, until S4-05b ──────────────────────────
+# ── the network, where Kazma filters it (S4-05b) ────────────────────────
 
 
-def test_people_refuses_turning_the_network_on(two_people) -> None:
+@pytest.fixture
+def filtered(monkeypatch):
+    """Kazma's own engine is the one in force and its filter is put in."""
+    from kazma_core import container_engine_setup, docker_cli
+
+    monkeypatch.delenv("KAZMA_CLOUD_PROFILE", raising=False)
+    monkeypatch.delenv("KAZMA_TRUST_LAN", raising=False)
+    monkeypatch.setattr(docker_cli, "engine_in_force", lambda: "kazma")
+    monkeypatch.setattr(container_engine_setup, "egress_installed", lambda: True)
+    monkeypatch.setattr(container_engine_setup, "egress_network_ok", lambda run=None: True)
+
+
+def test_why_the_network_cannot_be_given_here(filtered, monkeypatch) -> None:
+    from kazma_core import container_engine_setup, docker_cli
+
+    assert member_code.network_refusal() == ""
+    monkeypatch.setattr(container_engine_setup, "egress_installed", lambda: False)
+    assert member_code.network_refusal() == "code_network_no_filter"
+    for engine in ("desktop", "system", "other"):
+        monkeypatch.setattr(docker_cli, "engine_in_force", lambda engine=engine: engine)
+        assert member_code.network_refusal() == "code_network_engine", engine
+    monkeypatch.setenv("KAZMA_TRUST_LAN", "1")
+    assert member_code.network_refusal() == "code_network_trust_lan"
+    monkeypatch.setenv("KAZMA_CLOUD_PROFILE", "1")
+    assert member_code.network_refusal() == "code_network_cloud"
+    assert set(member_code.NETWORK_REFUSALS) == {
+        "code_network_cloud", "code_network_trust_lan", "code_network_engine", "code_network_no_filter"}
+
+
+@pytest.mark.parametrize("refusal", member_code.NETWORK_REFUSALS)
+def test_allowing_is_refused_where_kazma_cannot_filter(two_people, monkeypatch, refusal) -> None:
     m = two_people
+    monkeypatch.setattr(member_code, "network_refusal", lambda: refusal)
     with pytest.raises(people.PeopleRefused) as refused:
         people.set_code_network(m.account_b, True, by=OWNER_ACCOUNT_ID)
-    assert refused.value.code == "code_network_not_yet" and refused.value.status == 409
-    policy = identity.read_registry()["policies"].get(m.account_b) or {}
-    assert CODE_NETWORK_POLICY not in policy  # nothing stored
+    assert refused.value.code == refusal and refused.value.status == 409
+    assert CODE_NETWORK_POLICY not in (identity.read_registry()["policies"].get(m.account_b) or {})
     with pytest.raises(people.PeopleRefused) as admin:
         people.set_code_network(OWNER_ACCOUNT_ID, False, by=OWNER_ACCOUNT_ID)
     assert admin.value.code == "admin_code_rules"
@@ -117,59 +152,98 @@ def test_people_refuses_turning_the_network_on(two_people) -> None:
     assert bad.value.code == "bad_code_network"
 
 
-def test_a_stored_allowance_reads_as_not_allowed_and_off_clears_it(two_people) -> None:
+def test_allowed_where_kazma_filters_it_and_off_takes_it_back(two_people, filtered) -> None:
     m = two_people
-    _stored_allowance(m.account_b)
-    reg = identity.read_registry()
-    assert member_code.allowed_network(reg, m.account_b) is False
+    people.set_code_network(m.account_b, True, by=OWNER_ACCOUNT_ID)
+    assert identity.read_registry()["policies"][m.account_b][CODE_NETWORK_POLICY] is True
     listed = {p["id"]: p for p in people.list_people()}
-    assert listed[m.account_b]["code_network"] is False and listed[OWNER_ACCOUNT_ID]["code_network"] is None
+    assert listed[m.account_b]["code_network"] is True and listed[OWNER_ACCOUNT_ID]["code_network"] is None
     with scope.bind_scope(A, m.account_b):
-        assert code_rule() == CONTAINER
+        assert code_rule() == CodeRule(container_only=True, network=True)
+    with scope.bind_scope(A, m.account_a):
+        assert code_rule() == CONTAINER  # not allowed for them
     people.set_code_network(m.account_b, False, by=OWNER_ACCOUNT_ID)
     assert CODE_NETWORK_POLICY not in (identity.read_registry()["policies"].get(m.account_b) or {})
+    with scope.bind_scope(A, m.account_b):
+        assert code_rule() == CONTAINER
     events = [e for e in identity.read_registry()["events"] if e.get("kind") == "code_network_set"]
-    assert events and events[-1].get("account") == m.account_b
+    assert len(events) == 2 and events[-1].get("account") == m.account_b
 
 
-def test_control_todays_allowance_gave_the_network(two_people, monkeypatch) -> None:
-    """The first build of S4-05 read the same stored value as allowed: the
-    gate (no network for members until S4-05b) is what stops it now."""
+def test_a_stored_allowance_is_not_used_where_kazma_cannot_filter(two_people, filtered, monkeypatch) -> None:
+    from kazma_core import docker_cli
+
     m = two_people
     _stored_allowance(m.account_b)
-    monkeypatch.setattr(member_code, "_network_for_members", lambda: True)
-    assert member_code.allowed_network(identity.read_registry(), m.account_b) is True
+    with scope.bind_scope(A, m.account_b):
+        assert code_rule().network is True
+    monkeypatch.setattr(docker_cli, "engine_in_force", lambda: "desktop")
+    assert member_code.allowed_network(identity.read_registry(), m.account_b) is False
+    with scope.bind_scope(A, m.account_b):
+        assert code_rule() == CONTAINER
+    listed = {p["id"]: p for p in people.list_people()}
+    assert listed[m.account_b]["code_network"] is False
 
 
-def test_the_route_refuses_allowing_and_takes_off(two_people) -> None:
+def test_an_identity_store_that_cannot_answer_gives_no_network(two_people, filtered, monkeypatch) -> None:
+    m = two_people
+    _stored_allowance(m.account_b)
+
+    def away() -> Any:
+        raise identity.IdentityUnavailable("the store is away")
+
+    monkeypatch.setattr(identity, "read_registry", away)
+    with scope.bind_scope(A, m.account_b):
+        assert code_rule() == CONTAINER
+
+
+def _people_client(m: Matrix):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from kazma_ui import auth
     from kazma_ui.people_api import create_people_router
 
-    m = two_people
-    _stored_allowance(m.account_b)
     app = FastAPI()
     app.include_router(create_people_router())
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(auth, "get_request_principal",
-                      lambda request: {"source": "secret", "actor": "owner", "role": "admin"})
-        with TestClient(app) as client:
+    patch = pytest.MonkeyPatch()
+    patch.setattr(auth, "get_request_principal", lambda request: {"source": "secret", "actor": "owner", "role": "admin"})
+    return patch, TestClient(app)
+
+
+def test_the_route_allows_where_filtered_and_refuses_elsewhere(two_people, filtered, monkeypatch) -> None:
+    from kazma_core import docker_cli
+
+    m = two_people
+    patch, client = _people_client(m)
+    try:
+        with client:
+            listed = client.get("/api/people").json()
             on = client.put(f"/api/people/{m.account_b}/code-network", json={"allowed": True})
             bad = client.put(f"/api/people/{m.account_b}/code-network", json={"allowed": "on"})
+            monkeypatch.setattr(docker_cli, "engine_in_force", lambda: "desktop")
+            elsewhere = client.get("/api/people").json()
+            refused = client.put(f"/api/people/{m.account_a}/code-network", json={"allowed": True})
             off = client.put(f"/api/people/{m.account_b}/code-network", json={"allowed": False})
-    assert on.status_code == 409 and on.json()["error"] == "code_network_not_yet", on.text
+    finally:
+        patch.undo()
+    assert listed["code_network_refusal"] == "" and elsewhere["code_network_refusal"] == "code_network_engine"
+    assert on.status_code == 200, on.text
     assert bad.status_code == 400 and bad.json()["error"] == "bad_code_network", bad.text
+    assert refused.status_code == 409 and refused.json()["error"] == "code_network_engine", refused.text
     assert off.status_code == 200, off.text
     assert CODE_NETWORK_POLICY not in (identity.read_registry()["policies"].get(m.account_b) or {})
 
 
-def test_the_refusal_is_worded_in_both_languages() -> None:
+def test_every_refusal_is_worded_in_both_languages() -> None:
     from kazma_ui.i18n.catalog.settings import TRANSLATIONS
 
-    for key in ("settings.people_err.code_network_not_yet", "settings.people_code_network_not_yet"):
+    for code in member_code.NETWORK_REFUSALS:
+        key = f"settings.people_err.{code}"
         assert TRANSLATIONS[key]["en"] and TRANSLATIONS[key]["ar"], key
-    assert "public internet" in TRANSLATIONS["settings.people_err.code_network_not_yet"]["en"]
+    for key in ("settings.people_code_network_title", "settings.people_code_network_means",
+                "settings.people_code_network_on", "settings.people_code_network_off"):
+        assert TRANSLATIONS[key]["en"] and TRANSLATIONS[key]["ar"], key
+    assert "public internet" in TRANSLATIONS["settings.people_code_network_means"]["en"]
 
 
 # ── per space, through the real python_exec ─────────────────────────────
@@ -276,16 +350,58 @@ def _network(args: list[str]) -> str:
     return args[args.index("--network") + 1]
 
 
-def test_every_container_has_no_network_a_stored_allowance_too(two_people, monkeypatch) -> None:
+def test_the_jail_joins_the_filtered_network_only_for_an_allowed_person(two_people, filtered, monkeypatch) -> None:
+    from kazma_core.container_engine_setup import EGRESS_NETWORK
+
     m = two_people
     _stored_allowance(m.account_b)
-    for space, person in ((A, m.account_b), (A, m.account_a), (OWNER_SPACE_ID, OWNER_ACCOUNT_ID)):
+    args, script = _docker_args(monkeypatch, A, m.account_b)
+    assert _network(args) == EGRESS_NETWORK and "'socket'" not in script.decode()
+    with scope.bind_scope(A, m.account_b):
+        assert code_exec.sandbox_refusal("import socket") is None
+        assert "public internet only" in code_exec.jail_note_for_tool("python_exec")
+    for space, person in ((A, m.account_a), (OWNER_SPACE_ID, OWNER_ACCOUNT_ID)):
         args, script = _docker_args(monkeypatch, space, person)
         assert _network(args) == "none", (space, person, args)
         assert "'socket'" in script.decode()  # the network modules stay blocked
-    with scope.bind_scope(A, m.account_b):
+    with scope.bind_scope(A, m.account_a):
         assert "socket" in (code_exec.sandbox_refusal("import socket") or "")
         assert "(no network)" in code_exec.jail_note_for_tool("python_exec")
+
+
+def test_every_container_has_no_network_where_kazma_cannot_filter(two_people, monkeypatch) -> None:
+    from kazma_core import docker_cli
+
+    m = two_people
+    _stored_allowance(m.account_b)
+    monkeypatch.setattr(docker_cli, "engine_in_force", lambda: "desktop")
+    for space, person in ((A, m.account_b), (A, m.account_a), (OWNER_SPACE_ID, OWNER_ACCOUNT_ID)):
+        args, script = _docker_args(monkeypatch, space, person)
+        assert _network(args) == "none", (space, person, args)
+        assert "'socket'" in script.decode()
+
+
+def test_a_network_that_is_not_setups_refuses_the_run(two_people, filtered, monkeypatch) -> None:
+    """A ``kazma-egress`` network made any other way (or removed by a prune)
+    would not be filtered: the run is refused, never put on another network."""
+    from kazma_core import container_engine_setup
+
+    m = two_people
+    _stored_allowance(m.account_b)
+    monkeypatch.setattr(container_engine_setup, "egress_network_ok", lambda run=None: False)
+    spawned: list[Any] = []
+
+    async def spawn(*args: Any, **kwargs: Any) -> Any:
+        spawned.append(args)
+        raise AssertionError("a container was started")
+
+    monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "1")
+    code_exec.reset_docker_probe()
+    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "docker")
+    monkeypatch.setattr(code_exec.asyncio, "create_subprocess_exec", spawn)
+    out = _exec_as(A, m.account_b, "print('hi')")
+    assert out.startswith("[Exit code: 1]") and "kazma setup engine" in out, out
+    assert spawned == []
 
 
 def test_e2b_never_runs_a_persons_code(two_people, monkeypatch) -> None:
@@ -303,13 +419,17 @@ def test_e2b_never_runs_a_persons_code(two_people, monkeypatch) -> None:
         assert e2b.e2b_enabled() is True  # the admin: as before
 
 
-def test_no_product_code_puts_a_container_on_a_network() -> None:
-    """Members' code gets no network until S4-05b's filtered network: no
-    product module names the engine's default network for the jail (the
-    first build ran ``--network bridge``)."""
+def test_no_product_code_puts_a_container_on_the_engines_default_network() -> None:
+    """The control of S4-05's review: the first build ran the jail with
+    ``--network bridge``, the engine's default network, which reached this
+    computer, the LAN and cloud metadata. The jail names one network
+    argument, and it is ``none`` or the filtered network."""
     source = Path(code_exec.__file__).read_text(encoding="utf-8")
-    assert '"--network", "none"' in source
-    assert "bridge" not in source
+    assert source.count('"--network"') == 1 and '"--network", joined,' in source
+    assert 'joined = "none"' in source and "joined = EGRESS_NETWORK" in source
+    assert '"--network", "bridge"' not in source and "'bridge' if network" not in source
+    first_build = source.replace('"--network", joined,', '"--network", "bridge" if network else "none",')
+    assert first_build.count('"--network"') == 1 and '"--network", joined,' not in first_build
 
 
 # ── a chat-app turn runs as its linked person (stage 3) ─────────────────

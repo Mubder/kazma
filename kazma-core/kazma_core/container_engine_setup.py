@@ -23,6 +23,16 @@ tasks and starts none, and WSL refuses LocalSystem. Without it the VM ended
 like a power cut, and a container's last writes came back as NUL bytes
 (2026-11-13, measured on the drill VM).
 
+A person's code that the admin allowed the network (Spaces S4-05b) runs on
+the ``kazma-egress`` network, which reaches the public internet only: the
+engine:egress step puts in the distro the rules that hold its bridge there
+(``egress-filter.sh``, applied before Docker at every start), then makes the
+network (:data:`EGRESS_NETWORK`). Only a member's network needs it: until the
+admin has given one the network (``spaces.member_code.network_given``) the
+filter is not missing from the engine (:attr:`EngineCheck.waiting`), so an
+install without it -- the live one -- is whole to ``kazma setup install``;
+``kazma setup engine`` puts it in all the same, after the record.
+
 Every download is pinned by URL, size and SHA-256, and nothing is kept that
 does not match. Each step is idempotent: a second run repairs what is missing
 and changes nothing that is there.
@@ -53,11 +63,16 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DISTRO",
     "DOWNLOADS",
+    "EGRESS_BRIDGE",
+    "EGRESS_LABEL",
+    "EGRESS_NETWORK",
     "RESTART",
     "SHUTDOWN_SERVICE",
     "TASK_NAME",
     "EngineCheck",
     "check",
+    "egress_installed",
+    "egress_network_ok",
     "install_steps",
     "preflight",
     "remove",
@@ -89,6 +104,13 @@ PORT = 2376
 #: What an action answers when Windows must restart before the next step
 #: (the WSL features were just turned on).
 RESTART = "restart Windows to finish WSL, then run setup again"
+#: The network a person's code reaches the public internet through (Spaces
+#: S4-05b, ``egress-filter.sh``): its bridge, which the distro's rules name,
+#: and the label setup gives it. A network of the name made any other way is
+#: not used (:func:`egress_network_ok`).
+EGRESS_NETWORK = "kazma-egress"
+EGRESS_BRIDGE = "kz-egress"
+EGRESS_LABEL = "io.kazma.egress"
 
 
 @dataclass(frozen=True)
@@ -262,12 +284,15 @@ def _docker(run: Runner, *args: str, timeout: float = 30) -> tuple[int, str]:
 @dataclass
 class EngineCheck:
     """Kazma's engine as found: ``ok`` (True: all of it is there), what is
-    ``missing`` (wsl, distro, docker, cli, context, task), a ``detail``."""
+    ``missing`` (wsl, distro, docker, cli, context, task, shutdown, egress), a
+    ``detail``; and what is not there and not needed yet (``waiting``: the
+    egress filter, until someone's code has the network)."""
 
     ok: bool | None
     detail: str
     missing: list[str] = field(default_factory=list)
     version: str = ""
+    waiting: list[str] = field(default_factory=list)
 
 
 def check(run: Runner = subprocess.run) -> EngineCheck:
@@ -295,18 +320,34 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
     # set up a Docker that answers again.
     code, text = (_docker(run, "version", "--format", "{{.Server.Version}}")
                   if not {"distro", "context"} & set(missing) and find_docker_cli() else (1, ""))
+    waiting: list[str] = []
     if code == 0 and text.strip():
         version = text.strip().splitlines()[-1]
+        if not (egress_installed() and egress_network_ok(run)):
+            # Only a member's network needs the filter: before one has it,
+            # an engine without it is whole (nothing to repair, nothing red).
+            (missing if _network_given() else waiting).append("egress")
     else:
         missing.append("docker")  # no distro: nothing there to answer
     if not missing:
-        return EngineCheck(True, f"Kazma's engine, Docker {version}", [], version)
+        return EngineCheck(True, f"Kazma's engine, Docker {version}", [], version, waiting)
     words = {"wsl": "WSL is not installed", "distro": "the kazma-engine distro is not there",
              "docker": "Docker in it does not answer", "cli": "Docker's CLI is not installed",
              "context": "the kazma-engine Docker context is not set up",
              "task": "the KazmaEngine task that starts it at boot is not registered",
-             "shutdown": "nothing stops it cleanly when Windows shuts down (the KazmaEngineShutdown service)"}
-    return EngineCheck(False, "; ".join(words[m] for m in missing), missing, version)
+             "shutdown": "nothing stops it cleanly when Windows shuts down (the KazmaEngineShutdown service)",
+             "egress": "members' code has no network limited to the public internet (the kazma-egress network)"}
+    return EngineCheck(False, "; ".join(words[m] for m in missing), missing, version, waiting)
+
+
+def _network_given() -> bool:
+    """Whether the admin gave someone's code the network (Spaces S4-05b):
+    what makes the egress filter part of the engine. Read only when the
+    filter is not there; an identity store that cannot be read counts as
+    nobody."""
+    from kazma_core.spaces.member_code import network_given
+
+    return network_given()
 
 
 def _keep_engine_current() -> bool:
@@ -331,6 +372,34 @@ def _stop_helpers_current() -> bool:
     except OSError:
         return False
     return stamp == hashlib.sha256(_asset("engine-stop.sh").encode("utf-8")).hexdigest()
+
+
+def _egress_stamp() -> Path:
+    """The SHA-256 of the ``egress-filter.sh`` last put in the distro (written
+    by the engine:egress step once the network is made)."""
+    return _engine_dir() / "egress-filter.sha256"
+
+
+def egress_installed() -> bool:
+    """This build's egress filter was put in the distro (Spaces S4-05b): read
+    from the stamp alone, no call to WSL or Docker. The network itself is
+    :func:`egress_network_ok`'s."""
+    try:
+        stamp = _egress_stamp().read_text(encoding="ascii").strip()
+    except OSError:
+        return False
+    return stamp == hashlib.sha256(_asset("egress-filter.sh").encode("utf-8")).hexdigest()
+
+
+def egress_network_ok(run: Runner = subprocess.run) -> bool:
+    """The ``kazma-egress`` network on Kazma's engine is setup's: its bridge
+    is the one the distro's rules name and it carries setup's label. A
+    network of the name made any other way would not be filtered."""
+    code, text = _docker(run, "network", "inspect", EGRESS_NETWORK, "--format",
+                         '{{index .Options "com.docker.network.bridge.name"}}|{{index .Labels "'
+                         + EGRESS_LABEL + '"}}')
+    lines = text.strip().splitlines()
+    return code == 0 and bool(lines) and lines[-1].strip() == f"{EGRESS_BRIDGE}|1"
 
 
 def _service_state(run: Runner) -> str | None:
@@ -415,6 +484,7 @@ _TITLES = {
     "engine:task": "start it at boot with nobody signed in (the KazmaEngine task)",
     "engine:shutdown": "stop it cleanly when Windows shuts down (the KazmaEngineShutdown service)",
     "engine:shutdown_service": "stop Kazma cleanly when Windows shuts down (the KazmaEngineShutdown service)",
+    "engine:egress": "limit members' code to the public internet (the kazma-egress network)",
     "engine:record": "check it answers, and record it",
 }
 
@@ -427,9 +497,15 @@ def shutdown_service_step() -> Any:
     return Step(_TITLES["engine:shutdown_service"], action="engine:shutdown_service", admin=True)
 
 
-def install_steps(found: EngineCheck) -> list[Any]:
+def install_steps(found: EngineCheck, *, with_waiting: bool = False) -> list[Any]:
     """The steps that put in what *found* says is missing, in order; the
-    record always last (it also checks that the engine answers)."""
+    record last but for the egress filter (the record also checks that the
+    engine answers: a filter that fails never leaves the engine unrecorded).
+
+    The filter is a step when it is missing (someone's code has the network),
+    or with *with_waiting* (``kazma setup engine``) when it is not there yet
+    or the engine is being set up: ``kazma setup install`` never puts in what
+    no one needs."""
     from kazma_core.postgres_service import Step
 
     wanted = {
@@ -441,6 +517,8 @@ def install_steps(found: EngineCheck) -> list[Any]:
         "engine:task": "task" in found.missing,
         "engine:shutdown": "shutdown" in found.missing,
         "engine:record": True,
+        "engine:egress": "egress" in found.missing or (with_waiting and (
+            "egress" in found.waiting or bool({"wsl", "distro", "docker"} & set(found.missing)))),
     }
     admin = ("engine:wsl", "engine:task", "engine:shutdown")
     return [Step(_TITLES[action], action=action, admin=action in admin, dep="docker")
@@ -829,6 +907,65 @@ def _action_shutdown_service(run: Runner, log: Callable[[str], None], opener: An
                   f"{SHUTDOWN_KAZMA_BUDGET_S} s), then the engine's containers (up to {SHUTDOWN_BUDGET_S} s)")
 
 
+def _engine_answers(run: Runner, wait_s: float) -> tuple[bool, str]:
+    """Start the engine's task and wait for Docker in it: ``(True, version)``,
+    or ``(False, why)`` past *wait_s*."""
+    _out(run, ["schtasks", "/Run", "/TN", TASK_NAME])  # running it while it runs does nothing
+    deadline = time.monotonic() + wait_s
+    while True:
+        code, text = _docker(run, "version", "--format", "{{.Server.Version}}")
+        if code == 0 and text.strip():
+            return True, text.strip().splitlines()[-1]
+        if time.monotonic() >= deadline:
+            return False, f"Kazma's engine did not answer within {int(wait_s)} s: {text.strip()[-200:]}"
+        time.sleep(3)
+
+
+def _windows_addresses(run: Runner) -> list[str]:
+    """This computer's IPv4 addresses as Windows lists them: in WSL's NAT
+    mode the distro cannot see them, and a public one would reach this
+    computer's own services from a container."""
+    code, text = _out(run, ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                            "Get-NetIPAddress -AddressFamily IPv4 | ForEach-Object { $_.IPAddress }"])
+    if code != 0:
+        return []
+    found: list[str] = []
+    for line in text.splitlines():
+        parts = line.strip().split(".")
+        if len(parts) == 4 and all(p.isdigit() and int(p) < 256 for p in parts):
+            found.append(line.strip())
+    return found
+
+
+def _action_egress(run: Runner, log: Callable[[str], None], opener: Any,
+                   *, wait_s: float = 120.0) -> tuple[bool, str]:
+    """Spaces S4-05b: the rules first (``egress-filter.sh``, before Docker at
+    every start), then the network they hold to the public internet; the
+    stamp last, so a step that stopped half way is run again."""
+    answered, detail = _engine_answers(run, wait_s)
+    if not answered:
+        return False, detail
+    addresses = _windows_addresses(run)
+    code, text = _out(run, ["wsl.exe", "-d", DISTRO, "-u", "root", "--", "bash", "-s", "--", *addresses],
+                      stdin=_asset("egress-filter.sh"), timeout=120, env=_wsl_env())
+    if code != 0 or "EGRESS_READY" not in text:
+        return False, f"putting the egress filter in the distro failed: {text.strip()[-300:]}"
+    if not egress_network_ok(run):
+        # A network of the name made any other way is not filtered: replaced.
+        _docker(run, "network", "rm", EGRESS_NETWORK)
+        code, text = _docker(run, "network", "create", "--driver", "bridge",
+                             "-o", f"com.docker.network.bridge.name={EGRESS_BRIDGE}",
+                             "-o", "com.docker.network.bridge.enable_icc=false",
+                             "--label", f"{EGRESS_LABEL}=1", EGRESS_NETWORK)
+        if code != 0 or not egress_network_ok(run):
+            return False, f"the {EGRESS_NETWORK} network could not be made: {text.strip()[-300:]}"
+    _engine_dir().mkdir(parents=True, exist_ok=True)
+    _egress_stamp().write_text(
+        hashlib.sha256(_asset("egress-filter.sh").encode("utf-8")).hexdigest() + "\n", encoding="ascii")
+    log(f"members' code: the public internet only ({len(addresses)} of this computer's addresses refused)")
+    return True, f"the {EGRESS_NETWORK} network reaches the public internet only"
+
+
 def _action_record(run: Runner, log: Callable[[str], None], opener: Any,
                    *, wait_s: float = 120.0) -> tuple[bool, str]:
     from kazma_core.atomic_files import atomic_write_text
@@ -836,17 +973,9 @@ def _action_record(run: Runner, log: Callable[[str], None], opener: Any,
     from kazma_core.docker_cli import apply_engine_choice
     from kazma_core.postgres_service import _record_path, read_record
 
-    _out(run, ["schtasks", "/Run", "/TN", TASK_NAME])  # running it while it runs does nothing
-    deadline = time.monotonic() + wait_s
-    version = ""
-    while True:
-        code, text = _docker(run, "version", "--format", "{{.Server.Version}}")
-        if code == 0 and text.strip():
-            version = text.strip().splitlines()[-1]
-            break
-        if time.monotonic() >= deadline:
-            return False, f"Kazma's engine did not answer within {int(wait_s)} s: {text.strip()[-200:]}"
-        time.sleep(3)
+    answered, version = _engine_answers(run, wait_s)
+    if not answered:
+        return False, version
     target = _record_path()
     data = read_record(target)
     data.update({"version": 1, RECORD_KEY: {"kind": "kazma", "distro": DISTRO, "context": CONTEXT,
@@ -870,6 +999,7 @@ _ACTIONS: dict[str, Callable[..., tuple[bool, str]]] = {
     "engine:task": _action_task,
     "engine:shutdown": _action_shutdown,
     "engine:shutdown_service": _action_shutdown_service,
+    "engine:egress": _action_egress,
     "engine:record": _action_record,
 }
 

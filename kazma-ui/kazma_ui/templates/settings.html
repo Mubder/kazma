@@ -2824,23 +2824,26 @@
               </template>
             </div>
         </div>
-        <!-- Code (Spaces S4-05): a person's code runs only in a container,
-             with no network unless the admin allows it here. The admin's code
-             keeps its own rules. -->
+        <!-- Code (Spaces S4-05, S4-05b): a person's code runs only in a
+             container, with no network unless the admin allows it here, and
+             then the public internet only. Offered only where Kazma can hold
+             it there (its own engine, with the filter); else the reason is
+             shown and the switch is off. The admin's code keeps its rules. -->
         <div class="settings-group mb-6" id="people-code" x-show="peopleLoaded && !peopleFailed" x-cloak>
             <h3>{{ t('settings.people_code_title') }}</h3>
             <p class="form-hint">{{ t('settings.people_code_help') }}</p>
+            <p class="notice tone-warning" id="people-code-network-refused" x-show="!!codeNetworkRefusal" x-cloak
+               x-text="_peopleError({ error: codeNetworkRefusal })"></p>
             <div class="account-list-table">
               <template x-for="p in people.filter((q) => !q.owner)" :key="'code-' + p.id">
                 <div class="people-features-row" :data-person-code="p.id">
                   <span class="account-list-name"><bdi translate="no" x-text="p.name"></bdi></span>
-                  <!-- Off and not offered until S4-05b limits a container to
-                       the public internet (the review of S4-05). -->
                   <label class="people-feature">
-                    <input type="checkbox" data-network-switch disabled
-                           :aria-label="window.t('settings.people_code_network_of', {name: p.name})">
+                    <input type="checkbox" data-network-switch :checked="!!p.code_network"
+                           :disabled="!!codeNetworkRefusal"
+                           :aria-label="window.t('settings.people_code_network_of', {name: p.name})"
+                           @change="setPersonCodeNetwork(p, $event.target.checked, $event.target)">
                     <span>{{ t('settings.people_code_network') }}</span>
-                    <span class="badge badge-secondary" data-network-not-yet>{{ t('settings.people_code_network_not_yet') }}</span>
                   </label>
                 </div>
               </template>

@@ -537,6 +537,8 @@
         peopleRecordWhole: true,
         closedSpaces: [],
         newPerson: { name: '', password: '' },
+        // Why a person's code cannot be given the network here, or '' (S4-05b).
+        codeNetworkRefusal: '',
         // Shared spaces (Spaces S2-12): a plain one by default.
         sharedSpaces: [],
         newSpace: { name: '', kind: 'sandboxed', folder: '' },
@@ -576,6 +578,7 @@
             this.people = data.people;
             this.closedSpaces = Array.isArray(data.closed_spaces) ? data.closed_spaces : [];
             this.sharedSpaces = Array.isArray(data.shared_spaces) ? data.shared_spaces : [];
+            this.codeNetworkRefusal = typeof data.code_network_refusal === 'string' ? data.code_network_refusal : '';
             this.peopleRecordWhole = data.record_whole !== false;
             if (data.limit_for_people && data.limit_for_people.limit) {
                 this.limitForPeople = data.limit_for_people;
@@ -1315,6 +1318,38 @@
         // ── Disable / enable (Spaces S2-07): their work waits while disabled ──
         // Whether a person's code may use the network (Spaces S4-05): their
         // code runs only in a container either way; allowing it asks first.
+        // Whether a person's code may use the network (Spaces S4-05b): their
+        // code runs only in a container either way, and with the network it
+        // reaches the public internet only. Allowing it asks first.
+        async setPersonCodeNetwork(person, allowed, box) {
+            if (allowed) {
+                const ok = await window.kazmaConfirm({
+                    title: _t('settings.people_code_network_title', "Let {name}'s code use the public internet?",
+                        { name: _iso(person.name) }),
+                    message: _t('settings.people_code_network_means',
+                        'Their code still runs only in a container, never on this machine, and reaches the public internet only. What it reads in their spaces could leave this install.'),
+                    confirmText: _t('settings.people_code_network_allow', 'Allow'),
+                });
+                if (!ok) {
+                    if (box) box.checked = false;
+                    return;
+                }
+            }
+            try {
+                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/code-network',
+                    { method: 'PUT', body: { allowed: !!allowed } });
+            } catch (e) {
+                showToast(this._peopleError(e && e.body), 'error');
+                await this.loadPeople();
+                return;
+            }
+            showToast(allowed
+                ? _t('settings.people_code_network_on', "{name}'s code may use the public internet.", { name: _iso(person.name) })
+                : _t('settings.people_code_network_off', "{name}'s code runs with no network.", { name: _iso(person.name) }),
+                'success');
+            await this.loadPeople();
+        },
+
         async setPersonEnabled(person, enabled) {
             if (!enabled) {
                 const ok = await window.kazmaConfirm({

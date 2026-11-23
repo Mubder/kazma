@@ -16191,44 +16191,85 @@ an install with one account behaves as before.
     tasks first and another space's waiting; a caller of the budget that
     runs the graph anyway as the gate's control; the People page's limits
     in both languages).
-- **A member's code runs only in a container, with no network (S4-05,
-  2026-11-23, and its review).** Only where Spaces is enforced: an install
-  that does not enforce it reads nothing more, and the admin's code keeps
-  the rules it had. `kazma_core/spaces/member_code.py` `code_rule()` is the
-  one answer for the work running now: anyone but the admin, in any space,
-  runs `python_exec` in the Docker jail or not at all -- never the host
-  fallback, whatever `KAZMA_CODE_EXEC_ALLOW_LOCAL` says
-  (`code_exec.local_exec_forbidden` asks it first), and never E2B, which
-  always has the internet (`sandbox.e2b.e2b_enabled`). Work no person asked
-  for likewise. A chat-app turn runs as the person whose linked account
-  sent it (stage 3, `chat_apps.chat_place`), so their code is held there
-  too.
-  - **No network for members' code, until S4-05b.** The first build let the
-    admin allow it per person, and the jail then ran `--network bridge`: the
-    review reached a host service through the LAN and WSL addresses, and the
-    router's admin page, from the jail; cloud metadata (169.254.169.254) was
-    open, and on Docker Desktop `host.docker.internal` reaches the host's
-    loopback. Now every jail run is `--network none` with the network
-    modules blocked, `allowed_network` answers False whatever is stored (a
-    first-build allowance reads as not allowed), and People refuses turning
-    it on (`people.set_code_network`: 409 `code_network_not_yet`, worded in
-    both languages; off is taken and clears a stored value). The People page
-    shows the switch off, disabled, "Not yet". S4-05b brings filtered egress
-    on Kazma's own engine. Never give a member's container the engine's
-    default network.
+- **A member's code runs only in a container, with the network only where
+  Kazma filters it (S4-05, S4-05b, 2026-11-23).** Only where Spaces is
+  enforced: an install that does not enforce it reads nothing more, and the
+  admin's code keeps the rules it had. `kazma_core/spaces/member_code.py`
+  `code_rule()` is the one answer for the work running now: anyone but the
+  admin, in any space, runs `python_exec` in the Docker jail or not at all
+  -- never the host fallback, whatever `KAZMA_CODE_EXEC_ALLOW_LOCAL` says
+  (`code_exec.local_exec_forbidden` asks it first), and never E2B (the
+  install's paid key, its internet not this filter's;
+  `sandbox.e2b.e2b_enabled`). Work no person asked for likewise, with no
+  network. A chat-app turn runs as the person whose linked account sent it
+  (stage 3, `chat_apps.chat_place`), so their code is held there too.
+  - **The network is the public internet only, on Kazma's own engine**
+    (S4-05b; the review of S4-05: the first build's `--network bridge`
+    reached a host service through the LAN and WSL addresses, the router's
+    admin page and cloud metadata). Setup's step `engine:egress`
+    (`container_engine_setup._action_egress`, `egress-filter.sh`) puts in
+    the distro `kazma-egress-rules` and the unit `kazma-egress.service`
+    (before Docker, at every start of the distro), then makes the network
+    `container_engine_setup.EGRESS_NETWORK` on the bridge `EGRESS_BRIDGE`
+    with `EGRESS_LABEL`. A packet from the bridge goes on only to a public
+    address: the private ranges, 100.64/10, link-local (169.254/16, the
+    metadata address), loopback, the reserved, documentation and multicast
+    ranges, this computer's own addresses (the distro's, and Windows' as
+    listed at setup) and any local destination are refused at once (TCP
+    reset or ICMP), in Docker's `DOCKER-USER` chain ahead of its own rules;
+    a packet to the distro itself (`INPUT`) and every IPv6 packet from the
+    bridge are refused. `member_code.network_refusal` says why it cannot be
+    given here (`NETWORK_REFUSALS`: a public install, the cloud profile;
+    `KAZMA_TRUST_LAN` on; another engine, Docker Desktop or a system Docker,
+    whose rules Kazma does not control; the filter not put in, read from
+    setup's stamp), else "". Refused, `allowed_network` answers False
+    whatever is stored and People refuses turning it on with that code (409,
+    worded EN/AR; `/api/people` gives `code_network_refusal` and the page
+    shows it beside a disabled switch). Allowed (People asks first), the
+    person's jail joins the filtered network -- checked as setup's
+    (`egress_network_ok`) before every run, a network of the name made
+    otherwise refusing the run -- and the snippet may import the network
+    modules; everyone else's runs `--network none`. Never put a member's
+    container on the engine's default network.
+  - **Only a member's network needs the filter** (the main session's rule,
+    2026-11-23): until the admin gives someone's code the network
+    (`member_code.network_given`: a stored `code_network` of anyone but the
+    admin; an identity store that cannot be read is nobody), an engine
+    without the filter is whole -- `container_engine_setup.check` lists it
+    in `EngineCheck.waiting`, never `missing` -- so nothing pages, no check
+    is red and `kazma setup install` repairs nothing (the live install has
+    no filter). Once someone has it, it is missing and the install puts it
+    in. `kazma setup engine` puts it in all the same
+    (`install_steps(with_waiting=True)`), and the filter's step comes after
+    the engine's record: a filter that fails never leaves the engine
+    unrecorded. Nothing else (readiness, the guard, doctor) reads it.
   - S2-12's member rules (`spaces.tools.MEMBER_DEVELOPMENT`) keep a member
     off every host process that runs a project's code; this holds the one
     code runner they keep.
   - Gates: `tests/test_member_code_in_containers.py` (the rule; per-space
     runs with no Docker refused, the local fallback reading a host file as
-    the control; the refusal, a first-build allowance read as not allowed,
-    today's allowance as the control; `--network none` for every container;
-    E2B never; a chat-app turn of a linked person through the real gateway
-    handler, the owner's own link as the control; a real Docker run where
-    the sandbox image is present, `real_docker`: no network and no host file
-    in the container, the local fallback reading it as the control),
-    `tests/e2e/test_person_code_network_browser.py` (by the sidebar, EN/AR:
-    the switch off, disabled, "Not yet", a stored allowance shown off).
+    the control; each refusal of the network, the switch and its route
+    where Kazma filters and where it cannot; the jail on the filtered
+    network only for an allowed person, `--network none` for the rest, a
+    network not setup's refusing the run; E2B never; a chat-app turn of a
+    linked person; the source holding the jail to `none` or the filtered
+    network, the first build's `bridge` as the control; a real Docker run,
+    `real_docker`), `tests/test_engine_egress_filter.py` (the rules script
+    run by bash against stand-in iptables: every refused range and the
+    host's own addresses, the public internet on, nothing doubled, removal;
+    without the host's addresses as the control),
+    `tests/test_container_engine_setup.py` (the filter waiting until
+    someone has the network, the check of before as the control; the step:
+    rules before the network, a network made otherwise replaced, nothing
+    made when the rules
+    did not go in), `tests/test_member_code_egress_engine.py` (opt-in,
+    `KAZMA_TEST_EGRESS_ENGINE=1`, on Kazma's engine with names of its own:
+    the public internet reached, this computer and the metadata address
+    refused at once; Docker's default network reaching this computer as the
+    control), `tests/e2e/test_person_code_network_browser.py` (by the
+    sidebar, EN/AR: the reason and a disabled switch where Kazma cannot
+    filter; where it can, a stored allowance shown on, taken back, allowed
+    again after the confirmation).
 - **A space moves to another install (S4-06, 2026-11-23).** Only where
   Spaces is enforced: an import into an install that does not enforce it is
   refused (`spaces_off`), and so is one on Postgres (`postgres_not_yet`, as

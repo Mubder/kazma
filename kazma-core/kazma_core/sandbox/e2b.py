@@ -32,8 +32,9 @@ def e2b_enabled() -> bool:
     """Effective backend choice shared by execution and approval preflight.
     Never in a turn that runs on the person's own key only (Spaces S2-04,
     ``spaces.install_paid``): E2B is paid with the install's key. Never for
-    a person's code (S4-05, ``spaces.member_code``): E2B always has the
-    internet, and members' code has no network until S4-05b."""
+    a person's code (S4-05, S4-05b, ``spaces.member_code``): E2B always has
+    the internet, unfiltered by Kazma, and is the install's paid key; a
+    person allowed the network gets Kazma's filtered network instead."""
     from kazma_core.safety.deployment_policy import container_required, policy_read_failures
     from kazma_core.spaces.daily_limits import own_keys_only
     from kazma_core.spaces.member_code import code_rule

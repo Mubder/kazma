@@ -560,11 +560,18 @@ _ENGINE_PIECES = (("wsl", "WSL 2"), ("distro", "the kazma-engine WSL distro"),
                   ("docker", "Docker Engine in it, answering"), ("cli", "Docker's command-line tools"),
                   ("context", "the kazma-engine Docker context"),
                   ("task", "the KazmaEngine task (starts it at boot, nobody signed in)"),
-                  ("shutdown", "the KazmaEngineShutdown service (stops it cleanly when Windows shuts down)"))
+                  ("shutdown", "the KazmaEngineShutdown service (stops it cleanly when Windows shuts down)"),
+                  ("egress", "the kazma-egress network (members' code on the public internet only)"))
 
 
 def _say_engine(found) -> None:
     for key, label in _ENGINE_PIECES:
+        if key in getattr(found, "waiting", ()):
+            _say(f"  {'--':4} {label}: not needed until someone's code is given the network")
+            continue
+        if key == "egress" and {"wsl", "distro", "docker"} & set(found.missing):
+            _say(f"  {'--':4} {label}: not checked (the engine does not answer)")
+            continue
         _say(f"  {'NO' if key in found.missing else 'ok':4} {label}")
 
 
@@ -612,7 +619,7 @@ def _setup_engine(options, *, run=subprocess.run, ask=input, platform=None, open
     if problem:
         _say(f"Kazma's engine cannot run here: {problem}")
         return 2
-    steps = ces.install_steps(found)
+    steps = ces.install_steps(found, with_waiting=True)
     _say("The plan:")
     for i, step in enumerate(steps, 1):
         _say(f"  {i:2}. {step.title}")

@@ -376,8 +376,8 @@ def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str,
             "tools": features.listed_tools(features.grants_of(reg, account_id)),
             # The models they may use and their default (S2-03).
             "models": person_models.listed_models(reg, account_id),
-            # Whether their code may use the network (S4-05): never until
-            # S4-05b, whatever is stored; the admin's code keeps its own
+            # Whether their code may use the network (S4-05b): allowed by
+            # the admin and filterable here; the admin's code keeps its own
             # rules (None).
             "code_network": (None if account_id == OWNER_ACCOUNT_ID
                              else member_code.allowed_network(reg, account_id))}
@@ -1123,35 +1123,49 @@ def set_tools(account_id: str, off: Any, *, by: str) -> list[str]:
     return kept
 
 
+#: Each refusal of the network, said in English (the page words its code).
+_NETWORK_REFUSED = {
+    "code_network_cloud": "Not on a public install (the cloud profile): members' code runs with no network.",
+    "code_network_trust_lan": "Not while KAZMA_TRUST_LAN is on: members' code runs with no network.",
+    "code_network_engine": ("Network for members' code needs Kazma's own container engine (kazma setup "
+                            "engine): only there can Kazma limit it to the public internet."),
+    "code_network_no_filter": ("Kazma's engine has no filtered network yet: run `kazma setup engine` to "
+                               "put it in."),
+}
+
+
 def set_code_network(account_id: str, allowed: Any, *, by: str) -> None:
-    """A person's code and the network (Spaces S4-05): their code runs only
-    in a container, with no network. Turning the network on is refused
-    (``code_network_not_yet``) until S4-05b can limit a container to the
-    public internet: the engine's default network reaches this computer, the
-    LAN and cloud metadata (the review of S4-05). Turning it off is taken,
-    recorded, and clears what a first build of S4-05 stored. Refused too: the
-    admin, whose code keeps its own rules; a value that is not true or false."""
+    """A person's code and the network (Spaces S4-05, S4-05b): their code
+    runs only in a container, with no network unless allowed here, and then
+    on Kazma's filtered network: the public internet only. Allowing it is
+    refused where Kazma cannot filter it (``member_code.network_refusal``:
+    another engine, no filter put in, a public install, ``KAZMA_TRUST_LAN``),
+    each with its code. Turning it off is always taken. Recorded either way.
+    Refused too: the admin, whose code keeps its own rules; a value that is
+    not true or false."""
     _require_enforced()
-    from kazma_core.spaces.member_code import CODE_NETWORK_POLICY
+    from kazma_core.spaces.member_code import CODE_NETWORK_POLICY, network_refusal
 
     if not isinstance(allowed, bool):
         raise PeopleRefused("bad_code_network", 400, "The network is allowed or not.")
     if account_id == OWNER_ACCOUNT_ID:
         raise PeopleRefused("admin_code_rules", 400, "The admin's code keeps its own rules.")
     if allowed:
-        raise PeopleRefused(
-            "code_network_not_yet", 409,
-            "Network for members' code comes once Kazma can limit it to the public internet; "
-            "until then their code runs with no network.")
+        refused = network_refusal()
+        if refused:
+            raise PeopleRefused(refused, 409, _NETWORK_REFUSED[refused])
 
     def _change(reg: dict[str, Any]) -> None:
         _person(reg, account_id)
         policy = reg["policies"].setdefault(account_id, {})
-        policy.pop(CODE_NETWORK_POLICY, None)
+        if allowed:
+            policy[CODE_NETWORK_POLICY] = True
+        else:
+            policy.pop(CODE_NETWORK_POLICY, None)
         _record(reg, "code_network_set", account_id, by)
 
     _changed(_change)
-    logger.info("[people] code network off id=%s by=%s", account_id, by)
+    logger.info("[people] code network %s id=%s by=%s", "allowed" if allowed else "off", account_id, by)
 
 
 def set_enabled(account_id: str, enabled: Any, *, by: str) -> None:

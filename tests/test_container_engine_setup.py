@@ -46,6 +46,10 @@ class Machine:
         self.service_command: str | None = None
         self.engine_version = "29.9.3"
         self.containers = ["kazma-searxng"]
+        #: The kazma-egress network as setup makes it (Spaces S4-05b), and
+        #: what its inspection answers when it was made otherwise.
+        self.egress = True
+        self.egress_answer: str | None = None
         self.ran: list[list[str]] = []
         self.stdin: list[str | None] = []
         self.answers: dict[tuple[str, ...], tuple[int, str]] = {}
@@ -103,6 +107,14 @@ class Machine:
                 return (0, self.engine_version) if self.engine_version else (1, "cannot connect")
             if rest[:2] == ["ps", "-a"]:
                 return (0, "\n".join(self.containers)) if self.engine_version else (1, "cannot connect")
+            if rest[:2] == ["network", "inspect"]:
+                if not self.egress:
+                    return 1, "Error: No such network"
+                return 0, self.egress_answer or f"{ces.EGRESS_BRIDGE}|1"
+            if rest[:2] == ["network", "create"]:
+                self.egress = True
+            if rest[:2] == ["network", "rm"]:
+                self.egress = False
             return 0, ""
         return 0, ""
 
@@ -126,6 +138,7 @@ def make_machine(monkeypatch, tmp_path) -> Machine:
     monkeypatch.setattr("kazma_core.postgres_service._record_path", lambda: tmp_path / "setup_record.json")
     _context(ces.CONTEXT)
     _clean_stop_installed()
+    _egress_installed()
     _own_cli_installed()
     return box
 
@@ -136,6 +149,14 @@ def _own_cli_installed() -> None:
     (ces.bin_dir() / "docker.exe").write_bytes(b"cli")
     ces._plugins_dir().mkdir(parents=True, exist_ok=True)
     (ces._plugins_dir() / "docker-compose.exe").write_bytes(b"compose")
+
+
+def _egress_installed() -> None:
+    """The stamp of this build's egress filter, as the engine:egress step
+    leaves it (Spaces S4-05b)."""
+    ces._engine_dir().mkdir(parents=True, exist_ok=True)
+    ces._egress_stamp().write_text(
+        hashlib.sha256(ces._asset("egress-filter.sh").encode("utf-8")).hexdigest() + "\n", encoding="ascii")
 
 
 def _clean_stop_installed() -> None:
@@ -311,6 +332,11 @@ def test_a_bare_machine_gets_every_step_in_order():
                                          "engine:context", "engine:task", "engine:shutdown", "engine:record"]
     assert {s.action for s in steps if s.admin} == {"engine:wsl", "engine:task", "engine:shutdown"}
     assert {s.dep for s in steps} == {"docker"}
+    # ``kazma setup engine`` puts the filter in too, after the record: a
+    # filter that fails never leaves the engine unrecorded.
+    whole = ces.install_steps(found, with_waiting=True)
+    assert [s.action for s in whole][-2:] == ["engine:record", "engine:egress"]
+    assert not whole[-1].admin
 
 
 def test_a_complete_engine_is_only_checked_and_recorded():
@@ -320,6 +346,153 @@ def test_a_complete_engine_is_only_checked_and_recorded():
 def test_a_stopped_docker_is_set_up_again_and_reconnected():
     steps = ces.install_steps(ces.EngineCheck(False, "", ["docker"]))
     assert [s.action for s in steps] == ["engine:docker", "engine:context", "engine:record"]
+    steps = ces.install_steps(ces.EngineCheck(False, "", ["docker"]), with_waiting=True)
+    assert [s.action for s in steps] == ["engine:docker", "engine:context", "engine:record", "engine:egress"]
+
+
+# ── the filtered network for members' code (Spaces S4-05b) ──────────────
+
+
+def _identity():
+    """The identity store's module (patched by attribute: a patch by name
+    would count against the debt ratchet's by-value imports)."""
+    from kazma_core.spaces import identity
+
+    return identity
+
+
+def _registry(monkeypatch, policies) -> None:
+    """The identity store as ``member_code.network_given`` reads it."""
+    monkeypatch.setattr(_identity(), "read_registry", lambda: {"policies": policies})
+
+
+def test_an_engine_without_the_filter_is_whole_until_someone_has_the_network(machine, monkeypatch):
+    """The live install has no filter: nothing about it may be red, and
+    ``kazma setup install`` finds nothing to repair. Only a member given the
+    network needs it."""
+    _registry(monkeypatch, {"owner": {"code_network": True}, "acct_reem": {"code_network": False}})
+    for broken in ("network", "stamp"):
+        if broken == "network":
+            machine.egress = False
+        else:
+            machine.egress = True
+            ces._egress_stamp().write_text("an older filter\n", encoding="ascii")
+        found = ces.check(machine)
+        assert found.ok is True and found.missing == [] and found.waiting == ["egress"], broken
+        assert [s.action for s in ces.install_steps(found)] == ["engine:record"]
+        assert [s.action for s in ces.install_steps(found, with_waiting=True)] == ["engine:record", "engine:egress"]
+    # A member given the network: now the filter is part of the engine.
+    _registry(monkeypatch, {"acct_reem": {"code_network": True}})
+    found = ces.check(machine)
+    assert found.ok is False and found.missing == ["egress"] and found.waiting == []
+    assert "kazma-egress" in found.detail
+    steps = ces.install_steps(found)
+    assert [s.action for s in steps] == ["engine:record", "engine:egress"] and not steps[-1].admin
+
+
+def test_an_identity_store_that_cannot_be_read_counts_as_nobody(machine, monkeypatch):
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    def unreadable():
+        raise IdentityUnavailable("the identity store could not be read: OperationalError")
+
+    monkeypatch.setattr(_identity(), "read_registry", unreadable)
+    machine.egress = False
+    found = ces.check(machine)
+    assert found.ok is True and found.waiting == ["egress"]
+
+
+def test_the_identity_store_is_read_only_when_the_filter_is_not_there(machine, monkeypatch):
+    def not_asked():
+        raise AssertionError("the identity store was read with the filter in place")
+
+    monkeypatch.setattr(_identity(), "read_registry", not_asked)
+    found = ces.check(machine)
+    assert found.ok is True and found.waiting == [] and found.missing == []
+    machine.egress = False
+    machine.engine_version = ""  # an engine that does not answer: nothing to judge the filter by
+    found = ces.check(machine)
+    assert found.missing == ["docker"] and found.waiting == []
+
+
+def test_control_the_check_of_before_counts_the_filter_on_every_install(machine, monkeypatch):
+    """Counted whatever the policies say (the first S4-05b check), the live
+    install's engine is not whole and the install plans a repair of it."""
+    _registry(monkeypatch, {})
+    machine.egress = False
+    monkeypatch.setattr(ces, "_network_given", lambda: True)
+    found = ces.check(machine)
+    assert found.ok is False and found.missing == ["egress"]
+    assert "engine:egress" in [s.action for s in ces.install_steps(found)]
+
+
+def test_who_has_the_network_is_read_from_the_policies():
+    from kazma_core.spaces.member_code import network_given
+
+    assert network_given({}) is False
+    assert network_given({"policies": {"owner": {"code_network": True}}}) is False  # the admin's own
+    assert network_given({"policies": {"acct_a": {"code_network": "yes"}}}) is False
+    assert network_given({"policies": {"acct_a": {"code_network": False}, "acct_b": {}}}) is False
+    assert network_given({"policies": ["acct_a"]}) is False
+    assert network_given({"policies": {"acct_a": {"code_network": True}}}) is True
+
+
+def test_a_network_of_the_name_made_otherwise_is_not_setups(machine):
+    assert ces.egress_network_ok(machine) is True
+    for answer in ("docker0|1", "kz-egress|", "|"):  # another bridge, no label
+        machine.egress_answer = answer
+        assert ces.egress_network_ok(machine) is False, answer
+    machine.egress_answer = None
+    machine.egress = False
+    assert ces.egress_network_ok(machine) is False
+
+
+def test_the_egress_step_replaces_a_network_of_the_name_made_otherwise(machine):
+    ces._egress_stamp().unlink()
+    machine.egress_answer = "docker0|"
+    machine.answers[("wsl.exe", "-d", ces.DISTRO, "-u", "root", "--", "bash", "-s", "--")] = (0, "EGRESS_READY")
+
+    def removed(argv, **kw):
+        if argv[3:5] == ["network", "rm"]:
+            machine.egress_answer = None
+        return Machine.__call__(machine, argv, **kw)
+
+    ok, detail = ces.run_action("engine:egress", run=removed)
+    assert ok, detail
+    removes = [a for a in machine.ran if a[3:5] == ["network", "rm"]]
+    assert removes and removes[0][-1] == ces.EGRESS_NETWORK
+    assert any(a[3:5] == ["network", "create"] for a in machine.ran)
+
+
+def test_the_egress_step_puts_the_rules_in_first_then_the_network(machine, monkeypatch):
+    machine.egress = False
+    ces._egress_stamp().unlink()
+    machine.answers[("powershell.exe",)] = (0, "192.168.1.20\n127.0.0.1\n8.8.4.4\nnot an address\n")
+    machine.answers[("wsl.exe", "-d", ces.DISTRO, "-u", "root", "--", "bash", "-s", "--")] = (
+        0, "EGRESS_RULES kz-egress KAZMA-EGRESS\nEGRESS_READY")
+    ok, detail = ces.run_action("engine:egress", run=machine)
+    assert ok, detail
+    filtered = next(i for i, a in enumerate(machine.ran) if a[:2] == ["wsl.exe", "-d"] and "bash" in a)
+    made = next(i for i, a in enumerate(machine.ran) if a[3:5] == ["network", "create"])
+    assert filtered < made, "the rules are in before the network exists"
+    assert machine.ran[filtered][-3:] == ["192.168.1.20", "127.0.0.1", "8.8.4.4"]
+    assert machine.stdin[filtered] == ces._asset("egress-filter.sh").encode("utf-8")
+    create = machine.ran[made]
+    assert f"com.docker.network.bridge.name={ces.EGRESS_BRIDGE}" in create
+    assert "com.docker.network.bridge.enable_icc=false" in create
+    assert f"{ces.EGRESS_LABEL}=1" in create and create[-1] == ces.EGRESS_NETWORK
+    assert ces.egress_installed() and ces.check(machine).missing == []
+
+
+def test_an_egress_step_whose_rules_did_not_go_in_makes_no_network(machine):
+    machine.egress = False
+    ces._egress_stamp().unlink()
+    machine.answers[("wsl.exe", "-d", ces.DISTRO, "-u", "root", "--", "bash", "-s", "--")] = (
+        1, "iptables: Permission denied")
+    ok, detail = ces.run_action("engine:egress", run=machine)
+    assert not ok and "egress filter" in detail
+    assert not any(a[3:5] == ["network", "create"] for a in machine.ran)
+    assert not ces.egress_installed()
 
 
 # ── downloads ───────────────────────────────────────────────────────────
