@@ -20,6 +20,9 @@ test to the next; each is now closed for every test at once:
   their test, and the checkout left active in them (2026-11-08) sent a later
   test's file_write into the repository. The root conftest makes the store
   before the first test and puts its singleton and rows back after every one.
+* the document coordinator: the one ``get_ingestion_service()`` builds on
+  first use outlived its test, and a later migration export read its store
+  (2026-11-23). The root conftest puts the one the test found back.
 
 The environment, import timing, the workspace binding and the active
 workspace are shown working here, and shown to be what makes it work: each
@@ -304,6 +307,47 @@ def test_without_the_guard_the_language_reaches_the_next_test():
     )
     assert proc.returncode == 1, proc.stdout[-2000:]
     assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
+
+
+# ── the document platform's coordinator ────────────────────────────────────
+# get_ingestion_service() builds the process's coordinator on first use and
+# keeps it. test_chat_commands_act_as_the_account's /docs case built it, and
+# test_document_export_deleted_blobs, later in the same fast_test chunk,
+# exported that coordinator's store -- the session's, empty -- instead of its
+# own: "assert 0 == 2" (CI, 2026-11-23; it passed alone).
+
+_BUILT_DOCUMENTS: list = []
+
+
+def test_a_document_coordinator_is_built_here():
+    """First of a pair: the lazy build a /documents command or a document
+    tool makes."""
+    from kazma_core.documents.ingestion import get_ingestion_service, peek_ingestion_service
+
+    service = get_ingestion_service()
+    _BUILT_DOCUMENTS.append(service)
+    assert peek_ingestion_service() is service
+
+
+def test_and_the_coordinator_does_not_reach_the_next_test():
+    from kazma_core.documents.ingestion import peek_ingestion_service
+
+    left = peek_ingestion_service()
+    assert left is None or all(left is not built for built in _BUILT_DOCUMENTS)
+
+
+def test_without_the_guard_the_coordinator_reaches_the_next_test():
+    """Negative control: the same pair with test isolation off."""
+    proc = _child_pytest(
+        f"{HERE}::test_a_document_coordinator_is_built_here",
+        f"{HERE}::test_and_the_coordinator_does_not_reach_the_next_test",
+        KAZMA_TEST_ISOLATION="0",
+    )
+    assert proc.returncode == 1, proc.stdout[-2000:]
+    assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
+    # The build worked; it is the next test that met it.
+    assert "FAILED tests/test_order_independence.py::test_and_the_coordinator_does_not_reach" \
+        in proc.stdout.replace("\\", "/"), proc.stdout[-2000:]
 
 
 # ── the active workspace ───────────────────────────────────────────────────
