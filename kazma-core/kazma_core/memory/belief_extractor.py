@@ -102,6 +102,7 @@ Return ONLY valid JSON (no markdown fences) with this shape:
       "confidence": 0.0 to 1.0,
       "importance": 1 to 5,
       "since": "optional: when the fact began, YYYY-MM-DD, YYYY-MM or YYYY",
+      "on": "optional: for an event, the day it happened, YYYY-MM-DD or YYYY-MM",
       "replaces": "optional: the number of a held fact this one replaces, f1, f2, ...",
       "ended": "optional: true when this turn says the fact stopped being true"
     }
@@ -120,6 +121,18 @@ Rules:
   this turn ("last month" said on 2026-05-31 is "2026-04"; "two weeks ago" said on
   2026-05-31 is "2026-05-17"). Leave "since" out when the turn names no time;
   never guess one.
+- Events: when this turn tells of something the user did or that happened to
+  them -- went or travelled somewhere, attended or visited something, bought or
+  sold something (with its price), received or gave something, met someone,
+  started or finished something -- return it as a belief: subject "user", a
+  past-tense verb as predicate (attended, visited, bought, received, met,
+  started, finished, spent, ...), predicate_type "set", the object what it was
+  in the user's words with its name, place and amount ("a pottery exhibition at
+  the craft centre", "a Trek Domane road bike for $1,200"), and "on": the day it
+  happened, worked out from the date of this turn ("last Saturday" said on
+  2026-05-31, a Sunday, is "2026-05-30"; "today" is the turn's date). Leave "on"
+  out when the turn does not say when it happened; never guess one. One belief
+  for one event, however often it is told.
 - The fence may list facts Kazma holds now, numbered. When a fact you return
   replaces one of them -- a new job, a move, a correction, or the same fact under
   another name -- add "replaces": its number ("f2"), and use the held fact's
@@ -140,8 +153,8 @@ Rules:
   like grok_next_reset / zcode_next_reset with the datetime (or local time string)
   as object. When the user gives a NEW next-reset date, emit functional so it
   supersedes the previous week — do NOT invent a second parallel "user noted" row.
-- Extract 0 to 5 beliefs. Prefer identity, preferences, decisions, project facts,
-  and current entitlement times.
+- Extract 0 to 8 beliefs. Prefer identity, preferences, decisions, project facts,
+  events with their day, and current entitlement times.
 - Reuse a predicate from the "Predicates already in use" list when it names the
   same kind of fact ("timezone", not a new "timezone_is" or "time_zone"); invent a
   new name only for a new kind of fact. One fact under two names is two
@@ -459,6 +472,10 @@ def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
     since = _since_value(b.get("since"))
     if since:
         clean["since"] = since
+    # An event's day (the memory plan's W4): a real date, as "since" is.
+    on = _since_value(b.get("on"))
+    if on:
+        clean["on"] = on
     replaces = _REF_RE.fullmatch(str(b.get("replaces") or "").strip().lower())
     if replaces:
         clean["replaces"] = f"f{int(replaces[1])}"
@@ -1249,8 +1266,12 @@ def _apply_beliefs_to_v2(
             said_by=people.said_by(said_by),
             # The start this turn names ("since 2019", "last month"), kept
             # beside the fact; validity follows the order facts were said
-            # (W1), so a start never reorders them (framework audit F2).
-            started=_started_on(clean["since"], now, _turn_zone()) if clean.get("since") else None,
+            # (W1), so a start never reorders them (framework audit F2). An
+            # event's day ("on": "I went to a pottery exhibition last
+            # Saturday") is kept the same way, marked as a day it happened
+            # (the memory plan's W4, dated event lines).
+            started=_started_on(clean.get("on") or clean.get("since"), now, _turn_zone()),
+            happened=bool(clean.get("on")),
         )
         if action["action"] != "noop":
             stats["applied"] += 1

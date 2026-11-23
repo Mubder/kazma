@@ -504,20 +504,21 @@ def _month_of(ts: Any, zone: Any) -> str:
 
 def _fact_dates(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dict[str, tuple]:
     """``fact id -> (started, kind, replaced value, its from, its until, its id,
-    (where it was said), (where the replaced value was said))``: the start its
-    turn named (``metadata.started``), and the fact it replaced
+    (where it was said), (where the replaced value was said), happened)``: the
+    start its turn named (``metadata.started``; *happened*: an event's day,
+    ``metadata.happened``), and the fact it replaced
     (``supersedes_id``) when that still holds its value (a forgotten fact
     keeps none); each "where" is its ``(source_session, source_turn)``."""
     marks = ",".join("?" for _ in ids)
     rows = conn.execute(
         f"SELECT cur.id, json_extract(cur.metadata_json, '$.started'), cur.predicate_type, prev.object, "
         f"prev.valid_from, prev.valid_until, prev.id, cur.source_session, cur.source_turn, "
-        f"prev.source_session, prev.source_turn FROM beliefs cur "
+        f"prev.source_session, prev.source_turn, json_extract(cur.metadata_json, '$.happened') FROM beliefs cur "
         f"LEFT JOIN beliefs prev ON prev.id = cur.supersedes_id AND prev.tenant_id = cur.tenant_id "
         f"AND COALESCE(prev.object, '') != '' "
         f"WHERE cur.tenant_id = ? AND cur.id IN ({marks})",
         (tenant_id, *ids)).fetchall()
-    return {str(r[0]): (*r[1:7], (r[7], r[8]), (r[9], r[10])) for r in rows}
+    return {str(r[0]): (*r[1:7], (r[7], r[8]), (r[9], r[10]), bool(r[11])) for r in rows}
 
 
 def _stated_in(conn: sqlite3.Connection, turns: set[tuple[Any, Any]], tenant_id: str) -> dict[tuple[str, int], str]:
@@ -632,11 +633,15 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
     for hit in result.beliefs:
         if hit.id not in dates or hit.metadata.get("until"):
             continue
-        started, kind, value, start, end, prev_id, where, before_where = dates[hit.id]
+        started, kind, value, start, end, prev_id, where, before_where, happened = dates[hit.id]
         # The start the turn named ("we moved last month") is the fact's own;
-        # the month it was said is the fallback.
+        # the month it was said is the fallback. An event's day is the day
+        # it happened (W4): "[on 13 May 2023]".
         label = _started_label(started)
-        if label:
+        if label and happened:
+            hit.metadata["on"] = label
+            hit.metadata.pop("since", None)
+        elif label:
             hit.metadata["since"] = label
         if value is not None and (kind or (hit.metadata or {}).get("predicate_type")) in ("functional", "state"):
             span = " to ".join(m for m in (_month_of(start, zone), _month_of(end, zone)) if m)
@@ -4096,7 +4101,9 @@ def _dated_line(hit: RecallHit, shown: str) -> str:
         # An earlier value (part F): the months it held, and no "before
         # that" -- the question asked about this one.
         return f"[{meta.get('since') or '?'} to {meta['until']}] {shown}"
-    if meta.get("since"):
+    if meta.get("on"):
+        shown = f"[on {meta['on']}] {shown}"
+    elif meta.get("since"):
         shown = f"[since {meta['since']}] {shown}"
     if meta.get("before"):
         # A changed value: where each value was said, when the space still

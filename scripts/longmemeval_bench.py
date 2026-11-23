@@ -1121,7 +1121,7 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
                 split: str = "sample", look: str | None = None, reasoning: str = "low",
                 judge2: str | None = None, run: str = "", conditions: tuple[str, ...] = CONDITIONS,
                 judge_model: str | None = None, key_env: str = "DEEPSEEK_API_KEY",
-                blocks: dict[str, Path] | None = None) -> int:
+                blocks: dict[str, Path] | None = None, ids: Path | None = None) -> int:
     judge_model = judge_model or model
     log_look(split, look, f"answer --model {model} --judge {judge_model} --reasoning {reasoning}"
                           + (f" --run {run}" if run else ""))
@@ -1139,7 +1139,12 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
     from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
 
     by_id = {str(x["question_id"]): x for x in load(data)}
-    items = [by_id[q] for q in question_ids(split)[: limit or None]]
+    asked = question_ids(split)
+    if ids is not None:
+        # A subset of the split (the facts pilot's 50, scripts/longmemeval_facts_pilot.py).
+        wanted = set(json.loads(ids.read_text(encoding="utf-8"))["ids"])
+        asked = [q for q in asked if q in wanted]
+    items = [by_id[q] for q in asked[: limit or None]]
     extra = {name: load_blocks(path, [str(i["question_id"]) for i in items]) for name, path in blocks.items()}
     # One cache a reader, reasoning level and run label: a second run (the
     # noise run) asks every question again.
@@ -1194,6 +1199,7 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
                 print(f"  {n} of {len(jobs)} answered and judged", flush=True)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
     results = []
     for item in items:
@@ -1209,7 +1215,8 @@ def _cmd_answer(data: Path, limit: int | None, model: str, base_url: str, worker
     if run:
         out = out.with_name(f"{out.stem}_{run}{out.suffix}")
     out.write_text(json.dumps({
-        "source": SOURCE, "split": split, "run": run, "sample": len(items), "reader": model,
+        "source": SOURCE, "split": split, "run": run, "sample": len(items),
+        **({"ids_from": ids.name} if ids is not None else {}), "reader": model,
         "reader_reasoning": reasoning, "judge": judge_model, "judge2": judge2, "conditions": list(conditions),
         "blocks_from": {name: held["commit"] for name, held in extra.items()},
         "provider": base_url.split("//")[-1],
@@ -1931,6 +1938,8 @@ def main(argv: list[str] | None = None) -> int:
                            help="the histories to answer from, comma-separated; kazma_turn asks through "
                                 "Kazma's own chat turn")
             s.add_argument("--judge", default=None, help="the judge model (the reader's model unless named)")
+            s.add_argument("--ids", type=Path, default=None,
+                           help="a JSON file whose ids name the questions of the split to ask")
             s.add_argument("--blocks", action="append", default=[], metavar="NAME=FILE",
                            help="each question's block from another checkout (scripts/longmemeval_blocks.py), "
                                 "answered as condition NAME")
@@ -1969,7 +1978,7 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_answer(args.data, args.limit, args.model, args.base_url, args.workers, args.split, args.look,
                            args.reasoning, args.judge2, args.run,
                            tuple(c for c in args.conditions.split(",") if c in ALL_CONDITIONS),
-                           judge_model=args.judge, key_env=args.key_env, blocks=blocks)
+                           judge_model=args.judge, key_env=args.key_env, blocks=blocks, ids=args.ids)
     if args.cmd == "translate":
         return _cmd_translate(args.data, args.model, args.base_url, args.workers, args.key_env)
     if args.cmd == "parallel":

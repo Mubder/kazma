@@ -347,6 +347,10 @@ _SAID_BY: contextvars.ContextVar[str | None] = contextvars.ContextVar("kazma_bel
 #: When the fact the write in progress records began, as its turn named it
 #: (``mutate_belief``'s *started*), read where the row is built.
 _STARTED: contextvars.ContextVar[str | None] = contextvars.ContextVar("kazma_belief_started", default=None)
+#: Whether that start is the day an event happened (``mutate_belief``'s
+#: *happened*: "I went to a pottery exhibition last Saturday"), not the day
+#: a lasting fact began (the memory plan's W4, dated event lines).
+_HAPPENED: contextvars.ContextVar[bool] = contextvars.ContextVar("kazma_belief_happened", default=False)
 
 
 def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
@@ -446,6 +450,7 @@ def mutate_belief(
     replaces_users_fact: bool = True,
     said_by: str | None = None,
     started: str | None = None,
+    happened: bool = False,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
 
@@ -453,7 +458,10 @@ def mutate_belief(
     ``YYYY-MM`` or ``YYYY-MM-DD``: "we moved last month"; framework audit
     F2 step 2), kept in the row's metadata (``started``) and shown by
     recall. It never moves *now*: validity and supersession follow the order
-    facts were said in, whatever start a statement names.
+    facts were said in, whatever start a statement names. *happened*: that
+    start is the day an event happened ("I went to a pottery exhibition
+    last Saturday"; the memory plan's W4), kept as ``happened`` beside it,
+    so recall shows "[on 13 May 2023]", not "[since ...]".
 
     *said_by* is the account whose words these are, in a shared space
     (Spaces S1-11, ``memory/speakers.py``): kept in the fact's metadata, so
@@ -576,7 +584,7 @@ def mutate_belief(
     now = recorded if now is None else float(now)
 
     result: dict[str, Any] | None = None
-    tokens = _bind_write_context(said_by, started)
+    tokens = _bind_write_context(said_by, started, happened)
     try:
         with _mutation_lock:
             # W6: the name the subject already uses for the same words and
@@ -845,9 +853,11 @@ def _add_named_start(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *
 
     cur = beliefs_write(
         conn,
-        "UPDATE beliefs SET metadata_json = json_set(COALESCE(metadata_json, '{}'), '$.started', ?) "
+        "UPDATE beliefs SET metadata_json = CASE WHEN ? THEN json_set(COALESCE(metadata_json, '{}'), "
+        "'$.started', ?, '$.happened', json('true')) ELSE json_set(COALESCE(metadata_json, '{}'), "
+        "'$.started', ?) END "
         "WHERE id = ? AND tenant_id = ? AND json_extract(metadata_json, '$.started') IS NULL",
-        (started, belief_id, tenant_id))
+        (1 if _HAPPENED.get() else 0, started, started, belief_id, tenant_id))
     if not getattr(cur, "rowcount", 0):
         return None
     if began:
@@ -855,14 +865,17 @@ def _add_named_start(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *
     return {"action": "noop", "belief_id": belief_id, "superseded_id": None, "started_recorded": True}
 
 
-def _bind_write_context(said_by: str | None, started: str | None) -> tuple[Any, Any]:
-    """Bind who said the write in progress and the start its turn named,
-    read where the row is built (:func:`_insert_belief`)."""
-    return (_SAID_BY.set(str(said_by) if said_by else None), _STARTED.set(str(started) if started else None))
+def _bind_write_context(said_by: str | None, started: str | None, happened: bool = False) -> tuple[Any, Any, Any]:
+    """Bind who said the write in progress, the start its turn named and
+    whether that start is an event's day, read where the row is built
+    (:func:`_insert_belief`)."""
+    return (_SAID_BY.set(str(said_by) if said_by else None), _STARTED.set(str(started) if started else None),
+            _HAPPENED.set(bool(happened and started)))
 
 
-def _unbind_write_context(tokens: tuple[Any, Any]) -> None:
-    said, started = tokens
+def _unbind_write_context(tokens: tuple[Any, Any, Any]) -> None:
+    said, started, happened = tokens
+    _HAPPENED.reset(happened)
     _STARTED.reset(started)
     _SAID_BY.reset(said)
 
@@ -946,6 +959,8 @@ def _insert_belief(
     started = _STARTED.get()
     if started:
         meta["started"] = started
+        if _HAPPENED.get():
+            meta["happened"] = True
     try:
         from kazma_core.memory.embedder import get_embedding_model_name
 
@@ -1461,6 +1476,12 @@ def _mutate_set(
     ).fetchone()
     if dup:
         existing_id = dup["id"] if isinstance(dup, sqlite3.Row) else dup[0]
+        # The same entry told again with the day it happened, or the start
+        # it names, gains it (W4: "I went to the pottery exhibition" then
+        # "it was last Saturday"), as a single value does.
+        gained = _add_named_start(conn, str(existing_id), tenant_id, began=True)
+        if gained:
+            return gained
         return {"action": "noop", "belief_id": existing_id, "superseded_id": None}
 
     # noted diary blobs: near-dedupe so two "ShipX Overview" saves minutes

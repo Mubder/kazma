@@ -74,6 +74,31 @@ def _is_qwen_api(base_url: str) -> bool:
             or host == "qwencloudapi.com" or host.endswith(".qwencloudapi.com"))
 
 
+#: Model Studio's explicit context cache holds a marked prefix of at least
+#: 1,024 tokens for five minutes; a shorter one is not cached, so a system
+#: message under this many characters is not marked.
+_QWEN_CACHE_MIN_CHARS = 3000
+
+
+def _with_qwen_cache_marker(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """*messages* with the leading system message marked for Model Studio's
+    explicit context cache (``cache_control``, the memory plan's W4 pilot,
+    2026-11-23). Measured on qwen3.8-flash with the deep pass's system prompt:
+    the implicit cache served 1,024 of its 1,623 tokens, the marked one all
+    1,377 of the system text from the second call on; a cache hit is billed at
+    about a tenth of an input token. The leading system message is the stable
+    one (``prompt_cache.pack_system_messages``): identity, personality,
+    environment, or a background task's instructions."""
+    if not messages:
+        return messages
+    first = messages[0]
+    content = first.get("content")
+    if first.get("role") != "system" or not isinstance(content, str) or len(content) < _QWEN_CACHE_MIN_CHARS:
+        return messages
+    marked = {**first, "content": [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]}
+    return [marked, *messages[1:]]
+
+
 def _is_openai_api(base_url: str) -> bool:
     """True for OpenAI's own API (not an OpenAI-compatible one)."""
     from urllib.parse import urlparse
@@ -1751,6 +1776,8 @@ class LLMProvider:
             payload["tool_choice"] = "auto"
         if response_format:
             payload["response_format"] = response_format
+        if _is_qwen_api(str(self.config.base_url or "")):
+            payload["messages"] = _with_qwen_cache_marker(payload["messages"])
         _apply_param_fixes(
             payload, _param_fixes_for(str(self.config.base_url or ""), payload["model"]),
             openai_api=_is_openai_api(str(self.config.base_url or "")),

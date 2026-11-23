@@ -2777,6 +2777,25 @@ four injected were noise.
   Trust is not touched: the fact stays the model's reading. Subjects stay
   slugs. Gate: `tests/test_memory_users_spelling.py` (the apply step
   without the respelling as the negative control).
+- **The deep pass keeps a turn's events with their day** (2026-11-23, the
+  memory plan's W4, dated event lines). The prompt asks for something the
+  user did or that happened to them -- went somewhere, attended, bought (with
+  its price), received, met, started, finished -- as a fact of its own: a
+  past-tense predicate, the object in the user's words with its name, place
+  and amount, and `"on"`, the day it happened worked out from the turn's day
+  (never guessed); up to 8 facts a turn (it was 5). `_sanitize_belief` keeps
+  `on` by `_since_value`'s rule, `_started_on` drops a day after the turn,
+  and `mutate_belief(started=, happened=True)` keeps it in the row's
+  metadata (`started`, `happened`) -- never as `valid_from` (W1). The same
+  fact or list entry told again gains the day it lacks
+  (`_add_named_start`, now from `_mutate_set` too). Recall shows it as
+  "[on 30 May 2026]" (`_date_hits` `on`, `_dated_line`), never "[since
+  ...]". The prompt change is declared in the lock (`pending_recording`)
+  and waits for the pilot (`scripts/longmemeval_facts_pilot.py`: 50 dev
+  questions' histories written round by round through the product's own
+  deep-pass task) before any recording. Gate:
+  `tests/test_memory_event_lines.py` (EN/AR; the writer without the mark,
+  which shows the day as a start, as the negative control).
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
   0.00 Arabic recall). Token rules from the grammar, compared folded: a
@@ -12679,6 +12698,20 @@ is the reasoning setting below plus the tool count per turn (open).
   control, every `invoke_llm_chat` call in the chat turn's modules carrying
   the level), `tests/test_qwen_reasoning_off.py` (Qwen's switch on the wire,
   the classifier in English and Arabic, today's classifier as the control).
+- **Qwen caches Kazma's leading system prompt explicitly** (2026-11-23, the
+  memory plan's W4 pilot). Model Studio caches a prefix on its own when it
+  chooses (20 % of the input price); `llm_provider._with_qwen_cache_marker`,
+  applied in `_chat_payload` (the blocking and the streaming body) for a
+  Model Studio address (`_is_qwen_api`), sends a leading system message of
+  at least `_QWEN_CACHE_MIN_CHARS` characters as one text part with
+  `cache_control` (cached five minutes, renewed on each hit; Model Studio's
+  page gives a hit at typically 10 % of the input price and a first write
+  at 125 %, qwen3.8-flash's own ratios by region). Measured through Kazma's
+  own provider on qwen3.8-flash and qwen3.7-plus with the deep pass's
+  prompt: 1,614 of about 1,850 prompt tokens served from the cache from the
+  second call on. Any other message and provider are sent as before. Gate:
+  `tests/test_qwen_context_cache.py` (a host that only looks like Model
+  Studio's as the control).
 
 - **A result that says whether it worked is read where it is returned**
   (theme 1). `tests/test_failure_results_are_used.py` covers the vault, the

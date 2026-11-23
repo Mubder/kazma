@@ -575,6 +575,57 @@ move (Kazma's store p50 675, p95 1,030). Spend: 1.82M prompt and 0.65M
 completion tokens (0.58M reasoning), 7.4K of the prompt from Qwen's cache.
 Evidence: `docs/audits/evidence/memory_gathering/gathering.json`. What would
 reopen it: lines that hold the instance itself, the dated event lines below.
+The code is not in the repository (a change to recall's ranking has no
+place behind a switch nobody turns on): its patch is kept with the session's
+hand-over notes, and the harness's own commands measure it again
+(`longmemeval_bench.py retrieve --out`, `scripts/longmemeval_blocks.py`,
+`answer --blocks`).
+
+*Dated event lines, the pilot (23 Nov).* The deep pass now keeps what a turn
+tells the user did -- went, attended, bought with its price, received, met,
+started, finished -- as a fact of its own, with `"on"`, the day it happened
+worked out from the turn's day; recall shows it "[on 30 May 2026] user
+attended a pottery exhibition at the craft centre". The prompt change is
+declared in the extraction lock and waits for the pilot before any
+recording. The pilot (`scripts/longmemeval_facts_pilot.py`): 50 dev
+questions, a quarter by type with multi-session (16) and temporal reasoning
+(16) weighted in (`tests/fixtures/longmemeval/facts_pilot.json`), every
+round of their histories (12,322) written as a chat writes it -- the
+episode, the quick pass, then the product's own deep-pass task, unchanged,
+on qwen3.8-flash at its default reasoning, as the product sends it. Qwen's
+explicit context cache holds the deep pass's system prompt
+(`llm_provider._with_qwen_cache_marker`, for every Model Studio call). Then
+one reader and the same judges, twice (main and noise): today's block
+(`kazma`, no facts, as every run so far), the block with the facts the deep
+pass wrote (`facts_events`), and the same without the dated event facts
+(`facts_no_events`), which tells the event lines from facts at all. To the
+full dev set only if the event lines gain in both runs.
+
+| | today | facts, no dated events | facts with event lines |
+|---|---|---|---|
+| answered, main run (second judge) | 0.60 (0.60) | 0.60 (0.60) | 0.70 (0.70) |
+| answered, noise run (second judge) | 0.60 (0.62) | 0.60 (0.58) | 0.72 (0.70) |
+| multi-session (16), main / noise | 0.375 / 0.375 | 0.375 / 0.375 | 0.562 / 0.562 |
+| temporal reasoning (16), main / noise | 0.562 / 0.562 | 0.50 / 0.50 | 0.625 / 0.688 |
+| knowledge update (7) | 0.857 | 1.0 | 1.0 |
+| answers that flip between the two runs | 0 | 0 | 1 |
+| block tokens p50 / p95 | 1,429 / 1,494 | 1,456 / 1,496 | 1,455 / 1,496 |
+
+The event lines gain in both runs: against today +7 / -2 and +8 / -2 (7
+gains and both losses the same in each run), against the same facts without
+the dated events +5 / -0 and +6 / -0. Facts alone gain nothing (+2 / -2 in
+both runs): the gain is the event lines'. The two losses come with facts at
+all: an unanswerable question answered from a fact instead of left, and a
+count the facts misled. The stores: 13,900 facts, 838 of them dated events;
+a block shows 4.1 facts on average, 0.86 dated events, and 17 of the 50
+questions show at least one. Spend: 12,020 deep-pass calls, 33.3M prompt
+tokens (19.8M from the cache), 15.7M completion (14.5M reasoning), about
+$9.70 at qwen3.8-flash's international prices; 144 rounds (1.2 %) failed
+four tries (the product's 60 s timeout, the queue retries them in
+Kazma), and 40 replies (0.3 %) answered the turn instead of reading it.
+Evidence: `docs/audits/evidence/memory_event_lines/pilot.json`. The rest of
+dev (150 questions, 36,515 deep passes) waits for the main session's word,
+with its expected tokens.
 
 ### W6. Ingestion the product's way (M)
 
