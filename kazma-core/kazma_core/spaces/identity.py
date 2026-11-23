@@ -19,7 +19,9 @@ What it holds:
   account (its Development switch, its daily limit, S2-02); ``links`` holds
   each person's chat-app accounts (stage 3, ``spaces.chat_links``): a
   platform, a user id there and the account, one account per chat-app
-  account.
+  account. ``unlinked`` keeps the chat-app accounts that were linked and are
+  not now (unlinked, or their account deleted), with the chat replies went
+  to: anything still waiting for them is dropped (S3-07).
 * ``defaults`` -- what the admin set for every person who has no setting of
   their own (the daily limit people get, S2-02).
   (A space's key is not here: it lives in the vault's own file, beside the
@@ -186,6 +188,7 @@ def _empty_registry() -> dict[str, Any]:
             {"account": OWNER_ACCOUNT_ID, "space": OWNER_SPACE_ID, "role": "owner"}
         ],
         "links": [],
+        "unlinked": [],
         "policies": {},
         "defaults": {},
         "events": [],
@@ -211,7 +214,7 @@ def _normalized(raw: Any) -> dict[str, Any]:
     for table in ("accounts", "spaces", "policies", "defaults", "events_seen"):
         if not isinstance(reg.get(table), dict):
             reg[table] = {}
-    for table in ("memberships", "links", "events"):
+    for table in ("memberships", "links", "unlinked", "events"):
         if not isinstance(reg.get(table), list):
             reg[table] = []
     reg["accounts"].setdefault(OWNER_ACCOUNT_ID, base["accounts"][OWNER_ACCOUNT_ID])
@@ -439,6 +442,40 @@ def _check_links(reg: dict[str, Any]) -> None:
         if pair in seen:
             raise IdentityError("linked_elsewhere", f"{pair[0]} {pair[1]} is linked twice")
         seen.add(pair)
+
+
+#: How many unlinked chat-app accounts the registry remembers.
+_UNLINKED_KEPT = 500
+
+
+def retire_links(reg: dict[str, Any], account_id: str, *, platform: str = "",
+                 user_id: str = "") -> list[dict[str, Any]]:
+    """Take *account_id*'s chat-app links out of *reg* -- every one, or the
+    one of *platform* and *user_id* -- and remember each in ``unlinked``
+    (S3-07: what waits for it is dropped, and the owner's known id is not
+    linked again on its own). Returns the links taken. Pure (on *reg*)."""
+    from datetime import UTC, datetime
+
+    taken: list[dict[str, Any]] = []
+    kept: list[dict[str, Any]] = []
+    for link in reg["links"]:
+        if isinstance(link, dict) and link.get("account") == account_id and (
+                not platform or (link.get("platform") == platform
+                                 and str(link.get("user_id")) == str(user_id))):
+            taken.append(link)
+        else:
+            kept.append(link)
+    reg["links"] = kept
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    for link in taken:
+        pair = (str(link.get("platform")), str(link.get("user_id")))
+        reg["unlinked"] = [u for u in reg["unlinked"] if isinstance(u, dict) and (
+            str(u.get("platform")), str(u.get("user_id"))) != pair]
+        reg["unlinked"].append({"platform": pair[0], "user_id": pair[1],
+                                "target": str(link.get("target") or ""),
+                                "account": account_id, "at": now})
+    reg["unlinked"] = reg["unlinked"][-_UNLINKED_KEPT:]
+    return taken
 
 
 # ── Reading ─────────────────────────────────────────────────────────────

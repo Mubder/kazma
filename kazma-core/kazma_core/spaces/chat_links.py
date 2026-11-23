@@ -82,6 +82,7 @@ __all__ = [
     "NOT_LINKED",
     "OWNER_ID_KEYS",
     "address_of",
+    "address_revoked",
     "adopt_owner_ids",
     "is_their_address",
     "known_owner_ids",
@@ -89,6 +90,7 @@ __all__ = [
     "linked_count",
     "owner_links_to_adopt",
     "refresh_links",
+    "unlink",
     "CODE_TTL_S",
     "LINK_OUTCOMES",
     "LinkRefused",
@@ -445,6 +447,9 @@ def _link(platform: str, user_id: str, account_id: str, target: str = "") -> tup
         if _own_chat(platform, target):
             link["target"] = target
         reg["links"].append(link)
+        # Linked again: what is sent to it is delivered again (S3-07).
+        reg["unlinked"] = [u for u in reg["unlinked"] if isinstance(u, dict) and (
+            u.get("platform"), str(u.get("user_id"))) != (platform, user_id)]
         people.record_event(reg, "chat_linked", account_id, account_id, detail=platform)
         said.append("linked")
 
@@ -489,6 +494,34 @@ def redeem(platform: str, user_id: Any, code: str, *, direct: bool, target: str 
         refresh_links()  # the sender's next message is theirs at once
     return Redemption(outcome, plat, account=taken.account, language=taken.language,
                       account_name=name)
+
+
+def unlink(account_id: str, platform: str, user_id: Any, *, by: str = "") -> bool:
+    """Take *account_id*'s link to a chat-app account away (My account's
+    Unlink, S3-07): the sender is refused at once (the links are read again
+    in the writer's thread) and anything still waiting for that chat is
+    dropped. Recorded (``chat_unlinked``). Returns whether a link was taken.
+    Raises :class:`LinkRefused` (``spaces_off``) on an install that does not
+    enforce Spaces. Blocking."""
+    from kazma_core.spaces import people
+
+    if not linking_on():
+        raise LinkRefused("spaces_off", 409, "Chat apps are linked once Spaces is on for this install.")
+    plat = (platform or "").strip().lower()
+    uid = platform_user_id(plat, user_id)
+    taken: list[dict[str, Any]] = []
+
+    def change(reg: dict[str, Any]) -> None:
+        taken[:] = identity.retire_links(reg, account_id, platform=plat, user_id=uid)
+        if taken:
+            people.record_event(reg, "chat_unlinked", account_id, by or account_id, detail=plat)
+
+    identity.update_registry(change)
+    if taken:
+        logger.warning("[spaces] %s %s is no longer linked to account %s",
+                       PLATFORM_LABELS.get(plat, plat), uid, account_id)
+        refresh_links()
+    return bool(taken)
 
 
 # ── Reading links ───────────────────────────────────────────────────────
@@ -641,6 +674,8 @@ class _Links:
         self.read_at = 0.0
         self.links: dict[tuple[str, str], str] = {}
         self.enabled: frozenset[str] = frozenset()
+        #: The chats replies may no longer go to (S3-07).
+        self.revoked: frozenset[str] = frozenset()
         self.refreshing = False
 
 
@@ -659,10 +694,55 @@ def _remember(reg: dict[str, Any]) -> None:
         str(account_id) for account_id, account in (reg.get("accounts") or {}).items()
         if isinstance(account, dict) and account.get("enabled", True)
     )
+    revoked = _revoked_chats(reg, enabled)
     with _snapshot.lock:
         _snapshot.links = links
         _snapshot.enabled = enabled
+        _snapshot.revoked = revoked
         _snapshot.read_at = _now()
+
+
+def _chats_of(link: dict[str, Any]) -> set[str]:
+    """Every address a link's replies go to: the direct chat recorded when
+    it was made, and the chat its user id is (a Telegram user's direct
+    chat, a WhatsApp number). Pure."""
+    out: set[str] = set()
+    plat = str(link.get("platform") or "")
+    if _own_chat(plat, link.get("target")):
+        out.add(str(link["target"]))
+    uid = str(link.get("user_id") or "")
+    if uid and plat in ("telegram", "whatsapp"):
+        out.add(f"{plat}:{uid}")
+    return out
+
+
+def _revoked_chats(reg: dict[str, Any], enabled: frozenset[str]) -> frozenset[str]:
+    """The chats no reply may go to any more (S3-07): those of a chat-app
+    account unlinked (or whose account was deleted), and those of a link
+    whose account is disabled -- never a chat still linked to an enabled
+    account. Pure."""
+    gone: set[str] = set()
+    live: set[str] = set()
+    for item in reg.get("unlinked") or ():
+        if isinstance(item, dict):
+            gone |= _chats_of(item)
+    for link in reg.get("links") or ():
+        if isinstance(link, dict):
+            (live if str(link.get("account") or "") in enabled else gone).update(_chats_of(link))
+    return frozenset(gone - live)
+
+
+def address_revoked(target: Any) -> bool:
+    """Whether a reply to *target* (``<platform>:<chat>``) is to be dropped:
+    once Spaces is enforced, its chat-app account was unlinked, its account
+    deleted or disabled (S3-07). Memory only, any thread or loop; False
+    while the links were never read (a reply is sent as before)."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    with _snapshot.lock:
+        return str(target or "").strip() in _snapshot.revoked
 
 
 def refresh_links() -> bool:
@@ -779,6 +859,7 @@ def _forget_links_for_tests() -> None:
     with _snapshot.lock:
         _snapshot.links = {}
         _snapshot.enabled = frozenset()
+        _snapshot.revoked = frozenset()
         _snapshot.read_at = 0.0
 
 
@@ -851,6 +932,9 @@ def owner_links_to_adopt() -> list[dict[str, str]]:
     reg = identity.read_registry()
     held = {(str(link.get("platform")), str(link.get("user_id"))) for link in reg["links"]
             if isinstance(link, dict)}
+    # An account the owner unlinked is not linked again on its own (S3-07).
+    held |= {(str(u.get("platform")), str(u.get("user_id"))) for u in reg.get("unlinked") or ()
+             if isinstance(u, dict)}
     out: list[dict[str, str]] = []
     for plat in PLATFORMS:
         for uid, source in known_owner_ids(store, plat):

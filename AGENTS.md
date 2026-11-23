@@ -16257,6 +16257,30 @@ an install with one account behaves as before.
     bound to the space as the account; a command added needs a line in
     `SAMPLES`; every adapter's press gate asks `press_needs_admin`, a planted
     gate as its control; the sender-owner pointer as the control).
+- **Unlinking, and a disabled or deleted account, stops everything at once
+  (S3-07, 2026-11-23).** Only where Spaces is enforced.
+  - My account's Unlink (`DELETE /api/account/chat-links`,
+    `chat_links.unlink`, recorded `chat_unlinked`) and deleting a person
+    (`people.delete_person`) move the link to the identity store's
+    `unlinked` table (`identity.retire_links`, with the chat it answered);
+    linking it again takes it out. An owner's known id the owner unlinked is
+    not linked again on its own (`owner_links_to_adopt`).
+  - The sender is refused at once: the links are read again in the writer's
+    thread (S3-02), so the next message and button press are refused at the
+    adapter, and one already queued is not run (`chat_place`).
+  - **What waits for them is dropped**: `chat_links.address_revoked(target)`
+    (memory only, any thread) is true for the chats of an unlinked or deleted
+    chat-app account and of a disabled account's links, never a chat still
+    linked to an enabled account. `GatewayManager.send` drops a reply to such
+    a chat (`gateway._dropped_for_its_person`), and the outbox's retry pass
+    settles a waiting one `dropped` (`ChatOutbox.finish`, no notice owed):
+    an expired card's notice from the watchdog, a swarm result, a reply that
+    was not taken -- never sent. A disabled person's chats are answered
+    again once enabled.
+  - Gates: `tests/test_unlink_stops_everything.py` (the outbox, a queued
+    message, a press, a pending card's expiry; disabled, deleted, linked
+    again; a waiting reply still sent as the control),
+    `tests/e2e/test_chat_unlink_browser.py` (by the sidebar, EN/AR).
 
 ## UI Conventions (Web)
 

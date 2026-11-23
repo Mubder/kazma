@@ -164,6 +164,40 @@
                 }
             },
 
+            async unlink(link) {
+                if (this.busy) return;
+                const sure = window.kazmaConfirm ? await window.kazmaConfirm({
+                    title: say('chat_links.unlink_title', 'Unlink {platform}?', { platform: link.label || link.platform }),
+                    message: say('chat_links.unlink_confirm',
+                        'Kazma will no longer answer this {platform} account, and replies waiting for it are dropped. You can link it again later.',
+                        { platform: link.label || link.platform }),
+                    confirmText: say('chat_links.unlink', 'Unlink'),
+                    danger: true,
+                }) : true;
+                if (!sure) return;
+                this.busy = true;
+                this.justLinked = '';
+                try {
+                    const resp = await fetch('/api/account/chat-links', {
+                        method: 'DELETE',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ platform: link.platform, user_id: link.user_id }),
+                    });
+                    const body = await resp.json().catch(function () { return null; });
+                    if (!resp.ok || !body || !body.ok) throw new Error('not ok');
+                    if (window.showToast) {
+                        window.showToast(say('chat_links.unlinked', 'Unlinked: Kazma no longer answers that {platform} account.',
+                            { platform: link.label || link.platform }), 'success');
+                    }
+                } catch (e) {
+                    if (window.showToast) window.showToast(say('chat_links.unlink_failed', 'Could not unlink. Try again.'), 'error');
+                } finally {
+                    this.busy = false;
+                    await this.load();
+                }
+            },
+
             linkedAt(link) {
                 return window.KazmaFormat ? window.KazmaFormat.dateTime(link.linked_at) : (link.linked_at || '');
             },

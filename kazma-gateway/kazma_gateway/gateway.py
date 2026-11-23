@@ -589,6 +589,20 @@ def _tool_hints(msg: Any, suggester: Any) -> list[str]:
 
     return detect_tool_intent(msg.text)
 
+def _dropped_for_its_person(target_id: str) -> bool:
+    """Whether a reply to *target_id* is dropped: once Spaces is enforced, a
+    chat whose chat-app account was unlinked, or whose account was deleted
+    or disabled (S3-07, ``chat_links.address_revoked``: memory only). Said
+    at INFO, never its text."""
+    from kazma_core.spaces.chat_links import address_revoked
+
+    if not address_revoked(target_id):
+        return False
+    logger.info("[Gateway] a reply to a %s chat that is no longer linked was dropped",
+                str(target_id).split(":", 1)[0])
+    return True
+
+
 #: How often the outbox loop tries again what the platforms did not take.
 _OUTBOX_POLL_S = 10.0
 #: A reply sent later than this after its first try says it is late.
@@ -913,6 +927,8 @@ class GatewayManager:
             return False
 
         platform = outbound.target_id.split(":", 1)[0]
+        if _dropped_for_its_person(outbound.target_id):
+            return False
         # No chat app shows a markdown table: rows as lines (chat_tables).
         if outbound.text and "|" in outbound.text:
             from kazma_gateway.chat_tables import tables_to_lines
@@ -1005,6 +1021,11 @@ class GatewayManager:
             await _alert_undeliverable(row["platform"], row["error"])
         for row_id, outbound, first_tried in to_send:
             platform = outbound.target_id.split(":", 1)[0]
+            if _dropped_for_its_person(outbound.target_id):
+                # Waiting for a chat whose person was unlinked, deleted or
+                # disabled since (S3-07): dropped, never sent.
+                await asyncio.to_thread(outbox.finish, row_id, "dropped")
+                continue
             adapter = self.adapter_named(platform)
             if adapter is None:
                 await self._settle(row_id, "not_sent", f"no {platform} adapter", platform)

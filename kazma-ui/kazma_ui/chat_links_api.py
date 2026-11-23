@@ -3,7 +3,10 @@
 * ``GET /api/account/chat-links`` -- the caller's linked chat-app accounts
   and the chat apps this install runs (each with where to find its bot);
 * ``POST /api/account/chat-links/code`` -- ``{"platform"}``: a new code to
-  send that chat app's bot in a direct chat (one use, ten minutes).
+  send that chat app's bot in a direct chat (one use, ten minutes);
+* ``DELETE /api/account/chat-links`` -- ``{"platform", "user_id"}``: unlink
+  one of the caller's chat-app accounts (S3-07): refused at once, and what
+  waits for that chat is dropped.
 
 They answer for the caller only (an ``account`` route): every signed-in
 person reaches them once Spaces is enforced, and an install that does not
@@ -119,6 +122,31 @@ def create_chat_links_router() -> APIRouter:
             return _unavailable()
         return JSONResponse({"ok": True, **issued},
                             headers={"Cache-Control": "no-store"})
+
+    def _unlink(request: Request, platform: Any, user_id: Any) -> JSONResponse:
+        account = _caller(request)
+        if account is None:
+            return JSONResponse({"ok": False, "error": "no_account"}, status_code=403)
+        try:
+            taken = chat_links.unlink(account, str(platform or ""), user_id, by=account)
+        except chat_links.LinkRefused as exc:
+            return JSONResponse({"ok": False, "error": exc.code, "message": str(exc)},
+                                status_code=exc.status)
+        except IdentityUnavailable:
+            return _unavailable()
+        if not taken:
+            return JSONResponse({"ok": False, "error": "not_linked"}, status_code=404)
+        return JSONResponse({"ok": True})
+
+    @router.delete("/chat-links")
+    async def remove_chat_link(request: Request) -> JSONResponse:
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_unlink, request, body.get("platform"), body.get("user_id"))
 
     @router.post("/chat-links/code")
     async def new_chat_link_code(request: Request) -> JSONResponse:

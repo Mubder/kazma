@@ -76,4 +76,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Could not get a code. Try again.",
         "ar": "تعذّر الحصول على رمز. حاول مرة أخرى.",
     },
+    "chat_links.unlink": {
+        "en": "Unlink",
+        "ar": "فكّ الربط",
+    },
+    "chat_links.unlink_title": {
+        "en": "Unlink {platform}?",
+        "ar": "فكّ ربط {platform}؟",
+    },
+    "chat_links.unlink_confirm": {
+        "en": ("Kazma will no longer answer this {platform} account, and replies waiting for it are "
+               "dropped. You can link it again later."),
+        "ar": "لن يرد Kazma على حساب {platform} هذا بعد الآن، وتُلغى الردود التي تنتظر إرسالها إليه. يمكنك ربطه مرة أخرى لاحقًا.",
+    },
+    "chat_links.unlinked": {
+        "en": "Unlinked: Kazma no longer answers that {platform} account.",
+        "ar": "فُكّ الربط: لم يعد Kazma يرد على حساب {platform} ذلك.",
+    },
+    "chat_links.unlink_failed": {
+        "en": "Could not unlink. Try again.",
+        "ar": "تعذّر فكّ الربط. حاول مرة أخرى.",
+    },
 }

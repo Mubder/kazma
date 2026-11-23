@@ -2346,7 +2346,7 @@
                   <span class="account-list-name" translate="no" x-text="link.label || link.platform"></span>
                   <span class="account-list-mono" translate="no"><bdi dir="ltr" x-text="link.user_id"></bdi></span>
                   <span class="account-list-meta" x-text="linkedAt(link)"></span>
-                  <span class="account-list-actions"></span>
+                  <span class="account-list-actions"><button type="button" class="btn btn-ghost btn-sm" :disabled="busy" :data-chat-unlink="link.platform + ':' + link.user_id" @click="unlink(link)">{{ t('chat_links.unlink') }}</button></span>
                 </div>
               </template>
             </div>

@@ -862,8 +862,9 @@ def delete_person(account_id: str, *, by: str) -> None:
         del reg["accounts"][account_id]
         reg["policies"].pop(account_id, None)
         reg["memberships"] = [m for m in reg["memberships"] if m.get("account") != account_id]
-        # Their chat-app accounts are nobody's now (stage 3): refused at once.
-        reg["links"] = [link for link in reg["links"] if link.get("account") != account_id]
+        # Their chat-app accounts are nobody's now (stage 3): refused at once,
+        # and what waits for them is dropped (S3-07).
+        identity.retire_links(reg, account_id)
         now = _now()
         for space in reg["spaces"].values():
             if space.get("personal_of") == account_id:
