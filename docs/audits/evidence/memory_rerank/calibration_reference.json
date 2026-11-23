@@ -1,0 +1,271 @@
+{
+ "model": "BAAI/bge-reranker-v2-m3",
+ "fitted_on": "first set",
+ "kinds": {
+  "episode": {
+   "calibration": [
+    -0.6673,
+    6.8479,
+    0.4761
+   ],
+   "first_set": {
+    "pairs": 4408,
+    "answers": 130,
+    "auc": {
+     "evidence": 0.935,
+     "score": 0.9632,
+     "calibrated": 0.9668
+    },
+    "reliability": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 4183,
+      "mean_p": 0.008,
+      "answers": 0.007
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 77,
+      "mean_p": 0.135,
+      "answers": 0.156
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 42,
+      "mean_p": 0.252,
+      "answers": 0.405
+     },
+     {
+      "bin": [
+       0.3,
+       0.5
+      ],
+      "n": 28,
+      "mean_p": 0.399,
+      "answers": 0.464
+     },
+     {
+      "bin": [
+       0.5,
+       0.7
+      ],
+      "n": 20,
+      "mean_p": 0.614,
+      "answers": 0.5
+     },
+     {
+      "bin": [
+       0.7,
+       1.0
+      ],
+      "n": 58,
+      "mean_p": 0.884,
+      "answers": 0.828
+     }
+    ]
+   },
+   "second_set": {
+    "pairs": 1747,
+    "answers": 44,
+    "auc": {
+     "evidence": 0.918,
+     "score": 0.9758,
+     "calibrated": 0.9774
+    },
+    "reliability": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 1684,
+      "mean_p": 0.007,
+      "answers": 0.008
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 20,
+      "mean_p": 0.142,
+      "answers": 0.1
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 6,
+      "mean_p": 0.249,
+      "answers": 0.167
+     },
+     {
+      "bin": [
+       0.3,
+       0.5
+      ],
+      "n": 12,
+      "mean_p": 0.406,
+      "answers": 0.5
+     },
+     {
+      "bin": [
+       0.5,
+       0.7
+      ],
+      "n": 6,
+      "mean_p": 0.557,
+      "answers": 1.0
+     },
+     {
+      "bin": [
+       0.7,
+       1.0
+      ],
+      "n": 19,
+      "mean_p": 0.86,
+      "answers": 0.842
+     }
+    ]
+   }
+  },
+  "summary": {
+   "calibration": [
+    -1.6861,
+    5.806,
+    0.483
+   ],
+   "first_set": {
+    "pairs": 2700,
+    "answers": 70,
+    "auc": {
+     "evidence": 0.937,
+     "score": 0.9585,
+     "calibrated": 0.9641
+    },
+    "reliability": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 2573,
+      "mean_p": 0.007,
+      "answers": 0.006
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 32,
+      "mean_p": 0.149,
+      "answers": 0.281
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 24,
+      "mean_p": 0.247,
+      "answers": 0.375
+     },
+     {
+      "bin": [
+       0.3,
+       0.5
+      ],
+      "n": 29,
+      "mean_p": 0.427,
+      "answers": 0.31
+     },
+     {
+      "bin": [
+       0.5,
+       0.7
+      ],
+      "n": 25,
+      "mean_p": 0.615,
+      "answers": 0.52
+     },
+     {
+      "bin": [
+       0.7,
+       1.0
+      ],
+      "n": 17,
+      "mean_p": 0.815,
+      "answers": 0.824
+     }
+    ]
+   },
+   "second_set": {
+    "pairs": 1080,
+    "answers": 20,
+    "auc": {
+     "evidence": 0.9637,
+     "score": 0.9547,
+     "calibrated": 0.9637
+    },
+    "reliability": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 1060,
+      "mean_p": 0.006,
+      "answers": 0.008
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 11,
+      "mean_p": 0.138,
+      "answers": 0.364
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 2,
+      "mean_p": 0.257,
+      "answers": 1.0
+     },
+     {
+      "bin": [
+       0.3,
+       0.5
+      ],
+      "n": 2,
+      "mean_p": 0.363,
+      "answers": 1.0
+     },
+     {
+      "bin": [
+       0.7,
+       1.0
+      ],
+      "n": 5,
+      "mean_p": 0.82,
+      "answers": 0.8
+     }
+    ]
+   }
+  }
+ }
+}

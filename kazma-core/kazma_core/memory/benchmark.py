@@ -65,7 +65,9 @@ __all__ = [
     "EXTRACTION_SCORES",
     "RECORD_AGAIN",
     "RecordingEmbedder",
+    "RecordingReranker",
     "ReplayEmbedder",
+    "ReplayReranker",
     "StaleRecordingError",
     "extraction_rests_on",
     "extraction_scores",
@@ -595,6 +597,75 @@ class ReplayEmbedder:
                 "run: python scripts/memory_bench.py vectors"
             )
         return (self._vecs[i].astype("float32") * self._scale[i]).tolist()
+
+
+# ── Recorded relevance: the cross-encoder's scores, replayed (W3) ──────────
+#
+# The reranker (``memory/reranker.py``) is a model CI cannot load.
+# ``scripts/memory_bench.py rerank-scores`` runs the benchmark's stores once
+# with the real model inside a RecordingReranker and saves every (question,
+# memory text) score; ReplayReranker answers the same pairs from that file
+# (float32) and reads every pair whatever the deadline, so a measurement is
+# the same on any machine. A pair the file does not hold means the
+# candidates changed: record again, do not guess.
+
+
+def _pair_key(model: str, query: str, text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(f"{model}\x00{query}\x00{text}".encode()).hexdigest()[:32]
+
+
+class RecordingReranker:
+    """Wraps a real reranker, reads every pair, and keeps each score."""
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+        self.model = inner.model
+        self.seen: dict[str, float] = {}
+
+    def score(self, query: str, texts: list[str], *, deadline: float) -> list[float | None]:
+        keys = [_pair_key(self.model, query, t) for t in texts]
+        todo = [i for i, k in enumerate(keys) if k not in self.seen]
+        if todo:
+            got = self.inner.score(query, [texts[i] for i in todo], deadline=float("inf"))
+            for i, value in zip(todo, got, strict=True):
+                if value is not None:
+                    self.seen[keys[i]] = float(value)
+        return [self.seen.get(k) for k in keys]
+
+    def save(self, path: str | os.PathLike[str]) -> int:
+        import numpy as np
+
+        keys = sorted(self.seen)
+        np.savez_compressed(path, keys=np.asarray(keys), scores=np.asarray([self.seen[k] for k in keys],
+                                                                           dtype=np.float32),
+                            model=np.asarray(self.model))
+        return len(keys)
+
+
+class ReplayReranker:
+    """Answers the recorded pairs with the recorded scores, every pair read."""
+
+    def __init__(self, *paths: str | os.PathLike[str]) -> None:
+        import numpy as np
+
+        self._scores: dict[str, float] = {}
+        self.model = ""
+        for path in paths:
+            data = np.load(path)
+            self.model = self.model or str(data["model"])
+            self._scores.update({str(k): float(v) for k, v in zip(data["keys"], data["scores"], strict=True)})
+
+    def score(self, query: str, texts: list[str], *, deadline: float) -> list[float | None]:
+        out: list[float | None] = []
+        for text in texts:
+            key = _pair_key(self.model, query, text)
+            if key not in self._scores:
+                raise KeyError(f"no recorded score for {query[:40]!r} beside {text[:40]!r}: the candidates "
+                               "changed; run: python scripts/memory_bench.py rerank-scores")
+            out.append(self._scores[key])
+        return out
 
 
 # ── The edge (benchmark audit R4; the owner's decision 3, 2026-11-18) ───────
