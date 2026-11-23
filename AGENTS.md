@@ -2125,7 +2125,14 @@ four injected were noise.
   2026)"), after the reading tag, one line. No model, no new storage; a
   read that fails leaves the dates out with a WARNING. Gate:
   `tests/test_memory_recall_dates.py` (recall without the dating step as
-  the negative control). **A change waiting for the user's yes is shown
+  the negative control). **A changed value names the conversations that
+  said it** (2026-11-23, the memory plan's W4): on a fact line with
+  `before`, each value is followed by "(memory e_...)" of the turn that
+  stated it (`recall._stated_in`: the fact's `source_session` /
+  `source_turn`, in the asker's tenant, a turn recall could still show), so
+  the model can open it with `memory_read`; an unchanged fact names none.
+  Gate: `tests/test_memory_changed_value_sources.py` (EN/AR; the line as it
+  was as the control). **A change waiting for the user's yes is shown
   beside its fact** (2026-11-22, the memory plan's finding 17): the same
   step reads the newest open pending change on each shown fact
   (`recall._waiting_changes`, `changes.PENDING`, state open: a decided or

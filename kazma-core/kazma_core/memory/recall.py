@@ -503,19 +503,38 @@ def _month_of(ts: Any, zone: Any) -> str:
 
 
 def _fact_dates(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dict[str, tuple]:
-    """``fact id -> (started, kind, replaced value, its from, its until, its id)``:
-    the start its turn named (``metadata.started``), and the fact it replaced
+    """``fact id -> (started, kind, replaced value, its from, its until, its id,
+    (where it was said), (where the replaced value was said))``: the start its
+    turn named (``metadata.started``), and the fact it replaced
     (``supersedes_id``) when that still holds its value (a forgotten fact
-    keeps none)."""
+    keeps none); each "where" is its ``(source_session, source_turn)``."""
     marks = ",".join("?" for _ in ids)
     rows = conn.execute(
         f"SELECT cur.id, json_extract(cur.metadata_json, '$.started'), cur.predicate_type, prev.object, "
-        f"prev.valid_from, prev.valid_until, prev.id FROM beliefs cur "
+        f"prev.valid_from, prev.valid_until, prev.id, cur.source_session, cur.source_turn, "
+        f"prev.source_session, prev.source_turn FROM beliefs cur "
         f"LEFT JOIN beliefs prev ON prev.id = cur.supersedes_id AND prev.tenant_id = cur.tenant_id "
         f"AND COALESCE(prev.object, '') != '' "
         f"WHERE cur.tenant_id = ? AND cur.id IN ({marks})",
         (tenant_id, *ids)).fetchall()
-    return {str(r[0]): tuple(r[1:]) for r in rows}
+    return {str(r[0]): (*r[1:7], (r[7], r[8]), (r[9], r[10])) for r in rows}
+
+
+def _stated_in(conn: sqlite3.Connection, turns: set[tuple[Any, Any]], tenant_id: str) -> dict[tuple[str, int], str]:
+    """``(session, turn) -> the conversation's memory id`` for each of *turns*
+    the asker's space still remembers (a forgotten or erased turn has none):
+    where a changed value was said (the memory plan's W4), for
+    ``memory_read``."""
+    pairs = sorted({(str(s), int(t)) for s, t in turns if s and t is not None})
+    if not pairs:
+        return {}
+    marks = " OR ".join("(session_id = ? AND turn_number = ?)" for _ in pairs)
+    tiers = ",".join("?" for _ in RECALLABLE_TIERS)
+    rows = conn.execute(
+        f"SELECT session_id, turn_number, id FROM episodes WHERE tenant_id = ? "  # nosec B608 - placeholders only
+        f"AND tier IN ({tiers}) AND COALESCE(user_text, '') != '' AND ({marks}) ORDER BY created_at",
+        (tenant_id, *RECALLABLE_TIERS, *(v for pair in pairs for v in pair))).fetchall()
+    return {(str(r[0]), int(r[1])): str(r[2]) for r in rows}
 
 
 def _waiting_changes(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dict[str, str]:
@@ -566,7 +585,9 @@ def _started_label(started: Any) -> str:
 def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_id: str) -> None:
     """Put the dates on what recall shows: ``said_on`` on each turn,
     ``since`` on each fact, and ``before`` (the value it replaced, with its
-    months) on a single-valued fact. :func:`format_recall_block` prints them.
+    months) on a single-valued fact, with the conversations that said each
+    value (``stated_in``, ``before_in``: the memory plan's W4).
+    :func:`format_recall_block` prints them.
     A date that cannot be read is left out, with a WARNING: the memories are
     shown either way."""
     zone = _memory_zone()
@@ -596,6 +617,8 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
         ids = [h.id for h in result.beliefs]
         waiting = _waiting_changes(conn, ids, tenant_id)
         dates = _fact_dates(conn, ids, tenant_id)
+        said_in = _stated_in(conn, {where for row in dates.values() if row[2] is not None for where in row[6:8]},
+                             tenant_id)
     except sqlite3.Error:
         logger.warning("[recall] could not read when the recalled facts began", exc_info=True)
         return
@@ -609,7 +632,7 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
     for hit in result.beliefs:
         if hit.id not in dates or hit.metadata.get("until"):
             continue
-        started, kind, value, start, end, prev_id = dates[hit.id]
+        started, kind, value, start, end, prev_id, where, before_where = dates[hit.id]
         # The start the turn named ("we moved last month") is the fact's own;
         # the month it was said is the fallback.
         label = _started_label(started)
@@ -620,6 +643,12 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
             hit.metadata["before"] = f"{value} ({span})" if span else str(value)
             # Which fact that line shows (the benchmark scores it as shown).
             hit.metadata["before_id"] = str(prev_id)
+            # A changed value's history names the conversations that said
+            # each value (W4), for memory_read.
+            for key, said in (("stated_in", where), ("before_in", before_where)):
+                eid = said_in.get((str(said[0]), int(said[1]))) if said[0] and said[1] is not None else None
+                if eid:
+                    hit.metadata[key] = eid
 
 
 #: Which facts a shared space's question is about (``_whose_facts``): a
@@ -4070,7 +4099,14 @@ def _dated_line(hit: RecallHit, shown: str) -> str:
     if meta.get("since"):
         shown = f"[since {meta['since']}] {shown}"
     if meta.get("before"):
-        shown = f"{shown}; before that: {_one_line(meta['before'])}"
+        # A changed value: where each value was said, when the space still
+        # remembers it (the memory plan's W4).
+        if meta.get("stated_in"):
+            shown = f"{shown} {_ID_NOTE.format(id=meta['stated_in'])}"
+        before = _one_line(meta["before"])
+        if meta.get("before_in"):
+            before = f"{before} {_ID_NOTE.format(id=meta['before_in'])}"
+        shown = f"{shown}; before that: {before}"
     if meta.get("waiting") is not None:
         # The user's change that waits for their yes, after the value it would
         # replace (finding 17); the recall rules say what it means.

@@ -503,6 +503,18 @@ lines each, the date said and the date meant, each naming its source turns
 so a forget follows); a changed value's history with the conversations that
 stated it. Target: every answer session shown ≥ 90 %.
 
+*A changed value names the conversations that said it, built 23 Nov.* A fact
+line with the value it replaced ("user lives in London; before that: Paris
+(Jun 2026 to Oct 2026)") now follows each value with the conversation that
+stated it, "(memory e_...)", as every recalled conversation line does, so the
+model can open it with `memory_read` ("why did I move?"): the fact's source
+turn, in the asker's space, a turn recall could still show
+(`recall._stated_in`); a fact whose value never changed names none. No model;
+Kazma's benchmark's scores unchanged (an id in a line is not a memory shown);
+an ordinary turn's block p50 675 -> 676 tokens (Arabic 590 -> 592), the long
+store's 1,073 -> 1,080. Not measurable on LongMemEval: its histories hold no
+facts until W6. Gate: `tests/test_memory_changed_value_sources.py`.
+
 ### W6. Ingestion the product's way (M)
 
 The benchmark's memories written as Kazma writes them: the deep pass on
