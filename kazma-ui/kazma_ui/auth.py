@@ -24,6 +24,7 @@ Usage (in ``app.py``)::
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import os
 import socket
@@ -1285,6 +1286,42 @@ def websocket_principal(websocket: Any) -> dict[str, Any] | None:
     }
 
 
+#: Who is viewing the page being drawn, as the role rule reads them
+#: (``{"role", "source"}``), set by the tenant middleware for every request
+#: from the principal it already read; None when there is none (no sign-in
+#: asked for, open mode). A page reads it through
+#: :func:`install_settings_here`: no I/O.
+_PAGE_VIEWER: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
+    "kazma_page_viewer", default=None)
+
+#: The install's settings a page shell reads on every page -- the
+#: appearance, the active model, the providers, the voice settings -- are
+#: judged by this route: the admin's.
+_INSTALL_SETTINGS_PROBE = "/api/providers"
+
+
+def _viewer_of(principal: dict[str, Any] | None) -> dict[str, str] | None:
+    """What :data:`_PAGE_VIEWER` keeps of *principal*: its role and source."""
+    if principal is None:
+        return None
+    return {"role": str(principal.get("role") or "viewer"), "source": str(principal.get("source") or "")}
+
+
+def install_settings_here() -> bool:
+    """Whether the person viewing the page being drawn may use the install's
+    settings routes (``GET /api/providers`` and its siblings under the
+    admin's prefixes). The page shell reads the appearance, the active model,
+    the providers and the voice settings only then (``<meta
+    name="kazma-install-settings">``): a member's page asked four of them on
+    every page and was refused each time (Spaces, 2026-11-23). True with no
+    viewer recorded (open mode: nothing is refused), and for the shared
+    secret and an admin. No I/O."""
+    viewer = _PAGE_VIEWER.get()
+    if viewer is None:
+        return True
+    return principal_allows(viewer, _INSTALL_SETTINGS_PROBE, "GET")
+
+
 def principal_allows(principal: dict[str, Any], path: str, method: str) -> bool:
     """Whether *principal* may do what ``method path`` does over HTTP.
 
@@ -1972,6 +2009,9 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         # not visible out there, the ASGI scope is.
         request.scope["kazma_space"] = tenant_id
         request.scope["kazma_asker"] = asker or ""
+        # Who views the page this request may draw (install_settings_here):
+        # the principal read above, no further read.
+        viewer_token = _PAGE_VIEWER.set(_viewer_of(principal))
         if asker is not None and valid_space_id(tenant_id):
             scope_tokens = set_scope(tenant_id, asker)
         else:
@@ -2046,6 +2086,7 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                 reset_scope(scope_tokens)
             else:
                 reset_current_tenant_id(token)
+            _PAGE_VIEWER.reset(viewer_token)
 
     return tenant_middleware
 

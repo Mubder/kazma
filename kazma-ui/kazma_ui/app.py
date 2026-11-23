@@ -922,6 +922,18 @@ class KazmaAppBuilder:
 
         self.templates.env.globals["spaces_enforced"] = _spaces_enforced
 
+        def _install_settings_here() -> bool:
+            # Whether the page shell reads the install's settings (the
+            # appearance, the active model, the providers, the voice
+            # settings): never on a page drawn for someone the server would
+            # refuse them (<meta name="kazma-install-settings">). No I/O: the
+            # tenant middleware recorded who is viewing.
+            from kazma_ui.auth import install_settings_here
+
+            return install_settings_here()
+
+        self.templates.env.globals["install_settings_here"] = _install_settings_here
+
         def _development_here() -> bool:
             # Whether the sidebar shows the Workspace and IDE entries (Spaces
             # S1-20): no I/O, the tenant middleware worked it out.
@@ -1429,12 +1441,14 @@ class KazmaAppBuilder:
         try:
             from kazma_ui.account_spaces_api import create_account_spaces_router
             from kazma_ui.chat_links_api import create_chat_links_router
+            from kazma_ui.own_keys_api import create_own_keys_router
             from kazma_ui.people_api import create_people_router
             from kazma_ui.saas_api import create_saas_router
             from kazma_ui.spaces_api import create_spaces_router
 
             self.app.include_router(create_account_spaces_router())
             self.app.include_router(create_chat_links_router())
+            self.app.include_router(create_own_keys_router())
             self.app.include_router(create_people_router())
             self.app.include_router(create_spaces_router())
 

@@ -63,6 +63,8 @@ KAZMA_OWN = ("Kazma's own work after a turn that was allowed; not refused until 
              "in the per-call ledger (ledgered_chat, finding 6), so counted toward the person's limit")
 ADMIN = "the admin's own work, never a person's"
 CLIENT = "a client's own call: its retries and fallbacks, or the client it wraps; its caller is listed here"
+OWN_KEY = (CLIENT + " (Spaces S2-04: the call handed whole to the client carrying the person's own key; "
+           "the limit was asked by the call's caller, and own-key spend is not counted)")
 
 #: (file, function) -> (sites, why).
 DECLARED: dict[tuple[str, str], tuple[int, str]] = {
@@ -93,7 +95,8 @@ DECLARED: dict[tuple[str, str], tuple[int, str]] = {
         1, KAZMA_OWN + " (the lesson refiner, only on a signal)"),
     # ── the admin's own ──
     ("kazma-core/kazma_core/provider_check.py", "check_model"): (
-        1, ADMIN + ": Settings' provider Test and the setup guide, admin routes"),
+        1, ADMIN + ": Settings' provider Test and the setup guide, admin routes; and a member's own "
+                   "key before it is kept (S2-04), on their key, which no limit counts"),
     ("kazma-core/kazma_core/mcp/spec_client.py", "complete_mcp_sample"): (
         1, ADMIN + ": an MCP server's sampling request; MCP servers are Development (S1-20), and "
                    "each request is an approval card the admin answers"),
@@ -111,10 +114,16 @@ DECLARED: dict[tuple[str, str], tuple[int, str]] = {
     ("kazma-core/kazma_core/llm_provider.py", "LLMProvider._chat_stream_once"): (3, CLIENT),
     ("kazma-core/kazma_core/llm_provider.py", "LLMProvider.can_turn_off_reasoning"): (
         2, CLIENT + " (compares the class's own chat with LLMProvider's)"),
-    ("kazma-core/kazma_core/anthropic_llm.py", "AnthropicProvider.chat_stream"): (2, CLIENT),
+    ("kazma-core/kazma_core/llm_provider.py", "LLMProvider.chat"): (1, OWN_KEY),
+    ("kazma-core/kazma_core/llm_provider.py", "LLMProvider.chat_stream"): (1, OWN_KEY),
+    ("kazma-core/kazma_core/anthropic_llm.py", "AnthropicProvider.chat"): (1, OWN_KEY),
+    ("kazma-core/kazma_core/anthropic_llm.py", "AnthropicProvider.chat_stream"): (
+        3, CLIENT + "; one of them " + OWN_KEY),
     ("kazma-core/kazma_core/azure_llm.py", "AzureProvider.chat"): (1, CLIENT),
     ("kazma-core/kazma_core/azure_llm.py", "AzureProvider.chat_stream"): (1, CLIENT),
-    ("kazma-core/kazma_core/bedrock_llm.py", "BedrockProvider.chat_stream"): (1, CLIENT),
+    ("kazma-core/kazma_core/bedrock_llm.py", "BedrockProvider.chat"): (1, OWN_KEY),
+    ("kazma-core/kazma_core/bedrock_llm.py", "BedrockProvider.chat_stream"): (
+        2, CLIENT + "; one of them " + OWN_KEY),
     ("kazma-core/kazma_core/agent_runner.py", "KazmaAgent._make_compaction_client._CompactionLLM.chat"): (
         1, CLIENT + " (the compaction engine's client, ContextAuthority's, which no product code runs)"),
     # ── no product caller ──

@@ -25,7 +25,15 @@ import os
 import time
 from typing import Any
 
-from kazma_core.llm_provider import LLMConfig, LLMError, LLMProvider, LLMResponse, ToolCall
+from kazma_core.llm_provider import (
+    LLMConfig,
+    LLMError,
+    LLMProvider,
+    LLMResponse,
+    ToolCall,
+    own_key_answer,
+    own_key_delta,
+)
 from kazma_core.llm_stream import StreamDelta
 
 logger = logging.getLogger(__name__)
@@ -180,7 +188,11 @@ class BedrockProvider(LLMProvider):
     ) -> LLMResponse:
         import asyncio
 
-        await self._refuse_a_model_not_allowed(model)
+        own = await self._person_call(model)
+        if own is not None:
+            # Their own key (Spaces S2-04): the whole call is theirs.
+            return own_key_answer(
+                await BedrockProvider.chat(own, messages, tools, max_tokens, temperature, model, response_format))
         _ = response_format  # OpenAI-shaped; Bedrock Converse has no equivalent
         model_id = model or self.config.model
         system, convo = self._build_messages(messages)
@@ -338,7 +350,14 @@ class BedrockProvider(LLMProvider):
         """
         import asyncio
 
-        await self._refuse_a_model_not_allowed(model)
+        own = await self._person_call(model)
+        if own is not None:
+            # Their own key (Spaces S2-04): the whole call is theirs.
+            async for delta in BedrockProvider.chat_stream(
+                own, messages, tools, max_tokens, temperature, model, response_format,
+            ):
+                yield own_key_delta(delta)
+            return
         _ = response_format
         model_id = model or self.config.model
         system, convo = self._build_messages(messages)

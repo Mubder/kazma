@@ -268,3 +268,20 @@
         return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
     };
 })();
+
+/**
+ * Whether this page may read the install's settings routes -- the
+ * appearance, the active model, the providers, the voice settings: the
+ * server says so in <meta name="kazma-install-settings"> (the admin, or no
+ * sign-in asked for). A member's page never asks them: the server refuses
+ * each, and the shell asked four on every page (Spaces, 2026-11-23). A page
+ * drawn without the meta: yes, as before.
+ */
+(function () {
+    "use strict";
+    if (typeof window.kazmaInstallSettings === "function") return;
+    window.kazmaInstallSettings = function () {
+        var meta = document.querySelector('meta[name="kazma-install-settings"]');
+        return !meta || meta.getAttribute("content") === "1";
+    };
+})();

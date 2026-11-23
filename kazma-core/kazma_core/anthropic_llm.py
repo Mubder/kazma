@@ -30,6 +30,8 @@ from kazma_core.llm_provider import (
     LLMResponse,
     ToolCall,
     cost_from_usage,
+    own_key_answer,
+    own_key_delta,
     retry_after_seconds,
 )
 from kazma_core.llm_stream import StreamDelta
@@ -288,7 +290,11 @@ class AnthropicProvider(LLMProvider):
     ) -> LLMResponse:
         """:meth:`_chat_once`, again with the provider's next key when one
         fails for its key (providers stage 4, ``LLMProvider._with_key_switches``)."""
-        await self._refuse_a_model_not_allowed(model)
+        own = await self._person_call(model)
+        if own is not None:
+            # Their own key (Spaces S2-04): the whole call is theirs.
+            return own_key_answer(
+                await AnthropicProvider.chat(own, messages, tools, max_tokens, temperature, model, response_format))
         return await self._with_key_switches(
             self._chat_once, messages, tools, max_tokens, temperature, model, response_format,
         )
@@ -456,7 +462,14 @@ class AnthropicProvider(LLMProvider):
         response_format: dict[str, Any] | None = None,
     ) -> Any:
         """Native Anthropic SSE (``stream: true`` on ``/messages``)."""
-        await self._refuse_a_model_not_allowed(model)
+        own = await self._person_call(model)
+        if own is not None:
+            # Their own key (Spaces S2-04): the whole call is theirs.
+            async for delta in AnthropicProvider.chat_stream(
+                own, messages, tools, max_tokens, temperature, model, response_format,
+            ):
+                yield own_key_delta(delta)
+            return
         from kazma_core.llm_stream import stream_enabled
 
         if not stream_enabled():

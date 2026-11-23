@@ -232,7 +232,9 @@
 
     {# Footer #}
     <div class="sidebar-footer">
-        {# Model Selector Dropdown #}
+        {# Model Selector Dropdown: it sets the install's default model, the
+           admin's (PUT /api/settings/active_model); a member's page has none. #}
+        {% if install_settings_here is not defined or install_settings_here() %}
         <div class="sidebar-model-selector sidebar-collapsed-hide" x-show="!sidebarCollapsed" x-cloak>
             {# Model ids under provider names: names, not interface text. #}
             <select
@@ -249,6 +251,7 @@
                 </template>
             </select>
         </div>
+        {% endif %}
 
         <div class="sidebar-user" x-data="{ open: false }" @click.outside="open = false">
             <img src="/static/img/kazma-icon-dark-theme.png" alt="Kazma" class="user-avatar-img brand-on-dark"><img src="/static/img/kazma-icon.png" alt="Kazma" class="user-avatar-img brand-on-light">

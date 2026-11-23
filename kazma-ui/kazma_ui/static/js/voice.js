@@ -40,6 +40,9 @@
   var TTS_ENABLED_KEY = 'kazma.ttsEnabled';
 
   async function syncVoiceSettingsWithBackend() {
+    // The install's voice settings are the admin's: a member's page keeps the
+    // providers this browser knows.
+    if (typeof window.kazmaInstallSettings === 'function' && !window.kazmaInstallSettings()) return;
     try {
       var resp = await fetch('/api/settings/voice');
       if (resp.ok) {

@@ -127,6 +127,86 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "النموذج النشط",
         "en": "Active Model",
     },
+    "settings.own_keys_title": {
+        "ar": "استخدم مفتاحي الخاص",
+        "en": "Use my own key",
+    },
+    "settings.own_keys_help": {
+        "ar": "يستدعي Kazma النماذج بمفاتيح هذا التثبيت، ضمن حدك اليومي. يمكنك بدلًا من ذلك استخدام مفتاح خاص بك لمزوّد ما: يُحفظ مختومًا في مساحتك الشخصية، ولا يراه أحد غيرك، ولا المسؤول، وما تنفقه به لا يُحسب من حدك.",
+        "en": "Kazma calls models with the install's keys, under your daily limit. You can use a key of your own for a provider instead: it is kept sealed in your personal space, nobody else sees it, the admin included, and what you spend with it does not count against your limit.",
+    },
+    "settings.own_keys_input": {
+        "ar": "مفتاحك لهذا المزوّد",
+        "en": "Your key for this provider",
+    },
+    "settings.own_keys_use": {
+        "ar": "استخدم مفتاحي",
+        "en": "Use my own key",
+    },
+    "settings.own_keys_remove": {
+        "ar": "استخدم مفتاح التثبيت",
+        "en": "Use the install's key",
+    },
+    "settings.own_keys_using_own": {
+        "ar": "مفتاحك الخاص",
+        "en": "Your own key",
+    },
+    "settings.own_keys_using_install": {
+        "ar": "مفتاح التثبيت",
+        "en": "The install's key",
+    },
+    "settings.own_keys_none": {
+        "ar": "لا يوجد هنا مزوّد يقبل مفتاحًا خاصًا بك.",
+        "en": "No provider here takes a key of your own.",
+    },
+    "settings.own_keys_unreadable": {
+        "ar": "تعذّرت قراءة مفاتيحك الآن. حاول مرة أخرى.",
+        "en": "Your keys cannot be read right now. Try again.",
+    },
+    "settings.own_keys_saved": {
+        "ar": "حُفظ مفتاحك الخاص. طلباتك إلى {provider} تستخدمه الآن.",
+        "en": "Your own key is kept. Your calls to {provider} use it now.",
+    },
+    "settings.own_keys_removed": {
+        "ar": "طلباتك إلى {provider} تستخدم مفتاح التثبيت مرة أخرى.",
+        "en": "Your calls to {provider} use the install's key again.",
+    },
+    "settings.own_keys_remove_confirm": {
+        "ar": "هل تريد نسيان مفتاحك الخاص لـ {provider}؟ ستستخدم طلباتك إليه مفتاح التثبيت وتُحسب من حدك اليومي.",
+        "en": "Forget your own key for {provider}? Your calls to it will use the install's key and count against your daily limit.",
+    },
+    "settings.own_keys_type_key": {
+        "ar": "اكتب المفتاح الذي تريد حفظه.",
+        "en": "Type the key to keep.",
+    },
+    "settings.own_keys_err_key_refused": {
+        "ar": "رفض المزوّد هذا المفتاح. لم يُحفظ شيء.",
+        "en": "The provider refused this key. Nothing was kept.",
+    },
+    "settings.own_keys_err_unreachable": {
+        "ar": "تعذّر الوصول إلى المزوّد. لم يُحفظ شيء.",
+        "en": "The provider could not be reached. Nothing was kept.",
+    },
+    "settings.own_keys_err_rate_limited": {
+        "ar": "المزوّد يقيّد هذا المفتاح الآن. لم يُحفظ شيء.",
+        "en": "The provider is limiting this key right now. Nothing was kept.",
+    },
+    "settings.own_keys_err_timeout": {
+        "ar": "لم يُجب المزوّد في الوقت المحدد. لم يُحفظ شيء.",
+        "en": "The provider did not answer in time. Nothing was kept.",
+    },
+    "settings.own_keys_err_unknown_provider": {
+        "ar": "لا يمكنك استخدام مفتاح خاص لهذا المزوّد.",
+        "en": "You cannot bring a key for this provider.",
+    },
+    "settings.own_keys_err_vault": {
+        "ar": "خزنة Kazma غير مُعدّة، فلا يمكن حفظ أي مفتاح.",
+        "en": "Kazma's vault is not set up, so no key can be kept.",
+    },
+    "settings.own_keys_err_failed": {
+        "ar": "لم يعمل المفتاح. لم يُحفظ شيء.",
+        "en": "The key did not work. Nothing was kept.",
+    },
     "settings.active_sessions": {
         "ar": "الجلسات النشطة",
         "en": "Active Sessions",

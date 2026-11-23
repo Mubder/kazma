@@ -20,6 +20,9 @@
         // says, on #settings-root's data-areas. A member is shown My account
         // and This space; Install is the admin's.
         settingsAreas: ['account', 'space', 'install'],
+        // This space's tabs of a feature the person does not have (#settings-root's
+        // data-tabs-off): never opened, so their routes are never asked.
+        tabsOff: [],
 
         // ── Providers Tab ──
         // The providers UI lives entirely in the `hub*` state below. An older
@@ -374,6 +377,12 @@
         apiTokensLoaded: false,
         sessions: [],
         sessionsLoaded: false,
+        // A member's own model keys (Spaces S2-04): never the keys themselves.
+        ownKeys: [],
+        ownKeysLoaded: false,
+        ownKeysFailed: false,
+        ownKeyDraft: {},
+        ownKeyBusy: {},
         passwordForm: { old_password: '', new_password: '', confirm_password: '' },
         tokenName: '',
         // The role a new API token acts with; the server's default too.
@@ -643,7 +652,7 @@
         },
 
         _tabShown(tab) {
-            return this.settingsAreas.indexOf(this._tabArea(tab)) !== -1;
+            return this.settingsAreas.indexOf(this._tabArea(tab)) !== -1 && this.tabsOff.indexOf(tab) === -1;
         },
 
         async init() {
@@ -652,6 +661,8 @@
             const areasRoot = document.getElementById('settings-root');
             const areas = areasRoot && areasRoot.getAttribute('data-areas');
             if (areas) self.settingsAreas = areas.split(',').filter(Boolean);
+            const tabsOff = areasRoot && areasRoot.getAttribute('data-tabs-off');
+            if (tabsOff) self.tabsOff = tabsOff.split(',').filter(Boolean);
             if (self.settingsAreas.indexOf('install') === -1) {
                 // A member's page: nothing of Install is loaded (its routes are
                 // the admin's), and the page opens on My account or the tab

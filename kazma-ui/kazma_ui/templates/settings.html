@@ -6,8 +6,13 @@
 
 {% block content %}
 {# data-tab: the tab this page was asked for. A soft navigation runs the
-   page script before it pushes the new address (settings_core.js). #}
-<div id="settings-root" data-tab="{{ request.query_params.get('tab', '') | e }}" data-areas="{{ (settings_areas if settings_areas is defined else ['account', 'space', 'install']) | join(',') }}" x-data="settingsApp()">
+   page script before it pushes the new address (settings_core.js).
+   data-tabs-off: This space's tabs of a feature the person does not have
+   (Spaces S2-11): neither drawn nor loaded, so the page asks no route the
+   server would refuse them. #}
+{% set email_here = feature_here is not defined or feature_here('email_calendar') %}
+{% set x_here = feature_here is not defined or feature_here('x_studio') %}
+<div id="settings-root" data-tab="{{ request.query_params.get('tab', '') | e }}" data-tabs-off="{{ ((['email'] if not email_here else []) + (['x'] if not x_here else [])) | join(',') }}" data-areas="{{ (settings_areas if settings_areas is defined else ['account', 'space', 'install']) | join(',') }}" x-data="settingsApp()">
 
     <!-- ═══ Settings Navigation ═══ -->
     {# Three areas (Spaces S1-23): My account and This space are each person's,
@@ -24,8 +29,12 @@
         <div class="settings-area" data-area="space">
           <span class="settings-area-label" id="settings-area-space">{{ t('settings.area_space') }}</span>
           <div class="tabs settings-area-tabs" role="tablist" aria-labelledby="settings-area-space">
+            {% if email_here %}
             <button class="settings-tab tab" role="tab" :aria-selected="tab === 'email' ? 'true' : 'false'" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
+            {% endif %}
+            {% if x_here %}
             <button class="settings-tab tab" role="tab" :aria-selected="tab === 'x' ? 'true' : 'false'" :class="{ active: tab === 'x' }" @click="onTabChange('x')">{{ t('settings.tab_x') }}</button>
+            {% endif %}
             {% if spaces_enforced is defined and spaces_enforced() %}
             <button class="settings-tab tab" role="tab" :aria-selected="tab === 'space_data' ? 'true' : 'false'" :class="{ active: tab === 'space_data' }" @click="onTabChange('space_data')">{{ t('settings.tab_space_data') }}</button>
             {% endif %}
@@ -2427,6 +2436,29 @@
         </div>
         {% endif %}
 
+        {% if not install_area %}
+        <!-- A member's own model keys (Spaces S2-04): kept sealed in their
+             personal space; the route never answers a key back. -->
+        <div class="settings-group mb-6" id="own-model-keys">
+            <h3>{{ t('settings.own_keys_title') }}</h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">{{ t('settings.own_keys_help') }}</p>
+            <div x-show="ownKeysFailed" x-cloak class="notice tone-danger" style="margin-bottom:12px;">{{ t('settings.own_keys_unreadable') }}</div>
+            <div class="account-list-table own-keys-table" x-show="ownKeys.length > 0" x-cloak>
+              <template x-for="p in ownKeys" :key="p.provider">
+                <div class="account-list-row own-key-row" :data-provider="p.provider">
+                  <span class="account-list-name"><span translate="no" x-text="p.label"></span> <span class="badge" :class="p.own ? 'badge-success' : 'badge-neutral'" x-text="ownKeyState(p)"></span></span>
+                  <span><input type="password" class="form-input" autocomplete="off" x-model="ownKeyDraft[p.provider]" aria-label="{{ t('settings.own_keys_input') }}" placeholder="{{ t('settings.own_keys_input') }}"></span>
+                  <span class="account-list-actions">
+                    <button type="button" class="btn btn-primary btn-sm" @click="saveOwnKey(p)" :disabled="!!ownKeyBusy[p.provider]">{{ t('settings.own_keys_use') }}</button>
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="p.own" x-cloak @click="removeOwnKey(p)">{{ t('settings.own_keys_remove') }}</button>
+                  </span>
+                </div>
+              </template>
+            </div>
+            <div x-show="ownKeysLoaded && ownKeys.length === 0 && !ownKeysFailed" class="empty-state" style="padding:16px" x-cloak>{{ t('settings.own_keys_none') }}</div>
+        </div>
+        {% endif %}
+
         <!-- Sessions -->
         <div class="settings-group mb-6">
             <h3>{{ t('settings.active_sessions') }}</h3>
@@ -3980,6 +4012,7 @@
     </div>
     {% endif %}
 
+    {% if email_here %}{# drawn only for a person with email and calendar #}
     <div x-show="tab === 'email'" x-transition x-cloak>
         <div class="settings-group mb-6">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
@@ -4332,10 +4365,12 @@
             </p>
         </div>
     </div>
+    {% endif %}
 
     <!-- ═══════════════════════════════════════════════════════════════
          TAB: X (official API)
          ═══════════════════════════════════════════════════════════════ -->
+    {% if x_here %}{# drawn only for a person with X Studio: its x-init asks X's routes #}
     <div class="x-controls" x-show="tab === 'x'" x-transition x-cloak>
         <nav aria-label="{{ t('settings.xt.setup_sections') }}" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
             <a class="btn btn-sm btn-secondary" href="#xr-connection-section">{{ t('settings.xt.connection_section') }}</a>
@@ -5174,6 +5209,7 @@
             </div>
         </div>
     </div>
+    {% endif %}
 
     {% if install_area %}
     <!-- ═══════════════════════════════════════════════════════════════

@@ -213,7 +213,7 @@ def test_the_check_uses_the_typed_key_and_saves_nothing(monkeypatch):
 
     monkeypatch.setattr(pc, "CHECK_TIMEOUT_S", 0.05)
     client.behaviour = "slow"
-    monkeypatch.setattr(pc.check_model, "__kwdefaults__", {"timeout": 0.05})
+    monkeypatch.setattr(pc.check_model, "__kwdefaults__", {**pc.check_model.__kwdefaults__, "timeout": 0.05})
     assert http.post("/api/setup/check", json={"provider": "deepseek", "api_key": "k", "model": "m"}).json()[
         "error"] == "timeout"
 

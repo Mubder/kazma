@@ -1798,6 +1798,9 @@ async def supervisor_node(
 
         _llm_attempts = 0
         _served_by: list[str] = []  # failover bookkeeping: [model] when a chain model answered
+        # ... and the client that answered: the ledger names ITS provider
+        # (the review of Spaces S2-04: the build-time client's was recorded).
+        _served_clients: list[Any] = []
         _llm_messages = list(messages) + ([_budget_nudge] if _budget_nudge else [])
         if _token_limit and _turn_tokens_used >= _token_limit * _ttb.WARN_FRACTION:
             # Call-local, like the recheck below: never kept in the checkpoint.
@@ -1970,6 +1973,7 @@ async def supervisor_node(
                         fb_model,
                     )
                     _served_by.append(fb_model)
+                    _served_clients.append(client)
                     from kazma_core.observability.model_fallback import report_failover
 
                     report_failover(
@@ -2030,7 +2034,7 @@ async def supervisor_node(
             await arecord_llm_call(
                 thread_id=str(state.get("thread_id", "")),
                 iteration=int(state.get("iteration", 0) or 0),
-                provider=provider_of(llm),
+                provider=provider_of(turn_llm),
                 model=str(routed_model or ""),
                 duration_ms=(time.monotonic() - start) * 1000,
                 status="error",
@@ -2083,13 +2087,17 @@ async def supervisor_node(
     # Off the loop: the ledger is a SQLite write per call, and its switch a
     # settings read (arecord_llm_call runs both in a thread).
     try:
-        from kazma_core.observability.llm_ledger import arecord_llm_call, provider_of
+        from kazma_core.observability.llm_ledger import (
+            answered_with_own_key,
+            arecord_llm_call,
+            provider_of,
+        )
 
         _served_model = _served_by[-1] if _served_by else ""
         await arecord_llm_call(
             thread_id=str(state.get("thread_id", "")),
             iteration=int(state.get("iteration", 0) or 0),
-            provider=provider_of(llm),
+            provider=provider_of(_served_clients[-1] if _served_clients else turn_llm),
             model=str(response.model or _served_model or routed_model or ""),
             usage=response.usage,
             cost_usd=float(response.cost_usd or 0.0),
@@ -2097,6 +2105,7 @@ async def supervisor_node(
             status="ok",
             failover_from=str(routed_model or "") if _served_model else "",
             priced=bool(getattr(response, "cost_known", True)),
+            own_key=answered_with_own_key(response),
         )
     except Exception:
         pass

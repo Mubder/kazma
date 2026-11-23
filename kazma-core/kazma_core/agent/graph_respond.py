@@ -33,7 +33,11 @@ async def _ledger_synthesis_call(
     last and often largest call. Off the loop: the ledger is SQLite, and the
     switch that turns it on a settings read (``arecord_llm_call``).
     """
-    from kazma_core.observability.llm_ledger import arecord_llm_call, provider_of
+    from kazma_core.observability.llm_ledger import (
+        answered_with_own_key,
+        arecord_llm_call,
+        provider_of,
+    )
 
     usage = getattr(resp, "usage", None)
     try:
@@ -50,6 +54,7 @@ async def _ledger_synthesis_call(
         duration_ms=duration_ms,
         status="ok",
         priced=bool(getattr(resp, "cost_known", True)),
+        own_key=answered_with_own_key(resp),
     )
 
 from kazma_core.spaces.scope import bound_asker, space_of_state

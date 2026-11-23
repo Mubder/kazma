@@ -776,7 +776,9 @@ export function registerStores() {
             _modelOptions: [],  // [{ label, models: [] }] provider groups
 
             init() {
-                // Hydrate active model from backend
+                // Hydrate active model from backend: the install's, read only
+                // where this page may (a member's page is refused both).
+                if (typeof window.kazmaInstallSettings === 'function' && !window.kazmaInstallSettings()) return;
                 this._hydrateActiveModel();
                 this._loadModelOptions();
             },
