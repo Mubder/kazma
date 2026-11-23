@@ -345,6 +345,8 @@ def _valid_optional_fields(row):
         return False
     if 'asker' in row and (not isinstance(row['asker'], str) or len(row['asker']) > 120):
         return False
+    if 'space' in row and (not isinstance(row['space'], str) or len(row['space']) > 120):
+        return False
     return not ('notes' in row and (not isinstance(row['notes'], list) or len(row['notes']) > 16
                                     or any(not isinstance(note, str) for note in row['notes'])))
 
@@ -567,6 +569,7 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
     from kazma_core.spaces.scope import bound_asker
 
     asker = str(bound_asker() or '')[:120]
+    space, share = _space_share()
     def change(jobs):
         _recover(jobs)
         row = jobs.get(job_id)
@@ -579,6 +582,13 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
                 raise AcquisitionError(FetchErrorCode.POLICY, 'Crawl kind changed; resume was refused.')
         elif row is not None:
             raise AcquisitionError(FetchErrorCode.EXISTS, 'Crawl job already exists; resume an interrupted job explicitly.')
+        # The space's share of the install's crawls first (Spaces S2-08): a
+        # space at its share is refused here and never holds a slot another
+        # space's crawl could run in.
+        if share is not None and (kind or (row or {}).get('kind')) != 'research_pipeline' and sum(
+                _a_running_crawl_of(other, space) for key, other in jobs.items() if key != job_id) >= share:
+            raise AcquisitionError(FetchErrorCode.LIMIT, f'This space already runs {share} Knowledge crawls at once, '
+                                   'its share; retry after one finishes.', transient=True)
         if sum(other['status'] == 'running' for other in jobs.values()) >= _MAX_ACTIVE:
             raise AcquisitionError(FetchErrorCode.LIMIT, 'Installation crawl limit reached (four active jobs); retry after a job finishes.', transient=True)
         if (kind or (row or {}).get('kind') or 'site') in _KB_KINDS and any(
@@ -600,6 +610,9 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
                 # Who started it (Spaces S2-11): a resume after a restart
                 # runs as them and is held to their features.
                 row['asker'] = asker
+            if space:
+                # Whose share it runs in (S2-08).
+                row['space'] = space
             jobs[job_id] = row
         elif (row.get('kind', 'site') in _KB_KINDS):
             row.pop('interrupted_by', None)
@@ -613,6 +626,8 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
                     page.update(status='pending', receipt=None, error='')
         if kind is not None:
             row['kind'] = kind
+        if space and not row.get('space'):
+            row['space'] = space
         row.pop('failure', None)
         row.update(status='running', claim=token, owner=owner, install=install, host=host, updated_at=now)
         return row
@@ -989,6 +1004,34 @@ def inspect_jobs(job_id=None):
             'updated_at': row['updated_at']} for row in jobs.values()]
     except _storage_failures() as exc:
         raise _storage_error() from exc
+
+
+def _space_share():
+    """``(space, share)`` a new crawl is counted against: the bound space and
+    how many crawls it may run at once (``spaces.space_limits``), or
+    ``("", None)`` while the install does not enforce Spaces. Blocking (the
+    identity store)."""
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return '', None
+    from kazma_core.spaces.space_limits import share_of
+
+    bound = current_scope()
+    space = bound.space_id if bound is not None else ''
+    return space, share_of('crawls', space)
+
+
+def _a_running_crawl_of(row, space_id):
+    """A running crawl of *space_id*: a research run's journal row is its
+    research run's, counted in that share, never a crawl's."""
+    return (row['status'] == 'running' and row.get('space') == space_id
+            and row.get('kind', 'site') != 'research_pipeline')
+
+
+def running_in(space_id):
+    """How many crawls *space_id* runs now (the journal's rows that name it)."""
+    return sum(1 for row in _read()[1].values() if _a_running_crawl_of(row, space_id))
 
 
 def active_for_library(library_id):

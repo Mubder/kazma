@@ -170,6 +170,9 @@ STORES: dict[str, Store] = {
     "thread_scopes.db": Store(
         "which space each chat thread belongs to and which account opened it "
         "(kazma_core.spaces.threads)", "bundle"),
+    "activity.db": Store(
+        "every change a person made in a space, under their account: the route, the ids in "
+        "its path and the answer, never what was sent (kazma_core.spaces.activity)", "bundle"),
     "vault.db": Store("encrypted secrets", "bundle"),
     "settings.db": Store(
         "settings, workspaces and bookmarks", "settings",
@@ -324,6 +327,8 @@ RETENTION: dict[str, str] = {
     "run_incidents.db": "the run incident retention sweep",
     "thread_scopes.db": "kept while its chat is: one small row of ids per chat thread (no title, "
                         "no text). The chat delete removes it once nothing of the chat is left",
+    "activity.db": "90 days and at most 20,000 rows a space, pruned as rows are written "
+                   "(kazma_core.spaces.activity._prune); a space's rows go with its erase",
     "chat_outbox.db": "the chat outbox retention sweep: settled rows (their text already emptied) "
                       "after 7 days",
     "chat_inbox.db": "the next normal start: a message handed on keeps no text, and rows a week "
@@ -735,6 +740,11 @@ SPACE_RULES: dict[str, SpaceRule] = {
     "thread_scopes.db": SpaceRule(
         "row",
         why="ids only: a thread id, its space and the account that opened it; no content",
+        today="apart"),
+    "activity.db": SpaceRule(
+        "row",
+        why="ids only: a route, the ids in its path, its answer, the space and the account; "
+            "never what was sent",
         today="apart"),
     "run_incidents.db": SpaceRule(
         "row",

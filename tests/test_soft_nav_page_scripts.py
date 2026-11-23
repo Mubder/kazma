@@ -188,7 +188,7 @@ def test_every_template_script_is_classified() -> None:
 def test_soft_nav_calls_head_merge_and_body_inlines() -> None:
     nav = _NAV.read_text(encoding="utf-8")
     assert "function mergePageHead(" in nav
-    assert "function runIncomingBodyScripts(" in nav
+    assert "function runPageScripts(" in nav
     assert "isSoftNavPageScript(src)" in nav
     assert "PAGE_SCRIPT_RE" not in nav
 

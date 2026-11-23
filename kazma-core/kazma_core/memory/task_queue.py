@@ -140,6 +140,16 @@ ROW_NAMED_TASKS: dict[str, tuple[str, str]] = {
     "micro_consolidation": ("episodes", "episode_id"),
     "topic_summary_rebuild": ("memory_summaries", "summary_id"),
 }
+#: The tasks a turn queues for the person it was for (Spaces S2-05/S2-07
+#: second review): they run as that person -- ``asker`` in the payload, else
+#: ``said_by``, else the row's own ``metadata.said_by`` -- never as the
+#: space's maker. Those that call a model (:data:`_PERSON_MODEL_TASKS`)
+#: wait while the person is disabled or past their daily limit, and are not
+#: run for a person who left the space.
+_PERSON_TASKS = frozenset({"post_turn_memory", "micro_consolidation"})
+_PERSON_MODEL_TASKS = frozenset({"micro_consolidation"})
+#: How long a person's task waits before it is asked again.
+_PERSON_WAIT_S = 900.0
 #: * it is the install's own work: whole stores, no space's content.
 INSTALL_TASKS = frozenset({
     "native_backup", "native_pg_backup", "native_pg_offsite", "restic_maintenance",
@@ -155,6 +165,10 @@ class TaskBinding:
     space: str | None = None
     asker: str | None = None
     install: str | None = None
+    #: The person's task waits (put back, no attempt spent): why.
+    wait: str | None = None
+    #: The person's task does not run (done, nothing to do): why.
+    dropped: str | None = None
 
 
 def _task_binding(task_type: str, payload: Any) -> TaskBinding:
@@ -189,7 +203,64 @@ def _task_binding(task_type: str, payload: Any) -> TaskBinding:
         return TaskBinding(install=f"the memory task {task_type}, which names no space")
     from kazma_core.spaces.identity import acting_account
 
+    if task_type in _PERSON_TASKS:
+        person = _person_of(task_type, data)
+        if person:
+            return _persons_binding(task_type, tenant, person)
     return TaskBinding(space=tenant, asker=acting_account(tenant))
+
+
+def _person_of(task_type: str, payload: dict[str, Any]) -> str:
+    """The person a turn's task is for: the payload's ``asker`` (or
+    ``said_by``), else the episode row's ``metadata.said_by``; "" when none
+    is recorded (a task queued before, a turn Kazma reconciled)."""
+    person = str(payload.get("asker") or payload.get("said_by") or "").strip()
+    if person or task_type not in ROW_NAMED_TASKS:
+        return person
+    table, key = ROW_NAMED_TASKS[task_type]
+    row_id = str(payload.get(key) or "")
+    if not row_id or table != "episodes":
+        return ""
+    from kazma_core.paths import primary_memory_db
+
+    conn = sqlite3.connect(primary_memory_db(), timeout=5.0)
+    try:
+        row = conn.execute("SELECT metadata_json FROM episodes WHERE id = ?", (row_id,)).fetchone()
+    finally:
+        conn.close()
+    try:
+        meta = json.loads(row[0]) if row and row[0] else {}
+    except (TypeError, ValueError):
+        return ""
+    return str(meta.get("said_by") or "").strip() if isinstance(meta, dict) else ""
+
+
+def _persons_binding(task_type: str, tenant: str, person: str) -> TaskBinding:
+    """A turn's task bound to the person it was for (Spaces S2-05/S2-07
+    second review): their models and their limit apply to its model calls,
+    which wait while they are disabled or past their daily limit. A person
+    who left the space: the model's work is not run for them, the rest is
+    Kazma's own work for the space (their message stays remembered, N36)."""
+    from kazma_core.spaces.identity import AskerLeft, acting_account, disabled_accounts, work_scope
+
+    try:
+        found = work_scope(tenant, person)
+    except AskerLeft:
+        if task_type in _PERSON_MODEL_TASKS:
+            return TaskBinding(dropped="the person this turn was for is no longer in its space")
+        return TaskBinding(space=tenant, asker=acting_account(tenant))
+    if found is None:
+        return TaskBinding(space=tenant, asker=acting_account(tenant))
+    space, asker = found
+    if task_type in _PERSON_MODEL_TASKS:
+        if asker in disabled_accounts():
+            return TaskBinding(wait="the person this turn was for is disabled")
+        from kazma_core.spaces.daily_limits import verdict
+
+        day = verdict(asker)
+        if day is not None and day.get("over"):
+            return TaskBinding(wait="the person this turn was for reached their daily limit")
+    return TaskBinding(space=space, asker=asker)
 
 
 def _row_tenant(table: str, key: str, payload: dict[str, Any]) -> str | None:
@@ -577,6 +648,14 @@ class _MemoryWorker:
                 except Exception:
                     payload = {}
                 binding = await asyncio.to_thread(_task_binding, task_type, payload)
+                if binding.dropped:
+                    logger.info("[task_queue] %s not run: %s", task_type, binding.dropped)
+                    await asyncio.to_thread(self._ack, task, success=True, error=None)
+                    return
+                if binding.wait:
+                    logger.info("[task_queue] %s waits: %s", task_type, binding.wait)
+                    await asyncio.to_thread(self._put_back, task, binding.wait)
+                    return
                 reasons: list[str] = []
                 reasons_token = _FAILURE_REASONS.set(reasons)
                 try:
@@ -605,6 +684,27 @@ class _MemoryWorker:
             if lane in self._busy:
                 self._busy[lane] = max(0, self._busy[lane] - 1)
                 self._wake.set()  # a slot is free: claim again now
+
+    def _put_back(self, task: dict[str, Any], why: str) -> None:
+        """Put a person's task back without spending an attempt, asked again
+        after :data:`_PERSON_WAIT_S` (they are disabled or past their daily
+        limit: it waits, it did not fail)."""
+        from kazma_core.config_store import apply_sqlite_pragmas
+        from kazma_core.paths import memory_ops_db
+
+        conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
+        try:
+            apply_sqlite_pragmas(conn)
+            now = time.time()
+            conn.execute(
+                """UPDATE memory_task_queue
+                   SET status='pending', updated_at=?, error_log=?, lease_token=NULL, next_attempt_at=?
+                   WHERE id=? AND lease_token=?""",
+                (now, ("waits: " + why)[:1000], now + _PERSON_WAIT_S, task["id"], task.get("lease_token")),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def _ack(self, task: dict[str, Any], *, success: bool, error: str | None,
              outage: bool = False) -> None:

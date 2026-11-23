@@ -578,6 +578,12 @@ class KazmaAppBuilder:
 
         self.app.middleware("http")(create_auth_middleware())
         self.app.middleware("http")(create_tenant_middleware())
+        # Every change a person makes, under their name (Spaces S2-09):
+        # outside the tenant middleware, it reads the space and asker that
+        # middleware bound.
+        from kazma_ui.activity import ActivityRecorder
+
+        self.app.add_middleware(ActivityRecorder)
         # Cross-origin mutation guard (CSRF) — see kazma_ui/csrf.py.
         self.app.middleware("http")(create_csrf_middleware())
         # Sticky-session cookie for multi-replica LB (SSE / in-process state)
@@ -1412,6 +1418,9 @@ class KazmaAppBuilder:
         except Exception as exc:
             logger.warning("[setup] router not available: %s", exc)
         self.app.include_router(settings_router)
+        from kazma_ui.activity import create_activity_router
+
+        self.app.include_router(create_activity_router(self.templates))
         try:
             from kazma_ui.account_spaces_api import create_account_spaces_router
             from kazma_ui.people_api import create_people_router

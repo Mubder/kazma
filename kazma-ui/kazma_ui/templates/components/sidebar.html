@@ -180,6 +180,18 @@
             </span>
             <span class="nav-label">{{ t('nav.replay') }}</span>
         </a>
+        {# Activity (Spaces S2-09): what was done in this space, under each
+           member's name. Only where Spaces is enforced. #}
+        {% if spaces_enforced is defined and spaces_enforced() %}
+        <a href="/activity" class="nav-link {{ 'active' if active_page == 'activity' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.activity') }}</span>
+        </a>
+        {% endif %}
         {% if feature_here is not defined or feature_here('scheduled') %}
         <a href="/scheduled" class="nav-link {{ 'active' if active_page == 'scheduled' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">

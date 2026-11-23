@@ -1319,9 +1319,10 @@ class PostgresDocumentRepository:
             (tenant, tenant, tenant),
         )
         prospective = int(_as_dict(cur.fetchone()).get("total") or 0) + int(blob["byte_size"])
-        if prospective > self._tenant_quota_bytes:
+        quota = _space_quota(tenant, self._tenant_quota_bytes)
+        if prospective > quota:
             raise ValueError(
-                f"tenant blob quota exceeded: {prospective} > {self._tenant_quota_bytes}"
+                f"tenant blob quota exceeded: {prospective} > {quota}"
             )
 
     def tenant_referenced_blob_bytes(self, *, tenant_id: str) -> int:
@@ -1604,3 +1605,12 @@ def resolve_document_repository(
             exc,
         )
         return sqlite_repo
+
+
+def _space_quota(tenant_id: str, install_value: int) -> int:
+    """A tenant's documents quota: its space's own limit once Spaces is
+    enforced (Spaces S2-08, ``spaces.space_limits``), else the install's one
+    value for every tenant (``documents.quotas.tenant_bytes``), as before."""
+    from kazma_core.spaces.space_limits import documents_bytes
+
+    return documents_bytes(tenant_id, install_value)

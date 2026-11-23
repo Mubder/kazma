@@ -114,4 +114,8 @@ def build_client(
 
     extra = _EXTRA_KWARGS.get(style)
     kwargs = extra(entry or {}) if extra else {}
-    return _resolve(style)(config, **kwargs)
+    client = _resolve(style)(config, **kwargs)
+    # The provider row it was built for: a model call is judged by
+    # ``provider:model`` (Spaces S2-03, ``LLMProvider._refuse_a_model_not_allowed``).
+    client.provider_name = provider_name
+    return client

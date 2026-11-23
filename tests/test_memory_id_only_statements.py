@@ -136,6 +136,8 @@ DECLARED: dict[tuple[str, str], tuple[int, str]] = {
     (f"{_MEMORY}topic_summaries.py", "prepare"): (1, _ROW_NAMED),
     (f"{_MEMORY}topic_summaries.py", "queue_due_work"): (1, _KAZMA_SWEEP),
     (f"{_MEMORY}turn_reconcile.py", "_set_aside"): (1, _KAZMA_SWEEP),
+    (f"{_MEMORY}task_queue.py", "_person_of"): (
+        1, _ROW_NAMED + "; it reads the speaker the row recorded, to bind the task to its person"),
     (f"{_MEMORY}worker_bootstrap.py", "_apply_if_still_remembered"): (1, _ROW_NAMED),
     (f"{_MEMORY}worker_bootstrap.py", "_mark_deep_pass"): (1, _ROW_NAMED),
     (f"{_MEMORY}worker_bootstrap.py", "_micro_consolidation_prepare"): (1, _ROW_NAMED),

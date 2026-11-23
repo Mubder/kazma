@@ -294,10 +294,24 @@ export function initSoftNav() {
     }
 
     /**
-     * Load only page bundles (settings.js, agents.js, …) in order.
-     * Skips importmap, ES modules, Alpine, HTMX, icons.
+     * Run the incoming page's scripts in the order the page has them, as a
+     * page load does: its bundles (settings.js, agents.js, …; importmap, ES
+     * modules, Alpine, HTMX and icons are the shell's) and its inline
+     * scripts, each where it stands.
+     *
+     * Pages put their words inline before the script that reads them
+     * (chat.html's CHAT_I18N before chat.js, the Dashboard's __DASH_I18N,
+     * Knowledge's __KB_STRINGS, Memory's __MEM_STRINGS). Every bundle used
+     * to run first and every inline script after, so a script painting at
+     * once read an empty table: English on an Arabic page reached by the
+     * sidebar (Spaces S2-05 review, 2026-11-22).
+     *
+     * *root* is the swapped-in element (.page-body, else #main-content), and
+     * *rootSelector* finds it in *doc*: an inline script inside it is run
+     * where it stands in the page (the swap left an inert copy there), one
+     * elsewhere in the body is added to the body; the head's are the shell's.
      */
-    async function reinjectPageScripts(doc) {
+    async function runPageScripts(doc, root, rootSelector) {
         document.querySelectorAll('script[data-kazma-page-script]').forEach((el) => el.remove());
 
         // Refresh i18n from the new page
@@ -313,39 +327,58 @@ export function initSoftNav() {
         }
 
         // In the page's own order: a shared script comes before the page
-        // script that uses it (chat.html: turn modules, then chat.js).
-        const scripts = Array.from(doc.querySelectorAll('script')).filter((s) => {
-            const src = s.getAttribute('src') || '';
-            const type = (s.getAttribute('type') || '').toLowerCase();
-            if (!src) return false;
-            if (type === 'module' || type === 'importmap') return false;
-            if (isGlobalLib(src)) return false;
-            if (s.hasAttribute('data-kazma-page-script') || s.hasAttribute('data-page-script')) return true;
-            return isSoftNavPageScript(src) || isSoftNavSharedScript(src);
-        });
-
-        for (const s of scripts) {
-            const src = s.getAttribute('src') || '';
-            const explicitPage = s.hasAttribute('data-kazma-page-script') || s.hasAttribute('data-page-script');
-            if (!explicitPage && isSoftNavSharedScript(src)) {
-                // Once per version: shared machinery keeps its state and
-                // listeners from page to page, as after a full load.
-                const key = scriptKey(src);
-                if (loadedShared.has(key)) continue;
-                loadedShared.add(key);
-                if (!(await loadScript(src, 'data-kazma-shared-script'))) loadedShared.delete(key);
+        // script that uses it (chat.html: turn modules, then chat.js), and
+        // the page's inline data before the script that reads it.
+        const docRoot = rootSelector ? doc.querySelector(rootSelector) : null;
+        const inert = root ? Array.from(root.querySelectorAll('script')).filter(isRunnableInline) : [];
+        let nextInert = 0;
+        for (const s of Array.from(doc.querySelectorAll('script'))) {
+            if (!s.getAttribute('src')) {
+                if (!isRunnableInline(s)) continue;
+                if (docRoot && docRoot.contains(s)) {
+                    const copy = inert[nextInert++];
+                    if (copy) rerunInline(copy, copy);
+                } else if (doc.body && doc.body.contains(s)) {
+                    rerunInline(s, null);
+                }
                 continue;
             }
-            // Monaco / mermaid are sticky globals — reloading them mid-session
-            // resets the constructor. Skip if the previous page already loaded them.
-            if (/monaco-editor/i.test(src) && window.monaco) continue;
-            if (/codemirror/i.test(src) && window.CodeMirror) continue;
-            if (/mermaid\.min/i.test(src) && window.mermaid) continue;
-            const fullSrc = src.includes('?')
-                ? src + '&_sn=' + Date.now()
-                : src + '?_sn=' + Date.now();
-            await loadScript(fullSrc, 'data-kazma-page-script');
+            if (isPageBundle(s)) await runPageBundle(s);
         }
+    }
+
+    /** A script the page brings and soft navigation runs: not the shell's. */
+    function isPageBundle(s) {
+        const src = s.getAttribute('src') || '';
+        const type = (s.getAttribute('type') || '').toLowerCase();
+        if (!src) return false;
+        if (type === 'module' || type === 'importmap') return false;
+        if (isGlobalLib(src)) return false;
+        if (s.hasAttribute('data-kazma-page-script') || s.hasAttribute('data-page-script')) return true;
+        return isSoftNavPageScript(src) || isSoftNavSharedScript(src);
+    }
+
+    async function runPageBundle(s) {
+        const src = s.getAttribute('src') || '';
+        const explicitPage = s.hasAttribute('data-kazma-page-script') || s.hasAttribute('data-page-script');
+        if (!explicitPage && isSoftNavSharedScript(src)) {
+            // Once per version: shared machinery keeps its state and
+            // listeners from page to page, as after a full load.
+            const key = scriptKey(src);
+            if (loadedShared.has(key)) return;
+            loadedShared.add(key);
+            if (!(await loadScript(src, 'data-kazma-shared-script'))) loadedShared.delete(key);
+            return;
+        }
+        // Monaco / mermaid are sticky globals — reloading them mid-session
+        // resets the constructor. Skip if the previous page already loaded them.
+        if (/monaco-editor/i.test(src) && window.monaco) return;
+        if (/codemirror/i.test(src) && window.CodeMirror) return;
+        if (/mermaid\.min/i.test(src) && window.mermaid) return;
+        const fullSrc = src.includes('?')
+            ? src + '&_sn=' + Date.now()
+            : src + '?_sn=' + Date.now();
+        await loadScript(fullSrc, 'data-kazma-page-script');
     }
 
     /**
@@ -543,56 +576,37 @@ export function initSoftNav() {
         });
     }
 
-    function runIncomingBodyScripts(doc) {
-        // {% block scripts %} lives after .page-body. Re-run those inlines
-        // (hash deep-links, page I18N) that runInlinePageScripts never sees.
-        if (!doc.body) return;
-        const scripts = Array.from(doc.body.querySelectorAll('script')).filter((s) => {
-            if (s.getAttribute('src')) return false;
-            if (s.closest('.page-body')) return false;
-            const type = (s.getAttribute('type') || '').toLowerCase();
-            if (type && type !== 'text/javascript' && type !== 'application/javascript') {
-                return false;
-            }
-            const text = (s.textContent || '').trim();
-            if (!text) return false;
-            if (text.includes('window.KAZMA_I18N')) return false;
-            return true;
-        });
-        for (const s of scripts) {
-            try {
-                const ns = document.createElement('script');
-                ns.textContent = s.textContent;
-                ns.setAttribute('data-kazma-inline-rerun', '1');
-                document.body.appendChild(ns);
-            } catch (e) {
-                console.warn('[soft-nav] body inline script re-run failed:', e);
-            }
+    /** An inline script soft navigation runs again: JavaScript with a
+     *  body, never the shell's i18n bootstrap (marked
+     *  ``data-kazma-i18n-bootstrap``: KAZMA_I18N is refreshed from its inert
+     *  JSON instead). A page's own merge into KAZMA_I18N runs again, after
+     *  the refresh (research.html's words: excluded by its text, it never
+     *  ran again and the refresh wiped it, so the Research page reached by
+     *  the sidebar fell back to English). */
+    function isRunnableInline(s) {
+        if (s.getAttribute('src')) return false;
+        if (s.getAttribute('data-kazma-i18n-bootstrap') !== null) return false;
+        const type = (s.getAttribute('type') || '').toLowerCase();
+        if (type && type !== 'text/javascript' && type !== 'application/javascript') {
+            return false;
         }
+        const text = (s.textContent || '').trim();
+        if (!text) return false;
+        return true;
     }
 
-    function runInlinePageScripts(root) {
-        if (!root) return;
-        const scripts = Array.from(root.querySelectorAll('script')).filter((s) => {
-            if (s.getAttribute('src')) return false;
-            const type = (s.getAttribute('type') || '').toLowerCase();
-            if (type && type !== 'text/javascript' && type !== 'application/javascript') {
-                return false;
-            }
-            const text = (s.textContent || '').trim();
-            if (!text) return false;
-            if (text.includes('window.KAZMA_I18N')) return false;
-            return true;
-        });
-        for (const s of scripts) {
-            try {
-                const ns = document.createElement('script');
-                ns.textContent = s.textContent;
-                ns.setAttribute('data-kazma-inline-rerun', '1');
-                s.replaceWith(ns);
-            } catch (e) {
-                console.warn('[soft-nav] inline script re-run failed:', e);
-            }
+    /** Run inline script *s* again: in place of *where* (the swap's inert
+     *  copy), else added to the body (the {% block scripts %} after
+     *  .page-body, which the swap does not bring). */
+    function rerunInline(s, where) {
+        try {
+            const ns = document.createElement('script');
+            ns.textContent = s.textContent;
+            ns.setAttribute('data-kazma-inline-rerun', '1');
+            if (where) where.replaceWith(ns);
+            else document.body.appendChild(ns);
+        } catch (e) {
+            console.warn('[soft-nav] inline script re-run failed:', e);
         }
     }
 
@@ -657,9 +671,7 @@ export function initSoftNav() {
                     if (doc.title) document.title = doc.title;
                     window.scrollTo(0, 0);
                     mergePageHead(doc);
-                    await reinjectPageScripts(doc);
-                    runInlinePageScripts(oldMain);
-                    runIncomingBodyScripts(doc);
+                    await runPageScripts(doc, oldMain, '#main-content');
                     if (gen !== softNavGeneration) return;
                     await bindPageAlpine(oldMain, gen);
                     hydrateIcons(oldMain);
@@ -674,9 +686,7 @@ export function initSoftNav() {
                     window.scrollTo(0, 0);
 
                     mergePageHead(doc);
-                    await reinjectPageScripts(doc);
-                    runInlinePageScripts(oldBody);
-                    runIncomingBodyScripts(doc);
+                    await runPageScripts(doc, oldBody, '.page-body');
                     if (gen !== softNavGeneration) return;
 
                     await bindPageAlpine(oldBody, gen);

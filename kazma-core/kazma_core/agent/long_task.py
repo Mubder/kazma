@@ -9,7 +9,11 @@ Resolution order for a turn:
   3. Safe defaults (15 / 100)
 
 ConfigStore keys:
-  - ``long_task.{thread_id}`` — per-chat enable payload
+  - ``long_task.{holder}`` — per-chat enable payload: the chat's thread id,
+    and once Spaces is enforced the person too (``<thread>~<account>``,
+    ``safety.grant_holder.holder``): one member's ``/long`` or
+    ``/unrestricted`` -- and the YOLO window it slides -- is theirs alone
+    (the Spaces S2-05 review)
   - ``agent.max_iterations`` — baseline when long-task is OFF (Settings)
   - ``agent.long_task.default_enabled`` — optional default ON for new chats
   - ``agent.long_task.default_preset`` — chat|deep|research
@@ -178,6 +182,16 @@ def mission_recursion_limit() -> int:
     return min(_MAX_MISSION_RECURSION, max(500, mission_hard_rounds() * 5))
 
 
+def _record_key(thread_id: str | None) -> str:
+    """The settings key of *thread_id*'s long-task record for the person
+    bound now (``safety.grant_holder.holder``); ``""`` for none (no chat, or
+    Spaces enforced and nobody bound: no record is made or read)."""
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id)
+    return f"long_task.{key_holder}" if key_holder else ""
+
+
 def enable_long_task(
     thread_id: str,
     *,
@@ -290,7 +304,11 @@ def enable_long_task(
         # on the first task after /long (the turn that should benefit).
         "remaining_turns": turns,
     }
-    get_config_store().set(f"long_task.{thread_id}", payload, category="agent")
+    key = _record_key(thread_id)
+    if not key:
+        # Spaces enforced and nobody bound: a budget for no one is not made.
+        return long_task_status(thread_id)
+    get_config_store().set(key, payload, category="agent")
     record_long_task_event("enable_mission" if mode_key == "mission" else "enable")
     logger.info(
         "[long_task] ENABLED thread=%s actor=%s mode=%s preset=%s max_iter=%s "
@@ -310,7 +328,9 @@ def enable_long_task(
 def disable_long_task(thread_id: str, *, actor: str = "unknown") -> None:
     from kazma_core.config_store import get_config_store
 
-    get_config_store().delete(f"long_task.{thread_id}")
+    key = _record_key(thread_id)
+    if key:
+        get_config_store().delete(key)
     record_long_task_event("disable")
     logger.info("[long_task] DISABLED thread=%s actor=%s", thread_id, actor)
 
@@ -342,8 +362,11 @@ def consume_long_task_turn(thread_id: str | None) -> str | None:
     try:
         from kazma_core.config_store import get_config_store
 
+        key = _record_key(thread_id)
+        if not key:
+            return None
         cs = get_config_store()
-        raw = cs.get(f"long_task.{thread_id}")
+        raw = cs.get(key)
         if not raw or not isinstance(raw, dict) or not raw.get("enabled"):
             return None
         # Paused after a Partial — no turns are eaten while idle; a later
@@ -356,7 +379,7 @@ def consume_long_task_turn(thread_id: str | None) -> str | None:
             if expires is not None:
                 try:
                     if time.time() > float(expires):
-                        cs.delete(f"long_task.{thread_id}")
+                        cs.delete(key)
                         logger.info(
                             "[long_task] UNRESTRICTED EXPIRED thread=%s (inactivity TTL)",
                             thread_id[:12],
@@ -372,7 +395,7 @@ def consume_long_task_turn(thread_id: str | None) -> str | None:
             if ttl > 0:
                 new_expiry = time.time() + ttl
                 raw["expires_at"] = new_expiry
-                cs.set(f"long_task.{thread_id}", raw, category="agent")
+                cs.set(key, raw, category="agent")
                 try:
                     from kazma_core.safety.yolo import slide_yolo_expiry
 
@@ -390,14 +413,14 @@ def consume_long_task_turn(thread_id: str | None) -> str | None:
         # after enable must still receive the raised budget. Expire only when
         # a *new* turn arrives and no slots remain.
         if remaining <= 0:
-            cs.delete(f"long_task.{thread_id}")
+            cs.delete(key)
             logger.info(
                 "[long_task] EXPIRED thread=%s (turn-count exhausted at consume)",
                 thread_id[:12],
             )
             return None
         raw["remaining_turns"] = remaining - 1
-        cs.set(f"long_task.{thread_id}", raw, category="agent")
+        cs.set(key, raw, category="agent")
         logger.info(
             "[long_task] turn consumed thread=%s remaining_turns=%d",
             thread_id[:12], remaining - 1,
@@ -419,7 +442,8 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
     from kazma_core.config_store import get_config_store
 
     cs = get_config_store()
-    raw = cs.get(f"long_task.{thread_id}")
+    key = _record_key(thread_id)
+    raw = cs.get(key) if key else None
     if not raw or not isinstance(raw, dict) or not raw.get("enabled"):
         return {
             "active": False,
@@ -432,7 +456,7 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
     if expires is not None:
         try:
             if time.time() > float(expires):
-                cs.delete(f"long_task.{thread_id}")
+                cs.delete(key)
                 logger.info("[long_task] EXPIRED thread=%s (TTL)", thread_id)
                 return {
                     "active": False,
@@ -748,14 +772,17 @@ def pause_long_task(thread_id: str | None, *, reason: str = "budget_exhausted") 
         return
     from kazma_core.config_store import get_config_store
 
+    key = _record_key(thread_id)
+    if not key:
+        return
     cs = get_config_store()
-    raw = cs.get(f"long_task.{thread_id}")
+    raw = cs.get(key)
     if not isinstance(raw, dict) or not raw.get("enabled") or raw.get("paused"):
         return
     raw["paused"] = True
     raw["paused_reason"] = reason
     raw["paused_at"] = time.time()
-    cs.set(f"long_task.{thread_id}", raw, category="agent")
+    cs.set(key, raw, category="agent")
     record_long_task_event("task_paused")
     logger.info(
         "[long_task] PAUSED thread=%s reason=%s", thread_id[:12], reason

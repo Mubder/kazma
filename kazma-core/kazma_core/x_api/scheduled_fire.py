@@ -20,6 +20,7 @@ must review and reschedule them; restart never silently catches up a campaign.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 
 from kazma_core.x_api import config as _config
@@ -129,13 +130,14 @@ async def _fire_post(post: ScheduledXPost) -> None:
     from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
 
     if spaces_enforced():
-        from kazma_core.spaces.features import FeatureOff
+        from kazma_core.spaces.features import FeatureOff, ToolOff
         from kazma_core.spaces.identity import IdentityUnavailable
         from kazma_core.x_api.ownership import x_work_scope
 
         try:
-            scope = await asyncio.to_thread(x_work_scope, post.tenant_id)
-        except FeatureOff:
+            scope = await asyncio.to_thread(
+                functools.partial(x_work_scope, post.tenant_id, tool="x_schedule_post"))
+        except (FeatureOff, ToolOff):
             # The person it is for no longer has X Studio (Spaces S2-11):
             # still pending, nothing failed; it goes once the feature is on.
             logger.info("[x-schedule] post %s waits: X Studio is off for the person it is for", post.id)

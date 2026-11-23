@@ -199,6 +199,10 @@ async def gate_pending_from_payload(
             mechanism=mechanism,
             kind=str(payload.get("kind") or "security"),
             tool=tool,
+            # Whose card it is: the turn's asker, which the graph names on
+            # the card once Spaces is enforced (S2-05) -- never whoever this
+            # registration happens to run for.
+            asker=str(payload.get("asker") or ""),
             # Whole and real: register_gate keeps them as a card shows them
             # and their digest, and bounds what it keeps (a JSON text cut
             # before it is masked no longer parses, and its secrets stay).
@@ -254,6 +258,8 @@ async def gate_claimed(
             create = GateRow(
                 gate_id=gid or _alias_for(thread_id, tool, src.get("args") or {}),
                 thread_id=thread_id,
+                # The card's own asker (S2-05), never the person answering.
+                asker=str(src.get("asker") or ""),
                 tool=tool or str(src.get("tool") or ""),
                 kind=str(src.get("kind") or "security"),
                 message=str(src.get("message") or ""),
@@ -492,7 +498,14 @@ def gate_row_to_pending_item(row: Any) -> dict[str, Any]:
         # process and has only its tenant to be recognised by.
         "mechanism": str(getattr(row, "mechanism", "") or "graph"),
         "tenant_id": str(getattr(row, "tenant_id", "") or ""),
+        # Whose card it is and the tools it asks about: who may answer it
+        # is decided from them (Spaces S2-05, kazma_ui.hitl_answerers).
+        "asker": str(getattr(row, "asker", "") or payload.get("asker") or ""),
+        "tools": [t for t in payload.get("tools") or () if isinstance(t, (dict, str))],
     }
+    if isinstance(payload.get("answered_by"), list):
+        item["answered_by"] = list(payload["answered_by"])
+        item["answered_by_names"] = list(payload.get("answered_by_names") or [])
     # Countdown surface: an unattended card auto-denies at the watchdog
     # deadline — show it counting down instead of dropping silently.
     try:

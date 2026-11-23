@@ -8,7 +8,7 @@ since 2026-09-27 (``tests/test_memory_routes_tenant_scope.py``). The matrix
 makes it the rule for every part.
 
 This is the harness, and it starts empty. ``tests/_space_matrix.py`` holds
-the tables; each later item of stage 1 adds its cases there. The gate:
+the tables; each later item adds its cases there. The gate:
 
 * every route of the built app that the route table classes ``space`` has a
   case, or is pending under the plan item that will write it;
@@ -95,9 +95,10 @@ def matrix(monkeypatch) -> Matrix:
 
 
 def plan_items(text: str | None = None) -> set[str]:
-    """The item ids of the plan's stage 1, read from its table."""
+    """The item ids of the plan's stages, read from their tables (stage 2's
+    items add cases too: S2-09's activity)."""
     text = PLAN.read_text(encoding="utf-8") if text is None else text
-    return set(re.findall(r"^\|\s*(S1-\d\d)\s*\|", text, flags=re.MULTILINE))
+    return set(re.findall(r"^\|\s*(S\d-\d\d)\s*\|", text, flags=re.MULTILINE))
 
 
 # ── the checks ───────────────────────────────────────────────────────────
@@ -150,12 +151,12 @@ def stale(routes: list[str], tools: list[str], t: Tables) -> list[str]:
 
 
 def unknown_items(items: set[str], t: Tables) -> list[str]:
-    """Item ids the plan's stage 1 does not have."""
+    """Item ids the plan does not have."""
     named = [(c.item, f"the case of {target}") for target, c in t.cases.items()]
     named += [(item, f"the pending rule {pattern!r}") for pattern, item in t.route_rules]
     named += [(item, f"the pending tool {target}") for target, item in t.tools.items()]
     return sorted(
-        f"{where} names {item}, which is not an item of stage 1"
+        f"{where} names {item}, which is not an item of the plan"
         for item, where in named
         if item not in items
     )
@@ -214,9 +215,9 @@ def test_nothing_in_the_matrix_is_stale(routes, tools, live) -> None:
     assert all(len(reason) > 30 for reason in NOT_IN_THE_MATRIX.values())
 
 
-def test_every_item_named_is_an_item_of_stage_one(live) -> None:
+def test_every_item_named_is_an_item_of_the_plan(live) -> None:
     items = plan_items()
-    assert {"S1-01", "S1-29", "S1-34"} <= items, "the plan's stage 1 table was not read"
+    assert {"S1-01", "S1-29", "S1-34", "S2-09"} <= items, "the plan's tables were not read"
     assert unknown_items(items, live) == []
 
 
@@ -526,17 +527,17 @@ def test_a_stale_route_rule_is_reported(routes, tools, live) -> None:
 def test_an_item_the_plan_does_not_have_is_reported(live) -> None:
     items = plan_items()
     assert unknown_items(items, replace(live, tools={**live.tools, "tool:memory_search": "S1-99"})) == [
-        "the pending tool tool:memory_search names S1-99, which is not an item of stage 1"
+        "the pending tool tool:memory_search names S1-99, which is not an item of the plan"
     ]
     assert unknown_items(
-        items, replace(live, route_rules=(*live.route_rules, ("/api/planted", "S2-05")))
-    ) == ["the pending rule '/api/planted' names S2-05, which is not an item of stage 1"]
+        items, replace(live, route_rules=(*live.route_rules, ("/api/planted", "S9-05")))
+    ) == ["the pending rule '/api/planted' names S9-05, which is not an item of the plan"]
     assert unknown_items(
-        items, replace(live, cases={**live.cases, "tool:memory_search": _planted_case("tool:memory_search", "S4-01")})
-    ) == ["the case of tool:memory_search names S4-01, which is not an item of stage 1"]
+        items, replace(live, cases={**live.cases, "tool:memory_search": _planted_case("tool:memory_search", "S9-01")})
+    ) == ["the case of tool:memory_search names S9-01, which is not an item of the plan"]
     # The ids come from the plan's own table.
     assert plan_items("| S1-01 | x |\n| S1-02 | y |\ntext S1-77 in a sentence\n| S2-01 | z |") == {
-        "S1-01", "S1-02",
+        "S1-01", "S1-02", "S2-01",
     }
 
 

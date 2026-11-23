@@ -689,27 +689,36 @@ def standing_approval(thread_id: str | None, tool_name: str) -> str | None:
     settings read: async callers use ``asyncio.to_thread``.
     """
     from kazma_core.safety.unasked import BY_TASK_GRANT, BY_TOOL_GRANT, BY_YOLO
+    from kazma_core.spaces.approvals import approvers_now
 
     if not thread_id:
         return None
-    try:
-        from kazma_core.safety.yolo import is_yolo_active
+    # A person whose cards go to approvers (N4): only a standing approval an
+    # approver made holds, read now (the S2-05 second review: YOLO or a grant
+    # they made before the admin set approvers kept skipping their cards).
+    only_by = approvers_now()
 
-        if is_yolo_active(thread_id):
+    def made_by_an_approver(by: str) -> bool:
+        return only_by is None or by in only_by
+
+    try:
+        from kazma_core.safety.yolo import is_yolo_active, yolo_by
+
+        if is_yolo_active(thread_id) and made_by_an_approver(yolo_by(thread_id)):
             return BY_YOLO
     except Exception as exc:
         logger.warning("YOLO check failed in requires_approval: %s", exc)
     try:
-        from kazma_core.safety.task_grants import has_task_grant
+        from kazma_core.safety.task_grants import has_task_grant, task_grant_by
 
-        if has_task_grant(thread_id):
+        if has_task_grant(thread_id) and made_by_an_approver(task_grant_by(thread_id)):
             return BY_TASK_GRANT
     except Exception as exc:
         logger.debug("Task grant check failed in requires_approval: %s", exc)
     try:
-        from kazma_core.safety.hitl_grants import has_tool_grant
+        from kazma_core.safety.hitl_grants import has_tool_grant, tool_grant_by
 
-        if has_tool_grant(thread_id, tool_name):
+        if has_tool_grant(thread_id, tool_name) and made_by_an_approver(tool_grant_by(thread_id, tool_name)):
             return BY_TOOL_GRANT
     except Exception as exc:
         logger.warning("Tool grant check failed in requires_approval: %s", exc)

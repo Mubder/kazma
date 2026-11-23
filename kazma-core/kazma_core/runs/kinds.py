@@ -103,6 +103,7 @@ KINDS: dict[str, KindSpec] = {spec.kind: spec for spec in (
 
 #: Tables holding a status or state column that are not runs, with why.
 NOT_RUNS: dict[str, str] = {
+    "activity": "a space's record of finished actions: its status is the answer's HTTP status, not work",
     "commitments": "commitment-layer decisions about one tool call, settled inside its turn",
     "entity_merges": "memory entity merge records (a ledger, not work)",
     "entity_merges_archive": "archived memory entity merge records",

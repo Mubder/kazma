@@ -106,6 +106,11 @@ A password reset is never silent: it is recorded in the identity store's
 record, which cannot be edited without the edit showing, and the person is
 told the next time they open Kazma.
 
+People shows each person whole: their features, tools, daily limit and
+models, the spaces they are a member of, when they last signed in and how
+many sessions they have open. Ending their sessions signs them out on every
+device; it is recorded, and they are told the next time they sign in.
+
 ## A daily limit per person
 
 Your friends use your model keys, so each person but you has a daily
@@ -141,6 +146,36 @@ Development. A new person starts with chat and its memory, documents,
 knowledge, the web, research, and images and voice; the rest is off until
 you turn it on. Grants are per person, in a shared space too, and only you
 make them.
+
+## Limits per space
+
+One space at its limit does not slow or stop another. Each space has its
+own limits beside the install's:
+
+- **Work running at once.** A space runs at most its share of the
+  install's slots: by default 2 of the 4 Knowledge crawls, 2 of the 4
+  research runs and 5 of the 10 swarm tasks, so two spaces at their limit
+  still leave each other room. Work past its share is refused at once and
+  can be started again when one ends; it never waits in the install's
+  queue.
+- **Storage.** The files in the space's own folder (2 GiB by default), its
+  documents (10 GiB) and its Knowledge libraries (256 MiB). A space at one
+  of these takes no more of it -- an upload, a saved file, a generated
+  image, a new document or library page is refused with the reason -- and
+  everything it holds stays. Your own space keeps the install's folders and
+  has no files limit.
+
+Settings → People shows each space's usage beside its limits (counts and
+sizes, never what it holds), and sets the limits for spaces and, for any
+space, limits of its own. Each change is recorded.
+
+## Activity
+
+Every change made in a space -- a message sent, a document moved, a
+setting saved, an approval answered -- is recorded under the name of the
+person who made it: when, who, which action and whether it was done.
+What was sent is never kept there. The members of a space see its record on
+the Activity page; nobody else does, you included. It is kept for 90 days.
 
 A feature that is off is gone for that person: no menu entry, its pages
 say it is off, its routes and live voice refuse, its chat commands refuse,

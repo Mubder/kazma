@@ -60,7 +60,8 @@ def _not_theirs(approval_id: str) -> bool:
     from kazma_core.swarm.single_operator import answered_by_caller
 
     space, asker = shared_approvals.whose(approval_id)
-    return not answered_by_caller(space, asker or None)
+    tool = str((shared_approvals.get(approval_id) or {}).get("tool") or "")
+    return not answered_by_caller(space, asker or None, (tool,) if tool else ())
 
 
 def register_approval_routes(router: APIRouter) -> None:
@@ -84,20 +85,27 @@ def register_approval_routes(router: APIRouter) -> None:
         if decision not in ("approve", "deny"):
             return JSONResponse({"ok": False, "error": "bad_decision"}, status_code=422)
         approval_id = valid_approval_id(approval_id)
-        if _not_this_spaces(shared_approvals.describe(approval_id)):
-            return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
-        from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_core.spaces.scope import spaces_enforced
 
-        try:
-            not_theirs = _not_theirs(approval_id)
-        except IdentityUnavailable:
-            # Who the request is for cannot be read: try again, never a 500
-            # (Spaces S1-16 follow-up). The request stays pending.
-            logger.warning("[SwarmApproval] who %s is for cannot be read; the decision waits", approval_id)
-            return JSONResponse({"ok": False, "error": "identity_unavailable"}, status_code=503,
-                                headers={"Retry-After": "5"})
-        if not_theirs:
-            return JSONResponse({"ok": False, "error": "not_yours"}, status_code=403)
+        # The request is read for its space and person only where Spaces is
+        # enforced (the S2-05 review): an install that does not enforce it
+        # decides as before Spaces.
+        if spaces_enforced():
+            if _not_this_spaces(shared_approvals.describe(approval_id)):
+                return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+            from kazma_core.spaces.identity import IdentityUnavailable
+
+            try:
+                not_theirs = _not_theirs(approval_id)
+            except IdentityUnavailable:
+                # Who the request is for cannot be read: try again, never a
+                # 500 (Spaces S1-16 follow-up). The request stays pending.
+                logger.warning("[SwarmApproval] who %s is for cannot be read; the decision waits",
+                               approval_id)
+                return JSONResponse({"ok": False, "error": "identity_unavailable"}, status_code=503,
+                                    headers={"Retry-After": "5"})
+            if not_theirs:
+                return JSONResponse({"ok": False, "error": "not_yours"}, status_code=403)
         actor = _actor(request)
         decided = shared_approvals.decide_from_web(approval_id, decision == "approve", actor=actor)
         if decided is None:

@@ -126,6 +126,7 @@ CASE_MODULES: tuple[str, ...] = (
     "tests._github_space_cases", "tests._document_space_cases",  # S1-12
     "tests._vault_space_cases", "tests._files_space_cases",
     "tests._host_tools_space_cases", "tests._runs_space_cases", "tests._traces_space_cases",
+    "tests._activity_space_cases",
 )
 
 

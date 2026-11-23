@@ -2341,7 +2341,14 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: chatSessionId }),
           credentials: 'same-origin',
-        }).then(function() {}).catch(function() { /* best-effort */ });
+        }).then(function(r) {
+          return r.ok ? r.json() : null;
+        }).then(function(body) {
+          // Another member's turn: the server says whose (Spaces).
+          if (body && body.refused && body.message && window.showToast) {
+            window.showToast(String(body.message), 'error', 5000);
+          }
+        }).catch(function() { /* best-effort */ });
       }
     } catch (e) { /* best-effort */ }
     forceEndTurn();
@@ -2896,6 +2903,13 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: chatSessionId || '' }),
           credentials: 'same-origin',
+        }).then(function(r) {
+          return r.ok ? r.json() : null;
+        }).then(function(body) {
+          // Another member's turn: the server says whose (Spaces).
+          if (body && body.ok === false && body.message && window.showToast) {
+            window.showToast(String(body.message), 'error', 5000);
+          }
         }).catch(function() { /* best-effort */ });
         forceEndTurn();
         return;
@@ -2960,7 +2974,10 @@
             }
             return;
           }
-          if (body.reason && window.showToast) {
+          // A refusal carries its own line (whose turn it is, Spaces).
+          if (body.message && window.showToast) {
+            window.showToast(String(body.message), 'error', 5000);
+          } else if (body.reason && window.showToast) {
             window.showToast(tiFmt('steer_failed', 'Steer failed: {reason}', { reason: body.reason }), 'error', 3500);
           }
           return;
@@ -5912,6 +5929,60 @@
    * idempotency skip let the first live card on the page eat every later
    * approval (2026-09-02, three watchdog auto-denials in a row).
    */
+  /**
+   * Spaces S2-05: a card goes to the people it asks (`answered_by`, which the
+   * server sends only on an install that enforces Spaces). Anyone else
+   * watching the chat sees it waiting, with no buttons; the server refuses
+   * their answer too. Returns the names it waits for, or '' when the person
+   * looking may answer it (or the card names nobody, or the page does not
+   * know its account: the server decides).
+   */
+  function _hitlWaitingFor(data, mine) {
+    var by = data && Array.isArray(data.answered_by) ? data.answered_by : null;
+    if (!by || !by.length || !mine) return '';
+    if (by.indexOf(mine) !== -1) return '';
+    var names = (Array.isArray(data.answered_by_names) ? data.answered_by_names : [])
+      .map(function (n) { return String(n || '').trim(); })
+      .filter(function (n) { return n; });
+    return names.length ? names.join(', ') : '\u2026';
+  }
+
+  /** The line a waiting card shows instead of its buttons. The base
+   *  catalog (window.kazmaT) first: it is there from the tab's first page,
+   *  and a sidebar navigation runs chat.js before the page's CHAT_I18N, so
+   *  a card painted from history at once read English on an Arabic page. */
+  function _hitlWaitingHtml(names) {
+    var english = 'Waiting for {names} to answer';
+    var line = (typeof window !== 'undefined' && typeof window.kazmaT === 'function')
+      ? window.kazmaT('chat.hitl_waiting_for', english, { names: '\u0001' })
+      : tiFmt('hitl_waiting_for', english, { names: '\u0001' });
+    return '<span class="hitl-status hitl-waiting-for">' +
+      escapeHtml(line).replace('\u0001', '<bdi translate="no">' + escapeHtml(names) + '</bdi>') +
+      '</span>';
+  }
+
+  /** Hide and disable a card's buttons and say who it waits for. */
+  function _markHitlWaiting(card, names) {
+    if (!card || !names) return;
+    var act = card.querySelector('.hitl-approval-actions');
+    if (!act) return;
+    Array.prototype.forEach.call(act.querySelectorAll('button'), function (b) {
+      // `hidden` alone loses to `.btn`'s display: the style is what hides it.
+      b.hidden = true;
+      b.style.display = 'none';
+      b.disabled = true;
+    });
+    act.insertAdjacentHTML('beforeend', _hitlWaitingHtml(names));
+    try { card.setAttribute('data-hitl-waiting', '1'); } catch (eW) { /* ignore */ }
+  }
+
+  function _pageAccount() {
+    try {
+      var accountMeta = document.querySelector('meta[name="kazma-account"]');
+      return accountMeta ? String(accountMeta.getAttribute('content') || '') : '';
+    } catch (e) { return ''; }
+  }
+
   function renderHitlCard(data, opts) {
     if (!data) return null;
     var lockComposer = !(opts && opts.lock === false);
@@ -5965,6 +6036,7 @@
                    escapeHtml(opt.id) + '">' + escapeHtml(semanticOptionLabel(opt)) + '</button>';
           }).join('') +
         '</div>';
+      _markHitlWaiting(_semCard, _hitlWaitingFor(data, _pageAccount()));
       // Attach only — TurnView's next pass moves it to its declared slot.
       content.appendChild(_semCard);
       _revealHitlCard(_semCard);
@@ -6164,6 +6236,7 @@
           : '') +
         '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">' + escapeHtml(ti('hitl_deny', 'Deny')) + '</button>' +
       '</div>';
+    _markHitlWaiting(card, _hitlWaitingFor(data, _pageAccount()));
     // Attach only — TurnView's next pass moves it to its declared slot.
     content.appendChild(card);
     _revealHitlCard(card);

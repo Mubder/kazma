@@ -8,14 +8,15 @@ project folder (plan 4.11, decisions N1, N21, N28, N29).
   admin holds it as anyone does (N28: on at first). The admin's own tools
   are never there.
 * A plain shared space has no Development, for anyone who holds it.
-* N21, until S2-05: a person other than the admin who holds Development is
-  refused their always-ask actions and folder grants there, before any card
-  and with no effect, in their language. Their file and git cards are
-  their own, as before.
+* N21: the admin answers the always-ask actions and folder grants of a
+  person other than the admin who holds Development there. Until S2-05 they
+  were refused before any card; since S2-05 the card is made and goes to
+  the admin (``spaces.approvals``), on the chat and the swarm alike. Their
+  file and git cards are their own, as before.
 
 Controls: S1-20's rule (no host tool in another host space) refuses the
-Development holder; without the interim refusal their always-ask call goes
-on to a card they would answer themselves.
+Development holder; the rule without N21 lets the holder answer their own
+always-ask card.
 """
 
 from __future__ import annotations
@@ -164,7 +165,7 @@ def test_the_project_space_works_in_its_own_folder(spaces) -> None:
         assert resolve_active_root() == spaces["folder"].resolve()
 
 
-# ── N21, until S2-05 ────────────────────────────────────────────────────
+# ── N21: the admin answers a holder's always-ask cards (S2-05) ──────────
 
 
 def _always_ask() -> list[str]:
@@ -175,82 +176,78 @@ def _always_ask() -> list[str]:
     return sorted({*ALWAYS_HITL_TOOLS, "request_path_access"})
 
 
-def test_the_preflight_asks_for_every_always_ask_tool() -> None:
+def test_the_admins_cards_cover_every_always_ask_tool() -> None:
     from kazma_core.safety.call_preflight import ALWAYS_ASK_TOOLS
 
     assert set(_always_ask()) <= ALWAYS_ASK_TOOLS
-    # Control: an always-ask tool the preflight did not know would be found.
+    # Control: an always-ask tool the list did not know would be found.
     assert not set([*_always_ask(), "x_planted_act"]) <= ALWAYS_ASK_TOOLS
 
 
 @pytest.mark.parametrize("name", _always_ask())
-def test_a_holders_always_ask_action_is_refused_before_its_card(spaces, name) -> None:
+def test_a_holders_always_ask_card_goes_to_the_admin(spaces, name) -> None:
     from kazma_core.agent.graph_tool_worker import _refuse_unrunnable_calls
     from kazma_core.safety.call_preflight import call_refusal
+    from kazma_core.spaces import approvals
+    from kazma_core.swarm.single_operator import answered_by_caller
 
     with bind_scope(spaces["dev"], CODER):
-        english = asyncio.run(call_refusal(name, {}, user_text="Please do this for me"))
-        arabic = asyncio.run(call_refusal(name, {}, user_text="سوّ هذا لو سمحت"))
+        # The card is made now (S2-05 lifted N21's interim refusal) ...
+        assert asyncio.run(call_refusal(name, {}, user_text="Please do this for me")) is None
         kept, refused = asyncio.run(_refuse_unrunnable_calls(
             [{"id": "c1", "name": name, "arguments": {}}], user_text="do it"))
-    assert english and "admin's approval" in english and "later update" in english
-    assert arabic and "موافقة المسؤول" in arabic and "تحديث لاحق" in arabic
-    assert kept == [] and [r["outcome"] for r in refused] == ["policy"], (name, refused)
-    answer, entered = _call(spaces["dev"], CODER, name)
-    # The registry refuses it with no effect: N21's refusal, or a stricter one
-    # first -- the vault tools are the admin's own, which no shared space has.
-    content = str(answer["content"])
-    assert entered == [] and answer.get("refused"), answer
-    assert "admin's approval" in content or (name in host_tools.ADMIN and "does not exist" in content), answer
+        # ... and the swarm's approval of it is not the holder's either.
+        assert not answered_by_caller(spaces["dev"], CODER, (name,))
+    assert [tc["name"] for tc in kept] == [name] and refused == [], (name, refused)
+    # ... and it goes to the admin, never to the holder.
+    found = approvals._answerers(spaces["dev"], CODER, [name])
+    assert found.accounts == {OWNER_ACCOUNT_ID} and found.why == "admin", found
+    assert approvals.answer_refusal(spaces["dev"], CODER, [name], caller=CODER) == approvals.NOT_YOURS
+    assert approvals.answer_refusal(spaces["dev"], CODER, [name], caller=WRITER) == approvals.NOT_YOURS
+    assert approvals.answer_refusal(spaces["dev"], CODER, [name], caller=OWNER_ACCOUNT_ID) is None
+    with bind_scope(spaces["dev"], OWNER_ACCOUNT_ID):
+        assert answered_by_caller(spaces["dev"], CODER, (name,))
 
 
 @pytest.mark.parametrize("name", _always_ask())
-def test_control_without_the_interim_refusal_every_card_is_the_holders(spaces, monkeypatch, name) -> None:
-    from kazma_core.safety.call_preflight import call_refusal
+def test_control_without_n21_the_holder_answers_their_own(spaces, monkeypatch, name) -> None:
+    from kazma_core.spaces import approvals
 
-    monkeypatch.setattr(host_tools, "approval_refusal", lambda *_a, **_k: None)
-    with bind_scope(spaces["dev"], CODER):
-        assert asyncio.run(call_refusal(name, {}, user_text="do it")) is None
+    monkeypatch.setattr(approvals, "_always_ask", lambda _names: False)
+    assert approvals.answer_refusal(spaces["dev"], CODER, [name], caller=CODER) is None
 
 
-def test_the_graph_refuses_it_with_no_card(spaces) -> None:
-    from kazma_core.agent.graph_tool_worker import _refuse_unrunnable_calls
+def test_the_graph_keeps_the_card(spaces) -> None:
+    from kazma_core.agent.graph_tool_worker import _refuse_unrunnable_calls, _whose_card
 
     pending = [{"id": "c1", "name": "x_post", "arguments": {"text": "hi"}},
                {"id": "c2", "name": "file_read", "arguments": {"path": "a.txt"}}]
     with bind_scope(spaces["dev"], CODER):
         kept, refused = asyncio.run(_refuse_unrunnable_calls(pending, user_text="post it"))
-    assert [tc["name"] for tc in kept] == ["file_read"]
-    assert [r["name"] for r in refused] == ["x_post"] and refused[0]["outcome"] == "policy"
-    assert "no approval was asked" in refused[0]["content"]
+        card = _whose_card(["x_post"])
+    assert [tc["name"] for tc in kept] == ["x_post", "file_read"] and refused == []
+    # The card names who it waits for: the admin.
+    assert card["asker"] == CODER and card["answered_by"] == [OWNER_ACCOUNT_ID], card
 
 
-def test_control_without_the_interim_refusal_the_card_is_the_holders(spaces, monkeypatch) -> None:
-    from kazma_core.agent.graph_tool_worker import _refuse_unrunnable_calls
-
-    monkeypatch.setattr(host_tools, "approval_refusal", lambda *_a, **_k: None)
-    pending = [{"id": "c1", "name": "x_post", "arguments": {"text": "hi"}}]
-    with bind_scope(spaces["dev"], CODER):
-        kept, refused = asyncio.run(_refuse_unrunnable_calls(pending, user_text="post it"))
-    assert [tc["name"] for tc in kept] == ["x_post"] and refused == []
-
-
-def test_the_interim_refusal_is_only_for_a_non_admin_holder_in_a_project_space(spaces) -> None:
-    from kazma_core.safety.call_preflight import call_refusal
+def test_the_admin_answers_only_for_a_non_admin_holder_in_a_project_space(spaces) -> None:
+    from kazma_core.spaces import approvals
 
     for space, account in ((spaces["dev"], OWNER_ACCOUNT_ID),  # the admin answers their own
                            (spaces["dev"], WRITER),            # no Development: their own cards (N4)
                            (spaces["plain"], CODER)):          # a plain space: no Development there
-        with bind_scope(space, account):
-            assert asyncio.run(call_refusal("x_post", {}, user_text="post it")) is None, (space, account)
-    # Their git cards stay their own: never refused here (the shell is not
-    # theirs at all, the review's finding 1).
-    with bind_scope(spaces["dev"], CODER):
-        assert host_tools.approval_refusal("shell_exec") is None
-        assert host_tools.approval_refusal("git_push") is None
+        assert approvals._answerers(space, account, ["x_post"]).accounts == {account}, (space, account)
+    # Their git and file cards stay their own (N21 is the always-ask ones).
+    for name in ("git_push", "file_write"):
+        assert approvals._answerers(spaces["dev"], CODER, [name]).accounts == {CODER}, name
 
 
 def test_with_spaces_off_nothing_is_refused(spaces, monkeypatch) -> None:
+    from kazma_core.spaces import approvals
+
     monkeypatch.setattr(scope, "_enforced", False)
+    assert approvals.answer_refusal(spaces["dev"], CODER, ["x_post"], caller=WRITER) is None
     with bind_scope(spaces["dev"], CODER):
-        assert host_tools.approval_refusal("x_post") is None
+        from kazma_core.agent.graph_tool_worker import _whose_card
+
+        assert _whose_card(["x_post"]) == {}

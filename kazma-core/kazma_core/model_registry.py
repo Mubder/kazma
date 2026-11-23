@@ -593,6 +593,13 @@ class ModelRegistry:
                     model = pinned
             except Exception:
                 pass
+        if model is None:
+            # Work for a person that chose no model runs on one they may use
+            # (Spaces S2-03): their default, else the install's when they may
+            # use it. In memory when Spaces is not enforced or no one is bound.
+            from kazma_core.spaces.person_models import model_for_work
+
+            model = model_for_work(None)
 
         client, outcome = self._build_client(model)
         from kazma_core.observability import model_fallback

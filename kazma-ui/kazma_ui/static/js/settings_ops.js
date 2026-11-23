@@ -454,6 +454,16 @@
         limitDraftForPeople: { tokens: '', usd: '' },
         limitEditing: '',
         limitDraft: { tokens: '', usd: '' },
+        // Models per person (Spaces S2-03): every model the install offers.
+        peopleModelOptions: [],
+        // Limits per space (Spaces S2-08): bytes are shown and typed in MiB.
+        spaceUsage: [],
+        spaceUsageLoaded: false,
+        spaceLimitNames: ['disk_bytes', 'documents_bytes', 'knowledge_bytes', 'crawls', 'research', 'swarm'],
+        limitsForSpaces: { limits: null, set: false, shipped: null },
+        spaceLimitsDraft: {},
+        spaceLimitEditing: '',
+        spaceLimitDraftOne: {},
 
         _peopleError(data) {
             const code = (data && data.error) || 'failed';
@@ -479,7 +489,122 @@
                     usd: String(data.limit_for_people.limit.usd || 0),
                 };
             }
+            const models = typeof window.kazmaGetJson === 'function'
+                ? await window.kazmaGetJson('/api/models/options') : null;
+            this.peopleModelOptions = models && Array.isArray(models.options)
+                ? models.options.map((o) => o.ref) : [];
             this.peopleLoaded = true;
+            await this.loadSpaceUsage();
+        },
+
+        // ── Limits per space (Spaces S2-08) ──
+        async loadSpaceUsage() {
+            const data = typeof window.kazmaGetJson === 'function'
+                ? await window.kazmaGetJson('/api/people/spaces/usage') : null;
+            if (!data || !Array.isArray(data.spaces)) {
+                this.spaceUsageLoaded = false;
+                return;
+            }
+            this.spaceUsage = data.spaces;
+            this.limitsForSpaces = { limits: data.limits_for_spaces, set: !!data.set, shipped: data.shipped };
+            this.spaceLimitsDraft = this._spaceDraft(data.limits_for_spaces || {});
+            this.spaceUsageLoaded = true;
+        },
+
+        _isBytes(name) {
+            return /_bytes$/.test(name);
+        },
+
+        // A limit as typed: MiB for bytes, the number itself for work at once.
+        _spaceDraft(limits) {
+            const draft = {};
+            for (const name of this.spaceLimitNames) {
+                const value = limits[name];
+                draft[name] = value == null ? '' : String(this._isBytes(name)
+                    ? Math.round(Number(value) / 1048576) : Number(value));
+            }
+            return draft;
+        },
+
+        _spaceLimitsBody(draft) {
+            const body = {};
+            for (const name of this.spaceLimitNames) {
+                const raw = String(draft[name] == null ? '' : draft[name]).trim();
+                if (raw === '') continue;
+                const number = Number(raw);
+                body[name] = this._isBytes(name) ? Math.round(number * 1048576) : Math.round(number);
+            }
+            return body;
+        },
+
+        spaceLimitLabel(name) {
+            const words = {
+                disk_bytes: 'Files (MiB)', documents_bytes: 'Documents (MiB)', knowledge_bytes: 'Knowledge (MiB)',
+                crawls: 'Crawls at once', research: 'Research at once', swarm: 'Swarm tasks at once',
+            };
+            return _t('settings.space_limit.' + name, words[name] || name);
+        },
+
+        _mib(bytes) {
+            const n = Number(bytes) / 1048576;
+            const shown = window.KazmaFormat
+                ? window.KazmaFormat.number(n, { maximumFractionDigits: n < 10 ? 1 : 0 }) : n.toFixed(n < 10 ? 1 : 0);
+            return _t('settings.people_space_mib', '{size} MiB', { size: shown });
+        },
+
+        spaceUsedText(space, name) {
+            const used = space[name];
+            const limit = (space.limits || {})[name];
+            if (name === 'disk_bytes' && space.has_folder === false) {
+                return _t('settings.people_space_usage_install_files', "The install's own folders");
+            }
+            if (used == null || limit == null) return _t('settings.people_space_usage_unknown', 'Not counted');
+            if (this._isBytes(name)) {
+                return _t('settings.people_space_usage_of', '{used} of {limit}',
+                    { used: this._mib(used), limit: this._mib(limit) });
+            }
+            return _t('settings.people_space_usage_of', '{used} of {limit}',
+                { used: String(used), limit: String(limit) });
+        },
+
+        async _putSpaceLimits(url, limits) {
+            try {
+                await window.kazmaSave(url, { method: 'PUT', body: { limits: limits } });
+            } catch (e) {
+                showToast(this._peopleError(e && e.body), 'error');
+                return false;
+            }
+            showToast(_t('settings.people_space_limits_saved', 'Limits saved.'), 'success');
+            await this.loadSpaceUsage();
+            return true;
+        },
+
+        async saveLimitsForSpaces() {
+            await this._putSpaceLimits('/api/people/space-limits', this._spaceLimitsBody(this.spaceLimitsDraft));
+        },
+
+        async useShippedSpaceLimits() {
+            await this._putSpaceLimits('/api/people/space-limits', null);
+        },
+
+        // The space's own limits only: a field left empty takes the limits
+        // for spaces (its placeholder shows the one in force).
+        editSpaceLimits(space) {
+            this.spaceLimitDraftOne = this._spaceDraft(space.own_limits || {});
+            this.spaceLimitEditing = space.id;
+        },
+
+        async saveSpaceLimits(space) {
+            if (!space) return;
+            const done = await this._putSpaceLimits('/api/people/spaces/' + encodeURIComponent(space.id) + '/limits',
+                this._spaceLimitsBody(this.spaceLimitDraftOne));
+            if (done) this.spaceLimitEditing = '';
+        },
+
+        async clearSpaceLimits(space) {
+            if (!space) return;
+            const done = await this._putSpaceLimits('/api/people/spaces/' + encodeURIComponent(space.id) + '/limits', null);
+            if (done) this.spaceLimitEditing = '';
         },
 
         _tokensText(n) {
@@ -560,7 +685,7 @@
                     title: _t('settings.people_development_title', 'Turn on Development for {name}?',
                         { name: _iso(person.name) }),
                     message: _t('settings.people_development_means',
-                        'Development, for someone other than you: in a shared space with a project folder that they are in, they get the shell, git, GitHub and that project\'s files. They approve their own shell, file and git steps. Their always-ask actions, such as posting on X, and their folder grants need your approval, which comes in a later update: until then Kazma refuses them.'),
+                        'Development, for someone other than you: in a shared space with a project folder that they are in, they get git, GitHub and that project\'s files. They approve their own file and git steps. Their always-ask actions, such as posting on X, and their folder grants come to you to approve: only you can answer those cards.'),
                     confirmText: _t('settings.people_development_turn_on', 'Turn on'),
                 });
                 if (!answer) {
@@ -578,6 +703,101 @@
             }
             showToast(_t('settings.people_features_saved', 'Features saved.'), 'success');
             await this.loadPeople();
+        },
+
+        // ── Tools (Spaces S2-01): single tools per person ──
+        personToolGroupLabel(key) {
+            if (key === 'chat' || key === 'memory') {
+                return _t('settings.people_tools_from_' + key, key === 'chat' ? 'Chat' : 'Memory');
+            }
+            return _t('settings.feature.' + key, key);
+        },
+
+        // A change to one person's list (tools, models) sends the whole list,
+        // computed from what People shows: one change at a time, each after
+        // the last one's save and reload, so two quick clicks never build the
+        // second list from the state before the first (Spaces S2-03).
+        _personChange(person, work) {
+            const run = async () => {
+                const now = (this.people || []).find((q) => q.id === person.id) || person;
+                await work(now);
+            };
+            this._personChanges = (this._personChanges || Promise.resolve()).then(run, run);
+            return this._personChanges;
+        },
+
+        togglePersonTool(person, tool, on) {
+            return this._personChange(person, async (now) => {
+                const off = [];
+                (now.tools || []).forEach((g) => (g.tools || []).forEach((t) => {
+                    const isOn = t.name === tool.name ? !!on : !!t.on;
+                    if (!isOn) off.push(t.name);
+                }));
+                try {
+                    await window.kazmaSave('/api/people/' + encodeURIComponent(now.id) + '/tools',
+                        { method: 'PUT', body: { off: off } });
+                } catch (e) {
+                    showToast(this._peopleError(e && e.body), 'error');
+                    await this.loadPeople();
+                    return;
+                }
+                showToast(_t('settings.people_tools_saved', 'Tools saved.'), 'success');
+                await this.loadPeople();
+            });
+        },
+
+        // ── Models (Spaces S2-03): which a person may use, and their default ──
+        personModels(person) {
+            return (person && person.models) || { allowed: null, default: '' };
+        },
+
+        personModelOn(person, ref) {
+            const m = this.personModels(person);
+            return m.allowed === null || m.allowed === undefined || m.allowed.indexOf(ref) >= 0;
+        },
+
+        personModelChoices(person) {
+            const m = this.personModels(person);
+            return m.allowed === null || m.allowed === undefined ? this.peopleModelOptions : m.allowed;
+        },
+
+        async _putModels(person, allowed, chosen) {
+            try {
+                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/models',
+                    { method: 'PUT', body: { allowed: allowed, default: chosen || '' } });
+            } catch (e) {
+                showToast(this._peopleError(e && e.body), 'error');
+                await this.loadPeople();
+                return;
+            }
+            showToast(_t('settings.people_models_saved', 'Models saved.'), 'success');
+            await this.loadPeople();
+        },
+
+        setPersonModelsEvery(person, every) {
+            return this._personChange(person, async (now) => {
+                const m = this.personModels(now);
+                await this._putModels(now, every ? null : this.peopleModelOptions.slice(),
+                    every ? m.default : (this.peopleModelOptions.indexOf(m.default) >= 0 ? m.default : ''));
+            });
+        },
+
+        togglePersonModel(person, ref, on) {
+            return this._personChange(person, async (now) => {
+                const m = this.personModels(now);
+                const held = (m.allowed === null || m.allowed === undefined)
+                    ? this.peopleModelOptions.slice() : m.allowed.slice();
+                const allowed = on ? Array.from(new Set(held.concat([ref])))
+                    : held.filter((r) => r !== ref);
+                await this._putModels(now, allowed, allowed.indexOf(m.default) >= 0 ? m.default : '');
+            });
+        },
+
+        setPersonModelDefault(person, ref) {
+            return this._personChange(person, async (now) => {
+                const m = this.personModels(now);
+                await this._putModels(now, m.allowed === undefined ? null : m.allowed, ref);
+            });
         },
 
         async clearPersonLimit(person) {
@@ -920,6 +1140,63 @@
             } catch (e) {
                 showToast(this._peopleError(null), 'error');
             }
+        },
+
+        // ── Disable / enable (Spaces S2-07): their work waits while disabled ──
+        async setPersonEnabled(person, enabled) {
+            if (!enabled) {
+                const ok = await window.kazmaConfirm({
+                    title: _t('settings.people_disable_title', 'Disable {name}?', { name: _iso(person.name) }),
+                    message: _t('settings.people_disable_confirm',
+                        'They can no longer sign in, and their scheduled jobs and other work wait until you enable them again. Their spaces and data stay.'),
+                    confirmText: _t('settings.people_disable', 'Disable'),
+                });
+                if (!ok) return;
+            }
+            try {
+                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/enabled',
+                    { method: 'PUT', body: { enabled: !!enabled } });
+            } catch (e) {
+                showToast(this._peopleError(e && e.body), 'error');
+                return;
+            }
+            showToast(enabled
+                ? _t('settings.people_enabled_done', '{name} is enabled again.', { name: _iso(person.name) })
+                : _t('settings.people_disabled_done', '{name} is disabled.', { name: _iso(person.name) }), 'success');
+            await this.loadPeople();
+        },
+
+        // When a person last signed in (Spaces S2-10): a date in the page's
+        // language, or "never".
+        lastSignInText(person) {
+            if (!person || !person.last_sign_in) return _t('settings.people_never_signed_in', 'Never');
+            return window.KazmaFormat ? window.KazmaFormat.dateTime(person.last_sign_in) : person.last_sign_in;
+        },
+
+        sessionsText(person) {
+            const n = Number((person && person.sessions) || 0);
+            return window.kazmaCount('settings.people_sessions_open', n,
+                { n: window.KazmaFormat ? window.KazmaFormat.number(n) : String(n) });
+        },
+
+        async endPersonSessions(person) {
+            if (!person) return;
+            const ok = await window.kazmaConfirm({
+                title: _t('settings.people_end_sessions_title', 'Sign {name} out everywhere?', { name: _iso(person.name) }),
+                message: _t('settings.people_end_sessions_confirm',
+                    'Every session they have open ends, and they sign in again on each device. They are told the next time they sign in.'),
+                confirmText: _t('settings.people_end_sessions', 'End sessions'),
+            });
+            if (!ok) return;
+            try {
+                await window.kazmaSave('/api/people/' + encodeURIComponent(person.id) + '/sessions/end', { method: 'POST' });
+            } catch (e) {
+                showToast(this._peopleError(e && e.body), 'error');
+                return;
+            }
+            showToast(_t('settings.people_sessions_ended', '{name} is signed out everywhere.', { name: _iso(person.name) }),
+                'success');
+            await this.loadPeople();
         },
 
         async deletePerson(person) {

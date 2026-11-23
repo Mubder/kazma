@@ -953,6 +953,23 @@ def _approval_card_is_stale(msg: IncomingMessage, requested_gate: str, pending: 
     return bool((requested_gate and requested_gate != live_gate) or (interactive and not requested_gate))
 
 
+async def _not_recorded(recording: Any) -> str | None:
+    """Await *recording* (``record_gate_decision(...)``) and return the text
+    to send instead when nothing was recorded: not this person's card
+    (Spaces S2-05: it waits for whoever it asks), or decision storage
+    unavailable (the graph stays paused). None when it was recorded."""
+    from kazma_ui.hitl_decision import GateNotYours
+
+    try:
+        await recording
+    except GateNotYours:
+        return "This approval is not yours to answer; it waits for the person it asks."
+    except Exception:
+        logger.warning("[HITL] decision storage unavailable; graph remains paused", exc_info=True)
+        return "Approval remains paused: decision storage is unavailable. Retry after storage recovers."
+    return None
+
+
 async def _handle_hitl_resume(
     msg: IncomingMessage,
     graph: Any,
@@ -1126,24 +1143,22 @@ async def _handle_hitl_resume(
             # Record the decision the way every surface does: registry CAS,
             # the transcript part a browser on this thread paints, and the
             # journal frame that tells open tabs it was decided here.
-            try:
-                from kazma_ui.hitl_decision import record_gate_decision
+            from kazma_ui.hitl_decision import record_gate_decision
 
-                _pending = pending if isinstance(pending, dict) else {}
-                await record_gate_decision(
-                    target_thread,
-                    decision="approved" if approved else "denied",
-                    actor=actor,
-                    tool=str(_pending.get("tool") or ""),
-                    payload=_pending,
-                    interrupt_id=str(_pending.get("interrupt_id") or ""),
-                    require_durable=True,
-                )
-            except Exception:
-                logger.warning("[HITL] decision storage unavailable; graph remains paused", exc_info=True)
+            _pending = pending if isinstance(pending, dict) else {}
+            refused = await _not_recorded(record_gate_decision(
+                target_thread,
+                decision="approved" if approved else "denied",
+                actor=actor,
+                tool=str(_pending.get("tool") or ""),
+                payload=_pending,
+                interrupt_id=str(_pending.get("interrupt_id") or ""),
+                require_durable=True,
+            ))
+            if refused:
                 await manager.send(OutboundMessage(
                     target_id=_build_target_id(msg.platform, ctx),
-                    text="Approval remains paused: decision storage is unavailable. Retry after storage recovers.",
+                    text=refused,
                     context_metadata=ctx,
                 ))
                 return True
@@ -1180,7 +1195,9 @@ async def _handle_hitl_resume(
                     # empty (caught by the surrounding try, silently dropping
                     # the actor from the grant audit) (audit finding).
                     actor = msg.sender_id or "unknown"
-                    grant_task(target_thread, actor=actor)
+                    # A settings write and the identity store (N4's grant
+                    # rule): off the loop.
+                    await asyncio.to_thread(grant_task, target_thread, actor=actor)
                     logger.info(
                         "[HITL] Task grant activated for thread=%s actor=%s",
                         target_thread, actor,

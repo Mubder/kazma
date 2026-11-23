@@ -273,6 +273,8 @@ def _cron_item(job: dict[str, Any]) -> dict[str, Any]:
         "destination": job.get("destination", ""),
         "edit_pending": job.get("edit_pending", False),
         "cancel_pending": job.get("cancel_pending", False),
+        # Why a job waits (S2-07: its person is disabled), "" when it does not.
+        "paused": job.get("paused", ""),
         "last_result": last[:500],
         "outcome": shorten_outcome(last),
         "dir": text_dir(shown),

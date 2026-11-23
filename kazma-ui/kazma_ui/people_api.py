@@ -17,6 +17,15 @@ people; each person reads the changes made to their account.
 * ``PUT /api/people/{account_id}/features`` -- switch a person's features
   (``{"features": {id: on}}``, S2-11); ``GET /api/people`` lists each
   person's features.
+* ``PUT /api/people/{account_id}/tools`` -- the single tools switched off
+  for a person inside their features (``{"off": [tool, ...]}``, S2-01);
+  ``GET /api/people`` lists each person's switchable tools, each on or off.
+* ``PUT /api/people/{account_id}/enabled`` -- disable or enable a person
+  (``{"enabled": bool}``, S2-07): disabled, they cannot sign in and their
+  work waits.
+* ``PUT /api/people/{account_id}/models`` -- the models a person may use
+  and their default (``{"allowed": [ref, ...] or null, "default": ref}``,
+  S2-03); ``GET /api/people`` lists each person's.
 * ``GET /api/account/notices``, ``POST /api/account/notices/seen`` -- the
   signed-in person's own notices: a reset of their password someone else
   made.
@@ -258,6 +267,145 @@ def create_people_router() -> APIRouter:
         if not isinstance(body, dict):
             return invalid_json_response()
         return await asyncio.to_thread(_set_features, request, account_id, body)
+
+    def _set_tools(request: Request, account_id: str, body: dict[str, Any]) -> JSONResponse:
+        try:
+            off = people.set_tools(account_id, body.get("off"), by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True, "off": off})
+
+    @router.put("/api/people/{account_id}/tools")
+    async def set_tools(account_id: str, request: Request) -> JSONResponse:
+        """The single tools switched off for a person (Spaces S2-01):
+        ``{"off": [tool, ...]}``, the whole list."""
+        denied = await asyncio.to_thread(_not_admin, request)
+        if denied:
+            return denied
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_set_tools, request, account_id, body)
+
+    def _set_enabled(request: Request, account_id: str, body: dict[str, Any]) -> JSONResponse:
+        try:
+            people.set_enabled(account_id, body.get("enabled"), by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True})
+
+    @router.put("/api/people/{account_id}/enabled")
+    async def set_enabled(account_id: str, request: Request) -> JSONResponse:
+        """Disable or enable a person (Spaces S2-07): ``{"enabled": bool}``."""
+        denied = await asyncio.to_thread(_not_admin, request)
+        if denied:
+            return denied
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_set_enabled, request, account_id, body)
+
+    @router.post("/api/people/{account_id}/sessions/end")
+    def end_sessions(account_id: str, request: Request) -> JSONResponse:
+        """End every open session of a person (Spaces S2-10): they sign in
+        again; recorded, and they are told."""
+        denied = _not_admin(request)
+        if denied:
+            return denied
+        try:
+            ended = people.end_sessions(account_id, by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True, "ended": ended})
+
+    def _set_models(request: Request, account_id: str, body: dict[str, Any]) -> JSONResponse:
+        try:
+            kept = people.set_models(account_id, body.get("allowed"), body.get("default"),
+                                     by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True, **kept})
+
+    @router.put("/api/people/{account_id}/models")
+    async def set_models(account_id: str, request: Request) -> JSONResponse:
+        """The models a person may use and their default (Spaces S2-03):
+        ``{"allowed": [ref, ...] or null, "default": ref}``."""
+        denied = await asyncio.to_thread(_not_admin, request)
+        if denied:
+            return denied
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_set_models, request, account_id, body)
+
+    @router.get("/api/people/spaces/usage")
+    def spaces_usage(request: Request) -> JSONResponse:
+        """Every space's limits and what it holds and runs now (Spaces
+        S2-08): counts and sizes, never a word of what a space holds."""
+        denied = _not_admin(request)
+        if denied:
+            return denied
+        try:
+            usage = people.spaces_usage()
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True, "enforced": spaces_enforced(), **usage})
+
+    def _set_space_limits(request: Request, space_id: str | None, body: dict[str, Any]) -> JSONResponse:
+        raw = body.get("limits")
+        if raw is not None and not isinstance(raw, dict):
+            return JSONResponse({"ok": False, "error": "bad_limits"}, status_code=400)
+        try:
+            if space_id is None:
+                people.set_default_space_limits(raw, by=_caller(request) or "")
+            else:
+                people.set_space_limits(space_id, raw, by=_caller(request) or "")
+        except people.PeopleRefused as exc:
+            return _refused(exc)
+        except IdentityUnavailable:
+            return _unavailable()
+        return JSONResponse({"ok": True})
+
+    async def _space_limits_route(request: Request, space_id: str | None) -> JSONResponse:
+        denied = await asyncio.to_thread(_not_admin, request)
+        if denied:
+            return denied
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        if not isinstance(body, dict):
+            return invalid_json_response()
+        return await asyncio.to_thread(_set_space_limits, request, space_id, body)
+
+    @router.put("/api/people/space-limits")
+    async def set_default_space_limits(request: Request) -> JSONResponse:
+        """The limits for spaces with none of their own (Spaces S2-08):
+        ``{"limits": {name: value} or null}``."""
+        return await _space_limits_route(request, None)
+
+    @router.put("/api/people/spaces/{space_id}/limits")
+    async def set_space_limits(space_id: str, request: Request) -> JSONResponse:
+        """A space's own limits (Spaces S2-08): ``{"limits": {name: value}
+        or null}``."""
+        return await _space_limits_route(request, space_id)
 
     @router.get("/api/account/notices")
     def my_notices(request: Request) -> JSONResponse:

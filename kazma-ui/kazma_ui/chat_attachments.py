@@ -51,6 +51,10 @@ def store_uploaded_attachment(data: bytes, filename: str) -> str:
     """
     if len(data) > MAX_UPLOAD_BYTES:
         raise ValueError("attachment exceeds upload size limit")
+    from kazma_core.spaces.space_limits import refuse_write_for_disk
+
+    # The space's disk limit (Spaces S2-08): raises SpaceOverLimit.
+    refuse_write_for_disk(len(data))
     attachment_id = f"att_{hashlib.sha256(data).hexdigest()[:32]}"
     folder = _attachment_dir()
     held = [p for p in folder.glob(f"{attachment_id}*")

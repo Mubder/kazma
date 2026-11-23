@@ -1782,6 +1782,26 @@ def _lacking_feature(needed: tuple[str, ...], grants: Any) -> str | None:
     return next((feature for feature in needed if not grants.has(feature)), None)
 
 
+def _switched_off_tool(tools: tuple[str, ...], grants: Any) -> str | None:
+    """The first of *tools* switched off for the person (``tools_off``,
+    Spaces S2-01); None when none is, or no rule applies."""
+    if grants is None:
+        return None
+    return next((tool for tool in tools if tool in grants.tools_off), None)
+
+
+def _tool_off_response(request: Request, tool: str) -> Response:
+    """The answer to a route door of a tool switched off for the person
+    (Spaces S2-01), in the page's language."""
+    from kazma_core.spaces.features import tool_off_text
+
+    from kazma_ui.i18n import current_language
+
+    lang = "ar" if current_language() == "ar" else "en"
+    return JSONResponse({"ok": False, "code": "tool_off", "tool": tool, "error": tool_off_text(tool, lang)},
+                        status_code=403)
+
+
 def _feature_off_response(request: Request, feature: str, *, page: bool) -> Response:
     """The answer to a request for a feature the person has not got (Spaces
     S2-11), in the page's language: a page says so, an API call answers
@@ -1946,10 +1966,12 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
 
         scope_tokens = None
         token = None
-        # The space this request acts in, for a layer outside this one that
-        # records what was done (the memory operator trail): the context
-        # bound below is not visible out there, the ASGI scope is.
+        # The space this request acts in and the account it acts as, for a
+        # layer outside this one that records what was done (the activity
+        # recorder, the memory operator trail): the context bound below is
+        # not visible out there, the ASGI scope is.
         request.scope["kazma_space"] = tenant_id
+        request.scope["kazma_asker"] = asker or ""
         if asker is not None and valid_space_id(tenant_id):
             scope_tokens = set_scope(tenant_id, asker)
         else:
@@ -1965,14 +1987,15 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                 from kazma_core.spaces.features import remember_page_grants
                 from kazma_core.spaces.tools import remember_allowance
 
-                from kazma_ui.route_scopes import features_of_route, is_development_route
+                from kazma_ui.route_scopes import features_of_route, is_development_route, tools_of_route
 
                 path = judged_path(request)
                 host_route = is_development_route(path, request.method)
                 needed = features_of_route(path, request.method)
+                door_of = tools_of_route(path, request.method)
                 page = request.method in ("GET", "HEAD") and not path.startswith(
                     ("/api/", "/static/", "/ws/", "/health"))
-                if host_route or page or needed:
+                if host_route or page or needed or door_of:
                     try:
                         allowance, grants = await asyncio.to_thread(_rules_here)
                     except IdentityUnavailable:
@@ -1991,6 +2014,11 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     lacking = _lacking_feature(needed, grants)
                     if lacking:
                         return _feature_off_response(request, lacking, page=page)
+                    # A route door of a tool switched off for the person
+                    # (Spaces S2-01): the effect is off, not only the tool.
+                    switched_off = _switched_off_tool(door_of, grants)
+                    if switched_off:
+                        return _tool_off_response(request, switched_off)
                     allowance_token = remember_allowance(allowance)
                     grants_token = remember_page_grants(grants)
             response = await call_next(request)

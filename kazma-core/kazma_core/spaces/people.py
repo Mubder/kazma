@@ -80,16 +80,25 @@ __all__ = [
     "set_daily_limit",
     "set_default_daily_limit",
     "set_features",
+    "set_enabled",
+    "set_models",
+    "set_default_space_limits",
+    "set_space_limits",
+    "set_tools",
+    "spaces_usage",
+    "end_sessions",
+    "note_sign_in",
 ]
 
 logger = logging.getLogger(__name__)
 
 #: What the record holds.
 _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased",
-          "daily_limit_set", "default_daily_limit_set", "features_set", "space_created",
-          "member_added", "member_left", "member_removed")
+          "daily_limit_set", "default_daily_limit_set", "features_set", "tools_set",
+          "models_set", "account_disabled", "account_enabled", "space_created", "member_added", "member_left", "member_removed",
+          "space_limits_set", "default_space_limits_set", "sessions_ended")
 #: The events a person is told about, when someone else made them.
-_TOLD = ("password_reset", "member_added", "member_removed")
+_TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended")
 _NAME_MAX = 64
 #: One shared-space create at a time in this process (the review, finding 10).
 _CREATE_LOCK = threading.Lock()
@@ -185,13 +194,16 @@ def broken_at(events: list[dict[str, Any]] | None = None) -> int | None:
 def list_people() -> list[dict[str, Any]]:
     """Every account, the owner first: id, name, install role, enabled,
     when made, its personal space, its daily limit (its own, ``None`` for
-    none, and the one it has: ``limit``, ``limit_source``). Never a password
-    hash, never a word of a space's data."""
+    none, and the one it has: ``limit``, ``limit_source``), the spaces it is
+    a member of (``spaces``), when it last signed in (``last_sign_in``) and
+    how many sessions it has open (``sessions``). Never a password hash, a
+    session id, or a word of a space's data."""
     from kazma_core.spaces.daily_limits import limit_of
 
     reg = identity.read_registry()
     personal = {space.get("personal_of"): space_id for space_id, space in reg["spaces"].items()
                 if space.get("personal_of") and not space.get("account_deleted_at")}
+    signed_in = _sign_ins(reg)
     people = [
         {
             "id": account_id,
@@ -201,6 +213,8 @@ def list_people() -> list[dict[str, Any]]:
             "created_at": str(account.get("created_at") or ""),
             "personal_space": personal.get(account_id, ""),
             "owner": account_id == OWNER_ACCOUNT_ID,
+            "spaces": _spaces_of(reg, account_id),
+            **signed_in.get(account_id, {"sessions": 0, "last_sign_in": ""}),
             **_limits_of(reg, account_id, limit_of),
         }
         for account_id, account in reg["accounts"].items()
@@ -208,15 +222,138 @@ def list_people() -> list[dict[str, Any]]:
     return sorted(people, key=lambda p: (not p["owner"], p["name"].lower()))
 
 
+def _spaces_of(reg: dict[str, Any], account_id: str) -> list[dict[str, Any]]:
+    """The spaces *account_id* is a member of, its personal one first: id,
+    name (a personal space's is its person's), personal or shared, and its
+    role there. A space being erased is left out."""
+    out = []
+    for membership in reg["memberships"]:
+        if membership.get("account") != account_id:
+            continue
+        space_id = str(membership.get("space") or "")
+        space = reg["spaces"].get(space_id) or {}
+        if not space or space.get("erasing_at"):
+            continue
+        personal = bool(space.get("personal_of")) or space_id == OWNER_SPACE_ID
+        out.append({"id": space_id, "name": "" if personal else str(space.get("name") or ""),
+                    "kind": "personal" if personal else "shared",
+                    "role": str(membership.get("role") or "member")})
+    return sorted(out, key=lambda s: (s["kind"] != "personal", s["name"].lower()))
+
+
+# ── Sign-ins and sessions (S2-10) ───────────────────────────────────────
+
+#: When each person last signed in, by account: runtime state (``system.``,
+#: never carried by a backup or a restore), written at a sign-in with a
+#: name and password. A session's own start is read beside it.
+LAST_SIGN_IN_KEY = "system.people.last_sign_in"
+_LAST_SIGN_IN_MAX = 2000
+#: The user id a sign-in with the install's shared secret is given, and the
+#: actor of the loopback auto-login: both are the owner's sessions.
+_OWNER_SESSION_USER = "shared-secret"
+_OWNER_SESSION_ACTOR = "auto-cookie"
+
+
+def _account_of_session(reg: dict[str, Any], user_id: str, actor: str) -> str:
+    """The account a session or a sign-in is, or ``""`` for none (an OIDC
+    session, one of an account deleted since)."""
+    if actor == _OWNER_SESSION_ACTOR or user_id == _OWNER_SESSION_USER:
+        return OWNER_ACCOUNT_ID
+    if not user_id or actor == "oidc":
+        return ""
+    for account_id, account in reg["accounts"].items():
+        if str(account.get("legacy_user_id") or "") == user_id:
+            return account_id
+    return ""
+
+
+def note_sign_in(user_id: str, actor: str = "login") -> None:
+    """Record that the person behind *user_id* signed in now, for the People
+    page. Only where Spaces is enforced; nothing else depends on it, so a
+    store that cannot answer is said and the sign-in goes on. Blocking."""
+    if not spaces_enforced():
+        return
+    from kazma_core.config_store import get_config_store
+
+    try:
+        account = _account_of_session(identity.read_registry(), str(user_id or ""), str(actor or ""))
+        if not account:
+            return
+        now = _now()
+
+        def _update(current: Any) -> dict[str, str]:
+            held = {str(k): str(v) for k, v in current.items()} if isinstance(current, dict) else {}
+            held[account] = now
+            if len(held) > _LAST_SIGN_IN_MAX:
+                held = dict(sorted(held.items(), key=lambda kv: kv[1])[-_LAST_SIGN_IN_MAX:])
+            return held
+
+        get_config_store().atomic_update(LAST_SIGN_IN_KEY, _update, category="system")
+    except (sqlite3.Error, OSError, RuntimeError, ValueError, TypeError, LookupError):
+        # The store away, locked or refusing (RuntimeError covers an
+        # unreadable identity store and a store that is unavailable): the
+        # sign-in is never refused for it.
+        logger.warning("[people] a sign-in was not recorded on People", exc_info=True)
+
+
+def _sign_ins(reg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """By account: how many sessions it has open and when it last signed in
+    (the newer of the recorded sign-in and its newest session's start)."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.security.web_sessions import session_starts
+
+    recorded = get_config_store().get(LAST_SIGN_IN_KEY) or {}
+    out: dict[str, dict[str, Any]] = {}
+    for session in session_starts():
+        account = _account_of_session(reg, session["user_id"], session["actor"])
+        if not account:
+            continue
+        held = out.setdefault(account, {"sessions": 0, "last_sign_in": ""})
+        held["sessions"] += 1
+        began = datetime.fromtimestamp(session["started_at"], UTC).isoformat(timespec="seconds") if session["started_at"] else ""
+        held["last_sign_in"] = max(held["last_sign_in"], began)
+    if isinstance(recorded, dict):
+        for account, at in recorded.items():
+            held = out.setdefault(str(account), {"sessions": 0, "last_sign_in": ""})
+            held["last_sign_in"] = max(held["last_sign_in"], str(at or ""))
+    return out
+
+
+def end_sessions(account_id: str, *, by: str) -> int:
+    """End every open session of a person: they sign in again on each
+    device. Recorded, and the person is told at their next sign-in. Refused:
+    the owner (their own sessions are ended in My account). Returns how
+    many were ended."""
+    _require_enforced()
+    if account_id == OWNER_ACCOUNT_ID:
+        raise PeopleRefused("owner_in_my_account", 409, "Your own sessions are ended in My account.")
+
+    def _change(reg: dict[str, Any]) -> None:
+        _person(reg, account_id)
+        _record(reg, "sessions_ended", account_id, by)
+
+    reg = _changed(_change)
+    account = reg["accounts"].get(account_id) or {}
+    from kazma_core.security.web_sessions import revoke_user_sessions
+
+    ended = revoke_user_sessions(user_id=str(account.get("legacy_user_id") or account_id))
+    logger.warning("[people] sessions ended id=%s count=%d by=%s", account_id, ended, by)
+    return ended
+
+
 def _limits_of(reg: dict[str, Any], account_id: str, limit_of: Any) -> dict[str, Any]:
-    from kazma_core.spaces import features
+    from kazma_core.spaces import features, person_models
 
     policy = reg["policies"].get(account_id) or {}
     own = policy.get("daily_limit") if isinstance(policy, dict) else None
     limit, source = limit_of(reg, account_id)
     return {"daily_limit": own if isinstance(own, dict) else None,
             "limit": limit.as_dict() if limit else None, "limit_source": source,
-            "features": features.listed(features.grants_of(reg, account_id))}
+            "features": features.listed(features.grants_of(reg, account_id)),
+            # The single tools of what they hold, each on or off (S2-01).
+            "tools": features.listed_tools(features.grants_of(reg, account_id)),
+            # The models they may use and their default (S2-03).
+            "models": person_models.listed_models(reg, account_id)}
 
 
 def limits_for_people() -> dict[str, Any]:
@@ -490,7 +627,7 @@ def _changed_on(change: Any, reg: dict[str, Any]) -> None:
     try:
         change(reg)
     except identity.IdentityError as exc:
-        status = 404 if exc.code == "no_such_account" else 409
+        status = 404 if exc.code in ("no_such_account", "no_such_space") else 409
         raise PeopleRefused(exc.code, status, str(exc)) from exc
 
 
@@ -613,7 +750,7 @@ def _changed(change: Any) -> dict[str, Any]:
     try:
         return identity.update_registry(change)
     except identity.IdentityError as exc:
-        status = 404 if exc.code == "no_such_account" else 409
+        status = 404 if exc.code in ("no_such_account", "no_such_space") else 409
         raise PeopleRefused(exc.code, status, str(exc)) from exc
 
 
@@ -782,6 +919,83 @@ def set_default_daily_limit(raw: dict[str, Any] | None, *, by: str) -> None:
     logger.info("[people] the daily limit for people was set by=%s", by)
 
 
+# ── Limits per space (S2-08) ────────────────────────────────────────────
+
+
+def _checked_space_limits(raw: Any) -> dict[str, int]:
+    from kazma_core.spaces.space_limits import LimitsRefused, parse_limits
+
+    try:
+        return parse_limits(raw)
+    except LimitsRefused as exc:
+        raise PeopleRefused(exc.code, 400, str(exc)) from exc
+
+
+def set_space_limits(space_id: str, raw: dict[str, Any] | None, *, by: str) -> None:
+    """Set a space's own limits (``{name: value}``, ``spaces.space_limits``;
+    a limit left out or empty takes the limits for spaces), or take them
+    all away (``None``). Recorded."""
+    _require_enforced()
+    limits = _checked_space_limits(raw)
+
+    def _change(reg: dict[str, Any]) -> None:
+        space = reg["spaces"].get(space_id)
+        if not isinstance(space, dict) or space.get("erasing_at"):
+            raise identity.IdentityError("no_such_space", "There is no such space.")
+        if limits:
+            space["limits"] = dict(limits)
+        else:
+            space.pop("limits", None)
+        _record(reg, "space_limits_set", "", by, space=space_id)
+
+    _changed(_change)
+    logger.info("[people] limits set space=%s by=%s", space_id, by)
+
+
+def set_default_space_limits(raw: dict[str, Any] | None, *, by: str) -> None:
+    """Set the limits for spaces that have none of their own, or go back to
+    Kazma's own (``None``). Recorded."""
+    _require_enforced()
+    limits = _checked_space_limits(raw)
+
+    def _change(reg: dict[str, Any]) -> None:
+        if limits:
+            reg["defaults"]["space_limits"] = dict(limits)
+        else:
+            reg["defaults"].pop("space_limits", None)
+        _record(reg, "default_space_limits_set", "", by)
+
+    _changed(_change)
+    logger.info("[people] the limits for spaces were set by=%s", by)
+
+
+def spaces_usage() -> dict[str, Any]:
+    """Every space that is open, the owner's first: its name and kind
+    (``personal`` or ``shared``), its own limits (``None`` each not set)
+    and what it holds and runs beside the limits it has
+    (``space_limits.usage_of``); and the limits for spaces. Counts and
+    sizes only, never a word of what a space holds. Blocking."""
+    from kazma_core.spaces.space_limits import SHIPPED, limits_for_spaces, usage_of
+
+    reg = identity.read_registry()
+    names = {account_id: str(account.get("name") or "") for account_id, account in reg["accounts"].items()}
+    out = []
+    for space_id, space in reg["spaces"].items():
+        if space.get("erasing_at") or (space.get("personal_of") and space.get("account_deleted_at")):
+            continue
+        personal = space.get("personal_of")
+        out.append({
+            "id": space_id,
+            "name": str(space.get("name") or "") or names.get(str(personal or ""), ""),
+            "kind": "personal" if personal or space_id == OWNER_SPACE_ID else "shared",
+            "own_limits": dict(space.get("limits") or {}),
+            **usage_of(space_id),
+        })
+    out.sort(key=lambda s: (s["id"] != OWNER_SPACE_ID, s["kind"] != "personal", s["name"].lower()))
+    return {"spaces": out, "limits_for_spaces": limits_for_spaces(reg).as_dict(),
+            "set": isinstance(reg["defaults"].get("space_limits"), dict), "shipped": SHIPPED.as_dict()}
+
+
 def set_features(account_id: str, changes: dict[str, Any], *, by: str) -> None:
     """Switch a person's features (``{feature: on}``, S2-11): one step,
     recorded. The admin has every feature; only Development is theirs to
@@ -809,6 +1023,95 @@ def set_features(account_id: str, changes: dict[str, Any], *, by: str) -> None:
             raise PeopleRefused(exc.code, 400, str(exc)) from exc
         raise
     logger.info("[people] features set id=%s by=%s", account_id, by)
+
+
+def set_tools(account_id: str, off: Any, *, by: str) -> list[str]:
+    """Switch single tools off for a person (S2-01, plan 4.8: "X Studio on,
+    but posting off"): *off* is the whole list of their tools that are off.
+    One step, recorded. Refused: the admin (who has every tool), a tool no
+    person can have, a value that is not a list of names. Returns the list
+    kept."""
+    _require_enforced()
+    from kazma_core.spaces import features
+
+    kept: list[str] = []
+
+    def _change(reg: dict[str, Any]) -> None:
+        if account_id not in reg["accounts"]:
+            raise identity.IdentityError("no_such_account", "There is no such person.")
+        try:
+            checked = features.checked_tools(account_id, off, reg)
+        except features.FeatureRefused as exc:
+            raise identity.IdentityError(exc.code, str(exc)) from exc
+        features.apply_tools(reg, account_id, checked)
+        kept[:] = checked
+        _record(reg, "tools_set", account_id, by)
+
+    try:
+        _changed(_change)
+    except PeopleRefused as exc:
+        if exc.code in ("unknown_tool", "bad_tools"):
+            raise PeopleRefused(exc.code, 400, str(exc)) from exc
+        raise
+    logger.info("[people] tools set id=%s off=%d by=%s", account_id, len(kept), by)
+    return kept
+
+
+def set_enabled(account_id: str, enabled: Any, *, by: str) -> None:
+    """Disable or enable a person (S2-07). Disabled, they cannot sign in,
+    their sessions end, and their work waits -- a scheduled job is held at
+    its occurrence and says why, any other background work is refused as
+    work of a feature that is off (``features.Grants.disabled``) -- until
+    they are enabled again. Their spaces, data and switches stay. One step,
+    recorded. Refused: the owner, a value that is not true or false."""
+    _require_enforced()
+    if not isinstance(enabled, bool):
+        raise PeopleRefused("bad_enabled", 400, "A person is enabled or disabled.")
+
+    def _change(reg: dict[str, Any]) -> None:
+        account = _person(reg, account_id)
+        account["enabled"] = enabled
+        _record(reg, "account_enabled" if enabled else "account_disabled", account_id, by)
+
+    reg = _changed(_change)
+    if not enabled:
+        _end_sessions(reg, account_id)
+    logger.warning("[people] account %s id=%s by=%s", "enabled" if enabled else "disabled", account_id, by)
+
+
+def set_models(account_id: str, allowed: Any, default: Any, *, by: str) -> dict[str, Any]:
+    """Choose the models a person may use and their default (S2-03):
+    *allowed* is the whole list of ``provider:model`` references (None:
+    every model the install offers), *default* one of them (empty: the
+    install's when they may use it, else their first). One step, recorded.
+    Refused: the admin (who has every model), a value that is not a list of
+    references, a default they may not use, no model at all. Returns what
+    was kept: ``{"allowed", "default"}``."""
+    _require_enforced()
+    from kazma_core.spaces import person_models
+
+    kept: dict[str, Any] = {}
+
+    def _change(reg: dict[str, Any]) -> None:
+        if account_id not in reg["accounts"]:
+            raise identity.IdentityError("no_such_account", "There is no such person.")
+        try:
+            clean, chosen = person_models.checked_models(account_id, allowed, default, reg)
+        except person_models.ModelsRefused as exc:
+            raise identity.IdentityError(exc.code, str(exc)) from exc
+        person_models.apply_models(reg, account_id, clean, chosen)
+        kept.update({"allowed": clean, "default": chosen})
+        _record(reg, "models_set", account_id, by)
+
+    try:
+        _changed(_change)
+    except PeopleRefused as exc:
+        if exc.code in ("bad_models", "default_not_allowed", "no_models"):
+            raise PeopleRefused(exc.code, 400, str(exc)) from exc
+        raise
+    logger.info("[people] models set id=%s allowed=%s by=%s", account_id,
+                "every" if kept.get("allowed") is None else len(kept["allowed"]), by)
+    return kept
 
 
 def _end_sessions(reg: dict[str, Any], account_id: str) -> None:

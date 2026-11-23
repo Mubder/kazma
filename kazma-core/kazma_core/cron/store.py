@@ -893,7 +893,7 @@ class SQLiteCronStore:
     async def mark_missed(
         self, job_id: str, *, expected_next_run: str, notice: str, target: str,
         advance: Callable[[str, datetime, str], datetime | None], now: datetime | None = None,
-        refused: str = "",
+        refused: str = "", reason: str = "",
     ) -> dict[str, Any] | None:
         """Record an occurrence missed while Kazma was down: one notice, never "done".
 
@@ -901,7 +901,8 @@ class SQLiteCronStore:
         after *now*. None when the job changed meanwhile (compare-and-swap on
         status and ``next_run``). *refused*: the job would not fire (a key of
         the scheduler's fire refusals, Spaces S1-14): it is recorded missed
-        and no notice is queued.
+        and no notice is queued. *reason*: why, as the job's last result (a
+        paused job says why, S2-07); else "while Kazma was not running".
         """
         now = now or self.clock.now()
         async with self._tx() as db:
@@ -918,16 +919,18 @@ class SQLiteCronStore:
                      self.clock.time()))
                 delivery_id = cur.lastrowid if cur.rowcount else None
             nxt = advance(str(row["timing"]), now, str(row["series_start"] or ""))
+            said = f"Missed: due {due}. {reason}" if reason else f"Missed: due {due} while Kazma was not running."
             if nxt is not None:
                 await db.execute(
-                    "UPDATE cron_jobs SET next_run = ?, last_outcome = 'missed', last_fire_at = ? WHERE job_id = ?",
-                    (norm_iso(nxt), norm_iso(now), job_id))
+                    "UPDATE cron_jobs SET next_run = ?, last_outcome = 'missed', last_fire_at = ?"
+                    + (", last_result = ?" if reason else "") + " WHERE job_id = ?",
+                    (norm_iso(nxt), norm_iso(now), *((said,) if reason else ()), job_id))
                 status = "pending"
             else:
                 await db.execute(
                     "UPDATE cron_jobs SET status = 'missed', last_outcome = 'missed', finished_at = ?, "
                     "last_result = ? WHERE job_id = ?",
-                    (norm_iso(now), f"Missed: due {due} while Kazma was not running.", job_id))
+                    (norm_iso(now), said, job_id))
                 status = "missed"
             await self._event(db, job_id, "missed", source="scheduler",
                               detail={"due": due, "delivery_id": delivery_id, "status": status,

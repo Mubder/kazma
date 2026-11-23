@@ -336,6 +336,19 @@ def x_queue(limit: int = 50, cursor: str = "", include_finished: bool = False) -
 
 @protected_router.post("/queue/{operation_id}/{action}", dependencies=[Depends(_verify_same_origin)])
 def x_queue_action(operation_id: str, action: str, body: _XQueueActionBody) -> JSONResponse:
+    # The person's tool switch (Spaces S2-01): moving a booked post is
+    # x_schedule_post's work, cancelling it x_cancel_scheduled_post's.
+    from kazma_core.spaces.features import tool_door_refusal
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    tool = {"reschedule": "x_schedule_post", "cancel": "x_cancel_scheduled_post"}.get(action, "")
+    try:
+        refused = tool_door_refusal(tool) if tool else None
+    except IdentityUnavailable:
+        return JSONResponse({"ok": False, "code": "identity_unavailable",
+                             "error": "Accounts cannot be read right now. Try again."}, status_code=503)
+    if refused:
+        return JSONResponse({"ok": False, "code": "tool_off", "error": refused}, status_code=403)
     try:
         from kazma_core.x_api.booking import _parse_when
         from kazma_core.x_api.publication_service import update_schedule
@@ -436,9 +449,33 @@ def x_audit(limit: int = 50, action: str | None = None) -> JSONResponse:
         return _safe_error(exc)
 
 
+async def _own_click_refused() -> JSONResponse | None:
+    """A person whose cards go to approvers posts and deletes on X only
+    through the chat's card (decision N4, Spaces S2-05 second review): their
+    own click in X Studio is refused with a line naming the approvers."""
+    from kazma_core.spaces.approvals import own_click_refusal
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    from kazma_ui.i18n import current_language
+
+    lang = "ar" if current_language() == "ar" else "en"
+    try:
+        refused = await asyncio.to_thread(own_click_refusal, lang)
+    except IdentityUnavailable:
+        return JSONResponse({"ok": False, "code": "identity_unavailable",
+                             "error": "Accounts cannot be read right now; nothing was sent."}, status_code=503)
+    if refused:
+        return JSONResponse({"ok": False, "posted": False, "code": "approvers_decide", "error": refused},
+                            status_code=403)
+    return None
+
+
 @protected_router.post("/post", dependencies=[Depends(_verify_same_origin)])
 async def x_post_now(body: XPostBody) -> JSONResponse:
     """Immediate post from X Studio. Operator click is the approval."""
+    refused = await _own_click_refused()
+    if refused is not None:
+        return refused
     try:
         from kazma_core.x_api.booking import publish_x_post
 
@@ -477,6 +514,9 @@ async def x_post_now(body: XPostBody) -> JSONResponse:
 @protected_router.post("/delete", dependencies=[Depends(_verify_same_origin)])
 async def x_delete_now(body: XDeleteBody) -> JSONResponse:
     """Delete a live tweet from X Studio. Operator click is the approval."""
+    refused = await _own_click_refused()
+    if refused is not None:
+        return refused
     try:
         from kazma_core.x_api.booking import delete_x_post
 

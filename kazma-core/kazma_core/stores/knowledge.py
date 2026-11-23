@@ -2093,7 +2093,7 @@ class KnowledgeStore:
             )
         from kazma_core.spaces.scope import spaces_enforced
 
-        if spaces_enforced() and self.space_used_bytes(self._current_tenant()) >= _SPACE_QUOTA_BYTES:
+        if spaces_enforced() and self._space_over_its_share():
             raise KnowledgeSpaceFull(
                 "This space's Knowledge libraries are at their share of the storage; delete a "
                 "library you no longer need to make room."
@@ -2108,6 +2108,15 @@ class KnowledgeStore:
         ceiling = library_ceiling()
         if exists is None and held >= ceiling:
             raise KnowledgeLibraryLimit(ceiling)
+
+    def _space_over_its_share(self) -> bool:
+        """The bound space's libraries hold its knowledge limit or more (its
+        own, Spaces S2-08: ``spaces.space_limits``, :data:`_SPACE_QUOTA_BYTES`
+        by default)."""
+        from kazma_core.spaces.space_limits import knowledge_bytes
+
+        space = self._current_tenant()
+        return self.space_used_bytes(space) >= knowledge_bytes(space, _SPACE_QUOTA_BYTES)
 
     @staticmethod
     def _writing_space() -> str | None:

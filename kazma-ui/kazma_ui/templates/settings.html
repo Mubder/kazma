@@ -2475,17 +2475,43 @@
                 <span></span>
               </div>
               <template x-for="p in people" :key="p.id">
+                <div :data-person-block="p.id">
                 <div class="account-list-row" :data-person="p.id">
-                  <span class="account-list-name"><bdi translate="no" x-text="p.name || window.t('settings.people_owner')"></bdi></span>
+                  <span class="account-list-name"><bdi translate="no" x-text="p.name || window.t('settings.people_owner')"></bdi>
+                    <span class="badge badge-warning" x-show="p.enabled === false" x-cloak data-person-disabled>{{ t('settings.people_disabled') }}</span></span>
                   <span class="account-list-meta" x-text="p.created_at ? KazmaFormat.date(p.created_at) : ''"></span>
                   <span class="account-list-actions">
                     <template x-if="!p.owner">
                       <span style="display:inline-flex;gap:6px">
                         <button type="button" class="btn btn-sm btn-secondary" @click="resetPerson(p)" :aria-label="window.t('settings.people_reset_of', {name: p.name})">{{ t('settings.people_reset') }}</button>
+                        <button type="button" class="btn btn-sm btn-secondary" data-person-enable x-cloak x-show="p.enabled === false" @click="setPersonEnabled(p, true)" :aria-label="window.t('settings.people_enable_of', {name: p.name})">{{ t('settings.people_enable') }}</button>
+                        <button type="button" class="btn btn-sm btn-warning" data-person-disable x-cloak x-show="p.enabled !== false" @click="setPersonEnabled(p, false)" :aria-label="window.t('settings.people_disable_of', {name: p.name})">{{ t('settings.people_disable') }}</button>
                         <button type="button" class="btn btn-sm btn-danger" @click="deletePerson(p)" :aria-label="window.t('settings.people_delete_of', {name: p.name})">{{ t('settings.delete') }}</button>
                       </span>
                     </template>
                   </span>
+                </div>
+                <!-- Their spaces, last sign-in and open sessions (Spaces S2-10):
+                     names and counts, never a session id. -->
+                <div class="account-list-row" style="flex-wrap:wrap;gap:6px 16px" :data-person-details="p.id">
+                  <span class="account-list-meta" :data-person-spaces="p.id">
+                    <span>{{ t('settings.people_spaces_of') }}</span>
+                    <template x-for="s in (p.spaces || [])" :key="p.id + ':space:' + s.id">
+                      <span class="badge badge-secondary" :data-person-space="s.id">
+                        <template x-if="s.kind === 'personal'"><span>{{ t('settings.people_space_usage_personal') }}</span></template>
+                        <template x-if="s.kind !== 'personal'"><bdi translate="no" x-text="s.name"></bdi></template>
+                        <template x-if="s.role === 'owner'"><span>{{ t('settings.people_space_owner_mark') }}</span></template>
+                      </span>
+                    </template>
+                  </span>
+                  <span class="account-list-meta" :data-person-last-sign-in="p.id">
+                    <span>{{ t('settings.people_last_sign_in') }}</span>
+                    <time :datetime="p.last_sign_in || null" x-text="lastSignInText(p)"></time>
+                  </span>
+                  <span class="account-list-meta" :data-person-sessions="p.id" x-text="sessionsText(p)"></span>
+                  <button type="button" class="btn btn-sm btn-ghost" data-person-end-sessions x-show="!p.owner && p.sessions > 0" x-cloak
+                          @click="endPersonSessions(p)" :aria-label="window.t('settings.people_end_sessions_of', {name: p.name})">{{ t('settings.people_end_sessions') }}</button>
+                </div>
                 </div>
               </template>
             </div>
@@ -2601,6 +2627,56 @@
               </template>
             </div>
         </div>
+        <!-- Limits per space (Spaces S2-08): what each space holds and runs
+             beside its limits, counts and sizes only; the limits for spaces
+             and each space's own. -->
+        <div class="settings-group mb-6" id="people-space-usage" x-show="peopleLoaded && !peopleFailed && spaceUsageLoaded" x-cloak>
+            <h3>{{ t('settings.people_space_limits_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_space_limits_help') }}</p>
+            <h4>{{ t('settings.people_space_limits_default') }}</h4>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:flex-end;">
+              <template x-for="name in spaceLimitNames" :key="'default-' + name">
+                <div style="flex:1;min-width:120px">
+                  <label class="form-label" :for="'space-limits-default-' + name" x-text="spaceLimitLabel(name)"></label>
+                  <input type="number" min="1" step="1" class="form-input" :id="'space-limits-default-' + name" x-model="spaceLimitsDraft[name]">
+                </div>
+              </template>
+              <button class="btn btn-primary" type="button" id="space-limits-default-save" @click="saveLimitsForSpaces()">{{ t('settings.people_limit_save') }}</button>
+              <button class="btn btn-secondary" type="button" id="space-limits-default-shipped" x-show="limitsForSpaces.set" x-cloak @click="useShippedSpaceLimits()">{{ t('settings.people_limit_shipped') }}</button>
+            </div>
+            <div class="account-list-table">
+              <template x-for="s in spaceUsage" :key="'usage-' + s.id">
+                <div :data-space-usage="s.id">
+                  <div class="account-list-row">
+                    <span class="account-list-name"><bdi translate="no" x-text="s.name || window.t('settings.people_owner')"></bdi></span>
+                    <span class="badge badge-secondary" x-text="s.kind === 'shared' ? window.t('settings.people_space_usage_shared') : window.t('settings.people_space_usage_personal')"></span>
+                    <span class="account-list-actions">
+                      <button type="button" class="btn btn-sm btn-secondary" @click="editSpaceLimits(s)" :aria-label="window.t('settings.people_space_limits_edit_of', {name: s.name || window.t('settings.people_owner')})">{{ t('settings.people_limit_edit') }}</button>
+                    </span>
+                  </div>
+                  <div class="account-list-row" style="flex-wrap:wrap;gap:6px 16px">
+                    <template x-for="name in spaceLimitNames" :key="s.id + ':' + name">
+                      <span class="account-list-meta" :data-space-used="s.id + ':' + name"
+                            x-text="spaceLimitLabel(name) + ': ' + spaceUsedText(s, name)"></span>
+                    </template>
+                  </div>
+                  <div x-show="spaceLimitEditing === s.id" x-cloak :data-space-limits-editor="s.id">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 12px;">
+                      <template x-for="name in spaceLimitNames" :key="s.id + ':edit:' + name">
+                        <input type="number" min="1" step="1" class="form-input" style="flex:1;min-width:110px"
+                               x-model="spaceLimitDraftOne[name]" :data-space-limit-input="name"
+                               :placeholder="_spaceDraft(s.limits || {})[name]"
+                               :aria-label="window.t('settings.people_space_limit_of', {limit: spaceLimitLabel(name), name: s.name || window.t('settings.people_owner')})">
+                      </template>
+                      <button type="button" class="btn btn-sm btn-primary" @click="saveSpaceLimits(s)">{{ t('settings.people_limit_save') }}</button>
+                      <button type="button" class="btn btn-sm btn-secondary" x-show="Object.keys(s.own_limits || {}).length" x-cloak @click="clearSpaceLimits(s)">{{ t('settings.people_space_limits_clear') }}</button>
+                      <button type="button" class="btn btn-sm btn-ghost" @click="spaceLimitEditing = ''">{{ t('settings.people_limit_cancel') }}</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+        </div>
         <!-- Features (Spaces S2-11): a switch per feature for each person.
              The admin has every feature; only Development is theirs to
              switch off (N28). -->
@@ -2623,6 +2699,78 @@
                     </template>
                   </span>
                 </div>
+              </template>
+            </div>
+        </div>
+        <!-- Tools (Spaces S2-01): inside the features a person has, single
+             tools switched off for them. The admin has every tool. -->
+        <div class="settings-group mb-6" id="people-tools" x-show="peopleLoaded && !peopleFailed" x-cloak>
+            <h3>{{ t('settings.people_tools_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_tools_help') }}</p>
+            <div class="account-list-table">
+              <template x-for="p in people.filter((q) => !q.owner)" :key="'tools-' + p.id">
+                <details class="people-tools-row" :data-person-tools="p.id">
+                  <summary><bdi translate="no" x-text="p.name"></bdi></summary>
+                  <template x-for="g in (p.tools || [])" :key="p.id + '-tools-' + g.from">
+                    <div class="people-tools-group">
+                      <span class="people-tools-from" x-text="personToolGroupLabel(g.from)"></span>
+                      <span class="people-features-list">
+                        <template x-for="tool in g.tools" :key="p.id + '-' + tool.name">
+                          <span class="people-feature">
+                            <input type="checkbox" :checked="tool.on" :data-tool="tool.name"
+                                   :aria-label="window.t('settings.people_tool_of', {tool: tool.name, name: p.name})"
+                                   @change="togglePersonTool(p, tool, $event.target.checked)">
+                            <code aria-hidden="true" translate="no" x-text="tool.name"></code>
+                          </span>
+                        </template>
+                      </span>
+                    </div>
+                  </template>
+                </details>
+              </template>
+            </div>
+        </div>
+        <!-- Models (Spaces S2-03): which models a person may use, and their
+             default. The admin has every model. -->
+        <div class="settings-group mb-6" id="people-models" x-show="peopleLoaded && !peopleFailed" x-cloak>
+            <h3>{{ t('settings.people_models_title') }}</h3>
+            <p class="form-hint">{{ t('settings.people_models_help') }}</p>
+            <div class="account-list-table">
+              <template x-for="p in people.filter((q) => !q.owner)" :key="'models-' + p.id">
+                <details class="people-tools-row" :data-person-models="p.id">
+                  <summary><bdi translate="no" x-text="p.name"></bdi></summary>
+                  <div class="people-tools-group">
+                    <label class="people-feature">
+                      <input type="checkbox" data-models-every
+                             :checked="personModels(p).allowed === null"
+                             :aria-label="window.t('settings.people_models_every_of', {name: p.name})"
+                             @change="setPersonModelsEvery(p, $event.target.checked)">
+                      <span>{{ t('settings.people_models_every') }}</span>
+                    </label>
+                  </div>
+                  <div class="people-tools-group" x-cloak x-show="personModels(p).allowed !== null">
+                    <span class="people-features-list">
+                      <template x-for="ref in peopleModelOptions" :key="p.id + '-model-' + ref">
+                        <span class="people-feature">
+                          <input type="checkbox" :checked="personModelOn(p, ref)" :data-model="ref"
+                                 :aria-label="window.t('settings.people_model_of', {model: ref, name: p.name})"
+                                 @change="togglePersonModel(p, ref, $event.target.checked)">
+                          <code aria-hidden="true" translate="no" x-text="ref"></code>
+                        </span>
+                      </template>
+                    </span>
+                  </div>
+                  <div class="people-tools-group">
+                    <label class="form-label" :for="'people-model-default-' + p.id">{{ t('settings.people_models_default') }}</label>
+                    <select class="form-input" :id="'people-model-default-' + p.id" data-models-default
+                            @change="setPersonModelDefault(p, $event.target.value)">
+                      <option value="" :selected="!personModels(p).default">{{ t('settings.people_models_default_install') }}</option>
+                      <template x-for="ref in personModelChoices(p)" :key="p.id + '-default-' + ref">
+                        <option :value="ref" :selected="personModels(p).default === ref" x-text="ref" translate="no"></option>
+                      </template>
+                    </select>
+                  </div>
+                </details>
               </template>
             </div>
         </div>

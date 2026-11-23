@@ -931,6 +931,24 @@ class LLMProvider:
         """
         return await self._get_client()
 
+    async def _refuse_a_model_not_allowed(self, model: str | None) -> None:
+        """Spaces S2-03: a model the person this work is for may not use is
+        never called (``spaces.person_models.call_refusal``). Every ``chat``
+        and ``chat_stream`` of every provider class asks it first. Only where
+        Spaces is enforced and a person is bound (in memory: an install with
+        one account stops here); the identity store is read off the loop."""
+        from kazma_core.spaces.scope import bound_asker, spaces_enforced
+
+        if not spaces_enforced() or not bound_asker():
+            return
+        from kazma_core.spaces.person_models import call_refusal
+
+        why = await asyncio.to_thread(
+            call_refusal, str(getattr(self, "provider_name", "") or ""), str(model or self.config.model or ""),
+        )
+        if why:
+            raise LLMError(f"Not sent: {why}", kind="model_not_allowed", transient=False)
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -953,6 +971,7 @@ class LLMProvider:
         spans would report three fast calls and hide the latency that was
         actually experienced.
         """
+        await self._refuse_a_model_not_allowed(model)
         from kazma_core.observability.genai_otel import (
             genai_chat_span,
             record_chat_response,
@@ -1768,6 +1787,7 @@ class LLMProvider:
         it failed for its key before any text was streamed (providers stage
         4): a key that is refused, out of credit or out of requests gives way
         to the next. Once text has been streamed, a failure is the call's."""
+        await self._refuse_a_model_not_allowed(model)
         from kazma_core.provider_keys import MAX_SWITCHES
 
         for attempt in range(MAX_SWITCHES + 1):
@@ -2433,6 +2453,8 @@ class LLMError(Exception):
     * ``"stream_truncated"`` — the stream closed before the answer ended.
     * ``"daily_limit"`` — not sent: the person the call is for reached their
       daily limit (Spaces S2-02, ``spaces.daily_limits``).
+    * ``"model_not_allowed"`` — not sent: the model is not one the person the
+      call is for may use (Spaces S2-03, ``spaces.person_models``).
     """
 
     def __init__(

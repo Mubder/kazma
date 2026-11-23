@@ -38,6 +38,8 @@ def test_every_destination_is_still_present(markup):
         "/memory", "/knowledge", "/documents", "/research",
         "/agents", "/swarm", "/scheduled",
         "/dashboard", "/replay",
+        "/activity",  # Spaces S2-09: shown only where Spaces is enforced
+
         "/skills", "/mcp", "/x",
         "/settings",
     }

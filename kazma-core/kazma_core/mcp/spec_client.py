@@ -141,6 +141,17 @@ def list_sampling_pending() -> list[dict[str, Any]]:
     return rows
 
 
+def pending_sampling_card(thread_id: str) -> dict[str, Any] | None:
+    """The sampling card waiting on *thread_id*, as the pending list shows
+    it, or None: what the approve route asks who may answer before it
+    resolves anything (Spaces S2-05)."""
+    key = (thread_id or "").strip()
+    for row in list_sampling_pending():
+        if str(row.get("thread_id") or "") == key:
+            return row
+    return None
+
+
 def resolve_sampling_hitl(thread_id: str, approved: bool) -> bool:
     """Resolve an in-flight sampling wait. True if a waiter was waiting."""
     key = (thread_id or "").strip()
@@ -169,6 +180,24 @@ def _preview_messages(params: dict[str, Any] | None) -> str:
             )
         bits.append(str(content or "")[:200])
     return " | ".join(bits)[:400]
+
+
+def _sampling_card_who() -> dict[str, Any]:
+    """The who-answers fields of a sampling card: the
+    person bound now (the turn that called the MCP server) and, once Spaces
+    is enforced, who answers it (``spaces.approvals.card_fields``). Nothing
+    when no person is bound. Blocking (the identity store, the thread
+    record)."""
+    from kazma_core.spaces.scope import current_scope
+
+    bound = current_scope()
+    if bound is None or not bound.asker:
+        return {}
+    from kazma_core.spaces.approvals import card_fields
+
+    fields = {"asker": bound.asker, "space_id": bound.space_id}
+    fields.update(card_fields(bound.space_id, bound.asker, ("mcp_sampling",)))
+    return fields
 
 
 async def request_sampling_hitl(
@@ -209,6 +238,9 @@ async def request_sampling_hitl(
             "(call our LLM, no tools). Approve once. Not auto-run."
         ),
     }
+    # Whose card it is (Spaces S2-05): the person whose turn called the MCP
+    # server, so only they -- or whoever answers for them -- decide it.
+    payload.update(await asyncio.to_thread(_sampling_card_who))
     loop = asyncio.get_running_loop()
     fut: asyncio.Future[bool] = loop.create_future()
     async with _sampling_lock:

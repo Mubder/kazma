@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kazma_ui.hitl_answerers import card_who
+
 logger = logging.getLogger(__name__)
 
 __all__: list[str] = []
@@ -66,6 +68,8 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
                 "yolo_allowed": bool(value.get("yolo_allowed", True)),
                 "always_ask": bool(value.get("always_ask", False)),
                 "interrupt_id": iid,
+                # Whose card it is and who answers it (Spaces S2-05).
+                **card_who(value),
             }
         # Fallback: some interrupt payloads may not carry the type tag but
         # still have tool/args keys
@@ -83,6 +87,8 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
                 "yolo_allowed": bool(value.get("yolo_allowed", True)),
                 "always_ask": bool(value.get("always_ask", False)),
                 "interrupt_id": iid,
+                # Whose card it is and who answers it (Spaces S2-05).
+                **card_who(value),
             }
     return None
 
@@ -263,6 +269,7 @@ async def _get_pending_approvals(
                         "yolo_allowed": info.get("yolo_allowed", True),
                         "always_ask": bool(info.get("always_ask", False)),
                         "interrupt_id": iid,
+                        **card_who(info),
                     }
                 )
                 # Only need one interrupt per thread

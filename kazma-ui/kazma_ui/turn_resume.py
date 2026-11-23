@@ -151,6 +151,35 @@ async def _find_cut_turns(checkpointer: Any, graph: Any, now: float | None = Non
     return found
 
 
+async def _whose_turn_goes_on(thread_id: str) -> tuple[Any, str]:
+    """``(whose, "")`` for a cut turn that may go on as its asker, or
+    ``(None, words)`` when it may not: its asker left its space, or who it is
+    cannot be read now. ``(None, "")`` while the install does not enforce
+    Spaces (nothing is read or bound)."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return None, ""
+    import sqlite3
+
+    from kazma_core.spaces.identity import IdentityUnavailable, asker_left
+    from kazma_ui.hitl_answerers import whose_turn
+
+    def _read() -> tuple[Any, bool]:
+        whose = whose_turn(thread_id)
+        return whose, asker_left(whose.space_id, whose.asker)
+
+    try:
+        whose, left = await asyncio.to_thread(_read)
+    except (sqlite3.Error, OSError, IdentityUnavailable):
+        logger.warning("[turn_resume] whose turn thread=%s is cannot be read; not continued",
+                       thread_id[:12], exc_info=True)
+        return None, "Whose turn this is cannot be read right now; try again."
+    if left:
+        return None, "The person who started this turn is no longer in its space, so it does not go on."
+    return whose, ""
+
+
 async def continue_turn(graph: Any, turn: CutTurn, *, drive: Any = None) -> tuple[bool, str]:
     """Continue *turn* from its checkpoint. ``(started, words)``. *drive* runs
     a web turn into its journal (``_drive_graph_to_journal`` by default)."""
@@ -162,20 +191,39 @@ async def continue_turn(graph: Any, turn: CutTurn, *, drive: Any = None) -> tupl
     if turn.platform in _CHAT_APPS:
         if _continuer is None or not turn.target.startswith(f"{turn.platform}:"):
             return False, "The chat app this turn belongs to is not connected."
-        task = asyncio.create_task(_continuer(thread_id=turn.thread_id, resume_config=config,
-                                              platform=turn.platform, target_id=turn.target,
-                                              user_text=turn.user_text))
+        # A chat app's turn goes on as its asker too (the S2-05 second
+        # review: it ran unbound, as the chat's opener or no one).
+        whose, refusal = await _whose_turn_goes_on(turn.thread_id)
+        if refusal:
+            return False, refusal
+        from kazma_ui.hitl_answerers import as_the_asker
+
+        with as_the_asker(whose):
+            task = asyncio.create_task(_continuer(thread_id=turn.thread_id, resume_config=config,
+                                                  platform=turn.platform, target_id=turn.target,
+                                                  user_text=turn.user_text))
     else:
         from kazma_ui.reply_sink import resolve_reply_turn
         from kazma_ui.session_manager import get_session_manager
         if drive is None:
             from kazma_ui.sse_chat._streaming import _drive_graph_to_journal as drive
 
-        session = await asyncio.to_thread(get_session_manager().get_by_thread_id, turn.thread_id)
-        session_id = getattr(session, "id", "") or ""
-        reply_turn = await asyncio.to_thread(resolve_reply_turn, turn.thread_id, session_id)
-        task = asyncio.create_task(drive(graph, None, config, thread_id=turn.thread_id,
-                                         session_id=session_id, reply_turn_id=reply_turn))
+        # The turn goes on as its asker (Spaces S2-05 review), whoever pressed
+        # Continue or none (the start pass): unbound, it ran as the chat's
+        # opener. A turn whose asker left its space does not go on.
+        whose, refusal = await _whose_turn_goes_on(turn.thread_id)
+        if refusal:
+            return False, refusal
+        from kazma_ui.hitl_answerers import as_the_asker
+
+        # The chat's own store is read in the asker's scope too: the start
+        # pass binds nothing, and the chat store is each space's.
+        with as_the_asker(whose):
+            session = await asyncio.to_thread(lambda: get_session_manager().get_by_thread_id(turn.thread_id))
+            session_id = getattr(session, "id", "") or ""
+            reply_turn = await asyncio.to_thread(resolve_reply_turn, turn.thread_id, session_id)
+            task = asyncio.create_task(drive(graph, None, config, thread_id=turn.thread_id,
+                                             session_id=session_id, reply_turn_id=reply_turn))
     register_turn(turn.thread_id, task)
     _left.pop(turn.thread_id, None)
     logger.warning("[turn_resume] continuing thread=%s (%s) cut off by a restart", turn.thread_id[:12],

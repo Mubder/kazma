@@ -491,14 +491,20 @@ def _resolve_reported(approval_id: str, approved: bool, *, actor: str, platform:
 def _a_chat_button_may_decide(approval_id: str) -> bool:
     """Whether a chat app's button may decide this request: always while
     Spaces is not enforced; once it is, only a request that acts for the
-    owner, whose chat apps they are. Blocking."""
-    from kazma_core.spaces.scope import spaces_enforced
-    from kazma_core.swarm.single_operator import for_the_owner
+    owner, whose chat apps they are (O1), and that the owner answers by the
+    one rule of who answers a card (``single_operator.answered_by_caller``,
+    S2-05 review: the owner's approvers when the admin set some, N4).
+    Blocking."""
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, spaces_enforced
+    from kazma_core.swarm.single_operator import answered_by_caller, for_the_owner
 
     if not spaces_enforced():
         return True
     space, asker = whose(approval_id)
-    return for_the_owner(space, asker or None)
+    if not for_the_owner(space, asker or None):
+        return False
+    tool = str((get(approval_id) or {}).get("tool") or "")
+    return answered_by_caller(space, asker or None, (tool,) if tool else (), caller=OWNER_ACCOUNT_ID)
 
 
 #: A swarm card's button data: the decision and the request's id.

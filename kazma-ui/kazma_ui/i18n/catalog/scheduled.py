@@ -336,6 +336,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أُلغي",
         "en": "cancelled",
     },
+    # Spaces S2-07: a job whose person the admin disabled waits.
+    "scheduled.paused_creator_disabled": {
+        "ar": "متوقفة مؤقتًا: حساب الشخص الذي حجزها معطّل، فلا تعمل حتى يفعّله المسؤول.",
+        "en": "Paused: the person who booked it is disabled, so it does not run until the admin enables them.",
+    },
     "scheduled.edit_pending": {
         "ar": "المهمة تعمل الآن؛ يُطبَّق التعديل عند انتهاء هذا التشغيل.",
         "en": "The task is running now; the change applies when this run ends.",

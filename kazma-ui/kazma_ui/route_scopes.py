@@ -226,6 +226,9 @@ ROUTE_SCOPE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/voice/livekit/status$", INSTALL),
 
     # ── A space ───────────────────────────────────────────────────────────
+    # What was done in the space, under each person's name (S2-09).
+    ("/activity$", SPACE),
+    ("/api/activity$", SPACE),
     # Chats, their approvals and their saved steps.
     ("/chat$", SPACE),
     ("/api/chat", SPACE),
@@ -442,6 +445,29 @@ def features_of_route(path: str, method: str = "GET") -> tuple[str, ...]:
     extra = tuple(feature for rule, needs in _also_rules() if rule.matches(wanted, segments)
                   for feature in needs)
     return ((own,) if own else ()) + extra
+
+
+#: ``spaces.features.TOOL_ROUTE_DOORS``, compiled once.
+_TOOL_DOOR_RULES: list[tuple[Rule, tuple[str, ...]]] = []
+
+
+def _tool_door_rules() -> list[tuple[Rule, tuple[str, ...]]]:
+    if not _TOOL_DOOR_RULES:
+        from kazma_core.spaces.features import TOOL_ROUTE_DOORS
+
+        rows = list(TOOL_ROUTE_DOORS.items())
+        compiled = compile_rules((pattern, SPACE) for pattern, _ in rows)
+        _TOOL_DOOR_RULES.extend(zip(compiled, (tools for _, tools in rows), strict=True))
+    return _TOOL_DOOR_RULES
+
+
+def tools_of_route(path: str, method: str = "GET") -> tuple[str, ...]:
+    """The tools whose work ``method path`` does (Spaces S2-01,
+    ``spaces.features.TOOL_ROUTE_DOORS``): the tenant middleware refuses it
+    when one of them is switched off for the person. No I/O."""
+    wanted = "GET" if (method or "").upper() == "HEAD" else (method or "").upper()
+    segments = _segments(path)
+    return tuple(tool for rule, tools in _tool_door_rules() if rule.matches(wanted, segments) for tool in tools)
 
 
 def deciding_rule(

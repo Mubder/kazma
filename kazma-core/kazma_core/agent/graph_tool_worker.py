@@ -227,6 +227,22 @@ async def _refuse_unrunnable_calls(
     return kept, refused
 
 
+def _whose_card(tools: Any) -> dict[str, Any]:
+    """Who answers a card about *tools* (Spaces S2-05): its asker and the
+    accounts that answer it (``spaces.approvals.card_fields``), once Spaces
+    is enforced; nothing before, so the card is as it was. Blocking (the
+    identity store)."""
+    from kazma_core.spaces.approvals import card_fields
+    from kazma_core.spaces.scope import current_scope, spaces_enforced
+
+    if not spaces_enforced():
+        return {}
+    bound = current_scope()
+    if bound is None:
+        return {}
+    return card_fields(bound.space_id, bound.asker, [str(t) for t in tools])
+
+
 def _commitment_resolve_gate(
     state: SupervisorState,
     pending: list[PendingToolCall],
@@ -506,6 +522,8 @@ def _commitment_resolve_gate(
                 "message": (_items[0]["question"] if len(_items) == 1
                             else f"{len(_items)} actions need clarification"),
             }
+            # Who answers it (Spaces S2-05): this function runs in a thread.
+            _sem_payload.update(_whose_card(_tc["name"] for _tc, _ in semantic_hold))
             _sem_choice = interrupt(_sem_payload)
             _choice_map = (_sem_choice if isinstance(_sem_choice, dict)
                            else {str(semantic_hold[0][0].get("id") or ""): _sem_choice})
@@ -1547,6 +1565,11 @@ async def tool_worker_node(
                 # wherever YOLO is off for the install.
                 "always_ask": bool(_batch_always),
             }
+            # Who answers it, once Spaces is enforced (S2-05): the card goes
+            # to its asker -- or the admin, or the asker's approvers -- and
+            # nobody else answers it (spaces.approvals).
+            approval_input.update(await asyncio.to_thread(
+                _whose_card, [str(tc.get("name") or "") for tc in danger_tools]))
 
             # Defense-in-depth: requires_approval() already filtered YOLO/grants
             # when splitting safe/danger above. Re-check here in case grants

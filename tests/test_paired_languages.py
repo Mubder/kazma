@@ -676,10 +676,6 @@ def test_negative_control_a_pair_catches_an_english_only_rule(monkeypatch):
 
 #: Product modules with Arabic in their code that need no pair here, and why.
 DECLARED: dict[str, str] = {
-    "kazma-core/kazma_core/spaces/tools.py":
-        "N21's interim refusal (S2-12) is one sentence written in both languages; "
-        "approval_refusal passes the pair to language_lock.in_their_language, which picks by "
-        "what the person wrote (tests/test_development_per_person.py runs it in both)",
     "kazma-gateway/kazma_gateway/adapters/whatsapp.py":
         "two short notes (a file it could not download, an approval only the owner may answer) "
         "written in both languages; WhatsAppAdapter._say passes the pair to "
@@ -742,6 +738,18 @@ DECLARED: dict[str, str] = {
     M + "x_api/subject_policy.py": "the Arabic article rule for matching a subject's name",
     "kazma-skills/kazma_skills/native/arabic_bilingual_nlp/tools.py": "a bilingual NLP skill: Hijri dates written in Arabic",
     "kazma-skills/kazma_skills/native/email_manager/analyze.py": "the product's Arabic name in a prompt",
+    "kazma-ui/kazma_ui/hitl_answerers.py": "the bell's line for a card waiting for the person, an "
+                                           "(English, Arabic) pair chosen by the page's language "
+                                           "(current_language); nothing is decided by Arabic text; "
+                                           "tests/test_approvals_reach_the_asker.py",
+    "kazma-ui/kazma_ui/hitl_timeout.py": "the line a turn ends with when its card's asker left the space, "
+                                         "two fixed strings that language_lock.in_their_language chooses "
+                                         "between; nothing is decided by Arabic text; "
+                                         "tests/test_approvals_review_fixes.py",
+    "kazma-ui/kazma_ui/sse_chat/__init__.py": "the refusal of a message while a card waits on another member, "
+                                              "two fixed strings that language_lock.in_their_language "
+                                              "chooses between; nothing is decided by Arabic text; "
+                                              "tests/test_approvals_review_fixes.py",
     "kazma-ui/kazma_ui/config_errors.py": "a settings-save error in the PAGE's language (current_language), "
                                           "English otherwise; tests/test_durable_config_outage.py",
     M + "cron/scheduler.py": "a job's refusal when its person lacks the Scheduled feature, an (English, "
@@ -750,6 +758,9 @@ DECLARED: dict[str, str] = {
     M + "spaces/daily_limits.py": "the daily-limit refusal as two fixed strings that "
                                   "language_lock.in_their_language chooses between; nothing is decided "
                                   "by Arabic text; tests/test_person_daily_limit.py",
+    M + "spaces/approvals.py": "X Studio's refusal of a person's own click when approvers decide their "
+                               "cards, an (English, Arabic) pair chosen by the page's language; nothing "
+                               "is decided by Arabic text; tests/test_tool_doors.py",
     M + "spaces/features.py": "each feature's name and its refusal in both languages (NAMES, held equal "
                               "to the catalog); nothing is decided by Arabic text; "
                               "tests/test_feature_grants.py",

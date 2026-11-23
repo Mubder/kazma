@@ -100,7 +100,7 @@ def book_x_post(
     ``id``, ``text``, ``fire_at``, ``tz``; on failure a single ``error``.
     """
     from kazma_core.cron.scheduler import resolve_cron_zone
-    from kazma_core.spaces.features import work_refusal
+    from kazma_core.spaces.features import tool_work_refusal, work_refusal
     from kazma_core.spaces.identity import IdentityUnavailable
     from kazma_core.spaces.scope import bound_asker
     from kazma_core.x_api.ownership import x_tenant_id
@@ -118,7 +118,9 @@ def book_x_post(
     # (``x_work_scope``): switched off later, their posts wait.
     booker = bound_asker() or ""
     try:
-        refused = work_refusal("x_studio", booker)
+        # The person's tool switch too (Spaces S2-01): x_schedule_post
+        # switched off for them is off at every door that books.
+        refused = work_refusal("x_studio", booker) or tool_work_refusal("x_schedule_post", booker)
     except IdentityUnavailable:
         return False, {"error": "Accounts cannot be read right now; nothing was booked.",
                        "code": "identity_unavailable"}
@@ -150,6 +152,9 @@ async def publish_x_post(
     The caller is responsible for HITL on the agent path; the Web studio
     treats the operator click as the approval, matching ``book_x_post``.
     """
+    refused = await _tool_switched_off("x_post")
+    if refused is not None:
+        return False, refused
     from kazma_core.x_api.publication_service import publish
 
     return await publish(text=text, reply_to_id=reply_to_id, idempotency_key=idempotency_key, origin=origin, metadata=metadata)
@@ -161,6 +166,26 @@ async def delete_x_post(*, tweet_id: str) -> tuple[bool, dict[str, Any]]:
     Same no-retry contract as publish. Web Studio treats the operator click
     as approval; the chat tool stays always-HITL outside this function.
     """
+    refused = await _tool_switched_off("x_delete_post")
+    if refused is not None:
+        return False, refused
     from kazma_core.x_api.publication_service import delete
 
     return await delete(tweet_id=tweet_id)
+
+
+async def _tool_switched_off(tool: str) -> dict[str, Any] | None:
+    """The refusal of a post or a delete whose tool is switched off for the
+    person bound now (Spaces S2-01): every way to it -- the tool, X Studio,
+    the reply bot's approve and delete, the chat apps' /x -- passes here.
+    None when it may go. Off the loop (the identity store)."""
+    import asyncio
+
+    from kazma_core.spaces.features import tool_door_refusal
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    try:
+        refused = await asyncio.to_thread(tool_door_refusal, tool)
+    except IdentityUnavailable:
+        return {"error": "Accounts cannot be read right now; nothing was sent.", "code": "identity_unavailable"}
+    return {"error": refused, "code": "tool_off"} if refused else None

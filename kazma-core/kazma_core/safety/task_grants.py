@@ -15,8 +15,9 @@ Auto-expiry is two-layered:
      one nothing read (audit 2026-10-26 AUD-062), and a longer net is a
      wider blast radius, not a setting.
 
-Storage: ConfigStore key ``task_grant.{thread_id}``, category ``safety``.
-Mirrors the ``hitl_grants.py`` pattern exactly.
+Storage: ConfigStore key ``task_grant.{holder}``, category ``safety``: the
+chat's thread id, and once Spaces is enforced the thread and the person
+(``safety.grant_holder``, S2-06). Mirrors the ``hitl_grants.py`` pattern.
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ def grant_task(
     *,
     actor: str = "unknown",
     ttl_seconds: int | None = None,
+    person: str | None = None,
 ) -> dict[str, Any]:
     """Grant ALL danger tools for this thread until the next user message or TTL.
 
@@ -60,17 +62,33 @@ def grant_task(
     """
     if not thread_id:
         return {"active": False, "error": "no thread_id"}
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id, person)
+    if not key_holder:
+        return {"active": False, "error": "no person to grant it to"}
+    from kazma_core.spaces.approvals import standing_grant_refusal
+
+    refused = standing_grant_refusal(person)
+    if refused:
+        # A person whose cards go to approvers does not skip them (Spaces
+        # S2-05, N4); an approver's grant from the card they answered passes.
+        logger.warning("[SECURITY] grant refused thread=%s actor=%s: %s", thread_id, actor, refused)
+        return {"active": False, "error": refused}
 
     ttl = ttl_seconds if ttl_seconds is not None else _DEFAULT_GRANT_TTL
     now = time.time()
+    from kazma_core.spaces.approvals import made_by_a_person
+
     payload = {
         "enabled": True,
         "since": now,
         "actor": actor,
+        "granted_by": made_by_a_person(),
         "ttl_seconds": ttl,
         "expires_at": (now + ttl) if ttl else None,
     }
-    key = f"task_grant.{thread_id}"
+    key = f"task_grant.{key_holder}"
     _cs().set(key, payload, category="safety")
     logger.warning(
         "[SECURITY] TASK GRANT enabled for thread=%s actor=%s ttl=%ds",
@@ -78,25 +96,37 @@ def grant_task(
         actor,
         ttl,
     )
-    return task_grant_status(thread_id)
+    return task_grant_status(thread_id, person)
 
 
-def has_task_grant(thread_id: str | None) -> bool:
+def has_task_grant(thread_id: str | None, person: str | None = None) -> bool:
     """True if an active (non-expired) task grant exists for this thread.
 
     Auto-expires + cleans up on TTL. Returns False for empty thread_id.
     """
     if not thread_id:
         return False
-    status = task_grant_status(thread_id)
+    status = task_grant_status(thread_id, person)
     return bool(status.get("active"))
 
 
-def clear_task_grant(thread_id: str) -> bool:
+def task_grant_by(thread_id: str | None, person: str | None = None) -> str:
+    """Who made the task grant (``granted_by``), "" when nobody is recorded."""
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id, person)
+    raw = _cs().get(f"task_grant.{key_holder}") if key_holder else None
+    return str(raw.get("granted_by") or "") if isinstance(raw, dict) else ""
+
+
+def clear_task_grant(thread_id: str, person: str | None = None) -> bool:
     """Remove a task grant (safety re-engages). Returns True if one was cleared."""
-    if not thread_id:
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id, person)
+    if not key_holder:
         return False
-    key = f"task_grant.{thread_id}"
+    key = f"task_grant.{key_holder}"
     try:
         existing = _cs().get(key)
         if existing is None:
@@ -108,11 +138,15 @@ def clear_task_grant(thread_id: str) -> bool:
         return False
 
 
-def task_grant_status(thread_id: str | None) -> dict[str, Any]:
-    """Return the task-grant status for a thread (auto-expires on TTL)."""
-    if not thread_id:
+def task_grant_status(thread_id: str | None, person: str | None = None) -> dict[str, Any]:
+    """Return the task-grant status for a thread (auto-expires on TTL), for
+    *person* once Spaces is enforced (the person bound now when None)."""
+    from kazma_core.safety.grant_holder import holder
+
+    key_holder = holder(thread_id, person)
+    if not key_holder:
         return {"active": False}
-    key = f"task_grant.{thread_id}"
+    key = f"task_grant.{key_holder}"
     try:
         raw = _cs().get(key)
         if raw is None:

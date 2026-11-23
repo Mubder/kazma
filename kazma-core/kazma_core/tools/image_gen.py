@@ -134,6 +134,16 @@ async def generate_image(
     except Exception as exc:  # noqa: BLE001
         return f"Error: Could not initialise image backend — {exc}"
 
+    # ── The space's disk limit (Spaces S2-08) ───────────────────────
+    # Asked before the provider is: a space whose folder is at its limit
+    # gets no image made that could not be saved.
+    from kazma_core.spaces.space_limits import SpaceOverLimit, refuse_write_for_disk
+
+    try:
+        await asyncio.to_thread(refuse_write_for_disk, 0)
+    except SpaceOverLimit as exc:
+        return f"Error: {exc}"
+
     # ── Generate ────────────────────────────────────────────────────
     try:
         image_bytes = await backend.generate(prompt, width, height)

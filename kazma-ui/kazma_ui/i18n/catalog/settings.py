@@ -2753,6 +2753,56 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.people_limit_clear": {"en": "Use the limit for people", "ar": "استخدام الحد للأشخاص"},
     "settings.people_limit_clear_admin": {"en": "No limit", "ar": "بلا حد"},
     "settings.people_limit_cancel": {"en": "Cancel", "ar": "إلغاء"},
+    # Limits per space (Spaces S2-08).
+    "settings.people_space_limits_title": {"en": "Limits per space", "ar": "حدود كل مساحة"},
+    "settings.people_space_limits_help": {
+        "en": "Each space has its own limits beside the install's, so one space at its limit never slows or stops another. Work running at once is a space's share of the install's slots. Only counts and sizes are shown, never what a space holds.",
+        "ar": "لكل مساحة حدودها الخاصة إلى جانب حدود التثبيت، فلا تُبطئ مساحة بلغت حدها مساحةً أخرى ولا توقفها. العمل الجاري في آن واحد هو حصة المساحة من خانات التثبيت. تُعرض الأعداد والأحجام فقط، لا محتوى المساحة.",
+    },
+    "settings.people_space_limits_default": {"en": "The limits for spaces", "ar": "حدود المساحات"},
+    "settings.people_space_usage_shared": {"en": "Shared", "ar": "مشتركة"},
+    "settings.people_space_usage_personal": {"en": "Personal", "ar": "شخصية"},
+    "settings.people_space_limits_edit_of": {"en": "Change the limits of {name}", "ar": "غيّر حدود {name}"},
+    "settings.people_space_limit_of": {"en": "{limit} for {name}", "ar": "{name}: {limit}"},
+    "settings.people_space_limits_clear": {"en": "Use the limits for spaces", "ar": "استخدم حدود المساحات"},
+    "settings.people_space_limits_saved": {"en": "Limits saved.", "ar": "حُفظت الحدود."},
+    "settings.people_space_mib": {"en": "{size} MiB", "ar": "{size} ميبيبايت"},
+    # Each person's spaces, last sign-in and sessions (Spaces S2-10).
+    "settings.people_spaces_of": {"en": "Spaces:", "ar": "المساحات:"},
+    "settings.people_space_owner_mark": {"en": "(owner)", "ar": "(مالك)"},
+    "settings.people_last_sign_in": {"en": "Last sign-in:", "ar": "آخر تسجيل دخول:"},
+    "settings.people_never_signed_in": {"en": "Never", "ar": "لم يسجّل الدخول بعد"},
+    "settings.people_sessions_open.zero": {"en": "No session open", "ar": "لا جلسات مفتوحة"},
+    "settings.people_sessions_open.one": {"en": "1 session open", "ar": "جلسة واحدة مفتوحة"},
+    "settings.people_sessions_open.two": {"en": "{n} sessions open", "ar": "جلستان مفتوحتان"},
+    "settings.people_sessions_open.few": {"en": "{n} sessions open", "ar": "{n} جلسات مفتوحة"},
+    "settings.people_sessions_open.many": {"en": "{n} sessions open", "ar": "{n} جلسة مفتوحة"},
+    "settings.people_sessions_open.other": {"en": "{n} sessions open", "ar": "{n} جلسة مفتوحة"},
+    "settings.people_end_sessions": {"en": "End sessions", "ar": "إنهاء الجلسات"},
+    "settings.people_end_sessions_of": {"en": "End the sessions of {name}", "ar": "إنهاء جلسات {name}"},
+    "settings.people_end_sessions_title": {"en": "Sign {name} out everywhere?", "ar": "تسجيل خروج {name} من كل مكان؟"},
+    "settings.people_end_sessions_confirm": {
+        "en": "Every session they have open ends, and they sign in again on each device. "
+              "They are told the next time they sign in.",
+        "ar": "تنتهي كل جلسة مفتوحة لهم، ويسجّلون الدخول من جديد على كل جهاز. ويُبلَّغون عند تسجيل دخولهم التالي.",
+    },
+    "settings.people_sessions_ended": {"en": "{name} is signed out everywhere.", "ar": "سُجّل خروج {name} من كل مكان."},
+    "settings.people_err.owner_in_my_account": {
+        "en": "Your own sessions are ended in My account.",
+        "ar": "تُنهى جلساتك أنت من «حسابي».",
+    },
+    "settings.people_space_usage_of": {"en": "{used} of {limit}", "ar": "{used} من {limit}"},
+    "settings.people_space_usage_unknown": {"en": "Not counted", "ar": "غير محسوب"},
+    "settings.people_space_usage_install_files": {"en": "The install's own folders", "ar": "مجلدات التثبيت نفسها"},
+    "settings.space_limit.disk_bytes": {"en": "Files (MiB)", "ar": "الملفات (ميبيبايت)"},
+    "settings.space_limit.documents_bytes": {"en": "Documents (MiB)", "ar": "المستندات (ميبيبايت)"},
+    "settings.space_limit.knowledge_bytes": {"en": "Knowledge (MiB)", "ar": "المعرفة (ميبيبايت)"},
+    "settings.space_limit.crawls": {"en": "Crawls at once", "ar": "عمليات الزحف في آن واحد"},
+    "settings.space_limit.research": {"en": "Research at once", "ar": "الأبحاث في آن واحد"},
+    "settings.space_limit.swarm": {"en": "Swarm tasks at once", "ar": "مهام السرب في آن واحد"},
+    "settings.people_err.unknown_limit": {"en": "There is no such limit.", "ar": "لا يوجد حد بهذا الاسم."},
+    "settings.people_err.bad_limits": {"en": "Limits are a number for each limit.", "ar": "الحدود عدد لكل حد."},
+    "settings.people_err.no_such_space": {"en": "There is no such space.", "ar": "لا توجد مساحة كهذه."},
     "settings.people_limit_none": {"en": "None: the install's own limit", "ar": "لا شيء: حد التثبيت نفسه"},
     "settings.people_limit_own": {"en": "Their own", "ar": "حده الخاص"},
     "settings.people_limit_from_default": {"en": "The limit for people", "ar": "الحد للأشخاص"},
@@ -2799,6 +2849,66 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.feature_off_back": {"en": "Back to chat", "ar": "العودة إلى المحادثة"},
     "settings.people_features_saved": {"en": "Features saved.", "ar": "حُفظت الميزات."},
+    # Spaces S2-01: inside a feature, single tools per person.
+    "settings.people_tools_title": {"en": "Tools", "ar": "الأدوات"},
+    "settings.people_tools_help": {
+        "en": "Inside the features a person has, switch single tools off: for example X Studio on, but "
+              "posting off. A tool that is off is neither offered nor run for them, in chat, a scheduled job "
+              "or a swarm worker. You have every tool.",
+        "ar": "داخل الميزات التي لدى الشخص، عطّل أدوات بعينها: مثلًا استوديو X مفعّل والنشر معطّل. الأداة "
+              "المعطّلة لا تُعرض عليه ولا تعمل له، في المحادثة أو مهمة مجدولة أو عامل في السرب. لديك أنت كل الأدوات.",
+    },
+    "settings.people_tools_saved": {"en": "Tools saved.", "ar": "حُفظت الأدوات."},
+    "settings.people_tool_of": {"en": "{tool} for {name}", "ar": "{tool} لـ {name}"},
+    "settings.people_tools_from_chat": {"en": "Chat", "ar": "المحادثة"},
+    "settings.people_tools_from_memory": {"en": "Memory", "ar": "الذاكرة"},
+    "settings.people_err.unknown_tool": {"en": "There is no such tool a person can have.",
+                                         "ar": "لا توجد أداة بهذا الاسم يمكن أن تكون لشخص."},
+    "settings.people_err.bad_tools": {"en": "Name the tools to switch off, as a list.",
+                                      "ar": "حدّد الأدوات المراد تعطيلها في قائمة."},
+    "settings.people_err.admin_has_every_tool": {"en": "The admin has every tool.",
+                                                 "ar": "لدى المسؤول كل الأدوات."},
+    # Spaces S2-07: the admin disables a person; their work waits.
+    "settings.people_disabled": {"en": "Disabled", "ar": "معطّل"},
+    "settings.people_disable": {"en": "Disable", "ar": "تعطيل"},
+    "settings.people_enable": {"en": "Enable", "ar": "تفعيل"},
+    "settings.people_disable_of": {"en": "Disable {name}", "ar": "تعطيل {name}"},
+    "settings.people_enable_of": {"en": "Enable {name}", "ar": "تفعيل {name}"},
+    "settings.people_disable_title": {"en": "Disable {name}?", "ar": "تعطيل {name}؟"},
+    "settings.people_disable_confirm": {
+        "en": "They can no longer sign in, and their scheduled jobs and other work wait until you enable "
+              "them again. Their spaces and data stay.",
+        "ar": "لن يستطيع تسجيل الدخول، وتنتظر مهامه المجدولة وأعماله الأخرى حتى تفعّله مجددًا. تبقى مساحاته وبياناته.",
+    },
+    "settings.people_disabled_done": {"en": "{name} is disabled.", "ar": "عُطّل {name}."},
+    "settings.people_enabled_done": {"en": "{name} is enabled again.", "ar": "فُعّل {name} مجددًا."},
+    "settings.people_err.bad_enabled": {"en": "A person is enabled or disabled.",
+                                        "ar": "الشخص إما مفعّل أو معطّل."},
+    # Spaces S2-03: the models a person may use, and their default.
+    "settings.people_models_title": {"en": "Models", "ar": "النماذج"},
+    "settings.people_models_help": {
+        "en": "Which models each person may use, and their default. A model they may not use is not in "
+              "their model picker, and is never called for them: not in chat, a scheduled job or a swarm "
+              "worker. You have every model.",
+        "ar": "النماذج التي يمكن لكل شخص استخدامها، ونموذجه الافتراضي. النموذج غير المتاح له لا يظهر في قائمة "
+              "نماذجه، ولا يُستدعى له أبدًا: لا في المحادثة ولا في مهمة مجدولة ولا في عامل في السرب. لديك أنت كل النماذج.",
+    },
+    "settings.people_models_every": {"en": "Every model this install offers",
+                                      "ar": "كل النماذج التي يتيحها هذا التثبيت"},
+    "settings.people_models_every_of": {"en": "Every model for {name}", "ar": "كل النماذج لـ {name}"},
+    "settings.people_model_of": {"en": "{model} for {name}", "ar": "{model} لـ {name}"},
+    "settings.people_models_default": {"en": "Their default model", "ar": "نموذجه الافتراضي"},
+    "settings.people_models_default_install": {"en": "This install's default, when they may use it",
+                                               "ar": "النموذج الافتراضي لهذا التثبيت، إن كان متاحًا له"},
+    "settings.people_models_saved": {"en": "Models saved.", "ar": "حُفظت النماذج."},
+    "settings.people_err.bad_models": {"en": "Name the models as provider:model references.",
+                                       "ar": "حدّد النماذج بصيغة المزوّد:النموذج."},
+    "settings.people_err.default_not_allowed": {"en": "The default must be one of the models they may use.",
+                                                "ar": "يجب أن يكون النموذج الافتراضي من النماذج المتاحة له."},
+    "settings.people_err.no_models": {"en": "Leave a person at least one model.",
+                                      "ar": "اترك للشخص نموذجًا واحدًا على الأقل."},
+    "settings.people_err.admin_has_every_model": {"en": "The admin has every model.",
+                                                  "ar": "لدى المسؤول كل النماذج."},
     "settings.people_err.unknown_feature": {"en": "There is no such feature.", "ar": "لا توجد ميزة بهذا الاسم."},
     "settings.people_err.bad_switch": {"en": "A feature is switched on or off.", "ar": "الميزة إما مفعّلة أو معطّلة."},
     "settings.people_err.bad_features": {"en": "Name the features to switch.", "ar": "حدّد الميزات المراد تبديلها."},
@@ -2960,13 +3070,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
               "in, they get git, GitHub and that project's files. Nothing of the project's runs on this computer "
               "for them: no shell, no tests or package installs, git with its hooks and the project's own git "
               "programs switched off, and none of your MCP servers. They approve their own file and git steps. "
-              "Their always-ask actions, such as posting on X, and their folder grants need your approval, which "
-              "comes in a later update: until then Kazma refuses them.",
+              "Their always-ask actions, such as posting on X, and their folder grants come to you to approve: "
+              "only you can answer those cards.",
         "ar": "التطوير لشخص غيرك: في مساحة مشتركة بمجلد مشروع هو عضو فيها، يحصل على git وGitHub وملفات ذلك "
               "المشروع. ولا يعمل له شيء من المشروع على هذا الحاسوب: لا طرفية، ولا تشغيل اختبارات أو تثبيت حزم، "
               "ويعمل git وخطافاته وبرامج المشروع الخاصة به معطّلة، ولا يصل إلى أيّ من خوادم MCP التي أعددتها. "
               "يوافق بنفسه على خطوات الملفات وgit. أما الإجراءات التي تُطلب الموافقة عليها دائمًا، كالنشر على "
-              "X، ومنح صلاحية المجلدات، فتحتاج موافقتك، وهذه تأتي في تحديث لاحق: إلى ذلك الحين يرفضها Kazma.",
+              "X، ومنح صلاحية المجلدات، فتأتيك أنت لتوافق عليها: لا يجيب عن تلك البطاقات غيرك.",
     },
     "settings.people_development_title": {"en": "Turn on Development for {name}?", "ar": "تفعيل التطوير لـ {name}؟"},
     "settings.people_development_turn_on": {"en": "Turn on", "ar": "تفعيل"},
@@ -3027,6 +3137,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أُخرجت من {space} في {when}. ينسى Kazma الحقائق التي سجّلها عنك هناك، وتبقى رسائلك في محادثاتها.",
     },
     "account.notice_reset_title": {"en": "Your password was reset", "ar": "أُعيد تعيين كلمة مرورك"},
+    "account.notice_signed_out_title": {"en": "You were signed out everywhere", "ar": "سُجّل خروجك من كل مكان"},
+    "account.notice_signed_out_body": {
+        "en": "The admin ended your sessions on {when}: you sign in again on each device. "
+              "If you did not expect this, tell them.",
+        "ar": "أنهى المسؤول جلساتك في {when}: تسجّل الدخول من جديد على كل جهاز. إن لم تتوقع ذلك، فأبلغه.",
+    },
     "account.notice_reset_body": {
         "en": "The admin reset your password on {when}. If you did not ask for this, tell them.",
         "ar": "أعاد المسؤول تعيين كلمة مرورك في {when}. إن لم تطلب ذلك، فأبلغه.",

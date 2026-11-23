@@ -555,13 +555,9 @@ class LocalToolRegistry:
         from kazma_core.spaces.scope import spaces_enforced
 
         if spaces_enforced():
-            from kazma_core.spaces.tools import approval_refusal, tool_refusal
+            from kazma_core.spaces.tools import tool_refusal
 
             if (refusal := await asyncio.to_thread(tool_refusal, tool_name)) is not None:
-                return {"content": refusal, "is_error": True, "refused": True}
-            # A card the admin answers that cannot reach them yet (N21,
-            # until S2-05): refused with no effect, the call included.
-            if (refusal := await asyncio.to_thread(approval_refusal, tool_name)) is not None:
                 return {"content": refusal, "is_error": True, "refused": True}
 
         # Closed schema: drop invented keys; JSON null on defaulted params

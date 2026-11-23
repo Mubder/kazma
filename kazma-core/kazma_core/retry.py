@@ -163,6 +163,15 @@ def friendly_llm_error(
             "proxy in front of it), or switch provider in Settings > Providers & Connectors."
         )
 
+    if getattr(exc, "kind", "") == "model_not_allowed":
+        # Spaces S2-03: the model is not one the person may use; nothing was sent.
+        where = f" ({model.strip()})" if model.strip() else ""
+        return (
+            f"⚠️ This model{where} is not one you may use, so Kazma did not call it. "
+            "Choose another model in the chat's model picker, or ask the admin, who "
+            "chooses each person's models in Settings > People."
+        )
+
     if getattr(exc, "kind", "") == "stream_truncated":
         return (
             "⚠️ The model's answer was cut off before it finished: its connection "

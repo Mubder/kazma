@@ -111,7 +111,7 @@ def _actor_and_tenant(headers: list[tuple[bytes, bytes]]) -> tuple[str, str]:
 
 
 def _record(action: str, ids: list[str], status: int, headers: list[tuple[bytes, bytes]],
-            acted_in: str = "") -> None:
+            acted_in: str = "", account: str = "") -> None:
     """The trail: one INFO line and one audit row (ids, never values).
 
     *acted_in* is the space the request was bound to (the tenant middleware
@@ -125,6 +125,13 @@ def _record(action: str, ids: list[str], status: int, headers: list[tuple[bytes,
         logger.warning("[memory] the actor of %s could not be read", action, exc_info=True)
         actor, tenant = "web:unknown", "default"
     tenant = acted_in or tenant
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if account and spaces_enforced():
+        # The person who made the change (Spaces S2-09): the account the
+        # tenant middleware bound; the session's label where none was, and
+        # on an install of one person, as before.
+        actor = f"account:{account}"
     ids = [str(i)[:120] for i in ids][:20]
     _COUNTS[action] += 1
     logger.info("[memory] operator action=%s actor=%s tenant=%s ids=%s status=%d",
@@ -225,4 +232,5 @@ class MemoryActionRecorder:
         ids = [str(v) for v in (scope.get("path_params") or {}).values()]
         status = int(held.get("status") or (held.get("start") or {}).get("status") or 500)
         await asyncio.to_thread(_record, f"{scope['method']} {template}", ids, status,
-                                list(scope.get("headers") or []), str(scope.get("kazma_space") or ""))
+                                list(scope.get("headers") or []), str(scope.get("kazma_space") or ""),
+                                str(scope.get("kazma_asker") or ""))

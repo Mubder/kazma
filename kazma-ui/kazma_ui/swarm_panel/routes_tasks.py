@@ -186,7 +186,7 @@ def register_tasks_routes(
         answers it (decision N4). Blocking."""
         from kazma_ui.swarm_panel.task_actions import task_refusal
 
-        return _refusal_answer(task_refusal(engine, task_id))
+        return _refusal_answer(task_refusal(engine, task_id, answering=True))
 
     def _require_admin(request: Request) -> JSONResponse | None:
         """Admin/operator gate for the task action routes (approve/reject/cancel/retry).

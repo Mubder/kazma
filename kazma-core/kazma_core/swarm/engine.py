@@ -682,6 +682,38 @@ class SwarmEngine:
         """Public: the admission cap when a new task would be refused now."""
         return self._at_capacity()
 
+    def running_in(self, space_id: str) -> int:
+        """How many of *space_id*'s tasks run now (paused ones wait on a
+        human and do not count, as for the install's cap)."""
+        return sum(1 for t in list(self._active_tasks.values())
+                   if t.status != TaskStatus.PAUSED and (t.metadata or {}).get("tenant_id") == space_id)
+
+    def _running_ahead_of(self, task: SwarmTask) -> int:
+        """How many tasks of *task*'s space were admitted before it and run
+        now (paused ones do not count). On the loop: the in-flight table is
+        the loop's."""
+        space = (task.metadata or {}).get("tenant_id")
+        ahead = 0
+        for other in list(self._active_tasks.values()):
+            if other is task:
+                break
+            if other.status != TaskStatus.PAUSED and (other.metadata or {}).get("tenant_id") == space:
+                ahead += 1
+        return ahead
+
+    @staticmethod
+    def _space_share_refusal(task: SwarmTask, ahead: int) -> str | None:
+        """Why *task* is refused for its space's share of the slots when
+        *ahead* of its space's tasks run before it
+        (``spaces.space_limits.running_refusal``), or None. Its space is the
+        one ``_stamp_whose`` recorded. Blocking (the identity store)."""
+        from kazma_core.spaces.scope import spaces_enforced
+        from kazma_core.spaces.space_limits import running_refusal
+
+        if not spaces_enforced():
+            return None
+        return running_refusal("swarm", str((task.metadata or {}).get("tenant_id") or ""), ahead)
+
     async def _admit_to_store(self, task: SwarmTask, *, must_record: bool = False) -> TaskResult | None:
         """Record *task* RUNNING at its new generation (SW-E03). None when
         admitted; the stored outcome when another run already holds the id;
@@ -930,6 +962,7 @@ class SwarmEngine:
             )
 
         started = perf_counter()
+        as_it_was = (task.status, task.started_at, task.generation, task.run_id)
         task.started_at = task.started_at or _utc_now_iso()
         task.status = TaskStatus.RUNNING
         task.generation = int(task.generation or 0) + 1
@@ -943,6 +976,32 @@ class SwarmEngine:
             # An unstamped task is listed for every tenant (SW-E14: was silent).
             logger.warning("[SwarmEngine] could not stamp the tenant of task '%s'", task.id, exc_info=True)
         self._active_tasks[task.id] = task  # track in-flight
+
+        # A space's share of the slots (Spaces S2-08): one space's tasks never
+        # take them all, so another space's task is never refused for them.
+        # The slot is held while the share is read (off the loop), and only
+        # the space's tasks admitted ahead of this one count: two dispatches
+        # at once never both pass, nor both fail, the share.
+        from kazma_core.spaces.scope import spaces_enforced
+
+        held = None
+        if spaces_enforced():
+            ahead = self._running_ahead_of(task)
+            try:
+                held = await asyncio.to_thread(self._space_share_refusal, task, ahead)
+            except asyncio.CancelledError:
+                # Stopped before it was admitted: nothing ran, its slot goes.
+                self._active_tasks.pop(task.id, None)
+                task.status, task.started_at, task.generation, task.run_id = as_it_was
+                raise
+        if held is not None:
+            self._active_tasks.pop(task.id, None)
+            task.status, task.started_at, task.generation, task.run_id = as_it_was
+            logger.warning("[SwarmEngine] task '%s' refused: its space holds its share", task.id)
+            return TaskResult(
+                task_id=task.id, status="failed", error=held,
+                metadata={"admission_denied": True, "code": "space_limit"},
+            )
 
         # Persist the RUNNING row immediately (audit H-9): tasks used to be
         # persisted only at terminal/paused states, so a crash mid-task left

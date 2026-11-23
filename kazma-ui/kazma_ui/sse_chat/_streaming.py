@@ -1411,6 +1411,11 @@ async def _stream_langgraph_events(
                                         payload.get("always_ask", False)
                                     ),
                                 }
+                                # Whose card it is and who answers it
+                                # (Spaces S2-05), when the graph named them.
+                                from kazma_ui.hitl_answerers import card_who
+
+                                _hitl_payload_saved.update(card_who(payload))
                                 try:
                                     from kazma_core.safety.hitl import (
                                         approval_deadline_from,
