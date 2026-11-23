@@ -148,6 +148,8 @@ ROW_NAMED_TASKS: dict[str, tuple[str, str]] = {
 #: run for a person who left the space.
 _PERSON_TASKS = frozenset({"post_turn_memory", "micro_consolidation"})
 _PERSON_MODEL_TASKS = frozenset({"micro_consolidation"})
+#: The payload mark of a deep pass a chat move queued (``memory.chat_move``).
+REBUILD_CHAT_MOVE = "chat_move"
 #: How long a person's task waits before it is asked again.
 _PERSON_WAIT_S = 900.0
 #: * it is the install's own work: whole stores, no space's content.
@@ -203,6 +205,12 @@ def _task_binding(task_type: str, payload: Any) -> TaskBinding:
         return TaskBinding(install=f"the memory task {task_type}, which names no space")
     from kazma_core.spaces.identity import acting_account
 
+    if task_type in _PERSON_MODEL_TASKS and data.get("rebuild") == REBUILD_CHAT_MOVE:
+        # A moved chat's memory rebuilt in its new space (Spaces S2-12,
+        # memory.chat_move): Kazma's own work, counted against no one's
+        # daily limit (the memory session's decision). Its writes name
+        # their tenant; a call that asks for "the" space is refused.
+        return TaskBinding(install="the rebuild of a moved chat's memory")
     if task_type in _PERSON_TASKS:
         person = _person_of(task_type, data)
         if person:

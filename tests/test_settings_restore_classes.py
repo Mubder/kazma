@@ -117,6 +117,9 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     # Ends the auto-login's sessions when everyone must sign in (Spaces
     # S4-02's re-check): deletes web_session.<hash> rows.
     "kazma-core/kazma_core/security/web_sessions.py::end_peer_trust_sessions": ("web_session.",),
+    # A moved chat's chat-app pointers (Spaces S2-12): deletes the
+    # active_thread.<sender> rows that name the moved thread.
+    "kazma-ui/kazma_ui/chat_move.py::_drop_pointers": ("active_thread.",),
     # A migration import writes the bundle's rows, keys as stored, only those
     # migration carries (FA-255: never RUNTIME, never a web session).
     "kazma-core/kazma_core/migration/importer.py::_restore_settings": (

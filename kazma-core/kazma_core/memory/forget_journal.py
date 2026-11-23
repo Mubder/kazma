@@ -59,13 +59,16 @@ __all__ = [
 #: (Spaces S1-11, N36); the entry's id is the ``session_key``.
 #: ``mentions``: "forget everything that mentions X" (the memory framework
 #: audit's F5, part D): the ids it forgot, never the text (``detail``).
-KINDS = ("turn", "chat", "keep_out", "remember", "summary", "rewind", "entry", "mentions")
+#: ``chat_moved``: a chat a person moved to another space (Spaces S2-12,
+#: ``memory.chat_move``); its ``detail`` holds the chat's keys, the space it
+#: went to and the mover, and its replay runs only while it is still away.
+KINDS = ("turn", "chat", "keep_out", "remember", "summary", "rewind", "entry", "mentions", "chat_moved")
 
 #: The kinds whose ``detail`` records the chat's keys when it was forgotten
 #: (``{"keys": [...]}``): a chat deleted since has no copy in the chat store
 #: to name its other key, and a restore brought the memory back under it
 #: (the memory framework audit's F11).
-_KEYED_KINDS = ("turn", "chat", "keep_out", "remember")
+_KEYED_KINDS = ("turn", "chat", "keep_out", "remember", "chat_moved")
 
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS forget_journal (
@@ -239,6 +242,10 @@ def _apply(conn: sqlite3.Connection, e: Entry) -> None:
                                    conn=conn, journal=False, keys=entry_keys(e))
     elif e.kind == "mentions":
         forget.replay_mentions(conn, e)
+    elif e.kind == "chat_moved":
+        from kazma_core.memory.chat_move import replay_chat_moved
+
+        replay_chat_moved(conn, e)
     elif e.kind == "entry":
         if _still_a_member(e):
             # Journaled before a membership change that did not happen (it

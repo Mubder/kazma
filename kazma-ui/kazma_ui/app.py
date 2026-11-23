@@ -1754,6 +1754,17 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Replay] Failed to mount replay API: %s", e)
             self._init_errors.append({"subsystem": "replay_api", "error": str(e)})
+        # ── Moving a chat between one's own space and a shared one (S2-12) ──
+        try:
+            from kazma_ui.chat_move import create_chat_move_router
+
+            self.app.include_router(create_chat_move_router(
+                graph_getter=lambda: self._hitl_state.get("graph") or self._graph_holder.get("graph"),
+                checkpoints_getter=lambda: self._hitl_state.get("checkpointer") or self._checkpointer,
+            ))
+        except ImportError as e:
+            logger.warning("[Spaces] Failed to mount the chat move API: %s", e)
+            self._init_errors.append({"subsystem": "chat_move_api", "error": str(e)})
         try:
             from kazma_ui.research_panel import create_research_router
 
@@ -2224,6 +2235,19 @@ class KazmaAppBuilder:
                 logger.info("[HITL] Approval-timeout watchdog started")
             except Exception as exc:
                 logger.warning("[HITL] Failed to start approval-timeout watchdog: %s", exc)
+
+            # ── Chat moves a stop cut off (Spaces S2-12) ───────────
+            # Before the switch the copies go back; after it the move is
+            # finished. Nothing to do on an install with no move recorded.
+            try:
+                from kazma_core.background import spawn_background
+
+                from kazma_ui.chat_move import settle_chat_moves
+
+                spawn_background(settle_chat_moves(self._hitl_state.get("checkpointer") or self._checkpointer),
+                                 name="chat-move-settle")
+            except ImportError as exc:
+                logger.warning("[spaces] cut-off chat moves were not settled: %s", exc)
 
             # ── Turns a restart cut off (resilience plan C1) ───────
             # A safe one continues by itself; one whose tool effect is

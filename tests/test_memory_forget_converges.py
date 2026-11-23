@@ -355,7 +355,10 @@ def test_only_the_forget_code_skips_the_journal():
     for pkg in ("kazma-core/kazma_core", "kazma-ui/kazma_ui", "kazma-gateway/kazma_gateway"):
         for p in (REPO / pkg).rglob("*.py"):
             sources[p.relative_to(REPO).as_posix()] = p.read_text(encoding="utf-8", errors="replace")
+    # A moved chat's memory (Spaces S2-12) replays its own journal entry
+    # (``memory.chat_move.replay_chat_moved``): forget code too.
     assert _unjournaled_calls(sources) == [
+        "kazma-core/kazma_core/memory/chat_move.py",
         "kazma-core/kazma_core/memory/forget.py", "kazma-core/kazma_core/memory/forget_journal.py"]
 
 

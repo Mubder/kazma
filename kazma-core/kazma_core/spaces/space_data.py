@@ -191,7 +191,7 @@ def _table_rule(store: str, table: str, columns: set[str], *, virtual_fts: bool 
 # ── where the stores are ────────────────────────────────────────────────
 
 
-def _store_paths() -> list[tuple[str, Path]]:
+def store_paths() -> list[tuple[str, Path]]:
     """``(store name, file)`` for every ``row`` store file that exists."""
     from kazma_core import paths
     from kazma_core.store_registry import SPACE_RULES
@@ -336,7 +336,7 @@ def _walk(space: str, earlier: _Context | None = None) -> tuple[_Context, list[_
 
     *earlier*: the ids a walk before a delete found, kept: a deleted library
     is no longer in its table, and the rows that name it must still be found."""
-    stores = _store_paths()
+    stores = store_paths()
     ctx = _context(space, stores)
     if earlier is not None:
         for key, values in earlier.ids.items():

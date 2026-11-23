@@ -20,6 +20,8 @@ ContextVar is left as the entry point left it.
 
 The record holds ids only: no title, no text. It is one small row per
 thread, kept while its chat exists (:func:`forget_thread` when it is deleted).
+It changes in one way only: a person moves their chat between their own
+space and a shared one (Spaces S2-12, :func:`move_thread`).
 
 **Everything kept by thread follows the record** (S1-08): the checkpoints,
 the Time Travel steps, the plan, the receipts. :func:`thread_refusal` is the one
@@ -49,6 +51,7 @@ __all__ = [
     "ThreadRecord",
     "bound",
     "forget_thread",
+    "move_thread",
     "record_new_thread",
     "record_of",
     "record_thread",
@@ -154,9 +157,10 @@ def record_of(thread_id: str) -> ThreadRecord | None:
             ).fetchone()
         )
     if found is not None:
-        # A record never changes: remember its space, so the guards a turn's
-        # own code asks afterwards (``thread_refusal``, often on the event
-        # loop) answer from memory. ``scope_for_turn`` reads it for every turn.
+        # A record changes only by a move, which updates this memory too:
+        # remember its space, so the guards a turn's own code asks
+        # afterwards (``thread_refusal``, often on the event loop) answer
+        # from memory. ``scope_for_turn`` reads it for every turn.
         _remember(found)
     return found
 
@@ -188,9 +192,11 @@ def record_thread(thread_id: str, space_id: str, opener: str) -> ThreadRecord:
 
 # ── The thread's space, for everything kept by thread (S1-08) ────────────
 
-#: thread id -> its recorded space. A record never changes once written, so a
-#: hit is safe to keep; a thread with no record is asked again every time (it
-#: may be recorded a moment later). Bounded; :func:`forget_thread` removes.
+#: thread id -> its recorded space. A record changes only through
+#: :func:`move_thread`, which updates this too, so a hit is safe to keep (one
+#: runtime holds the data folder); a thread with no record is asked again
+#: every time (it may be recorded a moment later). Bounded;
+#: :func:`forget_thread` removes.
 _spaces: dict[str, str] = {}
 _spaces_lock = threading.Lock()
 _SPACES_MAX = 4096
@@ -222,6 +228,42 @@ def known_space(thread_id: str) -> str | None:
     """A recorded thread's space from memory alone: None when the store must be asked."""
     with _spaces_lock:
         return _spaces.get(str(thread_id or ""))
+
+
+def move_thread(thread_id: str, space_id: str) -> ThreadRecord:
+    """Record that *thread_id* is now *space_id*'s: a chat a person moved
+    between their own space and a shared one (Spaces S2-12,
+    ``kazma_ui.chat_move``). The one statement that changes where a chat is:
+    everything kept by thread alone follows it (the checkpoints' home, Time
+    Travel's steps, the grants, the guards). A thread with no record (from
+    before Spaces: the owner's, N19) gets one, opened by the owner. The
+    opener stays. This process's memory of the space changes with it."""
+    tid = str(thread_id or "")
+    if not tid or not valid_space_id(space_id):
+        raise ValueError(f"not a thread and a space: {thread_id!r}, {space_id!r}")
+    with _connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        committed = False
+        try:
+            found = conn.execute("SELECT 1 FROM thread_scopes WHERE thread_id = ?", (tid,)).fetchone()
+            if found is None:
+                conn.execute(
+                    "INSERT INTO thread_scopes (thread_id, space_id, opener, created_at) VALUES (?, ?, ?, ?)",
+                    (tid, space_id, _scope.OWNER_ACCOUNT_ID, datetime.now(UTC).isoformat()),
+                )
+            else:
+                conn.execute("UPDATE thread_scopes SET space_id = ? WHERE thread_id = ?", (space_id, tid))
+            stands = _row(conn.execute(
+                "SELECT thread_id, space_id, opener, created_at FROM thread_scopes WHERE thread_id = ?",
+                (tid,)).fetchone())
+            conn.execute("COMMIT")
+            committed = True
+        finally:
+            if not committed:
+                conn.execute("ROLLBACK")
+    assert stands is not None
+    _remember(stands)
+    return stands
 
 
 def forget_thread(thread_id: str) -> bool:

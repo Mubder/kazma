@@ -513,7 +513,10 @@ Output ONLY the delta text (or NOTHING), no preamble."""
         try:
             from kazma_core.memory.swarm_bridge import log_evolution_v2
 
-            log_evolution_v2(
+            # Off the loop: it opens the memory database and asks the forget
+            # ledger and the chat's thread record.
+            await asyncio.to_thread(
+                log_evolution_v2,
                 worker_name=worker_name,
                 task_id=f"evolution_{ts}",
                 delta=delta[:500],

@@ -354,6 +354,56 @@ class CheckpointManager(BaseCheckpointSaver):
             if hasattr(saver, "adelete_thread"):
                 await saver.adelete_thread(thread_id)
 
+    # ── A chat moved between spaces (Spaces S2-12) ─────────────────────────
+
+    #: The tables LangGraph's SQLite saver keeps a thread in.
+    _THREAD_TABLES = ("checkpoints", "writes")
+
+    async def acopy_thread(self, thread_id: str, *, from_space: str, to_space: str) -> int:
+        """Copy every checkpoint of *thread_id* from *from_space*'s saver into
+        *to_space*'s, as they are (ids, parents, writes): the chat's history
+        moves whole (``kazma_ui.chat_move``). Nothing to do when both spaces
+        share one saver (one table on Postgres). Idempotent: a row already
+        there is kept. Returns the rows copied. The thread's record still
+        names the source while this runs, so nothing reads the copy yet."""
+        source = await self._saver_of(from_space)
+        target = await self._saver_of(to_space)
+        if source is target:
+            return 0
+        if not (hasattr(source, "conn") and hasattr(target, "conn")):
+            raise RuntimeError("these checkpoints cannot be copied between spaces")
+        copied = 0
+        for table in self._THREAD_TABLES:
+            async with source.conn.execute(f'PRAGMA table_info("{table}")') as cur:
+                columns = [str(row[1]) for row in await cur.fetchall()]
+            if not columns:
+                continue
+            names = ", ".join(f'"{c}"' for c in columns)
+            marks = ", ".join("?" for _ in columns)
+            async with source.conn.execute(
+                f'SELECT {names} FROM "{table}" WHERE thread_id = ?', (str(thread_id),),  # nosec B608 - the saver's own columns
+            ) as cur:
+                rows = await cur.fetchall()
+            if rows:
+                await target.conn.executemany(
+                    f'INSERT OR IGNORE INTO "{table}" ({names}) VALUES ({marks})',  # nosec B608 - the saver's own columns
+                    [tuple(row) for row in rows],
+                )
+                copied += len(rows)
+        await target.conn.commit()
+        return copied
+
+    async def adelete_thread_in(self, thread_id: str, *, space: str) -> None:
+        """Delete *thread_id*'s checkpoints from *space*'s saver: the copy a
+        move leaves behind (the source after the switch, the target when a
+        move is put back). Never the saver the thread's record names: there
+        the checkpoints are the chat's own."""
+        saver = await self._saver_of(space)
+        if saver is await self._saver_of(await self._home(str(thread_id))):
+            return
+        if hasattr(saver, "adelete_thread"):
+            await saver.adelete_thread(str(thread_id))
+
     @staticmethod
     async def _thread_ids(saver: Any) -> list[str]:
         """Every thread that has a checkpoint in *saver*'s table."""

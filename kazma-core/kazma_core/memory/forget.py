@@ -150,6 +150,8 @@ def refuses_write(
     if not session_id:
         return False
     names = list(dict.fromkeys([session_id, *(chat_keys(session_id) if keys is None else keys)]))
+    if _moved_elsewhere(names, tenant_id):
+        return True
     marks = ",".join("?" for _ in names)
     return bool(
         _ledger_rows(
@@ -160,6 +162,30 @@ def refuses_write(
             (*ledger_reach(tenant_id), *names, int(turn_number or 0), question_sha(user_text)),
         )
     )
+
+
+def _moved_elsewhere(keys: list[str], tenant_id: str) -> bool:
+    """Whether the chat *keys* is recorded in another space than *tenant_id*
+    (Spaces S2-12): a person moved it, and what was queued for it before --
+    a post-turn write, a deep pass, a reconcile pass -- must not write into
+    the space it left (``memory.chat_move``). Only a chat with a record
+    counts: one with none (imported, from before Spaces, the agent's notes)
+    is where its writer says. Nothing is read before Spaces is enforced."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    from kazma_core.spaces import threads
+
+    tenant = space_of_record(tenant_id)
+    for key in keys:
+        home = threads.known_space(key)
+        if home is None:
+            record = threads.record_of(key)
+            home = record.space_id if record is not None else None
+        if home is not None:
+            return home != tenant
+    return False
 
 
 def forgotten_turns(

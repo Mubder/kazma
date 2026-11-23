@@ -142,9 +142,11 @@ def _in_memory(conn: sqlite3.Connection, tenant: str, keys: list[str]) -> tuple[
 
 
 def _reconcile_session(
-    conn: sqlite3.Connection, row: dict[str, Any], settled_before: float
+    conn: sqlite3.Connection, row: dict[str, Any], settled_before: float, *, source: str = "turn_reconcile",
 ) -> tuple[int, int]:
-    """Write the session's missing settled turns. Returns (written, still young)."""
+    """Write the session's missing settled turns. Returns (written, still young).
+    *source*: a moved chat's rebuild writes its own (``memory.chat_move``),
+    whose facts the move extracts itself."""
     from kazma_core.memory.dual_write import mirror_episode
 
     thread = row["thread_id"] or row["session_id"]
@@ -177,7 +179,7 @@ def _reconcile_session(
             assistant_text=answer,
             tenant_id=row["tenant_id"],
             tier="episodic",
-            source="turn_reconcile",
+            source=source,
             created_at=at,
             # Its author, as a live turn keeps it (Spaces S1-11): the fact
             # pass below reads it back; none in a shared space files no

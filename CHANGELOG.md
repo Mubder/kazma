@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Spaces: moving one's own chat between one's own space and a shared one (2026-11-23)
+
+- Once Spaces is on, a chat you started can move from your own space into a
+  shared space you are in ("Share with…" in the chat list's menu), and back
+  ("Take out to my space"). The dialog says how many of your questions the
+  chat holds before anything moves.
+- A chat others wrote in stays in the shared space: their words are the
+  space's. Kazma offers a new private chat in your own space instead.
+- After a move the chat is in exactly one space: its messages, its history,
+  its drafts and plan, its reminders. Taking a chat out leaves the shared
+  space a line with who took it out, when, and its title, never its words.
+- What Kazma remembers of the chat follows it: rebuilt where it went, with
+  your own decisions, Kazma's notes and your "Not me" answers carried as they
+  were, and what you kept out of memory kept out there too. It fills in over
+  the next hour or so. The Changes card's history of the chat does not move.
+- At most three moves a person a day, and one a chat a day. A move cut off by
+  a restart is put back or finished at the next start.
+
 ## Spaces: stronger sign-in, and no open switch once two people have accounts (2026-11-23)
 
 - A second factor can be turned on in My account: after the password, a code

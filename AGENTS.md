@@ -15778,8 +15778,8 @@ an install with one account behaves as before.
     title it had: `taken_out_documents`, tombstones of reason `taken_out`,
     which only the move writes: a delete refuses `MOVE_REASONS`). A move is
     the person's click on the Documents page (`POST
-    /api/documents/{document_id}/move`), never the agent's. Files and chats
-    are not moved here.
+    /api/documents/{document_id}/move`), never the agent's. A chat moves by
+    the same rule (piece 6, below); a file is not moved.
   - Gates: `tests/test_document_moves.py` (a move that does not retire the
     source as the control), the taken-out read on SQLite and Postgres
     (`tests/test_document_listing_queries_are_joined.py`), the matrix case,
@@ -15799,6 +15799,58 @@ an install with one account behaves as before.
     leaves its earlier versions behind. Gate:
     `tests/test_document_move_safety.py` (piece 5's move, interleaved, as
     the control: in neither space).
+  - **Moving one's own chat (piece 6, 2026-11-23).** The document's rule
+    (`spaces.moves.move_rule`), and the chat is the person's own (its
+    thread's record names them as opener; a chat from before Spaces is the
+    owner's). A chat other members wrote in is never taken out of a shared
+    space (`chat_moves.others_wrote`; the page offers "New private chat").
+    The move (`kazma_ui/chat_move.py`, `move_chat`, under the thread's
+    mutation lock) is refused while a turn runs or a card waits (409), at
+    most `chat_moves.MOVES_PER_DAY` a person and one a chat a day, and a
+    rate-limit bucket (`chat_move`). It is journaled first
+    (`chat_moves.MOVES_KEY`, ids only) and runs: the chat row copied into
+    the target (the person's messages stamped with their account going into
+    a shared space), the checkpoints copied into the target's file
+    (`CheckpointManager.acopy_thread`), then the switch
+    (`threads.move_thread`, the one statement that changes where a chat is;
+    everything kept by thread alone follows it), then the source's copies
+    removed (`adelete_thread_in`), the rows naming the thread beside a space
+    moved (`chat_moves.MOVED_COLUMNS`; what follows by its own code is
+    `MOVED_BY_THEIR_CODE`, what stays is `STAYS`, with why: a new such table
+    fails `tests/test_chat_moves.py`), the chat apps' pointers dropped,
+    memory following, and the line the shared space keeps when a chat is
+    taken out (`chat_moves.record_taken_out`: who, when, the title; only
+    the move writes it). A failure before the switch takes the copies back;
+    after it, and any move a stop cut off, `settle_chat_moves` finishes at
+    the next start. **Memory follows the chat** (`memory/chat_move.py`,
+    agreed with the memory session): it is rebuilt in the target from the
+    chat store at move time (`turn_reconcile._reconcile_session`, source
+    `chat_move`, the quick pass on each turn, the deep pass queued as
+    Kazma's own work, `task_queue.REBUILD_CHAT_MOVE`: counted against no
+    one's limit, and the chat's weeks summarized again,
+    `topic_summaries.requeue_weeks`), except what the chat store cannot
+    rebuild, which is carried: the person's decisions (`user_explicit` and
+    `agent_asserted` facts, at their own time and trust, the subject mapped
+    `user` <-> `member_<account>`), the agent's notes, and "Not me". Every
+    ledger row of the chat is copied for the target, journaled. In the
+    source the chat's memory is retired as a forget leaves it, then its
+    tombstones are deleted (`_delete_moved_tombstones`, declared in
+    `tests/test_memory_deletes.py`: under the same ids a move back would
+    write nothing), what its facts closed is reopened unless closed since,
+    and open changes go (the dialog says the Changes card's history and its
+    Undo do not move). Once the switch is made the episode writer refuses
+    the source (`forget._moved_elsewhere`, in `refuses_write`, which every
+    live writer asks: `tests/test_memory_forget.py`). The memory move is
+    journaled (`forget_journal` kind `chat_moved`) and replayed by the
+    forget convergence only while the chat is still away. Routes:
+    `GET`/`POST /api/chat/sessions/{session_id}/move` (the preview gives the
+    person's questions in the chat, whether others wrote, the bounds) and
+    `GET /api/chat/taken-out`; the chat list's menu offers "Share with…"
+    or "Take out to my space". Gates: `tests/test_chat_moves.py` (a
+    "private" mark in the shared space, the design turned down, as the
+    control), `tests/test_chat_move_memory.py` (each point with the step
+    taken out as its control), `tests/_chat_move_space_cases.py`,
+    `tests/e2e/test_chat_moves_browser.py` (by the sidebar, EN/AR).
 - **An approval card goes to the person it asks (S2-05, 2026-11-22;
   decisions N4 and N21).** Only where Spaces is enforced; an install that
   does not enforce it shows, lists, pushes and decides every card as

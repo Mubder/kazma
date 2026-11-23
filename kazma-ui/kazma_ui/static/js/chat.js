@@ -296,6 +296,12 @@
       }
     }, _onPage);
 
+    // The person's spaces were read (space_scope.js): the list's menus can
+    // now offer to move a chat between their own space and a shared one.
+    document.addEventListener('kazma:spaces', function() {
+      if (_sessionsLoaded) renderSessionList();
+    }, _onPage);
+
     // New session button
     var newBtn = $('new-session-btn');
     if (newBtn) newBtn.addEventListener('click', newSession);
@@ -6559,6 +6565,7 @@
         if (requestVersion !== _sessionsRequestVersion || showArchived) return;
         sessions = data || [];
         _sessionsLoaded = true;
+        _loadTakenOut();
         // Preserve optimistic active session if the server hasn't flushed it yet
         // (race: first WS message still writing while we re-list).
         if (chatSessionId) {
@@ -6771,6 +6778,7 @@
             escapeHtml(ti('copy_id', 'Copy ID')) + '</button>' +
           '<button class="session-menu-item" data-menu-action="memory" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
             escapeHtml(ti('chat_memory', 'Memory\u2026')) + '</button>' +
+          _moveMenuItems(s.session_id) +
           '<button class="session-menu-item" data-menu-action="archive" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
             escapeHtml(ti('archive', 'Archive')) + '</button>' +
           '<button class="session-menu-item danger" data-menu-action="delete" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
@@ -6890,8 +6898,141 @@
         else if (action === 'memory') chatMemory(sid);
         else if (action === 'archive') archiveSession(sid);
         else if (action === 'delete') deleteSession(sid);
+        else if (action === 'move') moveSession(sid, this.dataset.menuTo, this.dataset.menuTakeout === '1');
       });
     });
+    _paintTakenOut();
+  }
+
+  // ── Moving a chat between one's own space and a shared one (S2-12) ──
+  // Only where Spaces is enforced (the page's meta): the person's own chats
+  // move between their personal space and a shared one they are in. The
+  // spaces come from the switcher (space_scope.js, 'kazma:spaces').
+  function _spacesOn() {
+    var flag = document.querySelector('meta[name="kazma-spaces-enforced"]');
+    return !!flag && flag.getAttribute('content') === '1';
+  }
+
+  function _moveTargets() {
+    var spaceApi = window.kazmaSpace;
+    if (!_spacesOn() || !spaceApi || !spaceApi.id) return [];
+    var spaces = spaceApi.spaces || [];
+    var here = null;
+    spaces.forEach(function(s) { if (s.id === spaceApi.id) here = s; });
+    if (!here) return [];
+    if (!here.personal) {
+      var own = spaces.filter(function(s) { return s.personal; })[0];
+      return own ? [{ to: own.id, takeOut: true, label: ti('move_take_out', 'Take out to my space') }] : [];
+    }
+    return spaces.filter(function(s) { return !s.personal; }).map(function(s) {
+      return { to: s.id, takeOut: false,
+               label: tiFmt('move_share_with', 'Share with {name}', { name: '\u2068' + (s.name || s.id) + '\u2069' }) };
+    });
+  }
+
+  function _moveMenuItems(sid) {
+    return _moveTargets().map(function(target) {
+      return '<button class="session-menu-item" data-menu-action="move" data-menu-sid="' + escapeHtml(sid) +
+        '" data-menu-to="' + escapeHtml(target.to) + '" data-menu-takeout="' + (target.takeOut ? '1' : '') + '">' +
+        escapeHtml(target.label) + '</button>';
+    }).join('');
+  }
+
+  var _MOVE_REFUSALS = {
+    turn_running: ['move_err_turn_running', 'Kazma is answering in this chat. Move it when it is done.'],
+    approval_pending: ['move_err_approval', 'This chat waits for an approval. Answer it, then move the chat.'],
+    move_in_progress: ['move_err_in_progress', 'This chat is already being moved.'],
+    moves_today: ['move_err_moves_today', 'You have moved three chats in the last day. Try again tomorrow.'],
+    moved_today: ['move_err_moved_today', 'This chat was moved in the last day. Try again tomorrow.'],
+    not_your_chat: ['move_err_not_your_chat', 'Only the person who started a chat moves it.'],
+  };
+
+  function _moveRefusalText(code) {
+    var words = _MOVE_REFUSALS[code];
+    return words ? ti(words[0], words[1]) : ti('move_failed', 'The chat was not moved. Try again.');
+  }
+
+  async function _offerPrivateChat() {
+    var fresh = await window.kazmaConfirm({
+      title: ti('move_others_wrote_title', 'Others wrote in this chat'),
+      message: ti('move_others_wrote_offer', 'Their words belong to this space, so the chat stays here. Start a new private chat in your own space instead?'),
+      confirmText: ti('move_new_private', 'New private chat'),
+    });
+    if (fresh && window.kazmaSpace) window.kazmaSpace.newPrivateChat();
+  }
+
+  async function moveSession(sessionId, toSpace, takeOut) {
+    var url = '/api/chat/sessions/' + encodeURIComponent(sessionId) + '/move';
+    var size = null;
+    try {
+      size = await window.kazmaSave(url);
+    } catch (e) {
+      KS.toast(_moveRefusalText(e && e.body && e.body.error), 'error', 4000);
+      return;
+    }
+    if (takeOut && size && size.others_wrote) return _offerPrivateChat();
+    if (size && size.bounded) {
+      KS.toast(_moveRefusalText(size.bounded), 'error', 4000);
+      return;
+    }
+    var turns = tiCount('move_size', (size && size.turns) || 0, 'This chat holds 1 question of yours.',
+                        'This chat holds {n} questions of yours.');
+    var ok = await window.kazmaConfirm({
+      title: takeOut ? ti('move_take_out_title', 'Take this chat out to your space?')
+                     : ti('move_share_title', 'Share this chat with the space?'),
+      message: turns + ' ' + (takeOut
+        ? ti('move_take_out_body', 'It moves to your own space, with what Kazma remembers of it. This space keeps a line saying you took it out, with its title.')
+        : ti('move_share_body', 'It moves to the shared space, with what Kazma remembers of it: everyone in that space can read it.')) +
+        ' ' + ti('move_memory_note', "What the Changes card recorded about it, and its Undo, do not move. Kazma's memory of it fills in over the next hour or so."),
+      confirmText: takeOut ? ti('move_take_out_ok', 'Take out') : ti('move_share_ok', 'Share'),
+    });
+    if (!ok) return;
+    try {
+      await window.kazmaSave(url, { method: 'POST', body: { to_space: toSpace } });
+    } catch (e) {
+      var code = e && e.body && e.body.error;
+      if (code === 'others_wrote') return _offerPrivateChat();
+      KS.toast(_moveRefusalText(code), 'error', 4000);
+      return;
+    }
+    KS.toast(takeOut ? ti('move_taken_out', 'Taken out to your space.') : ti('move_shared', 'Shared with the space.'),
+             'success', 3000);
+    if (sessionId === chatSessionId) newSession();
+    loadSessions();
+  }
+
+  // The lines this space keeps for the chats taken out of it: who, when,
+  // the title each had. Read when the list loads, painted under it.
+  var _takenOut = [];
+  var _takenOutVersion = 0;
+
+  function _loadTakenOut() {
+    if (!_spacesOn() || typeof window.kazmaGetJson !== 'function') return;
+    var version = ++_takenOutVersion;
+    window.kazmaGetJson('/api/chat/taken-out').then(function(data) {
+      if (version !== _takenOutVersion) return;
+      _takenOut = (data && data.ok && Array.isArray(data.lines)) ? data.lines : [];
+      _paintTakenOut();
+    });
+  }
+
+  function _paintTakenOut() {
+    if (!sessionListEl || showArchived || searchQuery || !_takenOut.length) return;
+    var old = sessionListEl.querySelector('.session-taken-out');
+    if (old) old.remove();
+    var html = '<div class="session-taken-out"><div class="session-section-label">' +
+      escapeHtml(ti('taken_out_label', 'Taken out of this space')) + '</div>';
+    _takenOut.forEach(function(line) {
+      var when = '';
+      try { when = window.KazmaFormat ? window.KazmaFormat.dateTime(line.at) : String(line.at || ''); } catch (e) {}
+      html += '<div class="session-item session-taken-out-line" data-taken-out>' +
+        '<div class="session-info"><span class="session-title" dir="auto" translate="no">' + escapeHtml(line.title || '') + '</span>' +
+        '<span class="session-meta">' + escapeHtml(line.by_name
+          ? tiFmt('taken_out_by', 'Taken out by {name}', { name: '\u2068' + line.by_name + '\u2069' })
+          : ti('taken_out_unnamed', 'Taken out')) +
+        (when ? ' \u00B7 ' + escapeHtml(when) : '') + '</span></div></div>';
+    });
+    sessionListEl.insertAdjacentHTML('beforeend', html + '</div>');
   }
 
   // The memory choice of a new, empty chat (resilience plan I): no chat in

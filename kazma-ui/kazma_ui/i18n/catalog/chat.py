@@ -1643,4 +1643,125 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الرسالة",
         "en": "Message",
     },
+    # Moving a chat between one's own space and a shared one (Spaces S2-12).
+    "chat.move_take_out": {
+        "ar": 'انقلها إلى مساحتي',
+        "en": 'Take out to my space',
+    },
+    "chat.move_share_with": {
+        "ar": 'شاركها مع {name}',
+        "en": 'Share with {name}',
+    },
+    "chat.move_err_turn_running": {
+        "ar": 'Kazma يرد في هذه المحادثة. انقلها بعد أن ينتهي.',
+        "en": 'Kazma is answering in this chat. Move it when it is done.',
+    },
+    "chat.move_err_approval": {
+        "ar": 'هذه المحادثة تنتظر موافقة. أجب عنها ثم انقل المحادثة.',
+        "en": 'This chat waits for an approval. Answer it, then move the chat.',
+    },
+    "chat.move_err_in_progress": {
+        "ar": 'هذه المحادثة تُنقل الآن.',
+        "en": 'This chat is already being moved.',
+    },
+    "chat.move_err_moves_today": {
+        "ar": 'نقلت ثلاث محادثات خلال اليوم الماضي. حاول مرة أخرى غدًا.',
+        "en": 'You have moved three chats in the last day. Try again tomorrow.',
+    },
+    "chat.move_err_moved_today": {
+        "ar": 'نُقلت هذه المحادثة خلال اليوم الماضي. حاول مرة أخرى غدًا.',
+        "en": 'This chat was moved in the last day. Try again tomorrow.',
+    },
+    "chat.move_err_not_your_chat": {
+        "ar": 'لا ينقل المحادثة إلا من بدأها.',
+        "en": 'Only the person who started a chat moves it.',
+    },
+    "chat.move_failed": {
+        "ar": 'لم تُنقل المحادثة. حاول مرة أخرى.',
+        "en": 'The chat was not moved. Try again.',
+    },
+    "chat.move_others_wrote_title": {
+        "ar": 'كتب آخرون في هذه المحادثة',
+        "en": 'Others wrote in this chat',
+    },
+    "chat.move_others_wrote_offer": {
+        "ar": 'كلامهم يخص هذه المساحة، فتبقى المحادثة هنا. هل تبدأ محادثة خاصة جديدة في مساحتك بدلًا من ذلك؟',
+        "en": 'Their words belong to this space, so the chat stays here. Start a new private chat in your own space instead?',
+    },
+    "chat.move_new_private": {
+        "ar": 'محادثة خاصة جديدة',
+        "en": 'New private chat',
+    },
+    "chat.move_take_out_title": {
+        "ar": 'تنقل هذه المحادثة إلى مساحتك؟',
+        "en": 'Take this chat out to your space?',
+    },
+    "chat.move_share_title": {
+        "ar": 'تشارك هذه المحادثة مع المساحة؟',
+        "en": 'Share this chat with the space?',
+    },
+    "chat.move_take_out_body": {
+        "ar": 'تنتقل إلى مساحتك مع ما يتذكره Kazma منها. وتبقى في هذه المساحة إشارة إلى أنك نقلتها، مع عنوانها.',
+        "en": 'It moves to your own space, with what Kazma remembers of it. This space keeps a line saying you took it out, with its title.',
+    },
+    "chat.move_share_body": {
+        "ar": 'تنتقل إلى المساحة المشتركة مع ما يتذكره Kazma منها، ويستطيع كل من في تلك المساحة قراءتها.',
+        "en": 'It moves to the shared space, with what Kazma remembers of it: everyone in that space can read it.',
+    },
+    "chat.move_memory_note": {
+        "ar": 'ما سجّلته بطاقة التغييرات عنها، وزر التراجع فيها، لا ينتقلان. وتكتمل ذاكرة Kazma عنها خلال الساعة القادمة تقريبًا.',
+        "en": "What the Changes card recorded about it, and its Undo, do not move. Kazma's memory of it fills in over the next hour or so.",
+    },
+    "chat.move_take_out_ok": {
+        "ar": 'انقلها',
+        "en": 'Take out',
+    },
+    "chat.move_share_ok": {
+        "ar": 'شاركها',
+        "en": 'Share',
+    },
+    "chat.move_taken_out": {
+        "ar": 'نُقلت إلى مساحتك.',
+        "en": 'Taken out to your space.',
+    },
+    "chat.move_shared": {
+        "ar": 'شوركت مع المساحة.',
+        "en": 'Shared with the space.',
+    },
+    "chat.taken_out_label": {
+        "ar": 'نُقلت من هذه المساحة',
+        "en": 'Taken out of this space',
+    },
+    "chat.taken_out_unnamed": {
+        "ar": 'نُقلت',
+        "en": 'Taken out',
+    },
+    "chat.taken_out_by": {
+        "ar": 'نقلها {name}',
+        "en": 'Taken out by {name}',
+    },
+    "chat.move_size.zero": {
+        "ar": 'لا أسئلة لك في هذه المحادثة.',
+        "en": 'This chat holds no questions of yours.',
+    },
+    "chat.move_size.one": {
+        "ar": 'في هذه المحادثة سؤال واحد لك.',
+        "en": 'This chat holds 1 question of yours.',
+    },
+    "chat.move_size.two": {
+        "ar": 'في هذه المحادثة سؤالان لك.',
+        "en": 'This chat holds {n} questions of yours.',
+    },
+    "chat.move_size.few": {
+        "ar": 'في هذه المحادثة {n} أسئلة لك.',
+        "en": 'This chat holds {n} questions of yours.',
+    },
+    "chat.move_size.many": {
+        "ar": 'في هذه المحادثة {n} سؤالًا لك.',
+        "en": 'This chat holds {n} questions of yours.',
+    },
+    "chat.move_size.other": {
+        "ar": 'في هذه المحادثة {n} سؤال لك.',
+        "en": 'This chat holds {n} questions of yours.',
+    },
 }

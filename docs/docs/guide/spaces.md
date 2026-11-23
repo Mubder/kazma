@@ -93,6 +93,24 @@ never in a shared space, for you either. Outside your own space, git signs
 in with the space's own GitHub account and never with this computer's SSH
 keys or saved passwords.
 
+## Moving a chat or a document
+
+Private means in your personal space. Once Spaces is on, a chat you started,
+or a document of yours, can move from your own space into a shared space you
+are in, and back out:
+
+- **A chat:** the chat list's menu offers "Share with…" in your own space and
+  "Take out to my space" in a shared one. What Kazma remembers of the chat
+  follows it; it fills in over the next hour or so. The Changes card's
+  history of the chat does not move.
+- **A document:** the Documents page offers the same two moves.
+
+A chat someone else wrote in stays in the shared space: their words are the
+space's. Taking something out leaves the shared space a line saying who took
+it out and when, with its title. At most three chat moves a person a day, and
+one a chat a day. A move is always your own click: the agent never moves a
+chat or a document.
+
 ## What the admin can and cannot do
 
 | The admin can | The admin cannot |
