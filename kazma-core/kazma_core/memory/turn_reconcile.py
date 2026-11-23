@@ -294,7 +294,8 @@ def _extract_facts(
             continue
         attempts.pop(str(episode_id), None)
         # Small talk queues no deep pass (consolidator._run_turn_memory's rule).
-        if not is_filler_turn(user or "") and enqueue_task("micro_consolidation", {"episode_id": episode_id}):
+        if not is_filler_turn(user or "") and enqueue_task("micro_consolidation", {"episode_id": episode_id},
+                                                           space=tenant):
             report["deep_queued"] += 1
         report["facts_turns"] += 1
         report["facts_after"] = rowid

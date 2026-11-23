@@ -688,31 +688,39 @@ class SwarmEngine:
         return sum(1 for t in list(self._active_tasks.values())
                    if t.status != TaskStatus.PAUSED and (t.metadata or {}).get("tenant_id") == space_id)
 
-    def _running_ahead_of(self, task: SwarmTask) -> int:
-        """How many tasks of *task*'s space were admitted before it and run
-        now (paused ones do not count). On the loop: the in-flight table is
-        the loop's."""
-        space = (task.metadata or {}).get("tenant_id")
-        ahead = 0
+    def _running_ahead_of(self, task: SwarmTask) -> tuple[int, int]:
+        """``(of its space, of its person)``: how many tasks of *task*'s
+        space, and of the person who asked for it, were admitted before it
+        and run now (paused ones do not count). On the loop: the in-flight
+        table is the loop's."""
+        meta = task.metadata or {}
+        space, asker = meta.get("tenant_id"), str(meta.get("asker") or "")
+        ahead = mine = 0
         for other in list(self._active_tasks.values()):
             if other is task:
                 break
-            if other.status != TaskStatus.PAUSED and (other.metadata or {}).get("tenant_id") == space:
+            theirs = other.metadata or {}
+            if other.status != TaskStatus.PAUSED and theirs.get("tenant_id") == space:
                 ahead += 1
-        return ahead
+                mine += bool(asker) and str(theirs.get("asker") or "") == asker
+        return ahead, mine
 
     @staticmethod
-    def _space_share_refusal(task: SwarmTask, ahead: int) -> str | None:
-        """Why *task* is refused for its space's share of the slots when
-        *ahead* of its space's tasks run before it
-        (``spaces.space_limits.running_refusal``), or None. Its space is the
-        one ``_stamp_whose`` recorded. Blocking (the identity store)."""
+    def _space_share_refusal(task: SwarmTask, ahead: tuple[int, int]) -> str | None:
+        """Why *task* is refused for its space's share of the slots, or its
+        person's share of the space's (Spaces S4-04), when *ahead* --
+        ``(of its space, of its person)`` -- run before it
+        (``spaces.space_limits.running_refusal``), or None. Its space and
+        person are the ones ``_stamp_whose`` recorded. Blocking (the identity
+        store)."""
         from kazma_core.spaces.scope import spaces_enforced
         from kazma_core.spaces.space_limits import running_refusal
 
         if not spaces_enforced():
             return None
-        return running_refusal("swarm", str((task.metadata or {}).get("tenant_id") or ""), ahead)
+        meta = task.metadata or {}
+        return running_refusal("swarm", str(meta.get("tenant_id") or ""), ahead[0],
+                               person=str(meta.get("asker") or ""), person_running=ahead[1])
 
     async def _admit_to_store(self, task: SwarmTask, *, must_record: bool = False) -> TaskResult | None:
         """Record *task* RUNNING at its new generation (SW-E03). None when
@@ -978,7 +986,8 @@ class SwarmEngine:
         self._active_tasks[task.id] = task  # track in-flight
 
         # A space's share of the slots (Spaces S2-08): one space's tasks never
-        # take them all, so another space's task is never refused for them.
+        # take them all, so another space's task is never refused for them;
+        # and a person's share of the space's (S4-04).
         # The slot is held while the share is read (off the loop), and only
         # the space's tasks admitted ahead of this one count: two dispatches
         # at once never both pass, nor both fail, the share.

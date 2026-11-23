@@ -719,7 +719,7 @@ class _DueStore:
     def __init__(self, jobs):
         self.jobs = jobs
 
-    async def due_jobs(self, *, now, limit):
+    async def due_jobs(self, *, now, limit, fair=False):
         return list(self.jobs)
 
 

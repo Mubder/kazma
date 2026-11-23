@@ -40,6 +40,13 @@ _ATTACH_MAX_IDLE_TICKS = 30
 _SSE_ATTACH_TERMINAL = frozenset({"done", "turn_complete", "stream_end", "error"})
 
 
+async def _no_events() -> AsyncGenerator[Any, None]:
+    """No graph events: a turn refused before it started, for its space's or
+    its person's share of turns (Spaces S4-04)."""
+    return
+    yield
+
+
 def _attach_frame_is_terminal(frame: dict[str, Any]) -> bool:
     """True when an attach subscriber should close after yielding *frame*."""
     ftype = str((frame or {}).get("type") or "")
@@ -933,7 +940,12 @@ async def _stream_langgraph_events(
                         async with turn_segment_budget(
                             graph, config, thread_id=thread_id, input_state=input_state,
                         ) as _segment:
-                            async for ev in _astream_turn(graph, input_state, config):
+                            # Refused for its space's or person's share of
+                            # turns (Spaces S4-04): no graph runs, and the
+                            # segment's honest end is the turn's answer.
+                            events = (_astream_turn(graph, input_state, config)
+                                      if not _segment.refused else _no_events())
+                            async for ev in events:
                                 # Bounded queue: drop advisory stream events when
                                 # the consumer is gone/slow rather than grow the
                                 # queue unbounded for up to DETACHED_TTL_S. The

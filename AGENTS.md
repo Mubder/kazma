@@ -16139,6 +16139,52 @@ an install with one account behaves as before.
     install and the other is refused; each byte limit taken out as its
     control; the routes and refusals; nothing read without Spaces),
     `tests/e2e/test_space_limits_browser.py` (by the sidebar, EN/AR).
+- **Fairness between spaces and between people (S4-04, 2026-11-23).** Only
+  where Spaces is enforced: an install that does not enforce it reads
+  nothing more, counts nothing, and every queue keeps its order.
+  `kazma_core/spaces/fairness.py` is the one rule.
+  - **A person's share** (`person_share`): in a shared space with more than
+    one member, each person holds at most half of any of the space's
+    shares, rounded up; in a personal space, or one with a single member,
+    the space's. `shares(kind, space)` answers both;
+    `space_limits.running_refusal(..., person=, person_running=)` refuses
+    for either, and crawls (`crawl_jobs.start`, the journal row's `asker`),
+    research runs (`research_runtime._take_space_share`) and swarm tasks
+    (`engine._running_ahead_of`, the task's `asker`) ask it.
+  - **Turns and scheduled jobs have shares** (`SpaceLimits.turns`, 8;
+    `scheduled`, 2; both on the People page), counted in this process
+    (`fairness.turn_slots`, `fairness.scheduled_slots`). A new turn takes its
+    slot in `turn_segment_budget`, waiting up to `TURN_WAIT_S`; past it the
+    turn is refused before it starts (`TurnSegment.refused`, `expired` too,
+    the honest end written in the person's language) and the caller runs
+    no graph: every caller of the budget checks `segment.refused` (a gate).
+    An approval's resume is let in and counted; a turn inside one that
+    holds a slot -- a sub-agent's, a scheduled task's -- takes none
+    (`fairness.held`). A due job takes its slot in
+    `CronScheduler._execute_bounded` before the scheduler's own semaphore,
+    waiting up to one poll and holding nothing while it waits; one still
+    beyond its share is left pending, unclaimed.
+  - **Queues take turns**: the scheduler's due list by space, then by
+    person (`SQLiteCronStore.due_jobs(fair=True)`); document claims, within
+    a tenant, by the person with the fewest running (`fair_claim_order`'s
+    `running_actor`, both backends); the memory lane by space (N37:
+    `memory_task_queue.claim_space`, filled at enqueue -- `enqueue_task(
+    space=)`, else the payload's tenant, else the bound scope -- read by
+    `_claim_batch`; never whose data a task is, which the space walk reads
+    from the payload).
+  - **Uploads and paid endpoints**: a space's documents are bounded by its
+    queue and rate budgets (`documents.admission`, per tenant); every rate
+    window (`kazma_ui.rate_limit`) is keyed by the person the tenant
+    middleware bound, wherever they sign in from, and each request also
+    counts in its space's window of `SPACE_WINDOW_FACTOR` (2) people's
+    worth: both admit it or neither counts it.
+  - Gates: `tests/test_space_fairness.py` (turns through the real
+    `run_agent_turn` and graph, the scheduler's real poll on a real store,
+    real document claims, the real memory claim, the real rate dependency;
+    one queue for all as each control: one space's turns, jobs, claims or
+    tasks first and another space's waiting; a caller of the budget that
+    runs the graph anyway as the gate's control; the People page's limits
+    in both languages).
 - **Every action under the person's name (S2-09, 2026-11-22).** Only where
   Spaces is enforced; an install that does not enforce it records nothing
   more (the memory operator trail and the logs as before).

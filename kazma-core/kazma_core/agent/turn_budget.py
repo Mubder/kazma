@@ -50,7 +50,7 @@ import asyncio
 import contextlib
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -103,6 +103,11 @@ class TurnSegment:
     text: str = ""
     #: The state the cut segment ends on (the checkpoint's, with the reply).
     state: dict[str, Any] = field(default_factory=dict)
+    #: True when the turn was refused before it started: its space, or its
+    #: person, ran its share of turns at once (Spaces S4-04). The caller runs
+    #: no graph; ``expired`` is True too, and ``text`` / ``state`` hold the
+    #: honest end, as for a cut segment.
+    refused: bool = False
 
 
 def parse_turn_timeout(value: Any) -> int | None:
@@ -330,6 +335,16 @@ async def _end_timed_out_segment(
         budget.seconds, budget.source, thread_id[:12],
     )
     _report_turn_timeout(budget.seconds, thread_id)
+    state = await _write_honest_end(graph, config, thread_id, input_state, text, what="timed-out")
+    return text, {**state, EXPIRED_KEY: budget.seconds}
+
+
+async def _write_honest_end(graph: Any, config: dict[str, Any], thread_id: str, input_state: Any,
+                            text: str, *, what: str) -> dict[str, Any]:
+    """Write *text* as the turn's end into the checkpoint and return the
+    state it ends on. A graph without a checkpointer keeps nothing; a
+    checkpoint that cannot be read or written is not written over: the
+    caller still shows the reply."""
     values: dict[str, Any] = {}
     update: dict[str, Any] = {}
     if getattr(graph, "checkpointer", None) is not None:
@@ -339,12 +354,12 @@ async def _end_timed_out_segment(
             await _write_reply(graph, config, thread_id, update)
         except Exception:  # noqa: BLE001 -- the reply still reaches the caller
             logger.warning(
-                "[turn-budget] the timed-out reply was not written to the checkpoint "
-                "thread=%s; the caller still shows it", thread_id[:12], exc_info=True,
+                "[turn-budget] the %s reply was not written to the checkpoint "
+                "thread=%s; the caller still shows it", what, thread_id[:12], exc_info=True,
             )
     if not update:
         update = _reply_update(values, input_state, text)
-    return text, {**values, **update, EXPIRED_KEY: budget.seconds}
+    return {**values, **update}
 
 
 @contextlib.asynccontextmanager
@@ -370,6 +385,16 @@ async def turn_segment_budget(
 
     ``enforce=False`` is for ``/compact`` only (maintenance the operator ran,
     not a turn; declared in ``tests/test_turn_budget.py``).
+
+    **A turn's slot** (Spaces S4-04, ``spaces.fairness.turn_slots``): once
+    Spaces is enforced, a new turn takes a slot of its space and its person,
+    waiting up to ``fairness.TURN_WAIT_S`` for one to end; past it the turn
+    is refused before it starts -- ``segment.refused`` (and ``expired``),
+    with the honest end written -- and the caller runs no graph: every
+    caller checks ``segment.refused`` first
+    (``tests/test_space_fairness.py``). An approval's resume is a turn
+    already admitted: let in, and counted. A turn inside another (a
+    sub-agent's) holds no slot of its own.
     """
     cfg = dict(config or {})
     tid = str(thread_id or _thread_of(cfg))
@@ -382,15 +407,35 @@ async def turn_segment_budget(
     turn_scope = await asyncio.to_thread(_threads.scope_for_turn, tid)
     budget = await asyncio.to_thread(resolve_turn_budget, tid) if enforce else None
     segment = TurnSegment(budget=budget)
-    if budget is None:
-        with _threads.bound(turn_scope):
-            yield segment
-        return
+    release = await _take_turn_slot(graph, cfg, tid, turn_scope, input_state, segment) if enforce else None
+    from kazma_core.spaces import fairness
+
+    try:
+        # A turn run inside this one (a sub-agent's) is part of it.
+        with fairness.held() if release is not None else contextlib.nullcontext():
+            if segment.refused or budget is None:
+                with _threads.bound(turn_scope):
+                    yield segment
+                return
+            async with _budget_window(graph, cfg, tid, budget, input_state, segment, turn_scope):
+                yield segment
+    finally:
+        if release is not None:
+            release()
+
+
+@contextlib.asynccontextmanager
+async def _budget_window(graph: Any, cfg: dict[str, Any], tid: str, budget: TurnBudget, input_state: Any,
+                         segment: TurnSegment, turn_scope: Any) -> AsyncIterator[None]:
+    """The segment's wall-clock window: the run is cancelled where it waits
+    when it ends, and the honest end written (module doc)."""
+    from kazma_core.spaces import threads as _threads
+
     window = asyncio.timeout(budget.seconds)
     try:
         async with window:
             with _threads.bound(turn_scope):
-                yield segment
+                yield
     except TimeoutError:
         if not window.expired():
             raise
@@ -398,3 +443,57 @@ async def turn_segment_budget(
         segment.text, segment.state = await _end_timed_out_segment(
             graph, cfg, thread_id=tid, budget=budget, input_state=input_state,
         )
+
+
+def _is_resume(input_state: Any) -> bool:
+    """An approval's resume (a ``Command``), or a run that continues the
+    checkpoint (no input): a turn already admitted."""
+    if input_state is None:
+        return True
+    try:
+        from langgraph.types import Command
+    except ImportError:  # pragma: no cover -- langgraph is a dependency
+        return False
+    return isinstance(input_state, Command)
+
+
+async def _take_turn_slot(graph: Any, cfg: dict[str, Any], tid: str, turn_scope: Any, input_state: Any,
+                          segment: TurnSegment) -> Callable[[], None] | None:
+    """Take the turn's slot of its space and person (Spaces S4-04), or
+    refuse the turn: ``segment.refused``, the honest end written. Returns the
+    release, or None (Spaces not enforced, a turn inside another)."""
+    from kazma_core.spaces import fairness
+    from kazma_core.spaces.space_limits import SpaceOverLimit
+
+    if fairness.holding():
+        return None
+    scope_ = getattr(turn_scope, "scope", None)
+    space = str(getattr(scope_, "space_id", "") or "")
+    person = str(getattr(scope_, "asker", "") or "")
+    try:
+        release = await fairness.turn_slots.take(space, person, wait_s=fairness.TURN_WAIT_S,
+                                                 force=_is_resume(input_state))
+    except SpaceOverLimit as refused:
+        segment.refused = segment.expired = True
+        segment.text, segment.state = await _end_refused_turn(graph, cfg, tid, input_state, str(refused))
+        return None
+    return release
+
+
+async def _end_refused_turn(graph: Any, cfg: dict[str, Any], tid: str, input_state: Any,
+                            why: str) -> tuple[str, dict[str, Any]]:
+    """The honest end of a turn refused before it started: the question and
+    the refusal, in the person's language, as the turn's last messages; no
+    page (a share is the limit working, not a fault)."""
+    from kazma_core.language_lock import in_their_language
+
+    asked = ""
+    if isinstance(input_state, dict):
+        from kazma_core.agent.turn_input import extract_latest_user_text
+
+        asked = extract_latest_user_text(list(input_state.get("messages") or []), image_marker=False)
+    arabic = ("هذه المساحة، أو أنت، تستخدم حصتها من الطلبات الجارية في آن واحد؛ "
+              "انتظر حتى ينتهي أحدها ثم أعد المحاولة.")
+    text = in_their_language(asked, why, arabic)
+    logger.info("[turn] refused before it started (thread=%s): %s", tid[:12], why)
+    return text, await _write_honest_end(graph, cfg, tid, input_state, text, what="refused turn's")

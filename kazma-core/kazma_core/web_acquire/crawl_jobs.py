@@ -570,6 +570,7 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
 
     asker = str(bound_asker() or '')[:120]
     from kazma_core.spaces.daily_limits import own_keys_only
+    from kazma_core.spaces.space_limits import share_refusal
 
     own_keys = own_keys_only()
     space, share = _space_share()
@@ -585,13 +586,16 @@ def start(library, seed, policy, *, job_id=None, resume=False, kind=None):
                 raise AcquisitionError(FetchErrorCode.POLICY, 'Crawl kind changed; resume was refused.')
         elif row is not None:
             raise AcquisitionError(FetchErrorCode.EXISTS, 'Crawl job already exists; resume an interrupted job explicitly.')
-        # The space's share of the install's crawls first (Spaces S2-08): a
-        # space at its share is refused here and never holds a slot another
-        # space's crawl could run in.
-        if share is not None and (kind or (row or {}).get('kind')) != 'research_pipeline' and sum(
-                _a_running_crawl_of(other, space) for key, other in jobs.items() if key != job_id) >= share:
-            raise AcquisitionError(FetchErrorCode.LIMIT, f'This space already runs {share} Knowledge crawls at once, '
-                                   'its share; retry after one finishes.', transient=True)
+        # The space's share of the install's crawls first (Spaces S2-08), and
+        # its person's share of the space's (S4-04): a space at its share is
+        # refused here and never holds a slot another space's crawl could run in.
+        if share is not None and (kind or (row or {}).get('kind')) != 'research_pipeline':
+            others = [other for key, other in jobs.items() if key != job_id and _a_running_crawl_of(other, space)]
+            refused = share_refusal('crawls', len(others), share, person=asker,
+                                    person_running=sum(bool(asker) and other.get('asker') == asker
+                                                       for other in others))
+            if refused:
+                raise AcquisitionError(FetchErrorCode.LIMIT, refused, transient=True)
         if sum(other['status'] == 'running' for other in jobs.values()) >= _MAX_ACTIVE:
             raise AcquisitionError(FetchErrorCode.LIMIT, 'Installation crawl limit reached (four active jobs); retry after a job finishes.', transient=True)
         if (kind or (row or {}).get('kind') or 'site') in _KB_KINDS and any(
@@ -1015,19 +1019,19 @@ def inspect_jobs(job_id=None):
 
 
 def _space_share():
-    """``(space, share)`` a new crawl is counted against: the bound space and
-    how many crawls it may run at once (``spaces.space_limits``), or
-    ``("", None)`` while the install does not enforce Spaces. Blocking (the
-    identity store)."""
+    """``(space, shares)`` a new crawl is counted against: the bound space
+    and ``(how many crawls it may run at once, how many its person may)``
+    (``spaces.fairness.shares``), or ``("", None)`` while the install does
+    not enforce Spaces. Blocking (the identity store)."""
     from kazma_core.spaces.scope import current_scope, spaces_enforced
 
     if not spaces_enforced():
         return '', None
-    from kazma_core.spaces.space_limits import share_of
+    from kazma_core.spaces.fairness import shares
 
     bound = current_scope()
     space = bound.space_id if bound is not None else ''
-    return space, share_of('crawls', space)
+    return space, shares('crawls', space)
 
 
 def _a_running_crawl_of(row, space_id):

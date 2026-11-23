@@ -485,6 +485,7 @@ def _run_turn_memory(
                 # (authoritative), and runs bound to it (task_queue._task_space),
                 # as the person the turn was for (Spaces S2-07 second review).
                 {"episode_id": written, **({"asker": said_by} if said_by else {})},
+                space=tenant_id,  # the memory lane takes turns by space (Spaces S4-04, N37)
             ) is None:
                 logger.warning("[post_turn] the deep pass of %s was not queued", written)
                 _metric_fail("enqueue", RuntimeError("queue refused"))

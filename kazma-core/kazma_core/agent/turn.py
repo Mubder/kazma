@@ -184,10 +184,15 @@ async def run_agent_turn(
         # for an approval, which ends the segment.
         from kazma_core.agent.turn_budget import turn_segment_budget
 
+        raw: Any = None
         async with turn_segment_budget(
             graph, cfg, thread_id=thread_id, input_state=state,
         ) as segment:
-            if ns_cfg is not None and getattr(ns_cfg, "enabled", False):
+            if segment.refused:
+                # Its space, or its person, runs its share of turns (Spaces
+                # S4-04): no graph runs; the honest end is the reply.
+                pass
+            elif ns_cfg is not None and getattr(ns_cfg, "enabled", False):
                 from kazma_core.agent.supervisor_watchdog import (
                     reset_heartbeat,
                     supervised_invoke,

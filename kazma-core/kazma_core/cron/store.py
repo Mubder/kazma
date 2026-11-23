@@ -539,11 +539,27 @@ class SQLiteCronStore:
             return await self._jobs(f"WHERE tenant_id = ? ORDER BY created_at DESC{limit_clause}", (tenant_id,))
         return await self._jobs(f"ORDER BY created_at DESC{limit_clause}")
 
-    async def due_jobs(self, *, now: datetime, limit: int = 100) -> list[ScheduledJob]:
-        """Pending jobs due by *now*, soonest first (the ``(status, next_run)`` index)."""
-        return await self._jobs(
-            "WHERE status = 'pending' AND next_run IS NOT NULL AND next_run != '' AND next_run <= ? "
-            "ORDER BY next_run LIMIT ?", (norm_iso(now), int(limit)))
+    async def due_jobs(self, *, now: datetime, limit: int = 100, fair: bool = False) -> list[ScheduledJob]:
+        """Pending jobs due by *now*, soonest first (the ``(status, next_run)`` index).
+
+        *fair* (Spaces S4-04, once Spaces is enforced): the spaces take turns,
+        and within a space its people do -- each space's soonest job of its
+        least served person first, then each space's next -- so a space with
+        hundreds of jobs due never fills the pass's window before another
+        space's one job."""
+        due = ("WHERE status = 'pending' AND next_run IS NOT NULL AND next_run != '' AND next_run <= ?")
+        if not fair:
+            return await self._jobs(f"{due} ORDER BY next_run LIMIT ?", (norm_iso(now), int(limit)))
+        # A job stored with no tenant is the owner's space's (N19).
+        sql = (f"SELECT {_JOB_COLUMNS} FROM ("
+               f" SELECT *, ROW_NUMBER() OVER (PARTITION BY space ORDER BY in_person, next_run) AS turn FROM ("
+               f"  SELECT {_JOB_COLUMNS}, COALESCE(NULLIF(tenant_id, ''), 'default') AS space,"
+               f"   ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(tenant_id, ''), 'default'),"
+               f"    COALESCE(creator, '') ORDER BY next_run) AS in_person"
+               f"  FROM cron_jobs {due}))"
+               f" ORDER BY turn, next_run LIMIT ?")
+        rows = await self._conn().execute_fetchall(sql, (norm_iso(now), int(limit)))
+        return [self._row_to_job(r) for r in rows]
 
     async def list_running(self) -> list[ScheduledJob]:
         """Every running job -- no limit: recovery must see the oldest one too (SCH-E07)."""

@@ -65,6 +65,11 @@ def fair_claim_order() -> tuple[str, str]:
     tenant's failing jobs no longer return to the front of the queue. One
     tenant's backlog of hundreds no longer makes every other tenant wait
     behind all of it.
+
+    And across the people of a tenant (Spaces S4-04: a space is a tenant):
+    among one tenant's jobs, the person with the fewest running goes first,
+    so one member's backlog never makes the space's other members wait
+    behind it. On both backends; the callers join ``running r`` as before.
     """
     active = ",".join(f"'{s}'" for s in _ACTIVE_STATE_VALUES)
     with_clause = f"""
@@ -72,8 +77,15 @@ def fair_claim_order() -> tuple[str, str]:
             SELECT tenant_id, COUNT(*) AS n FROM document_jobs
             WHERE state IN ({active}) AND lease_owner IS NOT NULL
             GROUP BY tenant_id
+        ), running_actor AS (
+            SELECT tenant_id, actor_id, COUNT(*) AS n FROM document_jobs
+            WHERE state IN ({active}) AND lease_owner IS NOT NULL
+            GROUP BY tenant_id, actor_id
         )"""
-    order = "ORDER BY COALESCE(r.n, 0), COALESCE(j.retry_at, j.created_at), j.id"
+    order = ("ORDER BY COALESCE(r.n, 0), "
+             "COALESCE((SELECT ra.n FROM running_actor ra WHERE ra.tenant_id = j.tenant_id "
+             "AND ra.actor_id = j.actor_id), 0), "
+             "COALESCE(j.retry_at, j.created_at), j.id")
     return with_clause, order
 
 _ACTIVE_STATES = frozenset(

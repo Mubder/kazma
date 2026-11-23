@@ -550,7 +550,8 @@
         // Limits per space (Spaces S2-08): bytes are shown and typed in MiB.
         spaceUsage: [],
         spaceUsageLoaded: false,
-        spaceLimitNames: ['disk_bytes', 'documents_bytes', 'knowledge_bytes', 'crawls', 'research', 'swarm'],
+        spaceLimitNames: ['disk_bytes', 'documents_bytes', 'knowledge_bytes', 'crawls', 'research', 'swarm',
+            'turns', 'scheduled'],
         limitsForSpaces: { limits: null, set: false, shipped: null },
         spaceLimitsDraft: {},
         spaceLimitEditing: '',
@@ -632,6 +633,7 @@
             const words = {
                 disk_bytes: 'Files (MiB)', documents_bytes: 'Documents (MiB)', knowledge_bytes: 'Knowledge (MiB)',
                 crawls: 'Crawls at once', research: 'Research at once', swarm: 'Swarm tasks at once',
+                turns: 'Turns at once', scheduled: 'Scheduled jobs at once',
             };
             return _t('settings.space_limit.' + name, words[name] || name);
         },

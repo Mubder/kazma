@@ -963,7 +963,11 @@ class CronScheduler:
         from kazma_core.db import availability
         from kazma_core.spaces.scope import spaces_enforced
 
-        for job in await self._store.due_jobs(now=now, limit=max(50, self._max_concurrent * 10)):
+        # Once Spaces is enforced the spaces, and their people, take turns in
+        # the pass's window (S4-04): one space's backlog never fills it.
+        due = await self._store.due_jobs(now=now, limit=max(50, self._max_concurrent * 10),
+                                         fair=spaces_enforced())
+        for job in due:
             if not self._running:
                 break
             if job.job_id in self._in_flight:
@@ -1033,9 +1037,36 @@ class CronScheduler:
         return done
 
     async def _execute_bounded(self, job: ScheduledJob, sem: asyncio.Semaphore) -> None:
-        """Run job under the global concurrency semaphore."""
-        async with sem:
-            await self._execute(job)
+        """Run job under the global concurrency semaphore.
+
+        Once Spaces is enforced the job first takes a slot of its space and
+        of the person who booked it (Spaces S4-04,
+        ``spaces.fairness.scheduled_slots``), waiting up to one poll; a job
+        still beyond its share is left pending for a later pass, unclaimed.
+        It waits holding nothing, so one space's jobs never hold the
+        scheduler's slots another space's could fire in. Its turn takes no
+        turn slot of its own (``fairness.held``)."""
+        from kazma_core.spaces import fairness
+        from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_core.spaces.scope import space_of_record
+        from kazma_core.spaces.space_limits import SpaceOverLimit
+
+        release = None
+        try:
+            release = await fairness.scheduled_slots.take(
+                space_of_record(job.tenant_id), job.creator or "", wait_s=self._poll_interval)
+        except SpaceOverLimit:
+            logger.debug("[CronScheduler] %s waits for its space's or person's share", job.job_id)
+            return
+        except IdentityUnavailable:
+            pass  # the fire's own binding holds it while the store is away
+        try:
+            with fairness.held() if release is not None else contextlib.nullcontext():
+                async with sem:
+                    await self._execute(job)
+        finally:
+            if release is not None:
+                release()
 
     @staticmethod
     def _is_missed(job: ScheduledJob, now: datetime, default_catchup_s: int) -> bool:
