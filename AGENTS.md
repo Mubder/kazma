@@ -16583,6 +16583,21 @@ an install with one account behaves as before.
     that changes a whole chat asks the same rule. Gate:
     `tests/test_whole_chat_routes_per_person.py` (the space-only check as
     the control).
+- **Once a second account exists, no switch opens the install (S4-03,
+  2026-11-23).** The boot refuses sign-in off (`KAZMA_AUTH_DISABLED`,
+  `KAZMA_DEV_WS_BYPASS`, `KAZMA_LOOPBACK_AUTOLOGIN`), demo mode
+  (`KAZMA_DEMO_MODE`) and the chat apps' open switch
+  (`KAZMA_GATEWAY_OPEN_TO_EVERYONE`, unless
+  `KAZMA_GATEWAY_STRICT_ALLOWLIST` overrides it). One list,
+  `boot_guard.OPEN_SWITCHES` (its sign-in part, `SIGN_IN_OFF_SWITCHES`, is
+  the cloud profile's too, S4-08): a new switch that lets anyone in goes
+  there. `boot_guard.open_switches_refusal` is asked by
+  `KazmaAppBuilder._bootstrap_services` once the settings store answers:
+  exit 1 before anything serves, the refusal on stderr and in the log.
+  With no switch on it reads nothing; an identity store that cannot answer
+  refuses. Gate: `tests/test_open_switches_refused_with_members.py` (each
+  switch through the real `create_app`; the boot guard without the rule as
+  the control).
 
 ## UI Conventions (Web)
 

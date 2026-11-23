@@ -156,7 +156,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_LONG_TASK_MAX_ITER` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_LONG_TASK_MAX_RECURSION` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_LONG_TASK_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | yes |
-| `KAZMA_LOOPBACK_AUTOLOGIN` | (none) | `kazma_ui.auth` | yes |
+| `KAZMA_LOOPBACK_AUTOLOGIN` | (none) | `kazma_core.security.boot_guard`, `kazma_ui.auth` | yes |
 | `KAZMA_LOOP_STALL_WATCHDOG` | (none) | `kazma_core.observability.loop_stall` | yes |
 | `KAZMA_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_MCP_ALLOW_UNGATED` | (none) | `kazma_core.mcp.server` | yes |

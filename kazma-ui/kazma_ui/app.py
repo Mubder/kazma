@@ -354,6 +354,18 @@ class KazmaAppBuilder:
         if "pytest" not in sys.modules:
             _ensure_generated_secrets()
 
+        # Spaces S4-03: once a second account exists, no switch may open the
+        # install to people it has not signed in (sign-in off, demo mode, the
+        # chat apps' open switch). Refused before anything serves; reads
+        # nothing with no such switch on.
+        from kazma_core.security.boot_guard import open_switches_refusal
+
+        _open_refusal = open_switches_refusal()
+        if _open_refusal:
+            logger.error("[App] %s", _open_refusal)
+            print(_open_refusal, file=sys.stderr)
+            raise SystemExit(1)
+
         self.config = load_config(self.config_path)
         # Process-wide singleton — never construct ConfigStore() elsewhere.
         from kazma_core.config_store import get_config_store

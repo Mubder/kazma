@@ -46,8 +46,12 @@ from __future__ import annotations
 import os
 
 __all__ = [
+    "CHAT_APPS_OPEN_SWITCH",
     "LOOPBACK_HOSTS",
+    "OPEN_SWITCHES",
     "SECURITY_SWITCHES",
+    "SIGN_IN_OFF_SWITCHES",
+    "open_switches_refusal",
     "WEAK_SECRET_CHARS",
     "env_flag",
     "exposure",
@@ -85,6 +89,23 @@ SECURITY_SWITCHES: frozenset[str] = frozenset({
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
+#: The switches that turn sign-in off, or let a visitor in without it. The
+#: one list of them: the cloud profile's sign-in check (Spaces S4-08) and the
+#: refusal once a second account exists (S4-03) both read it.
+SIGN_IN_OFF_SWITCHES: tuple[str, ...] = (
+    "KAZMA_AUTH_DISABLED",
+    "KAZMA_DEMO_MODE",
+    "KAZMA_DEV_WS_BYPASS",
+    "KAZMA_LOOPBACK_AUTOLOGIN",
+)
+#: The chat apps' switch that lets anyone message a bot whose allowlist is
+#: empty (``kazma_gateway.sender_rule``); ``KAZMA_GATEWAY_STRICT_ALLOWLIST``
+#: set too wins over it.
+CHAT_APPS_OPEN_SWITCH = "KAZMA_GATEWAY_OPEN_TO_EVERYONE"
+#: Every switch that opens an install to people it has not signed in:
+#: refused at boot once a second account exists (Spaces S4-03).
+OPEN_SWITCHES: tuple[str, ...] = (*SIGN_IN_OFF_SWITCHES, CHAT_APPS_OPEN_SWITCH)
+
 
 def env_flag(name: str) -> bool:
     """True when *name* is set to a truthy value: ``1``, ``true``, ``yes``, ``on``.
@@ -93,6 +114,51 @@ def env_flag(name: str) -> bool:
     middleware cannot disagree about whether a switch is on.
     """
     return os.environ.get(name, "").strip().lower() in _TRUTHY
+
+
+def _open_switches_on() -> list[str]:
+    """The switches of :data:`OPEN_SWITCHES` that are on, in that order. The
+    chat apps' open switch counts only while the strict allowlist does not
+    override it, as the sender rule reads them. In memory."""
+    on = [name for name in SIGN_IN_OFF_SWITCHES if env_flag(name)]
+    if env_flag(CHAT_APPS_OPEN_SWITCH) and not env_flag("KAZMA_GATEWAY_STRICT_ALLOWLIST"):
+        on.append(CHAT_APPS_OPEN_SWITCH)
+    return on
+
+
+def open_switches_refusal() -> str:
+    """Why Kazma refuses to start, or ``""``: once a second account exists,
+    no switch of :data:`OPEN_SWITCHES` may be on (Spaces S4-03). With people
+    on an install who do not all trust each other, sign-in off, demo mode or
+    a bot that answers anyone hands every one of them -- and anyone who can
+    reach it -- what the owner's sign-in guards. With no switch on nothing is
+    read; with one on, the accounts are read from the identity store
+    (blocking: call it once the settings store answers). An identity store
+    that cannot answer is a refusal: unknown is never a pass."""
+    on = _open_switches_on()
+    if not on:
+        return ""
+    from kazma_core.spaces import identity
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    try:
+        others = [a for a in identity.list_accounts() if a.get("id") != OWNER_ACCOUNT_ID]
+    except identity.IdentityUnavailable as exc:
+        return (
+            f"Kazma will not start: {', '.join(on)} {'is' if len(on) == 1 else 'are'} on, and whether "
+            f"people other than the owner have accounts could not be read ({type(exc).__name__}). "
+            "Turn the switch off in the install's .env, or start Kazma when its settings database answers."
+        )
+    if not others:
+        return ""
+    people = len(others) + 1
+    return (
+        f"Kazma will not start: {people} people have accounts on this install, and "
+        f"{', '.join(on)} {'lets' if len(on) == 1 else 'let'} anyone in without signing in. "
+        "Once a second person has an account these switches are refused (Spaces S4-03). Turn "
+        f"{'it' if len(on) == 1 else 'them'} off in the install's .env (remove the line, or set it to 0), "
+        "then start Kazma again."
+    )
 
 
 def is_loopback(host: str) -> bool:
