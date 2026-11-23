@@ -947,7 +947,9 @@ class SlackAdapter(SenderGate, BaseAdapter):
                                             _ia_user_id, action.kind,
                                         )
                                         continue
-                                    if action.kind in ("hitl", "swarm", "run"):
+                                    from kazma_gateway.allowlists import press_needs_admin
+
+                                    if action.kind in ("hitl", "swarm", "run") and press_needs_admin(action.kind):
                                         # Admin gate for approval buttons
                                         # (audit 2026-09-16 F-8): audit H-8
                                         # made installs admin-grade and left

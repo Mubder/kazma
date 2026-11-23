@@ -696,7 +696,9 @@ class DiscordAdapter(SenderGate, BaseAdapter):
         # shipped posture (allowed_users, or the owner's own id, ⇒ admin); it
         # bites only with the open switch, where any guild member could
         # otherwise answer the operator.
-        if action.kind in ("hitl", "swarm", "run"):
+        from kazma_gateway.allowlists import press_keeps_card, press_needs_admin
+
+        if action.kind in ("hitl", "swarm", "run") and press_needs_admin(action.kind):
             from kazma_gateway.allowlists import is_gateway_admin
 
             if not await asyncio.to_thread(is_gateway_admin, f"discord:{_ia_user_id}", "discord"):
@@ -810,8 +812,10 @@ class DiscordAdapter(SenderGate, BaseAdapter):
                 return  # Already acknowledged before enqueueing.
             from kazma_gateway.run_cards import press_keeps_buttons
 
-            if press_keeps_buttons(action):
-                # A run card's Diagnose decides nothing: leave the card as it is.
+            if press_keeps_buttons(action) or press_keeps_card(action.kind, direct=not data.get("guild_id")):
+                # A run card's Diagnose decides nothing, and in a server
+                # channel the handler says whose press counts (S3-04): leave
+                # the card as it is.
                 await _ack({"type": 6})
                 return
             await _ack({"type": 7, "data": {"content": old_content, "components": []}})

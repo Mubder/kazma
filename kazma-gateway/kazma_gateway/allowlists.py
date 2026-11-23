@@ -34,6 +34,8 @@ __all__ = [
     "apply_gateway_allowlists",
     "is_gateway_admin",
     "known_owner_ids",
+    "press_keeps_card",
+    "press_needs_admin",
     "split_ids",
 ]
 
@@ -113,6 +115,35 @@ def known_owner_ids(config_store: Any, platform: str) -> list[OwnerId]:
     from kazma_core.spaces.chat_links import known_owner_ids as _known
 
     return [OwnerId(uid, source) for uid, source in _known(config_store, platform)]
+
+
+#: The buttons the card's own rule decides once Spaces is enforced: an
+#: approval card (S3-04, ``hitl_answerers.refusal_for_card``) and a run
+#: incident card (S3-06, ``runs.decide``: its asker or an owner of its
+#: space). A swarm bus card is the install's admin's (O1).
+_DECIDED_BY_THE_CARD = frozenset({"hitl", "run"})
+
+
+def press_needs_admin(kind: str) -> bool:
+    """Whether a press of *kind* (``hitl``, ``swarm``, ``run``) needs a
+    gateway admin before it reaches the handler. Before Spaces all three
+    do; once it is enforced an approval or a run card's press goes on --
+    the sender is a linked account (the sender rule let them in) and the
+    handler asks the card's own rule, so another person's press is told it
+    is not theirs. No I/O."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    return not (spaces_enforced() and kind in _DECIDED_BY_THE_CARD)
+
+
+def press_keeps_card(kind: str, *, direct: bool) -> bool:
+    """Whether a press on an approval or run card leaves the card's buttons
+    as they are: once Spaces is enforced, in a group -- the handler decides
+    whose press counts, and another member's press changes nothing, the
+    card included (S3-04). No I/O."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    return spaces_enforced() and not direct and kind in _DECIDED_BY_THE_CARD
 
 
 def is_gateway_admin(sender_id: str, platform: str = "") -> bool:

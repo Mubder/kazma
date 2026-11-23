@@ -373,7 +373,9 @@ class WhatsAppAdapter(SenderGate, BaseAdapter):
         data = decode_callback_data(m.button_id)
         action = parse_callback_data(data)
         actor = f"whatsapp:{m.from_id}"
-        if action.kind in ("hitl", "swarm", "run"):
+        from kazma_gateway.allowlists import press_needs_admin
+
+        if action.kind in ("hitl", "swarm", "run") and press_needs_admin(action.kind):
             from kazma_gateway.allowlists import is_gateway_admin
 
             if not await asyncio.to_thread(is_gateway_admin, actor, "whatsapp"):

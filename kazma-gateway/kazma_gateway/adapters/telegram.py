@@ -1470,10 +1470,12 @@ class TelegramAdapter(SenderGate, BaseAdapter):
         # changes nothing. It bites only with the open switch, where it is
         # supposed to: every member of a group chat could otherwise answer
         # the operator's approvals.
-        if action.kind in ("hitl", "swarm", "run"):
+        from kazma_gateway.allowlists import press_keeps_card, press_needs_admin
+
+        _approver = f"telegram:{from_user.get('id', '')}"
+        if action.kind in ("hitl", "swarm", "run") and press_needs_admin(action.kind):
             from kazma_gateway.allowlists import is_gateway_admin
 
-            _approver = f"telegram:{from_user.get('id', '')}"
             if not await asyncio.to_thread(is_gateway_admin, _approver, "telegram"):
                 logger.warning(
                     "[telegram] Non-admin user %s tried to answer a %s approval.",
@@ -1491,7 +1493,12 @@ class TelegramAdapter(SenderGate, BaseAdapter):
 
         # Dismiss loading indicator with status text
         alert_text = None
-        if action.kind == "hitl":
+        _direct = str((message.get("chat") or {}).get("type") or "private") == "private"
+        _keeps = press_keeps_card(action.kind, direct=_direct)
+        if _keeps:
+            # Whose press counts is the handler's to say (S3-04).
+            alert_text = "Processing..."
+        elif action.kind == "hitl":
             if data.startswith("hitl:opt:"):
                 # Semantic clarify/confirm option buttons — their data never
                 # contains "approve", so the old substring check showed
@@ -1510,7 +1517,7 @@ class TelegramAdapter(SenderGate, BaseAdapter):
         # (not after a run card's Diagnose: it decides nothing, the card stays answerable).
         from kazma_gateway.run_cards import press_keeps_buttons
 
-        if action.kind in ("hitl", "run") and not press_keeps_buttons(action):
+        if action.kind in ("hitl", "run") and not press_keeps_buttons(action) and not _keeps:
             chat_id = message.get("chat", {}).get("id")
             message_id = message.get("message_id")
             if chat_id and message_id:

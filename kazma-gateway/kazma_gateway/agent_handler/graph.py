@@ -13,7 +13,12 @@ from typing import TYPE_CHECKING, Any
 from kazma_core import language_lock
 from kazma_gateway.gateway import Attachment, IncomingMessage, OutboundMessage, SessionStore
 from kazma_gateway.telegram_format import md_to_tg_html
-from kazma_gateway.slash_commands import changes_global_config, is_slash_command, resolve_slash_command
+from kazma_gateway.slash_commands import (
+    changes_global_config,
+    decided_in_the_space,
+    is_slash_command,
+    resolve_slash_command,
+)
 
 if TYPE_CHECKING:
     from kazma_core.spaces.chat_apps import ChatPlace
@@ -1038,7 +1043,7 @@ def create_graph_handler(
                         context_metadata=msg.context_metadata,
                     ))
                     return
-            await _handler_body(msg, thread_id)
+            await _handler_body(msg, thread_id, place.sender_key if place is not None else "")
 
     async def _waits_on_someone_else(thread_id: str) -> str:
         """The name of the person the thread's paused card waits on, when that
@@ -1053,8 +1058,10 @@ def create_graph_handler(
             waiting_for_someone_else, thread_id, pending, str(pending.get("interrupt_id") or ""))
         return name or ""
 
-    async def _handler_body(msg: IncomingMessage, thread_id: str) -> None:
-        """Inner handler body (typing keepalive wraps this)."""
+    async def _handler_body(msg: IncomingMessage, thread_id: str, chat_key: str = "") -> None:
+        """Inner handler body (typing keepalive wraps this). *chat_key* is the
+        key the chat's season pointer is kept under in its space (S3-03,
+        ``ChatPlace.sender_key``); "" before Spaces."""
         sender = msg.sender_id or "unknown"
         from kazma_core.agent.command_catalog import BY_NAME, INTERNAL_COMMANDS, command_name
 
@@ -1202,6 +1209,7 @@ def create_graph_handler(
                 manager=manager,
                 sessions_map=_sessions,
                 prepare_outbound=_prepare_tg_outbound,
+                chat_key=chat_key,
             )
         if session_handled:
             return
@@ -1696,7 +1704,9 @@ def create_graph_handler(
             # personality -- must not be reachable by anyone a chat app lets
             # in (with KAZMA_GATEWAY_OPEN_TO_EVERYONE, everyone).
             # The admin allowlist is a settings read (audit 2026-10-26 AUD-111).
-            if changes_global_config(msg.text) and not await asyncio.to_thread(
+            if changes_global_config(msg.text) and not decided_in_the_space(
+                msg.text
+            ) and not await asyncio.to_thread(
                 _sender_is_gateway_admin, msg
             ):
                 ctx = await _store.get(thread_id) or msg.context_metadata

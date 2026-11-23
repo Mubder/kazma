@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "BOT_MENU_COMMANDS",
     "changes_global_config",
+    "decided_in_the_space",
     "is_slash_command",
     "resolve_slash_command",
     "switch_model_from_chat",
@@ -228,6 +229,23 @@ def changes_global_config(text: str) -> bool:
         # word is admin-only too, so a subcommand added later starts closed.
         return sub not in X_OPEN_SUBCOMMANDS
     return False
+
+
+def decided_in_the_space(text: str) -> bool:
+    """Whether a command :func:`changes_global_config` names acts, once
+    Spaces is enforced, as the linked account in the chat's space rather
+    than for everyone (S3-06): acting on a run (``/runs act``: its asker or
+    an owner of its space, ``runs.decide``) and the changes to the space's
+    own facts (the ``/memory`` change words: the bound space's tenant). The
+    admin gate does not apply to them there. No I/O."""
+    from kazma_core.spaces.scope import spaces_enforced
+
+    if not spaces_enforced():
+        return False
+    parts = (text or "").strip().split()
+    head = parts[0].lower().split("@", 1)[0] if parts else ""
+    sub = parts[1].lower() if len(parts) > 1 else ""
+    return (head == "/runs" and sub == "act") or (head == "/memory" and sub in MEMORY_CHANGE_WORDS)
 
 
 #: The ``/x`` words any allowed sender may use: help and reading.

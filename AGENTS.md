@@ -16230,6 +16230,33 @@ an install with one account behaves as before.
     owner's Telegram stamped on every web turn as the control),
     `tests/e2e/test_member_reminder_browser.py` (by the sidebar, EN/AR: a
     linked member books, an unlinked one is told to link).
+- **Every chat-app command acts as the linked account in the chat's space
+  (S3-06, 2026-11-23).** Only where Spaces is enforced: the handler binds the
+  sender's linked account in the chat's place (S3-03) before any command, so
+  every command's replies and turns run there; ``/space`` alone is answered
+  before the place exists (it chooses it).
+  - **Seasons** (`agent_handler/session_commands.py`): the pointer is the
+    chat's own key in its space (`_mouth_key`: `ChatPlace.sender_key`, passed
+    to `_handler_body` as `chat_key`); `/sessions` lists the bound space's
+    chats (its chat store); a take-over is of a season of that space only
+    (`_in_this_space`, the thread's home); the gateway-admin and owner rules
+    of before stay for an install that does not enforce Spaces.
+  - `/runs act` and the `/memory` change words are decided in the space
+    (`slash_commands.decided_in_the_space`: `runs.decide`'s own rule, the
+    bound tenant's facts), not by the gateway-admin rule; the rest of
+    `changes_global_config` stays the admin's (S3-08).
+  - **Buttons**: the adapters' admin gate for an approval or run card's
+    press gives way to the card's own rule (`allowlists.press_needs_admin`,
+    asked by every adapter's press gate) -- the sender rule already let a
+    linked account in, and the handler asks whose card it is (S3-04); a swarm
+    bus card stays the admin's (O1). In a group the card keeps its buttons on
+    a press (`allowlists.press_keeps_card`: Telegram's keyboard and alert,
+    Discord's components): another member's press changes nothing.
+  - Gates: `tests/test_chat_commands_act_as_the_account.py` (a matrix over
+    every catalog command through the real handler, each reply and turn
+    bound to the space as the account; a command added needs a line in
+    `SAMPLES`; every adapter's press gate asks `press_needs_admin`, a planted
+    gate as its control; the sender-owner pointer as the control).
 
 ## UI Conventions (Web)
 
