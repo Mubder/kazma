@@ -67,7 +67,7 @@ for (const [name, loader] of TABLES) {
 test("memory.html shows each table's failure line, worded from the catalog", () => {
   for (const [name, , key] of TABLES) {
     const row = new RegExp(
-      `<template x-if="${name}Failed">\\s*<tr><td colspan="\\d+" role="alert"[^>]*>\\{\\{ t\\('${key.replace(/\./g, "\\.")}'\\) \\}\\}</td></tr>`,
+      `<template x-if="${name}Failed">\\s*<tr><td colspan="\\d+"[^>]*><span role="alert">\\{\\{ t\\('${key.replace(/\./g, "\\.")}'\\) \\}\\}</span></td></tr>`,
     );
     assert.match(template, row, `${name}: no failure row`);
     // The empty row still waits for a successful read.
