@@ -10298,7 +10298,16 @@ Read the named test before changing the code it guards.
   (2026-11-14, `kazma_ui.i18n.install_language`): an app a test built on
   Arabic settings set it at startup, and CI's `/replay` test answered in
   Arabic whenever such a test landed earlier in its chunk (the probe pair
-  there, isolation off as the control).
+  there, isolation off as the control). So is the tool registry the space
+  matrix shares (2026-11-23, `tests/_chat_space_cases.py`: built once per
+  process, every tool case calls through it): a test wrote a stand-in
+  `web_search` straight into its table and the matrix's `tool:web_search`
+  case, in the same fast_test chunk at fae123ffd, called the stand-in and
+  found no search recorded. The root conftest puts the registry back after
+  every test and fails the test that left it changed, naming what it
+  changed (`_helper_tool_registry_put_back`); a test changes it only
+  through its monkeypatch. Gate: `tests/test_shared_registry_isolation.py`
+  (a planted write before the case; isolation off as the control).
   **No test reads a real `.env`** — two Postgres tests did, one the LIVE
   install's by hard-coded path. **`@pytest.mark.postgres` is the Postgres
   job's list** (`scripts/postgres_suite.py`), per test, verified on a real
