@@ -611,7 +611,28 @@ def _build_approval_prompt(
 
     All platforms share the ``hitl:approve|deny:<id>`` action vocabulary
     (Telegram keyboards, Discord components, Slack Block Kit).
+
+    A card someone else answers (Spaces S3-04: N21's admin, N4's approvers
+    -- the card names them, ``answered_by``) reaches the asker's chat
+    without buttons, saying whom it waits for.
     """
+    out = _approval_prompt(payload, thread_id, platform=platform)
+    answerers = [str(a) for a in payload.get("answered_by") or () if a]
+    asker = str(payload.get("asker") or "")
+    if answerers and asker and asker not in answerers:
+        names = ", ".join(str(n) for n in payload.get("answered_by_names") or () if n) or "someone else"
+        out = {**out, "markup": None,
+               "text": out["text"] + "\n\n⏳ Waiting for " + names + " to answer this approval."}
+    return out
+
+
+def _approval_prompt(
+    payload: dict[str, Any],
+    thread_id: str,
+    *,
+    platform: str = "telegram",
+) -> dict[str, Any]:
+    """The card's text and controls, as everyone who may answer sees it."""
     request_id = _gate_request_id(thread_id, payload)
     tool = payload.get("tool", "unknown")
     args = payload.get("args", {})
@@ -970,6 +991,83 @@ async def _not_recorded(recording: Any) -> str | None:
     return None
 
 
+#: What a press on someone else's card is told (S3-04).
+_NOT_YOURS_TEXT = "This approval is not yours to answer; it waits for the person it asks."
+
+
+def _not_yours_text(card: dict[str, Any], refusal: str) -> str:
+    """What another person's press is told: whose answer the card waits for
+    (the names the card carries), or that it cannot be read now. No I/O."""
+    from kazma_core.spaces.approvals import IDENTITY_UNAVAILABLE
+
+    if refusal == IDENTITY_UNAVAILABLE:
+        return "Approval remains paused: who answers it cannot be read right now. Try again in a moment."
+    names = [str(n) for n in card.get("answered_by_names") or () if n]
+    if names:
+        return f"This approval is not yours to answer; it waits for {', '.join(names)}."
+    return _NOT_YOURS_TEXT
+
+
+def _asker_route(state: Any) -> tuple[str, str] | None:
+    """(platform, target id) of the chat the turn belongs to, from its own
+    routing block (``_gateway``), when that is a chat app's. No I/O."""
+    routing = (state.get("_gateway") if isinstance(state, dict) else None) or {}
+    platform = str(routing.get("platform") or "").strip().lower()
+    target = str(routing.get("delivery_target") or "").strip()
+    if platform not in CHAT_APP_PLATFORMS | {"whatsapp"}:
+        return None
+    if not target.startswith(f"{platform}:") or target.endswith(":unknown"):
+        return None
+    return platform, target
+
+
+async def _decision_authorized(msg: IncomingMessage, target_thread: str, *,
+                               enforced: bool) -> tuple[bool, str]:
+    """(may decide, actor) for a ``/hitl`` decision. Before Spaces: a
+    gateway admin who owns the thread. Once Spaces is enforced: a sender the
+    handler bound to their linked account; the card's own rule is asked on
+    the live card (S3-04)."""
+    from kazma_core.sessions.directory import ThreadOwnerUnavailable, thread_owner
+    from kazma_core.spaces.scope import current_scope
+
+    from kazma_gateway.allowlists import is_gateway_admin
+
+    current_sender = (msg.sender_id or "").strip()
+    platform = (msg.platform or "").strip().lower()
+    actor = current_sender if ":" in current_sender or not current_sender else f"{platform}:{current_sender}"
+    same_platform = bool(current_sender and platform and actor.split(":", 1)[0] == platform)
+    if enforced:
+        bound = current_scope()
+        return bool(bound is not None and bound.asker and same_platform), actor
+    try:
+        if same_platform and await asyncio.to_thread(is_gateway_admin, actor, platform):
+            owner = await asyncio.to_thread(thread_owner, target_thread, strict=True)
+            owner = owner if ":" in owner or not owner else f"{platform}:{owner}"
+            return bool(owner and owner == actor), actor
+    except (ThreadOwnerUnavailable, OSError, ValueError, TypeError):
+        logger.warning("[HITL] authorization unavailable; refusing decision", exc_info=True)
+    return False, actor
+
+
+async def _resume_destination(manager: Any, msg: IncomingMessage, ctx: dict[str, Any],
+                              result_state: Any, *, answered_elsewhere: bool,
+                              approved: bool) -> tuple[str, str, dict[str, Any]]:
+    """Where a resumed turn's answer and next card go: the chat that pressed,
+    unless the card was answered from another chat (an approver's, the
+    asker's other chat) -- then the chat that asked, never the one that
+    pressed, which is told so (S3-04)."""
+    here = _build_target_id(msg.platform, ctx)
+    route = _asker_route(result_state) if answered_elsewhere else None
+    if route is None or route[1] == here:
+        return msg.platform, here, ctx
+    if not await manager.send(OutboundMessage(
+            target_id=here,
+            text=("✅ Approved" if approved else "🚫 Denied") + " -- the rest goes to the chat that asked.",
+            context_metadata=ctx)):
+        logger.warning("[HITL] the answer's receipt did not reach %s", msg.platform)
+    return route[0], route[1], {}
+
+
 async def _handle_hitl_resume(
     msg: IncomingMessage,
     graph: Any,
@@ -1032,27 +1130,28 @@ async def _handle_hitl_resume(
         for _k, _v in stored.items():
             ctx.setdefault(_k, _v)
 
-    # Buttons and text decisions require the same admin policy. Ownership
-    # comes from the durable directory, not a delivery cache that expires or
-    # changes on /session take-over. Never infer identity from the command.
-    from kazma_core.sessions.directory import ThreadOwnerUnavailable, thread_owner
+    # Buttons and text decisions require the same policy. Before Spaces: a
+    # gateway admin who owns the thread (ownership from the durable
+    # directory, not a delivery cache that expires or changes on /session
+    # take-over). Once Spaces is enforced (S3-04): the card's own rule
+    # (``hitl_answerers.refusal_for_card``), asked on the live card below --
+    # the sender is the linked account the handler bound, and only the
+    # card's asker (or the people the rule names) answers it, in a group too.
+    # Never infer identity from the command.
+    from kazma_core.spaces.scope import spaces_enforced
 
-    from kazma_gateway.allowlists import is_gateway_admin
-
-    authorized = False
-    try:
-        current_sender = (msg.sender_id or "").strip()
-        platform = (msg.platform or "").strip().lower()
-        if current_sender and platform:
-            actor = current_sender if ":" in current_sender else f"{platform}:{current_sender}"
-            if actor.split(":", 1)[0] == platform:
-                is_admin = await asyncio.to_thread(is_gateway_admin, actor, platform)
-                if is_admin:
-                    owner = await asyncio.to_thread(thread_owner, target_thread, strict=True)
-                    owner = owner if ":" in owner or not owner else f"{platform}:{owner}"
-                    authorized = bool(owner and owner == actor)
-    except (ThreadOwnerUnavailable, OSError, ValueError, TypeError):
-        logger.warning("[HITL] authorization unavailable; refusing decision", exc_info=True)
+    enforced = spaces_enforced()
+    platform = (msg.platform or "").strip().lower()
+    authorized, actor = await _decision_authorized(msg, target_thread, enforced=enforced)
+    if not authorized and enforced:
+        logger.warning("[HITL] a decision from a sender with no account was refused for thread=%s",
+                       target_thread)
+        await manager.send(OutboundMessage(
+            target_id=_build_target_id(msg.platform, ctx),
+            text=_NOT_YOURS_TEXT,
+            context_metadata=ctx,
+        ))
+        return True
     if not authorized:
         logger.warning("[HITL] unauthorized decision refused for thread=%s", target_thread)
         await manager.send(OutboundMessage(
@@ -1107,6 +1206,27 @@ async def _handle_hitl_resume(
                     context_metadata=ctx,
                 ))
                 return True
+
+            # Whose card it is (S3-04): asked on the LIVE interrupt, before
+            # anything is recorded or resumed. Another person's press -- a
+            # member of a group's space who is not the asker -- changes
+            # nothing and is told so.
+            whose = None
+            if enforced:
+                from kazma_ui.hitl_answerers import refusal_for_card
+
+                _live = pending if isinstance(pending, dict) else {}
+                refused_by_rule, whose = await asyncio.to_thread(
+                    refusal_for_card, target_thread, str(_live.get("interrupt_id") or ""), _live)
+                if refused_by_rule:
+                    logger.warning("[HITL] %s's press on thread=%s refused: %s", platform,
+                                   target_thread[:12], refused_by_rule)
+                    await manager.send(OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=_not_yours_text(_live, refused_by_rule),
+                        context_metadata=ctx,
+                    ))
+                    return True
 
             # An always-ask tool (X writes) takes a one-time approval only:
             # "Approve for task" approved THIS call while reading as "allow
@@ -1196,8 +1316,12 @@ async def _handle_hitl_resume(
                     # the actor from the grant audit) (audit finding).
                     actor = msg.sender_id or "unknown"
                     # A settings write and the identity store (N4's grant
-                    # rule): off the loop.
-                    await asyncio.to_thread(grant_task, target_thread, actor=actor)
+                    # rule): off the loop. The grant is the card's asker's
+                    # (S3-04), whoever pressed: an approver's answer grants
+                    # the person whose turn it is, never the approver.
+                    await asyncio.to_thread(
+                        grant_task, target_thread, actor=actor,
+                        person=(whose.asker or None) if whose is not None else None)
                     logger.info(
                         "[HITL] Task grant activated for thread=%s actor=%s",
                         target_thread, actor,
@@ -1236,15 +1360,23 @@ async def _handle_hitl_resume(
                     context_metadata=ctx,
                 ))
                 return True
-            result_state, chained = await _run_resume(
-                graph, _resume_cmd, resume_config, target_thread,
-            )
+            # The resumed turn is its asker's, whoever answered (S3-04, as
+            # S2-05 on the web): it runs as them, in their space.
+            from kazma_ui.hitl_answerers import as_the_asker
 
+            with as_the_asker(whose):
+                result_state, chained = await _run_resume(
+                    graph, _resume_cmd, resume_config, target_thread,
+                )
+
+        deliver_platform, deliver_target, deliver_ctx = await _resume_destination(
+            manager, msg, ctx, result_state, answered_elsewhere=(
+                whose is not None and target_thread != thread_id), approved=approved)
         await _deliver_resume(
             manager,
-            platform=msg.platform,
-            target_id=_build_target_id(msg.platform, ctx),
-            ctx=ctx,
+            platform=deliver_platform,
+            target_id=deliver_target,
+            ctx=deliver_ctx,
             thread_id=target_thread,
             result_state=result_state,
             chained=chained,

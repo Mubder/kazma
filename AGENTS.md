@@ -16174,6 +16174,34 @@ an install with one account behaves as before.
     the sender's thread with no space as the control),
     `tests/test_chat_apps_once_enforced.py` (re-pointed: the owner's linked
     accounts).
+- **A chat app's approval card is its asker's (S3-04, 2026-11-23).** Only
+  where Spaces is enforced; before it, a `/hitl` decision still needs a
+  gateway admin who owns the thread.
+  - `agent_handler.hitl._handle_hitl_resume` asks the card's own rule
+    (`hitl_answerers.refusal_for_card`, S2-05) on the LIVE card, before
+    anything is recorded or resumed: the sender is the linked account the
+    handler bound (S3-03); another person's press -- another member of the
+    group's space, the admin, a sender outside it (answered in
+    `_chat_place_or_answer`) -- is told whom it waits for and changes
+    nothing. The resume runs inside `as_the_asker(whose)`; "Approve for
+    task" grants the card's asker (`grant_task(person=)`), never an
+    approver. A card someone else answers (N21's admin, N4's approvers)
+    reaches the asker's chat without buttons, saying whom it waits for
+    (`_build_approval_prompt`).
+  - **Results go to the chat that asked**: a card answered from another
+    chat (an approver's) sends the turn's answer and next card to the
+    turn's own chat (its `_gateway` route, `_resume_destination`), never the
+    presser's, which gets a receipt. A swarm task's result goes to its
+    asker's own chat (`chat_apps.chat_is_the_askers`: a group bound to the
+    task's space they are a member of, or their own chat in it), never
+    another person's; a bus approval request of someone else still stays in
+    its space (O1).
+  - In a group, another member's message while a card waits on someone
+    else is answered with whom it waits for, and the card is kept
+    (`_waits_on_someone_else`): a new turn would drop it.
+  - Gates: `tests/test_chat_approvals_asker.py` (the real handler; the
+    gateway-admin rule, and O1 keeping results off every chat, as the
+    controls).
 
 ## UI Conventions (Web)
 

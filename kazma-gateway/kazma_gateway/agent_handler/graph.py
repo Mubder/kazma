@@ -92,6 +92,13 @@ def _prepare_outbound(
 _ANSWERED = object()
 
 
+def _is_hitl_decision(text: Any) -> bool:
+    """Whether *text* answers an approval card (``/hitl ...``: a button press
+    or the typed command). Pure."""
+    low = str(text or "").strip().lower()
+    return low.startswith(("/hitl ", "hitl "))
+
+
 def _resolve_thread_in_place(msg: IncomingMessage, sender_key: str) -> str:
     """The thread of *msg* as it is found by *sender_key* (S3-03): the
     platform sender for the owner's space, as before; a key that carries a
@@ -947,6 +954,12 @@ def create_graph_handler(
             return _ANSWERED
         if place.scope is None:
             logger.info("[agent-handler] a %s message was not run: %s", msg.platform, place.refusal)
+            if place.group and place.refusal == "not_a_member" and _is_hitl_decision(msg.text):
+                # A press on a card in a group by someone outside its space
+                # (S3-04): told it is not theirs, nothing changed.
+                await manager.send(OutboundMessage(target_id=target, text=_hitl._NOT_YOURS_TEXT,
+                                                   context_metadata=msg.context_metadata))
+                return _ANSWERED
             if place.reply:
                 await manager.send(OutboundMessage(target_id=target, text=place.reply,
                                                    context_metadata=msg.context_metadata))
@@ -1004,7 +1017,41 @@ def create_graph_handler(
             await _handler_body(msg, thread_id)
             return
         with bind_scope(bound.space_id, bound.asker):
+            if place is not None and place.group and not _is_hitl_decision(msg.text):
+                waiting = await _waits_on_someone_else(thread_id)
+                if waiting:
+                    # A group's paused card is its asker's (S3-04): another
+                    # member's message -- a new request, a steer, an abort --
+                    # would discard it (LangGraph drops a pending interrupt
+                    # when a new turn starts), so it waits for them.
+                    logger.info("[agent-handler] a %s group message waits: a card there is "
+                                "someone else's", msg.platform)
+                    await manager.send(OutboundMessage(
+                        target_id=_build_target_id(msg.platform, msg.context_metadata),
+                        text=language_lock.in_their_language(
+                            msg.text,
+                            f"An approval in this chat waits for {waiting}; send your message "
+                            "after they answer it.",
+                            f"هناك موافقة في هذه المحادثة بانتظار {waiting}؛ أرسل رسالتك بعد أن "
+                            "يجيب عليها.",
+                        ),
+                        context_metadata=msg.context_metadata,
+                    ))
+                    return
             await _handler_body(msg, thread_id)
+
+    async def _waits_on_someone_else(thread_id: str) -> str:
+        """The name of the person the thread's paused card waits on, when that
+        is not the sender bound now; "" when none does (or no card waits)."""
+        from kazma_ui.hitl_answerers import waiting_for_someone_else
+
+        pending = await _check_graph_interrupt(
+            graph, {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}})
+        if not isinstance(pending, dict):
+            return ""
+        name = await asyncio.to_thread(
+            waiting_for_someone_else, thread_id, pending, str(pending.get("interrupt_id") or ""))
+        return name or ""
 
     async def _handler_body(msg: IncomingMessage, thread_id: str) -> None:
         """Inner handler body (typing keepalive wraps this)."""

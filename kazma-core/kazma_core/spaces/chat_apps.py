@@ -65,6 +65,7 @@ __all__ = [
     "ChatRecordUnreadable",
     "chat_app_scope",
     "chat_app_work",
+    "chat_is_the_askers",
     "chat_place",
     "is_space_command",
     "space_command",
@@ -287,6 +288,31 @@ def chat_place(platform: str, meta: dict[str, Any], sender_id: str,
     if not _member(reg, account, bound):
         return ChatPlace(None, refusal="not_a_member", group=True)
     return ChatPlace(Scope(bound, account), sender_key=f"{plat}:grp{group}--in-{bound}", group=True)
+
+
+def chat_is_the_askers(space_id: str, asker: str, platform: str, target: str,
+                       source_thread: str = "") -> bool:
+    """Whether the chat-app chat *target* (``<platform>:<chat>``) is one
+    work of *asker* in *space_id* may be delivered to (S3-04): a group bound
+    to that space while the asker is a member of it, or the asker's own chat
+    in that space (the source thread's record: that space, opened by them).
+    Never another person's chat. Blocking (the identity store, the bindings,
+    the thread record); raises ``IdentityUnavailable`` when who is a member
+    cannot be read."""
+    from kazma_core.spaces import identity, threads
+
+    if not space_id or not asker or ":" not in str(target or ""):
+        return False
+    reg = identity.read_registry()
+    if not _member(reg, asker, space_id):
+        return False
+    plat = (platform or "").strip().lower()
+    chat = str(target).split(":", 1)[1]
+    bound = str((_bindings()["group"].get(f"{plat}:{chat}") or {}).get("space") or "")
+    if bound:
+        return bound == space_id
+    record = threads.record_of(str(source_thread or "")) if source_thread else None
+    return record is not None and record.space_id == space_id and record.opener == asker
 
 
 # ── /space ──────────────────────────────────────────────────────────────
