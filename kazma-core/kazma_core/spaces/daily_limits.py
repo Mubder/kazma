@@ -26,13 +26,16 @@ A member's own model keys (S2-04) are not the install's, and what they
 spend on them is not counted against the limit. So a turn that starts past
 the limit is let in when the model it will use is one they hold a key for
 (:func:`on_own_key`, asked by the supervisor for the client the turn's call
-will go to), and the whole turn then uses their own keys only
+will go to), and every model call of the turn then goes on their own keys
 (:func:`own_keys_only`): the turn's state carries ``own_keys_only``, every
 node binds it (:func:`hold_to_own_keys`), and a call that would go out on
 the install's key -- another provider for the respond synthesis, a router's
 model, a failover -- is refused before it is sent
-(``LLMProvider._person_call``, ``kind="daily_limit"``). A call outside a
-turn (``resilient_chat``, ``x_chat``) stays refused by :func:`call_refusal`.
+(``LLMProvider._person_call``, ``kind="daily_limit"``). A tool that pays
+another API with the install's key keeps off it too
+(``spaces.install_paid``); the remote embedder is the one accepted
+exception. A call outside a turn (``resilient_chat``, ``x_chat``) stays
+refused by :func:`call_refusal`.
 
 Whose limit
 -----------

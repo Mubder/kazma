@@ -29,8 +29,14 @@ def e2b_api_key() -> str:
 
 
 def e2b_enabled() -> bool:
-    """Effective backend choice shared by execution and approval preflight."""
+    """Effective backend choice shared by execution and approval preflight.
+    Never in a turn that runs on the person's own key only (Spaces S2-04,
+    ``spaces.install_paid``): E2B is paid with the install's key."""
     from kazma_core.safety.deployment_policy import container_required, policy_read_failures
+    from kazma_core.spaces.daily_limits import own_keys_only
+
+    if own_keys_only():
+        return False
 
     try:
         if container_required():

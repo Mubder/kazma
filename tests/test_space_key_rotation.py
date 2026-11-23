@@ -8,9 +8,14 @@ space's key is destroyed.
   key they had -- the old key still opens a new secret.
 * **The old key is destroyed**: deleted in the change's transaction, and its
   wrapped bytes are in neither the vault's file nor its write-ahead log.
-  Controls: the change without emptying the log leaves them there; a row of
-  another space that names the old key no longer keeps it alive (the
-  statement of before kept it).
+  Control: the change without emptying the log leaves them there.
+* **No secret is lost to a change** (the review of S4-07): a change is
+  refused, naming the rows, while a row that is not the space's own is
+  sealed with one of its keys -- a real secret whose name a later build
+  classes elsewhere reads back after it; control: the change as 3615dc0ee
+  had it loses that secret for good. A row of the space that does not open
+  refuses the change too, and ``kazma spaces keys change --all`` reports
+  that space and goes on.
 * **A deleted space's key is destroyed**: an erase takes it; when an older
   vault file is restored over an identity store that recorded the erase, the
   maintenance sweep destroys it again. Only a space the record says was
@@ -32,7 +37,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from kazma_core.config_store import get_config_store
 from kazma_core.security import vault as vault_mod
-from kazma_core.security.vault import SecretVault, SpaceKeyMissing, _aad, sealing_space
+from kazma_core.security.vault import SecretVault, SpaceKeyMissing, SpaceKeyStillNamed, _aad, sealing_space
 from kazma_core.spaces import identity, people, scope, space_keys
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, bind_scope
 
@@ -192,25 +197,80 @@ def _plant_a_row_of_a_naming(v: SecretVault, key_id: str) -> None:
         "VALUES ('stray', 'stray', x'00', x'00', ?, 't', 't', ?)", (A, key_id))
 
 
-def test_a_row_of_another_space_naming_the_old_key_does_not_keep_it(vault, enforced) -> None:
+def test_a_row_outside_the_space_sealed_with_its_key_refuses_the_change(vault, enforced) -> None:
     _store_two_spaces(vault)
     old_id = _active(vault, B)
     _plant_a_row_of_a_naming(vault, old_id)
-    vault.rotate_space_key(B)
-    assert old_id not in {k["key_id"] for k in vault.space_key_ids(B)}
-    with as_space(A), pytest.raises(SpaceKeyMissing):
-        vault.retrieve("stray")
+    with pytest.raises(SpaceKeyStillNamed) as refused:
+        vault.rotate_space_key(B)
+    assert refused.value.names == ["stray"]
+    assert _active(vault, B) == old_id  # nothing changed
+    with as_space(B):
+        assert vault.retrieve("bank") == "pin-of-b"
 
 
-def test_control_the_statement_of_before_kept_the_old_key(vault, enforced) -> None:
+def _drifted(monkeypatch, name: str) -> None:
+    """A later build classes *name* as the install's (``secret_scope``)."""
+    real = vault_mod.secret_scope
+    monkeypatch.setattr(vault_mod, "secret_scope",
+                        lambda n: ("install", None) if n == name else real(n))
+
+
+def _change_of_before(v: SecretVault, space: str) -> str:
+    """``rotate_space_key`` as 3615dc0ee had it: no refusal, and every
+    retired key deleted."""
+    def _work() -> str:
+        rows = [r for r in v._space_rows(space) if r["key_id"]]
+        old = v._active_key_id(space, make=False)
+        v._conn.execute("UPDATE space_keys SET state = 'retired' WHERE key_id = ?", (old,))
+        new = str(v._active_key_id(space, make=True))
+        v._reseal(space, rows, new)
+        v._conn.execute("DELETE FROM space_keys WHERE space_id = ? AND state = 'retired'", (space,))
+        return new
+
+    new = v._in_one_step(space, _work)
+    v._space_keys.clear()  # as the change cleared its cache
+    return new
+
+
+def test_a_real_secret_under_a_drifted_name_is_never_lost(vault, enforced, monkeypatch) -> None:
+    """The review of S4-07: ``bank`` of space B is sealed with B's key, and
+    a later build classes its name as the install's. The change is refused,
+    naming it; the classification restored, it reads back."""
     _store_two_spaces(vault)
-    old_id = _active(vault, B)
-    _plant_a_row_of_a_naming(vault, old_id)
-    vault._conn.execute("UPDATE space_keys SET state = 'retired' WHERE key_id = ?", (old_id,))
-    vault._conn.execute(  # rotate_space_key's delete before S4-07
-        "DELETE FROM space_keys WHERE space_id = ? AND state = 'retired' AND key_id NOT IN "
-        "(SELECT key_id FROM secrets WHERE key_id IS NOT NULL)", (B,))
-    assert old_id in {k["key_id"] for k in vault.space_key_ids(B)}
+    with monkeypatch.context() as drift:
+        _drifted(drift, "bank")
+        with pytest.raises(SpaceKeyStillNamed) as refused:
+            vault.rotate_space_key(B)
+        assert "bank" in refused.value.names
+    with as_space(B):
+        assert vault.retrieve("bank") == "pin-of-b"
+
+
+def test_control_the_change_of_before_loses_the_drifted_secret(vault, enforced, monkeypatch) -> None:
+    _store_two_spaces(vault)
+    with monkeypatch.context() as drift:
+        _drifted(drift, "bank")
+        _change_of_before(vault, B)
+    with as_space(B), pytest.raises(SpaceKeyMissing):
+        vault.retrieve("bank")
+
+
+def test_a_damaged_row_is_a_refusal_and_change_all_goes_on(vault, enforced, spaces, capsys) -> None:
+    from kazma_cli import spaces as cli
+
+    _store_two_spaces(vault)
+    old_a, old_b = _active(vault, A), _active(vault, B)
+    vault._conn.execute(  # a row of A, sealed with its key, that does not open
+        "INSERT INTO secrets (id, name, encrypted_value, nonce, tenant_id, created_at, updated_at, key_id) "
+        "VALUES ('broken', 'broken', x'00', x'000000000000000000000000', ?, 't', 't', ?)", (A, old_a))
+    with pytest.raises(space_keys.KeyChangeRefused) as refused:
+        space_keys.change_key(A, by=OWNER_ACCOUNT_ID)
+    assert refused.value.code == "rows_damaged"
+    assert cli.run(["keys", "change", "--all", "--yes"]) == 1
+    out = capsys.readouterr().out
+    assert f"{A}: not changed" in out and f"{B}: new key" in out
+    assert _active(vault, A) == old_a and _active(vault, B) != old_b
 
 
 # ── a deleted space's key is destroyed ──────────────────────────────────

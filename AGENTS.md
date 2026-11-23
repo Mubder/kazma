@@ -15145,18 +15145,24 @@ an install with one account behaves as before.
     and `kazma spaces keys` lists key ids, never a key): its sealed secrets
     are sealed again with the new key, read back first, in one transaction
     (`SecretVault.rotate_space_key`), and its old keys are destroyed --
-    deleted there whatever row still names them (a row of another space
-    never opened with them), zeroed, and the write-ahead log emptied
+    deleted there, zeroed, and the write-ahead log emptied
     (`SecretVault._empty_the_log`, the erase's too; a reader that holds the
-    log is said at WARNING). Recorded (`space_key_changed`). Refused for the
-    owner's space, a space not held or erasing, the vault off. A deleted
+    log is said at WARNING). **A change never loses a secret** (the review
+    of S4-07): it is refused, naming the rows (`SpaceKeyStillNamed`,
+    `rows_elsewhere`), while a row that is not the space's own -- a name a
+    later build classes elsewhere -- is sealed with one of its keys, and a
+    key some row still names is never deleted; a row of the space that does
+    not open refuses it too (`rows_damaged`), and `--all` reports that space
+    and goes on. Recorded (`space_key_changed`). Refused for the owner's
+    space, a space not held or erasing, the vault off. A deleted
     space's key is destroyed: the erase takes it, and the maintenance sweep
     "erased space keys" (`space_keys.destroy_erased_keys`) destroys again
     what an older vault file restored over the identity store brings back,
     for a space the record says was erased (`space_erased`) only. A running
     Kazma keeps an old key it unwrapped in memory until it reloads. Gate:
     `tests/test_space_key_rotation.py` (a change under the old key, a change
-    that leaves the log, the statement of before and no sweep as controls).
+    that leaves the log, the change of before losing a real secret under a
+    drifted name, and no sweep as controls).
   - What it does not do: the vault key wraps every space's key, so this
     keeps one space's secret from another's key, not from the person who
     runs the machine. Rotating the install's vault key is stage 4.
@@ -15462,8 +15468,8 @@ an install with one account behaves as before.
     call will go to (`graph_supervisor._turn_client`, the one answer for the
     call and the admission) and lets the turn in when they hold a key of
     their own for its provider (`daily_limits.on_own_key`; a store that
-    cannot say is no). The whole turn then uses their own keys only: the
-    state's `own_keys_only`, read by every graph node first
+    cannot say is no). In that turn every model call goes on their own
+    keys: the state's `own_keys_only`, read by every graph node first
     (`hold_to_own_keys`: LangGraph runs a node in a copy of its caller's
     context, and only turns the rule on, so a sub-agent keeps it), and
     `LLMProvider._person_call` refuses a call that would go on the install's
@@ -15474,6 +15480,22 @@ an install with one account behaves as before.
     refused, today's refusal and the failover under the limit as the
     controls; every graph node holds the rule, a planted node as the
     control).
+  - **A tool that pays another API with the install's key keeps off it in
+    such a turn** (the review of de6874f3f, `kazma_core/spaces/install_paid.py`):
+    `generate_image`'s paid backends (`INSTALL_PAID_TOOLS`; asked by name,
+    refused before the card by `call_preflight` in the person's language and
+    at the call; `auto` resolves to the keyless pollinations), the
+    acquisition policy's remote providers (Tavily, Jina, Firecrawl, the
+    proxy: `AcquisitionPolicy.permits` answers no) and E2B (`e2b_enabled`).
+    `PAID_KEY_READERS` declares every tool-reachable module that reads an
+    API key from the environment with how such a turn keeps off what it
+    pays; a new one fails `tests/test_install_paid_tools.py` (a planted tool
+    as the control; outside such a turn every path is as before). **The one
+    accepted exception**: the remote embedder (`memory/embedder.py`, when the
+    owner chose a remote embedding model) embeds the turn's question for
+    recall on the install's key -- it costs very little. Speech in and out
+    of a turn (`voice/stt.py`, `voice/tts.py`) is outside the turn and was
+    never counted by a daily limit.
   - **Every model call is checked or declared**
     (`tests/test_model_calls_checked.py`): each product `.chat(`,
     `.chat_stream(`, `invoke_llm_chat(`, `ledgered_chat(` and each `.chat`

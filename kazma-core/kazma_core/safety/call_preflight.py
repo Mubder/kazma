@@ -25,6 +25,7 @@ import asyncio
 from typing import Any
 
 from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
+from kazma_core.spaces.install_paid import INSTALL_PAID_TOOLS
 
 #: The tools that start the native browser on their first call
 #: (``computer_use`` drives the same page).
@@ -46,9 +47,14 @@ async def browser_refusal() -> str | None:
 
 async def call_refusal(name: str, arguments: Any, *, user_text: str | None = None) -> str | None:
     """Why this call would be refused before it acts, or None. *user_text*:
-    the person's latest message (kept for callers: since S2-05 lifted N21's
-    interim refusal, no refusal here is worded in their language)."""
+    the person's latest message: a call that would pay an API with the
+    install's key in a turn that runs on the person's own key only
+    (``spaces.install_paid``) is refused in their language."""
     args = arguments if isinstance(arguments, dict) else {}
+    if name in INSTALL_PAID_TOOLS:
+        from kazma_core.spaces.install_paid import own_key_refusal
+
+        return own_key_refusal(name, args, user_text)
     if name == "shell_exec":
         from kazma_core.safety.shell_paths import shell_target_refusal
         from kazma_core.safety.shell_preflight import shell_refusal
@@ -69,4 +75,4 @@ async def call_refusal(name: str, arguments: Any, *, user_text: str | None = Non
 ALWAYS_ASK_TOOLS = frozenset({*ALWAYS_HITL_TOOLS, "request_path_access"})
 
 #: Every tool ``call_refusal`` answers for.
-PREFLIGHT_TOOLS = frozenset({"shell_exec", *BROWSER_TOOLS})
+PREFLIGHT_TOOLS = frozenset({"shell_exec", *BROWSER_TOOLS, *INSTALL_PAID_TOOLS})

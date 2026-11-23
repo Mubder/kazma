@@ -35,7 +35,15 @@ class AcquisitionPolicy:
     browser_network: str = 'required'
 
     def permits(self, provider: str) -> bool:
-        return self.mode == "local_first_with_remote_fallback" and provider in self.providers
+        """Whether the remote *provider* (Tavily, Jina, Firecrawl, the
+        scraping proxy: each paid with the install's key) may be used. Never
+        in a turn that runs on the person's own key only (Spaces S2-04,
+        ``spaces.install_paid``): search and reading go on locally."""
+        if not (self.mode == "local_first_with_remote_fallback" and provider in self.providers):
+            return False
+        from kazma_core.spaces.daily_limits import own_keys_only
+
+        return not own_keys_only()
 
     @property
     def cache_namespace(self) -> str:

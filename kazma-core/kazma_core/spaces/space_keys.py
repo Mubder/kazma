@@ -114,8 +114,9 @@ def change_key(space_id: str, *, by: str) -> dict[str, Any]:
     it (each read back first), its old keys are destroyed, and the change
     is recorded. One vault transaction. Refused (:class:`KeyChangeRefused`)
     for the owner's space (its secrets are the install's vault key's, N22),
-    a space the install does not hold or is erasing, and with the vault
-    off. Returns ``{"space", "key_id", "sealed"}`` (no key). A running
+    a space the install does not hold or is erasing, the vault off, a
+    secret outside the space sealed with its key (``rows_elsewhere``) and a
+    secret of the space that does not open (``rows_damaged``). Returns ``{"space", "key_id", "sealed"}`` (no key). A running
     Kazma that unwrapped the old key keeps it in its memory until it
     reloads; the file holds it no more. Blocking."""
     from kazma_core.security.vault import get_vault
@@ -130,7 +131,19 @@ def change_key(space_id: str, *, by: str) -> dict[str, Any]:
     vault = get_vault()
     if vault is None:
         raise KeyChangeRefused("vault_off", "The vault is off (KAZMA_VAULT_KEY is not set): no space has a key.")
-    key_id = vault.rotate_space_key(space_id)
+    from kazma_core.security.vault import SpaceKeyMissing, SpaceKeyStillNamed
+
+    try:
+        key_id = vault.rotate_space_key(space_id)
+    except SpaceKeyStillNamed as exc:
+        # Rows sealed with the space's key that are not its own: changed,
+        # they would be lost for good (the review of S4-07).
+        raise KeyChangeRefused("rows_elsewhere", str(exc)) from exc
+    except SpaceKeyMissing as exc:
+        # A row of the space does not open: nothing can be sealed again.
+        raise KeyChangeRefused(
+            "rows_damaged", f"A secret of space {space_id} does not open ({exc}); the key was not changed.",
+        ) from exc
     try:
         people.note_key_changed(space_id, by=by)
     except (people.PeopleRefused, identity.IdentityUnavailable) as exc:
