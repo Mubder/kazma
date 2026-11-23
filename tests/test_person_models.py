@@ -389,8 +389,10 @@ _ASKS_IT = "_person_call"
 def _provider_classes(sources: dict[str, str]) -> list[str]:
     """``file:Class.method`` for each ``chat``/``chat_stream`` of a provider
     class (``LLMProvider`` and every class deriving from it) that neither
-    asks the refusal first (itself, or through ``_person_call``) nor hands
-    the call to ``super()``."""
+    asks ``_person_call`` -- the refusal first, then the person's own key
+    (S2-04): a class asking the refusal alone sends the install's key for a
+    person who keeps their own (the review of S2-04) -- nor hands the call
+    to ``super()``."""
     missing: list[str] = []
     for rel, text in sources.items():
         tree = ast.parse(text)
@@ -407,7 +409,7 @@ def _provider_classes(sources: dict[str, str]) -> list[str]:
                     and c.func.attr == fn.name and isinstance(c.func.value, ast.Call)
                     and getattr(c.func.value.func, "id", "") == "super"
                     for c in ast.walk(fn))
-                if _ASK not in calls and _ASKS_IT not in calls and not delegates:
+                if _ASKS_IT not in calls and not delegates:
                     missing.append(f"{rel}:{cls.name}.{fn.name}")
     return sorted(missing)
 
@@ -444,6 +446,19 @@ def test_control_a_provider_class_that_does_not_ask_is_found() -> None:
         "class LLMProvider:\n    pass\n"
         "class Planted(LLMProvider):\n"
         "    async def chat(self, messages, model=None):\n"
+        "        return await self._send(messages, model)\n"
+    )}
+    assert _provider_classes(planted) == ["planted.py:Planted.chat"]
+
+
+def test_control_a_class_asking_the_refusal_alone_is_found() -> None:
+    """S2-03's own check without S2-04's: the model is judged, and the
+    person's own key never used (the review of S2-04)."""
+    planted = {"planted.py": (
+        "class LLMProvider:\n    pass\n"
+        "class Planted(LLMProvider):\n"
+        "    async def chat(self, messages, model=None):\n"
+        "        await self._refuse_a_model_not_allowed(model)\n"
         "        return await self._send(messages, model)\n"
     )}
     assert _provider_classes(planted) == ["planted.py:Planted.chat"]

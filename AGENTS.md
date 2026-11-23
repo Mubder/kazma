@@ -16097,30 +16097,54 @@ an install with one account behaves as before.
     the whole call to the client it returns
     (`LLMProvider._own_key_client`: the row's model and prices, their key,
     no switch to the install's other keys, none of the row's secret headers,
-    never through the install's egress proxy). Their key refused, the call
+    never through the install's egress proxy: pinned to the provider's own
+    address, taken as a string before the twin was built, since a
+    constructor routes its config through the proxy in place -- compared
+    with that same object, her key went to the install's LiteLLM proxy, the
+    review of S2-04). Their key refused, the call
     fails as theirs (`_switch_key_after`), never the install's key in its
     place; a store that cannot say whether they have one refuses the call
     (`own_key_unreadable`). A client built with a typed key (the providers'
     check) is marked `_key_is_given` and never swapped. A new provider class
     asks `_person_call` and hands the call on, or the gate fails.
-  - **Their spend on it is theirs**: the ledger marks the call (`own_key`,
-    `own_keys.uses_own_key`, the answer the call was given), and neither
-    `llm_ledger.usage_of` (their daily limit), `usage_since` (the install's)
-    nor `spend_by_person` counts it.
+  - **Their spend on it is theirs, read from the answer**: the delegation
+    marks the answer it was given (`LLMResponse.own_key`, `own_key_answer`,
+    `own_key_delta`), every ledger writer of an answered call passes
+    `own_key=llm_ledger.answered_with_own_key(response)` and names the
+    client that answered (`provider_of`: its `provider_name`; the
+    supervisor's routed or failover client, never the build-time one), and
+    neither `llm_ledger.usage_of` (their daily limit), `usage_since` (the
+    install's) nor `spend_by_person` counts it. The ledger never works it
+    out from a provider's name: it named the build-time client's provider
+    and asked the vault whether she had a key for it, so a call on the
+    install's key was recorded as hers and the reverse (the review of
+    S2-04). Gate: every ledger write passing `usage=` passes `own_key=`.
   - **The routes** (`kazma_ui/own_keys_api.py`, `/api/account/model-keys`):
     GET lists the providers they may bring a key for, each with `own`, never
     a key; PUT keeps a key only once one short message through it answered
-    (`provider_check.check_model`); DELETE forgets it. Settings -> My account
-    -> "Use my own key" (`#own-model-keys`, a member's page only), EN/AR.
+    (`provider_check.check_model(own_key_of=(space, account))`: to the
+    provider's own address with the typed key alone, never through the
+    egress proxy -- behind it the proxy's key answered, a key that does not
+    work was kept and the install paid -- and ledgered as theirs, `own_key`
+    only when their key answered; rate limit bucket `own_keys`, 6 a
+    minute); DELETE forgets it. Settings -> My account -> "Use my own key"
+    (`#own-model-keys`, a member's page only), EN/AR.
   - Gates: `tests/test_member_own_keys.py` (her key in the header and never
     the install's, on the OpenAI-shaped and Anthropic classes, chat and
     stream, from a shared space too; refused as hers with nothing else
     tried; nobody else's calls changed; her own-key spend outside her limit;
     the admin's work cannot read it and no GET route answers it to the
-    admin; the install-scoped row as the control),
-    `tests/e2e/test_member_own_keys_browser.py` (by the sidebar, EN/AR: a
-    refused key keeps nothing, a good one is kept sealed and never shown,
-    "Use the install's key" forgets it; the admin's page as the control).
+    admin; the install-scoped row as the control; the review's cases --
+    a real supervisor turn on the install's key and on hers, a provider
+    moved to this network, `resilient_chat`'s rows, her key and her check
+    behind the egress proxy, the route's limit -- fail on beb126dec),
+    `tests/test_person_models.py` (the S2-03 gate requires `_person_call`; a
+    class asking the refusal alone is the control),
+    `tests/e2e/test_member_own_keys_browser.py` (by the sidebar, EN/AR,
+    through the real check behind the egress proxy: a refused key keeps
+    nothing, a good one is kept sealed and never shown, "Use the install's
+    key" forgets it; the admin's page, and the check sent through the
+    proxy keeping a refused key, as the controls).
     Left: a person over their daily limit is still refused before a turn,
     even when the turn would run on their own key.
 - **A member's page asks nothing the server refuses (2026-11-23).** The

@@ -22,7 +22,7 @@ import logging
 import time
 from typing import Any
 
-from kazma_core.observability.llm_ledger import provider_of
+from kazma_core.observability.llm_ledger import answered_with_own_key, provider_of
 
 __all__ = ["reset_failover_cache", "resilient_chat"]
 
@@ -229,6 +229,7 @@ async def resilient_chat(
                 duration_ms=(time.monotonic() - start) * 1000,
                 status="ok",
                 priced=bool(getattr(response, "cost_known", True)),
+                own_key=answered_with_own_key(response),
             )
             # The primary answered: a failover it was under is over.
             from kazma_core.observability.model_fallback import report_model_served
@@ -313,6 +314,7 @@ async def resilient_chat(
                         status="ok",
                         failover_from=str(model or ""),
                         priced=bool(getattr(response, "cost_known", True)),
+                        own_key=answered_with_own_key(response),
                     )
                     from kazma_core.observability.model_fallback import report_failover
 

@@ -6,8 +6,10 @@
   Never the key itself.
 * ``PUT /api/account/model-keys/{provider}`` ``{"key"}`` -- keep a key of
   theirs, once one short message through it answered
-  (``provider_check.check_model``, the providers' one check): a key that
-  does not work is not kept.
+  (``provider_check.check_model``, the providers' one check, sent to the
+  provider's own address with their key alone and ledgered as their call):
+  a key that does not work is not kept. Rate limited (bucket
+  ``own_keys``): each check is a model call.
 * ``DELETE /api/account/model-keys/{provider}`` -- forget it; their calls
   use the install's key again.
 
@@ -23,7 +25,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from kazma_core.errors import validation_error
 from kazma_core.spaces.identity import IdentityUnavailable
@@ -31,6 +33,7 @@ from kazma_core.spaces.own_keys import OwnKeyRefused, OwnKeyUnreadable
 
 from kazma_ui import auth, space_binding
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
+from kazma_ui.rate_limit import rate_limit
 
 __all__ = ["create_own_keys_router"]
 
@@ -63,12 +66,12 @@ def _registry() -> Any:
     return get_model_registry()
 
 
-def _prepare(account: str, provider: str) -> tuple[dict[str, Any], str]:
+def _prepare(account: str, provider: str) -> tuple[dict[str, Any], str, str]:
     """The install's row for *provider* as the person would call it -- their
     key in place of the install's, none of the row's other keys or secret
-    headers -- and the model the check asks. Raises ``OwnKeyRefused``.
-    Blocking."""
-    from kazma_core.spaces.own_keys import providers_of, refusal
+    headers -- the model the check asks, and the personal space their key
+    is kept in. Raises ``OwnKeyRefused``. Blocking."""
+    from kazma_core.spaces.own_keys import key_space, providers_of, refusal
 
     why = refusal(account)
     if why:
@@ -79,7 +82,7 @@ def _prepare(account: str, provider: str) -> tuple[dict[str, Any], str]:
     if not found or not row:
         raise OwnKeyRefused("unknown_provider", "There is no such provider for your own key.")
     entry = {**row, "api_key": "", "api_keys": [], "secret_headers": {}}
-    return entry, str(found.get("model") or "")
+    return entry, str(found.get("model") or ""), key_space(account)
 
 
 def create_own_keys_router() -> APIRouter:
@@ -103,7 +106,7 @@ def create_own_keys_router() -> APIRouter:
             return _unreadable()
         return JSONResponse({"ok": True, "providers": providers})
 
-    @router.put("/{provider}")
+    @router.put("/{provider}", dependencies=[Depends(rate_limit("own_keys", 6))])
     async def keep_model_key(request: Request, provider: str) -> JSONResponse:
         from kazma_core.provider_check import check_model
         from kazma_core.spaces.own_keys import set_key
@@ -118,8 +121,8 @@ def create_own_keys_router() -> APIRouter:
         # Who signed in reads the user store: off the loop.
         account = await asyncio.to_thread(_account, request)
         try:
-            entry, model = await asyncio.to_thread(_prepare, account, provider)
-            checked = await check_model({**entry, "api_key": key}, model)
+            entry, model, space = await asyncio.to_thread(_prepare, account, provider)
+            checked = await check_model({**entry, "api_key": key}, model, own_key_of=(space, account))
             if not checked.get("ok"):
                 return JSONResponse({"ok": False, "code": str(checked.get("error_code") or "failed"),
                                      "error": str(checked.get("error") or "The key did not work.")},

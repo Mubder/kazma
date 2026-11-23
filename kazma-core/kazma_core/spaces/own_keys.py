@@ -20,8 +20,10 @@ and never for the admin (the install's keys are the admin's).
   (``LLMProvider._own_key_client``). It never falls back to the install's
   key, nor switches to the install's other keys (providers stage 4): a key
   of theirs that is refused fails the call, said as theirs.
-* **Their spend on their own key is theirs**: the ledger marks such a call
-  (``own_key``, :func:`uses_own_key`), and neither their daily limit
+* **Their spend on their own key is theirs**: the answer such a call gave
+  is marked (``LLMResponse.own_key``), the ledger records the row from it
+  (``own_key``, ``llm_ledger.answered_with_own_key``: never worked out
+  from a provider's name), and neither their daily limit
   (``llm_ledger.usage_of``) nor the install's (``usage_since``) counts it.
 * **Only a provider signed in with a plain key** (:func:`_takes_own_key`):
   a Bearer, ``x-api-key`` or ``api-key`` header, not a server on this
@@ -49,8 +51,8 @@ __all__ = [
     "providers_of",
     "refusal",
     "remove_key",
+    "key_space",
     "set_key",
-    "uses_own_key",
 ]
 
 #: The part of a vault name after the space that marks a model key.
@@ -203,16 +205,10 @@ def _provider_row(provider: str) -> dict[str, Any] | None:
     return registry.get_provider(provider) if registry is not None else None
 
 
-def uses_own_key(asker: str, provider: str) -> bool:
-    """For the ledger: whether a call for *asker* to *provider* was made with
-    the person's own key -- the same answer :func:`key_for_call` gave for
-    it. Never raises. Blocking."""
-    if not spaces_enforced() or not asker or asker == OWNER_ACCOUNT_ID or not provider:
-        return False
-    try:
-        return bool(_read_key(asker, provider))
-    except OwnKeyUnreadable:
-        return False
+def key_space(account: str) -> str:
+    """The personal space *account*'s own keys are kept in, or "" (none).
+    Raises ``IdentityUnavailable``. Blocking."""
+    return _personal_space(account)
 
 
 # ── what the person sees and changes ────────────────────────────────────

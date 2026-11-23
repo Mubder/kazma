@@ -15,6 +15,16 @@ are the admin's.
   nothing is read).
 * **Her spend on her own key does not count against her limit** (the ledger
   marks the call ``own_key``; ``usage_of`` and ``usage_since`` leave it out).
+* **The ledger records the call that answered** (the review of S2-04): a
+  real supervisor turn and ``resilient_chat`` write the row of the client
+  that answered, ``own_key`` from its answer, never worked out from a
+  provider's name. Controls: today's rows named the build-time client's
+  provider and asked the vault whether she had a key for it, so a call on
+  the install's key was recorded as hers and the reverse.
+* **Her key never goes through the install's egress proxy** (LiteLLM), and
+  neither does the check of a key she types: behind the proxy a key that
+  does not work was kept (the proxy's own key answered) and the install
+  paid for the check. The check is ledgered as hers, rate limited.
 * **The key is not shown to the admin**: the admin's own work cannot read
   it from the vault, and no GET route of the built app answers it to the
   admin. The routes answer Reem whether one is kept, never the key.
@@ -34,6 +44,8 @@ import asyncio
 import json
 import secrets
 import sqlite3
+import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +87,11 @@ def _no_real_models(monkeypatch):
 
 
 class _Registry:
-    """The install's three providers, as the model registry answers them."""
+    """The install's three providers, as the model registry answers them
+    (DeepSeek in use), and the clients it builds."""
+
+    def __init__(self, world: World) -> None:
+        self.world = world
 
     def get_provider(self, name: str) -> dict[str, Any] | None:
         row = ROWS.get(str(name))
@@ -83,6 +99,24 @@ class _Registry:
 
     def list_providers(self) -> list[dict[str, Any]]:
         return [dict(r) for r in ROWS.values()]
+
+    def split_model_ref(self, ref: str) -> tuple[str, str]:
+        head, sep, tail = str(ref or "").partition(":")
+        return (head, tail) if sep and head in ROWS else ("", str(ref or ""))
+
+    def find_provider_for_model(self, model: str) -> dict[str, Any] | None:
+        return next((dict(ROWS[p]) for p, m in MODELS.items() if m == model), None)
+
+    def get_active_profile(self) -> dict[str, Any]:
+        return {"provider": "deepseek", "model": MODELS["deepseek"]}
+
+    def get_client(self, model: str | None = None) -> LLMProvider:
+        provider = self.split_model_ref(str(model or ""))[0] or (
+            (self.find_provider_for_model(str(model or "")) or {}).get("name") or "deepseek")
+        return self.world.client(str(provider))
+
+    def provider_for_client(self, client: Any) -> str:
+        return str(getattr(client, "provider_name", "") or "")
 
 
 def _listed() -> dict[str, Any]:
@@ -101,7 +135,7 @@ class World:
         self.reem_space = ""
         self.sent: list[dict[str, str]] = []
         self.refuse: set[str] = set()
-        self.registry = _Registry()
+        self.registry = _Registry(self)
 
     def client(self, provider: str) -> LLMProvider:
         """The install's client for *provider*, as the registry builds it:
@@ -113,13 +147,51 @@ class World:
     def keys_sent(self) -> list[str]:
         return [s["key"] for s in self.sent]
 
+    def sent_to(self) -> list[tuple[str, str]]:
+        """(host, key) of every request."""
+        return [(s["host"], s["key"]) for s in self.sent]
+
+
+def _stream_of(anthropic: bool) -> str:
+    """A streamed answer "done" (3 prompt tokens, 1 completion), in the
+    provider's own event format."""
+    if anthropic:
+        events = [
+            ("message_start", {"type": "message_start", "message": {
+                "id": "m", "type": "message", "role": "assistant", "model": "claude-test", "content": [],
+                "stop_reason": None, "usage": {"input_tokens": 3, "output_tokens": 0}}}),
+            ("content_block_start", {"type": "content_block_start", "index": 0,
+                                     "content_block": {"type": "text", "text": ""}}),
+            ("content_block_delta", {"type": "content_block_delta", "index": 0,
+                                     "delta": {"type": "text_delta", "text": "done"}}),
+            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+            ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"},
+                               "usage": {"output_tokens": 1}}),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+        return "".join(f"event: {name}\ndata: {json.dumps(body)}\n\n" for name, body in events)
+    chunks = [
+        {"id": "c", "model": "deepseek-chat", "choices": [
+            {"index": 0, "delta": {"role": "assistant", "content": "done"}, "finish_reason": None}]},
+        {"id": "c", "model": "deepseek-chat", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+         "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4}},
+    ]
+    return "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+
 
 def _transport(world: World) -> httpx.MockTransport:
     def answer(request: httpx.Request) -> httpx.Response:
         key = request.headers.get("x-api-key") or request.headers.get("authorization", "").removeprefix("Bearer ")
-        world.sent.append({"path": request.url.path, "key": key})
+        world.sent.append({"host": request.url.host, "path": request.url.path, "key": key})
         if key in world.refuse:
             return httpx.Response(401, json={"error": {"message": "invalid api key"}})
+        try:
+            streamed = bool(json.loads(request.content or b"{}").get("stream"))
+        except ValueError:
+            streamed = False
+        if streamed:
+            return httpx.Response(200, text=_stream_of(request.url.path.endswith("/messages")),
+                                  headers={"content-type": "text/event-stream"})
         if request.url.path.endswith("/messages"):
             return httpx.Response(200, json={
                 "id": "m", "type": "message", "role": "assistant", "model": "claude-test",
@@ -312,13 +384,12 @@ def ledger(tmp_path, monkeypatch) -> sqlite3.Connection:
 
 
 def _record(world: World, provider: str, tokens: int) -> None:
+    """A call answered on her own key (the answer said so)."""
     llm_ledger.record_llm_call(provider=provider, model=MODELS[provider], prompt_tokens=tokens,
-                               cost_usd=1.0, asker=world.reem, space=world.reem_space)
+                               cost_usd=1.0, asker=world.reem, space=world.reem_space, own_key=True)
 
 
 def test_her_own_key_spend_is_not_counted_against_her_limit(world, ledger) -> None:
-    from datetime import UTC, datetime, timedelta
-
     _record(world, "deepseek", 900)  # her own key
     llm_ledger.record_llm_call(provider="ollama", model="llama3", prompt_tokens=50, cost_usd=0.0,
                                asker=world.reem, space=world.reem_space)  # the install's server
@@ -331,8 +402,6 @@ def test_her_own_key_spend_is_not_counted_against_her_limit(world, ledger) -> No
 
 
 def test_control_counting_every_row_counts_her_own_key(world, ledger) -> None:
-    from datetime import UTC, datetime, timedelta
-
     _record(world, "deepseek", 900)
     since = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     total = ledger.execute("SELECT SUM(total_tokens) FROM llm_calls WHERE asker = ? AND ts >= ?",
@@ -605,3 +674,215 @@ def test_no_get_route_answers_her_key_to_the_admin(tmp_path, monkeypatch) -> Non
         reset_model_registry()
         vault.close()
         vault_mod.reset_posture_cache()
+
+
+# ── the ledger records the call that answered (the review of S2-04) ─────
+
+
+def _rows(conn: sqlite3.Connection, account: str) -> list[tuple[str, int]]:
+    return [(str(p), int(o)) for p, o in conn.execute(
+        "SELECT provider, own_key FROM llm_calls WHERE asker = ? AND status = 'ok' ORDER BY id", (account,))]
+
+
+def _counted(account: str) -> int:
+    return int(llm_ledger.usage_of(account, datetime.now(UTC) - timedelta(hours=1))["tokens"])
+
+
+def _only_her_key_for(world: World, provider: str) -> None:
+    for other in REEMS:
+        if other != provider:
+            own_keys.remove_key(world.reem, other, world.registry)
+    own_keys._forget(world.reem)
+
+
+def _her_default(world: World, ref: str) -> None:
+    people.set_models(world.reem, [f"{p}:{m}" for p, m in MODELS.items() if p != "ollama"], ref,
+                      by=OWNER_ACCOUNT_ID)
+
+
+def _turn(world: World, space: str) -> None:
+    """One real supervisor turn for Reem in *space*, its graph built over
+    the install's DeepSeek client (the install's default)."""
+    from kazma_core.agent.graph_builder import build_supervisor_graph
+    from kazma_core.agent.turn import run_agent_turn
+    from kazma_core.authority import create_authority
+    from kazma_core.cost_breaker import create_cost_breaker
+    from kazma_core.spaces import threads
+    from kazma_core.tracing import KazmaTracer
+
+    graph = build_supervisor_graph(
+        llm=world.client("deepseek"), system_prompt="You are Kazma.", tool_definitions=[], tool_executor=None,
+        cost_breaker=create_cost_breaker(), authority=create_authority(model="test", window=128000),
+        tracer=KazmaTracer(backend="console"),
+    )
+    thread_id = f"t-own-key-{uuid.uuid4().hex[:8]}"
+    threads.record_thread(thread_id, space, world.reem)
+    result = asyncio.run(run_agent_turn(graph=graph, thread_id=thread_id,
+                                        state={"messages": [{"role": "user", "content": "what time is it?"}]},
+                                        persist=False))
+    assert not result.error, result.error
+
+
+def test_a_turn_on_the_installs_key_is_recorded_as_the_installs(world, ledger) -> None:
+    """Her own key is DeepSeek's (the install's default); she picks
+    Anthropic, which goes out on the install's key: the row names Anthropic,
+    not her own key, and counts against her limit. Today's row said
+    ``deepseek, own_key=1`` and nothing was counted."""
+    _only_her_key_for(world, "deepseek")
+    _her_default(world, "anthropic:claude-test")
+    _turn(world, world.reem_space)
+    assert world.keys_sent() == [INSTALL["anthropic"]], world.sent
+    rows = _rows(ledger, world.reem)
+    assert rows and set(rows) == {("anthropic", 0)}, rows
+    assert _counted(world.reem) > 0
+
+
+def test_a_turn_on_her_own_key_is_not_counted_against_her_limit(world, ledger) -> None:
+    """The reverse: her own key is Anthropic's, the turn runs on it. Today's
+    row said ``deepseek, own_key=0`` and counted her own spend."""
+    _only_her_key_for(world, "anthropic")
+    _her_default(world, "anthropic:claude-test")
+    _turn(world, TEAM)
+    assert world.keys_sent() == [REEMS["anthropic"]], world.sent
+    rows = _rows(ledger, world.reem)
+    assert rows and set(rows) == {("anthropic", 1)}, rows
+    assert _counted(world.reem) == 0
+
+
+def test_a_provider_moved_to_this_network_is_the_installs_whatever_she_kept(world, ledger, monkeypatch) -> None:
+    """Her DeepSeek key is still kept, but the row now names a server on
+    this network, which takes no own key: the call goes on the install's
+    key, and is counted. Today's ledger asked the vault alone and said it
+    was hers."""
+    monkeypatch.setitem(ROWS["deepseek"], "base_url", "http://localhost:8000/v1")
+    _turn(world, world.reem_space)
+    assert world.keys_sent() == [INSTALL["deepseek"]], world.sent
+    assert set(_rows(ledger, world.reem)) == {("deepseek", 0)}
+    assert _counted(world.reem) > 0
+
+
+@pytest.mark.parametrize(("own", "expected"), [("anthropic", ("anthropic", 1)), ("deepseek", ("anthropic", 0))])
+def test_resilient_chat_records_the_answer_it_was_given(world, ledger, own, expected) -> None:
+    from kazma_core.agent.resilient_chat import resilient_chat
+
+    _only_her_key_for(world, own)
+    with bind_scope(world.reem_space, world.reem):
+        asyncio.run(resilient_chat(world.client("anthropic"), messages=[{"role": "user", "content": "go"}],
+                                   max_attempts=1))
+    assert _rows(ledger, world.reem) == [expected]
+
+
+# ── never through the install's egress proxy ────────────────────────────
+
+GATEWAY = "litellm.gateway.invalid"
+GATEWAY_KEY = "install-gateway-master-key"
+
+
+@pytest.fixture
+def egress(monkeypatch):
+    """The install's calls go through a LiteLLM proxy with its own key."""
+    monkeypatch.delenv("KAZMA_LITELLM", raising=False)
+    monkeypatch.setenv("KAZMA_LITELLM_URL", f"https://{GATEWAY}/v1")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", GATEWAY_KEY)
+
+
+def test_her_key_never_goes_through_the_egress_proxy(world, egress) -> None:
+    with bind_scope(TEAM, world.omar):
+        _chat(world.client("deepseek"))
+    with bind_scope(world.reem_space, world.reem):
+        _chat(world.client("deepseek"))
+    assert world.sent_to() == [(GATEWAY, GATEWAY_KEY), ("api.deepseek.invalid", REEMS["deepseek"])], world.sent
+
+
+def test_the_check_of_her_key_goes_direct_with_her_key_alone(world, egress, ledger) -> None:
+    from kazma_core.provider_check import check_model
+
+    world.refuse.add("reem-wrong-key")
+    entry = {**ROWS["deepseek"], "api_key": "reem-wrong-key"}
+    refused = asyncio.run(check_model(entry, MODELS["deepseek"], own_key_of=(world.reem_space, world.reem)))
+    assert refused["ok"] is False and refused["error_code"] == "key_refused", refused
+    good = asyncio.run(check_model({**entry, "api_key": "reem-good-key"}, MODELS["deepseek"],
+                                   own_key_of=(world.reem_space, world.reem)))
+    assert good["ok"] is True, good
+    assert world.sent_to() == [("api.deepseek.invalid", "reem-wrong-key"),
+                               ("api.deepseek.invalid", "reem-good-key")], world.sent
+    calls = ledger.execute("SELECT provider, status, own_key, asker, space FROM llm_calls ORDER BY id").fetchall()
+    assert calls == [("deepseek", "error", 0, world.reem, world.reem_space),
+                     ("deepseek", "ok", 1, world.reem, world.reem_space)], calls
+
+
+@pytest.fixture
+def real_check_app(world, monkeypatch):
+    """The routes with the providers' real check."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from kazma_ui import auth
+    from kazma_ui.own_keys_api import create_own_keys_router
+
+    built = FastAPI()
+    built.middleware("http")(auth.create_tenant_middleware())
+    built.include_router(create_own_keys_router())
+    with TestClient(built) as client:
+        yield client
+
+
+def test_behind_the_egress_proxy_a_key_that_does_not_work_is_not_kept(world, egress, as_reem,
+                                                                     real_check_app) -> None:
+    world.refuse.add("reem-wrong-key")
+    refused = real_check_app.put("/api/account/model-keys/deepseek", json={"key": "reem-wrong-key"},
+                                 headers=as_reem)
+    assert refused.status_code == 400 and refused.json()["code"] == "key_refused", refused.text
+    own_keys._forget(world.reem)
+    assert own_keys._read_key(world.reem, "deepseek") == REEMS["deepseek"], "the refused key was kept"
+    assert world.sent_to() == [("api.deepseek.invalid", "reem-wrong-key")], world.sent
+
+
+def test_the_key_route_is_rate_limited(world, app, as_reem, monkeypatch) -> None:
+    from kazma_ui import rate_limit
+
+    monkeypatch.setenv("KAZMA_SECRET", "own-key-rate-limit-secret")
+    monkeypatch.setattr(rate_limit, "_windows", type(rate_limit._windows)())
+    answers = [app.put("/api/account/model-keys/deepseek", json={"key": f"reem-key-{n}"}, headers=as_reem)
+               for n in range(7)]
+    assert [a.status_code for a in answers] == [200] * 6 + [429]
+
+
+# ── every answered row says whether it was on the person's own key ──────
+
+_WRITERS = ("arecord_llm_call", "record_llm_call", "_record")
+
+
+def _rows_without_own_key(sources: dict[str, str]) -> list[str]:
+    """``file:line`` of each ledger write of an answered call (``usage=``)
+    that does not say whether it went out on the person's own key."""
+    missing: list[str] = []
+    for rel, text in sources.items():
+        for node in ast.walk(ast.parse(text)):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "attr", "") or getattr(node.func, "id", "")
+            words = {k.arg for k in node.keywords}
+            if name in _WRITERS and "usage" in words and "own_key" not in words:
+                missing.append(f"{rel}:{node.lineno}")
+    return sorted(missing)
+
+
+def _product_sources() -> dict[str, str]:
+    found = {}
+    for package in ("kazma-core/kazma_core", "kazma-ui/kazma_ui", "kazma-gateway/kazma_gateway"):
+        for path in (REPO / package).rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            if any(w + "(" in text for w in _WRITERS):
+                found[str(path.relative_to(REPO))] = text
+    return found
+
+
+def test_every_answered_row_says_whether_it_was_on_the_persons_own_key() -> None:
+    sources = _product_sources()
+    assert any("graph_supervisor.py" in r for r in sources) and any("resilient_chat.py" in r for r in sources)
+    assert _rows_without_own_key(sources) == []
+
+
+def test_control_a_row_that_does_not_say_is_found() -> None:
+    planted = {"planted.py": "async def f(r):\n    await arecord_llm_call(model='m', usage=r.usage)\n"}
+    assert _rows_without_own_key(planted) == ["planted.py:2"]

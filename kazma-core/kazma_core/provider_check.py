@@ -306,11 +306,24 @@ def _check_error(exc: BaseException) -> tuple[str, str]:
     return "failed", f"The check failed ({type(exc).__name__})."
 
 
-async def check_model(entry: dict[str, Any], model: str, *, timeout: float = CHECK_TIMEOUT_S) -> dict[str, Any]:
+async def check_model(
+    entry: dict[str, Any],
+    model: str,
+    *,
+    timeout: float = CHECK_TIMEOUT_S,
+    own_key_of: tuple[str, str] | None = None,
+) -> dict[str, Any]:
     """One short message to *model* through the client chat would build for
     *entry*: ``{"ok", "ms", "model", "reachable", "error_code", "error"}``.
     An answer with no text and no tool call is a failure (``empty``): a 200
-    that says nothing is not a working provider."""
+    that says nothing is not a working provider.
+
+    ``own_key_of`` (space, account): the check of a person's own key
+    (Spaces S2-04). It goes to the provider's own address with their key
+    alone, never through the install's egress proxy -- whose own key would
+    answer in its place, so a key that does not work was kept and the
+    install paid for the check (the review of S2-04) -- and its row in the
+    per-call ledger is theirs, ``own_key`` only when their key answered."""
     import httpx
 
     from kazma_core.bounded_cancel import wait_for_bounded
@@ -325,11 +338,15 @@ async def check_model(entry: dict[str, Any], model: str, *, timeout: float = CHE
         "extra_headers": entry.get("secret_headers") or {},
         "api_version": str(entry.get("api_version") or ""),
     })
+    direct_url = str(config.base_url or "")
+    typed_key = str(config.api_key or "")
     # A Google client may read Application Default Credentials: off the loop.
     client = await asyncio.to_thread(build_client, str(entry["name"]), config, entry)
     # The key checked is the one typed: never a person's kept key in its
     # place (Spaces S2-04, ``LLMProvider._person_call``).
     client._key_is_given = True
+    if own_key_of is not None:
+        _go_direct(client, direct_url, typed_key)
     kwargs: dict[str, Any] = {"max_tokens": CHECK_MAX_TOKENS, "model": model}
     can_off = getattr(client, "can_turn_off_reasoning", None)
     if callable(can_off) and can_off():
@@ -340,10 +357,12 @@ async def check_model(entry: dict[str, Any], model: str, *, timeout: float = CHE
             client.chat([{"role": "user", "content": CHECK_PROMPT}], **kwargs), timeout, what="provider check",
         )
     except TimeoutError:
+        await _ledger_own_key_check(own_key_of, entry, model, None, started, "timeout")
         return {"ok": False, "model": model, "reachable": True, "error_code": "timeout",
                 "error": f"The model did not answer within {int(timeout)} seconds."}
     except (LLMError, httpx.HTTPError, OSError, ValueError, RuntimeError) as exc:
         code, sentence = _check_error(exc)
+        await _ledger_own_key_check(own_key_of, entry, model, None, started, code)
         return {"ok": False, "model": model, "reachable": code != "unreachable",
                 "error_code": code, "error": sentence}
     finally:
@@ -353,7 +372,55 @@ async def check_model(entry: dict[str, Any], model: str, *, timeout: float = CHE
                 await closer()
             except Exception:  # noqa: BLE001 - a client that cannot close changes no answer
                 logger.debug("[provider-check] client close failed", exc_info=True)
+    await _ledger_own_key_check(own_key_of, entry, model, resp, started, "")
     if not str(getattr(resp, "content", "") or "").strip() and not getattr(resp, "tool_calls", None):
         return {"ok": False, "model": model, "reachable": True, "error_code": "empty",
                 "error": "The provider returned an empty completion."}
     return {"ok": True, "ms": int((time.monotonic() - started) * 1000), "model": model, "reachable": True}
+
+
+def _go_direct(client: Any, url: str, key: str) -> None:
+    """Pin *client* to the provider's own *url* and *key*: no egress proxy
+    now or at its call (Spaces S2-04). Its constructor may have routed it
+    through the proxy already, so the answer is compared with the strings
+    taken before it was built. No I/O."""
+    client._egress_frozen = True
+    client._via_gateway = False
+    config = getattr(client, "config", None)
+    if config is not None and (str(config.base_url or "") != url or str(config.api_key or "") != key):
+        client.reconfigure(base_url=url, api_key=key)
+
+
+async def _ledger_own_key_check(
+    own_key_of: tuple[str, str] | None,
+    entry: dict[str, Any],
+    model: str,
+    response: Any,
+    started: float,
+    error_code: str,
+) -> None:
+    """The check of a person's own key in the per-call ledger, under their
+    name (Spaces S2-04): a call they asked for, on their key when it
+    answered (``own_key``), so no limit counts it; a refused one cost
+    nothing and is an error row. Nothing for an install's check. Never
+    raises but a cancellation."""
+    if own_key_of is None:
+        return
+    from kazma_core.observability.llm_ledger import arecord_llm_call
+
+    space, account = own_key_of
+    usage = getattr(response, "usage", None)
+    await arecord_llm_call(
+        thread_id="own-key-check",
+        provider=str(entry.get("name") or ""),
+        model=str(getattr(response, "model", "") or model or ""),
+        usage=usage if isinstance(usage, dict) else {},
+        cost_usd=float(getattr(response, "cost_usd", 0.0) or 0.0) if response is not None else 0.0,
+        duration_ms=(time.monotonic() - started) * 1000,
+        status="ok" if response is not None else "error",
+        error_kind=error_code,
+        priced=bool(getattr(response, "cost_known", True)) if response is not None else True,
+        space=space,
+        asker=account,
+        own_key=response is not None,
+    )

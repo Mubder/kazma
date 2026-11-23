@@ -389,6 +389,12 @@ class LLMResponse:
     #: answer (DeepSeek's ``reasoning_content``). Not shown, not part of
     #: ``content``; it counts against ``max_tokens``.
     reasoning_chars: int = 0
+    #: True when the call that made this answer went out on the key of the
+    #: person it was for (Spaces S2-04, ``LLMProvider._person_call``). The
+    #: ledger records it from here (``llm_ledger.answered_with_own_key``):
+    #: never from a provider's name, which may not be the client that
+    #: answered (the review of S2-04).
+    own_key: bool = False
 
     def output_detail(self) -> str:
         """What the completion's tokens went to, for a truncation warning."""
@@ -560,6 +566,25 @@ def _attribution_headers(base_url: str) -> dict[str, str]:
 #: client they stand in for: ``{client: {(account, key print): twin}}``.
 #: Changed on the event loop only; a client that goes takes its twins.
 _OWN_KEY_CLIENTS: weakref.WeakKeyDictionary[Any, dict[tuple[str, str], Any]] = weakref.WeakKeyDictionary()
+
+
+def own_key_answer(response: Any) -> Any:
+    """*response*, marked as made with the person's own key (Spaces S2-04):
+    what a provider class's ``chat`` returns when it handed the call to the
+    client carrying their key."""
+    if response is not None:
+        try:
+            response.own_key = True
+        except AttributeError:  # a stand-in answer that takes no attribute
+            logger.debug("[LLMProvider] an answer of type %s cannot be marked", type(response).__name__)
+    return response
+
+
+def own_key_delta(delta: Any) -> Any:
+    """A stream's *delta*, its final answer marked as made with the person's
+    own key (Spaces S2-04)."""
+    own_key_answer(getattr(delta, "response", None))
+    return delta
 
 
 class LLMProvider:
@@ -1019,15 +1044,20 @@ class LLMProvider:
 
         from kazma_core.provider_adapters import build_client
 
-        direct = getattr(self, "_direct_base_url", "") or self.config.base_url
+        # The provider's own address, kept as a string of its own: the
+        # constructor may route the config it is given through the install's
+        # egress proxy IN PLACE (``_sync_gateway``), and a comparison with
+        # that same object then saw no change (the review of S2-04: her key
+        # went to the install's LiteLLM proxy).
+        direct = str(getattr(self, "_direct_base_url", "") or self.config.base_url or "")
         config = replace(self.config, api_key=key, key_switch=None, base_url=direct, extra_headers={})
         twin = build_client(str(getattr(self, "provider_name", "") or ""), config, entry)
         twin._egress_frozen = True
         twin._via_gateway = False
-        if twin.config.api_key != key or twin.config.base_url != config.base_url:
-            # The constructor sent it through the install's proxy: back to
-            # the provider itself, with their key.
-            twin.reconfigure(base_url=config.base_url, api_key=key)
+        if str(twin.config.base_url or "") != direct or str(twin.config.api_key or "") != key:
+            # Its constructor routed it through the egress proxy: back to the
+            # provider's own address, with her key.
+            twin.reconfigure(base_url=direct, api_key=key)
         twin._carries_own_key = account
         return twin
 
@@ -1056,9 +1086,9 @@ class LLMProvider:
         own = await self._person_call(model)
         if own is not None:
             # Their own key (Spaces S2-04): the whole call is theirs.
-            return await LLMProvider.chat(
+            return own_key_answer(await LLMProvider.chat(
                 own, messages, tools, max_tokens, temperature, model, response_format, reasoning,
-            )
+            ))
         from kazma_core.observability.genai_otel import (
             genai_chat_span,
             record_chat_response,
@@ -1895,7 +1925,7 @@ class LLMProvider:
             async for delta in LLMProvider.chat_stream(
                 own, messages, tools, max_tokens, temperature, model, response_format, reasoning,
             ):
-                yield delta
+                yield own_key_delta(delta)
             return
         from kazma_core.provider_keys import MAX_SWITCHES
 

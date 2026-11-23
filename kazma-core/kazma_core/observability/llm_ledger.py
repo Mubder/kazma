@@ -166,11 +166,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def provider_of(client: Any) -> str:
-    """The provider a client's calls go to -- its name in Settings, from the
-    model registry that built it -- else the client's class. Every row said
-    ``LLMProvider`` (the class), so the ledger could not tell DeepSeek from
-    OpenRouter (8,839 such rows on the live install, 2026-11-08). No I/O:
-    the registry is only peeked at."""
+    """The provider a client's calls go to -- its name in Settings: the row
+    it was built for (``provider_name``, set by ``build_client``), else the
+    one the model registry that built it knows -- else the client's class.
+    Every row said ``LLMProvider`` (the class), so the ledger could not tell
+    DeepSeek from OpenRouter (8,839 such rows on the live install,
+    2026-11-08). No I/O: the registry is only peeked at."""
+    named = getattr(client, "provider_name", "")
+    if isinstance(named, str) and named:
+        return named
     try:
         from kazma_core.model_registry import peek_model_registry
 
@@ -179,6 +183,13 @@ def provider_of(client: Any) -> str:
     except Exception:  # noqa: BLE001 - a label must never fail a call
         name = ""
     return str(name or type(client).__name__)
+
+
+def answered_with_own_key(response: Any) -> bool:
+    """Whether *response* was made with the key of the person the call was
+    for (Spaces S2-04, ``LLMResponse.own_key``). Every writer of an answered
+    call's row passes it (``tests/test_member_own_keys.py`` reads every one)."""
+    return getattr(response, "own_key", False) is True
 
 
 def _marks(values: tuple[str, ...]) -> str:
@@ -221,7 +232,7 @@ def record_llm_call(
     asker: str | None = None,
     cached_tokens: int = 0,
     usage: Mapping[str, Any] | None = None,
-    own_key: bool | None = None,
+    own_key: bool = False,
 ) -> None:
     """Record one LLM call. Best-effort: never raises, never blocks the turn.
 
@@ -237,10 +248,12 @@ def record_llm_call(
     which survives an approval pause, so every segment's calls sum to one
     turn (:func:`turn_usage`).
 
-    ``own_key`` defaults to whether the call was made with the person's own
-    key for its provider (Spaces S2-04, ``spaces.own_keys.uses_own_key``:
-    the answer the call itself was given). Such a call is the person's to
-    pay: no limit counts it (:func:`usage_of`, :func:`usage_since`).
+    ``own_key``: the call went out on the key of the person it was for
+    (Spaces S2-04), as its answer says (:func:`answered_with_own_key`), and
+    never worked out from a provider's name: the name a writer had was not
+    always the client that answered, and an install's key was recorded as
+    the person's (the review of S2-04). Such a call is the person's to pay:
+    no limit counts it (:func:`usage_of`, :func:`usage_since`).
     """
     try:
         if usage is not None:
@@ -257,10 +270,6 @@ def record_llm_call(
             bound_space, bound_asker = _whose()
             space = bound_space if space is None else space
             asker = bound_asker if asker is None else asker
-        if own_key is None:
-            from kazma_core.spaces.own_keys import uses_own_key
-
-            own_key = uses_own_key(str(asker or ""), str(provider or ""))
         with _lock:
             conn = _get_conn()
             # Commits, or rolls back when the insert raises: an open
@@ -421,6 +430,7 @@ async def ledgered_chat(client: Any, messages: Any, *, work: str, **kwargs: Any)
         duration_ms=(time.monotonic() - started) * 1000, status="ok",
         priced=bool(getattr(response, "cost_known", False)),
         usage=usage if isinstance(usage, Mapping) else {},
+        own_key=answered_with_own_key(response),
     )
     return response
 

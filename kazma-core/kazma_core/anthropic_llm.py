@@ -30,6 +30,8 @@ from kazma_core.llm_provider import (
     LLMResponse,
     ToolCall,
     cost_from_usage,
+    own_key_answer,
+    own_key_delta,
     retry_after_seconds,
 )
 from kazma_core.llm_stream import StreamDelta
@@ -291,7 +293,8 @@ class AnthropicProvider(LLMProvider):
         own = await self._person_call(model)
         if own is not None:
             # Their own key (Spaces S2-04): the whole call is theirs.
-            return await AnthropicProvider.chat(own, messages, tools, max_tokens, temperature, model, response_format)
+            return own_key_answer(
+                await AnthropicProvider.chat(own, messages, tools, max_tokens, temperature, model, response_format))
         return await self._with_key_switches(
             self._chat_once, messages, tools, max_tokens, temperature, model, response_format,
         )
@@ -465,7 +468,7 @@ class AnthropicProvider(LLMProvider):
             async for delta in AnthropicProvider.chat_stream(
                 own, messages, tools, max_tokens, temperature, model, response_format,
             ):
-                yield delta
+                yield own_key_delta(delta)
             return
         from kazma_core.llm_stream import stream_enabled
 
