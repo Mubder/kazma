@@ -481,6 +481,20 @@ decides what is shown.
   lacked, about 6,000 an hour on this CPU beside the other measurements;
   30,112 are in the cache, the rest wait for a run that needs them).
 
+  **Measured and not adopted** (the main session, 23 Nov). The reranker
+  stays off, and no faster runtime is tried now: it loses an answer at every
+  floor with either model, and an int8 or ONNX runtime might bring the
+  shipping model under the budget but would not keep the answers it loses.
+  `memory/reranker.py`, its calibration and its scripts stay as they are, off,
+  so a later attempt starts from the recorded scores and the sweep. What
+  would reopen it: a model or setting that loses no answer on all four of
+  Kazma's stores (the store, four times its chat, the small stores and the
+  speakers' space, both sets, the plan's rules 1 and 5) **and** fits the
+  latency budget on this CPU (150 ms p50, 400 ms p95 added to a recall).
+  Until then W2's "say nothing when nothing fits" stays today's evidence
+  floor, and item 5 of section 7 (a wrong memory rated strong for a question
+  memory cannot answer) stays open.
+
 ### W4. Questions across many conversations (M)
 
 Gathering ("how many", "every time", "all my trips") every matching round
@@ -748,7 +762,8 @@ alone as the negative controls.
    0 of 6 on dev (4.7 memories, 982 tokens) and 0 of 24 on the report
    split (4.8 memories, 1,089 tokens); on Kazma's own benchmark 0 of 22
    English and 0 of 4 Arabic (`tests/fixtures/memory_bench/product_measures.json`).
-   W3 + W2's to fix: saying nothing when nothing fits.
+   W3 + W2's to fix: saying nothing when nothing fits. Still open: the
+   reranker was measured and not adopted (23 Nov, W3 + W2).
 6. **Memory's own model calls are not in the per-call ledger.** Found by
    the Spaces builder's review of every model call (22 Nov) and checked in
    the code: no module under `kazma_core/memory/` and not
