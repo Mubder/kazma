@@ -424,7 +424,7 @@
           </thead>
           <tbody>
             <template x-if="mergesFailed">
-              <tr><td colspan="5" role="alert" style="padding:1rem;color:var(--danger);">{{ t('memory.console.merges_load_failed') }}</td></tr>
+              <tr><td colspan="5" style="padding:1rem;color:var(--danger);"><span role="alert">{{ t('memory.console.merges_load_failed') }}</span></td></tr>
             </template>
             <template x-if="mergesLoaded && !merges.length">
               <tr><td colspan="5" style="padding:1rem;color:var(--text-muted);">{{ t('memory.page.joins_none') }}</td></tr>
