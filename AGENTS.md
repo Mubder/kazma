@@ -15412,6 +15412,23 @@ an install with one account behaves as before.
     (`XDailyLimitReached`, the work held), which also writes each answered
     call to the ledger the limit counts. A turn that started under the limit
     runs to its end; its own token budget bounds how far past.
+  - **Past the limit, a turn still runs on the person's own key** (S2-04's
+    follow-up, 2026-11-23): the supervisor resolves the client the turn's
+    call will go to (`graph_supervisor._turn_client`, the one answer for the
+    call and the admission) and lets the turn in when they hold a key of
+    their own for its provider (`daily_limits.on_own_key`; a store that
+    cannot say is no). The whole turn then uses their own keys only: the
+    state's `own_keys_only`, read by every graph node first
+    (`hold_to_own_keys`: LangGraph runs a node in a copy of its caller's
+    context, and only turns the rule on, so a sub-agent keeps it), and
+    `LLMProvider._person_call` refuses a call that would go on the install's
+    key (`LLMError` kind `daily_limit`, worded by `friendly_llm_error`) -- a
+    respond synthesis on another provider, a failover. A call outside a turn
+    stays refused by `call_refusal`. Gate: `tests/test_member_own_keys.py`
+    (a real turn on her own key past her limit, one on the install's
+    refused, today's refusal and the failover under the limit as the
+    controls; every graph node holds the rule, a planted node as the
+    control).
   - **Every model call is checked or declared**
     (`tests/test_model_calls_checked.py`): each product `.chat(`,
     `.chat_stream(`, `invoke_llm_chat(`, `ledgered_chat(` and each `.chat`
@@ -16145,8 +16162,8 @@ an install with one account behaves as before.
     nothing, a good one is kept sealed and never shown, "Use the install's
     key" forgets it; the admin's page, and the check sent through the
     proxy keeping a refused key, as the controls).
-    Left: a person over their daily limit is still refused before a turn,
-    even when the turn would run on their own key.
+    Past their daily limit a turn on their own key still runs, on their own
+    keys only (S2-02's entry above).
 - **A member's page asks nothing the server refuses (2026-11-23).** The
   page shell read the install's settings on every page -- the appearance
   (and a `PUT` on a theme switch), `/api/provider/active`, `/api/providers`

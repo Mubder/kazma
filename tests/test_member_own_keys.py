@@ -28,6 +28,14 @@ are the admin's.
 * **The key is not shown to the admin**: the admin's own work cannot read
   it from the vault, and no GET route of the built app answers it to the
   admin. The routes answer Reem whether one is kept, never the key.
+* **Past her daily limit a turn on her own key still runs**, on her own keys
+  only: a real turn whose model she holds a key for starts and goes with
+  her key; a call the turn would make on the install's key (a respond
+  synthesis on another provider, a failover) is refused before it is sent.
+  Controls: a turn on the install's key refused as at the limit; today's
+  refusal (no admission) refusing her own-key turn too; the failover under
+  her limit going on the install's key; the respond node without the rule.
+  Gate: every graph node holds the rule (a planted node as the control).
 * **Gate**: every ``chat``/``chat_stream`` of every provider class that asks
   ``_person_call`` hands the call to the client it returns (a planted class
   that asks and ignores the answer is the control).
@@ -135,6 +143,7 @@ class World:
         self.reem_space = ""
         self.sent: list[dict[str, str]] = []
         self.refuse: set[str] = set()
+        self.down: set[str] = set()
         self.registry = _Registry(self)
 
     def client(self, provider: str) -> LLMProvider:
@@ -185,6 +194,8 @@ def _transport(world: World) -> httpx.MockTransport:
         world.sent.append({"host": request.url.host, "path": request.url.path, "key": key})
         if key in world.refuse:
             return httpx.Response(401, json={"error": {"message": "invalid api key"}})
+        if key in world.down:
+            return httpx.Response(503, json={"error": {"message": "overloaded"}})
         try:
             streamed = bool(json.loads(request.content or b"{}").get("stream"))
         except ValueError:
@@ -700,9 +711,9 @@ def _her_default(world: World, ref: str) -> None:
                       by=OWNER_ACCOUNT_ID)
 
 
-def _turn(world: World, space: str) -> None:
+def _turn(world: World, space: str, *, ok: bool = True) -> Any:
     """One real supervisor turn for Reem in *space*, its graph built over
-    the install's DeepSeek client (the install's default)."""
+    the install's DeepSeek client (the install's default); its result."""
     from kazma_core.agent.graph_builder import build_supervisor_graph
     from kazma_core.agent.turn import run_agent_turn
     from kazma_core.authority import create_authority
@@ -720,7 +731,9 @@ def _turn(world: World, space: str) -> None:
     result = asyncio.run(run_agent_turn(graph=graph, thread_id=thread_id,
                                         state={"messages": [{"role": "user", "content": "what time is it?"}]},
                                         persist=False))
-    assert not result.error, result.error
+    if ok:
+        assert not result.error, result.error
+    return result
 
 
 def test_a_turn_on_the_installs_key_is_recorded_as_the_installs(world, ledger) -> None:
@@ -886,3 +899,207 @@ def test_every_answered_row_says_whether_it_was_on_the_persons_own_key() -> None
 def test_control_a_row_that_does_not_say_is_found() -> None:
     planted = {"planted.py": "async def f(r):\n    await arecord_llm_call(model='m', usage=r.usage)\n"}
     assert _rows_without_own_key(planted) == ["planted.py:2"]
+
+
+# ── past her daily limit, a turn on her own key still runs ──────────────
+
+
+def _past_her_limit(world: World, monkeypatch) -> None:
+    """Her limit is 100 tokens a day, and the install's key has spent 200
+    for her today."""
+    from kazma_core.spaces import daily_limits
+
+    people.set_daily_limit(world.reem, {"tokens": 100, "usd": 0}, by=OWNER_ACCOUNT_ID)
+    monkeypatch.setattr(daily_limits, "_ledger_on", lambda: True)
+    llm_ledger.record_llm_call(provider="ollama", model="llama3", prompt_tokens=200,
+                               asker=world.reem, space=world.reem_space)
+    assert daily_limits.verdict(world.reem)["over"]
+
+
+def test_past_her_limit_a_turn_on_her_own_key_runs_on_it(world, ledger, monkeypatch) -> None:
+    """Past her limit, the turn's model is Anthropic, which she holds a key
+    for: the turn starts, its call goes with her key alone, is marked hers
+    and is not counted, and the turn keeps to her own keys."""
+    _only_her_key_for(world, "anthropic")
+    _her_default(world, "anthropic:claude-test")
+    _past_her_limit(world, monkeypatch)
+    result = _turn(world, world.reem_space)
+    assert world.keys_sent() == [REEMS["anthropic"]], world.sent
+    assert result.text.strip() == "done", result.text
+    assert result.state.get("own_keys_only") is True
+    assert set(_rows(ledger, world.reem)) == {("ollama", 0), ("anthropic", 1)}
+    assert _counted(world.reem) == 200
+
+
+def test_control_past_her_limit_a_turn_on_the_installs_key_is_refused(world, ledger, monkeypatch) -> None:
+    """Her own key is Anthropic's, but the turn's model is DeepSeek, on the
+    install's key: refused before any call, as at the limit."""
+    _only_her_key_for(world, "anthropic")
+    _her_default(world, "deepseek:deepseek-chat")
+    _past_her_limit(world, monkeypatch)
+    result = _turn(world, world.reem_space)
+    assert world.sent == []
+    assert "daily limit" in result.text, result.text
+
+
+def test_control_todays_refusal_refuses_her_own_key_turn_too(world, ledger, monkeypatch) -> None:
+    """Today's rule (no admission on her own key): the same turn on
+    Anthropic is refused. What lets it in is ``on_own_key``."""
+    from kazma_core.spaces import daily_limits
+
+    _only_her_key_for(world, "anthropic")
+    _her_default(world, "anthropic:claude-test")
+    _past_her_limit(world, monkeypatch)
+    monkeypatch.setattr(daily_limits, "on_own_key", lambda provider: False)
+    result = _turn(world, world.reem_space)
+    assert world.sent == []
+    assert "daily limit" in result.text, result.text
+
+
+def _failover_to_deepseek(monkeypatch) -> None:
+    """One attempt, then the failover chain's DeepSeek (the install's key)."""
+    from dataclasses import replace
+
+    import kazma_core.agent.graph_supervisor as graph_supervisor
+    import kazma_core.agent.nonstop as nonstop
+    import kazma_core.retry as retry
+    from kazma_core.agent.nonstop import FailoverConfig
+
+    real = nonstop.get_nonstop_config
+    monkeypatch.setattr(nonstop, "get_nonstop_config", lambda *a, **k: replace(
+        real(*a, **k), failover=FailoverConfig(enabled=True, chain=["deepseek-chat"], cooldown_seconds=0.0)))
+    monkeypatch.setattr(retry, "load_retry_config",
+                        lambda: {"max_attempts": 1, "min_wait": 0.0, "max_wait": 0.0})
+    monkeypatch.setattr(graph_supervisor, "_failover_clients", {})
+    monkeypatch.setattr(graph_supervisor, "_failover_cooldowns", {})
+
+
+def test_past_her_limit_a_failover_never_goes_on_the_installs_key(world, ledger, monkeypatch) -> None:
+    """Her Anthropic call fails (503) and the failover chain names DeepSeek,
+    on the install's key: within a turn let in on her own key it is not
+    sent, and the turn fails as hers."""
+    _only_her_key_for(world, "anthropic")
+    _her_default(world, "anthropic:claude-test")
+    _failover_to_deepseek(monkeypatch)
+    world.down.add(REEMS["anthropic"])
+    _past_her_limit(world, monkeypatch)
+    _turn(world, world.reem_space, ok=False)
+    assert world.keys_sent() == [REEMS["anthropic"]], world.sent
+
+
+def test_control_under_her_limit_the_failover_goes_on_the_installs_key(world, ledger, monkeypatch) -> None:
+    _only_her_key_for(world, "anthropic")
+    _her_default(world, "anthropic:claude-test")
+    _failover_to_deepseek(monkeypatch)
+    world.down.add(REEMS["anthropic"])
+    result = _turn(world, world.reem_space, ok=False)
+    assert world.keys_sent() == [REEMS["anthropic"], INSTALL["deepseek"]], world.sent
+    assert result.text.strip() == "done", result.text
+
+
+def _synthesis_state(world: World, **extra: Any) -> dict[str, Any]:
+    """A turn's state that the respond node must finish with a synthesis
+    call, on the install's DeepSeek (the turn's last model)."""
+    return {"messages": [{"role": "user", "content": "hi"}], "force_synthesis": True,
+            "last_model": "deepseek-chat", "thread_id": f"t-synth-{uuid.uuid4().hex[:8]}",
+            "iteration": 3, "max_iterations": 15, "tenant_id": world.reem_space, **extra}
+
+
+@pytest.mark.parametrize(("held", "sent"), [(True, []), (False, [INSTALL["deepseek"]])])
+def test_the_respond_node_keeps_to_her_own_keys(world, held: bool, sent: list[str]) -> None:
+    """The respond node runs in a context of its own: it reads the turn's
+    rule from the state. Held, its synthesis on the install's DeepSeek is
+    not sent; not held (the control), it is."""
+    from kazma_core.agent.graph_respond import respond_node
+
+    _only_her_key_for(world, "anthropic")
+    with bind_scope(world.reem_space, world.reem):
+        asyncio.run(respond_node(_synthesis_state(world, own_keys_only=held), llm=world.client("deepseek")))
+    assert world.keys_sent() == sent, world.sent
+
+
+def test_held_to_her_own_keys_the_installs_key_is_refused_chat_and_stream(world) -> None:
+    from kazma_core.retry import friendly_llm_error
+    from kazma_core.spaces import daily_limits
+
+    _only_her_key_for(world, "anthropic")
+
+    async def calls() -> None:
+        daily_limits.hold_to_own_keys({"own_keys_only": True})
+        with pytest.raises(LLMError) as refused:
+            await world.client("deepseek").chat([{"role": "user", "content": "hi"}], max_tokens=10)
+        assert refused.value.kind == "daily_limit" and not refused.value.transient
+        assert "daily limit" in friendly_llm_error(refused.value)
+        with pytest.raises(LLMError) as streamed:
+            async for _ in world.client("deepseek").chat_stream([{"role": "user", "content": "hi"}]):
+                pass
+        assert streamed.value.kind == "daily_limit"
+        await world.client("anthropic").chat([{"role": "user", "content": "hi"}], max_tokens=10)
+
+    with bind_scope(world.reem_space, world.reem):
+        asyncio.run(calls())
+    assert world.keys_sent() == [REEMS["anthropic"]], world.sent
+    assert daily_limits.own_keys_only() is False  # the rule stayed in that run
+
+
+def test_a_store_that_cannot_say_is_no(world, monkeypatch) -> None:
+    from kazma_core.spaces import daily_limits
+
+    def away(provider: str) -> Any:
+        raise own_keys.OwnKeyUnreadable("away")
+
+    monkeypatch.setattr(own_keys, "key_for_call", away)
+    with bind_scope(world.reem_space, world.reem):
+        assert daily_limits.on_own_key("anthropic") is False
+
+
+# Every graph node reads the turn's rule: LangGraph runs each node in a copy
+# of its caller's context, so a node that does not would use the install's
+# key past the limit.
+
+_HOLD = "hold_to_own_keys"
+
+
+def _nodes_without_the_hold(builder: str, sources: dict[str, str]) -> list[str]:
+    """Each ``*_node`` function a graph node of *builder* calls whose
+    definition (in *sources*) does not call :data:`_HOLD`."""
+    tree = ast.parse(builder)
+    added = {getattr(c.args[1], "id", "") for c in ast.walk(tree) if isinstance(c, ast.Call)
+             and getattr(c.func, "attr", "") == "add_node" and len(c.args) == 2}
+    called: set[str] = set()
+    for fn in ast.walk(tree):
+        if isinstance(fn, ast.AsyncFunctionDef | ast.FunctionDef) and fn.name in added:
+            called |= {getattr(c.func, "id", "") for c in ast.walk(fn) if isinstance(c, ast.Call)
+                       and getattr(c.func, "id", "").endswith("_node")}
+    missing = []
+    for name in sorted(called):
+        defs = [fn for text in sources.values() for fn in ast.walk(ast.parse(text))
+                if isinstance(fn, ast.AsyncFunctionDef | ast.FunctionDef) and fn.name == name]
+        holds = any(getattr(c.func, "id", "") == _HOLD for fn in defs for c in ast.walk(fn)
+                    if isinstance(c, ast.Call))
+        if not defs or not holds:
+            missing.append(name)
+    return missing
+
+
+def _agent_sources() -> dict[str, str]:
+    return {p.name: p.read_text(encoding="utf-8")
+            for p in (REPO / "kazma-core" / "kazma_core" / "agent").glob("graph_*.py")}
+
+
+def test_every_graph_node_holds_the_turn_to_her_own_keys() -> None:
+    sources = _agent_sources()
+    assert _nodes_without_the_hold(sources["graph_builder.py"], sources) == []
+    builder = ast.parse(sources["graph_builder.py"])
+    assert sum(getattr(c.func, "attr", "") == "add_node" for c in ast.walk(builder)
+               if isinstance(c, ast.Call)) == 3
+
+
+def test_control_a_node_that_does_not_hold_is_found() -> None:
+    builder = ("def build(graph):\n"
+               "    async def _a(state):\n        return await a_node(state)\n"
+               "    async def _b(state):\n        return await b_node(state)\n"
+               "    graph.add_node('a', _a)\n    graph.add_node('b', _b)\n")
+    nodes = {"n.py": ("async def a_node(state):\n    hold_to_own_keys(state)\n"
+                      "async def b_node(state):\n    return state\n")}
+    assert _nodes_without_the_hold(builder, nodes) == ["b_node"]

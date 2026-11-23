@@ -162,6 +162,11 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     """
     messages = [_normalize_msg(m) for m in state.get("messages", [])]
     iteration = state.get("iteration", 0) + 1
+    from kazma_core.spaces.daily_limits import hold_to_own_keys
+
+    # A turn let in past its person's daily limit on their own key: the
+    # synthesis and the format repair use their own keys only (S2-04).
+    hold_to_own_keys(state)
 
     # Clear the per-turn file-read dedup cache (turn boundary — audit 2026-08-15)
     try:
