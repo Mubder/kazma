@@ -16392,11 +16392,20 @@ an install with one account behaves as before.
   an inline `style` on an `x-show` element — the inline declaration wins
   over Alpine's `display:none` toggle; put flex layout in a CSS class
   instead (see `.system-alerts-banner`).
-- **A boolean binding is a boolean** (2026-11-23, found building S2-04):
-  with the vendored Alpine (3.14.8) `:disabled="busy[key]"` that evaluates to
-  `undefined` leaves the button DISABLED (measured in Chromium: `false`
-  enables it, `undefined` does not). Bind `!!busy[key]`, or a value that is
-  always `true` or `false`.
+- **A boolean binding is a boolean** (2026-11-23, found building S2-04;
+  corrected the same day). The vendored Alpine (3.14.8) sets a boolean
+  attribute (`disabled`, `hidden`, `required`, `readonly`, `open`...) for
+  every value but `null`, `undefined` and `false` (`0` and `""` set it), and
+  turns an `undefined` into `""` when the expression's text holds a `.`
+  (measured in Chromium): `:disabled="busy[p.provider]"` or
+  `:disabled="e.protected"` DISABLES the control while the value is missing,
+  and a bare `:disabled="busy"` does not. Bind `!!value`, a comparison or a
+  value that is always `true` or `false`. Gate:
+  `tests/test_alpine_boolean_bindings.py` (every dotted binding of an
+  attribute on Alpine's own list, read from the vendored file, is provably a
+  boolean or declared; 20 were not, all latent; planted shapes as controls),
+  `tests/e2e/test_alpine_boolean_binding_trap.py` (the gate flags exactly
+  what the browser disables).
 - **Responsive grids:** use `class="two-col-grid"` (collapses to one column
   ≤768px via `kazma.css`) on any inline `grid-template-columns:1fr 1fr;` —
   bare inline 2-col grids don't collapse and crush on mobile.

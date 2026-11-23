@@ -326,7 +326,7 @@
               type="text" class="form-input" :aria-label="lib._t_search_placeholder" :placeholder="lib._t_search_placeholder"
               x-model="lib._query" @keydown.enter="runSearch(lib)"
             >
-            <button class="btn btn-primary btn-sm" @click="runSearch(lib)" :disabled="lib._searching" x-text="lib._t_search_btn"></button>
+            <button class="btn btn-primary btn-sm" @click="runSearch(lib)" :disabled="!!lib._searching" x-text="lib._t_search_btn"></button>
           </div>
           <template x-if="lib._searching">
             <div style="font-size:0.8rem;color:var(--text-secondary);" x-text="lib._t_searching"></div>

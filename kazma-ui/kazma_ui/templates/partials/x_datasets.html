@@ -43,7 +43,7 @@
             <small x-text="c.human_reviewed ? t('reviewed') : t('unreviewed')"></small>
           </button></template>
           <div class="xd-actions"><button class="btn btn-secondary" @click="page--" :disabled="page === 0 || busy">{{ t('x_dataset.previous') }}</button><span x-text="page + 1"></span>
-            <button class="btn btn-secondary" @click="page++" :disabled="(page + 1) * 20 >= filtered.length || busy">{{ t('x_dataset.next') }}</button></div>
+            <button class="btn btn-secondary" @click="page++" :disabled="(page + 1) * 20 >= filtered.length || !!busy">{{ t('x_dataset.next') }}</button></div>
         </div></template>
         <template x-if="form"><form @submit.prevent="save()" @invalid.capture.prevent="invalidField($event)" class="xd-editor">
           <h3>{{ t('x_dataset.edit') }}</h3>

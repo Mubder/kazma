@@ -395,7 +395,7 @@
                             @click="toggleProtect(e)" title="{{ t('memory.pg.protect_hint') }}">{{ t('memory.pg.protect') }}</button>
                     <button class="btn btn-sm btn-secondary" x-show="!e.core && e.protected" x-cloak
                             @click="toggleProtect(e)" title="{{ t('memory.pg.unprotect_hint') }}">{{ t('memory.pg.unprotect') }}</button>
-                    <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected"
+                    <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="!!e.protected"
                             :title="e.protected ? tOr(e.core ? 'memory.pg.core_always_protected' : 'memory.pg.unprotect_first', '') : tOr('memory.page.delete_thing_hint', '')"
                             x-text="S.delete || 'Delete'"></button>
                   </div>

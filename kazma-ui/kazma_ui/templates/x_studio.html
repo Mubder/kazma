@@ -209,7 +209,7 @@
     </template>
     <p role="alert" x-show="loadStates.threads && loadStates.threads.error" translate="no" :dir="textDir((loadStates.threads || {}).error)" x-text="(loadStates.threads || {}).error" x-cloak></p>
     <button class="btn btn-secondary" @click="loadThreads()">{{ t('common.refresh') }}</button>
-    <button class="btn btn-secondary" x-show="threadsNext" @click="loadThreads(true)" :disabled="loadStates.threads && loadStates.threads.loading" x-cloak>{{ t('x_studio.load_more') }}</button>
+    <button class="btn btn-secondary" x-show="threadsNext" @click="loadThreads(true)" :disabled="!!(loadStates.threads && loadStates.threads.loading)" x-cloak>{{ t('x_studio.load_more') }}</button>
   </div>
 
   <div id="xs-panel-studio" role="tabpanel" aria-labelledby="xs-tab-studio" x-show="tab === 'studio'" x-cloak>
@@ -309,7 +309,7 @@
           </div>
         </div>
       </template>
-      <button class="btn btn-secondary btn-sm" x-show="queueNext" :disabled="loadStates.queue && loadStates.queue.loading" @click="loadQueue(true)" x-cloak>{{ t('x_studio.load_more') }}</button>
+      <button class="btn btn-secondary btn-sm" x-show="queueNext" :disabled="!!(loadStates.queue && loadStates.queue.loading)" @click="loadQueue(true)" x-cloak>{{ t('x_studio.load_more') }}</button>
     </div>
   </div>
 
@@ -355,7 +355,7 @@
           </div>
         </div>
       </template>
-      <button class="btn btn-secondary btn-sm" x-show="draftsNext" :disabled="loadStates.drafts && loadStates.drafts.loading" @click="loadDrafts(true)" x-cloak>{{ t('x_studio.load_more') }}</button>
+      <button class="btn btn-secondary btn-sm" x-show="draftsNext" :disabled="!!(loadStates.drafts && loadStates.drafts.loading)" @click="loadDrafts(true)" x-cloak>{{ t('x_studio.load_more') }}</button>
     </div>
     <div class="card xs-card">
       <h2>{{ t('x_studio.publication_history') }}</h2>
@@ -378,7 +378,7 @@
           </div>
         </div>
       </template>
-      <button class="btn btn-secondary btn-sm" x-show="operationsNext" :disabled="loadStates.operations && loadStates.operations.loading" @click="loadOperations(true)" x-cloak>{{ t('x_studio.load_more') }}</button>
+      <button class="btn btn-secondary btn-sm" x-show="operationsNext" :disabled="!!(loadStates.operations && loadStates.operations.loading)" @click="loadOperations(true)" x-cloak>{{ t('x_studio.load_more') }}</button>
       <p x-show="operationError" role="alert" translate="no" :dir="textDir(operationError)" x-text="operationError" x-cloak></p>
       <div x-show="selectedOperation" x-cloak>
         <template x-for="event in (selectedOperation ? selectedOperation.events : [])" :key="event.id">
