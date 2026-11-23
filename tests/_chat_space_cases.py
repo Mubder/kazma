@@ -772,10 +772,19 @@ def voice_room(w: World) -> None:
 
 
 _REGISTRY: list[Any] = []
+#: What the shared registry held when it was built (:func:`registry_state`).
+_BUILT: list[Any] = []
 
 
 def _registry() -> Any:
-    """The registry a running Kazma builds, as the matrix lists its tools."""
+    """The registry a running Kazma builds, as the matrix lists its tools.
+
+    It is built once per process and shared by every test that asks for it
+    (the matrix's cases, the feature grants, the creator-policy tests). A test
+    changes it only through its monkeypatch; the root conftest puts back
+    anything a test left changed, and fails that test
+    (``_helper_tool_registry_put_back``, ``tests/test_shared_registry_isolation.py``).
+    """
     if not _REGISTRY:
         from kazma_core.agent.tool_builtins import register_builtin_tools
         from kazma_core.agent.tool_registry import LocalToolRegistry
@@ -783,7 +792,55 @@ def _registry() -> Any:
         registry = LocalToolRegistry()
         register_builtin_tools(registry)
         _REGISTRY.append(registry)
+        _BUILT.append(_state_of(registry))
     return _REGISTRY[0]
+
+
+def _state_of(registry: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
+    """The registry's own attributes, its tool table (the object and a copy)
+    and each tool's fields. Shallow: a tool's schema edited in place is not
+    seen, a schema, function or flag replaced is."""
+    tools = registry._tools
+    return dict(vars(registry)), tools, dict(tools), {name: dict(vars(tool)) for name, tool in tools.items()}
+
+
+def registry_state() -> Any:
+    """What the shared registry holds now; None while it is not built."""
+    return _state_of(_REGISTRY[0]) if _REGISTRY else None
+
+
+def put_back_registry(state: Any) -> list[str]:
+    """Put the shared registry back to *state* (None: as it was built) and
+    name what had changed; an empty list when nothing had (or it was never
+    built). The tool table keeps its identity: a monkeypatch holding it can
+    still undo into it."""
+    if not _REGISTRY:
+        return []
+    registry = _REGISTRY[0]
+    attributes, table, entries, fields = state if state is not None else _BUILT[0]
+    changed: list[str] = []
+    if dict(vars(registry)) != attributes:
+        changed.append("the registry's attributes")
+        vars(registry).clear()
+        vars(registry).update(attributes)
+    now = registry._tools  # the original table, put back just above when it was replaced
+    for name in sorted(set(now) | set(entries)):
+        if name not in entries:
+            changed.append(f"{name} (added)")
+        elif name not in now:
+            changed.append(f"{name} (removed)")
+        elif now[name] is not entries[name]:
+            changed.append(f"{name} (replaced)")
+        elif vars(now[name]) != fields[name]:
+            changed.append(f"{name} (changed in place)")
+    if changed:
+        table.clear()
+        table.update(entries)
+        for name, tool in entries.items():
+            if vars(tool) != fields[name]:
+                vars(tool).clear()
+                vars(tool).update(fields[name])
+    return changed
 
 
 def _call(name: str, **arguments: Any) -> str:
