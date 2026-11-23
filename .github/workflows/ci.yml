@@ -185,7 +185,7 @@ jobs:
         # Five Tests runs on 2026-11-22/23 were ended from outside 30-39
         # minutes in ("received a shutdown signal" / "lost communication").
         # The cause measured on 2026-11-23 was memory: the chunks grew to 14.3
-        # of 16 GB (see MALLOC_ARENA_MAX below). systemd-oomd, which ends a
+        # of 16 GB (see --files-per-process below). systemd-oomd, which ends a
         # whole service group under pressure, was found inactive on the
         # image; this step keeps it off should a later image enable it, and
         # prints the memory state the run starts with.
@@ -210,6 +210,20 @@ jobs:
         # runner: every chunk of every run in November 2026 ran out of time
         # and was re-run whole as pieces, and the job took 60-75 minutes.
         # A hung test is pytest-timeout's (--timeout=120), not this budget's.
+        # --files-per-process: a chunk runs its ~470 files as consecutive
+        # pytest processes of at most this many, one after another, so four
+        # processes run at any moment as before. One process per chunk grew
+        # for the whole run -- 3.8, 3.6, 3.5 and 2.8 GB at 40 minutes, 14.6 of
+        # 16 GB in use (2026-11-23); 5.1, 4.3 and 4.1 GB at 52 minutes on an
+        # earlier run -- and the runner was ended from outside. What a test
+        # leaves reachable stays until its process ends, so a process ends
+        # every ~60 files: measured on the same 471 files (Windows), one
+        # process reached 5.53 GB, processes of at most 60 files 0.77-1.72 GB,
+        # for ~6 s of start-up each (AGENTS.md, Testing & Validation).
+        # MALLOC_ARENA_MAX=2 was tried for this on 2026-11-23 and did not
+        # change the growth (it is Python-level: objects kept reachable, not
+        # glibc's arenas), so it is not set: the suite runs on glibc's own
+        # allocator settings, as an install does.
         # A line every four minutes with memory, disk and the process count:
         # the runner was ended from outside 31-39 minutes in, three times on
         # 2026-11-22/23, before any chunk had printed, and a "failure()" step
@@ -224,19 +238,11 @@ jobs:
           ) &
           monitor=$!
           status=0
-          python scripts/fast_test.py --chunks 4 || status=$?
+          python scripts/fast_test.py --chunks 4 --files-per-process 60 || status=$?
           kill "$monitor" 2>/dev/null || true
           exit "$status"
         env:
           KAZMA_DB_BACKEND: sqlite
-          # glibc gives each thread that allocates its own malloc arena (up to
-          # eight per core) and rarely hands their pages back, so a test chunk
-          # that runs thousands of tests with worker threads only grows: on
-          # 2026-11-23 the four chunks reached 5.1, 4.3 and 4.1 GB of the
-          # runner's 16 (14.3 GB used, 1.7 available), and five runs before
-          # that starved the runner to death 30-39 minutes in. Two arenas
-          # bound that growth; Python's own allocator is unaffected.
-          MALLOC_ARENA_MAX: "2"
           # Each "[fast-test]" line reaches the log as it is printed: piped,
           # Python buffers it, and on 2026-11-22 two runs ended by a SIGTERM
           # (exit 143) 37 minutes in left nothing to say which chunk ran.

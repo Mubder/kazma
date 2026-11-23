@@ -19,7 +19,7 @@
     <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mubder/kazma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%E2%80%93%203.14-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11 to 3.14"></a>
-    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-28%2C786-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/Tests-28%2C793-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
     <a href="https://kazma.ai/docs/security/prompt-injection/"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection measured"></a>
     <a href="https://www.bestpractices.dev/projects/16743"><img src="https://img.shields.io/cii/level/16743?style=flat-square&label=OpenSSF%20Best%20Practices" alt="OpenSSF Best Practices"></a>
     <a href="https://scorecard.dev/viewer/?uri=github.com/Mubder/kazma"><img src="https://img.shields.io/ossf-scorecard/github.com/Mubder/kazma?style=flat-square&label=OpenSSF%20Scorecard" alt="OpenSSF Scorecard"></a>
@@ -42,7 +42,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~1031K LOC** (814K Python code + 52K JS) | **28,786 tests** (2,017 test files) | **5,922+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~1032K LOC** (814K Python code + 52K JS) | **28,793 tests** (2,017 test files) | **5,923+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 

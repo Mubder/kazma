@@ -26,7 +26,7 @@ checks for `.github/workflows/ci.yml`:
 
 | Check | What it holds |
 |---|---|
-| `Tests` | the full suite (`scripts/fast_test.py --chunks 4`) |
+| `Tests` | the full suite (`scripts/fast_test.py --chunks 4 --files-per-process 60`: four chunks, each run as consecutive pytest processes of at most 60 files) |
 | `Tests (Postgres backend)` | every `@pytest.mark.postgres` test on a real Postgres |
 | `Tests (pgvector)` | the Postgres-primary memory benchmark on a real pgvector, pgvector's own search beside the exact comparison; its floors report until they are locked from a named run, and a named test that skips fails it |
 | `Document worker container profile (real Docker)` | the worker and broker images build, the container policy attests from inside the image, the container-profile qualification suite passes with no skips, and the compose-shaped broker topology leaves no container behind |
