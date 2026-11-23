@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**293** variables are read by the product code; **293** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**294** variables are read by the product code; **294** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -22,7 +22,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_ALLOW_YOLO` | (none) | `kazma_core.safety.yolo` | yes |
 | `KAZMA_API_KEY` | `""` | `kazma_core.llm_provider`, `kazma_core.model_registry`, `kazma_ui.app` | yes |
 | `KAZMA_ARTIFACTS_DB` | (none) | `kazma_core.agent.artifacts` | yes |
-| `KAZMA_AUTH_DISABLED` | (none) | `kazma_core.config_store`, `kazma_core.security.boot_guard`, `kazma_core.security.hardening` +1 | yes |
+| `KAZMA_AUTH_DISABLED` | (none) | `kazma_core.config_store`, `kazma_core.security.boot_guard`, `kazma_core.security.cloud_profile` +2 | yes |
 | `KAZMA_AUTOLOGIN_HOSTS` | (none) | `kazma_ui.auth` | yes |
 | `KAZMA_AUTO_STORE_BELIEFS` | (none) | `kazma_core.memory.belief_extractor` | yes |
 | `KAZMA_BACKUPS_DIR` | (none) | `kazma_core.paths` | yes |
@@ -39,6 +39,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_CHILD_ENV_ALLOW` | (none) | `kazma_core.security.child_env` | yes |
 | `KAZMA_CLONE_DIR` | `""` | `kazma_gateway.agent_handler.commands`, `kazma_gateway.routers.github`, `kazma_gateway.routers.workspaces` | yes |
 | `KAZMA_CLONE_HOSTS` | `""` | `kazma_gateway.routers.github` | yes |
+| `KAZMA_CLOUD_PROFILE` | (none) | `kazma_core.security.boot_guard`, `kazma_core.security.cloud_profile` | yes |
 | `KAZMA_CODE_EXEC_ALLOW_LOCAL` | (none) | `kazma_core.tools.code_exec` | yes |
 | `KAZMA_CODE_EXEC_DOCKER` | (none) | `kazma_core.safety.post_hitl`, `kazma_core.tools.code_exec` | yes |
 | `KAZMA_CODE_EXEC_IMAGE` | (none) | `kazma_core.engine_move`, `kazma_core.tools.code_exec` | yes |
@@ -62,9 +63,9 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_DB_BACKEND_SOURCE` | (none) | `kazma_core.migration.exporter` | yes |
 | `KAZMA_DB_CONTAINER` | `""` | `kazma_core.engine_move`, `kazma_core.guard_dependencies`, `kazma_core.migration.pg_bridge` +1 | yes |
 | `KAZMA_DB_INTERNAL_PORT` | `"5432"` | `kazma_core.migration.pg_bridge` | yes |
-| `KAZMA_DEMO_MODE` | (none) | `kazma_core.memory.belief_extractor`, `kazma_core.memory.health`, `kazma_core.security.boot_guard` +5 | yes |
+| `KAZMA_DEMO_MODE` | (none) | `kazma_core.memory.belief_extractor`, `kazma_core.memory.health`, `kazma_core.security.boot_guard` +6 | yes |
 | `KAZMA_DETACHED_TTL_S` | `"300"` | `kazma_ui.active_turns` | yes |
-| `KAZMA_DEV_WS_BYPASS` | (none) | `kazma_core.security.boot_guard`, `kazma_core.security.hardening`, `kazma_ui.app` +1 | yes |
+| `KAZMA_DEV_WS_BYPASS` | (none) | `kazma_core.security.boot_guard`, `kazma_core.security.cloud_profile`, `kazma_core.security.hardening` +2 | yes |
 | `KAZMA_DIGEST_INTERVAL_HOURS` | `"24"` | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_DISABLE_COST_BREAKER` | `"0"` | `kazma_core.cost_breaker` | yes |
 | `KAZMA_DISCLOSURE_KEY` | `""` | `kazma_core.config_store` | yes |
@@ -120,7 +121,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_HARD_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_HITL_CANONICAL_FLOOR` | `""` | `kazma_core.safety.hitl` | yes |
 | `KAZMA_HITL_GRANT_TTL_SECONDS` | (none) | `kazma_core.safety.hitl_grants` | yes |
-| `KAZMA_HOST` | `"127.0.0.1"` | `kazma_cli.main`, `kazma_core.security.boot_guard`, `kazma_core.security.hardening` +6 | yes |
+| `KAZMA_HOST` | `"127.0.0.1"` | `kazma_cli.main`, `kazma_core.security.boot_guard`, `kazma_core.security.cloud_profile` +7 | yes |
 | `KAZMA_HOST_SHELL` | (none) | `kazma_core.safety.post_hitl` | yes |
 | `KAZMA_HUB_DB` | (none) | `kazma_core.hub.cli`, `kazma_core.paths` | yes |
 | `KAZMA_HUB_URL` | (none) | `kazma_core.hub.cli` | yes |
@@ -156,7 +157,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_LONG_TASK_MAX_ITER` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_LONG_TASK_MAX_RECURSION` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_LONG_TASK_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | yes |
-| `KAZMA_LOOPBACK_AUTOLOGIN` | (none) | `kazma_ui.auth` | yes |
+| `KAZMA_LOOPBACK_AUTOLOGIN` | (none) | `kazma_core.security.cloud_profile`, `kazma_ui.auth` | yes |
 | `KAZMA_LOOP_STALL_WATCHDOG` | (none) | `kazma_core.observability.loop_stall` | yes |
 | `KAZMA_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_MCP_ALLOW_UNGATED` | (none) | `kazma_core.mcp.server` | yes |
@@ -219,11 +220,11 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PLAN_MODE` | (none) | `kazma_core.agent.plan_mode` | yes |
 | `KAZMA_PORT` | (none) | `kazma_cli.port_setup`, `kazma_core.server_port` | yes |
 | `KAZMA_PROCESS_PRIORITY` | (none) | `kazma_core.process_priority` | yes |
-| `KAZMA_PRODUCTION` | (none) | `kazma_core.agent.tool_builtins.system`, `kazma_core.documents.config`, `kazma_core.mcp.manager` +9 | yes |
+| `KAZMA_PRODUCTION` | (none) | `kazma_core.agent.tool_builtins.system`, `kazma_core.documents.config`, `kazma_core.mcp.manager` +10 | yes |
 | `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | yes |
 | `KAZMA_PROMPT_CACHE` | (none) | `kazma_core.prompt_cache` | yes |
 | `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_core.web_acquire.research_pipeline_job`, `kazma_ui.app` | yes |
-| `KAZMA_PUBLIC_URL` | `""` | `kazma_cli.port_setup`, `kazma_core.ide.env_context`, `kazma_core.migration.exporter` +12 | yes |
+| `KAZMA_PUBLIC_URL` | `""` | `kazma_cli.port_setup`, `kazma_core.ide.env_context`, `kazma_core.migration.exporter` +13 | yes |
 | `KAZMA_RATE_LIMIT_ENABLED` | `""` | `kazma_ui.rate_limit` | yes |
 | `KAZMA_READ_ONLY_START` | (none) | `kazma_ui.read_only_mode` | yes |
 | `KAZMA_READ_URL_MAX_CHARS` | (none) | `kazma_core.tools.read_url` | yes |
@@ -246,7 +247,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_RESTIC_PASSWORD` | `""` | `kazma_core.backup.restic_repo` | yes |
 | `KAZMA_RUNTIME_HA` | `"0"` | `kazma_core.runtime_ownership`, `kazma_core.stores.workspaces` | yes |
 | `KAZMA_SEARXNG_URL` | (none) | `kazma_core.container_services`, `kazma_core.guard_dependencies`, `kazma_core.tools.research_readiness` +2 | yes |
-| `KAZMA_SECRET` | `""` | `kazma_cli.main`, `kazma_core.config_store`, `kazma_core.runtime.local_api` +5 | yes |
+| `KAZMA_SECRET` | `""` | `kazma_cli.main`, `kazma_core.config_store`, `kazma_core.runtime.local_api` +6 | yes |
 | `KAZMA_SELF_IMPROVEMENT` | (none) | `kazma_core.skills.self_improvement` | yes |
 | `KAZMA_SEMANTIC_CACHE` | (none) | `kazma_ui.app` | yes |
 | `KAZMA_SEMANTIC_COMPACT` | (none) | `kazma_core.agent.semantic_compact` | yes |
@@ -280,7 +281,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_TOOL_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.graph_helpers` | yes |
 | `KAZMA_TRANSCRIPT_RECALL` | (none) | `kazma_core.memory.transcript_recall` | yes |
 | `KAZMA_TRANSLATION_REMOTE` | `""` | `kazma_skills.native.arabic_bilingual_nlp.tools` | yes |
-| `KAZMA_TRUSTED_PROXIES` | `""` | `kazma_core.security.boot_guard`, `kazma_ui.auth` | yes |
+| `KAZMA_TRUSTED_PROXIES` | `""` | `kazma_core.security.boot_guard`, `kazma_core.security.cloud_profile`, `kazma_ui.auth` | yes |
 | `KAZMA_TRUST_LAN` | (none) | `kazma_ui.auth` | yes |
 | `KAZMA_TURN_DURABLE_CHARS` | `"600"` | `kazma_ui.sse_chat._streaming` | yes |
 | `KAZMA_TURN_DURABLE_INTERVAL_S` | `"2.0"` | `kazma_ui.sse_chat._streaming` | yes |

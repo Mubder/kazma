@@ -28,8 +28,10 @@ from kazma_core.english_count import count_noun
 OK = "ok"
 WARN = "warn"
 BAD = "bad"
+#: Shown, never counted: a check that does not apply here (the cloud profile off).
+INFO = "info"
 
-_MARK = {OK: "[ ok ]", WARN: "[warn]", BAD: "[FAIL]"}
+_MARK = {OK: "[ ok ]", WARN: "[warn]", BAD: "[FAIL]", INFO: "[info]"}
 
 
 def _host(url: str) -> str:
@@ -382,6 +384,28 @@ def _database_service_rows() -> list[tuple[str, str]]:
     return out
 
 
+def _cloud_profile_rows() -> list[tuple[str, str]]:
+    """The cloud profile (Spaces S4-08): every check a public install must
+    pass at boot. With the profile on, a missing piece that refuses the boot
+    fails here and one that warns warns; off, each is shown for what a
+    public install would need, and counts for nothing."""
+    from kazma_core.security.cloud_profile import PROFILE_SWITCH, REFUSE, findings, profile_on
+
+    on = profile_on()
+    out = [_line(OK if on else INFO, f"the cloud profile is {'on' if on else 'off'} ({PROFILE_SWITCH})",
+                 "" if on else "a public install turns it on; below is what it would ask")]
+    with read_only_diagnostic("kazma doctor: the cloud profile"):
+        found = findings()
+    for f in found:
+        if f.ok:
+            out.append(_line(OK, f.title, f.detail))
+            continue
+        status = (BAD if f.severity == REFUSE else WARN) if on else INFO
+        what = "Kazma refuses to start" if f.severity == REFUSE else "Kazma warns at boot"
+        out.append(_line(status, f"{f.title}: no ({what})", f.detail + "\n         fix: " + f.fix))
+    return out
+
+
 def run(argv: list[str] | None = None) -> int:
     """Print the report. Exit 1 if anything is broken, 0 otherwise."""
     rows = collect()
@@ -399,6 +423,11 @@ def run(argv: list[str] | None = None) -> int:
         for _status, rendered in db_rows:
             print(rendered)
         rows = rows + db_rows
+    cloud_rows = _cloud_profile_rows()
+    print("\nThe cloud profile\n")
+    for _status, rendered in cloud_rows:
+        print(rendered)
+    rows = rows + cloud_rows
     worst = {s for s, _ in rows}
     if BAD in worst:
         print("\nOne or more checks FAILED — the next turn will likely error.")

@@ -81,6 +81,9 @@ SECURITY_SWITCHES: frozenset[str] = frozenset({
     "KAZMA_DEV_WS_BYPASS",
     "KAZMA_GATEWAY_OPEN_TO_EVERYONE",
     "KAZMA_GATEWAY_STRICT_ALLOWLIST",
+    # Spaces S4-08: the install is public, and the cloud profile's checks
+    # run at boot (``kazma_core.security.cloud_profile``).
+    "KAZMA_CLOUD_PROFILE",
 })
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})

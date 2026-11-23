@@ -16229,6 +16229,29 @@ an install with one account behaves as before.
   new person's features, by the sidebar, EN/AR, every tab shown and a theme
   switch: no request refused; today's shell and the tabs drawn whatever the
   features as controls).
+- **The cloud profile (S4-08, 2026-11-23).** An install the operator
+  declares public (`KAZMA_CLOUD_PROFILE`, one of `boot_guard.SECURITY_SWITCHES`,
+  read through `env_flag`) runs the checks of
+  `kazma_core/security/cloud_profile.py` at boot; with it off nothing there
+  runs or is read. `CHECKS` is the one table, each check declaring what a
+  missing piece does: **refuse** (Kazma does not start, and prints what is
+  missing and the fix) for an `https` `KAZMA_PUBLIC_URL`, a proxy named in
+  `KAZMA_TRUSTED_PROXIES` (`*` is no proxy), sign-in on (no
+  `KAZMA_AUTH_DISABLED`, `KAZMA_DEMO_MODE`, `KAZMA_DEV_WS_BYPASS`,
+  `KAZMA_LOOPBACK_AUTOLOGIN`; no hand-set `KAZMA_SECRET` under
+  `WEAK_SECRET_CHARS`) and code only in containers
+  (`security.execution.container_required`); **warn** (said at WARNING) for
+  `KAZMA_PRODUCTION`, a loopback bind, a container engine installed and a
+  backup copy off the machine. A check that cannot be made is a missing
+  piece. Two stages: the environment's checks in `create_app` before the app
+  is built (before it waits for its database), the settings' in the builder
+  once the store answers (`boot_refusal(settings=...)`). A new piece is a
+  row of `CHECKS` and a way to break it in the test's `BREAKS`. `kazma
+  doctor` shows every check: on, a missing refuse piece fails it; off, each
+  is shown (`[info]`) and counts for nothing. Gate:
+  `tests/test_cloud_profile.py` (each piece missing on its own, through the
+  real `create_app` for both stages; the profile off and every piece in
+  place as controls; a check with no way to break it fails the gate).
 
 ## UI Conventions (Web)
 

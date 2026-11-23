@@ -354,6 +354,16 @@ class KazmaAppBuilder:
         if "pytest" not in sys.modules:
             _ensure_generated_secrets()
 
+        # Spaces S4-08: the cloud profile's checks that read settings (code
+        # only in containers, a backup copy off the machine, a container
+        # engine), once the store answers. A no-op with the profile off.
+        from kazma_core.security.cloud_profile import boot_refusal
+
+        _cloud_refusal = boot_refusal(settings=True)
+        if _cloud_refusal:
+            print(_cloud_refusal, file=sys.stderr)
+            raise SystemExit(1)
+
         self.config = load_config(self.config_path)
         # Process-wide singleton — never construct ConfigStore() elsewhere.
         from kazma_core.config_store import get_config_store
@@ -3088,6 +3098,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # sign-in switch on a network bind served every /api route (security
     # audit 2026-11-10). A no-op unless such a switch is on.
     refusal = factory_exposure_refusal()
+    if not refusal:
+        # Spaces S4-08: an install declared public (KAZMA_CLOUD_PROFILE)
+        # refuses to start without what the environment must give it -- TLS,
+        # a declared proxy, sign-in on -- before it waits for its database.
+        # A no-op, reading nothing, with the profile off.
+        from kazma_core.security.cloud_profile import boot_refusal
+
+        refusal = boot_refusal(settings=False)
     if refusal:
         import sys
 
