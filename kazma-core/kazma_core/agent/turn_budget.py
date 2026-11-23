@@ -271,11 +271,17 @@ def _reply_messages(values: dict[str, Any], input_state: Any, text: str) -> list
     return [*base, {"role": "assistant", "content": text}]
 
 
-def _reply_update(values: dict[str, Any], input_state: Any, text: str) -> dict[str, Any]:
+def _reply_update(values: dict[str, Any], input_state: Any, text: str, *,
+                  failed: bool = True) -> dict[str, Any]:
+    """The checkpoint's honest end. *failed* False is a refusal, not a
+    failure (a turn refused for its share, Spaces S4-04): recorded as the
+    daily-limit refusal at iteration 0 is -- ``turn_failed`` False, so
+    ``close_turn`` logs ``failed=no`` and the digest and the weekly report
+    never count it as a turn that failed."""
     return {
         "messages": _reply_messages(values, input_state, text),
-        "turn_failed": True,
-        "error_message": text,
+        "turn_failed": failed,
+        "error_message": text if failed else "",
         "tool_calls_pending": [],
         "next_node": "end",
     }
@@ -340,7 +346,7 @@ async def _end_timed_out_segment(
 
 
 async def _write_honest_end(graph: Any, config: dict[str, Any], thread_id: str, input_state: Any,
-                            text: str, *, what: str) -> dict[str, Any]:
+                            text: str, *, what: str, failed: bool = True) -> dict[str, Any]:
     """Write *text* as the turn's end into the checkpoint and return the
     state it ends on. A graph without a checkpointer keeps nothing; a
     checkpoint that cannot be read or written is not written over: the
@@ -350,7 +356,7 @@ async def _write_honest_end(graph: Any, config: dict[str, Any], thread_id: str, 
     if getattr(graph, "checkpointer", None) is not None:
         try:
             values = await _stored_values(graph, config)
-            update = _reply_update(values, input_state, text)
+            update = _reply_update(values, input_state, text, failed=failed)
             await _write_reply(graph, config, thread_id, update)
         except Exception:  # noqa: BLE001 -- the reply still reaches the caller
             logger.warning(
@@ -358,7 +364,7 @@ async def _write_honest_end(graph: Any, config: dict[str, Any], thread_id: str, 
                 "thread=%s; the caller still shows it", what, thread_id[:12], exc_info=True,
             )
     if not update:
-        update = _reply_update(values, input_state, text)
+        update = _reply_update(values, input_state, text, failed=failed)
     return {**values, **update}
 
 
@@ -484,7 +490,8 @@ async def _end_refused_turn(graph: Any, cfg: dict[str, Any], tid: str, input_sta
                             why: str) -> tuple[str, dict[str, Any]]:
     """The honest end of a turn refused before it started: the question and
     the refusal, in the person's language, as the turn's last messages; no
-    page (a share is the limit working, not a fault)."""
+    page, and not recorded as failed (a share is the limit working, not a
+    fault)."""
     from kazma_core.language_lock import in_their_language
 
     asked = ""
@@ -496,4 +503,5 @@ async def _end_refused_turn(graph: Any, cfg: dict[str, Any], tid: str, input_sta
               "انتظر حتى ينتهي أحدها ثم أعد المحاولة.")
     text = in_their_language(asked, why, arabic)
     logger.info("[turn] refused before it started (thread=%s): %s", tid[:12], why)
-    return text, await _write_honest_end(graph, cfg, tid, input_state, text, what="refused turn's")
+    return text, await _write_honest_end(graph, cfg, tid, input_state, text, what="refused turn's",
+                                         failed=False)

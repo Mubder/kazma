@@ -212,14 +212,16 @@ async def run_agent_turn(
             else:
                 raw = await _ainvoke(graph, state, cfg)
         if segment.expired:
-            # Cut by the budget: the checkpoint already ends with this reply.
+            # Cut by the budget, or refused for its share before it started:
+            # the checkpoint already ends with this reply. A refusal is not a
+            # failure (Spaces S4-04), as the daily-limit refusal is not.
             text = segment.text
             return TurnResult(
                 thread_id=thread_id,
                 text=text,
                 state=segment.state,
-                error=text,
-                turn_failed=True,
+                error=None if segment.refused else text,
+                turn_failed=not segment.refused,
             )
 
         if not isinstance(raw, dict):

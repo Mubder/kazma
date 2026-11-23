@@ -40,14 +40,32 @@ def _sqlite_jobs(tmp_path, clock):
     jobs = DocumentJobRepository(meta, clock=clock, jitter=lambda _b: 0, retry_base_seconds=5)
     counter = {"n": 0}
 
-    def enqueue(tenant: str):
+    def enqueue(tenant: str, actor: str = ""):
         counter["n"] += 1
-        job = _enqueue(meta, jobs, tenant=tenant, key=f"k{counter['n']}")
+        if actor:
+            job = _enqueue_as(meta, jobs, tenant=tenant, key=f"k{counter['n']}", actor=actor)
+        else:
+            job = _enqueue(meta, jobs, tenant=tenant, key=f"k{counter['n']}")
         _to_ready(jobs, job)
         clock.tick()
         return job
 
     return jobs, enqueue, meta.close
+
+
+def _enqueue_as(meta, jobs, *, tenant: str, key: str, actor: str):
+    """A job one person queued (the job's ``actor_id``)."""
+    import hashlib
+
+    document = meta.create_document(tenant_id=tenant, owner_id=actor, title="Document")
+    payload = f"{tenant}-{key}".encode()
+    digest = hashlib.sha256(payload).hexdigest()
+    blob = meta.register_blob(tenant_id=tenant, sha256=digest, byte_size=len(payload), storage_kind="originals")
+    version = meta.create_version(tenant_id=tenant, document_id=document.id, actor_id=actor,
+                                  source_blob_id=blob.id, source_sha256=digest,
+                                  original_filename="document.pdf", mime_type="application/pdf")
+    return jobs.enqueue(tenant_id=tenant, workspace_id="workspace-1", document_id=document.id,
+                        version_id=version.id, idempotency_key=key, actor_id=actor)
 
 
 def _to_ready(jobs, job):
@@ -83,11 +101,12 @@ def queue(request, tmp_path):
         jobs = PostgresDocumentJobRepository(pool, clock=clock, jitter=lambda _b: 0, retry_base_seconds=5)
         counter = {"n": 0}
 
-        def enqueue(tenant: str):
+        def enqueue(tenant: str, actor: str = ""):
             counter["n"] += 1
             job = jobs.enqueue(
                 tenant_id=tenant, workspace_id="w", document_id=DocumentId(str(uuid.uuid4())),
                 version_id=VersionId(str(uuid.uuid4())), idempotency_key=f"k{counter['n']}",
+                actor_id=actor,
             )
             job = _to_ready(jobs, job)
             clock.tick()
@@ -133,6 +152,33 @@ def test_a_retried_job_waits_for_its_turn_by_when_it_became_ready(queue):
     # By readiness the new job goes first; by created_at (the old order) the
     # retried job would have jumped back to the front.
     assert order == [second.id, first.id]
+
+
+def _one_tenant_two_people(queue) -> tuple[list, object]:
+    """One tenant; the operator queues three jobs, then Reem one (the
+    newest); the operator's first is claimed and runs. Returns the queued
+    jobs and the next job claimed."""
+    jobs, enqueue, _clock = queue
+    operators = [enqueue("t", actor="operator") for _ in range(3)]
+    reems = enqueue("t", actor="reem")
+    assert jobs.claim_next(owner="w0", lease_seconds=600).id == operators[0].id
+    return [*operators, reems], jobs.claim_next(owner="w1", lease_seconds=600)
+
+
+def test_with_spaces_off_the_claim_order_is_the_one_before_spaces(queue):
+    # The S4-04 review: the per-person key changed the order on an install
+    # that does not enforce Spaces. Off, the oldest ready job of the tenant
+    # is next, whoever queued it -- the operator's second, not Reem's.
+    queued, claimed = _one_tenant_two_people(queue)
+    assert claimed.id == queued[1].id
+
+
+def test_control_with_spaces_on_the_person_with_fewest_running_goes_first(queue, monkeypatch):
+    from kazma_core.spaces import scope
+
+    monkeypatch.setattr(scope, "_enforced", True)
+    queued, claimed = _one_tenant_two_people(queue)
+    assert claimed.id == queued[3].id  # Reem's, though it is the newest
 
 
 def test_the_old_order_would_starve_the_quiet_tenant(tmp_path):

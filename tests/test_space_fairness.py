@@ -112,6 +112,46 @@ def test_nothing_is_counted_while_spaces_is_not_enforced(matrix) -> None:
     assert asyncio.run(take()) is None and fairness.turn_slots.running(A) == 0
 
 
+def _thread_hops(monkeypatch, matrix: Matrix) -> list[str]:
+    """Every slot a turn and a due job take, through the real turn runner:
+    the calls handed to a thread on the way (S4-04 review: one per turn and
+    per due job with Spaces off)."""
+    hops: list[str] = []
+    real = asyncio.to_thread
+
+    async def counting(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        hops.append(getattr(func, "__name__", repr(func)))
+        return await real(func, *args, **kwargs)
+
+    held = _Held()
+    held.go.set()
+    graph = _turn_graph(held)
+
+    async def scenario() -> None:
+        monkeypatch.setattr(asyncio, "to_thread", counting)
+        try:
+            with matrix.as_a():
+                for slots in (fairness.turn_slots, fairness.scheduled_slots):
+                    release = await slots.take(A, matrix.account_a)
+                    if release is not None:
+                        release()
+                await _turn(graph, "hops-1", "a question")
+        finally:
+            monkeypatch.setattr(asyncio, "to_thread", real)
+    assert fairness.turn_slots.running(A) == 0 and fairness.scheduled_slots.running(A) == 0
+
+    asyncio.run(scenario())
+    return [h for h in hops if h == "shares"]
+
+
+def test_with_spaces_off_a_slot_costs_no_thread_hop(matrix, monkeypatch) -> None:
+    assert _thread_hops(monkeypatch, matrix) == []
+
+
+def test_control_with_spaces_on_each_slot_reads_its_shares_in_a_thread(matrix, enforced, monkeypatch) -> None:
+    assert _thread_hops(monkeypatch, matrix) == ["shares", "shares", "shares"]
+
+
 # ── turns, through the real run_agent_turn and graph ────────────────────
 
 
@@ -180,8 +220,10 @@ def _run_turns(shared: Matrix, monkeypatch) -> dict[str, Any]:
 def test_a_turn_beyond_its_share_is_refused_and_another_spaces_turn_runs(shared, monkeypatch) -> None:
     out = _run_turns(shared, monkeypatch)
     second = out["second"]
-    assert second.turn_failed and "your share of this space's" in (second.error or "")
-    assert out["a_full"].turn_failed and "This space already runs 2 turns" in (out["a_full"].error or "")
+    # A refusal, not a failure (the S4-04 review): answered, never counted as failed.
+    assert not second.turn_failed and second.error is None
+    assert "your share of this space's" in second.text
+    assert not out["a_full"].turn_failed and "This space already runs 2 turns" in out["a_full"].text
     assert out["running_a"] == 2 and len(out["ran"]) == 3  # the refused turns' graphs never ran
     assert all(not r.turn_failed for r in out["done"]), out["done"]
     assert fairness.turn_slots.running(A) == 0 and fairness.turn_slots.running(B) == 0
@@ -189,7 +231,9 @@ def test_a_turn_beyond_its_share_is_refused_and_another_spaces_turn_runs(shared,
     async def stored() -> Any:
         return await out["graph"].aget_state({"configurable": {"thread_id": "t-a2", "checkpoint_ns": ""}})
 
-    messages = asyncio.run(stored()).values["messages"]
+    values = asyncio.run(stored()).values
+    messages = values["messages"]
+    assert values["turn_failed"] is False and not values.get("error_message")
     assert [m["role"] for m in messages] == ["user", "assistant"]  # the question and the honest end
     assert messages[0]["content"] == "second question" and "your share" in messages[1]["content"]
 
@@ -213,7 +257,7 @@ def test_control_one_queue_for_all_lets_one_space_starve_another(shared, monkeyp
         return starved
 
     starved = asyncio.run(scenario())
-    assert starved.turn_failed  # space B waited behind A's turns and was refused
+    assert "This space already runs 2 turns" in starved.text  # B waited behind A's turns and was refused
 
 
 def test_a_refused_turn_is_answered_in_the_persons_language(shared, monkeypatch) -> None:
@@ -233,7 +277,55 @@ def test_a_refused_turn_is_answered_in_the_persons_language(shared, monkeypatch)
         return refused
 
     refused = asyncio.run(scenario())
-    assert refused.turn_failed and "حصتها" in (refused.error or "")
+    assert not refused.turn_failed and "حصتها" in refused.text
+
+
+def _refused_turn_line(shared: Matrix, monkeypatch, caplog) -> str:
+    """The line ``close_turn`` writes for a turn refused for its share --
+    the one the daily digest and the weekly report read."""
+    from collections import OrderedDict
+
+    from kazma_ui import turn_runtime
+
+    # The line is written once per turn per process: a table of its own.
+    monkeypatch.setattr(turn_runtime, "_finished_logged", OrderedDict())
+    monkeypatch.setattr(fairness, "TURN_WAIT_S", 0.1)
+    _limits(A, turns=1)
+    held = _Held()
+    graph = _turn_graph(held)
+
+    async def scenario() -> Any:
+        with shared.as_a():
+            first = asyncio.create_task(_turn(graph, "line-1", "first"))
+        await _until(lambda: held.ran == ["ran"])
+        with shared.as_a():
+            await _turn(graph, "line-2", "refused question")
+        held.go.set()
+        await first
+        return await graph.aget_state({"configurable": {"thread_id": "line-2", "checkpoint_ns": ""}})
+
+    snap = asyncio.run(scenario())
+    with caplog.at_level("INFO", logger="kazma_ui.turn_runtime"):
+        turn_runtime._note_finished_turn(snap, "line-2")
+    lines = [r.getMessage() for r in caplog.records if "Turn finished" in r.getMessage()]
+    assert len(lines) == 1, lines
+    return lines[0]
+
+
+def test_a_refused_turn_is_not_counted_as_failed(shared, monkeypatch, caplog) -> None:
+    assert "failed=no" in _refused_turn_line(shared, monkeypatch, caplog)
+
+
+def test_control_a_refusal_written_as_a_failure_is_counted_failed(shared, monkeypatch, caplog) -> None:
+    from kazma_core.agent import turn_budget
+
+    real = turn_budget._reply_update
+
+    def as_before(values: Any, input_state: Any, text: str, *, failed: bool = True) -> Any:
+        return real(values, input_state, text)  # every honest end failed, refusals too
+
+    monkeypatch.setattr(turn_budget, "_reply_update", as_before)
+    assert "failed=yes" in _refused_turn_line(shared, monkeypatch, caplog)
 
 
 def test_an_approvals_resume_is_let_in_beyond_the_share(shared, monkeypatch) -> None:
@@ -336,15 +428,15 @@ async def _scheduled_world(tmp: Path, shared: Matrix) -> Any:
     store = SQLiteCronStore(db_path=str(tmp / "cron.db"))
     await store.init()
     now = datetime.now(UTC)
-    for i in range(5):  # A's backlog, due first
+    for i in range(5):  # A's backlog, due first (task fires: a reminder takes no slot)
         await store.insert(ScheduledJob(
             job_id=f"a-{i}", timing="2026-11-23T09:00", prompt=f"A {i}", platform="telegram",
-            thread_id=f"ta{i}", status=JobStatus.PENDING, kind="reminder",
+            thread_id=f"ta{i}", status=JobStatus.PENDING, kind="task",
             next_run=(now - timedelta(seconds=60 - i)).isoformat(), created_at=now.isoformat(),
             delivery_target="telegram:1", tenant_id=A, creator=shared.account_a))
     await store.insert(ScheduledJob(
         job_id="b-0", timing="2026-11-23T09:00", prompt="B", platform="telegram", thread_id="tb",
-        status=JobStatus.PENDING, kind="reminder", next_run=(now - timedelta(seconds=1)).isoformat(),
+        status=JobStatus.PENDING, kind="task", next_run=(now - timedelta(seconds=1)).isoformat(),
         created_at=now.isoformat(), delivery_target="telegram:1", tenant_id=B, creator=shared.account_b))
     return store
 
@@ -453,7 +545,7 @@ def _document_queue(tmp_path: Path) -> Any:
     return meta, jobs, enqueue
 
 
-def test_within_a_space_the_person_with_fewest_running_goes_first(tmp_path) -> None:
+def test_within_a_space_the_person_with_fewest_running_goes_first(enforced, tmp_path) -> None:
     meta, jobs, enqueue = _document_queue(tmp_path)
     try:
         backlog = [enqueue("ali", f"ali-{n}") for n in range(4)]
@@ -692,7 +784,7 @@ def _fires_when_b_arrives_later(shared: Matrix, tmp: Path, monkeypatch) -> list[
         for i in range(5):
             await store.insert(ScheduledJob(
                 job_id=f"a-{i}", timing="2026-11-23T09:00", prompt=f"A {i}", platform="telegram",
-                thread_id=f"ta{i}", status=JobStatus.PENDING, kind="reminder",
+                thread_id=f"ta{i}", status=JobStatus.PENDING, kind="task",
                 next_run=(now - timedelta(seconds=60 - i)).isoformat(), created_at=now.isoformat(),
                 delivery_target="telegram:1", tenant_id=A, creator=shared.account_a))
         sched = CronScheduler(store=store, poll_interval=0.2, max_concurrent=2)
@@ -702,7 +794,7 @@ def _fires_when_b_arrives_later(shared: Matrix, tmp: Path, monkeypatch) -> list[
             await asyncio.sleep(0.3)
             await store.insert(ScheduledJob(
                 job_id="b-0", timing="2026-11-23T09:00", prompt="B", platform="telegram", thread_id="tb",
-                status=JobStatus.PENDING, kind="reminder", next_run=datetime.now(UTC).isoformat(),
+                status=JobStatus.PENDING, kind="task", next_run=datetime.now(UTC).isoformat(),
                 created_at=now.isoformat(), delivery_target="telegram:1", tenant_id=B,
                 creator=shared.account_b))
             await sched._poll_once()
@@ -727,3 +819,64 @@ def test_control_without_the_slots_it_waits_behind_the_backlog(shared, tmp_path,
     _one_queue_for_all(monkeypatch, cap=10**6)
     fired = _fires_when_b_arrives_later(shared, tmp_path, monkeypatch)
     assert fired[:2] == ["a-0", "a-1"] and "b-0" not in fired[:2], fired
+
+
+def _reminder_behind_a_task(shared: Matrix, tmp: Path, monkeypatch) -> list[str]:
+    """Person B's task fire in shared space A holds B's one scheduled slot
+    (the space's share 2, a person's 1) while B's reminder comes due: the
+    jobs that reached their fire before the task ended."""
+    from kazma_core.cron.scheduler import CronScheduler, JobStatus, ScheduledJob, SQLiteCronStore
+
+    fired: list[str] = []
+    go = asyncio.Event()
+
+    async def execute(self: Any, job: Any) -> None:
+        fired.append(job.job_id)
+        if job.kind == "task":
+            await go.wait()
+
+    monkeypatch.setattr(CronScheduler, "_execute", execute)
+
+    async def scenario() -> None:
+        store = SQLiteCronStore(db_path=str(tmp / "cron.db"))
+        await store.init()
+        now = datetime.now(UTC)
+        await store.insert(ScheduledJob(
+            job_id="task-b", timing="2026-11-23T09:00", prompt="a long task", platform="telegram",
+            thread_id="tt", status=JobStatus.PENDING, kind="task",
+            next_run=(now - timedelta(seconds=5)).isoformat(), created_at=now.isoformat(),
+            delivery_target="telegram:1", tenant_id=A, creator=shared.account_b))
+        sched = CronScheduler(store=store, poll_interval=0.2, max_concurrent=4)
+        sched._running = True
+        try:
+            await sched._poll_once()
+            await _until(lambda: "task-b" in fired, 3.0)
+            await store.insert(ScheduledJob(
+                job_id="remind-b", timing="2026-11-23T09:00", prompt="remind me at 9:00", platform="telegram",
+                thread_id="tr", status=JobStatus.PENDING, kind="reminder",
+                next_run=datetime.now(UTC).isoformat(), created_at=now.isoformat(),
+                delivery_target="telegram:1", tenant_id=A, creator=shared.account_b))
+            await sched._poll_once()
+            await asyncio.sleep(0.6)  # three polls' worth: the slot's wait is one
+        finally:
+            go.set()
+            await asyncio.gather(*list(sched._exec_tasks), return_exceptions=True)
+            await store.close()
+
+    asyncio.run(scenario())
+    return fired
+
+
+def test_a_reminder_never_waits_behind_its_persons_running_task(shared, tmp_path, monkeypatch) -> None:
+    assert fairness.shares("scheduled", A) == (2, 1)
+    fired = _reminder_behind_a_task(shared, tmp_path, monkeypatch)
+    assert fired == ["task-b", "remind-b"], fired
+
+
+def test_control_a_reminder_that_takes_a_slot_waits_behind_the_task(shared, tmp_path, monkeypatch) -> None:
+    from kazma_core.cron.scheduler import CronScheduler
+
+    # Today's rule before the fix: every due job takes a slot, reminders too.
+    monkeypatch.setattr(CronScheduler, "_takes_a_slot", staticmethod(lambda job: True))
+    fired = _reminder_behind_a_task(shared, tmp_path, monkeypatch)
+    assert fired == ["task-b"], fired  # "remind me at 9:00" waits for the task to end

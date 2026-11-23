@@ -16156,18 +16156,24 @@ an install with one account behaves as before.
     (`fairness.turn_slots`, `fairness.scheduled_slots`). A new turn takes its
     slot in `turn_segment_budget`, waiting up to `TURN_WAIT_S`; past it the
     turn is refused before it starts (`TurnSegment.refused`, `expired` too,
-    the honest end written in the person's language) and the caller runs
-    no graph: every caller of the budget checks `segment.refused` (a gate).
+    the honest end written in the person's language, never recorded as
+    failed: `turn_failed` False, as the daily-limit refusal) and the caller
+    runs no graph: every caller of the budget checks `segment.refused` (a
+    gate).
     An approval's resume is let in and counted; a turn inside one that
     holds a slot -- a sub-agent's, a scheduled task's -- takes none
     (`fairness.held`). A due job takes its slot in
     `CronScheduler._execute_bounded` before the scheduler's own semaphore,
     waiting up to one poll and holding nothing while it waits; one still
-    beyond its share is left pending, unclaimed.
+    beyond its share is left pending, unclaimed. A reminder (no model call)
+    takes no slot (`CronScheduler._takes_a_slot`): behind a running task
+    fire it would ring minutes late, or past its catch-up window. With
+    Spaces off a slot is not even asked (no thread hop).
   - **Queues take turns**: the scheduler's due list by space, then by
     person (`SQLiteCronStore.due_jobs(fair=True)`); document claims, within
     a tenant, by the person with the fewest running (`fair_claim_order`'s
-    `running_actor`, both backends); the memory lane by space (N37:
+    `running_actor`, both backends; with Spaces off the order is the one
+    before S4-04); the memory lane by space (N37:
     `memory_task_queue.claim_space`, filled at enqueue -- `enqueue_task(
     space=)`, else the payload's tenant, else the bound scope -- read by
     `_claim_batch`; never whose data a task is, which the space walk reads

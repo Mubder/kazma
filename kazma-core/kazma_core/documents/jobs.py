@@ -66,18 +66,25 @@ def fair_claim_order() -> tuple[str, str]:
     tenant's backlog of hundreds no longer makes every other tenant wait
     behind all of it.
 
-    And across the people of a tenant (Spaces S4-04: a space is a tenant):
-    among one tenant's jobs, the person with the fewest running goes first,
-    so one member's backlog never makes the space's other members wait
-    behind it. On both backends; the callers join ``running r`` as before.
+    And, once Spaces is enforced, across the people of a tenant (Spaces
+    S4-04: a space is a tenant): among one tenant's jobs, the person with the
+    fewest running goes first, so one member's backlog never makes the
+    space's other members wait behind it. On both backends; the callers join
+    ``running r`` as before. With Spaces off the order is exactly the one
+    before S4-04 (the switch is read per claim, in memory).
     """
+    from kazma_core.spaces.scope import spaces_enforced
+
     active = ",".join(f"'{s}'" for s in _ACTIVE_STATE_VALUES)
-    with_clause = f"""
+    running = f"""
         WITH running AS (
             SELECT tenant_id, COUNT(*) AS n FROM document_jobs
             WHERE state IN ({active}) AND lease_owner IS NOT NULL
             GROUP BY tenant_id
-        ), running_actor AS (
+        )"""
+    if not spaces_enforced():
+        return running, "ORDER BY COALESCE(r.n, 0), COALESCE(j.retry_at, j.created_at), j.id"
+    with_clause = running + f""", running_actor AS (
             SELECT tenant_id, actor_id, COUNT(*) AS n FROM document_jobs
             WHERE state IN ({active}) AND lease_owner IS NOT NULL
             GROUP BY tenant_id, actor_id

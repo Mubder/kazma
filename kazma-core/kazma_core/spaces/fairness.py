@@ -21,14 +21,16 @@ runs: they are counted here, in this process (:class:`_FairSlots`).
 
 * **Turns** (``turn_slots``): a new turn beyond its space's or its person's
   share waits up to :data:`TURN_WAIT_S` for one to end, then ends with an
-  honest refusal (``agent.turn_budget.turn_segment_budget``). An approval's
+  honest refusal (``agent.turn_budget.turn_segment_budget``), recorded as
+  answered, not failed (a share is the limit working). An approval's
   resume is a turn already admitted: always let in, and counted. A turn
   inside another (a sub-agent's) is part of it and not counted again.
 * **Scheduled jobs** (``scheduled_slots``): a due job waits for its space's
   and its person's slot before it takes one of the scheduler's
   (``cron.scheduler``), and the due list takes turns by space, then by
   person (``cron.store``), so a space with hundreds of jobs due never holds
-  up another's.
+  up another's. A reminder takes no slot: it makes no model call, and
+  behind a running task fire it would ring late.
 
 **Queues take turns.** Document jobs are claimed from the space with the
 fewest running, then from the person of that space with the fewest running
@@ -195,6 +197,11 @@ class _FairSlots:
 
     async def take(self, space_id: str, person: str, *, wait_s: float = 0.0,
                    force: bool = False) -> Callable[[], None] | None:
+        # Spaces off: nothing counted, and no thread hop for every turn and
+        # due job (the switch is in memory; ``shares`` reads the identity
+        # store only once it is on).
+        if not spaces_enforced():
+            return None
         space = str(space_id or "")
         who = str(person or "")
         cap = await asyncio.to_thread(shares, self.kind, space)

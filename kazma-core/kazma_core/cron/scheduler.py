@@ -1045,12 +1045,19 @@ class CronScheduler:
         still beyond its share is left pending for a later pass, unclaimed.
         It waits holding nothing, so one space's jobs never hold the
         scheduler's slots another space's could fire in. Its turn takes no
-        turn slot of its own (``fairness.held``)."""
+        turn slot of its own (``fairness.held``). A reminder takes no slot:
+        it makes no model call, and behind a person's running task fire
+        "remind me at 9:00" would arrive minutes late, or past its catch-up
+        window and be recorded missed."""
         from kazma_core.spaces import fairness
         from kazma_core.spaces.identity import IdentityUnavailable
         from kazma_core.spaces.scope import space_of_record
         from kazma_core.spaces.space_limits import SpaceOverLimit
 
+        if not self._takes_a_slot(job):
+            async with sem:
+                await self._execute(job)
+            return
         release = None
         try:
             release = await fairness.scheduled_slots.take(
@@ -1067,6 +1074,13 @@ class CronScheduler:
         finally:
             if release is not None:
                 release()
+
+    @staticmethod
+    def _takes_a_slot(job: ScheduledJob) -> bool:
+        """Whether a due job waits for its space's and its person's
+        scheduled slot (Spaces S4-04): a reminder makes no model call and
+        takes none."""
+        return job.kind != "reminder"
 
     @staticmethod
     def _is_missed(job: ScheduledJob, now: datetime, default_catchup_s: int) -> bool:
