@@ -184,7 +184,7 @@ def test_the_people_reset_is_a_signed_in_admin_s_and_never_their_own(app, enforc
     monkeypatch.setattr(auth, "get_request_principal", lambda request: token)
     by_token = _client(app).post(f"/api/people/{OWNER_ACCOUNT_ID}/second-factor/reset", headers=OWNER)
     monkeypatch.setattr(auth, "get_request_principal", real_principal)
-    assert second_factor.is_on(OWNER_ACCOUNT_ID), "a token switched off the owner's second factor"
+    assert second_factor._is_on(OWNER_ACCOUNT_ID), "a token switched off the owner's second factor"
     assert by_token.status_code == 403
     # The install's secret: a program's key.
     by_secret = _client(app).post(f"/api/people/{person['id']}/second-factor/reset", headers=OWNER)
@@ -193,10 +193,10 @@ def test_the_people_reset_is_a_signed_in_admin_s_and_never_their_own(app, enforc
     admin = _admin_session(app, owner_secret)
     own = admin.post(f"/api/people/{OWNER_ACCOUNT_ID}/second-factor/reset")
     assert own.status_code == 409 and own.json()["error"] == "own_in_my_account"
-    assert second_factor.is_on(OWNER_ACCOUNT_ID)
+    assert second_factor._is_on(OWNER_ACCOUNT_ID)
     # Anyone else's, from the admin's session: done.
     assert admin.post(f"/api/people/{person['id']}/second-factor/reset").status_code == 200
-    assert not second_factor.is_on(person["id"])
+    assert not second_factor._is_on(person["id"])
 
 
 def test_negative_control_the_reset_without_its_rule(app, enforced, monkeypatch) -> None:
@@ -416,7 +416,7 @@ def test_a_failed_vault_never_stops_a_sign_in_with_no_second_factor(app, monkeyp
 
 
 def test_negative_control_the_vault_read_for_every_sign_in(app, monkeypatch) -> None:
-    monkeypatch.setattr(second_factor, "is_on",
+    monkeypatch.setattr(second_factor, "_is_on",
                         lambda account: bool(second_factor._read(second_factor._name(account))))
     with pytest.raises(AssertionError, match="stopped a sign-in with no second factor"):
         test_a_failed_vault_never_stops_a_sign_in_with_no_second_factor(app, monkeypatch)

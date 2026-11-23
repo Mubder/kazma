@@ -848,6 +848,11 @@ def create_person(name: str, password: str, *, by: str) -> dict[str, Any]:
 
     _changed(_change)
     logger.info("[people] account created id=%s by=%s", account_id, by)
+    # Everyone signs in from now on, the owner too (S4-02): the sessions the
+    # peer address made for nothing go with the peer trust that made them.
+    from kazma_core.security.web_sessions import end_peer_trust_sessions
+
+    end_peer_trust_sessions()
     return next(p for p in list_people() if p["id"] == account_id)
 
 

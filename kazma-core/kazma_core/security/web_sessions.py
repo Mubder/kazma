@@ -24,6 +24,7 @@ __all__ = [
     "revoke_session",
     "revoke_user_sessions",
     "end_one_session",
+    "end_peer_trust_sessions",
     "sessions_of_account",
     "session_label",
     "validate_session",
@@ -371,6 +372,36 @@ def revoke_user_sessions(*, user_id: str = "", username: str = "", keep: str | N
         ended += 1
     if ended:
         logger.info("[web_sessions] ended %d other session(s) of one user", ended)
+    return ended
+
+
+#: How the owner's auto-login sessions came by the peer address alone (the
+#: session's ``via``): ended once a second person has an account
+#: (:func:`end_peer_trust_sessions`).
+PEER_TRUST_VIAS: tuple[str, ...] = ("this_computer", "local_network")
+
+
+def end_peer_trust_sessions() -> int:
+    """End every session the peer address made for nothing -- the auto-login
+    on this computer or the local network, and an auto-login session from
+    before its ``via`` was kept -- once everyone signs in (Spaces S4-02's
+    re-check): a second person got an account, or Spaces was switched on
+    with one. Such a session lasted its 14 days from any address after the
+    peer trust that made it was gone. A session a browser made with the
+    install's secret stays (it holds the key). Returns how many ended."""
+    from kazma_core.config_store import get_config_store
+
+    ended = 0
+    for key, payload in _live_records():
+        if str(payload.get("actor") or "") not in OWNER_SESSION_ACTORS:
+            continue
+        if str(payload.get("via") or "") not in ("", *PEER_TRUST_VIAS):
+            continue
+        _cache_evict(key, revoked=True)
+        get_config_store().delete(key)
+        ended += 1
+    if ended:
+        logger.warning("[web_sessions] ended %d auto-login session(s): everyone signs in now", ended)
     return ended
 
 

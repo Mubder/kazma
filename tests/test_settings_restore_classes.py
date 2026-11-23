@@ -114,6 +114,9 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     # Ends one session of one person (Spaces S4-02: My account and People):
     # deletes one web_session.<hash> row.
     "kazma-core/kazma_core/security/web_sessions.py::end_one_session": ("web_session.",),
+    # Ends the auto-login's sessions when everyone must sign in (Spaces
+    # S4-02's re-check): deletes web_session.<hash> rows.
+    "kazma-core/kazma_core/security/web_sessions.py::end_peer_trust_sessions": ("web_session.",),
     # A migration import writes the bundle's rows, keys as stored, only those
     # migration carries (FA-255: never RUNTIME, never a web session).
     "kazma-core/kazma_core/migration/importer.py::_restore_settings": (

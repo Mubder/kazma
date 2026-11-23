@@ -62,7 +62,8 @@ __all__ = [
     "check",
     "confirm",
     "forget",
-    "is_on",
+    "break_glass",
+    "factor_on",
     "reset",
     "state",
     "turn_off",
@@ -95,6 +96,9 @@ _PAUSE_SHOWN_S = 7 * 24 * 3600
 _SECRET_USER_ID = "shared-secret"
 _RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _lock = threading.Lock()
+
+#: Accounts whose unreadable vault was said (:func:`_held`), once each.
+_SAID_UNREADABLE: set[str] = set()
 
 
 class SecondFactorRefused(ValueError):
@@ -218,7 +222,7 @@ def _markers() -> dict[str, Any]:
     return held if isinstance(held, dict) else {}
 
 
-def is_on(account_id: str) -> bool:
+def _is_on(account_id: str) -> bool:
     """Whether *account_id* has a second factor, from the marker alone: no
     vault read. Blocking (a settings read)."""
     return bool(account_id) and account_id in _markers()
@@ -264,15 +268,50 @@ def account_for_sign_in(user_id: str) -> str:
 
 
 def _held(account_id: str) -> dict[str, Any] | None:
-    """The second factor kept for *account_id*, or None when its marker is
-    off (the vault is not read then). A marker that is on with nothing in
-    the vault cannot be checked: :class:`SecondFactorUnavailable`."""
-    if not is_on(account_id):
+    """The second factor kept for *account_id*, or None when it has none.
+
+    The marker says it is on: the vault must hold it, or it cannot be
+    checked (:class:`SecondFactorUnavailable`). The marker is off: the vault
+    is asked too -- a settings restore from before the factor existed took
+    the marker away while the vault kept it (the S4-02 re-check), and a
+    second factor never goes off silently. One found there is on, and its
+    marker is put back. A vault that cannot be read while the marker is off
+    answers no: a vault that failed to open never stops an account with no
+    second factor (the review of S4-02, item 7)."""
+    marked = _is_on(account_id)
+    try:
+        held = _read(_name(account_id))
+    except SecondFactorUnavailable:
+        if marked:
+            raise
+        if account_id not in _SAID_UNREADABLE:
+            # Once per account and process: this runs on every request that
+            # sends the install's secret.
+            _SAID_UNREADABLE.add(account_id)
+            logger.warning("[auth] the vault cannot be read; account %s has no second factor marked",
+                           account_id, exc_info=True)
         return None
-    held = _read(_name(account_id))
     if not held or not held.get("secret"):
-        raise SecondFactorUnavailable("a second factor is marked on and its secret is not in the vault")
+        if marked:
+            raise SecondFactorUnavailable("a second factor is marked on and its secret is not in the vault")
+        return None
+    if not marked:
+        logger.warning("[auth] the second factor of account %s was kept with no marker; marked on again",
+                       account_id)
+        try:
+            _mark(account_id, str(held.get("since") or ""))
+        except (sqlite3.Error, OSError, RuntimeError):
+            # It is on either way: the vault holds it.
+            logger.warning("[auth] the marker of account %s could not be put back", account_id, exc_info=True)
     return held
+
+
+def factor_on(account_id: str) -> bool:
+    """Whether *account_id* has a second factor: its marker, or the vault's
+    copy when the marker is off (:func:`_held`). Raises
+    :class:`SecondFactorUnavailable` when it is marked on and cannot be
+    read. Blocking (settings, the vault)."""
+    return bool(account_id) and _held(account_id) is not None
 
 
 def state(account_id: str) -> dict[str, Any]:
@@ -300,7 +339,7 @@ def begin(account_id: str, label: str) -> dict[str, str]:
     if not account_id:
         raise SecondFactorRefused("no_account", 403, "Only an account has a second factor.")
     with _lock:
-        if is_on(account_id):
+        if factor_on(account_id):
             raise SecondFactorRefused("already_on", 409, "A second factor is on already. Turn it off first.")
         secret = totp.new_secret()
         _write(_pending_name(account_id), {"secret": secret, "at": time.time()})
@@ -348,7 +387,7 @@ def confirm(account_id: str, code: str) -> list[str]:
 def turn_off(account_id: str, code: str) -> None:
     """Turn *account_id*'s second factor off, with a code from it or a
     recovery code. Refused: none on (``not_on``), a wrong code, a pause."""
-    if not is_on(account_id):
+    if not factor_on(account_id):
         raise SecondFactorRefused("not_on", 409, "No second factor is on.")
     if not check(account_id, code):
         raise SecondFactorRefused("wrong_code", 400, "That code is not right.")
@@ -360,7 +399,7 @@ def turn_off(account_id: str, code: str) -> None:
 def reset(account_id: str, *, by: str) -> None:
     """The admin takes a person's second factor off (they lost the phone and
     the recovery codes): recorded, and told to the person."""
-    if not is_on(account_id):
+    if not factor_on(account_id):
         raise SecondFactorRefused("not_on", 409, "This person has no second factor.")
     forget(account_id)
     _record("second_factor_reset", account_id, by)
@@ -368,14 +407,45 @@ def reset(account_id: str, *, by: str) -> None:
 
 
 def forget(account_id: str) -> None:
-    """Delete *account_id*'s second factor and any begun one. The marker
-    goes first: a vault copy left behind is never asked for."""
+    """Delete *account_id*'s second factor and any begun one. The vault's
+    copy goes first, then the marker: a copy left behind would be found
+    again (:func:`_held`), and a marker left on with no copy refuses until
+    this is done again."""
     with _lock:
-        _unmark(account_id)
         _delete(_name(account_id))
+        _unmark(account_id)
         _delete(_pending_name(account_id))
         _forget_step(account_id)
         _forget_pauses(account_id)
+
+
+def break_glass(account_id: str, *, by: str) -> dict[str, bool]:
+    """Take *account_id*'s second factor off from this machine, with no code
+    and no server (``kazma account second-factor off``, the S4-02 re-check):
+    the way back for an owner who lost the phone and the recovery codes, or
+    whose vault was reset (the marker on, nothing in the vault). The caller
+    holds the runtime lock, so no server is running. The marker always
+    goes; the vault's copies go when the vault can be opened (a copy left
+    in a vault that cannot be read is never asked for: :func:`_held`).
+    Recorded. Returns what it removed."""
+    if not account_id:
+        raise SecondFactorRefused("no_account", 403, "Only an account has a second factor.")
+    with _lock:
+        marked = _is_on(account_id)
+        vault_cleared = True
+        try:
+            _delete(_name(account_id))
+            _delete(_pending_name(account_id))
+        except (SecondFactorUnavailable, sqlite3.Error, OSError, RuntimeError, ValueError):
+            vault_cleared = False
+            logger.warning("[auth] break-glass: the vault's copy of account %s could not be removed",
+                           account_id, exc_info=True)
+        _unmark(account_id)
+        _forget_step(account_id)
+        _forget_pauses(account_id)
+    _record("second_factor_reset", account_id, by)
+    logger.warning("[auth] the second factor of account %s was taken off on this machine by %s", account_id, by)
+    return {"was_marked": marked, "vault_cleared": vault_cleared}
 
 
 # ── Checking a code ──────────────────────────────────────────────────────
@@ -398,10 +468,12 @@ def check(account_id: str, code: str) -> bool:
         if until > time.time():
             raise SecondFactorPaused(until)
         right = _matches(account_id, held, typed)
+        # Counted under the lock (the S4-02 re-check): counted after it, 40
+        # wrong codes at once were all checked and the pause ran to a day.
+        paused = False if right else _count_wrong(account_id)
     if right:
         _clear_wrong(account_id)
         return True
-    paused = _count_wrong(account_id)
     if paused:
         logger.warning("[auth] code checks of account %s paused after %d wrong codes", account_id, WRONG_CODES)
         try:

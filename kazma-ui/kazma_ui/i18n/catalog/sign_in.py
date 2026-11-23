@@ -138,9 +138,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "sign_in.auto_login_note": {
         "en": "On this computer Kazma doesn't ask for the code: it signs you in by itself here "
-              "(the auto-login). Elsewhere it asks.",
+              "(the auto-login). Elsewhere it asks, on your local network too.",
         "ar": "على هذا الحاسوب لا يطلب Kazma الرمز: يسجّل دخولك بنفسه هنا (الدخول التلقائي). "
-              "في أي مكان آخر يطلبه.",
+              "في أي مكان آخر يطلبه، وعلى شبكتك المحلية أيضًا.",
     },
     "sign_in.install_secret_note": {
         "en": "The install's secret (KAZMA_SECRET, in the install's .env) is a full key for programs: "

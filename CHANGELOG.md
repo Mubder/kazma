@@ -27,6 +27,20 @@
 - The admin invites a person with a link that works once and runs out, and can
   list and end each person's sessions, the owner's own of every kind. The
   link's token rides after a `#`, so no log keeps it.
+- When the second person's account is made, or Spaces is switched on with one,
+  the sessions the auto-login had already made end: the browser on Kazma's
+  machine signs in again like anyone.
+- Once the owner has a second factor, a browser on the local network no longer
+  signs in by itself with `KAZMA_TRUST_LAN`, and the chat page's socket no
+  longer takes the old secret cookie. Kazma's own machine keeps its auto-login
+  while it is the only account.
+- An owner who lost the phone and the recovery codes takes the second factor
+  off on Kazma's machine, with Kazma stopped:
+  `kazma account second-factor off --account owner`. It works even when the
+  vault lost its copy, and People records it.
+- A second factor stays on when a settings restore from before it took its
+  marker away: the vault's copy counts. Many wrong codes sent at once make one
+  pause, not several.
 
 ## Memory: the thresholds chosen on the first set alone (2026-11-22)
 

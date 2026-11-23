@@ -54,6 +54,7 @@ kazma
 ├── maintenance ...        # an update window: begin, end
 ├── uninstall              # take Kazma off this computer (data kept unless asked)
 ├── spaces migrate ...     # several people on one Kazma: what must hold first (--check)
+├── account second-factor off --account <id>  # the way back to an account, on this machine only
 ├── report <what happened> # send a problem report (you see it first)
 ├── import <export>        # bring a ChatGPT or Claude export into memory
 └── --help | -h | help     # print command list
@@ -388,6 +389,14 @@ added, and makes the parts of the move Kazma can make itself.
 | `kazma spaces migrate --dry-run` | Lists what the move would change. Changes nothing. |
 | `kazma spaces migrate [--yes]` | Shows the changes and asks, then makes them: a secret held in copies that disagree gets its newest copy's value (no copy is deleted), every space gets its key, and the owner's API token for the deploy check is made and kept in Kazma's home, readable by you only. The vault is copied first; a second run changes nothing. It does not turn Spaces on. |
 | `kazma spaces migrate --switch-on` | The same, then turns Spaces on, only when every precondition holds. Otherwise it says which do not. |
+
+### 2.20 `kazma account` {#kazma-account}
+
+What only the machine Kazma runs on may do to an account.
+
+| Command | What it does |
+|---|---|
+| `kazma account second-factor off --account <id> [--yes]` | Takes the account's second factor off with no code: the way back for an owner who lost the phone and the recovery codes, or whose vault was reset. It runs with no server: it is refused while a Kazma server runs on the data folder (stop it first), reads the vault directly and records the change in the People record. The owner's account id is `owner`. |
 
 ---
 

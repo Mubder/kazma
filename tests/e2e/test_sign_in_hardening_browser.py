@@ -136,6 +136,17 @@ def test_an_invitation_a_second_factor_and_a_session_ended(lang):
             note.wait_for(state="visible", timeout=20000)
             assert note.inner_text().strip() == _t("login.everyone_signs_in", lang)
 
+            # ── The admin's own page: the auto-login session it had ended
+            # when the second account was made (the re-check of S4-02); the
+            # admin signs in again, with the install's secret ────────────
+            pg.reload(wait_until="domcontentloaded")
+            pg.wait_for_function("() => location.pathname === '/login'", timeout=20000)
+            pg.locator("#everyone-signs-in").wait_for(state="visible", timeout=20000)
+            pg.click("#tabs [data-mode='secret']")
+            pg.fill("#secret", os.environ["KAZMA_SECRET"])
+            pg.click("#btnSecret")
+            pg.wait_for_function("() => location.pathname !== '/login'", timeout=20000)
+
             # ── They sign in, and turn on a second factor ────────────────
             gp.click("#invite-sign-in")
             gp.wait_for_function("() => location.pathname === '/login'", timeout=20000)
@@ -177,7 +188,9 @@ def test_an_invitation_a_second_factor_and_a_session_ended(lang):
             fp.wait_for_function("() => location.pathname !== '/login'", timeout=20000)
 
             # ── The admin sees their two sessions and ends one ───────────
-            pg.reload(wait_until="domcontentloaded")
+            pg.goto(f"{h.base}/chat?space=default", wait_until="domcontentloaded")
+            pg.wait_for_function("() => !!window.kazmaSpace", timeout=20000)
+            _soft_nav(pg, "/settings")
             _settings_loaded(pg)
             _open_tab(pg, "settings.tab_people", lang)
             person = pg.evaluate("(n) => fetch('/api/people').then(r => r.json())"
@@ -194,12 +207,15 @@ def test_an_invitation_a_second_factor_and_a_session_ended(lang):
                 "'[data-person-session-list=\"' + id + '\"] [data-person-session]').length === 1",
                 arg=person["id"], timeout=20000)
             assert pg.locator(f"[data-person-second-factor='{person['id']}'] .badge-success").is_visible()
-            # The admin's own sessions: the auto-login on this computer, by name.
+            # The admin's own sessions: the one signed in with the secret, by
+            # name; the auto-login's is gone.
             pg.locator(f"[data-person-sessions-toggle='{scope.OWNER_ACCOUNT_ID}']").click()
-            own = pg.locator(f"[data-person-session-list='{scope.OWNER_ACCOUNT_ID}'] "
-                             "[data-person-session-via='this_computer']")
+            mine = f"[data-person-session-list='{scope.OWNER_ACCOUNT_ID}']"
+            own = pg.locator(f"{mine} [data-person-session-via='login']")
             own.first.wait_for(state="visible", timeout=20000)
-            assert _t("sign_in.via_this_computer", lang) in own.first.inner_text()
+            assert _t("sign_in.via_signed_in", lang) in own.first.inner_text()
+            assert pg.locator(f"{mine} [data-person-session-via='this_computer']").count() == 0, (
+                "the auto-login's session outlived the second account")
             # My account tells the admin what the second factor does not cover.
             _open_tab(pg, "settings.tab_account", lang)
             note = pg.locator("[data-install-secret-note]")

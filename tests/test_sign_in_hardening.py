@@ -210,9 +210,12 @@ def test_a_vault_not_ready_refuses_never_guesses_none(app, monkeypatch) -> None:
     from kazma_core.security import vault
 
     _turn_on(_client(app), OWNER)
-    monkeypatch.setattr(vault, "get_vault", lambda: None)
-    monkeypatch.setattr(vault, "vault_disabled", lambda: False)
-    answer = _sign_in(_client(app), secret=SECRET, code="123456")
+    # Undone at the end of the test, before the fixture's clean-up takes the
+    # factor out of the vault: a copy left there is on (the S4-02 re-check).
+    with monkeypatch.context() as patched:
+        patched.setattr(vault, "get_vault", lambda: None)
+        patched.setattr(vault, "vault_disabled", lambda: False)
+        answer = _sign_in(_client(app), secret=SECRET, code="123456")
     assert answer.status_code == 503 and answer.headers.get("retry-after"), answer.text
 
 
@@ -422,13 +425,6 @@ def test_a_second_account_ends_the_auto_login(app, enforced) -> None:
     signed = local.post("/api/auth/login", json={"secret": SECRET})
     assert signed.status_code == 200 and "kazma-session" in signed.cookies
     assert local.get("/api/account/second-factor").status_code == 200
-    # A socket from this machine with no credential is refused.
-    from starlette.websockets import WebSocketDisconnect
-
-    with pytest.raises(WebSocketDisconnect) as closed,             TestClient(app, base_url="http://127.0.0.1:9090", client=("127.0.0.1", 40001)
-                       ).websocket_connect("/ws/dashboard") as socket:
-        socket.receive_text()
-    assert closed.value.code == 4003
 
 
 def test_negative_control_today_s_auto_login(app, enforced, monkeypatch) -> None:
@@ -470,12 +466,45 @@ def test_a_second_account_ends_the_lan_auto_login(app, enforced, monkeypatch) ->
     people.create_person("noor-lan", PASSWORD, by=OWNER_ACCOUNT_ID)
     assert not _bridge_session(app), "a bridge peer got the owner's session with a second account"
     assert _bridge(app).get("/api/account/second-factor").status_code == 401
+
+
+# ── A socket with no credential, from this machine or a bridge peer ──────
+#
+# The socket names this machine (``ws://localhost:9090``): a relative URL is
+# sent with Host ``testserver``, which no peer trust takes, so it was
+# refused with or without the rule. The close REASON tells the cases apart:
+# refused at sign-in (``Unauthorized``) or let in by peer trust and refused
+# later for having no account (``no_account``).
+
+
+def _socket_refusal(app: Any, peer: str) -> tuple[int, str]:
     from starlette.websockets import WebSocketDisconnect
 
-    with pytest.raises(WebSocketDisconnect) as closed, _bridge(app, 40001).websocket_connect(
-            "/ws/dashboard") as socket:
-        socket.receive_text()
-    assert closed.value.code == 4003
+    url = "ws://localhost:9090/ws/dashboard"
+    try:
+        with TestClient(app, client=(peer, 40001)).websocket_connect(
+                url, headers={"origin": "http://localhost:9090"}) as socket:
+            socket.receive_text()
+    except WebSocketDisconnect as closed:
+        return closed.code, closed.reason
+    return 0, "open"
+
+
+@pytest.mark.parametrize("peer", ["127.0.0.1", BRIDGE])
+def test_a_socket_from_here_or_the_network_is_refused_with_a_second_account(app, enforced, monkeypatch,
+                                                                            peer) -> None:
+    monkeypatch.setenv("KAZMA_TRUST_LAN", "1")
+    people.create_person(f"noor-socket-{peer.replace('.', '')}", PASSWORD, by=OWNER_ACCOUNT_ID)
+    assert _socket_refusal(app, peer) == (4003, "Unauthorized"), "peer trust let the socket in"
+
+
+@pytest.mark.parametrize("peer", ["127.0.0.1", BRIDGE])
+def test_negative_control_today_s_socket_peer_trust(app, enforced, monkeypatch, peer) -> None:
+    from kazma_ui import auth
+
+    monkeypatch.setattr(auth, "everyone_signs_in", lambda: False)
+    with pytest.raises(AssertionError, match="peer trust let the socket in"):
+        test_a_socket_from_here_or_the_network_is_refused_with_a_second_account(app, None, monkeypatch, peer)
 
 
 def test_negative_control_today_s_lan_auto_login(app, enforced, monkeypatch) -> None:

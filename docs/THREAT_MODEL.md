@@ -45,8 +45,11 @@ in without signing in (sign-in off, demo mode, the chat apps' open switch)
 stop Kazma from starting. A second factor (a code from an authenticator
 app) can be turned on for any account. It does not cover the install's
 secret (`KAZMA_SECRET`), which stays a full key for programs: once the
-owner has a second factor the secret no longer signs a browser in, but
-whoever holds it reaches the API. Spaces has not been reviewed
+owner has a second factor the secret no longer signs a browser in, nor
+does the local network's auto-login, but whoever holds it reaches the API.
+An owner who lost the phone and the recovery codes takes the factor off on
+the install's own machine, with Kazma stopped
+(`kazma account second-factor off`). Spaces has not been reviewed
 independently.
 
 - **The operator has full control.** Every safeguard below can be switched

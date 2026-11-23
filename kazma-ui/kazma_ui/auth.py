@@ -759,7 +759,7 @@ def _auto_cookie_via(request: Request, expected: str) -> str:
     if _peer_trust_allowed(request) and _host_is_local_name(request):
         if _is_loopback_client(request):
             return "this_computer"
-        if _trust_lan_enabled() and _is_private_lan_client(request):
+        if _lan_auto_login(request):
             return "local_network"
     provided = request.headers.get(SECRET_HEADER, "")
     if provided and verify_secret(provided, expected) and not _owner_second_factor_on():
@@ -767,17 +767,26 @@ def _auto_cookie_via(request: Request, expected: str) -> str:
     return ""
 
 
+def _lan_auto_login(peer: Any) -> bool:
+    """Whether a private-network peer gets the owner's auto-login
+    (``KAZMA_TRUST_LAN``): never once the owner has a second factor -- a
+    device on the network would hold the owner's session with no code (the
+    S4-02 re-check). This computer keeps its auto-login, as My account says.
+    Blocking (a settings read)."""
+    return _trust_lan_enabled() and _is_private_lan_client(peer) and not _owner_second_factor_on()
+
+
 def _owner_second_factor_on() -> bool:
-    """Whether the owner's account has a second factor (its marker in
-    settings; no vault read). Then the install's secret is a key for
+    """Whether the owner's account has a second factor (its marker, else the
+    vault's copy: ``second_factor.factor_on``). Then the install's secret is a key for
     programs only: it never makes a browser session, and a browser that
     sends it is refused (the review of S4-02, item 1). Unreadable counts as
     on. Blocking (a settings read)."""
-    from kazma_core.security.second_factor import is_on
+    from kazma_core.security.second_factor import factor_on
     from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
 
     try:
-        return is_on(OWNER_ACCOUNT_ID)
+        return factor_on(OWNER_ACCOUNT_ID)
     except (RuntimeError, OSError, sqlite3.Error):
         logger.warning("[auth] whether the owner has a second factor cannot be read: "
                        "the install's secret makes no browser session", exc_info=True)
@@ -1305,12 +1314,12 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
         ):
             return True
 
-        # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN enabled
+        # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN
+        # is on and the owner has no second factor (_lan_auto_login).
         if (
-            _is_private_lan_client(websocket)
-            and _trust_lan_enabled()
-            and _host_is_local_name(websocket)
+            _host_is_local_name(websocket)
             and _ws_origin_allowed(websocket)
+            and _lan_auto_login(websocket)
         ):
             return True
 
@@ -1375,6 +1384,10 @@ def get_websocket_principal(websocket: Any) -> dict[str, Any] | None:
             for name in (SECRET_HEADER, "X-Api-Token", "X-Kazma-Token", "authorization")
         )
         if not header_credential and not _ws_origin_allowed(websocket):
+            return None
+        if not header_credential and not provided.startswith("session:") and _owner_second_factor_on():
+            # The legacy secret cookie is a browser's: never once the owner
+            # has a second factor, as websocket_is_authenticated says (S4-02).
             return None
         return get_request_principal(websocket)
     if websocket_is_authenticated(websocket):

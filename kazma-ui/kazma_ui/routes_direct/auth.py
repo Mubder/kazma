@@ -147,14 +147,15 @@ def _second_factor_verdict(user_id: str, code: str) -> str | None:
     """None when the sign-in of *user_id* may go on; ``second_factor_required``
     when its account has a second factor and no code came;
     ``wrong_second_factor`` for a wrong one; ``second_factor_paused`` while
-    wrong codes paused the account's checks. The marker is read first and the
-    vault only when it is on: a vault that failed to open never stops an
-    account with no second factor (the review of S4-02, item 7). Blocking
+    wrong codes paused the account's checks. Its marker, else the vault's
+    copy (``second_factor.factor_on``): a vault that cannot be read with the
+    marker off never stops an account with no second factor (the review of
+    S4-02, item 7), and a marker a restore took away never turns one off. Blocking
     (the identity store, settings, the vault); raises when it cannot say."""
     from kazma_core.security import second_factor
 
     account = second_factor.account_for_sign_in(user_id)
-    if not account or not second_factor.is_on(account):
+    if not account or not second_factor.factor_on(account):
         return None
     if not str(code or "").strip():
         return "second_factor_required"
