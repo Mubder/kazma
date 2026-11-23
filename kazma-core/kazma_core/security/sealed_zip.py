@@ -26,10 +26,11 @@ import struct
 import zipfile
 import zlib
 from pathlib import Path
+from typing import Any
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-__all__ = ["MIN_PASSWORD", "seal"]
+__all__ = ["MIN_PASSWORD", "SealedZipRefused", "seal", "unseal"]
 
 #: The shortest password a sealed zip takes.
 MIN_PASSWORD = 12
@@ -180,3 +181,121 @@ def seal(source: Path, target: Path, password: str) -> int:
         if partial.exists():
             partial.unlink()
     return len(central)
+
+
+class SealedZipRefused(ValueError):
+    """A sealed zip was not opened (Spaces S4-06): ``code`` is
+    ``wrong_password``, ``changed`` (an entry's authentication failed: the
+    file was altered or cut short), ``not_sealed`` (not a zip this module
+    sealed) or ``too_big`` (past the caller's bound). Nothing usable was
+    written."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _data_start(handle: Any, info: zipfile.ZipInfo) -> int:
+    """Where *info*'s sealed bytes start: after its local header, read from
+    the file (its extra field may differ from the central directory's)."""
+    handle.seek(info.header_offset)
+    header = handle.read(30)
+    if len(header) != 30 or header[:4] != b"PK\x03\x04":
+        raise SealedZipRefused("not_sealed", f"{info.filename}: no local header")
+    name_len, extra_len = struct.unpack("<2H", header[26:30])
+    return info.header_offset + 30 + name_len + extra_len
+
+
+def _aes_method(info: zipfile.ZipInfo) -> int:
+    """The compression inside a WinZip AES entry (its 0x9901 extra field)."""
+    extra = info.extra
+    at = 0
+    while at + 4 <= len(extra):
+        kind, size = struct.unpack("<HH", extra[at:at + 4])
+        body = extra[at + 4:at + 4 + size]
+        if kind == 0x9901 and size == 7:
+            _version, vendor, strength, method = struct.unpack("<H2sBH", body)
+            if vendor != b"AE" or strength != 3:
+                raise SealedZipRefused("not_sealed", f"{info.filename}: not AES-256")
+            return int(method)
+        at += 4 + size
+    raise SealedZipRefused("not_sealed", f"{info.filename}: not a WinZip AES entry")
+
+
+def unseal(source: Path, target: Path, password: str, *, max_bytes: int, max_entries: int = 200_000) -> int:
+    """Write *target*, a plain zip of every entry of the sealed zip *source*
+    (as :func:`seal` writes it), each entry checked before it is kept: the
+    password's verifier, then the entry's authentication over every sealed
+    byte. Written under a ``.partial`` name and renamed when complete; a
+    refusal (:class:`SealedZipRefused`) leaves no *target*. Bounded: past
+    *max_bytes* unpacked in all, or *max_entries*, ``too_big``. Returns the
+    number of entries.
+
+    The names are copied as they are: the caller reads entries by name and
+    never writes one to a path it did not choose."""
+    partial = target.with_name(target.name + ".partial")
+    total = 0
+    count = 0
+    try:
+        try:
+            sealed = zipfile.ZipFile(source)
+        except (zipfile.BadZipFile, OSError) as exc:
+            raise SealedZipRefused("not_sealed", "not a zip") from exc
+        with sealed, open(source, "rb") as handle, zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as plain:
+            entries = [info for info in sealed.infolist() if not info.is_dir()]
+            if len(entries) > max_entries:
+                raise SealedZipRefused("too_big", f"more than {max_entries} entries")
+            for info in entries:
+                if info.compress_type != _METHOD_AES:
+                    raise SealedZipRefused("not_sealed", f"{info.filename}: not sealed")
+                method = _aes_method(info)
+                if method not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    raise SealedZipRefused("not_sealed", f"{info.filename}: an unknown compression")
+                sealed_size = info.compress_size - _SALT_BYTES - 2 - _MAC_BYTES
+                if sealed_size < 0:
+                    raise SealedZipRefused("changed", f"{info.filename}: cut short")
+                handle.seek(_data_start(handle, info))
+                salt = handle.read(_SALT_BYTES)
+                verifier = handle.read(2)
+                key, auth, expected = _keys(password, salt)
+                if not hmac.compare_digest(verifier, expected):
+                    raise SealedZipRefused("wrong_password", "the password does not open this file")
+                counter = _Counter(key)
+                mac = hmac.new(auth, digestmod=hashlib.sha1)  # nosec B324 - the authentication WinZip AES fixes
+                inflate = zlib.decompressobj(-15) if method == zipfile.ZIP_DEFLATED else None
+                left = sealed_size
+                with plain.open(info.filename, "w", force_zip64=True) as out:
+                    while left:
+                        piece = handle.read(min(_CHUNK, left))
+                        if not piece:
+                            raise SealedZipRefused("changed", f"{info.filename}: cut short")
+                        left -= len(piece)
+                        mac.update(piece)
+                        clear = counter.apply(piece)
+                        if inflate is not None:
+                            # Bounded per step: a small entry cannot expand
+                            # past what is left of the bound (a zip bomb).
+                            clear = inflate.decompress(clear, max(1, max_bytes - total + 1))
+                            if inflate.unconsumed_tail:
+                                raise SealedZipRefused("too_big", f"more than {max_bytes} bytes unpacked")
+                        total += len(clear)
+                        if total > max_bytes:
+                            raise SealedZipRefused("too_big", f"more than {max_bytes} bytes unpacked")
+                        out.write(clear)
+                    if inflate is not None:
+                        tail = inflate.flush()
+                        total += len(tail)
+                        if total > max_bytes:
+                            raise SealedZipRefused("too_big", f"more than {max_bytes} bytes unpacked")
+                        out.write(tail)
+                    stored_mac = handle.read(_MAC_BYTES)
+                    if not hmac.compare_digest(stored_mac, mac.digest()[:_MAC_BYTES]):
+                        raise SealedZipRefused("changed", f"{info.filename}: altered")
+                count += 1
+        partial.replace(target)
+    except zlib.error as exc:
+        raise SealedZipRefused("changed", "an entry does not unpack") from exc
+    finally:
+        if partial.exists():
+            partial.unlink()
+    return count

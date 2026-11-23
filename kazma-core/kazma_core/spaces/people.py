@@ -101,6 +101,8 @@ _KINDS = ("account_created", "password_reset", "account_deleted", "space_erased"
           "space_limits_set", "default_space_limits_set", "sessions_ended", "space_key_changed", "code_network_set")
 #: A person's chat-app accounts (Spaces stage 3, ``spaces.chat_links``).
 _KINDS += ("chat_linked", "chat_unlinked")
+#: A space moved in from another install (S4-06, ``spaces.space_move``).
+_KINDS += ("space_imported",)
 #: The events a person is told about, when someone else made them.
 _TOLD = ("password_reset", "member_added", "member_removed", "sessions_ended", "chat_linked")
 _NAME_MAX = 64
@@ -499,6 +501,33 @@ def _record_shared_space(space_id: str, name: str, kind: str, by: str, workspace
     finally:
         if workspace_id and not recorded:
             _drop_project_workspace(space_id, workspace_id)
+
+
+def record_moved_space(space_id: str, name: str, owner: str, *, by: str) -> None:
+    """Record a space moved in from another install (Spaces S4-06): a shared
+    space with no project folder, its owner the person the admin chose, its
+    only member; recorded (``space_imported``). Its rows, settings, secrets
+    and files are written before this (``spaces.space_move``): nobody can
+    bind it until it is recorded. Refused: Spaces off, the admin not the
+    caller, an id already here, an owner who is no account here."""
+    _require_enforced()
+    if not identity.is_admin_account(by):
+        raise PeopleRefused("admin_only", 403, "Only the admin brings a space in.")
+
+    def _change(reg: dict[str, Any]) -> None:
+        if space_id in reg["spaces"]:
+            raise identity.IdentityError("space_exists", f"the space {space_id!r} exists")
+        if owner not in reg["accounts"]:
+            raise identity.IdentityError("no_such_account", "There is no such person.")
+        reg["spaces"][space_id] = {
+            "id": space_id, "name": _checked_name(name), "kind": "sandboxed", "personal_of": None,
+            "created_by": owner, "created_at": _now(),
+        }
+        reg["memberships"].append({"account": owner, "space": space_id, "role": "owner"})
+        _record(reg, "space_imported", owner, by, space=space_id)
+
+    _changed(_change)
+    logger.info("[people] space moved in id=%s owner=%s by=%s", space_id, owner, by)
 
 
 def _drop_orphan_rows() -> None:

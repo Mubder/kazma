@@ -44,6 +44,7 @@ __all__ = [
     "SecretVault",
     "SpaceKeyMissing",
     "SpaceKeyStillNamed",
+    "SpaceSecretsRefused",
     "VaultScopeError",
     "consolidate_install_scoped_secrets",
     "get_vault",
@@ -252,6 +253,16 @@ class SpaceKeyStillNamed(ValueError):
             f"({', '.join(sorted(names)[:10])}); the key was not changed")
         self.space = space
         self.names = sorted(names)
+
+
+class SpaceSecretsRefused(ValueError):
+    """A moved space's keys and secrets were not taken (Spaces S4-06):
+    ``code`` says why (``space_in_vault``, ``key_collides``, ``name_collides``,
+    ``not_the_spaces``, ``does_not_open``). Nothing was written."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def secret_scope(name: str) -> tuple[str, str | None]:
@@ -753,6 +764,120 @@ class SecretVault:
             self._empty_the_log(f"the key of space {space} was changed")
         logger.info("[Vault] Space %s has the new key %s; its old keys are destroyed", space, new)
         return new
+
+    def export_space_sealed(self, space: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """``(keys, rows)`` of *space* for a space bundle (Spaces S4-06).
+
+        Every row of the space still under the install's vault key is first
+        sealed with the space's key (:meth:`seal_space`), so no value leaves
+        sealed with the vault key and none leaves plain. *rows* are the rows
+        as sealed (bytes, never a value); *keys* are the space's keys the rows
+        name, unwrapped (``key`` is 32 bytes): the caller seals them under the
+        person's password at once and keeps them nowhere else."""
+        self.seal_space(space)
+        with self._lock:
+            listed = self._space_rows(space)
+            rows: list[dict[str, Any]] = []
+            for row in listed:
+                full = self._conn.execute(
+                    "SELECT name, tenant_id, key_id, encrypted_value, nonce, category, metadata, "
+                    "created_at, updated_at FROM secrets WHERE id = ?", (row["id"],)).fetchone()
+                if not full["key_id"]:
+                    raise SpaceKeyMissing(f"the row {full['name']!r} is not sealed with its space's key")
+                rows.append(dict(full))
+            named = {row["key_id"] for row in rows}
+            active = self._active_key_id(space, make=False)
+            if active:
+                named.add(active)
+            keys: list[dict[str, Any]] = []
+            for found in self._conn.execute(
+                    "SELECT key_id, state, created_at, retired_at FROM space_keys WHERE space_id = ? "
+                    "ORDER BY created_at, key_id", (space,)):
+                if found["key_id"] not in named:
+                    continue
+                held_space, key = self._space_key(found["key_id"])
+                if held_space != space:
+                    raise SpaceKeyMissing(f"the space key {found['key_id']} is another space's")
+                keys.append({"key_id": found["key_id"], "state": found["state"],
+                             "created_at": found["created_at"], "retired_at": found["retired_at"],
+                             "key": key})
+        return keys, rows
+
+    def import_space_sealed(self, space: str, keys: list[dict[str, Any]], rows: list[dict[str, Any]]) -> int:
+        """Take a moved space's keys and sealed rows (Spaces S4-06), in one
+        transaction: each key wrapped with this install's vault key, each row
+        as it came (a new row id), then every row opened with the key it
+        names before the transaction commits, so a row that does not open
+        here is never kept. Refused (:class:`SpaceSecretsRefused`, nothing
+        written) when this vault already holds anything of the space, a key
+        id or a name is here already, or a row is not the space's or names a
+        key the bundle does not carry. Returns the rows taken."""
+        from kazma_core.spaces.scope import OWNER_SPACE_ID, valid_space_id
+
+        if not valid_space_id(space) or space == OWNER_SPACE_ID:
+            raise SpaceSecretsRefused("not_the_spaces", f"not a space that can be moved here: {space!r}")
+        refuse_write("vault", f"{_SPACE_NAME_PREFIX}{space}:")
+        carried = {str(k["key_id"]): k for k in keys}
+        for row in rows:
+            if sealing_space(str(row["name"]), row.get("tenant_id")) != space:
+                raise SpaceSecretsRefused("not_the_spaces", f"the secret {row['name']!r} is not the space's")
+            if str(row.get("key_id") or "") not in carried:
+                raise SpaceSecretsRefused("not_the_spaces",
+                                          f"the secret {row['name']!r} names a key the bundle does not carry")
+        if space in self.held_spaces():
+            raise SpaceSecretsRefused("space_in_vault", f"this vault already holds space {space}")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            done = False
+            try:
+                for key_id, key in carried.items():
+                    if self._conn.execute("SELECT 1 FROM space_keys WHERE key_id = ?", (key_id,)).fetchone():
+                        raise SpaceSecretsRefused("key_collides", f"the key {key_id} is here already")
+                    raw = key["key"]
+                    if not isinstance(raw, bytes | bytearray) or len(raw) != _KEY_BYTES:
+                        raise SpaceSecretsRefused("not_the_spaces", f"the key {key_id} is not a space key")
+                    wrapped, nonce = self._wrap_space_key(space, key_id, bytes(raw))
+                    self._conn.execute(
+                        "INSERT INTO space_keys (key_id, space_id, wrapped, nonce, wrap, state, created_at, retired_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (key_id, space, wrapped, nonce, _WRAP_SCHEME,
+                         "active" if key.get("state") == "active" else "retired",
+                         str(key.get("created_at") or datetime.now(UTC).isoformat()), key.get("retired_at")),
+                    )
+                for row in rows:
+                    clash = self._conn.execute(
+                        "SELECT 1 FROM secrets WHERE name = ? AND "
+                        "COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')",
+                        (row["name"], row.get("tenant_id"))).fetchone()
+                    if clash:
+                        raise SpaceSecretsRefused("name_collides", f"the secret {row['name']!r} is here already")
+                    self._conn.execute(
+                        """INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, tenant_id,
+                           created_at, updated_at, key_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (_secrets.token_hex(16), row["name"], bytes(row["encrypted_value"]), bytes(row["nonce"]),
+                         row.get("category") or "general", row.get("metadata") or "{}", row.get("tenant_id"),
+                         row.get("created_at") or datetime.now(UTC).isoformat(),
+                         row.get("updated_at") or datetime.now(UTC).isoformat(), row["key_id"]),
+                    )
+                # Read back: every row opens with the key it names, here.
+                self._space_keys.clear()
+                for row in self._space_rows(space):
+                    full = self._conn.execute(
+                        "SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets WHERE id = ?",
+                        (row["id"],)).fetchone()
+                    try:
+                        self._open_row(full)
+                    except (SpaceKeyMissing, UnicodeDecodeError):
+                        raise SpaceSecretsRefused(
+                            "does_not_open", f"the secret {full['name']!r} does not open with its key") from None
+                self._conn.execute("COMMIT")
+                done = True
+            finally:
+                if not done:
+                    self._conn.execute("ROLLBACK")
+                self._space_keys.clear()
+        logger.info("[Vault] Took %d secret(s) and %d key(s) of moved space %s", len(rows), len(carried), space)
+        return len(rows)
 
     def _empty_the_log(self, after: str) -> None:
         """Empty the write-ahead log after a destroying change (*after* says

@@ -67,6 +67,7 @@ def _route_body_limits() -> dict[tuple[str, str], int]:
     the upload limits are ``upload_limits.UPLOAD_LIMITS`` (FA-134's table)."""
     from kazma_core.ide.service import MAX_EDITOR_FILE_BYTES
     from kazma_core.settings_restore import MAX_BACKUP_BYTES
+    from kazma_core.spaces.space_move import MAX_BUNDLE_BYTES as MOVED_SPACE_BYTES
 
     from kazma_ui import upload_limits
     from kazma_ui.a2a_api import MAX_BODY_BYTES as A2A_BODY_BYTES
@@ -92,6 +93,8 @@ def _route_body_limits() -> dict[tuple[str, str], int]:
         ("POST", "/api/webhooks/whatsapp"): WEBHOOK_BODY_LIMIT,
         # Reads its own stream under its own, smaller limit (a2a_api).
         ("POST", "/api/a2a"): A2A_BODY_BYTES,
+        # A moved space's sealed bundle (Spaces S4-06).
+        ("POST", "/api/spaces/import"): MOVED_SPACE_BYTES,
     })
     return limits
 

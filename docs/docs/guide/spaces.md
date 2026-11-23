@@ -218,12 +218,22 @@ holds. Its owner can:
   choose (at least 12 characters). It opens with 7-Zip, WinZip or Keka; the
   zip tools built into Windows and macOS do not open sealed zips. Kazma
   does not keep the password.
+- **Move a shared space to another Kazma.** *Move this space* makes a
+  bundle sealed with a password you choose: everything in the space, its
+  secrets too, their key sealed under that password. On the other install,
+  its admin brings it in (Settings, *People*, *Shared spaces*, *Bring in a
+  space*) with the file and the password, and chooses who owns it there. It
+  arrives as a plain shared space. Nothing is merged: if anything of the
+  space, or any of its ids, is already on that install, nothing is brought
+  in, and an import that stops halfway is taken back. The space stays where
+  it was until you delete it. A personal space does not move; export it to
+  keep a copy.
 - **Delete a shared space.** Everything in it is erased for good. A
   personal space is erased when its person is deleted: the admin erases it
   from People, without seeing what it holds.
 
-Not yet on an install whose data is in Postgres: there, export and delete
-are refused rather than done halfway.
+Not yet on an install whose data is in Postgres: there, export, move and
+delete are refused rather than done halfway.
 
 ## Backups
 

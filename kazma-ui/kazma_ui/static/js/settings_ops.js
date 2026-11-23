@@ -540,6 +540,9 @@
         // Shared spaces (Spaces S2-12): a plain one by default.
         sharedSpaces: [],
         newSpace: { name: '', kind: 'sandboxed', folder: '' },
+        // A space brought in from another install (Spaces S4-06).
+        bringIn: { file: null, password: '', owner: '' },
+        bringInBusy: false,
         // Daily limits (Spaces S2-02).
         limitForPeople: { limit: null, set: false, shipped: null },
         limitDraftForPeople: { tokens: '', usd: '' },
@@ -1048,52 +1051,95 @@
             await this.loadPeople();
         },
 
-        async exportThisSpace() {
-            const space = this._thisSpace();
-            // Sealed with a password the person chooses: asked twice, since
-            // a mistyped one opens nothing.
-            const password = await window.kazmaPrompt({
-                title: _t('settings.space_data_export', 'Export this space'),
-                message: _t('settings.space_data_export_password',
-                    'Choose a password for the export (at least 12 characters). It opens with 7-Zip, WinZip or Keka, not with the zip tools built into Windows or macOS. Kazma does not keep it.'),
-                inputType: 'password',
-            });
-            if (password === null || password === undefined) return;
+        // A password the person chooses, asked twice (a mistyped one opens
+        // nothing); null when they stop or the two differ.
+        async _choosePassword(title, message, differ) {
+            const password = await window.kazmaPrompt({ title: title, message: message, inputType: 'password' });
+            if (password === null || password === undefined) return null;
             if (password.length < 12) {
                 showToast(this._spaceDataError({ error: 'password_too_short' }), 'error');
-                return;
+                return null;
             }
             const again = await window.kazmaPrompt({
-                title: _t('settings.space_data_export', 'Export this space'),
+                title: title,
                 message: _t('settings.space_data_export_again', 'Type the password again.'),
                 inputType: 'password',
             });
-            if (again === null || again === undefined) return;
+            if (again === null || again === undefined) return null;
             if (again !== password) {
-                showToast(_t('settings.space_data_err.passwords_differ', 'The two passwords differ. Nothing was exported.'), 'error');
-                return;
+                showToast(differ, 'error');
+                return null;
             }
+            return password;
+        },
+
+        // POST the password, save the sealed file the server answers.
+        async _downloadSealed(url, password, filename) {
+            const resp = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: password }),
+            });
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                showToast(this._spaceDataError(data), 'error');
+                return false;
+            }
+            const blob = await resp.blob();
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+            return true;
+        },
+
+        async exportThisSpace() {
+            const space = this._thisSpace();
+            const password = await this._choosePassword(
+                _t('settings.space_data_export', 'Export this space'),
+                _t('settings.space_data_export_password',
+                    'Choose a password for the export (at least 12 characters). It opens with 7-Zip, WinZip or Keka, not with the zip tools built into Windows or macOS. Kazma does not keep it.'),
+                _t('settings.space_data_err.passwords_differ', 'The two passwords differ. Nothing was exported.'));
+            if (password === null) return;
             this.spaceDataBusy = true;
             try {
-                const resp = await fetch('/api/spaces/' + encodeURIComponent(space) + '/export', {
-                    method: 'POST', credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: password }),
-                });
-                if (!resp.ok) {
-                    const data = await resp.json().catch(() => ({}));
-                    showToast(this._spaceDataError(data), 'error');
-                    return;
-                }
-                const blob = await resp.blob();
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = 'kazma-space-' + space + '.zip';
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-                setTimeout(() => URL.revokeObjectURL(link.href), 60000);
-                showToast(_t('settings.space_data_exported', 'The space was exported.'), 'success');
+                const done = await this._downloadSealed(
+                    '/api/spaces/' + encodeURIComponent(space) + '/export', password, 'kazma-space-' + space + '.zip');
+                if (done) showToast(_t('settings.space_data_exported', 'The space was exported.'), 'success');
+            } catch (e) {
+                showToast(this._spaceDataError(null), 'error');
+            } finally {
+                this.spaceDataBusy = false;
+            }
+        },
+
+        // Move this space to another install (Spaces S4-06): a bundle sealed
+        // with the person's password, which the other install's admin
+        // brings in. The space stays here until its owner deletes it.
+        async moveThisSpace() {
+            const space = this._thisSpace();
+            const name = this.spaceData.name || space;
+            const go = await window.kazmaConfirm({
+                title: _t('settings.space_data_move_title', 'Move {name}?', { name: _iso(name) }),
+                message: _t('settings.space_data_move_confirm',
+                    "Kazma makes a bundle of everything in this space: its chats, memory, files, documents, libraries, schedules, settings and secrets, sealed with a password you choose. On the other install, its admin brings it in with that password and chooses who owns it there. Nothing leaves this install: the space stays here until you delete it."),
+                confirmText: _t('settings.space_data_move_go', 'Make the bundle'),
+            });
+            if (!go) return;
+            const password = await this._choosePassword(
+                _t('settings.space_data_move', 'Move this space'),
+                _t('settings.space_data_move_password',
+                    "Choose a password for the bundle (at least 12 characters). Give it to the other install's admin another way than the file. Kazma does not keep it."),
+                _t('settings.space_data_err.passwords_differ_move', 'The two passwords differ. No bundle was made.'));
+            if (password === null) return;
+            this.spaceDataBusy = true;
+            try {
+                const done = await this._downloadSealed(
+                    '/api/spaces/' + encodeURIComponent(space) + '/move', password, 'kazma-space-' + space + '-move.zip');
+                if (done) showToast(_t('settings.space_data_moved', 'The bundle was made. Bring it in on the other install.'), 'success');
             } catch (e) {
                 showToast(this._spaceDataError(null), 'error');
             } finally {
@@ -1128,9 +1174,12 @@
                     return;
                 }
                 showToast(_t('settings.space_data_deleted', '{name} was deleted.', { name: _iso(name) }), 'success');
-                // This tab's space is gone: go to another of the person's.
-                const mine = await window.kazmaGetJson('/api/account/spaces');
-                const next = mine && Array.isArray(mine.spaces) ? mine.spaces.find((s) => s.id !== space) : null;
+                // This tab's space is gone: go to another of the person's,
+                // from the list the page read when it loaded. Asked again
+                // now, the request would name the space that is gone and
+                // be refused.
+                const known = window.kazmaSpace ? window.kazmaSpace.spaces : [];
+                const next = known.find((s) => s && s.id !== space) || null;
                 if (next && window.kazmaSpace) window.kazmaSpace.switchTo(next.id);
                 else window.location.assign('/');
             } catch (e) {
@@ -1184,6 +1233,34 @@
             } catch (e) {
                 showToast(this._peopleError(null), 'error');
                 return;
+            }
+            await this.loadPeople();
+        },
+
+        async bringInSpace() {
+            const draft = this.bringIn;
+            if (!draft.file || !draft.owner) return;
+            const form = new FormData();
+            form.append('bundle', draft.file);
+            form.append('password', draft.password);
+            form.append('owner', draft.owner);
+            this.bringInBusy = true;
+            try {
+                const resp = await fetch('/api/spaces/import', { method: 'POST', credentials: 'same-origin', body: form });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    showToast(this._spaceDataError(data), 'error');
+                    return;
+                }
+                showToast(_t('settings.people_bring_in_done', '{name} was brought in.', { name: _iso(data.name || data.space) }), 'success');
+                this.bringIn = { file: null, password: '', owner: '' };
+                const picker = document.getElementById('people-bring-in-file');
+                if (picker) picker.value = '';
+            } catch (e) {
+                showToast(this._spaceDataError(null), 'error');
+                return;
+            } finally {
+                this.bringInBusy = false;
             }
             await this.loadPeople();
         },

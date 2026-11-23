@@ -3043,6 +3043,68 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "كلمتا المرور مختلفتان. لم يُصدَّر شيء.",
     },
     "settings.space_data_exported": {"en": "The space was exported.", "ar": "صُدّرت المساحة."},
+    "settings.space_data_move": {"en": "Move this space", "ar": "نقل هذه المساحة"},
+    "settings.space_data_move_title": {"en": "Move {name}?", "ar": "نقل {name}؟"},
+    "settings.space_data_move_confirm": {
+        "en": "Kazma makes a bundle of everything in this space: its chats, memory, files, documents, libraries, schedules, settings and secrets, sealed with a password you choose. On the other install, its admin brings it in with that password and chooses who owns it there. Nothing leaves this install: the space stays here until you delete it.",
+        "ar": "يصنع Kazma حزمة بكل ما في هذه المساحة: محادثاتها وذاكرتها وملفاتها ومستنداتها ومكتباتها ومواعيدها وإعداداتها وأسرارها، مختومة بكلمة مرور تختارها. وفي التثبيت الآخر، يُدخلها مسؤوله بكلمة المرور هذه ويختار من يملكها هناك. لا يغادر شيء هذا التثبيت: تبقى المساحة هنا حتى تحذفها.",
+    },
+    "settings.space_data_move_go": {"en": "Make the bundle", "ar": "إنشاء الحزمة"},
+    "settings.space_data_move_password": {
+        "en": "Choose a password for the bundle (at least 12 characters). Give it to the other install's admin another way than the file. Kazma does not keep it.",
+        "ar": "اختر كلمة مرور للحزمة (12 حرفًا على الأقل). أعطها لمسؤول التثبيت الآخر بطريقة غير الملف. لا يحتفظ Kazma بها.",
+    },
+    "settings.space_data_err.passwords_differ_move": {
+        "en": "The two passwords differ. No bundle was made.",
+        "ar": "كلمتا المرور مختلفتان. لم تُنشأ حزمة.",
+    },
+    "settings.space_data_moved": {
+        "en": "The bundle was made. Bring it in on the other install.",
+        "ar": "أُنشئت الحزمة. أدخِلها في التثبيت الآخر.",
+    },
+    "settings.space_data_err.admin_only": {"en": "Only the admin brings a space in.", "ar": "المسؤول وحده يُدخل مساحة."},
+    "settings.space_data_err.wrong_password": {
+        "en": "That is not the bundle's password. Nothing was brought in.",
+        "ar": "ليست هذه كلمة مرور الحزمة. لم يُدخل شيء.",
+    },
+    "settings.space_data_err.changed": {
+        "en": "The bundle was changed after it was made, so nothing was brought in.",
+        "ar": "تغيّرت الحزمة بعد إنشائها، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.not_a_bundle": {"en": "That file is not a space's bundle.", "ar": "هذا الملف ليس حزمة مساحة."},
+    "settings.space_data_err.too_big": {"en": "The bundle is larger than Kazma brings in.", "ar": "الحزمة أكبر مما يُدخله Kazma."},
+    "settings.space_data_err.space_exists": {
+        "en": "This install already has that space, so nothing was brought in.",
+        "ar": "في هذا التثبيت تلك المساحة أصلًا، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.id_collides": {
+        "en": "Something in the bundle has the id of something already on this install, so nothing was brought in.",
+        "ar": "في الحزمة شيء يحمل معرّف شيء موجود في هذا التثبيت، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.foreign_row": {
+        "en": "The bundle holds a record of another space, so nothing was brought in.",
+        "ar": "تحوي الحزمة سجلًا لمساحة أخرى، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.foreign_setting": {
+        "en": "The bundle holds a setting of another space, so nothing was brought in.",
+        "ar": "تحوي الحزمة إعدادًا لمساحة أخرى، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.foreign_secret": {
+        "en": "The bundle points at a secret that is not the space's, so nothing was brought in.",
+        "ar": "تشير الحزمة إلى سرّ ليس للمساحة، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.unknown_column": {
+        "en": "The bundle was made by a Kazma that keeps something this one does not, so nothing was brought in. Update this install first.",
+        "ar": "أنشأ الحزمةَ Kazma يحفظ شيئًا لا يحفظه هذا، فلم يُدخل شيء. حدِّث هذا التثبيت أولًا.",
+    },
+    "settings.space_data_err.no_such_account": {
+        "en": "There is no such person on this install.",
+        "ar": "لا يوجد شخص كهذا في هذا التثبيت.",
+    },
+    "settings.space_data_err.personal_space_stays": {
+        "en": "A personal space stays with its person: export it to keep a copy. A shared space can move.",
+        "ar": "تبقى المساحة الخاصة مع صاحبها: صدّرها لتحتفظ بنسخة. أما المساحة المشتركة فيمكن نقلها.",
+    },
     "settings.space_data_delete": {"en": "Delete this space", "ar": "حذف هذه المساحة"},
     "settings.space_data_delete_title": {"en": "Delete {name}?", "ar": "حذف {name}؟"},
     "settings.space_data_delete_confirm": {
@@ -3118,6 +3180,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مجلد على هذا الحاسوب تعمل فيه المساحة. ليس أحد مجلدات Kazma نفسه، ولا مجلد مساحة أخرى.",
     },
     "settings.people_space_create": {"en": "Make the space", "ar": "إنشاء المساحة"},
+    "settings.people_bring_in_title": {"en": "Bring in a space", "ar": "إدخال مساحة"},
+    "settings.people_bring_in_help": {
+        "en": "A shared space moved from another install: the bundle its owner made there, the password they chose, and who owns it here. It arrives as a plain shared space. Nothing is merged with what this install holds: a bundle whose space or ids are already here is refused.",
+        "ar": "مساحة مشتركة نُقلت من تثبيت آخر: الحزمة التي أنشأها مالكها هناك، وكلمة المرور التي اختارها، ومن يملكها هنا. تصل مساحةً مشتركة عادية. لا يُدمج شيء مع ما في هذا التثبيت: تُرفض الحزمة إن كانت مساحتها أو معرّفاتها موجودة هنا.",
+    },
+    "settings.people_bring_in_file": {"en": "Bundle", "ar": "الحزمة"},
+    "settings.people_bring_in_password": {"en": "Its password", "ar": "كلمة مرورها"},
+    "settings.people_bring_in_owner": {"en": "Who owns it here", "ar": "من يملكها هنا"},
+    "settings.people_bring_in_go": {"en": "Bring it in", "ar": "إدخالها"},
+    "settings.people_bring_in_done": {"en": "{name} was brought in.", "ar": "أُدخلت {name}."},
     "settings.people_space_created": {"en": "{name} is made.", "ar": "أُنشئت {name}."},
     "settings.people_space_members.zero": {"en": "no members", "ar": "لا أعضاء"},
     "settings.people_space_members.one": {"en": "1 member", "ar": "عضو واحد"},

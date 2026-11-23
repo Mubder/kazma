@@ -48,6 +48,7 @@ __all__ = [
     "ThreadInAnotherSpace",
     "ThreadRecord",
     "bound",
+    "ensure_store",
     "forget_thread",
     "record_new_thread",
     "record_of",
@@ -133,6 +134,13 @@ def _connection() -> Iterator[sqlite3.Connection]:
         yield conn
     finally:
         conn.close()
+
+
+def ensure_store() -> None:
+    """Make the record store's table when it is not there (a moved space
+    lands in it: ``spaces.row_stores``)."""
+    with _connection() as conn:
+        conn.executescript(_SCHEMA)
 
 
 def _row(row: tuple | None) -> ThreadRecord | None:

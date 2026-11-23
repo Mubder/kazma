@@ -9,6 +9,14 @@
 * ``DELETE /api/spaces/{space_id}`` -- erase it: an owner of a shared space,
   or the admin for the closed personal space of a person they deleted.
 
+Moving a space to another install (S4-06, ``spaces.space_move``):
+
+* ``POST /api/spaces/{space_id}/move`` -- the shared space as a bundle sealed
+  with a password the person chooses (``{"password": ...}``): its owner only.
+* ``POST /api/spaces/import`` -- the admin brings a bundle in: a form with
+  ``bundle`` (the file), ``password`` and ``owner`` (the person who will own
+  it here).
+
 Who is in a shared space (S2-12):
 
 * ``GET /api/spaces/{space_id}/members`` -- its members (id, name, role): a
@@ -43,11 +51,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 from kazma_core.errors import validation_error
 from kazma_core.security.sealed_zip import MIN_PASSWORD
-from kazma_core.spaces import people, space_data
+from kazma_core.spaces import people, space_data, space_move
 from kazma_core.spaces.identity import IdentityUnavailable, read_registry
 from kazma_core.spaces.people import PeopleRefused
 from kazma_core.spaces.scope import spaces_enforced
 from starlette.background import BackgroundTask
+from starlette.formparsers import MultiPartException
 
 from kazma_ui import auth, space_binding
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
@@ -105,6 +114,8 @@ def _guarded(request: Request, space_id: str, action: str, run: Any) -> Any:
             return refused
         return run()
     except space_data.SpaceDataRefused as exc:
+        return _answer(exc.code, exc.status, validation_error(exc))
+    except space_move.SpaceMoveRefused as exc:
         return _answer(exc.code, exc.status, validation_error(exc))
     except PeopleRefused as exc:
         return _answer(exc.code, exc.status, validation_error(exc))
@@ -200,6 +211,84 @@ def create_spaces_router() -> APIRouter:
             made = False
             try:
                 space_data.export_space(space_id, target, password=password)
+                made = True
+            finally:
+                if not made:
+                    shutil.rmtree(folder, ignore_errors=True)
+            return FileResponse(target, media_type="application/zip", filename=target.name,
+                                background=BackgroundTask(shutil.rmtree, folder, ignore_errors=True))
+
+        return await asyncio.to_thread(_guarded, request, space_id, "export", _run)
+
+    @router.post("/import")
+    async def bring_in(request: Request) -> Any:
+        # The bundle is read to a file of its own before anything is checked;
+        # the import itself runs in a worker thread (space_move).
+        def _refused() -> JSONResponse | None:
+            if not spaces_enforced():
+                return _answer("spaces_off", 409, "This is done once Spaces is on for this install.")
+            if auth.admin_decision(request) != "ok":
+                return _answer("admin_only", 403, "Only the admin brings a space in.")
+            return None
+
+        refused = await asyncio.to_thread(_refused)
+        if refused:
+            return refused
+        try:
+            form = await request.form(max_files=1, max_fields=4)
+        except (MultiPartException, ValueError):  # a body that is no form is the caller's to fix
+            return _answer("not_a_bundle", 400, "Send the bundle as a form.")
+        upload = form.get("bundle")
+        password = str(form.get("password") or "")
+        owner = str(form.get("owner") or "")
+        if upload is None or isinstance(upload, str):
+            return _answer("not_a_bundle", 400, "Choose the bundle to bring in.")
+        folder = Path(tempfile.mkdtemp(prefix="kazma-space-bundle-"))
+        source = folder / "bundle.zip"
+
+        def _run() -> Any:
+            with open(source, "wb") as out:
+                shutil.copyfileobj(upload.file, out, 1 << 20)
+            by = space_binding.account_of(auth.get_request_principal(request)) or ""
+            try:
+                taken = space_move.import_bundle(source, password, owner=owner, by=by)
+            except space_move.SpaceMoveRefused as exc:
+                return _answer(exc.code, exc.status, validation_error(exc))
+            except space_data.SpaceDataRefused as exc:
+                return _answer(exc.code, exc.status, validation_error(exc))
+            except PeopleRefused as exc:
+                return _answer(exc.code, exc.status, validation_error(exc))
+            except IdentityUnavailable:
+                return JSONResponse({"ok": False, "error": "identity_unavailable"}, status_code=503,
+                                    headers={"Retry-After": "5"})
+            return JSONResponse({"ok": True, **taken}, status_code=201)
+
+        try:
+            return await asyncio.to_thread(_run)
+        finally:
+            await upload.close()
+            await asyncio.to_thread(shutil.rmtree, folder, True)
+
+    @router.post("/{space_id}/move")
+    async def move(space_id: str, request: Request) -> Any:
+        # Sealed with a password the person chooses (decision N10): the
+        # bundle holds the space and its secrets' keys, sealed under it.
+        try:
+            body = await read_json(request)
+        except InvalidJsonBody:
+            return invalid_json_response()
+        password = str(body.get("password") or "") if isinstance(body, dict) else ""
+
+        def _run() -> Any:
+            if len(password) < MIN_PASSWORD:
+                return _answer("password_too_short", 400,
+                               f"The bundle's password is at least {MIN_PASSWORD} characters.")
+            by = space_binding.account_of(auth.get_request_principal(request)) or ""
+            folder = Path(tempfile.mkdtemp(prefix="kazma-space-move-"))
+            target = folder / f"kazma-space-{space_id}-move.zip"
+            made = False
+            try:
+                space_move.export_bundle(space_id, target, password, by=by)
                 made = True
             finally:
                 if not made:

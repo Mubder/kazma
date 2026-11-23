@@ -2680,6 +2680,24 @@
                 <p class="form-hint">{{ t('settings.people_space_folder_help') }}</p>
             </div>
             <button class="btn btn-primary" type="button" id="people-space-create" @click="createSharedSpace()">{{ t('settings.people_space_create') }}</button>
+            <!-- A space moved from another install (Spaces S4-06): its bundle,
+                 the password its owner chose, and who owns it here. -->
+            <h4>{{ t('settings.people_bring_in_title') }}</h4>
+            <p class="form-hint">{{ t('settings.people_bring_in_help') }}</p>
+            <div class="form-group" id="people-bring-in">
+                <label class="form-label" for="people-bring-in-file">{{ t('settings.people_bring_in_file') }}</label>
+                <input type="file" class="form-input" id="people-bring-in-file" accept=".zip,application/zip" @change="bringIn.file = $event.target.files[0] || null">
+                <label class="form-label" for="people-bring-in-password">{{ t('settings.people_bring_in_password') }}</label>
+                <input type="password" class="form-input" id="people-bring-in-password" x-model="bringIn.password" autocomplete="off">
+                <label class="form-label" for="people-bring-in-owner">{{ t('settings.people_bring_in_owner') }}</label>
+                <select class="form-input" id="people-bring-in-owner" x-model="bringIn.owner">
+                    <option value="">{{ t('settings.space_choose_person') }}</option>
+                    <template x-for="p in people" :key="'bring-in:' + p.id">
+                        <option :value="p.id" x-text="p.name || window.t('settings.space_member_admin')"></option>
+                    </template>
+                </select>
+            </div>
+            <button class="btn btn-primary" type="button" id="people-bring-in-go" :disabled="!!(bringInBusy || !bringIn.file || !bringIn.owner)" @click="bringInSpace()">{{ t('settings.people_bring_in_go') }}</button>
         </div>
         <!-- Daily limits (Spaces S2-02): the limit for people, and each
              person's limit beside what they used today (counts and money,
@@ -2939,6 +2957,7 @@
             </div>
             <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;" x-show="spaceDataLoaded" x-cloak>
                 <button class="btn btn-secondary" type="button" id="space-data-export" x-show="spaceData.role === 'owner'" x-cloak :disabled="spaceDataBusy" @click="exportThisSpace()">{{ t('settings.space_data_export') }}</button>
+                <button class="btn btn-secondary" type="button" id="space-data-move" x-show="spaceData.role === 'owner' && !spaceData.personal" x-cloak :disabled="spaceDataBusy" @click="moveThisSpace()">{{ t('settings.space_data_move') }}</button>
                 <button class="btn btn-danger" type="button" id="space-data-delete" x-show="spaceData.role === 'owner' && !spaceData.personal" x-cloak :disabled="spaceDataBusy" @click="deleteThisSpace()">{{ t('settings.space_data_delete') }}</button>
             </div>
             <p class="form-hint" x-show="spaceDataLoaded && spaceData.personal" x-cloak>{{ t('settings.space_data_personal_hint') }}</p>
