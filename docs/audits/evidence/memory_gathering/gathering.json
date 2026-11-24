@@ -1,0 +1,328 @@
+{
+ "what": "The memory plan's W4 gathering (counts and totals see every conversation above the question's background once one clears the floor), with and without on one commit (d1d87f26b and the change). LongMemEval-S dev (200), no model for the proxies; answered by qwen3.7-plus at the provider's default reasoning, judged by qwen3.8-flash (second judge qwen3.7-plus), a main run and a noise run. Ids and scores only. Measured, not adopted (23 Nov): the end-to-end gain is smaller than the noise.",
+ "made_on": "2026-11-23",
+ "retrieval_dev": {
+  "today": {
+   "overall": {
+    "every_answer_session": 0.8196,
+    "answer_session": 0.9639,
+    "evidence_turn": 0.9021,
+    "precision": 0.828,
+    "answer_in_block": 0.4341,
+    "shown_mean": 4.47,
+    "tokens": {
+     "shown_mean": 4.47,
+     "tokens_p50": 1337,
+     "tokens_p95": 1489,
+     "nothing": 0.01
+    }
+   },
+   "knowledge-update": {
+    "every_answer_session": 0.8667,
+    "answer_session": 1.0,
+    "evidence_turn": 0.9667,
+    "precision": 0.9428,
+    "answer_in_block": 0.8235,
+    "shown_mean": 4.52
+   },
+   "multi-session": {
+    "every_answer_session": 0.78,
+    "answer_session": 0.98,
+    "evidence_turn": 0.94,
+    "precision": 0.8938,
+    "answer_in_block": 0.1,
+    "shown_mean": 5.42
+   },
+   "single-session-assistant": {
+    "every_answer_session": 1.0,
+    "answer_session": 1.0,
+    "evidence_turn": 0.7391,
+    "precision": 0.9167,
+    "answer_in_block": 0.5238,
+    "shown_mean": 2.96
+   },
+   "single-session-preference": {
+    "every_answer_session": 1.0,
+    "answer_session": 1.0,
+    "evidence_turn": 0.9167,
+    "precision": 0.6306,
+    "answer_in_block": 0.0,
+    "shown_mean": 4.67
+   },
+   "single-session-user": {
+    "every_answer_session": 1.0,
+    "answer_session": 1.0,
+    "evidence_turn": 1.0,
+    "precision": 0.7901,
+    "answer_in_block": 0.913,
+    "shown_mean": 3.46
+   },
+   "temporal-reasoning": {
+    "every_answer_session": 0.6154,
+    "answer_session": 0.8846,
+    "evidence_turn": 0.8462,
+    "precision": 0.7206,
+    "answer_in_block": 0.1957,
+    "shown_mean": 4.66
+   }
+  },
+  "gathering": {
+   "overall": {
+    "every_answer_session": 0.8763,
+    "answer_session": 0.9742,
+    "evidence_turn": 0.9227,
+    "precision": 0.7859,
+    "answer_in_block": 0.4341,
+    "shown_mean": 6.07,
+    "tokens": {
+     "shown_mean": 6.07,
+     "tokens_p50": 1415,
+     "tokens_p95": 1487,
+     "nothing": 0.01
+    }
+   },
+   "knowledge-update": {
+    "every_answer_session": 0.8667,
+    "answer_session": 1.0,
+    "evidence_turn": 0.9667,
+    "precision": 0.9066,
+    "answer_in_block": 0.8235,
+    "shown_mean": 5.13
+   },
+   "multi-session": {
+    "every_answer_session": 0.94,
+    "answer_session": 1.0,
+    "evidence_turn": 1.0,
+    "precision": 0.8422,
+    "answer_in_block": 0.1,
+    "shown_mean": 8.64
+   },
+   "single-session-assistant": {
+    "every_answer_session": 1.0,
+    "answer_session": 1.0,
+    "evidence_turn": 0.7391,
+    "precision": 0.9167,
+    "answer_in_block": 0.5238,
+    "shown_mean": 2.96
+   },
+   "single-session-preference": {
+    "every_answer_session": 1.0,
+    "answer_session": 1.0,
+    "evidence_turn": 0.9167,
+    "precision": 0.6306,
+    "answer_in_block": 0.0,
+    "shown_mean": 4.67
+   },
+   "single-session-user": {
+    "every_answer_session": 1.0,
+    "answer_session": 1.0,
+    "evidence_turn": 1.0,
+    "precision": 0.7901,
+    "answer_in_block": 0.913,
+    "shown_mean": 3.5
+   },
+   "temporal-reasoning": {
+    "every_answer_session": 0.6731,
+    "answer_session": 0.9038,
+    "evidence_turn": 0.8654,
+    "precision": 0.632,
+    "answer_in_block": 0.1957,
+    "shown_mean": 7.06
+   }
+  }
+ },
+ "answers_main": {
+  "overall": {
+   "kazma": 0.69,
+   "kazma_gather": 0.715,
+   "kazma_time": 0.675
+  },
+  "types": {
+   "knowledge-update": {
+    "n": 31,
+    "kazma": 0.8387,
+    "kazma_gather": 0.8387,
+    "kazma_time": 0.871
+   },
+   "multi-session": {
+    "n": 53,
+    "kazma": 0.3962,
+    "kazma_gather": 0.4528,
+    "kazma_time": 0.3208
+   },
+   "single-session-assistant": {
+    "n": 23,
+    "kazma": 0.8261,
+    "kazma_gather": 0.8261,
+    "kazma_time": 0.8261
+   },
+   "single-session-preference": {
+    "n": 12,
+    "kazma": 1.0,
+    "kazma_gather": 0.9167,
+    "kazma_time": 1.0
+   },
+   "single-session-user": {
+    "n": 28,
+    "kazma": 1.0,
+    "kazma_gather": 1.0,
+    "kazma_time": 1.0
+   },
+   "temporal-reasoning": {
+    "n": 53,
+    "kazma": 0.6038,
+    "kazma_gather": 0.6604,
+    "kazma_time": 0.6038
+   }
+  },
+  "second_judge": {
+   "kazma": 0.675,
+   "kazma_gather": 0.7,
+   "kazma_time": 0.66
+  },
+  "usage": {
+   "calls": 1800,
+   "prompt_tokens": 1092739,
+   "completion_tokens": 395226,
+   "prompt_cache_hit_tokens": 5120,
+   "reasoning_tokens": 352567
+  }
+ },
+ "answers_noise": {
+  "overall": {
+   "kazma": 0.69,
+   "kazma_gather": 0.69
+  },
+  "types": {
+   "knowledge-update": {
+    "n": 31,
+    "kazma": 0.8387,
+    "kazma_gather": 0.8387
+   },
+   "multi-session": {
+    "n": 53,
+    "kazma": 0.3962,
+    "kazma_gather": 0.3962
+   },
+   "single-session-assistant": {
+    "n": 23,
+    "kazma": 0.8261,
+    "kazma_gather": 0.8261
+   },
+   "single-session-preference": {
+    "n": 12,
+    "kazma": 0.9167,
+    "kazma_gather": 1.0
+   },
+   "single-session-user": {
+    "n": 28,
+    "kazma": 1.0,
+    "kazma_gather": 1.0
+   },
+   "temporal-reasoning": {
+    "n": 53,
+    "kazma": 0.6226,
+    "kazma_gather": 0.6038
+   }
+  },
+  "second_judge": {
+   "kazma": 0.675,
+   "kazma_gather": 0.68
+  },
+  "usage": {
+   "calls": 1200,
+   "prompt_tokens": 726274,
+   "completion_tokens": 257914,
+   "prompt_cache_hit_tokens": 2304,
+   "reasoning_tokens": 228566
+  }
+ },
+ "changes": {
+  "main": {
+   "gained": [
+    "2e6d26dc",
+    "46a3abf7",
+    "67e0d0f2",
+    "a2f3aa27",
+    "a3332713",
+    "d682f1a2",
+    "gpt4_21adecb5",
+    "gpt4_5501fe77",
+    "gpt4_8279ba02",
+    "gpt4_d31cdae3"
+   ],
+   "lost": [
+    "1da05512",
+    "4d6b87c8",
+    "85fa3a3f",
+    "88432d0a_abs",
+    "gpt4_e05b82a6"
+   ]
+  },
+  "noise": {
+   "gained": [
+    "54026fce",
+    "67e0d0f2",
+    "a3332713",
+    "d23cf73b",
+    "d682f1a2",
+    "gpt4_21adecb5",
+    "gpt4_8279ba02"
+   ],
+   "lost": [
+    "09ba9854_abs",
+    "85fa3a3f",
+    "88432d0a_abs",
+    "gpt4_4929293a",
+    "gpt4_d31cdae3",
+    "gpt4_e05b82a6",
+    "gpt4_f420262d"
+   ]
+  },
+  "in_both": {
+   "gained": [
+    "67e0d0f2",
+    "a3332713",
+    "d682f1a2",
+    "gpt4_21adecb5",
+    "gpt4_8279ba02"
+   ],
+   "lost": [
+    "85fa3a3f",
+    "88432d0a_abs",
+    "gpt4_e05b82a6"
+   ]
+  },
+  "flips_between_runs": {
+   "kazma": 2,
+   "kazma_gather": 11
+  }
+ },
+ "kazma_time": "the gathering block with the count's conversations oldest first (an experiment, one run)",
+ "kazma_benchmark": {
+  "precision": [
+   0.4872,
+   0.4868
+  ],
+  "list.precision": [
+   0.5071,
+   0.5002
+  ],
+  "small.precision": [
+   0.6752,
+   0.6743
+  ],
+  "scale.precision": [
+   0.4379,
+   0.4378
+  ],
+  "answers_and_mrr": "unchanged on every store",
+  "list_first_try": {
+   "list.precision": [
+    0.5071,
+    0.385
+   ],
+   "note": "gathering for every request for every memory (lists too): no answer gained, precision lost; counts and totals only kept"
+  }
+ }
+}

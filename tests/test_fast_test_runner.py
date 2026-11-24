@@ -796,3 +796,191 @@ def test_the_cap_reaches_every_process_the_run_starts() -> None:
     # The control: without the cap (the runner before quiet hours), a process
     # the run starts sees every core this one has.
     assert grandchild_cores(0) == own
+
+
+# ── A pytest process runs a bounded number of files (2026-11-23) ─────────
+# CI's runner (4 vCPUs, 16 GB, ``--chunks 4``: ~470 files per process) was
+# ended from outside 30-40 minutes in: every chunk process grew for the whole
+# run (3.8, 3.6, 3.5, 2.8 GB at 40 minutes; 5.1 GB at 52 on an earlier run),
+# and ``MALLOC_ARENA_MAX=2`` did not change it. A chunk now runs its files as
+# consecutive pytest processes of at most ``--files-per-process`` files.
+
+
+def test_a_chunk_splits_into_even_consecutive_pieces() -> None:
+    runner = _runner()
+    files = [Path(f"tests/test_{i:03d}.py") for i in range(471)]
+    pieces = runner.split_into_pieces(files, 120)
+    assert [len(p) for p in pieces] == [118, 118, 118, 117]
+    assert [f for p in pieces for f in p] == files, "every file once, in the chunk's order"
+    assert max(len(p) for p in runner.split_into_pieces(files, 150)) <= 150
+    assert runner.split_into_pieces(files[:120], 120) == [files[:120]]
+    assert runner.split_into_pieces([], 120) == []
+    # 0 (or none): the whole chunk in one process, the runner before pieces.
+    assert runner.split_into_pieces(files, 0) == [files]
+    assert runner.split_into_pieces(files, None) == [files]
+
+
+def test_each_process_gets_the_budget_of_its_own_size(monkeypatch) -> None:
+    runner = _runner()
+    _drive_main(runner, monkeypatch, lambda n: 0)
+    budgets: list[tuple[int, float]] = []
+
+    def chunk(idx, files, timeout):
+        budgets.append((len(files), timeout))
+        return {"idx": idx, "code": 0, "counts": {"passed": len(files)}, "failed": [],
+                "log": "", "files": files}
+
+    monkeypatch.setattr(runner, "run_chunk", chunk)
+    monkeypatch.setattr(runner, "_MIN_CHUNK_TIMEOUT", 0.0)
+    monkeypatch.setattr(runner.sys, "argv", ["fast_test.py", "--chunks", "2", "--files-per-process", "2"])
+    assert runner.main() == 0
+    assert sorted(budgets) == [(2, 20.0)] * 4, budgets
+    # The control: one process per chunk gets the whole chunk's budget.
+    budgets.clear()
+    monkeypatch.setattr(runner.sys, "argv", ["fast_test.py", "--chunks", "2", "--files-per-process", "0"])
+    assert runner.main() == 0
+    assert sorted(budgets) == [(4, 40.0)] * 2, budgets
+
+
+def test_the_default_bounds_every_process() -> None:
+    """``python scripts/fast_test.py`` with no option is bounded too: the
+    machine the owner runs it on is the one the live install runs on. The
+    bound is the measured one (2026-11-23, 471 files: one process 5.53 GB,
+    at most 120 files a process up to 2.34 GB, at most 60 up to 1.72 GB)."""
+    runner = _runner()
+    assert 0 < runner.DEFAULT_FILES_PER_PROCESS <= 60
+    ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    coverage = (REPO / ".github" / "workflows" / "coverage.yml").read_text(encoding="utf-8")
+    for name, text in (("ci.yml", ci), ("coverage.yml", coverage)):
+        runs = re.findall(r"scripts/fast_test\.py[^\n|]*", text)
+        commands = [run for run in runs if "--chunks" in run]
+        assert commands, f"{name} runs no fast_test.py"
+        for command in commands:
+            found = re.search(r"--files-per-process\s+(\d+)", command)
+            assert found and 0 < int(found.group(1)) <= 60, f"{name}: {command}"
+
+
+#: A test file of the probe suite: it records which process ran it and when.
+_PIECE_TEST = '''
+import os
+import time
+
+
+def test_records_its_process():
+    # One file per process: appends from two processes at once can collide.
+    log = os.path.join(os.environ["KZ_PIECE_LOG"], f"{os.getpid()}.log")
+    with open(log, "a") as f:
+        f.write(f"{os.getpid()} {__name__} start {time.time()!r}\\n")
+    if __name__.endswith("crashes") and not os.path.exists(os.environ["KZ_CRASHED"]):
+        open(os.environ["KZ_CRASHED"], "w").close()
+        os._exit(139)  # how a shell reports a segfault: the runner's crash code
+    time.sleep(0.4)
+    with open(log, "a") as f:
+        f.write(f"{os.getpid()} {__name__} end {time.time()!r}\\n")
+'''
+
+
+def _piece_suite(tmp_path: Path, monkeypatch, runner, names: list[str]) -> Path:
+    """Real test files in a folder of their own, run by ``main`` with real
+    pytest processes; returns the folder their records are written to."""
+    suite = tmp_path / "suite"
+    suite.mkdir()
+    (suite / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    files = []
+    for name in names:
+        path = suite / f"{name}.py"
+        path.write_text(_PIECE_TEST, encoding="utf-8")
+        files.append(path)
+    log = tmp_path / "pieces"
+    log.mkdir()
+    monkeypatch.setenv("KZ_PIECE_LOG", str(log))
+    monkeypatch.setenv("KZ_CRASHED", str(tmp_path / "crashed.once"))
+    monkeypatch.setattr(runner, "REPO", suite)
+    monkeypatch.setattr(runner, "discover_test_files", lambda: files)
+    monkeypatch.setattr(runner, "MIN_EXPECTED_PASSED", 1)
+    monkeypatch.setattr(runner, "read_schedule", lambda: None)
+    monkeypatch.setattr(runner, "limit_to_cores", lambda cores: False)
+    monkeypatch.setattr(runner, "remove_ended_run_folders", lambda: 0)
+    return log
+
+
+def _records(log: Path) -> list[list[str]]:
+    """Every line the probe tests wrote: pid, module, start or end, time."""
+    return [line.split() for path in sorted(log.glob("*.log"))
+            for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _runs(log: Path) -> dict[int, dict]:
+    """Per pytest process: the files it ran and when it was working."""
+    runs: dict[int, dict] = {}
+    for pid, name, what, when in _records(log):
+        run = runs.setdefault(int(pid), {"files": [], "first": float(when), "last": float(when)})
+        if what == "start":
+            run["files"].append(name)
+        run["first"] = min(run["first"], float(when))
+        run["last"] = max(run["last"], float(when))
+    return runs
+
+
+@pytest.mark.parametrize("per_process", [2, 0], ids=["pieces", "one-process-control"])
+def test_a_chunk_runs_its_pieces_one_after_another(tmp_path, monkeypatch, capsys, per_process) -> None:
+    """Real pytest processes: two chunks of four files, at most two files a
+    process. Each chunk's processes run one after the other, never two of a
+    chunk at once, and the tallies of all of them add up. The control: with
+    0 (the runner before), one process runs every file of its chunk."""
+    runner = _runner()
+    names = [f"test_p{i}" for i in range(8)]
+    log = _piece_suite(tmp_path, monkeypatch, runner, names)
+    monkeypatch.setattr(runner.sys, "argv", ["fast_test.py", "--chunks", "2",
+                                             "--files-per-process", str(per_process)])
+    assert runner.main() == 0
+    out = capsys.readouterr().out
+    assert "TOTALS" in out and "8 passed" in out, out
+    runs = _runs(log)
+    chunk_of = {name: i % 2 for i, name in enumerate(names)}  # round-robin
+    assert sorted(f for run in runs.values() for f in run["files"]) == sorted(names)
+    if per_process == 0:
+        assert len(runs) == 2 and sorted(len(r["files"]) for r in runs.values()) == [4, 4], runs
+        return
+    assert len(runs) == 4, runs
+    assert all(len(run["files"]) <= 2 for run in runs.values()), runs
+    assert "process 2/2" in out, out
+    for chunk in (0, 1):
+        mine = sorted((r for r in runs.values() if chunk_of[r["files"][0]] == chunk),
+                      key=lambda r: r["first"])
+        assert len(mine) == 2 and all(chunk_of[f] == chunk for r in mine for f in r["files"])
+        assert mine[0]["last"] < mine[1]["first"], f"two processes of chunk {chunk} ran at once: {mine}"
+        # In the chunk's own order: its first two files, then the next two.
+        assert mine[0]["files"] == [n for n in names if chunk_of[n] == chunk][:2]
+
+
+@pytest.mark.parametrize("per_process", [2, 0], ids=["pieces", "one-process-control"])
+def test_a_crashed_process_is_recovered_and_costs_the_others_nothing(tmp_path, monkeypatch, capsys, per_process) -> None:
+    """Real pytest processes: one chunk of six files, two a process. The
+    second process dies in its first file with a crash code (once: a native
+    crash is often intermittent). The third process still runs, in the first
+    pass; only the crashed one's files are recovered; every file counts once.
+    The control: as one process (0, the runner before), the same crash sends
+    every file of the chunk back to recovery, the ones that had passed too."""
+    runner = _runner()
+    names = ["test_a0", "test_a1", "test_b0_crashes", "test_b1", "test_c0", "test_c1"]
+    log = _piece_suite(tmp_path, monkeypatch, runner, names)
+    monkeypatch.setattr(runner.sys, "argv", ["fast_test.py", "--chunks", "1",
+                                             "--files-per-process", str(per_process)])
+    assert runner.main() == 0
+    out = capsys.readouterr().out
+    assert "6 passed" in out and "POISON" not in out, out
+    lines = _records(log)
+    starts = [(name, float(when)) for _pid, name, what, when in lines if what == "start"]
+    runs_of = {name: sum(1 for started, _ in starts if started == name) for name in names}
+    if per_process == 0:
+        assert "chunk 00 crashed (exit=139)" in out, out
+        assert runs_of["test_a0"] == runs_of["test_a1"] == 2, runs_of
+        return
+    assert "chunk 00, process 2/3 crashed (exit=139)" in out, out
+    ended = [name for _pid, name, what, _when in lines if what == "end"]
+    assert sorted(ended) == sorted(names), "every file ran to its end exactly once"
+    assert runs_of == {**{name: 1 for name in names}, "test_b0_crashes": 2}, runs_of
+    crashed = sorted(when for name, when in starts if name == "test_b0_crashes")
+    third = [when for name, when in starts if name == "test_c0"]
+    assert crashed[0] < third[0] < crashed[1], "the process after the crash ran in the first pass"

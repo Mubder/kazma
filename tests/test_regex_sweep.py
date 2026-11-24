@@ -54,6 +54,8 @@ from pathlib import Path
 from re import _constants as sre_c
 from re import _parser as sre_parse
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[1]
 N = 3000
 SUSPECT_S = 0.0005     # at N characters: most linear patterns take a tenth of that
@@ -332,6 +334,10 @@ def _run(compiled: re.Pattern[str], op: str, text: str) -> float:
     return time.perf_counter() - start
 
 
+#: How many more runs a slow growth must survive before it names a pattern.
+CONFIRMATIONS = 6
+
+
 def measure(literal: Literal) -> dict | None:
     """The first input on which *literal* grows faster than linear, with its times, or None."""
     try:
@@ -349,9 +355,15 @@ def measure(literal: Literal) -> dict | None:
         if whole < SUSPECT_S:
             continue
         four = _run(compiled, literal.op, recipe.text(4 * N))
-        if four > SLOW_S and four > 8 * whole:  # confirmed, so one late scheduling slice decides nothing
+        # Confirmed, so a late scheduling slice decides nothing: the fastest of
+        # up to CONFIRMATIONS more runs. A busy CI runner paused both of two
+        # runs of a plain character class (0.5 ms, then 20.6 ms, 2026-11-24).
+        for _ in range(CONFIRMATIONS):
+            if not (four > SLOW_S and four > 8 * whole):
+                break
             whole = min(whole, _run(compiled, literal.op, recipe.text(N)))
             four = min(four, _run(compiled, literal.op, recipe.text(4 * N)))
+        else:
             if four > SLOW_S and four > 8 * whole:
                 return {"input": str(recipe), "seconds at n": round(whole, 4), "seconds at 4n": round(four, 4)}
     return None
@@ -464,6 +476,24 @@ def test_every_product_regex_literal_is_linear_or_declared():
     assert len(literals) > 500, len(literals)  # the scan found the product's patterns
     problems = _report(literals, slow, hung)
     assert not problems, "\n".join(problems)
+
+
+@pytest.mark.parametrize(("paused_runs", "named"), [(2, False), (10_000, True)])
+def test_a_paused_runner_is_no_patterns_time(monkeypatch, paused_runs, named):
+    """Two paused runs of a fast pattern decide nothing (with one
+    confirmation they named it); a pattern that stays slow is named."""
+    calls = {"four": 0}
+
+    def run(compiled, op, text):
+        if len(text) < 3 * N:
+            return SUSPECT_S
+        calls["four"] += 1
+        slow = max(SLOW_S, 8 * SUSPECT_S) * 2
+        return slow if calls["four"] <= paused_runs else 4 * SUSPECT_S
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", run)
+    literal = Literal(*[{"pattern": "[a-z]", "flags": 0, "op": "sub"}.get(f, "x") for f in Literal.__dataclass_fields__])
+    assert (measure(literal) is not None) is named
 
 
 def test_every_declaration_names_a_pattern_that_exists():

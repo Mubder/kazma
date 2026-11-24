@@ -323,6 +323,35 @@ def test_the_reader_reasons_at_the_shipped_level(lme):
         lme.Chat(model="m", base_url="https://api.example", key="k", reasoning="max")
 
 
+def test_a_dropped_connection_is_tried_again_and_never_ends_the_run(lme, monkeypatch):
+    """Qwen dropped a connection in a judge call (23 Nov, RemoteProtocolError)
+    and the whole 200-question run ended. A dropped connection is tried again;
+    past the tries it is a refused call (asked again on the next run).
+    Control: a client that raises is what the run met."""
+    import httpx
+
+    monkeypatch.setattr(lme.time, "sleep", lambda _s: None)
+    calls = {"n": 0}
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+        return httpx.Response(200, json=_ANSWER)
+
+    chat = lme.Chat(model="m", base_url="https://api.example", key="k", reasoning="off")
+    chat.client = httpx.Client(transport=httpx.MockTransport(flaky))
+    assert chat.ask("q", max_tokens=10)[0] == "In May." and calls["n"] == 2
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+    chat.client = httpx.Client(transport=httpx.MockTransport(down))
+    assert chat.ask("q", max_tokens=10) == ("", {"error": "transport"})
+    with pytest.raises(httpx.RemoteProtocolError):
+        chat.client.post("https://api.example/chat/completions", json={})
+
+
 def test_an_answer_cut_at_its_limit_is_said(lme):
     cut = {**_ANSWER, "choices": [{"message": {"content": ""}, "finish_reason": "length"}]}
     chat, _ = _chat(lme, "low", cut)

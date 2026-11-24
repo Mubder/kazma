@@ -53,12 +53,13 @@ Turns in English, Arabic and both, with the facts a person would expect remember
 | Quick pass | English | 42.1 % | 100.0 % | 100.0 % | 100.0 % | 18 turns |
 | Quick pass | Arabic | 50.0 % | 100.0 % | 100.0 % | 100.0 % | 14 turns |
 | Quick pass | Mixed | 60.0 % | 100.0 % | 100.0 % | 100.0 % | 8 turns |
-| Model pass (5 askings a turn) | English | 100.0 % | 86.3 % | 100.0 % | 100.0 % | 90 askings (18 turns, 5 each) |
-| Model pass (5 askings a turn) | Arabic | 97.1 % | 94.1 % | 100.0 % | 100.0 % | 70 askings (14 turns, 5 each) |
-| Model pass (5 askings a turn) | Mixed | 100.0 % | 72.0 % | 92.6 % | 100.0 % | 40 askings (8 turns, 5 each) |
+| Model pass (5 askings a turn, previous prompt) | English | 100.0 % | 86.3 % | 100.0 % | 100.0 % | 90 askings (18 turns, 5 each) |
+| Model pass (5 askings a turn, previous prompt) | Arabic | 97.1 % | 94.1 % | 100.0 % | 100.0 % | 70 askings (14 turns, 5 each) |
+| Model pass (5 askings a turn, previous prompt) | Mixed | 100.0 % | 72.0 % | 92.6 % | 100.0 % | 40 askings (8 turns, 5 each) |
 
 The model pass is deepseek-flash's replies, recorded on 2026-11-20, 5 askings a turn. Asked again, a model answers a little differently, so the lock keeps each score's spread: two standard errors over the askings, at most 7.5 points for the scores in this table.
 On the ten turns that give it the turn's day, the turn before and the facts held, the model pass gives a fact's start right 90.0 % in English, 100.0 % in Arabic; names the held fact it replaces 100.0 % in English, 100.0 % in Arabic; reads that a fact ended 100.0 % in English, 100.0 % in Arabic.
+Kazma's extraction prompt has changed since that recording (1 change since 2026-11-23). The model-pass rows replay the recording through today's code, which checks that the code reading the model's replies still keeps what it kept; they do not measure the new prompt, which is measured when it is recorded.
 
 With Postgres and pgvector as the memory store: not yet measured on dataset version 8. CI's pgvector job measures it on every run, with pgvector's own search and with every row compared, and its numbers are printed here once they are locked from a named run.
 
@@ -73,8 +74,8 @@ What memory adds to every turn, and what it gets right, in English and in Arabic
 | Answer shown (questions with one) | 95.7 % | 90.5 % |
 | Precision of what is shown | 47.7 % | 42.8 % |
 | Questions with no answer that show nothing | 0.0 % of 22 | 0.0 % of 4 |
-| Tokens the recall block adds (median / 95th / largest) | 711 / 1,035 / 1,341 | 590 / 823 / 1,091 |
-| The same, the store four times as large | 736 / 1,211 / 1,343 | 598 / 848 / 1,085 |
+| Tokens the recall block adds (median / 95th / largest) | 711 / 1,035 / 1,341 | 592 / 826 / 1,109 |
+| The same, the store four times as large | 738 / 1,211 / 1,361 | 598 / 848 / 1,103 |
 
 Recall took 95.9 ms (median; 102.9 ms at the 95th) on the store, 243.6 ms at four times its size; the embedding model 75.6 ms a question; Kazma's own share of the time to the first token 0.115 s (0.12 s at the 95th, `tests/e2e/test_first_token_latency.py`). Times are the development PC's. A new install's small store: 96.4 % answered, precision 67.5 %, 3.9 % of the questions with no answer show nothing.
 

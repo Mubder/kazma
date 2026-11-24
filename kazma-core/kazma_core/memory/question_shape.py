@@ -51,7 +51,7 @@ _ANAPHORS_EN = re.compile(
     re.IGNORECASE,
 )
 _ANAPHORS_AR = re.compile(
-    r"(?:^|\s)(?:هو|هي|هم|هذا|هذي|هذه|ذاك|ذيك|هناك|هناك|الاول|الثاني|الثانيه)(?=\s|$|[؟?.,،!])"
+    r"(?:^|\s)(?:هو|هي|هم|هذا|هذي|هذه|ذاك|ذيك|هناك|الاول|الثاني|الثانيه)(?=\s|$|[؟?.,،!])"
 )
 #: A follow-up is short: past this many content words a message says what
 #: it is about.

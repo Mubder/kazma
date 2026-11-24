@@ -1,0 +1,268 @@
+{
+ "what": "The memory plan's W4 pilot of dated event lines: 50 dev questions; kazma is today's block (no facts), facts_events the block with the facts the deep pass wrote, facts_no_events the same without the dated event facts. One reader (qwen3.7-plus, default reasoning), judges qwen3.8-flash then qwen3.7-plus, twice (main and noise). Ids and scores only.",
+ "main": {
+  "overall": {
+   "kazma": {
+    "answered": 0.69,
+    "answered_judge2": 0.675,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1322
+   },
+   "facts_no_events": {
+    "answered": 0.7,
+    "answered_judge2": 0.685,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1392
+   },
+   "facts_events": {
+    "answered": 0.755,
+    "answered_judge2": 0.74,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1392
+   }
+  },
+  "types": {
+   "knowledge-update": {
+    "n": 31,
+    "kazma": 0.839,
+    "facts_no_events": 0.871,
+    "facts_events": 0.903
+   },
+   "multi-session": {
+    "n": 53,
+    "kazma": 0.396,
+    "facts_no_events": 0.491,
+    "facts_events": 0.566
+   },
+   "single-session-assistant": {
+    "n": 23,
+    "kazma": 0.826,
+    "facts_no_events": 0.826,
+    "facts_events": 0.826
+   },
+   "single-session-preference": {
+    "n": 12,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0
+   },
+   "single-session-user": {
+    "n": 28,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0
+   },
+   "temporal-reasoning": {
+    "n": 53,
+    "kazma": 0.604,
+    "facts_no_events": 0.528,
+    "facts_events": 0.642
+   }
+  }
+ },
+ "noise": {
+  "overall": {
+   "kazma": {
+    "answered": 0.69,
+    "answered_judge2": 0.675,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1322
+   },
+   "facts_no_events": {
+    "answered": 0.71,
+    "answered_judge2": 0.7,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1392
+   },
+   "facts_events": {
+    "answered": 0.765,
+    "answered_judge2": 0.75,
+    "unasked": 0,
+    "reader_prompt_tokens_mean": 1392
+   }
+  },
+  "types": {
+   "knowledge-update": {
+    "n": 31,
+    "kazma": 0.839,
+    "facts_no_events": 0.935,
+    "facts_events": 0.903
+   },
+   "multi-session": {
+    "n": 53,
+    "kazma": 0.396,
+    "facts_no_events": 0.491,
+    "facts_events": 0.585
+   },
+   "single-session-assistant": {
+    "n": 23,
+    "kazma": 0.826,
+    "facts_no_events": 0.826,
+    "facts_events": 0.826
+   },
+   "single-session-preference": {
+    "n": 12,
+    "kazma": 0.917,
+    "facts_no_events": 0.917,
+    "facts_events": 1.0
+   },
+   "single-session-user": {
+    "n": 28,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0
+   },
+   "temporal-reasoning": {
+    "n": 53,
+    "kazma": 0.623,
+    "facts_no_events": 0.547,
+    "facts_events": 0.66
+   }
+  }
+ },
+ "changes": {
+  "facts_events vs kazma": {
+   "main": {
+    "gained": 20,
+    "lost": 7
+   },
+   "noise": {
+    "gained": 22,
+    "lost": 7
+   },
+   "gained_in_both": [
+    "00ca467f",
+    "10d9b85a",
+    "129d1232",
+    "2a1811e2",
+    "3a704032",
+    "46a3abf7",
+    "50635ada",
+    "5a7937c8",
+    "60036106",
+    "61f8c8f8",
+    "6456829e_abs",
+    "830ce83f",
+    "87f22b4a",
+    "a2f3aa27",
+    "a3045048",
+    "a3332713",
+    "d682f1a2",
+    "gpt4_21adecb5",
+    "gpt4_8279ba02",
+    "gpt4_a1b77f9c"
+   ],
+   "lost_in_both": [
+    "4d6b87c8",
+    "88432d0a_abs",
+    "a9f6b44c",
+    "b46e15ed",
+    "gpt4_2d58bcd6"
+   ]
+  },
+  "facts_events vs facts_no_events": {
+   "main": {
+    "gained": 11,
+    "lost": 0
+   },
+   "noise": {
+    "gained": 13,
+    "lost": 2
+   },
+   "gained_in_both": [
+    "00ca467f",
+    "10d9b85a",
+    "2a1811e2",
+    "3a704032",
+    "5a7937c8",
+    "a3045048",
+    "b29f3365",
+    "gpt4_8279ba02",
+    "gpt4_a1b77f9c"
+   ],
+   "lost_in_both": []
+  },
+  "facts_no_events vs kazma": {
+   "main": {
+    "gained": 11,
+    "lost": 9
+   },
+   "noise": {
+    "gained": 13,
+    "lost": 9
+   },
+   "gained_in_both": [
+    "129d1232",
+    "46a3abf7",
+    "50635ada",
+    "60036106",
+    "61f8c8f8",
+    "6456829e_abs",
+    "87f22b4a",
+    "a2f3aa27",
+    "a3332713",
+    "d682f1a2",
+    "gpt4_21adecb5"
+   ],
+   "lost_in_both": [
+    "09ba9854_abs",
+    "88432d0a_abs",
+    "a9f6b44c",
+    "b29f3365",
+    "b46e15ed",
+    "c9f37c46",
+    "gpt4_2d58bcd6",
+    "gpt4_f420262d"
+   ]
+  }
+ },
+ "flips": {
+  "kazma": 2,
+  "facts_no_events": 4,
+  "facts_events": 4
+ },
+ "stores": {
+  "rounds": 49585,
+  "quick": 48817,
+  "deep": 48109,
+  "deep_failed": 495,
+  "facts": 55226,
+  "current": 51758,
+  "deep_pass": 55029,
+  "dated_events": 3271,
+  "dated_starts": 1476
+ },
+ "blocks": {
+  "kazma": {
+   "tokens_p50": 1336.0,
+   "tokens_p95": 1490
+  },
+  "facts_no_events": {
+   "tokens_p50": 1427.5,
+   "tokens_p95": 1498
+  },
+  "facts_events": {
+   "tokens_p50": 1423.5,
+   "tokens_p95": 1496,
+   "facts_shown_mean": 3.87,
+   "dated_events_shown_mean": 0.8,
+   "questions_with_a_dated_event_shown": 69
+  }
+ },
+ "usage": {
+  "main": {
+   "calls": 1800,
+   "prompt_tokens": 1097421,
+   "completion_tokens": 379263,
+   "prompt_cache_hit_tokens": 355840,
+   "reasoning_tokens": 336946
+  },
+  "noise": {
+   "calls": 1800,
+   "prompt_tokens": 1097781,
+   "completion_tokens": 370911,
+   "prompt_cache_hit_tokens": 105344,
+   "reasoning_tokens": 328417
+  }
+ }
+}
