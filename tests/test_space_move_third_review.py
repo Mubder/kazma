@@ -160,9 +160,12 @@ def test_no_two_space_ids_have_one_checkpoint_file() -> None:
     assert ("a", "a_") in _meeting(_before) and _before("v") == _before("v_")
 
 
-def test_every_id_there_is_keeps_its_file() -> None:
+def test_an_id_that_does_not_end_in_an_underscore_keeps_its_file() -> None:
     """A guard: the ids Kazma makes, and the tenants of before Spaces (a
-    retired memory mode's, an identity provider's)."""
+    retired memory mode's, an identity provider's) in the shapes named here.
+    One that ends in an underscore has a file of its own now, not the one it
+    had: that is the fix."""
+    assert paths.space_checkpoints_db("acme_").name == "checkpoints_acme_.db" != _before("acme_")
     for held in (scope.new_space_id(), "telegram", "telegram:12345", "discord:987/65", "Alice", "acme-corp",
                  "a.very/odd tenant", "x" * 60, "telegram:" + "9" * 60):
         assert paths.space_checkpoints_db(held).name == _before(held), held

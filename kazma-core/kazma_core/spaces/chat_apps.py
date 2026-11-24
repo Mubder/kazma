@@ -234,6 +234,24 @@ def _key_for(sender_id: str, space_id: str) -> str:
     return sender_id if space_id == OWNER_SPACE_ID else f"{sender_id}--in-{space_id}"
 
 
+#: The ids of the ``gw-`` form that are random, so no chat of another space
+#: ever has one: a chat given a name or forked (``/new``, ``/fork``: the
+#: sender's key, then eight hex digits) and a chat with no sender.
+_RANDOM_CHAT_THREAD = re.compile(r"gw-(?:([a-z0-9]+)-\1_.*-[0-9a-f]{8}|[0-9a-f]{12})", re.DOTALL)
+
+
+def foreign_chat_thread(thread_id: str, space_id: str) -> bool:
+    """Whether *thread_id* is the id a chat app's chat of another space than
+    *space_id* has, or will have with its first message: ``gw-<platform>-``
+    and the sender, or their topic or thread, with nothing random in it. A
+    space's own carries ``--in-<space>`` at its end (:func:`_key_for`,
+    ``agent_handler.graph._resolve_thread_in_place``); the owner's carries
+    none. Pure."""
+    if not thread_id.startswith("gw-") or thread_id.endswith(f"--in-{space_id}"):
+        return False
+    return _RANDOM_CHAT_THREAD.fullmatch(thread_id) is None
+
+
 def _unbound_reply(platform: str, group: str, user_text: str | None) -> str:
     now = time.time()
     key = f"{platform}:{group}"

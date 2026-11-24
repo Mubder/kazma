@@ -26,6 +26,7 @@ from kazma_core.config_store import get_config_store
 from kazma_core.spaces import identity, scope, space_data, threads
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
 from kazma_core.store_registry import SPACE_RULES
+from kazma_core.stores.knowledge import _library_id_in_space
 
 #: Ids as Kazma makes them (``scope.new_space_id``): a bundle of any other
 #: is refused.
@@ -132,6 +133,8 @@ def _plant(space: str, word: str) -> list[str]:
     threads.record_thread(thread, space, OWNER_ACCOUNT_ID)
     parents = {key: f"{key}-{space}-{uuid.uuid4().hex[:6]}" for key in
                ("summaries", "commitments", "jobs", "swarm_tasks", "libraries")}
+    # As this space makes one: a bundle carrying any other is refused.
+    parents["libraries"] = _library_id_in_space(parents["libraries"], space)
     parents["memory_rows:episodes"] = f"ep-{space}-{uuid.uuid4().hex[:6]}"
     parents["memory_rows:beliefs"] = f"b-{space}-{uuid.uuid4().hex[:6]}"
     parents["memory_rows"] = parents["memory_rows:episodes"]

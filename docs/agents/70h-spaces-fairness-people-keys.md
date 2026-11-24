@@ -274,7 +274,7 @@
     makes** (the third review, 2026-11-24: the name lost the underscores at
     its ends, so an id `v_` had `v`'s file, and a refused import of `v_`
     deleted `v`'s chats): a space id is the file's name as it is (a tenant of
-    before Spaces keeps the name it had), a bundle's id must be one Kazma
+    before Spaces keeps the name it had, unless its id ends in an underscore), a bundle's id must be one Kazma
     makes (`scope.made_space_id`, `scope.new_space_id`: `s` and twelve hex
     digits), and a checkpoint file of its name that is here counts as the
     space's being here -- a retired memory mode's is someone else's -- but
@@ -290,16 +290,35 @@
     never merged; integer row ids alone are given new numbers) -- in any
     store and whoever's it is, a chat of the owner's from before Spaces, which
     has no record, among them (`_check_ids`: such a chat was recorded as the
-    space's, and a take-back deleted it); a pointer to a secret not in the
+    space's, and a take-back deleted it); an id this install makes by itself
+    for another space and has not yet (`foreign_row`, the fourth review: a
+    chat app's chat, `chat_apps.foreign_chat_thread` -- `gw-` with nothing
+    random in it and no `--in-<space>` of its own at its end -- in any row's
+    `thread_id` or a transcript's `session_id`; a library whose id
+    `_library_id_in_space` would not give it: that person's own chat was
+    "another space's" from then on, and the owner's "Handbook" failed); a
+    file or folder at the top of the space's folder named as the import's
+    own mark (`reserved_name`, as the bundle is made too: never dropped
+    without a word; a mark that could not be removed is Kazma's own); a pointer to a secret not in the
     bundle (`foreign_secret`); a table or column this install lacks.
   - **A half-done import leaves the install as it was**: every row store is
     made by its own code first (`spaces/row_stores.py`); the space is
-    recorded in `space_move.JOURNAL_KEY` before anything is written; a
-    failure takes back what was written by the erase's own walk, and a file
+    recorded in `space_move.JOURNAL_KEY` before anything is written; its
+    chats' records are written first, alone, and what the checks asked is
+    asked again after them (`_claim_threads`; the entry says `claiming` until
+    then: a take-back of such an import removes the records alone, since a
+    row keyed by one is the chat's that was made here meanwhile); a
+    failure takes back what was written by the erase's own walk, by what is
+    recorded here as the space's and **never by the ids the bundle names**
+    (a chat or a job made here after the checks was erased by its id), and a file
     or folder only when it carries the import's own mark, which the journal
     holds (the checkpoint file's `application_id`, put in place over nothing;
     `.kazma-arriving` in a folder until the space lands): never one another
-    space has. The checkpoint file goes last -- a program may hold it open --
+    space has -- or an empty one at the name with the import's staged file
+    still beside it (`_claim_and_replace`, a disk with no hard links: a
+    replace that fails gives the name up, a stop leaves both); a staged file
+    a program holds is no failure of an import that landed (`_unmark` tries
+    again). The checkpoint file goes last -- a program may hold it open --
     and the journal keeps it for the next start. One a stop cut off is taken
     back as Kazma starts (`settle_at_start`) or by the next import, never a
     running one (`settle_unfinished_imports` takes the import lock), nor one
@@ -330,7 +349,9 @@
     `tests/test_space_move_second_review.py` (the second review's, failing
     on 46f200bcb), `tests/test_space_move_third_review.py` (the third's,
     failing on b55865291; the file name of before, where `v` and `v_` meet,
-    as the control),
+    as the control), `tests/test_space_move_fourth_review.py` (the fourth's,
+    failing on b5d8330c7; the gateway's own ids for every chat app, made by
+    its own code),
     `tests/e2e/test_space_move_browser.py` (by the sidebar, EN/AR: moved,
     the file sealed whole, deleted, a wrong password refused, brought back in
     with a person as owner).

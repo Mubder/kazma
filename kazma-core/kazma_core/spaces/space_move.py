@@ -61,15 +61,22 @@ makes; anything of the space, or of a chat, memory, job or library the bundle
 names, here already -- a checkpoint file of its name too, whoever's it is; a
 row that is not the space's, a row of a table that never moves, another
 person's entry, work or account, a person of this install named by a row; an
-id here already; a setting outside the space's own, or one whose value its
+id this install makes by itself for another space (a chat app's chat, a
+library: ``chat_apps.foreign_chat_thread``, ``_library_id_in_space``); an id
+here already; a setting outside the space's own, or one whose value its
 rule refuses; a pointer to a secret that is not in the bundle. It
 writes with an import journal first (:data:`JOURNAL_KEY`) and the identity
 store last; what takes a space with no member for a left one leaves a space
-in the journal alone (:func:`importing_spaces`). A half-done import is taken
+in the journal alone (:func:`importing_spaces`). **The chats' records go
+first, alone, and what the checks asked is asked again after them**
+(:func:`_claim_threads`): a chat made here meanwhile refuses the import. A
+half-done import is taken
 back, and one a stop cut off is taken back at the next start, or by the next
 import (:func:`settle_unfinished_imports`). A take-back deletes a file or a
 folder only when it carries the import's own mark, which the journal holds:
-never one another space has (the third review).
+never one another space has (the third review). It deletes the rows recorded
+here as the space's, never a row by an id the bundle named: a chat made here
+between the checks and the write was erased by its id (the fourth review).
 
 **Not moved:** a personal space; a project folder (the space arrives as a
 plain shared space; the folder's files stay on the old machine); the
@@ -93,7 +100,7 @@ import threading
 import time
 import zipfile
 from collections.abc import Callable, Iterator
-from contextlib import closing
+from contextlib import closing, suppress
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -150,7 +157,8 @@ MAX_DEPTH = 200
 _ARRIVING = ".kazma-arriving"
 #: How LangGraph says a checkpoint's value is kept.
 _STATE_TYPES = frozenset({"msgpack", "json", "null", "bytes", "bytearray", "empty"})
-_FIRST = ("thread_scopes.db", "swarm_tasks.db")
+_THREADS = ("thread_scopes.db", "thread_scopes")
+_FIRST = ("swarm_tasks.db",)
 _IMPORT_LOCK = threading.Lock()
 _ENTRY_NAME = re.compile(r"[A-Za-z0-9_.-]{1,120}")
 
@@ -857,12 +865,40 @@ def _must_own(space: str, by: str) -> dict[str, Any]:
     return registry
 
 
-def _files_bytes(space: str) -> int:
-    total = 0
-    for where in _space_folders(space).values():
-        if where.is_dir():
-            total += sum(p.stat().st_size for p in where.rglob("*") if p.is_file())
-    return total
+def _is_the_marks(inside: PurePosixPath) -> bool:
+    """Whether a path inside a space's folder is the import's mark there, or
+    in a folder of its name: as Windows reads a name too (its case, and the
+    dots and spaces at its end)."""
+    return inside.parts[0].rstrip(". ").casefold() == _ARRIVING
+
+
+def _left_mark(path: Path) -> bool:
+    """Whether *path* is a mark an import could not remove once its space
+    landed: eight hex digits, and no file of a person's."""
+    try:
+        return path.stat().st_size == 8 and re.fullmatch(rb"[0-9a-f]{8}", path.read_bytes()) is not None
+    except OSError:
+        return False
+
+
+def _moving_files(space: str) -> Iterator[tuple[str, Path, Path]]:
+    """``(part, folder, file)`` of every file of the space that moves. A file
+    of a person's under the mark's name refuses the move: no import takes
+    one, and it is never left out without a word."""
+    for part, where in _space_folders(space).items():
+        if not where.is_dir():
+            continue
+        for path in sorted(where.rglob("*")):
+            if not path.is_file():
+                continue
+            inside = PurePosixPath(path.relative_to(where).as_posix())
+            if _is_the_marks(inside):
+                if len(inside.parts) == 1 and _left_mark(path):
+                    continue
+                raise SpaceMoveRefused(
+                    "reserved_name", 409, f"A file of the space is named {_ARRIVING}, a name Kazma uses itself; "
+                                          "rename it, then move the space.")
+            yield part, where, path
 
 
 def export_bundle(space: str, target: Path, password: str, *, by: str) -> dict[str, Any]:
@@ -879,7 +915,7 @@ def export_bundle(space: str, target: Path, password: str, *, by: str) -> dict[s
     if len(password or "") < MIN_PASSWORD:
         raise SpaceMoveRefused("password_too_short", 400, f"The password is at least {MIN_PASSWORD} characters.")
     registry = _must_own(space, by)
-    if _files_bytes(space) > MAX_BUNDLE_BYTES:
+    if sum(path.stat().st_size for _part, _where, path in _moving_files(space)) > MAX_BUNDLE_BYTES:
         raise SpaceMoveRefused("too_big", 413, "The space's files are bigger than a bundle another install takes.")
     keys, rows = _space_secrets(space, by)
     rows, staying = _travelling_secrets(space, by, registry, rows)
@@ -908,16 +944,12 @@ def export_bundle(space: str, target: Path, password: str, *, by: str) -> dict[s
             _put(zipped, plan, "keys.json", json.dumps([
                 {"key_id": k["key_id"], "state": k["state"], "created_at": k["created_at"],
                  "retired_at": k.get("retired_at"), "key": _b64(bytes(k["key"]))} for k in keys]).encode("utf-8"))
-            for part, where in _space_folders(space).items():
-                if not where.is_dir():
-                    continue
-                for path in sorted(where.rglob("*")):
-                    if path.is_file():
-                        name = f"files/{part}/{path.relative_to(where).as_posix()}"
-                        zipped.write(path, name)
-                        plan.entries[name] = path.stat().st_size
-                        manifest["files"] += 1
-                        plan.check_size()
+            for part, where, path in _moving_files(space):
+                name = f"files/{part}/{path.relative_to(where).as_posix()}"
+                zipped.write(path, name)
+                plan.entries[name] = path.stat().st_size
+                manifest["files"] += 1
+                plan.check_size()
             manifest["entries"] = dict(sorted(plan.entries.items()))
             manifest["left_out"] = plan.left_out
             zipped.writestr("bundle.json", json.dumps(manifest))
@@ -1272,6 +1304,25 @@ class _Import:
         return value
 
 
+#: A mail's own thread id, which names no chat.
+_NO_CHAT_THREADS = frozenset({"sandbox_emails.db"})
+#: The stores whose ``session_id`` is a chat's: a chat app's is its thread id.
+_CHAT_STORES = frozenset({"chat_sessions.db", "chat_sessions_test.db", "chat_sessions_spool.db"})
+
+
+def _check_chat_names(store: str, row: dict[str, Any], table: str, space: str) -> None:
+    """No row names a chat by the id a chat app's chat of another space has,
+    or will have here (the fourth review, L1): recorded as this space's, that
+    person's own direct chat was refused from then on."""
+    from kazma_core.spaces.chat_apps import foreign_chat_thread
+
+    named = [] if store in _NO_CHAT_THREADS else [row.get("thread_id")]
+    if store in _CHAT_STORES:
+        named.append(row.get("session_id"))
+    if any(foreign_chat_thread(str(name or ""), space) for name in named):
+        raise SpaceMoveRefused("foreign_row", 409, f"A row of {table} names a chat app's chat of another space.")
+
+
 def _check_rows(bundle: _Bundle, targets: dict[tuple[str, str], _Target], ctx: space_data._Context,
                 people: _Import) -> None:
     """Every row the space's and allowed to move, every column known, no key
@@ -1287,6 +1338,7 @@ def _check_rows(bundle: _Bundle, targets: dict[tuple[str, str], _Target], ctx: s
                 if unknown:
                     raise SpaceMoveRefused("unknown_column", 409,
                                            f"This install's {table} has no column {sorted(unknown)[0]}.")
+                _check_chat_names(store, row, table, ctx.space)
                 people.check_row(target.move, row, table)
                 if target.key and not target.virtual:
                     where = " AND ".join(f'"{c}" IS ?' for c in target.key)
@@ -1353,7 +1405,12 @@ def _file_entries(bundle: _Bundle) -> list[tuple[str, PurePosixPath, str]]:
         if len(parts) < 3 or parts[1] not in ("space", "documents") or any(
                 p in ("", ".", "..") or ":" in p or "\\" in p for p in parts):
             raise SpaceMoveRefused("not_a_bundle", 400, "The bundle names a file it should not.")
-        out.append((parts[1], PurePosixPath(*parts[2:]), name))
+        inside = PurePosixPath(*parts[2:])
+        if _is_the_marks(inside):
+            # The mark is written there: a folder of its name failed the
+            # import, a file was written over and lost.
+            raise SpaceMoveRefused("reserved_name", 409, f"The bundle carries a file named {_ARRIVING}.")
+        out.append((parts[1], inside, name))
     return out
 
 
@@ -1361,15 +1418,26 @@ def _check_ids(space: str, ctx: space_data._Context) -> None:
     """Nothing here is keyed by a chat, memory, job, task or library the
     bundle names -- in any store, whoever's it is. A chat from before Spaces
     has no record and is the owner's (N19): taken for the bundle's, its rows
-    would be the space's, and a take-back would delete them."""
+    would be the space's, and a take-back would delete them. Nor is a library
+    one this install would make for another space: its names are one
+    namespace, and the owner's "Handbook" could not be made once a bundle
+    had taken ``handbook`` (the fourth review, L1)."""
     from kazma_core.spaces import threads as thread_store
+    from kazma_core.stores.knowledge import _library_id_in_space
 
-    threads = ctx.ids["threads"]
-    if any(thread_store.record_of(thread) is not None for thread in threads):
+    if any(_library_id_in_space(library, space) != library for library in ctx.ids["libraries"]):
+        raise SpaceMoveRefused("foreign_row", 409, "The bundle carries a library of another space.")
+    if any(thread_store.record_of(thread) is not None for thread in ctx.ids["threads"]):
         raise SpaceMoveRefused("id_collides", 409, "A chat of the bundle is here already.")
+    _nothing_keyed_by(space, ctx)
+
+
+def _nothing_keyed_by(space: str, ctx: space_data._Context, *, claimed: bool = False) -> None:
+    """No row or setting here is keyed by an id the bundle names; *claimed*:
+    but for the chats' records, which the import has written."""
     _ctx, found = space_data._walk(space, ctx)
-    held = [item for item in found if item.rows]
-    if held or space_data._settings_keys(space, threads):
+    held = [item for item in found if item.rows and not (claimed and (item.store, item.table) == _THREADS)]
+    if held or space_data._settings_keys(space, ctx.ids["threads"]):
         where = f"{held[0].store}:{held[0].table}" if held else "a setting"
         raise SpaceMoveRefused("id_collides", 409, f"Something the bundle names is here already ({where}).")
 
@@ -1502,21 +1570,44 @@ _STOPS: dict[tuple[str, str], Callable[[dict[str, Any], dict[str, Any]], dict[st
 
 
 def _land_new(staged: Path, where: Path) -> None:
-    """*staged* renamed to *where*, never over a file that is there."""
+    """*staged* renamed to *where*, never over a file that is there. The
+    staged name may stay beside a file that landed (one a program holds):
+    :func:`_drop_staged` takes it."""
     try:
         if os.name == "nt":
             staged.rename(where)  # Windows never renames over a file
             return
         try:
             os.link(staged, where)
-            staged.unlink()
         except FileExistsError:
             raise
-        except OSError:  # a disk with no hard links: the name is claimed, then replaced
-            os.close(os.open(where, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-            staged.replace(where)
+        except OSError:  # a disk with no hard links
+            _claim_and_replace(staged, where)
+            return
     except FileExistsError:
+        with suppress(OSError):  # it claimed nothing (``_take_back`` reads whether it is there)
+            staged.unlink(missing_ok=True)
         raise SpaceMoveRefused("space_exists", 409, "The space has a checkpoint file here already.") from None
+    try:
+        staged.unlink()
+    except OSError:
+        logger.info("[spaces] %s could not be removed yet; its file landed", staged.name)
+
+
+def _claim_and_replace(staged: Path, where: Path) -> None:
+    """*staged* renamed to *where* on a disk with no hard links: the name is
+    claimed with an empty file, then replaced. A replace that fails gives the
+    name up (an empty file, with no mark, stayed there and the space was
+    ``space_exists`` from then on); one a stop cuts off leaves both files,
+    which a take-back reads."""
+    os.close(os.open(where, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    landed = False
+    try:
+        staged.replace(where)
+        landed = True
+    finally:
+        if not landed:
+            where.unlink(missing_ok=True)
 
 
 def _staged_checkpoints(space: str, mark: int) -> Path:
@@ -1524,6 +1615,14 @@ def _staged_checkpoints(space: str, mark: int) -> Path:
 
     own = space_checkpoints_db(space)
     return own.with_name(f"{own.name}.moving-{mark:08x}")
+
+
+def _drop_staged(space: str, mark: int) -> None:
+    """Remove the staged checkpoint file of the import marked *mark*, and what
+    SQLite keeps beside it."""
+    staged = _staged_checkpoints(space, mark)
+    for path in staged.parent.glob(staged.name + "*"):
+        path.unlink(missing_ok=True)
 
 
 def _make_checkpoint_file(space: str, mark: int) -> None:
@@ -1600,6 +1699,18 @@ def _write_rows(bundle: _Bundle, targets: dict[tuple[str, str], _Target], people
             finally:
                 if not committed:
                     conn.execute("ROLLBACK")
+    return written
+
+
+def _claim_threads(bundle: _Bundle, targets: dict[tuple[str, str], _Target], ctx: space_data._Context,
+                   people: _Import, stop_ctx: dict[str, Any], mark: int) -> int:
+    """Record the bundle's chats as the space's, before any other row of it,
+    then ask again that nothing here is keyed by what the bundle names: a
+    chat made here since the checks refuses the import, and is left as it
+    is. From then on a turn on one of them is refused by its record."""
+    target = targets.get(_THREADS)
+    written = _write_rows(bundle, {_THREADS: target}, people, stop_ctx, mark) if target is not None else 0
+    _nothing_keyed_by(bundle.space, ctx, claimed=True)
     return written
 
 
@@ -1713,9 +1824,15 @@ def _arrived_with(where: Path, mark: int) -> bool:
         return False
 
 
-def _unmark_folders(space: str) -> None:
-    """The space landed: its folders no longer carry the import's mark (a
-    file a program holds keeps it; nothing reads it once the space is here)."""
+def _unmark(space: str, mark: int) -> None:
+    """The space landed: its folders no longer carry the import's mark, and
+    its checkpoint file has one name (a file a program holds stays; nothing
+    reads it once the space is here)."""
+    if mark:
+        try:
+            _drop_staged(space, mark)
+        except OSError:
+            logger.info("[spaces] the staged checkpoint file of space %s could not be removed", space)
     for where in _space_folders(space).values():
         try:
             (where / _ARRIVING).unlink(missing_ok=True)
@@ -1723,13 +1840,15 @@ def _unmark_folders(space: str) -> None:
             logger.info("[spaces] %s could not be removed from the folder of space %s", _ARRIVING, space)
 
 
-def _journal(space: str, *, add: bool, by: str = "", mark: int = 0) -> None:
+def _journal(space: str, *, add: bool, by: str = "", mark: int = 0, claiming: bool = False) -> None:
+    """Write, or close, the space's entry. *claiming*: nothing of it but its
+    secrets and its chats' records is written yet."""
     from kazma_core.config_store import get_config_store
 
     def _change(current: Any) -> Any:
         held = dict(current) if isinstance(current, dict) else {}
         if add:
-            held[space] = {"by": by, "started_at": _iso_now(), "mark": mark}
+            held[space] = {"by": by, "started_at": _iso_now(), "mark": mark, "claiming": claiming}
         else:
             held.pop(space, None)
         return held
@@ -1745,17 +1864,23 @@ def _take_back_failures() -> tuple[type[BaseException], ...]:
     return (OSError, sqlite3.Error, ValueError, ConfigStoreUnavailableError)
 
 
-def _take_back(space: str, earlier: space_data._Context | None = None, *, mark: int) -> None:
+def _take_back(space: str, *, mark: int, claiming: bool = False) -> None:
     """Remove what the import marked *mark* wrote of *space*. Its rows,
-    settings and secrets: nothing of the space, nor of an id the bundle
-    names, was here before it began (checked). Its folders and its checkpoint
-    file only when they carry the mark; the file last, since a process may
-    hold it open (the journal keeps the rest of the work for the next
-    start)."""
+    settings and secrets, found by what is recorded here as the space's,
+    never by the ids the bundle names: nothing of the space was here before
+    it began (checked), and something of an id may be here since. An import
+    still *claiming* its chats wrote no row of them: its records alone go,
+    since a row keyed by one is the chat's that was made here meanwhile. Its
+    folders and its checkpoint file only when they carry the mark; the file
+    last, since a process may hold it open (the journal keeps the rest of the
+    work for the next start)."""
     from kazma_core.security.vault import get_vault
     from kazma_core.spaces import threads
 
-    ctx, found = space_data._walk(space, earlier)
+    if claiming:
+        for thread in threads.space_threads(space)[1]:
+            threads.forget_thread(thread)
+    ctx, found = space_data._walk(space)
     space_data._erase_rows(found, ctx)
     space_data._erase_settings(space, ctx.ids["threads"])
     for thread in ctx.ids["threads"]:
@@ -1770,10 +1895,12 @@ def _take_back(space: str, earlier: space_data._Context | None = None, *, mark: 
         if _arrived_with(where, mark):
             shutil.rmtree(where)
     if mark:
-        staged_file = _staged_checkpoints(space, mark)
-        for path in staged_file.parent.glob(staged_file.name + "*"):  # and what SQLite keeps beside it
-            path.unlink(missing_ok=True)
         files = _checkpoint_files(space)
+        if _staged_checkpoints(space, mark).exists() and files[0].exists() and not files[0].stat().st_size:
+            # A stop between the claim of the name and the replace: an empty
+            # file with no mark, the staged one still beside it.
+            files[0].unlink()
+        _drop_staged(space, mark)
         if files[0].exists() and _mark_of(files[0]) == mark:
             for path in files:
                 path.unlink(missing_ok=True)
@@ -1829,15 +1956,16 @@ def _settle() -> list[str]:
     for space, entry in list(held.items()):
         if not made_space_id(space):
             continue
+        entry = entry if isinstance(entry, dict) else {}
+        mark = entry["mark"] if isinstance(entry.get("mark"), int) else 0
         if space in recorded:
             # It landed: only the journal's last step was cut off.
-            _unmark_folders(space)
+            _unmark(space, mark)
             _journal(space, add=False)
             logger.info("[spaces] the import of space %s had landed; its journal entry is closed", space)
             continue
-        mark = entry.get("mark") if isinstance(entry, dict) else 0
         try:
-            _take_back(space, mark=mark if isinstance(mark, int) else 0)
+            _take_back(space, mark=mark, claiming=entry.get("claiming") is True)
         except _take_back_failures():
             logger.warning("[spaces] an unfinished import of space %s could not be taken back yet", space,
                            exc_info=True)
@@ -1914,7 +2042,8 @@ def _take_in(bundle: _Bundle, *, owner: str, by: str, people_module: Any, here: 
     stop_ctx = {"now": _iso_now(), "address": _owner_address(owner)}
     # Everything checked: write, the journal first, the identity store last.
     mark = _secrets.randbelow(2**31 - 2) + 1
-    _journal(space, add=True, by=by, mark=mark)
+    claiming = True
+    _journal(space, add=True, by=by, mark=mark, claiming=claiming)
     done = False
     try:
         if vault is not None:
@@ -1925,7 +2054,10 @@ def _take_in(bundle: _Bundle, *, owner: str, by: str, people_module: Any, here: 
                 code = "id_collides" if exc.code in ("space_in_vault", "key_collides", "name_collides") else (
                     "foreign_secret" if exc.code == "not_the_spaces" else "changed")
                 raise SpaceMoveRefused(code, status, "The bundle's secrets were not taken.") from exc
-        written = _write_rows(bundle, targets, people, stop_ctx, mark)
+        written = _claim_threads(bundle, targets, ctx, people, stop_ctx, mark)
+        _journal(space, add=True, by=by, mark=mark)
+        claiming = False
+        written += _write_rows(bundle, {k: t for k, t in targets.items() if k != _THREADS}, people, stop_ctx, mark)
         expired = _expire_waiting_cards(space, ctx.ids["threads"])
         _write_settings(space, settings, people)
         files = _write_files(bundle, entries, mark)
@@ -1940,12 +2072,12 @@ def _take_in(bundle: _Bundle, *, owner: str, by: str, people_module: Any, here: 
             key["key"] = b""
         if not done:
             try:
-                _take_back(space, ctx, mark=mark)
+                _take_back(space, mark=mark, claiming=claiming)
                 _journal(space, add=False)
             except _take_back_failures():  # the journal keeps it for the next import's settle
                 logger.warning("[spaces] the import of space %s was not taken back yet; the next import will",
                                space, exc_info=True)
-    _unmark_folders(space)
+    _unmark(space, mark)
     _journal(space, add=False)
     logger.info("[spaces] space moved in space=%s owner=%s by=%s rows=%d files=%d secrets=%d cards=%d",
                 space, owner, by, written, files, len(rows), expired)
