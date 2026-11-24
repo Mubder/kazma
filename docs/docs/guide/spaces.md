@@ -110,16 +110,25 @@ are in, and back out:
   in the shared space.
   The moved chat is a new chat there, with the conversation, and the one it
   was is deleted where it was: a tab still open on it is told so, and your
-  message goes to a new chat. The files Kazma shared in it move with it.
-  Reminders and scheduled tasks you booked from it stay where you booked
-  them, and so do its drafts and plans. Its Time Travel steps do not move,
-  and a file you attached has to be attached again. What you asked Kazma to
-  forget of it stays forgotten where it was said; the chat's own words stay
-  in the chat. A chat from a chat app (Telegram, Discord,
-  Slack, WhatsApp) stays in its space, and so does one with an answer cut
-  off half way until you continue or close it. A swarm task the chat started
-  that finishes after the move delivers its result where the task was told
-  to, which may be the space the chat left.
+  message goes to a new chat. The files Kazma shared in it go with it. Its
+  Time Travel steps, thoughts and approval cards do not come along, and a
+  file you attached has to be attached again.
+
+  *When you share it,* its drafts and plans, and the reminders and scheduled
+  tasks you booked from it, stay in your own space. *When you take it out,*
+  the shared space keeps none of its drafts, plans, confirmations or finished
+  swarm tasks, and the reminders and tasks you booked in it come with you
+  (another member's stay). Approvals you gave for the chat, YOLO, `/long` and
+  folder grants end with the chat it was.
+
+  What you asked Kazma to forget of it stays forgotten where it was said; the
+  chat's own words stay in the chat. A chat from a chat app (Telegram,
+  Discord, Slack, WhatsApp) stays in its space. One with an answer cut off
+  half way waits until you continue or close it, one that started a swarm
+  task until the task is over, and one in plan mode until you approve or
+  cancel the plan. If something is written in the chat while it moves, it
+  stays where it was and you can try again; if both the chat and its copy were
+  written in, both are kept.
 - **A document:** the Documents page offers the same two moves.
 
 A chat someone else wrote in stays in the shared space: their words are the

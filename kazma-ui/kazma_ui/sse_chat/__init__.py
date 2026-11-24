@@ -103,6 +103,15 @@ def _chat_gone_response() -> StreamingResponse:
     )
 
 
+def _chat_deleted_answer() -> JSONResponse:
+    """The answer to a change of a whole chat that was deleted (or moved):
+    its code, and the line the page shows."""
+    from kazma_ui.i18n import current_language, t
+
+    return JSONResponse({"status": "error", "error": "chat_deleted",
+                         "message": t("chat.chat_was_deleted", current_language())}, status_code=404)
+
+
 def _not_run_frame(session_id: str, thread_id: str, prepared_at: int) -> str | None:
     """What a turn is answered that is not started: its chat was deleted (or
     moved to another space), or restored, while the turn was prepared from
@@ -1895,11 +1904,10 @@ def create_sse_chat_router(
                 refused = await _turn_control(thread_id or session_id, _get_graph(), "reset")
                 if refused is not None:
                     return _whole_chat_answer(refused)
-            await asyncio.to_thread(store.delete, session_id)
             from kazma_ui import dashboard as _dash
-            from kazma_ui.chat_delete import remove_chat_remains
+            from kazma_ui.chat_delete import delete_chat
 
-            await remove_chat_remains(session_id, thread_id, _dash._checkpoint_manager)
+            await delete_chat(session_id, thread_id, _dash._checkpoint_manager)
             return {"status": "ok"}
         except Exception as exc:
             logger.error("delete_session failed: %s", exc)
@@ -1918,6 +1926,8 @@ def create_sse_chat_router(
             if session is None:
                 return {"status": "error", "error": "Session not found"}
             return {"status": "ok", "title": session.title}
+        except ChatDeleted:
+            return _chat_deleted_answer()
         except Exception as exc:
             logger.error("rename_session failed: %s", exc)
             return {"status": "error", "error": "Internal error"}
@@ -1932,6 +1942,8 @@ def create_sse_chat_router(
             if session is None:
                 return {"status": "error", "error": "Session not found"}
             return {"status": "ok", "archived": True}
+        except ChatDeleted:
+            return _chat_deleted_answer()
         except Exception as exc:
             logger.error("archive_session failed: %s", exc)
             return {"status": "error", "error": "Internal error"}
@@ -1946,6 +1958,8 @@ def create_sse_chat_router(
             if session is None:
                 return {"status": "error", "error": "Session not found"}
             return {"status": "ok", "archived": False}
+        except ChatDeleted:
+            return _chat_deleted_answer()
         except Exception as exc:
             logger.error("unarchive_session failed: %s", exc)
             return {"status": "error", "error": "Internal error"}
@@ -1960,6 +1974,8 @@ def create_sse_chat_router(
             if session is None:
                 return {"status": "error", "error": "Session not found"}
             return {"status": "ok", "pinned": True}
+        except ChatDeleted:
+            return _chat_deleted_answer()
         except Exception as exc:
             logger.error("pin_session failed: %s", exc)
             return {"status": "error", "error": "Internal error"}
@@ -1974,6 +1990,8 @@ def create_sse_chat_router(
             if session is None:
                 return {"status": "error", "error": "Session not found"}
             return {"status": "ok", "pinned": False}
+        except ChatDeleted:
+            return _chat_deleted_answer()
         except Exception as exc:
             logger.error("unpin_session failed: %s", exc)
             return {"status": "error", "error": "Internal error"}

@@ -137,17 +137,18 @@ def _chat_was_deleted(thread_id: str) -> bool:
     """Whether the chat *thread_id* -- a web chat a chat app had taken over --
     was deleted (or moved to another space) in this process: nothing brings
     it back. Memory only."""
-    from kazma_ui.session_manager import peek_session_manager
+    from kazma_core.spaces.threads import thread_ended
 
-    store = peek_session_manager()
-    return store is not None and store.chat_deleted(thread_id=thread_id)
+    return thread_ended(thread_id)
 
 
 def _begin_again(thread_id: str) -> None:
     """A chat app's own chat, named by its sender, starts again with the
     message that came in: a delete on the web takes the chat that was."""
+    from kazma_core.spaces.threads import begin_again
     from kazma_ui.session_manager import peek_session_manager
 
+    begin_again(thread_id)
     store = peek_session_manager()
     if store is not None:
         store.begin_again(thread_id)

@@ -105,6 +105,12 @@ def test_share_and_take_out_a_chat_from_the_chat_list(lang):
             tab.goto(f"{h.base}/documents?space={OWNER_SPACE_ID}", wait_until="domcontentloaded")
             _soft_nav(tab, "/chat")
             _open_chat(tab, session_id)
+            # What this browser keeps by the chat's id: the model chosen for
+            # it, and how far its frames were read.
+            pg.evaluate("""(id) => {
+              localStorage.setItem('kazma.chatModel.' + id, 'p:chosen');
+              localStorage.setItem('kazma.deliveryCursor.' + id, '41');
+            }""", session_id)
 
             # ── In the person's own space: Share with Family ─────────────
             menu = _open_menu(pg, session_id)
@@ -120,12 +126,15 @@ def test_share_and_take_out_a_chat_from_the_chat_list(lang):
             assert _plain(_t("chat.move_size.one", lang)) in said, said
             assert _plain(_t("chat.move_share_body", lang)) in said
             assert _plain(_t("chat.move_memory_note", lang)) in said
-            assert _plain(_t("chat.move_also_note", lang)) in said
+            assert _plain(_t("chat.move_share_note", lang)) in said
             with pg.expect_response(lambda r: r.url.endswith("/move") and r.request.method == "POST") as answer:
                 _modal_action(pg, _t("chat.move_share_ok", lang))
             assert answer.value.status == 200, answer.value.text()
             copy_id = answer.value.json()["session_id"]
             pg.locator(f'.session-item[data-session-id="{session_id}"]').wait_for(state="detached", timeout=20000)
+            kept = pg.evaluate("""() => Object.fromEntries(Object.entries(localStorage))""")
+            assert kept.get(f"kazma.chatModel.{copy_id}") == "p:chosen", kept
+            assert not [k for k in kept if session_id in k], kept
             assert copy_id != session_id and threads.record_of(thread_id) is None
             copy = _held(family, OWNER_ACCOUNT_ID, copy_id)
             assert threads.record_of(copy.thread_id).space_id == family
@@ -156,6 +165,7 @@ def test_share_and_take_out_a_chat_from_the_chat_list(lang):
             assert _plain(_t("chat.move_take_out_title", lang)) in said
             assert _plain(_t("chat.move_take_out_body", lang)) in said
             assert _plain(_t("chat.move_memory_note", lang)) in said
+            assert _plain(_t("chat.move_take_out_note", lang)) in said
             with pg.expect_response(lambda r: r.url.endswith("/move") and r.request.method == "POST") as answer:
                 _modal_action(pg, _t("chat.move_take_out_ok", lang))
             assert answer.value.status == 200

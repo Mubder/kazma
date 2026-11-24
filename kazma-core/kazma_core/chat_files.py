@@ -17,6 +17,7 @@ download link.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import re
@@ -34,6 +35,7 @@ __all__ = [
     "SharedFile",
     "copy_shared_files",
     "load_shared",
+    "relink",
     "remove_shared_files",
     "share_file",
     "web_chat_thread",
@@ -199,36 +201,46 @@ def _records_of(root: Path, thread_id: str) -> list[str]:
 
 
 def copy_shared_files(text: str, *, thread_id: str, new_thread: str, from_space: str, to_space: str,
-                      by: str) -> int:
+                      by: str) -> dict[str, str]:
     """Copy the files a chat's messages (*text*) link to, and those shared in
-    the chat *thread_id*, from *from_space*'s folder into *to_space*'s under
-    the same ids, as files of the chat's copy *new_thread*: its links open in
-    the space it moves to. A link whose file is not there opened nothing
-    before either. Returns how many.
+    the chat *thread_id*, from *from_space*'s folder into *to_space*'s, as
+    files of the chat's copy *new_thread*, each under a new id: a file that is
+    there is never written over. A link whose file is not there opened nothing
+    before either. Returns each old id and its new one, for :func:`relink`.
 
     The target's disk limit is asked for all of them first
-    (``SpaceOverLimit``). Run again, it copies them again."""
+    (``SpaceOverLimit``)."""
     from kazma_core.spaces.scope import bind_scope
     from kazma_core.spaces.space_limits import refuse_write_for_disk
 
     with bind_scope(from_space, by):
         ids = list(dict.fromkeys([*_REFERENCE_RE.findall(text or ""), *_records_of(_shared_dir(), thread_id)]))
         files = [found for found in (load_shared(i) for i in ids) if found is not None]
+    copied: dict[str, str] = {}
     if not files:
-        return 0
+        return copied
     with bind_scope(to_space, by):
         refuse_write_for_disk(sum(shared.size for shared, _blob in files))
         root = _shared_dir()
         root.mkdir(parents=True, exist_ok=True)
         for shared, blob in files:
-            shutil.copyfile(blob, root / shared.id)
-            _write_record(root, shared, thread_id=new_thread, created_at=time.time())
-    return len(files)
+            new_id = f"att_{uuid.uuid4().hex}"
+            # The record first: what a stop leaves is found by its thread.
+            _write_record(root, dataclasses.replace(shared, id=new_id), thread_id=new_thread,
+                          created_at=time.time())
+            shutil.copyfile(blob, root / new_id)
+            copied[shared.id] = new_id
+    return copied
+
+
+def relink(text: str, ids: dict[str, str]) -> str:
+    """*text* with its links to the files of *ids* naming their copies."""
+    return _REFERENCE_RE.sub(lambda m: f"/api/chat/files/{ids.get(m.group(1), m.group(1))}", text)
 
 
 def remove_shared_files(thread_id: str, *, space: str, by: str) -> int:
     """Remove the files shared in the chat *thread_id* from *space*'s folder:
-    the chat moved away with them (a file another chat shared stays), or its
+    the chat was taken out of it (a file another chat shared stays), or its
     move was put back. Returns how many."""
     from kazma_core.spaces.scope import bind_scope
 

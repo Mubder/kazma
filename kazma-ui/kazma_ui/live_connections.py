@@ -9,9 +9,10 @@ space are closed (4403, ``not_a_member``) and their streams woken, which
 end once they see the departure. Their next request is refused by the
 membership check every request passes.
 
-A chat a person moves into another space (Spaces S2-12) is a deleted chat in
-the space it left: every socket and stream of it there is closed or ended
-(:func:`chat_gone`), so a tab left open on it says so at its next message.
+A chat that is deleted, or moved into another space (Spaces S2-12; a deleted
+chat in the space it left), has every socket and stream of it closed or ended
+(:func:`chat_gone`, told ``deleted`` or ``moved``): the page does not connect
+to it again, and says so at its next message.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ import asyncio
 import itertools
 import logging
 import threading
-from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -34,10 +34,6 @@ _SOCKETS: dict[int, tuple[str, str, Any, asyncio.AbstractEventLoop, str]] = {}
 _STREAMS: dict[int, tuple[str, str, Any, Any, asyncio.AbstractEventLoop, str]] = {}
 _TOKENS = itertools.count(1)
 _INSTALLED: list[Any] = []
-
-#: The threads of the chats that went (:func:`chat_gone`), newest last.
-_GONE: OrderedDict[str, None] = OrderedDict()
-_GONE_KEPT = 1_000
 
 #: The close code a socket gets when its person left the space.
 CLOSE_CODE = 4403
@@ -107,29 +103,27 @@ def _on_departure(account: str, space: str) -> None:
 
 
 def is_gone(thread_id: str) -> bool:
-    """Whether the chat of *thread_id* went (:func:`chat_gone`)."""
-    with _LOCK:
-        return thread_id in _GONE
+    """Whether the chat of *thread_id* was deleted, or moved away."""
+    from kazma_core.spaces.threads import thread_ended
+
+    return thread_ended(thread_id)
 
 
-def chat_gone(*, session_id: str, thread_id: str, space: str) -> int:
-    """The chat left *space* for another: close its sockets there and wake
-    its streams, which end once they see it (:func:`is_gone`). Returns how
-    many. Called from any thread."""
+def chat_gone(*, session_id: str, thread_id: str, space: str, reason: str = "moved") -> int:
+    """The chat left *space* (*reason*: ``moved`` to another, or ``deleted``):
+    close its sockets there and wake its streams, which end once they see it
+    (:func:`is_gone`). Returns how many. Called from any thread."""
     chats = {str(c) for c in (session_id, thread_id) if c}
     with _LOCK:
-        _GONE[thread_id] = None
-        while len(_GONE) > _GONE_KEPT:
-            _GONE.popitem(last=False)
         sockets = [(ws, loop) for _a, s, ws, loop, c in _SOCKETS.values() if c in chats and s == space]
         streams = [(q, wake, loop) for _a, s, q, wake, loop, c in _STREAMS.values() if c in chats and s == space]
     for websocket, loop in sockets:
-        _on_loop(loop, _close, websocket, "moved")
+        _on_loop(loop, _close, websocket, reason)
     for queue, wake, loop in streams:
         _on_loop(loop, queue.put_nowait, wake)
     if sockets or streams:
-        logger.info("[spaces] a chat left %s: %d socket(s) closed, %d stream(s) ended",
-                    space, len(sockets), len(streams))
+        logger.info("[spaces] a chat left %s (%s): %d socket(s) closed, %d stream(s) ended",
+                    space, reason, len(sockets), len(streams))
     return len(sockets) + len(streams)
 
 

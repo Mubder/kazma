@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable, Iterator
 
 from kazma_core.config_store import apply_sqlite_pragmas
+from kazma_core.spaces import threads
 from kazma_core.spaces.scope import OWNER_SPACE_ID, require_space_id
 
 logger = logging.getLogger(__name__)
@@ -87,9 +88,10 @@ DELETED_CHATS_KEPT = 10_000
 
 
 class ChatDeleted(KeyError):
-    """The chat was deleted in this process. A write that was still on its
-    way -- a closing turn's reply, a message being sent, a tab left open, a
-    voice utterance -- never brings it back."""
+    """The chat was deleted in this process, or is leaving for another space.
+    A write that was still on its way -- a closing turn's reply, a message
+    being sent, a tab left open, a voice utterance, a rename -- never brings
+    it back."""
 
 
 @dataclass
@@ -119,10 +121,6 @@ class ChatSession:
     title: str = ""
     archived: bool = False
     pinned: bool = False
-    # How many of its first messages were copied here with a chat that was
-    # moved from another space (Spaces S2-12): turn reconcile starts after
-    # them, so this space remembers what is said here only.
-    copied: int = 0
 
     def __post_init__(self) -> None:
         now = datetime.now(UTC).isoformat()
@@ -216,10 +214,8 @@ class ChatSession:
 
     def trim_messages(self, max_messages: int = MAX_MESSAGES_PER_SESSION) -> None:
         """Cap the message history to prevent unbounded memory growth."""
-        over = len(self.messages) - max_messages
-        if over > 0:
+        if len(self.messages) > max_messages:
             self.messages = self.messages[-max_messages:]
-            self.copied = max(0, self.copied - over)
 
 
 class SessionManager:
@@ -268,10 +264,11 @@ class SessionManager:
         # concurrent persist paths (live stream, detached done_callback,
         # /reset) never interleave on the same ChatSession.
         self._mutation_locks: dict[str, threading.Lock] = {}
-        # The chats deleted in this process (``<space>:<session id>``) and
-        # their threads, bounded: nothing written late re-creates one.
-        self._deleted: OrderedDict[str, None] = OrderedDict()
-        self._deleted_threads: OrderedDict[str, None] = OrderedDict()
+        # The chats deleted in this process by the person's delete or a move
+        # to another space -- never by a prune -- by (space, session id),
+        # bounded: nothing written late re-creates one. Their threads end too
+        # (``kazma_core.spaces.threads.end_thread``).
+        self._deleted: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._pg = False
         self._conn: sqlite3.Connection | None = None
 
@@ -343,7 +340,6 @@ class SessionManager:
                     ("title", "TEXT DEFAULT ''"),
                     ("archived", "INTEGER DEFAULT 0"),
                     ("pinned", "INTEGER DEFAULT 0"),
-                    ("copied", "INTEGER DEFAULT 0"),
                 ),
             )
 
@@ -360,7 +356,6 @@ class SessionManager:
         title: Any,
         archived: Any,
         pinned: Any = None,
-        copied: Any = None,
     ) -> ChatSession:
         if isinstance(messages_raw, (list, dict)):
             messages = messages_raw if isinstance(messages_raw, list) else []
@@ -381,7 +376,6 @@ class SessionManager:
             title=title or "",
             archived=bool(archived),
             pinned=bool(pinned),
-            copied=int(copied or 0),
         )
         # Every read of the primary store passes through here, so this is
         # the one place a spooled save is laid over what the primary has.
@@ -447,11 +441,14 @@ class SessionManager:
     def _write_durably(self, session: ChatSession) -> None:
         """Write the primary store; if it refuses, the spool keeps the session.
 
-        Raises only when BOTH refuse. The primary write stays the one path
-        (``_upsert_db``); nothing else may call it, which
-        ``test_session_saves_go_through_the_spool`` enforces.
+        Raises only when BOTH refuse -- and :class:`ChatDeleted` for a chat
+        deleted in this process, which is never written again. The primary
+        write stays the one path (``_upsert_db``); nothing else may call it,
+        which ``test_session_saves_go_through_the_spool`` enforces.
         """
         tenant_id = session.tenant_id or OWNER_SPACE_ID
+        if self._is_deleted(tenant_id, session.session_id, session.thread_id):
+            raise ChatDeleted(session.session_id)
         try:
             self._upsert_db(session)
         except Exception as exc:
@@ -570,7 +567,7 @@ class SessionManager:
 
             sql = (
                 "SELECT tenant_id, session_id, messages, created_at, total_cost, "
-                "total_tokens, thread_id, updated_at, title, archived, pinned, copied "
+                "total_tokens, thread_id, updated_at, title, archived, pinned "
                 "FROM kazma_chat_sessions "
                 "ORDER BY COALESCE(NULLIF(updated_at,''), created_at) DESC"
             )
@@ -585,7 +582,6 @@ class SessionManager:
                     row["created_at"], row["total_cost"], row["total_tokens"],
                     row["thread_id"], row["updated_at"], row["title"], row["archived"],
                     row["pinned"] if "pinned" in row else None,
-                        row.get("copied"),
                 )
                 dest[f"{session.tenant_id}:{session.session_id}"] = session
             return
@@ -593,7 +589,7 @@ class SessionManager:
         assert self._conn is not None
         sql = (
             "SELECT tenant_id, session_id, messages, created_at, total_cost, "
-            "total_tokens, thread_id, updated_at, title, archived, pinned, copied FROM sessions "
+            "total_tokens, thread_id, updated_at, title, archived, pinned FROM sessions "
             "ORDER BY COALESCE(NULLIF(updated_at,''), created_at) DESC"
         )
         if limit is not None and limit > 0:
@@ -602,10 +598,10 @@ class SessionManager:
         rows = cursor.fetchall()
         for row in rows:
             (tenant_id, session_id, messages_str, created_at, total_cost,
-             total_tokens, thread_id, updated_at, title, archived, pinned, copied) = row
+             total_tokens, thread_id, updated_at, title, archived, pinned) = row
             session = self._session_from_row(
                 tenant_id, session_id, messages_str, created_at, total_cost,
-                total_tokens, thread_id, updated_at, title, archived, pinned, copied,
+                total_tokens, thread_id, updated_at, title, archived, pinned,
             )
             dest[f"{session.tenant_id}:{session_id}"] = session
 
@@ -668,8 +664,8 @@ class SessionManager:
                     INSERT INTO kazma_chat_sessions (
                         tenant_id, session_id, messages, created_at,
                         total_cost, total_tokens, thread_id, updated_at,
-                        title, archived, pinned, copied
-                    ) VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        title, archived, pinned
+                    ) VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (tenant_id, session_id) DO UPDATE SET
                         messages = EXCLUDED.messages,
                         created_at = EXCLUDED.created_at,
@@ -679,8 +675,7 @@ class SessionManager:
                         updated_at = EXCLUDED.updated_at,
                         title = EXCLUDED.title,
                         archived = EXCLUDED.archived,
-                        pinned = EXCLUDED.pinned,
-                        copied = EXCLUDED.copied
+                        pinned = EXCLUDED.pinned
                     """,
                     (
                         session.tenant_id,
@@ -694,7 +689,6 @@ class SessionManager:
                         session.title,
                         bool(session.archived),
                         bool(session.pinned),
-                        int(session.copied),
                     ),
                 )
                 return
@@ -707,8 +701,8 @@ class SessionManager:
                     """
                     INSERT INTO sessions (tenant_id, session_id, messages, created_at,
                                           total_cost, total_tokens, thread_id, updated_at,
-                                          title, archived, pinned, copied)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                          title, archived, pinned)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(tenant_id, session_id) DO UPDATE SET
                         messages=excluded.messages,
                         created_at=excluded.created_at,
@@ -718,8 +712,7 @@ class SessionManager:
                         updated_at=excluded.updated_at,
                         title=excluded.title,
                         archived=excluded.archived,
-                        pinned=excluded.pinned,
-                        copied=excluded.copied
+                        pinned=excluded.pinned
                     """,
                     (
                         session.tenant_id,
@@ -734,7 +727,6 @@ class SessionManager:
                         session.title,
                         int(session.archived),
                         int(session.pinned),
-                        int(session.copied),
                     ),
                 )
             try:
@@ -758,15 +750,17 @@ class SessionManager:
             return loaded
         return self._spooled_only(tenant_id, session_id)
 
-    def _load_one_from_primary(self, tenant_id: str, session_id: str) -> ChatSession | None:
-        """Load a single primary-store row (overlaid by ``_session_from_row``)."""
+    def _load_one_from_primary(self, tenant_id: str, session_id: str, *,
+                               strict: bool = False) -> ChatSession | None:
+        """Load a single primary-store row (overlaid by ``_session_from_row``).
+        *strict*: a store that cannot be read raises; else it reads as none."""
         try:
             if self._pg:
                 from kazma_core.db.pg_helpers import get_pool
 
                 row = get_pool().execute_one(
                     "SELECT tenant_id, session_id, messages, created_at, total_cost, "
-                    "total_tokens, thread_id, updated_at, title, archived, pinned, copied "
+                    "total_tokens, thread_id, updated_at, title, archived, pinned "
                     "FROM kazma_chat_sessions WHERE tenant_id = %s AND session_id = %s",
                     (tenant_id, session_id),
                 )
@@ -777,29 +771,30 @@ class SessionManager:
                     row["created_at"], row["total_cost"], row["total_tokens"],
                     row["thread_id"], row["updated_at"], row["title"], row["archived"],
                     row["pinned"] if "pinned" in row else None,
-                        row.get("copied"),
                 )
 
             assert self._conn is not None
             cursor = self._conn.execute(
                 "SELECT tenant_id, session_id, messages, created_at, total_cost, "
-                "total_tokens, thread_id, updated_at, title, archived, pinned, copied "
+                "total_tokens, thread_id, updated_at, title, archived, pinned "
                 "FROM sessions WHERE tenant_id = ? AND session_id = ?",
                 (tenant_id, session_id),
             )
             row = cursor.fetchone()
         except Exception:
+            if strict:
+                raise
             logger.debug("[SessionManager] DB load failed for %s", session_id, exc_info=True)
             return None
         if not row:
             return None
         (
             tenant_id, session_id, messages_str, created_at, total_cost,
-            total_tokens, thread_id, updated_at, title, archived, pinned, copied,
+            total_tokens, thread_id, updated_at, title, archived, pinned,
         ) = row
         return self._session_from_row(
             tenant_id, session_id, messages_str, created_at, total_cost,
-            total_tokens, thread_id, updated_at, title, archived, pinned, copied,
+            total_tokens, thread_id, updated_at, title, archived, pinned,
         )
 
     def get(self, session_id: str) -> ChatSession | None:
@@ -807,7 +802,7 @@ class SessionManager:
         with self._lock:
             tenant_id = _space()
             key = f"{tenant_id}:{session_id}"
-            if key in self._deleted:
+            if (tenant_id, session_id) in self._deleted:
                 return None  # its row's removal may still be tried again
             session = self._sessions.get(key)
             if session is not None:
@@ -920,6 +915,8 @@ class SessionManager:
             tenant_id = _space()
             for key, session in self._sessions.items():
                 if key.startswith(f"{tenant_id}:") and session.thread_id == thread_id:
+                    if (tenant_id, session.session_id) in self._deleted:
+                        return None
                     self._sessions.move_to_end(key)
                     return session
 
@@ -929,7 +926,7 @@ class SessionManager:
 
                     row = get_pool().execute_one(
                         "SELECT tenant_id, session_id, messages, created_at, total_cost, "
-                        "total_tokens, thread_id, updated_at, title, archived, pinned, copied "
+                        "total_tokens, thread_id, updated_at, title, archived, pinned "
                         "FROM kazma_chat_sessions WHERE tenant_id = %s AND thread_id = %s",
                         (tenant_id, thread_id),
                     )
@@ -940,13 +937,12 @@ class SessionManager:
                         row["created_at"], row["total_cost"], row["total_tokens"],
                         row["thread_id"], row["updated_at"], row["title"], row["archived"],
                         row["pinned"] if "pinned" in row else None,
-                        row.get("copied"),
                     )
                 else:
                     assert self._conn is not None
                     row = self._conn.execute(
                         "SELECT tenant_id, session_id, messages, created_at, total_cost, "
-                        "total_tokens, thread_id, updated_at, title, archived, pinned, copied "
+                        "total_tokens, thread_id, updated_at, title, archived, pinned "
                         "FROM sessions WHERE tenant_id = ? AND thread_id = ?",
                         (tenant_id, thread_id),
                     ).fetchone()
@@ -961,36 +957,49 @@ class SessionManager:
                 )
                 return None
 
+            if (tenant_id, loaded.session_id) in self._deleted:
+                return None
             self._sessions[f"{loaded.tenant_id}:{loaded.session_id}"] = loaded
             return loaded
 
     # ── Deleted stays deleted ─────────────────────────────────────────
 
     def _is_deleted(self, tenant_id: str, session_id: str, thread_id: str = "") -> bool:
-        """Whether the chat was deleted in this process, under its session id
-        or its thread (a row minted from the thread alone is the same chat)."""
+        """Whether the chat was deleted in this process: under its session id
+        in its space, under a thread of that space (a row minted from the
+        thread alone is the same chat), or its thread ended."""
         return (
-            f"{tenant_id}:{session_id}" in self._deleted
-            or session_id in self._deleted_threads
-            or bool(thread_id and thread_id in self._deleted_threads)
+            (tenant_id, session_id) in self._deleted
+            or threads.thread_ended(session_id, tenant_id)
+            or bool(thread_id and threads.thread_ended(thread_id))
         )
 
-    def _remember_deleted(self, tenant_id: str, session_id: str, thread_id: str) -> None:
-        for ids, key in ((self._deleted, f"{tenant_id}:{session_id}"), (self._deleted_threads, thread_id)):
-            if not key:
-                continue
-            ids[key] = None
-            ids.move_to_end(key)
-            while len(ids) > DELETED_CHATS_KEPT:
-                ids.popitem(last=False)
+    def mark_deleted(self, session_id: str, thread_id: str) -> None:
+        """From here on nothing writes the bound space's chat *session_id*,
+        nothing lists it, and its thread *thread_id* runs no turn: it was
+        deleted, or it is leaving for another space (a move's handover, or
+        one settled after a restart). Its row may still be there."""
+        tenant_id = _space()
+        with self._lock:
+            self._deleted[(tenant_id, session_id)] = None
+            self._deleted.move_to_end((tenant_id, session_id))
+            while len(self._deleted) > DELETED_CHATS_KEPT:
+                self._deleted.popitem(last=False)
+        threads.end_thread(thread_id, tenant_id)
+
+    def unmark_deleted(self, session_id: str, thread_id: str) -> None:
+        """Take the mark away: the chat stays (a move that was put back)."""
+        with self._lock:
+            self._deleted.pop((_space(), session_id), None)
+        threads.begin_again(thread_id)
 
     def chat_deleted(self, session_id: str = "", thread_id: str = "") -> bool:
         """Whether a chat was deleted in this process: *session_id* in the
         bound space, or *thread_id* in any (a thread is one chat's). Memory
         only, no store is read."""
+        if thread_id and threads.thread_ended(thread_id):
+            return True
         with self._lock:
-            if thread_id and thread_id in self._deleted_threads:
-                return True
             return bool(session_id) and self._is_deleted(_space(), session_id, thread_id)
 
     def begin_again(self, thread_id: str) -> None:
@@ -998,9 +1007,9 @@ class SessionManager:
         the next message starts it again after it was deleted. Only the
         gateway calls this, for a message that just came in."""
         with self._lock:
-            self._deleted_threads.pop(thread_id, None)
-            for key in [k for k in self._deleted if k.split(":", 1)[-1] == thread_id]:
+            for key in [k for k in self._deleted if k[1] == thread_id]:
                 del self._deleted[key]
+        threads.begin_again(thread_id)
 
     def put(self, session: ChatSession) -> None:
         """Insert or replace a session in the store. A chat deleted in this
@@ -1012,8 +1021,6 @@ class SessionManager:
                 logger.info("[SessionManager] not saved: chat %s was deleted", session.session_id[:12])
                 return
             session.updated_at = datetime.now(UTC).isoformat()
-            # What an undo, a /reset or a /compact took out was copied first.
-            session.copied = min(session.copied, len(session.messages or []))
 
             # Auto-generate a title from the first user message if none set.
             if not session.title:
@@ -1084,18 +1091,30 @@ class SessionManager:
             session = self.get(session_id)
             return copy.deepcopy(session) if session is not None else None
 
+    def held(self, session_id: str) -> ChatSession | None:
+        """The bound space's row of *session_id* as the store holds it now --
+        never the cache, and whether or not the chat is marked deleted.
+        Raises when the store cannot be read: "no row" is an answer a move
+        acts on."""
+        tenant_id = _space()
+        loaded = self._load_one_from_primary(tenant_id, session_id, strict=True)
+        return loaded if loaded is not None else self._spooled_only(tenant_id, session_id)
+
     def hand_over(self, session_id: str, *, messages: list[dict[str, Any]], to: ChatSession,
                   commit: Callable[[], bool]) -> bool:
-        """Replace the bound space's chat *session_id* with its copy *to* (in
-        ``to.tenant_id``, under its own new ids) in one step: Spaces S2-12's
+        """The bound space's chat *session_id* goes on as its copy *to* (in
+        ``to.tenant_id``, under its own new ids), in one step: Spaces S2-12's
         move. Only while the chat still holds exactly *messages* -- what was
-        copied -- and *commit* (called once the copy is stored) says the move
-        stands; else nothing changes, the copy is gone, and False.
+        copied -- and *commit* (called at once when the copy's row is stored,
+        the last thing written of it) says the move stands; else nothing
+        changes, the copy's row is gone, and False.
 
-        Every writer of either chat waits for its locks meanwhile, so a
-        message sent during the move is in the chat before (and the move does
-        not happen) or is refused (the chat is deleted): never lost, never in
-        both. The title, pin and archive are the chat's own at this moment."""
+        Once it stands the chat is marked deleted (:meth:`mark_deleted`); its
+        row is deleted by the move's own delete. Every writer of either chat
+        waits for its locks meanwhile, so a message sent during the move is in
+        the chat before (and the move does not happen) or is refused (the
+        chat is deleted): never lost, never in both. The title, pin and
+        archive are the chat's own at this moment."""
         with self._mutation(session_id), self._mutation(to.session_id), self._lock:
             current = self.get(session_id)
             if current is None or current.messages != messages:
@@ -1109,11 +1128,7 @@ class SessionManager:
                 if not committed:  # nobody has seen it
                     self._delete_row(str(to.tenant_id), to.session_id)
             if committed:
-                # Deleted from here on, whatever its row's delete answers: a
-                # tab left open writes nothing into the chat that moved.
-                tenant_id = _space()
-                self._remember_deleted(tenant_id, session_id, current.thread_id or session_id)
-                self._delete_row(tenant_id, session_id)
+                self.mark_deleted(session_id, current.thread_id or session_id)
             return committed
 
     def add_usage(self, session_id: str, tokens: int, cost: float) -> tuple[int, float]:
@@ -1142,14 +1157,25 @@ class SessionManager:
         return totals
 
     def delete(self, session_id: str) -> None:
-        """Remove a session.  No-op if not found. Nothing written late brings
-        it back (:meth:`chat_deleted`)."""
+        """Remove a session: the person's delete. No-op if not found. Nothing
+        written late brings it back (:meth:`chat_deleted`)."""
         with self._lock:
-            tenant_id = _space()
             held = self.get(session_id)
-            self._delete_row(tenant_id, session_id)
-            self._remember_deleted(tenant_id, session_id,
-                                   (held.thread_id or session_id) if held is not None else "")
+            self._delete_row(_space(), session_id)
+            self.mark_deleted(session_id, (held.thread_id or session_id) if held is not None else "")
+
+    def delete_if(self, session_id: str, unchanged: Callable[[ChatSession], bool]) -> bool:
+        """Remove the bound space's *session_id* -- marked deleted already, so
+        nothing writes it -- only while *unchanged* says its row is still what
+        a move copied. Compared and removed under its mutation lock. True: it
+        is gone (or was); False: it changed, and nothing was removed. Raises
+        when the store cannot be read."""
+        with self._mutation(session_id), self._lock:
+            row = self.held(session_id)
+            if row is not None and not unchanged(row):
+                return False
+            self._delete_row(_space(), session_id)
+            return True
 
     def _delete_row(self, tenant_id: str, session_id: str) -> None:
         """Take a session's row out of the cache, the store and the spool."""
@@ -1329,12 +1355,13 @@ class SessionManager:
         # under it made every concurrent list wait for the others (FA-278).
         with self._lock:
             held = list(self._sessions.items())
+            deleted = set(self._deleted)
         sessions: list[ChatSession] = []
         seen_sids: set[str] = set()
         for key, sess in held:
             if sess.session_id in seen_sids:
                 continue
-            if not key.startswith(f"{tenant_id}:"):
+            if not key.startswith(f"{tenant_id}:") or (tenant_id, sess.session_id) in deleted:
                 continue
             if not include_archived and sess.archived:
                 continue
@@ -1392,10 +1419,18 @@ class SessionManager:
             self._list_refreshing.active = False
             self._list_refresh_lock.release()
 
+    def _live(self, session_id: str) -> ChatSession | None:
+        """:meth:`get`, refusing a chat deleted in this process."""
+        session = self.get(session_id)
+        if session is None and self.chat_deleted(session_id):
+            raise ChatDeleted(session_id)
+        return session
+
     def rename(self, session_id: str, title: str) -> ChatSession | None:
-        """Set a custom title on a session. Returns the session or None."""
+        """Set a custom title on a session. Returns the session or None;
+        raises :class:`ChatDeleted` for one deleted in this process."""
         with self._lock:
-            session = self.get(session_id)
+            session = self._live(session_id)
             if session is None:
                 return None
             session.title = title.strip()[:120]
@@ -1403,9 +1438,9 @@ class SessionManager:
             return session
 
     def set_archived(self, session_id: str, archived: bool) -> ChatSession | None:
-        """Archive or unarchive a session. Returns the session or None."""
+        """Archive or unarchive a session, as :meth:`rename` answers."""
         with self._lock:
-            session = self.get(session_id)
+            session = self._live(session_id)
             if session is None:
                 return None
             session.archived = archived
@@ -1413,9 +1448,10 @@ class SessionManager:
             return session
 
     def set_pinned(self, session_id: str, pinned: bool) -> ChatSession | None:
-        """Pin or unpin a session (stays at the top of the sidebar)."""
+        """Pin or unpin a session (stays at the top of the sidebar), as
+        :meth:`rename` answers."""
         with self._lock:
-            session = self.get(session_id)
+            session = self._live(session_id)
             if session is None:
                 return None
             session.pinned = pinned

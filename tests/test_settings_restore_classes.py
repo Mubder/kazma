@@ -76,6 +76,12 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     # Erasing a space (S1-27) deletes the keys it holds, each already named
     # by a rule (tenant.<id>., a chat's state), and takes the space's entry
     # out of the documents kept by space.
+    # A chat that ended takes its own state with it (S2-12): deletes only, of
+    # keys each named by a rule (_CHAT_STATE_PREFIXES, held to the rules by
+    # the writers of each).
+    "kazma-core/kazma_core/spaces/space_data.py::forget_chat_state": (
+        "hitl_grant.", "task_grant.", "yolo.", "path_grant.", "path_grant_index.", "long_task.", "plan_mode.",
+        "active_thread.", "session.", "hitl.last_stale_notice."),
     "kazma-core/kazma_core/spaces/space_data.py::_erase_settings": (
         "self_improvement.space_evolution", "email.accounts_by_space"),
     # One row and revision per job (Knowledge KB-E04), admission under the

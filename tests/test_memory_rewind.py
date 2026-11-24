@@ -238,6 +238,54 @@ def test_the_deep_pass_does_not_apply_a_turn_forgotten_during_its_model_call(mem
     assert mem.db.execute("SELECT COUNT(*) FROM beliefs WHERE object = 'Faro'").fetchone()[0] == 0
 
 
+# ── A rewind keeps to its own space once Spaces is enforced ───────────────
+
+
+def _another_spaces_turn(mem) -> None:
+    """Another space's memory of a chat of the very same key, and a fact of it."""
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.dual_write import mirror_episode
+
+    assert mirror_episode(session_id=THREAD, turn_number=2, user_text="where does the team meet", tenant_id="team",
+                          assistant_text="In Zagreb.", created_at=time.time() - 3600)
+    mutate_belief(mem.db, "team_room", "located_in", "Zagreb", ops_conn=mem.ops, tenant_id="team",
+                  predicate_type="functional", source_session=THREAD, source_turn=2)
+    mem.db.commit()
+
+
+def _teams(mem) -> tuple[int, int]:
+    """What the other space still remembers: memories and facts."""
+    episodes = mem.db.execute("SELECT COUNT(*) FROM episodes WHERE tenant_id = 'team' AND tier != 'forgotten'")
+    facts = mem.db.execute("SELECT COUNT(*) FROM beliefs WHERE tenant_id = 'team' AND object = 'Zagreb'")
+    return episodes.fetchone()[0], facts.fetchone()[0]
+
+
+def test_a_rewind_keeps_to_its_own_space_once_spaces_is_enforced(mem, monkeypatch):
+    """Session ids are a browser's: two spaces' chats may share one. An undo
+    in one space takes nothing back of what another remembers, on its own
+    call and when its journal entry is applied again."""
+    from kazma_core.memory import forget_journal
+    from kazma_core.spaces import scope
+
+    _remember_both_turns(mem)
+    _another_spaces_turn(mem)
+    monkeypatch.setattr(scope, "_enforced", True)
+    asyncio.run(forget.rewind_memory(THREAD, MESSAGES, MESSAGES[:2], tenant_id="default"))
+    assert not _recall_holds_turn_two(mem) and _teams(mem) == (1, 1)
+    entry = [e for e in forget_journal._entries() if e.kind == "rewind"][-1]
+    forget.replay_rewind(mem.db, entry)
+    assert _teams(mem) == (1, 1)
+
+
+def test_control_before_spaces_a_rewind_follows_its_chat_into_every_tenant(mem):
+    """One install, one memory: the chat's rows under any tenant go, as they
+    always did."""
+    _remember_both_turns(mem)
+    _another_spaces_turn(mem)
+    asyncio.run(forget.rewind_memory(THREAD, MESSAGES, MESSAGES[:2], tenant_id="default"))
+    assert not _recall_holds_turn_two(mem) and _teams(mem) == (0, 0)
+
+
 # ── The gate: every graph-state writer takes its turns back ───────────────
 
 #: Functions that write graph state without rewinding a chat, and why.
@@ -245,12 +293,19 @@ NOT_A_REWIND = {
     "kazma-core/kazma_core/agent/supervisor_watchdog.py": "appends a reflection note to the running turn",
     "kazma-core/kazma_core/agent/turn_budget.py": "ends the running turn its time limit cut with the honest reply; "
                                                    "takes no earlier turn back",
+    "kazma-core/kazma_core/time_travel.py:write_turn_boundary": "the write itself; its callers are held below",
+    "kazma-ui/kazma_ui/thread_rewind.py:carry_conversation": "a moved chat's copy: its new thread held nothing, so "
+                                                             "no turn is taken back (Spaces S2-12)",
 }
+
+#: What writes a thread's state: the graph's own, and the writer of a moved
+#: chat's copy, which rewinds nothing itself.
+_WRITES = {"aupdate_state", "write_turn_boundary"}
 
 
 def _writers(sources: dict[str, str]) -> list[str]:
-    """Innermost functions that call ``.aupdate_state(...)`` and neither call
-    ``rewind_memory`` nor are declared."""
+    """Innermost functions that write a thread's state (:data:`_WRITES`) and
+    neither call ``rewind_memory`` nor are declared."""
     out = []
     for rel, text in sources.items():
         tree = ast.parse(text)
@@ -262,7 +317,8 @@ def _writers(sources: dict[str, str]) -> list[str]:
             own = [c for c in calls if not any(id(p) in nested for p in _parents(fn, c))]
             names = {c.func.attr for c in own}
             names |= {c.func.id for c in ast.walk(fn) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
-            if "aupdate_state" in names and "rewind_memory" not in names and rel not in NOT_A_REWIND:
+            if (names & _WRITES and "rewind_memory" not in names and rel not in NOT_A_REWIND
+                    and f"{rel}:{fn.name}" not in NOT_A_REWIND):
                 out.append(f"{rel}:{fn.name}")
     return sorted(out)
 
@@ -289,7 +345,7 @@ def test_every_graph_state_writer_rewinds_memory():
     for pkg in ("kazma-core/kazma_core", "kazma-ui/kazma_ui", "kazma-gateway/kazma_gateway"):
         for p in (REPO / pkg).rglob("*.py"):
             text = p.read_text(encoding="utf-8", errors="replace")
-            if "aupdate_state(" in text:
+            if any(f"{write}(" in text for write in _WRITES):
                 sources[p.relative_to(REPO).as_posix()] = text
     assert _writers(sources) == []
 

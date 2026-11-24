@@ -402,7 +402,7 @@ def test_a_card_the_registry_knows_as_another_gate_is_refused(tmp_path, monkeypa
 NOT_UNDER_THE_LOCK = {
     "kazma-core/kazma_core/agent/supervisor_watchdog.py:supervised_invoke":
         "inside the running turn it supervises (the turn is registered; restores are refused)",
-    "kazma-core/kazma_core/time_travel.py:apply_snapshot_to_thread":
+    "kazma-core/kazma_core/time_travel.py:write_turn_boundary":
         "called only by kazma_ui.thread_rewind, under the lock (the next gate)",
     "kazma-gateway/kazma_gateway/stores/checkpoint.py:adelete_thread":
         "the checkpoint store's own delete; its callers hold the lock",
@@ -510,9 +510,13 @@ def callers_of_apply(sources: dict[str, str]) -> list[str]:
     out = []
     for rel, text in sources.items():
         for node in ast.walk(ast.parse(text)):
-            if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) == "apply_snapshot_to_thread":
+            if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) in _STATE_WRITERS:
                 out.append(rel)
     return sorted(set(out))
+
+
+#: What writes a snapshot, or a moved chat's conversation, onto a thread.
+_STATE_WRITERS = ("apply_snapshot_to_thread", "write_turn_boundary")
 
 
 def test_only_the_rewind_service_writes_a_snapshot_onto_a_thread():
@@ -521,7 +525,9 @@ def test_only_the_rewind_service_writes_a_snapshot_onto_a_thread():
                 "kazma-cli/kazma_cli", "kazma-tui/kazma_tui"):
         for p in (REPO / pkg).rglob("*.py"):
             sources[p.relative_to(REPO).as_posix()] = p.read_text(encoding="utf-8", errors="replace")
-    assert callers_of_apply(sources) == ["kazma-ui/kazma_ui/thread_rewind.py"]
+    assert callers_of_apply(sources) == [
+        "kazma-core/kazma_core/time_travel.py",  # apply_snapshot_to_thread itself
+        "kazma-ui/kazma_ui/thread_rewind.py"]
 
 
 def test_a_route_writing_a_restore_itself_is_caught():

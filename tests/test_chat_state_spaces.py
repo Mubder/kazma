@@ -254,7 +254,7 @@ def test_a_fork_whose_new_chat_cannot_be_recorded_is_refused(matrix, monkeypatch
 
     from kazma_ui.thread_rewind import RewindRefused
 
-    def _cannot(thread_id: str) -> None:
+    def _cannot(thread_id: str, **_: Any) -> None:
         raise sqlite3.OperationalError("unable to open database file")
 
     with world(matrix) as w:
@@ -326,7 +326,7 @@ def test_control_the_old_guard_raised_what_the_record_store_raised(matrix, monke
         if new_thread_id:
             threads.record_new_thread(new_thread_id)
 
-    def _cannot(thread_id: str) -> None:
+    def _cannot(thread_id: str, **_: Any) -> None:
         raise sqlite3.OperationalError("unable to open database file")
 
     monkeypatch.setattr(thread_rewind, "_in_this_space", _old)

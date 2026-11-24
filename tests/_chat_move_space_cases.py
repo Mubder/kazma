@@ -57,6 +57,9 @@ class NoCardGraph:
     async def aget_state(self, config: dict[str, Any]) -> Any:
         return self.snapshot
 
+    async def aupdate_state(self, config: dict[str, Any], values: dict[str, Any], as_node: str = "") -> None:
+        return None
+
 
 class Checkpoints:
     """A checkpoint manager that holds nothing: a moved chat's delete asks it."""

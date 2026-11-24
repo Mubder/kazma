@@ -880,9 +880,15 @@
           setTimeout(function() { _resyncDelivery('sse-truncated'); }, 400);
         }
       },
-      onError: function() {
+      onError: function(said, data) {
         if (!_mine()) return;
         activeStream = null;
+        // The chat was deleted, or moved under another id: nothing to read,
+        // and nothing to attach to again.
+        if (data && data.code === 'chat_deleted') {
+          _leaveDeletedChat(said, '');
+          return;
+        }
         // HITL pause closes the HTTP body. That is catch-up, not a failed
         // turn — always resync. Skipping because `_awaitingApproval` left
         // the bubble on a frozen card with no journal tail.
@@ -6972,6 +6978,10 @@
     not_your_chat: ['move_err_not_your_chat', 'Only the person who started a chat moves it.'],
     chat_app_chat: ['move_err_chat_app', "This chat is a chat app's, so it stays in its space."],
     approval_unknown: ['move_err_approval_unknown', 'Kazma could not check whether this chat waits for an approval. Try again in a moment.'],
+    swarm_running: ['move_err_swarm', 'A swarm task this chat started is not over. Move the chat when it is.'],
+    plan_waiting: ['move_err_plan', 'This chat is in plan mode. Approve or cancel the plan, then move the chat.'],
+    changed: ['move_err_changed', 'Something was written in this chat while it was moved, so it stayed here. Try again.'],
+    kept_both: ['move_err_kept_both', 'Both chats were written in while this one was moved, so both are kept: this one here, the other in the other space.'],
   };
 
   function _moveRefusalText(code) {
@@ -6986,6 +6996,20 @@
       confirmText: ti('move_new_private', 'New private chat'),
     });
     if (fresh && window.kazmaSpace) window.kazmaSpace.newPrivateChat();
+  }
+
+  // What this browser kept by the chat's old id goes to its new one: the
+  // open chat and the model chosen for it. A message waiting to be sent, and
+  // how far the old chat's frames were read, end with it.
+  function _moveBrowserState(oldId, newId) {
+    try {
+      var model = localStorage.getItem(_chatModelKey(oldId));
+      if (model) localStorage.setItem(_chatModelKey(newId), model);
+      localStorage.removeItem(_chatModelKey(oldId));
+      if (localStorage.getItem(SESSION_LS_KEY) === oldId) localStorage.setItem(SESSION_LS_KEY, newId);
+      localStorage.removeItem('kazma_outbox_' + oldId);
+    } catch (e) { /* private mode: nothing was kept */ }
+    if (window.KazmaDeliveryCursor) window.KazmaDeliveryCursor.forget(oldId);
   }
 
   async function moveSession(sessionId, toSpace, takeOut) {
@@ -7007,7 +7031,9 @@
         ? ti('move_take_out_body', 'It moves to your own space. This space keeps a line saying you took it out, with its title.')
         : ti('move_share_body', 'It moves to the shared space: everyone in that space can read it.')) +
         ' ' + ti('move_memory_note', 'Moving a chat moves the conversation. What Kazma remembered from it stays where it was said, and from now on it remembers what you say in the new space. Taking a chat out of a shared space makes that space forget it.') +
-        ' ' + ti('move_also_note', 'The files Kazma shared in it move with it. Reminders and scheduled tasks you booked from it stay where you booked them. Its earlier Time Travel steps do not move, and Kazma can no longer open files you attached to it: attach them again.'),
+        ' ' + (takeOut
+          ? ti('move_take_out_note', 'The files Kazma shared in it come with it. Its Time Travel steps, thoughts and approval cards do not come along, and Kazma can no longer open files you attached to it: attach them again. Its drafts are removed from the shared space, and the reminders and scheduled tasks you booked in it come with you.')
+          : ti('move_share_note', 'The files Kazma shared in it go with it. Its Time Travel steps, thoughts and approval cards do not come along, and Kazma can no longer open files you attached to it: attach them again. Drafts, reminders and scheduled tasks stay in your own space.')),
       confirmText: takeOut ? ti('move_take_out_ok', 'Take out') : ti('move_share_ok', 'Share'),
     });
     if (!ok) return;
@@ -7022,6 +7048,7 @@
     }
     KS.toast(takeOut ? ti('move_taken_out', 'Taken out to your space.') : ti('move_shared', 'Shared with the space.'),
              'success', 3000);
+    if (moved && moved.session_id) _moveBrowserState(sessionId, moved.session_id);
     if (sessionId === chatSessionId) {
       // The chat open here is a deleted chat now: its copy is opened, where
       // it lives.

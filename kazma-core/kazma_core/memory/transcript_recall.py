@@ -148,7 +148,9 @@ def search_transcripts(
             sqlite_path=Path(db_path) if db_path is not None else None,
         )
         from kazma_core.memory.forget import forgotten_in_chat
+        from kazma_core.spaces.threads import copied_threads
 
+        copied = copied_threads() if rows else {}
         hits: list[dict[str, Any]] = []
         for r in rows:
             title = str(r.get("title") or "")
@@ -162,6 +164,13 @@ def search_transcripts(
                 continue
             if forgotten:
                 messages = _without_turns(messages, forgotten)
+            since = copied.get(str(r.get("thread_id") or r.get("session_id") or ""))
+            if since is not None:
+                # A chat copied here from another space (Spaces S2-12): what
+                # was said before was said there, so it is not read here.
+                messages = _said_here(messages, since)
+                if not messages:
+                    continue
             matched = _present(terms, f"{title}\n{messages}")
             if len(matched) * 2 <= len(terms):
                 continue  # half the question or less: not about it
@@ -217,6 +226,21 @@ def _without_turns(messages: str, forgotten: set[tuple[int, str]]) -> str:
         if not skipping:
             kept.append(item)
     return json.dumps(kept, ensure_ascii=False)
+
+
+def _said_here(messages: str, since: float) -> str:
+    """The chat's stored messages from the turns asked since *since*, or ""
+    when there are none (or they cannot be read)."""
+    import json
+
+    from kazma_core.memory.chat_history import said_since
+
+    try:
+        items = json.loads(messages)
+    except (TypeError, ValueError):
+        return ""
+    kept = said_since(items, since) if isinstance(items, list) else []
+    return json.dumps(kept, ensure_ascii=False) if kept else ""
 
 
 def format_transcript_block(hits: list[dict[str, Any]]) -> str:

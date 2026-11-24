@@ -13,25 +13,32 @@
   space's. Kazma offers a new private chat in your own space instead.
 - The moved chat is a new chat in the space it moves to, with the
   conversation and the files Kazma shared in it, and the one it was is
-  deleted where it was: it is in exactly one space. What the chat recalled
-  does not go with it, and neither do its Time Travel steps, its drafts and
-  plans, or the reminders booked from it; a file you attached has to be
-  attached again. Taking a chat out leaves the shared space a line with who
-  took it out, when, and its title, never its words.
+  deleted where it was: it is in exactly one space. Its Time Travel steps,
+  thoughts and approval cards do not come along, nor what the chat recalled;
+  a file you attached has to be attached again.
+- When you share a chat, its drafts and plans and the reminders booked from
+  it stay in your own space. When you take one out, the shared space keeps
+  none of them, and the reminders and tasks you booked in it come with you.
+  Taking a chat out leaves the shared space a line with who took it out,
+  when, and its title, never its words.
 - A move waits while Kazma is answering, while an approval waits (or Kazma
-  cannot tell whether one does), and while an answer was cut off half way.
+  cannot tell whether one does), while an answer was cut off half way, while a
+  swarm task the chat started runs, and in plan mode. Something written in
+  the chat while it moves keeps it where it was; nothing written is lost.
   Anyone else's open window on a chat you took out stops showing it. A chat
   from a chat app is not offered for moving.
 - A move cut off by a restart, or one the database interrupted, is put back
   or finished: at the next start, within the next quarter of an hour, or when
   the chat is moved again.
+- Once Spaces is on, undoing a turn takes back what its own space remembers of
+  it, never what another space does.
 
 ## A deleted chat stays deleted (2026-11-24)
 
 - A chat you deleted is not brought back by what was still on its way to it:
   a reply that was closing, a message being sent, a tab left open, a voice
-  utterance, a chat app that had taken it over. The message you were sending
-  goes to a new chat.
+  utterance, a rename, a chat app that had taken it over, an approval
+  answered late. The message you were sending goes to a new chat.
 - Deleting a chat as its answer finished no longer pages "a reply was
   produced but not saved".
 

@@ -619,6 +619,7 @@ async def _stream_langgraph_events(
         reset_turn_id,
     )
     from kazma_core.safety.hitl import reset_current_thread_id, set_current_thread_id
+    from kazma_core.spaces.threads import ThreadEnded
 
     # Turn correlation id — binds once per streamed turn so every log line,
     # the terminal done payload, and the stored reply row carry the same
@@ -1717,6 +1718,14 @@ async def _stream_langgraph_events(
         except asyncio.CancelledError:
             logger.info("SSE stream cancelled by client disconnect (thread=%s)", thread_id)
             raise
+
+        except ThreadEnded:
+            # Deleted, or moved, as this turn was about to run (an approval
+            # answered late, a resume): nothing ran, and nothing is kept.
+            from kazma_ui.sse_chat import chat_gone_text
+
+            logger.info("[SSE] the chat of thread %s was deleted; its turn did not run", thread_id)
+            yield _sse_frame("error", {"content": chat_gone_text(), "code": "chat_deleted"})
 
         except Exception as exc:
             logger.error("SSE stream error: %s", exc, exc_info=True)

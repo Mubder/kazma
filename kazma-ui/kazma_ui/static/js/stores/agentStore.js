@@ -295,6 +295,9 @@ function registerAgentStore() {
 
     async connect(sessionId) {
       if (!sessionId) return;
+      // A chat that was deleted, or moved under another id, is not bound or
+      // connected to again (its socket was closed saying so).
+      if (this._goneSession === sessionId) return;
       this._startLivenessTicker();
       if (this.sessionId === sessionId && this._socket && this._socket.readyState === WebSocket.OPEN) {
         return;
@@ -406,6 +409,15 @@ function registerAgentStore() {
         const intentional = !!this._intentionalClose;
         this._intentionalClose = false;
         console.warn(`[AgentStore] Telemetry socket closed for session ${sessionId} (code=${code}, reason=${reason || 'none'})`);
+
+        if (code === 4403 && (reason === 'deleted' || reason === 'moved')) {
+          // The chat is gone: nothing binds or connects to it again, and the
+          // page says so at its next message. A chat app's chat, named by its
+          // sender, begins again with its next message.
+          if (String(sessionId).indexOf('gw-') !== 0) this._goneSession = sessionId;
+          this._endTurn();
+          return;
+        }
 
         // Unexpected drop mid-turn: reconcile with server truth (resync paints
         // the durable result or keeps waiting — the reconnect handshake replays

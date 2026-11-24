@@ -182,6 +182,8 @@ NOT_ECHOED = {
         "finds a chat's grant keys; shows nothing",
     ("kazma-core/kazma_core/spaces/space_data.py", "_settings_keys"):
         "one space's count, export and erase (S1-27): its own rule picks the space's keys",
+    ("kazma-core/kazma_core/spaces/space_data.py", "forget_chat_state"):
+        "finds the state of one chat that ended, and deletes it (S2-12); shows nothing",
     ("kazma-ui/kazma_ui/providers.py", "_load_connector_config"):
         "one chat app's install connector settings, by its prefix",
     ("kazma-ui/kazma_ui/providers.py", "_purge"):

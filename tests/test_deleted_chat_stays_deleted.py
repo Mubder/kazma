@@ -24,7 +24,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
-from kazma_core.spaces import scope
+from kazma_core.spaces import scope, threads
 from kazma_ui import reply_sink, session_manager, turn_runtime
 from kazma_ui.session_manager import ChatDeleted, ChatSession, SessionManager
 
@@ -44,7 +44,8 @@ def store(tmp_path):
 @pytest.fixture
 def forgets(monkeypatch):
     """The store before: it remembers no delete."""
-    monkeypatch.setattr(SessionManager, "_remember_deleted", lambda *_a, **_k: None)
+    monkeypatch.setattr(SessionManager, "mark_deleted", lambda *_a, **_k: None)
+    monkeypatch.setattr(threads, "end_thread", lambda *_a, **_k: None)
 
 
 def _chat(store: SessionManager, *, title: str = "a chat", thread: str = "") -> tuple[str, str]:
@@ -115,15 +116,35 @@ def test_a_chat_of_the_same_id_in_another_space_is_not_deleted(store) -> None:
     store.delete(session_id)
     with scope.bind_scope("elsewhere", "someone"):
         assert not store.chat_deleted(session_id) and store.get(session_id) is not None
+        # Named as the deleted chat's thread is: still another space's.
+        store.put(store.get_or_create(_thread, thread_id="t-there"))
+        assert not store.chat_deleted(_thread) and store.get(_thread) is not None
+
+
+def test_a_deleted_chat_whose_row_is_still_there_is_not_found(store) -> None:
+    """A move whose delete waits: nothing lists it, nor finds it by its
+    thread, from the cache or the database."""
+    session_id, thread_id = _chat(store)
+    store.mark_deleted(session_id, thread_id)
+    for _cached in (True, False):
+        assert store.get(session_id) is None and store.get_by_thread_id(thread_id) is None
+        assert session_id not in {s.session_id for s in store.list_all()}
+        with pytest.raises(ChatDeleted):
+            store.rename(session_id, "back")
+        store._sessions.clear()
+    assert _stored(store, session_id) == 1
 
 
 def test_what_is_remembered_is_bounded(store, monkeypatch) -> None:
     monkeypatch.setattr(session_manager, "DELETED_CHATS_KEPT", 3)
-    ids = [_chat(store)[0] for _ in range(5)]
-    for session_id in ids:
+    monkeypatch.setattr(threads, "_ENDED_KEPT", 3)
+    chats = [_chat(store) for _ in range(5)]
+    for session_id, _thread in chats:
         store.delete(session_id)
-    assert len(store._deleted) == len(store._deleted_threads) == 3
-    assert [store.chat_deleted(s) for s in ids] == [False, False, True, True, True], "the oldest are dropped"
+    assert len(store._deleted) == len(threads._ended) == 3
+    kept = [False, False, True, True, True]
+    assert [store.chat_deleted(s) for s, _t in chats] == kept, "the oldest are dropped"
+    assert [threads.thread_ended(t) for _s, t in chats] == kept
 
 
 def test_a_delete_the_database_refused_is_not_one(store, monkeypatch) -> None:

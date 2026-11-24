@@ -494,7 +494,6 @@ def _ensure_core_schema(pool: PostgresPool) -> None:
         title TEXT DEFAULT '',
         archived BOOLEAN DEFAULT FALSE,
         pinned BOOLEAN DEFAULT FALSE,
-        copied INTEGER DEFAULT 0,
         PRIMARY KEY (tenant_id, session_id)
     );
     CREATE TABLE IF NOT EXISTS kazma_swarm_tasks (
@@ -531,7 +530,6 @@ def _ensure_core_schema(pool: PostgresPool) -> None:
             ensure_schema(cur, [
                 *split_statements(ddl),
                 "ALTER TABLE kazma_chat_sessions ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE",
-                "ALTER TABLE kazma_chat_sessions ADD COLUMN IF NOT EXISTS copied INTEGER DEFAULT 0",
             ])
         conn.commit()
     logger.info("[PostgresPool] core schema ensured")

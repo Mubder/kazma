@@ -1,22 +1,82 @@
-"""What a deleted chat leaves beside its row: one place removes it.
+"""Deleting a chat: one function, for the person's delete
+(``DELETE /api/chat/sessions/{id}``) and for a move to another space, which
+is a fork there and this delete here (Spaces S2-12, ``kazma_ui.chat_move``).
 
-Deleting a chat (``DELETE /api/chat/sessions/{id}``) and moving one to
-another space, which is a fork there and this delete here (Spaces S2-12,
-``kazma_ui.chat_move``), remove the same things: the thread's checkpoints,
-its Time Travel steps and, last, its space record. What Kazma learned is
-memory and is kept (AGENTS.md section 15I).
+:func:`delete_chat` removes the row and marks the chat deleted (nothing
+written late brings it back, and its thread runs no turn again:
+``session_manager``, ``kazma_core.spaces.threads.end_thread``), bumps the
+thread's rewind generation (a turn prepared from its state does not start),
+ends the sockets and streams open on it, and removes what is left beside the
+row: the thread's checkpoints, its Time Travel steps and, last, its space
+record. What Kazma learned is memory and is kept (AGENTS.md section 15I).
+Safe to run twice.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import sqlite3
+from collections.abc import Callable
 from typing import Any
 
-__all__ = ["remove_chat_remains"]
+__all__ = ["delete_chat", "end_chat", "remove_chat_remains"]
 
 logger = logging.getLogger(__name__)
+
+
+def _remove_row(session_id: str, thread_id: str, unchanged: Callable[[Any], bool] | None) -> bool:
+    """The chat's row out of the store, and the chat marked deleted. With
+    *unchanged* (a move's), only while its row is still that. Blocking."""
+    from kazma_ui.session_manager import get_session_manager
+
+    chats = get_session_manager()
+    if unchanged is None:
+        chats.delete(session_id)
+        if thread_id:  # a second run no longer holds the row that named it
+            chats.mark_deleted(session_id, thread_id)
+        return True
+    chats.mark_deleted(session_id, thread_id)
+    return chats.delete_if(session_id, unchanged)
+
+
+def end_chat(session_id: str, thread_id: str, *, reason: str = "deleted") -> None:
+    """Nothing prepared from the chat's state starts, and the sockets and
+    streams open on it in the bound space end, told *reason*."""
+    from kazma_core.spaces.scope import require_space_id
+
+    from kazma_ui.live_connections import chat_gone
+    from kazma_ui.thread_locks import bump_rewind_generation
+
+    if thread_id:
+        bump_rewind_generation(thread_id)
+    chat_gone(session_id=session_id, thread_id=thread_id, space=require_space_id(), reason=reason)
+
+
+async def delete_chat(
+    session_id: str, thread_id: str, checkpoints: Any, *, scope: tuple[str, str] | None = None,
+    reason: str = "deleted", unchanged: Callable[[Any], bool] | None = None,
+) -> bool | None:
+    """Delete the chat *session_id* (thread *thread_id*) of the bound space,
+    or of *scope* (space, account) when a journal names it. *checkpoints* is
+    the checkpoint manager, *reason* what its open sockets are told.
+
+    True: nothing of it is left. False: a part could not be removed (a
+    WARNING names it; run it again). None: *unchanged* says its row is not
+    what a move copied, and nothing was removed."""
+    from kazma_core.spaces import threads
+    from kazma_core.spaces.scope import bind_scope
+
+    with bind_scope(*scope) if scope else contextlib.nullcontext():
+        if not await asyncio.to_thread(_remove_row, session_id, thread_id, unchanged):
+            return None
+        end_chat(session_id, thread_id, reason=reason)
+        # The record goes last, so a thread recorded elsewhere, or nowhere,
+        # has nothing left in the space the journal names.
+        if scope and await asyncio.to_thread(threads.thread_home, thread_id) != scope[0]:
+            return True
+        return await remove_chat_remains(session_id, thread_id, checkpoints)
 
 
 def _forget_thread_record(thread_id: str) -> None:

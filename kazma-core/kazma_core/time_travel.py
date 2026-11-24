@@ -1410,6 +1410,24 @@ def turn_boundary_payload(state: dict[str, Any], thread_id: str) -> dict[str, An
     return payload
 
 
+async def write_turn_boundary(graph: Any, state: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    """Write *state* onto ``thread_id`` as a quiescent, turn-boundary state,
+    and nothing else: memory is not rewound. For a thread that holds nothing
+    yet (a moved chat's copy); a restore or a fork goes through
+    :func:`apply_snapshot_to_thread`. Called by ``kazma_ui.thread_rewind``
+    only, as that is.
+    """
+    payload = turn_boundary_payload(state, thread_id)
+    config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+    nodes = getattr(graph, "nodes", None) or {}
+    if "respond" in nodes:
+        # As the turn's last node: the checkpoint has no next step.
+        await graph.aupdate_state(config, payload, as_node="respond")
+    else:
+        await graph.aupdate_state(config, payload)
+    return payload
+
+
 async def apply_snapshot_to_thread(
     graph: Any,
     state: dict[str, Any],
@@ -1422,17 +1440,11 @@ async def apply_snapshot_to_thread(
     lock and has refused a running turn or a pending approval. Callers pass
     the live thread for a restore and a new id for a fork.
     """
-    payload = turn_boundary_payload(state, thread_id)
     config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
     # The state being replaced: its later turns leave memory.
     before = await graph.aget_state(config)
     old_messages = list(((before.values if before is not None else None) or {}).get("messages") or [])
-    nodes = getattr(graph, "nodes", None) or {}
-    if "respond" in nodes:
-        # As the turn's last node: the checkpoint has no next step.
-        await graph.aupdate_state(config, payload, as_node="respond")
-    else:
-        await graph.aupdate_state(config, payload)
+    payload = await write_turn_boundary(graph, state, thread_id)
     # A rewind takes the turns after the restored point back from memory too
     # (Memory audit M09); a fork's new thread holds none.
     from kazma_core.memory.forget import rewind_memory

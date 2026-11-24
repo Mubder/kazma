@@ -20,6 +20,15 @@ ContextVar is left as the entry point left it.
 
 The record holds ids only: no title, no text. It is one small row per
 thread, kept while its chat exists (:func:`forget_thread` when it is deleted).
+**A deleted chat's thread never runs again** (:func:`end_thread`): the mark is
+kept in this process, and no turn starts on a marked thread and none is
+recorded again -- an approval answered late, a turn being prepared, a resume.
+A chat app's chat, named by its sender, begins again with the message that
+comes in (:func:`begin_again`).
+
+A chat a person moved from another space (S2-12) says when it was copied
+(``copied_at``): what was said before is the space's where it was said, and
+this one remembers what is said here (:func:`copied_threads`).
 
 **Everything kept by thread follows the record** (S1-08): the checkpoints,
 the Time Travel steps, the plan, the receipts. :func:`thread_refusal` is the one
@@ -35,6 +44,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -45,9 +55,13 @@ from kazma_core.spaces import scope as _scope
 from kazma_core.spaces.scope import NoSpaceBound, Scope, valid_account_id, valid_space_id
 
 __all__ = [
+    "ThreadEnded",
     "ThreadInAnotherSpace",
     "ThreadRecord",
+    "begin_again",
     "bound",
+    "copied_threads",
+    "end_thread",
     "forget_thread",
     "record_new_thread",
     "record_of",
@@ -56,6 +70,7 @@ __all__ = [
     "thread_refusal",
     "require_thread",
     "scope_for_turn",
+    "thread_ended",
     "thread_scopes_db",
     "new_web_thread_id",
 ]
@@ -67,7 +82,8 @@ CREATE TABLE IF NOT EXISTS thread_scopes (
     thread_id  TEXT PRIMARY KEY,
     space_id   TEXT NOT NULL,
     opener     TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    copied_at  REAL
 );
 CREATE INDEX IF NOT EXISTS idx_thread_scopes_space ON thread_scopes(space_id);
 """
@@ -75,6 +91,10 @@ CREATE INDEX IF NOT EXISTS idx_thread_scopes_space ON thread_scopes(space_id);
 
 class ThreadInAnotherSpace(NoSpaceBound):
     """A turn was asked for on a thread that belongs to another space."""
+
+
+class ThreadEnded(NoSpaceBound):
+    """The thread's chat was deleted: nothing runs on it again."""
 
 
 class _AskerNotInSpace(NoSpaceBound):
@@ -90,6 +110,9 @@ class ThreadRecord:
     space_id: str
     opener: str
     created_at: str
+    #: When the chat was copied here from another space (S2-12); None for
+    #: every other chat.
+    copied_at: float | None = None
 
 
 def new_web_thread_id(session_id: str) -> str:
@@ -129,6 +152,9 @@ def _connection() -> Iterator[sqlite3.Connection]:
             with _schema_lock:
                 if path not in _schema_ready:
                     conn.executescript(_SCHEMA)
+                    from kazma_core.db.sqlite_columns import add_missing_columns
+
+                    add_missing_columns(conn, "thread_scopes", (("copied_at", "REAL"),))
                     _schema_ready.add(path)
         yield conn
     finally:
@@ -138,7 +164,8 @@ def _connection() -> Iterator[sqlite3.Connection]:
 def _row(row: tuple | None) -> ThreadRecord | None:
     if row is None:
         return None
-    return ThreadRecord(thread_id=row[0], space_id=row[1], opener=row[2], created_at=row[3])
+    return ThreadRecord(thread_id=row[0], space_id=row[1], opener=row[2], created_at=row[3],
+                        copied_at=float(row[4]) if row[4] is not None else None)
 
 
 def record_of(thread_id: str) -> ThreadRecord | None:
@@ -148,7 +175,7 @@ def record_of(thread_id: str) -> ThreadRecord | None:
     with _connection() as conn:
         found = _row(
             conn.execute(
-                "SELECT thread_id, space_id, opener, created_at FROM thread_scopes "
+                "SELECT thread_id, space_id, opener, created_at, copied_at FROM thread_scopes "
                 "WHERE thread_id = ?",
                 (str(thread_id),),
             ).fetchone()
@@ -161,22 +188,26 @@ def record_of(thread_id: str) -> ThreadRecord | None:
     return found
 
 
-def record_thread(thread_id: str, space_id: str, opener: str) -> ThreadRecord:
+def record_thread(thread_id: str, space_id: str, opener: str, *,
+                  copied_at: float | None = None) -> ThreadRecord:
     """Record a thread once. A thread already recorded keeps its record: the
-    first writer wins, and the record that stands is returned."""
+    first writer wins, and the record that stands is returned. *copied_at*:
+    when the chat was copied here from another space (S2-12). A deleted
+    chat's thread is not recorded again (:class:`ThreadEnded`)."""
     if not thread_id:
         raise ValueError("a thread record needs a thread id")
     if not valid_space_id(space_id) or not valid_account_id(opener):
         raise ValueError(f"not a space and an account: {space_id!r}, {opener!r}")
+    _refuse_ended(thread_id)
     with _connection() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO thread_scopes (thread_id, space_id, opener, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (str(thread_id), space_id, opener, datetime.now(UTC).isoformat()),
+            "INSERT OR IGNORE INTO thread_scopes (thread_id, space_id, opener, created_at, copied_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (str(thread_id), space_id, opener, datetime.now(UTC).isoformat(), copied_at),
         )
         stands = _row(
             conn.execute(
-                "SELECT thread_id, space_id, opener, created_at FROM thread_scopes "
+                "SELECT thread_id, space_id, opener, created_at, copied_at FROM thread_scopes "
                 "WHERE thread_id = ?",
                 (str(thread_id),),
             ).fetchone()
@@ -224,11 +255,68 @@ def known_space(thread_id: str) -> str | None:
         return _spaces.get(str(thread_id or ""))
 
 
+def copied_threads() -> dict[str, float]:
+    """Every thread whose chat was copied here from another space (S2-12),
+    and when: what was said before that was said elsewhere, so this space's
+    memory starts there (turn reconcile, the past-chats search, the scan of
+    old sessions). One read; raises when the store cannot be read -- never
+    "none was"."""
+    if not Path(thread_scopes_db()).exists():
+        return {}  # no thread was ever recorded
+    with _connection() as conn:
+        return {str(r[0]): float(r[1]) for r in conn.execute(
+            "SELECT thread_id, copied_at FROM thread_scopes WHERE copied_at IS NOT NULL").fetchall()}
+
+
+# ── A deleted chat's thread never runs again ─────────────────────────────
+
+#: thread id -> the space its chat was deleted in, newest last; in this
+#: process, bounded.
+_ended: OrderedDict[str, str] = OrderedDict()
+_ENDED_KEPT = 10_000
+
+
+def end_thread(thread_id: str, space_id: str = "") -> None:
+    """Mark a thread whose chat is deleted (in *space_id*): no turn starts on
+    it again and nothing records it again. Memory only."""
+    tid = str(thread_id or "")
+    if not tid:
+        return
+    with _spaces_lock:
+        _ended[tid] = space_id or _ended.get(tid) or _spaces.get(tid) or ""
+        _ended.move_to_end(tid)
+        while len(_ended) > _ENDED_KEPT:
+            _ended.popitem(last=False)
+
+
+def thread_ended(thread_id: str, space_id: str | None = None) -> bool:
+    """Whether the thread's chat was deleted in this process (in *space_id*,
+    when one is named). Memory only."""
+    with _spaces_lock:
+        where = _ended.get(str(thread_id or ""))
+    return where is not None and (space_id is None or where == space_id)
+
+
+def begin_again(thread_id: str) -> None:
+    """Take a thread's mark away: a chat app's chat, named by its sender,
+    which the message that came in starts again; or a delete that did not
+    happen (a move put back)."""
+    with _spaces_lock:
+        _ended.pop(str(thread_id or ""), None)
+
+
+def _refuse_ended(thread_id: str) -> None:
+    if thread_ended(thread_id):
+        raise ThreadEnded("this chat was deleted, so nothing runs on it")
+
+
 def forget_thread(thread_id: str) -> bool:
-    """Remove a thread's record: its chat was deleted. True when one was removed."""
+    """Remove a thread's record: its chat was deleted, and it never runs
+    again (:func:`end_thread`). True when one was removed."""
     tid = str(thread_id or "")
     if not tid:
         return False
+    end_thread(tid)
     with _connection() as conn:
         removed = conn.execute("DELETE FROM thread_scopes WHERE thread_id = ?", (tid,)).rowcount
     with _spaces_lock:
@@ -290,9 +378,10 @@ def thread_refusal(thread_id: str, *, space_id: str | None = None) -> str | None
     return None
 
 
-def record_new_thread(thread_id: str) -> ThreadRecord | None:
-    """Record a thread this work is about to make (a fork) in the space, and
-    for the account, it is bound to. On an install that does not enforce
+def record_new_thread(thread_id: str, *, copied_at: float | None = None) -> ThreadRecord | None:
+    """Record a thread this work is about to make (a fork, a moved chat's
+    copy with its *copied_at*) in the space, and for the account, it is bound
+    to. On an install that does not enforce
     Spaces, work that bound nothing records nothing: the thread is recorded
     on its first turn, as before. Enforced, such work is refused."""
     bound_scope = _scope.current_scope()
@@ -300,7 +389,7 @@ def record_new_thread(thread_id: str) -> ThreadRecord | None:
         if not _scope.spaces_enforced():
             return None
         bound_scope = _scope.require_scope()
-    return record_thread(thread_id, bound_scope.space_id, bound_scope.asker)
+    return record_thread(thread_id, bound_scope.space_id, bound_scope.asker, copied_at=copied_at)
 
 
 def require_thread(thread_id: str, *, space_id: str | None = None) -> None:
@@ -338,9 +427,12 @@ def scope_for_turn(thread_id: str) -> TurnScope:
     first turn. Reads and writes the record store: call it off the loop.
 
     Raises :class:`ThreadInAnotherSpace` when the entry point bound a space
-    the thread does not belong to, and ``NoSpaceBound`` when nothing is bound
-    for a new thread on an install that enforces Spaces.
+    the thread does not belong to, :class:`ThreadEnded` for a deleted chat's
+    thread, and ``NoSpaceBound`` when nothing is bound for a new thread on an
+    install that enforces Spaces.
     """
+    if thread_id:
+        _refuse_ended(thread_id)
     entry = _scope.current_scope()
     enforced = _scope.spaces_enforced()
     record = record_of(thread_id) if thread_id else None

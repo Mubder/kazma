@@ -833,8 +833,23 @@ def _isolate_process_singletons(tmp_path):
         _peek_documents = None
         _prev_documents = None
 
+    # The threads whose chats were deleted in this process (nothing runs on
+    # one again, Spaces S2-12): a chat one test deleted must not refuse a
+    # later test's chat of the same thread id.
+    try:
+        from kazma_core.spaces import threads as _threads
+
+        _prev_ended = dict(_threads._ended)
+    except Exception:
+        _prev_ended = None
+
     # ---- teardown: restore + park (never close/GC — see _PARKED) ---------
     yield
+
+    if _prev_ended is not None:
+        with _threads._spaces_lock:
+            _threads._ended.clear()
+            _threads._ended.update(_prev_ended)
 
     if _peek_documents is not None:
         try:

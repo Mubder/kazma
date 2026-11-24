@@ -37,6 +37,7 @@ import asyncio
 import contextlib
 import logging
 import sqlite3
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -382,30 +383,42 @@ def projected_rows(messages: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
-async def carry_conversation(graph: Any, values: dict[str, Any], new_thread_id: str, *, space: str, by: str) -> int:
-    """The fork of a chat that moves to another space (Spaces S2-12): the
-    questions and answers of *values* (its state), written under the new
-    thread *new_thread_id* as a turn-boundary state, in *space* for *by*.
-    Nothing else of the state goes: no turn notes, no "About me", nothing
-    recalled, no tool results, drafts or plans. Returns how many messages.
+def _conversation_of(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The model's messages of a chat row's questions and answers: each
+    question as it is shown, and one assistant message a turn, its final
+    answer (a turn that paused for an approval may hold more)."""
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        message = {"role": row["role"], "content": row["content"]}
+        if out and message["role"] == "assistant" and out[-1]["role"] == "assistant":
+            out[-1] = message
+        else:
+            out.append(message)
+    return out
 
-    A state that was compacted holds a summary instead of its first turns;
-    none is written then (nor when it holds no message), and the chat's next
-    turn starts from its transcript, as any chat with no checkpoint does."""
+
+async def carry_conversation(
+    graph: Any, rows: list[dict[str, Any]], new_thread_id: str, *, space: str, by: str,
+) -> int:
+    """The state of a moved chat's copy (Spaces S2-12): *rows*, its row's
+    questions and answers (:func:`projected_rows`), as the new thread's
+    turn-boundary state in *space*, for *by*. From the row, so it is what the
+    chat shows; nothing of the source's state goes -- no turn notes, no
+    "About me", no summary, nothing recalled, no tool results, documents or
+    images, drafts or plans, and nothing pending -- and memory is not told of
+    a rewind: the new thread was never anything else. Returns how many
+    messages."""
     from kazma_core.spaces.scope import bind_scope
-    from kazma_core.time_travel import apply_snapshot_to_thread
-    from kazma_core.turn_notes import opens_with
+    from kazma_core.time_travel import write_turn_boundary
 
     from kazma_ui.thread_locks import thread_mutation
 
-    held = list(values.get("messages") or [])
-    messages = _projected_transcript(held)
-    if not messages or any(opens_with(m, "[CONTEXT SUMMARY]") for m in held):
+    messages = _conversation_of(rows)
+    if not messages:
         return 0
     with bind_scope(space, by):
         async with thread_mutation(new_thread_id):
-            await apply_snapshot_to_thread(
-                graph, {"messages": messages, "tenant_id": space}, new_thread_id)
+            await write_turn_boundary(graph, {"messages": messages, "tenant_id": space}, new_thread_id)
     return len(messages)
 
 
@@ -420,7 +433,12 @@ def _in_this_space(thread_id: str, new_thread_id: str | None = None) -> None:
     try:
         refused = threads.thread_refusal(thread_id)
         if not refused and new_thread_id:
-            threads.record_new_thread(new_thread_id)
+            # A fork of a chat that was copied here from another space (Spaces
+            # S2-12) holds what was said there: this space's memory starts at
+            # the fork, as it starts at the copy in the chat itself.
+            source = threads.record_of(thread_id)
+            copied = source is not None and source.copied_at is not None
+            threads.record_new_thread(new_thread_id, copied_at=time.time() if copied else None)
     except (sqlite3.Error, OSError) as exc:
         # The record store is where a chat's space is kept: a restore or a
         # fork that cannot ask it, or cannot record the new chat, does not
@@ -475,18 +493,13 @@ def _theirs_to_change(thread_id: str) -> None:
                                   "can restore it, fork it or delete its saved steps.", status=403)
 
 
-def _save_fork_chat(session_id: str, title: str, messages: list[dict[str, Any]], source_thread: str) -> None:
-    """The fork's chat row, so it shows in the sidebar (blocking: a
-    chat-store write). A fork of a chat that was moved here from another
-    space (Spaces S2-12) holds what was said there: turn reconcile starts
-    after what it was forked with, as it does in the chat itself."""
+def _save_fork_chat(session_id: str, title: str, messages: list[dict[str, Any]], tenant_id: str | None = None) -> None:
+    """The fork's chat row, so it shows in the sidebar (blocking: a chat-store write)."""
     from kazma_ui.session_manager import ChatSession, get_session_manager
 
-    store = get_session_manager()
-    source = store.get_by_thread_id(source_thread)
-    copied = len(messages) if source is not None and source.copied else 0
-    store.put(ChatSession(session_id=session_id, thread_id=session_id, title=title, messages=messages,
-                          copied=copied))
+    get_session_manager().put(ChatSession(
+        session_id=session_id, thread_id=session_id, title=title, messages=messages, tenant_id=tenant_id,
+    ))
 
 
 def _fork_title(thread_id: str, turn_index: int, lang: str) -> str:
@@ -567,7 +580,7 @@ async def fork_thread(
     title = await asyncio.to_thread(_fork_title, thread_id, record.turn_index, lang)
     chat_saved, _ = await asyncio.to_thread(
         _best_effort, f"saving the chat of fork {new_id} (it will not show in the chat list)",
-        _save_fork_chat, new_id, title, messages, thread_id,
+        _save_fork_chat, new_id, title, messages,
     )
     _metric("fork", "ok")
     await _audit("fork", "ok", detail={"turn_index": record.turn_index, "chat_saved": chat_saved,

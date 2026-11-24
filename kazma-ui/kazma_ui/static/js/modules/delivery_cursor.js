@@ -25,6 +25,13 @@ window.KazmaDeliveryCursor = (function() {
     } catch (e) { /* private mode / quota — resume just falls behind */ }
   }
 
+  /** The session is gone (deleted, or moved under another id): its cursor too. */
+  function forget(sessionKey) {
+    try {
+      window.localStorage.removeItem(LS_PREFIX + sessionKey);
+    } catch (e) { /* private mode: none was kept */ }
+  }
+
   /**
    * Create a tracker for one live connection.
    * observeSeq(seq) → 'init' | 'ok' | 'dupe' | 'gap'
@@ -97,6 +104,7 @@ window.KazmaDeliveryCursor = (function() {
   return {
     loadPersisted: loadPersisted,
     persist: persist,
+    forget: forget,
     createTracker: createTracker,
     adoptHead: adoptHead,
   };
