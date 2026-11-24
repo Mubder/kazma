@@ -12,6 +12,10 @@ own in LongMemEval's shape (no dataset text in the repository).
 * The harness's ``answer --ids`` asks only the questions the file names.
 * The control: with Kazma's memory paths not routed to the question's store,
   the deep pass writes elsewhere and the store holds no deep-pass fact.
+* Another extractor's run (``--label``) keeps stores, replies and blocks of its
+  own, and one with a spend limit stops there: no message past it is asked, its
+  question stays unwritten and is asked for the rest on a later run. The
+  control: the same run with no limit asks every message.
 """
 
 from __future__ import annotations
@@ -99,8 +103,8 @@ def private(tmp_path, monkeypatch):
     return folder
 
 
-def _run(pilot, folder, provider, *, route: bool = True) -> dict:
-    model = pilot.CachedModel(provider, folder / "replies.jsonl")
+def _run(pilot, folder, provider, *, route: bool = True, spend=None) -> dict:
+    model = pilot.CachedModel(provider, folder / "replies.jsonl", spend)
     registry = type("Registry", (), {"get_client": lambda self, *_a, **_k: model})()
     if route:
         pilot._route_memory_paths()
@@ -129,6 +133,45 @@ def test_a_second_run_asks_the_model_nothing(pilot, private):
     again = _run(pilot, private, _Model(refuse=True))
     assert {k: again[k] for k in ("facts", "dated_events", "deep")} == \
         {k: first[k] for k in ("facts", "dated_events", "deep")}
+
+
+#: One scripted reply: 80 of its 100 prompt tokens from the cache, 10 out.
+PRICES = (0.1, 1.0, 10.0)
+REPLY_USD = (80 * 0.1 + 20 * 1.0 + 10 * 10.0) / 1_000_000
+
+
+def test_a_run_stops_at_its_spend_and_goes_on_from_there(pilot, private):
+    provider = _Model()
+    with pytest.raises(pilot.SpendLimitError):
+        _run(pilot, private, provider, spend=pilot.Spend(PRICES, 2 * REPLY_USD))
+    assert provider.calls == 2 and not (private / "done" / "pilot_q.json").exists()
+    # What the kept replies cost is counted again by the next run: at the same
+    # limit it asks nothing, past it only what is left.
+    with pytest.raises(pilot.SpendLimitError):
+        _run(pilot, private, _Model(refuse=True), spend=pilot.Spend(PRICES, 2 * REPLY_USD))
+    rest, spend = _Model(), pilot.Spend(PRICES, 1.0)
+    stats = _run(pilot, private, rest, spend=spend)
+    assert rest.calls == 1 and (stats["deep"], stats["deep_failed"]) == (3, 0)
+    assert spend.usd == pytest.approx(3 * REPLY_USD)
+
+
+def test_control_with_no_limit_every_message_is_asked(pilot, private):
+    provider = _Model()
+    stats = _run(pilot, private, provider, spend=pilot.Spend(PRICES))
+    assert provider.calls == 3 and stats["deep"] == 3
+
+
+def test_deepseeks_cache_share_is_read_from_its_own_field(pilot):
+    spend = pilot.Spend((0.003, 0.15, 0.6), 5.0)
+    spend.add({"prompt_tokens": 1_000_000, "prompt_cache_hit_tokens": 600_000, "completion_tokens": 1_000_000})
+    assert spend.usd == pytest.approx(0.6 * 0.003 + 0.4 * 0.15 + 0.6)
+    assert not spend.reached
+
+
+def test_another_extractors_run_is_kept_apart(pilot, tmp_path):
+    first, other = pilot.work_folder(tmp_path), pilot.work_folder(tmp_path, "deepseek-flash")
+    assert first.name == pilot.prompt_tag() and other.name == f"{pilot.prompt_tag()}-deepseek-flash"
+    assert first.parent == other.parent
 
 
 def test_control_without_routing_the_deep_pass_writes_elsewhere(pilot, private):

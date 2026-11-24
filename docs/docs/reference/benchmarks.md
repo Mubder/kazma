@@ -53,13 +53,12 @@ Turns in English, Arabic and both, with the facts a person would expect remember
 | Quick pass | English | 42.1 % | 100.0 % | 100.0 % | 100.0 % | 18 turns |
 | Quick pass | Arabic | 50.0 % | 100.0 % | 100.0 % | 100.0 % | 14 turns |
 | Quick pass | Mixed | 60.0 % | 100.0 % | 100.0 % | 100.0 % | 8 turns |
-| Model pass (5 askings a turn, previous prompt) | English | 100.0 % | 86.3 % | 100.0 % | 100.0 % | 90 askings (18 turns, 5 each) |
-| Model pass (5 askings a turn, previous prompt) | Arabic | 97.1 % | 94.1 % | 100.0 % | 100.0 % | 70 askings (14 turns, 5 each) |
-| Model pass (5 askings a turn, previous prompt) | Mixed | 100.0 % | 72.0 % | 92.6 % | 100.0 % | 40 askings (8 turns, 5 each) |
+| Model pass (5 askings a turn) | English | 99.0 % | 81.9 % | 99.0 % | 100.0 % | 90 askings (18 turns, 5 each) |
+| Model pass (5 askings a turn) | Arabic | 97.1 % | 91.2 % | 97.2 % | 100.0 % | 70 askings (14 turns, 5 each) |
+| Model pass (5 askings a turn) | Mixed | 100.0 % | 74.0 % | 100.0 % | 100.0 % | 40 askings (8 turns, 5 each) |
 
-The model pass is deepseek-flash's replies, recorded on 2026-11-20, 5 askings a turn. Asked again, a model answers a little differently, so the lock keeps each score's spread: two standard errors over the askings, at most 7.5 points for the scores in this table.
-On the ten turns that give it the turn's day, the turn before and the facts held, the model pass gives a fact's start right 90.0 % in English, 100.0 % in Arabic; names the held fact it replaces 100.0 % in English, 100.0 % in Arabic; reads that a fact ended 100.0 % in English, 100.0 % in Arabic.
-Kazma's extraction prompt has changed since that recording (1 change since 2026-11-23). The model-pass rows replay the recording through today's code, which checks that the code reading the model's replies still keeps what it kept; they do not measure the new prompt, which is measured when it is recorded.
+The model pass is deepseek-flash's replies, recorded on 2026-11-24, 5 askings a turn. Asked again, a model answers a little differently, so the lock keeps each score's spread: two standard errors over the askings, at most 8.3 points for the scores in this table.
+On the ten turns that give it the turn's day, the turn before and the facts held, the model pass gives a fact's start right 80.0 % in English, 100.0 % in Arabic; names the held fact it replaces 100.0 % in English, 100.0 % in Arabic; reads that a fact ended 100.0 % in English, 100.0 % in Arabic.
 
 With Postgres and pgvector as the memory store: not yet measured on dataset version 8. CI's pgvector job measures it on every run, with pgvector's own search and with every row compared, and its numbers are printed here once they are locked from a named run.
 

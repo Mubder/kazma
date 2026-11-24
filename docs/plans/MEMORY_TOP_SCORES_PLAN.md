@@ -636,8 +636,68 @@ against today, 20 gains and 5 losses in both runs; multi-session 0.40 to
 0.57 / 0.59. The block's median 1,336 to 1,424 tokens (p95 1,490 to 1,496).
 Reviewed before the merge: an event told again that already has its day left
 a write transaction open on a default-mode connection (fixed), and the cache
-marker now goes to Qwen's own models only. The extraction recording stays
-declared pending: it is taken on the model the last one was made on.
+marker now goes to Qwen's own models only. The extraction recording stayed
+declared pending until it could be taken on the model the last one was made
+on (below).
+
+**The recording** (24 Nov): deepseek-flash, the 40 turns of extraction
+dataset v3, 5 askings each, 200 calls (360,945 prompt tokens, 325,968 of them
+from DeepSeek's cache, 31,270 completion, about $0.03); locked with
+`--new-recording`, which ends the declared change. Before (20 Nov, the prompt
+without events) and after, the spread two standard errors:
+
+| | English | Arabic | mixed |
+|---|---|---|---|
+| found | 1.000 -> 0.990 (0.021) | 0.971 -> 0.971 (0.057) | 1.000 -> 1.000 |
+| named as the list names it | 0.863 -> 0.819 (0.025) | 0.941 -> 0.912 (0.083) | 0.720 -> 0.740 (0.049) |
+| right | 1.000 -> 0.990 (0.020) | 1.000 -> 0.972 (0.057) | 0.926 -> 1.000 |
+| quiet | 1.000 -> 1.000 | 1.000 -> 1.000 | 1.000 -> 1.000 |
+| a fact's start | 0.90 -> 0.80 (0.245) | 1.00 -> 1.00 | |
+| replaced / ended | 1.00 / 1.00, unchanged | 1.00 / 1.00, unchanged | |
+
+Every fall but one is inside the spread of five askings: one English asking
+kept "3 May" for "the 3rd of May" (found and right), one Arabic asking wrote
+Noura's name in Latin letters (both of its facts count as unwanted), two
+askings of "last month" said on 31 May gave May (one did before). The
+English name is past it: 77 of 94 found facts under a listed name against 82
+of 95, mostly `loves` for "likes", `occupation_is` for "occupation" and
+`prefers_drink` for "morning_drink", twice each; the facts are the same. The
+write scenarios all pass as before. What it does not say: none of the 40 turns
+tells an event (no reply before or after gives `"on"`), so this set measures
+what the prompt change did to the rest of extraction, not the event lines;
+those are measured by the pilots. Event turns would be dataset v4.
+
+**The pilot on deepseek-flash** (24 Nov, the model live runs on): the same 50
+questions, 12,322 rounds, prompt, reader and judges, with stores and replies
+of its own (`longmemeval_facts_pilot.py --label deepseek-flash --stop-usd`).
+The Qwen pilot's blocks rebuilt at this commit are the same, 50 of 50, so its
+answers stand and only the new blocks were asked.
+
+| | today | Qwen: facts / with event lines | DeepSeek: facts / with event lines |
+|---|---|---|---|
+| answered, main run (second judge) | 0.60 (0.60) | 0.60 (0.60) / 0.70 (0.70) | 0.64 (0.64) / 0.72 (0.74) |
+| answered, noise run (second judge) | 0.60 (0.62) | 0.60 (0.58) / 0.72 (0.70) | 0.66 (0.66) / 0.74 (0.76) |
+| multi-session (16), main / noise, with event lines | 0.375 / 0.375 | 0.562 / 0.562 | 0.625 / 0.688 |
+| temporal reasoning (16), main / noise, with event lines | 0.562 / 0.562 | 0.625 / 0.688 | 0.688 / 0.625 |
+| answers that flip between the two runs | 0 | 0 / 1 | 1 / 3 |
+| block tokens p50 / p95 | 1,429 / 1,494 | 1,456 / 1,496; 1,455 / 1,496 | 1,458 / 1,500; 1,459 / 1,498 |
+| facts written (dated events) | 0 | 13,900 (838) | 9,319 (853) |
+| deep passes that failed four tries | | 144 | 0 |
+| tokens: prompt (cached), completion (reasoning) | | 33.3M (19.8M), 15.7M (14.5M) | 32.3M (19.1M), 3.2M (2.6M) |
+| cost | | about $9.70 | $3.95 off-peak (twice that at peak) |
+
+On live's model the event lines gain in both runs: against today +8 / -2 and
++8 / -1 (7 gains and 1 loss in both), against the same facts without the dated
+events +5 / -1 in each (4 gains in both, no loss in both). Facts without the
+events gain here too (+3 / -1, +3 / -0; on Qwen +2 / -2), so on this model
+part of the gain is the facts'. Between the two extractors +3 / -2 in each run
+on 50 questions: no difference to claim. DeepSeek writes a third fewer facts
+and the same number of dated events with a fifth of the completion tokens.
+The loss in both runs is the one Qwen's had: an unanswerable question answered
+from a fact. Each extractor wrote its stores once, so what extraction itself
+varies by is not in these numbers; the noise run repeats the answers only.
+Answers asked: 300 calls a run, 189K prompt and 73K completion tokens each.
+Evidence: `docs/audits/evidence/memory_event_lines/pilot_deepseek.json`.
 
 ### W6. Ingestion the product's way (M)
 

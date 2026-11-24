@@ -1,0 +1,409 @@
+{
+ "what": "The W4 pilot's 50 dev questions with the deep pass on deepseek-flash (ds_*) beside qwen3.8-flash (facts_*): blocks with the facts written, with and without the dated event facts; kazma is today's block. One reader (qwen3.7-plus), judges qwen3.8-flash then qwen3.7-plus, twice. Ids and scores only.",
+ "main": {
+  "overall": {
+   "kazma": {
+    "answered": 0.6,
+    "answered_judge2": 0.6,
+    "unasked": 0
+   },
+   "facts_no_events": {
+    "answered": 0.6,
+    "answered_judge2": 0.6,
+    "unasked": 0
+   },
+   "facts_events": {
+    "answered": 0.7,
+    "answered_judge2": 0.7,
+    "unasked": 0
+   },
+   "ds_no_events": {
+    "answered": 0.64,
+    "answered_judge2": 0.64,
+    "unasked": 0
+   },
+   "ds_events": {
+    "answered": 0.72,
+    "answered_judge2": 0.74,
+    "unasked": 0
+   }
+  },
+  "types": {
+   "knowledge-update": {
+    "n": 7,
+    "kazma": 0.857,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0,
+    "ds_no_events": 1.0,
+    "ds_events": 1.0
+   },
+   "multi-session": {
+    "n": 16,
+    "kazma": 0.375,
+    "facts_no_events": 0.375,
+    "facts_events": 0.562,
+    "ds_no_events": 0.438,
+    "ds_events": 0.625
+   },
+   "single-session-assistant": {
+    "n": 4,
+    "kazma": 0.5,
+    "facts_no_events": 0.5,
+    "facts_events": 0.5,
+    "ds_no_events": 0.5,
+    "ds_events": 0.5
+   },
+   "single-session-preference": {
+    "n": 2,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0,
+    "ds_no_events": 1.0,
+    "ds_events": 0.5
+   },
+   "single-session-user": {
+    "n": 5,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0,
+    "ds_no_events": 1.0,
+    "ds_events": 1.0
+   },
+   "temporal-reasoning": {
+    "n": 16,
+    "kazma": 0.562,
+    "facts_no_events": 0.5,
+    "facts_events": 0.625,
+    "ds_no_events": 0.562,
+    "ds_events": 0.688
+   }
+  }
+ },
+ "noise": {
+  "overall": {
+   "kazma": {
+    "answered": 0.6,
+    "answered_judge2": 0.62,
+    "unasked": 0
+   },
+   "facts_no_events": {
+    "answered": 0.6,
+    "answered_judge2": 0.58,
+    "unasked": 0
+   },
+   "facts_events": {
+    "answered": 0.72,
+    "answered_judge2": 0.7,
+    "unasked": 0
+   },
+   "ds_no_events": {
+    "answered": 0.66,
+    "answered_judge2": 0.66,
+    "unasked": 0
+   },
+   "ds_events": {
+    "answered": 0.74,
+    "answered_judge2": 0.76,
+    "unasked": 0
+   }
+  },
+  "types": {
+   "knowledge-update": {
+    "n": 7,
+    "kazma": 0.857,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0,
+    "ds_no_events": 1.0,
+    "ds_events": 1.0
+   },
+   "multi-session": {
+    "n": 16,
+    "kazma": 0.375,
+    "facts_no_events": 0.375,
+    "facts_events": 0.562,
+    "ds_no_events": 0.5,
+    "ds_events": 0.688
+   },
+   "single-session-assistant": {
+    "n": 4,
+    "kazma": 0.5,
+    "facts_no_events": 0.5,
+    "facts_events": 0.5,
+    "ds_no_events": 0.5,
+    "ds_events": 0.5
+   },
+   "single-session-preference": {
+    "n": 2,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0,
+    "ds_no_events": 1.0,
+    "ds_events": 1.0
+   },
+   "single-session-user": {
+    "n": 5,
+    "kazma": 1.0,
+    "facts_no_events": 1.0,
+    "facts_events": 1.0,
+    "ds_no_events": 1.0,
+    "ds_events": 1.0
+   },
+   "temporal-reasoning": {
+    "n": 16,
+    "kazma": 0.562,
+    "facts_no_events": 0.5,
+    "facts_events": 0.688,
+    "ds_no_events": 0.562,
+    "ds_events": 0.625
+   }
+  }
+ },
+ "changes": {
+  "ds_events vs kazma": {
+   "main": {
+    "gained": 8,
+    "lost": 2
+   },
+   "noise": {
+    "gained": 8,
+    "lost": 1
+   },
+   "gained_in_both": [
+    "00ca467f",
+    "10d9b85a",
+    "28dc39ac",
+    "2a1811e2",
+    "50635ada",
+    "5a7937c8",
+    "87f22b4a"
+   ],
+   "lost_in_both": [
+    "88432d0a_abs"
+   ]
+  },
+  "ds_events vs ds_no_events": {
+   "main": {
+    "gained": 5,
+    "lost": 1
+   },
+   "noise": {
+    "gained": 5,
+    "lost": 1
+   },
+   "gained_in_both": [
+    "00ca467f",
+    "10d9b85a",
+    "2a1811e2",
+    "5a7937c8"
+   ],
+   "lost_in_both": []
+  },
+  "ds_no_events vs kazma": {
+   "main": {
+    "gained": 3,
+    "lost": 1
+   },
+   "noise": {
+    "gained": 3,
+    "lost": 0
+   },
+   "gained_in_both": [
+    "28dc39ac",
+    "50635ada",
+    "87f22b4a"
+   ],
+   "lost_in_both": []
+  },
+  "ds_events vs facts_events": {
+   "main": {
+    "gained": 3,
+    "lost": 2
+   },
+   "noise": {
+    "gained": 3,
+    "lost": 2
+   },
+   "gained_in_both": [
+    "28dc39ac",
+    "gpt4_2d58bcd6"
+   ],
+   "lost_in_both": [
+    "gpt4_a1b77f9c"
+   ]
+  },
+  "ds_no_events vs facts_no_events": {
+   "main": {
+    "gained": 2,
+    "lost": 0
+   },
+   "noise": {
+    "gained": 3,
+    "lost": 0
+   },
+   "gained_in_both": [
+    "28dc39ac",
+    "gpt4_2d58bcd6"
+   ],
+   "lost_in_both": []
+  },
+  "facts_events vs kazma": {
+   "main": {
+    "gained": 7,
+    "lost": 2
+   },
+   "noise": {
+    "gained": 8,
+    "lost": 2
+   },
+   "gained_in_both": [
+    "00ca467f",
+    "10d9b85a",
+    "2a1811e2",
+    "50635ada",
+    "5a7937c8",
+    "87f22b4a",
+    "gpt4_a1b77f9c"
+   ],
+   "lost_in_both": [
+    "88432d0a_abs",
+    "gpt4_2d58bcd6"
+   ]
+  },
+  "facts_events vs facts_no_events": {
+   "main": {
+    "gained": 5,
+    "lost": 0
+   },
+   "noise": {
+    "gained": 6,
+    "lost": 0
+   },
+   "gained_in_both": [
+    "00ca467f",
+    "10d9b85a",
+    "2a1811e2",
+    "5a7937c8",
+    "gpt4_a1b77f9c"
+   ],
+   "lost_in_both": []
+  }
+ },
+ "flips": {
+  "kazma": 0,
+  "facts_no_events": 0,
+  "facts_events": 1,
+  "ds_no_events": 1,
+  "ds_events": 3
+ },
+ "stores": {
+  "deepseek-flash": {
+   "rounds": 12322,
+   "quick": 12139,
+   "deep": 12089,
+   "deep_failed": 0,
+   "facts": 9319,
+   "current": 8728,
+   "deep_pass": 9140,
+   "dated_events": 853,
+   "dated_starts": 249
+  },
+  "qwen3.8-flash": {
+   "rounds": 12322,
+   "quick": 12139,
+   "deep": 11945,
+   "deep_failed": 144,
+   "facts": 13900,
+   "current": 13060,
+   "deep_pass": 13815,
+   "dated_events": 838,
+   "dated_starts": 377
+  }
+ },
+ "blocks": {
+  "deepseek-flash": {
+   "kazma": {
+    "tokens_p50": 1429.0,
+    "tokens_p95": 1494
+   },
+   "facts_no_events": {
+    "tokens_p50": 1457.5,
+    "tokens_p95": 1500
+   },
+   "facts_events": {
+    "tokens_p50": 1459.0,
+    "tokens_p95": 1498,
+    "facts_shown_mean": 3.52,
+    "dated_events_shown_mean": 1.14,
+    "questions_with_a_dated_event_shown": 19
+   }
+  },
+  "qwen3.8-flash": {
+   "kazma": {
+    "tokens_p50": 1429.0,
+    "tokens_p95": 1494
+   },
+   "facts_no_events": {
+    "tokens_p50": 1455.5,
+    "tokens_p95": 1496
+   },
+   "facts_events": {
+    "tokens_p50": 1455.0,
+    "tokens_p95": 1496,
+    "facts_shown_mean": 4.12,
+    "dated_events_shown_mean": 0.86,
+    "questions_with_a_dated_event_shown": 17
+   }
+  }
+ },
+ "usage": {
+  "main": {
+   "calls": 750,
+   "prompt_tokens": 468995,
+   "completion_tokens": 182006,
+   "prompt_cache_hit_tokens": 161920,
+   "reasoning_tokens": 162676
+  },
+  "noise": {
+   "calls": 750,
+   "prompt_tokens": 469579,
+   "completion_tokens": 177509,
+   "prompt_cache_hit_tokens": 47616,
+   "reasoning_tokens": 157905
+  }
+ },
+ "commit": "81b7a2529",
+ "extraction": {
+  "model": "deepseek-flash",
+  "at": "DeepSeek's own API, off-peak, default reasoning (as the product sends it)",
+  "made_on": "2026-11-24",
+  "prompt": "bd40b75a",
+  "usage": {
+   "calls": 12083,
+   "cached_replies": 0,
+   "prompt": 32287932,
+   "cached": 19089024,
+   "completion": 3186733,
+   "reasoning": 2612282
+  },
+  "usd": 3.95,
+  "usd_from": "0.003 / 0.15 / 0.6 USD per million tokens (cache hit, miss, output); the account's balance fell 3.96 with the extraction recording's 0.03",
+  "calls_failed_and_retried": 2,
+  "replies_unusable": 1,
+  "deep_failed": 0
+ },
+ "answers_of_the_new_conditions": {
+  "main": {
+   "calls": 300,
+   "prompt": 189042,
+   "cached": 82176,
+   "completion": 74633
+  },
+  "noise": {
+   "calls": 300,
+   "prompt": 189214,
+   "cached": 21120,
+   "completion": 71383
+  },
+  "note": "the other three conditions came from the Qwen pilot's answers: their blocks rebuilt at this commit are the same, 50 of 50"
+ }
+}

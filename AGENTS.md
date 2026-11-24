@@ -2267,12 +2267,14 @@ four injected were noise.
   check leaves out, named (`llm_waiting`), the turns added after its
   recording's `extraction_version`. A relabel is a file holding every
   locked reply (`reply_hashes`), re-keyed or extended. **The recording**
-  (2026-11-20, the owner's yes): deepseek-flash, all 40 turns of v3, 5
-  askings each, 200 calls; the file says what the provider counted
-  (`usage`: 307,945 prompt tokens, 259,712 of them cache hits, 31,740
-  completion tokens, 21,916 of them reasoning; no price known to Kazma)
-  and names the message each turn was asked (`asked`, which a drift check
-  replays by after a later message form, `_reply_key`). The recording of
+  (2026-11-24, the dated event lines' prompt; the one before, 2026-11-20,
+  is in git): deepseek-flash, all 40 turns of v3, 5 askings each, 200
+  calls; the file says what the provider counted (`usage`: 360,945 prompt
+  tokens, 325,968 of them cache hits, 31,270 completion tokens, 21,337 of
+  them reasoning) and names the message each turn was asked (`asked`, which
+  a drift check replays by after a later message form, `_reply_key`). No
+  turn of the 40 tells an event, so it says what the prompt change did to
+  the rest of extraction, not what event lines keep. The recording of
   2026-10-15 is kept as `extraction_llm_2026-10-15.json`: the Spaces R3
   study and the 2026-11 audits' evidence measured it. Gate:
   `tests/test_memory_benchmark_c2_turns.py` (answers with no start,
@@ -2790,10 +2792,11 @@ four injected were noise.
   fact or list entry told again gains the day it lacks
   (`_add_named_start`, now from `_mutate_set` too). Recall shows it as
   "[on 30 May 2026]" (`_date_hits` `on`, `_dated_line`), never "[since
-  ...]". The prompt change is declared in the lock (`pending_recording`)
-  and waits for the pilot (`scripts/longmemeval_facts_pilot.py`: 50 dev
-  questions' histories written round by round through the product's own
-  deep-pass task) before any recording. Gate:
+  ...]". Measured by `scripts/longmemeval_facts_pilot.py` (LongMemEval
+  histories written round by round through the product's own deep-pass
+  task, one store a question; `--label` keeps another extractor's run
+  apart, `--prices` with `--stop-usd` ends one at its spend), then recorded
+  (2026-11-24). Gate:
   `tests/test_memory_event_lines.py` (EN/AR; the writer without the mark,
   which shows the day as a start, as the negative control).
 - The quick (heuristic) pass reads Arabic and mixed text too

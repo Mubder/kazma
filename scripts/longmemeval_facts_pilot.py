@@ -105,8 +105,14 @@ def prompt_tag() -> str:
     return hashlib.sha256(_EXTRACT_SYSTEM.encode("utf-8")).hexdigest()[:8]
 
 
-def work_folder(data: Path) -> Path:
-    return data / "cache" / "facts-pilot" / prompt_tag()
+def run_tag(label: str = "") -> str:
+    """The names a run's folder and blocks carry: the prompt's, and the
+    extractor's *label* when it is not the first pilot's."""
+    return f"{prompt_tag()}-{label}" if label else prompt_tag()
+
+
+def work_folder(data: Path, label: str = "") -> Path:
+    return data / "cache" / "facts-pilot" / run_tag(label)
 
 
 class PilotEmbedder(bench.CachedEmbedder):
@@ -147,13 +153,39 @@ class PilotEmbedder(bench.CachedEmbedder):
         os.replace(tmp, self.extra)
 
 
+class SpendLimitError(RuntimeError):
+    """The run's replies have cost the most it may spend."""
+
+
+class Spend:
+    """What a run's replies cost at *prices* (USD per million tokens: cache
+    hit, cache miss, output), and the most it may spend. With no prices it
+    counts nothing and stops nothing."""
+
+    def __init__(self, prices: tuple[float, float, float] | None = None, stop: float | None = None) -> None:
+        self.prices, self.stop, self.usd = prices, stop, 0.0
+
+    def add(self, usage: Any) -> None:
+        if self.prices is None:
+            return
+        from kazma_core.token_usage import token_counts
+
+        n, (hit, miss, out) = token_counts(usage), self.prices
+        self.usd += (n.cached * hit + (n.prompt - n.cached) * miss + n.completion * out) / 1_000_000
+
+    @property
+    def reached(self) -> bool:
+        return self.stop is not None and self.usd >= self.stop
+
+
 class CachedModel:
     """Kazma's own provider for the deep pass, its replies kept by message
     (``replies.jsonl``) and its usage counted (prompt, cache, completion,
-    reasoning)."""
+    reasoning). *spend* holds what every kept reply cost, earlier runs' too:
+    past its stop no new message is asked."""
 
-    def __init__(self, provider: Any, path: Path) -> None:
-        self.provider, self.path = provider, path
+    def __init__(self, provider: Any, path: Path, spend: Spend | None = None) -> None:
+        self.provider, self.path, self.spend = provider, path, spend or Spend()
         self.provider_name = getattr(provider, "provider_name", "qwen")
         self.config = provider.config
         self.lock = threading.Lock()
@@ -164,6 +196,7 @@ class CachedModel:
                 if line.strip():
                     row = json.loads(line)
                     self.replies[row["key"]] = row["content"]
+                    self.spend.add(row.get("usage"))
 
     def key(self, messages: Any, kw: dict[str, Any]) -> str:
         return hashlib.sha256(json.dumps({"model": self.config.model, "messages": messages, "kw": kw},
@@ -171,18 +204,23 @@ class CachedModel:
 
     async def chat(self, messages: Any, **kw: Any) -> Any:
         from kazma_core.llm_provider import LLMResponse
+        from kazma_core.token_usage import token_counts
 
         key = self.key(messages, kw)
         if key in self.replies:
             self.usage["cached_replies"] += 1
             return LLMResponse(content=self.replies[key], model=self.config.model)
+        if self.spend.reached:
+            raise SpendLimitError(f"${self.spend.usd:.2f} of ${self.spend.stop:.2f} spent")
         response = await self.provider.chat(messages, **kw)
         usage = response.usage or {}
+        counts = token_counts(usage)
         with self.lock:
+            self.spend.add(usage)
             self.usage["calls"] += 1
-            self.usage["prompt"] += int(usage.get("prompt_tokens") or 0)
-            self.usage["cached"] += int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
-            self.usage["completion"] += int(usage.get("completion_tokens") or 0)
+            self.usage["prompt"] += counts.prompt
+            self.usage["cached"] += counts.cached
+            self.usage["completion"] += counts.completion
             self.usage["reasoning"] += int((usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
                                            or 0)
             self.replies[key] = response.content or ""
@@ -254,7 +292,7 @@ def store_counts(db: Path) -> dict[str, int]:
 
 
 async def _one_question(qid: str, item: dict[str, Any], folder: Path, gate: asyncio.Semaphore,
-                        progress: dict[str, int]) -> dict[str, Any] | None:
+                        progress: dict[str, int], spend: Spend) -> dict[str, Any] | None:
     from kazma_core.memory import worker_bootstrap
     from kazma_core.memory.belief_extractor import is_filler_turn
 
@@ -282,6 +320,10 @@ async def _one_question(qid: str, item: dict[str, Any], folder: Path, gate: asyn
                 if await worker_bootstrap._handle_micro_consolidation({"episode_id": row["id"]}):
                     stats["deep"] += 1
                     break
+                if spend.reached:
+                    # The product's task reads the refusal as an outage: the
+                    # question stays unwritten, never counted as failed.
+                    raise SpendLimitError(f"{qid}: ${spend.usd:.2f} of ${spend.stop:.2f} spent")
                 await asyncio.sleep(20 * (attempt + 1))
             else:
                 stats["deep_failed"] += 1
@@ -321,13 +363,13 @@ async def _extract(items: list[dict[str, Any]], folder: Path, model: Any, worker
         while True:
             await asyncio.sleep(300)
             print(f"  [{datetime.now().strftime('%H:%M')}] {progress['questions']} questions done, "
-                  f"{progress['deep']} deep passes this run; usage {model.usage}", flush=True)
+                  f"{progress['deep']} deep passes this run; usage {model.usage}; ${model.spend.usd:.2f}", flush=True)
             print(f"    threads: {_where_threads_wait()}", flush=True)
 
     reporter = asyncio.create_task(report())  # noqa: RUF006 - cancelled below
     try:
-        results = await asyncio.gather(*(_one_question(str(i["question_id"]), i, folder, gate, progress)
-                                         for i in items))
+        results = await asyncio.gather(*(_one_question(str(i["question_id"]), i, folder, gate, progress,
+                                                       model.spend) for i in items))
     finally:
         reporter.cancel()
     return {str(i["question_id"]): r for i, r in zip(items, results, strict=True)}
@@ -341,7 +383,8 @@ def _embedder(data: Path, folder: Path) -> PilotEmbedder:
 
 
 def _cmd_extract(data: Path, model_name: str, base_url: str, key_env: str, workers: int,
-                 limit: int | None, questions: str = "pilot") -> int:
+                 limit: int | None, questions: str = "pilot", label: str = "",
+                 spend: Spend | None = None) -> int:
     key = os.environ.get(key_env, "")
     if not key:
         print(f"set {key_env}", file=sys.stderr)
@@ -352,28 +395,32 @@ def _cmd_extract(data: Path, model_name: str, base_url: str, key_env: str, worke
 
     from kazma_core.llm_provider import LLMConfig, LLMProvider
 
-    folder = work_folder(data)
+    folder = work_folder(data, label)
     for sub in ("stores", "done"):
         (folder / sub).mkdir(parents=True, exist_ok=True)
     by_id = {str(x["question_id"]): x for x in bench.load(data)}
     items = [by_id[q] for q in pilot_ids(questions)[: limit or None]]
     embedder = _embedder(data, folder)
     model = CachedModel(LLMProvider(LLMConfig(base_url=base_url, api_key=key, model=model_name)),
-                        folder / f"replies-{model_name}.jsonl")
+                        folder / f"replies-{model_name}.jsonl", spend)
     registry = type("Registry", (), {"get_client": lambda self, *_a, **_k: model})()
     _route_memory_paths()
-    print(f"{len(items)} questions, prompt {prompt_tag()}, {model_name}; {len(model.replies)} replies held",
-          flush=True)
+    print(f"{len(items)} questions, prompt {prompt_tag()}, {model_name}; {len(model.replies)} replies held, "
+          f"${model.spend.usd:.2f} spent", flush=True)
     try:
         with mock.patch("kazma_core.memory.embedder.get_embedder", lambda: embedder), \
                 mock.patch("kazma_core.model_registry.get_model_registry", lambda: registry), \
                 mock.patch("kazma_core.memory.belief_extractor._turn_zone", lambda: UTC):
             stats = asyncio.run(_extract(items, folder, model, workers))
+    except SpendLimitError as exc:
+        print(f"stopped at the spend limit: {exc}; usage this run {model.usage}", file=sys.stderr)
+        return 3
     finally:
         embedder.save()
     total = {k: sum(int((s or {}).get(k, 0)) for s in stats.values())
              for k in ("rounds", "quick", "deep", "deep_failed", "facts", "deep_pass", "dated_events")}
-    (folder / "usage.json").write_text(json.dumps({"model": model_name, "this_run": model.usage, "total": total},
+    (folder / "usage.json").write_text(json.dumps({"model": model_name, "this_run": model.usage, "total": total,
+                                                   "usd_all_runs": round(model.spend.usd, 2)},
                                                   indent=1) + "\n", encoding="utf-8")
     print("totals", total)
     print("usage this run", model.usage)
@@ -415,12 +462,12 @@ def _recall_block(item: dict[str, Any], db: Path, *, without_events: bool) -> tu
     return block or bench.NO_MEMORIES, shown
 
 
-def _cmd_blocks(data: Path, stats_out: Path | None, questions: str = "pilot") -> int:
+def _cmd_blocks(data: Path, stats_out: Path | None, questions: str = "pilot", label: str = "") -> int:
     bench._private_data_folder()
     bench._limit_cpu_threads()
     from unittest import mock
 
-    folder = work_folder(data)
+    folder = work_folder(data, label)
     by_id = {str(x["question_id"]): x for x in bench.load(data)}
     ids = pilot_ids(questions)
     missing = [q for q in ids if not (folder / "done" / f"{q}.json").is_file()]
@@ -448,14 +495,16 @@ def _cmd_blocks(data: Path, stats_out: Path | None, questions: str = "pilot") ->
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True,
                             check=False).stdout.strip()
     for name, held in blocks.items():
-        out = data / "cache" / f"blocks-{questions}-{name}-{prompt_tag()}.json"
+        out = data / "cache" / f"blocks-{questions}-{name}-{run_tag(label)}.json"
         out.write_text(json.dumps({"commit": commit, "split": "dev", "made_on": datetime.now(UTC).isoformat(),
-                                   "prompt": prompt_tag(), "blocks": held}, ensure_ascii=False), encoding="utf-8")
+                                   "prompt": prompt_tag(), "label": label, "blocks": held}, ensure_ascii=False),
+                       encoding="utf-8")
         print(f"wrote {out}")
     if stats_out:
         stats_out.parent.mkdir(parents=True, exist_ok=True)
         stats_out.write_text(json.dumps({"what": "The pilot's stores and blocks: counts only (no dataset text).",
-                                         "commit": commit, "prompt": prompt_tag(), "questions": rows},
+                                         "commit": commit, "prompt": prompt_tag(), "label": label,
+                                         "questions": rows},
                                         indent=1) + "\n", encoding="utf-8", newline="\n")
     return 0
 
@@ -469,12 +518,17 @@ def main(argv: list[str] | None = None) -> int:
         if name in ("extract", "blocks"):
             s.add_argument("--questions", choices=("pilot", "dev"), default="pilot",
                            help="the pilot's 50, or every dev question (the pilot's stores kept)")
+            s.add_argument("--label", default="", help="a run of its own (another extractor): its stores, replies "
+                                                       "and blocks are kept apart under this name")
         if name == "extract":
             s.add_argument("--model", default="qwen3.8-flash")
             s.add_argument("--base-url", required=True)
             s.add_argument("--key-env", default="DASHSCOPE_API_KEY")
             s.add_argument("--workers", type=int, default=16, help="questions written at once")
             s.add_argument("--limit", type=int, default=None)
+            s.add_argument("--prices", type=float, nargs=3, metavar=("HIT", "MISS", "OUT"),
+                           help="USD per million tokens: cache hit, cache miss, output")
+            s.add_argument("--stop-usd", type=float, help="stop once the replies have cost this (needs --prices)")
         if name == "blocks":
             s.add_argument("--stats", type=Path, default=None, help="the counts, for the evidence folder")
     args = p.parse_args(argv)
@@ -489,9 +543,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{PILOT}: {len(ids)} questions, {rounds} rounds")
         return 0
     if args.cmd == "extract":
+        if args.stop_usd is not None and not args.prices:
+            p.error("--stop-usd needs --prices")
         return _cmd_extract(args.data, args.model, args.base_url, args.key_env, args.workers, args.limit,
-                            args.questions)
-    return _cmd_blocks(args.data, args.stats, args.questions)
+                            args.questions, args.label, Spend(tuple(args.prices) if args.prices else None,
+                                                              args.stop_usd))
+    return _cmd_blocks(args.data, args.stats, args.questions, args.label)
 
 
 if __name__ == "__main__":
