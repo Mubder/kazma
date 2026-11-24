@@ -14,14 +14,17 @@
 #   DOCKER-USER chain before its own rules and never changes it; made before
 #   Docker starts, it is there before any container can run;
 # * a drop-in for docker.service (docker.service.d/kazma-egress.conf): Docker
-#   requires the service, and puts the rules in again before it starts
-#   (ExecStartPre). Rules that cannot be put in stop Docker starting: never a
-#   Docker whose kz-egress bridge is unfiltered;
+#   puts the rules in again before it starts (ExecStartPre), and once it has
+#   started kazma-egress-guard takes the kazma-egress network away when they
+#   are not in effect (ExecStartPost). Rules that cannot be put in cost the
+#   members' network, never Docker: SearXNG, Neo4j and the document worker
+#   start with it or without it;
 # * `kazma-egress-rules [bridge] [chain] check`, which Kazma runs before every
-#   run of a member's code on the network: every jump and the chain's
-#   refusals there, or the run is refused (rules flushed later -- another
-#   distro sharing the network namespace, `iptables -F`, a firewall backend
-#   change -- are found before code runs, not after);
+#   run of a member's code on the network: each jump the first rule the
+#   bridge's packets meet, and the chain exactly the one made here, or the
+#   run is refused (rules flushed or put in front later -- another distro
+#   sharing the network namespace, `iptables -F`, a firewall backend change
+#   -- are found before code runs, not after);
 # * /etc/kazma/egress-host-addresses: the addresses Windows has (in WSL's NAT
 #   mode the distro cannot see them; a public one would reach this
 #   computer's own services).
@@ -36,7 +39,8 @@
 #   computer's own addresses (the distro's, Windows'), and every broadcast,
 #   multicast and local destination; else it goes on (the public internet);
 # * IPv6: the network has none, and every IPv6 packet from the bridge is
-#   refused, both ways in.
+#   refused, both ways in. A kernel with no IPv6 carries none: nothing is put
+#   in for it, and its missing ip6tables fails nothing.
 # A refusal is a reset (TCP) or an ICMP unreachable: a connection that may
 # not be made fails at once, never by a timeout.
 set -euo pipefail
@@ -59,6 +63,10 @@ CHAIN="${2:-KAZMA-EGRESS}"
 MODE="${3:-apply}"
 NEW="$CHAIN-NEW"
 HOSTS="${KAZMA_EGRESS_HOSTS:-/etc/kazma/egress-host-addresses}"
+INET6="${KAZMA_EGRESS_INET6:-/proc/net/if_inet6}"
+# As iptables -S prints them: a rule is put in and found by the same text.
+REFUSE_V4="-i $IF -j REJECT --reject-with icmp-port-unreachable"
+REFUSE_V6="-i $IF -j REJECT --reject-with icmp6-port-unreachable"
 REFUSED_V4="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12
 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24 192.168.0.0/16 198.18.0.0/15 198.51.100.0/24
 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4"
@@ -77,13 +85,60 @@ drop_chain() {  # drop_chain CHAIN: its jumps, its rules, the chain
 
 hooks_off() {
   jumps_off "$CHAIN"
-  while iptables -w -C INPUT -i "$IF" -j REJECT 2>/dev/null; do
-    iptables -w -D INPUT -i "$IF" -j REJECT
+  # shellcheck disable=SC2086
+  while iptables -w -C INPUT $REFUSE_V4 2>/dev/null; do
+    iptables -w -D INPUT $REFUSE_V4
   done
-  for c in DOCKER-USER FORWARD INPUT; do
-    while ip6tables -w -C "$c" -i "$IF" -j REJECT 2>/dev/null; do
-      ip6tables -w -D "$c" -i "$IF" -j REJECT
+  if ipv6; then
+    for c in DOCKER-USER FORWARD INPUT; do
+      # shellcheck disable=SC2086
+      while ip6tables -w -C "$c" $REFUSE_V6 2>/dev/null; do
+        ip6tables -w -D "$c" $REFUSE_V6
+      done
     done
+  fi
+}
+
+ipv6() {  # whether the kernel carries IPv6 at all
+  [[ -e "$INET6" ]]
+}
+
+first_for() {  # first_for TOOL CHAIN: the first rule of CHAIN the bridge's packets meet
+  local line name="[[:space:]]-i[[:space:]]([^[:space:]]+)"
+  while IFS= read -r line; do
+    [[ "$line" == "-A $2 "* ]] || continue
+    line="${line#-A "$2" }"
+    # A rule for another interface, by its whole name, never sees them.
+    if [[ " $line" =~ $name && " $line" != *" ! -i "* ]]; then
+      if [[ "${BASH_REMATCH[1]}" != "$IF" && "${BASH_REMATCH[1]}" != *+ ]]; then
+        continue
+      fi
+    fi
+    echo "$line"
+    return 0
+  done < <("$1" -w -S "$2" 2>/dev/null)
+  return 0
+}
+
+put_first() {  # put_first TOOL CHAIN RULE: RULE the first the bridge's packets meet, once
+  local tool="$1" chain="$2" rule="$3" at last
+  if [[ "$(first_for "$tool" "$chain")" == "$rule" ]]; then
+    return 0
+  fi
+  # In front before any later copy goes: never a moment without it.
+  # shellcheck disable=SC2086
+  "$tool" -w -I "$chain" 1 $rule
+  while true; do
+    at=0 last=0
+    while IFS= read -r line; do
+      [[ "$line" == "-A $chain "* ]] || continue
+      at=$((at + 1))
+      if [[ "${line#-A "$chain" }" == "$rule" ]]; then
+        last=$at
+      fi
+    done < <("$tool" -w -S "$chain")
+    (( last > 1 )) || break
+    "$tool" -w -D "$chain" "$last"
   done
 }
 
@@ -91,10 +146,23 @@ hosts() {
   if [[ -f "$HOSTS" ]]; then
     while IFS= read -r addr; do
       if [[ -n "$addr" ]]; then
-        echo "$addr"
+        echo "$addr/32"
       fi
     done < "$HOSTS"
   fi
+}
+
+chain_rules() {  # the chain's rules, one a line, as iptables -S prints them
+  local net kind
+  for net in $REFUSED_V4 $(hosts); do
+    echo "-d $net -p tcp -j REJECT --reject-with tcp-reset"
+    echo "-d $net -j REJECT --reject-with icmp-net-prohibited"
+  done
+  for kind in LOCAL BROADCAST MULTICAST ANYCAST; do
+    echo "-p tcp -m addrtype --dst-type $kind -j REJECT --reject-with tcp-reset"
+    echo "-m addrtype --dst-type $kind -j REJECT --reject-with icmp-net-prohibited"
+  done
+  echo "-j RETURN"
 }
 
 if [[ "$MODE" == remove ]]; then
@@ -106,21 +174,22 @@ if [[ "$MODE" == remove ]]; then
 fi
 
 if [[ "$MODE" == check ]]; then
-  # Every jump, and the chain's refusals, in effect now; else exit 3 naming
-  # what is missing (Kazma then refuses the run).
+  # Each jump the first rule the bridge's packets meet -- a rule in front of
+  # it would let them past -- and the chain exactly the one made here; else
+  # exit 3 naming what is not (Kazma then refuses the run).
   missing=()
-  iptables -w -C FORWARD -j DOCKER-USER 2>/dev/null || missing+=("FORWARD->DOCKER-USER")
-  iptables -w -C DOCKER-USER -i "$IF" -j "$CHAIN" 2>/dev/null || missing+=("DOCKER-USER->$CHAIN")
-  iptables -w -C INPUT -i "$IF" -j REJECT 2>/dev/null || missing+=("INPUT")
-  for c in DOCKER-USER FORWARD INPUT; do
-    ip6tables -w -C "$c" -i "$IF" -j REJECT 2>/dev/null || missing+=("ip6:$c")
-  done
-  for net in $REFUSED_V4 $(hosts); do
-    iptables -w -C "$CHAIN" -d "$net" -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null \
-      || missing+=("$CHAIN:$net")
-  done
-  iptables -w -C "$CHAIN" -m addrtype --dst-type LOCAL -j REJECT --reject-with icmp-net-prohibited 2>/dev/null \
-    || missing+=("$CHAIN:LOCAL")
+  [[ "$(first_for iptables FORWARD)" == "-j DOCKER-USER" ]] || missing+=("FORWARD->DOCKER-USER")
+  [[ "$(first_for iptables DOCKER-USER)" == "-i $IF -j $CHAIN" ]] || missing+=("DOCKER-USER->$CHAIN")
+  [[ "$(first_for iptables INPUT)" == "$REFUSE_V4" ]] || missing+=("INPUT")
+  if ipv6; then
+    [[ "$(first_for ip6tables DOCKER-USER)" == "$REFUSE_V6" ]] || missing+=("ip6:DOCKER-USER")
+    # Docker puts its own jump to DOCKER-USER in front of FORWARD's.
+    forward="$(first_for ip6tables FORWARD)"
+    [[ "$forward" == "$REFUSE_V6" || "$forward" == "-j DOCKER-USER" ]] || missing+=("ip6:FORWARD")
+    [[ "$(first_for ip6tables INPUT)" == "$REFUSE_V6" ]] || missing+=("ip6:INPUT")
+  fi
+  want="$(echo "-N $CHAIN"; while IFS= read -r rule; do echo "-A $CHAIN $rule"; done < <(chain_rules))"
+  [[ "$(iptables -w -S "$CHAIN" 2>/dev/null)" == "$want" ]] || missing+=("$CHAIN")
   if (( ${#missing[@]} )); then
     echo "EGRESS_NOT_IN_EFFECT ${missing[*]}"
     exit 3
@@ -130,7 +199,9 @@ if [[ "$MODE" == check ]]; then
 fi
 
 iptables -w -N DOCKER-USER 2>/dev/null || true
-ip6tables -w -N DOCKER-USER 2>/dev/null || true
+if ipv6; then
+  ip6tables -w -N DOCKER-USER 2>/dev/null || true
+fi
 # A run that stopped half way: its new chain, adopted when the old is gone.
 if iptables -w -S "$NEW" >/dev/null 2>&1; then
   if iptables -w -S "$CHAIN" >/dev/null 2>&1; then
@@ -143,28 +214,39 @@ fi
 # bridge's packets are filtered by the old chain until the new one's jump is
 # first, never by none.
 iptables -w -N "$NEW"
-refuse() {
-  iptables -w -A "$NEW" "$@" -p tcp -j REJECT --reject-with tcp-reset
-  iptables -w -A "$NEW" "$@" -j REJECT --reject-with icmp-net-prohibited
-}
-for net in $REFUSED_V4 $(hosts); do
-  refuse -d "$net"
-done
-for kind in LOCAL BROADCAST MULTICAST ANYCAST; do
-  refuse -m addrtype --dst-type "$kind"
-done
-iptables -w -A "$NEW" -j RETURN
+while IFS= read -r rule; do
+  # shellcheck disable=SC2086
+  iptables -w -A "$NEW" $rule
+done < <(chain_rules)
 iptables -w -I DOCKER-USER 1 -i "$IF" -j "$NEW"
 drop_chain "$CHAIN"
 iptables -w -E "$NEW" "$CHAIN"
-# The fixed refusals: put in when missing, never taken out first.
-iptables -w -C INPUT -i "$IF" -j REJECT 2>/dev/null || iptables -w -I INPUT 1 -i "$IF" -j REJECT
-for c in DOCKER-USER FORWARD INPUT; do
-  ip6tables -w -C "$c" -i "$IF" -j REJECT 2>/dev/null || ip6tables -w -I "$c" 1 -i "$IF" -j REJECT
-done
+# The fixed refusals: in front, never taken out first.
+put_first iptables INPUT "$REFUSE_V4"
+if ipv6; then
+  for c in DOCKER-USER FORWARD INPUT; do
+    put_first ip6tables "$c" "$REFUSE_V6"
+  done
+fi
 echo "EGRESS_RULES $IF $CHAIN"
 RULES
 chmod 755 /usr/local/sbin/kazma-egress-rules
+
+cat > /usr/local/sbin/kazma-egress-guard <<'GUARD'
+#!/bin/bash
+# After Docker starts: rules not in effect take the members' network away --
+# nothing can run on it -- and leave Docker running. `kazma setup engine`
+# puts both back.
+set -uo pipefail
+NET="${1:-kazma-egress}"
+if /usr/local/sbin/kazma-egress-rules kz-egress KAZMA-EGRESS check; then
+  exit 0
+fi
+timeout 30 docker network rm "$NET" >/dev/null 2>&1
+echo "EGRESS_NETWORK_REMOVED $NET"
+exit 0
+GUARD
+chmod 755 /usr/local/sbin/kazma-egress-guard
 
 cat > /etc/systemd/system/kazma-egress.service <<'UNIT'
 [Unit]
@@ -180,16 +262,16 @@ ExecStart=/usr/local/sbin/kazma-egress-rules
 [Install]
 WantedBy=docker.service multi-user.target
 UNIT
-# Docker requires the rules: it does not start without them, and puts them in
-# again each time it starts.
+# Docker puts the rules in again each time it starts; rules that cannot be
+# put in never stop it (the "-"): they take the network away once it runs.
 install -d -m 755 /etc/systemd/system/docker.service.d
 cat > /etc/systemd/system/docker.service.d/kazma-egress.conf <<'DROPIN'
 [Unit]
-Requires=kazma-egress.service
 After=kazma-egress.service
 
 [Service]
-ExecStartPre=/usr/local/sbin/kazma-egress-rules
+ExecStartPre=-/usr/local/sbin/kazma-egress-rules
+ExecStartPost=-/usr/local/sbin/kazma-egress-guard
 DROPIN
 systemctl daemon-reload
 systemctl enable kazma-egress.service >/dev/null 2>&1

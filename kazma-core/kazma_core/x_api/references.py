@@ -91,15 +91,24 @@ def load_references(paths: tuple[str, ...]) -> tuple[ReferenceDocument, ...]:
     """Read every reference whole, or raise ReferenceUnreadable.
 
     A relative path is read under the active workspace, like a path the
-    agent's file tools are given. Blocking (workspace lookup and file reads):
+    agent's file tools are given. Once Spaces is enforced each is read only
+    where the bound space's file tools read (``path_policy``), whoever set
+    it: a space names no file of the machine its people may not open (the
+    second review of S4-06). Blocking (workspace lookup and file reads):
     call it in a thread.
     """
+    from kazma_core.spaces.scope import spaces_enforced
     from kazma_core.store_registry import is_kazma_store
     from kazma_core.workspace.binding import resolve_tool_path
+    from kazma_core.workspace.path_policy import check_path_access
 
     documents: list[ReferenceDocument] = []
     total = 0
     for raw in validate_paths(paths):
+        if spaces_enforced():
+            access = check_path_access(raw, "read")
+            if not access.allowed:
+                raise ReferenceUnreadable(f"Reference document {raw} cannot be read in this space: {access.reason}")
         path = resolve_tool_path(raw)
         if is_kazma_store(path):
             raise ReferenceUnreadable(f"Reference document {raw} is one of Kazma's own databases, not a text file.")

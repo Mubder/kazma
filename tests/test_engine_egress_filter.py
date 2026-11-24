@@ -17,7 +17,13 @@ packets jump to:
   (evaluated before Docker's own rules), a packet to this computer itself
   is refused (``INPUT``), and every IPv6 packet from the bridge is refused;
 * run again, nothing is doubled; ``remove`` takes every rule and the chain
-  out (the real-engine test removes its own this way).
+  out (the real-engine test removes its own this way);
+* the check before every run finds a rule put in front of a jump and a chain
+  that is not exactly the one made (the S4-06/S4-05b second review: asking
+  ``iptables -C`` rule by rule found neither), and a rule for another
+  interface in front is no one's concern;
+* a kernel with no IPv6 is whole without ip6tables, and rules that cannot be
+  put in take the members' network away, never Docker.
 
 **Control: without the host's addresses** a public address of this computer
 is not refused (it would reach this computer's own services).
@@ -43,7 +49,10 @@ _FAKE = r'''
 import json, sys
 from pathlib import Path
 
+sys.stdout.reconfigure(newline=chr(10))
 family, state_file, args = sys.argv[1], Path(sys.argv[2]), [a for a in sys.argv[3:] if a != "-w"]
+if family == "v6" and state_file.with_name("no-ip6tables").exists():
+    sys.exit(3)  # IPv6 off in the kernel: ip6tables can do nothing
 state = json.loads(state_file.read_text()) if state_file.exists() else {}
 tables = state.setdefault(family, {"INPUT": [], "FORWARD": [], "OUTPUT": []})
 op, chain, rest = args[0], args[1], args[2:]
@@ -70,7 +79,9 @@ elif op == "-I":
 elif op == "-C":
     code = 0 if rest in tables.get(chain, []) else 1
 elif op == "-D":
-    if rest in tables.get(chain, []):
+    if len(rest) == 1 and rest[0].isdigit():
+        del tables[chain][int(rest[0]) - 1]
+    elif rest in tables.get(chain, []):
         tables[chain].remove(rest)
     else:
         code = 1
@@ -117,6 +128,7 @@ def stand_in(tmp_path):
     fake = tmp_path / "fake_iptables.py"
     fake.write_text(_FAKE, encoding="utf-8")
     state = tmp_path / "state.json"
+    (tmp_path / "if_inet6").write_text("", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     python = Path(sys.executable).as_posix()
@@ -130,6 +142,8 @@ def stand_in(tmp_path):
     def call(*args: str, hosts: list[str] | None = None, shell: str | None = None) -> subprocess.CompletedProcess:
         env = dict(os.environ)
         env["PATH"] = bin_dir.as_posix() + os.pathsep + env.get("PATH", "")
+        # Whether the kernel carries IPv6: /proc/net/if_inet6, here a file of the test's own.
+        env["KAZMA_EGRESS_INET6"] = (tmp_path / "if_inet6").as_posix()
         if hosts is not None:
             listed = tmp_path / "hosts"
             listed.write_text("".join(f"{h}\n" for h in hosts), encoding="utf-8", newline="\n")
@@ -157,6 +171,7 @@ def stand_in(tmp_path):
         return [json.loads(line)[1] for line in lines if json.loads(line)[0] == "jumps"]
 
     run.save = save
+    run.folder = tmp_path
     run.jumps_seen = jumps_seen
     run.call = call
     return run, rules
@@ -174,6 +189,8 @@ def _verdict(chain: list[list[str]], destination: str) -> str:
     return "RETURN"
 
 
+INPUT_V4 = ["-i", "kz-egress", "-j", "REJECT", "--reject-with", "icmp-port-unreachable"]
+REFUSE_V6 = ["-i", "kz-egress", "-j", "REJECT", "--reject-with", "icmp6-port-unreachable"]
 REFUSED = ("10.1.2.3", "172.20.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "127.0.0.1",
            "0.0.0.1", "224.0.0.251", "240.0.0.1", "198.18.0.1", "192.0.2.10")
 PUBLIC = ("1.1.1.1", "93.184.216.34", "8.8.8.8")
@@ -191,13 +208,14 @@ def test_only_the_public_internet_is_reached(stand_in) -> None:
         assert _verdict(chain, destination) == "RETURN", destination
     assert chain[-1] == ["-j", "RETURN"]
     for kind in ("LOCAL", "BROADCAST", "MULTICAST"):
-        assert any(r[:4] == ["-m", "addrtype", "--dst-type", kind] for r in chain), kind
+        of_kind = [r for r in chain if kind in r and "addrtype" in r]
+        assert len(of_kind) == 2 and any("tcp" in r for r in of_kind), kind
     # TCP is reset at once, everything else answered unreachable: no timeout.
     assert any("tcp-reset" in r for r in chain) and any("icmp-net-prohibited" in r for r in chain)
     assert v4["DOCKER-USER"][0] == ["-i", "kz-egress", "-j", "KAZMA-EGRESS"]
-    assert v4["INPUT"][0] == ["-i", "kz-egress", "-j", "REJECT"]
+    assert v4["INPUT"][0] == INPUT_V4
     for name in ("DOCKER-USER", "FORWARD", "INPUT"):
-        assert v6[name][0] == ["-i", "kz-egress", "-j", "REJECT"], name
+        assert v6[name][0] == REFUSE_V6, name
 
 
 def test_run_again_nothing_is_doubled_and_remove_takes_it_all(stand_in) -> None:
@@ -238,12 +256,16 @@ def test_the_installer_keeps_only_addresses_and_starts_before_docker() -> None:
     unit = text[text.index("<<'UNIT'"):text.index("\nUNIT\n")]
     assert "Before=docker.service" in unit and "WantedBy=docker.service" in unit
     assert "Type=oneshot" in unit and "ExecStart=/usr/local/sbin/kazma-egress-rules" in unit
-    # Docker requires the rules (the S4-05b review: WantedBy alone started
-    # Docker when they failed) and puts them in again before it starts.
+    # Docker puts the rules in again before it starts, and never fails to
+    # start for them (the second review: an engine whose kernel could not
+    # take them lost SearXNG, Neo4j and the document worker, with nobody
+    # given the network): the members' network goes instead, once it runs.
     assert "/etc/systemd/system/docker.service.d/kazma-egress.conf" in text
     drop_in = text[text.index("<<'DROPIN'"):text.index("\nDROPIN\n")]
-    assert "Requires=kazma-egress.service" in drop_in and "After=kazma-egress.service" in drop_in
-    assert "ExecStartPre=/usr/local/sbin/kazma-egress-rules" in drop_in
+    assert "Requires=" not in drop_in and "After=kazma-egress.service" in drop_in
+    starts = [line for line in drop_in.splitlines() if line.startswith("Exec")]
+    assert starts == ["ExecStartPre=-/usr/local/sbin/kazma-egress-rules",
+                      "ExecStartPost=-/usr/local/sbin/kazma-egress-guard"]
     assert text.index("DROPIN") < text.index("systemctl daemon-reload")
     assert "{1,3}" in text.split("for addr in")[1].split("done")[0]  # only an IPv4 address is kept
     assert text.rstrip().endswith('echo "EGRESS_READY"')
@@ -261,13 +283,27 @@ def _as_docker_starts(run, rules) -> dict:
 
 
 _TCP_RESET = ["-p", "tcp", "-j", "REJECT", "--reject-with", "tcp-reset"]
+_UNREACHABLE = ["-j", "REJECT", "--reject-with", "icmp-net-prohibited"]
 
 #: Each way the rules stop being in effect after they were put in.
 _BREAKS = {
     "the bridge's jump": lambda st: st["v4"]["DOCKER-USER"].clear(),
     "Docker's jump": lambda st: st["v4"]["FORWARD"].remove(["-j", "DOCKER-USER"]),
     "a refused range": lambda st: st["v4"]["KAZMA-EGRESS"].remove(["-d", "169.254.0.0/16", *_TCP_RESET]),
-    "this computer's address": lambda st: st["v4"]["KAZMA-EGRESS"].remove(["-d", HOST, *_TCP_RESET]),
+    "this computer's address": lambda st: st["v4"]["KAZMA-EGRESS"].remove(["-d", f"{HOST}/32", *_TCP_RESET]),
+    "a range's UDP and ICMP": lambda st: st["v4"]["KAZMA-EGRESS"].remove(["-d", "169.254.0.0/16", *_UNREACHABLE]),
+    "a local destination's UDP and ICMP": lambda st: st["v4"]["KAZMA-EGRESS"].remove(
+        ["-m", "addrtype", "--dst-type", "LOCAL", *_UNREACHABLE]),
+    "an accept at the chain's top": lambda st: st["v4"]["KAZMA-EGRESS"].insert(0, ["-j", "ACCEPT"]),
+    "an accept before the bridge's jump": lambda st: st["v4"]["DOCKER-USER"].insert(
+        0, ["-i", "kz-egress", "-j", "ACCEPT"]),
+    "an accept for every bridge before it": lambda st: st["v4"]["DOCKER-USER"].insert(0, ["-i", "kz+", "-j", "ACCEPT"]),
+    "an accept for all but another interface": lambda st: st["v4"]["DOCKER-USER"].insert(
+        0, ["!", "-i", "eth0", "-j", "ACCEPT"]),
+    "an accept before Docker's jump": lambda st: st["v4"]["FORWARD"].insert(0, ["-j", "ACCEPT"]),
+    "an accept before INPUT's refusal": lambda st: st["v4"]["INPUT"].insert(0, ["-p", "tcp", "-j", "ACCEPT"]),
+    "an accept before IPv6's refusal": lambda st: st["v6"]["DOCKER-USER"].insert(0, ["-j", "ACCEPT"]),
+    "an accept before IPv6's INPUT": lambda st: st["v6"]["INPUT"].insert(0, ["-j", "ACCEPT"]),
     "the chain flushed": lambda st: st["v4"]["KAZMA-EGRESS"].clear(),
     "INPUT": lambda st: st["v4"]["INPUT"].clear(),
     "IPv6": lambda st: st["v6"]["FORWARD"].clear(),
@@ -290,11 +326,96 @@ def test_check_finds_the_rules_in_effect_and_each_way_they_are_not(stand_in) -> 
         assert "EGRESS_NOT_IN_EFFECT" in out, name
     run.save(good)
     assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
+    # Rules the bridge's packets never meet stand in front of nothing, and
+    # Docker's own jump in front of IPv6's FORWARD leads to the refusal.
+    good["v4"]["DOCKER-USER"].insert(0, ["-i", "kzet1234", "-j", "KAZMA-EGRESS-T1234"])
+    good["v4"]["INPUT"].insert(0, ["-i", "lo", "-j", "ACCEPT"])
+    good["v6"]["FORWARD"].insert(0, ["-j", "DOCKER-USER"])
+    run.save(good)
+    assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
+
+
+def test_control_asking_rule_by_rule_misses_what_stands_in_front(stand_in) -> None:
+    """The first check (46f200bcb: ``iptables -C`` for each jump and each
+    range's TCP refusal) answers "there" for an accept in front of the jump
+    and for a range's UDP refusal taken out."""
+    run, rules = stand_in
+    run(hosts=[HOST])
+    _as_docker_starts(run, rules)
+    asked = ("iptables -w -C DOCKER-USER -i kz-egress -j KAZMA-EGRESS && "
+             "iptables -w -C KAZMA-EGRESS -d 169.254.0.0/16 -p tcp -j REJECT --reject-with tcp-reset")
+    for name in ("an accept before the bridge's jump", "a range's UDP and ICMP"):
+        state = rules()
+        _BREAKS[name](state)
+        run.save(state)
+        assert run.call(shell=asked).returncode == 0, name
+        run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST], expect_code=3)
+
+
+def test_a_reapply_puts_a_refusal_that_lost_its_place_in_front_again(stand_in) -> None:
+    run, rules = stand_in
+    run(hosts=[HOST])
+    _as_docker_starts(run, rules)
+    state = rules()
+    state["v4"]["INPUT"].insert(0, ["-p", "tcp", "-j", "ACCEPT"])
+    state["v4"]["DOCKER-USER"].insert(0, ["-i", "kz-egress", "-j", "ACCEPT"])
+    state["v6"]["INPUT"].insert(0, ["-j", "ACCEPT"])
+    run.save(state)
+    run(hosts=[HOST])
+    assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
+    assert rules()["v4"]["INPUT"].count(INPUT_V4) == 1 and rules()["v6"]["INPUT"].count(REFUSE_V6) == 1
+
+
+# ── rules that cannot be put in ─────────────────────────────────────────────
+
+
+def test_a_kernel_with_no_ipv6_is_filtered_without_it(stand_in) -> None:
+    """IPv6 off in the kernel: no packet of it, nothing to put in.
+    **Control:** with the kernel's IPv6 there and ip6tables failing, the
+    rules fail, as they must."""
+    run, rules = stand_in
+    (run.folder / "no-ip6tables").write_text("", encoding="utf-8")
+    run(hosts=[HOST], expect_code=3)
+    (run.folder / "if_inet6").unlink()
+    assert "EGRESS_RULES" in run(hosts=[HOST])
+    _as_docker_starts(run, rules)
+    assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
+    assert "EGRESS_REMOVED" in run("kz-egress", "KAZMA-EGRESS", "remove")
+
+
+def _guard_script() -> str:
+    text = ces._asset("egress-filter.sh")
+    start = text.index("<<'GUARD'\n") + len("<<'GUARD'\n")
+    return text[start:text.index("\nGUARD\n", start) + 1]
+
+
+@pytest.mark.parametrize("in_effect", [True, False])
+def test_rules_not_in_effect_take_the_network_away_and_leave_docker(tmp_path, in_effect) -> None:
+    """``kazma-egress-guard`` (Docker's ExecStartPost): the members' network
+    goes when the rules are not in effect, and it always ends well, so Docker
+    stays."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    asked = tmp_path / "asked"
+    (bin_dir / "docker").write_bytes(f'#!/bin/bash\necho "$@" >> "{asked.as_posix()}"\nexit 1\n'.encode())
+    rules = bin_dir / "rules"
+    rules.write_bytes(f"#!/bin/bash\nexit {0 if in_effect else 3}\n".encode())
+    (bin_dir / "timeout").write_bytes(b'#!/bin/bash\nshift\nexec "$@"\n')
+    script = tmp_path / "guard"
+    script.write_bytes(_guard_script().replace("/usr/local/sbin/kazma-egress-rules", f'"{rules.as_posix()}"')
+                       .encode("utf-8"))
+    env = {**os.environ, "PATH": bin_dir.as_posix() + os.pathsep + os.environ.get("PATH", "")}
+    done = subprocess.run([find_bash(), "-c", f'PATH="{bin_dir.as_posix()}:$PATH" bash "{script.as_posix()}"'],
+                          capture_output=True, text=True, env=env, timeout=60, check=False)
+    assert done.returncode == 0, done.stderr
+    assert asked.exists() is not in_effect
+    if not in_effect:
+        assert asked.read_text().strip() == "network rm kazma-egress"
 
 
 def test_kazma_asks_the_rules_themselves_before_a_run(stand_in) -> None:
     """``egress_rules_in_effect`` runs the distro's check as root, and is
-    False for every break above. **Control:** a stamp and a network of the
+    False for a break above. **Control:** a stamp and a network of the
     name -- the checks before the review -- say nothing of any of them."""
     import copy
 
@@ -312,7 +433,8 @@ def test_kazma_asks_the_rules_themselves_before_a_run(stand_in) -> None:
 
     assert ces.egress_rules_in_effect(wsl) is True
     assert asked[-1][7:] == ["kz-egress", "KAZMA-EGRESS", "check"]
-    for name, broken in _BREAKS.items():
+    for name in ("the bridge's jump", "a range's UDP and ICMP", "an accept before the bridge's jump", "iptables -F"):
+        broken = _BREAKS[name]
         state = copy.deepcopy(good)
         broken(state)
         run.save(state)

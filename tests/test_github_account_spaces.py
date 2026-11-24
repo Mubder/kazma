@@ -741,6 +741,11 @@ def _where(tree: ast.AST, node: ast.AST) -> str:
     return best
 
 
+#: A file that names the keys only as the keys of one table (what moves with
+#: a space, S4-06: each joined with the space's own prefix), and reads none.
+_KEY_TABLES = {"kazma-core/kazma_core/spaces/space_move.py": "_MOVED_SETTINGS"}
+
+
 def _key_findings(sources: dict[str, str]) -> list[str]:
     """Every sign-in key named where it does not go to ``github_key``, in
     the files allowed to name them; any key named elsewhere.
@@ -754,6 +759,14 @@ def _key_findings(sources: dict[str, str]) -> list[str]:
         text = _docstrings(tree)
         named = [n for n in ast.walk(tree)
                  if isinstance(n, ast.Constant) and n.value in _KEYS and id(n) not in text]
+        table = _KEY_TABLES.get(rel)
+        if table is not None:
+            in_table = {id(k) for n in ast.walk(tree)
+                        if isinstance(n, ast.Assign | ast.AnnAssign) and isinstance(n.value, ast.Dict)
+                        and table in {t.id for t in (n.targets if isinstance(n, ast.Assign) else [n.target])
+                                      if isinstance(t, ast.Name)}
+                        for k in n.value.keys if k is not None}
+            named = [n for n in named if id(n) not in in_table]
         if not named:
             continue
         if rel not in _KEY_FILES:
@@ -778,6 +791,12 @@ def test_control_a_planted_reader_without_the_space_fails_the_gate() -> None:
     sources["kazma-gateway/kazma_gateway/routers/github.py"] += (
         "\n\ndef planted():\n    return get_config_store().get('connectors.github.token')\n")
     sources["kazma-core/kazma_core/planted.py"] = "KEY = 'connectors.github.oauth_token'\n"
+    # The move's table is no door: the same file reading one is found.
+    sources["kazma-core/kazma_core/spaces/space_move.py"] += (
+        "\n\ndef planted():\n    return get_config_store().get('connectors.github.token')\n")
+    assert "kazma-core/kazma_core/spaces/space_move.py: names a GitHub sign-in key" in _key_findings(sources)
+    sources["kazma-core/kazma_core/spaces/space_move.py"] = _product_sources()[
+        "kazma-core/kazma_core/spaces/space_move.py"]
     assert _key_findings(sources) == ["kazma-core/kazma_core/planted.py: names a GitHub sign-in key",
                                       "kazma-gateway/kazma_gateway/routers/github.py:planted"]
 

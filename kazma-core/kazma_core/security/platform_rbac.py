@@ -202,6 +202,13 @@ def _connects_a_spaces_own_account(path: str) -> bool:
     return spaces_enforced()
 
 
+def connects_an_account(path: str, method: str) -> bool:
+    """Whether the request is a person connecting an account of their space
+    (a sign-in, a saved key or password): what it keeps is recorded as theirs
+    (``connected_accounts.connecting``). Only once Spaces is enforced."""
+    return method.upper() in ("POST", "PUT", "PATCH") and _connects_a_spaces_own_account(path)
+
+
 # Single routes (never their children) only an administrator may call.
 # Model discovery asks the address a request names: with an operator's
 # credential, or a link the signed-in owner opened (a GET carries the

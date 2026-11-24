@@ -411,8 +411,9 @@ EGRESS_CHAIN = "KAZMA-EGRESS"
 def egress_rules_in_effect(run: Runner = subprocess.run) -> bool:
     """The distro's rules for the ``kz-egress`` bridge are in effect now
     (``kazma-egress-rules ... check``: Docker's jump to ``DOCKER-USER``, the
-    jump to the filtering chain, its refusals, the ``INPUT`` and IPv6
-    refusals). Asked before every run of a member's code on the network
+    jump to the filtering chain and the ``INPUT`` and IPv6 refusals each the
+    first rule the bridge's packets meet, and the chain exactly the one the
+    script makes). Asked before every run of a member's code on the network
     (the S4-05b review): a stamp says the filter was put in, not that its
     rules are still there -- another distro sharing the network namespace,
     an ``iptables -F`` or a firewall backend change takes them out, and the

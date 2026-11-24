@@ -76,8 +76,9 @@ def moved(tmp_path_factory) -> dict[str, Any]:
             where = _where_word(world["words"][A])
             ctx, _ = space_data._walk(A)
             bundle = folder / "a.zip"
-            manifest = space_move.export_bundle(A, bundle, PASSWORD, by=OWNER_ACCOUNT_ID)
+            # The key that travels; the old install has another one after.
             key = get_vault().export_space_sealed(A)[0][0]["key"]
+            manifest = space_move.export_bundle(A, bundle, PASSWORD, by=OWNER_ACCOUNT_ID)
         finally:
             world_gen.close()
     return {"bundle": bundle, "manifest": manifest, "words": world["words"], "counts": counts,
@@ -238,8 +239,8 @@ def test_the_key_travels_inside_the_seal_never_a_vault_key(moved, tmp_path) -> N
     for needle in (moved["key"], base64.b64encode(moved["key"]), moved["only_here"].encode(),
                    b"secrets.jsonl", b"keys.json", b"bundle.json", b"stores/"):
         assert needle not in raw
-    # Inside the seal, the key the vault holds (wrapped there with this
-    # install's own vault key on import).
+    # Inside the seal, the key the vault held as the bundle was made (wrapped
+    # with the other install's own vault key on import).
     assert [base64.b64decode(k["key"]) for k in keys] == [moved["key"]]
     from kazma_core.security.sealed_file import SealedFileRefused
 

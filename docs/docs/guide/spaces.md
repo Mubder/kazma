@@ -231,12 +231,15 @@ holds. Its owner can:
 - **Move a shared space to another Kazma.** Only an owner moves it. *Move
   this space* makes one file sealed whole with a password you choose:
   scrypt, then AES-256-GCM over every byte, so nobody without the password
-  can read it, change it, or drop or rename anything in it. It holds the
+  can read it, change it, or drop or rename anything in it. The key this
+  space's secrets were sealed with goes inside it, so the space gets a new
+  one here as the bundle is made. It holds the
   space's chats, memory, files, documents, libraries, settings and secrets.
   **Only you arrive with it:** the other members leave it on arrival and
   are invited again there. What Kazma remembers about them, their scheduled
   jobs, tasks, research and posts, and the accounts they connected stay
-  here; what they wrote stays the space's, by someone who left. **What the
+  here, and so do the files X Studio drafts from: they are paths of this
+  machine. What they wrote stays the space's, by someone who left. **What the
   space was running arrives stopped**, since the space keeps running here
   too: a scheduled job arrives cancelled (restore it there, and it goes to
   your own chat there), a swarm task cancelled, a research run interrupted,

@@ -356,6 +356,8 @@ class DocumentWorker:
     async def _process_claimed(self, job: DocumentJobRecord, owner: str) -> None:
         from kazma_core.spaces.features import work_refusal
         from kazma_core.spaces.identity import asker_left
+        from kazma_core.spaces.scope import spaces_enforced
+        from kazma_core.spaces.space_move import importing_spaces
 
         current = job
         while current.state in _PROCESSING_STATES:
@@ -377,6 +379,10 @@ class DocumentWorker:
                 refused = await asyncio.to_thread(work_refusal, "documents", current.actor_id)
                 if refused:
                     raise PermanentDocumentError("feature_off", refused)
+                # A space an import is writing: its people are recorded last
+                # and its files come after its rows (S4-06), so the job waits.
+                if spaces_enforced() and current.tenant_id in await asyncio.to_thread(importing_spaces):
+                    raise TransientDocumentError("space_arriving", "The document's space is being brought in.")
                 # The person it is for left its space: never run for anyone
                 # else (the S2-12 review, finding 6).
                 if await asyncio.to_thread(asker_left, current.tenant_id, current.actor_id):

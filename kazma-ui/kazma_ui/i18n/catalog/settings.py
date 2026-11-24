@@ -3148,6 +3148,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The bundle holds a setting this install does not take, so nothing was brought in.",
         "ar": "تحوي الحزمة إعدادًا لا يقبله هذا التثبيت، فلم يُدخل شيء.",
     },
+    "settings.space_data_err.secrets_unreadable": {
+        "en": "A secret of this space cannot be opened, so no bundle was made. Save that connection again, or remove it.",
+        "ar": "يتعذّر فتح سرّ من أسرار هذه المساحة، فلم تُنشأ حزمة. احفظ ذلك الاتصال من جديد أو أزِله.",
+    },
+    "settings.space_data_err.not_recorded": {
+        "en": "This install could not record the space, so nothing was brought in.",
+        "ar": "تعذّر على هذا التثبيت تسجيل المساحة، فلم يُدخل شيء.",
+    },
     "settings.space_data_err.missing_secret": {
         "en": "The bundle points at a secret it does not carry, so nothing was brought in.",
         "ar": "تشير الحزمة إلى سرّ لا تحمله، فلم يُدخل شيء.",

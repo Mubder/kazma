@@ -24,6 +24,7 @@ Usage (in ``app.py``)::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import logging
 import os
@@ -2054,6 +2055,17 @@ def _feature_off_response(request: Request, feature: str, *, page: bool) -> Resp
     )
 
 
+def _connecting_here(request: Request) -> contextlib.AbstractContextManager[None]:
+    """What the request runs inside: a person connecting an account of their
+    space (what it keeps is recorded as theirs, Spaces S4-06), or nothing. No
+    I/O."""
+    from kazma_core.security.platform_rbac import connects_an_account
+    from kazma_core.spaces.connected_accounts import connecting
+
+    connects = connects_an_account(judged_path(request), request.method)
+    return connecting() if connects else contextlib.nullcontext()
+
+
 def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitable[Response]]], Awaitable[Response]]:
     """Create an HTTP middleware that extracts tenant id and propagates it.
 
@@ -2246,7 +2258,8 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                         return _tool_off_response(request, switched_off)
                     allowance_token = remember_allowance(allowance)
                     grants_token = remember_page_grants(grants)
-            response = await call_next(request)
+            with _connecting_here(request):
+                response = await call_next(request)
             if explicit_tenant and tenant_id and allow_spoof:
                 if request.cookies.get("X-Tenant-ID") != tenant_id:
                     response.set_cookie(

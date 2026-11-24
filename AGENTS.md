@@ -16275,18 +16275,29 @@ an install with one account behaves as before.
     2026-11-23: a stamp and a network say the filter was put in, not that
     its rules still hold -- another distro sharing the network namespace,
     `iptables -F` or a firewall backend change takes them out, and the
-    bridge reached everything). Docker requires them: a drop-in
-    (`docker.service.d/kazma-egress.conf`: `Requires=` and `After=`
-    `kazma-egress.service`, and the rules put in again as its
-    `ExecStartPre`), so a Docker whose rules failed does not start. Before
-    every networked run `container_engine_setup.egress_rules_in_effect` runs
-    `kazma-egress-rules ... check` in the distro as root (Docker's jump to
-    `DOCKER-USER`, the bridge's jump to `EGRESS_CHAIN`, every refused range
-    and host address there, the `INPUT` and IPv6 refusals); anything missing
-    refuses the run, never another network. Put in again, the chain is built
-    under a name of its own (`<chain>-NEW`) and swapped in (jump first, the
-    old chain out, then renamed): the bridge is never filtered by an empty
-    chain. Not refused, and said on People's confirm (EN/AR) and in the
+    bridge reached everything). Before every networked run
+    `container_engine_setup.egress_rules_in_effect` runs
+    `kazma-egress-rules ... check` in the distro as root: Docker's jump to
+    `DOCKER-USER`, the bridge's jump to `EGRESS_CHAIN` and the `INPUT` and
+    IPv6 refusals are each the FIRST rule the bridge's packets meet
+    (`first_for`: a rule for another interface by its whole name is not in
+    front of them), and the chain is exactly the list the script makes
+    (`chain_rules`, compared with `iptables -S`, so each rule is written as
+    iptables prints it). Asked rule by rule with `iptables -C`, the first
+    check answered "in effect" with an ACCEPT in front of the jump and with
+    a range's UDP refusal gone (the second review). Anything else refuses
+    the run, never another network. Put in again, the chain is built under a
+    name of its own (`<chain>-NEW`) and swapped in (jump first, the old chain
+    out, then renamed), and a refusal that lost its place is put in front
+    again (`put_first`): the bridge is never filtered by an empty chain.
+    **Rules that cannot be put in cost the members' network, never Docker**
+    (the second review: a Docker that required them took SearXNG, Neo4j and
+    the document worker down with nobody given the network): the drop-in
+    (`docker.service.d/kazma-egress.conf`) puts them in again before Docker
+    starts and lets it start whatever that answers, and once it runs
+    `kazma-egress-guard` removes the network when the check fails
+    (`kazma setup engine` puts both back). A kernel with no IPv6
+    (`/proc/net/if_inet6` absent) carries none: nothing is put in for it. Not refused, and said on People's confirm (EN/AR) and in the
     guide: the network's own public address (hairpin NAT to the router's
     public side, its forwards and its admin page if it answers there).
   - **Only a member's network needs the filter** (the main session's rule,
@@ -16315,7 +16326,9 @@ an install with one account behaves as before.
     `real_docker`), `tests/test_engine_egress_filter.py` (the rules script
     run by bash against stand-in iptables: every refused range and the
     host's own addresses, the public internet on, nothing doubled, removal;
-    without the host's addresses as the control),
+    each way the rules stop being in effect, a rule in front of a jump and a
+    refusal taken out among them, `iptables -C` rule by rule as the control;
+    no IPv6; the guard; without the host's addresses as the control),
     `tests/test_container_engine_setup.py` (the filter waiting until
     someone has the network, the check of before as the control; the step:
     rules before the network, a network made otherwise replaced, nothing
@@ -16324,7 +16337,8 @@ an install with one account behaves as before.
     `KAZMA_TEST_EGRESS_ENGINE=1`, on Kazma's engine with names of its own:
     the public internet reached, this computer and the metadata address
     refused at once; Docker's default network reaching this computer as the
-    control), `tests/e2e/test_person_code_network_browser.py` (by the
+    control; the rules on real iptables in a container's own network
+    namespace), `tests/e2e/test_person_code_network_browser.py` (by the
     sidebar, EN/AR: the reason and a disabled switch where Kazma cannot
     filter; where it can, a stored allowance shown on, taken back, allowed
     again after the confirmation).
@@ -16359,7 +16373,11 @@ an install with one account behaves as before.
     `SecretVault.export_space_sealed` seals the space's secrets with its key
     (sealing first a row still under the vault key) and hands the keys over;
     `SecretVault.import_space_sealed` wraps them with the target's own vault
-    key, in one transaction that opens every secret before it commits.
+    key, in one transaction that opens every secret before it commits. The
+    key that leaves is changed here as the bundle is made
+    (`space_keys.change_key`, recorded): it opens nothing kept on the old
+    install. A secret that does not open stops the bundle
+    (`secrets_unreadable`).
   - **Only the owner arrives** (the owner's decision): the bundle maker's
     account becomes the person chosen; everyone else in the space leaves it,
     as a member who leaves does (S2-12), and is invited again there. Their
@@ -16367,12 +16385,25 @@ an install with one account behaves as before.
     their work (scheduled jobs, swarm tasks, research sessions, X posts and
     composers), their share of documents and the accounts they connected do
     not travel. A space secret records who stored it (`vault.STORED_BY` in
-    its metadata, from the bound asker; a refresh with nobody bound keeps the
-    stamp): another person's stays, with its connection's settings; one with
-    no record travels only from a space nobody but its owner was ever in
-    (`_only_ever`). What they wrote stays the space's, written by
+    its metadata): the bound asker of its FIRST write, and from then on only
+    a person connecting the account again changes it
+    (`spaces.connected_accounts.connecting`: the tenant middleware binds it
+    for a POST, PUT or PATCH that connects a space's own account,
+    `platform_rbac.connects_an_account`; `oauth_sign_in.attempt_scope` for a
+    sign-in callback; the agent's `vault_store`). Every other write -- a
+    token refresh in whoever's turn, the hourly check as the space's maker
+    -- keeps the record the row has, none included (the second review:
+    stamped at every write, a refresh made another member's account the
+    maker's, and it travelled). Another person's stays, with its
+    connection's settings; one with no record travels only from a space
+    nobody but its owner was ever in (`_only_ever`). A new route or tool
+    that connects an account binds `connecting`. What they wrote stays the space's, written by
     `identity.DEPARTED_ACCOUNT`, which is no account: work naming it is
-    refused as a departed person's (`identity.work_scope`).
+    refused as a departed person's (`identity.work_scope`). Nobody who
+    stays is named inside a chat's saved state either
+    (`_rewrite_checkpoint`: a card's `asker`, `answered_by` and its names,
+    the state's `said_by`; on arrival the owner's own become the new
+    owner's, and a state naming a person of this install is refused).
   - **Every table says how it moves** (`space_move.MOVE_RULES`, a
     `MoveRule` each: `moves`, with the column that names its person, its
     memory entry or grant; `stopped`; `out`, with why). A table a space keeps
@@ -16382,10 +16413,17 @@ an install with one account behaves as before.
     and `cron_alerts` would have sent and paged outside the space), the old
     install's own state (a chat app's routing, approval cards, Time Travel's
     steps), what is rebuilt here, and a chat's state: grants, YOLO windows
-    and pointers. A setting moves only in its space's own forms
-    (`_moved_setting`: the space's X and GitHub connection keys), each value
-    checked (`_check_settings`: `foreign_setting`, `bad_setting`,
-    `missing_secret`).
+    and pointers. A setting moves only when it is NAMED
+    (`_MOVED_SETTINGS`: the space's X and GitHub connection keys, each with
+    what it holds), each value checked both ways (`_holds_what_it_should`;
+    `foreign_setting`, `bad_setting`, `missing_secret`); what stays is in
+    `_STAYING_SETTINGS` with why. A new `connectors.x.` or
+    `connectors.github.` key goes in one of the two or
+    `tests/test_space_move_second_review.py` fails: moved by prefix, the
+    files X drafting reads (`connectors.x.drafting.reference_files`)
+    travelled, and a bundle's owner read any file of the new machine. Once
+    Spaces is enforced `x_api.references.load_references` also asks the
+    bound space's path policy, whoever set them.
   - **Live work arrives stopped** (the owner's decision; a move is a copy
     and the old install still runs it, `_STOPS`): a scheduled job cancelled
     (Restore here, to the new owner's own chat), a swarm task cancelled, a
@@ -16411,10 +16449,20 @@ an install with one account behaves as before.
   - **A half-done import leaves the install as it was**: every row store is
     made by its own code first (`spaces/row_stores.py`); the space is
     recorded in `space_move.JOURNAL_KEY` before anything is written; a
-    failure takes back what was written by the erase's own walk; one a stop
-    cut off is taken back by the next (`settle_unfinished_imports`); the
-    space joins the identity store last (`people.record_moved_space`, event
-    `space_imported`). A project folder's files stay on the old machine (the
+    failure takes back what was written by the erase's own walk (and the
+    space's own checkpoint file, which is made only once the bundle is
+    taken); one a stop cut off is taken back as Kazma starts
+    (`settle_at_start`) or by the next import, never a running one
+    (`settle_unfinished_imports` takes the import lock); the space joins the
+    identity store last (`people.record_moved_space`, event
+    `space_imported`; its refusal is a worded code). **So what takes a space
+    with no member, or none at all, for one that is gone leaves a space in
+    the journal alone** (`importing_spaces`, read AFTER what is stored and
+    BEFORE the identity store): the forget of departed entries (it forgot
+    the new owner's facts as they arrived), the erased-key sweep (a space
+    erased here once and moved back) and the document worker (the job
+    waits, `space_arriving`). A new sweep of that kind asks it. A project
+    folder's files stay on the old machine (the
     guide says so).
   - **An erase leaves no activity row**: `activity.record` writes nothing
     for a space the install no longer holds or is erasing.
@@ -16428,6 +16476,8 @@ an install with one account behaves as before.
     install whose space A was moved in), `tests/test_space_move_review.py`
     (each of the four decisions and eight review findings, every one failing
     on 052dd4be3; a table with no rule as the control),
+    `tests/test_space_move_second_review.py` (the second review's, failing
+    on 46f200bcb),
     `tests/e2e/test_space_move_browser.py` (by the sidebar, EN/AR: moved,
     the file sealed whole, deleted, a wrong password refused, brought back in
     with a person as owner).

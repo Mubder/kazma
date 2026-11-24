@@ -2112,6 +2112,13 @@ class KazmaAppBuilder:
 
             spawn_background(_aio.to_thread(_move_plaintext_secrets), name="plaintext-secrets")
 
+            # ── A space an import left half brought in ───────────────
+            # A stop in the middle of an import leaves its rows with no
+            # space to own them: taken back now, not at the next import.
+            from kazma_core.spaces.space_move import settle_at_start
+
+            spawn_background(_aio.to_thread(settle_at_start), name="unfinished-space-imports")
+
             # ── The document worker broker the guard runs ───────────
             # Tell the guard now whether documents need it (it then starts
             # while the rest of Kazma boots), and again whenever the profile

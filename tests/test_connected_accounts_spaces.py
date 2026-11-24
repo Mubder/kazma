@@ -570,6 +570,9 @@ _DECLARED = {
     "kazma-core/kazma_core/spaces/connected_accounts.py": (
         "the one list of the install's app registration names, read by the mail code and by "
         "the vault's space scope"),
+    "kazma-core/kazma_core/spaces/space_move.py": (
+        "a moved space leaves the mail accounts another member connected: it names an extra "
+        "account's secrets as a group, and reads none (S4-06)"),
     "kazma-core/kazma_core/settings_restore.py": (
         "a settings restore brings back the owner's extra mail accounts only while this vault holds "
         "their sign-in: the owner's names"),

@@ -17,6 +17,10 @@ limit). A container on the filtered network:
 **Control: the engine's default network** (Docker's ``bridge``, what the
 first build of S4-05 used) reaches the listener, and its packet to the
 metadata address goes out and is waited for.
+
+The rules on real ``iptables`` run in a container of their own, whose network
+namespace is its own (``--rm``, a memory limit; it installs iptables from
+Debian): nothing of the engine's rules is read or changed.
 """
 
 from __future__ import annotations
@@ -138,3 +142,35 @@ def test_the_filtered_network_reaches_the_public_internet_only(tmp_path) -> None
         _run(["wsl.exe", "-d", ces.DISTRO, "-u", "root", "--", "rm", "-f", hosts])
     left = _run(["wsl.exe", "-d", ces.DISTRO, "-u", "root", "--", "iptables", "-w", "-S"])
     assert chain.encode() not in left.stdout and bridge.encode() not in left.stdout
+
+
+def test_the_rules_on_real_iptables(tmp_path) -> None:
+    """Put in, found in effect, found again after a re-apply; each way they
+    stop being in effect found, and put right by the next apply."""
+    steps = """set -u
+(apt-get update -qq && apt-get install -y -qq iptables) >/dev/null 2>&1
+printf '8.8.4.4\n' > /hosts; export KAZMA_EGRESS_HOSTS=/hosts
+R="bash /rules kz-test KAZMA-EGRESS-TEST"
+$R >/dev/null && iptables -I FORWARD 1 -j DOCKER-USER
+say() { $R check >/dev/null; echo "$1 $?"; }
+say fresh; $R >/dev/null; say again
+broken() { say "$1"; $R >/dev/null; say "$1-put-right"; }
+iptables -I DOCKER-USER 1 -i kz-test -j ACCEPT; broken accept-before-the-jump
+iptables -D KAZMA-EGRESS-TEST -d 169.254.0.0/16 -j REJECT --reject-with icmp-net-prohibited; broken udp-refusal-gone
+iptables -I INPUT 1 -p tcp -j ACCEPT; broken accept-in-input
+ip6tables -I INPUT 1 -j ACCEPT; broken accept-in-input6
+iptables -F KAZMA-EGRESS-TEST; broken flushed
+iptables -I DOCKER-USER 1 -i other0 -j ACCEPT; say another-bridge
+ip6tables -I FORWARD 1 -j DOCKER-USER; say docker-s-own-jump6
+$R remove >/dev/null; say removed
+"""
+    script = "cat > /rules <<'ZZZ'\n" + _rules_script() + "ZZZ\n" + steps
+    name = f"kazma-egress-test-iptables-{uuid.uuid4().hex[:6]}"
+    done = _run([*_docker(), "run", "--rm", "-i", "--name", name, "--memory", "256m", "--cap-add", "NET_ADMIN",
+                 code_exec.DEFAULT_DOCKER_IMAGE, "bash", "-s"], stdin=script, timeout=240)
+    said = dict(line.rsplit(" ", 1) for line in done.stdout.decode("utf-8").splitlines() if line.strip())
+    if not said or said.get("fresh") == "127":
+        pytest.skip("iptables could not be installed in the container")
+    broken = {"accept-before-the-jump", "udp-refusal-gone", "accept-in-input", "accept-in-input6", "flushed", "removed"}
+    assert {k for k, v in said.items() if v == "3"} == broken, said
+    assert {k for k, v in said.items() if v == "0"} == set(said) - broken, said

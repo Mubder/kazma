@@ -28,6 +28,7 @@ import json
 # (tests, a reset vault) never reaches these tools.
 from kazma_core.security import vault as _vault
 from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+from kazma_core.spaces.connected_accounts import connecting
 
 
 def _refuse_kazma_owned(name: str) -> None:
@@ -67,7 +68,9 @@ async def vault_store(
         meta = {}
     try:
         # The vault is SQLite: every call off the loop (audit 2026-10-26 AUD-111).
-        sid = await asyncio.to_thread(vault.store, name, value, category=category, metadata=meta)
+        # The person gives the value now: recorded as theirs (Spaces S4-06).
+        with connecting():
+            sid = await asyncio.to_thread(vault.store, name, value, category=category, metadata=meta)
         return f"Secret '{name}' stored securely (id={sid}, category={category})."
     except Exception as exc:
         return f"Error storing secret: {exc}"

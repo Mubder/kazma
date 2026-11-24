@@ -1029,28 +1029,40 @@ class SecretVault:
 
     def _stamped_metadata(self, name: str, metadata: dict[str, Any] | None, tenant: str | None) -> str:
         """*metadata* as stored, with who stored a space's secret
-        (:data:`STORED_BY`, the person the work is for): an account another
-        member connected does not move with the space (Spaces S4-06). Work
-        that names no person -- a token refresh -- keeps the stamp the row
-        had. Called with the vault's lock held."""
+        (:data:`STORED_BY`): an account another member connected does not
+        move with the space (Spaces S4-06). The person the work is for, when
+        the secret is written the first time or they are connecting it now
+        (``connected_accounts.connecting``). Any other write -- a token
+        refresh, whoever it runs as -- keeps the record the row has, none
+        included. Called with the vault's lock held."""
         meta = dict(metadata or {})
+        meta.pop(STORED_BY, None)
         if secret_scope(name)[0] != "install":
+            from kazma_core.spaces.connected_accounts import is_connecting
             from kazma_core.spaces.scope import bound_asker
 
-            who = str(bound_asker() or "")
-            if not who:
-                prior = self._conn.execute(
-                    "SELECT metadata FROM secrets WHERE name = ? AND "
-                    "COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__') ORDER BY rowid DESC LIMIT 1",
-                    (name, tenant)).fetchone()
-                try:
-                    held = json.loads(prior["metadata"] or "{}") if prior is not None else {}
-                except ValueError:
-                    held = {}
-                who = str(held.get(STORED_BY) or "") if isinstance(held, dict) else ""
+            held, who = self._stored_by(name, tenant)
+            asker = str(bound_asker() or "")
+            if asker and (not held or is_connecting()):
+                who = asker
             if who:
                 meta[STORED_BY] = who
         return json.dumps(meta)
+
+    def _stored_by(self, name: str, tenant: str | None) -> tuple[bool, str]:
+        """Whether the secret is held, and who its row says stored it ("":
+        no record). Called with the vault's lock held."""
+        prior = self._conn.execute(
+            "SELECT metadata FROM secrets WHERE name = ? AND "
+            "COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__') ORDER BY rowid DESC LIMIT 1",
+            (name, tenant)).fetchone()
+        if prior is None:
+            return False, ""
+        try:
+            meta = json.loads(prior["metadata"] or "{}")
+        except ValueError:
+            meta = {}
+        return True, str(meta.get(STORED_BY) or "") if isinstance(meta, dict) else ""
 
     @staticmethod
     def _space_for_write(name: str, tenant_id: str | None) -> str | None:
@@ -1137,6 +1149,8 @@ class SecretVault:
                     newest[row["tenant_id"]] = None  # unreadable: rewrite it
             scopes = [None, *sorted(t for t in newest if t is not None)]
             stale = [s for s in scopes if s not in newest or newest[s] != value]
+            if None not in stale and json.loads(meta).get(STORED_BY, "") != self._stored_by(name, None)[1]:
+                stale.append(None)  # connected again by another person: theirs from now on
             if not stale:
                 return 0, ids[None]
             now = datetime.now(UTC).isoformat()

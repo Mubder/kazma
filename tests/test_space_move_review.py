@@ -79,9 +79,11 @@ def _a_thread() -> str:
     return sorted(threads.space_threads(A)[1])[0]
 
 
-def _paused_at_a_card(thread: str) -> str:
+def _paused_at_a_card(thread: str, asker: str = "", names: tuple[str, ...] = ()) -> str:
     """Space A's own checkpoint file, holding *thread* paused at an approval
-    card (an interrupt waiting, as LangGraph writes it). Returns its id."""
+    card (an interrupt waiting, as LangGraph writes it) that names *asker*,
+    its answerers and their *names*; its state names who spoke. Returns its
+    id."""
     from langgraph.checkpoint.base import empty_checkpoint
     from langgraph.checkpoint.sqlite import SqliteSaver
     from langgraph.types import Interrupt
@@ -92,9 +94,14 @@ def _paused_at_a_card(thread: str) -> str:
     with closing(sqlite3.connect(str(paths.space_checkpoints_db(A)), check_same_thread=False)) as conn:
         saver = SqliteSaver(conn, serde=kazma_checkpoint_serde())
         saver.setup()
-        config = saver.put({"configurable": {"thread_id": thread, "checkpoint_ns": ""}}, empty_checkpoint(),
-                           {"source": "loop", "step": 1}, {})
-        saver.put_writes(config, [("__interrupt__", (Interrupt(value={"tool": "x_post"}, id=gate),))], "task-1")
+        state = empty_checkpoint()
+        state["channel_values"] = {"_post_turn_memory": {"said_by": asker, "turns": [1, 2]},
+                                   "opened": {"said_by": OWNER_ACCOUNT_ID}}
+        config = saver.put({"configurable": {"thread_id": thread, "checkpoint_ns": ""}}, state,
+                           {"source": "loop", "step": 1, "asker": asker}, {})
+        card = {"tool": "x_post", "asker": asker, "answered_by": [asker, OWNER_ACCOUNT_ID],
+                "answered_by_names": list(names)}
+        saver.put_writes(config, [("__interrupt__", (Interrupt(value=card, id=gate),))], "task-1")
     return gate
 
 
@@ -123,6 +130,10 @@ def moved(tmp_path_factory) -> dict[str, Any]:
             _clone("memory_state.db", "beliefs", "id", {"subject": entry, "object": "diabetic"})
             _clone("memory_state.db", "entities", "id", {"id": entry})
             _clone("memory_state.db", "memory_member_profile", "account", {"account": maya, "about": "maya-about"})
+            # The owner's own entry: a fact filed under it arrives as the
+            # new owner's.
+            _clone("memory_state.db", "beliefs", "id",
+                   {"subject": f"member_{OWNER_ACCOUNT_ID}", "object": "owner-fact"})
             owner_about = _clone("memory_state.db", "memory_member_profile", "account",
                                  {"account": OWNER_ACCOUNT_ID, "about": "owner-about"})
             maya_job = _clone("cron.db", "cron_jobs", "job_id", {"creator": maya, "status": "pending"})
@@ -152,7 +163,12 @@ def moved(tmp_path_factory) -> dict[str, Any]:
                 get_vault().for_space(A).store(f"space:{A}:email.gmail.refresh_token", "maya-token-secret")
                 get_config_store().set(f"tenant.{A}.connectors.github.token", "maya-github-secret",
                                        category="connectors")
+            # The hourly check refreshes her tokens as the space's maker, and
+            # so does an owner's own turn: her account stays hers.
             with scope.bind_scope(A, OWNER_ACCOUNT_ID):
+                get_vault().for_space(A).store(f"space:{A}:email.gmail.refresh_token", "maya-token-secret-2")
+                get_config_store().set(f"tenant.{A}.connectors.github.token", "maya-github-secret-2",
+                                       category="connectors")
                 get_vault().for_space(A).store(f"space:{A}:own-secret", "the-owners-secret")
             get_config_store().set(f"yolo.{thread}", {"until": 4102444800}, category="runtime")
             get_config_store().set("active_thread.telegram:4242", thread, category="runtime")
@@ -160,16 +176,25 @@ def moved(tmp_path_factory) -> dict[str, Any]:
 
             waiting = f"thread-waiting-{uuid.uuid4().hex[:6]}"
             threads.record_thread(waiting, A, OWNER_ACCOUNT_ID)
-            gate = _paused_at_a_card(waiting)
+            gate = _paused_at_a_card(waiting, maya, ("Maya Alnasser",))
+            source_key = {r["key_id"] for r in get_vault()._space_rows(A)}
             bundle = folder / "a.kazmaspace"
             manifest = space_move.export_bundle(A, bundle, PASSWORD, by=OWNER_ACCOUNT_ID)
+            # What is left on the old install: its secrets, and their key now.
+            left = {"key_ids": {r["key_id"] for r in get_vault()._space_rows(A)}, "before": source_key,
+                    "held": [str(r[0]) for r in get_vault()._conn.execute(
+                        "SELECT key_id FROM space_keys WHERE space_id = ?", (A,))]}
+            with scope.bind_scope(A, OWNER_ACCOUNT_ID):
+                left["opens"] = get_vault().for_space(A).retrieve(f"space:{A}:own-secret")
+            left["recorded"] = [e for e in identity.read_registry()["events"]
+                                if e.get("kind") == "space_key_changed" and e.get("space") == A]
         finally:
             world_gen.close()
     return {"bundle": bundle, "manifest": manifest, "maya": maya, "words": world["words"], "thread": thread,
             "waiting": waiting, "gate": gate, "maya_job": maya_job, "owner_job": owner_job, "maya_task": maya_task,
             "owner_task": owner_task, "maya_research": maya_research, "owner_research": owner_research,
             "maya_acl": maya_acl, "chat": chat, "owner_post": owner_post, "owner_about": owner_about,
-            "folder": folder}
+            "folder": folder, "left": left}
 
 
 @pytest.fixture
@@ -191,6 +216,8 @@ def _refused(bundle: Path, owner: str, code: str) -> None:
     _ctx, found = space_data._walk(A)
     assert sum(item.rows for item in found) == 0
     assert A not in identity.read_registry()["spaces"]
+    # Nothing of it, not even an empty file of its own (46f200bcb left one).
+    assert not list(paths.space_checkpoints_db(A).parent.glob(f"checkpoints_{A}.db*"))
 
 
 def _rows(store: str, table: str, where: str = "1", params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -392,6 +419,16 @@ def test_2_a_bundle_carrying_an_outbox_is_refused(moved, target, tmp_path) -> No
     _refused(sealed_again(entries, tmp_path / "alerts.kazmaspace"), target["person"], "not_moved")
 
 
+def test_2_a_bundle_carrying_waiting_messages_is_refused(moved, target, tmp_path) -> None:
+    """A delivery taken here would be sent, to whatever address it names."""
+    entries = entries_of(moved["bundle"])
+    job = json.loads(entries["stores/cron.db/cron_jobs.jsonl"].decode("utf-8").splitlines()[0])
+    entries["stores/cron.db/cron_deliveries.jsonl"] = (json.dumps(
+        {"id": 1, "job_id": job["job_id"], "tenant_id": A, "target": "telegram:4242", "content": "spoofed",
+         "state": "pending"}) + "\n").encode()
+    _refused(sealed_again(entries, tmp_path / "deliveries.kazmaspace"), target["person"], "not_moved")
+
+
 def test_3_a_chats_state_never_arrives(moved, target) -> None:
     _bring_in(moved["bundle"], target["person"])
     held = {key for group in get_config_store().get_all().values() for key in group}
@@ -407,6 +444,11 @@ def test_3_a_chats_state_never_arrives(moved, target) -> None:
     (f"tenant.{A}.mcp.servers", [{"name": "x", "command": "calc.exe"}], "foreign_setting"),
     (f"tenant.{A}.research.papers_index", [], "foreign_setting"),
     (f"tenant.{A}.connectors.x.ai_usage", {"calls": 0}, "foreign_setting"),
+    (f"tenant.{A}.connectors.x.drafting.reference_files", ["C:/Users/admin/.ssh/id_ed25519"], "foreign_setting"),
+    (f"tenant.{A}.connectors.x.reply.summoners", ["someone"], "foreign_setting"),
+    (f"tenant.{A}.connectors.x.ai", {"provider": "x", "model": "y"}, "foreign_setting"),
+    (f"tenant.{A}.connectors.x.oauth2.expires_at", "soon", "bad_setting"),
+    (f"tenant.{A}.connectors.x.account", {"id": {"nested": 1}}, "bad_setting"),
     (f"tenant.{A}.connectors.x.oauth2.access_token", "plain-token", "bad_setting"),
     (f"tenant.{A}.connectors.x.api_key", f"vault://cfg:tenant.{A}.connectors.x.api_key", "missing_secret"),
 ])
@@ -432,18 +474,48 @@ def test_4_another_members_connected_account_stays(moved, target) -> None:
     assert _where_word("maya-token-secret") == {} and _where_word("maya-github-secret") == {}
 
 
-def test_4_who_stored_a_spaces_secret_is_recorded(tmp_path, monkeypatch) -> None:
-    from kazma_core.security.vault import STORED_BY, get_vault
+def _stamp(name: str) -> str:
+    from kazma_core.security.vault import STORED_BY
+
+    with closing(sqlite3.connect(str(paths.vault_db_path()))) as conn:
+        meta = json.loads(conn.execute("SELECT metadata FROM secrets WHERE name = ?", (name,)).fetchone()[0])
+    return meta.get(STORED_BY, "")
+
+
+@pytest.mark.parametrize("name", ["space:stamped:email.gmail.refresh_token",
+                                  "cfg:tenant.stamped.connectors.x.oauth2.refresh_token"])
+def test_4_who_connected_an_account_is_recorded_once(tmp_path, monkeypatch, name) -> None:
+    """The first write says who stored a secret; a refresh -- with nobody
+    bound, as the space's maker (the hourly check), in another member's
+    turn -- keeps it, and only connecting the account again changes it
+    (46f200bcb: every write with a person bound took it over)."""
+    from kazma_core.security.vault import get_vault
+    from kazma_core.spaces.connected_accounts import connecting
 
     with own_install(monkeypatch, tmp_path / "stamp"):
         identity.create_space("Stamped", created_by=OWNER_ACCOUNT_ID, space_id="stamped")
+        vault = get_vault().for_space("stamped")
         with scope.bind_scope("stamped", "pperson"):
-            get_vault().for_space("stamped").store("space:stamped:token", "v1")
-        get_vault().for_space("stamped").store("space:stamped:token", "v2")  # a refresh: no person
+            vault.store(name, "v1")
+        assert _stamp(name) == "pperson"
+        vault.store(name, "v2")  # a refresh: no person
+        with scope.bind_scope("stamped", OWNER_ACCOUNT_ID):  # (space, its acting account): the hourly check
+            vault.store(name, "v3")
+        with scope.bind_scope("stamped", "pother"):  # a refresh in another member's turn
+            vault.store(name, "v4")
+        assert _stamp(name) == "pperson"
+        with scope.bind_scope("stamped", "pother"), connecting():  # signed in again, by another member
+            vault.store(name, "v4")  # even with the value it has
+        assert _stamp(name) == "pother"
+        # One with no record -- written before there was one -- is nobody's
+        # because someone refreshed it.
         with closing(sqlite3.connect(str(paths.vault_db_path()))) as conn:
-            meta = json.loads(conn.execute("SELECT metadata FROM secrets WHERE name = 'space:stamped:token'")
-                              .fetchone()[0])
-    assert meta[STORED_BY] == "pperson"
+            conn.execute("UPDATE secrets SET metadata = '{}' WHERE name = ?", (name,))
+            conn.commit()
+        with scope.bind_scope("stamped", OWNER_ACCOUNT_ID):
+            vault.store(name, "v5")
+        assert _stamp(name) == ""
+        assert vault.retrieve(name) == "v5"
 
 
 def test_6_7_another_members_work_never_runs_as_the_new_owner(moved, target) -> None:

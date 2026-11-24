@@ -33,8 +33,9 @@ the space's settings that move (its connections' settings, as stored: a
 secret is a ``vault://`` pointer), its secrets as the vault seals them with
 the space's key and the keys themselves (inside the seal: **the install's
 vault key never leaves it**; on the other install the keys are wrapped with
-that install's own), its files, and ``bundle.json``: what it holds, entry by
-entry. Written straight into the seal: no plain copy on disk. Refused
+that install's own, and here the space gets a new key as the bundle is made,
+so the one that left opens nothing kept here), its files, and
+``bundle.json``: what it holds, entry by entry. Written straight into the seal: no plain copy on disk. Refused
 before it is written when the space is bigger than an import takes.
 
 **Never moved** (:data:`MOVE_RULES` ``out``, each with its reason): ledgers
@@ -61,8 +62,10 @@ another person's entry, work or account, a person of this install named by
 a row; an id here already; a setting outside the space's own, or one whose
 value its rule refuses; a pointer to a secret that is not in the bundle. It
 writes with an import journal first (:data:`JOURNAL_KEY`) and the identity
-store last; a half-done import is taken back, and one a stop cut off is
-taken back by the next (:func:`settle_unfinished_imports`).
+store last; what takes a space with no member for a left one leaves a space
+in the journal alone (:func:`importing_spaces`). A half-done import is taken
+back, and one a stop cut off is taken back at the next start, or by the next
+import (:func:`settle_unfinished_imports`).
 
 **Not moved:** a personal space; a project folder (the space arrives as a
 plain shared space; the folder's files stay on the old machine); the
@@ -85,7 +88,7 @@ import time
 import zipfile
 from collections.abc import Callable, Iterator
 from contextlib import closing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -101,6 +104,8 @@ __all__ = [
     "SpaceMoveRefused",
     "export_bundle",
     "import_bundle",
+    "importing_spaces",
+    "settle_at_start",
     "settle_unfinished_imports",
 ]
 
@@ -123,8 +128,10 @@ JOURNAL_KEY = "system.spaces.importing"
 ACCOUNT_FIELDS = frozenset({
     "asker", "author", "creator", "created_by", "updated_by", "owner_id", "actor_id", "said_by", "opener",
     "account", "account_id", "granted_by", "booker", "principal_id", "requested_by", "decided_by",
-    "deleted_by", "actor", "stored_by",
+    "deleted_by", "actor", "stored_by", "answered_by", "approvers",
 })
+#: Keys whose values name people by their names: emptied on the way out.
+_NAME_FIELDS = frozenset({"answered_by_names"})
 #: The store name the space's checkpoints travel under, wherever they were
 #: kept (``checkpoints.db``, ``checkpoints_<space>.db``); they land in the
 #: space's own checkpoint file here (``paths.space_checkpoints_db``).
@@ -374,6 +381,67 @@ def _rewrite(value: Any, swap: Callable[[str, str], str], key: str = "") -> tupl
     return False, value
 
 
+def _rewrite_state(value: Any, swap: Callable[[str, str], str], key: str = "") -> tuple[bool, Any]:
+    """:func:`_rewrite` through a checkpoint's own objects: an interrupt's
+    card, a send's argument, a tuple."""
+    from langgraph.types import Interrupt, Send
+
+    if isinstance(value, Interrupt):
+        changed, card = _rewrite_state(value.value, swap, key)
+        return changed, replace(value, value=card) if changed else value
+    if isinstance(value, Send):
+        changed, arg = _rewrite_state(value.arg, swap, key)
+        return changed, Send(value.node, arg) if changed else value
+    if isinstance(value, dict):
+        walked = {k: _rewrite_state(v, swap, str(k)) for k, v in value.items()}
+        return any(c for c, _ in walked.values()), {k: v for k, (_, v) in walked.items()}
+    if type(value) in (list, tuple):
+        results = [_rewrite_state(v, swap, key) for v in value]
+        return any(c for c, _ in results), type(value)(v for _, v in results)
+    return _rewrite(value, swap, key)
+
+
+def _rewrite_checkpoint(row: dict[str, Any], swap: Callable[[str, str], str]) -> dict[str, Any]:
+    """A checkpoint row with every person field inside its state passed
+    through *swap*: a card names who asked, who answers it and their names.
+    ``ValueError`` when the state cannot be read. A state of another kind
+    than LangGraph writes is left as it is: the strict serializer that loads
+    a chat reads no other (never a pickle)."""
+    from kazma_core.checkpoint_serde import kazma_checkpoint_serde
+
+    row = dict(row)
+    kind = str(row.get("type") or "")
+    serde = kazma_checkpoint_serde()
+    for column in ("checkpoint", "value"):
+        blob = row.get(column)
+        if not isinstance(blob, bytes) or kind not in ("msgpack", "json"):
+            continue
+        try:
+            if kind == "json":
+                changed, state = _rewrite(json.loads(blob), swap)
+                if changed:
+                    row[column] = json.dumps(state, ensure_ascii=False).encode("utf-8")
+            else:
+                changed, state = _rewrite_state(serde.loads_typed((kind, blob)), swap)
+                if changed:
+                    row["type"], row[column] = serde.dumps_typed(state)
+        except (ValueError, TypeError, NotImplementedError) as exc:
+            if isinstance(exc, SpaceMoveRefused):
+                raise
+            raise ValueError("a checkpoint's state cannot be read") from exc
+    meta = row.get("metadata")
+    if isinstance(meta, bytes):
+        try:
+            changed, state = _rewrite(json.loads(meta), swap)
+        except (ValueError, UnicodeDecodeError) as exc:
+            if isinstance(exc, SpaceMoveRefused):
+                raise
+            return row  # not JSON: holds no person field
+        if changed:
+            row["metadata"] = json.dumps(state, ensure_ascii=False).encode("utf-8")
+    return row
+
+
 # ── secrets ─────────────────────────────────────────────────────────────
 
 
@@ -433,12 +501,54 @@ def _travelling_secrets(space: str, exporter: str, registry: dict[str, Any],
 
 # ── settings ────────────────────────────────────────────────────────────
 
-#: The space's own settings that move (``tenant.<space>.`` + these): its
-#: connections' settings. Nothing else of ``tenant.<space>.`` moves.
-_MOVED_SETTINGS = ("connectors.x.", "connectors.github.")
-#: Under those, what never moves: the reply bot (the owner's account only)
-#: and the X AI's usage counters (a ledger).
-_NEVER_MOVED_SETTINGS = ("connectors.x.reply.", "connectors.x.ai_usage", "connectors.x.read_usage")
+#: The space's own settings that move (``tenant.<space>.`` + these), each
+#: with what it holds: ``secret`` (one ``vault://`` pointer), ``flag``,
+#: ``number``, ``text`` or ``account`` (who is signed in). A list, so a
+#: setting added later stays until it is said to move: the first lists moved
+#: ``connectors.x.`` whole, and with it the files X drafting reads
+#: (the second review of S4-06).
+_MOVED_SETTINGS: dict[str, str] = {
+    "connectors.x.enabled": "flag",
+    "connectors.x.handle": "text",
+    "connectors.x.account": "account",
+    "connectors.x.max_posts_per_day": "number",
+    "connectors.x.max_posts_per_month": "number",
+    "connectors.x.duplicate_window_days": "number",
+    "connectors.x.max_chars": "number",
+    "connectors.x.max_mentions": "number",
+    "connectors.x.max_hashtags": "number",
+    "connectors.x.max_cashtags": "number",
+    "connectors.x.drafting.post_length": "text",
+    "connectors.x.api_key": "secret",
+    "connectors.x.api_key_secret": "secret",
+    "connectors.x.access_token": "secret",
+    "connectors.x.access_token_secret": "secret",
+    "connectors.x.bearer_token": "secret",
+    "connectors.x.oauth2.client_id": "text",
+    "connectors.x.oauth2.client_secret": "secret",
+    "connectors.x.oauth2.access_token": "secret",
+    "connectors.x.oauth2.refresh_token": "secret",
+    "connectors.x.oauth2.expires_at": "number",
+    "connectors.x.oauth2.account": "account",
+    "connectors.github.token": "secret",
+    "connectors.github.oauth_token": "secret",
+    "connectors.github.oauth_scope": "text",
+    "connectors.github.oauth_token_type": "text",
+}
+#: What of X and GitHub stays, and why (a prefix when it ends with a dot or
+#: an underscore). Every ``connectors.x.`` and ``connectors.github.`` key the
+#: code names is here or above.
+_STAYING_SETTINGS: dict[str, str] = {
+    "connectors.x.drafting.reference_files": "paths of files of the old machine, read whole by X drafting",
+    "connectors.x.reply.": "the reply bot answers the owner's account only",
+    "connectors.x.ai": "the X model: a provider of the old install",
+    "connectors.x.ai_limits": "what the X model may spend, decided on each install",
+    "connectors.x.ai_usage": "a ledger: the X model's calls",
+    "connectors.x.read_usage": "a ledger: the X API's reads",
+    "connectors.github.app_": "the install's GitHub App",
+    "connectors.github.oauth_state": "a sign-in in progress on the old install",
+}
+_TEXT_MAX = 4_000
 _MAPPINGS = dict(space_data._BY_SPACE_MAPPINGS)
 _ALIAS = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
 
@@ -449,15 +559,38 @@ def _setting_group(base: str) -> str:
 
 def _moved_setting(key: str, space: str) -> str | None:
     """The base key of *key* when it is a setting of *space* that moves."""
-    from kazma_core.settings_restore import CREDENTIAL, SETTING, classify
-
     prefix = f"tenant.{space}."
-    if not key.startswith(prefix):
-        return None
-    base = key[len(prefix):]
-    if not base.startswith(_MOVED_SETTINGS) or base.startswith(_NEVER_MOVED_SETTINGS):
-        return None
-    return base if classify(base) in (SETTING, CREDENTIAL) else None
+    base = key.removeprefix(prefix)
+    return base if key.startswith(prefix) and base in _MOVED_SETTINGS else None
+
+
+def _holds_what_it_should(base: str, value: Any) -> bool:
+    """Whether *value* is what the moved setting *base* holds."""
+    from kazma_core.settings_validation import SettingRejected, validate_setting
+
+    kind = _MOVED_SETTINGS[base]
+    if kind == "secret":
+        return isinstance(value, str) and len(list(_pointers(value))) == 1
+    if any(True for _ in _pointers(value)):
+        return False
+    if kind == "flag":
+        right = isinstance(value, bool | int) or str(value).lower() in ("true", "false", "1", "0", "yes", "no", "on", "off")
+    elif kind == "number":
+        right = isinstance(value, int | float) and not isinstance(value, bool)
+    elif kind == "account":
+        right = isinstance(value, dict) and len(value) <= 20 and all(
+            isinstance(v, str | int | float | bool | type(None))
+            or (isinstance(v, list) and len(v) <= 100 and all(isinstance(s, str) for s in v))
+            for v in value.values())
+    else:
+        right = isinstance(value, str) and len(value) <= _TEXT_MAX
+    if not right:
+        return False
+    try:
+        validate_setting(base, value)
+    except SettingRejected:
+        return False
+    return True
 
 
 def _pointers(value: Any) -> Iterator[str]:
@@ -473,11 +606,13 @@ def _pointers(value: Any) -> Iterator[str]:
             yield from _pointers(item)
 
 
-def _space_settings(space: str, staying: set[str], secret_names: set[str]) -> dict[str, dict[str, Any]]:
+def _space_settings(space: str, staying: set[str], secret_names: set[str],
+                    left_out: dict[str, int]) -> dict[str, dict[str, Any]]:
     """The space's settings that move, as stored, each with its category:
-    its connections' settings (a connection that stays leaves all of them)
-    and its entries of the mappings kept by space (an extra mail account
-    that stays leaves its entry)."""
+    its connections' settings (a connection that stays leaves all of them,
+    and one holding a value an import would refuse stays, counted) and its
+    entries of the mappings kept by space (an extra mail account that stays
+    leaves its entry)."""
     from kazma_core.config_store import get_config_store
 
     found: dict[str, dict[str, Any]] = {}
@@ -486,6 +621,9 @@ def _space_settings(space: str, staying: set[str], secret_names: set[str]) -> di
             base = _moved_setting(key, space)
             if base is not None:
                 if _setting_group(base) in staying or any(p not in secret_names for p in _pointers(value)):
+                    continue
+                if not _holds_what_it_should(base, value):
+                    left_out["settings"] = left_out.get("settings", 0) + 1
                     continue
                 found[key] = {"category": category, "value": value}
             elif key in _MAPPINGS:
@@ -533,8 +671,6 @@ def _check_settings(space: str, settings: dict[str, Any], secret_names: set[str]
     """Only the key forms that are the space's own, each value as its rule
     takes it, each pointer to a secret the bundle carries."""
     from kazma_core.config_store import get_config_store
-    from kazma_core.settings_restore import CREDENTIAL, classify
-    from kazma_core.settings_validation import SettingRejected, validate_setting
 
     store = get_config_store()
     for key, held in settings.items():
@@ -554,18 +690,11 @@ def _check_settings(space: str, settings: dict[str, Any], secret_names: set[str]
         base = _moved_setting(key, space)
         if base is None:
             raise SpaceMoveRefused("foreign_setting", 409, f"The bundle carries a setting that does not move: {key}.")
-        pointers = list(_pointers(value))
-        if classify(base) == CREDENTIAL:
-            if not (isinstance(value, str) and len(pointers) == 1):
-                raise SpaceMoveRefused("bad_setting", 409, f"The bundle's {key} is a credential with no pointer.")
-        else:
-            try:
-                validate_setting(base, value)
-            except SettingRejected:
-                raise SpaceMoveRefused("bad_setting", 409, f"The bundle's {key} holds a value its rule refuses.") from None
+        if not _holds_what_it_should(base, value):
+            raise SpaceMoveRefused("bad_setting", 409, f"The bundle's {key} holds a value this install does not take.")
         if store.get(key) is not None:
             raise SpaceMoveRefused("id_collides", 409, f"The setting {key} is here already.")
-        for pointer in pointers:
+        for pointer in _pointers(value):
             from kazma_core.security.vault import sealing_space
 
             if sealing_space(pointer, space) != space:
@@ -587,15 +716,24 @@ def _space_folders(space: str) -> dict[str, Path]:
             "documents": Path(get_document_storage_root()) / storage.space_folder(space)}
 
 
-def _space_secrets(space: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    from kazma_core.security.vault import get_vault
+def _space_secrets(space: str, by: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    from kazma_core.security.vault import SpaceKeyMissing, get_vault
+    from kazma_core.spaces import space_keys
 
     if not space_data._vault_rows(space) and not space_data._vault_keys(space):
         return [], []
     vault = get_vault()
     if vault is None:
         raise SpaceMoveRefused("vault_unavailable", 503, "The vault cannot be opened; nothing was made.")
-    return vault.export_space_sealed(space)
+    try:
+        keys, rows = vault.export_space_sealed(space)
+        # The keys leave with the bundle: here the space has a new one from
+        # now on (S4-07), so a bundle opened later opens nothing kept here.
+        space_keys.change_key(space, by=by)
+    except (SpaceKeyMissing, space_keys.KeyChangeRefused) as exc:
+        raise SpaceMoveRefused("secrets_unreadable", 409, "A secret of the space cannot be opened; "
+                                                          "nothing was made.") from exc
+    return keys, rows
 
 
 def _b64(raw: bytes) -> str:
@@ -624,6 +762,8 @@ class _Export:
         person; a member entry is left as it is (its row's rule decides)."""
         from kazma_core.spaces.identity import DEPARTED_ACCOUNT
 
+        if key in _NAME_FIELDS:
+            return ""
         if key in ACCOUNT_FIELDS and value != self.exporter and value in self.people:
             return DEPARTED_ACCOUNT
         entry = _entry_of(value)
@@ -687,7 +827,7 @@ def export_bundle(space: str, target: Path, password: str, *, by: str) -> dict[s
     registry = _must_own(space, by)
     if _files_bytes(space) > MAX_BUNDLE_BYTES:
         raise SpaceMoveRefused("too_big", 413, "The space's files are bigger than a bundle another install takes.")
-    keys, rows = _space_secrets(space)
+    keys, rows = _space_secrets(space, by)
     rows, staying = _travelling_secrets(space, by, registry, rows)
     named = {str(row["key_id"]) for row in rows}
     keys = [key for key in keys if str(key["key_id"]) in named or key.get("state") == "active"]
@@ -703,7 +843,7 @@ def export_bundle(space: str, target: Path, password: str, *, by: str) -> dict[s
         with zipfile.ZipFile(writer, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zipped:
             _write_tables(zipped, plan, ctx, tables, manifest)
             secret_names = {str(row["name"]) for row in rows}
-            settings = _space_settings(space, staying, secret_names)
+            settings = _space_settings(space, staying, secret_names, plan.left_out)
             manifest["settings"] = len(settings)
             _put(zipped, plan, "settings.json", json.dumps(settings, ensure_ascii=False, default=str).encode("utf-8"))
             for row in rows:
@@ -765,6 +905,15 @@ def _write_tables(zipped: zipfile.ZipFile, plan: _Export, ctx: space_data._Conte
                     if not plan.keeps(rule, row):
                         plan.left_out[f"{store}:{table}"] = plan.left_out.get(f"{store}:{table}", 0) + 1
                         continue
+                    if store == CHECKPOINTS:
+                        try:
+                            row = {k: space_data._jsonable(v)
+                                   for k, v in _rewrite_checkpoint(_decoded(row), plan.swap).items()}
+                        except SpaceMoveRefused:
+                            raise
+                        except ValueError:  # a state this build cannot read: it could not be resumed there
+                            plan.left_out[f"{store}:{table}"] = plan.left_out.get(f"{store}:{table}", 0) + 1
+                            continue
                     moved = {k: _rewrite(v, plan.swap, k)[1] for k, v in row.items()}
                     out.write((json.dumps(moved, ensure_ascii=False, default=str) + "\n").encode("utf-8"))
                     count += 1
@@ -941,22 +1090,28 @@ class _Target:
     virtual: bool = False
 
 
-def _space_checkpoints(space: str) -> Path:
-    """The space's own checkpoint file here, made by LangGraph's own saver
-    (the schema every checkpoint file has)."""
+def _checkpoint_schema(conn: sqlite3.Connection) -> None:
+    """The schema every checkpoint file has, made by LangGraph's own saver."""
     from langgraph.checkpoint.sqlite import SqliteSaver
 
     from kazma_core.checkpoint_serde import kazma_checkpoint_serde
-    from kazma_core.paths import space_checkpoints_db
 
-    path = space_checkpoints_db(space)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(str(path), check_same_thread=False)) as conn:
-        SqliteSaver(conn, serde=kazma_checkpoint_serde()).setup()
-    return path
+    SqliteSaver(conn, serde=kazma_checkpoint_serde()).setup()
+
+
+def _read_only(path: Path) -> sqlite3.Connection:
+    """*path* to be read while a bundle is checked. The space's own
+    checkpoint file is made only once the bundle is taken: until then its
+    schema alone, in memory."""
+    if path.is_file():
+        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    _checkpoint_schema(conn)
+    return conn
 
 
 def _targets(bundle: _Bundle) -> dict[tuple[str, str], _Target]:
+    from kazma_core.paths import space_checkpoints_db
     from kazma_core.spaces import row_stores
 
     row_stores.make_row_stores()
@@ -964,12 +1119,12 @@ def _targets(bundle: _Bundle) -> dict[tuple[str, str], _Target]:
     found: dict[tuple[str, str], _Target] = {}
     for store, tables in bundle.tables.items():
         if store == CHECKPOINTS:
-            name, path = "checkpoints_*.db", _space_checkpoints(bundle.space)
+            name, path = "checkpoints_*.db", space_checkpoints_db(bundle.space)
         elif store in paths and _logical_store(store, paths[store]) == store:
             name, path = store, paths[store]
         else:
             raise SpaceMoveRefused("unknown_table", 409, f"This install keeps no store {store} a space moves into.")
-        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
+        with closing(_read_only(path)) as conn:
             present = dict(space_data._tables(conn))
             for table in tables:
                 move = _rule(store, table)
@@ -1028,8 +1183,17 @@ class _Import:
 
         for key, value in row.items():
             _rewrite(value, look, key)
+        if table in ("checkpoints", "writes") and "type" in row:
+            try:
+                _rewrite_checkpoint(row, look)
+            except SpaceMoveRefused:
+                raise
+            except ValueError:
+                raise SpaceMoveRefused("not_a_bundle", 400, "A chat's state cannot be read.") from None
 
     def swap(self, key: str, value: str) -> str:
+        if key in _NAME_FIELDS:
+            return ""
         if key in ACCOUNT_FIELDS and value == self.exporter:
             return self.owner
         if _entry_of(value) == self.exporter:
@@ -1042,7 +1206,7 @@ def _check_rows(bundle: _Bundle, targets: dict[tuple[str, str], _Target], ctx: s
     """Every row the space's and allowed to move, every column known, no key
     here already."""
     for (store, table), target in targets.items():
-        with closing(sqlite3.connect(f"file:{target.path}?mode=ro", uri=True)) as conn:
+        with closing(_read_only(target.path)) as conn:
             for raw in bundle.lines(store, table):
                 row = _decoded(raw)
                 if not _belongs(row, target.rule, ctx):
@@ -1238,6 +1402,11 @@ def _write_rows(bundle: _Bundle, targets: dict[tuple[str, str], _Target], people
     written = 0
     for path in sorted(by_path, key=_order):
         items = by_path[path]
+        checkpoints = any(t.store == CHECKPOINTS for t in items)
+        if checkpoints:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with closing(sqlite3.connect(str(path), check_same_thread=False)) as made:
+                _checkpoint_schema(made)
         with closing(sqlite3.connect(str(path), timeout=30)) as conn:
             conn.execute("BEGIN IMMEDIATE")
             committed = False
@@ -1248,6 +1417,8 @@ def _write_rows(bundle: _Bundle, targets: dict[tuple[str, str], _Target], people
                     stop = _STOPS.get((target.store, target.table))
                     for raw in bundle.lines(target.store, target.table):
                         row = {k: _rewrite(v, people.swap, k)[1] for k, v in _decoded(raw).items()}
+                        if checkpoints:
+                            row = _rewrite_checkpoint(row, people.swap)
                         if stop is not None:
                             row = stop(row, stop_ctx)
                         if target.renumbered:
@@ -1386,11 +1557,15 @@ def _take_back_failures() -> tuple[type[BaseException], ...]:
 def _take_back(space: str, earlier: space_data._Context | None = None) -> None:
     """Remove everything of *space* this install holds: the space was not
     here before its import began (checked), so all of it is the import's."""
+    from kazma_core.paths import space_checkpoints_db
     from kazma_core.security.vault import get_vault
     from kazma_core.spaces import threads
 
     ctx, found = space_data._walk(space, earlier)
     space_data._erase_rows(found, ctx)
+    own = space_checkpoints_db(space)  # its own file, made by the import
+    for path in (own, own.with_name(own.name + "-wal"), own.with_name(own.name + "-shm")):
+        path.unlink(missing_ok=True)
     space_data._erase_settings(space, ctx.ids["threads"])
     for thread in ctx.ids["threads"]:
         threads.forget_thread(thread)  # its record went with the rows; its cached space too
@@ -1406,10 +1581,45 @@ def _take_back(space: str, earlier: space_data._Context | None = None) -> None:
             shutil.rmtree(staged, ignore_errors=True)
 
 
+def importing_spaces() -> frozenset[str]:
+    """The spaces an import is writing now, or left half written by a stop:
+    in the import journal. Their people are recorded last, so what reads "no
+    member left" or "no such space" leaves them alone. **Read what is stored
+    first, then this, then the identity store**: the journal is written
+    before anything of the space and emptied after it is recorded, so one
+    read after the other never misses it. Blocking (settings)."""
+    from kazma_core.config_store import get_config_store
+
+    held = get_config_store().get(JOURNAL_KEY)
+    return frozenset(str(space) for space in held) if isinstance(held, dict) else frozenset()
+
+
+def settle_at_start() -> None:
+    """:func:`settle_unfinished_imports` as Kazma starts: a stop in the
+    middle of an import leaves nothing of it until the next one. Nothing is
+    read where Spaces is not enforced (no space is brought in there).
+    Blocking."""
+    from kazma_core.spaces.identity import IdentityUnavailable
+
+    if not spaces_enforced():
+        return
+    try:
+        settle_unfinished_imports()
+    except (IdentityUnavailable, *_take_back_failures()):  # the next import or start tries again
+        logger.warning("[spaces] an unfinished import could not be looked for at start", exc_info=True)
+
+
 def settle_unfinished_imports() -> list[str]:
     """Take back every import a stop cut off (its space is in the journal and
-    not in the identity store). Returns the spaces taken back; one whose take
-    back failed stays in the journal for the next call."""
+    not in the identity store), never one that is running. Returns the spaces
+    taken back; one whose take back failed stays in the journal for the next
+    call."""
+    with _IMPORT_LOCK:
+        return _settle()
+
+
+def _settle() -> list[str]:
+    """:func:`settle_unfinished_imports`, the import lock held."""
     from kazma_core.config_store import get_config_store
     from kazma_core.spaces import identity
 
@@ -1455,7 +1665,7 @@ def import_bundle(source: Path, password: str, *, owner: str, by: str) -> dict[s
     if owner not in registry["accounts"]:
         raise SpaceMoveRefused("no_such_account", 400, "There is no such person here.")
     with _IMPORT_LOCK:
-        settle_unfinished_imports()
+        _settle()
         try:
             reader = SealedReader(source, password, purpose=FORMAT, max_bytes=MAX_BUNDLE_BYTES)
         except SealedFileRefused as exc:
@@ -1471,9 +1681,14 @@ def import_bundle(source: Path, password: str, *, owner: str, by: str) -> dict[s
 
 def _take_in(bundle: _Bundle, *, owner: str, by: str, people_module: Any, here: set[str]) -> dict[str, Any]:
     from kazma_core.security.vault import SpaceSecretsRefused, get_vault
+    from kazma_core.spaces import identity
 
     space = bundle.space
     people = _Import(bundle.exporter, owner, here)
+    try:
+        name = people_module._checked_name(str(bundle.manifest.get("name") or space))
+    except people_module.PeopleRefused:
+        raise SpaceMoveRefused("not_a_bundle", 400, "The bundle's space has no name this install takes.") from None
     _nothing_of_the_space_here(space)
     targets = _targets(bundle)
     ctx = _bundle_context(bundle)
@@ -1509,7 +1724,11 @@ def _take_in(bundle: _Bundle, *, owner: str, by: str, people_module: Any, here: 
         expired = _expire_waiting_cards(space, ctx.ids["threads"])
         _write_settings(space, settings, people)
         files = _write_files(bundle, entries)
-        people_module.record_moved_space(space, str(bundle.manifest.get("name") or space), owner, by=by)
+        try:
+            people_module.record_moved_space(space, name, owner, by=by)
+        except (people_module.PeopleRefused, identity.IdentityError) as exc:
+            code = exc.code if exc.code in ("space_exists", "no_such_account", "admin_only") else "not_recorded"
+            raise SpaceMoveRefused(code, 409, "The space could not be recorded; nothing was brought in.") from exc
         done = True
     finally:
         for key in keys:
