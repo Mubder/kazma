@@ -18,8 +18,9 @@ and a shared space she is in with Omar, in English and in Arabic.
    agent's notes, weekly summaries, lessons -- and nothing else.
 5. Personal memory is never touched by a move in either direction, the next
    turns' facts included (control: plain ledger rows take them).
-6. After the switch the space it left is written nothing; a thread record
-   that cannot be read fails the write, so it is tried again.
+6. After the switch a shared space it left is written nothing, and a personal
+   one only what was said there before the switch, when its write was queued;
+   a thread record that cannot be read fails the write, so it is tried again.
 7. A memory database restored from before the move keeps the turns out.
 8. A forget that fails half way is finished by the forget convergence.
 """
@@ -345,7 +346,7 @@ def test_the_next_turns_facts_stay(chat) -> None:
 def test_control_plain_ledger_rows_take_the_next_turns_facts(chat, monkeypatch) -> None:
     """The keep-out written as any forgotten turn's: the convergence reads
     "turn 3" as her next turn's number and takes back its facts."""
-    def plain(session: str, *, keys: Any, turns: Any, tenant_id: str) -> int:
+    def plain(session: str, *, keys: Any, turns: Any, tenant_id: str, said_here: int) -> int:
         return sum(forget.keep_turn_out(session, n, q, tenant_id=tenant_id) for n, q in turns)
 
     monkeypatch.setattr(forget, "keep_moved_turns_out", plain)
@@ -374,13 +375,182 @@ def test_nothing_of_a_move_waits_in_the_forget_journal(chat) -> None:
     assert forget_journal.pending(chat.db) == []
 
 
+# ── the rows a move writes ────────────────────────────────────────────────
+
+
+def _rows(chat: Chat, space: str, key: str = THREAD) -> list[tuple[int, str]]:
+    return [(int(r[0]), str(r[1])) for r in chat.db.execute(
+        "SELECT turn_number, question_sha FROM memory_forgotten WHERE tenant_id = ? AND session_key = ? "
+        "ORDER BY turn_number", (space, key))]
+
+
+def test_a_take_out_writes_rows_for_the_shared_spaces_turns_alone(chat) -> None:
+    _there_and_back(chat)
+    assert _rows(chat, OWN) == _rows(chat, OWN, SESSION) == [(3, forget.question_sha("I work at Initech."))]
+
+
+def test_a_turn_the_space_holds_anything_of_gets_no_row(chat) -> None:
+    """A chat whose record names no space it left (moved before that was
+    kept): what the space holds decides -- a memory, or a fact alone."""
+    _tell(chat, OWN, "en")
+    chat.row(OWN, "We leave on Friday.", at=T0 + 200)
+    chat.db.execute("DELETE FROM episodes WHERE tenant_id = ? AND turn_number = 1", (OWN,))
+    chat.db.commit()
+    before = chat.memory(OWN)
+    assert "Lisbon" in chat.facts(OWN), "turn 1 left a fact, and no memory is held of it"
+    chat.move(OWN, TEAM)
+    threads.move_thread(THREAD, TEAM)  # the record as it was before it named what it left
+    chat.move(TEAM, OWN)
+    assert _rows(chat, OWN) == [(3, forget.question_sha("We leave on Friday."))]
+    forget.converge(chat.db)
+    assert chat.memory(OWN) == before
+
+
+def test_the_rows_are_numbered_as_reconcile_numbers_the_turns(chat) -> None:
+    """Slash commands, a message that is only an attachment, a question no
+    answer came to and the same question twice: the rows name every turn
+    reconcile counts, by its number and its question, under both keys -- and
+    after a new turn in the target its pass learns none of the old ones."""
+    from kazma_core.memory.turn_reconcile import _turns
+    from kazma_ui.session_manager import get_session_manager
+
+    for n, text in enumerate(["/long on", "I live in Lisbon.", "a photo", "ok so", "I live in Lisbon."]):
+        chat.row(OWN, text, at=T0 + 60 * n)
+    with scope.bind_scope(OWN, SARA):
+        store = get_session_manager()
+        held = store.get(SESSION)
+        held.messages[4]["content"] = [{"type": "image_url", "image_url": {"url": "x"}}]  # only an attachment
+        del held.messages[7]  # "ok so" was never answered
+        store.put(held)
+        turns = [(t[0], forget.question_sha(t[1])) for t in _turns(held.messages)]
+    assert [n for n, _sha in turns] == [2, 4, 5], "reconcile passes over the command and the bare attachment"
+    chat.move(OWN, TEAM)
+    assert _rows(chat, TEAM) == _rows(chat, TEAM, SESSION)
+    assert set(turns) <= set(_rows(chat, TEAM)) and [n for n, _sha in _rows(chat, TEAM)] == [1, 2, 3, 4, 5]
+    chat.say(TEAM, "I live in Lisbon.", n=6, at=T0 + 900)
+    chat.row(TEAM, "We leave on Friday.", at=T0 + 960)
+    chat.reconcile()
+    assert chat.remembers(TEAM) == ["I live in Lisbon.", "We leave on Friday."]
+    assert [int(r[0]) for r in chat.db.execute(
+        "SELECT turn_number FROM episodes WHERE tenant_id = ? ORDER BY turn_number", (TEAM,))] == [6, 7]
+
+
+def test_a_fork_of_a_moved_chat_learns_none_of_it_and_loses_nothing(chat) -> None:
+    """A fork's transcript holds the old turns: it is given the rows as the
+    move wrote them, so they keep the copies out and take back no turn of
+    its own."""
+    chat.say(OWN, "I live in Lisbon.", n=1, at=T0)
+    chat.row(OWN, "/cost", at=T0 + 10)
+    chat.move(OWN, TEAM)
+    threads.record_thread("t-fork", TEAM, SARA)
+    assert forget.inherit_ledger(THREAD, "t-fork")["turns"] == 2
+    assert [n for n, _sha in _rows(chat, TEAM, "t-fork")] == [1, 2]
+    assert forget_journal.pending(chat.db) == []
+    _say(SARA, "t-fork", "My name is Sara.", n=2, at=time.time())
+    forget.converge(chat.db)
+    assert "Sara" in chat.facts(TEAM), "its live turn 2 is not the row's"
+    copied = sqlite3.connect(str(chat.team.tmp / "memory_forget_journal.db"))
+    try:
+        kinds = [r[0] for r in copied.execute("SELECT kind FROM forget_journal WHERE session_key = 't-fork'")]
+    finally:
+        copied.close()
+    assert kinds == ["moved_turns"]
+
+
+def test_an_undo_in_the_shared_space_leaves_her_own_memory(chat) -> None:
+    """A rewind takes its turns back from the memory of the space it is made
+    in: what was remembered of them where they were said stays."""
+    chat.say(OWN, "I live in Lisbon.", n=1, at=T0)
+    chat.move(OWN, TEAM)
+    chat.say(TEAM, "I work at Initech.", n=2, at=T0 + 60)
+    before = chat.memory(OWN)
+    old = [{"role": "user", "content": "I live in Lisbon."}, {"role": "assistant", "content": "Noted."},
+           {"role": "user", "content": "I work at Initech."}, {"role": "assistant", "content": "Noted."}]
+    asyncio.run(forget.rewind_memory(THREAD, old, [], tenant_id=TEAM, from_turn=1))
+    assert chat.remembers(TEAM) == [] and chat.facts(TEAM) == set()
+    assert chat.memory(OWN) == before
+
+
+# ── a turn still queued when its chat moves ───────────────────────────────
+
+
+def _queued(space: str, text: str, n: int) -> dict[str, Any]:
+    """What the durable queue holds of a turn whose write is still waiting."""
+    return {"user_text": text, "assistant_text": "Noted.", "session_id": THREAD, "turn": n,
+            "tenant_id": space, "at": T0 + 60 * n, "said_by": SARA}
+
+
+def test_only_the_personal_space_it_was_shared_out_of_takes_those_turns(chat) -> None:
+    """Shared with the team, taken out, shared with another space: a write
+    the team still had queued is not the team's."""
+    threads.move_thread(THREAD, "another-space", left_turn=5)
+    assert forget.last_turn_taken([SESSION, THREAD], OWN) == 5
+    assert forget.last_turn_taken([SESSION, THREAD], TEAM) == -1
+    assert forget.last_turn_taken([SESSION, THREAD], "another-space") is None
+    assert forget.last_turn_taken(["a chat with no record"], TEAM) is None
+
+
+@pytest.mark.parametrize("lang", ["en", "ar"])
+def test_a_turn_queued_when_its_chat_is_shared_is_still_hers(chat, lang) -> None:
+    from kazma_core.memory.consolidator import run_deferred_turn_memory
+
+    (home, word), (work, _w) = SAYINGS[lang]
+    chat.row(OWN, home, at=T0 + 60)
+    chat.move(OWN, TEAM)
+    assert not forget.turn_kept_out(THREAD, 1, home, tenant_id=OWN), "its lesson is hers too"
+    assert run_deferred_turn_memory(_queued(OWN, home, 1))
+    assert chat.remembers(OWN) == [home] and any(word in fact for fact in chat.facts(OWN))
+    run_deferred_turn_memory(_queued(OWN, work, 2))  # numbered after it left
+    assert chat.remembers(OWN) == [home] and chat.held(TEAM) == 0
+
+
+def test_a_turn_still_queued_when_its_chat_is_back_is_still_hers(chat) -> None:
+    """Shared and taken back out before its write ran: no row names it."""
+    from kazma_core.memory.consolidator import run_deferred_turn_memory
+
+    chat.row(OWN, "I live in Lisbon.", at=T0 + 60)
+    chat.move(OWN, TEAM)
+    chat.say(TEAM, "I work at Initech.", n=2, at=T0 + 120)
+    chat.move(TEAM, OWN)
+    assert run_deferred_turn_memory(_queued(OWN, "I live in Lisbon.", 1))
+    assert chat.remembers(OWN) == ["I live in Lisbon."] and "Lisbon" in chat.facts(OWN)
+    chat.reconcile()
+    assert chat.remembers(OWN) == ["I live in Lisbon."], "and what she said in the shared space is not"
+
+
+def test_a_turn_queued_when_its_chat_is_taken_out_is_not_the_teams(chat) -> None:
+    from kazma_core.memory.consolidator import run_deferred_turn_memory
+
+    threads.move_thread(THREAD, TEAM)
+    chat.row(TEAM, "I live in Lisbon.", at=T0 + 60)
+    chat.move(TEAM, OWN)
+    run_deferred_turn_memory(_queued(TEAM, "I live in Lisbon.", 1))
+    assert chat.held(TEAM) == 0 and chat.held(OWN) == 0
+
+
+@pytest.mark.parametrize(("frm", "to", "written"), [(OWN, TEAM, 1), (TEAM, OWN, 0)])
+def test_reconcile_meets_a_row_a_move_left_behind(chat, monkeypatch, frm, to, written) -> None:
+    """The source's row its last step could not remove: a personal space
+    still learns what was said there, a shared one nothing more."""
+    from kazma_ui import chat_move
+
+    if frm == TEAM:
+        threads.move_thread(THREAD, TEAM)
+    chat.row(frm, "I live in Lisbon.", at=T0)
+    with monkeypatch.context() as patch:
+        patch.setattr(chat_move, "_remove_row", lambda *_a: (_ for _ in ()).throw(OSError("busy")))
+        chat.move(frm, to)
+    assert chat.reconcile()["turns_written"] == written
+    assert chat.remembers(frm) == ["I live in Lisbon."][:written] and chat.remembers(to) == []
+
+
 # ── 6. the space it left is written nothing ───────────────────────────────
 
 
-def test_after_the_switch_the_space_it_left_is_written_nothing(chat) -> None:
+def test_after_the_switch_her_space_takes_no_later_turn(chat) -> None:
     chat.say(OWN, "I live in Lisbon.", n=1, at=T0)
     chat.move(OWN, TEAM)
-    _say(SARA, THREAD, "I work at Initech.", n=2, at=T0 + 60, space=OWN)  # queued before the move
+    _say(SARA, THREAD, "I work at Initech.", n=2, at=T0 + 60, space=OWN)  # numbered after it left
     assert chat.remembers(OWN) == ["I live in Lisbon."] and chat.facts(OWN) == {"Lisbon"}
 
 

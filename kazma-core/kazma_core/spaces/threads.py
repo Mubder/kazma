@@ -21,7 +21,10 @@ ContextVar is left as the entry point left it.
 The record holds ids only: no title, no text. It is one small row per
 thread, kept while its chat exists (:func:`forget_thread` when it is deleted).
 It changes in one way only: a person moves their chat between their own
-space and a shared one (Spaces S2-12, :func:`move_thread`).
+space and a shared one (Spaces S2-12, :func:`move_thread`). A chat shared out
+of a personal space is recorded with that space and the turns it held when it
+left (``left_space``, ``left_turn``): what was said there is that space's to
+remember, also when its write was still queued.
 
 **Everything kept by thread follows the record** (S1-08): the checkpoints,
 the Time Travel steps, the plan, the receipts. :func:`thread_refusal` is the one
@@ -75,6 +78,10 @@ CREATE TABLE IF NOT EXISTS thread_scopes (
 CREATE INDEX IF NOT EXISTS idx_thread_scopes_space ON thread_scopes(space_id);
 """
 
+#: Added to a store made before chats could move (S2-12).
+_COLUMNS = (("left_space", "TEXT NOT NULL DEFAULT ''"), ("left_turn", "INTEGER NOT NULL DEFAULT 0"))
+_FIELDS = "thread_id, space_id, opener, created_at, left_space, left_turn"
+
 
 class ThreadInAnotherSpace(NoSpaceBound):
     """A turn was asked for on a thread that belongs to another space."""
@@ -87,12 +94,15 @@ class _AskerNotInSpace(NoSpaceBound):
 
 @dataclass(frozen=True)
 class ThreadRecord:
-    """Where a chat thread lives and who opened it."""
+    """Where a chat thread lives and who opened it; and, for a chat shared
+    out of a personal space, that space and the turns the chat held then."""
 
     thread_id: str
     space_id: str
     opener: str
     created_at: str
+    left_space: str = ""
+    left_turn: int = 0
 
 
 def new_web_thread_id(session_id: str) -> str:
@@ -131,7 +141,10 @@ def _connection() -> Iterator[sqlite3.Connection]:
         if path not in _schema_ready:
             with _schema_lock:
                 if path not in _schema_ready:
+                    from kazma_core.db.sqlite_columns import add_missing_columns
+
                     conn.executescript(_SCHEMA)
+                    add_missing_columns(conn, "thread_scopes", _COLUMNS)
                     _schema_ready.add(path)
         yield conn
     finally:
@@ -141,7 +154,8 @@ def _connection() -> Iterator[sqlite3.Connection]:
 def _row(row: tuple | None) -> ThreadRecord | None:
     if row is None:
         return None
-    return ThreadRecord(thread_id=row[0], space_id=row[1], opener=row[2], created_at=row[3])
+    return ThreadRecord(thread_id=row[0], space_id=row[1], opener=row[2], created_at=row[3],
+                        left_space=str(row[4] or ""), left_turn=int(row[5] or 0))
 
 
 def record_of(thread_id: str) -> ThreadRecord | None:
@@ -151,8 +165,7 @@ def record_of(thread_id: str) -> ThreadRecord | None:
     with _connection() as conn:
         found = _row(
             conn.execute(
-                "SELECT thread_id, space_id, opener, created_at FROM thread_scopes "
-                "WHERE thread_id = ?",
+                f"SELECT {_FIELDS} FROM thread_scopes WHERE thread_id = ?",
                 (str(thread_id),),
             ).fetchone()
         )
@@ -180,8 +193,7 @@ def record_thread(thread_id: str, space_id: str, opener: str) -> ThreadRecord:
         )
         stands = _row(
             conn.execute(
-                "SELECT thread_id, space_id, opener, created_at FROM thread_scopes "
-                "WHERE thread_id = ?",
+                f"SELECT {_FIELDS} FROM thread_scopes WHERE thread_id = ?",
                 (str(thread_id),),
             ).fetchone()
         )
@@ -230,14 +242,18 @@ def known_space(thread_id: str) -> str | None:
         return _spaces.get(str(thread_id or ""))
 
 
-def move_thread(thread_id: str, space_id: str) -> ThreadRecord:
+def move_thread(thread_id: str, space_id: str, *, left_turn: int = 0) -> ThreadRecord:
     """Record that *thread_id* is now *space_id*'s: a chat a person moved
     between their own space and a shared one (Spaces S2-12,
     ``kazma_ui.chat_move``). The one statement that changes where a chat is:
     everything kept by thread alone follows it (the checkpoints' home, Time
     Travel's steps, the grants, the guards). A thread with no record (from
     before Spaces: the owner's, N19) gets one, opened by the owner. The
-    opener stays. This process's memory of the space changes with it."""
+    opener stays. This process's memory of the space changes with it.
+
+    *left_turn*: the turns the chat holds as it leaves a personal space for a
+    shared one; that space goes on taking those (``memory.forget``). 0 (a
+    take-out): the space it leaves takes nothing more."""
     tid = str(thread_id or "")
     if not tid or not valid_space_id(space_id):
         raise ValueError(f"not a thread and a space: {thread_id!r}, {space_id!r}")
@@ -245,17 +261,20 @@ def move_thread(thread_id: str, space_id: str) -> ThreadRecord:
         conn.execute("BEGIN IMMEDIATE")
         committed = False
         try:
-            found = conn.execute("SELECT 1 FROM thread_scopes WHERE thread_id = ?", (tid,)).fetchone()
+            found = conn.execute("SELECT space_id FROM thread_scopes WHERE thread_id = ?", (tid,)).fetchone()
+            left = str(found[0]) if found is not None else _scope.OWNER_SPACE_ID
+            turns = max(0, int(left_turn or 0))
+            behind = (left if turns else "", turns)
             if found is None:
                 conn.execute(
-                    "INSERT INTO thread_scopes (thread_id, space_id, opener, created_at) VALUES (?, ?, ?, ?)",
-                    (tid, space_id, _scope.OWNER_ACCOUNT_ID, datetime.now(UTC).isoformat()),
+                    f"INSERT INTO thread_scopes ({_FIELDS}) VALUES (?, ?, ?, ?, ?, ?)",
+                    (tid, space_id, _scope.OWNER_ACCOUNT_ID, datetime.now(UTC).isoformat(), *behind),
                 )
             else:
-                conn.execute("UPDATE thread_scopes SET space_id = ? WHERE thread_id = ?", (space_id, tid))
-            stands = _row(conn.execute(
-                "SELECT thread_id, space_id, opener, created_at FROM thread_scopes WHERE thread_id = ?",
-                (tid,)).fetchone())
+                conn.execute("UPDATE thread_scopes SET space_id = ?, left_space = ?, left_turn = ? "
+                             "WHERE thread_id = ?", (space_id, *behind, tid))
+            stands = _row(conn.execute(f"SELECT {_FIELDS} FROM thread_scopes WHERE thread_id = ?",
+                                       (tid,)).fetchone())
             conn.execute("COMMIT")
             committed = True
         finally:

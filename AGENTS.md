@@ -1272,7 +1272,8 @@ declared.
 TT-03: memory is rewound, not kept). `/undo`, `/edit`, a restore
 (`apply_snapshot_to_thread`) and abort call `memory.forget.rewind_memory`
 after they write: the turns they took back -- episodes, the agent's notes,
-facts -- are forgotten under every key and tenant that holds them, journaled,
+facts -- are forgotten under every key and tenant that holds them (once
+Spaces is enforced, in the rewind's own space alone: S2-12), journaled,
 with ledger rows from the old questions (a deferred write, the deep pass and
 turn reconcile from the unchanged transcript do not bring them back); a fork
 touches the original chat's memory not at all. The deep pass applies facts
@@ -15850,26 +15851,36 @@ an install with one account behaves as before.
     memory between spaces failed review (restatements, resurrected facts,
     notes copied twice): nothing of memory is carried, rebuilt, reopened or
     extracted again by a move, and nothing may be added that does.
-    - *In:* before anything of the chat is in the target, every turn it
-      already holds is kept out of the target's memory
+    - *In:* before anything of the chat is in the target, every turn that is
+      not the target's own is kept out of its memory
       (`forget.keep_moved_turns_out`: a ledger row under every key of the
-      chat, one journal entry of kind `moved_turns`; a turn the target
-      already remembers gets none), and a whole-chat keep-out of the source
-      is copied. Turn reconcile, the fact passes and the past-chats search
-      then leave them out by the rules they have. The rows are marked
-      (`forget.MOVED_IN`) and `enforce_ledger` leaves them out: the chat
-      store's numbers run ahead of the live turn numbers (a slash command is
-      a row there and no turn), so a plain row would take back the facts of a
-      turn said after the move. What is said after the move is remembered as
+      chat, numbered as `turn_reconcile._turns` numbers it, one journal entry
+      of kind `moved_turns`), and a whole-chat keep-out of the source is
+      copied. The target's own, which get no row: a turn the chat held when
+      it left this space (`ThreadRecord.left_turn`), and one the target holds
+      a memory or a fact of. Turn reconcile, the fact passes and the
+      past-chats search then leave the rest out by the rules they have. The
+      rows are marked (`forget.MOVED_IN`) and `enforce_ledger` leaves them
+      out: the chat store's numbers run ahead of the live turn numbers (a
+      slash command is a row there and no turn), so a plain row would take
+      back the facts of a turn said after the move; a fork is given them
+      marked (`inherit_ledger`). What is said after the move is remembered as
       any turn is.
     - *Out of a shared space:* `forget.forget_chat` runs in the SHARED
-      tenant (journaled, finished by the convergence), and entities left
-      with nothing but a name go (`forget.retire_names_left`). A personal
-      space's memory is never touched by a move, either way.
-    - After the switch every live writer refuses the space the chat left
-      (`forget.moved_elsewhere`, in `refuses_write`; turn reconcile asks it
-      before it reads a row). A thread-record file that cannot be read FAILS
-      the write, so the queue tries it again: never "not moved".
+      tenant with the chat's keys (journaled, finished by the convergence),
+      and entities left with nothing but a name go
+      (`forget.retire_names_left`). It reopens nothing the chat's facts had
+      closed there, and a fact another chat of that space restated can go
+      with it (decided; the guide says so). A personal space's memory is
+      never touched by a move, either way, nor by a rewind made in another
+      space (`forget.replay_rewind` keeps to its own space once enforced).
+    - After the switch every live writer asks `forget.last_turn_taken` (in
+      `refuses_write`; turn reconcile asks it before it reads a row): a
+      personal space the chat was shared out of still takes the turns the
+      chat held then (`threads.move_thread(left_turn=)`: one whose write was
+      queued), and nothing later; a shared space it was taken out of takes
+      nothing more. A thread-record file that cannot be read FAILS the write,
+      so the queue tries it again: never "not moved".
     - *The move* (`kazma_ui/chat_move.py`, `_move_chat`) takes the thread's
       mutation lock first, settles what an earlier move of the chat left,
       and checks everything again: where the chat is, no turn running, no
@@ -15915,7 +15926,8 @@ an install with one account behaves as before.
       mark in the shared space, the design turned down, as the control; the
       state cleaned in place on real Postgres),
       `tests/test_chat_move_memory.py` (the keep-out taken out, a take-out
-      that forgets nothing and plain ledger rows as the controls),
+      that forgets nothing and plain ledger rows as the controls; a turn
+      queued at a share, at a take-out and at a share and take-out),
       `tests/_chat_move_space_cases.py`, `tests/e2e/test_chat_moves_browser.py`
       (by the sidebar, EN/AR).
 - **An approval card goes to the person it asks (S2-05, 2026-11-22;

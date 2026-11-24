@@ -1370,6 +1370,32 @@ def test_the_owners_rows_from_before_spaces_follow_too(world, monkeypatch) -> No
     assert space_of("t-before") == {i["family"]} and space_of("t-hers") == {i["mine"]}
 
 
+def test_a_record_names_the_personal_space_a_chat_was_shared_out_of(world) -> None:
+    w, i = world, world.ids
+    session, thread = w.chat("reem", i["mine"], mark="left")
+    assert w.move("reem", i["mine"], session, i["family"]).status_code == 200
+    record = threads.record_of(thread)
+    assert (record.left_space, record.left_turn) == (i["mine"], 1)
+    assert w.move("reem", i["family"], session, i["mine"]).status_code == 200
+    record = threads.record_of(thread)
+    assert (record.left_space, record.left_turn) == ("", 0), "a shared space it leaves takes nothing more"
+
+
+def test_a_thread_store_from_before_chats_moved_is_read(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "thread_scopes.db"
+    with closing(sqlite3.connect(path)) as conn, conn:
+        conn.execute("CREATE TABLE thread_scopes (thread_id TEXT PRIMARY KEY, space_id TEXT NOT NULL, "
+                     "opener TEXT NOT NULL, created_at TEXT NOT NULL)")
+        conn.execute("INSERT INTO thread_scopes VALUES ('t-old', 'a-space', 'reem', '2026-11-17')")
+    monkeypatch.setattr(threads, "thread_scopes_db", lambda: str(path))
+    monkeypatch.setattr(threads, "_spaces", {})
+    record = threads.record_of("t-old")
+    assert (record.space_id, record.left_space, record.left_turn) == ("a-space", "", 0)
+    assert threads.move_thread("t-old", "b-space", left_turn=4).left_space == "a-space"
+    assert threads.move_thread("t-new", "b-space", left_turn=2).left_space == scope.OWNER_SPACE_ID, (
+        "a chat with no record is the owner's")
+
+
 def test_two_moves_at_once_ask_again_under_the_lock(world) -> None:
     from kazma_ui.chat_move import _move_chat
 

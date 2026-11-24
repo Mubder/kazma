@@ -29,7 +29,8 @@ that cannot be read refuses) -- then:
 
 1. **journal** the attempt (``chat_moves.record_move``, stage ``copying``);
 2. **keep the old messages out of the target's memory**
-   (``memory.forget.keep_moved_turns_out``, and the source's whole-chat
+   (``memory.forget.keep_moved_turns_out``: the turns that are not its own,
+   numbered as turn reconcile numbers them; and the source's whole-chat
    keep-out), before anything of the chat is in the target;
 3. **copy** the chat row into the target space without what its turns
    remembered (:func:`_moved_message`; the person's own messages that name no
@@ -39,8 +40,10 @@ that cannot be read refuses) -- then:
    ``chat_moves.moved_state``);
 4. **switch**: the thread's record names the target (``threads.move_thread``;
    stage ``switched``) and its journal of frames is dropped. From here the
-   chat is in the target: the memory writers refuse the source, and every
-   socket and stream of the chat open in another space is closed
+   chat is in the target: the memory writers refuse the source (a personal
+   space still takes the turns said before this, when their writes were
+   queued), and every socket and stream of the chat open in another space is
+   closed
    (``live_connections.thread_moved``);
 5. **finish** (:func:`_finish`, :data:`_STEPS`): the rows that name the
    thread beside a space follow it, the chat apps' pointers to it and its
@@ -198,26 +201,33 @@ def _remove_row(space: str, by: str, session_id: str) -> None:
 
 
 def _turns_of(messages: list[Any]) -> list[tuple[int, str]]:
-    """``(number, question)`` of every message a person wrote, counted as the
-    readers of the chat store count turns (``turn_reconcile._turns``,
-    ``transcript_recall._without_turns``)."""
+    """``(number, question)`` of every message a person wrote: turn
+    reconcile's own turns (``turn_reconcile._turns``), and, numbered the same,
+    the messages it passes over and the past-chats search reads (slash
+    commands)."""
     from kazma_core.memory.chat_history import normalize_message
     from kazma_core.memory.consolidator import message_text
+    from kazma_core.memory.turn_reconcile import _turns
 
     asked = [m for m in (normalize_message(m) for m in messages) if m.get("role") == "user"]
-    return [(number, message_text(m.get("content"))) for number, m in enumerate(asked, start=1)]
+    numbered = {n: message_text(m.get("content")) for n, m in enumerate(asked, start=1)}
+    numbered.update({turn[0]: turn[1] for turn in _turns(messages)})
+    return sorted(numbered.items())
 
 
 def _keep_out_of_memory(session: Any, entry: dict[str, Any]) -> None:
-    """The target learns nothing from the messages the chat already holds:
-    every turn is kept out of its memory, and so is the whole chat when the
-    person keeps it out where it is now. Before the switch, and before the
-    row is there for turn reconcile to read."""
+    """The target learns nothing from the messages the chat already holds,
+    but what was said there before: every other turn is kept out of its
+    memory, and so is the whole chat when the person keeps it out where it is
+    now. Before the switch, and before the row is there for turn reconcile to
+    read."""
     from kazma_core.memory import forget
 
     keys = [entry["session"], entry["thread"]]
+    record = threads.record_of(entry["thread"])
+    said_here = record.left_turn if record is not None and record.left_space == entry["target"] else 0
     forget.keep_moved_turns_out(entry["session"], keys=keys, turns=_turns_of(session.messages),
-                                tenant_id=entry["target"])
+                                tenant_id=entry["target"], said_here=said_here)
     whole, _turns = forget.forgotten_in_chat(entry["source"], keys)
     if whole:
         forget.set_chat_remembered(entry["session"], False, tenant_id=entry["target"], keys=keys)
@@ -379,7 +389,7 @@ async def _move_chat(*, session_id: str, from_space: str, to_space: str, by: str
         attempt = uuid.uuid4().hex
         turns = len(_turns_of(session.messages))
         entry: dict[str, Any] = {"thread": thread, "session": session_id, "source": from_space,
-                                 "target": to_space, "by": by, "taken_out": taken_out,
+                                 "target": to_space, "by": by, "taken_out": taken_out, "turns": turns,
                                  "title": str(session.title or ""), "stage": "copying", "at": time.time()}
         await asyncio.to_thread(chat_moves.record_move, attempt, entry)
         # ``None`` while it runs: a stop of any kind (a refusal, a cancel)
@@ -421,7 +431,10 @@ async def _copy(session: Any, entry: dict[str, Any], checkpoints: Any) -> None:
 
 
 def _switch(attempt: str, entry: dict[str, Any]) -> None:
-    threads.move_thread(entry["thread"], entry["target"])
+    # Shared, the personal space goes on taking what was said before this; a
+    # shared space a chat is taken out of takes nothing more.
+    threads.move_thread(entry["thread"], entry["target"],
+                        left_turn=0 if entry["taken_out"] else int(entry["turns"]))
     chat_moves.record_move(attempt, {"stage": "switched"})
 
 

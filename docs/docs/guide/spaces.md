@@ -104,7 +104,10 @@ are in, and back out:
   conversation. What Kazma remembered from it stays where it was said, and
   from now on it remembers what you say in the new space. Taking a chat out
   of a shared space makes that space forget it: its memories, notes,
-  summaries and lessons. Your own space's memory is never changed by a move.
+  summaries and lessons. It does not bring back what the chat's facts had
+  replaced there, and a fact another chat of that space states too can go
+  with it. Your own space's memory is never changed by a move, nor by an undo
+  in the shared space.
   The chat's reminders and scheduled tasks, and the files Kazma shared in
   it, move with it. Its Time Travel steps do not, and a file you attached
   has to be attached again. A chat from a chat app (Telegram, Discord,

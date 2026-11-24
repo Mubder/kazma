@@ -58,7 +58,7 @@ __all__ = [
     "forget_mentions",
     "keep_moved_turns_out",
     "keep_turn_out",
-    "moved_elsewhere",
+    "last_turn_taken",
     "forgotten_in_chat",
     "forgotten_turns",
     "question_sha",
@@ -153,7 +153,8 @@ def refuses_write(
     if not session_id:
         return False
     names = list(dict.fromkeys([session_id, *(chat_keys(session_id) if keys is None else keys)]))
-    if moved_elsewhere(names, tenant_id):
+    last = last_turn_taken(names, tenant_id)
+    if last is not None and int(turn_number or 0) > last:
         return True
     marks = ",".join("?" for _ in names)
     return bool(
@@ -167,18 +168,40 @@ def refuses_write(
     )
 
 
-def moved_elsewhere(keys: Iterable[str], tenant_id: str) -> bool:
-    """Whether the chat *keys* is recorded in another space than *tenant_id*
-    (Spaces S2-12): a person moved it, and what was queued for it before --
-    a post-turn write, a deep pass, a reconcile pass -- must not write into
-    the space it left (``kazma_ui.chat_move``). Only a chat with a record
-    counts: one with none (imported, from before Spaces, the agent's notes)
-    is where its writer says. Nothing is read before Spaces is enforced.
+def last_turn_taken(keys: Iterable[str], tenant_id: str) -> int | None:
+    """The last turn of the chat *keys* that *tenant_id* still takes, when
+    the chat moved to another space (Spaces S2-12, ``kazma_ui.chat_move``);
+    None when it is here, and every turn is taken.
+
+    Shared out of a personal space, what was said there before the switch is
+    that space's to remember, also when its write was still queued: the turns
+    the chat held then (``threads.ThreadRecord.left_turn``). Taken out of a
+    shared space, nothing more is: -1. A writer that names no turn (0) counts
+    as before the switch.
 
     Raises when the thread records cannot be read: where the chat is is not
     known, so the write fails and the queue tries it again (the move's
     re-review, N11). Taken as "not moved", a busy file wrote a turn into the
     space its chat had left."""
+    keys = list(keys)
+    if not _moved_elsewhere(keys, tenant_id):
+        return None
+    from kazma_core.spaces import threads
+
+    tenant = space_of_record(tenant_id)
+    for key in keys:
+        record = threads.record_of(key)
+        if record is not None:
+            return record.left_turn if record.left_space == tenant and record.left_turn > 0 else -1
+    return -1
+
+
+def _moved_elsewhere(keys: Iterable[str], tenant_id: str) -> bool:
+    """Whether the chat *keys* is recorded in another space than *tenant_id*:
+    a person moved it. Only a chat with a record counts: one with none
+    (imported, from before Spaces, the agent's notes) is where its writer
+    says. Nothing is read before Spaces is enforced. Raises when the thread
+    records cannot be read (:func:`last_turn_taken`)."""
     from kazma_core.spaces.scope import spaces_enforced
 
     if not spaces_enforced():
@@ -1187,14 +1210,18 @@ def inherit_ledger(source_key: str, new_key: str) -> dict[str, Any]:
         marks = ",".join("?" for _ in source)
         rows = _ledger_rows(
             conn,
-            "SELECT DISTINCT tenant_id, turn_number, question_sha FROM memory_forgotten "
-            f"WHERE session_key IN ({marks}) ORDER BY tenant_id, turn_number, question_sha",
-            source,
+            "SELECT DISTINCT tenant_id, turn_number, question_sha, COALESCE(episode_id, '') = ? "
+            f"FROM memory_forgotten WHERE session_key IN ({marks}) ORDER BY tenant_id, turn_number, question_sha",
+            (MOVED_IN, *source),
         )
         whole = turns = 0
         now = time.time()
-        for tenant, turn, sha in rows:
+        moved: dict[str, list[tuple[int, str]]] = {}
+        for tenant, turn, sha, moved_in in rows:
             tid, turn, sha = space_of_record(tenant), int(turn or 0), str(sha or "")
+            if moved_in:
+                moved.setdefault(tid, []).append((turn, sha))
+                continue
             if turn == 0 and not sha:
                 seq = forget_journal.append("keep_out", tenant_id=tid, session_key=new_key,
                                             detail=forget_journal.keys_detail(targets))
@@ -1211,6 +1238,14 @@ def inherit_ledger(source_key: str, new_key: str) -> dict[str, Any]:
                 [(tid, k, turn, sha, now) for k in targets],
             )
             forget_journal.mark_applied(conn, seq)
+        for tid, kept in moved.items():
+            # The turns a move kept out of the space, marked as its own rows
+            # are: they keep the fork's copies out and take nothing back.
+            seq = forget_journal.append("moved_turns", tenant_id=tid, session_key=new_key,
+                                        detail=forget_journal.moved_turns_detail(targets, kept))
+            _write_moved_turns(conn, tid, targets, kept, at=now)
+            forget_journal.mark_applied(conn, seq)
+            turns += len(kept)
         conn.commit()
         return {"chat_kept_out": whole > 0, "turns": turns}
     finally:
@@ -1280,23 +1315,26 @@ MOVED_IN = "moved"
 
 
 def keep_moved_turns_out(
-    chat: str, *, keys: Iterable[str], turns: Iterable[tuple[int, str]], tenant_id: str,
+    chat: str, *, keys: Iterable[str], turns: Iterable[tuple[int, str]], tenant_id: str, said_here: int = 0,
 ) -> int:
-    """Keep every turn a chat already holds out of the memory of the space it
+    """Keep the turns a chat already holds out of the memory of the space it
     is about to move into (Spaces S2-12, ``kazma_ui.chat_move``): a ledger row
     per turn, under every key of the chat, so turn reconcile, the fact passes
     and the past-chats search leave them out by the rules they have. *turns*
-    is ``(number, question)`` as the chat store counts them. Returns how many.
+    is ``(number, question)`` as turn reconcile counts them
+    (``turn_reconcile._turns``). Returns how many.
 
     Journaled first, as one entry (``moved_turns``): a memory database
     restored from before the move keeps them out too.
 
-    A turn the space already remembers (said while the chat was there before)
-    gets no row: a move never touches what a space remembers. That is also
-    why these rows are marked (:data:`MOVED_IN`). The numbers the chat store
-    counts run ahead of the live turn numbers (a slash command is a message
-    there and no turn), so a plain row of turn 4 would take back the facts of
-    the live turn 4 said after the move."""
+    Only a turn that is not the space's own gets a row: never one said while
+    the chat was there before -- a turn up to *said_here*, the turns it held
+    when it left this space, also while its write is still queued -- nor one
+    the space holds a memory or a fact of. A move never touches what a space
+    remembers. That is also why these rows are marked (:data:`MOVED_IN`): the
+    numbers the chat store counts run ahead of the live turn numbers (a slash
+    command is a message there and no turn), so a plain row of turn 4 would
+    take back the facts of the live turn 4 said after the move."""
     from kazma_core.memory import forget_journal
 
     names = [k for k in dict.fromkeys([*keys, chat]) if k]
@@ -1306,11 +1344,14 @@ def keep_moved_turns_out(
         from kazma_core.memory.limits import turn_key
 
         held = _remembered_questions(conn, owner, names)
+        stated = _turns_with_facts(conn, owner, names)
         rows: list[tuple[int, str]] = []
         for number, question in turns:
             key = turn_key(str(question or ""))
             if key and held[key] > 0:
                 held[key] -= 1
+                continue
+            if int(number) <= said_here or int(number) in stated:
                 continue
             rows.append((int(number), question_sha(question)))
         if not rows:
@@ -1336,6 +1377,16 @@ def _remembered_questions(conn: sqlite3.Connection, tenant_id: str, keys: list[s
         "AND COALESCE(user_text, '') != ''",
         (tenant_id, FORGOTTEN_TIER, *keys),
     ))
+
+
+def _turns_with_facts(conn: sqlite3.Connection, tenant_id: str, keys: list[str]) -> set[int]:
+    """The turns of the chat *keys* that *tenant_id* holds a fact of."""
+    marks = ",".join("?" for _ in keys)
+    return {int(r[0]) for r in conn.execute(
+        f"SELECT DISTINCT source_turn FROM beliefs WHERE tenant_id = ? AND source_session IN ({marks}) "
+        "AND source_turn > 0 AND object != ''",
+        (tenant_id, *keys),
+    )}
 
 
 def _write_moved_turns(
@@ -1921,7 +1972,7 @@ def forget_chat(
     conn = conn or _open()
     try:
         caller = space_named_or_bound(tenant_id)
-        elsewhere = moved_elsewhere(keys, caller)
+        elsewhere = _moved_elsewhere(keys, caller)
         marks = ",".join("?" for _ in keys)
         every = sees_every_tenant(caller)
         scope = "" if every else " AND tenant_id = ?"
@@ -2098,23 +2149,31 @@ def replay_rewind(conn: sqlite3.Connection, entry: Any) -> int:
         marks = ",".join("?" for _ in keys)
         # Install work, declared: a rewind follows its chat into every tenant
         # that holds the chat's rows (each forget below names its row's tenant);
-        # the entry's own tenant is a record's (N19).
-        tenants = {space_of_record(entry.tenant_id)} | {
+        # the entry's own tenant is a record's (N19). Once Spaces is enforced
+        # it keeps to its own space: a chat a person moved left what was
+        # remembered of it where it was said (S2-12), and an undo in the
+        # shared space never takes back their own space's memory.
+        from kazma_core.spaces.scope import spaces_enforced
+
+        own = space_of_record(entry.tenant_id)
+        within = " AND tenant_id = ?" if spaces_enforced() else ""
+        spaces = (own,) if within else ()
+        tenants = {own} | {
             space_of_record(r[0]) for r in conn.execute(
                 f"SELECT DISTINCT tenant_id FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ? "
-                "AND created_at <= ?",
-                (*keys, from_turn, before),
+                f"AND created_at <= ?{within}",
+                (*keys, from_turn, before, *spaces),
             )
         }
         stored = {int(r[0]) for r in conn.execute(
             f"SELECT DISTINCT turn_number FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ? "
-            "AND created_at <= ?",
-            (*keys, from_turn, before),
+            f"AND created_at <= ?{within}",
+            (*keys, from_turn, before, *spaces),
         )}
         stored |= {int(r[0]) for r in conn.execute(
             f"SELECT DISTINCT source_turn FROM beliefs WHERE source_session IN ({marks}) AND source_turn >= ? "
-            "AND ingested_at <= ?",
-            (*keys, from_turn, before),
+            f"AND ingested_at <= ?{within}",
+            (*keys, from_turn, before, *spaces),
         )}
         turns = 0
         for turn in sorted(stored | set(questions)):
