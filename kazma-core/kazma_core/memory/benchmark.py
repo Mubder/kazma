@@ -46,7 +46,7 @@ import sqlite3
 import statistics
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -1240,13 +1240,18 @@ def _slug(text: str) -> str:
     return "_".join(str(text or "").strip().lower().replace("-", " ").split())
 
 
+#: Punctuation around a word is no part of it ("عادل، مدرسي القديم" holds "عادل").
+_AROUND_A_WORD = ".,;:!?\"'()[]،؛؟«»“”‘’"
+
+
 def _folded(text: str) -> str:
     """A value as search reads it: folded, and an underscore separates words
     (``memory/query_terms``, FTS5) -- the extraction prompt slugged values
     until part C2, so ``kuwait_city`` is the user's "Kuwait City"."""
     from kazma_core.documents.arabic import fold_for_search
 
-    return " ".join(fold_for_search(str(text or "").replace("_", " ")).lower().split())
+    words = (w.strip(_AROUND_A_WORD) for w in fold_for_search(str(text or "").replace("_", " ")).lower().split())
+    return " ".join(w for w in words if w)
 
 
 def _holds(gold: str, value: str) -> bool:
@@ -1350,18 +1355,19 @@ def _score_extraction(turns: list[dict[str, Any]], extracted: dict[str, list[dic
             if g not in good or not any(_value_matches(a, g) for alts in allowed for a in alts):
                 row["kept_unwanted"] += 1
                 row["unwanted"].append(f"{turn['id']}: {g.get('subject')} {g.get('predicate')} {g.get('object')}")
-        if not gold:
+        if not allowed:
+            # Nothing to keep; a turn that may keep something is not one.
             row["quiet_turns"] += 1
             row["quiet_kept_nothing"] += int(not got)
     return {lang: _with_ratios(row) for lang, row in sorted(by_lang.items())}
 
 
-#: What part C2 asks the model besides the fact itself, by the gold field
-#: that asks it: the count of gold facts asking it (the dataset's), the count
+#: What part C2 (and v4's event turns: ``on``, the day) asks the model
+#: besides the fact itself, by the gold field that asks it: the count of gold facts asking it (the dataset's), the count
 #: given right (each asking's), and the score.
-_C2_GOLD = {"since": "gold_since", "replaces": "gold_replaces", "ended": "gold_ended"}
-_C2_RIGHT = {"since": "dated_right", "replaces": "replaced_right", "ended": "ended_found"}
-_C2_SCORES = {"since": "dated", "replaces": "replaced", "ended": "ended"}
+_C2_GOLD = {"since": "gold_since", "replaces": "gold_replaces", "ended": "gold_ended", "on": "gold_on"}
+_C2_RIGHT = {"since": "dated_right", "replaces": "replaced_right", "ended": "ended_found", "on": "on_right"}
+_C2_SCORES = {"since": "dated", "replaces": "replaced", "ended": "ended", "on": "on"}
 
 
 def _since_holds(gold: str, got: Any) -> bool:
@@ -1383,6 +1389,9 @@ def _score_c2(row: dict[str, Any], gold: list[list[dict[str, Any]]], good: list[
                 _value_matches(a, g) and (
                     field == "ended"
                     or (field == "since" and _since_holds(a["since"], g.get("since")))
+                    # An event's day: a reply that calls a coming one, or a
+                    # move, a fact with a start ("since") gives it too.
+                    or (field == "on" and any(_since_holds(a["on"], g.get(k)) for k in ("on", "since")))
                     or (field == "replaces" and str(g.get("replaces") or "").strip().lower() == a["replaces"]))
                 for a in wanted for g in good)
             row[_C2_RIGHT[field]] += int(right)
@@ -1591,8 +1600,14 @@ def run_extraction_benchmark(
     and the report says so (``llm_replay``)."""
     from kazma_core.memory.belief_extractor import extract_beliefs_heuristic
 
+    from kazma_core.memory.benchmark_events import is_event_turn, run_event_turns
+
     data = dataset or json.loads(EXTRACTION_PATH.read_text(encoding="utf-8"))
-    turns = data["turns"]
+    # The event turns (v4) are scored apart, by the model's reply and by what
+    # it leaves stored: the other turns' scores stay comparable across v3 and
+    # v4, and the quick pass reads no events.
+    turns = [t for t in data["turns"] if not is_event_turn(t)]
+    events = [t for t in data["turns"] if is_event_turn(t)]
     report: dict[str, Any] = {
         "version": data["version"],
         "heuristic": _score_extraction(turns, {t["id"]: extract_beliefs_heuristic(t["user"]) for t in turns}),
@@ -1606,16 +1621,20 @@ def run_extraction_benchmark(
     # recording's ``extraction_version``) wait for the next one, named,
     # never guessed.
     made_for = int(llm_replies.get("extraction_version") or 0)
-    asked = [t for t in turns if mode == "current" or int(t.get("new_in") or 0) <= made_for]
-    if len(asked) < len(turns):
-        report["llm_waiting"] = [t["id"] for t in turns if t not in asked]
+    asked, asked_events = ([t for t in part if mode == "current" or int(t.get("new_in") or 0) <= made_for]
+                           for part in (turns, events))
+    if len(asked) + len(asked_events) < len(data["turns"]):
+        report["llm_waiting"] = [t["id"] for t in data["turns"] if t not in asked and t not in asked_events]
     # Every asking is scored, through the product's parser; a score is the
     # total over all askings, and its spread how much the askings differ.
+    askings = range(max(1, _recording_askings(llm_replies)))
     parts = [_score_extraction(asked, _replayed_extraction(asked, _asking(llm_replies, i), mode=mode))
-             for i in range(max(1, _recording_askings(llm_replies)))]
+             for i in askings]
     report["llm"] = _total_over_askings(parts)
     if len(parts) > 1:
         report["llm_spread"] = _spread(parts)
+    if asked_events:
+        report.update(run_event_turns(asked_events, [_asking(llm_replies, i) for i in askings], mode=mode))
     report["llm_recording"] = _recording_identity(llm_replies)
     report["llm_replay"] = mode
     return report
@@ -1643,13 +1662,21 @@ def extraction_rests_on(report: dict[str, Any]) -> dict[str, dict[str, dict[str,
             if pass_name == "llm":
                 entry["askings"] = int(row["turns"]) * askings
             out.setdefault(pass_name, {})[lang] = entry
+    for lang, row in sorted((report.get("events") or {}).items()):
+        out.setdefault("events", {})[lang] = {k: int(row[k]) for k in ("turns", "gold", "entries", "guarded",
+                                                                       "quiet_turns")}
+        out["events"][lang]["askings"] = int(row["turns"]) * askings
     return out
 
 
 def extraction_scores(report: dict[str, Any]) -> dict[str, float]:
     """The extraction scores the lock holds: per pass and language, ``found``,
-    ``named``, ``right`` and ``quiet``."""
-    out = {}
+    ``named``, ``right`` and ``quiet``; for the event turns, the reply's and
+    what is stored after it (``benchmark_events.EVENT_SCORES``)."""
+    from kazma_core.memory.benchmark_events import EVENT_SCORES
+
+    out = {f"events.{lang}.{k}": float(row[k]) for lang, row in (report.get("events") or {}).items()
+           for k in EVENT_SCORES if k in row}
     for pass_name in ("heuristic", "llm"):
         part = report.get(pass_name) or {}
         for lang, row in part.items():
@@ -1743,8 +1770,44 @@ def _expected_holds(expected: dict[str, Any], row: dict[str, Any]) -> bool:
     return expected.get("trust") != "user" or row["extraction_method"] in _USER_SOURCES
 
 
-def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: dict[str, str],
-                  llm_replies: dict[str, Any] | None = None, mode: str = "current") -> dict[str, Any]:
+@contextlib.contextmanager
+def _private_stores(prefix: str) -> Iterator[tuple[sqlite3.Connection, sqlite3.Connection]]:
+    """A private memory database and its operations database, removed after:
+    autocommit, as the live writers open them (``mutate_belief`` owns its
+    transactions)."""
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+
+    paths = []
+    for name in ("primary", "ops"):
+        fd, path = tempfile.mkstemp(prefix=f"{prefix}-{name}-", suffix=".db")
+        os.close(fd)
+        paths.append(path)
+    primary = sqlite3.connect(paths[0], isolation_level=None)
+    primary.row_factory = sqlite3.Row
+    ops = sqlite3.connect(paths[1], isolation_level=None)
+    try:
+        ensure_primary_schema(primary)
+        ensure_ops_schema(ops)
+        yield primary, ops
+    finally:
+        primary.close()
+        ops.close()
+        for path in paths:
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    os.remove(path + suffix)
+                except OSError:
+                    pass
+
+
+def _tell(primary: Any, ops: Any, client: _ScriptedClient, reply: Callable[[list[dict[str, Any]]], str], *,
+          user: str, session: str, number: int, at: float, said_on: str | None = None,
+          previous: tuple[str, str] | None = None) -> None:
+    """One chat turn through the write path, in the order a live turn takes
+    it: the quick pass, then the deep pass as the memory worker runs it, with
+    the turn's day, the turn before and the facts held about it
+    (``worker_bootstrap._turn_context``), applied at the turn's time. *reply*
+    gives the model's reply from the held facts it is shown."""
     import asyncio
     from datetime import UTC
 
@@ -1757,21 +1820,31 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
     )
     from kazma_core.memory.entity_resolution import entity_vocabulary
     from kazma_core.memory.predicates import predicate_vocabulary
-    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
 
-    paths = []
-    for name in ("primary", "ops"):
-        fd, path = tempfile.mkstemp(prefix=f"kazma-writes-{name}-", suffix=".db")
-        os.close(fd)
-        paths.append(path)
-    # Autocommit, as the live writers open them: mutate_belief owns its
-    # transactions.
-    primary = sqlite3.connect(paths[0], isolation_level=None)
-    primary.row_factory = sqlite3.Row
-    ops = sqlite3.connect(paths[1], isolation_level=None)
-    try:
-        ensure_primary_schema(primary)
-        ensure_ops_schema(ops)
+    extract_and_apply_beliefs_sync(primary, ops, user, session_id=session, turn=number, tenant_id=BENCH_TENANT,
+                                   now=at, private=True)
+    held = held_facts(primary, tenant_id=BENCH_TENANT, text=user)
+    client.reply = reply(held)
+    raw, stats = asyncio.run(extract_beliefs_for_turn(
+        user, "", vocabulary=predicate_vocabulary(primary, tenant_id=BENCH_TENANT),
+        entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT),
+        said_on=said_on or said_on_iso(at, UTC), previous=previous, held=held))
+    if raw:
+        _apply_beliefs_to_v2(raw, primary, ops, stats=stats, session_id=session, turn=number,
+                             tenant_id=BENCH_TENANT, now=at, private=True, user_text=user, held=held)
+
+
+#: The changes waiting for the user in a private database, oldest first: the
+#: value of each (the held one for an ending).
+_WAITING_SQL = (
+    "SELECT subject, CASE WHEN new_value = '' THEN old_value ELSE new_value END AS object, "
+    "new_value = '' AS ended FROM memory_changes WHERE tenant_id = ? AND kind = 'pending' "
+    "AND state = 'open' ORDER BY created_at")
+
+
+def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: dict[str, str],
+                  llm_replies: dict[str, Any] | None = None, mode: str = "current") -> dict[str, Any]:
+    with _private_stores("kazma-writes") as (primary, ops):
         session = f"writes-{scenario['id']}"
         asked_before = ""
         for number, turn in enumerate(scenario["turns"], 1):
@@ -1796,44 +1869,20 @@ def _run_scenario(scenario: dict[str, Any], client: _ScriptedClient, recorded: d
                 elif waiting:
                     changes.dismiss(primary, waiting[0]["id"], tenant_id=BENCH_TENANT, actor="benchmark")
                 continue
-            at = BASE_TIME + number * 86400
-            extract_and_apply_beliefs_sync(primary, ops, turn["user"], session_id=session, turn=number,
-                                           tenant_id=BENCH_TENANT, now=at, private=True)
-            # The turn's day, the turn before and the facts held about it,
-            # as the memory worker gives them (worker_bootstrap._turn_context),
-            # on the benchmark's clock.
-            held = held_facts(primary, tenant_id=BENCH_TENANT, text=turn["user"])
-            client.reply = _turn_reply(turn, recorded, llm_replies, mode, held)
-            raw, stats = asyncio.run(extract_beliefs_for_turn(
-                turn["user"], "", vocabulary=predicate_vocabulary(primary, tenant_id=BENCH_TENANT),
-                entities=entity_vocabulary(primary, tenant_id=BENCH_TENANT),
-                said_on=said_on_iso(at, UTC), previous=(asked_before, "") if asked_before else None,
-                held=held))
+            # On the benchmark's clock: a turn a day.
+            _tell(primary, ops, client,
+                  lambda held, turn=turn: _turn_reply(turn, recorded, llm_replies, mode, held),
+                  user=turn["user"], session=session, number=number, at=BASE_TIME + number * 86400,
+                  previous=(asked_before, "") if asked_before else None)
             asked_before = turn["user"]
-            if raw:
-                _apply_beliefs_to_v2(raw, primary, ops, stats=stats, session_id=session, turn=number,
-                                     tenant_id=BENCH_TENANT, now=at, private=True, user_text=turn["user"],
-                                     held=held)
         rows = [dict(r) for r in primary.execute(
             "SELECT subject, predicate, object, extraction_method, json_extract(metadata_json, '$.started') "
             "AS started FROM beliefs WHERE tenant_id = ? "
             "AND valid_until IS NULL AND invalidated_at IS NULL ORDER BY valid_from", (BENCH_TENANT,))]
-        waiting = [dict(r) for r in primary.execute(
-            "SELECT subject, CASE WHEN new_value = '' THEN old_value ELSE new_value END AS object, "
-            "new_value = '' AS ended FROM memory_changes WHERE tenant_id = ? AND kind = 'pending' "
-            "AND state = 'open' ORDER BY created_at", (BENCH_TENANT,))]
+        waiting = [dict(r) for r in primary.execute(_WAITING_SQL, (BENCH_TENANT,))]
         updated = [dict(r) for r in primary.execute(
             "SELECT subject, new_value AS object, old_value AS replaced FROM memory_changes "
             "WHERE tenant_id = ? AND kind = 'update' AND state = 'open' ORDER BY created_at", (BENCH_TENANT,))]
-    finally:
-        primary.close()
-        ops.close()
-        for path in paths:
-            for suffix in ("", "-wal", "-shm"):
-                try:
-                    os.remove(path + suffix)
-                except OSError:
-                    pass
     problems = []
     for expected in scenario["current"]:
         if not any(_expected_holds(expected, r) for r in rows):
@@ -1965,7 +2014,8 @@ async def record_llm_extraction(
     reply it got is kept. Every turn's first asking comes before any turn's
     second, so a recording cut short still covers each turn the same number
     of times. *held* is a recording made before, of the same prompt, message
-    form and dataset: what it holds is never asked again. *save* is called
+    form and dataset -- or of an earlier version of the dataset that today's
+    only added turns to: what it holds is never asked again. *save* is called
     with the recording after every reply. At most *limit* calls are made; a
     recording that stopped there says so (``complete``: false)."""
     import datetime as _dt
@@ -1982,11 +2032,14 @@ async def record_llm_extraction(
     prompt = _sha256(_EXTRACT_SYSTEM)
     replies: dict[str, list[str]] = {}
     if held:
-        if (held.get("prompt_sha256"), _recording_shape(held), held.get("extraction_version")) != (
-                prompt, MESSAGE_SHAPE, data["version"]):
+        replies = {k: _reply_list(v) for k, v in (held.get("replies") or {}).items()}
+        # A version that only added turns asks every message the recording
+        # answered: it goes on with the new turns.
+        today = {_text_key(_llm_blob(t["user"], **_turn_context(t))) for t in data["turns"]}
+        if (held.get("prompt_sha256"), _recording_shape(held)) != (prompt, MESSAGE_SHAPE) or (
+                held.get("extraction_version") != data["version"] and not set(replies) <= today):
             raise StaleRecordingError("the recording to continue answered another prompt, message form or "
                                       "dataset: record into a new file")
-        replies = {k: _reply_list(v) for k, v in (held.get("replies") or {}).items()}
     # The provider client keeps its model on its config (``LLMProvider.config``).
     model = (getattr(getattr(client, "config", None), "model", None) or getattr(client, "model", None)
              or getattr(registry, "active_model", None) or "unknown")

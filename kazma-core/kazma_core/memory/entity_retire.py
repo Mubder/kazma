@@ -48,7 +48,9 @@ def _own_aliases(eid: str, name: str) -> set[str]:
 def _is_plain_empty_shell(
     conn: sqlite3.Connection, eid: str, *, tenant_id: str, self_ids: Collection[str]
 ) -> bool:
-    """True when entity *eid* has no live fact and carries nothing but its name."""
+    """True when entity *eid* has no live fact -- none that names it in
+    another spelling ("LISBON" of ``lisbon``) either -- and carries nothing
+    but its name."""
     from kazma_core.memory.entity_counts import belief_count_sql
     from kazma_core.memory.entity_protection import protection
 
@@ -77,6 +79,14 @@ def _is_plain_empty_shell(
     except (TypeError, ValueError):
         return False
     if not aliases <= _own_aliases(str(rid), str(rname or "")):
+        return False
+    spelled = conn.execute(
+        "SELECT 1 FROM beliefs WHERE tenant_id = ? AND valid_until IS NULL AND invalidated_at IS NULL "
+        "AND ? IN (LOWER(REPLACE(REPLACE(object, ' ', '_'), '-', '_')), "
+        "LOWER(REPLACE(REPLACE(subject, ' ', '_'), '-', '_'))) LIMIT 1",
+        (tenant_id, eid),
+    ).fetchone()
+    if spelled is not None:
         return False
     held = conn.execute(
         "SELECT 1 FROM graph_associations WHERE tenant_id = ? AND (member = ? OR group_root = ?) "

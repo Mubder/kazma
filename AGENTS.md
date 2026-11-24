@@ -2250,7 +2250,7 @@ four injected were noise.
   new. The page prints the last look apart. Gate:
   `tests/test_memory_benchmark_sealed.py` (a planted set; a test that scores
   the sealed file as the negative control). An extraction benchmark
-  (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 40 turns
+  (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 70 turns
   EN/AR/mixed; the heuristic pass in CI, the model's deep pass from
   recorded replies, `tests/fixtures/memory_bench/extraction_llm.json`,
   recorded with `scripts/memory_extraction_record.py --out <fixture>
@@ -2268,13 +2268,29 @@ four injected were noise.
   recording's `extraction_version`. A relabel is a file holding every
   locked reply (`reply_hashes`), re-keyed or extended. **The recording**
   (2026-11-24, the dated event lines' prompt; the one before, 2026-11-20,
-  is in git): deepseek-flash, all 40 turns of v3, 5 askings each, 200
-  calls; the file says what the provider counted (`usage`: 360,945 prompt
-  tokens, 325,968 of them cache hits, 31,270 completion tokens, 21,337 of
+  is in git): deepseek-flash, all 70 turns of v4, 5 askings each, 350
+  calls; the file says what the provider counted (`usage`: 634,210 prompt
+  tokens, 572,368 of them cache hits, 76,193 completion tokens, 58,036 of
   them reasoning) and names the message each turn was asked (`asked`, which
-  a drift check replays by after a later message form, `_reply_key`). No
-  turn of the 40 tells an event, so it says what the prompt change did to
-  the rest of extraction, not what event lines keep. The recording of
+  a drift check replays by after a later message form, `_reply_key`). A
+  recording of an earlier version that today's only added turns to goes on
+  with those (`record_llm_extraction`). **Dataset v4 asks what an event
+  leaves stored** (2026-11-24, `memory_bench.EXTRACTION_EVENT_TURNS`, fifteen
+  shapes EN/AR, `new_in: 4`): a turn with `stored` is an event turn
+  (`benchmark_events.is_event_turn`), scored apart from the others (the
+  quick pass reads no events, and the v3 scores stay comparable) by its reply
+  (`found`, `right`, `quiet`, and `on`, the day) and by what the store holds
+  after the product's write path took the reply, with the chat before it
+  written too (`benchmark._tell`, the write scenarios' own path): `stored`,
+  `day` (the dated entries carry exactly these days), `safe` (the user's own
+  facts stand, nothing pasted or someone else's is stored, what must be asked
+  is asked) and `whole`. With other facts held about the turn than the model
+  was shown (its `held`), nothing of it is right. The lock holds them
+  as `events.<lang>.<score>`, compared exactly on the same recording; the
+  event's name is not scored. Gate: `tests/test_memory_benchmark_event_turns.py`
+  (a reader's replies whole in both languages; each part of the write path
+  put back leaves the reply's scores where they were and the stored ones
+  fall). The recording of
   2026-10-15 is kept as `extraction_llm_2026-10-15.json`: the Spaces R3
   study and the 2026-11 audits' evidence measured it. Gate:
   `tests/test_memory_benchmark_c2_turns.py` (answers with no start,
@@ -3812,7 +3828,18 @@ drawing, the rest by extraction.
   (`entity_retire.retire_empty_entities`, from `invalidate_belief` and a
   supersede): a plain concept only -- own name and hash as aliases, no
   metadata, grouping, merge row or redirect onto it; not protected, major
-  or high-stakes. Declared in `tests/test_memory_deletes.py`.
+  or high-stakes. Declared in `tests/test_memory_deletes.py`. **A fact's
+  entities are asked for by their ids** (2026-11-24,
+  `entity_counts.entity_ids_named`: the value, its slug, and the entity of
+  that name): a fact keeps the user's words ("Lisbon") and its entity the id
+  they make ("lisbon"), so a retire asked by the text took the Arabic entity
+  and left every English name with a capital on the map, after a forget, an
+  invalidation and a supersede, and the stored counts were not recomputed.
+  Every caller that holds a fact's text asks it; the merge, purge and repair
+  callers hold ids (declared). A live fact naming the entity in another
+  spelling keeps it. Gate: `tests/test_entity_goes_with_its_fact.py` (EN/AR;
+  the call by text as the negative control, which loses English only; a
+  planted caller).
 - **Which entities no delete, merge or purge takes is one answer**
   (`memory/entity_protection.py`): core ids (`user`, `assistant`, `kazma`),
   the hub's own names (`self_hub.collect_self_entity_ids`: an entity the

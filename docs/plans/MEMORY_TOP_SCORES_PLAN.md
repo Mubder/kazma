@@ -665,7 +665,7 @@ of 95, mostly `loves` for "likes", `occupation_is` for "occupation" and
 write scenarios all pass as before. What it does not say: none of the 40 turns
 tells an event (no reply before or after gives `"on"`), so this set measures
 what the prompt change did to the rest of extraction, not the event lines;
-those are measured by the pilots. Event turns would be dataset v4.
+those are measured by the pilots. Event turns are dataset v4 (below).
 
 **The pilot on deepseek-flash** (24 Nov, the model live runs on): the same 50
 questions, 12,322 rounds, prompt, reader and judges, with stores and replies
@@ -732,14 +732,22 @@ was; 6 and 2 named one no longer held):
 | block tokens p50 / p95 | 1,424 / 1,496 -> 1,425 / 1,496 | 1,459 / 1,498 -> the same |
 | questions showing an event line | 69 -> 72 | 19 -> 20 |
 | the answer's words in the block | 57 of 129 -> the same | 12 of 37 -> the same |
-| answered, main / noise, before | 0.755 / 0.765 | 0.72 / 0.74 |
+| answered, main run (second judge) | 0.755 (0.74) -> 0.760 (0.745), +1 / -0 | 0.72 (0.74) -> the same, 0 / 0 |
+| answered, noise run (second judge) | 0.765 (0.75) -> the same, 0 / 0 | 0.74 (0.76) -> 0.72 (0.74), +0 / -1 |
+| the changed blocks right, main / noise | 34 -> 35 / 35 -> 35 of 45 | 8 -> 8 / 8 -> 7 of 11 |
 
-No reader or judge call was made. A block that is the same has the same
-answer, so the answers to 155 of the 200 and 39 of the 50 stand (117 and 118,
-28 and 29 right); 14 and 3 blocks change by more than the word, 10 and 2 of
-them answered right before in each run. Read one by one, none of those 17
-loses what its question asks; "Which book did I finish a week ago?" and "What
-did I do 5 days ago?" now show only that day's. What fell: the 67 and 12
+Only the changed blocks were asked (a block that is the same has the same
+answer): 67 answers a run, judged twice. Nothing is lost in both runs; without
+the event facts one of 9 changed dev answers is lost in the noise run; the one
+DeepSeek answer lost in the noise run is right in the main one (it is one of
+the four that flip between the runs), and the one Qwen gain is in the main run
+only. Beside the block with no facts the fixed blocks stay where they were:
+0.69 -> 0.76 (main) and 0.69 -> 0.765 (noise) on dev, 0.60 -> 0.72 and 0.60 ->
+0.72 on the pilot. Read one by one, none of the 14 and 3 blocks that change by
+more than the word loses what its question asks; "Which book did I finish a
+week ago?" and "What did I do 5 days ago?" now show only that day's. Spend on
+Qwen, both runs: 134 answers and 268 judgements, 191,108 prompt tokens for the
+reader (48,000 cached) and 82,421 out, 62,850 and 268 for the judges. What fell: the 67 and 12
 events. The first rule (half of the event's words in the turn's own words)
 left out 103 and 21, and reading them showed days told of something memory
 holds, by "it" ("I got it in 2018"), so the held fact's words count when the
@@ -749,6 +757,39 @@ lasting fact ("since 2019") is not carried over to the entry that replaces
 it: the new one may be another thing. Evidence:
 `docs/audits/evidence/memory_event_lines/review_fixes.json`. The Qwen spend
 above counted no cache writes; there were 30 (49,560 tokens, under a cent).
+
+**Event turns, dataset v4** (24 Nov). Fifteen shapes, each in English and in
+Arabic: two events of one day with a place and a price, a call with a day, a
+move, the same farm on two days, a retelling without its day, a wrong day
+corrected, an appointment to come, two kinds of pasted first-person text,
+three turns with no event, a habit, someone else's trip, a month, and an event
+with no day. Each is scored by the model's reply and by what the store holds
+after the product's own write path took it -- the quick pass, the reply
+parsed and applied with the facts held, after the chat before it
+(`memory/benchmark_events.py`): the event stored, its days exactly right, what
+must stand standing, nothing stored that is not the user's. With one part of
+the write path put back as it was before the review and the same replies, the
+reply's scores do not move and the stored ones fall (seven controls,
+`tests/test_memory_benchmark_event_turns.py`). Recorded on deepseek-flash, 5
+askings of the 30 turns (150 calls: 273,265 prompt tokens, 246,400 of them
+from DeepSeek's cache, 44,923 completion; the balance went from $5.72 to $5.66,
+live's own calls in it); the 200 replies to the other 40 turns are the ones
+locked before, and their scores are unchanged.
+
+| | English | Arabic |
+|---|---|---|
+| the event in the reply / its day | 1.000 / 1.000 | 0.980 (0.040) / 0.971 (0.057) |
+| right | 0.928 (0.056) | 0.867 (0.008) |
+| quiet (nothing to keep, nothing kept) | 0.800 (0.163) | 0.667 |
+| stored / its days exactly right | 1.000 / 1.000 | 1.000 / 0.975 (0.050) |
+| safe / everything about the turn right | 1.000 / 1.000 | 0.980 (0.040) / 0.973 (0.033) |
+
+The gap between "right" and "safe" is the pasted text: the model reads it as
+the user's in most askings, and Kazma's own-words rule keeps all but one out
+(finding 20). The one Arabic event missed is one empty reply of five to "I
+went to the farm again yesterday". A move told with no held home named
+("moved_to Porto", an event) is kept as an event and asks nothing; the model
+named the held home in 10 of 10 replies, and then the question is asked.
 
 ### W6. Ingestion the product's way (M)
 
@@ -1326,3 +1367,16 @@ alone as the negative controls.
     `own_words` was reviewed three times as a security rule (a paste is never
     the user's statement), so its change wants a change and a review of its
     own.
+20. **An event told with no day is not held to the user's own words.** Found
+    by the event turns (24 Nov): asked about pasted text ("صحح النص: رحت
+    روما ..."), deepseek-flash gave it as the user's in 5 of 5 Arabic
+    askings and 3 of 5 English ones, sixteen facts. The twelve with a day
+    are all refused (not the user's own words); a reply that leaves the day
+    out is no event to Kazma, so one Arabic asking stored "visited Rome" and
+    the bag (the English one's two were held back by their low confidence).
+    The same check on undated events was measured on the pilots' cached
+    replies before building it: 21 of 549 (DeepSeek) and 66 of 2,421 (Qwen)
+    would go, and read one by one most are the user's own, lost to finding
+    19 ("Do you think I could use the apples I bought ...?"). Left as it is:
+    finding 19 first, then this. Evidence:
+    `docs/audits/evidence/memory_event_lines/undated_events.json`.

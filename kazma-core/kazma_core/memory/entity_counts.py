@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Iterable
 from typing import Any
 
 from kazma_core.spaces.scope import space_named_or_bound, space_of_record
@@ -36,6 +37,7 @@ __all__ = [
     "BELIEF_COUNT_STALE",
     "belief_count_sql",
     "entity_degree_sql",
+    "entity_ids_named",
     "recompute_entity_counts",
     "repair_entity_counts",
 ]
@@ -90,6 +92,31 @@ def entity_degree_sql() -> str:
             AND EXISTS (SELECT 1 FROM entities oe WHERE oe.tenant_id = e.tenant_id AND oe.id = other_id)
         )
     """
+
+
+def entity_ids_named(conn: Any, values: Iterable[Any], *, tenant_id: str) -> list[str]:
+    """The ids a fact's *values* (its subject and object, as stored) may name
+    an entity by: the value itself, the id its words make
+    (``entity_resolution.slug``) and the entity of exactly that name.
+
+    A fact keeps the user's own words ("Lisbon") and its entity the id they
+    make ("lisbon"), so an entity asked for by a fact's text was found only
+    where the two are the same -- every Arabic name, and no English one with
+    a capital: a forgotten or replaced "Lisbon" left its bare entity on the
+    memory map, and its counts waited for the repair sweep (2026-11-24).
+    Every caller that holds a fact, not an entity's id, asks here first
+    (``tests/test_entity_goes_with_its_fact.py``)."""
+    from kazma_core.memory.entity_resolution import slug
+
+    out: dict[str, None] = {}
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        out[text] = out[slug(text)] = None
+        for (eid,) in conn.execute("SELECT id FROM entities WHERE tenant_id = ? AND name = ?", (tenant_id, text)):
+            out[str(eid)] = None
+    return list(out)
 
 
 def recompute_entity_counts(

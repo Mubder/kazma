@@ -722,9 +722,10 @@ def mutate_belief(
         # The object is included even when it's a literal — recompute is a
         # no-op for ids with no entity row. Caller owns the commit.
         affected = [sub, obj]
-        try:
-            from kazma_core.memory.entity_counts import recompute_entity_counts
+        gone = ""
+        from kazma_core.memory.entity_counts import entity_ids_named, recompute_entity_counts
 
+        try:
             # M-09: a supersede also DROPS the old row — its former object
             # entity (when it was an entity id) loses a belief that nobody
             # recomputed otherwise.
@@ -734,17 +735,20 @@ def mutate_belief(
                     (str(result["superseded_id"]),),
                 ).fetchone()
                 if srow and srow[0]:
-                    affected.append(str(srow[0]))
-            recompute_entity_counts(primary_conn, affected, tenant_id=tenant_id)
+                    gone = str(srow[0])
+                    affected.append(gone)
+            recompute_entity_counts(primary_conn, entity_ids_named(primary_conn, affected, tenant_id=tenant_id),
+                                    tenant_id=tenant_id)
             primary_conn.commit()
         except Exception:
             logger.debug("[belief_mutate] entity count recompute failed", exc_info=True)
         # A superseded value's entity may now hold nothing (entity_retire).
-        if result.get("superseded_id"):
+        if gone:
             from kazma_core.memory.entity_retire import retire_empty_entities
 
             try:
-                if retire_empty_entities(primary_conn, affected[2:], tenant_id=tenant_id):
+                if retire_empty_entities(primary_conn, entity_ids_named(primary_conn, [gone], tenant_id=tenant_id),
+                                         tenant_id=tenant_id):
                     primary_conn.commit()
             except sqlite3.Error:
                 logger.warning("[belief_mutate] empty-entity cleanup failed", exc_info=True)
@@ -834,9 +838,10 @@ def _after_ending(conn: sqlite3.Connection, row: Any, *, tenant_id: str) -> None
     triggers; the mirror and graph syncs drain them), so a *private*
     database sends nothing anywhere."""
     try:
-        from kazma_core.memory.entity_counts import recompute_entity_counts
+        from kazma_core.memory.entity_counts import entity_ids_named, recompute_entity_counts
 
-        recompute_entity_counts(conn, [str(row[0] or ""), str(row[2] or "")], tenant_id=tenant_id)
+        recompute_entity_counts(conn, entity_ids_named(conn, [row[0], row[2]], tenant_id=tenant_id),
+                                tenant_id=tenant_id)
         if conn.in_transaction:
             conn.commit()
     except sqlite3.Error:

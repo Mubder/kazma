@@ -439,7 +439,7 @@ def test_extraction_only_improves():
     # Every language is measured by both passes, each with turns that should keep nothing.
     assert set(report["heuristic"]) == set(report["llm"]) == {"en", "ar", "mixed"}
     assert all(row["quiet_turns"] >= 1 for row in report["heuristic"].values())
-    assert {key.split(".")[0] for key in locked["scores"]} == {"heuristic", "llm"}
+    assert {key.split(".")[0] for key in locked["scores"]} == {"heuristic", "llm", "events"}
 
 
 def test_the_extraction_gate_sees_an_extractor_that_keeps_nothing(monkeypatch):

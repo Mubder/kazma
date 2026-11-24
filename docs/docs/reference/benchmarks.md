@@ -60,6 +60,18 @@ Turns in English, Arabic and both, with the facts a person would expect remember
 The model pass is deepseek-flash's replies, recorded on 2026-11-24, 5 askings a turn. Asked again, a model answers a little differently, so the lock keeps each score's spread: two standard errors over the askings, at most 8.3 points for the scores in this table.
 On the ten turns that give it the turn's day, the turn before and the facts held, the model pass gives a fact's start right 80.0 % in English, 100.0 % in Arabic; names the held fact it replaces 100.0 % in English, 100.0 % in Arabic; reads that a fact ended 100.0 % in English, 100.0 % in Arabic.
 
+#### Events and their days {#memory-events}
+
+Turns that tell of something the user did, each shape in English and in Arabic: two events of one day, the same place on two days, something told again without its day, a wrong day corrected, an appointment to come, a call that must not become a name, a move that must be asked about, pasted words that are not the user's, someone else's trip, and turns with no event. The model's recorded reply is read (**Found**, **Day given**: the event in the reply, and its day; **Right** and **Quiet** as above), then written by Kazma's own code after the chat before it, and the store is read. **Stored**: the event is kept. **Day stored**: its days are exactly right, with no second entry. **Safe**: nothing that must stand was changed and nothing that must not be stored was. **Whole**: everything about the turn is right.
+
+| Language | Found | Day given | Right | Quiet | Stored | Day stored | Safe | Whole | Rests on |
+|---|---|---|---|---|---|---|---|---|---|
+| English | 100.0 % | 100.0 % | 92.8 % | 80.0 % | 100.0 % | 100.0 % | 100.0 % | 100.0 % | 75 askings (15 turns, 5 each) |
+| Arabic | 98.0 % | 97.1 % | 86.7 % | 66.7 % | 100.0 % | 97.5 % | 98.0 % | 97.3 % | 75 askings (15 turns, 5 each) |
+
+**Right** and **Quiet** are the model's alone: asked to fix or explain pasted words, it often reads them as the user's. Kazma keeps what is not in the user's own words out, which **Safe** measures.
+Asked again, a score in this table moves by at most 16.3 points (two standard errors over the askings).
+
 With Postgres and pgvector as the memory store: not yet measured on dataset version 8. CI's pgvector job measures it on every run, with pgvector's own search and with every row compared, and its numbers are printed here once they are locked from a named run.
 
 Reproduce: `python scripts/memory_bench.py run` (add `--real` to use the real model), and `python -m pytest tests/test_memory_benchmark.py`.

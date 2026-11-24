@@ -27,7 +27,6 @@ code the page words (``not_found``, ``no_account``, ``empty``, ``too_long``,
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 import time
