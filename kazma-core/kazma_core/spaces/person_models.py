@@ -171,7 +171,7 @@ def _their_choice(models: _PersonModels) -> str:
     install = _install_default()
     if install and models.allows(install):
         return install
-    return sorted(models.allowed or ())[0] if models.allowed else ""
+    return sorted(models.allowed)[0] if models.allowed else ""
 
 
 def refusal(ref: str, *, person: str | None = None) -> str | None:

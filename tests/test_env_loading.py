@@ -263,6 +263,11 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
     "scripts/verify_docx_rtl.py": "renders built-in RTL samples",
     "scripts/smoke_topic_shift_p0.py": "pure intent-policy smoke; no server, no settings",
     "scripts/memory_bench.py": "builds and scores the retrieval benchmark on a temp database",
+    "scripts/longmemeval_facts_pilot.py": (
+        "writes and reads private databases in a temporary folder and the benchmark's data folder; an "
+        "install's .env would point Kazma at the live stores, and the model's key is named on the command "
+        "line as an environment variable"
+    ),
     "scripts/longmemeval_bench.py": (
         "measures recall on LongMemEval in private temp databases and a temp data folder; "
         "it reads no install"

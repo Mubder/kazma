@@ -277,6 +277,25 @@ user's message alone. Read from the call that holds the recall note (fixed
 the same day), the turn saw the harness's block for 199 of 200; the one left
 is a product finding (section 7, item 11).
 
+Run again 23 Nov on the product of that day (d1d87f26b: findings 11 to 17
+in since), twice, each run asking every question afresh (judges
+qwen3.8-flash, then qwen3.7-plus): 0.815 and 0.79 answered (0.80 and 0.785
+by the second judge), against 0.79 on 22 Nov. 15 answers flip between the
+two runs of the same code, against 2 for the block read alone: the turn's
+own model calls and tool rounds make it the noisier path, and a change
+measured through it needs a difference beyond that. 6 questions right in
+both of the day's runs were wrong on 22 Nov, 3 the other way: inside the
+noise. The turn saw the harness's block for all 200 (finding 12's fix: the
+classifier no longer asks first on Qwen); 1.74 model calls and 0.70 tool
+requests a question, 20,908 prompt tokens mean (61 % from Qwen's cache),
+10.8 s median; no call refused. Judges agree on 97.5 % and 96.5 %. Spend:
+4.30M and 4.29M prompt tokens (2.61M and 2.53M cached), 0.13M and 0.14M
+completion (95K and 98K reasoning). The harness now tries a dropped
+connection again (a judge call's "Server disconnected" ended the second
+run's judging; its turns were cached and the rerun asked only the missing
+verdicts). Results: `docs/audits/evidence/memory_w1c/` (ids and scores
+only).
+
 ### W5 + W1b. One passage unit (M)
 
 A passage of about 256 tokens per stretch of a long memory, in a table of
@@ -502,6 +521,123 @@ with its date, sorted in time; dated event lines per conversation (a few
 lines each, the date said and the date meant, each naming its source turns
 so a forget follows); a changed value's history with the conversations that
 stated it. Target: every answer session shown ≥ 90 %.
+
+*A changed value names the conversations that said it, built 23 Nov.* A fact
+line with the value it replaced ("user lives in London; before that: Paris
+(Jun 2026 to Oct 2026)") now follows each value with the conversation that
+stated it, "(memory e_...)", as every recalled conversation line does, so the
+model can open it with `memory_read` ("why did I move?"): the fact's source
+turn, in the asker's space, a turn recall could still show
+(`recall._stated_in`); a fact whose value never changed names none. No model;
+Kazma's benchmark's scores unchanged (an id in a line is not a memory shown);
+an ordinary turn's block p50 675 -> 676 tokens (Arabic 590 -> 592), the long
+store's 1,073 -> 1,080. Not measurable on LongMemEval: its histories hold no
+facts until W6. Gate: `tests/test_memory_changed_value_sources.py`.
+
+*Gathering, measured and not adopted (23 Nov).* A question asking how many
+there are of a kind, or their total ("how many", "in total", "altogether",
+"كم مرة", "عدد", "المجموع", "الإجمالي"), kept every conversation more about
+it than the question's background (evidence above zero) once one cleared
+the ordinary floor; with none, nothing. Why it was tried: on dev, 71 answer
+conversations of the 125 questions with more than one were not shown; 60
+stood under the cut and 9 past the shown limit, their best round 3rd to 45th
+by evidence, most between 0.01 and 0.04 against the floor of 0.04. Each
+names one instance ("we ordered from Uber Eats", "a pottery exhibition")
+where the question names the kind ("food delivery services", "art-related
+events"). Tried first for every request for every memory, lists too:
+Kazma's list questions gained no answer and lost precision (0.507 ->
+0.385), and LongMemEval's gains came from counts and totals alone, so lists
+kept the floor. With and without on one commit (d1d87f26b and the change):
+
+| | today | gathering |
+|---|---|---|
+| dev: every answer conversation shown | 0.820 | 0.876 (+12, -0) |
+| multi-session / temporal | 0.78 / 0.615 | 0.94 / 0.673 |
+| the answer's text in the block | 0.434 | 0.434 |
+| precision; memories shown | 0.828; 4.5 | 0.786; 6.1 |
+| block tokens p50 / p95 | 1,337 / 1,489 | 1,415 / 1,487 |
+| answered, main run (second judge) | 0.69 (0.675) | 0.715 (0.70), +10 / -5 |
+| answered, noise run (second judge) | 0.69 (0.675) | 0.69 (0.68), +7 / -7 |
+| multi-session answered, main / noise | 0.396 / 0.396 | 0.453 / 0.396 |
+| answers that flip between the two runs | 2 | 11 |
+| Kazma's benchmark: answers, MRR | | unchanged on all four stores |
+| Kazma's precision (list), small store, scale | 0.4872 (0.5071), 0.6752, 0.4379 | 0.4868 (0.5002), 0.6743, 0.4378 |
+
+Not adopted: 5 gains and 3 losses repeat in both runs (two of the losses
+are unanswerable count questions answered instead of left), against 11
+answers that flip between two runs of the same gathering block. The right
+conversations are shown, but the answer's text in the block does not move:
+the gathered lines are "possibly related" ones at fixed bounds, cut from
+their start, and the instance a count needs is usually further in. A variant
+showing a count's conversations oldest first answered 0.675 (multi-session
+0.32): it takes the lead room from the best line. Ordinary turns did not
+move (Kazma's store p50 675, p95 1,030). Spend: 1.82M prompt and 0.65M
+completion tokens (0.58M reasoning), 7.4K of the prompt from Qwen's cache.
+Evidence: `docs/audits/evidence/memory_gathering/gathering.json`. What would
+reopen it: lines that hold the instance itself, the dated event lines below.
+The code is not in the repository (a change to recall's ranking has no
+place behind a switch nobody turns on): its patch is kept with the session's
+hand-over notes, and the harness's own commands measure it again
+(`longmemeval_bench.py retrieve --out`, `scripts/longmemeval_blocks.py`,
+`answer --blocks`).
+
+*Dated event lines, the pilot (23 Nov).* The deep pass now keeps what a turn
+tells the user did -- went, attended, bought with its price, received, met,
+started, finished -- as a fact of its own, with `"on"`, the day it happened
+worked out from the turn's day; recall shows it "[on 30 May 2026] user
+attended a pottery exhibition at the craft centre". The prompt change is
+declared in the extraction lock and waits for the pilot before any
+recording. The pilot (`scripts/longmemeval_facts_pilot.py`): 50 dev
+questions, a quarter by type with multi-session (16) and temporal reasoning
+(16) weighted in (`tests/fixtures/longmemeval/facts_pilot.json`), every
+round of their histories (12,322) written as a chat writes it -- the
+episode, the quick pass, then the product's own deep-pass task, unchanged,
+on qwen3.8-flash at its default reasoning, as the product sends it. Qwen's
+explicit context cache holds the deep pass's system prompt
+(`llm_provider._with_qwen_cache_marker`, for every Model Studio call). Then
+one reader and the same judges, twice (main and noise): today's block
+(`kazma`, no facts, as every run so far), the block with the facts the deep
+pass wrote (`facts_events`), and the same without the dated event facts
+(`facts_no_events`), which tells the event lines from facts at all. To the
+full dev set only if the event lines gain in both runs.
+
+| | today | facts, no dated events | facts with event lines |
+|---|---|---|---|
+| answered, main run (second judge) | 0.60 (0.60) | 0.60 (0.60) | 0.70 (0.70) |
+| answered, noise run (second judge) | 0.60 (0.62) | 0.60 (0.58) | 0.72 (0.70) |
+| multi-session (16), main / noise | 0.375 / 0.375 | 0.375 / 0.375 | 0.562 / 0.562 |
+| temporal reasoning (16), main / noise | 0.562 / 0.562 | 0.50 / 0.50 | 0.625 / 0.688 |
+| knowledge update (7) | 0.857 | 1.0 | 1.0 |
+| answers that flip between the two runs | 0 | 0 | 1 |
+| block tokens p50 / p95 | 1,429 / 1,494 | 1,456 / 1,496 | 1,455 / 1,496 |
+
+The event lines gain in both runs: against today +7 / -2 and +8 / -2 (7
+gains and both losses the same in each run), against the same facts without
+the dated events +5 / -0 and +6 / -0. Facts alone gain nothing (+2 / -2 in
+both runs): the gain is the event lines'. The two losses come with facts at
+all: an unanswerable question answered from a fact instead of left, and a
+count the facts misled. The stores: 13,900 facts, 838 of them dated events;
+a block shows 4.1 facts on average, 0.86 dated events, and 17 of the 50
+questions show at least one. Spend: 12,020 deep-pass calls, 33.3M prompt
+tokens (19.8M from the cache), 15.7M completion (14.5M reasoning), about
+$9.70 at qwen3.8-flash's international prices; 144 rounds (1.2 %) failed
+four tries (the product's 60 s timeout, the queue retries them in
+Kazma), and 40 replies (0.3 %) answered the turn instead of reading it.
+Evidence: `docs/audits/evidence/memory_event_lines/pilot.json`. The rest of
+dev (150 questions, 36,515 deep passes) waits for the main session's word,
+with its expected tokens.
+
+
+**The full dev run** (23 Nov, all 200 dev questions, the pilot's stores kept;
+`docs/audits/evidence/memory_event_lines/dev.json`): today's block 0.69,
+facts without the dated events 0.70 / 0.71, dated event lines 0.755 / 0.765
+(main / noise run, the second judge 0.74 / 0.75); +20 / -7 and +22 / -7
+against today, 20 gains and 5 losses in both runs; multi-session 0.40 to
+0.57 / 0.59. The block's median 1,336 to 1,424 tokens (p95 1,490 to 1,496).
+Reviewed before the merge: an event told again that already has its day left
+a write transaction open on a default-mode connection (fixed), and the cache
+marker now goes to Qwen's own models only. The extraction recording stays
+declared pending: it is taken on the model the last one was made on.
 
 ### W6. Ingestion the product's way (M)
 
@@ -1055,3 +1191,13 @@ alone as the negative controls.
    Spend of the six runs after finding 16: 146 model calls, 5.40M prompt
    tokens, 24,915 completion tokens; the judge 60 calls, 10,098 prompt
    tokens.
+18. **An Arabic "how many X" without "مرة" or "عدد" is not read as a
+    request for every memory.** Found building W4's gathering (23 Nov):
+    "How many guests will come?" is one (`asks_for_all`, "how many"),
+    "كم معزوم بيحضر؟" is not. "كم" with a noun is a count ("كم كتاب
+    قريت؟") or an amount ("كم سعر التذكرة؟", "كم عمري؟"), and no word list
+    tells them apart reliably; English "how many" has single-fact readings
+    too ("How many tiers is the cake?"). Kazma's benchmark holds two such
+    Arabic questions (q1004, h042), each answered by one memory. Left as it
+    is; measured before anything is built, on the parallel set's count
+    questions asked in both languages.

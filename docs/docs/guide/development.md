@@ -117,7 +117,8 @@ From AGENTS.md:
 node --check "kazma-ui/kazma_ui/static/js/chat.js"
 
 # Run tests — prefer the crash-tolerant chunked runner (full suite ~10 min;
-# one chunk per CPU, at most 8)
+# one chunk per CPU, at most 8; each chunk runs as consecutive pytest
+# processes of at most 60 files, --files-per-process, so none grows too big)
 python scripts/fast_test.py
 python -m pytest tests/test_system_install_allowlist.py -v   # one file
 
