@@ -58,6 +58,13 @@ class NoCardGraph:
         return self.snapshot
 
 
+class Checkpoints:
+    """A checkpoint manager that holds nothing: a moved chat's delete asks it."""
+
+    async def adelete_thread(self, thread_id: str) -> None:
+        return None
+
+
 @contextmanager
 def moves(matrix: Matrix) -> Iterator[SimpleNamespace]:
     """Spaces enforced; A's personal space; a chat of each person's space;
@@ -85,7 +92,7 @@ def moves(matrix: Matrix) -> Iterator[SimpleNamespace]:
         app = FastAPI()
         Matrix.role_checked(app)
         app.middleware("http")(auth.create_tenant_middleware())
-        app.include_router(create_chat_move_router(graph_getter=NoCardGraph))
+        app.include_router(create_chat_move_router(graph_getter=NoCardGraph, checkpoints_getter=Checkpoints))
         with TestClient(app) as client:
             yield SimpleNamespace(client=client, marks=marks, a_chat=a_chat, b_chat=b_chat)
 
@@ -135,7 +142,12 @@ def move_chat(matrix: Matrix) -> None:
         moved = w.client.post(f"/api/chat/sessions/{w.a_chat[0]}/move", headers=_as("a", OWN_A),
                               json={"to_space": Matrix.SPACE_A})
         assert moved.status_code == 200, moved.text
-        assert threads.record_of(w.a_chat[1]).space_id == Matrix.SPACE_A
+        assert threads.record_of(w.a_chat[1]) is None, "the chat it was is a deleted chat"
+        from kazma_ui.session_manager import get_session_manager
+
+        with scope.bind_scope(Matrix.SPACE_A, matrix.account_a):
+            copy = get_session_manager().get(moved.json()["session_id"])
+        assert threads.record_of(copy.thread_id).space_id == Matrix.SPACE_A
         _b_chat_stays(matrix, w)
 
 

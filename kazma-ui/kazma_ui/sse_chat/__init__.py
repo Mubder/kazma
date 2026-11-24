@@ -33,7 +33,8 @@ code to one another).
   approval_timeout   thread_id, interrupt_id, tool, turn_id, message
   capacity           action, reply, long_active, yolo_active, plan_active
                      (/long, /plan, /yolo)
-  error              content (the request or the turn failed)
+  error              content (the request or the turn failed), code
+                     ("chat_deleted": the chat was deleted or moved)
   done               content, tokens, cost, cost_known, duration_ms, interrupted, empty,
                      model, turn_id, session_tokens, session_cost, gate_views;
                      stopped_for_shutdown, notice (Kazma is restarting: the
@@ -63,6 +64,7 @@ from kazma_core.exceptions import sanitize_error
 
 from kazma_ui import reply_sink as _reply_sink
 from kazma_ui.rate_limit import rate_limit
+from kazma_ui.session_manager import ChatDeleted
 from kazma_ui.thread_ownership import resolve_caller_thread
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
@@ -83,16 +85,41 @@ def _not_this_spaces_chat(session_id: str) -> bool:
     return thread_refusal(session_id) is not None
 
 
-def _forget_thread_record(thread_id: str) -> None:
-    """Remove a deleted chat's thread record. Blocking; never raises."""
-    import sqlite3
+def chat_gone_text() -> str:
+    """What a message to a chat that was deleted (or moved to another space)
+    is answered, in the page's language."""
+    from kazma_ui.i18n import current_language, t
 
-    from kazma_core.spaces.threads import forget_thread
+    return t("chat.chat_gone", current_language())
 
-    try:
-        forget_thread(thread_id)
-    except (sqlite3.Error, OSError):
-        logger.warning("[chat] the space record of thread %s was not removed", thread_id, exc_info=True)
+
+def _chat_gone_response() -> StreamingResponse:
+    """The stream's answer to a message for a deleted chat: nothing was saved
+    or run, and the page offers the words again in a new chat (its ``code``)."""
+    return StreamingResponse(
+        iter([_sse_frame("error", {"content": chat_gone_text(), "code": "chat_deleted"})]),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _not_run_frame(session_id: str, thread_id: str, prepared_at: int) -> str | None:
+    """What a turn is answered that is not started: its chat was deleted (or
+    moved to another space), or restored, while the turn was prepared from
+    the state of rewind generation *prepared_at*. None: it runs. Asked under
+    the thread's lock; memory only."""
+    from kazma_ui.session_manager import get_session_manager
+    from kazma_ui.thread_locks import rewind_generation
+
+    if get_session_manager().chat_deleted(session_id, thread_id):
+        logger.info("[SSE] thread=%s was deleted while this turn was prepared; not run", thread_id[:12])
+        return _sse_frame("error", {"content": chat_gone_text(), "code": "chat_deleted"})
+    if rewind_generation(thread_id) == prepared_at:
+        return None
+    from kazma_ui.i18n import current_language, t
+
+    logger.info("[SSE] thread=%s was restored while this turn was prepared; not run", thread_id[:12])
+    return _sse_frame("error", {"content": t("replay.turn_after_restore", current_language())})
 
 
 async def _card_waits_on_someone_else(thread_id: str, graph: Any) -> str | None:
@@ -543,7 +570,7 @@ def create_sse_chat_router(
                 return JSONResponse({"error": "Invalid session id"}, status_code=400)
             session, thread_id = await asyncio.to_thread(_resolve_session, sid, durable=False)
             return JSONResponse({"session_id": session.session_id, "thread_id": thread_id})
-        except PermissionError:
+        except (PermissionError, ChatDeleted):
             return JSONResponse({"error": "Session unavailable"}, status_code=404)
         except Exception as exc:
             from kazma_core.errors import safe_error
@@ -623,6 +650,8 @@ def create_sse_chat_router(
             session, thread_id = await asyncio.to_thread(_resolve_session, session_id)
         except PermissionError:
             return JSONResponse({"error": "Session unavailable"}, status_code=404)
+        except ChatDeleted:
+            return _chat_gone_response()
         workspace_id = str(body.get("workspace_id") or "").strip()
         _ws_token = None
         _model_token = None
@@ -843,9 +872,7 @@ def create_sse_chat_router(
             # AUD-052: under the session's transaction, never a put of the
             # copy read before the checkpoint delete's await.
             try:
-                session = await asyncio.to_thread(
-                    _mutate_session, session.session_id, _clear, session
-                )
+                await asyncio.to_thread(_mutate_session, session.session_id, _clear, session)
             except Exception:
                 logger.exception("[SSE] failed to persist /reset")
 
@@ -898,7 +925,7 @@ def create_sse_chat_router(
                         # through the transaction, not the copy read before.
                         session = await asyncio.to_thread(
                             _mutate_session, session.session_id, _replace, session
-                        )
+                        ) or session
                         
                         confirmation = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
                     else:
@@ -1166,12 +1193,15 @@ def create_sse_chat_router(
         # previous turn persisted meanwhile is not overwritten by this
         # request's copy (read before the supersede awaits above).
         try:
-            session = await asyncio.to_thread(
+            _stored = await asyncio.to_thread(
                 _mutate_session,
                 session.session_id,
                 lambda sess: sess.messages.append(_user_row),
                 session,
             )
+            if _stored is None:  # deleted while this message was on its way
+                return _chat_gone_response()
+            session = _stored
         except Exception:
             logger.exception("[SSE] failed to persist user message for session=%s", session_id)
 
@@ -1548,8 +1578,9 @@ def create_sse_chat_router(
                 from kazma_ui.thread_locks import thread_mutation
 
                 async with thread_mutation(thread_id):
-                    _restored_meanwhile = rewind_generation(thread_id) != _rewind_gen
-                    if not _restored_meanwhile:
+                    # Restored, deleted or moved to another space meanwhile.
+                    _not_run = _not_run_frame(session_id, thread_id, _rewind_gen)
+                    if _not_run is None:
                         _drive = asyncio.create_task(
                             _drive_graph_to_journal(
                                 current_graph,
@@ -1561,13 +1592,8 @@ def create_sse_chat_router(
                             )
                         )
                         register_turn(thread_id, _drive)
-                if _restored_meanwhile:
-                    from kazma_ui.i18n import current_language
-                    from kazma_ui.i18n import t as _t_rw
-
-                    logger.info("[SSE] thread=%s was restored while this turn was prepared; not run",
-                                thread_id[:12])
-                    yield _sse_frame("error", {"content": _t_rw("replay.turn_after_restore", current_language())})
+                if _not_run is not None:
+                    yield _not_run
                     return
 
                 def _on_drive_done(t: asyncio.Task, tid: str = thread_id) -> None:
@@ -1870,46 +1896,10 @@ def create_sse_chat_router(
                 if refused is not None:
                     return _whole_chat_answer(refused)
             await asyncio.to_thread(store.delete, session_id)
+            from kazma_ui import dashboard as _dash
+            from kazma_ui.chat_delete import remove_chat_remains
 
-            leftovers = False
-            if thread_id:
-                try:
-                    from kazma_ui import dashboard as _dash
-                    from kazma_ui.thread_locks import thread_mutation
-
-                    cm = _dash._checkpoint_manager
-                    if cm and hasattr(cm, "adelete_thread"):
-                        # The thread's checkpoint-mutation lock (TT-04).
-                        async with thread_mutation(thread_id):
-                            await cm.adelete_thread(thread_id)
-                    else:
-                        # No checkpoint store to ask: whatever it holds of
-                        # this chat is still there.
-                        leftovers = True
-                except Exception as exc:
-                    leftovers = True
-                    logger.warning("[chat] %s deleted, but its checkpoints were NOT (%s)",
-                                   session_id, type(exc).__name__, exc_info=True)
-            # Its Time Travel steps go with it, under each of its keys (TT-05):
-            # they are copies of the chat, like the checkpoints above. What
-            # Kazma learned is memory, kept unless the dialog's "also forget"
-            # was ticked (§15I; the page asks the memory route first).
-            import sqlite3
-
-            from kazma_core.time_travel import SnapshotStoreError, forget_thread_snapshots
-
-            try:
-                await asyncio.to_thread(
-                    forget_thread_snapshots, [k for k in (session_id, thread_id) if k]
-                )
-            except (SnapshotStoreError, sqlite3.Error, OSError):
-                leftovers = True
-                logger.warning("[chat] %s deleted, but its saved steps were NOT", session_id, exc_info=True)
-            if thread_id and not leftovers:
-                # The thread's space record goes last, and only when nothing
-                # of the chat is left: while a copy remains, the record is
-                # what keeps it in its space.
-                await asyncio.to_thread(_forget_thread_record, thread_id)
+            await remove_chat_remains(session_id, thread_id, _dash._checkpoint_manager)
             return {"status": "ok"}
         except Exception as exc:
             logger.error("delete_session failed: %s", exc)

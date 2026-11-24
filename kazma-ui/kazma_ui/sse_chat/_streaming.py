@@ -1852,17 +1852,6 @@ async def _end_attach_for_shutdown(
     yield _sse_frame("done", _shutdown_done_payload(turn_id))
 
 
-def _moved_away(thread_id: str, space: str | None) -> bool:
-    """Whether the chat *thread_id* moved to another space than *space*
-    (Spaces S2-12): read from the thread records' memory, never a store."""
-    if not space:
-        return False
-    from kazma_core.spaces import threads
-
-    home = threads.known_space(thread_id)
-    return home is not None and home != space
-
-
 async def _sse_attach_stream(
     thread_id: str,
     session_id: str,
@@ -1899,7 +1888,7 @@ async def _sse_attach_stream(
     from kazma_core.spaces import departures
     from kazma_core.spaces.scope import current_scope, spaces_enforced
 
-    from kazma_ui.live_connections import stream_watched
+    from kazma_ui.live_connections import is_gone, stream_watched
 
     whose = current_scope() if spaces_enforced() else None
     asker, space = (whose.asker, whose.space_id) if whose is not None else (None, None)
@@ -1947,9 +1936,9 @@ async def _sse_attach_stream(
 
         idle_ticks = 0
         while True:
-            if departures.departed(asker, space) or _moved_away(thread_id, space):
+            if departures.departed(asker, space) or is_gone(thread_id):
                 # Their person left the space, or the chat moved to another
-                # space (the chat move review's H3): nothing more is sent.
+                # (Spaces S2-12): nothing more is sent.
                 return
             if is_shutting_down():
                 # Kazma is restarting: the page re-attaches when it is back

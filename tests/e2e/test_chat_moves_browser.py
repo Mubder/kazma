@@ -4,10 +4,13 @@ Reached by the sidebar. In the person's own space their chat's menu offers
 "Share with…" each shared space they are in; the dialog says how much of
 theirs the chat holds, what sharing means, and the rule -- the conversation
 moves, what Kazma remembered stays where it was said -- before it moves
-anything. Then the chat is gone from their own list and in the shared
-space's, its thread recorded there. In the shared space the same chat
-offers "Take out to my space", said first too, and afterwards the shared
-space lists the line it keeps: the title, never a word of the chat.
+anything. Then the chat is gone from their own list and its copy, under its
+own new id, is in the shared space's. A second tab left open on it is told
+when it sends: nothing is written into the chat that moved, and its message
+is in the composer of a new chat. In the shared space the copy, open in the
+tab, offers "Take out to my space", said first too; the tab then opens the
+chat where it lives now, and the shared space lists the line it keeps: the
+title, never a word of the chat.
 
 The routes, the chat store, the thread records, the checkpoints and the forget
 ledger are the real app's (memory: ``tests/test_chat_move_memory.py``).
@@ -47,9 +50,28 @@ def _chat(space: str, account: str) -> tuple[str, str]:
     return session_id, thread_id
 
 
-def _open_menu(pg, session_id: str):
+def _held(space: str, account: str, session_id: str):
+    from kazma_core.spaces.scope import bind_scope
+    from kazma_ui.session_manager import get_session_manager
+
+    with bind_scope(space, account):
+        return get_session_manager().get(session_id)
+
+
+def _item(pg, session_id: str):
     item = pg.locator(f'.session-item[data-session-id="{session_id}"]')
     item.wait_for(state="visible", timeout=30000)
+    return item
+
+
+def _open_chat(pg, session_id: str) -> None:
+    """Open the chat from the list, and its transcript read."""
+    _item(pg, session_id).click()
+    pg.locator("#chat-messages").get_by_text("Plan our trip to Oman").first.wait_for(state="visible", timeout=30000)
+
+
+def _open_menu(pg, session_id: str):
+    item = _item(pg, session_id)
     item.hover()
     item.locator(".session-more").click()
     return pg.locator(f'.session-menu[data-menu="{session_id}"]')
@@ -78,6 +100,11 @@ def test_share_and_take_out_a_chat_from_the_chat_list(lang):
             pg.goto(f"{h.base}/documents?space={OWNER_SPACE_ID}", wait_until="domcontentloaded")
             pg.wait_for_function("() => !!window.kazmaSpace && window.kazmaSpace.spaces.length > 1", timeout=20000)
             _soft_nav(pg, "/chat")
+            # A second tab stays open on the chat.
+            tab = context.new_page()
+            tab.goto(f"{h.base}/documents?space={OWNER_SPACE_ID}", wait_until="domcontentloaded")
+            _soft_nav(tab, "/chat")
+            _open_chat(tab, session_id)
 
             # ── In the person's own space: Share with Family ─────────────
             menu = _open_menu(pg, session_id)
@@ -97,14 +124,29 @@ def test_share_and_take_out_a_chat_from_the_chat_list(lang):
             with pg.expect_response(lambda r: r.url.endswith("/move") and r.request.method == "POST") as answer:
                 _modal_action(pg, _t("chat.move_share_ok", lang))
             assert answer.value.status == 200, answer.value.text()
+            copy_id = answer.value.json()["session_id"]
             pg.locator(f'.session-item[data-session-id="{session_id}"]').wait_for(state="detached", timeout=20000)
-            assert threads.record_of(thread_id).space_id == family
+            assert copy_id != session_id and threads.record_of(thread_id) is None
+            copy = _held(family, OWNER_ACCOUNT_ID, copy_id)
+            assert threads.record_of(copy.thread_id).space_id == family
+
+            # ── The tab left open on it ───────────────────────────────────
+            tab.fill("#chat-input", "Which day do we leave?")
+            tab.click("#send-btn")
+            tab.locator(".toast", has_text=_t("chat.chat_gone", lang)).first.wait_for(state="visible", timeout=20000)
+            tab.wait_for_function(
+                "() => document.querySelector('#chat-input').value === 'Which day do we leave?'", timeout=20000)
+            assert tab.locator("#chat-messages").get_by_text("Plan our trip to Oman").count() == 0
+            assert _held(OWNER_SPACE_ID, OWNER_ACCOUNT_ID, session_id) is None, "nothing was written into it"
+            assert len(_held(family, OWNER_ACCOUNT_ID, copy_id).messages) == 2, "nor into its copy"
+            tab.close()
 
             # ── In the shared space: Take out to my space ────────────────
             pg.goto(f"{h.base}/documents?space={family}", wait_until="domcontentloaded")
             pg.wait_for_function("() => !!window.kazmaSpace && window.kazmaSpace.spaces.length > 1", timeout=20000)
             _soft_nav(pg, "/chat")
-            menu = _open_menu(pg, session_id)
+            _open_chat(pg, copy_id)
+            menu = _open_menu(pg, copy_id)
             take = menu.locator('[data-menu-action="move"][data-menu-takeout="1"]')
             take.wait_for(state="visible", timeout=20000)
             assert _plain(take.inner_text()) == _plain(_t("chat.move_take_out", lang))
@@ -116,9 +158,22 @@ def test_share_and_take_out_a_chat_from_the_chat_list(lang):
             assert _plain(_t("chat.move_memory_note", lang)) in said
             with pg.expect_response(lambda r: r.url.endswith("/move") and r.request.method == "POST") as answer:
                 _modal_action(pg, _t("chat.move_take_out_ok", lang))
-            assert answer.value.status == 200, answer.value.text()
-            pg.locator(f'.session-item[data-session-id="{session_id}"]').wait_for(state="detached", timeout=20000)
-            assert threads.record_of(thread_id).space_id == OWNER_SPACE_ID
+            assert answer.value.status == 200
+            # It was the open chat: the tab goes with it, to its new id.
+            pg.wait_for_function("(id) => !!window.kazmaSpace && window.kazmaSpace.id === id", arg=OWNER_SPACE_ID,
+                                 timeout=20000)
+            pg.locator("#chat-messages").get_by_text("Plan our trip to Oman").first.wait_for(
+                state="visible", timeout=30000)
+            pg.locator(".session-item.active").wait_for(state="visible", timeout=20000)
+            back_id = pg.locator(".session-item.active").get_attribute("data-session-id")
+            assert back_id not in (session_id, copy_id)
+            assert _held(family, OWNER_ACCOUNT_ID, copy_id) is None
+            back = _held(OWNER_SPACE_ID, OWNER_ACCOUNT_ID, back_id)
+            assert threads.record_of(back.thread_id).space_id == OWNER_SPACE_ID
+            # The shared space keeps a line.
+            pg.goto(f"{h.base}/documents?space={family}", wait_until="domcontentloaded")
+            pg.wait_for_function("() => !!window.kazmaSpace && window.kazmaSpace.spaces.length > 1", timeout=20000)
+            _soft_nav(pg, "/chat")
             line = pg.locator("[data-taken-out]")
             line.first.wait_for(state="visible", timeout=20000)
             text = line.first.inner_text()
@@ -130,3 +185,36 @@ def test_share_and_take_out_a_chat_from_the_chat_list(lang):
         finally:
             browser.close()
             scope.set_enforced(False)
+
+
+def test_a_move_a_stop_cut_off_is_settled_before_anyone_is_served(monkeypatch):
+    """The app's start takes the copy away (or finishes the delete) before
+    the server answers: here, the copy of a move that was still copying."""
+    from kazma_core.spaces import chat_moves, scope, threads
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID
+    from kazma_ui import chat_move
+
+    settled_before: list[bool] = []
+    real = chat_move.settle_chat_moves
+
+    async def settle(checkpoints=None):
+        answer = await real(checkpoints)
+        settled_before.append(not served)
+        return answer
+
+    served: list[str] = []
+    monkeypatch.setattr(chat_move, "settle_chat_moves", settle)
+    threads.record_thread("t-cut-off-copy", OWNER_SPACE_ID, OWNER_ACCOUNT_ID)
+    chat_moves.record_move("cut-off", {
+        "thread": "t-source", "session": "s-source", "source": "s-elsewhere", "target": OWNER_SPACE_ID,
+        "by": OWNER_ACCOUNT_ID, "new_session": "s-cut-off-copy", "new_thread": "t-cut-off-copy",
+        "taken_out": False, "kept_out": False, "title": "", "stage": "copying", "at": 1.0})
+    try:
+        with unified_turn_server(Script(steps=[], final="ok")):
+            served.append("served")
+            assert settled_before == [True], settled_before
+            assert chat_moves.moves_under_way() == {}
+            assert threads.record_of("t-cut-off-copy") is None, "what the copy had is gone"
+    finally:
+        chat_moves.settle_move("cut-off")
+        scope.set_enforced(False)

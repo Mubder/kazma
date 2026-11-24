@@ -1270,6 +1270,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "بانتظار ردّ {names}",
         "en": "Waiting for {names} to answer",
     },
+    # A message to a chat that was deleted, or moved to another space
+    # (Spaces S2-12): nothing written late brings a chat back.
+    "chat.chat_gone": {
+        "ar": "حُذفت هذه المحادثة أو نُقلت إلى مساحة أخرى، فلم تُرسل رسالتك. أرسلها في محادثة جديدة.",
+        "en": "This chat was deleted or moved to another space, so your message was not sent. Send it in a new chat.",
+    },
     # Spaces S2-03: a model the person may not use is refused before the
     # turn runs.
     "chat.model_not_allowed": {
@@ -1713,8 +1719,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Moving a chat moves the conversation. What Kazma remembered from it stays where it was said, and from now on it remembers what you say in the new space. Taking a chat out of a shared space makes that space forget it.",
     },
     "chat.move_also_note": {
-        "ar": "وتنتقل معها تذكيراتها ومهامها المجدولة والملفات التي شاركها Kazma فيها. أما خطوات السفر عبر الزمن السابقة فلا تنتقل، ولن يستطيع Kazma فتح الملفات التي أرفقتها: أرفقها من جديد.",
-        "en": "Its reminders and scheduled tasks move with it, and so do the files Kazma shared in it. Its earlier Time Travel steps do not, and Kazma can no longer open files you attached to it: attach them again.",
+        "ar": "وتنتقل معها الملفات التي شاركها Kazma فيها. أما التذكيرات والمهام المجدولة التي حجزتها منها فتبقى حيث حجزتها. ولا تنتقل خطوات السفر عبر الزمن السابقة، ولن يستطيع Kazma فتح الملفات التي أرفقتها: أرفقها من جديد.",
+        "en": "The files Kazma shared in it move with it. Reminders and scheduled tasks you booked from it stay where you booked them. Its earlier Time Travel steps do not move, and Kazma can no longer open files you attached to it: attach them again.",
     },
     "chat.move_err_chat_app": {
         "ar": 'هذه محادثة من تطبيق دردشة، فتبقى في مساحتها.',

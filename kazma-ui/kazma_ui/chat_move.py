@@ -1,69 +1,60 @@
 """Moving a chat between one's own space and a shared one (Spaces S2-12):
 the move itself, its settling, and its routes.
 
-**Moving a chat moves the conversation.** What Kazma remembered from it stays
-where it was said, and from now on it remembers what is said in the new
-space. Taking a chat out of a shared space makes that space forget it.
+**A move is a fork into the other space and the ordinary delete here**, under
+a new session id and a new thread id. Moving a chat moves the conversation:
+what Kazma remembered from it stays where it was said, and from now on it
+remembers what is said in the new space. Taking a chat out of a shared space
+makes that space forget it.
 
 * ``GET /api/chat/sessions/{session_id}/move`` -- what the dialog shows
   before the move: the chat's size in turns and whether others wrote in it.
 * ``POST /api/chat/sessions/{session_id}/move`` -- ``{"to_space"}``: move
-  the bound space's chat ``session_id`` to ``to_space``. Refusals are codes
-  the page words (``chat.js``): ``spaces_off``, ``not_yours``,
+  the bound space's chat ``session_id`` to ``to_space``; answers the copy's
+  ``session_id``, which the page opens. Refusals are codes the page words
+  (``chat.js``): ``spaces_off``, ``not_yours``,
   ``not_between_own_and_shared`` (``spaces.moves``), ``not_found``,
   ``not_your_chat``, ``others_wrote`` (the page offers "New private chat"),
-  ``chat_app_chat`` (a chat app's chat stays in its space), ``already_there``,
-  ``turn_running``, ``turn_unfinished`` (a restart cut a turn off half way:
-  Continue or Close it first), ``approval_pending``, ``approval_unknown``
-  (whether a card waits could not be read: refused, never guessed),
-  ``move_in_progress``, ``space_limit`` (the files shared in the chat do not
-  fit), ``move_failed``, ``identity_unavailable``.
+  ``chat_app_chat`` (a chat app's chat stays in its space), ``turn_running``
+  (a turn, or a message that landed while the chat was copied),
+  ``turn_unfinished`` (a restart cut a turn off half way: Continue or Close
+  it first), ``approval_pending``, ``approval_unknown`` (whether a card waits
+  could not be read: refused, never guessed), ``move_in_progress``,
+  ``space_limit`` (the files shared in the chat do not fit), ``move_failed``,
+  ``identity_unavailable``.
 * ``GET /api/chat/taken-out`` -- the lines the bound space keeps for the
   chats taken out of it: who (their name), when, the title each had.
 
-The move (:func:`_move_chat`) takes the thread's mutation lock
-(``thread_locks``) first and checks everything again under it -- where the
-chat is, that it is not already there, no turn running or cut off, no card
-waiting (the graph's checkpoint and the gate registry's pending rows; one
-that cannot be read refuses) -- then:
+The move (:func:`_move`) holds the thread's mutation lock
+(``thread_locks``) and checks everything again under it -- no turn running
+or cut off, no card waiting (the graph's checkpoint and the gate registry's
+pending rows; one that cannot be read refuses), nobody else's words in a
+chat taken out -- then:
 
-1. **journal** the attempt (``chat_moves.record_move``, stage ``copying``);
-2. **keep the old messages out of the target's memory**
-   (``memory.forget.keep_moved_turns_out``: the turns that are not its own,
-   numbered as turn reconcile numbers them; and the source's whole-chat
-   keep-out), before anything of the chat is in the target;
-3. **copy** the chat row into the target space without what its turns
-   remembered (:func:`_moved_message`; the person's own messages that name no
-   author are stamped theirs when it goes into a shared space: it was their
-   personal space), the files shared in it (``chat_files.copy_shared_files``)
-   and the newest state, cleaned (``CheckpointManager.amove_state``,
-   ``chat_moves.moved_state``);
-4. **switch**: the thread's record names the target (``threads.move_thread``;
-   stage ``switched``) and its journal of frames is dropped. From here the
-   chat is in the target: the memory writers refuse the source (a personal
-   space still takes the turns said before this, when their writes were
-   queued), and every socket and stream of the chat open in another space is
-   closed
-   (``live_connections.thread_moved``);
-5. **finish** (:func:`_finish`, :data:`_STEPS`): the rows that name the
-   thread beside a space follow it, the chat apps' pointers to it and its
-   Time Travel steps go, a shared space it was taken out of forgets it
-   (``memory.forget.forget_chat``, journaled, with its own retries) and keeps
-   its line, and the source's files, checkpoints and chat row go -- each step
-   on its own: one that fails does not hold the others.
+1. **journals** the attempt with its new ids (stage ``copying``);
+2. **copies**: the new thread's record in the target; the source's "Don't
+   remember this chat", when it has one, under the new keys; the state, as a
+   fork (``thread_rewind.carry_conversation``: questions and answers); the
+   files Kazma shared in the chat;
+3. **hands over** (``SessionManager.hand_over``), in one step: if the chat
+   still holds exactly what was copied, its copy's row is stored, the
+   journal says ``copied``, and its row here is deleted. A message that
+   landed meanwhile makes it refuse, with nothing changed;
+4. **deletes** the rest here (:data:`_STEPS`), as any chat's delete does
+   (``chat_delete``), each step on its own and recorded as it is done. A
+   shared space the chat was taken out of forgets it under its old keys and
+   keeps its line.
 
-A failure before the switch takes the copies back (the chat stays where it
-was). A failure once the record names the target -- in the switch's own
-bookkeeping too -- never drops the journal. What its request could not
-settle is settled at the next start, by the maintenance sweep "chat moves"
-and by the next move of the same chat (:func:`settle_chat_moves`).
+The whole move runs in a task of its own: a request that goes away does not
+cut it off. One that did not end is settled at the next start, on the
+maintenance cadence, and by the next move of the same chat: ``copying`` takes
+the copy away and the chat stays here, ``copied`` finishes the delete here.
 """
 
 from __future__ import annotations
 
 import asyncio
 import copy
-import dataclasses
 import json
 import logging
 import sqlite3
@@ -74,11 +65,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from kazma_core.background import spawn_background
 from kazma_core.db.pg_helpers import store_errors
 from kazma_core.spaces import chat_moves, threads
 from kazma_core.spaces.chat_moves import ChatMoveRefused
 from kazma_core.spaces.identity import IdentityUnavailable
-from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, bind_scope
+from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, bind_scope
 from kazma_core.spaces.space_limits import SpaceOverLimit
 
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
@@ -89,46 +81,55 @@ __all__ = ["create_chat_move_router", "settle_chat_moves", "settler"]
 logger = logging.getLogger(__name__)
 
 #: What a step of a move can fail with: any store's own errors -- Postgres's
-#: among them (the move's re-review, N8) -- and an identity store that cannot
-#: answer. Each step is idempotent and tried again.
-_STEP_FAILURES: tuple[type[BaseException], ...] = (*store_errors(), IdentityUnavailable)
+#: among them -- and an identity store that cannot answer. Each step is
+#: idempotent and tried again.
+_STEP_FAILURES: tuple[type[Exception], ...] = (*store_errors(), IdentityUnavailable)
 
 #: What reading a chat's checkpoint can raise: the store's errors and a state
 #: that does not decode (either one means "not known").
-_STATE_FAILURES: tuple[type[BaseException], ...] = (*store_errors(), LookupError, AttributeError)
+_STATE_FAILURES: tuple[type[Exception], ...] = (*store_errors(), LookupError, AttributeError)
 
 #: How long the maintenance sweep waits for the settling it started.
 _SETTLE_WAIT_S = 120.0
 
+_TURN_RUNNING = ("turn_running", 409, "Kazma is answering in this chat. Move it when it is done.")
 
-def _session_in(space: str, by: str, session_id: str) -> Any:
+
+def _snapshot_in(space: str, by: str, session_id: str) -> Any:
+    """The chat as it is now, a copy of its own (blocking)."""
     from kazma_ui.session_manager import get_session_manager
 
     with bind_scope(space, by):
-        return get_session_manager().get(session_id)
+        return get_session_manager().snapshot(session_id)
+
+
+def _row_in(space: str, by: str, session_id: str) -> bool:
+    from kazma_ui.session_manager import get_session_manager
+
+    with bind_scope(space, by):
+        return get_session_manager().get(session_id) is not None
 
 
 def _thread_of(session: Any, session_id: str) -> str:
     return str(getattr(session, "thread_id", "") or session_id)
 
 
-def _opener(thread: str, from_space: str) -> str:
+def _opener(thread: str) -> str:
     """Who opened the chat: its record's opener; a chat from before Spaces
-    (no record) is the owner's, in the owner's space only (N19)."""
+    (no record: it is in the owner's space, ``threads.thread_home``) is the
+    owner's (N19)."""
     record = threads.record_of(thread)
-    if record is not None:
-        return record.opener
-    return OWNER_ACCOUNT_ID if from_space == OWNER_SPACE_ID else ""
+    return record.opener if record is not None else OWNER_ACCOUNT_ID
 
 
 def _prepare(session_id: str, from_space: str, to_space: str, by: str) -> tuple[Any, bool]:
-    """The chat and whether the move takes it out of a shared space, or a
-    refusal. Blocking; asked again under the thread's lock, with
-    :func:`_not_there_yet`."""
+    """A snapshot of the chat and whether the move takes it out of a shared
+    space, or a refusal. Blocking; asked again under the thread's lock: what
+    is judged then is what is copied."""
     refused, taken_out = chat_moves.move_refusal(from_space=from_space, to_space=to_space, by=by)
     if refused is not None:
         raise refused
-    session = _session_in(from_space, by, session_id)
+    session = _snapshot_in(from_space, by, session_id)
     if session is None:
         raise ChatMoveRefused("not_found", 404, "No such chat in this space.")
     thread = _thread_of(session, session_id)
@@ -136,7 +137,7 @@ def _prepare(session_id: str, from_space: str, to_space: str, by: str) -> tuple[
         raise ChatMoveRefused("not_found", 404, "No such chat in this space.")
     if chat_moves.is_chat_app_chat(session_id, thread):
         raise ChatMoveRefused("chat_app_chat", 409, "This chat is a chat app's, so it stays in its space.")
-    if _opener(thread, from_space) != by:
+    if _opener(thread) != by:
         raise ChatMoveRefused("not_your_chat", 403, "Only the person who started a chat moves it.")
     if taken_out and chat_moves.others_wrote(session.messages, by):
         # Their words are the shared space's (the plan's S2-12 row, decided).
@@ -144,170 +145,6 @@ def _prepare(session_id: str, from_space: str, to_space: str, by: str) -> tuple[
                               "Others wrote in this chat, so it stays in this space. Start a new "
                               "private chat in your own space instead.")
     return session, taken_out
-
-
-def _not_there_yet(session_id: str, to_space: str, by: str) -> None:
-    """Refuse a move onto a chat of that id in the target: asked once what an
-    earlier move left there was settled."""
-    if _session_in(to_space, by, session_id) is not None:
-        raise ChatMoveRefused("already_there", 409, "A chat of that id is already in that space.")
-
-
-# ── What is copied, and what memory is kept out of ───────────────────────
-
-
-def _moved_message(message: dict[str, Any]) -> dict[str, Any]:
-    """A chat row's message as it moves: without the memory its turn was
-    shown (the "Memory used" part and row), and without what its memory
-    tools answered (the steps stay, empty)."""
-    out = copy.deepcopy(message)
-    if isinstance(out.get("parts"), list):
-        out["parts"] = [_without_answer(p, p.get("name") or p.get("title")) if isinstance(p, dict) else p
-                        for p in out["parts"] if not (isinstance(p, dict) and p.get("type") == "memory")]
-    if isinstance(out.get("activity"), list):
-        out["activity"] = [_without_answer(r, r.get("title")) if isinstance(r, dict) else r
-                           for r in out["activity"] if not (isinstance(r, dict) and r.get("kind") == "memory")]
-    return out
-
-
-def _without_answer(row: dict[str, Any], tool: Any) -> dict[str, Any]:
-    if "tool" not in (row.get("type"), row.get("kind")) or not chat_moves.is_memory_tool(tool):
-        return row
-    return {**row, **{field: "" for field in ("result", "detail") if field in row}}
-
-
-def _copy_row(session: Any, to_space: str, by: str, *, taken_out: bool) -> None:
-    """The chat row, in the target space (:func:`_moved_message`). Going into
-    a shared space, the person's own messages that name no author are stamped
-    theirs: it was their personal space, and in a shared space every message
-    names its author (``reply_sink.authored``)."""
-    from kazma_ui.session_manager import get_session_manager
-
-    messages = [_moved_message(m) if isinstance(m, dict) else m for m in session.messages]
-    if not taken_out:
-        for message in messages:
-            if message.get("role") == "user" and not message.get("author"):
-                message["author"] = by
-    moved = dataclasses.replace(session, tenant_id=to_space, messages=messages)
-    with bind_scope(to_space, by):
-        get_session_manager().put(moved)
-
-
-def _remove_row(space: str, by: str, session_id: str) -> None:
-    from kazma_ui.session_manager import get_session_manager
-
-    with bind_scope(space, by):
-        get_session_manager().delete(session_id)
-
-
-def _turns_of(messages: list[Any]) -> list[tuple[int, str]]:
-    """``(number, question)`` of every message a person wrote: turn
-    reconcile's own turns (``turn_reconcile._turns``), and, numbered the same,
-    the messages it passes over and the past-chats search reads (slash
-    commands)."""
-    from kazma_core.memory.chat_history import normalize_message
-    from kazma_core.memory.consolidator import message_text
-    from kazma_core.memory.turn_reconcile import _turns
-
-    asked = [m for m in (normalize_message(m) for m in messages) if m.get("role") == "user"]
-    numbered = {n: message_text(m.get("content")) for n, m in enumerate(asked, start=1)}
-    numbered.update({turn[0]: turn[1] for turn in _turns(messages)})
-    return sorted(numbered.items())
-
-
-def _keep_out_of_memory(session: Any, entry: dict[str, Any]) -> None:
-    """The target learns nothing from the messages the chat already holds,
-    but what was said there before: every other turn is kept out of its
-    memory, and so is the whole chat when the person keeps it out where it is
-    now. Before the switch, and before the row is there for turn reconcile to
-    read."""
-    from kazma_core.memory import forget
-
-    keys = [entry["session"], entry["thread"]]
-    record = threads.record_of(entry["thread"])
-    said_here = record.left_turn if record is not None and record.left_space == entry["target"] else 0
-    forget.keep_moved_turns_out(entry["session"], keys=keys, turns=_turns_of(session.messages),
-                                tenant_id=entry["target"], said_here=said_here)
-    whole, _turns = forget.forgotten_in_chat(entry["source"], keys)
-    if whole:
-        forget.set_chat_remembered(entry["session"], False, tenant_id=entry["target"], keys=keys)
-
-
-def _forget_where_it_was(entry: dict[str, Any]) -> None:
-    """A shared space a chat was taken out of forgets it: its memories, the
-    agent's notes, its summaries and the lessons it taught
-    (``memory.forget.forget_chat``: journaled first, and the forget
-    convergence finishes one that fails). A personal space keeps what it
-    remembers: a move never touches it."""
-    from kazma_core.memory import forget
-
-    out = forget.forget_chat(entry["session"], tenant_id=entry["source"], keys=[entry["session"], entry["thread"]])
-    if not out.get("ok"):
-        raise RuntimeError(f"the shared space did not forget the chat: {out.get('error')}")
-    # A value's name on the memory map outlives its fact where the two are
-    # spelled apart ("Lisbon", `lisbon`).
-    forget.retire_names_left(entry["source"])
-
-
-def _copy_files(session: Any, entry: dict[str, Any]) -> None:
-    from kazma_core.chat_files import copy_shared_files
-
-    try:
-        copy_shared_files(json.dumps(session.messages, ensure_ascii=False, default=str), thread_id=entry["thread"],
-                          from_space=entry["source"], to_space=entry["target"], by=entry["by"])
-    except SpaceOverLimit as exc:
-        raise ChatMoveRefused("space_limit", 507, "The new space has no room for this chat's files.") from exc
-
-
-def _remove_files(entry: dict[str, Any], space: str) -> None:
-    from kazma_core.chat_files import remove_shared_files
-
-    remove_shared_files(entry["thread"], space=space, by=entry["by"])
-
-
-def _working_root(space: str, by: str) -> str:
-    """Where work in *space* runs: the moved state's root (``/compact`` reads
-    it before the chat's next turn captures its own). "" when it cannot be
-    worked out: the state then names none."""
-    from kazma_core.workspace.binding import resolve_active_root
-
-    try:
-        with bind_scope(space, by):
-            return str(resolve_active_root())
-    except _STEP_FAILURES:
-        logger.debug("[spaces] the working folder of %s could not be read", space, exc_info=True)
-        return ""
-
-
-def _drop_pointers(thread_id: str) -> int:
-    """The chat apps' pointers to the thread (``active_thread.<sender>``)
-    go: a chat app's next message starts a chat of its own in its space,
-    never the moved one. Blocking."""
-    from kazma_core.config_store import get_config_store
-
-    store = get_config_store()
-    dropped = 0
-    # The pointers are the "session" category's (sessions.directory).
-    for key, value in store.get_category("session").items():
-        if str(key).startswith("active_thread.") and str(value or "") == thread_id:
-            store.delete(key)
-            dropped += 1
-    return dropped
-
-
-def _forget_steps(keys: list[str]) -> int:
-    from kazma_core.time_travel import forget_thread_snapshots
-
-    return forget_thread_snapshots(keys)
-
-
-def _drop_frames(thread: str) -> None:
-    """The thread's journaled frames go: they hold what its turns were shown
-    (``memory_explain``, the tools' answers), which a member of the target
-    attaching would be replayed (the move's re-review, N3)."""
-    from kazma_ui.delivery import get_turn_broker
-
-    get_turn_broker().clear(thread)
 
 
 # ── What refuses a move ──────────────────────────────────────────────────
@@ -329,17 +166,15 @@ def _pending_gate_rows(thread_id: str) -> int:
     return len(hitl_gates.live_gates(thread_id))
 
 
-async def _quiet(graph: Any, thread_id: str) -> None:
-    """Refuse the move while something of the chat is unfinished:
+async def _quiet(graph: Any, thread_id: str) -> dict[str, Any]:
+    """The chat's state, or a refusal while something of it is unfinished:
 
     * a card waits on it -- an interrupt in its checkpoint, or an open row in
       the gate registry: it must never be left in the space the chat left;
-    * a turn was cut off half way (a next step and no card): its tools'
-      receipts are kept under the space (§30 G), so in the target Continue
-      would find none and run a finished tool again (the move's re-review,
-      N6: an email went out twice).
+    * a turn was cut off half way (a next step and no card): the copy starts
+      at a turn's end, so what that turn had begun would be lost.
 
-    Either that cannot be read refuses too (the chat move review's M5)."""
+    Either that cannot be read refuses too."""
     if graph is None:
         raise ChatMoveRefused(*_APPROVAL_UNKNOWN)
     try:
@@ -359,105 +194,217 @@ async def _quiet(graph: Any, thread_id: str) -> None:
         raise ChatMoveRefused(*_APPROVAL_PENDING)
     if unfinished:
         raise ChatMoveRefused(*_TURN_UNFINISHED)
+    return dict((snap.values if snap is not None else None) or {})
 
 
 # ── The move ─────────────────────────────────────────────────────────────
 
 
 async def _move_chat(*, session_id: str, from_space: str, to_space: str, by: str,
-                    graph: Any = None, checkpoints: Any = None) -> dict[str, Any]:
-    """Move *by*'s chat *session_id* from *from_space* to *to_space*.
-    Raises :class:`ChatMoveRefused`; anything else that stops it before the
-    switch leaves the chat where it was."""
+                     graph: Any = None, checkpoints: Any = None) -> dict[str, Any]:
+    """Move *by*'s chat *session_id* from *from_space* to *to_space*. Raises
+    :class:`ChatMoveRefused`; anything else that stops it before the handover
+    leaves the chat where it was. In a task of its own: a request that is
+    cancelled waits no longer, and the move goes on."""
+    task = spawn_background(
+        _answered(_move(session_id=session_id, from_space=from_space, to_space=to_space, by=by,
+                        graph=graph, checkpoints=checkpoints)), name="chat-move")
+    answer = await asyncio.shield(task)
+    if isinstance(answer, Exception):
+        raise answer
+    return answer
+
+
+async def _answered(move: Awaitable[dict[str, Any]]) -> dict[str, Any] | Exception:
+    """What the move answers, a refusal or a failure as a value: it is the
+    request's to answer, never the task's to log."""
+    try:
+        return await move
+    except (ChatMoveRefused, *_STEP_FAILURES) as exc:
+        return exc
+
+
+async def _move(*, session_id: str, from_space: str, to_space: str, by: str,
+                graph: Any, checkpoints: Any) -> dict[str, Any]:
     session, _ = await asyncio.to_thread(_prepare, session_id, from_space, to_space, by)
     thread = _thread_of(session, session_id)
     from kazma_ui.active_turns import is_turn_running
-    from kazma_ui.live_connections import thread_moved
+    from kazma_ui.live_connections import chat_gone
     from kazma_ui.thread_locks import thread_mutation
 
     async with thread_mutation(thread):
         # An earlier move of this chat that did not end: settled now, so it
-        # never holds the chat (the move's re-review, N8).
+        # never holds the chat.
         await _settle_thread(thread, checkpoints)
-        # Everything again, under the lock (the chat move review's M4): a
-        # move or a turn that ended while this one waited for it.
+        # Everything again, under the lock: a turn that ended while this
+        # waited, someone else's words, another space's rules.
         session, taken_out = await asyncio.to_thread(_prepare, session_id, from_space, to_space, by)
-        await asyncio.to_thread(_not_there_yet, session_id, to_space, by)
         if is_turn_running(thread):
-            raise ChatMoveRefused("turn_running", 409, "Kazma is answering in this chat. Move it when it is done.")
-        await _quiet(graph, thread)
+            raise ChatMoveRefused(*_TURN_RUNNING)
+        values = await _quiet(graph, thread)
         attempt = uuid.uuid4().hex
-        turns = len(_turns_of(session.messages))
-        entry: dict[str, Any] = {"thread": thread, "session": session_id, "source": from_space,
-                                 "target": to_space, "by": by, "taken_out": taken_out, "turns": turns,
-                                 "title": str(session.title or ""), "stage": "copying", "at": time.time()}
+        entry = await asyncio.to_thread(_entry, session, session_id, from_space, to_space, by, taken_out)
         await asyncio.to_thread(chat_moves.record_move, attempt, entry)
-        # ``None`` while it runs: a stop of any kind (a refusal, a cancel)
-        # settles it in ``finally``.
-        outcome: str | None = None
         try:
-            await _copy(session, entry, checkpoints)
-            _drop_frames(thread)
-            await asyncio.to_thread(_switch, attempt, entry)
-            outcome = "switched"
-        except _STEP_FAILURES:
-            # Switched after all (the switch's own bookkeeping failed): the
-            # chat is in the target, and the finish runs (the review's H2).
-            outcome = "switched" if await _settle_failure(attempt, entry, checkpoints) else "put_back"
-            if outcome == "put_back":
+            rows = _rows_to_copy(session, by)
+            await _copy(rows, values, entry, graph)
+            moved = await asyncio.to_thread(_hand_over, attempt, entry, session.messages, rows)
+        except (ChatMoveRefused, *_STEP_FAILURES):
+            # It may have stopped after the handover (the row's delete
+            # failed): then the chat is in the target, and settling went on.
+            if await _settle_one(attempt, checkpoints) not in _MOVED:
                 raise
-        finally:
-            if outcome is None:
-                await _settle_failure(attempt, entry, checkpoints)
+            moved = True
+        else:
+            # Not handed over: a message landed while the chat was copied,
+            # and settling takes the copy away. Nothing moved.
+            await _settle_one(attempt, checkpoints)
+        if not moved:
+            raise ChatMoveRefused(*_TURN_RUNNING)
         _drop_frames(thread)
-        thread_moved({session_id, thread}, to_space)
-        await _finish(attempt, {**entry, "stage": "switched"}, checkpoints)
+        chat_gone(session_id=session_id, thread_id=thread, space=from_space)
     logger.info("[spaces] %s moved a chat from %s to %s (taken out: %s)", by, from_space, to_space, taken_out)
-    return {"session_id": session_id, "space": to_space, "taken_out": taken_out, "turns": turns}
+    return {"session_id": entry["new_session"], "space": to_space, "taken_out": taken_out,
+            "turns": _asked(session.messages)}
 
 
-async def _copy(session: Any, entry: dict[str, Any], checkpoints: Any) -> None:
-    """Everything the target needs, before the switch. The keep-out first:
-    nothing of the chat is in the target without it."""
-    await asyncio.to_thread(_keep_out_of_memory, session, entry)
-    await asyncio.to_thread(_copy_files, session, entry)
-    await asyncio.to_thread(_copy_row, session, entry["target"], entry["by"], taken_out=entry["taken_out"])
-    if checkpoints is None:
-        return
-    root = await asyncio.to_thread(_working_root, entry["target"], entry["by"])
-    await checkpoints.amove_state(
-        entry["thread"], from_space=entry["source"], to_space=entry["target"],
-        clean=lambda values: chat_moves.moved_state(values, to_space=entry["target"], workspace_root=root))
+def _asked(messages: list[Any]) -> int:
+    return sum(1 for m in messages if isinstance(m, dict) and m.get("role") == "user")
 
 
-def _switch(attempt: str, entry: dict[str, Any]) -> None:
-    # Shared, the personal space goes on taking what was said before this; a
-    # shared space a chat is taken out of takes nothing more.
-    threads.move_thread(entry["thread"], entry["target"],
-                        left_turn=0 if entry["taken_out"] else int(entry["turns"]))
-    chat_moves.record_move(attempt, {"stage": "switched"})
+def _entry(session: Any, session_id: str, from_space: str, to_space: str, by: str,
+           taken_out: bool) -> dict[str, Any]:
+    """The journal's entry of a move about to start, with the copy's ids."""
+    from kazma_core.memory import forget
+
+    thread = _thread_of(session, session_id)
+    new_session = str(uuid.uuid4())
+    with bind_scope(to_space, by):
+        new_thread = threads.new_web_thread_id(new_session)
+    kept_out, _turns = forget.forgotten_in_chat(from_space, [session_id, thread])
+    return {"thread": thread, "session": session_id, "source": from_space, "target": to_space, "by": by,
+            "new_session": new_session, "new_thread": new_thread, "taken_out": taken_out,
+            "kept_out": bool(kept_out), "title": str(session.title or ""), "stage": "copying",
+            "at": time.time()}
 
 
-async def _settle_failure(attempt: str, entry: dict[str, Any], checkpoints: Any) -> bool:
-    """A move that stopped: True when the chat's record names the target
-    (switched after all: the journal stays, the finish runs). Else its copies
-    go back and its journal entry goes -- once they went. What cannot be
-    settled now keeps its entry, and is settled later."""
+def _rows_to_copy(session: Any, by: str) -> list[dict[str, Any]]:
+    """The copy's messages: the chat's questions and answers. The person's
+    own that name no author -- from their personal space, before Spaces --
+    are stamped theirs: in a shared space every message names its author
+    (``reply_sink.authored``)."""
+    from kazma_ui.thread_rewind import projected_rows
+
+    rows = projected_rows(session.messages)
+    for row in rows:
+        if row["role"] == "user" and not row.get("author"):
+            row["author"] = by
+    return rows
+
+
+async def _copy(rows: list[dict[str, Any]], values: dict[str, Any], entry: dict[str, Any], graph: Any) -> None:
+    """Everything of the copy but its row (:func:`_hand_over` stores that):
+    nobody sees any of it yet."""
+    from kazma_ui.thread_rewind import carry_conversation
+
+    await asyncio.to_thread(_record_copy, entry)
+    await carry_conversation(graph, values, entry["new_thread"], space=entry["target"], by=entry["by"])
+    await asyncio.to_thread(_copy_files, rows, entry)
+
+
+def _record_copy(entry: dict[str, Any]) -> None:
+    """The new thread's record, first: whatever is written under it is the
+    target's. And the source's "Don't remember this chat", before the copy
+    holds anything memory could read."""
+    from kazma_core.memory import forget
+
+    with bind_scope(entry["target"], entry["by"]):
+        threads.record_new_thread(entry["new_thread"])
+        if entry["kept_out"]:
+            forget.set_chat_remembered(entry["new_session"], False, tenant_id=entry["target"],
+                                       keys=[entry["new_session"], entry["new_thread"]])
+
+
+def _copy_files(rows: list[dict[str, Any]], entry: dict[str, Any]) -> None:
+    from kazma_core.chat_files import copy_shared_files
+
     try:
-        home = await asyncio.to_thread(threads.thread_home, entry["thread"])
-        if home == entry["target"]:
-            return True
-        await asyncio.to_thread(_remove_row, entry["target"], entry["by"], entry["session"])
-        await asyncio.to_thread(_remove_files, entry, entry["target"])
-        if checkpoints is not None:
-            await checkpoints.adelete_thread_in(entry["thread"], space=entry["target"])
-        await asyncio.to_thread(chat_moves.settle_move, attempt)
-    except _STEP_FAILURES:
-        logger.warning("[spaces] a chat move that stopped was not settled; it is tried again", exc_info=True)
-    return False
+        copy_shared_files(json.dumps(rows, ensure_ascii=False, default=str), thread_id=entry["thread"],
+                          new_thread=entry["new_thread"], from_space=entry["source"],
+                          to_space=entry["target"], by=entry["by"])
+    except SpaceOverLimit as exc:
+        raise ChatMoveRefused("space_limit", 507, "The new space has no room for this chat's files.") from exc
 
 
-# ── The finish: after the switch, one step at a time ─────────────────────
+def _hand_over(attempt: str, entry: dict[str, Any], messages: list[dict[str, Any]],
+               rows: list[dict[str, Any]]) -> bool:
+    """The copy's row in, the journal's ``copied``, the chat's row out: one
+    step (``SessionManager.hand_over``). False: the chat changed since it was
+    copied, or the move was settled meanwhile; nothing moved."""
+    from kazma_ui.session_manager import ChatSession, get_session_manager
+
+    moved = ChatSession(session_id=entry["new_session"], thread_id=entry["new_thread"],
+                        tenant_id=entry["target"], messages=copy.deepcopy(rows), copied=len(rows))
+    with bind_scope(entry["source"], entry["by"]):
+        return get_session_manager().hand_over(
+            entry["session"], messages=messages, to=moved,
+            commit=lambda: chat_moves.advance_move(attempt, at="copying", to="copied"))
+
+
+def _drop_frames(thread: str) -> None:
+    """The thread's journaled frames go with the chat: they hold what its
+    turns were shown."""
+    from kazma_ui.delivery import get_turn_broker
+
+    get_turn_broker().clear(thread)
+
+
+# ── The delete here: after the handover, one step at a time ──────────────
+
+
+def _remove_row(space: str, by: str, session_id: str) -> None:
+    from kazma_ui.session_manager import get_session_manager
+
+    with bind_scope(space, by):
+        get_session_manager().delete(session_id)
+
+
+def _drop_pointers(thread_id: str) -> int:
+    """The chat apps' pointers to the thread (``active_thread.<sender>``)
+    go: a chat app's next message starts a chat of its own. Blocking."""
+    from kazma_core.config_store import get_config_store
+
+    store = get_config_store()
+    dropped = 0
+    # The pointers are the "session" category's (sessions.directory).
+    for key, value in store.get_category("session").items():
+        if str(key).startswith("active_thread.") and str(value or "") == thread_id:
+            store.delete(key)
+            dropped += 1
+    return dropped
+
+
+def _forget_where_it_was(entry: dict[str, Any]) -> None:
+    """A shared space a chat was taken out of forgets it: its memories, the
+    agent's notes, its summaries and the lessons it taught
+    (``memory.forget.forget_chat``: journaled first, and the forget
+    convergence finishes one that fails). Its old keys are kept out first: a
+    turn still waiting to be written is not. A personal space keeps what it
+    remembers: a move never touches it."""
+    from kazma_core.memory import forget
+
+    keys = [entry["session"], entry["thread"]]
+    for out in (forget.set_chat_remembered(entry["session"], False, tenant_id=entry["source"], keys=keys),
+                forget.forget_chat(entry["session"], tenant_id=entry["source"], keys=keys)):
+        if not out.get("ok"):
+            raise RuntimeError(f"the shared space did not forget the chat: {out.get('error')}")
+
+
+def _remove_files(entry: dict[str, Any], space: str, thread: str) -> None:
+    from kazma_core.chat_files import remove_shared_files
+
+    remove_shared_files(thread, space=space, by=entry["by"])
+
 
 _Step = Callable[[dict[str, Any], Any], Awaitable[Any]]
 
@@ -469,28 +416,33 @@ def _in_thread(step: Callable[[dict[str, Any]], Any]) -> _Step:
     return run
 
 
-async def _remove_state(entry: dict[str, Any], checkpoints: Any) -> None:
-    if checkpoints is not None:
-        await checkpoints.adelete_thread_in(entry["thread"], space=entry["source"])
+async def _remains(space: str, session: str, thread: str, checkpoints: Any) -> None:
+    """Remove what a chat leaves beside its row in *space*. The thread's
+    record goes last, so a thread recorded elsewhere (or nowhere) has nothing
+    left there."""
+    from kazma_ui.chat_delete import remove_chat_remains
+
+    if await asyncio.to_thread(threads.thread_home, thread) != space:
+        return
+    if not await remove_chat_remains(session, thread, checkpoints):
+        raise RuntimeError("something of a chat could not be deleted")
 
 
-#: What finishes a move once the record names the target, in order, each on
-#: its own. The source's chat row goes last (the move's re-review, N8: it
-#: went first, and its failure stopped everything after it).
+async def _remove_remains(entry: dict[str, Any], checkpoints: Any) -> None:
+    await _remains(entry["source"], entry["session"], entry["thread"], checkpoints)
+
+
+#: What deletes the chat here once its copy stands, in order, each on its own.
+#: Its row went with the handover; asked again, it is gone.
 _STEPS: tuple[tuple[str, _Step], ...] = (
-    ("rows", _in_thread(lambda e: chat_moves.move_thread_rows(e["thread"], from_space=e["source"],
-                                                              to_space=e["target"]))),
+    ("chat", _in_thread(lambda e: _remove_row(e["source"], e["by"], e["session"]))),
     ("pointers", _in_thread(lambda e: _drop_pointers(e["thread"]))),
-    # Its Time Travel steps do not move (the review's M1): kept by thread
-    # alone, they would follow it with the source's state.
-    ("steps", _in_thread(lambda e: _forget_steps([e["session"], e["thread"]]))),
     ("memory", _in_thread(lambda e: _forget_where_it_was(e))),
     ("line", _in_thread(lambda e: chat_moves.record_taken_out(
         space_id=e["source"], thread_id=e["thread"], title=str(e.get("title") or ""), by=e["by"],
         since=float(e.get("at") or 0.0)))),
-    ("files", _in_thread(lambda e: _remove_files(e, e["source"]))),
-    ("state", _remove_state),
-    ("chat", _in_thread(lambda e: _remove_row(e["source"], e["by"], e["session"]))),
+    ("files", _in_thread(lambda e: _remove_files(e, e["source"], e["thread"]))),
+    ("remains", _remove_remains),
 )
 #: The steps of a chat taken out of a shared space alone.
 _TAKEN_OUT_STEPS = frozenset({"memory", "line"})
@@ -502,16 +454,17 @@ async def _finish(attempt: str, entry: dict[str, Any], checkpoints: Any) -> bool
     move is finished (its journal entry is gone)."""
     done = [str(s) for s in entry.get("done") or []]
     left: list[str] = []
-    for name, step in _STEPS:
-        if name in done or (name in _TAKEN_OUT_STEPS and not entry.get("taken_out")):
-            continue
-        try:
-            await step(entry, checkpoints)
-            await asyncio.to_thread(chat_moves.record_move, attempt, {"done": [*done, name]})
-            done.append(name)
-        except _STEP_FAILURES:
-            logger.warning("[spaces] a chat move's step %s failed; it is tried again", name, exc_info=True)
-            left.append(name)
+    with bind_scope(entry["source"], entry["by"]):
+        for name, step in _STEPS:
+            if name in done or (name in _TAKEN_OUT_STEPS and not entry.get("taken_out")):
+                continue
+            try:
+                await step(entry, checkpoints)
+                await asyncio.to_thread(chat_moves.record_move, attempt, {"done": [*done, name]})
+                done.append(name)
+            except _STEP_FAILURES:
+                logger.warning("[spaces] a chat move's step %s failed; it is tried again", name, exc_info=True)
+                left.append(name)
     if left:
         return False
     try:
@@ -525,16 +478,58 @@ async def _finish(attempt: str, entry: dict[str, Any], checkpoints: Any) -> bool
 # ── Settling: at start, by the maintenance sweep, by the next move ───────
 
 
-async def _settle_one(attempt: str, entry: dict[str, Any], checkpoints: Any) -> str:
-    """Settle one move, its thread's lock held: before its switch its copies
-    go back, after it the finish runs."""
-    if not all(entry.get(k) for k in ("thread", "target", "source", "session", "by")):
-        await asyncio.to_thread(chat_moves.settle_move, attempt)
-        return "dropped"
-    if await _settle_failure(attempt, entry, checkpoints):
-        return "finished" if await _finish(attempt, entry, checkpoints) else "waiting"
-    left = attempt in await asyncio.to_thread(chat_moves.moves_under_way)
-    return "waiting" if left else "put_back"
+def _copy_stands(entry: dict[str, Any]) -> bool:
+    """Whether a move whose journal says ``copied`` stands. It does not when
+    the copy is not there and the chat still is: the journal's write landed
+    and its answer was lost, so the handover took the copy back."""
+    if "chat" in (entry.get("done") or []) or _row_in(entry["target"], entry["by"], entry["new_session"]):
+        return True
+    return not _row_in(entry["source"], entry["by"], entry["session"])
+
+
+async def _put_back(attempt: str, entry: dict[str, Any], checkpoints: Any) -> None:
+    """Take the copy away: whatever the new ids have, in the target."""
+    from kazma_core.memory import forget
+
+    target, by = entry["target"], entry["by"]
+    await asyncio.to_thread(_remove_row, target, by, entry["new_session"])
+    await asyncio.to_thread(_remove_files, entry, target, entry["new_thread"])
+    if entry.get("kept_out"):
+        await asyncio.to_thread(forget.set_chat_remembered, entry["new_session"], True, tenant_id=target,
+                                keys=[entry["new_session"], entry["new_thread"]])
+    with bind_scope(target, by):
+        await _remains(target, entry["new_session"], entry["new_thread"], checkpoints)
+    await asyncio.to_thread(chat_moves.settle_move, attempt)
+
+
+#: What settling answers for a move that stands.
+_MOVED = ("copied", "finished")
+
+
+async def _settle_one(attempt: str, checkpoints: Any) -> str:
+    """Settle one move, its thread's lock held: ``copying`` is put back,
+    ``copied`` goes on. What cannot be settled now keeps its entry, and is
+    settled later. Returns ``put_back``, ``copied``, ``finished``,
+    ``dropped`` or ``waiting``."""
+    try:
+        entry = (await asyncio.to_thread(chat_moves.moves_under_way)).get(attempt)
+        if entry is None:
+            return "dropped"
+        if not all(entry.get(k) for k in ("thread", "target", "source", "session", "by", "new_session",
+                                          "new_thread")):
+            await asyncio.to_thread(chat_moves.settle_move, attempt)
+            return "dropped"
+        # The move's own handover and this never both decide.
+        if entry.get("stage") == "copying" and not await asyncio.to_thread(
+                chat_moves.advance_move, attempt, at="copying", to="putting_back"):
+            entry = (await asyncio.to_thread(chat_moves.moves_under_way)).get(attempt) or entry
+        if entry.get("stage") == "copied" and await asyncio.to_thread(_copy_stands, entry):
+            return "finished" if await _finish(attempt, entry, checkpoints) else "copied"
+        await _put_back(attempt, entry, checkpoints)
+        return "put_back"
+    except _STEP_FAILURES:
+        logger.warning("[spaces] a chat move that stopped was not settled; it is tried again", exc_info=True)
+        return "waiting"
 
 
 async def _settle_thread(thread: str, checkpoints: Any) -> None:
@@ -542,7 +537,7 @@ async def _settle_thread(thread: str, checkpoints: Any) -> None:
     move of it runs)."""
     for attempt, entry in (await asyncio.to_thread(chat_moves.moves_under_way)).items():
         if entry.get("thread") == thread:
-            await _settle_one(attempt, entry, checkpoints)
+            await _settle_one(attempt, checkpoints)
 
 
 async def settle_chat_moves(checkpoints: Any = None) -> list[dict[str, str]]:
@@ -558,10 +553,9 @@ async def settle_chat_moves(checkpoints: Any = None) -> list[dict[str, str]]:
         try:
             async with thread_mutation(str(entry.get("thread") or attempt)):
                 # Read again: the move that held the lock may have ended.
-                now = (await asyncio.to_thread(chat_moves.moves_under_way)).get(attempt)
-                if now is None:
+                if attempt not in await asyncio.to_thread(chat_moves.moves_under_way):
                     continue
-                outcome = await _settle_one(attempt, now, checkpoints)
+                outcome = await _settle_one(attempt, checkpoints)
         except _STEP_FAILURES:
             logger.warning("[spaces] a chat move was not settled; it is tried again", exc_info=True)
         settled.append({"attempt": attempt, "outcome": outcome})
@@ -601,10 +595,10 @@ def _unavailable() -> JSONResponse:
 
 
 def _preview(session_id: str, space: str, by: str) -> dict[str, Any]:
-    session = _session_in(space, by, session_id)
+    session = _snapshot_in(space, by, session_id)
     if session is None:
         raise ChatMoveRefused("not_found", 404, "No such chat in this space.")
-    return {"ok": True, "turns": len(_turns_of(session.messages)),
+    return {"ok": True, "turns": _asked(session.messages),
             "others_wrote": chat_moves.others_wrote(session.messages, by)}
 
 

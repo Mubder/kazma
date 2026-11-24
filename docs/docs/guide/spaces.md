@@ -108,9 +108,14 @@ are in, and back out:
   replaced there, and a fact another chat of that space states too can go
   with it. Your own space's memory is never changed by a move, nor by an undo
   in the shared space.
-  The chat's reminders and scheduled tasks, and the files Kazma shared in
-  it, move with it. Its Time Travel steps do not, and a file you attached
-  has to be attached again. A chat from a chat app (Telegram, Discord,
+  The moved chat is a new chat there, with the conversation, and the one it
+  was is deleted where it was: a tab still open on it is told so, and your
+  message goes to a new chat. The files Kazma shared in it move with it.
+  Reminders and scheduled tasks you booked from it stay where you booked
+  them, and so do its drafts and plans. Its Time Travel steps do not move,
+  and a file you attached has to be attached again. What you asked Kazma to
+  forget of it stays forgotten where it was said; the chat's own words stay
+  in the chat. A chat from a chat app (Telegram, Discord,
   Slack, WhatsApp) stays in its space, and so does one with an answer cut
   off half way until you continue or close it. A swarm task the chat started
   that finishes after the move delivers its result where the task was told

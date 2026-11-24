@@ -325,7 +325,7 @@ var KazmaStream = (function() {
             if (callbacks.onEvent) callbacks.onEvent(type, data);
             break;
           case 'error':
-            if (callbacks.onError) callbacks.onError(data ? data.content : 'Unknown error');
+            if (callbacks.onError) callbacks.onError(data ? data.content : 'Unknown error', data);
             // Mark the stream finished HERE. Otherwise the HTTP body close
             // fires onDone(undefined), which the approve-resume path treated
             // as a successful Approved with no answer (2026-09-01).

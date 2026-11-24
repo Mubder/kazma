@@ -142,8 +142,8 @@ def test_control_without_lifting_the_guard_the_erase_fails(world, monkeypatch) -
 
 
 def test_control_yesterdays_erase_misses_a_store(world, monkeypatch) -> None:
-    real = space_data.store_paths
-    monkeypatch.setattr(space_data, "store_paths",
+    real = space_data._store_paths
+    monkeypatch.setattr(space_data, "_store_paths",
                         lambda: [(name, path) for name, path in real() if name != "memory_state.db"])
     space_data.erase_space(A, by=OWNER_ACCOUNT_ID)
     left = _where_word(world["words"][A])

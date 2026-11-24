@@ -10,19 +10,20 @@ the forget ledger and journal. Sara moves her chat between her personal space
 and a shared space she is in with Omar, in English and in Arabic.
 
 1. Nothing is carried, retired or rebuilt: her memory is, byte for byte, what
-   it was, and the shared space learns nothing from the old messages
-   (control: without the keep-out, reconcile writes them there).
-2. What is said after the move is remembered, in both.
+   it was, and the shared space learns nothing from what was said before
+   (control: a copy that does not say how many messages came with it).
+2. What is said after the move is remembered, and a turn its live write
+   missed is reconciled; a fork of the moved chat learns nothing either.
 3. A chat kept out of memory stays out in the space it moves to.
 4. Taken out of the shared space, that space forgets it -- memories, the
    agent's notes, weekly summaries, lessons -- and nothing else.
-5. Personal memory is never touched by a move in either direction, the next
-   turns' facts included (control: plain ledger rows take them).
-6. After the switch a shared space it left is written nothing, and a personal
-   one only what was said there before the switch, when its write was queued;
-   a thread record that cannot be read fails the write, so it is tried again.
-7. A memory database restored from before the move keeps the turns out.
-8. A forget that fails half way is finished by the forget convergence.
+5. Personal memory is never touched by a move in either direction, nor by an
+   undo made in the other space.
+6. A write still queued when the chat moves is the source's, which keeps it
+   (her own space) or not (a shared space it was taken out of); a forget
+   still pending there never reaches the chat shared again.
+7. A forget that fails half way is finished by the forget convergence, and a
+   memory database restored from before a take-out forgets it again.
 """
 
 from __future__ import annotations
@@ -30,7 +31,6 @@ from __future__ import annotations
 import asyncio
 import shutil
 import sqlite3
-import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -38,11 +38,10 @@ import pytest
 from kazma_core.memory import forget, forget_journal
 from kazma_core.spaces import scope, threads
 
-from tests._chat_move_space_cases import NoCardGraph
+from tests._chat_move_space_cases import Checkpoints, NoCardGraph
 from tests.test_memory_speakers import OMAR, SARA, TEAM, _say, team  # noqa: F401
 
 OWN = "sara-own"
-SESSION, THREAD = "s-moved", "t-moved"
 T0 = 1_780_000_000.0
 
 #: What Sara says in each language: (a home, an employer) and a word of each.
@@ -55,18 +54,26 @@ _REAL_CHAT_KEYS = forget.chat_keys
 
 class Chat:
     """Sara's chat: its row in the real chat store, its turns remembered by
-    the real post-turn pipeline where it is."""
+    the real post-turn pipeline where it is. ``session`` and ``thread`` are
+    the ids it has now."""
 
     def __init__(self, team: Any) -> None:  # noqa: F811 -- the fixture
         self.team = team
         self.db: sqlite3.Connection = team.db
+        self.session, self.thread = "s-first", "t-first"
 
-    def row(self, space: str, text: str, *, at: float, author: str = SARA, answer: str = "Noted.") -> None:
+    def store(self) -> Any:
         from kazma_ui.session_manager import get_session_manager
 
+        return get_session_manager()
+
+    def begin(self, space: str) -> None:
+        threads.record_thread(self.thread, space, SARA)
+
+    def row(self, space: str, text: str, *, at: float, author: str = SARA, answer: str = "Noted.") -> None:
         with scope.bind_scope(space, author):
-            store = get_session_manager()
-            session = store.get_or_create(SESSION, thread_id=THREAD)
+            store = self.store()
+            session = store.get_or_create(self.session, thread_id=self.thread)
             stamp = datetime.fromtimestamp(at, UTC).isoformat()
             session.add_message("user", text, author=author)
             session.messages[-1]["ts"] = stamp
@@ -77,13 +84,20 @@ class Chat:
 
     def say(self, space: str, text: str, *, n: int, at: float, author: str = SARA) -> None:
         self.row(space, text, at=at, author=author)
-        _say(author, THREAD, text, n=n, at=at, space=space)
+        _say(author, self.thread, text, n=n, at=at, space=space)
 
-    def move(self, frm: str, to: str) -> None:
+    def move(self, frm: str, to: str) -> tuple[str, str]:
+        """Move it; the ids it had."""
         from kazma_ui.chat_move import _move_chat
 
-        asyncio.run(_move_chat(session_id=SESSION, from_space=frm, to_space=to, by=SARA, graph=NoCardGraph()))
-        assert threads.thread_home(THREAD) == to
+        had = self.session, self.thread
+        answer = asyncio.run(_move_chat(session_id=self.session, from_space=frm, to_space=to, by=SARA,
+                                        graph=NoCardGraph(), checkpoints=Checkpoints()))
+        with scope.bind_scope(to, SARA):
+            self.session = answer["session_id"]
+            self.thread = self.store().get(self.session).thread_id
+        assert threads.thread_home(self.thread) == to and self.thread != had[1]
+        return had
 
     def reconcile(self) -> dict[str, Any]:
         from kazma_core.memory.turn_reconcile import run_turn_reconcile_pass
@@ -92,8 +106,8 @@ class Chat:
 
     def remembers(self, space: str) -> list[str]:
         return [str(r[0]) for r in self.db.execute(
-            "SELECT user_text FROM episodes WHERE tenant_id = ? AND session_id IN (?, ?) AND tier != 'forgotten' "
-            "AND user_text != '' ORDER BY created_at", (space, SESSION, THREAD))]
+            "SELECT user_text FROM episodes WHERE tenant_id = ? AND tier != 'forgotten' "
+            "AND user_text != '' ORDER BY created_at", (space,))]
 
     def finds(self, space: str, word: str) -> list[str]:
         from kazma_core.memory.transcript_recall import search_transcripts
@@ -136,7 +150,6 @@ def chat(team, monkeypatch):  # noqa: F811 -- the fixture
     store = SessionManager(db_path=str(team.tmp / "chat_sessions.db"))
     monkeypatch.setattr(session_manager, "_session_manager", store)
     get_config_store().delete(chat_moves.MOVES_KEY)
-    threads.record_thread(THREAD, OWN, SARA)
     yield Chat(team)
     get_config_store().delete(chat_moves.MOVES_KEY)
     store.close()
@@ -152,6 +165,7 @@ def _tell(chat: Chat, space: str, lang: str, *, first: int = 1) -> None:
 
 @pytest.mark.parametrize("lang", ["en", "ar"])
 def test_a_shared_chat_takes_no_memory_with_it(chat, lang) -> None:
+    chat.begin(OWN)
     _tell(chat, OWN, lang)
     before = chat.memory(OWN)
     assert chat.remembers(OWN) == [text for text, _w in SAYINGS[lang]], "the turns were remembered"
@@ -162,22 +176,28 @@ def test_a_shared_chat_takes_no_memory_with_it(chat, lang) -> None:
 
     assert chat.memory(OWN) == before, "her memory is what it was"
     assert chat.reconcile()["turns_written"] == 0
-    assert chat.held(TEAM) == 0, "the shared space learned nothing from the old messages"
-    assert all(chat.finds(TEAM, word) == [] for word in words), "its past-chats search reads none of them"
+    assert chat.held(TEAM) == 0, "the shared space learned nothing from what was said before"
+    assert chat.finds(TEAM, SAYINGS[lang][1][1]) == [chat.session], "the conversation is there"
     assert chat.memory(OWN) == before, "nor did anything run on it since"
     queued = chat.team.ops.execute("SELECT COUNT(*) FROM memory_task_queue WHERE payload_json LIKE ?",
                                    (f"%{TEAM}%",)).fetchone()[0]
     assert queued == 0, "no pass was queued to extract them"
 
 
-def test_control_without_the_keep_out_the_target_learns_the_old_messages(chat, monkeypatch) -> None:
-    from kazma_ui import chat_move
+def test_control_a_copy_that_does_not_say_what_came_with_it_is_learned(chat, monkeypatch) -> None:
+    from kazma_ui import session_manager
 
-    monkeypatch.setattr(chat_move, "_keep_out_of_memory", lambda *_a: None)
+    real = session_manager.SessionManager.hand_over
+
+    def silent(self: Any, session_id: str, *, to: Any, **kwargs: Any) -> bool:
+        to.copied = 0
+        return real(self, session_id, to=to, **kwargs)
+
+    monkeypatch.setattr(session_manager.SessionManager, "hand_over", silent)
+    chat.begin(OWN)
     _tell(chat, OWN, "en")
     chat.move(OWN, TEAM)
     assert chat.reconcile()["turns_written"] == 2
-    assert chat.finds(TEAM, "Lisbon") == [SESSION]
 
 
 # ── 2. what is said after the move is remembered ─────────────────────────
@@ -186,55 +206,181 @@ def test_control_without_the_keep_out_the_target_learns_the_old_messages(chat, m
 @pytest.mark.parametrize("lang", ["en", "ar"])
 def test_what_is_said_in_the_new_space_is_remembered_there(chat, lang) -> None:
     (home, _w1), (work, word) = SAYINGS[lang]
+    chat.begin(OWN)
     chat.say(OWN, home, n=1, at=T0)
     chat.move(OWN, TEAM)
     chat.say(TEAM, work, n=2, at=T0 + 60)
     assert chat.remembers(TEAM) == [work] and any(word in fact for fact in chat.facts(TEAM))
-    assert chat.finds(TEAM, word) == [SESSION]
-    # A turn its live write missed: reconcile writes that one, and no other.
-    chat.row(TEAM, "We leave on Friday.", at=T0 + 120)
+    # A turn its live write missed: reconcile writes that one, and no other --
+    # the question she asked before the move, asked again, among them.
+    chat.row(TEAM, home, at=T0 + 120)
     assert chat.reconcile()["turns_written"] == 1
-    assert chat.remembers(TEAM) == [work, "We leave on Friday."]
+    assert chat.remembers(TEAM) == [work, home]
     assert chat.remembers(OWN) == [home]
+
+
+def test_what_came_with_it_is_counted_as_reconcile_counts(chat) -> None:
+    """Slash commands, a message that is only an attachment and a question
+    nobody answered are turns to one count and none to another: reconcile
+    starts after the messages that came, whatever they were."""
+    chat.begin(OWN)
+    for n, text in enumerate(["/long on", "I live in Lisbon.", "a photo", "ok so", "I work at Initech."]):
+        chat.row(OWN, text, at=T0 + 60 * n)
+    with scope.bind_scope(OWN, SARA):
+        held = chat.store().get(chat.session)
+        held.messages[4]["content"] = [{"type": "image_url", "image_url": {"url": "x"}}]  # only an attachment
+        del held.messages[7]  # "ok so" was never answered
+        chat.store().put(held)
+    chat.move(OWN, TEAM)
+    chat.row(TEAM, "We leave on Friday.", at=T0 + 900)
+    assert chat.reconcile()["turns_written"] == 1
+    assert chat.remembers(TEAM) == ["We leave on Friday."]
+
+
+def test_the_count_holds_when_the_chat_is_cut_or_trimmed(chat) -> None:
+    """It never reads a message that came with the chat as one said here: an
+    undo, a ``/reset``, a ``/compact`` and the store's own trim only take
+    from the front or the end."""
+    from kazma_ui.session_manager import MAX_MESSAGES_PER_SESSION
+
+    chat.begin(OWN)
+    _tell(chat, OWN, "en")
+    chat.move(OWN, TEAM)
+    with scope.bind_scope(TEAM, SARA):
+        store = chat.store()
+
+        def count(cut: Any) -> tuple[int, int]:
+            with store.transact(chat.session) as held:
+                cut(held)
+            held = store.get(chat.session)
+            return held.copied, len(held.messages)
+
+        assert count(lambda s: s.messages.extend({"role": "assistant", "content": f"m{n}"} for n in range(2))) == (4, 6)
+        assert count(lambda s: setattr(s, "messages", s.messages[:3])) == (3, 3), "undone past the move"
+        full = [{"role": "user", "content": f"m{n}"} for n in range(MAX_MESSAGES_PER_SESSION)]
+        copied, kept = count(lambda s: [s.add_message(m["role"], m["content"]) for m in full])
+        assert copied == 0 and kept == MAX_MESSAGES_PER_SESSION, "trimmed from the front"
+        assert count(lambda s: setattr(s, "messages", [])) == (0, 0)
+
+
+def test_the_count_is_the_rows_own(chat) -> None:
+    """A new process reads it wherever the row is read."""
+    from kazma_ui.session_manager import SessionManager
+
+    chat.begin(OWN)
+    _tell(chat, OWN, "en")
+    chat.move(OWN, TEAM)
+    path = chat.store().db_path
+    again = SessionManager(db_path=path)
+    with scope.bind_scope(TEAM, SARA):
+        assert again.get(chat.session).copied == 4
+        assert [s.copied for s in again.list_all()] == [4]
+    again.close()
+    other = SessionManager(db_path=path)
+    with scope.bind_scope(TEAM, SARA):
+        assert other.get_by_thread_id(chat.thread).copied == 4
+    other.close()
+
+
+def test_a_chat_store_from_before_chats_moved_is_read(chat) -> None:
+    """A file an older build wrote has no such column: nothing in it came
+    with a move, and the column is added where the store opens it."""
+    from kazma_core.memory.chat_history import sessions_changed_since
+    from kazma_ui.session_manager import SessionManager
+
+    path = chat.team.tmp / "older.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE sessions (tenant_id TEXT, session_id TEXT, messages TEXT, created_at TEXT, "
+                 "total_cost REAL, total_tokens INTEGER, thread_id TEXT, updated_at TEXT, "
+                 "PRIMARY KEY (tenant_id, session_id))")
+    conn.execute("INSERT INTO sessions VALUES (?, 's', '[{\"role\": \"user\", \"content\": \"hi\"}]', "
+                 "'', 0, 0, 't', '2026')", (OWN,))
+    conn.commit()
+    conn.close()
+
+    def counts() -> list[int]:
+        return [r["copied"] for r in sessions_changed_since(sqlite_path=path)]
+
+    assert counts() == [0]
+    store = SessionManager(db_path=str(path))
+    with scope.bind_scope(OWN, SARA):
+        held = store.get("s")
+        assert held.copied == 0
+        held.copied = 1
+        store.put(held)
+    store.close()
+    assert counts() == [1]
+
+
+def test_a_fork_of_a_moved_chat_learns_none_of_it(chat) -> None:
+    from kazma_ui import thread_rewind
+    from kazma_ui.session_manager import ChatSession
+
+    chat.begin(OWN)
+    _tell(chat, OWN, "en")
+    chat.move(OWN, TEAM)
+    stamp = datetime.fromtimestamp(T0, UTC).isoformat()
+    forked = [{"role": "user", "content": "We pack on Thursday."}, {"role": "assistant", "content": "Ok."}]
+    ordinary = [{"role": "user", "content": "We leave on Friday.", "ts": stamp},
+                {"role": "assistant", "content": "Ok.", "ts": stamp}]
+    with scope.bind_scope(TEAM, SARA):
+        messages = [{"role": m["role"], "content": m["content"]} for m in chat.store().get(chat.session).messages]
+        for key in ("fork-1", "plain", "fork-2"):
+            threads.record_thread(key, TEAM, SARA)
+        thread_rewind._save_fork_chat("fork-1", "a fork", messages, chat.thread)
+        chat.store().put(ChatSession(session_id="plain", thread_id="plain", messages=ordinary))
+        thread_rewind._save_fork_chat("fork-2", "another", forked, "plain")
+        for key in ("fork-1", "fork-2"):
+            with chat.store().transact(key) as held:
+                for message in held.messages:
+                    message["ts"] = stamp
+    chat.reconcile()
+    assert set(chat.remembers(TEAM)) == {"We leave on Friday.", "We pack on Thursday."}, (
+        "an ordinary chat's fork is as it was")
 
 
 # ── 3. a chat kept out of memory stays out ────────────────────────────────
 
 
-def test_the_turns_are_kept_out_before_the_row_is_there_to_read(chat, monkeypatch) -> None:
-    """A reconcile pass running beside the move never meets the row without
-    its ledger rows."""
-    from kazma_ui import chat_move
-
-    _tell(chat, OWN, "en")
-    real, kept = chat_move._copy_row, []
-
-    def copy_row(*args: Any, **kwargs: Any) -> None:
-        kept.append(forget.forgotten_in_chat(TEAM, [SESSION, THREAD])[1])
-        real(*args, **kwargs)
-
-    monkeypatch.setattr(chat_move, "_copy_row", copy_row)
-    chat.move(OWN, TEAM)
-    assert len(kept) == 1 and len(kept[0]) == 2, kept
-
-
 def test_a_chat_kept_out_of_memory_is_kept_out_where_it_moves(chat) -> None:
+    chat.begin(OWN)
     chat.row(OWN, "I live in Lisbon.", at=T0)
-    assert forget.set_chat_remembered(SESSION, False, tenant_id=OWN)["ok"]
+    assert forget.set_chat_remembered(chat.session, False, tenant_id=OWN)["ok"]
     chat.move(OWN, TEAM)
-    assert not forget.chat_remembered(SESSION, tenant_id=TEAM)
+    assert not forget.chat_remembered(chat.session, tenant_id=TEAM)
+    assert not forget.chat_remembered(chat.thread, tenant_id=TEAM)
     chat.say(TEAM, "I work at Initech.", n=2, at=T0 + 60)
     assert chat.remembers(TEAM) == [] and chat.facts(TEAM) == set()
-    # Let back in there, the old messages are still kept out of it.
-    assert forget.set_chat_remembered(SESSION, True, tenant_id=TEAM)["ok"]
+    # Let back in there, what was said before is still not learned there.
+    assert forget.set_chat_remembered(chat.session, True, tenant_id=TEAM)["ok"]
     assert chat.reconcile()["turns_written"] == 1
     assert chat.remembers(TEAM) == ["I work at Initech."]
 
 
+def test_it_is_kept_out_before_there_is_a_row_to_read(chat, monkeypatch) -> None:
+    """A pass running beside the move never meets the copy without it."""
+    from kazma_ui import chat_move
+
+    chat.begin(OWN)
+    chat.row(OWN, "I live in Lisbon.", at=T0)
+    forget.set_chat_remembered(chat.session, False, tenant_id=OWN)
+    real, kept = chat_move._hand_over, []
+
+    def hand_over(attempt: str, entry: dict[str, Any], *args: Any) -> bool:
+        kept.append(forget.forgotten_in_chat(TEAM, [entry["new_session"], entry["new_thread"]])[0])
+        return real(attempt, entry, *args)
+
+    monkeypatch.setattr(chat_move, "_hand_over", hand_over)
+    chat.move(OWN, TEAM)
+    assert kept == [True]
+
+
 def test_a_chat_not_kept_out_is_not_kept_out_where_it_moves(chat) -> None:
+    chat.begin(OWN)
     chat.row(OWN, "I live in Lisbon.", at=T0)
     chat.move(OWN, TEAM)
-    assert forget.chat_remembered(SESSION, tenant_id=TEAM)
+    assert forget.chat_remembered(chat.session, tenant_id=TEAM)
+    assert chat.db.execute("SELECT COUNT(*) FROM memory_forgotten").fetchone()[0] == 0, "no ledger row at all"
 
 
 # ── 4. taken out, the shared space forgets it ─────────────────────────────
@@ -243,7 +389,7 @@ def test_a_chat_not_kept_out_is_not_kept_out_where_it_moves(chat) -> None:
 def _summary(chat: Chat, space: str, text: str) -> str:
     """A weekly summary written from the chat's first remembered turn."""
     episode = chat.db.execute("SELECT id FROM episodes WHERE tenant_id = ? AND session_id = ? LIMIT 1",
-                              (space, THREAD)).fetchone()[0]
+                              (space, chat.thread)).fetchone()[0]
     columns = {r[1] for r in chat.db.execute("PRAGMA table_info(memory_summaries)")}
     values = {"id": "sum-1", "tenant_id": space, "period_key": "2026-W20", "period_start": T0, "period_end": T0 + 9,
               "title": "Homes", "summary_text": text, "status": "active", "created_at": T0, "updated_at": T0,
@@ -260,7 +406,7 @@ def _summary(chat: Chat, space: str, text: str) -> str:
 def test_a_chat_taken_out_is_forgotten_by_the_shared_space(chat, lang) -> None:
     from kazma_core.skills import self_improvement as si
 
-    threads.move_thread(THREAD, TEAM)
+    chat.begin(TEAM)
     _say(OMAR, "omars-chat", "I live in Doha.", n=1, at=T0)
     _tell(chat, TEAM, lang)
     words = {word for _t, word in SAYINGS[lang]}
@@ -269,29 +415,30 @@ def test_a_chat_taken_out_is_forgotten_by_the_shared_space(chat, lang) -> None:
     chat.db.execute(
         "INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, tier, created_at, metadata_json) "
         "VALUES ('note-1', ?, 'memory_store', 0, ?, 'recall', ?, json_object('chat', ?, 'chat_turn', 1))",
-        (TEAM, f"Sara asked to keep {word}", T0, THREAD))
+        (TEAM, f"Sara asked to keep {word}", T0, chat.thread))
     chat.db.commit()
     assert si.apply_agent_mutation("supervisor", f"Prefer {word} trains.", space=TEAM,
-                                   source={"chat": THREAD, "turn": 1})
+                                   source={"chat": chat.thread, "turn": 1})
     own_before = chat.memory(OWN)
 
     chat.move(TEAM, OWN)
 
-    said = repr(chat.memory(TEAM)) + repr(si._load_agent_evolution(TEAM))
+    # The names left on the memory map are the memory session's own fix.
+    held = {t: rows for t, rows in chat.memory(TEAM).items() if t != "entities"}
+    said = repr(held) + repr(si._load_agent_evolution(TEAM))
     assert all(w not in said for w in words), "no row of the shared space holds what she said"
     assert "Doha" in chat.facts(TEAM), "Omar's own memory is there"
-    assert chat.remembers(TEAM) == [] and all(chat.finds(TEAM, w) == [] for w in words)
+    assert chat.remembers(TEAM) == ["I live in Doha."] and all(chat.finds(TEAM, w) == [] for w in words)
     assert chat.memory(OWN) == own_before == {t: [] for t in own_before}
     assert chat.reconcile()["turns_written"] == 0, "nor does her own space learn it"
-    assert all(chat.finds(OWN, w) == [] for w in words)
-    assert chat.remembers(OWN) == []
+    assert chat.remembers(OWN) == [] and chat.finds(OWN, SAYINGS[lang][1][1]) == [chat.session]
 
 
 def test_control_a_take_out_that_forgets_nothing_leaves_it_there(chat, monkeypatch) -> None:
     from kazma_ui import chat_move
 
     monkeypatch.setattr(chat_move, "_forget_where_it_was", lambda _entry: None)
-    threads.move_thread(THREAD, TEAM)
+    chat.begin(TEAM)
     _tell(chat, TEAM, "en")
     chat.move(TEAM, OWN)
     assert "Lisbon" in chat.facts(TEAM)
@@ -299,6 +446,7 @@ def test_control_a_take_out_that_forgets_nothing_leaves_it_there(chat, monkeypat
 
 def test_a_shared_chat_is_not_forgotten_where_it_was_said(chat, monkeypatch) -> None:
     """Only a take-out forgets: sharing never runs a forget."""
+    chat.begin(OWN)
     _tell(chat, OWN, "en")
     monkeypatch.setattr(forget, "forget_chat", lambda *_a, **_k: pytest.fail("a forget ran"))
     chat.move(OWN, TEAM)
@@ -307,326 +455,112 @@ def test_a_shared_chat_is_not_forgotten_where_it_was_said(chat, monkeypatch) -> 
 # ── 5. personal memory is never touched, in either direction ──────────────
 
 
-def _there_and_back(chat: Chat) -> dict[str, list[tuple[Any, ...]]]:
-    """Said in her own space, shared, more said there, taken back out: her
-    memory as it was before the first move."""
+def test_her_own_memory_is_untouched_there_and_back(chat) -> None:
+    chat.begin(OWN)
     chat.say(OWN, "I live in Lisbon.", n=1, at=T0)
     chat.row(OWN, "/cost", at=T0 + 10)  # a message the chat store counts, and no turn
     before = chat.memory(OWN)
     chat.move(OWN, TEAM)
     chat.say(TEAM, "I work at Initech.", n=2, at=T0 + 60)
     chat.move(TEAM, OWN)
-    return before
-
-
-def test_her_own_memory_is_untouched_there_and_back(chat) -> None:
-    before = _there_and_back(chat)
     assert chat.memory(OWN) == before
     forget.converge(chat.db)
     assert chat.reconcile()["turns_written"] == 0
     assert chat.memory(OWN) == before, "nor by the convergence and reconcile passes"
-    assert chat.finds(OWN, "Lisbon") == [SESSION], "what she said there is still found"
-    assert chat.finds(OWN, "Initech") == [], "what she said in the shared space is not"
-    assert chat.facts(TEAM) == set()
-
-
-def _next_turn(chat: Chat) -> None:
-    """The next turn in her own space: turn 3 to the live writer, and the
-    chat store's fourth message -- the number the move kept out is 3."""
-    chat.say(OWN, "I am allergic to penicillin. My name is Sara.", n=3, at=time.time())
+    assert chat.facts(TEAM) == set() and chat.remembers(TEAM) == []
+    # The next turn in her own space, its facts too.
+    chat.say(OWN, "My name is Sara.", n=3, at=T0 + 600)
     forget.converge(chat.db)
-
-
-def test_the_next_turns_facts_stay(chat) -> None:
-    _there_and_back(chat)
-    _next_turn(chat)
-    assert "Sara" in chat.facts(OWN)
-
-
-def test_control_plain_ledger_rows_take_the_next_turns_facts(chat, monkeypatch) -> None:
-    """The keep-out written as any forgotten turn's: the convergence reads
-    "turn 3" as her next turn's number and takes back its facts."""
-    def plain(session: str, *, keys: Any, turns: Any, tenant_id: str, said_here: int) -> int:
-        return sum(forget.keep_turn_out(session, n, q, tenant_id=tenant_id) for n, q in turns)
-
-    monkeypatch.setattr(forget, "keep_moved_turns_out", plain)
-    _there_and_back(chat)
-    _next_turn(chat)
-    assert "Sara" not in chat.facts(OWN)
-
-
-def test_a_move_takes_back_no_turn_the_space_holds(chat) -> None:
-    """The rows a move writes keep turns out; they never take one back, the
-    very turn they name included."""
-    _tell(chat, OWN, "en")
-    forget._write_moved_turns(chat.db, OWN, [SESSION, THREAD],
-                              [(n, forget.question_sha(text)) for n, (text, _w) in enumerate(SAYINGS["en"], 1)],
-                              at=time.time())
-    chat.db.commit()
-    before = chat.memory(OWN)
-    forget.converge(chat.db)
-    assert chat.memory(OWN) == before and chat.remembers(OWN) == [t for t, _w in SAYINGS["en"]]
-
-
-def test_nothing_of_a_move_waits_in_the_forget_journal(chat) -> None:
-    _tell(chat, OWN, "en")
-    chat.move(OWN, TEAM)
-    chat.move(TEAM, OWN)
-    assert forget_journal.pending(chat.db) == []
-
-
-# ── the rows a move writes ────────────────────────────────────────────────
-
-
-def _rows(chat: Chat, space: str, key: str = THREAD) -> list[tuple[int, str]]:
-    return [(int(r[0]), str(r[1])) for r in chat.db.execute(
-        "SELECT turn_number, question_sha FROM memory_forgotten WHERE tenant_id = ? AND session_key = ? "
-        "ORDER BY turn_number", (space, key))]
-
-
-def test_a_take_out_writes_rows_for_the_shared_spaces_turns_alone(chat) -> None:
-    _there_and_back(chat)
-    assert _rows(chat, OWN) == _rows(chat, OWN, SESSION) == [(3, forget.question_sha("I work at Initech."))]
-
-
-def test_a_turn_the_space_holds_anything_of_gets_no_row(chat) -> None:
-    """A chat whose record names no space it left (moved before that was
-    kept): what the space holds decides -- a memory, or a fact alone."""
-    _tell(chat, OWN, "en")
-    chat.row(OWN, "We leave on Friday.", at=T0 + 200)
-    chat.db.execute("DELETE FROM episodes WHERE tenant_id = ? AND turn_number = 1", (OWN,))
-    chat.db.commit()
-    before = chat.memory(OWN)
-    assert "Lisbon" in chat.facts(OWN), "turn 1 left a fact, and no memory is held of it"
-    chat.move(OWN, TEAM)
-    threads.move_thread(THREAD, TEAM)  # the record as it was before it named what it left
-    chat.move(TEAM, OWN)
-    assert _rows(chat, OWN) == [(3, forget.question_sha("We leave on Friday."))]
-    forget.converge(chat.db)
-    assert chat.memory(OWN) == before
-
-
-def test_the_rows_are_numbered_as_reconcile_numbers_the_turns(chat) -> None:
-    """Slash commands, a message that is only an attachment, a question no
-    answer came to and the same question twice: the rows name every turn
-    reconcile counts, by its number and its question, under both keys -- and
-    after a new turn in the target its pass learns none of the old ones."""
-    from kazma_core.memory.turn_reconcile import _turns
-    from kazma_ui.session_manager import get_session_manager
-
-    for n, text in enumerate(["/long on", "I live in Lisbon.", "a photo", "ok so", "I live in Lisbon."]):
-        chat.row(OWN, text, at=T0 + 60 * n)
-    with scope.bind_scope(OWN, SARA):
-        store = get_session_manager()
-        held = store.get(SESSION)
-        held.messages[4]["content"] = [{"type": "image_url", "image_url": {"url": "x"}}]  # only an attachment
-        del held.messages[7]  # "ok so" was never answered
-        store.put(held)
-        turns = [(t[0], forget.question_sha(t[1])) for t in _turns(held.messages)]
-    assert [n for n, _sha in turns] == [2, 4, 5], "reconcile passes over the command and the bare attachment"
-    chat.move(OWN, TEAM)
-    assert _rows(chat, TEAM) == _rows(chat, TEAM, SESSION)
-    assert set(turns) <= set(_rows(chat, TEAM)) and [n for n, _sha in _rows(chat, TEAM)] == [1, 2, 3, 4, 5]
-    chat.say(TEAM, "I live in Lisbon.", n=6, at=T0 + 900)
-    chat.row(TEAM, "We leave on Friday.", at=T0 + 960)
-    chat.reconcile()
-    assert chat.remembers(TEAM) == ["I live in Lisbon.", "We leave on Friday."]
-    assert [int(r[0]) for r in chat.db.execute(
-        "SELECT turn_number FROM episodes WHERE tenant_id = ? ORDER BY turn_number", (TEAM,))] == [6, 7]
-
-
-def test_a_fork_of_a_moved_chat_learns_none_of_it_and_loses_nothing(chat) -> None:
-    """A fork's transcript holds the old turns: it is given the rows as the
-    move wrote them, so they keep the copies out and take back no turn of
-    its own."""
-    chat.say(OWN, "I live in Lisbon.", n=1, at=T0)
-    chat.row(OWN, "/cost", at=T0 + 10)
-    chat.move(OWN, TEAM)
-    threads.record_thread("t-fork", TEAM, SARA)
-    assert forget.inherit_ledger(THREAD, "t-fork")["turns"] == 2
-    assert [n for n, _sha in _rows(chat, TEAM, "t-fork")] == [1, 2]
-    assert forget_journal.pending(chat.db) == []
-    _say(SARA, "t-fork", "My name is Sara.", n=2, at=time.time())
-    forget.converge(chat.db)
-    assert "Sara" in chat.facts(TEAM), "its live turn 2 is not the row's"
-    copied = sqlite3.connect(str(chat.team.tmp / "memory_forget_journal.db"))
-    try:
-        kinds = [r[0] for r in copied.execute("SELECT kind FROM forget_journal WHERE session_key = 't-fork'")]
-    finally:
-        copied.close()
-    assert kinds == ["moved_turns"]
+    assert "Sara" in chat.facts(OWN) and "Lisbon" in chat.facts(OWN)
 
 
 def test_an_undo_in_the_shared_space_leaves_her_own_memory(chat) -> None:
-    """A rewind takes its turns back from the memory of the space it is made
-    in: what was remembered of them where they were said stays."""
+    """A rewind takes its turns back from the chat it is made in: what was
+    remembered of them where they were said is another chat's."""
+    chat.begin(OWN)
     chat.say(OWN, "I live in Lisbon.", n=1, at=T0)
     chat.move(OWN, TEAM)
     chat.say(TEAM, "I work at Initech.", n=2, at=T0 + 60)
     before = chat.memory(OWN)
     old = [{"role": "user", "content": "I live in Lisbon."}, {"role": "assistant", "content": "Noted."},
            {"role": "user", "content": "I work at Initech."}, {"role": "assistant", "content": "Noted."}]
-    asyncio.run(forget.rewind_memory(THREAD, old, [], tenant_id=TEAM, from_turn=1))
+    asyncio.run(forget.rewind_memory(chat.thread, old, [], tenant_id=TEAM))
     assert chat.remembers(TEAM) == [] and chat.facts(TEAM) == set()
     assert chat.memory(OWN) == before
 
 
-# ── a turn still queued when its chat moves ───────────────────────────────
+# ── 6. what is still waiting when the chat moves ──────────────────────────
 
 
-def _queued(space: str, text: str, n: int) -> dict[str, Any]:
+def _queued(thread: str, space: str, text: str, n: int) -> dict[str, Any]:
     """What the durable queue holds of a turn whose write is still waiting."""
-    return {"user_text": text, "assistant_text": "Noted.", "session_id": THREAD, "turn": n,
+    return {"user_text": text, "assistant_text": "Noted.", "session_id": thread, "turn": n,
             "tenant_id": space, "at": T0 + 60 * n, "said_by": SARA}
-
-
-def test_only_the_personal_space_it_was_shared_out_of_takes_those_turns(chat) -> None:
-    """Shared with the team, taken out, shared with another space: a write
-    the team still had queued is not the team's."""
-    threads.move_thread(THREAD, "another-space", left_turn=5)
-    assert forget.last_turn_taken([SESSION, THREAD], OWN) == 5
-    assert forget.last_turn_taken([SESSION, THREAD], TEAM) == -1
-    assert forget.last_turn_taken([SESSION, THREAD], "another-space") is None
-    assert forget.last_turn_taken(["a chat with no record"], TEAM) is None
 
 
 @pytest.mark.parametrize("lang", ["en", "ar"])
 def test_a_turn_queued_when_its_chat_is_shared_is_still_hers(chat, lang) -> None:
     from kazma_core.memory.consolidator import run_deferred_turn_memory
 
-    (home, word), (work, _w) = SAYINGS[lang]
+    (home, word), _work = SAYINGS[lang]
+    chat.begin(OWN)
     chat.row(OWN, home, at=T0 + 60)
-    chat.move(OWN, TEAM)
-    assert not forget.turn_kept_out(THREAD, 1, home, tenant_id=OWN), "its lesson is hers too"
-    assert run_deferred_turn_memory(_queued(OWN, home, 1))
+    _session, thread = chat.move(OWN, TEAM)
+    assert not forget.turn_kept_out(thread, 1, home, tenant_id=OWN), "its lesson is hers too"
+    assert run_deferred_turn_memory(_queued(thread, OWN, home, 1))
     assert chat.remembers(OWN) == [home] and any(word in fact for fact in chat.facts(OWN))
-    run_deferred_turn_memory(_queued(OWN, work, 2))  # numbered after it left
-    assert chat.remembers(OWN) == [home] and chat.held(TEAM) == 0
-
-
-def test_a_turn_still_queued_when_its_chat_is_back_is_still_hers(chat) -> None:
-    """Shared and taken back out before its write ran: no row names it."""
-    from kazma_core.memory.consolidator import run_deferred_turn_memory
-
-    chat.row(OWN, "I live in Lisbon.", at=T0 + 60)
-    chat.move(OWN, TEAM)
-    chat.say(TEAM, "I work at Initech.", n=2, at=T0 + 120)
+    assert chat.held(TEAM) == 0
+    # And when it came back meanwhile.
     chat.move(TEAM, OWN)
-    assert run_deferred_turn_memory(_queued(OWN, "I live in Lisbon.", 1))
-    assert chat.remembers(OWN) == ["I live in Lisbon."] and "Lisbon" in chat.facts(OWN)
-    chat.reconcile()
-    assert chat.remembers(OWN) == ["I live in Lisbon."], "and what she said in the shared space is not"
+    assert run_deferred_turn_memory(_queued(thread, OWN, "I like the sea.", 2))
+    assert chat.remembers(OWN) == [home, "I like the sea."]
 
 
 def test_a_turn_queued_when_its_chat_is_taken_out_is_not_the_teams(chat) -> None:
     from kazma_core.memory.consolidator import run_deferred_turn_memory
 
-    threads.move_thread(THREAD, TEAM)
+    chat.begin(TEAM)
     chat.row(TEAM, "I live in Lisbon.", at=T0 + 60)
-    chat.move(TEAM, OWN)
-    run_deferred_turn_memory(_queued(TEAM, "I live in Lisbon.", 1))
+    _session, thread = chat.move(TEAM, OWN)
+    assert forget.turn_kept_out(thread, 1, "I live in Lisbon.", tenant_id=TEAM), "nor does it teach a lesson"
+    run_deferred_turn_memory(_queued(thread, TEAM, "I live in Lisbon.", 1))
     assert chat.held(TEAM) == 0 and chat.held(OWN) == 0
 
 
-@pytest.mark.parametrize(("frm", "to", "written"), [(OWN, TEAM, 1), (TEAM, OWN, 0)])
-def test_reconcile_meets_a_row_a_move_left_behind(chat, monkeypatch, frm, to, written) -> None:
-    """The source's row its last step could not remove: a personal space
-    still learns what was said there, a shared one nothing more."""
-    from kazma_ui import chat_move
-
-    if frm == TEAM:
-        threads.move_thread(THREAD, TEAM)
-    chat.row(frm, "I live in Lisbon.", at=T0)
+def test_a_forget_still_pending_never_reaches_the_chat_shared_again(chat, monkeypatch) -> None:
+    """Taken out while the shared space's memory could not be written, then
+    shared again: the pending forget is the old chat's."""
+    chat.begin(TEAM)
+    _tell(chat, TEAM, "en")
     with monkeypatch.context() as patch:
-        patch.setattr(chat_move, "_remove_row", lambda *_a: (_ for _ in ()).throw(OSError("busy")))
-        chat.move(frm, to)
-    assert chat.reconcile()["turns_written"] == written
-    assert chat.remembers(frm) == ["I live in Lisbon."][:written] and chat.remembers(to) == []
-
-
-# ── 6. the space it left is written nothing ───────────────────────────────
-
-
-def test_after_the_switch_her_space_takes_no_later_turn(chat) -> None:
-    chat.say(OWN, "I live in Lisbon.", n=1, at=T0)
+        patch.setattr(forget, "_forget_chat_facts", lambda *_a, **_k: (_ for _ in ()).throw(
+            sqlite3.OperationalError("database is locked")))
+        chat.move(TEAM, OWN)
     chat.move(OWN, TEAM)
-    _say(SARA, THREAD, "I work at Initech.", n=2, at=T0 + 60, space=OWN)  # numbered after it left
-    assert chat.remembers(OWN) == ["I live in Lisbon."] and chat.facts(OWN) == {"Lisbon"}
+    chat.say(TEAM, "My name is Sara.", n=3, at=T0 + 600)
+    forget.converge(chat.db)
+    assert forget_journal.pending(chat.db) == []
+    assert chat.facts(TEAM) == {"Sara"} and chat.remembers(TEAM) == ["My name is Sara."]
 
 
-def _unreadable(monkeypatch) -> None:
-    def record_of(_thread: str) -> Any:
-        raise sqlite3.OperationalError("database is locked")
-
-    monkeypatch.setattr(threads, "_spaces", {})
-    monkeypatch.setattr(threads, "record_of", record_of)
-
-
-def test_an_unreadable_thread_record_fails_the_write_so_it_is_tried_again(chat, monkeypatch) -> None:
-    from kazma_core.memory.consolidator import _run_turn_memory
-    from kazma_core.memory.dual_write import write_episode
-
-    chat.row(OWN, "I live in Lisbon.", at=T0)
-    turn = [{"role": "user", "content": "I live in Lisbon."}, {"role": "assistant", "content": "Noted."}]
-    with monkeypatch.context() as patch:
-        _unreadable(patch)
-        assert write_episode(session_id=THREAD, turn_number=1, user_text="I live in Lisbon.",
-                             tenant_id=OWN)[0] == "failed"
-        assert _run_turn_memory(turn, session_id=THREAD, turn=1, tenant_id=OWN, at=T0, said_by=SARA) is False, (
-            "the queue's task fails and is retried")
-        assert chat.remembers(OWN) == [] and chat.facts(OWN) == set()
-        after = chat.reconcile()
-        assert after == {"error": "chat store unreadable"}, "and reconcile waits before it"
-    assert chat.reconcile()["turns_written"] == 1, "readable again, it is written"
-    assert chat.remembers(OWN) == ["I live in Lisbon."]
-
-
-# ── 7. a restored memory database keeps them out ──────────────────────────
-
-
-def test_a_memory_database_restored_from_before_the_move_keeps_the_turns_out(chat) -> None:
-    _tell(chat, OWN, "en")
-    chat.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    path = chat.team.tmp / "memory_state.db"
-    shutil.copyfile(path, chat.team.tmp / "backup.db")
-    chat.move(OWN, TEAM)
-    restored = sqlite3.connect(str(chat.team.tmp / "backup.db"))
-    try:
-        assert restored.execute("SELECT COUNT(*) FROM memory_forgotten").fetchone()[0] == 0
-        out = forget_journal.apply_pending(restored)
-        assert out["failed"] == []
-        rows = restored.execute("SELECT DISTINCT tenant_id, turn_number, episode_id FROM memory_forgotten "
-                                "WHERE session_key = ? ORDER BY turn_number", (THREAD,)).fetchall()
-        assert rows == [(TEAM, 1, forget.MOVED_IN), (TEAM, 2, forget.MOVED_IN)]
-        assert restored.execute("SELECT COUNT(*) FROM episodes WHERE tenant_id = ? AND tier != 'forgotten'",
-                                (OWN,)).fetchone()[0] == 2, "her own turns are as they were"
-    finally:
-        restored.close()
-    journal = sqlite3.connect(str(chat.team.tmp / "memory_forget_journal.db"))
-    try:
-        assert "Lisbon" not in repr(journal.execute("SELECT * FROM forget_journal").fetchall()), "no text in it"
-    finally:
-        journal.close()
-
-
-# ── 8. a forget that fails half way ───────────────────────────────────────
+# ── 7. a forget that fails half way; a restore ────────────────────────────
 
 
 def test_a_forget_that_fails_is_finished_by_the_convergence(chat, monkeypatch) -> None:
     from kazma_core.spaces import chat_moves
     from kazma_ui.chat_move import settle_chat_moves
 
-    threads.move_thread(THREAD, TEAM)
+    chat.begin(TEAM)
     _tell(chat, TEAM, "en")
     with monkeypatch.context() as patch:
         patch.setattr(forget, "_forget_chat_facts", lambda *_a, **_k: (_ for _ in ()).throw(
             sqlite3.OperationalError("database is locked")))
         chat.move(TEAM, OWN)
     (entry,) = chat_moves.moves_under_way().values()
-    assert "memory" not in entry["done"] and "chat" in entry["done"], "the chat itself is moved"
+    assert "memory" not in entry["done"] and "remains" in entry["done"], "the chat itself is moved"
     forget.converge(chat.db)
     assert chat.remembers(TEAM) == [] and "Lisbon" not in chat.facts(TEAM)
-    asyncio.run(settle_chat_moves(None))
+    asyncio.run(settle_chat_moves(Checkpoints()))
     assert chat_moves.moves_under_way() == {}
 
 
@@ -634,28 +568,32 @@ def test_a_forget_that_answers_not_done_is_asked_again(chat, monkeypatch) -> Non
     from kazma_core.spaces import chat_moves
     from kazma_ui.chat_move import settle_chat_moves
 
-    threads.move_thread(THREAD, TEAM)
+    chat.begin(TEAM)
     _tell(chat, TEAM, "en")
     with monkeypatch.context() as patch:
         patch.setattr(forget, "forget_chat", lambda *_a, **_k: {"ok": False, "error": "busy"})
         chat.move(TEAM, OWN)
     (entry,) = chat_moves.moves_under_way().values()
     assert "memory" not in entry["done"] and "Lisbon" in chat.facts(TEAM)
-    asyncio.run(settle_chat_moves(None))
+    asyncio.run(settle_chat_moves(Checkpoints()))
     assert chat_moves.moves_under_way() == {} and chat.facts(TEAM) == set()
 
 
-def test_forgetting_a_chat_moved_away_leaves_its_new_spaces_steps(chat, monkeypatch) -> None:
-    """Time Travel steps are kept by thread alone: a forget replayed for the
-    space a chat left never deletes the steps it made since."""
-    from kazma_core import time_travel
-
-    threads.move_thread(THREAD, TEAM)
+def test_a_memory_database_restored_from_before_a_take_out_forgets_it_again(chat) -> None:
+    chat.begin(TEAM)
     _tell(chat, TEAM, "en")
+    chat.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    path = chat.team.tmp / "memory_state.db"
+    shutil.copyfile(path, chat.team.tmp / "backup.db")
     chat.move(TEAM, OWN)
-    asked: list[Any] = []
-    monkeypatch.setattr(time_travel, "forget_thread_snapshots", lambda keys, **_k: asked.append(keys) or 0)
-    assert forget.forget_chat(SESSION, tenant_id=TEAM, keys=[SESSION, THREAD], journal=False)["ok"]
-    assert asked == []
-    assert forget.forget_chat(SESSION, tenant_id=OWN, keys=[SESSION, THREAD], journal=False)["ok"]
-    assert len(asked) == 1
+    restored = sqlite3.connect(str(chat.team.tmp / "backup.db"))
+    restored.row_factory = sqlite3.Row
+    try:
+        assert restored.execute("SELECT COUNT(*) FROM episodes WHERE tier != 'forgotten'").fetchone()[0] == 2
+        assert forget_journal.apply_pending(restored)["failed"] == []
+        assert restored.execute("SELECT COUNT(*) FROM episodes WHERE tier != 'forgotten'").fetchone()[0] == 0
+        assert restored.execute("SELECT COUNT(*) FROM beliefs WHERE object LIKE '%Lisbon%'").fetchone()[0] == 0
+    finally:
+        restored.close()
+    # The copy in her own space is no reconcile's to learn, whatever the memory holds.
+    assert chat.reconcile()["turns_written"] == 0 and chat.remembers(OWN) == []

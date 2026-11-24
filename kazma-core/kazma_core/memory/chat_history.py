@@ -295,7 +295,9 @@ def sessions_changed_since(
 ) -> list[dict[str, Any]]:
     """Sessions updated after the cursor *after* = ``(updated_at, session_id)``,
     oldest first, at most *limit*: ``{tenant_id, session_id, thread_id,
-    created_at, updated_at, messages}``. The cursor is composite so sessions
+    created_at, updated_at, messages, copied}`` (``copied``: how many of its
+    first messages came with a chat moved from another space, Spaces S2-12).
+    The cursor is composite so sessions
     sharing an ``updated_at`` across a page boundary are not skipped; ``("",
     "")`` starts from the beginning (rows without an ``updated_at`` first). A
     session with a newer copy in the save spool is returned as that copy.
@@ -308,7 +310,7 @@ def sessions_changed_since(
             from kazma_core.db.pg_helpers import get_pool
 
             rows = get_pool().execute(
-                "SELECT tenant_id, session_id, thread_id, created_at, updated_at, messages "
+                "SELECT tenant_id, session_id, thread_id, created_at, updated_at, messages, copied "
                 "FROM kazma_chat_sessions WHERE COALESCE(updated_at, '') > %s "
                 "OR (COALESCE(updated_at, '') = %s AND session_id > %s) "
                 "ORDER BY COALESCE(updated_at, ''), session_id LIMIT %s",
@@ -320,11 +322,15 @@ def sessions_changed_since(
                 rows = []
             else:
                 try:
+                    # A file an older build wrote has no such column: nothing
+                    # in it was copied.
+                    held = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+                    copied = "copied" if "copied" in held else "0 AS copied"
                     rows = [
                         dict(r)
                         for r in conn.execute(
                             "SELECT tenant_id, session_id, thread_id, created_at, updated_at, "
-                            "messages FROM sessions WHERE COALESCE(updated_at, '') > ? "
+                            f"messages, {copied} FROM sessions WHERE COALESCE(updated_at, '') > ? "
                             "OR (COALESCE(updated_at, '') = ? AND session_id > ?) "
                             "ORDER BY COALESCE(updated_at, ''), session_id LIMIT ?",
                             (stamp, stamp, key, int(limit)),
@@ -350,6 +356,7 @@ def sessions_changed_since(
             "created_at": str(r.get("created_at") or ""),
             "updated_at": str(r.get("updated_at") or ""),
             "messages": msgs if isinstance(msgs, list) else [],
+            "copied": int(r.get("copied") or 0),
         })
     return out
 

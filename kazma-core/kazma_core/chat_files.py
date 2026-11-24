@@ -198,11 +198,13 @@ def _records_of(root: Path, thread_id: str) -> list[str]:
     return found
 
 
-def copy_shared_files(text: str, *, thread_id: str, from_space: str, to_space: str, by: str) -> int:
+def copy_shared_files(text: str, *, thread_id: str, new_thread: str, from_space: str, to_space: str,
+                      by: str) -> int:
     """Copy the files a chat's messages (*text*) link to, and those shared in
     the chat *thread_id*, from *from_space*'s folder into *to_space*'s under
-    the same ids: the chat's links open in the space it moves to. A link
-    whose file is not there opened nothing before either. Returns how many.
+    the same ids, as files of the chat's copy *new_thread*: its links open in
+    the space it moves to. A link whose file is not there opened nothing
+    before either. Returns how many.
 
     The target's disk limit is asked for all of them first
     (``SpaceOverLimit``). Run again, it copies them again."""
@@ -220,7 +222,7 @@ def copy_shared_files(text: str, *, thread_id: str, from_space: str, to_space: s
         root.mkdir(parents=True, exist_ok=True)
         for shared, blob in files:
             shutil.copyfile(blob, root / shared.id)
-            _write_record(root, shared, thread_id=thread_id, created_at=time.time())
+            _write_record(root, shared, thread_id=new_thread, created_at=time.time())
     return len(files)
 
 

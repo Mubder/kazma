@@ -230,13 +230,23 @@ async def run_voice_user_turn(
     except Exception:
         logger.debug("[voice] HITL supersede cancel skipped", exc_info=True)
 
-    # Persist the user line immediately (journal/sidebar truth).
+    # Persist the user line immediately (journal/sidebar truth), under the
+    # session's transaction: never a put of the copy this socket has held
+    # since it opened. A chat that was deleted (or moved to another space)
+    # is not brought back: refused, nothing run.
     ts = datetime.now(UTC).isoformat()
     from kazma_ui.reply_sink import authored
+    from kazma_ui.sse_chat import chat_gone_text
+    from kazma_ui.sse_chat._persistence import _mutate_session
 
-    session.messages.append(authored({"role": "user", "content": user_text, "ts": ts}))
+    user_row = authored({"role": "user", "content": user_text, "ts": ts})
     try:
-        get_session_manager().put(session)
+        stored = await asyncio.to_thread(
+            _mutate_session, session_id, lambda sess: sess.messages.append(user_row), session)
+        if stored is None:
+            result.error = chat_gone_text()
+            return result
+        session = stored
     except Exception:
         logger.exception("[voice] failed to persist user message for session=%s", session_id)
 
@@ -289,18 +299,29 @@ async def run_voice_user_turn(
     # voice utterance (barge-in) cancels only the subscription — the turn
     # survives and persists, and the next utterance supersedes it above.
     journal_head = get_turn_broker().head_seq(thread_id)
-    drive = asyncio.create_task(
-        _drive_graph_to_journal(
-            graph,
-            input_state,
-            graph_config,
-            thread_id=thread_id,
-            session_id=session_id,
-            reply_turn_id=reply_turn,
-        ),
-        name=f"voice-turn:{thread_id[:12]}",
-    )
-    register_turn(thread_id, drive)
+    from kazma_ui.thread_locks import thread_mutation
+
+    # Started under the thread's lock, as a typed turn is: a move of the
+    # chat to another space (or its delete) either finished before, and the
+    # turn does not run, or sees it running.
+    drive = None
+    async with thread_mutation(thread_id):
+        if not get_session_manager().chat_deleted(session_id, thread_id):
+            drive = asyncio.create_task(
+                _drive_graph_to_journal(
+                    graph,
+                    input_state,
+                    graph_config,
+                    thread_id=thread_id,
+                    session_id=session_id,
+                    reply_turn_id=reply_turn,
+                ),
+                name=f"voice-turn:{thread_id[:12]}",
+            )
+            register_turn(thread_id, drive)
+    if drive is None:
+        result.error = chat_gone_text()
+        return result
 
     def _on_drive_done(t: asyncio.Task, tid: str = thread_id) -> None:
         unregister_turn(tid, t)

@@ -907,6 +907,23 @@
   function _outboxClear() {
     try { localStorage.removeItem(_outboxKey()); } catch (e) { /* ignore */ }
   }
+  function _outboxHolds() {
+    try { return !!localStorage.getItem(_outboxKey()); } catch (e) { return false; }
+  }
+  // The chat this tab is on was deleted, or moved to another space: nothing
+  // is written into it again. A message that was not taken goes back to the
+  // composer, of a new chat.
+  function _leaveDeletedChat(said, text) {
+    var undelivered = _outboxHolds() ? String(text || '') : '';
+    _outboxClear();
+    newSession();
+    if (undelivered && inputEl) {
+      inputEl.value = undelivered + (inputEl.value ? '\n' + inputEl.value : '');
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    if (said) KS.toast(said, 'warning', 6000);
+    refreshSessionsSoon();
+  }
   function _restoreUndeliveredOutbox(serverMessages) {
     try {
       var raw = localStorage.getItem(_outboxKey());
@@ -3516,8 +3533,13 @@
         refreshSessionsSoon();
       },
 
-      onError: function(msg) {
+      onError: function(msg, data) {
         if (!_mine()) return;
+        if (data && data.code === 'chat_deleted') {
+          activeStream = null;
+          _leaveDeletedChat(msg, text);
+          return;
+        }
         diag('sse-error', String(msg || ''));
         dumpDiagnostics();
         _sseAttempts++;
@@ -6985,12 +7007,13 @@
         ? ti('move_take_out_body', 'It moves to your own space. This space keeps a line saying you took it out, with its title.')
         : ti('move_share_body', 'It moves to the shared space: everyone in that space can read it.')) +
         ' ' + ti('move_memory_note', 'Moving a chat moves the conversation. What Kazma remembered from it stays where it was said, and from now on it remembers what you say in the new space. Taking a chat out of a shared space makes that space forget it.') +
-        ' ' + ti('move_also_note', 'Its reminders and scheduled tasks move with it, and so do the files Kazma shared in it. Its earlier Time Travel steps do not, and Kazma can no longer open files you attached to it: attach them again.'),
+        ' ' + ti('move_also_note', 'The files Kazma shared in it move with it. Reminders and scheduled tasks you booked from it stay where you booked them. Its earlier Time Travel steps do not move, and Kazma can no longer open files you attached to it: attach them again.'),
       confirmText: takeOut ? ti('move_take_out_ok', 'Take out') : ti('move_share_ok', 'Share'),
     });
     if (!ok) return;
+    var moved = null;
     try {
-      await window.kazmaSave(url, { method: 'POST', body: { to_space: toSpace } });
+      moved = await window.kazmaSave(url, { method: 'POST', body: { to_space: toSpace } });
     } catch (e) {
       var code = e && e.body && e.body.error;
       if (code === 'others_wrote') return _offerPrivateChat();
@@ -6999,7 +7022,15 @@
     }
     KS.toast(takeOut ? ti('move_taken_out', 'Taken out to your space.') : ti('move_shared', 'Shared with the space.'),
              'success', 3000);
-    if (sessionId === chatSessionId) newSession();
+    if (sessionId === chatSessionId) {
+      // The chat open here is a deleted chat now: its copy is opened, where
+      // it lives.
+      if (moved && moved.session_id && window.kazmaSpace && window.kazmaSpace.openChat) {
+        window.kazmaSpace.openChat(toSpace, moved.session_id);
+        return;
+      }
+      newSession();
+    }
     loadSessions();
   }
 

@@ -148,8 +148,8 @@ def _make_stores() -> list[str]:
     SandboxBackend(space=scope.OWNER_SPACE_ID)
     made.append("sandbox_emails.db")
     threads.record_thread(f"make-{uuid.uuid4().hex[:6]}", scope.OWNER_SPACE_ID, OWNER_ACCOUNT_ID)
-    # The chat moves' two tables, made by their own code the first time a
-    # chat move is asked for (S2-12): on every install that moved a chat.
+    # The table of the chats taken out, made by its own code the first time
+    # a chat is (S2-12).
     from kazma_core.spaces import chat_moves
 
     chat_moves._connection().close()
@@ -240,7 +240,7 @@ def _plant(space: str, word: str) -> list[str]:
     parents["memory_rows:beliefs"] = f"b-{space}-{uuid.uuid4().hex[:6]}"
     parents["memory_rows"] = parents["memory_rows:episodes"]
     planted: list[str] = []
-    for store, path in space_data.store_paths():
+    for store, path in space_data._store_paths():
         with closing(sqlite3.connect(str(path))) as conn:
             conn.execute("PRAGMA foreign_keys = OFF")
             tables = space_data._tables(conn)
@@ -273,7 +273,7 @@ def _plant(space: str, word: str) -> list[str]:
 
 #: The erase's own map of the stores, taken before a control replaces it:
 #: the scan must read every store whatever the erase was told.
-_EVERY_STORE = space_data.store_paths
+_EVERY_STORE = space_data._store_paths
 
 
 def _databases() -> list[Path]:

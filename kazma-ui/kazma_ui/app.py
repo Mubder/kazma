@@ -2237,10 +2237,12 @@ class KazmaAppBuilder:
                 logger.warning("[HITL] Failed to start approval-timeout watchdog: %s", exc)
 
             # ── Chat moves that did not end (Spaces S2-12) ─────────
-            # Before the switch the copies go back; after it the move is
-            # finished. Nothing to do on an install with no move recorded.
+            # A copy under way is taken away, a chat handed over finishes
+            # its delete: before anyone is served, so nothing is written into
+            # a chat that moved. Nothing to do with no move recorded.
+            from kazma_core.db.pg_helpers import store_errors
+
             try:
-                from kazma_core.background import spawn_background
                 from kazma_core.spaces import chat_moves
 
                 from kazma_ui.chat_move import settle_chat_moves, settler
@@ -2250,9 +2252,10 @@ class KazmaAppBuilder:
 
                 # And, until it stops, by the maintenance sweep "chat moves".
                 chat_moves.register_settler(settler(asyncio.get_running_loop(), _move_checkpoints))
-                spawn_background(settle_chat_moves(_move_checkpoints()), name="chat-move-settle")
-            except ImportError as exc:
-                logger.warning("[spaces] cut-off chat moves were not settled: %s", exc)
+                await settle_chat_moves(_move_checkpoints())
+            except (ImportError, *store_errors()) as exc:
+                # The sweep settles them when the store answers.
+                logger.warning("[spaces] cut-off chat moves were not settled at start: %s", exc)
 
             # ── Turns a restart cut off (resilience plan C1) ───────
             # A safe one continues by itself; one whose tool effect is

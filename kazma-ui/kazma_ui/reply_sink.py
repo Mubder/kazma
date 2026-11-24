@@ -57,6 +57,8 @@ from typing import Any
 
 from kazma_core.chaos import InjectionTarget, chaos_injection
 
+from kazma_ui.session_manager import ChatDeleted
+
 __all__ = [
     "close_reply_turn",
     "open_turns_snapshot",
@@ -593,6 +595,10 @@ def upsert_reply(
                 row["rev"] = 1
             row["schema"] = TURN_SCHEMA_VERSION
         return True
+    except ChatDeleted:
+        # Its chat was deleted while the turn closed: nothing to save it in.
+        logger.info("[reply_sink] reply not saved: chat %s was deleted", str(session_id)[:12])
+        return False
     except Exception:
         logger.warning(
             "[reply_sink] upsert FAILED session=%s turn=%s (%d chars) — the "
@@ -683,6 +689,8 @@ def record_instant_turn(
                         m["kind"] = kind
                         break
         close_reply_turn(thread_id)
+    except ChatDeleted:
+        logger.info("[reply_sink] instant turn not saved: chat %s was deleted", str(session_id)[:12])
     except Exception:
         logger.warning(
             "[reply_sink] instant turn NOT stored session=%s",

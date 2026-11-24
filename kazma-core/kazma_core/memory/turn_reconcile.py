@@ -118,6 +118,13 @@ def _turns(messages: list[Any]) -> list[tuple[int, str, str, float | None, str |
     return out
 
 
+def _asked(messages: list[Any]) -> int:
+    """How many turns *messages* holds, as :func:`_turns` numbers them."""
+    from kazma_core.memory.chat_history import normalize_message
+
+    return sum(1 for m in messages if normalize_message(m).get("role") == "user")
+
+
 def _in_memory(conn: sqlite3.Connection, tenant: str, keys: list[str]) -> tuple[Counter, list[str]]:
     """The conversation's episode questions (counted, by ``limits.turn_key``)
     and erased-row stubs.
@@ -149,20 +156,17 @@ def _reconcile_session(
 
     thread = row["thread_id"] or row["session_id"]
     keys = list(dict.fromkeys(k for k in (thread, row["session_id"]) if k))
-    from kazma_core.memory.forget import last_turn_taken
-
-    # A row of a chat taken out of this space (Spaces S2-12): nothing of it
-    # is this space's to write. Raises when where it is cannot be read, so
-    # the cursor stays before it (a failed write below would be passed over).
-    last = last_turn_taken(keys, row["tenant_id"])
-    if last is not None and last < 0:
-        return 0, 0
     texts, stubs = _in_memory(conn, row["tenant_id"], keys)
     fallback = _epoch(row["updated_at"]) or _epoch(row["created_at"])
     written = young = 0
     from kazma_core.memory.speakers import episode_metadata
 
+    # What came with a chat moved from another space (Spaces S2-12) was said
+    # there: this space starts after it.
+    copied = _asked(row["messages"][: int(row.get("copied") or 0)])
     for index, question, answer, when, author in _turns(row["messages"]):
+        if index <= copied:
+            continue
         stored = turn_key(question)
         if texts[stored] > 0:
             texts[stored] -= 1

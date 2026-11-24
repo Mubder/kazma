@@ -242,11 +242,10 @@ class TurnJournal:
             return [frame for frame in bucket if frame["seq"] > after], False
 
     def clear(self, thread_id: str) -> int:
-        """Drop *thread_id*'s events, keeping its sequence: the chat moved to
-        another space (Spaces S2-12), and what its turns showed there -- the
-        memory they used -- is not replayed in the one it moved to. A client
-        with a cursor from before gets a gap and reads the transcript. Returns
-        how many went."""
+        """Drop *thread_id*'s events, keeping its sequence: its chat moved to
+        another space (Spaces S2-12) and is a deleted chat here, and what its
+        turns showed -- the memory they used -- goes with it. A client with a
+        cursor from before gets a gap. Returns how many went."""
         with self._lock:
             return len(self._events.pop(thread_id or "", ()))
 

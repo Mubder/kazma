@@ -9,10 +9,9 @@ space are closed (4403, ``not_a_member``) and their streams woken, which
 end once they see the departure. Their next request is refused by the
 membership check every request passes.
 
-A chat a person moves into another space (Spaces S2-12, the chat move
-review's H3) is treated the same way: every socket and stream of its thread
-registered under another space than the one it moved to is closed or ended
-(:func:`thread_moved`), so no member of the space it left reads it on.
+A chat a person moves into another space (Spaces S2-12) is a deleted chat in
+the space it left: every socket and stream of it there is closed or ended
+(:func:`chat_gone`), so a tab left open on it says so at its next message.
 """
 
 from __future__ import annotations
@@ -21,11 +20,12 @@ import asyncio
 import itertools
 import logging
 import threading
+from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-__all__ = ["socket_watched", "stream_watched", "thread_moved"]
+__all__ = ["chat_gone", "is_gone", "socket_watched", "stream_watched"]
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,10 @@ _SOCKETS: dict[int, tuple[str, str, Any, asyncio.AbstractEventLoop, str]] = {}
 _STREAMS: dict[int, tuple[str, str, Any, Any, asyncio.AbstractEventLoop, str]] = {}
 _TOKENS = itertools.count(1)
 _INSTALLED: list[Any] = []
+
+#: The threads of the chats that went (:func:`chat_gone`), newest last.
+_GONE: OrderedDict[str, None] = OrderedDict()
+_GONE_KEPT = 1_000
 
 #: The close code a socket gets when its person left the space.
 CLOSE_CODE = 4403
@@ -102,22 +106,30 @@ def _on_departure(account: str, space: str) -> None:
                     account, space, len(sockets), len(streams))
 
 
-def thread_moved(chats: set[str], to_space: str) -> int:
-    """The chat *chats* (its session and thread ids) moved to *to_space*:
-    close its sockets and wake its streams registered under any other space
-    (their streams end once they see the thread is away). Returns how many.
-    Called from any thread."""
-    chats = {str(c) for c in chats if c}
+def is_gone(thread_id: str) -> bool:
+    """Whether the chat of *thread_id* went (:func:`chat_gone`)."""
     with _LOCK:
-        sockets = [(ws, loop) for _a, s, ws, loop, c in _SOCKETS.values() if c in chats and s != to_space]
-        streams = [(q, wake, loop) for _a, s, q, wake, loop, c in _STREAMS.values() if c in chats and s != to_space]
+        return thread_id in _GONE
+
+
+def chat_gone(*, session_id: str, thread_id: str, space: str) -> int:
+    """The chat left *space* for another: close its sockets there and wake
+    its streams, which end once they see it (:func:`is_gone`). Returns how
+    many. Called from any thread."""
+    chats = {str(c) for c in (session_id, thread_id) if c}
+    with _LOCK:
+        _GONE[thread_id] = None
+        while len(_GONE) > _GONE_KEPT:
+            _GONE.popitem(last=False)
+        sockets = [(ws, loop) for _a, s, ws, loop, c in _SOCKETS.values() if c in chats and s == space]
+        streams = [(q, wake, loop) for _a, s, q, wake, loop, c in _STREAMS.values() if c in chats and s == space]
     for websocket, loop in sockets:
         _on_loop(loop, _close, websocket, "moved")
     for queue, wake, loop in streams:
         _on_loop(loop, queue.put_nowait, wake)
     if sockets or streams:
-        logger.info("[spaces] a chat moved to %s: %d socket(s) closed, %d stream(s) ended elsewhere",
-                    to_space, len(sockets), len(streams))
+        logger.info("[spaces] a chat left %s: %d socket(s) closed, %d stream(s) ended",
+                    space, len(sockets), len(streams))
     return len(sockets) + len(streams)
 
 

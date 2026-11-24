@@ -17,7 +17,7 @@ import json
 import logging
 import re
 from collections import OrderedDict
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import aiosqlite
@@ -32,7 +32,6 @@ from langgraph.checkpoint.base import (
     ChannelVersions,
     Checkpoint,
     CheckpointMetadata,
-    uuid6,
 )
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -354,92 +353,6 @@ class CheckpointManager(BaseCheckpointSaver):
             saver = await self._open(str(thread_id) if thread_id else None, write=True)
             if hasattr(saver, "adelete_thread"):
                 await saver.adelete_thread(thread_id)
-
-    # ── A chat moved between spaces (Spaces S2-12) ─────────────────────────
-
-    async def amove_state(self, thread_id: str, *, from_space: str, to_space: str,
-                          clean: Callable[[dict[str, Any]], dict[str, Any]]) -> bool:
-        """Put the thread's newest state, passed through *clean*, where
-        *to_space* reads it: the chat's state moves
-        (``kazma_ui.chat_move``, ``spaces.chat_moves.moved_state``). Only that
-        one state, with no pending writes: the older ones hold what the
-        source space recalled at each step, and nothing reads them but
-        Time Travel, whose steps do not move. False when the thread has none.
-
-        Each space's own file: the target gets the cleaned state, and the
-        source's is left for :meth:`adelete_thread_in` after the switch. One
-        table for every space (Postgres, the live install's): the cleaned
-        state replaces the thread's, in place -- before the switch, so that
-        nothing of the source space is there to read after it. The thread's
-        record still names the source while this runs. Run again, it does
-        the same."""
-        tid = str(thread_id)
-        source = await self._saver_of(from_space)
-        target = await self._saver_of(to_space)
-        config: Any = {"configurable": {"thread_id": tid, "checkpoint_ns": ""}}
-        found = await source.aget_tuple(config)
-        if found is None:
-            return False
-        checkpoint = dict(found.checkpoint)
-        values = dict(checkpoint.get("channel_values") or {})
-        cleaned = clean(values)
-        versions = dict(checkpoint.get("channel_versions") or {})
-        if source is not target:
-            checkpoint["channel_values"] = cleaned
-            await target.adelete_thread(tid)  # an earlier attempt's copy
-            await target.aput(config, checkpoint, found.metadata, versions)
-            return True
-        # One table: a channel's value is stored by its version, so what
-        # changed gets a new one, and what went loses its own.
-        version = self._version_after(source, versions)
-        changed = {k: version for k, v in cleaned.items() if k not in values or values[k] != v}
-        kept = {k: v for k, v in versions.items() if k in cleaned or k not in values}
-        checkpoint.update(id=str(uuid6(clock_seq=-2)), channel_values=cleaned,
-                          channel_versions={**kept, **changed})
-        await source.aput(config, checkpoint, found.metadata, changed)
-        await self._keep_only(source, tid, checkpoint["id"])
-        return True
-
-    def _version_after(self, saver: Any, versions: ChannelVersions) -> Any:
-        """The version after every one of *versions*, in the scheme they are
-        in: a graph numbers its channels through the saver it was compiled
-        with -- this manager (whole numbers) or a saver of its own (text) --
-        and LangGraph compares them, so the two schemes never mix."""
-        newest = max(versions.values(), default=None)
-        return (saver if isinstance(newest, str) else self).get_next_version(newest, None)
-
-    @staticmethod
-    async def _keep_only(saver: Any, thread_id: str, checkpoint_id: str) -> None:
-        """Delete every checkpoint and pending write of *thread_id* but the
-        root checkpoint *checkpoint_id*, in one transaction, and (Postgres)
-        every channel value it does not name."""
-        if "Postgres" in type(saver).__name__ and hasattr(saver.conn, "connection"):
-            async with saver.conn.connection() as conn, conn.transaction():
-                await conn.execute("DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,))
-                await conn.execute("DELETE FROM checkpoints WHERE thread_id = %s AND NOT "
-                                   "(checkpoint_ns = '' AND checkpoint_id = %s)", (thread_id, checkpoint_id))
-                await conn.execute(
-                    "DELETE FROM checkpoint_blobs b WHERE b.thread_id = %s AND NOT EXISTS ("
-                    "SELECT 1 FROM checkpoints c, jsonb_each_text(c.checkpoint -> 'channel_versions') e "
-                    "WHERE c.thread_id = b.thread_id AND c.checkpoint_ns = b.checkpoint_ns "
-                    "AND e.key = b.channel AND e.value = b.version)", (thread_id,))
-            return
-        async with saver.lock:
-            await saver.conn.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))
-            await saver.conn.execute("DELETE FROM checkpoints WHERE thread_id = ? AND NOT "
-                                     "(checkpoint_ns = '' AND checkpoint_id = ?)", (thread_id, checkpoint_id))
-            await saver.conn.commit()
-
-    async def adelete_thread_in(self, thread_id: str, *, space: str) -> None:
-        """Delete *thread_id*'s checkpoints from *space*'s saver: the copy a
-        move leaves behind (the source after the switch, the target when a
-        move is put back). Never the saver the thread's record names: there
-        the checkpoints are the chat's own."""
-        saver = await self._saver_of(space)
-        if saver is await self._saver_of(await self._home(str(thread_id))):
-            return
-        if hasattr(saver, "adelete_thread"):
-            await saver.adelete_thread(str(thread_id))
 
     @staticmethod
     async def _thread_ids(saver: Any) -> list[str]:
