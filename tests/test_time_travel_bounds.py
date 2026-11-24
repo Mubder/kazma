@@ -33,6 +33,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from tests import _tt_graph as tt
+from tests._agents_md import joined
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -467,7 +468,7 @@ def test_agents_18b_names_what_the_import_rewrites():
     """TT-09's last part: AGENTS §18 B named ``snapshots.state_json`` as a
     rewritten column, a store no bundle carries since TT-05, and named the
     rest loosely. It now lists exactly the importer's columns."""
-    agents = (REPO / "AGENTS.md").read_text(encoding="utf-8")
+    agents = joined()
     start = agents.index("**B. Embedded absolute paths are rewritten to the target root.**")
     section = agents[start:agents.index("**C. Import is atomic", start)]
     assert _agents_18b_problems(section) == []
@@ -490,7 +491,7 @@ def test_the_docs_claims_match_the_code():
     assert "| `/replay <N>` | **Restore**" not in page
     assert "`/replay <step>`" in page and "not backed up" in page
     assert "approval_pending" in page and "turn_running" in page
-    agents = (REPO / "AGENTS.md").read_text(encoding="utf-8")
+    agents = joined()
     assert "LRU-capped per-thread at 50" not in agents
     routes = (REPO / "kazma-ui/kazma_ui/replay_routes.py").read_text(encoding="utf-8")
     for named in re.findall(r"``(tests/[\w/]+\.py)``", routes):

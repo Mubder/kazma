@@ -90,7 +90,7 @@ Dated updates are in [Release notes](guide/release-notes). For an upgrade, follo
 | `docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md` | Documents hardening tracker (2026-10-13): what is implemented with evidence, and what is still open — a soak on the container profile and Postgres, multi-replica qualification, OCR on more real scans (the 48-hour soak on the default profile passed 2026-10-19; the independent review closed 2026-10-15) |
 | `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` | Full monorepo map (linked from [System map](reference/system-map)) |
 | `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` | This docs consolidation plan (completed) |
-| `AGENTS.md` | Build contract for coding agents (invariants §1–§33; not the live Soul) |
+| `AGENTS.md` | Build contract for coding agents: a short core and an index; each section is a file in `docs/agents/` (not the live Soul) |
 | `CHANGELOG.md` | Sprint history |
 | `docs/audits/archive/` | Archived audits (former docs-v2 / legacy trees) |
 

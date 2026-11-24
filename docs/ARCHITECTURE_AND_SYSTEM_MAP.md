@@ -586,7 +586,7 @@ Cross-reference: `docs/audits/REMEDIATION_PLAN_2026-07-21.md` (all WP 0.x–4.x 
 
 | Doc | Role |
 |-----|------|
-| `AGENTS.md` | Build contract (invariants §1–§33) |
+| `AGENTS.md`, `docs/agents/` | Build contract: the core with the index, and one file per section |
 | `docs/docs/guide/architecture.md` | Narrative architecture |
 | `docs/docs/guide/swarm-orchestration.md` | Swarm patterns + HITL bus |
 | `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` | Binding industrial audit (waves 0–8) |

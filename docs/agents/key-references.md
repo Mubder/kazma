@@ -1,0 +1,35 @@
+<!-- AGENTS.md, piece key-references. The index is in AGENTS.md; scripts/agents_md.py joins the pieces. -->
+## Key References
+
+- `docs/docs/intro.md` — Documentation map (single SoT under `docs/docs/`)
+- `docs/FEATURES.md` — What Kazma does, a plain list checked against the code (the website's source; re-check a line against the code before changing it)
+- `docs/docs/ops/website-sync.md` — How kazma.ai is kept in step with this repository: the standing procedure, `docs/website-pages.json` (every doc page's place on the site) and `scripts/website_sync_plan.py` (what the site must add, update, remove, translate)
+- `docs/docs/guide/architecture.md` — Full system architecture with data flow diagram
+- `docs/docs/guide/memory-and-rag.md` — Chat memory SoT (V2 cognitive engine is the single stack; the V1 4-layer RRF was removed in the V1→V2 cutover)
+- `docs/docs/guide/document-intelligence.md` — Document Intelligence product guide
+- `docs/docs/guide/document-phases.md` — Document phases 0–10 map
+- `docs/docs/security/document-security.md` — Document threat model
+- `docs/docs/ops/document-processing.md` — Document ops (metrics/GC/capacity)
+- `docs/docs/guide/document-rendering.md` — Unified document rendering (one `DocProfile` for every output format)
+- `docs/plans/DOCUMENTS_INDUSTRIAL_HARDENING_GOAL.md` — Documents hardening tracker (F01–F10, Q01–Q05): what is implemented, with evidence, and what stays open (independent review, the 48–72 h soak, Arabic OCR); handoff `docs/plans/DOCUMENTS_INDUSTRIAL_HANDOFF_2026-10-13.md`
+- `docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md` — Document docs remediation goal
+- `docs/plans/MEMORY_REMAINING.md` — Memory done vs later backlog
+- `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
+- `docs/docs/reference/tools-catalog.md` — Built-in + native tools
+- `docs/docs/ops/production-checklist.md` — Production go-live checklist
+- `docs/audits/AUDIT_LIVE_TOUR_2026-09-28.md` — Six passes of using the live install like a person (both languages): what was fixed, what was judged and left, and how the checks changed
+- `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` — Binding industrial audit (waves 0–8 shipped). Do **not** follow dump `AUDIT_DEEP_2026-09-01.md` Part 6 order.
+- `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` — Deep-structure audit (22 findings, change-impact map, CI recovery, Telegram desync §20)
+- `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Historical production audit (2026-07-21)
+- `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report (historical, 2026-08-11; not a current qualification — the current state is the hardening tracker above)
+- `docs/audits/AUDIT_{KNOWLEDGE,SWARM,MEMORY,SCHEDULED,TIME_TRAVEL}_2026-10-13.md` and their trackers `docs/plans/{KNOWLEDGE,SWARM,MEMORY,SCHEDULED,TIME_TRAVEL}_INDUSTRIAL_HARDENING_GOAL.md` — the 2026-10-13 audits of those areas (findings, AGENTS.md claims the code does not match, staged path) and the open remediation, one tracker per area, modelled on Documents
+- `docs/plans/HITL_GATE_REGISTRY_PLAN.md` — Gate registry (P6)
+- `docs/plans/TURN_DELIVERY_V2_CURSOR_RESUME_PLAN.md` — Turn Delivery V2
+- `docs/plans/CONTEXT_INTEGRITY_HARDENING_PLAN.md` — Context integrity
+- `docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md` — Deferred Guard/ops alerting sprint
+- `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan (completed)
+- `docs/docs/reference/benchmarks.md` — the public benchmarks page, WRITTEN by `scripts/benchmarks_page.py` from the committed result files (memory, Knowledge, document fidelity); never edit it by hand: a lock that changes a score re-runs the script in the same commit (`tests/test_benchmarks_page.py`)
+- `docs/docs/security/safety-design.md` — how the safeguards are built (the public write-up; the threat model says what they do not stop). A safeguard added or removed is described there in the same commit
+- `CHANGELOG.md` — Sprint history
+- Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees. A page added, moved or deleted there (or directly in `docs/`) changes `docs/website-pages.json` and `docs/sidebars.js` in the same commit (`tests/test_website_pages.py`, `tests/test_docs_sidebar.py`). Every `#anchor` a docs link names is a heading of its page -- a `{#id}` or the id Docusaurus derives -- because Docusaurus only warns and CI does not build the docs (`tests/test_docs_anchors.py`; five pointed at removed sections on 2026-10-01). kazma.ai honours `{#id}`, and its build fails on a missing anchor and on an Arabic page linking to an English page that has an Arabic one (docs/docs/ops/website-sync.md). Every file a published page names in a code span is a tracked file, or declared with its reason -- runtime, example, another repository, a removal the page states (`tests/test_docs_file_refs.py`; 39 pointed at nothing on 2026-10-01, one of them a security protection whose code had been deleted).
+- The docs site's build packages (`docs/package-lock.json`) are fixed with `npm audit fix`, never `--force`, and checked with `npm run build`; `docs/package.json` names Mermaid's major in `overrides` (12 since 2026-11-13) and `uuid` 11 (the dev server's sockjs asks for 8); every docs diagram parses with the site's own Mermaid (`tests/test_docs_mermaid_diagrams_parse.py`: the site draws diagrams in the browser, so a broken one is only a console error, and the Commitment Layer page's had never drawn). Each package the 2026-11 fix moved past its advisories has its first fixed release as a floor (`tests/test_docs_site_packages.py`, the old lock's versions as the negative control); what is left needs a major version Docusaurus 3.10.2 holds back (`docs/docs/contributing/development-setup.md`).

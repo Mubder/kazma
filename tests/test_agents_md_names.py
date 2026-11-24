@@ -1,4 +1,5 @@
-"""Every code name AGENTS.md cites exists (2026-11, FA-152 and FA-154).
+"""Every code name AGENTS.md cites exists, in its core and in every section
+piece under ``docs/agents/`` (2026-11, FA-152 and FA-154).
 
 AGENTS.md is what a change is checked against, and the functional audit of
 2026-11 found it naming functions that were renamed or removed: the
@@ -45,8 +46,9 @@ from pathlib import Path
 
 import pytest
 
+from tests._agents_md import load
+
 ROOT = Path(__file__).resolve().parents[1]
-AGENTS = ROOT / "AGENTS.md"
 PACKAGES = (
     "kazma-core/kazma_core",
     "kazma-ui/kazma_ui",
@@ -407,8 +409,14 @@ def problems(text: str) -> list[str]:
     return sorted(set(found))
 
 
+def agents_text() -> str:
+    """The core and every piece: what AGENTS.md says since its split."""
+    tree = load()
+    return tree.core + "\n" + tree.join()
+
+
 def test_every_code_name_agents_md_cites_exists():
-    found = problems(AGENTS.read_text(encoding="utf-8"))
+    found = problems(agents_text())
     assert not found, (
         "AGENTS.md names code that does not exist; correct the sentence, or declare a span "
         "that is not code in NOT_CODE with why:\n" + "\n".join(found)
@@ -416,7 +424,7 @@ def test_every_code_name_agents_md_cites_exists():
 
 
 def test_every_declaration_matches_a_span():
-    text = AGENTS.read_text(encoding="utf-8")
+    text = agents_text()
     stale = [key for key in NOT_CODE if f"`{key}`" not in text and f"`{key}(" not in text]
     assert not stale, f"NOT_CODE entries AGENTS.md no longer has: {stale}"
 
