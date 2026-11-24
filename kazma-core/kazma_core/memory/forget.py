@@ -36,7 +36,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, NamedTuple
 
 from kazma_core.db.fts5_purge import purge_deleted_rows
 from kazma_core.memory.memory_stores import MEMORY_TABLES
@@ -366,7 +366,35 @@ def _forget_turn(
     conn: sqlite3.Connection, *, eid: str, owner: str, keys: list[str], turn: int, sha: str, by: str,
     purge_index: bool, seq: int | None,
 ) -> dict[str, Any]:
-    """Every step of forgetting one turn; each re-runnable."""
+    """Every step of forgetting one turn; each re-runnable.
+
+    Asked again of a turn the ledger holds -- the maintenance pass, a user's
+    second Forget -- once an undo gave its number to another turn, it takes
+    nothing that turn stated (:func:`_ledger_until`)."""
+    until = _ledger_until(conn, tenant_id=owner, keys=keys, turn=turn) if keys and turn > 0 else None
+    if until is None or not until.reused or _TAKEN_BEFORE.get() is not None             or not _in_ledger(conn, owner=owner, keys=keys, turn=turn, sha=sha):
+        return _forget_turn_steps(conn, eid=eid, owner=owner, keys=keys, turn=turn, sha=sha, by=by,
+                                  purge_index=purge_index, seq=seq)
+    token = _TAKEN_BEFORE.set(until.forgotten_at)
+    try:
+        return _forget_turn_steps(conn, eid=eid, owner=owner, keys=keys, turn=turn, sha=sha, by=by,
+                                  purge_index=purge_index, seq=seq)
+    finally:
+        _TAKEN_BEFORE.reset(token)
+
+
+def _in_ledger(conn: sqlite3.Connection, *, owner: str, keys: list[str], turn: int, sha: str) -> bool:
+    marks = ",".join("?" for _ in keys)
+    return conn.execute(
+        f"SELECT 1 FROM memory_forgotten WHERE tenant_id = ? AND session_key IN ({marks}) AND turn_number = ? "
+        "AND question_sha = ? LIMIT 1", (owner, *keys, turn, sha)).fetchone() is not None
+
+
+def _forget_turn_steps(
+    conn: sqlite3.Connection, *, eid: str, owner: str, keys: list[str], turn: int, sha: str, by: str,
+    purge_index: bool, seq: int | None,
+) -> dict[str, Any]:
+    """:func:`_forget_turn`'s steps."""
     from kazma_core.memory import forget_journal
     from kazma_core.memory.topic_summaries import on_turns_forgotten
 
@@ -406,7 +434,7 @@ def _forget_turn(
     # What the turn changed or put to the user (memory/changes.py).
     from kazma_core.memory import changes
 
-    changes.forget_turn(conn, tenant_id=owner, keys=keys, turn=turn)
+    changes.forget_turn(conn, tenant_id=owner, keys=keys, turn=turn, before=_TAKEN_BEFORE.get())
     # Every memory of the turn now forgotten -- also copies an earlier forget
     # tombstoned, if it was cut short before their summaries were emptied.
     gone = list(dict.fromkeys([eid, *ids, *_forgotten_of_turn(conn, owner=owner, keys=keys, turn=turn)]))
@@ -513,7 +541,7 @@ def replay_turn(conn: sqlite3.Connection, entry: Any) -> None:
     days = _forget_given_days(conn, tenant_id=owner, keys=keys, turn=turn)
     from kazma_core.memory import changes
 
-    changes.forget_turn(conn, tenant_id=owner, keys=keys, turn=turn)
+    changes.forget_turn(conn, tenant_id=owner, keys=keys, turn=turn, before=_TAKEN_BEFORE.get())
     conn.commit()
     _after_facts(conn, owner=owner, changed=[*facts, *days], keys=keys, turn=turn)
 
@@ -646,23 +674,60 @@ _TAKEN_BEFORE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
 
 
 def _forget_turn_facts(
-    conn: sqlite3.Connection, *, tenant_id: str, keys: list[str], turn: int, now: float
+    conn: sqlite3.Connection, *, tenant_id: str, keys: list[str], turn: int, now: float,
+    until: _LedgerUntil | None = None,
 ) -> list[str]:
     """The facts a forgotten turn produced (``source_session`` / ``source_turn``):
     no longer current, and without their value. Skips those done already.
-    Returns the ids it changed."""
+    *until*: how far the ledger's word on the turn number reaches
+    (:func:`_ledger_until`). Returns the ids it changed."""
     if not keys or turn <= 0:
         return []
     marks = ",".join("?" for _ in keys)
     sql = (f"SELECT id, tenant_id, invalidated_at, valid_until, metadata_json FROM beliefs "
            f"WHERE tenant_id = ? AND source_turn = ? AND source_session IN ({marks})")
     params: list[Any] = [tenant_id, turn, *keys]
-    before = _TAKEN_BEFORE.get()
-    if before is not None:
+    before = until.forgotten_at if until else _TAKEN_BEFORE.get()
+    if until and not until.reused:
+        sql += " AND (ingested_at <= ? OR valid_from <= ?)"
+        params += [before, before]
+    elif before is not None:
         sql += " AND ingested_at <= ?"
         params.append(before)
     rows = conn.execute(sql, params).fetchall()
     return _forget_fact_rows(conn, rows, now=now)
+
+
+class _LedgerUntil(NamedTuple):
+    """How far the forget ledger's word on one turn number of a chat reaches."""
+
+    #: The last time a turn of that number was forgotten.
+    forgotten_at: float
+    #: A turn of that number, with another question, is remembered now.
+    reused: bool
+
+
+def _ledger_until(conn: sqlite3.Connection, *, tenant_id: str, keys: list[str], turn: int) -> _LedgerUntil | None:
+    """How far the ledger's word on the turn *turn* of the chat *keys* reaches;
+    None when it holds none.
+
+    A ledger row names a turn by its number, and after an undo the chat's next
+    turn has the same one: what that turn taught was forgotten at the next
+    convergence pass (2026-11-24). So the ledger takes what was written by the
+    time of the forget, and what was stated by then and written after it (a
+    fact pass that had read the turn, audit 2026-10-26 AUD-010) -- the latter
+    only while no other turn of that number is remembered."""
+    marks = ",".join("?" for _ in keys)
+    rows = conn.execute(
+        f"SELECT question_sha, forgotten_at FROM memory_forgotten WHERE tenant_id = ? AND session_key IN ({marks}) "
+        "AND turn_number = ?", (tenant_id, *keys, turn)).fetchall()
+    if not rows:
+        return None
+    forgotten = {str(r[0] or "") for r in rows}
+    reused = any(question_sha(r[0]) not in forgotten for r in conn.execute(
+        f"SELECT user_text FROM episodes WHERE tenant_id = ? AND session_id IN ({marks}) AND turn_number = ? "
+        "AND tier != ?", (tenant_id, *keys, turn, FORGOTTEN_TIER)))
+    return _LedgerUntil(max(float(r[1]) for r in rows), reused)
 
 
 def _forget_chat_facts(
@@ -800,18 +865,21 @@ def _scrub_archived_rows(conn: sqlite3.Connection, rows: list[Any], *, now: floa
 
 
 def _forget_given_days(conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[str],
-                       turn: int | None) -> list[str]:
+                       turn: int | None, until: _LedgerUntil | None = None) -> list[str]:
     """The days the forgotten turn -- with *turn* None, the chat -- gave facts
     of other turns ("it was last Saturday", told of an exhibition an earlier
     turn named; the memory plan's W4 review): the fact stays, the day it was
     given goes, and the day it held before stands again
-    (``fact_days.without_turn``). Archived copies too. Returns the ids of the
-    facts it changed."""
+    (``fact_days.without_turn``). Archived copies too. *until* as
+    :func:`_forget_turn_facts` takes it. Returns the ids of the facts it
+    changed."""
     from kazma_core.memory.fact_days import metadata_of, without_turn
 
     if not keys or (turn is not None and turn <= 0):
         return []
     held, before = set(keys), _TAKEN_BEFORE.get()
+    if until:
+        before = until.forgotten_at if until.reused else None
 
     def given(source: dict[str, Any]) -> bool:
         if str(source.get("session") or "") not in held:
@@ -860,10 +928,10 @@ def _ledgered_days(conn: sqlite3.Connection) -> int:
                 given.add((space_of_record(tenant), str(source["session"]), int(source["turn"])))
     taken = 0
     for tenant, key, turn in sorted(given):
-        if conn.execute("SELECT 1 FROM memory_forgotten WHERE tenant_id = ? AND session_key = ? AND turn_number = ? "
-                        "LIMIT 1", (tenant, key, turn)).fetchone():
-            taken += len(_forget_given_days(
-                conn, tenant_id=tenant, keys=list(dict.fromkeys([key, *chat_keys(key)])), turn=turn))
+        keys = list(dict.fromkeys([key, *chat_keys(key)]))
+        until = _ledger_until(conn, tenant_id=tenant, keys=keys, turn=turn)
+        if until:
+            taken += len(_forget_given_days(conn, tenant_id=tenant, keys=keys, turn=turn, until=until))
     return taken
 
 
@@ -2138,16 +2206,20 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
     # A fact a forgotten turn produced and that is still held: written by a
     # fact pass that read the turn before its forget landed (audit
     # 2026-10-26 AUD-010). The episode sweep above never looked at facts.
+    # Never one the turn that took its number after an undo stated.
     facts = 0
     for tenant, key, turn in conn.execute(
         "SELECT DISTINCT f.tenant_id, f.session_key, f.turn_number FROM memory_forgotten f "
         "JOIN beliefs b ON b.tenant_id = f.tenant_id AND b.source_session = f.session_key "
-        "AND b.source_turn = f.turn_number WHERE f.turn_number > 0 AND b.object != '' LIMIT ?",
+        "AND b.source_turn = f.turn_number WHERE f.turn_number > 0 AND b.object != '' "
+        "AND (b.ingested_at <= f.forgotten_at OR b.valid_from <= f.forgotten_at) LIMIT ?",
         (limit,),
     ).fetchall():
         keys = list(dict.fromkeys([str(key), *chat_keys(str(key))]))
+        owner = space_of_record(tenant)
         facts += len(_forget_turn_facts(
-            conn, tenant_id=space_of_record(tenant), keys=keys, turn=int(turn), now=time.time(),
+            conn, tenant_id=owner, keys=keys, turn=int(turn), now=time.time(),
+            until=_ledger_until(conn, tenant_id=owner, keys=keys, turn=int(turn)),
         ))
     days = _ledgered_days(conn)
     stale = [str(r[0]) for r in conn.execute(

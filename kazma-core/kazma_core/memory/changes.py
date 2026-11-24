@@ -601,14 +601,17 @@ def forget_facts(conn: sqlite3.Connection, fact_ids: list[str]) -> int:
     ).rowcount
 
 
-def forget_turn(conn: sqlite3.Connection, *, tenant_id: str, keys: list[str], turn: int) -> int:
-    """Forget takes every change a forgotten turn made. Caller's transaction."""
+def forget_turn(conn: sqlite3.Connection, *, tenant_id: str, keys: list[str], turn: int,
+                before: float | None = None) -> int:
+    """Forget takes every change a forgotten turn made -- by *before*, when
+    another turn may have its number by now. Caller's transaction."""
     if not keys or turn <= 0:
         return 0
     marks = ",".join("?" for _ in keys)
     return conn.execute(
-        f"DELETE FROM memory_changes WHERE tenant_id = ? AND source_turn = ? AND source_session IN ({marks})",  # nosec B608 - placeholders only
-        (tenant_id,turn, *keys),
+        f"DELETE FROM memory_changes WHERE tenant_id = ? AND source_turn = ? AND source_session IN ({marks}) "  # nosec B608 - placeholders only
+        "AND (? IS NULL OR created_at <= ?)",
+        (tenant_id, turn, *keys, before, before),
     ).rowcount
 
 

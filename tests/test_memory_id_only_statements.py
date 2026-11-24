@@ -89,7 +89,7 @@ DECLARED: dict[tuple[str, str], tuple[int, str]] = {
         (1, "Kazma's own sweep: the facts already forgotten, chosen by being tombstones in any "
             "tenant; it only empties what they still name (part D)"),
     (f"{_MEMORY}forget.py", "_forget_fact_rows"): (2, _FORGET_OWN),
-    (f"{_MEMORY}forget.py", "_forget_turn"): (1, _FORGET_OWN),
+    (f"{_MEMORY}forget.py", "_forget_turn_steps"): (1, _FORGET_OWN),
     (f"{_MEMORY}forget.py", "_memory_texts"): (1, _FORGET_OWN),
     (f"{_MEMORY}forget.py", "_tombstone"): (2, _FORGET_OWN),
     (f"{_MEMORY}forget.py", "forget_chat"): (1, _FORGET_OWN),

@@ -3331,6 +3331,18 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   writer on another thread; a pre-forget copy restored -> forgotten again,
   reconcile does not rebuild; negative control without the replay; only the
   forget code may pass `journal=False`).
+- **A turn number the ledger holds may be a newer turn's** (2026-11-24).
+  After an undo the chat's next turn has the same number, and the pass took
+  every fact and given day of a ledgered number: what was said instead was
+  forgotten within 15 minutes. `forget._ledger_until` says how far the
+  ledger's word reaches: what was written by the time of the forget, and --
+  while no other question is remembered under that number -- what was stated
+  by then and written after it (a fact pass that had read the turn, AUD-010).
+  `enforce_ledger`'s facts, `_ledgered_days` and a forget asked again of a
+  ledgered turn (`_forget_turn`: the facts, archived copies, notes, days and
+  changes) keep to it; `replay_rewind` binds `_TAKEN_BEFORE` as before. Gate:
+  `tests/test_memory_undo_reuses_the_turn_number.py` (EN/AR, the real rewind;
+  the pass by the number as the negative control).
 - **"Don't remember this chat"** is the whole-chat ledger row: the writer
   refuses its turns, the post-turn worker (`_run_turn_memory`) extracts no
   facts, the past-chats search skips the chat -- and reads other chats
