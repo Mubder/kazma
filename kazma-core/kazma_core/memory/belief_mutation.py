@@ -351,6 +351,12 @@ _STARTED: contextvars.ContextVar[str | None] = contextvars.ContextVar("kazma_bel
 #: *happened*: "I went to a pottery exhibition last Saturday"), not the day
 #: a lasting fact began (the memory plan's W4, dated event lines).
 _HAPPENED: contextvars.ContextVar[bool] = contextvars.ContextVar("kazma_belief_happened", default=False)
+#: The day an event is planned for (``mutate_belief``'s *planned*).
+_PLANNED: contextvars.ContextVar[str | None] = contextvars.ContextVar("kazma_belief_planned", default=None)
+#: ``(the write's own source, the day's source when it is another's)``, each
+#: ``fact_days``' ``day_source`` shape: who gave the day.
+_DAY_SOURCES: contextvars.ContextVar[tuple[dict[str, Any] | None, dict[str, Any] | None]] = contextvars.ContextVar(
+    "kazma_belief_day_sources", default=(None, None))
 
 
 def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
@@ -451,6 +457,9 @@ def mutate_belief(
     said_by: str | None = None,
     started: str | None = None,
     happened: bool = False,
+    planned: str | None = None,
+    day_source: dict[str, Any] | None = None,
+    corrects: str | None = None,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
 
@@ -461,7 +470,13 @@ def mutate_belief(
     facts were said in, whatever start a statement names. *happened*: that
     start is the day an event happened ("I went to a pottery exhibition
     last Saturday"; the memory plan's W4), kept as ``happened`` beside it,
-    so recall shows "[on 13 May 2023]", not "[since ...]".
+    so recall shows "[on 13 May 2023]", not "[since ...]". *planned*: the day
+    an event is planned for, after the turn that told it. Both are a list
+    entry's only: on a single-valued fact the day is its start. *day_source*
+    names who gave the day when it is not this write's own turn
+    (``fact_days``: a day taken over from the entry this one replaces).
+    *corrects* is the list entry this write tells again, whose day it may
+    correct (the same words with the day's number: "replaces").
 
     *said_by* is the account whose words these are, in a shared space
     (Spaces S1-11, ``memory/speakers.py``): kept in the fact's metadata, so
@@ -584,7 +599,8 @@ def mutate_belief(
     now = recorded if now is None else float(now)
 
     result: dict[str, Any] | None = None
-    tokens = _bind_write_context(said_by, started, happened)
+    own = {"session": source_session, "turn": source_turn, "method": extraction_method, "at": recorded}
+    tokens = _bind_write_context(said_by, started, happened, planned, own, day_source)
     try:
         with _mutation_lock:
             # W6: the name the subject already uses for the same words and
@@ -602,6 +618,11 @@ def mutate_belief(
                 logger.debug("[belief_mutate] predicate names unreadable; keeping %r", pred)
             ptype = _established_kind(primary_conn, tenant_id=tenant_id, subject=sub,
                                       predicate=pred, ptype=ptype)
+            if ptype != "set":
+                # A day something happened, or is planned for, is a list
+                # entry's; on a single value a day that has come is its start.
+                _HAPPENED.set(False)
+                _PLANNED.set(None)
             if ptype == "functional":
                 result = _mutate_functional(
                     primary_conn, ops_conn, sub, pred, obj,
@@ -628,7 +649,7 @@ def mutate_belief(
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
                     mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
-                    private=private,
+                    private=private, corrects=corrects,
                 )
         # Phase 0 instrumentation (Commitment Layer): surface every functional
         # supersede so ``belief.supersede_without_user_assert`` (plan §8.1) is
@@ -841,24 +862,62 @@ def _same_fact_again(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *
     return {"action": "noop", "belief_id": belief_id, "superseded_id": None}
 
 
-def _add_named_start(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *, began: bool) -> dict | None:
+def _written_day(*, gained: bool) -> dict[str, Any]:
+    """The day the write in progress names (``fact_days``), with who gave it:
+    always when a row of another turn gains it, only another turn's when the
+    row is this write's own."""
+    day: dict[str, Any] = {}
+    if _STARTED.get():
+        day["started"] = _STARTED.get()
+        if _HAPPENED.get():
+            day["happened"] = True
+    if _PLANNED.get():
+        day["planned"] = _PLANNED.get()
+    own, others = _DAY_SOURCES.get()
+    source = others or (own if gained else None)
+    if day and source:
+        day["day_source"] = {k: v for k, v in source.items() if v is not None}
+    return day
+
+
+def _add_named_start(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *, began: bool,
+                     correct: bool = False) -> dict | None:
     """The same fact again, now with the start its turn names ("since 2019";
-    framework audit F2 step 2): kept on the row that holds none, never over
-    one it holds; the value and its source stay. The write's outcome, or
-    None when there is no start to add."""
-    started = _STARTED.get()
-    if not started:
-        return None
+    framework audit F2 step 2) or the day it happened (W4): kept on the row
+    that holds none, never over one it holds -- but an event's day said less
+    exactly ("in May") takes the exact one, and with *correct* another day
+    replaces it (the day it held, and who gave it, stay behind it:
+    ``fact_days``). The value and its source stay; the day keeps its own. The
+    write's outcome, or None when there is nothing to add."""
+    from kazma_core.memory import fact_days
     from kazma_core.memory.hygiene import beliefs_write
 
+    day = _written_day(gained=True)
+    if not day:
+        return None
+    row = conn.execute("SELECT metadata_json FROM beliefs WHERE id = ? AND tenant_id = ?",
+                       (belief_id, tenant_id)).fetchone()
+    if row is None:
+        return None
+    held = fact_days.metadata_of(_col(row, "metadata_json", 0))
+    told, kept = fact_days.event_day(day), fact_days.any_day(held)
+    if fact_days.has_day(held):
+        # A planned day that came, or a start that was one day's: now the day
+        # it happened.
+        came = bool(day.get("happened") and not held.get("happened") and fact_days.compatible(told, kept))
+        if not told or told == kept and not came or not (came or correct or fact_days.vaguer(kept, told)):
+            return None
+        if came and fact_days.vaguer(told, kept):
+            day["started"] = kept
     open_before = conn.in_transaction
+    # An event is a list entry: told first without its day, it may be a row
+    # the model labelled single-valued (the user's own never: its write would
+    # have taken that kind, ``_established_kind``).
     cur = beliefs_write(
-        conn,
-        "UPDATE beliefs SET metadata_json = CASE WHEN ? THEN json_set(COALESCE(metadata_json, '{}'), "
-        "'$.started', ?, '$.happened', json('true')) ELSE json_set(COALESCE(metadata_json, '{}'), "
-        "'$.started', ?) END "
-        "WHERE id = ? AND tenant_id = ? AND json_extract(metadata_json, '$.started') IS NULL",
-        (1 if _HAPPENED.get() else 0, started, started, belief_id, tenant_id))
+        conn, "UPDATE beliefs SET metadata_json = ?, predicate_type = CASE WHEN ? THEN 'set' ELSE predicate_type END "
+        "WHERE id = ? AND tenant_id = ? AND metadata_json IS ?",
+        (json.dumps(fact_days.with_day(held, day), ensure_ascii=False), 1 if told else 0, belief_id, tenant_id,
+         _col(row, "metadata_json", 0)))
     if not getattr(cur, "rowcount", 0):
         # The UPDATE opened a transaction on a default-mode connection even
         # though it matched nothing; left open it holds the write lock. A
@@ -871,16 +930,21 @@ def _add_named_start(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *
     return {"action": "noop", "belief_id": belief_id, "superseded_id": None, "started_recorded": True}
 
 
-def _bind_write_context(said_by: str | None, started: str | None, happened: bool = False) -> tuple[Any, Any, Any]:
-    """Bind who said the write in progress, the start its turn named and
-    whether that start is an event's day, read where the row is built
-    (:func:`_insert_belief`)."""
+def _bind_write_context(said_by: str | None, started: str | None, happened: bool = False,
+                        planned: str | None = None, own: dict[str, Any] | None = None,
+                        day_source: dict[str, Any] | None = None) -> tuple[Any, ...]:
+    """Bind who said the write in progress and the day its turn named (a
+    start, an event's day, a planned day, and whose day it is), read where
+    the row is built (:func:`_insert_belief`)."""
     return (_SAID_BY.set(str(said_by) if said_by else None), _STARTED.set(str(started) if started else None),
-            _HAPPENED.set(bool(happened and started)))
+            _HAPPENED.set(bool(happened and started)), _PLANNED.set(str(planned) if planned else None),
+            _DAY_SOURCES.set((own, day_source)))
 
 
-def _unbind_write_context(tokens: tuple[Any, Any, Any]) -> None:
-    said, started, happened = tokens
+def _unbind_write_context(tokens: tuple[Any, ...]) -> None:
+    said, started, happened, planned, sources = tokens
+    _DAY_SOURCES.reset(sources)
+    _PLANNED.reset(planned)
     _HAPPENED.reset(happened)
     _STARTED.reset(started)
     _SAID_BY.reset(said)
@@ -962,11 +1026,7 @@ def _insert_belief(
     said_by = _SAID_BY.get()
     if said_by:
         meta["said_by"] = said_by
-    started = _STARTED.get()
-    if started:
-        meta["started"] = started
-        if _HAPPENED.get():
-            meta["happened"] = True
+    meta.update(_written_day(gained=False))
     try:
         from kazma_core.memory.embedder import get_embedding_model_name
 
@@ -1464,6 +1524,62 @@ def _normalize_noted_key(obj: str) -> str:
     return re.sub(r"\s+", " ", (obj or "").strip().lower())[:160]
 
 
+def _entry_told_again(conn: sqlite3.Connection, sub: str, pred: str, obj: str, tenant_id: str,
+                      corrects: str | None) -> tuple[str | None, bool]:
+    """``(the list entry this write tells again, whether its day is
+    corrected)``, or ``(None, False)``: the write is an entry of its own.
+
+    The same words are the same entry -- an event's however they are spelled
+    ("The pottery exhibition was Saturday", :func:`_same_value`) -- but an
+    event told with another day is another occasion ("visited the dentist" in
+    May and in November: the second was dropped until 2026-11-24). An entry
+    with no day takes this one's only when it can have happened by the time
+    it was first told.
+    *corrects* names the entry the turn says it tells again (its number, the
+    same value): another day is then a correction of it, under the same
+    rule."""
+    from kazma_core.memory import fact_days
+
+    day = fact_days.event_day(_written_day(gained=False))
+    rows = conn.execute(
+        """SELECT id, object, valid_from, metadata_json FROM beliefs
+           WHERE subject=? AND predicate=? AND tenant_id=?
+             AND valid_until IS NULL AND invalidated_at IS NULL
+           ORDER BY valid_from DESC""",
+        (sub, pred, tenant_id),
+    ).fetchall()
+
+    def same_words(r: Any) -> bool:
+        if _col(r, "object", 1) == obj:
+            return True
+        event = day or _col(r, "id", 0) == corrects or fact_days.event_day(
+            fact_days.metadata_of(_col(r, "metadata_json", 3)))
+        return bool(event) and _same_value(_col(r, "object", 1), obj)
+
+    rows = [r for r in rows if same_words(r)]
+    if not rows:
+        return None, False
+    named = next((str(_col(r, "id", 0)) for r in rows if str(_col(r, "id", 0)) == corrects), None)
+    if not day:
+        return named or str(_col(rows[0], "id", 0)), False
+    held = {str(_col(r, "id", 0)): (fact_days.metadata_of(_col(r, "metadata_json", 3)), _col(r, "valid_from", 2))
+            for r in rows}
+
+    def may_be(bid: str) -> bool:
+        meta, told_at = held[bid]
+        return bool(meta.get("planned")) or fact_days.could_have_happened_by(day, told_at)
+
+    for bid in [named] if named else list(held):
+        if fact_days.compatible(fact_days.any_day(held[bid][0]), day):
+            return bid, False
+    if named and fact_days.event_day(held[named][0]) and may_be(named):
+        return named, True
+    for bid in held:
+        if not fact_days.has_day(held[bid][0]) and may_be(bid):
+            return bid, False
+    return None, False
+
+
 def _mutate_set(
     conn: sqlite3.Connection,
     ops_conn: sqlite3.Connection | None,
@@ -1473,19 +1589,12 @@ def _mutate_set(
     tenant_id = kw["tenant_id"]
     now = kw["now"]
     # Skip if this exact (subject, predicate, object) already exists & active
-    dup = conn.execute(
-        """SELECT id FROM beliefs
-           WHERE subject=? AND predicate=? AND object=? AND tenant_id=?
-             AND valid_until IS NULL AND invalidated_at IS NULL
-           LIMIT 1""",
-        (sub, pred, obj, tenant_id),
-    ).fetchone()
-    if dup:
-        existing_id = dup["id"] if isinstance(dup, sqlite3.Row) else dup[0]
+    existing_id, correct = _entry_told_again(conn, sub, pred, obj, tenant_id, kw.get("corrects"))
+    if existing_id is not None:
         # The same entry told again with the day it happened, or the start
         # it names, gains it (W4: "I went to the pottery exhibition" then
         # "it was last Saturday"), as a single value does.
-        gained = _add_named_start(conn, str(existing_id), tenant_id, began=not conn.in_transaction)
+        gained = _add_named_start(conn, existing_id, tenant_id, began=not conn.in_transaction, correct=correct)
         if gained:
             return gained
         return {"action": "noop", "belief_id": existing_id, "superseded_id": None}

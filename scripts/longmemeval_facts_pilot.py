@@ -285,6 +285,8 @@ def store_counts(db: Path) -> dict[str, int]:
                 "deep_pass": one("SELECT COUNT(*) FROM beliefs WHERE extraction_method = 'llm_inferred'"),
                 "dated_events": one("SELECT COUNT(*) FROM beliefs WHERE json_extract(metadata_json, '$.happened') "
                                     "IS NOT NULL"),
+                "planned_events": one("SELECT COUNT(*) FROM beliefs WHERE json_extract(metadata_json, '$.planned') "
+                                      "IS NOT NULL"),
                 "dated_starts": one("SELECT COUNT(*) FROM beliefs WHERE json_extract(metadata_json, '$.started') "
                                     "IS NOT NULL AND json_extract(metadata_json, '$.happened') IS NULL")}
     finally:
@@ -432,7 +434,8 @@ def _cmd_extract(data: Path, model_name: str, base_url: str, key_env: str, worke
 
 def _recall_block(item: dict[str, Any], db: Path, *, without_events: bool) -> tuple[str, dict[str, int]]:
     """*item*'s recall block from a copy of its store (recall writes its
-    access counts), optionally without the dated event facts."""
+    access counts), optionally without the dated event facts
+    (a day it happened or is planned for)."""
     from unittest import mock
 
     from kazma_core.db.sqlite_snapshot import snapshot_copy
@@ -447,7 +450,8 @@ def _recall_block(item: dict[str, Any], db: Path, *, without_events: bool) -> tu
         try:
             if without_events:
                 conn.execute("PRAGMA foreign_keys=OFF")
-                conn.execute("DELETE FROM beliefs WHERE json_extract(metadata_json, '$.happened') IS NOT NULL")
+                conn.execute("DELETE FROM beliefs WHERE COALESCE(json_extract(metadata_json, '$.happened'), "
+                             "json_extract(metadata_json, '$.planned')) IS NOT NULL")
                 conn.commit()
             with mock.patch("kazma_core.memory.recall._memory_zone", lambda: UTC):
                 result = recall(str(item["question"]), conn=conn, tenant_id=bench.TENANT, limit=bench.LIMIT,

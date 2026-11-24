@@ -30,6 +30,9 @@ words of a question, in English and Arabic (Gulf and MSA), with no model:
   nothing), and a period named after it ("I moved to Porto last month"):
   :data:`TIME_AFTER_EN`, :func:`present_ar_words`.
 
+* **Whether a message names a day** at all (:func:`names_a_day`): a number,
+  a weekday, a month, "yesterday", "last", "ago", "أمس", "الماضي", "قبل".
+
 The words read here are not content words of the question
 (:attr:`TimeAsk.words`): a month's name matched nothing a memory says about
 the thing asked. Linear patterns only (``tests/test_regexes_stay_linear``):
@@ -43,7 +46,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-__all__ = ["TIME_AFTER_EN", "TimeAsk", "present_ar_words", "read_time"]
+__all__ = ["TIME_AFTER_EN", "TimeAsk", "names_a_day", "present_ar_words", "read_time"]
 
 DAY = 86400.0
 
@@ -346,3 +349,47 @@ def read_time(question: str, *, now: float, zone: Any, past: bool | None = None)
     words = frozenset(w for span in (*spans, *now_words) for w in content_terms(span))
     return TimeAsk(start=start, end=end, history=history, said=said and start is not None,
                    words=words, named=", ".join(spans))
+
+
+#: Words that name a day, or one counted from today, in a statement.
+_DAY_WORDS_EN = frozenset(
+    "yesterday today tonight tomorrow last next ago weekend monday tuesday wednesday thursday friday saturday sunday "
+    "easter christmas eve birthday anniversary".split())
+_DAY_WORDS_AR_RAW = (
+    "أمس", "امبارح", "البارحة", "اليوم", "الليلة", "بكرة", "باجر", "غدا", "قبل", "الماضي", "الماضية", "فات", "فاتت",
+    "طاف", "طافت", "الجاي", "الجاية", "القادم", "القادمة", "السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء",
+    "الخميس", "الجمعة", "رمضان", "العيد", *_AR_DUALS,
+)
+_DAY_WORDS_AR_CACHE: list[frozenset[str]] = []
+
+
+def _day_words_ar() -> frozenset[str]:
+    if not _DAY_WORDS_AR_CACHE:
+        from kazma_core.documents.arabic import fold_for_search
+
+        # "اب" (August) is also "father": a month of two letters is not read.
+        _DAY_WORDS_AR_CACHE.append(frozenset(
+            [fold_for_search(w) for w in _DAY_WORDS_AR_RAW] + [m for m in _ar_months() if len(m) > 2]))
+    return _DAY_WORDS_AR_CACHE[0]
+
+
+def names_a_day(text: str) -> bool:
+    """Whether *text* names a day, a month, a year or one counted from today,
+    in English or Arabic: "I bought it in 2018", "I started it last Monday",
+    "اشتريته قبل أسبوعين", "كان السبت الماضي". A word list, no model: which
+    day it is is not read here."""
+    from kazma_core.documents.arabic import fold_for_search
+
+    if _MONTH_EN.search(text):
+        return True
+    arabic = _day_words_ar()
+    for word in re.findall(r"\w+", fold_for_search(text)):
+        if any(ch.isdigit() for ch in word) or word in _DAY_WORDS_EN or word in arabic:
+            return True
+        for _prefix in range(2):  # "والسبت", "وبالخميس"
+            if word[:1] not in ("و", "ف", "ب", "ل"):
+                break
+            word = word[1:]
+            if word in arabic:
+                return True
+    return False

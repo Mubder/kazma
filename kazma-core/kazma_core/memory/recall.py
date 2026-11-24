@@ -329,7 +329,7 @@ def recall(
     result.time_named = ask.named if ask is not None else ""
     if not result.failed and not result.empty:
         _keep_sides(result, query, conn=conn, tenant_id=tenant_id)
-        _date_hits(result, conn=conn, tenant_id=tenant_id)
+        _date_hits(result, conn=conn, tenant_id=tenant_id, now=now)
     return result
 
 
@@ -504,21 +504,22 @@ def _month_of(ts: Any, zone: Any) -> str:
 
 def _fact_dates(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dict[str, tuple]:
     """``fact id -> (started, kind, replaced value, its from, its until, its id,
-    (where it was said), (where the replaced value was said), happened)``: the
-    start its turn named (``metadata.started``; *happened*: an event's day,
-    ``metadata.happened``), and the fact it replaced
+    (where it was said), (where the replaced value was said), metadata,
+    method)``: the start its turn named (``metadata.started``; the rest of its
+    day is read from its metadata, ``fact_days``), and the fact it replaced
     (``supersedes_id``) when that still holds its value (a forgotten fact
     keeps none); each "where" is its ``(source_session, source_turn)``."""
     marks = ",".join("?" for _ in ids)
     rows = conn.execute(
-        f"SELECT cur.id, json_extract(cur.metadata_json, '$.started'), cur.predicate_type, prev.object, "
+        f"SELECT cur.id, json_extract(CASE WHEN json_valid(cur.metadata_json) THEN cur.metadata_json END, "
+        f"'$.started'), cur.predicate_type, prev.object, "
         f"prev.valid_from, prev.valid_until, prev.id, cur.source_session, cur.source_turn, "
-        f"prev.source_session, prev.source_turn, json_extract(cur.metadata_json, '$.happened') FROM beliefs cur "
+        f"prev.source_session, prev.source_turn, cur.metadata_json, cur.extraction_method FROM beliefs cur "
         f"LEFT JOIN beliefs prev ON prev.id = cur.supersedes_id AND prev.tenant_id = cur.tenant_id "
         f"AND COALESCE(prev.object, '') != '' "
         f"WHERE cur.tenant_id = ? AND cur.id IN ({marks})",
         (tenant_id, *ids)).fetchall()
-    return {str(r[0]): (*r[1:7], (r[7], r[8]), (r[9], r[10]), bool(r[11])) for r in rows}
+    return {str(r[0]): (*r[1:7], (r[7], r[8]), (r[9], r[10]), r[11], r[12]) for r in rows}
 
 
 def _stated_in(conn: sqlite3.Connection, turns: set[tuple[Any, Any]], tenant_id: str) -> dict[tuple[str, int], str]:
@@ -583,7 +584,26 @@ def _started_label(started: Any) -> str:
     return f"{day} {_MONTHS[month - 1]} {year}" if day else f"{_MONTHS[month - 1]} {year}"
 
 
-def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_id: str) -> None:
+def _event_label(meta: dict[str, Any], today: str) -> str:
+    """When an event happened or is planned for, as the block shows it: "on
+    30 May 2026", "in Apr 2026", "in 2005"; "planned for 3 Jun 2026", and
+    "was planned for" once that day has passed (it was planned; that it
+    happened was not told). "" for a fact that is no event."""
+    from kazma_core.memory.fact_days import exact
+
+    if meta.get("happened"):
+        day = str(meta.get("started") or "")
+        label = _started_label(day)
+        return f"{'on' if exact(day) else 'in'} {label}" if label else ""
+    planned = str(meta.get("planned") or "")
+    label = _started_label(planned)
+    if not label:
+        return ""
+    return f"{'was planned' if planned < today[: len(planned)] else 'planned'} for {label}"
+
+
+def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_id: str,
+               now: float | None = None) -> None:
     """Put the dates on what recall shows: ``said_on`` on each turn,
     ``since`` on each fact, and ``before`` (the value it replaced, with its
     months) on a single-valued fact, with the conversations that said each
@@ -626,6 +646,10 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
     finally:
         if own and conn is not None:
             conn.close()
+    from kazma_core.memory import fact_days
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    today = fact_days.today(time.time() if now is None else float(now), zone).isoformat()
     for hit in result.beliefs:
         if hit.id in waiting and not hit.metadata.get("until"):
             # A change the user stated waits for their yes (finding 17).
@@ -633,16 +657,23 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
     for hit in result.beliefs:
         if hit.id not in dates or hit.metadata.get("until"):
             continue
-        started, kind, value, start, end, prev_id, where, before_where, happened = dates[hit.id]
+        started, kind, value, start, end, prev_id, where, before_where, meta_json, method = dates[hit.id]
         # The start the turn named ("we moved last month") is the fact's own;
         # the month it was said is the fallback. An event's day is the day
-        # it happened (W4): "[on 13 May 2023]".
+        # it happened (W4): "[on 13 May 2023]" -- a list entry's: on a single
+        # value an older write marked so, the day is its start.
+        meta = fact_days.metadata_of(meta_json)
         label = _started_label(started)
-        if label and happened:
-            hit.metadata["on"] = label
+        event = _event_label(meta, today) if (kind or "set") == "set" else ""
+        if event:
+            hit.metadata["on"] = event
             hit.metadata.pop("since", None)
         elif label:
             hit.metadata["since"] = label
+        if (event or label) and fact_days.days_method(meta, method) not in USER_SOURCES and method in USER_SOURCES:
+            # The user's own fact, with a day the model read (its line is not
+            # tagged as Kazma's reading, the day is).
+            hit.metadata["day_read"] = True
         if value is not None and (kind or (hit.metadata or {}).get("predicate_type")) in ("functional", "state"):
             span = " to ".join(m for m in (_month_of(start, zone), _month_of(end, zone)) if m)
             hit.metadata["before"] = f"{value} ({span})" if span else str(value)
@@ -1463,7 +1494,7 @@ def _primary_beliefs_as_local(ranked: list[RecallHit], rows: dict[str, Any],
     """The local path's steps after ranking facts (``_recall_beliefs``): the
     question's time ("where was I living in June": June's value, not
     today's) and a list's siblings (read from this install's database)."""
-    ranked = _facts_in_time(ranked, rows, _ASK.get())
+    ranked = _latest_first(_facts_in_time(ranked, rows, _ASK.get()), rows)
     if _LISTING.get() and local is not None:
         ranked = _with_list_siblings(local, tenant_id, ranked, rows, limit)
     return ranked
@@ -1848,7 +1879,7 @@ def _recall_beliefs(
         q, candidates, _question_background([sim for _bid, sim in dense], kind="belief"), kind="belief",
         named=_named_facts(q, rows),
     )
-    ranked = _facts_in_time(ranked, rows, ask)
+    ranked = _latest_first(_facts_in_time(ranked, rows, ask), rows)
     if _LISTING.get():
         ranked = _with_list_siblings(conn, tenant_id, ranked, rows, limit)
     return _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
@@ -1956,7 +1987,15 @@ def _started_at(row: Any) -> float | None:
 def _held_in(row: Any, ask: Any) -> bool:
     """Whether the fact *row* was true during the question's period: from
     when it began (its turn's own start, else when it was said) to when it
-    stopped (or now)."""
+    stopped (or now). An event is its day: "what did I buy last month" is not
+    what was bought before it (a planned one is the day it is planned for)."""
+    from kazma_core.memory import fact_days
+
+    if str(_field(row, "predicate_type") or "set") == "set":
+        day = fact_days.event_day(fact_days.metadata_of(_field(row, "metadata_json")))
+        span = fact_days.day_span(day, _memory_zone()) if day else None
+        if span is not None:
+            return span[0] < ask.end and span[1] > ask.start
     began = float(_field(row, "valid_from") or 0.0)
     started = _started_at(row)
     if started is not None:
@@ -1998,6 +2037,30 @@ def _facts_in_time(ranked: list[RecallHit], rows: dict[str, Any], ask: Any) -> l
         order.append(hit)
         placed.add(hit.id)
     return order
+
+
+def _latest_first(ranked: list[RecallHit], rows: dict[str, Any]) -> list[RecallHit]:
+    """*ranked* with the occasions of one event ("visited the dentist", in
+    May and in November) in the places they hold, the latest first: they say
+    the same words, so nothing else orders them, and "last time" is the
+    latest."""
+    from kazma_core.memory.fact_days import event_day, metadata_of
+
+    places: dict[tuple[str, str, str], list[int]] = {}
+    days: dict[str, str] = {}
+    for at, hit in enumerate(ranked):
+        row = rows.get(hit.id)
+        day = event_day(metadata_of(_field(row, "metadata_json"))) if row is not None else ""
+        if day:
+            days[hit.id] = day
+            key = (str(_field(row, "subject")), str(_field(row, "predicate")), str(_field(row, "object")).casefold())
+            places.setdefault(key, []).append(at)
+    out = list(ranked)
+    for held in places.values():
+        for at, hit in zip(held, sorted((ranked[i] for i in held), key=lambda h: days[h.id], reverse=True),
+                           strict=True):
+            out[at] = hit
+    return out
 
 
 def _belief_candidate(
@@ -4080,6 +4143,16 @@ def _reading_tag(hit: RecallHit) -> str:
     return READING_TAG_AR if arabic else READING_TAG_EN
 
 
+def _day_read_tag(hit: RecallHit) -> str:
+    """After the day of a fact the user stated when the day is the model's
+    reading, in the fact's own language: the fact is the user's word, the day
+    is not (``fact_days.days_method``)."""
+    from kazma_core.documents.arabic import is_rtl_dominant
+
+    arabic = is_rtl_dominant(str((hit.metadata or {}).get("object") or shown_text(hit)))
+    return f"، {READING_TAG_AR[1:-1]}" if arabic else f", {READING_TAG_EN[1:-1]}"
+
+
 def _one_line(text: str) -> str:
     """*text* on one line: every run of whitespace (newlines, Unicode line
     separators) one space. A recalled memory is one entry of the block, so a
@@ -4101,10 +4174,11 @@ def _dated_line(hit: RecallHit, shown: str) -> str:
         # An earlier value (part F): the months it held, and no "before
         # that" -- the question asked about this one.
         return f"[{meta.get('since') or '?'} to {meta['until']}] {shown}"
+    read = _day_read_tag(hit) if meta.get("day_read") else ""
     if meta.get("on"):
-        shown = f"[on {meta['on']}] {shown}"
+        shown = f"[{meta['on']}{read}] {shown}"
     elif meta.get("since"):
-        shown = f"[since {meta['since']}] {shown}"
+        shown = f"[since {meta['since']}{read}] {shown}"
     if meta.get("before"):
         # A changed value: where each value was said, when the space still
         # remembers it (the memory plan's W4).

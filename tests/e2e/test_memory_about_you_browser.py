@@ -153,3 +153,67 @@ def test_the_user_sees_corrects_and_ends_what_kazma_knows(harness: Harness, lang
         assert out["history_summary"] == "قبل ذلك: قيمة واحدة"
         assert (out["correct_label"], out["end_label"]) == ("صحّح", "لم تعد صحيحة")
         assert out["said"].startswith("صُحّحت.")
+
+
+def _seed_days() -> None:
+    """Events with their day, one ahead, and the user's own home with a start
+    Kazma read into what they said (the review of W4, 2026-11-24)."""
+    from kazma_core.memory.belief_mutation import mutate_belief
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.paths import primary_memory_db
+
+    c = sqlite3.connect(primary_memory_db())
+    try:
+        ensure_primary_schema(c)
+        now = time.time()
+        read = {"extraction_method": "llm_inferred", "source_session": "chat-a", "now": now - 600}
+        for turn, (pred, obj, days) in enumerate([
+                ("bought", "a road bike", {"started": "2026-05-30", "happened": True}),
+                ("visited", "Rome", {"started": "2026-04", "happened": True}),
+                ("scheduled_event", "the jazz concert", {"planned": "2999-06-07"})], 1):
+            mutate_belief(c, "user", pred, obj, predicate_type="set", source_turn=turn, **read, **days)
+        mutate_belief(c, "user", "lives_in", "London", extraction_method="user_stated", source_session="chat-a",
+                      source_turn=4, now=now - 900)
+        mutate_belief(c, "user", "lives_in", "London", source_turn=5, started="2019", **read)
+        c.commit()
+    finally:
+        c.close()
+
+
+def _days_on_the_page(harness: Harness, lang: str) -> dict[str, str]:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        host = harness.base.split("//", 1)[1].split(":", 1)[0]
+        context = browser.new_context(viewport={"width": 1400, "height": 1000}, locale="en-US")
+        context.add_cookies([{"name": "kazma-lang", "value": lang, "domain": host, "path": "/"}])
+        try:
+            pg = context.new_page()
+            pg.goto(f"{harness.base}/", wait_until="domcontentloaded", timeout=30000)
+            pg.locator("a.nav-link[href='/memory']").first.click()
+            pg.wait_for_function("location.pathname === '/memory'", timeout=15000)
+            pg.locator("#memory-you-link").click()
+            pg.wait_for_function("location.pathname === '/memory/you'", timeout=15000)
+            pg.wait_for_function(f"({_CARDS})() === 4", timeout=30000)
+            return {v: _card(pg, v).inner_text() for v in ("a road bike", "Rome", "the jazz concert", "London")}
+        finally:
+            context.close()
+            browser.close()
+
+
+@pytest.mark.parametrize(("lang", "words"), [
+    ("en", {"a road bike": "On May 30, 2026", "Rome": "In April 2026", "the jazz concert": "Planned for Jun 7, 2999",
+            "London": "Since 2019", "reading": "The date is Kazma's reading."}),
+    ("ar", {"a road bike": "في 30", "Rome": "خلال ", "the jazz concert": "مخطط له في ", "London": "منذ 2019",
+            "reading": "التاريخ قراءة Kazma."}),
+])
+def test_the_page_says_when_an_event_happened(harness: Harness, lang: str, words: dict[str, str]) -> None:
+    _seed_days()
+    cards = _days_on_the_page(harness, lang)
+    for value in ("a road bike", "Rome", "the jazz concert", "London"):
+        assert words[value] in cards[value], (value, cards[value])
+    assert "2026-04" not in cards["Rome"]
+    # The user said where they live; since when is Kazma's reading of it.
+    assert words["reading"] in cards["London"]
+    assert all(words["reading"] not in cards[v] for v in ("a road bike", "Rome", "the jazz concert"))

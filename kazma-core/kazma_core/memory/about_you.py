@@ -10,7 +10,9 @@ space, the asker's own entry in a shared one, Spaces S1-11), each with
   ``reading`` (Kazma's reading of a conversation), ``agent`` (Kazma wrote it
   with a memory tool), ``tool`` (a tool reported it) or ``unknown``;
 * **its dates**: since when it holds, and the start the person named for it
-  ("since 2024", ``metadata.started``), if any;
+  ("since 2024", ``metadata.started``), if any; an event is its day -- the day
+  it happened, or the day it is planned for -- and a day Kazma read into what
+  the person said is said to be Kazma's reading;
 * **its history**: the values it had before, each with when it held, as long
   as they were not forgotten.
 
@@ -55,18 +57,37 @@ def _whose(tenant_id: str, account: str | None) -> tuple[str, str] | None:
     return whose(tenant_id, account)
 
 
-def _started(meta: str | None) -> str:
-    try:
-        data = json.loads(meta or "{}")
-    except ValueError:
-        return ""
-    return str(data.get("started") or "") if isinstance(data, dict) else ""
+def _when(meta: dict[str, Any], kind: str, method: str | None, *, today: str) -> dict[str, Any]:
+    """The fact's own day, for the page: ``kind`` ``on`` (an event's day) or
+    ``in`` (its month or year), ``planned`` / ``was_planned`` (a day ahead, or
+    one that has passed), ``since`` (when it began) or "" (none); ``day`` as
+    told (``YYYY``, ``YYYY-MM``, ``YYYY-MM-DD``); ``reading`` when the day is
+    Kazma's reading."""
+    from kazma_core.memory import fact_days
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    event = fact_days.event_day(meta) if kind == "set" else ""
+    day = event or str(meta.get("started") or "")
+    if event and meta.get("happened"):
+        which = "on" if fact_days.exact(day) else "in"
+    elif event:
+        which = "was_planned" if day < today[: len(day)] else "planned"
+    else:
+        which = "since" if day else ""
+    return {"kind": which, "day": day,
+            "reading": bool(day) and fact_days.days_method(meta, method) not in USER_SOURCES}
 
 
-def facts_about(conn: sqlite3.Connection, *, tenant_id: str, account: str | None = None) -> dict[str, Any]:
+def facts_about(conn: sqlite3.Connection, *, tenant_id: str, account: str | None = None,
+                now: float | None = None) -> dict[str, Any]:
     """The asker's current facts, newest first within each name, each with
     its source, dates and history. Refused ``no_account`` in a shared space
     with no asker."""
+    from kazma_core.memory.fact_days import metadata_of
+    from kazma_core.memory.fact_days import today as day_now
+    from kazma_core.memory.recall import _memory_zone
+
+    today = day_now(time.time() if now is None else float(now), _memory_zone()).isoformat()
     whose = _whose(tenant_id, account)
     if whose is None:
         return {"ok": False, "error": "no_account"}
@@ -90,7 +111,8 @@ def facts_about(conn: sqlite3.Connection, *, tenant_id: str, account: str | None
         "kind": str(r[2] or "set"),
         "value": str(r[3]),
         "since": r[4],
-        "started": _started(r[6]),
+        "started": str(metadata_of(r[6]).get("started") or ""),
+        "when": _when(metadata_of(r[6]), str(r[2] or "set"), r[5], today=today),
         "source": _source_of(r[5]),
         "history": earlier.get(str(r[1]), []),
     } for r in current]
@@ -99,7 +121,8 @@ def facts_about(conn: sqlite3.Connection, *, tenant_id: str, account: str | None
 
 def _own_current(conn: sqlite3.Connection, belief_id: str, tenant_id: str, subject: str) -> sqlite3.Row | None:
     row = conn.execute(
-        "SELECT id, subject, predicate, predicate_type, object FROM beliefs WHERE id = ? AND tenant_id = ? "
+        "SELECT id, subject, predicate, predicate_type, object, metadata_json, source_session, source_turn, "
+        "extraction_method, ingested_at FROM beliefs WHERE id = ? AND tenant_id = ? "
         "AND subject = ? AND valid_until IS NULL AND invalidated_at IS NULL AND object != ''",
         (belief_id, tenant_id, subject)).fetchone()
     return row
@@ -139,11 +162,25 @@ def correct_fact(
             return {"ok": False, "error": "refused"}
     out = mutate_belief(conn, str(subject), predicate, value, predicate_type=row["predicate_type"],
                         extraction_method="user_explicit", confidence=0.95, tenant_id=tenant_id,
-                        said_by=said_by, now=now)
+                        said_by=said_by, now=now, **_events_day(row))
     conn.commit()
     if _refused(out) or not out.get("belief_id"):
         return {"ok": False, "error": "refused"}
     return {"ok": True, "belief_id": out.get("belief_id"), "replaced": belief_id}
+
+
+def _events_day(row: sqlite3.Row) -> dict[str, Any]:
+    """The day of the event being corrected, which the new words keep, with
+    who gave it: correcting what it was is no word on when it was."""
+    from kazma_core.memory.fact_days import event_day, metadata_of
+
+    meta = metadata_of(row["metadata_json"])
+    if str(row["predicate_type"] or "") != "set" or not event_day(meta):
+        return {}
+    return {"started": meta.get("started"), "happened": bool(meta.get("happened")), "planned": meta.get("planned"),
+            "day_source": meta.get("day_source") or {
+                "session": row["source_session"], "turn": row["source_turn"], "method": row["extraction_method"],
+                "at": row["ingested_at"]}}
 
 
 def _refused(out: dict[str, Any]) -> bool:

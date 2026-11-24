@@ -102,11 +102,13 @@ def test_an_event_is_kept_with_its_day_and_shown_on_it(memory, belief, said, ask
     assert "[since" not in block.split("## Known Facts")[1].split("##")[0]
 
 
-def test_a_day_after_the_turn_is_never_kept(memory):
+def test_a_day_after_the_turn_is_never_one_it_happened(memory):
+    """It is the day it is planned for (the review of W4: test_memory_event_lines_review.py)."""
     conn, _ops = memory
     _apply(memory, [{**EXHIBITION, "on": "2026-06-07"}], user_text="I'm going to a pottery exhibition next week.")
     assert _marks(conn) == [(None, None, SUNDAY_THE_31ST)]
-    assert "[since May 2026] user attended a pottery exhibition" in _block(conn, "the pottery exhibition")
+    block = _block(conn, "the pottery exhibition")
+    assert "planned for 7 Jun 2026] user attended a pottery exhibition" in block and "[on " not in block
 
 
 def test_an_event_told_again_gains_its_day(memory):
@@ -132,7 +134,7 @@ def test_control_without_the_mark_the_day_reads_as_a_start(memory, monkeypatch):
     conn, _ops = memory
     bind = belief_mutation._bind_write_context
     monkeypatch.setattr(belief_mutation, "_bind_write_context",
-                        lambda said_by, started, happened=False: bind(said_by, started))
+                        lambda said_by, started, happened=False, *more: bind(said_by, started, False, *more))
     _apply(memory, [EXHIBITION], user_text="I went to a pottery exhibition at the craft centre last Saturday.")
     assert _marks(conn) == [("2026-05-30", None, SUNDAY_THE_31ST)]
     assert "[since 30 May 2026] user attended" in _block(conn, "When did I go to the pottery exhibition?")
@@ -145,9 +147,9 @@ def test_an_event_told_again_leaves_no_write_lock(tmp_path, dated):
     that already has its day left the memory database's write lock held."""
     path = tmp_path / "default_mode.db"
     conn = sqlite3.connect(str(path))
-    conn.execute("CREATE TABLE beliefs (id TEXT, tenant_id TEXT, metadata_json TEXT)")
+    conn.execute("CREATE TABLE beliefs (id TEXT, tenant_id TEXT, metadata_json TEXT, predicate_type TEXT DEFAULT 'set')")
     held = '{"started": "2026-05-30", "happened": true}' if dated else "{}"
-    conn.execute("INSERT INTO beliefs VALUES ('b1', 'default', ?)", (held,))
+    conn.execute("INSERT INTO beliefs VALUES ('b1', 'default', ?, 'set')", (held,))
     conn.commit()
     tokens = belief_mutation._bind_write_context(None, "2026-05-30", True)
     try:
@@ -165,8 +167,9 @@ def test_an_event_told_again_leaves_no_write_lock(tmp_path, dated):
 
 def test_a_callers_own_transaction_is_left_to_it(tmp_path):
     conn = sqlite3.connect(str(tmp_path / "callers.db"))
-    conn.execute("CREATE TABLE beliefs (id TEXT, tenant_id TEXT, metadata_json TEXT)")
-    conn.execute("INSERT INTO beliefs VALUES ('b1', 'default', '{\"started\": \"2026-05-30\"}')")
+    conn.execute("CREATE TABLE beliefs (id TEXT, tenant_id TEXT, metadata_json TEXT, predicate_type TEXT)")
+    conn.execute("INSERT INTO beliefs VALUES ('b1', 'default', '{\"started\": \"2026-05-30\", "
+                 "\"happened\": true}', 'set')")
     assert conn.in_transaction
     tokens = belief_mutation._bind_write_context(None, "2026-05-30", True)
     try:

@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from kazma_core.memory.time_words import read_time
+from kazma_core.memory.time_words import names_a_day, read_time
 
 #: Friday 25 September 2026, noon UTC.
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC).timestamp()
@@ -109,3 +109,16 @@ def test_past_true_reads_a_bare_period():
     assert read_time("in August", now=NOW, zone=UTC) is None
     ask = read_time("in August", now=NOW, zone=UTC, past=True)
     assert ask is not None and (ask.start, ask.end) == (_day(2026, 8, 1), _day(2026, 9, 1))
+
+
+@pytest.mark.parametrize(("text", "named"), [
+    ("I got it in 2018.", True), ("Yeah, I think I started it last Monday.", True),
+    ("I went there three weeks ago", True), ("It was on May 3rd", True), ("in early April", True),
+    ("today's game", True), ("on the weekend", True),
+    ("اشتريتها قبل أسبوعين", True), ("كان السبت الماضي", True), ("رحت أمس", True), ("وبالخميس رجعت", True),
+    ("في عام ٢٠١٨", True), ("يوم ٣ مايو", True), ("خلال رمضان", True),
+    ("Yes, that one. Thank you!", False), ("I may march on", False), ("Can you remind me?", False),
+    ("اي والله، شكرا", False), ("ابوي يحب الشاي", False), ("", False),
+])
+def test_a_message_that_names_a_day(text, named):
+    assert names_a_day(text) is named

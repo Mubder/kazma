@@ -2799,6 +2799,37 @@ four injected were noise.
   (2026-11-24). Gate:
   `tests/test_memory_event_lines.py` (EN/AR; the writer without the mark,
   which shows the day as a start, as the negative control).
+- **What an event is, whose day it carries, and when it happened** (the
+  review of W4, 2026-11-24; `memory/fact_days.py` is the one home of a
+  fact's day). An event is a list entry under its own name whatever the
+  reply labelled it (`belief_extractor._read_days`): never
+  `fact_names.users_names`, a first reading or a question ("I called my
+  mom" became the user's name, "moved_to Porto" their home); on a fact a
+  person holds one value of (`fact_names.names_one_value`) `on` is its
+  start. The same words on another day are another occasion
+  (`belief_mutation._entry_told_again`, an event's words compared by
+  `_same_value`; the nightly merges read the day too), shown latest first
+  (`recall._latest_first`). `replaces` is the same event only when they
+  share a content word (`_same_event`: "bananas" was closed by "fresh
+  vegetables") and the day told can have happened by the first telling
+  (`fact_days.could_have_happened_by`): then it corrects the day, and one
+  with no day or a vaguer one keeps the day it replaces (`_keep_the_day`). A day names
+  who gave it when that is not the row's own turn (`day_source`: session,
+  turn, method; the day it took the place of stays under `day_before`), so
+  forgetting that turn or chat takes the day back
+  (`forget._forget_given_days`, the ledger pass too) and a day the model
+  read on a fact the user stated is tagged as Kazma's reading
+  (`fact_days.days_method`). An event is true on its day only
+  (`recall._held_in`, `memory_list`, `/memory/you`); a day after the turn is
+  `planned` ("[planned for 3 Jun 2026]", "[was planned for ...]"), never a
+  start thrown away; a month or a year reads "in". An event of the user
+  stands in their own words (`_in_users_words`, `own_words` with questions;
+  at least `_EVENT_WORDS` of its content words); the words of the fact held
+  of it count too when the day itself is in them (`_told_before`,
+  `time_words.names_a_day`: "I got it in 2018"). At most `_MAX_BELIEFS` facts a
+  reply. A new reader of a fact's day asks `fact_days`. Gate:
+  `tests/test_memory_event_lines_review.py` (EN/AR; each point fails on the
+  commit reviewed, with its control).
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
   0.00 Arabic recall). Token rules from the grammar, compared folded: a
@@ -12710,18 +12741,23 @@ is the reasoning setting below plus the tool count per turn (open).
   control, every `invoke_llm_chat` call in the chat turn's modules carrying
   the level), `tests/test_qwen_reasoning_off.py` (Qwen's switch on the wire,
   the classifier in English and Arabic, today's classifier as the control).
-- **Qwen caches Kazma's leading system prompt explicitly** (2026-11-23, the
-  memory plan's W4 pilot). Model Studio caches a prefix on its own when it
-  chooses (20 % of the input price); `llm_provider._with_qwen_cache_marker`,
-  applied in `_chat_payload` (the blocking and the streaming body) for a
-  Model Studio address (`_is_qwen_api`), sends a leading system message of
-  at least `_QWEN_CACHE_MIN_CHARS` characters as one text part with
-  `cache_control` (cached five minutes, renewed on each hit; Model Studio's
+- **Qwen caches a background call's instructions explicitly** (2026-11-23,
+  the memory plan's W4 pilot; its review, 2026-11-24). Model Studio caches a
+  prefix on its own when it chooses (20 % of the input price);
+  `llm_provider._with_qwen_cache_marker`, applied in `_chat_payload` (the
+  blocking and the streaming body) for a Model Studio address
+  (`_is_qwen_api`), marks only a call of the deep pass's shape -- one system
+  and one user message as the caller made it, no tools -- on a measured
+  model family (`_QWEN_CACHE_MODELS`), off with `KAZMA_PROMPT_CACHE=0`: its
+  system message of at least `_QWEN_CACHE_MIN_CHARS` characters is sent as
+  one text part with `cache_control` (cached five minutes, renewed on each hit; Model Studio's
   page gives a hit at typically 10 % of the input price and a first write
   at 125 %, qwen3.8-flash's own ratios by region). Measured through Kazma's
   own provider on qwen3.8-flash and qwen3.7-plus with the deep pass's
   prompt: 1,614 of about 1,850 prompt tokens served from the cache from the
-  second call on. Any other message and provider are sent as before. Gate:
+  second call on. `cost_from_usage` counts the write's 125 %
+  (`cache_creation_input_tokens`). Until the review every call of every Qwen
+  model was marked, a chat's changing system message included. Gate:
   `tests/test_qwen_context_cache.py` (a host that only looks like Model
   Studio's as the control).
 

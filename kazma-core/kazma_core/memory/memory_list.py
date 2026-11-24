@@ -151,7 +151,7 @@ def list_memories(
         conn = sqlite3.connect(primary_memory_db(), timeout=15)
     conn.row_factory = sqlite3.Row
     try:
-        facts = _facts(conn, only, terms, period)
+        facts = _facts(conn, only, terms, period, zone)
         tiers = ",".join("?" for _ in RECALLABLE_TIERS)
         where, params = [f"tier IN ({tiers})", "(? IS NULL OR tenant_id = ?)"], [*RECALLABLE_TIERS, only, only]
         if period is not None:
@@ -174,11 +174,15 @@ def list_memories(
             conn.close()
     turns = [r for r in rows if not terms or _holds_every(
         " ".join(str(r[k] or "") for k in ("user_text", "assistant_text", "summary_text")), terms)]
+    from kazma_core.memory.fact_days import today as day_now
+    from kazma_core.memory.recall import _event_label
+
+    today = day_now(now, zone).isoformat()
     lines: list[dict[str, Any]] = []
     for f in facts:
         sub = people.shown_subject(str(f["subject"] or ""), asker) if people.shared else str(f["subject"] or "")
         text = f"{sub.replace('_', ' ')} {str(f['predicate'] or '').replace('_', ' ')} {f['object']}".strip()
-        held = _day(f["valid_from"], zone)
+        held = _event_label(_event_of(f), today) or _day(f["valid_from"], zone)
         if f["valid_until"] is not None:
             held = f"{held} to {_day(f['valid_until'], zone)}"
         lines.append({"kind": "fact", "id": str(f["id"]), "date": held, "text": " ".join(text.split())})
@@ -198,11 +202,25 @@ def list_memories(
                          next_offset=end if end < len(lines) else None, about=about, when=when, period=period)
 
 
+def _event_of(row: sqlite3.Row) -> dict[str, Any]:
+    """A fact's metadata when it may be an event's: a list entry's."""
+    from kazma_core.memory.fact_days import metadata_of
+
+    return metadata_of(row["metadata_json"]) if str(row["predicate_type"] or "set") == "set" else {}
+
+
+#: A fact's metadata when it reads as JSON (an event's day is in it).
+_META = "CASE WHEN json_valid(metadata_json) THEN metadata_json END"
+
+
 def _facts(conn: sqlite3.Connection, only: str | None, terms: list[str],
-           period: tuple[float, float] | None) -> list[sqlite3.Row]:
+           period: tuple[float, float] | None, zone: Any) -> list[sqlite3.Row]:
     """The facts holding every term: the current ones, and with a period
-    every value that held during it (an earlier value included). Never a
-    forgotten fact (its value is gone)."""
+    every value that held during it (an earlier value included) -- an event
+    by its own day, whenever it was told. Never a forgotten fact (its value
+    is gone)."""
+    from kazma_core.memory import fact_days
+
     where = ["(? IS NULL OR tenant_id = ?)", "COALESCE(object, '') != ''"]
     params: list[Any] = [only, only]
     if period is None:
@@ -211,7 +229,9 @@ def _facts(conn: sqlite3.Connection, only: str | None, terms: list[str],
         # Held during the period: began before its end, ended after its start.
         # An earlier value is a fact another one replaced (``supersedes_id``):
         # a fact the user took back was never true, and is not listed.
-        where.append("valid_from < ? AND (valid_until IS NULL OR valid_until > ?)")
+        where.append("((valid_from < ? AND (valid_until IS NULL OR valid_until > ?)) "
+                     f"OR (valid_until IS NULL AND COALESCE(json_extract({_META}, '$.happened'), "
+                     f"json_extract({_META}, '$.planned')) IS NOT NULL))")
         params.extend([period[1], period[0]])
         where.append("(invalidated_at IS NULL OR id IN (SELECT supersedes_id FROM beliefs "
                      "WHERE supersedes_id IS NOT NULL))")
@@ -220,9 +240,16 @@ def _facts(conn: sqlite3.Connection, only: str | None, terms: list[str],
         where.append(clause)
         params.extend(likes)
     rows = conn.execute(
-        "SELECT id, subject, predicate, object, valid_from, valid_until FROM beliefs "
+        "SELECT id, subject, predicate, predicate_type, object, valid_from, valid_until, metadata_json FROM beliefs "
         f"WHERE {' AND '.join(where)} ORDER BY valid_from DESC",  # nosec B608 - fixed clauses, '?' placeholders
         params,
     ).fetchall()
-    return [r for r in rows if not terms or _holds_every(
-        f"{r['subject']} {r['predicate']} {r['object']}", terms)]
+
+    def in_period(row: sqlite3.Row) -> bool:
+        if period is None:
+            return True
+        span = fact_days.day_span(fact_days.event_day(_event_of(row)), zone)
+        return span is None or (span[0] < period[1] and span[1] > period[0])
+
+    return [r for r in rows if in_period(r) and (not terms or _holds_every(
+        f"{r['subject']} {r['predicate']} {r['object']}", terms))]

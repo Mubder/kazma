@@ -699,6 +699,57 @@ varies by is not in these numbers; the noise run repeats the answers only.
 Answers asked: 300 calls a run, 189K prompt and 73K completion tokens each.
 Evidence: `docs/audits/evidence/memory_event_lines/pilot_deepseek.json`.
 
+**The independent review, fixed** (24 Nov; code only, the prompt and the
+message are the same, so the recording and every cached reply stand). What it
+found at 81b7a2529 and what holds now (`memory/fact_days.py`,
+`tests/test_memory_event_lines_review.py`: each point fails on that commit):
+an event is a list entry under its own name ("I called my mom" became the
+user's name, "moved_to Porto" their home, and an event labelled single-valued
+closed the last one); one told again without its day keeps it, and another
+event is not closed by it ("bananas" by "fresh vegetables"); the same words on
+another day are another occasion, the latest shown first, and with `replaces`
+a correction -- when what was told then can have happened on that day; a day
+names the turn that gave it, so forgetting that turn takes the day back, and
+on a fact the user stated it reads as Kazma's; an event is true on its day
+("what did I buy last month?"); a day to come is planned, not a start lost; a
+month reads "in"; an event stands in the user's own words; Qwen's cache marks
+only a background call of the measured models, and its write is priced.
+
+The cached replies of both pilots through the fixed apply step, round by
+round, no model call (a reply's `replaces` resolved by what the fact it named
+was; 6 and 2 named one no longer held):
+
+| | Qwen replies, dev 200 | DeepSeek replies, pilot 50 |
+|---|---|---|
+| dated events current | 2,976 -> 3,049 | 782 -> 790 |
+| planned (they had no day) | 0 -> 251 | 0 -> 38 |
+| events on a single-valued fact | 21 -> 0 | 11 -> 0 |
+| events that were lost to an undated retelling | 95 have their day | 15 have their day |
+| another occasion, or a corrected day | 33 | 11 |
+| closed by another event before | 10 | 0 |
+| events not kept: not in the user's own words | 67 of 3,888 told | 12 of 959 told |
+| blocks that change | 45 of 200, 31 of them only "on" -> "in" | 11 of 50, 8 of them only that |
+| block tokens p50 / p95 | 1,424 / 1,496 -> 1,425 / 1,496 | 1,459 / 1,498 -> the same |
+| questions showing an event line | 69 -> 72 | 19 -> 20 |
+| the answer's words in the block | 57 of 129 -> the same | 12 of 37 -> the same |
+| answered, main / noise, before | 0.755 / 0.765 | 0.72 / 0.74 |
+
+No reader or judge call was made. A block that is the same has the same
+answer, so the answers to 155 of the 200 and 39 of the 50 stand (117 and 118,
+28 and 29 right); 14 and 3 blocks change by more than the word, 10 and 2 of
+them answered right before in each run. Read one by one, none of those 17
+loses what its question asks; "Which book did I finish a week ago?" and "What
+did I do 5 days ago?" now show only that day's. What fell: the 67 and 12
+events. The first rule (half of the event's words in the turn's own words)
+left out 103 and 21, and reading them showed days told of something memory
+holds, by "it" ("I got it in 2018"), so the held fact's words count when the
+day is the user's own (`time_words.names_a_day`); 48 and 4 of the rest stand
+in the message where `own_words` leaves them out (finding 19). A start of a
+lasting fact ("since 2019") is not carried over to the entry that replaces
+it: the new one may be another thing. Evidence:
+`docs/audits/evidence/memory_event_lines/review_fixes.json`. The Qwen spend
+above counted no cache writes; there were 30 (49,560 tokens, under a cent).
+
 ### W6. Ingestion the product's way (M)
 
 The benchmark's memories written as Kazma writes them: the deep pass on
@@ -1261,3 +1312,17 @@ alone as the negative controls.
     Arabic questions (q1004, h042), each answered by one memory. Left as it
     is; measured before anything is built, on the parallel set's count
     questions asked in both languages.
+19. **`own_words` drops what the user says after "What do you think about
+    ...?" and "Do you think I ...", in English only.** Found reading what
+    the event rule leaves out (24 Nov): "What do you think about my bathroom
+    rugs? I washed them last Sunday." is read as someone's words ("think"
+    as a reporting verb, the rest of the message as what they reported), and
+    "Do you think I could find one at the fair I attended last month?" keeps
+    "Do you"; Arabic keeps both ("شنو رايك في سجادي؟ غسلته الاحد."). The
+    quick pass, "remember" and the event rule read through it, so such a
+    message teaches nothing: 15 of the 67 events left out on the Qwen
+    replies, 2 of 12 on DeepSeek's. Pasted lists of the user's own ("Here's
+    the info: ...") and the text past 2,000 characters are the rest.
+    `own_words` was reviewed three times as a security rule (a paste is never
+    the user's statement), so its change wants a change and a review of its
+    own.

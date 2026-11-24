@@ -1,0 +1,253 @@
+{
+ "what": "The review of W4 (dated event lines), 2026-11-24: the same cached replies of the two pilots written again through the fixed apply step, no model call. Every reply is replayed by its round, a reply's \"replaces\" by what the fact it named was. before: 81b7a2529's stores and blocks; after: this commit's. Ids and counts only.",
+ "runs": {
+  "qwen_dev_200": {
+   "questions": "dev 200",
+   "extractor": "qwen3.8-flash",
+   "stores": {
+    "before": {
+     "current": 51758,
+     "dated_events": 3271,
+     "dated_events_current": 2976,
+     "day_before": 0,
+     "day_source": 0,
+     "events_on_single_value": 21,
+     "facts": 55226,
+     "lives_in_current": 135,
+     "name_is_current": 64,
+     "planned": 0,
+     "planned_current": 0,
+     "starts": 1471
+    },
+    "after": {
+     "current": 51740,
+     "dated_events": 3343,
+     "dated_events_current": 3049,
+     "day_before": 19,
+     "day_source": 237,
+     "events_on_single_value": 0,
+     "facts": 55187,
+     "lives_in_current": 135,
+     "name_is_current": 63,
+     "planned": 292,
+     "planned_current": 251,
+     "starts": 1464
+    }
+   },
+   "deep_passes": {
+    "written": 48110,
+    "no_reply_kept": 494,
+    "replaces_that_named_a_fact_no_longer_held": 6,
+    "events_not_in_the_users_own_words": 67
+   },
+   "current_dated_events": {
+    "events_kept_both": 2908,
+    "events_only_before": 66,
+    "events_only_after": 139
+   },
+   "why": {
+    "only_before": {
+     "not in the user's own words (not kept)": 44,
+     "another day kept for the same words (corrected, or more exact)": 19,
+     "under the event's own name": 2,
+     "a single value's start": 1
+    },
+    "only_after": {
+     "its day kept (an undated retelling took it before)": 95,
+     "another occasion, or a corrected day": 33,
+     "no longer closed by another event": 10,
+     "under the event's own name": 1
+    }
+   },
+   "blocks": {
+    "before": {
+     "tokens_p50": 1423.5,
+     "tokens_p95": 1496,
+     "facts_mean": 3.87,
+     "event_lines_mean": 0.8,
+     "questions_with_an_event_line": 69,
+     "planned_lines": 0,
+     "answer_text_held": 57,
+     "answer_text_of": 129
+    },
+    "after": {
+     "tokens_p50": 1425.0,
+     "tokens_p95": 1496,
+     "facts_mean": 3.87,
+     "event_lines_mean": 0.83,
+     "questions_with_an_event_line": 72,
+     "planned_lines": 4,
+     "answer_text_held": 57,
+     "answer_text_of": 129
+    },
+    "changed": 45,
+    "without_event_facts_changed": 9,
+    "only_the_word_in_for_on": 31,
+    "otherwise_changed": [
+     "10d9b85a",
+     "2a1811e2",
+     "2ebe6c92",
+     "5a7937c8",
+     "6613b389",
+     "7e974930",
+     "9a707b81",
+     "a11281a2",
+     "d905b33f",
+     "db467c8c",
+     "dcfa8644",
+     "eeda8a6d",
+     "gpt4_68e94288",
+     "gpt4_d84a3211"
+    ]
+   },
+   "answer_text": {
+    "gained": [],
+    "lost": []
+   },
+   "answers": {
+    "run_main": {
+     "answered_before": 0.755,
+     "right_of_unchanged": 117,
+     "unchanged": 155,
+     "right_before_of_word_only": 24,
+     "right_before_of_otherwise_changed": 10
+    },
+    "run_noise": {
+     "answered_before": 0.765,
+     "right_of_unchanged": 118,
+     "unchanged": 155,
+     "right_before_of_word_only": 25,
+     "right_before_of_otherwise_changed": 10
+    }
+   }
+  },
+  "deepseek_pilot_50": {
+   "questions": "pilot 50",
+   "extractor": "deepseek-flash",
+   "stores": {
+    "before": {
+     "current": 8728,
+     "dated_events": 853,
+     "dated_events_current": 782,
+     "day_before": 0,
+     "day_source": 0,
+     "events_on_single_value": 11,
+     "facts": 9319,
+     "lives_in_current": 30,
+     "name_is_current": 8,
+     "planned": 0,
+     "planned_current": 0,
+     "starts": 248
+    },
+    "after": {
+     "current": 8724,
+     "dated_events": 863,
+     "dated_events_current": 790,
+     "day_before": 6,
+     "day_source": 50,
+     "events_on_single_value": 0,
+     "facts": 9311,
+     "lives_in_current": 30,
+     "name_is_current": 7,
+     "planned": 44,
+     "planned_current": 38,
+     "starts": 248
+    }
+   },
+   "deep_passes": {
+    "written": 12089,
+    "no_reply_kept": 0,
+    "replaces_that_named_a_fact_no_longer_held": 2,
+    "events_not_in_the_users_own_words": 12
+   },
+   "current_dated_events": {
+    "events_kept_both": 761,
+    "events_only_before": 21,
+    "events_only_after": 29
+   },
+   "why": {
+    "only_before": {
+     "not in the user's own words (not kept)": 10,
+     "another day kept for the same words (corrected, or more exact)": 7,
+     "under the event's own name": 3,
+     "a single value's start": 1
+    },
+    "only_after": {
+     "its day kept (an undated retelling took it before)": 15,
+     "another occasion, or a corrected day": 11,
+     "under the event's own name": 3
+    }
+   },
+   "blocks": {
+    "before": {
+     "tokens_p50": 1459.0,
+     "tokens_p95": 1498,
+     "facts_mean": 3.52,
+     "event_lines_mean": 1.14,
+     "questions_with_an_event_line": 19,
+     "planned_lines": 0,
+     "answer_text_held": 12,
+     "answer_text_of": 37
+    },
+    "after": {
+     "tokens_p50": 1459.0,
+     "tokens_p95": 1498,
+     "facts_mean": 3.52,
+     "event_lines_mean": 1.18,
+     "questions_with_an_event_line": 20,
+     "planned_lines": 0,
+     "answer_text_held": 12,
+     "answer_text_of": 37
+    },
+    "changed": 11,
+    "without_event_facts_changed": 2,
+    "only_the_word_in_for_on": 8,
+    "otherwise_changed": [
+     "2a1811e2",
+     "d905b33f",
+     "gpt4_a56e767c"
+    ]
+   },
+   "answer_text": {
+    "gained": [],
+    "lost": []
+   },
+   "answers": {
+    "run_main": {
+     "answered_before": 0.72,
+     "right_of_unchanged": 28,
+     "unchanged": 39,
+     "right_before_of_word_only": 6,
+     "right_before_of_otherwise_changed": 2
+    },
+    "run_noise": {
+     "answered_before": 0.74,
+     "right_of_unchanged": 29,
+     "unchanged": 39,
+     "right_before_of_word_only": 6,
+     "right_before_of_otherwise_changed": 2
+    }
+   }
+  }
+ },
+ "own_words": {
+  "events_told": {
+   "qwen": 3888,
+   "deepseek": 959
+  },
+  "not_kept_with_the_first_rule": {
+   "qwen": 103,
+   "deepseek": 21
+  },
+  "not_kept": {
+   "qwen": 67,
+   "deepseek": 12
+  },
+  "of_those_in_the_message_but_not_in_own_words": {
+   "qwen": 48,
+   "deepseek": 4
+  },
+  "note": "The first rule asked half of the event's words in the turn's own words; the words of the fact held of it count now, when the day is the user's own."
+ },
+ "answers_note": "No reader or judge call was made. A block that is the same gets the same answer, so the answers to the unchanged blocks stand; those to the changed ones were not asked."
+}

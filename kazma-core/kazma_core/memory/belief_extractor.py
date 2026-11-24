@@ -23,6 +23,7 @@ import json
 import logging
 import re
 import sqlite3
+import time
 from typing import Any
 
 from kazma_core.memory.own_words import own_words
@@ -356,6 +357,10 @@ def turn_message(
     return blob
 
 
+#: The most facts one reply of the deep pass gives (its prompt says so).
+_MAX_BELIEFS = 8
+
+
 async def _llm_extract(
     user_text: str,
     assistant_text: str = "",
@@ -403,7 +408,9 @@ async def _llm_extract(
         beliefs = data.get("beliefs") or []
         if not isinstance(beliefs, list):
             return None, False
-        return beliefs, False
+        if len(beliefs) > _MAX_BELIEFS:
+            logger.info("[belief_extract] %d facts in one reply: the first %d are kept", len(beliefs), _MAX_BELIEFS)
+        return beliefs[:_MAX_BELIEFS], False
     except (ValueError, TypeError, AttributeError) as exc:  # an unusable answer: nothing to learn
         logger.warning("[belief_extract] LLM extraction answer unusable: %s", exc)
         return None, False
@@ -546,11 +553,72 @@ def _take_replaces(clean: dict[str, Any], held: list[dict[str, Any]] | None, con
     entry = next((h for h in held or () if h["ref"] == ref), None)
     if entry is None or entry["subject"] != clean["subject"]:
         return None
-    if conn.execute("SELECT 1 FROM beliefs WHERE id = ? AND tenant_id = ? AND valid_until IS NULL "
-                    "AND invalidated_at IS NULL", (entry["id"], tenant_id)).fetchone() is None:
+    row = conn.execute("SELECT metadata_json, valid_from, source_session, source_turn, ingested_at FROM beliefs "
+                       "WHERE id = ? AND tenant_id = ? AND valid_until IS NULL AND invalidated_at IS NULL",
+                       (entry["id"], tenant_id)).fetchone()
+    if row is None:
         return None
-    clean["predicate"], clean["predicate_type"] = entry["predicate"], entry["predicate_type"]
+    from kazma_core.memory.fact_days import metadata_of
+
+    entry = {**entry, "meta": metadata_of(row[0]), "told_at": row[1],
+             "source": {"session": row[2], "turn": row[3], "method": entry["method"], "at": row[4]}}
+    if _holds_one_value(entry):
+        # It replaces a single value ("moved_to Porto", replacing lives_in):
+        # no event of its own, and its day is when the new value began.
+        if clean.pop("event", None):
+            clean["day"] = {"started": clean["day"]["started"]} if clean["day"].get("started") else {}
+    elif not clean.get("ended") and not _same_event(entry, clean):
+        return None
+    clean["predicate"] = entry["predicate"]
+    clean["predicate_type"] = "set" if clean.get("event") else entry["predicate_type"]
     return entry
+
+
+def _holds_one_value(entry: dict[str, Any]) -> bool:
+    """Whether the held fact *entry* is one the user holds one value of: by
+    Kazma's own class, or a single value the user stated. A list entry an
+    older reply labelled single-valued is not."""
+    from kazma_core.memory.belief_mutation import kazma_classifies
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    return entry["predicate_type"] != "set" and (kazma_classifies(entry["predicate"])
+                                                 or entry["method"] in USER_SOURCES)
+
+
+def _same_event(entry: dict[str, Any], clean: dict[str, Any]) -> bool:
+    """Whether *clean*, which says it replaces the list entry *entry*, tells
+    the same event again -- always so when neither has an event's day. Told
+    in other words, it shares a content word with it ("bananas" was closed by
+    "fresh vegetables"). With another day it is a correction only when what
+    was told then can have happened on that day: what was told in May did not
+    happen in November, so that is another occasion (the review of W4,
+    2026-11-24)."""
+    from kazma_core.memory.fact_days import compatible, could_have_happened_by, event_day, same_thing
+
+    held, told = event_day(entry["meta"]), event_day(clean.get("day") or {})
+    if not held and not told:
+        return True
+    if not same_thing(str(entry["object"] or ""), str(clean["object"])):
+        return False
+    if not held or not told or compatible(held, told):
+        return True
+    return bool(entry["meta"].get("planned")) or could_have_happened_by(told, entry["told_at"])
+
+
+def _keep_the_day(entry: dict[str, Any], clean: dict[str, Any], method: str) -> None:
+    """An event told again without its day, or with one said less exactly,
+    keeps the day of the entry it replaces and who gave it (99 dated events
+    of the pilot's stores lost theirs to an undated retelling)."""
+    from kazma_core.memory.fact_days import DAY_KEYS, event_day, vaguer
+    from kazma_core.memory.provenance import may_overrule
+
+    held = event_day(entry["meta"])
+    if (not held or not vaguer(event_day(clean.get("day") or {}), held) or not may_overrule(entry["method"], method)
+            or _same_value_text(entry["object"], clean["object"])):
+        return
+    clean["day"] = {k: entry["meta"][k] for k in DAY_KEYS if entry["meta"].get(k) and k != "day_source"}
+    clean["day_source"] = entry["meta"].get("day_source") or entry["source"]
+    clean["event"], clean["predicate_type"] = True, "set"
 
 
 def _close_replaced_entry(entry: dict[str, Any], clean: dict[str, Any], method: str, *, conn: Any,
@@ -561,7 +629,8 @@ def _close_replaced_entry(entry: dict[str, Any], clean: dict[str, Any], method: 
     yields only to the user's own words)."""
     from kazma_core.memory.provenance import may_overrule
 
-    if entry["predicate_type"] != "set" or _same_value_text(entry["object"], clean["object"]):
+    if (entry["predicate_type"] != "set" and not clean.get("event")) or _same_value_text(entry["object"],
+                                                                                         clean["object"]):
         return
     if not may_overrule(entry["method"], method):
         stats["replace_refused"] = stats.get("replace_refused", 0) + 1
@@ -695,6 +764,83 @@ def _started_on(since: str | None, said_at: float | None, zone: Any) -> str | No
     if said and since[: len(said)] > said[: len(since)]:
         return None
     return since
+
+
+def _read_days(clean: dict[str, Any], said_at: float | None) -> None:
+    """Sort *clean*'s dates into ``day`` (``fact_days``): a start ("since"),
+    the day an event happened ("on"), or -- a day after the turn -- the day
+    it is planned for, which never throws away a start. An event is a list
+    entry whatever the reply labelled it: labelled single-valued, one event
+    closed the last. On a fact a person holds one value of, "on" is when it
+    began (the review of W4, 2026-11-24). Told at no known time, it is told
+    now: a day to come is never one that happened."""
+    from kazma_core.memory.fact_names import names_one_value
+
+    since, on = clean.pop("since", None), clean.pop("on", None)
+    clean["day"] = {}
+    if clean.get("ended") or not (since or on):
+        return
+    zone = _turn_zone()
+    at = time.time() if said_at is None else said_at
+    since = _started_on(since, at, zone)
+    if on and names_one_value(clean["subject"], clean["predicate"]):
+        since, on = since or _started_on(on, at, zone), None
+    clean["day"] = {"started": since} if since else {}
+    if not on:
+        return
+    clean["event"], clean["predicate_type"] = True, "set"
+    if _started_on(on, at, zone):
+        clean["day"] = {"started": on, "happened": True}
+    else:
+        clean["day"]["planned"] = on
+
+
+#: The share of an event's content words the user's own words hold, at least
+#: (:func:`_in_users_words`), measured on the two pilots' replies (2026-11-24).
+_EVENT_WORDS = 0.5
+
+
+def _in_users_words(value: str, user_text: str, told_before: str = "") -> bool:
+    """Whether an event stands in the user's own words (``own_words``, what
+    they ask included: "I bought a bike yesterday, which lock should I get?"),
+    by its content words: what the assistant's reply, a pasted page or a
+    quote tells is not something the user did.
+
+    *told_before* is the fact memory holds of it, if any: "I bought it in
+    2018", "I think I started it last Monday" name the thing by what was told
+    before, so its words count -- when the day is in the user's own words."""
+    from kazma_core.memory.query_terms import content_terms
+    from kazma_core.memory.time_words import names_a_day
+
+    wanted = content_terms(value)
+    if not wanted:
+        return True
+    own = own_words(user_text, questions=True)
+
+    def share(text: str) -> float:
+        held = set(content_terms(text))
+        held.update(part for word in list(held) for part in word.split("-") if len(part) > 1)
+
+        def said(word: str) -> bool:
+            parts = [p for p in word.split("-") if p]
+            return word in held or (len(parts) > 1 and all(p in held for p in parts))
+
+        return sum(map(said, wanted)) / len(wanted)
+
+    if share(own) >= _EVENT_WORDS:
+        return True
+    return bool(told_before) and names_a_day(own) and share(f"{own} {told_before}") >= _EVENT_WORDS
+
+
+def _told_before(clean: dict[str, Any], held: list[dict[str, Any]] | None) -> str:
+    """The value of the held fact the event *clean* tells again: the one its
+    reply names ("replaces"), else one of the same words; "" for none."""
+    ref = clean.get("replaces")
+    mine = [h for h in held or () if h["subject"] == clean["subject"]]
+    named = next((h for h in mine if ref and h["ref"] == ref), None)
+    same = next((h for h in mine if _same_value_text(h["object"], clean["object"])), None)
+    entry = named or same
+    return str(entry["object"] or "") if entry else ""
 
 
 # ── Heuristic fallback (no LLM) ──────────────────────────────────────────
@@ -1053,6 +1199,69 @@ def _put_to_the_user(
         stats["pending_changes"] = stats.get("pending_changes", 0) + 1
 
 
+def _filed(clean: dict[str, Any], named: str, method: str, *, people: Any, said_by: str | None, user_text: str,
+           now: float | None, held: list[dict[str, Any]] | None, not_again: set[tuple[str, ...]] | None,
+           stats: dict[str, Any]) -> str | None:
+    """*clean* as it is filed: with its day, under *named* (Kazma's name for
+    it) unless it is an event, in the user's spelling and -- in a shared
+    space -- under the member it is about. The source it is filed with, or
+    None when it is not kept.
+
+    A model's reading never gets the user's trust by itself: whether its name
+    fits the words ("I'm visiting Dubai next week" as lives_in, "I met Dana"
+    as name_is) only the user can say (the second security review of F1,
+    2026-11-18). It stays the model's inference, and a reading of the user's
+    own fact is put to the user (``_apply_beliefs_to_v2``). An event goes by
+    its own name: "called" my mom on Sunday is no name of the user's,
+    "moved_to" Porto no home (the review of W4)."""
+    from kazma_core.memory.fact_names import users_predicate
+    from kazma_core.memory.speakers import is_member_entry
+
+    _read_days(clean, now)
+    event = bool(clean.get("event"))
+    if not event:
+        clean["predicate"] = named
+    # The value as the user wrote it, when the turn holds it (part C2).
+    clean["object"] = _users_spelling(clean["object"], user_text)
+    if people.shared:
+        # A shared space files by member (Spaces S1-11, N30): "I" is the
+        # speaker's entry, a member's name theirs; with no speaker known a
+        # first-person fact is not filed (the turn is still remembered).
+        filed = people.filed(clean["subject"], said_by)
+        filed_object = people.filed(clean["object"], said_by) if clean["object"] == "user" else clean["object"]
+        if not filed or not filed_object:
+            stats["no_speaker"] = stats.get("no_speaker", 0) + 1
+            return None
+        clean["subject"], clean["object"] = filed, filed_object
+        if is_member_entry(filed) and not event:
+            # A member's facts go by the names the user's do (fact_names).
+            clean["predicate"] = users_predicate("user", clean["predicate"])
+        method = people.label(method, filed, said_by)
+        if not_again and (filed, clean["predicate"], str(clean["object"]).casefold()) in not_again:
+            return None
+    if (event and user_text and (clean["subject"] == "user" or is_member_entry(clean["subject"]))
+            and not _in_users_words(str(clean["object"]), user_text, _told_before(clean, held))):
+        stats["not_users_words"] = stats.get("not_users_words", 0) + 1
+        return None
+    return method
+
+
+def _day_written(clean: dict[str, Any], replaced: dict[str, Any] | None) -> dict[str, Any]:
+    """What ``mutate_belief`` is told of *clean*'s day.
+
+    The start this turn names ("since 2019", "last month"), kept beside the
+    fact; validity follows the order facts were said (W1), so a start never
+    reorders them (framework audit F2). An event's day ("on": "I went to a
+    pottery exhibition last Saturday") is kept the same way, marked as a day
+    it happened (the memory plan's W4, dated event lines), and a day to come
+    as the day it is planned for. With ``replaces`` naming the same value, the
+    entry whose day it may correct."""
+    day = clean["day"]
+    same = replaced and _same_value_text(replaced["object"], clean["object"])
+    return {"started": day.get("started"), "happened": bool(day.get("happened")), "planned": day.get("planned"),
+            "day_source": clean.get("day_source"), "corrects": replaced["id"] if same else None}
+
+
 def _apply_beliefs_to_v2(
     raw_beliefs: list[dict[str, Any]],
     primary_conn,
@@ -1109,6 +1318,7 @@ def _apply_beliefs_to_v2(
     tenant_id = space_named_or_bound(tenant_id)
     from kazma_core.memory.belief_mutation import mutate_belief
     from kazma_core.memory.entity_resolution import resolve_entity
+    from kazma_core.memory.fact_names import users_names
     from kazma_core.memory.provenance import LLM_INFERRED, USER_SOURCES
     from kazma_core.memory.speakers import is_member_entry
     from kazma_core.memory.speakers import room as speakers_room
@@ -1148,37 +1358,17 @@ def _apply_beliefs_to_v2(
             # A move the words do not call a place ("We moved to Slack"):
             # Kazma's reading, put to the user below (finding 15).
             _method = LLM_INFERRED
-        # A model's reading never gets the user's trust by itself: whether
-        # its name fits the words ("I'm visiting Dubai next week" as
-        # lives_in, "I met Dana" as name_is) only the user can say (the
-        # second security review of F1, 2026-11-18). It stays the model's
-        # inference, and a reading of the user's own fact is put to the user
-        # (below). The user's facts go by Kazma's names here, so "home_city"
-        # never stands beside the user's "lives_in" (``fact_names``, F4).
-        from kazma_core.memory.fact_names import users_names
-
-        clean["subject"], clean["predicate"] = users_names(clean.get("subject"), clean["predicate"])
-        # The value as the user wrote it, when the turn holds it (part C2).
-        clean["object"] = _users_spelling(clean["object"], user_text)
-        if people.shared:
-            # A shared space files by member (Spaces S1-11, N30): "I" is the
-            # speaker's entry, a member's name theirs; with no speaker known a
-            # first-person fact is not filed (the turn is still remembered).
-            filed = people.filed(clean["subject"], said_by)
-            filed_object = people.filed(clean["object"], said_by) if clean["object"] == "user" else clean["object"]
-            if not filed or not filed_object:
-                stats["rejected"] += 1
-                stats["no_speaker"] = stats.get("no_speaker", 0) + 1
-                continue
-            clean["subject"], clean["object"] = filed, filed_object
-            if is_member_entry(filed):
-                # A member's facts go by the names the user's do (fact_names).
-                _, clean["predicate"] = users_names("user", clean["predicate"])
-            _method = people.label(_method, filed, said_by)
-            if not_again and (filed, clean["predicate"], str(clean["object"]).casefold()) in not_again:
-                stats["rejected"] += 1
-                continue
+        # The user's facts go by Kazma's names, so "home_city" never stands
+        # beside the user's "lives_in" (``fact_names``, F4).
+        clean["subject"], named = users_names(clean.get("subject"), clean["predicate"])
+        _method = _filed(clean, named, _method, people=people, said_by=said_by, user_text=user_text, now=now,
+                         held=held, not_again=not_again, stats=stats)
+        if _method is None:
+            stats["rejected"] += 1
+            continue
         replaced = _take_replaces(clean, held, primary_conn, tenant_id)
+        if replaced and not clean.get("ended"):
+            _keep_the_day(replaced, clean, _method)
         if _said_not_me_before(primary_conn, clean, _method, tenant_id, stats):
             continue
         if _held_back_by_auto_store(clean, _method, cfg, stats):
@@ -1264,14 +1454,7 @@ def _apply_beliefs_to_v2(
             now=now,
             private=private,
             said_by=people.said_by(said_by),
-            # The start this turn names ("since 2019", "last month"), kept
-            # beside the fact; validity follows the order facts were said
-            # (W1), so a start never reorders them (framework audit F2). An
-            # event's day ("on": "I went to a pottery exhibition last
-            # Saturday") is kept the same way, marked as a day it happened
-            # (the memory plan's W4, dated event lines).
-            started=_started_on(clean.get("on") or clean.get("since"), now, _turn_zone()),
-            happened=bool(clean.get("on")),
+            **_day_written(clean, replaced),
         )
         if action["action"] != "noop":
             stats["applied"] += 1
@@ -1285,7 +1468,7 @@ def _apply_beliefs_to_v2(
         # fact they stated ("Moved to Rotterdam last month"), Kazma's reading
         # on the Memory page as the first of its kind ("We moved to
         # Rotterdam"), never a question.
-        if clean["subject"] == "user" and user_text and _method == "llm_inferred":
+        if clean["subject"] == "user" and user_text and _method == "llm_inferred" and not clean.get("event"):
             _put_to_the_user(primary_conn, action, clean, user_text=user_text, tenant_id=tenant_id,
                              session_id=session_id, turn=turn, now=now, stats=stats)
         if private:
