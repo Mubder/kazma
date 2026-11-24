@@ -974,24 +974,6 @@ def queue_due_work(*, now: float | None = None) -> dict[str, int]:
         conn.close()
 
 
-def requeue_weeks(conn: sqlite3.Connection, tenant_id: str, times: Iterable[float]) -> int:
-    """The weeks holding *times* summarized again for *tenant_id*: a chat
-    moved into the space (Spaces S2-12, ``memory.chat_move``) brought turns
-    to weeks the space may have done. A week with no record yet is queued
-    by the sweep as any week is. Commits. Returns the weeks put back."""
-    keys = sorted({_week_of(float(t))[0] for t in times if t})
-    if not keys:
-        return 0
-    marks = ",".join("?" for _ in keys)
-    n = conn.execute(
-        "UPDATE memory_summary_periods SET status = 'queued', queued_at = 0, attempts = 0 "
-        f"WHERE tenant_id = ? AND period_key IN ({marks})",  # nosec B608 - placeholders only
-        (tenant_id, *keys),
-    ).rowcount
-    conn.commit()
-    return int(n or 0)
-
-
 def _due_periods(conn: sqlite3.Connection, now: float, min_turns: int) -> list[tuple[str, float, float, str]]:
     """``(tenant, start, end, key)`` of every ended week with enough turns that
     this version has not done, oldest first. A queued week comes back after a

@@ -100,21 +100,24 @@ or a document of yours, can move from your own space into a shared space you
 are in, and back out:
 
 - **A chat:** the chat list's menu offers "Share with…" in your own space and
-  "Take out to my space" in a shared one. What Kazma remembers of the chat
-  follows it; it fills in over the next hour or so, and a fact you corrected
-  or ended stays corrected. Its reminders, scheduled tasks and held lessons
-  move with it. The Changes card's history of the chat, and its earlier Time
-  Travel steps, do not move. A chat from a chat app (Telegram, Discord,
-  Slack, WhatsApp) stays in its space. A swarm task the chat started that
-  finishes after the move delivers its result where the task was told to,
-  which may be the space the chat left.
+  "Take out to my space" in a shared one. Moving a chat moves the
+  conversation. What Kazma remembered from it stays where it was said, and
+  from now on it remembers what you say in the new space. Taking a chat out
+  of a shared space makes that space forget it: its memories, notes,
+  summaries and lessons. Your own space's memory is never changed by a move.
+  The chat's reminders and scheduled tasks, and the files Kazma shared in
+  it, move with it. Its Time Travel steps do not, and a file you attached
+  has to be attached again. A chat from a chat app (Telegram, Discord,
+  Slack, WhatsApp) stays in its space, and so does one with an answer cut
+  off half way until you continue or close it. A swarm task the chat started
+  that finishes after the move delivers its result where the task was told
+  to, which may be the space the chat left.
 - **A document:** the Documents page offers the same two moves.
 
 A chat someone else wrote in stays in the shared space: their words are the
 space's. Taking something out leaves the shared space a line saying who took
-it out and when, with its title. At most three chat moves a person a day, and
-one a chat a day. A move is always your own click: the agent never moves a
-chat or a document.
+it out and when, with its title. A move is always your own click: the agent
+never moves a chat or a document.
 
 ## What the admin can and cannot do
 

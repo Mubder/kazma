@@ -32,7 +32,9 @@ __all__ = [
     "INLINE_IMAGE_TYPES",
     "MAX_SHARED_BYTES",
     "SharedFile",
+    "copy_shared_files",
     "load_shared",
+    "remove_shared_files",
     "share_file",
     "web_chat_thread",
 ]
@@ -133,15 +135,19 @@ def share_file(path: Path, *, thread_id: str) -> SharedFile:
     root.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(src, root / file_id)
     shared = SharedFile(id=file_id, name=src.name, mime=mime, size=size, thread_id=thread_id)
+    _write_record(root, shared, thread_id=thread_id, created_at=time.time())
+    return shared
+
+
+def _write_record(root: Path, shared: SharedFile, *, thread_id: str, created_at: float) -> None:
     record = {
         "name": shared.name,
         "mime": shared.mime,
         "size": shared.size,
-        "thread_id": shared.thread_id,
-        "created_at": time.time(),
+        "thread_id": thread_id,
+        "created_at": created_at,
     }
-    (root / f"{file_id}.json").write_text(json.dumps(record), encoding="utf-8")
-    return shared
+    (root / f"{shared.id}.json").write_text(json.dumps(record), encoding="utf-8")
 
 
 def load_shared(file_id: str) -> tuple[SharedFile, Path] | None:
@@ -171,3 +177,63 @@ def load_shared(file_id: str) -> tuple[SharedFile, Path] | None:
         logger.warning("[chat-files] unreadable record for %s: %s", file_id, exc)
         return None
     return shared, blob
+
+
+# ── A chat moved between spaces (Spaces S2-12) ───────────────────────────
+
+_REFERENCE_RE = re.compile(r"/api/chat/files/(att_[0-9a-f]{32})")
+
+
+def _records_of(root: Path, thread_id: str) -> list[str]:
+    """The ids of the files shared in the chat *thread_id*, from their
+    records in *root*."""
+    found: list[str] = []
+    for meta in sorted(root.glob("att_*.json")) if root.is_dir() else []:
+        try:
+            record = json.loads(meta.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue  # no chat can open it either (load_shared says so)
+        if isinstance(record, dict) and str(record.get("thread_id") or "") == thread_id:
+            found.append(meta.stem)
+    return found
+
+
+def copy_shared_files(text: str, *, thread_id: str, from_space: str, to_space: str, by: str) -> int:
+    """Copy the files a chat's messages (*text*) link to, and those shared in
+    the chat *thread_id*, from *from_space*'s folder into *to_space*'s under
+    the same ids: the chat's links open in the space it moves to. A link
+    whose file is not there opened nothing before either. Returns how many.
+
+    The target's disk limit is asked for all of them first
+    (``SpaceOverLimit``). Run again, it copies them again."""
+    from kazma_core.spaces.scope import bind_scope
+    from kazma_core.spaces.space_limits import refuse_write_for_disk
+
+    with bind_scope(from_space, by):
+        ids = list(dict.fromkeys([*_REFERENCE_RE.findall(text or ""), *_records_of(_shared_dir(), thread_id)]))
+        files = [found for found in (load_shared(i) for i in ids) if found is not None]
+    if not files:
+        return 0
+    with bind_scope(to_space, by):
+        refuse_write_for_disk(sum(shared.size for shared, _blob in files))
+        root = _shared_dir()
+        root.mkdir(parents=True, exist_ok=True)
+        for shared, blob in files:
+            shutil.copyfile(blob, root / shared.id)
+            _write_record(root, shared, thread_id=thread_id, created_at=time.time())
+    return len(files)
+
+
+def remove_shared_files(thread_id: str, *, space: str, by: str) -> int:
+    """Remove the files shared in the chat *thread_id* from *space*'s folder:
+    the chat moved away with them (a file another chat shared stays), or its
+    move was put back. Returns how many."""
+    from kazma_core.spaces.scope import bind_scope
+
+    with bind_scope(space, by):
+        root = _shared_dir()
+        ids = _records_of(root, thread_id)
+        for file_id in ids:
+            (root / file_id).unlink(missing_ok=True)
+            (root / f"{file_id}.json").unlink(missing_ok=True)
+    return len(ids)

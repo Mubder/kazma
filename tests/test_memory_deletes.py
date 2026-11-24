@@ -49,11 +49,6 @@ DECLARED = {
         "page's Hygiene, memory_purge_empty_entities) lists -- only a plain concept shell "
         "(own name and hash as aliases, no metadata, grouping, merge row or redirect); "
         "its facts stay as history and the next fact naming it mints it again",
-    ("kazma-core/kazma_core/memory/chat_move.py", "_delete_moved_tombstones"):
-        "the tombstones a chat move left in the space the chat left (Spaces S2-12): only "
-        "rows the move itself emptied; the chat store holds the turns, its memory is "
-        "rebuilt where the chat went, and under the same ids a move back would write "
-        "nothing (the memory session's decision)",
     ("kazma-core/kazma_core/memory/eval_golden.py", "run_golden_eval"):
         "the golden eval's own private database; it refuses the live one",
 }

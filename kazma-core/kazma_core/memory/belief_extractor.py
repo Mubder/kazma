@@ -1077,10 +1077,8 @@ def _apply_beliefs_to_v2(
     a fact that says it ``replaces`` one about the same subject goes by its
     name and kind (:func:`_take_replaces`).
 
-    *not_again*: ``(subject, predicate, casefolded object)`` facts never filed
-    from this turn again, in any space: a member forgot them about themself
-    (N33), or the person corrected or ended them before their chat moved
-    (Spaces S2-12, ``memory.chat_move``).
+    *not_again*: ``(subject, predicate, casefolded object)`` facts a member
+    forgot about themself, never filed from this turn again (N33).
 
     *said_by* is the account whose turn this is (Spaces S1-11). In a shared
     space ``user`` is that member's own entry and a member's name is theirs
@@ -1177,11 +1175,9 @@ def _apply_beliefs_to_v2(
                 # A member's facts go by the names the user's do (fact_names).
                 _, clean["predicate"] = users_names("user", clean["predicate"])
             _method = people.label(_method, filed, said_by)
-        # In any space (a moved chat's turns name the values its person
-        # corrected or ended: Spaces S2-12, ``memory.chat_move``).
-        if not_again and (clean["subject"], clean["predicate"], str(clean["object"]).casefold()) in not_again:
-            stats["rejected"] += 1
-            continue
+            if not_again and (filed, clean["predicate"], str(clean["object"]).casefold()) in not_again:
+                stats["rejected"] += 1
+                continue
         replaced = _take_replaces(clean, held, primary_conn, tenant_id)
         if _said_not_me_before(primary_conn, clean, _method, tenant_id, stats):
             continue

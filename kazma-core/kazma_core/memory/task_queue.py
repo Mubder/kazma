@@ -62,8 +62,7 @@ _BACKOFF_MAX_SEC = 3600.0
 #: Task types that write what a user said into memory. They have slots of
 #: their own: a pg_dump or a restic check never holds up a user's turn
 #: (Memory audit M13). Everything else is maintenance.
-MEMORY_LANE = frozenset({"post_turn_memory", "micro_consolidation", "entity_merge", "topic_summary_rebuild",
-                         "chat_move_memory"})
+MEMORY_LANE = frozenset({"post_turn_memory", "micro_consolidation", "entity_merge", "topic_summary_rebuild"})
 
 
 #: A task that failed because Postgres is away is tried again after this, its
@@ -149,20 +148,12 @@ ROW_NAMED_TASKS: dict[str, tuple[str, str]] = {
 #: run for a person who left the space.
 _PERSON_TASKS = frozenset({"post_turn_memory", "micro_consolidation"})
 _PERSON_MODEL_TASKS = frozenset({"micro_consolidation"})
-#: The payload mark of a deep pass a chat move queued (``memory.chat_move``).
-REBUILD_CHAT_MOVE = "chat_move"
 #: How long a person's task waits before it is asked again.
 _PERSON_WAIT_S = 900.0
-#: The task a chat move queues once the chat switched (Spaces S2-12,
-#: ``kazma_ui.chat_move``): what memory holds of the chat follows it
-#: (``memory.chat_move.move_chat_memory``). It reads one space and writes
-#: another, so it is Kazma's own work, counted against no one.
-CHAT_MOVE_MEMORY = "chat_move_memory"
-#: * it is the install's own work: whole stores, no space's content -- or,
-#:   for :data:`CHAT_MOVE_MEMORY`, the two spaces a moved chat names.
+#: * it is the install's own work: whole stores, no space's content.
 INSTALL_TASKS = frozenset({
     "native_backup", "native_pg_backup", "native_pg_offsite", "restic_maintenance",
-    "connector_health", "universal_backup", CHAT_MOVE_MEMORY,
+    "connector_health", "universal_backup",
 })
 
 
@@ -212,12 +203,6 @@ def _task_binding(task_type: str, payload: Any) -> TaskBinding:
         return TaskBinding(install=f"the memory task {task_type}, which names no space")
     from kazma_core.spaces.identity import acting_account
 
-    if task_type in _PERSON_MODEL_TASKS and data.get("rebuild") == REBUILD_CHAT_MOVE:
-        # A moved chat's memory rebuilt in its new space (Spaces S2-12,
-        # memory.chat_move): Kazma's own work, counted against no one's
-        # daily limit (the memory session's decision). Its writes name
-        # their tenant; a call that asks for "the" space is refused.
-        return TaskBinding(install="the rebuild of a moved chat's memory")
     if task_type in _PERSON_TASKS:
         person = _person_of(task_type, data)
         if person:

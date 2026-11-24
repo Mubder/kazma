@@ -1,29 +1,29 @@
 # CHANGELOG
 
-## Spaces: moving one's own chat between one's own space and a shared one (2026-11-23)
+## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 
 - Once Spaces is on, a chat you started can move from your own space into a
   shared space you are in ("Share with…" in the chat list's menu), and back
   ("Take out to my space"). The dialog says how many of your questions the
   chat holds before anything moves.
+- Moving a chat moves the conversation. What Kazma remembered from it stays
+  where it was said, and from now on it remembers what you say in the new
+  space. Taking a chat out of a shared space makes that space forget it.
 - A chat others wrote in stays in the shared space: their words are the
   space's. Kazma offers a new private chat in your own space instead.
-- After a move the chat is in exactly one space: its messages, its history,
-  its drafts and plan, its reminders. Taking a chat out leaves the shared
-  space a line with who took it out, when, and its title, never its words.
-- What Kazma remembers of the chat follows it: rebuilt where it went, with
-  your own decisions, Kazma's notes and your "Not me" answers carried as they
-  were, and what you kept out of memory kept out there too. It fills in over
-  the next hour or so. The Changes card's history of the chat does not move.
-- At most three moves a person a day, and one a chat a day. A move cut off by
-  a restart is put back or finished at the next start.
-- Reviewed and fixed the same day: a fact you corrected or ended stays so
-  after the move; a fact another chat of yours also states stays where it
-  was; a stop half way through a move loses nothing; a chat from a chat app
-  is not offered for moving; anyone else's open window on a chat you took
-  out stops showing it; a move is refused while an approval waits, or when
-  Kazma cannot tell whether one does; the chat's earlier Time Travel steps
-  do not move, and its reminders, scheduled tasks and held lessons do.
+- After a move the chat is in exactly one space: its messages, its drafts and
+  plan, its reminders and scheduled tasks, and the files Kazma shared in it.
+  What the chat recalled does not go with it, and neither do its Time Travel
+  steps; a file you attached has to be attached again. Taking a chat out
+  leaves the shared space a line with who took it out, when, and its title,
+  never its words.
+- A move waits while Kazma is answering, while an approval waits (or Kazma
+  cannot tell whether one does), and while an answer was cut off half way.
+  Anyone else's open window on a chat you took out stops showing it. A chat
+  from a chat app is not offered for moving.
+- A move cut off by a restart, or one the database interrupted, is put back
+  or finished: at the next start, within the next quarter of an hour, or when
+  the chat is moved again.
 
 ## Spaces: stronger sign-in, and no open switch once two people have accounts (2026-11-23)
 

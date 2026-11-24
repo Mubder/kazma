@@ -2,22 +2,21 @@
 
 Reached by the sidebar. In the person's own space their chat's menu offers
 "Share with…" each shared space they are in; the dialog says how much of
-theirs the chat holds, what sharing means, and that the Changes card's
-history does not move and memory fills in over the next hour, before it
-moves anything. Then the chat is gone from their own list and in the shared
+theirs the chat holds, what sharing means, and the rule -- the conversation
+moves, what Kazma remembered stays where it was said -- before it moves
+anything. Then the chat is gone from their own list and in the shared
 space's, its thread recorded there. In the shared space the same chat
 offers "Take out to my space", said first too, and afterwards the shared
 space lists the line it keeps: the title, never a word of the chat.
 
-The routes, the chat store, the thread records and the checkpoints are the
-real app's; memory's part is recorded only (``tests/test_chat_move_memory.py``).
+The routes, the chat store, the thread records, the checkpoints and the forget
+ledger are the real app's (memory: ``tests/test_chat_move_memory.py``).
 """
 
 from __future__ import annotations
 
 import os
 import secrets
-from contextlib import closing
 
 import pytest
 
@@ -56,30 +55,18 @@ def _open_menu(pg, session_id: str):
     return pg.locator(f'.session-menu[data-menu="{session_id}"]')
 
 
-def _clear_bounds() -> None:
-    """The daily bound (one move a chat a day) is ``tests/test_chat_moves.py``'s."""
-    from kazma_core.spaces import chat_moves
-
-    with closing(chat_moves._connection()) as conn:
-        conn.execute("DELETE FROM chat_moves_done")
-
-
 @pytest.mark.parametrize("lang", ["en", "ar"])
 def test_share_and_take_out_a_chat_from_the_chat_list(lang):
-    from kazma_core.spaces import people, scope, threads
+    from kazma_core.spaces import chat_moves, people, scope, threads
     from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID
     from playwright.sync_api import sync_playwright
 
-    followed: list[dict] = []
-    with unified_turn_server(Script(steps=[], final="ok")) as h, sync_playwright() as p, \
-            pytest.MonkeyPatch.context() as patch:
-        patch.setattr("kazma_ui.chat_move._memory_follows",
-                      lambda entry: followed.append(dict(entry)) or {"ok": True})
+    with unified_turn_server(Script(steps=[], final="ok")) as h, sync_playwright() as p:
         os.environ["KAZMA_SECRET"] = "chat-moves-test-secret-" + "x" * 24
         scope.set_enforced(True)
+        assert chat_moves._SETTLER, "the app's start gives the maintenance sweep what settles a move"
         family = people.create_shared_space("Family", by=OWNER_ACCOUNT_ID)["id"]
         session_id, thread_id = _chat(OWNER_SPACE_ID, OWNER_ACCOUNT_ID)
-        _clear_bounds()
         browser = p.chromium.launch()
         try:
             context = browser.new_context()
@@ -106,15 +93,14 @@ def test_share_and_take_out_a_chat_from_the_chat_list(lang):
             assert _plain(_t("chat.move_size.one", lang)) in said, said
             assert _plain(_t("chat.move_share_body", lang)) in said
             assert _plain(_t("chat.move_memory_note", lang)) in said
+            assert _plain(_t("chat.move_also_note", lang)) in said
             with pg.expect_response(lambda r: r.url.endswith("/move") and r.request.method == "POST") as answer:
                 _modal_action(pg, _t("chat.move_share_ok", lang))
             assert answer.value.status == 200, answer.value.text()
             pg.locator(f'.session-item[data-session-id="{session_id}"]').wait_for(state="detached", timeout=20000)
             assert threads.record_of(thread_id).space_id == family
-            assert [f["target"] for f in followed] == [family]
 
             # ── In the shared space: Take out to my space ────────────────
-            _clear_bounds()
             pg.goto(f"{h.base}/documents?space={family}", wait_until="domcontentloaded")
             pg.wait_for_function("() => !!window.kazmaSpace && window.kazmaSpace.spaces.length > 1", timeout=20000)
             _soft_nav(pg, "/chat")
@@ -127,6 +113,7 @@ def test_share_and_take_out_a_chat_from_the_chat_list(lang):
             said = _plain(dialog.inner_text())
             assert _plain(_t("chat.move_take_out_title", lang)) in said
             assert _plain(_t("chat.move_take_out_body", lang)) in said
+            assert _plain(_t("chat.move_memory_note", lang)) in said
             with pg.expect_response(lambda r: r.url.endswith("/move") and r.request.method == "POST") as answer:
                 _modal_action(pg, _t("chat.move_take_out_ok", lang))
             assert answer.value.status == 200, answer.value.text()

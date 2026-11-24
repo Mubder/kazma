@@ -1,12 +1,23 @@
 """Moving one's own chat between one's own space and a shared one (Spaces
-S2-12): the rules, the journal of moves under way, the daily bounds, the line
-a shared space keeps, and the rows that name the chat beside a space.
+S2-12): the rules, the journal of moves under way, what of a chat's state
+moves, the line a shared space keeps, and the rows that name the chat beside
+a space.
 
 "Private means in my personal space": a person moves their own chat from
 their personal space into a shared space they are in ("Share with..."), or
-takes it back out ("Take out"). Decided (the plan's S2-12 row, the memory
-session's answer of 2026-11-23):
+takes it back out ("Take out"). Decided (the plan's S2-12 row, the owner's
+rule of 2026-11-24):
 
+* **moving a chat moves the conversation, never memory.** What Kazma
+  remembered from it stays where it was said, and from now on it remembers
+  what is said in the new space (``memory.forget.keep_moved_turns_out``: the
+  turns the chat already holds are kept out of the target's memory). Taking
+  a chat out of a shared space makes that space forget it
+  (``memory.forget.forget_chat``). Personal memory is never touched by a
+  move in either direction;
+* so what the chat's state holds of memory does not move with it
+  (:func:`moved_state`: the notes its turns recalled, "About me", what the
+  memory tools answered);
 * the spaces' rule is the document move's (``spaces.moves.move_rule``):
   Spaces enforced, a member of both spaces, one the person's own personal
   space and the other a shared one. The chat is the person's own: they
@@ -17,22 +28,19 @@ session's answer of 2026-11-23):
 * taking a chat out leaves the shared space a line -- who took it out, when,
   the title it had -- which is not a chat and which only the move writes
   (:func:`record_taken_out`, :func:`taken_out_chats`);
-* moves are bounded (the rebuild of a chat's memory is Kazma's own work, about
-  4K tokens a turn): at most :data:`MOVES_PER_DAY` a person and one a chat in
-  :data:`DAY_S` (:func:`bound_refusal`), beside the route's rate limit;
 * a moved chat is in exactly one space after the move, in every store. Its
   thread id stays: what is kept by thread alone follows the thread's record,
   which the move changes in one statement (``threads.move_thread``). What
   carries a space column beside the thread is moved by
   :func:`move_thread_rows` (:data:`MOVED_COLUMNS`); what stays with the
-  space it was made in, and why, is :data:`STAYS`; the chat store, the
-  checkpoints and memory are moved by their own code (``kazma_ui.chat_move``,
-  ``memory.chat_move``).
+  space it was made in, and why, is :data:`STAYS`; the chat store and the
+  checkpoints are moved by their own code (``kazma_ui.chat_move``).
 
 Every move is journaled before it starts (:data:`MOVES_KEY`, runtime state)
-with the stage it reached, and removed when it ends; one a stop cut off is
-settled at the next start (``kazma_ui.chat_move.settle_chat_moves``). Ids
-only, never a word of the chat.
+with the stage it reached, and removed when it ends; one that did not end is
+settled at the next start and on the maintenance cadence
+(``kazma_ui.chat_move.settle_chat_moves``, which the app registers with
+:func:`register_settler`). Ids only, never a word of the chat.
 
 Blocking (settings, SQLite, the identity store): call it off the event loop.
 """
@@ -41,8 +49,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import closing
 from datetime import UTC, datetime
 from typing import Any
@@ -51,24 +58,24 @@ from kazma_core.spaces import moves
 from kazma_core.spaces.scope import OWNER_SPACE_ID
 
 __all__ = [
-    "DAY_S",
+    "MEMORY_LEFT",
     "MOVED_BY_THEIR_CODE",
     "MOVED_COLUMNS",
     "MOVES_KEY",
-    "MOVES_PER_DAY",
     "STAYS",
     "ChatMoveRefused",
-    "bound_refusal",
-    "claim_move",
     "is_chat_app_chat",
+    "is_memory_tool",
     "move_refusal",
     "move_thread_rows",
+    "moved_state",
     "moves_under_way",
     "others_wrote",
     "record_move",
     "record_taken_out",
-    "release_move",
+    "register_settler",
     "settle_move",
+    "settle_unfinished",
     "taken_out_chats",
 ]
 
@@ -76,15 +83,9 @@ logger = logging.getLogger(__name__)
 
 #: The chat moves under way, by attempt: ``thread``, ``session``, ``source``,
 #: ``target``, ``by``, ``taken_out``, ``title``, ``stage`` (``copying``,
-#: ``switched``), ``memory``, ``line``, ``at``. Ids, the title the line will
-#: keep, never a word of the chat.
+#: ``switched``), each step of the finish done (``done``), ``at``. Ids, the
+#: title the line will keep, never a word of the chat.
 MOVES_KEY = "system.chats.moves"
-
-#: How many chats one person may move in :data:`DAY_S` (the memory session's
-#: decision: a chat's memory is rebuilt where it goes).
-MOVES_PER_DAY = 3
-#: The window the bounds count in, and how often one chat may move.
-DAY_S = 86400.0
 
 #: Every table that names a chat's thread beside a space column of its own:
 #: the move gives the thread's rows the target's space. ``(store, table) ->
@@ -94,7 +95,8 @@ MOVED_COLUMNS: dict[tuple[str, str], str] = {
     ("agent_artifacts.db", "agent_artifacts"): "tenant_id",
     # The chat's plan (agent.task_ledger).
     ("task_ledgers.db", "task_ledgers"): "tenant_id",
-    # The chat's held lessons and confirmations (safety.commitment).
+    # The chat's held confirmations (safety.commitment). A held lesson names
+    # no chat, so it stays where it was learned.
     ("memory_ops.db", "commitments"): "tenant_id",
     # The chat's decided approval gates (the move refuses a pending one).
     ("hitl_gates.db", "hitl_gates"): "tenant_id",
@@ -116,6 +118,9 @@ STAYS: dict[tuple[str, str], str] = {
     ("x_replies.db", "x_thread_permissions"): "a conversation on X the reply bot answers",
     ("activity.db", "activity"): "what happened in the space, by whom: the space's own record",
     ("thread_scopes.db", "chat_taken_out"): "the line the shared space keeps when a chat is taken out",
+    ("memory_state.db", "episodes"):
+        "what Kazma remembered from the chat stays where it was said; a shared space a chat is "
+        "taken out of forgets it (memory.forget.forget_chat)",
 }
 
 #: Tables that name a thread beside a space column and follow the chat by
@@ -130,8 +135,6 @@ MOVED_BY_THEIR_CODE: dict[tuple[str, str], str] = {
         "a session the database refused, kept until its next accepted save: the session manager "
         "writes it with the row it copies and discards it with the row it removes (kazma_ui.chat_move)",
     ("chat_sessions_test_*.db", "spool"): "the spool's file in test mode, moved as above",
-    ("memory_state.db", "episodes"):
-        "a chat's memories: rebuilt in the space it moved to, retired where it was (memory.chat_move)",
 }
 
 _SCHEMA = """\
@@ -143,15 +146,6 @@ CREATE TABLE IF NOT EXISTS chat_taken_out (
     taken_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chat_taken_out_space ON chat_taken_out(space_id, taken_at);
-CREATE TABLE IF NOT EXISTS chat_moves_done (
-    thread_id  TEXT NOT NULL,
-    moved_by   TEXT NOT NULL,
-    from_space TEXT NOT NULL,
-    to_space   TEXT NOT NULL,
-    moved_at   REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_chat_moves_done_by ON chat_moves_done(moved_by, moved_at);
-CREATE INDEX IF NOT EXISTS idx_chat_moves_done_thread ON chat_moves_done(thread_id, moved_at);
 """
 
 _TITLE_MAX = 200
@@ -245,7 +239,94 @@ def settle_move(attempt: str) -> None:
     get_config_store().atomic_update(MOVES_KEY, update, category="system")
 
 
-# ── This store's two tables ──────────────────────────────────────────────
+# ── A move that did not end: settled at start and on the cadence ─────────
+
+#: What settles the moves under way (``kazma_ui.chat_move``, registered by
+#: the app at start): kazma-core may not import the web UI.
+_SETTLER: list[Callable[[], None]] = []
+
+
+def register_settler(settle: Callable[[], None] | None) -> None:
+    """Register what settles the moves under way: called by the maintenance
+    sweep "chat moves", off the event loop. None takes it away (shutdown)."""
+    _SETTLER[:] = [settle] if settle is not None else []
+
+
+def settle_unfinished() -> None:
+    """The maintenance sweep "chat moves": a move its own request could not
+    finish is finished, or put back, without waiting for a restart. Nothing
+    to do with no move recorded."""
+    if not moves_under_way():
+        return
+    if not _SETTLER:
+        logger.info("[spaces] a chat move waits: the app that settles it is not running")
+        return
+    _SETTLER[0]()
+
+
+# ── What of a chat's state moves with it ─────────────────────────────────
+
+#: What a memory tool's answer reads as once its chat moved.
+MEMORY_LEFT = "[Left where it was said: what memory answered here stayed in the space this chat moved from.]"
+
+#: State that is about the space a turn ran in, or the turn itself: the last
+#: turn's memory hand-off and Time Travel step. Never moved.
+_LEFT_CHANNELS = ("_post_turn_memory", "memory_explain", "snapshot_id", "snapshot_iteration", "workspace_root")
+
+
+def is_memory_tool(name: Any) -> bool:
+    """Whether the tool *name* answers from memory (the ``memory_*`` tools,
+    ``agent.tool_builtins.memory``)."""
+    return str(name or "").startswith("memory_")
+
+
+def moved_state(values: Mapping[str, Any], *, to_space: str, workspace_root: str = "") -> dict[str, Any]:
+    """A chat's checkpointed state as it moves into *to_space*: the
+    conversation, without what the space it leaves remembered -- the turns'
+    notes (``kazma_core.turn_notes``: what was recalled, the past chats, the
+    Knowledge, the lessons, the environment), the identity notes ("About me"
+    among them; a turn adds its own again), and what the memory tools
+    answered (:data:`MEMORY_LEFT`). *workspace_root* is the target's."""
+    from kazma_core.turn_notes import IDENTITY_OPENINGS, opens_with, strip_turn_notes
+
+    out = {k: v for k, v in values.items() if k not in _LEFT_CHANNELS}
+    if isinstance(values.get("messages"), list):
+        kept = [m for m in strip_turn_notes(values["messages"]) if not opens_with(m, *IDENTITY_OPENINGS)]
+        out["messages"] = _without_memory_answers(kept)
+    # What the last turn's tools answered, kept for that turn alone.
+    for channel, empty in (("tool_results", {}), ("tool_calls_done", []), ("tool_calls_pending", []),
+                           ("active_attachments", [])):
+        if channel in values:
+            out[channel] = empty
+    if "tenant_id" in values:
+        out["tenant_id"] = to_space
+    if workspace_root and "workspace_root" in values:
+        out["workspace_root"] = workspace_root
+    return out
+
+
+def _without_memory_answers(messages: list[Any]) -> list[Any]:
+    """*messages* with every memory tool's answer replaced (the call and its
+    answer both stay: a provider refuses one without the other)."""
+    named: dict[str, str] = {}
+    out: list[Any] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            out.append(message)
+            continue
+        for call in message.get("tool_calls") or []:
+            if isinstance(call, dict):
+                fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+                named[str(call.get("id") or "")] = str(fn.get("name") or call.get("name") or "")
+        if message.get("role") == "tool" and is_memory_tool(
+            message.get("name") or named.get(str(message.get("tool_call_id") or ""))
+        ):
+            message = {**message, "content": MEMORY_LEFT}
+        out.append(message)
+    return out
+
+
+# ── The line a shared space keeps ────────────────────────────────────────
 
 
 def _connection() -> sqlite3.Connection:
@@ -258,81 +339,34 @@ def _connection() -> sqlite3.Connection:
     return conn
 
 
-def _bound_refusal_in(conn: sqlite3.Connection, thread_id: str, by: str, since: float) -> ChatMoveRefused | None:
-    mine = int(conn.execute("SELECT COUNT(*) FROM chat_moves_done WHERE moved_by = ? AND moved_at > ?",
-                            (by, since)).fetchone()[0])
-    this = conn.execute("SELECT 1 FROM chat_moves_done WHERE thread_id = ? AND moved_at > ? LIMIT 1",
-                        (thread_id, since)).fetchone()
-    if this is not None:
-        return ChatMoveRefused("moved_today", 429, "This chat was moved in the last day. Try again tomorrow.")
-    if mine >= MOVES_PER_DAY:
-        return ChatMoveRefused("moves_today", 429,
-                               f"You have moved {MOVES_PER_DAY} chats in the last day. Try again tomorrow.")
-    return None
-
-
-def bound_refusal(thread_id: str, by: str, *, now: float | None = None) -> ChatMoveRefused | None:
-    """Why *by* may not move the chat *thread_id* now, by the daily bounds:
-    :data:`MOVES_PER_DAY` moves of theirs in :data:`DAY_S` (``moves_today``),
-    or this chat moved in that window (``moved_today``). None when they may.
-    What the dialog shows; the move itself claims its place
-    (:func:`claim_move`)."""
-    since = (time.time() if now is None else float(now)) - DAY_S
-    with closing(_connection()) as conn:
-        return _bound_refusal_in(conn, thread_id, by, since)
-
-
-def claim_move(*, thread_id: str, by: str, from_space: str, to_space: str) -> float:
-    """Count a move toward the daily bounds, checked and recorded in one
-    write transaction (the chat move review's M4: two moves at once both
-    passed a check made before either was recorded). Raises the bound's
-    :class:`ChatMoveRefused`; returns the claim's time, which
-    :func:`release_move` takes back when the move is put back."""
-    now = time.time()
+def record_taken_out(*, space_id: str, thread_id: str, title: str, by: str, since: float = 0.0) -> None:
+    """The line the shared space *space_id* keeps for a chat its maker took
+    out: written only by the move (``kazma_ui.chat_move``). The newest
+    :data:`_KEPT_PER_SPACE` are kept. A line of the chat written since
+    *since* (when its move began) is this one, written already."""
+    begun = datetime.fromtimestamp(float(since), UTC).isoformat(timespec="seconds") if since else ""
     with closing(_connection()) as conn:
         conn.execute("BEGIN IMMEDIATE")
         committed = False
         try:
-            refused = _bound_refusal_in(conn, thread_id, by, now - DAY_S)
-            if refused is not None:
-                raise refused
-            conn.execute(
-                "INSERT INTO chat_moves_done (thread_id, moved_by, from_space, to_space, moved_at) "
-                "VALUES (?, ?, ?, ?, ?)", (thread_id, by, from_space, to_space, now))
-            conn.execute("DELETE FROM chat_moves_done WHERE moved_at < ?", (now - 2 * DAY_S,))
+            written = begun and conn.execute(
+                "SELECT 1 FROM chat_taken_out WHERE space_id = ? AND thread_id = ? AND taken_at >= ? LIMIT 1",
+                (space_id, thread_id, begun)).fetchone()
+            if not written:
+                conn.execute(
+                    "INSERT INTO chat_taken_out (space_id, thread_id, title, taken_by, taken_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (space_id, thread_id, str(title or "")[:_TITLE_MAX], by,
+                     datetime.now(UTC).isoformat(timespec="seconds")))
+                conn.execute(
+                    "DELETE FROM chat_taken_out WHERE space_id = ? AND rowid NOT IN ("
+                    "SELECT rowid FROM chat_taken_out WHERE space_id = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?)",
+                    (space_id, space_id, _KEPT_PER_SPACE))
             conn.execute("COMMIT")
             committed = True
         finally:
             if not committed:
                 conn.execute("ROLLBACK")
-    return now
-
-
-def release_move(*, thread_id: str, by: str, at: float) -> None:
-    """A claimed move that was put back (the chat stayed where it was): it
-    no longer counts toward the bounds."""
-    with closing(_connection()) as conn:
-        conn.execute("DELETE FROM chat_moves_done WHERE thread_id = ? AND moved_by = ? AND moved_at = ?",
-                     (thread_id, by, float(at)))
-
-
-def record_taken_out(*, space_id: str, thread_id: str, title: str, by: str) -> None:
-    """The line the shared space *space_id* keeps for a chat its maker took
-    out: written only by the move (``kazma_ui.chat_move``). The newest
-    :data:`_KEPT_PER_SPACE` are kept."""
-    with closing(_connection()) as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        conn.execute(
-            "INSERT INTO chat_taken_out (space_id, thread_id, title, taken_by, taken_at) VALUES (?, ?, ?, ?, ?)",
-            (space_id, thread_id, str(title or "")[:_TITLE_MAX], by,
-             datetime.now(UTC).isoformat(timespec="seconds")),
-        )
-        conn.execute(
-            "DELETE FROM chat_taken_out WHERE space_id = ? AND rowid NOT IN ("
-            "SELECT rowid FROM chat_taken_out WHERE space_id = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?)",
-            (space_id, space_id, _KEPT_PER_SPACE),
-        )
-        conn.execute("COMMIT")
 
 
 def taken_out_chats(space_id: str, *, limit: int = 50) -> list[dict[str, str]]:

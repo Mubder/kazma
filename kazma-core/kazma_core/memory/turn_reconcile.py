@@ -142,15 +142,20 @@ def _in_memory(conn: sqlite3.Connection, tenant: str, keys: list[str]) -> tuple[
 
 
 def _reconcile_session(
-    conn: sqlite3.Connection, row: dict[str, Any], settled_before: float, *, source: str = "turn_reconcile",
+    conn: sqlite3.Connection, row: dict[str, Any], settled_before: float
 ) -> tuple[int, int]:
-    """Write the session's missing settled turns. Returns (written, still young).
-    *source*: a moved chat's rebuild writes its own (``memory.chat_move``),
-    whose facts the move extracts itself."""
+    """Write the session's missing settled turns. Returns (written, still young)."""
     from kazma_core.memory.dual_write import mirror_episode
 
     thread = row["thread_id"] or row["session_id"]
     keys = list(dict.fromkeys(k for k in (thread, row["session_id"]) if k))
+    from kazma_core.memory.forget import moved_elsewhere
+
+    # A row of a chat its person moved away (Spaces S2-12): nothing of it is
+    # this space's to write. Raises when where it is cannot be read, so the
+    # cursor stays before it (a failed write below would be passed over).
+    if moved_elsewhere(keys, row["tenant_id"]):
+        return 0, 0
     texts, stubs = _in_memory(conn, row["tenant_id"], keys)
     fallback = _epoch(row["updated_at"]) or _epoch(row["created_at"])
     written = young = 0
@@ -179,7 +184,7 @@ def _reconcile_session(
             assistant_text=answer,
             tenant_id=row["tenant_id"],
             tier="episodic",
-            source=source,
+            source="turn_reconcile",
             created_at=at,
             # Its author, as a live turn keeps it (Spaces S1-11): the fact
             # pass below reads it back; none in a shared space files no

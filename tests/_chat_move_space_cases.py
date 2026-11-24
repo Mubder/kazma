@@ -5,8 +5,8 @@ personal space of their own beside the matrix's two shared spaces; each
 person has a chat of their own space, holding a mark. A moves A's own chat;
 B's chat, and the line B's space keeps, never move or show for A: named in
 A's own space it is no chat, and naming B's space is refused by the
-membership check every request passes. Memory's part of the move is its own
-file's (``tests/test_chat_move_memory.py``): here it is recorded only.
+membership check every request passes. What memory does with a moved chat is
+its own file's (``tests/test_chat_move_memory.py``).
 
 Nothing here builds the app or decides the vault while pytest imports it.
 """
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Iterator
-from contextlib import closing, contextmanager
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -77,12 +77,7 @@ def moves(matrix: Matrix) -> Iterator[SimpleNamespace]:
         patch.setattr(threads, "_spaces", {})
         patch.setattr(auth, "get_request_principal",
                       lambda request: people.get(request.headers.get("x-matrix-person", "")))
-        followed: list[dict[str, Any]] = []
-        patch.setattr("kazma_ui.chat_move._memory_follows",
-                      lambda entry: followed.append(dict(entry)) or {"ok": True})
         identity.update_registry(personal)
-        with closing(chat_moves._connection()) as conn:
-            conn.execute("DELETE FROM chat_moves_done")
         a_chat = _chat(OWN_A, matrix.account_a, marks.a)
         b_chat = _chat(Matrix.SPACE_B, matrix.account_b, marks.b)
         chat_moves.record_taken_out(space_id=Matrix.SPACE_B, thread_id=b_chat[1], title=f"line {marks.b}",
@@ -92,7 +87,7 @@ def moves(matrix: Matrix) -> Iterator[SimpleNamespace]:
         app.middleware("http")(auth.create_tenant_middleware())
         app.include_router(create_chat_move_router(graph_getter=NoCardGraph))
         with TestClient(app) as client:
-            yield SimpleNamespace(client=client, marks=marks, a_chat=a_chat, b_chat=b_chat, followed=followed)
+            yield SimpleNamespace(client=client, marks=marks, a_chat=a_chat, b_chat=b_chat)
 
 
 def _as(who: str, space: str) -> dict[str, str]:
@@ -141,7 +136,6 @@ def move_chat(matrix: Matrix) -> None:
                               json={"to_space": Matrix.SPACE_A})
         assert moved.status_code == 200, moved.text
         assert threads.record_of(w.a_chat[1]).space_id == Matrix.SPACE_A
-        assert [f["target"] for f in w.followed] == [Matrix.SPACE_A]
         _b_chat_stays(matrix, w)
 
 

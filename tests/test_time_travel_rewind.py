@@ -409,6 +409,10 @@ NOT_UNDER_THE_LOCK = {
     "kazma-gateway/kazma_gateway/stores/checkpoint.py:adelete_all_threads":
         "the admin's clear-all on a table several spaces share: each thread of the bound space "
         "goes, as the DELETE of the whole table beside it does for one space, which holds no lock either",
+    "kazma-gateway/kazma_gateway/stores/checkpoint.py:amove_state":
+        "called only by kazma_ui.chat_move, under the lock (the last gate)",
+    "kazma-gateway/kazma_gateway/stores/checkpoint.py:adelete_thread_in":
+        "called only by kazma_ui.chat_move, under the lock (the last gate)",
 }
 
 _WRITERS = ("aupdate_state", "adelete_thread")
@@ -504,6 +508,45 @@ def test_a_rewriter_without_the_lock_is_caught():
         "        await graph.checkpointer.adelete_thread(thread_id)\n"
     )
     assert unlocked_writers({"x.py": old}) == ["x.py:_reset", "x.py:restore_snapshot"]
+
+
+#: What of a chat's move (Spaces S2-12) writes its checkpoints, and the parts
+#: of the move that run inside a holder of the thread's lock.
+_MOVE_WRITERS = ("amove_state", "adelete_thread_in")
+_MOVE_PARTS = ("_copy", "_settle_failure", "_finish", "_settle_one", "_settle_thread")
+
+
+def unlocked_move_calls(text: str) -> list[str]:
+    """Functions of ``kazma_ui/chat_move.py`` that run a part of a move
+    outside the thread's lock (and are no part of one themselves)."""
+    tree = ast.parse(text)
+    parents = {id(c): n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
+    out = set()
+    for call in ast.walk(tree):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id in _MOVE_PARTS):
+            continue
+        owner: Any = parents.get(id(call))
+        while owner is not None and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            owner = parents.get(id(owner))
+        if owner is not None and owner.name not in _MOVE_PARTS and not _under_lock(owner, call, parents):
+            out.add(owner.name)
+    return sorted(out)
+
+
+def test_only_the_chat_move_moves_a_threads_state_and_under_the_lock():
+    callers = []
+    for pkg in ("kazma-core/kazma_core", "kazma-ui/kazma_ui", "kazma-gateway/kazma_gateway",
+                "kazma-cli/kazma_cli", "kazma-tui/kazma_tui"):
+        for p in (REPO / pkg).rglob("*.py"):
+            text = p.read_text(encoding="utf-8", errors="replace")
+            if any(f".{w}(" in text for w in _MOVE_WRITERS):
+                callers.append(p.relative_to(REPO).as_posix())
+    assert callers == ["kazma-ui/kazma_ui/chat_move.py"]
+    move = (REPO / callers[0]).read_text(encoding="utf-8")
+    assert unlocked_move_calls(move) == []
+    # Negative control: a settling that takes no lock.
+    planted = "async def settle(a, e, c):\n    await _settle_one(a, e, c)\n"
+    assert unlocked_move_calls(move + planted) == ["settle"]
 
 
 def callers_of_apply(sources: dict[str, str]) -> list[str]:

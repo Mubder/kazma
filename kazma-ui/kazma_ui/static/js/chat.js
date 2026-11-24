@@ -6945,8 +6945,8 @@
     turn_running: ['move_err_turn_running', 'Kazma is answering in this chat. Move it when it is done.'],
     approval_pending: ['move_err_approval', 'This chat waits for an approval. Answer it, then move the chat.'],
     move_in_progress: ['move_err_in_progress', 'This chat is already being moved.'],
-    moves_today: ['move_err_moves_today', 'You have moved three chats in the last day. Try again tomorrow.'],
-    moved_today: ['move_err_moved_today', 'This chat was moved in the last day. Try again tomorrow.'],
+    turn_unfinished: ['move_err_unfinished', 'An answer in this chat was cut off half way. Continue or close it, then move the chat.'],
+    space_limit: ['move_err_space_limit', "The new space has no room for this chat's files."],
     not_your_chat: ['move_err_not_your_chat', 'Only the person who started a chat moves it.'],
     chat_app_chat: ['move_err_chat_app', "This chat is a chat app's, so it stays in its space."],
     approval_unknown: ['move_err_approval_unknown', 'Kazma could not check whether this chat waits for an approval. Try again in a moment.'],
@@ -6976,20 +6976,16 @@
       return;
     }
     if (takeOut && size && size.others_wrote) return _offerPrivateChat();
-    if (size && size.bounded) {
-      KS.toast(_moveRefusalText(size.bounded), 'error', 4000);
-      return;
-    }
     var turns = tiCount('move_size', (size && size.turns) || 0, 'This chat holds 1 question of yours.',
                         'This chat holds {n} questions of yours.');
     var ok = await window.kazmaConfirm({
       title: takeOut ? ti('move_take_out_title', 'Take this chat out to your space?')
                      : ti('move_share_title', 'Share this chat with the space?'),
       message: turns + ' ' + (takeOut
-        ? ti('move_take_out_body', 'It moves to your own space, with what Kazma remembers of it. This space keeps a line saying you took it out, with its title.')
-        : ti('move_share_body', 'It moves to the shared space, with what Kazma remembers of it: everyone in that space can read it.')) +
-        ' ' + ti('move_memory_note', "What the Changes card recorded about it, and its Undo, do not move. Kazma's memory of it fills in over the next hour or so.") +
-        ' ' + ti('move_also_note', 'Its reminders, scheduled tasks and held lessons move with it; its earlier Time Travel steps do not.'),
+        ? ti('move_take_out_body', 'It moves to your own space. This space keeps a line saying you took it out, with its title.')
+        : ti('move_share_body', 'It moves to the shared space: everyone in that space can read it.')) +
+        ' ' + ti('move_memory_note', 'Moving a chat moves the conversation. What Kazma remembered from it stays where it was said, and from now on it remembers what you say in the new space. Taking a chat out of a shared space makes that space forget it.') +
+        ' ' + ti('move_also_note', 'Its reminders and scheduled tasks move with it, and so do the files Kazma shared in it. Its earlier Time Travel steps do not, and Kazma can no longer open files you attached to it: attach them again.'),
       confirmText: takeOut ? ti('move_take_out_ok', 'Take out') : ti('move_share_ok', 'Share'),
     });
     if (!ok) return;

@@ -15839,89 +15839,85 @@ an install with one account behaves as before.
     leaves its earlier versions behind. Gate:
     `tests/test_document_move_safety.py` (piece 5's move, interleaved, as
     the control: in neither space).
-  - **Moving one's own chat (piece 6, 2026-11-23).** The document's rule
-    (`spaces.moves.move_rule`), and the chat is the person's own (its
-    thread's record names them as opener; a chat from before Spaces is the
-    owner's). A chat other members wrote in is never taken out of a shared
-    space (`chat_moves.others_wrote`; the page offers "New private chat").
-    The move (`kazma_ui/chat_move.py`, `move_chat`, under the thread's
-    mutation lock) is refused while a turn runs or a card waits (409), at
-    most `chat_moves.MOVES_PER_DAY` a person and one a chat a day, and a
-    rate-limit bucket (`chat_move`). It is journaled first
-    (`chat_moves.MOVES_KEY`, ids only) and runs: the chat row copied into
-    the target (the person's messages stamped with their account going into
-    a shared space), the checkpoints copied into the target's file
-    (`CheckpointManager.acopy_thread`), then the switch
-    (`threads.move_thread`, the one statement that changes where a chat is;
-    everything kept by thread alone follows it), then the source's copies
-    removed (`adelete_thread_in`), the rows naming the thread beside a space
-    moved (`chat_moves.MOVED_COLUMNS`; what follows by its own code is
-    `MOVED_BY_THEIR_CODE`, what stays is `STAYS`, with why: a new such table
-    fails `tests/test_chat_moves.py`), the chat apps' pointers dropped,
-    memory following, and the line the shared space keeps when a chat is
-    taken out (`chat_moves.record_taken_out`: who, when, the title; only
-    the move writes it). A failure before the switch takes the copies back;
-    after it, and any move a stop cut off, `settle_chat_moves` finishes at
-    the next start. **Memory follows the chat** (`memory/chat_move.py`,
-    agreed with the memory session): it is rebuilt in the target from the
-    chat store at move time (`turn_reconcile._reconcile_session`, source
-    `chat_move`, the quick pass on each turn, the deep pass queued as
-    Kazma's own work, `task_queue.REBUILD_CHAT_MOVE`: counted against no
-    one's limit, and the chat's weeks summarized again,
-    `topic_summaries.requeue_weeks`), except what the chat store cannot
-    rebuild, which is carried: the person's decisions (`user_explicit` and
-    `agent_asserted` facts, at their own time and trust, the subject mapped
-    `user` <-> `member_<account>`), the agent's notes, and "Not me". Every
-    ledger row of the chat is copied for the target, journaled. In the
-    source the chat's memory is retired as a forget leaves it, then its
-    tombstones are deleted (`_delete_moved_tombstones`, declared in
-    `tests/test_memory_deletes.py`: under the same ids a move back would
-    write nothing), what its facts closed is reopened unless closed since,
-    and open changes go (the dialog says the Changes card's history and its
-    Undo do not move). Once the switch is made the episode writer refuses
-    the source (`forget._moved_elsewhere`, in `refuses_write`, which every
-    live writer asks: `tests/test_memory_forget.py`). The memory move is
-    journaled (`forget_journal` kind `chat_moved`) and replayed by the
-    forget convergence only while the chat is still away. Routes:
-    `GET`/`POST /api/chat/sessions/{session_id}/move` (the preview gives the
-    person's questions in the chat, whether others wrote, the bounds) and
-    `GET /api/chat/taken-out`; the chat list's menu offers "Share with…"
-    or "Take out to my space". Gates: `tests/test_chat_moves.py` (a
-    "private" mark in the shared space, the design turned down, as the
-    control), `tests/test_chat_move_memory.py` (each point with the step
-    taken out as its control), `tests/_chat_move_space_cases.py`,
-    `tests/e2e/test_chat_moves_browser.py` (by the sidebar, EN/AR).
-  - **The chat move review's fixes (2026-11-23).** The move takes the
-    thread's lock first and checks everything again under it, and claims its
-    place in the daily bounds in one write (`chat_moves.claim_move`). A card
-    waiting refuses it, read from the checkpoint AND the gate registry's open
-    rows (`hitl_gates.live_gates`); either that cannot be read refuses too
-    (`approval_unknown`, 503). A chat app's chat (`gw-*`,
-    `chat_moves.is_chat_app_chat`) is not moved, and the menu does not offer
-    it. The checkpoints are copied without their turn notes
-    (`CheckpointManager.acopy_thread(strip_turn_notes=True)`) and the chat's
-    Time Travel steps are deleted, not moved (`forget_thread_snapshots`; the
-    dialog says so, and that its reminders, scheduled tasks and held lessons
-    move with it). A failure once the record names the target never drops
-    the journal: the move finishes. Once switched, every socket and attached
-    stream of the chat open under another space is closed or ended
-    (`live_connections.thread_moved`). Memory's part is a durable queued
-    task (`task_queue.CHAT_MOVE_MEMORY`, Kazma's own work, retried by the
-    queue), so the route answers once the chat is switched. In memory:
-    everything is carried before the source is retired; the person's own
-    statements (`user_stated`) are carried with their decisions, current or
-    ended, and a value they corrected, ended, called wrong or undid is never
-    rebuilt as current (closed again after the quick pass, and named to the
-    deep pass in `metadata.not_again`, which the extractor now reads in any
-    space); "No, keep it" moves with "Not me" (`changes._answered_no_from`);
-    a fact another chat of the source states too stays current there; what
-    the chat's facts closed is reopened only while that fact still held its
-    place; the source's ledger rows go once copied; only the tombstones the
-    move made are deleted (a stale one in the target is dropped on a move
-    back); and a busy thread-record file never fails a memory write. A swarm
-    result that finishes after the move is delivered as its task says (the
-    guide names it). Gates: the review's tests in `tests/test_chat_moves.py`
-    and `tests/test_chat_move_memory.py`, each failing on 36675f3fa.
+  - **Moving one's own chat (piece 6, 2026-11-23; the memory carry taken
+    out 2026-11-24).** The document's rule (`spaces.moves.move_rule`), and
+    the chat is the person's own (its thread's record names them as opener; a
+    chat from before Spaces is the owner's). A chat other members wrote in is
+    never taken out of a shared space (`chat_moves.others_wrote`; the page
+    offers "New private chat"), and a chat app's chat (`gw-*`,
+    `chat_moves.is_chat_app_chat`) is never moved. **Moving a chat moves the
+    conversation; memory stays where it was said.** Two designs that carried
+    memory between spaces failed review (restatements, resurrected facts,
+    notes copied twice): nothing of memory is carried, rebuilt, reopened or
+    extracted again by a move, and nothing may be added that does.
+    - *In:* before anything of the chat is in the target, every turn it
+      already holds is kept out of the target's memory
+      (`forget.keep_moved_turns_out`: a ledger row under every key of the
+      chat, one journal entry of kind `moved_turns`; a turn the target
+      already remembers gets none), and a whole-chat keep-out of the source
+      is copied. Turn reconcile, the fact passes and the past-chats search
+      then leave them out by the rules they have. The rows are marked
+      (`forget.MOVED_IN`) and `enforce_ledger` leaves them out: the chat
+      store's numbers run ahead of the live turn numbers (a slash command is
+      a row there and no turn), so a plain row would take back the facts of a
+      turn said after the move. What is said after the move is remembered as
+      any turn is.
+    - *Out of a shared space:* `forget.forget_chat` runs in the SHARED
+      tenant (journaled, finished by the convergence), and entities left
+      with nothing but a name go (`forget.retire_names_left`). A personal
+      space's memory is never touched by a move, either way.
+    - After the switch every live writer refuses the space the chat left
+      (`forget.moved_elsewhere`, in `refuses_write`; turn reconcile asks it
+      before it reads a row). A thread-record file that cannot be read FAILS
+      the write, so the queue tries it again: never "not moved".
+    - *The move* (`kazma_ui/chat_move.py`, `_move_chat`) takes the thread's
+      mutation lock first, settles what an earlier move of the chat left,
+      and checks everything again: where the chat is, no turn running, no
+      card waiting (the checkpoint AND `hitl_gates.live_gates`; either that
+      cannot be read refuses, `approval_unknown`), and no turn cut off half
+      way (`turn_unfinished`: a tool receipt names its space, so Continue in
+      the target would run a finished tool again). A rate-limit bucket
+      (`chat_move`) is its only bound: a move makes no model call. It is
+      journaled first (`chat_moves.MOVES_KEY`, ids and the line's title).
+    - *What is copied:* the chat row without what its turns remembered
+      (`chat_move._moved_message`: memory parts and rows gone, a memory
+      tool's answer emptied; the person's messages stamped with their
+      account going into a shared space), the files shared in the chat
+      (`chat_files.copy_shared_files`, under their ids; the target's disk
+      limit refuses the move, `space_limit`), and the newest state alone,
+      cleaned (`CheckpointManager.amove_state`, `chat_moves.moved_state`: no
+      turn notes, no identity note, no memory tool's answer, no pending
+      writes, no older checkpoints). With a file per space the target gets
+      the cleaned state; on one shared table (Postgres) it replaces the
+      thread's in place, before the switch. The thread's journaled frames
+      are dropped around the switch (`TurnBroker.clear`). Uploads the person
+      attached do not move (the dialog says to attach them again).
+    - *The switch* is `threads.move_thread`, the one statement that changes
+      where a chat is; every socket and attached stream of the chat open in
+      another space is then closed or ended (`live_connections.thread_moved`).
+      A failure before it takes the copies back; one after it never drops
+      the journal.
+    - *The finish* (`chat_move._STEPS`) runs each step on its own, recorded
+      as it is done: the rows naming the thread beside a space
+      (`chat_moves.MOVED_COLUMNS`; what follows by its own code is
+      `MOVED_BY_THEIR_CODE`, what stays is `STAYS`, with why: a new such
+      table fails `tests/test_chat_moves.py`), the chat apps' pointers, its
+      Time Travel steps, the shared space's forget and its line
+      (`chat_moves.record_taken_out`: who, when, the title; only the move
+      writes it), the source's files and state, and its chat row last. A
+      step that fails (a Postgres error too) does not hold the others; what
+      is left is finished at the next start, by the maintenance sweep "chat
+      moves" (`chat_moves.settle_unfinished`, the settler the app registers)
+      and by the next move of the chat.
+    - Routes: `GET`/`POST /api/chat/sessions/{session_id}/move` and `GET
+      /api/chat/taken-out`; the chat list's menu offers "Share with…" or
+      "Take out to my space". Gates: `tests/test_chat_moves.py` (a "private"
+      mark in the shared space, the design turned down, as the control; the
+      state cleaned in place on real Postgres),
+      `tests/test_chat_move_memory.py` (the keep-out taken out, a take-out
+      that forgets nothing and plain ledger rows as the controls),
+      `tests/_chat_move_space_cases.py`, `tests/e2e/test_chat_moves_browser.py`
+      (by the sidebar, EN/AR).
 - **An approval card goes to the person it asks (S2-05, 2026-11-22;
   decisions N4 and N21).** Only where Spaces is enforced; an install that
   does not enforce it shows, lists, pushes and decides every card as

@@ -35,6 +35,7 @@ import logging
 import sqlite3
 import threading
 import time
+from collections import Counter
 from collections.abc import Iterable
 from typing import Any
 
@@ -55,7 +56,9 @@ __all__ = [
     "forget_episode",
     "finish_old_tombstones",
     "forget_mentions",
+    "keep_moved_turns_out",
     "keep_turn_out",
+    "moved_elsewhere",
     "forgotten_in_chat",
     "forgotten_turns",
     "question_sha",
@@ -150,7 +153,7 @@ def refuses_write(
     if not session_id:
         return False
     names = list(dict.fromkeys([session_id, *(chat_keys(session_id) if keys is None else keys)]))
-    if _moved_elsewhere(names, tenant_id):
+    if moved_elsewhere(names, tenant_id):
         return True
     marks = ",".join("?" for _ in names)
     return bool(
@@ -164,13 +167,18 @@ def refuses_write(
     )
 
 
-def _moved_elsewhere(keys: list[str], tenant_id: str) -> bool:
+def moved_elsewhere(keys: Iterable[str], tenant_id: str) -> bool:
     """Whether the chat *keys* is recorded in another space than *tenant_id*
     (Spaces S2-12): a person moved it, and what was queued for it before --
     a post-turn write, a deep pass, a reconcile pass -- must not write into
-    the space it left (``memory.chat_move``). Only a chat with a record
+    the space it left (``kazma_ui.chat_move``). Only a chat with a record
     counts: one with none (imported, from before Spaces, the agent's notes)
-    is where its writer says. Nothing is read before Spaces is enforced."""
+    is where its writer says. Nothing is read before Spaces is enforced.
+
+    Raises when the thread records cannot be read: where the chat is is not
+    known, so the write fails and the queue tries it again (the move's
+    re-review, N11). Taken as "not moved", a busy file wrote a turn into the
+    space its chat had left."""
     from kazma_core.spaces.scope import spaces_enforced
 
     if not spaces_enforced():
@@ -181,14 +189,7 @@ def _moved_elsewhere(keys: list[str], tenant_id: str) -> bool:
     for key in keys:
         home = threads.known_space(key)
         if home is None:
-            try:
-                record = threads.record_of(key)
-            except sqlite3.OperationalError:
-                # The records' file is busy: no move is known for this key,
-                # and a memory write is never failed for it (the chat move
-                # review). A move records the space in memory first.
-                logger.debug("[memory] thread record of %s unreadable; taken as not moved", key[:12])
-                continue
+            record = threads.record_of(key)
             home = record.space_id if record is not None else None
         if home is not None:
             return home != tenant
@@ -1253,6 +1254,110 @@ def keep_turn_out(session_key: str, turn: int, question: str, *, tenant_id: str)
     return True
 
 
+def retire_names_left(tenant_id: str) -> int:
+    """Remove the entities of *tenant_id* that hold nothing any more but their
+    name (``entity_retire``'s one rule): for a shared space a chat was taken
+    out of, where a forgotten value stayed as a name on the memory map.
+    Returns how many."""
+    from kazma_core.memory.entity_retire import plain_empty_shells, retire_empty_entities
+
+    conn = _open()
+    try:
+        shells = [entity for _tenant, entity in plain_empty_shells(conn, tenant_id=tenant_id)]
+        removed = retire_empty_entities(conn, shells, tenant_id=tenant_id)
+        purge_search_index(conn)
+        conn.commit()
+        return len(removed)
+    finally:
+        conn.close()
+
+
+#: The ``episode_id`` of the ledger rows a chat move writes: the turns a chat
+#: held before it moved into a space (:func:`keep_moved_turns_out`). They
+#: refuse a write, as any ledger row does; they take back nothing the space
+#: holds (:func:`enforce_ledger` leaves them out).
+MOVED_IN = "moved"
+
+
+def keep_moved_turns_out(
+    chat: str, *, keys: Iterable[str], turns: Iterable[tuple[int, str]], tenant_id: str,
+) -> int:
+    """Keep every turn a chat already holds out of the memory of the space it
+    is about to move into (Spaces S2-12, ``kazma_ui.chat_move``): a ledger row
+    per turn, under every key of the chat, so turn reconcile, the fact passes
+    and the past-chats search leave them out by the rules they have. *turns*
+    is ``(number, question)`` as the chat store counts them. Returns how many.
+
+    Journaled first, as one entry (``moved_turns``): a memory database
+    restored from before the move keeps them out too.
+
+    A turn the space already remembers (said while the chat was there before)
+    gets no row: a move never touches what a space remembers. That is also
+    why these rows are marked (:data:`MOVED_IN`). The numbers the chat store
+    counts run ahead of the live turn numbers (a slash command is a message
+    there and no turn), so a plain row of turn 4 would take back the facts of
+    the live turn 4 said after the move."""
+    from kazma_core.memory import forget_journal
+
+    names = [k for k in dict.fromkeys([*keys, chat]) if k]
+    owner = space_named_or_bound(tenant_id)
+    conn = _open()
+    try:
+        from kazma_core.memory.limits import turn_key
+
+        held = _remembered_questions(conn, owner, names)
+        rows: list[tuple[int, str]] = []
+        for number, question in turns:
+            key = turn_key(str(question or ""))
+            if key and held[key] > 0:
+                held[key] -= 1
+                continue
+            rows.append((int(number), question_sha(question)))
+        if not rows:
+            return 0
+        seq = forget_journal.append("moved_turns", tenant_id=owner, session_key=chat,
+                                    detail=forget_journal.moved_turns_detail(names, rows))
+        _write_moved_turns(conn, owner, names, rows, at=time.time())
+        forget_journal.mark_applied(conn, seq)
+        conn.commit()
+        return len(rows)
+    finally:
+        conn.close()
+
+
+def _remembered_questions(conn: sqlite3.Connection, tenant_id: str, keys: list[str]) -> Counter[str]:
+    """The questions *tenant_id* remembers of the chat *keys*, counted, by
+    ``limits.turn_key`` (as turn reconcile counts them)."""
+    from kazma_core.memory.limits import turn_key
+
+    marks = ",".join("?" for _ in keys)
+    return Counter(turn_key(str(r[0])) for r in conn.execute(
+        f"SELECT user_text FROM episodes WHERE tenant_id = ? AND tier != ? AND session_id IN ({marks}) "
+        "AND COALESCE(user_text, '') != ''",
+        (tenant_id, FORGOTTEN_TIER, *keys),
+    ))
+
+
+def _write_moved_turns(
+    conn: sqlite3.Connection, tenant_id: str, keys: list[str], rows: Iterable[tuple[int, str]], *, at: float,
+) -> None:
+    conn.executemany(
+        "INSERT OR IGNORE INTO memory_forgotten "
+        "(tenant_id, session_key, turn_number, question_sha, episode_id, forgotten_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [(tenant_id, k, number, sha, MOVED_IN, at) for number, sha in rows for k in keys],
+    )
+
+
+def replay_moved_turns(conn: sqlite3.Connection, entry: Any) -> None:
+    """A journaled :func:`keep_moved_turns_out` applied to *conn* (a restored
+    copy): its ledger rows, and nothing else."""
+    from kazma_core.memory import forget_journal
+
+    _write_moved_turns(conn, space_of_record(entry.tenant_id), forget_journal.entry_keys(entry),
+                       forget_journal.entry_turns(entry), at=entry.at)
+
+
 def forget_mentions(text: str, *, tenant_id: str) -> dict[str, Any]:
     """Forget everything of the tenant's memory that mentions *text*: the
     user's "forget everything that mentions X".
@@ -1816,6 +1921,7 @@ def forget_chat(
     conn = conn or _open()
     try:
         caller = space_named_or_bound(tenant_id)
+        elsewhere = moved_elsewhere(keys, caller)
         marks = ",".join("?" for _ in keys)
         every = sees_every_tenant(caller)
         scope = "" if every else " AND tenant_id = ?"
@@ -1879,8 +1985,10 @@ def forget_chat(
 
         forget_journal.mark_applied(conn, seq)
         conn.commit()
-        # Forgetting the chat takes its Time Travel steps too (TT-05).
-        snapshots = _forget_snapshots(keys, turn=None)
+        # Forgetting the chat takes its Time Travel steps too (TT-05) -- the
+        # steps of a chat that is this space's: they are kept by thread alone,
+        # so those of a chat moved away are the space's it moved to.
+        snapshots = 0 if elsewhere else _forget_snapshots(keys, turn=None)
         return {"ok": True, "forgotten": len(ids) + len(notes),
                 "facts_forgotten": facts + len(chat_facts), "chat_keys": keys,
                 "lessons_removed": lessons, "snapshots_deleted": snapshots}
@@ -2063,6 +2171,9 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
       race window), written before that forget;
     - a weekly summary still active though a turn it was written from is
       forgotten.
+
+    The rows a chat move wrote (:data:`MOVED_IN`) keep turns out of a space;
+    they take back nothing it holds, so they are left out here.
     """
     from kazma_core.memory import forget_journal
     from kazma_core.memory.topic_summaries import on_turns_forgotten
@@ -2071,8 +2182,9 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
     for eid, tenant, text, sha in conn.execute(
         "SELECT e.id, e.tenant_id, e.user_text, f.question_sha FROM memory_forgotten f "
         "JOIN episodes e ON e.tenant_id = f.tenant_id AND e.session_id = f.session_key "
-        "AND e.turn_number = f.turn_number WHERE f.turn_number > 0 AND e.tier != ?",
-        (FORGOTTEN_TIER,),
+        "AND e.turn_number = f.turn_number WHERE f.turn_number > 0 AND e.tier != ? "
+        "AND COALESCE(f.episode_id, '') != ?",
+        (FORGOTTEN_TIER, MOVED_IN),
     ).fetchall():
         if question_sha(text) == sha:
             targets[str(eid)] = space_of_record(tenant)
@@ -2103,8 +2215,9 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
     for tenant, key, turn in conn.execute(
         "SELECT DISTINCT f.tenant_id, f.session_key, f.turn_number FROM memory_forgotten f "
         "JOIN beliefs b ON b.tenant_id = f.tenant_id AND b.source_session = f.session_key "
-        "AND b.source_turn = f.turn_number WHERE f.turn_number > 0 AND b.object != '' LIMIT ?",
-        (limit,),
+        "AND b.source_turn = f.turn_number WHERE f.turn_number > 0 AND b.object != '' "
+        "AND COALESCE(f.episode_id, '') != ? LIMIT ?",
+        (MOVED_IN, limit),
     ).fetchall():
         keys = list(dict.fromkeys([str(key), *chat_keys(str(key))]))
         facts += len(_forget_turn_facts(

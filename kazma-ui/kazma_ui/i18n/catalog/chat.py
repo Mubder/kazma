@@ -1664,13 +1664,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": 'هذه المحادثة تُنقل الآن.',
         "en": 'This chat is already being moved.',
     },
-    "chat.move_err_moves_today": {
-        "ar": 'نقلت ثلاث محادثات خلال اليوم الماضي. حاول مرة أخرى غدًا.',
-        "en": 'You have moved three chats in the last day. Try again tomorrow.',
+    "chat.move_err_unfinished": {
+        "ar": 'انقطع رد في هذه المحادثة قبل أن يكتمل. أكمله أو أغلقه، ثم انقل المحادثة.',
+        "en": 'An answer in this chat was cut off half way. Continue or close it, then move the chat.',
     },
-    "chat.move_err_moved_today": {
-        "ar": 'نُقلت هذه المحادثة خلال اليوم الماضي. حاول مرة أخرى غدًا.',
-        "en": 'This chat was moved in the last day. Try again tomorrow.',
+    "chat.move_err_space_limit": {
+        "ar": 'ملفات هذه المحادثة لا تتسع لها المساحة الجديدة.',
+        "en": "The new space has no room for this chat's files.",
     },
     "chat.move_err_not_your_chat": {
         "ar": 'لا ينقل المحادثة إلا من بدأها.',
@@ -1701,20 +1701,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": 'Share this chat with the space?',
     },
     "chat.move_take_out_body": {
-        "ar": 'تنتقل إلى مساحتك مع ما يتذكره Kazma منها. وتبقى في هذه المساحة إشارة إلى أنك نقلتها، مع عنوانها.',
-        "en": 'It moves to your own space, with what Kazma remembers of it. This space keeps a line saying you took it out, with its title.',
+        "ar": 'تنتقل إلى مساحتك. وتبقى في هذه المساحة إشارة إلى أنك نقلتها، مع عنوانها.',
+        "en": 'It moves to your own space. This space keeps a line saying you took it out, with its title.',
     },
     "chat.move_share_body": {
-        "ar": 'تنتقل إلى المساحة المشتركة مع ما يتذكره Kazma منها، ويستطيع كل من في تلك المساحة قراءتها.',
-        "en": 'It moves to the shared space, with what Kazma remembers of it: everyone in that space can read it.',
+        "ar": 'تنتقل إلى المساحة المشتركة، ويستطيع كل من في تلك المساحة قراءتها.',
+        "en": 'It moves to the shared space: everyone in that space can read it.',
     },
     "chat.move_memory_note": {
-        "ar": 'ما سجّلته بطاقة التغييرات عنها، وزر التراجع فيها، لا ينتقلان. وتكتمل ذاكرة Kazma عنها خلال الساعة القادمة تقريبًا.',
-        "en": "What the Changes card recorded about it, and its Undo, do not move. Kazma's memory of it fills in over the next hour or so.",
+        "ar": "نقل المحادثة ينقل الحوار نفسه. ما تذكّره Kazma منها يبقى حيث قيل، ومن الآن يتذكر ما تقوله في المساحة الجديدة. وإخراج محادثة من مساحة مشتركة يجعل تلك المساحة تنساها.",
+        "en": "Moving a chat moves the conversation. What Kazma remembered from it stays where it was said, and from now on it remembers what you say in the new space. Taking a chat out of a shared space makes that space forget it.",
     },
     "chat.move_also_note": {
-        "ar": 'وتنتقل معها تذكيراتها ومهامها المجدولة والدروس المعلّقة، أما خطوات السفر عبر الزمن السابقة فلا تنتقل.',
-        "en": "Its reminders, scheduled tasks and held lessons move with it; its earlier Time Travel steps do not.",
+        "ar": "وتنتقل معها تذكيراتها ومهامها المجدولة والملفات التي شاركها Kazma فيها. أما خطوات السفر عبر الزمن السابقة فلا تنتقل، ولن يستطيع Kazma فتح الملفات التي أرفقتها: أرفقها من جديد.",
+        "en": "Its reminders and scheduled tasks move with it, and so do the files Kazma shared in it. Its earlier Time Travel steps do not, and Kazma can no longer open files you attached to it: attach them again.",
     },
     "chat.move_err_chat_app": {
         "ar": 'هذه محادثة من تطبيق دردشة، فتبقى في مساحتها.',

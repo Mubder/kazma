@@ -44,10 +44,12 @@ __all__ = [
     "append",
     "apply_pending",
     "entry_keys",
+    "entry_turns",
     "health",
     "keys_detail",
     "journaled_seqs",
     "mark_applied",
+    "moved_turns_detail",
     "pending",
     "queue_remote_delete",
     "recent_chat_forgets",
@@ -59,16 +61,16 @@ __all__ = [
 #: (Spaces S1-11, N36); the entry's id is the ``session_key``.
 #: ``mentions``: "forget everything that mentions X" (the memory framework
 #: audit's F5, part D): the ids it forgot, never the text (``detail``).
-#: ``chat_moved``: a chat a person moved to another space (Spaces S2-12,
-#: ``memory.chat_move``); its ``detail`` holds the chat's keys, the space it
-#: went to and the mover, and its replay runs only while it is still away.
-KINDS = ("turn", "chat", "keep_out", "remember", "summary", "rewind", "entry", "mentions", "chat_moved")
+#: ``moved_turns``: the turns a chat held before it moved into the space
+#: (Spaces S2-12, ``forget.keep_moved_turns_out``): kept out of its memory,
+#: never taken back from it; numbers and question hashes only (``detail``).
+KINDS = ("turn", "chat", "keep_out", "remember", "summary", "rewind", "entry", "mentions", "moved_turns")
 
 #: The kinds whose ``detail`` records the chat's keys when it was forgotten
 #: (``{"keys": [...]}``): a chat deleted since has no copy in the chat store
 #: to name its other key, and a restore brought the memory back under it
 #: (the memory framework audit's F11).
-_KEYED_KINDS = ("turn", "chat", "keep_out", "remember", "chat_moved")
+_KEYED_KINDS = ("turn", "chat", "keep_out", "remember", "moved_turns")
 
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS forget_journal (
@@ -151,6 +153,18 @@ def append(
 def keys_detail(keys: list[str]) -> str:
     """The ``detail`` of an entry of :data:`_KEYED_KINDS`: the chat's keys."""
     return json.dumps({"keys": [k for k in dict.fromkeys(keys) if k]})
+
+
+def moved_turns_detail(keys: list[str], turns: list[tuple[int, str]]) -> str:
+    """The ``detail`` of a ``moved_turns`` entry: the chat's keys and each
+    turn kept out, by its number and its question's hash."""
+    return json.dumps({"keys": [k for k in dict.fromkeys(keys) if k], "turns": [list(t) for t in turns]})
+
+
+def entry_turns(e: Entry) -> list[tuple[int, str]]:
+    """The turns a ``moved_turns`` entry keeps out."""
+    data = json.loads(e.detail or "{}")
+    return [(int(number), str(sha)) for number, sha in data.get("turns") or []]
 
 
 def entry_keys(e: Entry) -> list[str]:
@@ -242,10 +256,8 @@ def _apply(conn: sqlite3.Connection, e: Entry) -> None:
                                    conn=conn, journal=False, keys=entry_keys(e))
     elif e.kind == "mentions":
         forget.replay_mentions(conn, e)
-    elif e.kind == "chat_moved":
-        from kazma_core.memory.chat_move import replay_chat_moved
-
-        replay_chat_moved(conn, e)
+    elif e.kind == "moved_turns":
+        forget.replay_moved_turns(conn, e)
     elif e.kind == "entry":
         if _still_a_member(e):
             # Journaled before a membership change that did not happen (it

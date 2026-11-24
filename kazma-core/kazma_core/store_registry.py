@@ -170,7 +170,7 @@ STORES: dict[str, Store] = {
     "thread_scopes.db": Store(
         "which space each chat thread belongs to and which account opened it "
         "(kazma_core.spaces.threads); the lines a shared space keeps for chats taken out "
-        "of it and the chat moves of the last day (kazma_core.spaces.chat_moves)", "bundle"),
+        "of it (kazma_core.spaces.chat_moves)", "bundle"),
     "activity.db": Store(
         "every change a person made in a space, under their account: the route, the ids in "
         "its path and the answer, never what was sent (kazma_core.spaces.activity)", "bundle"),
@@ -328,8 +328,8 @@ RETENTION: dict[str, str] = {
     "run_incidents.db": "the run incident retention sweep",
     "thread_scopes.db": "kept while its chat is: one small row of ids per chat thread (no title, "
                         "no text). The chat delete removes it once nothing of the chat is left. "
-                        "A shared space's lines for chats taken out of it: its newest 500; the "
-                        "count of chat moves: two days (Spaces S2-12)",
+                        "A shared space's lines for chats taken out of it: its newest 500 "
+                        "(Spaces S2-12)",
     "activity.db": "90 days and at most 20,000 rows a space, pruned as rows are written "
                    "(kazma_core.spaces.activity._prune); a space's rows go with its erase",
     "chat_outbox.db": "the chat outbox retention sweep: settled rows (their text already emptied) "
