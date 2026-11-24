@@ -85,7 +85,13 @@ def _refusal(request: Request, space_id: str, action: str) -> JSONResponse | Non
     """Why the caller may not *action* (count, export, erase) the space."""
     if not spaces_enforced():
         return _answer("spaces_off", 409, "This is done once Spaces is on for this install.")
-    account = space_binding.account_of(auth.get_request_principal(request))
+    principal = auth.get_request_principal(request)
+    if auth.token_below_admin(principal):
+        # Every API token is the owner's account: an operator token, handed
+        # to another agent, moved the owner's shared spaces out with the
+        # secrets in them, sealed with a password of its own choosing.
+        return _answer("own_sign_in_only", 403, "This is done with your own sign-in, not an API token.")
+    account = space_binding.account_of(principal)
     role = _role(account, space_id)
     admin = auth.admin_decision(request) == "ok"
     space = read_registry()["spaces"].get(space_id) or {}

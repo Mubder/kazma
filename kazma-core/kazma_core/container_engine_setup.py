@@ -418,12 +418,21 @@ def egress_rules_in_effect(run: Runner = subprocess.run) -> bool:
     rules are still there -- another distro sharing the network namespace,
     an ``iptables -F`` or a firewall backend change takes them out, and the
     bridge would then reach everything."""
+    in_effect, said = _egress_check(run)
+    if not in_effect:
+        logger.warning("[engine] the egress rules are not in effect: %s", said)
+    return in_effect
+
+
+def _egress_check(run: Runner) -> tuple[bool, str]:
+    """Whether the rules are in effect, and what the check said: which are
+    not, and the rule in front of each (``EGRESS_IN_FRONT``)."""
     code, text = _out(run, ["wsl.exe", "-d", DISTRO, "-u", "root", "--", "/usr/local/sbin/kazma-egress-rules",
                             EGRESS_BRIDGE, EGRESS_CHAIN, "check"], timeout=30, env=_wsl_env())
+    said = "; ".join(line.strip() for line in text.splitlines() if line.strip())[-600:]
     if code == 0 and f"EGRESS_IN_EFFECT {EGRESS_BRIDGE} {EGRESS_CHAIN}" in text:
-        return True
-    logger.warning("[engine] the egress rules are not in effect (exit %s): %s", code, text.strip()[-300:])
-    return False
+        return True, said
+    return False, f"exit {code}: {said}" if said else f"exit {code}"
 
 
 def _service_state(run: Runner) -> str | None:
@@ -964,8 +973,10 @@ def _windows_addresses(run: Runner) -> list[str]:
 def _action_egress(run: Runner, log: Callable[[str], None], opener: Any,
                    *, wait_s: float = 120.0) -> tuple[bool, str]:
     """Spaces S4-05b: the rules first (``egress-filter.sh``, before Docker at
-    every start), then the network they hold to the public internet; the
-    stamp last, so a step that stopped half way is run again."""
+    every start), then the network they hold to the public internet, then the
+    check every run makes -- put in is not in effect: a rule of someone
+    else's may stand in front. The stamp last, so a step that stopped half
+    way, or whose rules do not hold, is run again."""
     answered, detail = _engine_answers(run, wait_s)
     if not answered:
         return False, detail
@@ -983,6 +994,9 @@ def _action_egress(run: Runner, log: Callable[[str], None], opener: Any,
                              "--label", f"{EGRESS_LABEL}=1", EGRESS_NETWORK)
         if code != 0 or not egress_network_ok(run):
             return False, f"the {EGRESS_NETWORK} network could not be made: {text.strip()[-300:]}"
+    in_effect, said = _egress_check(run)
+    if not in_effect:
+        return False, f"the egress rules were put in and are not in effect ({said})"
     _engine_dir().mkdir(parents=True, exist_ok=True)
     _egress_stamp().write_text(
         hashlib.sha256(_asset("egress-filter.sh").encode("utf-8")).hexdigest() + "\n", encoding="ascii")

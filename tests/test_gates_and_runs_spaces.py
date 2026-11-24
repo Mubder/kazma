@@ -97,9 +97,9 @@ def test_the_swarm_adapter_stamps_space_and_asker() -> None:
     from kazma_core.swarm.task import SwarmTask, TaskStatus
 
     task = SwarmTask(prompt="p", status=TaskStatus.FAILED,
-                     metadata={"tenant_id": "matrix-b", "asker": "acct-b"})
+                     metadata={"tenant_id": "s0b0b0b0b0b0b", "asker": "acct-b"})
     run = ADAPTER._run(task, False, True)
-    assert (run.space, run.asker) == ("matrix-b", "acct-b")
+    assert (run.space, run.asker) == ("s0b0b0b0b0b0b", "acct-b")
 
 
 def test_the_swarm_adapter_reads_every_space_when_enforced(tmp_path, enforced) -> None:
@@ -110,10 +110,10 @@ def test_the_swarm_adapter_reads_every_space_when_enforced(tmp_path, enforced) -
     from kazma_core.swarm.task_store import TaskStore
 
     store = TaskStore(str(tmp_path / "tasks.db"))
-    for space in ("matrix-a", "matrix-b"):
+    for space in ("s0a0a0a0a0a0a", "s0b0b0b0b0b0b"):
         store.persist_task(SwarmTask(prompt=space, status=TaskStatus.PENDING, metadata={"tenant_id": space}))
     found = _SwarmAdapter._stored(store, 0.0)
-    assert sorted(t.metadata["tenant_id"] for t in found) == ["matrix-a", "matrix-b"]
+    assert sorted(t.metadata["tenant_id"] for t in found) == ["s0a0a0a0a0a0a", "s0b0b0b0b0b0b"]
 
 
 def test_control_the_old_swarm_read_is_refused_with_nothing_bound(tmp_path, enforced) -> None:
@@ -132,49 +132,49 @@ def test_the_cron_document_and_session_adapters_stamp_space_and_asker() -> None:
 
     job = SimpleNamespace(job_id="j", status="failed", fire_due=None, last_fire_at=None, finished_at=T0,
                           lease_until=None, delivery_error="", last_outcome="x", prompt="p", version=1,
-                          delivery_target="", thread_id="", tenant_id="matrix-b", creator="acct-b")
+                          delivery_target="", thread_id="", tenant_id="s0b0b0b0b0b0b", creator="acct-b")
     run = CRON._run(job, "failed", T0, None)
-    assert (run.space, run.asker) == ("matrix-b", "acct-b")
+    assert (run.space, run.asker) == ("s0b0b0b0b0b0b", "acct-b")
 
     state = SimpleNamespace(value="dead_letter")
     doc_job = SimpleNamespace(id="d", state=state, lease_owner=None, lease_expires_at=None, stage="",
                               cancel_requested=False, created_at=T0, heartbeat_at=None, updated_at=T0,
-                              retry_at=None, version=1, error_message="", error_code="", tenant_id="matrix-b",
+                              retry_at=None, version=1, error_message="", error_code="", tenant_id="s0b0b0b0b0b0b",
                               document_id="doc", actor_id="acct-b")
     run = DOCS._run(doc_job, "t", None, T0)
-    assert (run.space, run.asker) == ("matrix-b", "acct-b")
+    assert (run.space, run.asker) == ("s0b0b0b0b0b0b", "acct-b")
 
     row = {"id": "s", "topic": "t", "status": "error", "stage": "x", "sources": 0, "created_at": T0,
-           "updated_at": T0, "error": "", "tenant_id": "matrix-b", "asker": "acct-b"}
+           "updated_at": T0, "error": "", "tenant_id": "s0b0b0b0b0b0b", "asker": "acct-b"}
     run = SESSIONS._run(row, {}, False)
-    assert (run.space, run.asker) == ("matrix-b", "acct-b")
+    assert (run.space, run.asker) == ("s0b0b0b0b0b0b", "acct-b")
 
 
 def test_a_crawl_is_its_folder_s_or_its_library_s_space(monkeypatch) -> None:
     from kazma_core.paths import data_dir
     from kazma_core.runs.adapters.research import _CrawlSpaces
 
-    folder = data_dir() / "spaces" / "matrix-b" / "files"
+    folder = data_dir() / "spaces" / "s0b0b0b0b0b0b" / "files"
     folder.mkdir(parents=True, exist_ok=True)
     spaces = _CrawlSpaces()
-    assert spaces.of({"policy": {"workspace": str(folder)}}) == "matrix-b"
+    assert spaces.of({"policy": {"workspace": str(folder)}}) == "s0b0b0b0b0b0b"
     assert spaces.of({"policy": {"workspace": str(data_dir().parent)}}) == ""
 
     class _Store:
         @staticmethod
         def library_space(library_id: str) -> str | None:
-            return {"lib-b": "matrix-b"}.get(library_id)
+            return {"lib-b": "s0b0b0b0b0b0b"}.get(library_id)
 
     monkeypatch.setattr("kazma_core.stores.knowledge.get_knowledge_store", lambda: _Store())
-    assert spaces.of({"library_id": "lib-b"}) == "matrix-b"
+    assert spaces.of({"library_id": "lib-b"}) == "s0b0b0b0b0b0b"
     assert spaces.of({"library_id": "gone"}) == ""
 
 
 def test_a_memory_task_is_its_payload_s_space() -> None:
     from kazma_core.runs.adapters.memory_queue import _task_space
 
-    assert _task_space("post_turn_memory", json.dumps({"tenant_id": "matrix-b"})) == "matrix-b"
-    assert _task_space("native_backup", json.dumps({"tenant_id": "matrix-b"})) == ""
+    assert _task_space("post_turn_memory", json.dumps({"tenant_id": "s0b0b0b0b0b0b"})) == "s0b0b0b0b0b0b"
+    assert _task_space("native_backup", json.dumps({"tenant_id": "s0b0b0b0b0b0b"})) == ""
     assert _task_space("post_turn_memory", "not json") == ""
 
 
@@ -248,7 +248,7 @@ def test_control_without_the_filter_a_member_sees_another_space_s_runs(fake, mat
 
 
 def test_an_install_without_spaces_lists_everything(fake) -> None:
-    fake.runs = [_run("a", "matrix-a"), _run("b", "matrix-b"), _run("install", "")]
+    fake.runs = [_run("a", "s0a0a0a0a0a0a"), _run("b", "s0b0b0b0b0b0b"), _run("install", "")]
     assert sorted(_listed()) == ["a", "b", "install"]
     assert run_spaces.runs_refusal("refused") is None  # one operator: nothing refused
 
@@ -261,10 +261,10 @@ class _XStore:
 
     def __init__(self, marks) -> None:
         self.rows = {
-            "matrix-a": {"id": "op-a", "state": "sending", "text": f"post {marks.a}", "lease_until": T0 - 3600,
+            "s0a0a0a0a0a0a": {"id": "op-a", "state": "sending", "text": f"post {marks.a}", "lease_until": T0 - 3600,
                          "sent_at": T0 - 7200, "created_at": T0 - 7200, "updated_at": T0 - 3600, "attempts": 1,
                          "version": 3, "origin": "schedule", "reason": "", "outcome": ""},
-            "matrix-b": {"id": "op-b", "state": "sending", "text": f"post {marks.b}", "lease_until": T0 - 3600,
+            "s0b0b0b0b0b0b": {"id": "op-b", "state": "sending", "text": f"post {marks.b}", "lease_until": T0 - 3600,
                          "sent_at": T0 - 7200, "created_at": T0 - 7200, "updated_at": T0 - 3600, "attempts": 1,
                          "version": 3, "origin": "schedule", "reason": "", "outcome": ""},
         }
@@ -324,9 +324,9 @@ def test_a_stuck_x_post_of_another_space_pages_nobody(x_world) -> None:
     asyncio.run(supervisor.tick(now=T0))
     rows = {row["space"]: row for row in get_incident_store().recent(limit=10)}
     # Both incidents are opened, each carrying its space ...
-    assert set(rows) == {"matrix-a", "matrix-b"}
-    assert rows["matrix-b"]["notify"] == "suppressed"
-    assert rows["matrix-b"]["notify_detail"].startswith("kept in its space")
+    assert set(rows) == {"s0a0a0a0a0a0a", "s0b0b0b0b0b0b"}
+    assert rows["s0b0b0b0b0b0b"]["notify"] == "suppressed"
+    assert rows["s0b0b0b0b0b0b"]["notify_detail"].startswith("kept in its space")
     # ... and nothing of either member's post reached the owner's channels.
     assert x_world.marks.b not in _words(x_world) and x_world.marks.a not in _words(x_world)
     assert x_world.sent == [] and x_world.alerts == []
@@ -343,7 +343,7 @@ def test_the_owner_s_own_stuck_post_still_pages_the_owner(x_world, monkeypatch) 
     from kazma_core.runs.adapters import x_posts
 
     store = _XStore(x_world.marks)
-    store.rows = {"default": {**store.rows["matrix-a"], "id": "op-owner"}}
+    store.rows = {"default": {**store.rows["s0a0a0a0a0a0a"], "id": "op-owner"}}
     monkeypatch.setattr(x_posts, "_store_and_tenants", lambda: (store, store.operation_tenants()))
     asyncio.run(supervisor.tick(now=T0))
     assert x_world.marks.a in _words(x_world)
@@ -428,7 +428,7 @@ def test_in_a_shared_space_the_asker_or_the_owner_acts(fake, matrix, enforced) -
 def test_runbooks_take_no_step_on_another_space_s_run(enforced) -> None:
     from kazma_core.runs.runbooks import refusal
 
-    assert "another space" in refusal(_run("b", "matrix-b"), "cancel")
+    assert "another space" in refusal(_run("b", "s0b0b0b0b0b0b"), "cancel")
     assert refusal(_run("o", ""), "cancel") == ""
     assert refusal(_run("o", scope.OWNER_SPACE_ID), "cancel") == ""
 
@@ -473,11 +473,11 @@ def test_an_older_incident_file_gets_its_space_columns(tmp_path) -> None:
     conn.commit()
     conn.close()
     store = IncidentStore(path)
-    row, created = store.open_incident(_run("b", "matrix-b", "acct-b"), "failed", origin={})
-    assert created and (row["space"], row["asker"]) == ("matrix-b", "acct-b")
+    row, created = store.open_incident(_run("b", "s0b0b0b0b0b0b", "acct-b"), "failed", origin={})
+    assert created and (row["space"], row["asker"]) == ("s0b0b0b0b0b0b", "acct-b")
     # A row from before is the owner's space's (N19).
     assert [r["id"] for r in store.recent(space=scope.OWNER_SPACE_ID)] == ["inc_old"]
-    assert [r["id"] for r in store.recent(space="matrix-b")] == [row["id"]]
+    assert [r["id"] for r in store.recent(space="s0b0b0b0b0b0b")] == [row["id"]]
 
 
 def test_a_gate_names_whose_work_asked(tmp_path, monkeypatch, matrix) -> None:
@@ -504,8 +504,8 @@ def test_a_gate_names_whose_work_asked(tmp_path, monkeypatch, matrix) -> None:
 def test_run_records_keep_the_asker_on_the_server() -> None:
     from kazma_core.runs.incidents import public
 
-    run = _run("x", "matrix-a", "acct-secret")
-    assert "asker" not in run.to_dict() and run.to_dict()["space"] == "matrix-a"
+    run = _run("x", "s0a0a0a0a0a0a", "acct-secret")
+    assert "asker" not in run.to_dict() and run.to_dict()["space"] == "s0a0a0a0a0a0a"
     assert "asker" not in public({"origin": {}, "asker": "acct-secret", "decided_action": ""})
     assert contract.Run.__dataclass_fields__["space"].default == ""
 

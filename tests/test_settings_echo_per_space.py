@@ -182,6 +182,9 @@ NOT_ECHOED = {
         "finds a chat's grant keys; shows nothing",
     ("kazma-core/kazma_core/spaces/space_data.py", "_settings_keys"):
         "one space's count, export and erase (S1-27): its own rule picks the space's keys",
+    ("kazma-core/kazma_core/spaces/space_move.py", "_space_settings"):
+        "one space's bundle, sealed by its owner (S4-06): only that space's settings named in "
+        "_MOVED_SETTINGS (_moved_setting: its tenant.<id>. keys) and its own entry of the mappings",
     ("kazma-ui/kazma_ui/providers.py", "_load_connector_config"):
         "one chat app's install connector settings, by its prefix",
     ("kazma-ui/kazma_ui/providers.py", "_purge"):

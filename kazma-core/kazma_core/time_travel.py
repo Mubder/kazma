@@ -80,6 +80,7 @@ __all__ = [
     "capture_after_supervisor",
     "checkpoint_payload_from_snapshot",
     "create_recorder",
+    "ensure_snapshots_table",
     "forget_thread_snapshots",
     "forget_turn_snapshots",
     "maintain_snapshots",
@@ -692,6 +693,14 @@ class SnapshotStore:
         """Close the underlying connection."""
         with self._conn_lock:
             self._conn.close()
+
+
+def ensure_snapshots_table(db_path: str | Path | None = None) -> None:
+    """Make the snapshots database as the store makes itself, and close it: a
+    space moved in from another install needs its tables to be there
+    (``spaces.row_stores``). No other module holds a :class:`SnapshotStore`:
+    its writes are bounded here."""
+    SnapshotStore(db_path).close()
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -110,7 +110,7 @@ def dispatch_client():
 @pytest.mark.parametrize("key", sorted(KAZMA_KEYS))
 def test_the_dispatch_route_refuses_every_key_kazma_sets(dispatch_client, key: str) -> None:
     refused = dispatch_client.post("/api/swarm/dispatch", json={
-        "task": "write the report", "workers": ["probe"], "metadata": {key: "matrix-b"}})
+        "task": "write the report", "workers": ["probe"], "metadata": {key: "s0b0b0b0b0b0b"}})
     assert refused.status_code == 400, refused.text
     assert refused.json()["code"] == "metadata_set_by_kazma" and refused.json()["keys"] == [key]
 

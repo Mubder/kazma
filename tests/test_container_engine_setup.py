@@ -50,6 +50,8 @@ class Machine:
         #: what its inspection answers when it was made otherwise.
         self.egress = True
         self.egress_answer: str | None = None
+        #: What the rules' own check in the distro answers.
+        self.rules_answer = (0, f"EGRESS_IN_EFFECT {ces.EGRESS_BRIDGE} {ces.EGRESS_CHAIN}")
         self.ran: list[list[str]] = []
         self.stdin: list[str | None] = []
         self.answers: dict[tuple[str, ...], tuple[int, str]] = {}
@@ -74,6 +76,8 @@ class Machine:
             if argv[1:3] == ["-l", "-q"]:
                 names = self.running if "--running" in argv else self.distros
                 return 0, "\n".join(names)
+            if "/usr/local/sbin/kazma-egress-rules" in argv:
+                return self.rules_answer
             if argv[1] == "-d" and argv[3:6] == ["-e", "pgrep", "-x"]:
                 return (0, "123") if argv[2] in self.dockerd_in else (1, "")
             if argv[1] == "--unregister":
@@ -482,6 +486,21 @@ def test_the_egress_step_puts_the_rules_in_first_then_the_network(machine, monke
     assert "com.docker.network.bridge.enable_icc=false" in create
     assert f"{ces.EGRESS_LABEL}=1" in create and create[-1] == ces.EGRESS_NETWORK
     assert ces.egress_installed() and ces.check(machine).missing == []
+
+
+def test_an_egress_step_whose_rules_do_not_hold_names_the_rule_in_front(machine):
+    """Put in is not in effect: the step ends with the check every run makes
+    (b55865291 wrote its stamp and said the network was limited)."""
+    ces._egress_stamp().unlink()
+    machine.answers[("wsl.exe", "-d", ces.DISTRO, "-u", "root", "--", "bash")] = (
+        0, "EGRESS_RULES kz-egress KAZMA-EGRESS\nEGRESS_READY")
+    machine.rules_answer = (3, "EGRESS_NOT_IN_EFFECT INPUT\nEGRESS_IN_FRONT INPUT: -p tcp -j ACCEPT\n")
+    ok, detail = ces.run_action("engine:egress", run=machine)
+    assert not ok and "not in effect" in detail and "INPUT: -p tcp -j ACCEPT" in detail
+    assert not ces.egress_installed(), "a step whose rules do not hold is run again"
+    machine.rules_answer = (0, f"EGRESS_IN_EFFECT {ces.EGRESS_BRIDGE} {ces.EGRESS_CHAIN}")
+    ok, detail = ces.run_action("engine:egress", run=machine)
+    assert ok and ces.egress_installed(), detail
 
 
 def test_an_egress_step_whose_rules_did_not_go_in_makes_no_network(machine):

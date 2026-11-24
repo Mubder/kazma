@@ -158,9 +158,13 @@ broken() { say "$1"; $R >/dev/null; say "$1-put-right"; }
 iptables -I DOCKER-USER 1 -i kz-test -j ACCEPT; broken accept-before-the-jump
 iptables -D KAZMA-EGRESS-TEST -d 169.254.0.0/16 -j REJECT --reject-with icmp-net-prohibited; broken udp-refusal-gone
 iptables -I INPUT 1 -p tcp -j ACCEPT; broken accept-in-input
+iptables -I INPUT 1 -m comment --comment 'for -i eth0 only' -j ACCEPT; broken accept-whose-comment-names-another
+iptables -I DOCKER-USER 1 -p tcp -m comment --comment 'not ! -i lo -i eth0' -j ACCEPT; broken accept-of-tcp-with-a-comment
+iptables -I INPUT 1; broken no-condition
 ip6tables -I INPUT 1 -j ACCEPT; broken accept-in-input6
 iptables -F KAZMA-EGRESS-TEST; broken flushed
 iptables -I DOCKER-USER 1 -i other0 -j ACCEPT; say another-bridge
+iptables -I INPUT 1 -s 10.0.0.0/8 -d 10.1.0.0/16 -i eth0 -p udp -j ACCEPT; say another-interfaces-udp
 ip6tables -I FORWARD 1 -j DOCKER-USER; say docker-s-own-jump6
 $R remove >/dev/null; say removed
 """
@@ -171,6 +175,7 @@ $R remove >/dev/null; say removed
     said = dict(line.rsplit(" ", 1) for line in done.stdout.decode("utf-8").splitlines() if line.strip())
     if not said or said.get("fresh") == "127":
         pytest.skip("iptables could not be installed in the container")
-    broken = {"accept-before-the-jump", "udp-refusal-gone", "accept-in-input", "accept-in-input6", "flushed", "removed"}
+    broken = {"accept-before-the-jump", "udp-refusal-gone", "accept-in-input", "accept-in-input6", "flushed", "removed",
+              "accept-whose-comment-names-another", "accept-of-tcp-with-a-comment", "no-condition"}
     assert {k for k, v in said.items() if v == "3"} == broken, said
     assert {k for k, v in said.items() if v == "0"} == set(said) - broken, said

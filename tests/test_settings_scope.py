@@ -89,8 +89,8 @@ def test_no_scope_rule_names_nothing() -> None:
 
 def test_a_space_s_and_a_person_s_keys_are_theirs() -> None:
     assert _scope_of_key("connectors.x.bearer_token") == SPACE
-    assert _scope_of_key("tenant.matrix-a.connectors.x.bearer_token") == SPACE
-    assert _scope_of_key("tenant.matrix-a.connectors.github.oauth_token") == SPACE
+    assert _scope_of_key("tenant.s0a0a0a0a0a0a.connectors.x.bearer_token") == SPACE
+    assert _scope_of_key("tenant.s0a0a0a0a0a0a.connectors.github.oauth_token") == SPACE
     assert _scope_of_key("email.accounts_by_space") == SPACE
     assert _scope_of_key("long_task.thread-1") == SPACE
     assert _scope_of_key("account.tokens") == ACCOUNT

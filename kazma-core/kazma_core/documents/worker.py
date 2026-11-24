@@ -85,6 +85,15 @@ class TransientDocumentError(DocumentProcessingError):
     transient = True
 
 
+class _SpaceArriving(Exception):
+    """The job's space is being brought in from another install: the job is
+    given back, never failed."""
+
+
+#: How long a job of an arriving space waits before it is claimed again.
+_ARRIVING_WAIT_S = 30.0
+
+
 @dataclass(frozen=True, slots=True)
 class StageResult:
     """The canonical state reached by a successful stage handler."""
@@ -382,7 +391,7 @@ class DocumentWorker:
                 # A space an import is writing: its people are recorded last
                 # and its files come after its rows (S4-06), so the job waits.
                 if spaces_enforced() and current.tenant_id in await asyncio.to_thread(importing_spaces):
-                    raise TransientDocumentError("space_arriving", "The document's space is being brought in.")
+                    raise _SpaceArriving
                 # The person it is for left its space: never run for anyone
                 # else (the S2-12 review, finding 6).
                 if await asyncio.to_thread(asker_left, current.tenant_id, current.actor_id):
@@ -417,6 +426,14 @@ class DocumentWorker:
                 cancellation.set()
                 heartbeat.cancel()
                 await asyncio.gather(heartbeat, return_exceptions=True)
+            if isinstance(failure, _SpaceArriving):
+                # Not worked on: given back on the attempt it had. Counted as
+                # a failure, the job was dead-lettered in fifteen seconds.
+                await asyncio.to_thread(
+                    self._repository.hand_back, tenant_id=current.tenant_id, job_id=current.id, owner=owner,
+                    delay_seconds=_ARRIVING_WAIT_S, reason="space_arriving",
+                )
+                return
             telemetry.record_stage(
                 stage_label,
                 "failure" if failure is not None else "success",

@@ -27,11 +27,13 @@ from kazma_core.spaces import identity, scope, space_data, threads
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
 from kazma_core.store_registry import SPACE_RULES
 
-A, B = "erase-a", "erase-b"
+#: Ids as Kazma makes them (``scope.new_space_id``): a bundle of any other
+#: is refused.
+A, B = "se0a5e00000a0", "se0a5e00000b0"
 
 
 def _word(space: str) -> str:
-    return f"plant{space.replace('-', '')}{uuid.uuid4().hex[:6]}"
+    return f"plant{space}{uuid.uuid4().hex[:6]}"
 
 
 # ── every row store, made by its own code ───────────────────────────────
@@ -106,6 +108,8 @@ def _plant_table(conn: sqlite3.Connection, store: str, table: str, rule: space_d
         row[rule.column] = json.dumps({"tenant_id": space, "w": word})
     elif rule.how == "ids":
         row[rule.column] = parents[rule.ids]
+    if table in ("checkpoints", "writes"):
+        row["type"] = "bytes"  # how LangGraph says a value is kept as it is
     if table in _PARENTS:
         column, key = _PARENTS[table]
         row[column] = parents[key] if key != "memory_rows" else parents[f"{key}:{table}"]

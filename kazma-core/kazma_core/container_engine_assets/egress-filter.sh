@@ -22,9 +22,9 @@
 # * `kazma-egress-rules [bridge] [chain] check`, which Kazma runs before every
 #   run of a member's code on the network: each jump the first rule the
 #   bridge's packets meet, and the chain exactly the one made here, or the
-#   run is refused (rules flushed or put in front later -- another distro
-#   sharing the network namespace, `iptables -F`, a firewall backend change
-#   -- are found before code runs, not after);
+#   run is refused, naming the rule in front (rules flushed or put in front
+#   later -- another distro sharing the network namespace, `iptables -F`, a
+#   firewall backend change -- are found before code runs, not after);
 # * /etc/kazma/egress-host-addresses: the addresses Windows has (in WSL's NAT
 #   mode the distro cannot see them; a public one would reach this
 #   computer's own services).
@@ -103,20 +103,41 @@ ipv6() {  # whether the kernel carries IPv6 at all
   [[ -e "$INET6" ]]
 }
 
-first_for() {  # first_for TOOL CHAIN: the first rule of CHAIN the bridge's packets meet
-  local line name="[[:space:]]-i[[:space:]]([^[:space:]]+)"
+another_interface() {  # another_interface RULE: a rule for another interface, by its whole name
+  # -s, -d, -i and -o come first in what iptables prints, before any match:
+  # nothing after them is read -- a comment may say anything at all.
+  local -a words
+  local at=0 not=""
+  read -r -a words <<< "$1"
+  while (( at < ${#words[@]} )); do
+    case "${words[at]}" in
+      '!') not=1 at=$((at + 1)) ;;
+      -s|-d|-o) not="" at=$((at + 2)) ;;
+      -i) [[ -z "$not" && "${words[at + 1]:-}" != "$IF" && "${words[at + 1]:-}" != *+ ]]; return ;;
+      *) return 1 ;;
+    esac
+  done
+  return 1
+}
+
+rules_of() {  # rules_of TOOL CHAIN: CHAIN's rules, one a line; a rule with no condition is an empty line
+  local line
   while IFS= read -r line; do
-    [[ "$line" == "-A $2 "* ]] || continue
-    line="${line#-A "$2" }"
-    # A rule for another interface, by its whole name, never sees them.
-    if [[ " $line" =~ $name && " $line" != *" ! -i "* ]]; then
-      if [[ "${BASH_REMATCH[1]}" != "$IF" && "${BASH_REMATCH[1]}" != *+ ]]; then
-        continue
-      fi
+    if [[ "$line" == "-A $2" || "$line" == "-A $2 "* ]]; then
+      line="${line#-A "$2"}"
+      echo "${line# }"
     fi
-    echo "$line"
-    return 0
   done < <("$1" -w -S "$2" 2>/dev/null)
+}
+
+first_for() {  # first_for TOOL CHAIN: the first rule of CHAIN the bridge's packets meet
+  local line
+  while IFS= read -r line; do
+    if ! another_interface "$line"; then
+      echo "${line:-a rule with no condition}"
+      return 0
+    fi
+  done < <(rules_of "$1" "$2")
   return 0
 }
 
@@ -131,12 +152,11 @@ put_first() {  # put_first TOOL CHAIN RULE: RULE the first the bridge's packets 
   while true; do
     at=0 last=0
     while IFS= read -r line; do
-      [[ "$line" == "-A $chain "* ]] || continue
       at=$((at + 1))
-      if [[ "${line#-A "$chain" }" == "$rule" ]]; then
+      if [[ "$line" == "$rule" ]]; then
         last=$at
       fi
-    done < <("$tool" -w -S "$chain")
+    done < <(rules_of "$tool" "$chain")
     (( last > 1 )) || break
     "$tool" -w -D "$chain" "$last"
   done
@@ -176,22 +196,33 @@ fi
 if [[ "$MODE" == check ]]; then
   # Each jump the first rule the bridge's packets meet -- a rule in front of
   # it would let them past -- and the chain exactly the one made here; else
-  # exit 3 naming what is not (Kazma then refuses the run).
-  missing=()
-  [[ "$(first_for iptables FORWARD)" == "-j DOCKER-USER" ]] || missing+=("FORWARD->DOCKER-USER")
-  [[ "$(first_for iptables DOCKER-USER)" == "-i $IF -j $CHAIN" ]] || missing+=("DOCKER-USER->$CHAIN")
-  [[ "$(first_for iptables INPUT)" == "$REFUSE_V4" ]] || missing+=("INPUT")
+  # exit 3 naming what is not and the rule in front (Kazma then refuses the
+  # run).
+  missing=() front=()
+  must_be_first() {  # must_be_first NAME TOOL CHAIN RULE [OR RULE]
+    local met
+    met="$(first_for "$2" "$3")"
+    if [[ "$met" != "$4" && ( -z "${5:-}" || "$met" != "${5:-}" ) ]]; then
+      missing+=("$1")
+      [[ -z "$met" ]] || front+=("$1: $met")
+    fi
+  }
+  must_be_first "FORWARD->DOCKER-USER" iptables FORWARD "-j DOCKER-USER"
+  must_be_first "DOCKER-USER->$CHAIN" iptables DOCKER-USER "-i $IF -j $CHAIN"
+  must_be_first INPUT iptables INPUT "$REFUSE_V4"
   if ipv6; then
-    [[ "$(first_for ip6tables DOCKER-USER)" == "$REFUSE_V6" ]] || missing+=("ip6:DOCKER-USER")
+    must_be_first ip6:DOCKER-USER ip6tables DOCKER-USER "$REFUSE_V6"
     # Docker puts its own jump to DOCKER-USER in front of FORWARD's.
-    forward="$(first_for ip6tables FORWARD)"
-    [[ "$forward" == "$REFUSE_V6" || "$forward" == "-j DOCKER-USER" ]] || missing+=("ip6:FORWARD")
-    [[ "$(first_for ip6tables INPUT)" == "$REFUSE_V6" ]] || missing+=("ip6:INPUT")
+    must_be_first ip6:FORWARD ip6tables FORWARD "$REFUSE_V6" "-j DOCKER-USER"
+    must_be_first ip6:INPUT ip6tables INPUT "$REFUSE_V6"
   fi
   want="$(echo "-N $CHAIN"; while IFS= read -r rule; do echo "-A $CHAIN $rule"; done < <(chain_rules))"
   [[ "$(iptables -w -S "$CHAIN" 2>/dev/null)" == "$want" ]] || missing+=("$CHAIN")
   if (( ${#missing[@]} )); then
     echo "EGRESS_NOT_IN_EFFECT ${missing[*]}"
+    for met in ${front[@]+"${front[@]}"}; do
+      echo "EGRESS_IN_FRONT $met"
+    done
     exit 3
   fi
   echo "EGRESS_IN_EFFECT $IF $CHAIN"
@@ -242,8 +273,23 @@ NET="${1:-kazma-egress}"
 if /usr/local/sbin/kazma-egress-rules kz-egress KAZMA-EGRESS check; then
   exit 0
 fi
-timeout 30 docker network rm "$NET" >/dev/null 2>&1
-echo "EGRESS_NETWORK_REMOVED $NET"
+said="$(timeout 30 docker network rm "$NET" 2>&1)"
+code=$?
+if (( code == 0 )); then
+  echo "EGRESS_NETWORK_REMOVED $NET"
+  exit 0
+fi
+# Not removed: never there (the usual case, nobody given the network), or
+# still there, or Docker cannot say.
+if held="$(timeout 30 docker network ls --quiet --filter "name=^${NET}\$" 2>&1)"; then
+  if [[ -z "$held" ]]; then
+    echo "EGRESS_NETWORK_NOT_THERE $NET"
+  else
+    echo "EGRESS_NETWORK_STILL_THERE $NET: docker network rm answered $code: $said"
+  fi
+else
+  echo "EGRESS_NETWORK_UNKNOWN $NET: docker network rm answered $code: $said"
+fi
 exit 0
 GUARD
 chmod 755 /usr/local/sbin/kazma-egress-guard

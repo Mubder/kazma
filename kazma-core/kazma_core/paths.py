@@ -272,14 +272,20 @@ def checkpoints_db() -> str:
 def space_checkpoints_db(space_id: str) -> Path:
     """A space's own checkpoint file (``checkpoints_<space>.db``): the chats
     of every space but the owner's are kept there on SQLite (the gateway's
-    checkpoint store), and a moved space's arrive there (Spaces S4-06). The
-    id is made a safe file name (audit M-G3: ``telegram:12345`` holds a
-    ``:``, illegal on Windows, and an id could carry ``/`` or ``..``),
-    stable per space and bounded."""
+    checkpoint store), and a moved space's arrive there (Spaces S4-06).
+
+    One file per space: a space id is a safe file name as it is, so it is the
+    name (one past 48 characters, its start and a digest of all of it). The
+    ends of the id were cut of underscores, and a space ``v_`` shared ``v``'s
+    file: a refused import of one deleted the other's chats. An id that is no
+    space's -- a tenant of before Spaces (``telegram:12345`` holds a ``:``,
+    illegal on Windows; audit M-G3) -- keeps the name it always had."""
     import hashlib
     import re
 
-    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", space_id).strip("_") or "x"
+    from kazma_core.spaces.scope import valid_space_id
+
+    safe = space_id if valid_space_id(space_id) else re.sub(r"[^A-Za-z0-9_-]+", "_", space_id).strip("_") or "x"
     if len(safe) > 48:
         digest = hashlib.sha256(space_id.encode("utf-8")).hexdigest()[:16]
         safe = f"{safe[:32]}_{digest}"

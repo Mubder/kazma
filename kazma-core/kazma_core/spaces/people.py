@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.spaces import identity
-from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, spaces_enforced
+from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, new_space_id, spaces_enforced
 
 __all__ = [
     "PeopleRefused",
@@ -484,7 +484,7 @@ def create_shared_space(name: str, *, kind: str = "sandboxed", project_folder: s
     name = _checked_name(name)
     if kind not in SHARED_KINDS:
         raise PeopleRefused("bad_kind", 400, f"A shared space is one of {', '.join(SHARED_KINDS)}.")
-    space_id = f"s{secrets.token_hex(6)}"
+    space_id = new_space_id()
     workspace_id = ""
     # One create at a time from the folder check to the record (the S2-12
     # review, finding 10): two creates never take one folder.
@@ -856,7 +856,7 @@ def create_person(name: str, password: str, *, by: str) -> dict[str, Any]:
     name = _checked_name(name)
     password_hash = _password_hash(_checked_password(password))
     account_id = f"p{secrets.token_hex(6)}"
-    space_id = f"s{secrets.token_hex(6)}"
+    space_id = new_space_id()
 
     def _change(reg: dict[str, Any]) -> None:
         now = _now()

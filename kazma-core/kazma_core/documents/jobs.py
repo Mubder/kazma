@@ -1056,6 +1056,46 @@ class DocumentJobRepository:
                 raise
         return len(rows)
 
+    def hand_back(self, *, tenant_id: str, job_id: str, owner: str, delay_seconds: float, reason: str) -> bool:
+        """Give back the one job *owner* holds, due again in *delay_seconds*,
+        on the attempt it had (event ``handed_back_<reason>``): it was not
+        worked on, so its wait counts against no attempt. False when *owner*
+        does not hold it (any more). A job with a cancel requested ends
+        cancelled."""
+        with self._lock:
+            done = False
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    """
+                    SELECT * FROM document_jobs
+                    WHERE state IN ('validating', 'parsing', 'ocr_running',
+                                    'normalizing', 'indexing', 'verifying')
+                      AND tenant_id = ? AND id = ? AND lease_owner = ?
+                    """,
+                    (_required(tenant_id, "tenant_id"), _required(job_id, "job_id"), _required(owner, "owner")),
+                ).fetchone()
+                if row is not None:
+                    cancelled = bool(row["cancel_requested"])
+                    due = _as_utc(self._clock()) + timedelta(seconds=max(0.0, float(delay_seconds)))
+                    self._transition_locked(
+                        row,
+                        target=DocumentJobState.CANCELLED if cancelled else DocumentJobState.RETRY_WAIT,
+                        stage=row["stage"],
+                        event_type="cancelled" if cancelled else f"handed_back_{reason}",
+                        error_code=None,
+                        error_message=None,
+                        retry_at=None if cancelled else _timestamp(due),
+                        cancel_requested=cancelled,
+                        attempt_delta=0 if cancelled else -1,
+                    )
+                self._conn.execute("COMMIT")
+                done = True
+            finally:
+                if not done:
+                    self._rollback_if_needed()
+        return row is not None
+
     def recover_expired_leases(self, *, tenant_id: str | None = None) -> int:
         """Move expired active jobs to retry/dead-letter/cancelled exactly once."""
         tenant = _required(tenant_id, "tenant_id") if tenant_id is not None else None

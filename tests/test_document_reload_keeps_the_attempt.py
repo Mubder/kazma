@@ -42,6 +42,43 @@ def test_three_graceful_stops_never_dead_letter_a_job(tmp_path):
         metadata.close()
 
 
+def test_one_job_is_handed_back_on_its_attempt(tmp_path):
+    """A job that cannot be worked on yet (its space is being brought in):
+    given back by its owner only, due again later (the S4-06 third review)."""
+    from datetime import UTC, datetime, timedelta
+
+    metadata, jobs, job = _ready_job(tmp_path, key="handed-back", max_attempts=3)
+    now = [datetime.now(UTC)]
+    jobs._clock = lambda: now[0]
+    try:
+        _hands_it_back(jobs, job.tenant_id, job.id, "w:0", lambda: now.__setitem__(0, now[0] + timedelta(seconds=31)))
+        claimed = jobs.claim_next(owner="w:0", lease_seconds=60)
+        jobs.request_cancel(tenant_id=claimed.tenant_id, job_id=claimed.id)
+        assert jobs.hand_back(tenant_id=job.tenant_id, job_id=job.id, owner="w:0", delay_seconds=30,
+                              reason="space_arriving")
+        assert jobs.get(tenant_id=job.tenant_id, job_id=job.id).state is DocumentJobState.CANCELLED
+    finally:
+        metadata.close()
+
+
+def _hands_it_back(jobs, tenant, job_id, owner, later) -> None:
+    """Five waits of a job with three attempts, on either store."""
+    back = {"tenant_id": tenant, "job_id": job_id, "delay_seconds": 30, "reason": "space_arriving"}
+    for _wait in range(5):
+        claimed = jobs.claim_next(owner=owner, lease_seconds=60, tenant_id=tenant)
+        assert claimed is not None and claimed.id == job_id and claimed.attempt == 1
+        assert jobs.hand_back(**back, owner="another") is False, "only its holder gives it back"
+        assert jobs.hand_back(**back, owner=owner) is True
+        held = jobs.get(tenant_id=tenant, job_id=job_id)
+        assert held.state is DocumentJobState.RETRY_WAIT and held.attempt == 0 and held.lease_owner is None
+        assert held.error_code is None
+        assert jobs.hand_back(**back, owner=owner) is False, "held no longer"
+        assert jobs.claim_next(owner=owner, lease_seconds=60, tenant_id=tenant) is None, "due later"
+        later()
+    events = [e.event_type for e in jobs.events(tenant_id=tenant, job_id=job_id)]
+    assert events.count("handed_back_space_arriving") == 5 and "attempts_exhausted" not in events
+
+
 def test_a_job_with_a_cancel_requested_ends_cancelled(tmp_path):
     metadata, jobs, job = _ready_job(tmp_path, key="cancel-on-stop")
     try:
@@ -128,3 +165,36 @@ def test_the_postgres_store_releases_on_the_same_attempt():
         assert repo.release_leases([owner]) == 1
         back = repo.get(tenant_id=tenant, job_id=job.id)
         assert back.state is DocumentJobState.RETRY_WAIT and back.attempt == 0
+
+
+@pytest.mark.postgres
+def test_the_postgres_store_hands_one_job_back_on_its_attempt():
+    """The same rule on the Postgres job store."""
+    import os
+    from datetime import UTC, datetime, timedelta
+
+    from kazma_core.db.postgres_pool import get_postgres_pool, reset_postgres_pool
+    from kazma_core.documents.jobs_pg import PostgresDocumentJobRepository
+    from kazma_core.documents.models import new_document_id, new_version_id
+
+    if not os.environ.get("KAZMA_DATABASE_URL") or os.environ.get("KAZMA_TEST_ALLOW_REAL_DB") != "1":
+        pytest.skip("needs a throwaway Postgres (scripts/postgres_suite.py)")
+    reset_postgres_pool()
+    pool = get_postgres_pool()
+    if pool is None:
+        pytest.skip("Postgres pool not configured")
+    repo = PostgresDocumentJobRepository(pool)
+    now = [datetime.now(UTC)]
+    repo._clock = lambda: now[0]
+    tenant = f"t-{os.urandom(4).hex()}"
+    job = repo.enqueue(tenant_id=tenant, workspace_id="ws", document_id=new_document_id(),
+                       version_id=new_version_id(), idempotency_key="handed-back", max_attempts=3)
+    for state in (DocumentJobState.QUARANTINED, DocumentJobState.VALIDATING, DocumentJobState.READY_TO_PARSE):
+        job = repo.transition(tenant_id=tenant, job_id=job.id, expected_state=job.state,
+                              expected_version=job.version, new_state=state)
+    owner = f"handed-{os.urandom(3).hex()}:0"
+    _hands_it_back(repo, tenant, job.id, owner, lambda: now.__setitem__(0, now[0] + timedelta(seconds=31)))
+    repo.claim_next(owner=owner, lease_seconds=60, tenant_id=tenant)
+    repo.request_cancel(tenant_id=tenant, job_id=job.id)
+    assert repo.hand_back(tenant_id=tenant, job_id=job.id, owner=owner, delay_seconds=30, reason="space_arriving")
+    assert repo.get(tenant_id=tenant, job_id=job.id).state is DocumentJobState.CANCELLED

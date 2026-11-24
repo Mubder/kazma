@@ -15293,7 +15293,10 @@ an install with one account behaves as before.
   - Who may (`kazma_ui/spaces_api.py`, from the memberships): the admin or a
     member counts (numbers only); the space's owner exports; an owner deletes
     a shared space; the admin erases the closed personal space of a deleted
-    person and never exports a member's. The export is sealed with a
+    person and never exports a member's. An API token below admin does none
+    of it (403 `own_sign_in_only`, in `_refusal`, 2026-11-24): every token is
+    the owner's account, and an operator token moved the owner's shared
+    space out, secrets included. The export is sealed with a
     password the person chooses (decision N10, `security/sealed_zip.py`:
     WinZip AES-256, at least 12 characters).
   - Pages: Settings -> This space -> This space's data; People lists the
@@ -16281,12 +16284,17 @@ an install with one account behaves as before.
     `DOCKER-USER`, the bridge's jump to `EGRESS_CHAIN` and the `INPUT` and
     IPv6 refusals are each the FIRST rule the bridge's packets meet
     (`first_for`: a rule for another interface by its whole name is not in
-    front of them), and the chain is exactly the list the script makes
+    front of them -- `-i` read only among the words iptables prints before
+    any match, so a comment naming one hides nothing, and a rule with no
+    condition is a rule: the third review), and the chain is exactly the list the script makes
     (`chain_rules`, compared with `iptables -S`, so each rule is written as
     iptables prints it). Asked rule by rule with `iptables -C`, the first
     check answered "in effect" with an ACCEPT in front of the jump and with
     a range's UDP refusal gone (the second review). Anything else refuses
-    the run, never another network. Put in again, the chain is built under a
+    the run, never another network, and the check names the rule in front
+    (`EGRESS_IN_FRONT`). Setup's step ends with the same check: put in is not
+    in effect, and a step whose rules do not hold writes no stamp and says
+    which rule stands in front (`_egress_check`). Put in again, the chain is built under a
     name of its own (`<chain>-NEW`) and swapped in (jump first, the old chain
     out, then renamed), and a refusal that lost its place is put in front
     again (`put_first`): the bridge is never filtered by an empty chain.
@@ -16295,9 +16303,11 @@ an install with one account behaves as before.
     the document worker down with nobody given the network): the drop-in
     (`docker.service.d/kazma-egress.conf`) puts them in again before Docker
     starts and lets it start whatever that answers, and once it runs
-    `kazma-egress-guard` removes the network when the check fails
-    (`kazma setup engine` puts both back). A kernel with no IPv6
-    (`/proc/net/if_inet6` absent) carries none: nothing is put in for it. Not refused, and said on People's confirm (EN/AR) and in the
+    `kazma-egress-guard` removes the network when the check fails and says
+    what `docker network rm` answered: removed, not there, still there, or
+    Docker could not say (`kazma setup engine` puts both back). A kernel with
+    no IPv6 (`/proc/net/if_inet6` absent) carries none: nothing is put in for
+    it. Not refused, and said on People's confirm (EN/AR) and in the
     guide: the network's own public address (hairpin NAT to the router's
     public side, its forwards and its admin page if it answers there).
   - **Only a member's network needs the filter** (the main session's rule,
@@ -16388,22 +16398,30 @@ an install with one account behaves as before.
     its metadata): the bound asker of its FIRST write, and from then on only
     a person connecting the account again changes it
     (`spaces.connected_accounts.connecting`: the tenant middleware binds it
-    for a POST, PUT or PATCH that connects a space's own account,
-    `platform_rbac.connects_an_account`; `oauth_sign_in.attempt_scope` for a
-    sign-in callback; the agent's `vault_store`). Every other write -- a
+    for the requests in which a person gives the account, named one by one
+    in `platform_rbac.CONNECT_ROUTES` and never by prefix -- a disconnect or
+    a start writes too; every other request under the account routes is
+    declared not one in `tests/test_space_move_third_review.py`;
+    `oauth_sign_in.attempt_scope` for a sign-in callback; the agent's
+    `vault_store`). Every other write -- a
     token refresh in whoever's turn, the hourly check as the space's maker
     -- keeps the record the row has, none included (the second review:
     stamped at every write, a refresh made another member's account the
     maker's, and it travelled). Another person's stays, with its
     connection's settings; one with no record travels only from a space
     nobody but its owner was ever in (`_only_ever`). A new route or tool
-    that connects an account binds `connecting`. What they wrote stays the space's, written by
-    `identity.DEPARTED_ACCOUNT`, which is no account: work naming it is
-    refused as a departed person's (`identity.work_scope`). Nobody who
-    stays is named inside a chat's saved state either
+    that connects an account binds `connecting`. What they wrote stays the
+    space's, written by `identity.DEPARTED_ACCOUNT`, which is no account:
+    work naming it is refused as a departed person's (`identity.work_scope`).
+    Nobody who stays is named inside a chat's saved state either
     (`_rewrite_checkpoint`: a card's `asker`, `answered_by` and its names,
     the state's `said_by`; on arrival the owner's own become the new
-    owner's, and a state naming a person of this install is refused).
+    owner's, and a state naming a person of this install is refused). A
+    state, row or setting nested past `space_move.MAX_DEPTH`, a checkpoint
+    kept in a way LangGraph does not write (`_STATE_TYPES`) and a number
+    that is none (`math.isfinite`, `_a_number`; a JSON NaN) are refusals on
+    the way in (`not_a_bundle`, `bad_setting`) and, for a row, left out and
+    counted on the way out: never a RecursionError.
   - **Every table says how it moves** (`space_move.MOVE_RULES`, a
     `MoveRule` each: `moves`, with the column that names its person, its
     memory entry or grant; `stopped`; `out`, with why). A table a space keeps
@@ -16435,7 +16453,16 @@ an install with one account behaves as before.
     (`paths.space_checkpoints_db`, also what the gateway's checkpoint store
     opens): a bundle travels them under one name (`space_move.CHECKPOINTS`),
     from `checkpoints.db` or `checkpoints_<space>.db`, and one naming any
-    other checkpoint file is refused.
+    other checkpoint file is refused. **One file per space, and an id Kazma
+    makes** (the third review, 2026-11-24: the name lost the underscores at
+    its ends, so an id `v_` had `v`'s file, and a refused import of `v_`
+    deleted `v`'s chats): a space id is the file's name as it is (a tenant of
+    before Spaces keeps the name it had), a bundle's id must be one Kazma
+    makes (`scope.made_space_id`, `scope.new_space_id`: `s` and twelve hex
+    digits), and a checkpoint file of its name that is here counts as the
+    space's being here -- a retired memory mode's is someone else's -- but
+    for the emptied one of a space this install erased (`_emptied_here`),
+    which a space moving back is written into.
   - **Refused before anything is written**, each code worded EN/AR
     (`settings.space_data_err.<code>`): the password, a changed byte, an
     entry not listed or listed and missing, too big; anything of the space
@@ -16443,27 +16470,34 @@ an install with one account behaves as before.
     table that never moves (`not_moved`), another member's entry, work or
     account (`foreign_member`, `members_work`), a person of this install
     named by a row (`foreign_person`); an id here already (`id_collides`:
-    never merged; integer row ids alone are given new numbers); a pointer
-    to a secret not in the bundle (`foreign_secret`); a table or column this
-    install lacks.
+    never merged; integer row ids alone are given new numbers) -- in any
+    store and whoever's it is, a chat of the owner's from before Spaces, which
+    has no record, among them (`_check_ids`: such a chat was recorded as the
+    space's, and a take-back deleted it); a pointer to a secret not in the
+    bundle (`foreign_secret`); a table or column this install lacks.
   - **A half-done import leaves the install as it was**: every row store is
     made by its own code first (`spaces/row_stores.py`); the space is
     recorded in `space_move.JOURNAL_KEY` before anything is written; a
-    failure takes back what was written by the erase's own walk (and the
-    space's own checkpoint file, which is made only once the bundle is
-    taken); one a stop cut off is taken back as Kazma starts
-    (`settle_at_start`) or by the next import, never a running one
-    (`settle_unfinished_imports` takes the import lock); the space joins the
+    failure takes back what was written by the erase's own walk, and a file
+    or folder only when it carries the import's own mark, which the journal
+    holds (the checkpoint file's `application_id`, put in place over nothing;
+    `.kazma-arriving` in a folder until the space lands): never one another
+    space has. The checkpoint file goes last -- a program may hold it open --
+    and the journal keeps it for the next start. One a stop cut off is taken
+    back as Kazma starts (`settle_at_start`) or by the next import, never a
+    running one (`settle_unfinished_imports` takes the import lock), nor one
+    that landed: its entry is closed and said so. The space joins the
     identity store last (`people.record_moved_space`, event
     `space_imported`; its refusal is a worded code). **So what takes a space
     with no member, or none at all, for one that is gone leaves a space in
     the journal alone** (`importing_spaces`, read AFTER what is stored and
     BEFORE the identity store): the forget of departed entries (it forgot
     the new owner's facts as they arrived), the erased-key sweep (a space
-    erased here once and moved back) and the document worker (the job
-    waits, `space_arriving`). A new sweep of that kind asks it. A project
-    folder's files stay on the old machine (the
-    guide says so).
+    erased here once and moved back) and the document worker, which gives
+    the job back on the attempt it had, due again in half a minute
+    (`hand_back` on both job stores: counted as a failed attempt, it was
+    dead-lettered in fifteen seconds). A new sweep of that kind asks it. A
+    project folder's files stay on the old machine (the guide says so).
   - **An erase leaves no activity row**: `activity.record` writes nothing
     for a space the install no longer holds or is erasing.
   - Gates: `tests/test_space_bundle_round_trip.py` (S1-27's world exported
@@ -16477,7 +16511,9 @@ an install with one account behaves as before.
     (each of the four decisions and eight review findings, every one failing
     on 052dd4be3; a table with no rule as the control),
     `tests/test_space_move_second_review.py` (the second review's, failing
-    on 46f200bcb),
+    on 46f200bcb), `tests/test_space_move_third_review.py` (the third's,
+    failing on b55865291; the file name of before, where `v` and `v_` meet,
+    as the control),
     `tests/e2e/test_space_move_browser.py` (by the sidebar, EN/AR: moved,
     the file sealed whole, deleted, a wrong password refused, brought back in
     with a person as owner).

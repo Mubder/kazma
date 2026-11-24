@@ -687,6 +687,42 @@ class PostgresDocumentJobRepository:
                 raise
         return len(rows)
 
+    def hand_back(self, *, tenant_id: str, job_id: str, owner: str, delay_seconds: float, reason: str) -> bool:
+        """Give back the one job *owner* holds, on the attempt it had (the
+        SQLite store's rule)."""
+        now = self._clock()
+        with self._pool.connection() as conn:
+            done = False
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT * FROM document_jobs
+                        WHERE state IN ('validating','parsing','ocr_running','normalizing','indexing','verifying')
+                          AND tenant_id = %s AND id = %s AND lease_owner = %s
+                        FOR UPDATE
+                        """,
+                        (_required(tenant_id, "tenant_id"), _required(job_id, "job_id"), _required(owner, "owner")),
+                    )
+                    row = cur.fetchone()
+                    if row is not None:
+                        cancelled = bool(row["cancel_requested"])
+                        self._apply_transition(
+                            cur, row, target="cancelled" if cancelled else "retry_wait",
+                            stage=row["stage"],
+                            event_type="cancelled" if cancelled else f"handed_back_{reason}",
+                            error_code=None, error_message=None,
+                            retry_at=None if cancelled else now + timedelta(seconds=max(0.0, float(delay_seconds))),
+                            cancel_requested=cancelled, now=now,
+                            attempt_delta=0 if cancelled else -1,
+                        )
+                conn.commit()
+                done = True
+            finally:
+                if not done:
+                    conn.rollback()
+        return row is not None
+
     def recover_expired_leases(self, *, tenant_id: str | None = None) -> int:
         tenant = _required(tenant_id, "tenant_id") if tenant_id is not None else None
         now = self._clock()

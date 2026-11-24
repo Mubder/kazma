@@ -302,6 +302,11 @@ _BREAKS = {
         0, ["!", "-i", "eth0", "-j", "ACCEPT"]),
     "an accept before Docker's jump": lambda st: st["v4"]["FORWARD"].insert(0, ["-j", "ACCEPT"]),
     "an accept before INPUT's refusal": lambda st: st["v4"]["INPUT"].insert(0, ["-p", "tcp", "-j", "ACCEPT"]),
+    "an accept whose comment names another interface": lambda st: st["v4"]["DOCKER-USER"].insert(
+        0, ["-m", "comment", "--comment", '"for', "-i", "eth0", 'only"', "-j", "ACCEPT"]),
+    "an accept of TCP whose comment names one": lambda st: st["v4"]["INPUT"].insert(
+        0, ["-p", "tcp", "-m", "comment", "--comment", '"not', "!", "-i", "lo", "-i", 'eth0"', "-j", "ACCEPT"]),
+    "a rule with no condition in front": lambda st: st["v4"]["FORWARD"].insert(0, []),
     "an accept before IPv6's refusal": lambda st: st["v6"]["DOCKER-USER"].insert(0, ["-j", "ACCEPT"]),
     "an accept before IPv6's INPUT": lambda st: st["v6"]["INPUT"].insert(0, ["-j", "ACCEPT"]),
     "the chain flushed": lambda st: st["v4"]["KAZMA-EGRESS"].clear(),
@@ -324,12 +329,20 @@ def test_check_finds_the_rules_in_effect_and_each_way_they_are_not(stand_in) -> 
         run.save(state)
         out = run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST], expect_code=3)
         assert "EGRESS_NOT_IN_EFFECT" in out, name
+        if " before " in name or " in front" in name or "comment" in name:
+            assert "EGRESS_IN_FRONT " in out, (name, out)
+    state = copy.deepcopy(good)
+    _BREAKS["an accept before INPUT's refusal"](state)
+    run.save(state)
+    said = run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST], expect_code=3)
+    assert "EGRESS_NOT_IN_EFFECT INPUT\n" in said and "EGRESS_IN_FRONT INPUT: -p tcp -j ACCEPT\n" in said
     run.save(good)
     assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
     # Rules the bridge's packets never meet stand in front of nothing, and
     # Docker's own jump in front of IPv6's FORWARD leads to the refusal.
     good["v4"]["DOCKER-USER"].insert(0, ["-i", "kzet1234", "-j", "KAZMA-EGRESS-T1234"])
     good["v4"]["INPUT"].insert(0, ["-i", "lo", "-j", "ACCEPT"])
+    good["v4"]["INPUT"].insert(0, ["!", "-s", "10.0.0.0/8", "-d", "10.1.0.0/16", "-i", "eth0", "-p", "udp", "-j", "ACCEPT"])
     good["v6"]["FORWARD"].insert(0, ["-j", "DOCKER-USER"])
     run.save(good)
     assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
@@ -366,6 +379,21 @@ def test_a_reapply_puts_a_refusal_that_lost_its_place_in_front_again(stand_in) -
     assert rules()["v4"]["INPUT"].count(INPUT_V4) == 1 and rules()["v6"]["INPUT"].count(REFUSE_V6) == 1
 
 
+def test_a_reapply_takes_out_no_rule_of_anyone_elses(stand_in) -> None:
+    """A later copy of the refusal goes by its number, counted over every
+    rule of the chain, one with no condition too (b55865291: not counted, the
+    rule before the copy was deleted instead)."""
+    run, rules = stand_in
+    run(hosts=[HOST])
+    _as_docker_starts(run, rules)
+    state = rules()
+    state["v4"]["INPUT"] = [[], ["-p", "tcp", "-j", "ACCEPT"], INPUT_V4, ["-p", "udp", "-j", "ACCEPT"]]
+    run.save(state)
+    run(hosts=[HOST])
+    assert rules()["v4"]["INPUT"] == [INPUT_V4, [], ["-p", "tcp", "-j", "ACCEPT"], ["-p", "udp", "-j", "ACCEPT"]]
+    assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
+
+
 # ── rules that cannot be put in ─────────────────────────────────────────────
 
 
@@ -389,15 +417,24 @@ def _guard_script() -> str:
     return text[start:text.index("\nGUARD\n", start) + 1]
 
 
-@pytest.mark.parametrize("in_effect", [True, False])
-def test_rules_not_in_effect_take_the_network_away_and_leave_docker(tmp_path, in_effect) -> None:
+@pytest.mark.parametrize("in_effect, rm_code, listed, said", [
+    (True, 0, "", ""),
+    (False, 0, "", "EGRESS_NETWORK_REMOVED kazma-egress"),
+    (False, 1, "", "EGRESS_NETWORK_NOT_THERE kazma-egress"),
+    (False, 1, "echo 0a1b2c", "EGRESS_NETWORK_STILL_THERE kazma-egress: docker network rm answered 1: in use"),
+    (False, 1, "exit 1", "EGRESS_NETWORK_UNKNOWN kazma-egress: docker network rm answered 1: in use"),
+])
+def test_rules_not_in_effect_take_the_network_away_and_leave_docker(tmp_path, in_effect, rm_code, listed, said) -> None:
     """``kazma-egress-guard`` (Docker's ExecStartPost): the members' network
-    goes when the rules are not in effect, and it always ends well, so Docker
-    stays."""
+    goes when the rules are not in effect, it says what happened to it
+    (b55865291 said "removed" whatever ``docker network rm`` answered), and
+    it always ends well, so Docker stays."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     asked = tmp_path / "asked"
-    (bin_dir / "docker").write_bytes(f'#!/bin/bash\necho "$@" >> "{asked.as_posix()}"\nexit 1\n'.encode())
+    (bin_dir / "docker").write_bytes((
+        f'#!/bin/bash\necho "$@" >> "{asked.as_posix()}"\n'
+        f'if [[ "$2" == rm ]]; then echo "in use" >&2; exit {rm_code}; fi\n{listed}\nexit 0\n').encode())
     rules = bin_dir / "rules"
     rules.write_bytes(f"#!/bin/bash\nexit {0 if in_effect else 3}\n".encode())
     (bin_dir / "timeout").write_bytes(b'#!/bin/bash\nshift\nexec "$@"\n')
@@ -409,8 +446,11 @@ def test_rules_not_in_effect_take_the_network_away_and_leave_docker(tmp_path, in
                           capture_output=True, text=True, env=env, timeout=60, check=False)
     assert done.returncode == 0, done.stderr
     assert asked.exists() is not in_effect
+    assert done.stdout.strip() == said, done.stdout
     if not in_effect:
-        assert asked.read_text().strip() == "network rm kazma-egress"
+        calls = asked.read_text().splitlines()
+        assert calls[0] == "network rm kazma-egress"
+        assert calls[1:] == ([] if rm_code == 0 else ["network ls --quiet --filter name=^kazma-egress$"])
 
 
 def test_kazma_asks_the_rules_themselves_before_a_run(stand_in) -> None:

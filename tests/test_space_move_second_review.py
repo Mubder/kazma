@@ -182,17 +182,22 @@ def test_connecting_is_what_a_person_does_on_the_connect_routes(monkeypatch) -> 
 
     app = FastAPI()
     app.middleware("http")(auth.create_tenant_middleware())
-    for path in ("/api/email/protocol/connect", "/api/github/token", "/api/x/credentials", "/api/x/api-access",
-                 "/api/email/oauth/microsoft/device/poll", "/api/chat/anything", "/api/x/test"):
+    connects = ("/api/email/gmail/connect", "/api/email/protocol/connect", "/api/email/accounts",
+                "/api/email/oauth/microsoft/device/poll", "/api/github/token", "/api/x/credentials",
+                "/api/x/api-access")
+    # A disconnect, a removal and a start keep nothing a person gives: what
+    # they write is not theirs because they pressed it (the third review).
+    others = ("/api/chat/anything", "/api/x/test", "/api/email/gmail/disconnect", "/api/x/disconnect",
+              "/api/email/accounts/work/remove", "/api/email/oauth/gmail/start", "/api/calendar/anything")
+    for path in connects + others:
         app.add_api_route(path, lambda: {"connecting": is_connecting()}, methods=["GET", "POST"])
     monkeypatch.setattr(auth, "get_request_principal", lambda _request: None)
     with TestClient(app) as client:
         monkeypatch.setattr(scope, "_enforced", True)
-        for path in ("/api/email/protocol/connect", "/api/github/token", "/api/x/credentials", "/api/x/api-access",
-                     "/api/email/oauth/microsoft/device/poll"):
+        for path in connects:
             assert client.post(path).json() == {"connecting": True}, path
             assert client.get(path).json() == {"connecting": False}, path
-        for path in ("/api/chat/anything", "/api/x/test"):
+        for path in others:
             assert client.post(path).json() == {"connecting": False}, path
         assert is_connecting() is False
         monkeypatch.setattr(scope, "_enforced", False)
@@ -284,8 +289,12 @@ def test_control_without_the_journal_the_facts_and_the_key_go(moved, target, mon
 
 
 def test_a_document_job_of_an_arriving_space_waits(shared, tmp_path) -> None:
-    """Its people and its files are written after its row: the job is tried
-    again, not failed as one whose person left."""
+    """Its people and its files are written after its row: the job is given
+    back on the attempt it had, however long the import takes -- never failed
+    as one whose person left, never dead-lettered (b55865291: each wait was a
+    failed attempt, and the fourth claim found none left)."""
+    from datetime import UTC, datetime, timedelta
+
     from kazma_core.documents.config import DocumentConfig
     from kazma_core.documents.ingestion import DocumentIngestionService
     from kazma_core.documents.worker import DocumentWorker
@@ -294,16 +303,32 @@ def test_a_document_job_of_an_arriving_space_waits(shared, tmp_path) -> None:
         storage_root=tmp_path / "documents", security_malware_scan="off", security_local_salvage=False,
         ocr_enabled=False))
     svc.jobs._jitter = lambda _base: 0.0
+    now = [datetime.now(UTC)]
+    svc.jobs._clock = lambda: now[0]
     try:
         with scope.bind_scope(shared["space"], shared["person"]):
             result = svc.ingest_stream(io.BytesIO(b"tides of the Gulf\n"), filename="tides.txt",
                                        tenant_id=shared["space"], actor_id=shared["person"], workspace_id="w")
         people.leave_space(shared["space"], by=shared["person"])  # as before its people are recorded
         space_move._journal(shared["space"], add=True, by=OWNER_ACCOUNT_ID)
+        worker = DocumentWorker(svc.jobs, svc.stage_handlers())
+        for waits in range(1, 9):  # eight waits: more than any job has attempts
+            claimed = svc.jobs.claim_next(owner="worker", lease_seconds=60)
+            assert claimed is not None and claimed.attempt == 1, (waits, claimed)
+            asyncio.run(worker._process_claimed(claimed, "worker"))
+            job = svc.jobs.get(tenant_id=shared["space"], job_id=result.job_id)
+            assert job.state.value == "retry_wait" and job.attempt == 0 and job.error_code is None, job
+            assert job.lease_owner is None
+            assert svc.jobs.claim_next(owner="worker", lease_seconds=60) is None, "claimed again at once"
+            now[0] += timedelta(seconds=31)
+        events = [e.event_type for e in svc.jobs.events(tenant_id=shared["space"], job_id=result.job_id)]
+        assert events.count("handed_back_space_arriving") == 8
+        # One whose cancel was asked for meanwhile ends cancelled.
+        svc.jobs.request_cancel(tenant_id=shared["space"], job_id=result.job_id)
         claimed = svc.jobs.claim_next(owner="worker", lease_seconds=60)
-        asyncio.run(DocumentWorker(svc.jobs, svc.stage_handlers())._process_claimed(claimed, "worker"))
-        job = svc.jobs.get(tenant_id=shared["space"], job_id=result.job_id)
-        assert job.error_code == "space_arriving" and job.state.value == "retry_wait", job
+        if claimed is not None:
+            asyncio.run(worker._process_claimed(claimed, "worker"))
+        assert svc.jobs.get(tenant_id=shared["space"], job_id=result.job_id).state.value == "cancelled"
     finally:
         svc.close()
 

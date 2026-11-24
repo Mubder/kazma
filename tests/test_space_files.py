@@ -137,17 +137,17 @@ def test_a_sandboxed_space_cannot_leave_its_folder(matrix, enforced, tmp_path, m
         home = space_files.space_dir(Matrix.SPACE_A).resolve()
         assert check_path_access("note.md", "write").via == "space"
         assert check_path_access(home / "images" / "x.png", "read").allowed
-        climbing = ["../../../settings.db", "../../matrix-b/files/note.md"]
+        climbing = ["../../../settings.db", "../../s0b0b0b0b0b0b/files/note.md"]
         if os.name == "nt":
             # A backslash separates folders on Windows only; elsewhere it is
             # a letter of one file's name in A's own folder (below).
-            climbing.append("..\\..\\matrix-b\\files\\note.md")
+            climbing.append("..\\..\\s0b0b0b0b0b0b\\files\\note.md")
         for target in (machine / "README.md", outside / "x.txt", tmp_path / "y.txt", *climbing,
                        space_files.space_dir(Matrix.SPACE_B) / "files" / "note.md"):
             result = check_path_access(target, "read")
             assert not result.allowed, target
         if os.name != "nt":
-            named = check_path_access("..\\..\\matrix-b\\files\\note.md", "read")
+            named = check_path_access("..\\..\\s0b0b0b0b0b0b\\files\\note.md", "read")
             assert named.allowed and Path(named.resolved).parent == (home / "files").resolve(), named
     # The same paths for the owner: the extra folder and the switch still work.
     with as_owner():

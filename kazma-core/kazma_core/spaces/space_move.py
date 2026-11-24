@@ -56,16 +56,20 @@ cut half way through a turn is never continued here.
 **The import** (:func:`import_bundle`) refuses before it writes anything
 (:class:`SpaceMoveRefused`, each with a code the pages word): the install
 does not enforce Spaces, is on Postgres, the password, a changed byte, an
-entry that is not listed or listed and missing; anything of the space here
-already; a row that is not the space's, a row of a table that never moves,
-another person's entry, work or account, a person of this install named by
-a row; an id here already; a setting outside the space's own, or one whose
-value its rule refuses; a pointer to a secret that is not in the bundle. It
+entry that is not listed or listed and missing; an id that is not one Kazma
+makes; anything of the space, or of a chat, memory, job or library the bundle
+names, here already -- a checkpoint file of its name too, whoever's it is; a
+row that is not the space's, a row of a table that never moves, another
+person's entry, work or account, a person of this install named by a row; an
+id here already; a setting outside the space's own, or one whose value its
+rule refuses; a pointer to a secret that is not in the bundle. It
 writes with an import journal first (:data:`JOURNAL_KEY`) and the identity
 store last; what takes a space with no member for a left one leaves a space
 in the journal alone (:func:`importing_spaces`). A half-done import is taken
 back, and one a stop cut off is taken back at the next start, or by the next
-import (:func:`settle_unfinished_imports`).
+import (:func:`settle_unfinished_imports`). A take-back deletes a file or a
+folder only when it carries the import's own mark, which the journal holds:
+never one another space has (the third review).
 
 **Not moved:** a personal space; a project folder (the space arrives as a
 plain shared space; the folder's files stay on the old machine); the
@@ -79,6 +83,8 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
+import os
 import re
 import secrets as _secrets
 import shutil
@@ -93,7 +99,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from kazma_core.spaces import space_data
-from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, spaces_enforced, valid_space_id
+from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, made_space_id, spaces_enforced, valid_account_id
 
 __all__ = [
     "ACCOUNT_FIELDS",
@@ -137,6 +143,13 @@ _NAME_FIELDS = frozenset({"answered_by_names"})
 #: space's own checkpoint file here (``paths.space_checkpoints_db``).
 CHECKPOINTS = "checkpoints"
 _MEMBER = "member_"
+#: How deep a value may nest (a row's JSON, a chat's state): deeper is not
+#: something Kazma writes.
+MAX_DEPTH = 200
+#: The file that marks a folder an import brought, until the space lands.
+_ARRIVING = ".kazma-arriving"
+#: How LangGraph says a checkpoint's value is kept.
+_STATE_TYPES = frozenset({"msgpack", "json", "null", "bytes", "bytearray", "empty"})
 _FIRST = ("thread_scopes.db", "swarm_tasks.db")
 _IMPORT_LOCK = threading.Lock()
 _ENTRY_NAME = re.compile(r"[A-Za-z0-9_.-]{1,120}")
@@ -340,8 +353,8 @@ def _entry_of(value: Any) -> str | None:
 def _json_value(raw: Any, path: str) -> Any:
     try:
         value = json.loads(raw) if isinstance(raw, str) else raw
-    except ValueError:
-        return None
+    except (ValueError, RecursionError):
+        return None  # nested too deep: the whole row is refused (``_rewrite``)
     for step in path.removeprefix("$.").split("."):
         value = value.get(step) if isinstance(value, dict) else None
     return value
@@ -355,62 +368,88 @@ def _column_value(row: dict[str, Any], spec: str) -> Any:
     return row.get(spec)
 
 
-def _rewrite(value: Any, swap: Callable[[str, str], str], key: str = "") -> tuple[bool, Any]:
+class _TooDeep(ValueError):
+    """A value nests deeper than :data:`MAX_DEPTH`."""
+
+
+def _refuse_constant(name: str) -> Any:
+    raise ValueError(f"not a JSON number: {name}")
+
+
+def _strict_json(text: str | bytes) -> Any:
+    """JSON as written to the standard: no NaN or Infinity, never deeper than
+    the parser takes. ``ValueError`` for anything else."""
+    try:
+        return json.loads(text, parse_constant=_refuse_constant)
+    except RecursionError:
+        raise _TooDeep("JSON nested too deep") from None
+
+
+def _rewrite(value: Any, swap: Callable[[str, str], str], key: str = "", depth: int = 0) -> tuple[bool, Any]:
     """*value* with every person field and member entry passed through
-    *swap(key, value)*, inside JSON text too."""
+    *swap(key, value)*, inside JSON text too. :class:`_TooDeep` past
+    :data:`MAX_DEPTH`."""
+    if depth > MAX_DEPTH:
+        raise _TooDeep("a value nested too deep")
     if isinstance(value, dict):
         changed, out = False, {}
         for k, v in value.items():
-            c, out[k] = _rewrite(v, swap, str(k))
+            c, out[k] = _rewrite(v, swap, str(k), depth + 1)
             changed = changed or c
         return changed, out
     if isinstance(value, list):
-        results = [_rewrite(v, swap, key) for v in value]
+        results = [_rewrite(v, swap, key, depth + 1) for v in value]
         return any(c for c, _ in results), [v for _, v in results]
     if isinstance(value, str):
         if value[:1] in "{[" and len(value) <= MAX_JSON_BYTES:
             try:
                 parsed = json.loads(value)
+            except RecursionError:
+                raise _TooDeep("JSON nested too deep") from None
             except ValueError:
                 parsed = None
             if isinstance(parsed, dict | list):
-                changed, walked = _rewrite(parsed, swap, key)
+                changed, walked = _rewrite(parsed, swap, key, depth + 1)
                 return (True, json.dumps(walked, ensure_ascii=False)) if changed else (False, value)
         swapped = swap(key, value)
         return swapped != value, swapped
     return False, value
 
 
-def _rewrite_state(value: Any, swap: Callable[[str, str], str], key: str = "") -> tuple[bool, Any]:
+def _rewrite_state(value: Any, swap: Callable[[str, str], str], key: str = "",
+                   depth: int = 0) -> tuple[bool, Any]:
     """:func:`_rewrite` through a checkpoint's own objects: an interrupt's
     card, a send's argument, a tuple."""
     from langgraph.types import Interrupt, Send
 
+    if depth > MAX_DEPTH:
+        raise _TooDeep("a chat's state nested too deep")
     if isinstance(value, Interrupt):
-        changed, card = _rewrite_state(value.value, swap, key)
+        changed, card = _rewrite_state(value.value, swap, key, depth + 1)
         return changed, replace(value, value=card) if changed else value
     if isinstance(value, Send):
-        changed, arg = _rewrite_state(value.arg, swap, key)
+        changed, arg = _rewrite_state(value.arg, swap, key, depth + 1)
         return changed, Send(value.node, arg) if changed else value
     if isinstance(value, dict):
-        walked = {k: _rewrite_state(v, swap, str(k)) for k, v in value.items()}
+        walked = {k: _rewrite_state(v, swap, str(k), depth + 1) for k, v in value.items()}
         return any(c for c, _ in walked.values()), {k: v for k, (_, v) in walked.items()}
     if type(value) in (list, tuple):
-        results = [_rewrite_state(v, swap, key) for v in value]
+        results = [_rewrite_state(v, swap, key, depth + 1) for v in value]
         return any(c for c, _ in results), type(value)(v for _, v in results)
-    return _rewrite(value, swap, key)
+    return _rewrite(value, swap, key, depth)
 
 
 def _rewrite_checkpoint(row: dict[str, Any], swap: Callable[[str, str], str]) -> dict[str, Any]:
     """A checkpoint row with every person field inside its state passed
     through *swap*: a card names who asked, who answers it and their names.
-    ``ValueError`` when the state cannot be read. A state of another kind
-    than LangGraph writes is left as it is: the strict serializer that loads
-    a chat reads no other (never a pickle)."""
+    ``ValueError`` when the state cannot be read: kept in a way LangGraph
+    does not write (a pickle is code), damaged, or nested too deep."""
     from kazma_core.checkpoint_serde import kazma_checkpoint_serde
 
     row = dict(row)
     kind = str(row.get("type") or "")
+    if kind not in _STATE_TYPES:
+        raise ValueError("a checkpoint's state is kept in an unknown way")
     serde = kazma_checkpoint_serde()
     for column in ("checkpoint", "value"):
         blob = row.get(column)
@@ -425,7 +464,7 @@ def _rewrite_checkpoint(row: dict[str, Any], swap: Callable[[str, str], str]) ->
                 changed, state = _rewrite_state(serde.loads_typed((kind, blob)), swap)
                 if changed:
                     row["type"], row[column] = serde.dumps_typed(state)
-        except (ValueError, TypeError, NotImplementedError) as exc:
+        except (ValueError, TypeError, NotImplementedError, RecursionError) as exc:
             if isinstance(exc, SpaceMoveRefused):
                 raise
             raise ValueError("a checkpoint's state cannot be read") from exc
@@ -433,8 +472,10 @@ def _rewrite_checkpoint(row: dict[str, Any], swap: Callable[[str, str], str]) ->
     if isinstance(meta, bytes):
         try:
             changed, state = _rewrite(json.loads(meta), swap)
+        except RecursionError as exc:
+            raise _TooDeep("a checkpoint's metadata nested too deep") from exc
         except (ValueError, UnicodeDecodeError) as exc:
-            if isinstance(exc, SpaceMoveRefused):
+            if isinstance(exc, SpaceMoveRefused | _TooDeep):
                 raise
             return row  # not JSON: holds no person field
         if changed:
@@ -448,13 +489,13 @@ def _rewrite_checkpoint(row: dict[str, Any], swap: Callable[[str, str], str]) ->
 def _secret_group(name: str, space: str) -> str:
     """The connection a secret belongs to: its settings and secrets travel,
     or stay, together."""
-    for prefix in (f"cfg:tenant.{space}.connectors.x.", f"cfg-url:tenant.{space}.connectors.x."):
-        if name.startswith(prefix):
-            return "connectors.x"
-    for prefix in (f"cfg:tenant.{space}.connectors.github.", f"cfg-url:tenant.{space}.connectors.github."):
-        if name.startswith(prefix):
-            return "connectors.github"
-    inner = name.removeprefix(f"space:{space}:")
+    from kazma_core.security.vault import space_name_prefixes
+
+    own, *of_settings = space_name_prefixes(space)
+    for connection in ("connectors.x", "connectors.github"):
+        if name.startswith(tuple(f"{prefix}{connection}." for prefix in of_settings)):
+            return connection
+    inner = name.removeprefix(own)
     parts = inner.split(".")
     if inner != name:
         if parts[:2] == ["email", "account"] and len(parts) > 2:
@@ -467,7 +508,7 @@ def _secret_group(name: str, space: str) -> str:
 def _stored_by(row: dict[str, Any]) -> str:
     try:
         meta = json.loads(row.get("metadata") or "{}")
-    except ValueError:
+    except (ValueError, RecursionError):
         return ""
     return str(meta.get("stored_by") or "") if isinstance(meta, dict) else ""
 
@@ -564,6 +605,13 @@ def _moved_setting(key: str, space: str) -> str | None:
     return base if key.startswith(prefix) and base in _MOVED_SETTINGS else None
 
 
+def _a_number(value: Any) -> bool:
+    """A number its reader can use: never NaN or infinity, nor one no float
+    holds exactly."""
+    return (isinstance(value, int | float) and not isinstance(value, bool)
+            and abs(value) < 2**53 and math.isfinite(value))
+
+
 def _holds_what_it_should(base: str, value: Any) -> bool:
     """Whether *value* is what the moved setting *base* holds."""
     from kazma_core.settings_validation import SettingRejected, validate_setting
@@ -576,10 +624,10 @@ def _holds_what_it_should(base: str, value: Any) -> bool:
     if kind == "flag":
         right = isinstance(value, bool | int) or str(value).lower() in ("true", "false", "1", "0", "yes", "no", "on", "off")
     elif kind == "number":
-        right = isinstance(value, int | float) and not isinstance(value, bool)
+        right = _a_number(value)
     elif kind == "account":
         right = isinstance(value, dict) and len(value) <= 20 and all(
-            isinstance(v, str | int | float | bool | type(None))
+            isinstance(v, str | bool | type(None)) or _a_number(v)
             or (isinstance(v, list) and len(v) <= 100 and all(isinstance(s, str) for s in v))
             for v in value.values())
     else:
@@ -649,7 +697,7 @@ def _checked_mapping(key: str, entry: Any) -> None:
         for account in entry:
             if not isinstance(account, dict) or not _ALIAS.fullmatch(str(account.get("alias") or "")):
                 raise bad
-            if not all(isinstance(v, str | int | float | bool | type(None)) for v in account.values()):
+            if not all(isinstance(v, str | bool | type(None)) or _a_number(v) for v in account.values()):
                 raise bad
     elif key == "self_improvement.space_evolution":
         from kazma_core.safety.prompt_fence import is_override_delta
@@ -677,6 +725,10 @@ def _check_settings(space: str, settings: dict[str, Any], secret_names: set[str]
         if not isinstance(held, dict) or "value" not in held or set(held) - {"category", "value"}:
             raise SpaceMoveRefused("not_a_bundle", 400, "A setting of the bundle is not as written.")
         value = held["value"]
+        try:
+            _rewrite(value, lambda _key, text: text)
+        except _TooDeep:
+            raise SpaceMoveRefused("bad_setting", 409, f"The bundle's {key} is nested too deep.") from None
         if key in _MAPPINGS:
             if not isinstance(value, dict) or set(value) != {space}:
                 raise SpaceMoveRefused("foreign_setting", 409, f"The bundle's {key} names another space.")
@@ -914,8 +966,15 @@ def _write_tables(zipped: zipfile.ZipFile, plan: _Export, ctx: space_data._Conte
                         except ValueError:  # a state this build cannot read: it could not be resumed there
                             plan.left_out[f"{store}:{table}"] = plan.left_out.get(f"{store}:{table}", 0) + 1
                             continue
-                    moved = {k: _rewrite(v, plan.swap, k)[1] for k, v in row.items()}
-                    out.write((json.dumps(moved, ensure_ascii=False, default=str) + "\n").encode("utf-8"))
+                    try:
+                        moved = {k: _rewrite(v, plan.swap, k)[1] for k, v in row.items()}
+                        line = json.dumps(moved, ensure_ascii=False, default=str, allow_nan=False)
+                    except SpaceMoveRefused:
+                        raise
+                    except ValueError:  # too deep, or a number JSON has not: an import would refuse it
+                        plan.left_out[f"{store}:{table}"] = plan.left_out.get(f"{store}:{table}", 0) + 1
+                        continue
+                    out.write((line + "\n").encode("utf-8"))
                     count += 1
                     plan.check_size()
         if count:
@@ -943,10 +1002,13 @@ class _Bundle:
                     return
                 if len(raw) > MAX_JSON_BYTES:
                     raise SpaceMoveRefused("too_big", 413, "A row of the bundle is bigger than a row may be.")
-                text = raw.decode("utf-8").strip()
-                if not text:
-                    continue
-                row = json.loads(text)
+                try:
+                    text = raw.decode("utf-8").strip()
+                    if not text:
+                        continue
+                    row = _strict_json(text)
+                except ValueError:
+                    raise SpaceMoveRefused("not_a_bundle", 400, "A row of the bundle cannot be read.") from None
                 if not isinstance(row, dict):
                     raise SpaceMoveRefused("not_a_bundle", 400, "A row of the bundle is not an object.")
                 yield row
@@ -957,7 +1019,7 @@ class _Bundle:
         if self.zipped.getinfo(name).file_size > MAX_JSON_BYTES:
             raise SpaceMoveRefused("too_big", 413, f"The bundle's {name} is bigger than it may be.")
         try:
-            return json.loads(self.zipped.read(name).decode("utf-8"))
+            return _strict_json(self.zipped.read(name).decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             raise SpaceMoveRefused("not_a_bundle", 400, f"The bundle's {name} is not as written.") from None
 
@@ -979,18 +1041,22 @@ def _open_bundle(reader: Any) -> _Bundle:
         zipped.close()
         raise SpaceMoveRefused("too_big", 413, "The bundle's list of entries is bigger than it may be.")
     try:
-        manifest = json.loads(zipped.read("bundle.json").decode("utf-8"))
+        manifest = _strict_json(zipped.read("bundle.json").decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         zipped.close()
         raise SpaceMoveRefused("not_a_bundle", 400, "This is not a space bundle.") from None
     handed = False
     try:
         space = str(manifest.get("space") or "") if isinstance(manifest, dict) else ""
-        if not isinstance(manifest, dict) or manifest.get("format") != FORMAT or not valid_space_id(space) \
-                or space == OWNER_SPACE_ID or not isinstance(manifest.get("entries"), dict):
+        # An id as Kazma makes them, its file's name its own: never one a
+        # tenant of before Spaces had, whose folder or file would be taken
+        # for this space's.
+        if not isinstance(manifest, dict) or manifest.get("format") != FORMAT or not made_space_id(space) \
+                or _checkpoint_files(space)[0].stem.removeprefix("checkpoints_") != space \
+                or not isinstance(manifest.get("entries"), dict):
             raise SpaceMoveRefused("not_a_bundle", 400, "This is not a space bundle this build reads.")
         exporter = str(manifest.get("exported_by") or "")
-        if not valid_space_id(exporter):
+        if not valid_account_id(exporter):
             raise SpaceMoveRefused("not_a_bundle", 400, "The bundle names no owner it was made by.")
         listed = {str(k): v for k, v in manifest["entries"].items()}
         present = {i.filename: i.file_size for i in zipped.infolist() if not i.is_dir()}
@@ -1182,8 +1248,11 @@ class _Import:
             return value
 
         for key, value in row.items():
-            _rewrite(value, look, key)
-        if table in ("checkpoints", "writes") and "type" in row:
+            try:
+                _rewrite(value, look, key)
+            except _TooDeep:
+                raise SpaceMoveRefused("not_a_bundle", 400, f"A row of {table} is nested too deep.") from None
+        if table in ("checkpoints", "writes"):
             try:
                 _rewrite_checkpoint(row, look)
             except SpaceMoveRefused:
@@ -1224,8 +1293,35 @@ def _check_rows(bundle: _Bundle, targets: dict[tuple[str, str], _Target], ctx: s
                         raise SpaceMoveRefused("id_collides", 409, f"A row of {table} is here already.")
 
 
+def _checkpoint_files(space: str) -> list[Path]:
+    """The space's own checkpoint file and what SQLite keeps beside it."""
+    from kazma_core.paths import space_checkpoints_db
+
+    own = space_checkpoints_db(space)
+    return [own, own.with_name(own.name + "-wal"), own.with_name(own.name + "-shm")]
+
+
+def _emptied_here(space: str) -> bool:
+    """Whether the checkpoint file of the space's name is the one this
+    install left when it erased the space: recorded (``space_erased``), and
+    it holds no row. The import writes into it -- the gateway may hold it
+    open -- and it carries no mark, so a take-back leaves the file."""
+    from kazma_core.spaces import identity
+
+    own = _checkpoint_files(space)[0]
+    if not own.is_file() or not any(
+            isinstance(e, dict) and e.get("kind") == "space_erased" and e.get("space") == space
+            for e in identity.read_registry().get("events") or ()):
+        return False
+    try:
+        with closing(sqlite3.connect(f"file:{own}?mode=ro", uri=True)) as conn:
+            return not any(conn.execute(f'SELECT 1 FROM "{table}" LIMIT 1').fetchone()
+                           for table, _virtual in space_data._tables(conn))
+    except sqlite3.Error:
+        return False
+
+
 def _nothing_of_the_space_here(space: str) -> None:
-    from kazma_core.config_store import get_config_store
     from kazma_core.spaces import identity
 
     reason = ""
@@ -1233,12 +1329,14 @@ def _nothing_of_the_space_here(space: str) -> None:
         reason = "the identity store"
     elif sum(item.rows for item in space_data._walk(space)[1]):
         reason = "a store's rows"
-    elif any(key.startswith(f"tenant.{space}.") for group in get_config_store().get_all().values() for key in group):
+    elif space_data._settings_keys(space, []):
         reason = "a setting"
     elif space_data._vault_rows(space) or space_data._vault_keys(space):
         reason = "a secret"
     elif any(path.exists() for path in _space_folders(space).values()):
         reason = "a folder"
+    elif any(path.exists() for path in _checkpoint_files(space)) and not _emptied_here(space):
+        reason = "a checkpoint file"
     if reason:
         raise SpaceMoveRefused("space_exists", 409, f"This install holds the space already ({reason}).")
 
@@ -1257,12 +1355,21 @@ def _file_entries(bundle: _Bundle) -> list[tuple[str, PurePosixPath, str]]:
     return out
 
 
-def _check_threads(threads: list[str]) -> None:
+def _check_ids(space: str, ctx: space_data._Context) -> None:
+    """Nothing here is keyed by a chat, memory, job, task or library the
+    bundle names -- in any store, whoever's it is. A chat from before Spaces
+    has no record and is the owner's (N19): taken for the bundle's, its rows
+    would be the space's, and a take-back would delete them."""
     from kazma_core.spaces import threads as thread_store
 
-    for thread in threads:
-        if thread_store.record_of(thread) is not None:
-            raise SpaceMoveRefused("id_collides", 409, "A chat of the bundle is here already.")
+    threads = ctx.ids["threads"]
+    if any(thread_store.record_of(thread) is not None for thread in threads):
+        raise SpaceMoveRefused("id_collides", 409, "A chat of the bundle is here already.")
+    _ctx, found = space_data._walk(space, ctx)
+    held = [item for item in found if item.rows]
+    if held or space_data._settings_keys(space, threads):
+        where = f"{held[0].store}:{held[0].table}" if held else "a setting"
+        raise SpaceMoveRefused("id_collides", 409, f"Something the bundle names is here already ({where}).")
 
 
 def _secret_rows(bundle: _Bundle, space: str) -> list[dict[str, Any]]:
@@ -1280,7 +1387,10 @@ def _secret_rows(bundle: _Bundle, space: str) -> list[dict[str, Any]]:
                 raise SpaceMoveRefused("too_big", 413, "A secret of the bundle is bigger than a secret may be.")
             if not raw.strip():
                 continue
-            row = json.loads(raw.decode("utf-8"))
+            try:
+                row = _strict_json(raw.decode("utf-8"))
+            except ValueError:
+                row = None
             if not isinstance(row, dict):
                 raise SpaceMoveRefused("not_a_bundle", 400, "A secret of the bundle is not as written.")
             rows.append({**row, "encrypted_value": _unb64(row.get("encrypted_value")),
@@ -1389,8 +1499,61 @@ _STOPS: dict[tuple[str, str], Callable[[dict[str, Any], dict[str, Any]], dict[st
 }
 
 
+def _land_new(staged: Path, where: Path) -> None:
+    """*staged* renamed to *where*, never over a file that is there."""
+    try:
+        if os.name == "nt":
+            staged.rename(where)  # Windows never renames over a file
+            return
+        try:
+            os.link(staged, where)
+            staged.unlink()
+        except FileExistsError:
+            raise
+        except OSError:  # a disk with no hard links: the name is claimed, then replaced
+            os.close(os.open(where, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            staged.replace(where)
+    except FileExistsError:
+        raise SpaceMoveRefused("space_exists", 409, "The space has a checkpoint file here already.") from None
+
+
+def _staged_checkpoints(space: str, mark: int) -> Path:
+    from kazma_core.paths import space_checkpoints_db
+
+    own = space_checkpoints_db(space)
+    return own.with_name(f"{own.name}.moving-{mark:08x}")
+
+
+def _make_checkpoint_file(space: str, mark: int) -> None:
+    """The space's own checkpoint file, carrying the import's *mark* from the
+    moment it is there (SQLite's ``application_id``): what a take-back asks
+    before it deletes one."""
+    from kazma_core.paths import space_checkpoints_db
+
+    staged, own = _staged_checkpoints(space, mark), space_checkpoints_db(space)
+    own.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(str(staged), check_same_thread=False)) as conn:
+        conn.execute(f"PRAGMA application_id = {int(mark)}")
+        _checkpoint_schema(conn)
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("PRAGMA journal_mode = DELETE")  # one file, to be renamed
+    _land_new(staged, own)
+
+
+def _mark_of(path: Path) -> int:
+    """The mark a checkpoint file carries, 0 for none: read from the file's
+    header (SQLite's ``application_id``, bytes 68 to 71), never by opening a
+    database another program may hold."""
+    try:
+        with open(path, "rb") as held:
+            head = held.read(72)
+    except OSError:
+        return 0
+    return int.from_bytes(head[68:72], "big") if head.startswith(b"SQLite format 3\x00") else 0
+
+
 def _write_rows(bundle: _Bundle, targets: dict[tuple[str, str], _Target], people: _Import,
-                stop_ctx: dict[str, Any]) -> int:
+                stop_ctx: dict[str, Any], mark: int) -> int:
     by_path: dict[Path, list[_Target]] = {}
     for target in targets.values():
         by_path.setdefault(target.path, []).append(target)
@@ -1403,10 +1566,8 @@ def _write_rows(bundle: _Bundle, targets: dict[tuple[str, str], _Target], people
     for path in sorted(by_path, key=_order):
         items = by_path[path]
         checkpoints = any(t.store == CHECKPOINTS for t in items)
-        if checkpoints:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with closing(sqlite3.connect(str(path), check_same_thread=False)) as made:
-                _checkpoint_schema(made)
+        if checkpoints and not _emptied_here(bundle.space):
+            _make_checkpoint_file(bundle.space, mark)
         with closing(sqlite3.connect(str(path), timeout=30)) as conn:
             conn.execute("BEGIN IMMEDIATE")
             committed = False
@@ -1512,33 +1673,61 @@ def _write_settings(space: str, settings: dict[str, Any], people: _Import) -> in
     return len(settings)
 
 
-def _write_files(bundle: _Bundle, entries: list[tuple[str, PurePosixPath, str]]) -> int:
-    folders = _space_folders(bundle.space)
-    staged = {part: where.with_name(where.name + f".moving-{_secrets.token_hex(4)}")
-              for part, where in folders.items()}
+def _staged_folders(space: str, mark: int) -> dict[str, tuple[Path, Path]]:
+    """``{part: (the folder while it is written, its place)}``."""
+    return {part: (where.with_name(f"{where.name}.moving-{mark:08x}"), where)
+            for part, where in _space_folders(space).items()}
+
+
+def _write_files(bundle: _Bundle, entries: list[tuple[str, PurePosixPath, str]], mark: int) -> int:
+    folders = _staged_folders(bundle.space, mark)
     try:
         for part, inside, name in entries:
-            path = staged[part].joinpath(*inside.parts)
+            path = folders[part][0].joinpath(*inside.parts)
             path.parent.mkdir(parents=True, exist_ok=True)
             with bundle.zipped.open(name) as src, open(path, "wb") as out:
                 shutil.copyfileobj(src, out)
-        for part, where in folders.items():
-            if staged[part].exists():
+        for staged, where in folders.values():
+            if staged.exists():
+                (staged / _ARRIVING).write_text(f"{mark:08x}", encoding="ascii")
                 where.parent.mkdir(parents=True, exist_ok=True)
-                staged[part].replace(where)
+                try:
+                    staged.rename(where)  # a folder with anything in it is never replaced
+                except OSError as exc:
+                    if where.exists():
+                        raise SpaceMoveRefused("space_exists", 409, "The space has a folder here already.") from exc
+                    raise
     finally:
-        for path in staged.values():
-            shutil.rmtree(path, ignore_errors=True)
+        for staged, _where in folders.values():
+            shutil.rmtree(staged, ignore_errors=True)
     return len(entries)
 
 
-def _journal(space: str, *, add: bool, by: str = "") -> None:
+def _arrived_with(where: Path, mark: int) -> bool:
+    """Whether the folder *where* is the one the import marked *mark* brought."""
+    try:
+        return bool(mark) and (where / _ARRIVING).read_text(encoding="ascii").strip() == f"{mark:08x}"
+    except OSError:
+        return False
+
+
+def _unmark_folders(space: str) -> None:
+    """The space landed: its folders no longer carry the import's mark (a
+    file a program holds keeps it; nothing reads it once the space is here)."""
+    for where in _space_folders(space).values():
+        try:
+            (where / _ARRIVING).unlink(missing_ok=True)
+        except OSError:
+            logger.info("[spaces] %s could not be removed from the folder of space %s", _ARRIVING, space)
+
+
+def _journal(space: str, *, add: bool, by: str = "", mark: int = 0) -> None:
     from kazma_core.config_store import get_config_store
 
     def _change(current: Any) -> Any:
         held = dict(current) if isinstance(current, dict) else {}
         if add:
-            held[space] = {"by": by, "started_at": _iso_now()}
+            held[space] = {"by": by, "started_at": _iso_now(), "mark": mark}
         else:
             held.pop(space, None)
         return held
@@ -1554,18 +1743,18 @@ def _take_back_failures() -> tuple[type[BaseException], ...]:
     return (OSError, sqlite3.Error, ValueError, ConfigStoreUnavailableError)
 
 
-def _take_back(space: str, earlier: space_data._Context | None = None) -> None:
-    """Remove everything of *space* this install holds: the space was not
-    here before its import began (checked), so all of it is the import's."""
-    from kazma_core.paths import space_checkpoints_db
+def _take_back(space: str, earlier: space_data._Context | None = None, *, mark: int) -> None:
+    """Remove what the import marked *mark* wrote of *space*. Its rows,
+    settings and secrets: nothing of the space, nor of an id the bundle
+    names, was here before it began (checked). Its folders and its checkpoint
+    file only when they carry the mark; the file last, since a process may
+    hold it open (the journal keeps the rest of the work for the next
+    start)."""
     from kazma_core.security.vault import get_vault
     from kazma_core.spaces import threads
 
     ctx, found = space_data._walk(space, earlier)
     space_data._erase_rows(found, ctx)
-    own = space_checkpoints_db(space)  # its own file, made by the import
-    for path in (own, own.with_name(own.name + "-wal"), own.with_name(own.name + "-shm")):
-        path.unlink(missing_ok=True)
     space_data._erase_settings(space, ctx.ids["threads"])
     for thread in ctx.ids["threads"]:
         threads.forget_thread(thread)  # its record went with the rows; its cached space too
@@ -1574,11 +1763,18 @@ def _take_back(space: str, earlier: space_data._Context | None = None) -> None:
         if vault is None:
             raise SpaceMoveRefused("vault_unavailable", 503, "The vault cannot be opened.")
         vault.erase_space(space)
-    for where in _space_folders(space).values():
-        if where.exists():
+    for staged, where in _staged_folders(space, mark).values():
+        shutil.rmtree(staged, ignore_errors=True)
+        if _arrived_with(where, mark):
             shutil.rmtree(where)
-        for staged in where.parent.glob(where.name + ".moving-*") if where.parent.is_dir() else ():
-            shutil.rmtree(staged, ignore_errors=True)
+    if mark:
+        staged_file = _staged_checkpoints(space, mark)
+        for path in staged_file.parent.glob(staged_file.name + "*"):  # and what SQLite keeps beside it
+            path.unlink(missing_ok=True)
+        files = _checkpoint_files(space)
+        if files[0].exists() and _mark_of(files[0]) == mark:
+            for path in files:
+                path.unlink(missing_ok=True)
 
 
 def importing_spaces() -> frozenset[str]:
@@ -1628,16 +1824,22 @@ def _settle() -> list[str]:
         return []
     recorded = identity.read_registry()["spaces"]
     settled: list[str] = []
-    for space in list(held):
-        if not valid_space_id(space):
+    for space, entry in list(held.items()):
+        if not made_space_id(space):
             continue
-        if space not in recorded:
-            try:
-                _take_back(space)
-            except _take_back_failures():
-                logger.warning("[spaces] an unfinished import of space %s could not be taken back yet", space,
-                               exc_info=True)
-                continue
+        if space in recorded:
+            # It landed: only the journal's last step was cut off.
+            _unmark_folders(space)
+            _journal(space, add=False)
+            logger.info("[spaces] the import of space %s had landed; its journal entry is closed", space)
+            continue
+        mark = entry.get("mark") if isinstance(entry, dict) else 0
+        try:
+            _take_back(space, mark=mark if isinstance(mark, int) else 0)
+        except _take_back_failures():
+            logger.warning("[spaces] an unfinished import of space %s could not be taken back yet", space,
+                           exc_info=True)
+            continue
         _journal(space, add=False)
         settled.append(space)
         logger.warning("[spaces] an unfinished import of space %s was taken back", space)
@@ -1693,7 +1895,7 @@ def _take_in(bundle: _Bundle, *, owner: str, by: str, people_module: Any, here: 
     targets = _targets(bundle)
     ctx = _bundle_context(bundle)
     _check_rows(bundle, targets, ctx, people)
-    _check_threads(ctx.ids["threads"])
+    _check_ids(space, ctx)
     rows = _secret_rows(bundle, space)
     for row in rows:
         people.check_row(MoveRule("moves"), {"metadata": row.get("metadata") or "{}"}, "the vault")
@@ -1709,7 +1911,8 @@ def _take_in(bundle: _Bundle, *, owner: str, by: str, people_module: Any, here: 
         raise SpaceMoveRefused("vault_unavailable", 503, "The vault cannot be opened; nothing was taken.")
     stop_ctx = {"now": _iso_now(), "address": _owner_address(owner)}
     # Everything checked: write, the journal first, the identity store last.
-    _journal(space, add=True, by=by)
+    mark = _secrets.randbelow(2**31 - 2) + 1
+    _journal(space, add=True, by=by, mark=mark)
     done = False
     try:
         if vault is not None:
@@ -1720,10 +1923,10 @@ def _take_in(bundle: _Bundle, *, owner: str, by: str, people_module: Any, here: 
                 code = "id_collides" if exc.code in ("space_in_vault", "key_collides", "name_collides") else (
                     "foreign_secret" if exc.code == "not_the_spaces" else "changed")
                 raise SpaceMoveRefused(code, status, "The bundle's secrets were not taken.") from exc
-        written = _write_rows(bundle, targets, people, stop_ctx)
+        written = _write_rows(bundle, targets, people, stop_ctx, mark)
         expired = _expire_waiting_cards(space, ctx.ids["threads"])
         _write_settings(space, settings, people)
-        files = _write_files(bundle, entries)
+        files = _write_files(bundle, entries, mark)
         try:
             people_module.record_moved_space(space, name, owner, by=by)
         except (people_module.PeopleRefused, identity.IdentityError) as exc:
@@ -1735,11 +1938,12 @@ def _take_in(bundle: _Bundle, *, owner: str, by: str, people_module: Any, here: 
             key["key"] = b""
         if not done:
             try:
-                _take_back(space, ctx)
+                _take_back(space, ctx, mark=mark)
                 _journal(space, add=False)
             except _take_back_failures():  # the journal keeps it for the next import's settle
                 logger.warning("[spaces] the import of space %s was not taken back yet; the next import will",
                                space, exc_info=True)
+    _unmark_folders(space)
     _journal(space, add=False)
     logger.info("[spaces] space moved in space=%s owner=%s by=%s rows=%d files=%d secrets=%d cards=%d",
                 space, owner, by, written, files, len(rows), expired)

@@ -202,11 +202,27 @@ def _connects_a_spaces_own_account(path: str) -> bool:
     return spaces_enforced()
 
 
+#: The requests in which a person gives the account they connect (a key, a
+#: password, a device sign-in's answer). Named, never a prefix: a disconnect
+#: or a test that refreshes a token writes too, and what it writes is not
+#: theirs because they pressed it. A sign-in through the provider finishes in
+#: its callback (``oauth_sign_in.attempt_scope``).
+CONNECT_ROUTES = frozenset({
+    ("POST", "/api/email/accounts"),
+    ("POST", "/api/email/gmail/connect"),
+    ("POST", "/api/email/oauth/microsoft/device/poll"),
+    ("POST", "/api/email/protocol/connect"),
+    ("POST", "/api/github/token"),
+    ("POST", "/api/x/api-access"),
+    ("POST", "/api/x/credentials"),
+})
+
+
 def connects_an_account(path: str, method: str) -> bool:
     """Whether the request is a person connecting an account of their space
-    (a sign-in, a saved key or password): what it keeps is recorded as theirs
+    (:data:`CONNECT_ROUTES`): what it keeps is recorded as theirs
     (``connected_accounts.connecting``). Only once Spaces is enforced."""
-    return method.upper() in ("POST", "PUT", "PATCH") and _connects_a_spaces_own_account(path)
+    return (method.upper(), path.rstrip("/")) in CONNECT_ROUTES and _connects_a_spaces_own_account(path)
 
 
 # Single routes (never their children) only an administrator may call.

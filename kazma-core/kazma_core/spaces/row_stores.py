@@ -87,14 +87,15 @@ def make_row_stores() -> list[str]:
 
     _EffectJournal(paths.data_dir() / "tool_effects.db")
     made.append("tool_effects.db")
+    from kazma_core.checkpoint_serde import kazma_checkpoint_serde
     from langgraph.checkpoint.sqlite import SqliteSaver
 
     with closing(sqlite3.connect(paths.checkpoints_db(), check_same_thread=False)) as conn:
-        SqliteSaver(conn).setup()
+        SqliteSaver(conn, serde=kazma_checkpoint_serde()).setup()
     made.append("checkpoints.db")
-    from kazma_core.time_travel import SnapshotStore
+    from kazma_core.time_travel import ensure_snapshots_table
 
-    SnapshotStore(paths.snapshots_db())
+    ensure_snapshots_table(paths.snapshots_db())
     made.append("snapshots.db")
     from kazma_core import time_travel_audit
 

@@ -68,6 +68,7 @@ from typing import Any, Callable
 from kazma_core.spaces.scope import (
     OWNER_ACCOUNT_ID,
     OWNER_SPACE_ID,
+    new_space_id,
     set_enforced,
     valid_account_id,
     valid_space_id,
@@ -549,7 +550,7 @@ def create_space(
 ) -> dict[str, Any]:
     """Make a space. A personal space gets its one member; a shared space
     gets its maker as ``owner``. Returns the space."""
-    new_id = space_id or f"s{secrets.token_hex(6)}"
+    new_id = space_id or new_space_id()
     made: dict[str, Any] = {}
 
     def _change(reg: dict[str, Any]) -> None:

@@ -520,7 +520,7 @@ def test_every_name_built_from_a_library_id_keeps_the_space_apart() -> None:
     owner's delete removed the other space's fetched pages (S1-13 review)."""
     from kazma_core.stores.knowledge import _library_id_in_space
 
-    theirs = _library_id_in_space("docs", "matrix-a")
+    theirs = _library_id_in_space("docs", "s0a0a0a0a0a0a")
     owners = _library_id_in_space(theirs, OWNER_SPACE_ID)
     assert owners != theirs
     mine, other = _built_names(theirs), _built_names(owners)
@@ -539,7 +539,7 @@ def test_control_the_old_folder_rule_made_two_spaces_one_folder() -> None:
     def as_it_was(library_id: str) -> str:
         return "".join(c if c.isalnum() or c in "-_" else "_" for c in library_id)[:80] or "library"
 
-    theirs = _library_id_in_space("docs", "matrix-a")
+    theirs = _library_id_in_space("docs", "s0a0a0a0a0a0a")
     assert as_it_was(theirs) == as_it_was(_library_id_in_space(theirs, OWNER_SPACE_ID))
 
 
