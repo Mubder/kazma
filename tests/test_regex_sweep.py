@@ -471,6 +471,9 @@ def _report(literals: list[Literal], slow: dict[int, dict], hung: list[int]) -> 
 
 # ── the tests ─────────────────────────────────────────────────────────────
 
+#: Longer than the sweep's own limit (240 s), so a busy runner reads its answer:
+#: CI's 120 s a test ended it at no pattern (2026-11-24).
+@pytest.mark.timeout(300)
 def test_every_product_regex_literal_is_linear_or_declared():
     literals, slow, hung = sweep()
     assert len(literals) > 500, len(literals)  # the scan found the product's patterns

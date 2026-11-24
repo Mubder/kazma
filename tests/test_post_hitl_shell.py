@@ -48,6 +48,7 @@ def test_resolve_rejects_outside_path(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setenv("KAZMA_SHELL_STRICT", "1")
     evil = tmp_path / "evil-git"
     evil.write_text("#!/bin/sh\necho pwned\n", encoding="utf-8")
+    evil.chmod(0o755)
     # Absolute path outside restricted PATH dirs
     found = resolve_shell_binary(str(evil), restricted_path="/usr/bin" + os.pathsep + "/bin")
     assert found is None

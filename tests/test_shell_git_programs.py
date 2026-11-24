@@ -52,6 +52,7 @@ def configured_repo(isolated_git):
     repo = _repo(isolated_git, "configured")
     hooks = repo / ".git" / "hooks"
     (hooks / "pre-commit").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)
     _git(repo, "config", "filter.secretfilter.clean", "secret-clean %f")
     _git(repo, "config", "filter.secretfilter.smudge", "secret-smudge %f")
     _git(repo, "config", "diff.pdf.textconv", "pdftotext")

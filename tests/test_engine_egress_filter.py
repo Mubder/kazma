@@ -34,6 +34,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -136,6 +137,10 @@ def stand_in(tmp_path):
         wrapper = bin_dir / name
         wrapper.write_bytes(
             f'#!/bin/bash\nexec "{python}" "{fake.as_posix()}" {family} "{state.as_posix()}" "$@"\n'.encode())
+        # Not executable, it is passed over on Linux and the machine's own iptables
+        # answers: run by root, the test would write this computer's firewall.
+        wrapper.chmod(0o755)
+        assert os.name == "nt" or shutil.which(name, path=str(bin_dir)) == str(wrapper)
     script = tmp_path / "kazma-egress-rules"
     script.write_bytes(_rules_script().encode("utf-8"))
 
@@ -438,6 +443,8 @@ def test_rules_not_in_effect_take_the_network_away_and_leave_docker(tmp_path, in
     rules = bin_dir / "rules"
     rules.write_bytes(f"#!/bin/bash\nexit {0 if in_effect else 3}\n".encode())
     (bin_dir / "timeout").write_bytes(b'#!/bin/bash\nshift\nexec "$@"\n')
+    for program in bin_dir.iterdir():
+        program.chmod(0o755)
     script = tmp_path / "guard"
     script.write_bytes(_guard_script().replace("/usr/local/sbin/kazma-egress-rules", f'"{rules.as_posix()}"')
                        .encode("utf-8"))
