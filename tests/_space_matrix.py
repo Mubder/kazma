@@ -389,8 +389,10 @@ class Matrix:
     client of the built app) is added here by that item.
     """
 
-    SPACE_A = "matrix-a"
-    SPACE_B = "matrix-b"
+    #: Ids as Kazma makes them (a moved space has one); the prose of the case
+    #: modules calls the two spaces ``matrix-a`` and ``matrix-b``.
+    SPACE_A = "s0a0a0a0a0a0a"
+    SPACE_B = "s0b0b0b0b0b0b"
 
     def __init__(self) -> None:
         self.account_a = ""

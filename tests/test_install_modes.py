@@ -741,6 +741,86 @@ def test_full_installs_kazmas_engine_not_docker_desktop(box, capsys):
     assert box.engine_actions == [], "a second run changes nothing"
 
 
+def _on_an_engine_without_the_filter(box, monkeypatch, tmp_path):
+    """A second run whose engine is the real check over the engine-setup
+    tests' fake machine, the egress filter not there (the live install's
+    engine, Spaces S4-05b): returns a maker of such runs."""
+    from kazma_core import container_engine_setup as ces
+
+    from tests.test_container_engine_setup import _egress_installed, make_machine
+
+    engine = make_machine(monkeypatch, tmp_path / "engine")
+    engine.egress = False
+    ces._egress_stamp().unlink()
+
+    def act(action):
+        if action == "engine:egress":
+            engine.egress = True
+            _egress_installed()
+        return box.engine_action(action)
+
+    def again():
+        machine = _machine(box)
+        machine.finders["engine"] = lambda: ces.check(engine)
+        machine.finders["engine_action"] = act
+        return machine
+
+    return again
+
+
+def _identity():
+    """The identity store's module (patched by attribute: a patch by name
+    would count against the debt ratchet's by-value imports)."""
+    from kazma_core.spaces import identity
+
+    return identity
+
+
+def _policies(monkeypatch, policies) -> None:
+    monkeypatch.setattr(_identity(), "read_registry", lambda: {"policies": policies})
+
+
+def test_an_engine_without_the_egress_filter_is_whole_until_someone_has_the_network(box, capsys, monkeypatch,
+                                                                                   tmp_path):
+    """Spaces S4-05b: the live install's engine has no egress filter. Until the
+    admin gives someone's code the network it is not missing -- the Docker
+    part is in place and a second run repairs nothing -- and once a member
+    has the network the run puts it in, after the engine's record."""
+    from kazma_cli.install import install
+
+    assert install(_options(mode="full", yes=True), _machine(box)) == 0
+    again = _on_an_engine_without_the_filter(box, monkeypatch, tmp_path)
+    _policies(monkeypatch, {"owner": {"code_network": True}})  # the admin's own counts for nothing
+    box.engine_actions.clear()
+    assert install(_options(mode="full", yes=True), again()) == 0
+    assert box.engine_actions == [], "nothing to repair"
+    results = json.loads((box.home / "setup_record.json").read_text(encoding="utf-8"))["install"]["results"]
+    assert results["docker"]["ok"] is True, results["docker"]
+
+    _policies(monkeypatch, {"acct_reem": {"code_network": True}})
+    assert install(_options(mode="full", yes=True), again()) == 0
+    assert box.engine_actions == ["engine:record", "engine:egress"]
+    box.engine_actions.clear()
+    assert install(_options(mode="full", yes=True), again()) == 0
+    assert box.engine_actions == [], "the filter is in: whole again"
+
+
+def test_control_the_first_filter_check_repairs_the_live_installs_engine(box, capsys, monkeypatch, tmp_path):
+    """Negative control: counted whatever the policies say (the first S4-05b
+    check), the live install's engine is not whole, and every run of
+    ``kazma setup install`` repairs it."""
+    from kazma_cli.install import install
+    from kazma_core import container_engine_setup as ces
+
+    assert install(_options(mode="full", yes=True), _machine(box)) == 0
+    again = _on_an_engine_without_the_filter(box, monkeypatch, tmp_path)
+    _policies(monkeypatch, {})
+    monkeypatch.setattr(ces, "_network_given", lambda: True)
+    box.engine_actions.clear()
+    assert install(_options(mode="full", yes=True), again()) == 0
+    assert box.engine_actions == ["engine:record", "engine:egress"]
+
+
 def test_a_just_started_searxng_is_waited_for_before_it_is_judged(box, capsys):
     """The boot drill (2026-11-12): a Full install asked SearXNG 2 s after
     `docker compose up`, called private search not installed and ended with

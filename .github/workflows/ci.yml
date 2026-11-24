@@ -905,6 +905,7 @@ jobs:
             tests/e2e/test_member_settings_asks_nothing_refused.py \
             tests/e2e/test_alpine_boolean_binding_trap.py \
             tests/e2e/test_person_code_network_browser.py \
+            tests/e2e/test_space_move_browser.py \
             tests/e2e/test_person_disable_browser.py \
             tests/e2e/test_space_limits_browser.py \
             tests/e2e/test_activity_page_browser.py \

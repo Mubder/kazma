@@ -27,8 +27,9 @@ Calendar) and their callbacks talk HTTP about them:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
 from fastapi import Request
@@ -132,16 +133,16 @@ def attempt_scope(attempt: dict[str, Any]) -> Any:
     that space. Not enforced: nothing is bound, as before. Enforced: an
     attempt that names no space, or whose person is no longer a member of
     it, raises ``oauth_attempts.AttemptRefused("no_space")`` -- the account
-    is never kept for no one, nor in a space its person left. An identity
+    is never kept for no one, nor in a space its person left. Inside it, what
+    is kept is recorded as that person's (``connected_accounts.connecting``).
+    An identity
     store that cannot say is ``AttemptRefused("identity_unavailable")``,
     reported to the database watch: a refusal the page words, never a 500
     (S1-17 follow-up). Blocking (the identity store): call from a thread, or
     from a route that is a ``def``."""
-    import contextlib
-
     from kazma_core.security.oauth_attempts import AttemptRefused
     from kazma_core.spaces import identity
-    from kazma_core.spaces.scope import bind_scope, spaces_enforced
+    from kazma_core.spaces.scope import spaces_enforced
 
     if not spaces_enforced():
         return contextlib.nullcontext()
@@ -156,7 +157,16 @@ def attempt_scope(attempt: dict[str, Any]) -> Any:
         raise AttemptRefused("identity_unavailable") from exc
     if not member:
         raise AttemptRefused("no_space")
-    return bind_scope(space, asker)
+    return _connect_scope(space, asker)
+
+
+@contextlib.contextmanager
+def _connect_scope(space: str, asker: str) -> Iterator[None]:
+    from kazma_core.spaces.connected_accounts import connecting
+    from kazma_core.spaces.scope import bind_scope
+
+    with bind_scope(space, asker), connecting():
+        yield
 
 
 def forget_binding(response: Response, request: Request, state: str, attempt: dict[str, Any] | None = None) -> Response:

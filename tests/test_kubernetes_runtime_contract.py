@@ -109,6 +109,7 @@ _NOT_WRITE_LOCATIONS = {
     "legacy_user_home": "a read fallback for ~/.kazma; new code never writes there",
     "pin_project_root": "takes a path",
     "chat_spool_db": "takes a path (beside the chat store, which is under data)",
+    "space_checkpoints_db": "takes a space (its file is in the data folder itself)",
     "migrate_legacy_user_home": "moves a folder, never at a container's boot (KAZMA_USER_HOME is set)",
     "merge_legacy_hub_if_empty": "copies from the legacy home, same",
 }

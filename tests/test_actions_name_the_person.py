@@ -174,7 +174,7 @@ def test_a_request_no_person_made_writes_nothing(enforced, private_activity) -> 
     assert activity.recent(A) == []
 
 
-def test_old_rows_and_rows_past_the_most_go(enforced, private_activity, monkeypatch) -> None:
+def test_old_rows_and_rows_past_the_most_go(matrix, enforced, private_activity, monkeypatch) -> None:
     monkeypatch.setattr(activity, "MAX_ROWS_PER_SPACE", 5)
     monkeypatch.setattr(activity, "_PRUNE_EVERY", 1)
     for n in range(8):
@@ -183,6 +183,26 @@ def test_old_rows_and_rows_past_the_most_go(enforced, private_activity, monkeypa
     kept = [row.action for row in activity.recent(A)]
     assert kept == [f"POST /api/x/{n}" for n in (7, 6, 5, 4, 3)]
     assert [row.action for row in activity.recent(B)] == ["POST /api/y"]
+
+
+def test_a_space_the_install_no_longer_holds_writes_nothing(matrix, enforced, private_activity) -> None:
+    """An erase is answered after its space is gone: its own row is not
+    written, so nothing of the space is left (S4-06: a moved space deleted
+    here can be brought back in). A held space writes, as the control; a
+    space being erased writes nothing either."""
+    from kazma_core.spaces import identity
+
+    activity.record(A, matrix.account_a, "DELETE /api/spaces/{space_id}", [A], 200)
+    assert [row.action for row in activity.recent(A)] == ["DELETE /api/spaces/{space_id}"]
+    activity.record("erased-space", matrix.account_a, "DELETE /api/spaces/{space_id}", ["erased-space"], 200)
+    assert activity.recent("erased-space") == []
+
+    def closing(reg: dict[str, Any]) -> None:
+        reg["spaces"][B]["erasing_at"] = "2026-11-23T00:00:00Z"
+
+    identity.update_registry(closing)
+    activity.record(B, matrix.account_b, "DELETE /api/spaces/{space_id}", [B], 200)
+    assert activity.recent(B) == []
 
 
 # ── the Activity page ────────────────────────────────────────────────────

@@ -193,7 +193,8 @@ and extras `kazma[sandbox]` / `kazma[durable]`.
 | `KAZMA_E2B` | auto if key set | No | `0` keeps Docker/local even with a key. |
 | `KAZMA_CODE_EXEC_DOCKER` | `auto` | Single-operator jail | `1`/`true`/`on`/`yes`/`docker`/`force`/`required` require Docker without local fallback and block host shell unless explicitly granted. `0` requests local execution, which production/multi-user policy still refuses. |
 | `KAZMA_HOST_SHELL` | unset | Escape hatch | Production, multi-user and forced Docker profiles deny host shell by default. `1` explicitly grants it after HITL; this restores host capability, not isolation. Policy lookup failures deny it. |
-| `KAZMA_CODE_EXEC_IMAGE` | `python:3.12-slim` | No | Image for the Docker jail that runs `python_exec` / `code_exec` (no network, read-only work mount, tmpfs `/tmp`, memory cap). |
+| `KAZMA_CODE_EXEC_IMAGE` | `python:3.12-slim` | No | Image for the Docker jail that runs `python_exec` / `code_exec` (no network, read-only work mount, tmpfs `/tmp`, memory cap). Once Spaces is enforced, a person the admin allowed the network runs on the `kazma-egress` network instead: the public internet only, on Kazma's own engine (Spaces S4-05b). |
+| `KAZMA_EGRESS_HOSTS` | `/etc/kazma/egress-host-addresses` | No | Read only inside the `kazma-engine` distro, by the egress filter's rules script (`kazma-egress-rules`): the file listing this computer's own addresses, which members' code may not reach. Setup writes the default file; the real-engine test points it at a file of its own. |
 | `KAZMA_LIVE_EVAL` | unset | No | `1` runs the opt-in live-model eval (`tests/test_hands_live.py`). CI skips. |
 | `KAZMA_TEMPORAL_HOST` / `TEMPORAL_ADDRESS` | unset | Multi-hour swarm | Temporal frontend (`localhost:7233`). Each admitted swarm task runs through a Temporal workflow whose activity runs the engine's own run in this process ([swarm guide §1.0a](../guide/swarm-orchestration.md#10a-durable-execution-temporal-opt-in)). |
 | `KAZMA_TEMPORAL` | auto if host set | No | `0` keeps in-process swarm. |
@@ -207,6 +208,12 @@ Test-only: `KAZMA_TEST_TEMPORAL_REQUIRED=1` makes the durable path's
 qualification (`tests/test_swarm_temporal_durable.py`, on Temporal's
 time-skipping test server) fail instead of skip when the SDK is missing or the
 test server cannot start; its CI job sets it.
+
+Test-only, opt-in: `KAZMA_TEST_EGRESS_ENGINE=1` runs
+`tests/test_member_code_egress_engine.py` on Kazma's own engine (Windows):
+rules, a bridge and a network of the test's own, probes on the filtered
+network and on the engine's default network as the control, all removed
+after.
 
 ---
 

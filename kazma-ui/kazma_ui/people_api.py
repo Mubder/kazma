@@ -161,13 +161,19 @@ def create_people_router() -> APIRouter:
             limits = people.limits_for_people()
         except IdentityUnavailable:
             return _unavailable()
+        from kazma_core.spaces.member_code import network_refusal
+
+        # Why a person's code cannot be given the network here (S4-05b), or
+        # "": the page offers the switch only where it can.
+        code_network_refusal = network_refusal()
         spent, today = _spent_today()
         for person in listed:
             person["spent_today"] = (spent.get(person["id"], _NOTHING_SPENT)
                                      if spent is not None else None)
         return JSONResponse({"ok": True, "enforced": spaces_enforced(), "people": listed,
                              "shared_spaces": shared, "closed_spaces": closed, "limit_for_people": limits, "today": today,
-                             "record_whole": broken is None, "record_broken_at": broken})
+                             "record_whole": broken is None, "record_broken_at": broken,
+                             "code_network_refusal": code_network_refusal})
 
     def _create(request: Request, body: dict[str, Any]) -> JSONResponse:
         try:
@@ -327,10 +333,10 @@ def create_people_router() -> APIRouter:
 
     @router.put("/api/people/{account_id}/code-network")
     async def set_code_network(account_id: str, request: Request) -> JSONResponse:
-        """A person's code and the network (Spaces S4-05): ``{"allowed":
-        false}`` clears a stored allowance; ``true`` is refused (409
-        ``code_network_not_yet``) until S4-05b limits a container to the
-        public internet."""
+        """A person's code and the network (Spaces S4-05b): ``{"allowed":
+        true}`` gives it Kazma's filtered network (the public internet only),
+        refused (409, ``member_code.NETWORK_REFUSALS``) where Kazma cannot
+        filter it; ``false`` takes it back."""
         denied = await asyncio.to_thread(_not_admin, request)
         if denied:
             return denied

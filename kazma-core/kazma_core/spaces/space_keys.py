@@ -162,26 +162,34 @@ def destroy_erased_keys() -> list[str]:
     They come back when an older vault file is restored over an identity
     store that recorded the erase. Only a space recorded erased: one merely
     missing from the registry (a restore the other way, a stale copy) is
-    left, and :func:`report` names it. Raises when the identity store cannot
+    left, and :func:`report` names it. Never one an import is bringing back
+    (erased here once, moved here now). Raises when the identity store cannot
     be read (never taken as "nothing erased"). Returns the spaces whose
     keys were destroyed. Blocking."""
     from kazma_core.spaces import identity
 
-    registry = identity.read_registry()
-    erased = {
-        str(e["space"]) for e in registry.get("events") or ()
-        if isinstance(e, dict) and e.get("kind") == "space_erased" and e.get("space")
-    }
-    gone = erased - set(registry["spaces"]) - {OWNER_SPACE_ID}
-    if not gone:
+    def _gone() -> set[str]:
+        registry = identity.read_registry()
+        erased = {
+            str(e["space"]) for e in registry.get("events") or ()
+            if isinstance(e, dict) and e.get("kind") == "space_erased" and e.get("space")
+        }
+        return erased - set(registry["spaces"]) - {OWNER_SPACE_ID}
+
+    if not _gone():
         return []
     from kazma_core.security.vault import get_vault
+    from kazma_core.spaces.space_move import importing_spaces
 
     vault = get_vault()
     if vault is None:
         return []
+    # In this order: what is held, the spaces being imported, the record
+    # (``importing_spaces`` says why).
+    held = vault.held_spaces()
+    arriving = importing_spaces()
     destroyed: list[str] = []
-    for space in sorted(gone & vault.held_spaces()):
+    for space in sorted((_gone() - arriving) & held):
         vault.erase_space(space)
         logger.warning(
             "[spaces] the vault held keys or secrets of space %s, which was erased; they came back "

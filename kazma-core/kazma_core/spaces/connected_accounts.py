@@ -29,11 +29,15 @@ a connection is never looked up for no one, nor the owner's lent to it.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
+from contextvars import ContextVar
+
 from kazma_core.spaces.scope import OWNER_SPACE_ID
 
 __all__ = [
-    "INSTALL_ACCOUNT_SECRETS", "OWNER_ACCOUNT_PREFIXES", "SPACE_SECRET_PREFIX", "connected_space", "env_secret_name", "owners_environment", "space_secret_name",
-    "space_setting_key",
+    "INSTALL_ACCOUNT_SECRETS", "OWNER_ACCOUNT_PREFIXES", "SPACE_SECRET_PREFIX", "connected_space", "connecting",
+    "env_secret_name", "is_connecting", "owners_environment", "space_secret_name", "space_setting_key",
 ]
 
 #: The prefix of a space's connected-account secrets (install-scoped in the
@@ -53,6 +57,30 @@ INSTALL_ACCOUNT_SECRETS = frozenset({
 #: scopes, passwords, extra accounts), kept under the names they always had
 #: (N26). Everything under them but :data:`INSTALL_ACCOUNT_SECRETS`.
 OWNER_ACCOUNT_PREFIXES = ("email.", "calendar.")
+
+
+_connecting: ContextVar[bool] = ContextVar("kazma_connecting_account", default=False)
+
+
+@contextlib.contextmanager
+def connecting() -> Iterator[None]:
+    """A person connects an account now (a sign-in, a saved key or password):
+    a secret written inside records them as who stored it
+    (``vault.STORED_BY``), whoever did before. Any other write of it -- a
+    token refresh, in whoever's turn or as the space's own work -- keeps the
+    record the secret has: a refresh in another member's turn, or the hourly
+    check's as the space's maker, would make the account theirs, and it would
+    travel with them when the space moves (the second review of S4-06)."""
+    token = _connecting.set(True)
+    try:
+        yield
+    finally:
+        _connecting.reset(token)
+
+
+def is_connecting() -> bool:
+    """Whether the work running now is a person connecting an account."""
+    return _connecting.get()
 
 
 def connected_space() -> str:

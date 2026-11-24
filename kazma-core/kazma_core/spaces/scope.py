@@ -32,6 +32,7 @@ from __future__ import annotations
 import contextvars
 import logging
 import re
+import secrets
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -49,6 +50,8 @@ __all__ = [
     "bound_asker",
     "current_scope",
     "install_work",
+    "made_space_id",
+    "new_space_id",
     "require_scope",
     "require_space_id",
     "reset_scope",
@@ -80,6 +83,21 @@ def valid_space_id(value: object) -> bool:
     """A space id is a short lower-case name: letters, digits, ``_`` and
     ``-``. It becomes a folder name and a key prefix, so nothing else."""
     return isinstance(value, str) and _ID_RE.fullmatch(value) is not None
+
+
+_MADE_ID_RE = re.compile(r"s[0-9a-f]{12}")
+
+
+def new_space_id() -> str:
+    """A new space's id, the form every space Kazma makes has."""
+    return f"s{secrets.token_hex(6)}"
+
+
+def made_space_id(value: object) -> bool:
+    """Whether *value* is an id as Kazma makes them (:func:`new_space_id`):
+    what a space brought in from another install must have. Never a name a
+    tenant of before Spaces could have had."""
+    return isinstance(value, str) and _MADE_ID_RE.fullmatch(value) is not None
 
 
 def valid_account_id(value: object) -> bool:

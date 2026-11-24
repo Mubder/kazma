@@ -295,10 +295,10 @@ def test_the_matrix_fixture_keeps_two_people_apart(matrix) -> None:
 
     # In-process work runs as the person, in their space.
     with matrix.as_a():
-        assert scope.current_scope() == scope.Scope(space_id="matrix-a", asker=a)
-        assert scope.require_space_id() == "matrix-a"
+        assert scope.current_scope() == scope.Scope(space_id="s0a0a0a0a0a0a", asker=a)
+        assert scope.require_space_id() == "s0a0a0a0a0a0a"
     with matrix.as_b():
-        assert scope.current_scope() == scope.Scope(space_id="matrix-b", asker=b)
+        assert scope.current_scope() == scope.Scope(space_id="s0b0b0b0b0b0b", asker=b)
     assert scope.current_scope() is None, "the scope ends with its block"
 
     # At the request boundary, through the real tenant middleware: a person
@@ -307,13 +307,13 @@ def test_the_matrix_fixture_keeps_two_people_apart(matrix) -> None:
         own = client.get("/api/chat/sessions", headers=matrix.headers_a)
         other = client.get("/api/chat/sessions", headers=matrix.headers_b)
         reached = list(client.reached)
-    assert own.status_code == 200 and own.json() == {"space": "matrix-a", "asker": a}
+    assert own.status_code == 200 and own.json() == {"space": "s0a0a0a0a0a0a", "asker": a}
     assert other.status_code == 403 and other.json()["code"] == "not_a_member"
     assert reached == ["/api/chat/sessions"], "the refused request never reached its handler"
     with matrix.requests_as("b") as client:
         own = client.post("/api/documents/search", headers=matrix.headers_b)
         other = client.post("/api/documents/search", headers=matrix.headers_a)
-    assert own.json() == {"space": "matrix-b", "asker": b}
+    assert own.json() == {"space": "s0b0b0b0b0b0b", "asker": b}
     assert other.status_code == 403 and other.json()["code"] == "not_a_member"
 
 

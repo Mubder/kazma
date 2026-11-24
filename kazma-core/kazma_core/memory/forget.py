@@ -1804,19 +1804,20 @@ def entry_forgotten(entry_id: str, *, tenant_id: str) -> bool:
 def _forget_departed_entries(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
     """Forget every member's entry in a space whose account is no longer a
     member of it (the S2-12 review, finding 4): a leave or a removal whose
-    forget failed or was cut off, and a deleted account. Part of "forget
-    convergence". Only once Spaces is enforced (no entry is filed before);
-    an identity store that cannot be read forgets nothing (it raises, and
-    the pass is tried again)."""
+    forget failed or was cut off, and a deleted account. Never in a space an
+    import is writing, whose owner is recorded last (S4-06's second review:
+    the new owner's own facts were forgotten as they arrived). Part of
+    "forget convergence". Only once Spaces is enforced (no entry is filed
+    before); an identity store that cannot be read forgets nothing (it
+    raises, and the pass is tried again)."""
     from kazma_core.memory.speakers import MEMBER_PREFIX, account_of_entry
     from kazma_core.spaces.scope import spaces_enforced
 
     if not spaces_enforced():
         return {"forgotten": 0}
     from kazma_core.spaces import identity
+    from kazma_core.spaces.space_move import importing_spaces
 
-    registry = identity.read_registry()
-    members = {(str(m.get("account")), str(m.get("space"))) for m in registry["memberships"]}
     own = conn is None
     conn = conn or _open()
     try:
@@ -1826,8 +1827,14 @@ def _forget_departed_entries(conn: sqlite3.Connection | None = None) -> dict[str
             "UNION SELECT DISTINCT tenant_id, id FROM entities WHERE id LIKE ? ESCAPE '\\'",
             (pattern, pattern),
         ).fetchall()
+        # In this order: what is held, the spaces being imported, the people
+        # (``importing_spaces`` says why).
+        arriving = importing_spaces()
+        registry = identity.read_registry()
+        members = {(str(m.get("account")), str(m.get("space"))) for m in registry["memberships"]}
         gone = [(str(t), str(s)) for t, s in held
-                if account_of_entry(s) is not None and t and (account_of_entry(s), str(t)) not in members]
+                if account_of_entry(s) is not None and t and str(t) not in arriving
+                and (account_of_entry(s), str(t)) not in members]
         for tenant, subject in gone:
             forget_entry(subject, tenant_id=tenant, conn=conn)
             logger.info("[forget] the entry %s of a person no longer in %s was forgotten", subject, tenant)

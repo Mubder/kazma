@@ -176,6 +176,14 @@ That is a serious blast-radius reduction. A snippet cannot phone home, cannot
 write to your disk, cannot exhaust your RAM, and cannot read outside the
 workspace.
 
+One exception to `--network none`, once Spaces is enforced: a person the
+admin allows the network on People runs on the `kazma-egress` network of
+Kazma's own engine, which reaches the public internet only -- including this
+network's own public address, so anything the router forwards and its admin
+page if it answers there -- never this computer, the local network or cloud
+metadata. Its rules are checked before every such run and Docker does not
+start without them; an engine Kazma does not control gives nobody a network.
+
 **An import blocklist applies on top, in the container as well as locally.**
 The snippet may not import `os`, `sys`, `socket`, `subprocess`, `ctypes`,
 `pathlib`, `pickle` and about thirty-three more, and may not call

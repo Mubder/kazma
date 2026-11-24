@@ -2883,17 +2883,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.space_limit.turns": {"en": "Turns at once", "ar": "الطلبات في آن واحد"},
     "settings.people_code_title": {"en": "Code", "ar": "الشيفرة"},
     "settings.people_code_help": {
-        "en": "Code Kazma runs for someone other than you runs only in a container, never on this machine, and with no network. Network for their code comes once Kazma can limit it to the public internet: a container on the network today could reach this computer, your local network and a cloud machine's metadata. Your own code keeps its rules.",
-        "ar": "الشيفرة التي يشغّلها Kazma لغيرك تعمل في حاوية فقط، لا على هذا الجهاز، ومن دون شبكة. تأتي الشبكة لشيفرتهم حين يستطيع Kazma حصرها في الإنترنت العام: فالحاوية المتصلة بالشبكة اليوم قد تصل إلى هذا الجهاز وشبكتك المحلية وبيانات الجهاز السحابي. شيفرتك أنت تبقى على قواعدها.",
+        "en": "Code Kazma runs for someone other than you runs only in a container, never on this machine, and with no network unless you allow it here. Allowed, it reaches the public internet only: never this computer, your local network or a cloud machine's metadata. Kazma can hold it there only on its own container engine. Your own code keeps its rules.",
+        "ar": "الشيفرة التي يشغّلها Kazma لغيرك تعمل في حاوية فقط، لا على هذا الجهاز، ومن دون شبكة إلا إذا سمحت بها هنا. وإن سمحت بها تصل إلى الإنترنت العام فقط: لا إلى هذا الجهاز ولا إلى شبكتك المحلية ولا إلى بيانات الجهاز السحابي. ولا يستطيع Kazma حصرها هناك إلا على محرّك الحاويات الخاص به. شيفرتك أنت تبقى على قواعدها.",
     },
-    "settings.people_code_network": {"en": "Code may use the network", "ar": "يمكن للشيفرة استخدام الشبكة"},
-    "settings.people_code_network_of": {"en": "Code of {name} may use the network", "ar": "يمكن لشيفرة {name} استخدام الشبكة"},
-    "settings.people_code_network_not_yet": {"en": "Not yet", "ar": "ليس بعد"},
+    "settings.people_code_network": {"en": "Code may use the public internet", "ar": "يمكن للشيفرة استخدام الإنترنت العام"},
+    "settings.people_code_network_of": {"en": "Code of {name} may use the public internet", "ar": "يمكن لشيفرة {name} استخدام الإنترنت العام"},
+    "settings.people_code_network_title": {"en": "Let {name}'s code use the public internet?", "ar": "هل تسمح لشيفرة {name} باستخدام الإنترنت العام؟"},
+    "settings.people_code_network_means": {
+        "en": "Their code still runs only in a container, never on this machine, and reaches the public internet only, including this network's own public address: your router's public side, so anything it forwards and its admin page if it answers there. What it reads in their spaces could leave this install.",
+        "ar": "تبقى شيفرته تعمل في حاوية فقط، لا على هذا الجهاز، ولا تصل إلا إلى الإنترنت العام، بما فيه العنوان العام لهذه الشبكة: الجهة العامة من الراوتر، أي كل ما يحوّله وصفحة إدارته إن كان يجيب عليها. ما تقرؤه في مساحاته قد يخرج من هذا التثبيت.",
+    },
+    "settings.people_code_network_allow": {"en": "Allow", "ar": "اسمح"},
+    "settings.people_code_network_on": {"en": "{name}'s code may use the public internet.", "ar": "يمكن لشيفرة {name} استخدام الإنترنت العام."},
+    "settings.people_code_network_off": {"en": "{name}'s code runs with no network.", "ar": "شيفرة {name} تعمل من دون شبكة."},
     "settings.people_err.bad_code_network": {"en": "The network is allowed or not.", "ar": "الشبكة إما مسموحة أو لا."},
     "settings.people_err.admin_code_rules": {"en": "Your own code keeps its own rules.", "ar": "شيفرتك أنت تبقى على قواعدها."},
-    "settings.people_err.code_network_not_yet": {
-        "en": "Network for members' code comes once Kazma can limit it to the public internet; until then their code runs with no network.",
-        "ar": "تأتي الشبكة لشيفرة الأعضاء حين يستطيع Kazma حصرها في الإنترنت العام؛ وحتى ذلك الحين تعمل شيفرتهم من دون شبكة.",
+    "settings.people_err.code_network_cloud": {
+        "en": "Not on a public install (the cloud profile): members' code runs with no network.",
+        "ar": "ليس في تثبيت عام (ملف السحابة): تعمل شيفرة الأعضاء من دون شبكة.",
+    },
+    "settings.people_err.code_network_trust_lan": {
+        "en": "Not while KAZMA_TRUST_LAN is on: members' code runs with no network.",
+        "ar": "ليس ما دام KAZMA_TRUST_LAN مفعّلًا: تعمل شيفرة الأعضاء من دون شبكة.",
+    },
+    "settings.people_err.code_network_engine": {
+        "en": "Network for members' code needs Kazma's own container engine (kazma setup engine): only there can Kazma limit it to the public internet.",
+        "ar": "تحتاج الشبكة لشيفرة الأعضاء محرّك الحاويات الخاص بـ Kazma (kazma setup engine): هناك فقط يستطيع Kazma حصرها في الإنترنت العام.",
+    },
+    "settings.people_err.code_network_no_filter": {
+        "en": "Kazma's engine has no filtered network yet: run kazma setup engine to put it in.",
+        "ar": "لا توجد شبكة مفلترة في محرّك Kazma بعد: شغّل kazma setup engine لإضافتها.",
     },
     "settings.space_limit.scheduled": {"en": "Scheduled jobs at once", "ar": "المهام المجدولة في آن واحد"},
     "settings.people_err.unknown_limit": {"en": "There is no such limit.", "ar": "لا يوجد حد بهذا الاسم."},
@@ -3043,6 +3062,104 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "كلمتا المرور مختلفتان. لم يُصدَّر شيء.",
     },
     "settings.space_data_exported": {"en": "The space was exported.", "ar": "صُدّرت المساحة."},
+    "settings.space_data_move": {"en": "Move this space", "ar": "نقل هذه المساحة"},
+    "settings.space_data_move_title": {"en": "Move {name}?", "ar": "نقل {name}؟"},
+    "settings.space_data_move_confirm": {
+        "en": "Kazma makes a bundle of this space, sealed with a password you choose: its chats, memory, files, documents, libraries, settings and secrets. Only you arrive with it: the other members are invited again there, and what Kazma remembers about them, their work and the accounts they connected stay here. Its scheduled jobs, tasks and posts arrive stopped, to be started there. A project folder's files stay on this machine. On the other install, its admin brings the bundle in with that password and chooses who owns it there. Nothing leaves this install: the space stays here until you delete it.",
+        "ar": "يصنع Kazma حزمة بهذه المساحة مختومة بكلمة مرور تختارها: محادثاتها وذاكرتها وملفاتها ومستنداتها ومكتباتها وإعداداتها وأسرارها. لا يصل معها غيرك: يُدعى الأعضاء الآخرون من جديد هناك، ويبقى هنا ما يتذكره Kazma عنهم وأعمالهم والحسابات التي ربطوها. وتصل مواعيدها ومهامها ومنشوراتها متوقفة، لتُشغَّل هناك. وتبقى ملفات مجلد المشروع على هذا الجهاز. وفي التثبيت الآخر، يُدخل مسؤوله الحزمة بكلمة المرور هذه ويختار من يملكها هناك. لا يغادر شيء هذا التثبيت: تبقى المساحة هنا حتى تحذفها.",
+    },
+    "settings.space_data_move_go": {"en": "Make the bundle", "ar": "إنشاء الحزمة"},
+    "settings.space_data_move_password": {
+        "en": "Choose a password for the bundle (at least 12 characters). Give it to the other install's admin another way than the file. Kazma does not keep it.",
+        "ar": "اختر كلمة مرور للحزمة (12 حرفًا على الأقل). أعطها لمسؤول التثبيت الآخر بطريقة غير الملف. لا يحتفظ Kazma بها.",
+    },
+    "settings.space_data_err.passwords_differ_move": {
+        "en": "The two passwords differ. No bundle was made.",
+        "ar": "كلمتا المرور مختلفتان. لم تُنشأ حزمة.",
+    },
+    "settings.space_data_moved": {
+        "en": "The bundle was made. Bring it in on the other install.",
+        "ar": "أُنشئت الحزمة. أدخِلها في التثبيت الآخر.",
+    },
+    "settings.space_data_err.admin_only": {"en": "Only the admin brings a space in.", "ar": "المسؤول وحده يُدخل مساحة."},
+    "settings.space_data_err.wrong_password": {
+        "en": "That is not the bundle's password. Nothing was brought in.",
+        "ar": "ليست هذه كلمة مرور الحزمة. لم يُدخل شيء.",
+    },
+    "settings.space_data_err.changed": {
+        "en": "The bundle was changed after it was made, so nothing was brought in.",
+        "ar": "تغيّرت الحزمة بعد إنشائها، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.not_a_bundle": {"en": "That file is not a space's bundle.", "ar": "هذا الملف ليس حزمة مساحة."},
+    "settings.space_data_err.too_big": {"en": "The bundle is larger than Kazma brings in.", "ar": "الحزمة أكبر مما يُدخله Kazma."},
+    "settings.space_data_err.space_exists": {
+        "en": "This install already has that space, so nothing was brought in.",
+        "ar": "في هذا التثبيت تلك المساحة أصلًا، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.id_collides": {
+        "en": "Something in the bundle has the id of something already on this install, so nothing was brought in.",
+        "ar": "في الحزمة شيء يحمل معرّف شيء موجود في هذا التثبيت، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.foreign_row": {
+        "en": "The bundle holds a record of another space, so nothing was brought in.",
+        "ar": "تحوي الحزمة سجلًا لمساحة أخرى، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.foreign_setting": {
+        "en": "The bundle holds a setting of another space, so nothing was brought in.",
+        "ar": "تحوي الحزمة إعدادًا لمساحة أخرى، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.foreign_secret": {
+        "en": "The bundle points at a secret that is not the space's, so nothing was brought in.",
+        "ar": "تشير الحزمة إلى سرّ ليس للمساحة، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.unknown_column": {
+        "en": "The bundle was made by a Kazma that keeps something this one does not, so nothing was brought in. Update this install first.",
+        "ar": "أنشأ الحزمةَ Kazma يحفظ شيئًا لا يحفظه هذا، فلم يُدخل شيء. حدِّث هذا التثبيت أولًا.",
+    },
+    "settings.space_data_err.no_such_account": {
+        "en": "There is no such person on this install.",
+        "ar": "لا يوجد شخص كهذا في هذا التثبيت.",
+    },
+    "settings.space_data_err.personal_space_stays": {
+        "en": "A personal space stays with its person: export it to keep a copy. A shared space can move.",
+        "ar": "تبقى المساحة الخاصة مع صاحبها: صدّرها لتحتفظ بنسخة. أما المساحة المشتركة فيمكن نقلها.",
+    },
+    "settings.space_data_err.not_the_owner": {
+        "en": "Only an owner of the space moves it.",
+        "ar": "لا ينقل المساحة إلا أحد مالكيها.",
+    },
+    "settings.space_data_err.not_moved": {
+        "en": "The bundle holds records that never move between installs, so nothing was brought in.",
+        "ar": "تحوي الحزمة سجلات لا تُنقل بين التثبيتات أبدًا، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.foreign_member": {
+        "en": "The bundle holds what Kazma remembers about someone who does not arrive with the space, so nothing was brought in.",
+        "ar": "تحوي الحزمة ما يتذكره Kazma عن شخص لا يصل مع المساحة، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.members_work": {
+        "en": "The bundle holds work of someone who does not arrive with the space, so nothing was brought in.",
+        "ar": "تحوي الحزمة عملًا لشخص لا يصل مع المساحة، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.foreign_person": {
+        "en": "The bundle names a person of this install, so nothing was brought in.",
+        "ar": "تذكر الحزمة شخصًا من هذا التثبيت، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.bad_setting": {
+        "en": "The bundle holds a setting this install does not take, so nothing was brought in.",
+        "ar": "تحوي الحزمة إعدادًا لا يقبله هذا التثبيت، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.secrets_unreadable": {
+        "en": "A secret of this space cannot be opened, so no bundle was made. Save that connection again, or remove it.",
+        "ar": "يتعذّر فتح سرّ من أسرار هذه المساحة، فلم تُنشأ حزمة. احفظ ذلك الاتصال من جديد أو أزِله.",
+    },
+    "settings.space_data_err.not_recorded": {
+        "en": "This install could not record the space, so nothing was brought in.",
+        "ar": "تعذّر على هذا التثبيت تسجيل المساحة، فلم يُدخل شيء.",
+    },
+    "settings.space_data_err.missing_secret": {
+        "en": "The bundle points at a secret it does not carry, so nothing was brought in.",
+        "ar": "تشير الحزمة إلى سرّ لا تحمله، فلم يُدخل شيء.",
+    },
     "settings.space_data_delete": {"en": "Delete this space", "ar": "حذف هذه المساحة"},
     "settings.space_data_delete_title": {"en": "Delete {name}?", "ar": "حذف {name}؟"},
     "settings.space_data_delete_confirm": {
@@ -3118,6 +3235,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مجلد على هذا الحاسوب تعمل فيه المساحة. ليس أحد مجلدات Kazma نفسه، ولا مجلد مساحة أخرى.",
     },
     "settings.people_space_create": {"en": "Make the space", "ar": "إنشاء المساحة"},
+    "settings.people_bring_in_title": {"en": "Bring in a space", "ar": "إدخال مساحة"},
+    "settings.people_bring_in_help": {
+        "en": "A shared space moved from another install: the bundle its owner made there, the password they chose, and who owns it here. It arrives as a plain shared space. Nothing is merged with what this install holds: a bundle whose space or ids are already here is refused.",
+        "ar": "مساحة مشتركة نُقلت من تثبيت آخر: الحزمة التي أنشأها مالكها هناك، وكلمة المرور التي اختارها، ومن يملكها هنا. تصل مساحةً مشتركة عادية. لا يُدمج شيء مع ما في هذا التثبيت: تُرفض الحزمة إن كانت مساحتها أو معرّفاتها موجودة هنا.",
+    },
+    "settings.people_bring_in_file": {"en": "Bundle", "ar": "الحزمة"},
+    "settings.people_bring_in_password": {"en": "Its password", "ar": "كلمة مرورها"},
+    "settings.people_bring_in_owner": {"en": "Who owns it here", "ar": "من يملكها هنا"},
+    "settings.people_bring_in_go": {"en": "Bring it in", "ar": "إدخالها"},
+    "settings.people_bring_in_done": {"en": "{name} was brought in.", "ar": "أُدخلت {name}."},
     "settings.people_space_created": {"en": "{name} is made.", "ar": "أُنشئت {name}."},
     "settings.people_space_members.zero": {"en": "no members", "ar": "لا أعضاء"},
     "settings.people_space_members.one": {"en": "1 member", "ar": "عضو واحد"},

@@ -44,6 +44,7 @@ __all__ = [
     "SecretVault",
     "SpaceKeyMissing",
     "SpaceKeyStillNamed",
+    "SpaceSecretsRefused",
     "VaultScopeError",
     "consolidate_install_scoped_secrets",
     "get_vault",
@@ -256,6 +257,21 @@ class SpaceKeyStillNamed(ValueError):
             f"({', '.join(sorted(names)[:10])}); the key was not changed")
         self.space = space
         self.names = sorted(names)
+
+
+class SpaceSecretsRefused(ValueError):
+    """A moved space's keys and secrets were not taken (Spaces S4-06):
+    ``code`` says why (``space_in_vault``, ``key_collides``, ``name_collides``,
+    ``not_the_spaces``, ``does_not_open``). Nothing was written."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+#: The metadata field naming the person who stored a space's secret (Spaces
+#: S4-06): a connection another member made stays when the space moves.
+STORED_BY = "stored_by"
 
 
 def secret_scope(name: str) -> tuple[str, str | None]:
@@ -758,6 +774,120 @@ class SecretVault:
         logger.info("[Vault] Space %s has the new key %s; its old keys are destroyed", space, new)
         return new
 
+    def export_space_sealed(self, space: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """``(keys, rows)`` of *space* for a space bundle (Spaces S4-06).
+
+        Every row of the space still under the install's vault key is first
+        sealed with the space's key (:meth:`seal_space`), so no value leaves
+        sealed with the vault key and none leaves plain. *rows* are the rows
+        as sealed (bytes, never a value); *keys* are the space's keys the rows
+        name, unwrapped (``key`` is 32 bytes): the caller seals them under the
+        person's password at once and keeps them nowhere else."""
+        self.seal_space(space)
+        with self._lock:
+            listed = self._space_rows(space)
+            rows: list[dict[str, Any]] = []
+            for row in listed:
+                full = self._conn.execute(
+                    "SELECT name, tenant_id, key_id, encrypted_value, nonce, category, metadata, "
+                    "created_at, updated_at FROM secrets WHERE id = ?", (row["id"],)).fetchone()
+                if not full["key_id"]:
+                    raise SpaceKeyMissing(f"the row {full['name']!r} is not sealed with its space's key")
+                rows.append(dict(full))
+            named = {row["key_id"] for row in rows}
+            active = self._active_key_id(space, make=False)
+            if active:
+                named.add(active)
+            keys: list[dict[str, Any]] = []
+            for found in self._conn.execute(
+                    "SELECT key_id, state, created_at, retired_at FROM space_keys WHERE space_id = ? "
+                    "ORDER BY created_at, key_id", (space,)):
+                if found["key_id"] not in named:
+                    continue
+                held_space, key = self._space_key(found["key_id"])
+                if held_space != space:
+                    raise SpaceKeyMissing(f"the space key {found['key_id']} is another space's")
+                keys.append({"key_id": found["key_id"], "state": found["state"],
+                             "created_at": found["created_at"], "retired_at": found["retired_at"],
+                             "key": key})
+        return keys, rows
+
+    def import_space_sealed(self, space: str, keys: list[dict[str, Any]], rows: list[dict[str, Any]]) -> int:
+        """Take a moved space's keys and sealed rows (Spaces S4-06), in one
+        transaction: each key wrapped with this install's vault key, each row
+        as it came (a new row id), then every row opened with the key it
+        names before the transaction commits, so a row that does not open
+        here is never kept. Refused (:class:`SpaceSecretsRefused`, nothing
+        written) when this vault already holds anything of the space, a key
+        id or a name is here already, or a row is not the space's or names a
+        key the bundle does not carry. Returns the rows taken."""
+        from kazma_core.spaces.scope import OWNER_SPACE_ID, valid_space_id
+
+        if not valid_space_id(space) or space == OWNER_SPACE_ID:
+            raise SpaceSecretsRefused("not_the_spaces", f"not a space that can be moved here: {space!r}")
+        refuse_write("vault", f"{_SPACE_NAME_PREFIX}{space}:")
+        carried = {str(k["key_id"]): k for k in keys}
+        for row in rows:
+            if sealing_space(str(row["name"]), row.get("tenant_id")) != space:
+                raise SpaceSecretsRefused("not_the_spaces", f"the secret {row['name']!r} is not the space's")
+            if str(row.get("key_id") or "") not in carried:
+                raise SpaceSecretsRefused("not_the_spaces",
+                                          f"the secret {row['name']!r} names a key the bundle does not carry")
+        if space in self.held_spaces():
+            raise SpaceSecretsRefused("space_in_vault", f"this vault already holds space {space}")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            done = False
+            try:
+                for key_id, key in carried.items():
+                    if self._conn.execute("SELECT 1 FROM space_keys WHERE key_id = ?", (key_id,)).fetchone():
+                        raise SpaceSecretsRefused("key_collides", f"the key {key_id} is here already")
+                    raw = key["key"]
+                    if not isinstance(raw, bytes | bytearray) or len(raw) != _KEY_BYTES:
+                        raise SpaceSecretsRefused("not_the_spaces", f"the key {key_id} is not a space key")
+                    wrapped, nonce = self._wrap_space_key(space, key_id, bytes(raw))
+                    self._conn.execute(
+                        "INSERT INTO space_keys (key_id, space_id, wrapped, nonce, wrap, state, created_at, retired_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (key_id, space, wrapped, nonce, _WRAP_SCHEME,
+                         "active" if key.get("state") == "active" else "retired",
+                         str(key.get("created_at") or datetime.now(UTC).isoformat()), key.get("retired_at")),
+                    )
+                for row in rows:
+                    clash = self._conn.execute(
+                        "SELECT 1 FROM secrets WHERE name = ? AND "
+                        "COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')",
+                        (row["name"], row.get("tenant_id"))).fetchone()
+                    if clash:
+                        raise SpaceSecretsRefused("name_collides", f"the secret {row['name']!r} is here already")
+                    self._conn.execute(
+                        """INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, tenant_id,
+                           created_at, updated_at, key_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (_secrets.token_hex(16), row["name"], bytes(row["encrypted_value"]), bytes(row["nonce"]),
+                         row.get("category") or "general", row.get("metadata") or "{}", row.get("tenant_id"),
+                         row.get("created_at") or datetime.now(UTC).isoformat(),
+                         row.get("updated_at") or datetime.now(UTC).isoformat(), row["key_id"]),
+                    )
+                # Read back: every row opens with the key it names, here.
+                self._space_keys.clear()
+                for row in self._space_rows(space):
+                    full = self._conn.execute(
+                        "SELECT name, tenant_id, key_id, encrypted_value, nonce FROM secrets WHERE id = ?",
+                        (row["id"],)).fetchone()
+                    try:
+                        self._open_row(full)
+                    except (SpaceKeyMissing, UnicodeDecodeError):
+                        raise SpaceSecretsRefused(
+                            "does_not_open", f"the secret {full['name']!r} does not open with its key") from None
+                self._conn.execute("COMMIT")
+                done = True
+            finally:
+                if not done:
+                    self._conn.execute("ROLLBACK")
+                self._space_keys.clear()
+        logger.info("[Vault] Took %d secret(s) and %d key(s) of moved space %s", len(rows), len(carried), space)
+        return len(rows)
+
     def _empty_the_log(self, after: str) -> None:
         """Empty the write-ahead log after a destroying change (*after* says
         which): the deleted pages were zeroed in the file (``secure_delete``),
@@ -870,9 +1000,9 @@ class SecretVault:
             tid = self._tenant_filter(tenant_id)
         now = datetime.now(UTC).isoformat()
         sid = _secrets.token_hex(16)
-        meta = json.dumps(metadata or {})
 
         with self._lock:
+            meta = self._stamped_metadata(name, metadata, tid)
             # Atomic upsert: use BEGIN/COMMIT so a crash between DELETE and
             # INSERT doesn't lose the secret.
             self._conn.execute("BEGIN")
@@ -896,6 +1026,43 @@ class SecretVault:
                 raise
         logger.info("[Vault] Stored secret '%s' (category=%s, tenant=%s)", name, category, tid or "global")
         return sid
+
+    def _stamped_metadata(self, name: str, metadata: dict[str, Any] | None, tenant: str | None) -> str:
+        """*metadata* as stored, with who stored a space's secret
+        (:data:`STORED_BY`): an account another member connected does not
+        move with the space (Spaces S4-06). The person the work is for, when
+        the secret is written the first time or they are connecting it now
+        (``connected_accounts.connecting``). Any other write -- a token
+        refresh, whoever it runs as -- keeps the record the row has, none
+        included. Called with the vault's lock held."""
+        meta = dict(metadata or {})
+        meta.pop(STORED_BY, None)
+        if secret_scope(name)[0] != "install":
+            from kazma_core.spaces.connected_accounts import is_connecting
+            from kazma_core.spaces.scope import bound_asker
+
+            held, who = self._stored_by(name, tenant)
+            asker = str(bound_asker() or "")
+            if asker and (not held or is_connecting()):
+                who = asker
+            if who:
+                meta[STORED_BY] = who
+        return json.dumps(meta)
+
+    def _stored_by(self, name: str, tenant: str | None) -> tuple[bool, str]:
+        """Whether the secret is held, and who its row says stored it ("":
+        no record). Called with the vault's lock held."""
+        prior = self._conn.execute(
+            "SELECT metadata FROM secrets WHERE name = ? AND "
+            "COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__') ORDER BY rowid DESC LIMIT 1",
+            (name, tenant)).fetchone()
+        if prior is None:
+            return False, ""
+        try:
+            meta = json.loads(prior["metadata"] or "{}")
+        except ValueError:
+            meta = {}
+        return True, str(meta.get(STORED_BY) or "") if isinstance(meta, dict) else ""
 
     @staticmethod
     def _space_for_write(name: str, tenant_id: str | None) -> str | None:
@@ -963,8 +1130,8 @@ class SecretVault:
         """(rows written, id of the global row) -- see :meth:`store_install_scoped`."""
         from cryptography.exceptions import InvalidTag
 
-        meta = json.dumps(metadata or {})
         with self._lock:
+            meta = self._stamped_metadata(name, metadata, None)
             rows = self._conn.execute(
                 "SELECT id, name, tenant_id, key_id, encrypted_value, nonce FROM secrets "
                 "WHERE name = ? ORDER BY rowid DESC",
@@ -982,6 +1149,8 @@ class SecretVault:
                     newest[row["tenant_id"]] = None  # unreadable: rewrite it
             scopes = [None, *sorted(t for t in newest if t is not None)]
             stale = [s for s in scopes if s not in newest or newest[s] != value]
+            if None not in stale and json.loads(meta).get(STORED_BY, "") != self._stored_by(name, None)[1]:
+                stale.append(None)  # connected again by another person: theirs from now on
             if not stale:
                 return 0, ids[None]
             now = datetime.now(UTC).isoformat()

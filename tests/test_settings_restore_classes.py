@@ -78,6 +78,16 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     # out of the documents kept by space.
     "kazma-core/kazma_core/spaces/space_data.py::_erase_settings": (
         "self_improvement.space_evolution", "email.accounts_by_space"),
+    # A space moved in (S4-06) writes back the settings S1-27's walk reads:
+    # its own (tenant.<id>.: its connected accounts, its papers), its chats'
+    # state, the approval rows that record it, and its entry in the documents
+    # kept by space -- each checked as the space's before anything is written.
+    "kazma-core/kazma_core/spaces/space_move.py::_write_settings": (
+        "tenant.<space>.connectors.x.", "tenant.<space>.connectors.github.",
+        "tenant.<space>.research.papers_index",
+        "active_thread.", "session.", "long_task.", "yolo.", "plan_mode.", "hitl_grant.",
+        "task_grant.", "path_grant.", "path_grant_index.", "hitl.last_stale_notice.", "swarm.approval.",
+        "email.accounts_by_space", "self_improvement.space_evolution"),
     # One row and revision per job (Knowledge KB-E04), admission under the
     # registry revision; the old single value is moved in, then removed.
     "kazma-core/kazma_core/web_acquire/crawl_jobs.py::_mutate": ("acquisition.crawl.", "acquisition.crawls_revision"),

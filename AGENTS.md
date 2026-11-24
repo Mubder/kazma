@@ -15371,7 +15371,10 @@ an install with one account behaves as before.
   - Who may (`kazma_ui/spaces_api.py`, from the memberships): the admin or a
     member counts (numbers only); the space's owner exports; an owner deletes
     a shared space; the admin erases the closed personal space of a deleted
-    person and never exports a member's. The export is sealed with a
+    person and never exports a member's. An API token below admin does none
+    of it (403 `own_sign_in_only`, in `_refusal`, 2026-11-24): every token is
+    the owner's account, and an operator token moved the owner's shared
+    space out, secrets included. The export is sealed with a
     password the person chooses (decision N10, `security/sealed_zip.py`:
     WinZip AES-256, at least 12 characters).
   - Pages: Settings -> This space -> This space's data; People lists the
@@ -16309,44 +16312,289 @@ an install with one account behaves as before.
     tasks first and another space's waiting; a caller of the budget that
     runs the graph anyway as the gate's control; the People page's limits
     in both languages).
-- **A member's code runs only in a container, with no network (S4-05,
-  2026-11-23, and its review).** Only where Spaces is enforced: an install
-  that does not enforce it reads nothing more, and the admin's code keeps
-  the rules it had. `kazma_core/spaces/member_code.py` `code_rule()` is the
-  one answer for the work running now: anyone but the admin, in any space,
-  runs `python_exec` in the Docker jail or not at all -- never the host
-  fallback, whatever `KAZMA_CODE_EXEC_ALLOW_LOCAL` says
-  (`code_exec.local_exec_forbidden` asks it first), and never E2B, which
-  always has the internet (`sandbox.e2b.e2b_enabled`). Work no person asked
-  for likewise. A chat-app turn runs as the person whose linked account
-  sent it (stage 3, `chat_apps.chat_place`), so their code is held there
-  too.
-  - **No network for members' code, until S4-05b.** The first build let the
-    admin allow it per person, and the jail then ran `--network bridge`: the
-    review reached a host service through the LAN and WSL addresses, and the
-    router's admin page, from the jail; cloud metadata (169.254.169.254) was
-    open, and on Docker Desktop `host.docker.internal` reaches the host's
-    loopback. Now every jail run is `--network none` with the network
-    modules blocked, `allowed_network` answers False whatever is stored (a
-    first-build allowance reads as not allowed), and People refuses turning
-    it on (`people.set_code_network`: 409 `code_network_not_yet`, worded in
-    both languages; off is taken and clears a stored value). The People page
-    shows the switch off, disabled, "Not yet". S4-05b brings filtered egress
-    on Kazma's own engine. Never give a member's container the engine's
-    default network.
+- **A member's code runs only in a container, with the network only where
+  Kazma filters it (S4-05, S4-05b, 2026-11-23).** Only where Spaces is
+  enforced: an install that does not enforce it reads nothing more, and the
+  admin's code keeps the rules it had. `kazma_core/spaces/member_code.py`
+  `code_rule()` is the one answer for the work running now: anyone but the
+  admin, in any space, runs `python_exec` in the Docker jail or not at all
+  -- never the host fallback, whatever `KAZMA_CODE_EXEC_ALLOW_LOCAL` says
+  (`code_exec.local_exec_forbidden` asks it first), and never E2B (the
+  install's paid key, its internet not this filter's;
+  `sandbox.e2b.e2b_enabled`). Work no person asked for likewise, with no
+  network. A chat-app turn runs as the person whose linked account sent it
+  (stage 3, `chat_apps.chat_place`), so their code is held there too.
+  - **The network is the public internet only, on Kazma's own engine**
+    (S4-05b; the review of S4-05: the first build's `--network bridge`
+    reached a host service through the LAN and WSL addresses, the router's
+    admin page and cloud metadata). Setup's step `engine:egress`
+    (`container_engine_setup._action_egress`, `egress-filter.sh`) puts in
+    the distro `kazma-egress-rules` and the unit `kazma-egress.service`
+    (before Docker, at every start of the distro), then makes the network
+    `container_engine_setup.EGRESS_NETWORK` on the bridge `EGRESS_BRIDGE`
+    with `EGRESS_LABEL`. A packet from the bridge goes on only to a public
+    address: the private ranges, 100.64/10, link-local (169.254/16, the
+    metadata address), loopback, the reserved, documentation and multicast
+    ranges, this computer's own addresses (the distro's, and Windows' as
+    listed at setup) and any local destination are refused at once (TCP
+    reset or ICMP), in Docker's `DOCKER-USER` chain ahead of its own rules;
+    a packet to the distro itself (`INPUT`) and every IPv6 packet from the
+    bridge are refused. `member_code.network_refusal` says why it cannot be
+    given here (`NETWORK_REFUSALS`: a public install, the cloud profile;
+    `KAZMA_TRUST_LAN` on; another engine, Docker Desktop or a system Docker,
+    whose rules Kazma does not control; the filter not put in, read from
+    setup's stamp), else "". Refused, `allowed_network` answers False
+    whatever is stored and People refuses turning it on with that code (409,
+    worded EN/AR; `/api/people` gives `code_network_refusal` and the page
+    shows it beside a disabled switch). Allowed (People asks first), the
+    person's jail joins the filtered network -- checked as setup's
+    (`egress_network_ok`) before every run, a network of the name made
+    otherwise refusing the run -- and the snippet may import the network
+    modules; everyone else's runs `--network none`. Never put a member's
+    container on the engine's default network.
+  - **The rules are checked, never assumed** (the review of S4-05b,
+    2026-11-23: a stamp and a network say the filter was put in, not that
+    its rules still hold -- another distro sharing the network namespace,
+    `iptables -F` or a firewall backend change takes them out, and the
+    bridge reached everything). Before every networked run
+    `container_engine_setup.egress_rules_in_effect` runs
+    `kazma-egress-rules ... check` in the distro as root: Docker's jump to
+    `DOCKER-USER`, the bridge's jump to `EGRESS_CHAIN` and the `INPUT` and
+    IPv6 refusals are each the FIRST rule the bridge's packets meet
+    (`first_for`: a rule for another interface by its whole name is not in
+    front of them -- `-i` read only among the words iptables prints before
+    any match, so a comment naming one hides nothing, and a rule with no
+    condition is a rule: the third review), and the chain is exactly the list the script makes
+    (`chain_rules`, compared with `iptables -S`, so each rule is written as
+    iptables prints it). Asked rule by rule with `iptables -C`, the first
+    check answered "in effect" with an ACCEPT in front of the jump and with
+    a range's UDP refusal gone (the second review). Anything else refuses
+    the run, never another network, and the check names the rule in front
+    (`EGRESS_IN_FRONT`). Setup's step ends with the same check: put in is not
+    in effect, and a step whose rules do not hold writes no stamp and says
+    which rule stands in front (`_egress_check`). Put in again, the chain is built under a
+    name of its own (`<chain>-NEW`) and swapped in (jump first, the old chain
+    out, then renamed), and a refusal that lost its place is put in front
+    again (`put_first`): the bridge is never filtered by an empty chain.
+    **Rules that cannot be put in cost the members' network, never Docker**
+    (the second review: a Docker that required them took SearXNG, Neo4j and
+    the document worker down with nobody given the network): the drop-in
+    (`docker.service.d/kazma-egress.conf`) puts them in again before Docker
+    starts and lets it start whatever that answers, and once it runs
+    `kazma-egress-guard` removes the network when the check fails and says
+    what `docker network rm` answered: removed, not there, still there, or
+    Docker could not say (`kazma setup engine` puts both back). A kernel with
+    no IPv6 (`/proc/net/if_inet6` absent) carries none: nothing is put in for
+    it. Not refused, and said on People's confirm (EN/AR) and in the
+    guide: the network's own public address (hairpin NAT to the router's
+    public side, its forwards and its admin page if it answers there).
+  - **Only a member's network needs the filter** (the main session's rule,
+    2026-11-23): until the admin gives someone's code the network
+    (`member_code.network_given`: a stored `code_network` of anyone but the
+    admin; an identity store that cannot be read is nobody), an engine
+    without the filter is whole -- `container_engine_setup.check` lists it
+    in `EngineCheck.waiting`, never `missing` -- so nothing pages, no check
+    is red and `kazma setup install` repairs nothing (the live install has
+    no filter). Once someone has it, it is missing and the install puts it
+    in. `kazma setup engine` puts it in all the same
+    (`install_steps(with_waiting=True)`), and the filter's step comes after
+    the engine's record: a filter that fails never leaves the engine
+    unrecorded. Nothing else (readiness, the guard, doctor) reads it.
   - S2-12's member rules (`spaces.tools.MEMBER_DEVELOPMENT`) keep a member
     off every host process that runs a project's code; this holds the one
     code runner they keep.
   - Gates: `tests/test_member_code_in_containers.py` (the rule; per-space
     runs with no Docker refused, the local fallback reading a host file as
-    the control; the refusal, a first-build allowance read as not allowed,
-    today's allowance as the control; `--network none` for every container;
-    E2B never; a chat-app turn of a linked person through the real gateway
-    handler, the owner's own link as the control; a real Docker run where
-    the sandbox image is present, `real_docker`: no network and no host file
-    in the container, the local fallback reading it as the control),
-    `tests/e2e/test_person_code_network_browser.py` (by the sidebar, EN/AR:
-    the switch off, disabled, "Not yet", a stored allowance shown off).
+    the control; each refusal of the network, the switch and its route
+    where Kazma filters and where it cannot; the jail on the filtered
+    network only for an allowed person, `--network none` for the rest, a
+    network not setup's refusing the run; E2B never; a chat-app turn of a
+    linked person; the source holding the jail to `none` or the filtered
+    network, the first build's `bridge` as the control; a real Docker run,
+    `real_docker`), `tests/test_engine_egress_filter.py` (the rules script
+    run by bash against stand-in iptables: every refused range and the
+    host's own addresses, the public internet on, nothing doubled, removal;
+    each way the rules stop being in effect, a rule in front of a jump and a
+    refusal taken out among them, `iptables -C` rule by rule as the control;
+    no IPv6; the guard; without the host's addresses as the control),
+    `tests/test_container_engine_setup.py` (the filter waiting until
+    someone has the network, the check of before as the control; the step:
+    rules before the network, a network made otherwise replaced, nothing
+    made when the rules
+    did not go in), `tests/test_member_code_egress_engine.py` (opt-in,
+    `KAZMA_TEST_EGRESS_ENGINE=1`, on Kazma's engine with names of its own:
+    the public internet reached, this computer and the metadata address
+    refused at once; Docker's default network reaching this computer as the
+    control; the rules on real iptables in a container's own network
+    namespace), `tests/e2e/test_person_code_network_browser.py` (by the
+    sidebar, EN/AR: the reason and a disabled switch where Kazma cannot
+    filter; where it can, a stored allowance shown on, taken back, allowed
+    again after the confirmation).
+- **A space moves to another install (S4-06, 2026-11-23; reworked after its
+  review the same day).** Only where Spaces is enforced: an import into an
+  install that does not enforce it is refused (`spaces_off`), and so is one
+  on Postgres (`postgres_not_yet`, as S1-27).
+  `kazma_core/spaces/space_move.py` is the one home.
+  - **"Move this space"** (This space's data, a shared space's owner only,
+    `POST /api/spaces/{space_id}/move`, refused `not_the_owner` to anyone
+    else) makes a bundle (`space_move.FORMAT`, `kazma-space-<id>.kazmaspace`);
+    a personal space stays (`personal_space_stays`). **"Bring in a space"**
+    (People -> Shared spaces, the admin, `POST /api/spaces/import`: the file,
+    its password, who owns it here) takes it in.
+  - **One AEAD seals the whole file** (`kazma_core/security/sealed_file.py`,
+    the owner's decision): scrypt (`sealed_file.SCRYPT_N`) of a password the
+    person chooses, then AES-256-GCM over chunks of `sealed_file.CHUNK` bytes,
+    each nonce the file's prefix, the chunk's index and whether it is the
+    last, every chunk bound to the header. A chunk moved, dropped, repeated,
+    cut off or grown does not open, so neither does a renamed, added or
+    dropped entry; the header's check tells a wrong password (`wrong_password`)
+    from a changed file (`changed`). `SealedWriter` takes the zip as a
+    stream into a `.partial` file and `SealedReader` serves it by position,
+    each chunk checked again as it is read: no plain copy is written to disk.
+    Inside, `bundle.json` lists every entry and its size, and the import
+    takes exactly those. A JSON entry or a row is read up to
+    `space_move.MAX_JSON_BYTES`, rows a line at a time; an export bigger
+    than an import takes (`space_move.MAX_BUNDLE_BYTES`) is refused before it
+    is written. S1-27's own export keeps `security/sealed_zip.py` (opened
+    with 7-Zip).
+  - **The space's key travels inside the seal, never a vault key**:
+    `SecretVault.export_space_sealed` seals the space's secrets with its key
+    (sealing first a row still under the vault key) and hands the keys over;
+    `SecretVault.import_space_sealed` wraps them with the target's own vault
+    key, in one transaction that opens every secret before it commits. The
+    key that leaves is changed here as the bundle is made
+    (`space_keys.change_key`, recorded): it opens nothing kept on the old
+    install. A secret that does not open stops the bundle
+    (`secrets_unreadable`).
+  - **Only the owner arrives** (the owner's decision): the bundle maker's
+    account becomes the person chosen; everyone else in the space leaves it,
+    as a member who leaves does (S2-12), and is invited again there. Their
+    memory entry (`member_<id>`, its facts, About me, suggestions, changes),
+    their work (scheduled jobs, swarm tasks, research sessions, X posts and
+    composers), their share of documents and the accounts they connected do
+    not travel. A space secret records who stored it (`vault.STORED_BY` in
+    its metadata): the bound asker of its FIRST write, and from then on only
+    a person connecting the account again changes it
+    (`spaces.connected_accounts.connecting`: the tenant middleware binds it
+    for the requests in which a person gives the account, named one by one
+    in `platform_rbac.CONNECT_ROUTES` and never by prefix -- a disconnect or
+    a start writes too; every other request under the account routes is
+    declared not one in `tests/test_space_move_third_review.py`;
+    `oauth_sign_in.attempt_scope` for a sign-in callback; the agent's
+    `vault_store`). Every other write -- a
+    token refresh in whoever's turn, the hourly check as the space's maker
+    -- keeps the record the row has, none included (the second review:
+    stamped at every write, a refresh made another member's account the
+    maker's, and it travelled). Another person's stays, with its
+    connection's settings; one with no record travels only from a space
+    nobody but its owner was ever in (`_only_ever`). A new route or tool
+    that connects an account binds `connecting`. What they wrote stays the
+    space's, written by `identity.DEPARTED_ACCOUNT`, which is no account:
+    work naming it is refused as a departed person's (`identity.work_scope`).
+    Nobody who stays is named inside a chat's saved state either
+    (`_rewrite_checkpoint`: a card's `asker`, `answered_by` and its names,
+    the state's `said_by`; on arrival the owner's own become the new
+    owner's, and a state naming a person of this install is refused). A
+    state, row or setting nested past `space_move.MAX_DEPTH`, a checkpoint
+    kept in a way LangGraph does not write (`_STATE_TYPES`) and a number
+    that is none (`math.isfinite`, `_a_number`; a JSON NaN) are refusals on
+    the way in (`not_a_bundle`, `bad_setting`) and, for a row, left out and
+    counted on the way out: never a RecursionError.
+  - **Every table says how it moves** (`space_move.MOVE_RULES`, a
+    `MoveRule` each: `moves`, with the column that names its person, its
+    memory entry or grant; `stopped`; `out`, with why). A table a space keeps
+    with no rule refuses the move. **Never moved**: ledgers (`llm_calls`,
+    the forget journal, the action and audit records: a planted spend row
+    counted against the daily limit), outboxes and alerts (`cron_deliveries`
+    and `cron_alerts` would have sent and paged outside the space), the old
+    install's own state (a chat app's routing, approval cards, Time Travel's
+    steps), what is rebuilt here, and a chat's state: grants, YOLO windows
+    and pointers. A setting moves only when it is NAMED
+    (`_MOVED_SETTINGS`: the space's X and GitHub connection keys, each with
+    what it holds), each value checked both ways (`_holds_what_it_should`;
+    `foreign_setting`, `bad_setting`, `missing_secret`); what stays is in
+    `_STAYING_SETTINGS` with why. A new `connectors.x.` or
+    `connectors.github.` key goes in one of the two or
+    `tests/test_space_move_second_review.py` fails: moved by prefix, the
+    files X drafting reads (`connectors.x.drafting.reference_files`)
+    travelled, and a bundle's owner read any file of the new machine. Once
+    Spaces is enforced `x_api.references.load_references` also asks the
+    bound space's path policy, whoever set them.
+  - **Live work arrives stopped** (the owner's decision; a move is a copy
+    and the old install still runs it, `_STOPS`): a scheduled job cancelled
+    (Restore here, to the new owner's own chat), a swarm task cancelled, a
+    research session interrupted, an X post due to publish held for approval
+    (one being sent: outcome not known), an X thread cancelled, a crawl not
+    moved. A chat paused at an approval card arrives with the card expired
+    (`_expire_waiting_cards`: a gate row timed out, the turn not resumed).
+  - **The space's checkpoints land in its own file**
+    (`paths.space_checkpoints_db`, also what the gateway's checkpoint store
+    opens): a bundle travels them under one name (`space_move.CHECKPOINTS`),
+    from `checkpoints.db` or `checkpoints_<space>.db`, and one naming any
+    other checkpoint file is refused. **One file per space, and an id Kazma
+    makes** (the third review, 2026-11-24: the name lost the underscores at
+    its ends, so an id `v_` had `v`'s file, and a refused import of `v_`
+    deleted `v`'s chats): a space id is the file's name as it is (a tenant of
+    before Spaces keeps the name it had), a bundle's id must be one Kazma
+    makes (`scope.made_space_id`, `scope.new_space_id`: `s` and twelve hex
+    digits), and a checkpoint file of its name that is here counts as the
+    space's being here -- a retired memory mode's is someone else's -- but
+    for the emptied one of a space this install erased (`_emptied_here`),
+    which a space moving back is written into.
+  - **Refused before anything is written**, each code worded EN/AR
+    (`settings.space_data_err.<code>`): the password, a changed byte, an
+    entry not listed or listed and missing, too big; anything of the space
+    here already (`space_exists`); a row that is not the space's, a row of a
+    table that never moves (`not_moved`), another member's entry, work or
+    account (`foreign_member`, `members_work`), a person of this install
+    named by a row (`foreign_person`); an id here already (`id_collides`:
+    never merged; integer row ids alone are given new numbers) -- in any
+    store and whoever's it is, a chat of the owner's from before Spaces, which
+    has no record, among them (`_check_ids`: such a chat was recorded as the
+    space's, and a take-back deleted it); a pointer to a secret not in the
+    bundle (`foreign_secret`); a table or column this install lacks.
+  - **A half-done import leaves the install as it was**: every row store is
+    made by its own code first (`spaces/row_stores.py`); the space is
+    recorded in `space_move.JOURNAL_KEY` before anything is written; a
+    failure takes back what was written by the erase's own walk, and a file
+    or folder only when it carries the import's own mark, which the journal
+    holds (the checkpoint file's `application_id`, put in place over nothing;
+    `.kazma-arriving` in a folder until the space lands): never one another
+    space has. The checkpoint file goes last -- a program may hold it open --
+    and the journal keeps it for the next start. One a stop cut off is taken
+    back as Kazma starts (`settle_at_start`) or by the next import, never a
+    running one (`settle_unfinished_imports` takes the import lock), nor one
+    that landed: its entry is closed and said so. The space joins the
+    identity store last (`people.record_moved_space`, event
+    `space_imported`; its refusal is a worded code). **So what takes a space
+    with no member, or none at all, for one that is gone leaves a space in
+    the journal alone** (`importing_spaces`, read AFTER what is stored and
+    BEFORE the identity store): the forget of departed entries (it forgot
+    the new owner's facts as they arrived), the erased-key sweep (a space
+    erased here once and moved back) and the document worker, which gives
+    the job back on the attempt it had, due again in half a minute
+    (`hand_back` on both job stores: counted as a failed attempt, it was
+    dead-lettered in fifteen seconds). A new sweep of that kind asks it. A
+    project folder's files stay on the old machine (the guide says so).
+  - **An erase leaves no activity row**: `activity.record` writes nothing
+    for a space the install no longer holds or is erasing.
+  - Gates: `tests/test_space_bundle_round_trip.py` (S1-27's world exported
+    and brought into a fresh install with another vault key: every row that
+    moves, word, count, setting, secret, file and thread record of A, none
+    of B; the key and secrets absent in the clear; a bundle carrying B's row
+    refused, and landing with the row check taken out; each refusal leaving
+    the install as it was; a half-done and a cut-off import taken back; the
+    routes; every refusal worded; then every case of the space matrix on an
+    install whose space A was moved in), `tests/test_space_move_review.py`
+    (each of the four decisions and eight review findings, every one failing
+    on 052dd4be3; a table with no rule as the control),
+    `tests/test_space_move_second_review.py` (the second review's, failing
+    on 46f200bcb), `tests/test_space_move_third_review.py` (the third's,
+    failing on b55865291; the file name of before, where `v` and `v_` meet,
+    as the control),
+    `tests/e2e/test_space_move_browser.py` (by the sidebar, EN/AR: moved,
+    the file sealed whole, deleted, a wrong password refused, brought back in
+    with a person as owner).
 - **Every action under the person's name (S2-09, 2026-11-22).** Only where
   Spaces is enforced; an install that does not enforce it records nothing
   more (the memory operator trail and the logs as before).
@@ -16360,6 +16608,8 @@ an install with one account behaves as before.
     the answer's status. Never a body or a query value. A request no person
     made writes nothing. One middleware: a route added later is recorded the
     day it is added.
+  - A space the install no longer holds, or is erasing, gets no row
+    (`activity._held`): an erase is answered after its space is gone (S4-06).
   - The memory operator trail names the account too (`account:<id>`), the
     session's label only where no account was bound.
   - **The Activity page** (`/activity`, `GET /api/activity`; sidebar and

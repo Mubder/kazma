@@ -33,7 +33,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["ActivityRow", "record", "recent"]
+__all__ = ["ActivityRow", "ensure_store", "record", "recent"]
 
 logger = logging.getLogger(__name__)
 
@@ -105,12 +105,20 @@ def _connection() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def ensure_store() -> None:
+    """Make the store's tables when they are not there (a moved space lands
+    in them: ``spaces.row_stores``)."""
+    with _connection() as conn:
+        conn.executescript(_SCHEMA)
+
+
 def record(space: str, account: str, action: str, ids: list[str] | tuple[str, ...], status: int) -> None:
     """Write one action of *account* in *space*. A space or account that is
-    not one (an empty one: a request no person made) writes nothing."""
+    not one (an empty one: a request no person made) writes nothing, nor a
+    space the install no longer holds (:func:`_held`)."""
     from kazma_core.spaces.scope import valid_account_id, valid_space_id
 
-    if not valid_space_id(space) or not valid_account_id(account):
+    if not valid_space_id(space) or not valid_account_id(account) or not _held(space):
         return
     shown = "\x1f".join(str(i)[:_ID_CHARS] for i in list(ids)[:_IDS_MAX])
     global _written
@@ -124,6 +132,22 @@ def record(space: str, account: str, action: str, ids: list[str] | tuple[str, ..
             due = _written % _PRUNE_EVERY == 0
         if due:
             _prune(conn, space)
+
+
+def _held(space: str) -> bool:
+    """Whether *space* is a space of the install and not being erased. An
+    erase is answered after its space is gone: the erase's own row would be
+    all that is left of the space (Spaces S4-06 found it: a space moved and
+    then deleted could not be brought back in, its delete's row still
+    there). An identity store that cannot answer records the action: an
+    outage never loses one."""
+    from kazma_core.spaces.identity import IdentityUnavailable, read_registry
+
+    try:
+        found = read_registry()["spaces"].get(space)
+    except IdentityUnavailable:
+        return True
+    return bool(found) and not found.get("erasing_at")
 
 
 def _prune(conn: sqlite3.Connection, space: str) -> None:

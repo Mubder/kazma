@@ -72,6 +72,11 @@ NOT_INSTALL_WIDE: dict[tuple[str, str], str] = {
     ("POST", "/api/spaces/{space_id}/export"): "reads the password the export is sealed with; "
     "one zip of the caller's own space (its owner only) is written to a temporary folder and "
     "sent back: nothing install-wide changes",
+    ("POST", "/api/spaces/{space_id}/move"): "reads the password the bundle is sealed with; one sealed "
+    "file of one shared space, made for an owner of that space only, as the identity store records it "
+    "(space_move._must_own, and spaces_api._refusal before it: the admin who is no owner and an API token "
+    "below admin are refused), and sent back. It changes that space's own key and its record; nothing of "
+    "the install's",
     ("PUT", "/api/account/model-keys/{provider}"): "a member's own model key (Spaces S2-04): kept in "
     "their personal space, used only for their own calls; the install's provider rows and keys are "
     "not touched",

@@ -29,6 +29,7 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+
 __all__ = ["MIN_PASSWORD", "seal"]
 
 #: The shortest password a sealed zip takes.
