@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
+
+- Once Spaces is on, a chat you started can move from your own space into a
+  shared space you are in ("Share with…" in the chat list's menu), and back
+  ("Take out to my space"). The dialog says how many of your questions the
+  chat holds before anything moves.
+- Moving a chat moves the conversation. What Kazma remembered from it stays
+  where it was said, and from now on it remembers what you say in the new
+  space. Taking a chat out of a shared space makes that space forget it.
+- A chat others wrote in stays in the shared space: their words are the
+  space's. Kazma offers a new private chat in your own space instead.
+- The moved chat is a new chat in the space it moves to, with the
+  conversation and the files Kazma shared in it, and the one it was is
+  deleted where it was: it is in exactly one space. Its Time Travel steps,
+  thoughts and approval cards do not come along, nor what the chat recalled;
+  a file you attached has to be attached again.
+- When you share a chat, its drafts and plans and the reminders booked from
+  it stay in your own space. When you take one out, the shared space keeps
+  none of them, and the reminders and tasks you booked in it come with you.
+  Taking a chat out leaves the shared space a line with who took it out,
+  when, and its title, never its words.
+- A move waits while Kazma is answering, while an approval waits (or Kazma
+  cannot tell whether one does), while an answer was cut off half way, while a
+  swarm task the chat started runs, and in plan mode. Something written in
+  the chat while it moves keeps it where it was; nothing written is lost.
+  Anyone else's open window on a chat you took out stops showing it. A chat
+  from a chat app is not offered for moving.
+- A move cut off by a restart, or one the database interrupted, is put back
+  or finished: at the next start, within the next quarter of an hour, or when
+  the chat is moved again.
+- Once Spaces is on, undoing a turn takes back what its own space remembers of
+  it, never what another space does.
+
+## A deleted chat stays deleted (2026-11-24)
+
+- A chat you deleted is not brought back by what was still on its way to it:
+  a reply that was closing, a message being sent, a tab left open, a voice
+  utterance, a rename, a chat app that had taken it over, an approval
+  answered late. The message you were sending goes to a new chat.
+- Deleting a chat as its answer finished no longer pages "a reply was
+  produced but not saved".
+
 ## Spaces: stronger sign-in, and no open switch once two people have accounts (2026-11-23)
 
 - A second factor can be turned on in My account: after the password, a code

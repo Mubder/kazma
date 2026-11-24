@@ -1415,6 +1415,14 @@ def _destroy_erased_space_keys() -> None:
     destroy_erased_keys()
 
 
+def _settle_chat_moves() -> None:
+    # Spaces S2-12: a chat move its own request could not finish is finished
+    # (or put back) here, not at the next restart.
+    from kazma_core.spaces.chat_moves import settle_unfinished
+
+    settle_unfinished()
+
+
 def _provider_health() -> None:
     # Providers stage 4: once an hour every switched-on chat provider is
     # asked for its model list (no tokens); unreachable twice is said, a
@@ -1496,6 +1504,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("provider health", _provider_health),
     ("settings snapshot", _settings_snapshot),
     ("erased space keys", _destroy_erased_space_keys),
+    ("chat moves", _settle_chat_moves),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
     ("memory vector codes", _fill_vector_codes),

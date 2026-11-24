@@ -52,7 +52,7 @@ DEPARTED = identity.DEPARTED_ACCOUNT
 
 
 def _store_path(name: str) -> Path:
-    stores = dict(space_data._store_paths())
+    stores = dict(space_data.store_paths())
     if name == "chat_sessions.db" and name not in stores:
         name = "chat_sessions_test.db"  # the transcript store under pytest
     return stores[name]
@@ -64,7 +64,7 @@ def _clone(store: str, table: str, key: str, changes: dict[str, Any]) -> dict[st
     with closing(sqlite3.connect(str(_store_path(store)))) as conn:
         conn.row_factory = sqlite3.Row
         rule = space_data._table_rule(store, table, space_data._columns(conn, table))
-        clause, params = space_data._where(rule, space_data._context(A, space_data._store_paths()))[0]
+        clause, params = space_data._where(rule, space_data._context(A, space_data.store_paths()))[0]
         row = dict(conn.execute(f'SELECT * FROM "{table}" WHERE {clause} LIMIT 1', params).fetchone())
         row.update({key: f"{key}-{uuid.uuid4().hex[:8]}"}, **changes)
         conn.execute(f'INSERT INTO "{table}" ({", ".join(row)}) VALUES ({", ".join("?" * len(row))})',
@@ -368,7 +368,7 @@ def test_no_ledger_row_crosses(moved, target, tmp_path) -> None:
     _bring_in(moved["bundle"], owner)
     for store, table in (("llm_calls.db", "llm_calls"), ("activity.db", "activity"),
                          ("memory_forget_journal.db", "forget_journal")):
-        if store in dict(space_data._store_paths()):
+        if store in dict(space_data.store_paths()):
             column = "space" if table in ("llm_calls", "activity") else "tenant_id"
             assert not _rows(store, table, f'"{column}" = ?', (A,)), table
     spent = llm_ledger.usage_of(owner, datetime.now(UTC) - timedelta(days=1)) or {}
@@ -585,7 +585,7 @@ def test_every_table_a_space_keeps_says_how_it_moves(tmp_path, monkeypatch) -> N
     with own_install(monkeypatch, tmp_path / "rules"):
         _make_stores()
         missing = []
-        for name, path in space_data._store_paths():
+        for name, path in space_data.store_paths():
             store = space_move._logical_store(name, path)
             with closing(sqlite3.connect(str(path))) as conn:
                 for table, virtual in space_data._tables(conn):

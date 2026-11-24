@@ -146,18 +146,23 @@ def _mutate_session(session_id: str, mutate: Any, fallback: Any = None) -> Any:
     ``durable=False`` exists only in the cache, and if the cache evicted it
     before its first message there is nothing to re-read, so that copy is
     stored first (what the old ``put`` did). With no stored session and no
-    fallback nothing is written and None is returned.
+    fallback nothing is written and None is returned; nor is a chat that was
+    deleted (or moved to another space) brought back by the copy a request
+    still holds: None too, and the caller says so.
     """
-    from kazma_ui.session_manager import get_session_manager
+    from kazma_ui.session_manager import ChatDeleted, get_session_manager
 
     store = get_session_manager()
     if store.get(session_id) is None:
         if fallback is None:
             return None
         store.put(fallback)
-    with store.transact(session_id) as sess:
-        mutate(sess)
-        return sess
+    try:
+        with store.transact(session_id) as sess:
+            mutate(sess)
+            return sess
+    except ChatDeleted:
+        return None
 
 
 def _persist_instant_turn(

@@ -940,6 +940,7 @@ jobs:
             tests/e2e/test_shared_spaces_browser.py \
             tests/e2e/test_space_membership_browser.py \
             tests/e2e/test_document_moves_browser.py \
+            tests/e2e/test_chat_moves_browser.py \
             tests/e2e/test_approval_card_reaches_the_asker.py
         env:
           KAZMA_DB_BACKEND: sqlite

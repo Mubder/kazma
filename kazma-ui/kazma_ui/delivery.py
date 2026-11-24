@@ -241,6 +241,14 @@ class TurnJournal:
                 return [], True
             return [frame for frame in bucket if frame["seq"] > after], False
 
+    def clear(self, thread_id: str) -> int:
+        """Drop *thread_id*'s events, keeping its sequence: its chat moved to
+        another space (Spaces S2-12) and is a deleted chat here, and what its
+        turns showed -- the memory they used -- goes with it. A client with a
+        cursor from before gets a gap. Returns how many went."""
+        with self._lock:
+            return len(self._events.pop(thread_id or "", ()))
+
     def stats(self) -> dict[str, Any]:
         """Occupancy snapshot (tests / metrics / ops dashboards)."""
         with self._lock:
@@ -502,6 +510,10 @@ class TurnBroker:
         journaled). Used by the NEW-prompt stream to subscribe at the current
         head instead of replaying the previous turn's backlog."""
         return self._journal.head_seq(thread_id)
+
+    def clear(self, thread_id: str) -> int:
+        """Drop what is journaled of *thread_id* (:meth:`TurnJournal.clear`)."""
+        return self._journal.clear(thread_id)
 
     def resume(
         self, thread_id: str, last_seq: int

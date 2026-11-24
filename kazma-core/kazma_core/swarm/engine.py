@@ -86,6 +86,11 @@ logger = logging.getLogger(__name__)
 _swarm_engine: SwarmEngine | None = None
 
 
+def peek_task_store() -> TaskStore | None:
+    """The task store of the running engine, or None when there is none."""
+    return _swarm_engine._task_store if _swarm_engine is not None else None
+
+
 def set_swarm_engine(engine: SwarmEngine | None) -> None:
     """Set the module-level swarm engine singleton."""
     global _swarm_engine
@@ -378,6 +383,11 @@ class SwarmEngine:
     def get_worker(self, name: str) -> SwarmWorker | None:
         """Return a worker by name."""
         return self._workers.get(name)
+
+    def forget_task(self, task_id: str) -> None:
+        """Drop a task from this process's history (its row was removed)."""
+        with self._task_lock:
+            self._task_history.pop(task_id, None)
 
     def get_task(self, task_id: str) -> SwarmTask | None:
         """Return a task by id from the history."""

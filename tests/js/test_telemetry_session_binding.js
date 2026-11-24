@@ -47,8 +47,42 @@ async function switchRace(code) {
   assert.match(h.sockets[0].url, /\/ws\/chat\/second/);
 }
 
+// A chat that was deleted, or moved under another id, says so as its socket
+// closes: nothing binds or connects to it again.
+async function closedAsGone(code, reason, session, source_ = source) {
+  const h = harness(source_);
+  let retries = 0;
+  h.store._scheduleReconnect = () => { retries += 1; };
+  h.store._endTurn = () => {};
+  const open = h.store.connect(session);
+  h.pending[0].resolve({ ok: true });
+  await open;
+  h.sockets[0].readyState = 3;
+  h.store._intentionalClose = false;  // as once it opened
+  h.sockets[0].onclose({ code, reason });
+  const again = h.store.connect(session);
+  if (h.pending[1]) h.pending[1].resolve({ ok: true });
+  await again;
+  return { retries, binds: h.pending.length, sockets: h.sockets.length };
+}
+
+async function goneChats() {
+  const nothing = { retries: 0, binds: 1, sockets: 1 };
+  assert.deepEqual(await closedAsGone(4403, 'moved', 'chat-1'), nothing);
+  assert.deepEqual(await closedAsGone(4403, 'deleted', 'chat-1'), nothing);
+  // A chat app's chat is named by its sender: it begins again, and is bound.
+  assert.deepEqual(await closedAsGone(4403, 'deleted', 'gw-telegram-1'), { retries: 0, binds: 2, sockets: 2 });
+  // A connection that dropped is as before.
+  assert.deepEqual(await closedAsGone(1006, '', 'chat-1'), { retries: 1, binds: 2, sockets: 2 });
+  // Negative control: the store of before bound and connected to it again.
+  const old = source.replace("code === 4403 && (reason === 'deleted' || reason === 'moved')", 'false');
+  assert.notEqual(old, source);
+  assert.deepEqual(await closedAsGone(4403, 'moved', 'chat-1', old), { retries: 1, binds: 2, sockets: 2 });
+}
+
 (async () => {
   await switchRace(source);
+  await goneChats();
   const h = harness();
   let retries = 0;
   h.store._scheduleReconnect = () => { retries += 1; };

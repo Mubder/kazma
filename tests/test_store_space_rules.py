@@ -78,6 +78,10 @@ DDL_SOURCES: dict[str, tuple[str, ...]] = {
     ),
     "hitl_gates.db": ("kazma-core/kazma_core/safety/hitl_gates.py",),
     "run_incidents.db": ("kazma-core/kazma_core/runs/incidents.py",),
+    "thread_scopes.db": (
+        "kazma-core/kazma_core/spaces/threads.py",
+        "kazma-core/kazma_core/spaces/chat_moves.py",
+    ),
     "vault.db": ("kazma-core/kazma_core/security/vault.py",),
     "settings.db": (
         "kazma-core/kazma_core/config_store.py",

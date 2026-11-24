@@ -169,7 +169,8 @@ STORES: dict[str, Store] = {
         "stuck or failed runs: what the owner was told and what they decided", "bundle"),
     "thread_scopes.db": Store(
         "which space each chat thread belongs to and which account opened it "
-        "(kazma_core.spaces.threads)", "bundle"),
+        "(kazma_core.spaces.threads); the lines a shared space keeps for chats taken out "
+        "of it (kazma_core.spaces.chat_moves)", "bundle"),
     "activity.db": Store(
         "every change a person made in a space, under their account: the route, the ids in "
         "its path and the answer, never what was sent (kazma_core.spaces.activity)", "bundle"),
@@ -326,7 +327,9 @@ RETENTION: dict[str, str] = {
     "hitl_gates.db": "the gate retention sweep: decided gates after 90 days; a live one is kept",
     "run_incidents.db": "the run incident retention sweep",
     "thread_scopes.db": "kept while its chat is: one small row of ids per chat thread (no title, "
-                        "no text). The chat delete removes it once nothing of the chat is left",
+                        "no text). The chat delete removes it once nothing of the chat is left. "
+                        "A shared space's lines for chats taken out of it: its newest 500 "
+                        "(Spaces S2-12)",
     "activity.db": "90 days and at most 20,000 rows a space, pruned as rows are written "
                    "(kazma_core.spaces.activity._prune); a space's rows go with its erase",
     "chat_outbox.db": "the chat outbox retention sweep: settled rows (their text already emptied) "
@@ -739,7 +742,9 @@ SPACE_RULES: dict[str, SpaceRule] = {
         "row", content={"hitl_gates": ("args_json", "message", "payload_json")}, today="carries"),
     "thread_scopes.db": SpaceRule(
         "row",
-        why="ids only: a thread id, its space and the account that opened it; no content",
+        # A thread's record is ids only; the line a shared space keeps for a
+        # chat taken out of it holds the title the chat had (S2-12).
+        content={"chat_taken_out": ("title",)},
         today="apart"),
     "activity.db": SpaceRule(
         "row",

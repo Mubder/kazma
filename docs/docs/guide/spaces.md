@@ -103,6 +103,49 @@ never in a shared space, for you either. Outside your own space, git signs
 in with the space's own GitHub account and never with this computer's SSH
 keys or saved passwords.
 
+## Moving a chat or a document
+
+Private means in your personal space. Once Spaces is on, a chat you started,
+or a document of yours, can move from your own space into a shared space you
+are in, and back out:
+
+- **A chat:** the chat list's menu offers "Share with…" in your own space and
+  "Take out to my space" in a shared one. Moving a chat moves the
+  conversation. What Kazma remembered from it stays where it was said, and
+  from now on it remembers what you say in the new space. Taking a chat out
+  of a shared space makes that space forget it: its memories, notes,
+  summaries and lessons. It does not bring back what the chat's facts had
+  replaced there, and a fact another chat of that space states too can go
+  with it. Your own space's memory is never changed by a move, nor by an undo
+  in the shared space.
+  The moved chat is a new chat there, with the conversation, and the one it
+  was is deleted where it was: a tab still open on it is told so, and your
+  message goes to a new chat. The files Kazma shared in it go with it. Its
+  Time Travel steps, thoughts and approval cards do not come along, and a
+  file you attached has to be attached again.
+
+  *When you share it,* its drafts and plans, and the reminders and scheduled
+  tasks you booked from it, stay in your own space. *When you take it out,*
+  the shared space keeps none of its drafts, plans, confirmations or finished
+  swarm tasks, and the reminders and tasks you booked in it come with you
+  (another member's stay). Approvals you gave for the chat, YOLO, `/long` and
+  folder grants end with the chat it was.
+
+  What you asked Kazma to forget of it stays forgotten where it was said; the
+  chat's own words stay in the chat. A chat from a chat app (Telegram,
+  Discord, Slack, WhatsApp) stays in its space. One with an answer cut off
+  half way waits until you continue or close it, one that started a swarm
+  task until the task is over, and one in plan mode until you approve or
+  cancel the plan. If something is written in the chat while it moves, it
+  stays where it was and you can try again; if both the chat and its copy were
+  written in, both are kept.
+- **A document:** the Documents page offers the same two moves.
+
+A chat someone else wrote in stays in the shared space: their words are the
+space's. Taking something out leaves the shared space a line saying who took
+it out and when, with its title. A move is always your own click: the agent
+never moves a chat or a document.
+
 ## What the admin can and cannot do
 
 | The admin can | The admin cannot |

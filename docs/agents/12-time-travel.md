@@ -99,8 +99,9 @@ declared.
 TT-03: memory is rewound, not kept). `/undo`, `/edit`, a restore
 (`apply_snapshot_to_thread`) and abort call `memory.forget.rewind_memory`
 after they write: the turns they took back -- episodes, the agent's notes,
-facts -- are forgotten under every key and tenant that holds them, journaled,
-with ledger rows from the old questions (a deferred write, the deep pass and
+facts -- are forgotten under every key that holds them (in every tenant
+while Spaces is not enforced; in the rewind's own space alone once it is,
+`forget.replay_rewind`), journaled, with ledger rows from the old questions (a deferred write, the deep pass and
 turn reconcile from the unchanged transcript do not bring them back); a fork
 touches the original chat's memory not at all. The deep pass applies facts
 only while its turn is still remembered (`_apply_if_still_remembered`). The

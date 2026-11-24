@@ -60,6 +60,8 @@ __all__ = [
     "count_space",
     "erase_space",
     "export_space",
+    "forget_chat_state",
+    "store_paths",
 ]
 
 logger = logging.getLogger(__name__)
@@ -191,7 +193,7 @@ def _table_rule(store: str, table: str, columns: set[str], *, virtual_fts: bool 
 # ── where the stores are ────────────────────────────────────────────────
 
 
-def _store_paths() -> list[tuple[str, Path]]:
+def store_paths() -> list[tuple[str, Path]]:
     """``(store name, file)`` for every ``row`` store file that exists."""
     from kazma_core import paths
     from kazma_core.store_registry import SPACE_RULES
@@ -336,7 +338,7 @@ def _walk(space: str, earlier: _Context | None = None) -> tuple[_Context, list[_
 
     *earlier*: the ids a walk before a delete found, kept: a deleted library
     is no longer in its table, and the rows that name it must still be found."""
-    stores = _store_paths()
+    stores = store_paths()
     ctx = _context(space, stores)
     if earlier is not None:
         for key, values in earlier.ids.items():
@@ -373,12 +375,34 @@ _BY_SPACE_MAPPINGS = (("email.accounts_by_space", ()), ("self_improvement.space_
 _SPACE_RECORDING_PREFIXES = ("swarm.approval.",)
 
 
+def _is_chat_state(key: str, threads: set[str]) -> bool:
+    """Whether a settings key is the state of one of *threads*' chats. A
+    standing approval names its chat and its person (``<thread>~<account>``,
+    S2-06): the chat decides."""
+    from kazma_core.safety.grant_holder import thread_of
+
+    return bool(threads) and key.startswith(_CHAT_STATE_PREFIXES) and any(
+        thread_of(part) in threads for part in key.split("."))
+
+
+def forget_chat_state(thread_id: str) -> int:
+    """Delete every settings key of one chat's state -- its grants, YOLO
+    window, path grants, plan, ``/long`` record and season stamps: the chat
+    ended. Returns how many. Blocking (settings)."""
+    from kazma_core.config_store import get_config_store
+
+    store = get_config_store()
+    keys = [key for group in store.get_all().values() for key in group if _is_chat_state(key, {thread_id})]
+    for key in keys:
+        store.delete(key)
+    return len(keys)
+
+
 def _settings_keys(space: str, threads: list[str]) -> list[str]:
     """The settings keys of the space: its own (``tenant.<id>.``) and its
     chats' state (a key that names one of its threads). Read through the
     settings store's own listing."""
     from kazma_core.config_store import get_config_store
-    from kazma_core.safety.grant_holder import thread_of
 
     wanted = set(threads)
     keys: list[str] = []
@@ -386,10 +410,7 @@ def _settings_keys(space: str, threads: list[str]) -> list[str]:
         for key, value in group.items():
             if key.startswith(f"tenant.{space}."):
                 keys.append(key)
-            elif key.startswith(_CHAT_STATE_PREFIXES) and wanted and any(
-                    thread_of(part) in wanted for part in key.split(".")):
-                # A standing approval names its chat and its person
-                # (``<thread>~<account>``, S2-06): the chat decides.
+            elif _is_chat_state(key, wanted):
                 keys.append(key)
             elif (key.startswith(_SPACE_RECORDING_PREFIXES) and isinstance(value, dict)
                   and str(value.get("space") or "") == space):

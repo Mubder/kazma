@@ -97,6 +97,17 @@ class _EffectJournal:
                 )
                 return int(cur.rowcount or 0)
 
+    def forget_thread(self, thread_id: str) -> int:
+        """Remove the completed receipts of a thread that never runs again.
+        A started one -- an effect whose outcome is unknown -- stays."""
+        if not self.path.exists():
+            return 0
+        with closing(self._connect()) as conn:
+            with conn:
+                cur = conn.execute(
+                    "DELETE FROM tool_effects WHERE state = 'completed' AND thread_id = ?", (thread_id,))
+                return int(cur.rowcount or 0)
+
     def begin(self, effect_id: str, request_hash: str, thread_id: str, tool: str) -> dict[str, Any] | None:
         with closing(self._connect()) as conn:
             with conn:
@@ -255,6 +266,14 @@ def prune_completed_receipts(*, days: int = COMPLETED_RETENTION_DAYS) -> int:
     if not path.exists():
         return 0
     return _EffectJournal(path).prune_completed(days=days)
+
+
+def forget_thread_receipts(thread_id: str) -> int:
+    """Remove the completed receipts of a chat that ended (its thread never
+    runs again). Blocking."""
+    from kazma_core.paths import data_dir
+
+    return _EffectJournal(data_dir() / "tool_effects.db").forget_thread(thread_id)
 
 
 def main() -> int:

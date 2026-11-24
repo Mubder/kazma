@@ -123,7 +123,7 @@ def test_a_delete_cannot_write_the_taken_out_line(world) -> None:
 
 def test_with_spaces_off_nothing_moves(world, monkeypatch) -> None:
     monkeypatch.setattr(scope, "_enforced", False)
-    refused, _out = moves._move_refusal(from_space=world["mine"], to_space=world["family"], by=world["reem"])
+    refused, _out = moves.move_rule(from_space=world["mine"], to_space=world["family"], by=world["reem"])
     assert refused is not None and refused.code == "spaces_off"
 
 

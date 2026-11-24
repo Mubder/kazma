@@ -198,7 +198,7 @@ def test_benign_sse_close_is_not_a_failed_turn() -> None:
     assert "fetch(approvalUrl" in approve
     assert "res.status === 409" in approve
     assert "text/event-stream" not in approve
-    main_on_error = chat.split("buildSseCallbacks", 1)[1].split("onError: function(msg)", 1)[1].split("};", 1)[0]
+    main_on_error = chat.split("buildSseCallbacks", 1)[1].split("onError: function(msg, data)", 1)[1].split("};", 1)[0]
     assert "_awaitingApproval" in main_on_error
     assert "_turnPainted" in main_on_error
     planted = "callbacks.onError(err.message);\n"  # catch with no benign guard

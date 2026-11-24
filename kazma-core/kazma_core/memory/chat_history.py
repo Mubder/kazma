@@ -26,6 +26,7 @@ import json
 import logging
 import sqlite3
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +41,9 @@ __all__ = [
     "chat_ids",
     "checkpoint_message_versions",
     "conversations_for",
+    "epoch_of",
     "normalize_message",
+    "said_since",
     "search_sessions",
     "sessions_changed_since",
     "threads_containing",
@@ -67,6 +70,40 @@ def normalize_message(m: Any) -> dict[str, Any]:
     if calls:
         out["tool_calls"] = list(calls)
     return out
+
+
+def epoch_of(value: Any) -> float | None:
+    """Epoch seconds of the chat store's ISO timestamps; None when absent."""
+    if not value:
+        return None
+    try:
+        when = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return when.timestamp()
+
+
+def said_since(messages: Any, since: float | None) -> list[Any]:
+    """The messages of the turns asked at or after *since*: what was said in
+    this space of a chat that was copied here from another one at that moment
+    (Spaces S2-12, ``threads.copied_threads``). A turn whose question has no
+    time is left out: it is not known to have been said here. *since* None:
+    every message."""
+    items = list(messages or [])
+    if since is None:
+        return items
+    kept: list[Any] = []
+    here = False
+    for item in items:
+        msg = normalize_message(item)
+        if msg.get("role") == "user":
+            at = epoch_of(msg.get("ts"))
+            here = at is not None and at >= since
+        if here:
+            kept.append(item)
+    return kept
 
 
 def _never_created(exc: BaseException) -> bool:

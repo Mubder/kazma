@@ -76,6 +76,12 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     # Erasing a space (S1-27) deletes the keys it holds, each already named
     # by a rule (tenant.<id>., a chat's state), and takes the space's entry
     # out of the documents kept by space.
+    # A chat that ended takes its own state with it (S2-12): deletes only, of
+    # keys each named by a rule (_CHAT_STATE_PREFIXES, held to the rules by
+    # the writers of each).
+    "kazma-core/kazma_core/spaces/space_data.py::forget_chat_state": (
+        "hitl_grant.", "task_grant.", "yolo.", "path_grant.", "path_grant_index.", "long_task.", "plan_mode.",
+        "active_thread.", "session.", "hitl.last_stale_notice."),
     "kazma-core/kazma_core/spaces/space_data.py::_erase_settings": (
         "self_improvement.space_evolution", "email.accounts_by_space"),
     # A space moved in (S4-06) writes back the settings S1-27's walk reads:
@@ -127,6 +133,9 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     # Ends the auto-login's sessions when everyone must sign in (Spaces
     # S4-02's re-check): deletes web_session.<hash> rows.
     "kazma-core/kazma_core/security/web_sessions.py::end_peer_trust_sessions": ("web_session.",),
+    # A moved chat's chat-app pointers (Spaces S2-12): deletes the
+    # active_thread.<sender> rows that name the moved thread.
+    "kazma-ui/kazma_ui/chat_move.py::_drop_pointers": ("active_thread.",),
     # A migration import writes the bundle's rows, keys as stored, only those
     # migration carries (FA-255: never RUNTIME, never a web session).
     "kazma-core/kazma_core/migration/importer.py::_restore_settings": (

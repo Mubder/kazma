@@ -74,6 +74,23 @@ function makeTab(pageSpace, href, sharedStorage, enforced) {
   return { win, sent, store };
 }
 
+// ── A chat the person moved to another space is opened there (S2-12) ─────
+{
+  const { win, store } = makeTab("family");
+  win.kazmaSpace.openChat("default", "s & 1");
+  const opened = new URL(win.location.assigned);
+  assert("the moved chat is opened where it lives", opened.pathname === "/chat"
+    && opened.searchParams.get("s") === "s & 1" && opened.searchParams.get("space") === "default", opened.href);
+  assert("and the tab stays in that space", Object.values(store).includes("default"), store);
+  const other = makeTab("family");
+  other.win.kazmaSpace.openChat("default", "");
+  other.win.kazmaSpace.openChat("//evil.example", "s1");
+  assert("no chat or no valid space: the tab stays", other.win.location.assigned === null, other.win.location);
+  const off = makeTab("family", undefined, undefined, false);
+  off.win.kazmaSpace.openChat("default", "s1");
+  assert("nothing on an install that does not enforce Spaces", off.win.location.assigned === null);
+}
+
 // ── Every request to this server names the space ────────────────────────
 {
   const { win, sent } = makeTab("family");

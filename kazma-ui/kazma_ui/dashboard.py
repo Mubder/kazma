@@ -652,6 +652,10 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
         leftovers = False
         try:
             chat_keys = await asyncio.to_thread(_delete_chats_of_thread, thread_id)
+            from kazma_ui.chat_delete import end_chat
+
+            for key in chat_keys:
+                end_chat(key, thread_id)
         except Exception as exc:
             leftovers = True
             logger.warning(

@@ -83,6 +83,9 @@ class FakeSessionStore:
     def put(self, session) -> None:
         self.puts += 1
 
+    def chat_deleted(self, session_id: str = "", thread_id: str = "") -> bool:
+        return False
+
 
 def _make_session(sid: str = "", thread_id: str = ""):
     from kazma_ui.session_manager import ChatSession

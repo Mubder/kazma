@@ -37,6 +37,7 @@ import asyncio
 import contextlib
 import logging
 import sqlite3
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -45,9 +46,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "RewindRefused",
+    "carry_conversation",
     "chat_keys_for",
     "clear_thread_snapshots",
     "fork_thread",
+    "projected_rows",
     "rewind_thread",
 ]
 
@@ -364,6 +367,61 @@ def _projected_transcript(messages: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+#: What of a chat row's message a moved chat keeps beside its text (Spaces
+#: S2-12): who said it, when, and the model that answered.
+_CARRIED_FIELDS = ("ts", "author", "steer", "model", "run_model", "closed_at")
+
+
+def projected_rows(messages: list[Any]) -> list[dict[str, Any]]:
+    """A chat row's questions and answers alone (:func:`_projected_transcript`,
+    with :data:`_CARRIED_FIELDS`): no memory parts, no tool results, no
+    reasoning, no approval cards."""
+    out: list[dict[str, Any]] = []
+    for m in messages or []:
+        for row in _projected_transcript([m]):
+            out.append({**row, **{k: m[k] for k in _CARRIED_FIELDS if m.get(k)}})
+    return out
+
+
+def _conversation_of(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The model's messages of a chat row's questions and answers: each
+    question as it is shown, and one assistant message a turn, its final
+    answer (a turn that paused for an approval may hold more)."""
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        message = {"role": row["role"], "content": row["content"]}
+        if out and message["role"] == "assistant" and out[-1]["role"] == "assistant":
+            out[-1] = message
+        else:
+            out.append(message)
+    return out
+
+
+async def carry_conversation(
+    graph: Any, rows: list[dict[str, Any]], new_thread_id: str, *, space: str, by: str,
+) -> int:
+    """The state of a moved chat's copy (Spaces S2-12): *rows*, its row's
+    questions and answers (:func:`projected_rows`), as the new thread's
+    turn-boundary state in *space*, for *by*. From the row, so it is what the
+    chat shows; nothing of the source's state goes -- no turn notes, no
+    "About me", no summary, nothing recalled, no tool results, documents or
+    images, drafts or plans, and nothing pending -- and memory is not told of
+    a rewind: the new thread was never anything else. Returns how many
+    messages."""
+    from kazma_core.spaces.scope import bind_scope
+    from kazma_core.time_travel import write_turn_boundary
+
+    from kazma_ui.thread_locks import thread_mutation
+
+    messages = _conversation_of(rows)
+    if not messages:
+        return 0
+    with bind_scope(space, by):
+        async with thread_mutation(new_thread_id):
+            await write_turn_boundary(graph, {"messages": messages, "tenant_id": space}, new_thread_id)
+    return len(messages)
+
+
 def _in_this_space(thread_id: str, new_thread_id: str | None = None) -> None:
     """Refuse a restore or a fork of a chat that belongs to another space, as
     a chat that is not there; and record a fork's new thread in this space
@@ -375,7 +433,12 @@ def _in_this_space(thread_id: str, new_thread_id: str | None = None) -> None:
     try:
         refused = threads.thread_refusal(thread_id)
         if not refused and new_thread_id:
-            threads.record_new_thread(new_thread_id)
+            # A fork of a chat that was copied here from another space (Spaces
+            # S2-12) holds what was said there: this space's memory starts at
+            # the fork, as it starts at the copy in the chat itself.
+            source = threads.record_of(thread_id)
+            copied = source is not None and source.copied_at is not None
+            threads.record_new_thread(new_thread_id, copied_at=time.time() if copied else None)
     except (sqlite3.Error, OSError) as exc:
         # The record store is where a chat's space is kept: a restore or a
         # fork that cannot ask it, or cannot record the new chat, does not

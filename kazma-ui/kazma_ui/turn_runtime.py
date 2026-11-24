@@ -61,8 +61,17 @@ def resolve_session_id(thread_id: str, session_id: str = "") -> str:
         return ""
 
 
+def _chat_deleted(session_id: str, thread_id: str) -> bool:
+    """Whether the chat was deleted in this process: a late write to it is
+    no lost reply. Memory only."""
+    from kazma_ui.session_manager import get_session_manager
+
+    return get_session_manager().chat_deleted(session_id, thread_id)
+
+
 def ensure_session_for_thread(thread_id: str) -> str:
-    """Mint or bind a web session for *thread_id*. Never raises.
+    """Mint or bind a web session for *thread_id*. Never raises; a chat that
+    was deleted is not minted again.
 
     Used by HITL approve-resume when no sidebar row exists yet (Telegram
     pause, watchdog auto-deny, a thread the web UI has never opened).
@@ -217,6 +226,9 @@ def persist_reply(
                 len(str(content or "")),
                 interrupted,
             )
+        elif _chat_deleted(session_id, thread_id):
+            logger.info("[turn] Reply not saved: its chat was deleted thread=%s turn=%s",
+                        (thread_id or "")[:12], reply_turn_id[:12])
         elif not str(content or "").strip() and not pending:
             logger.debug(
                 "[turn] Nothing to persist thread=%s turn=%s (no text yet)",

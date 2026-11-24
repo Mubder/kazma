@@ -2010,9 +2010,10 @@ def _forget_rewound_turns(
 def replay_rewind(conn: sqlite3.Connection, entry: Any) -> int:
     """Apply a journaled rewind to *conn*: every memory of the chat's turns
     from ``entry.turn_number`` on that was made before the rewind
-    (``entry.at``), under every key and tenant that holds them, and the ledger
-    rows of the old questions (``entry.detail``). Idempotent; the caller marks
-    the entry applied. Returns the turns taken back."""
+    (``entry.at``), under every key that holds them -- in the rewind's own
+    space alone once Spaces is enforced, in every tenant before -- and the
+    ledger rows of the old questions (``entry.detail``). Idempotent; the
+    caller marks the entry applied. Returns the turns taken back."""
     from kazma_core.memory import forget_journal
 
     keys = chat_keys(entry.session_key) or ([entry.session_key] if entry.session_key else [])
@@ -2029,23 +2030,30 @@ def replay_rewind(conn: sqlite3.Connection, entry: Any) -> int:
         marks = ",".join("?" for _ in keys)
         # Install work, declared: a rewind follows its chat into every tenant
         # that holds the chat's rows (each forget below names its row's tenant);
-        # the entry's own tenant is a record's (N19).
-        tenants = {space_of_record(entry.tenant_id)} | {
+        # the entry's own tenant is a record's (N19). Once Spaces is enforced
+        # it keeps to its own space: a person's undo in one space never takes
+        # back what another space remembers of a chat of the same key.
+        from kazma_core.spaces.scope import spaces_enforced
+
+        own = space_of_record(entry.tenant_id)
+        within = " AND tenant_id = ?" if spaces_enforced() else ""
+        spaces = (own,) if within else ()
+        tenants = {own} | {
             space_of_record(r[0]) for r in conn.execute(
                 f"SELECT DISTINCT tenant_id FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ? "
-                "AND created_at <= ?",
-                (*keys, from_turn, before),
+                f"AND created_at <= ?{within}",
+                (*keys, from_turn, before, *spaces),
             )
         }
         stored = {int(r[0]) for r in conn.execute(
             f"SELECT DISTINCT turn_number FROM episodes WHERE session_id IN ({marks}) AND turn_number >= ? "
-            "AND created_at <= ?",
-            (*keys, from_turn, before),
+            f"AND created_at <= ?{within}",
+            (*keys, from_turn, before, *spaces),
         )}
         stored |= {int(r[0]) for r in conn.execute(
             f"SELECT DISTINCT source_turn FROM beliefs WHERE source_session IN ({marks}) AND source_turn >= ? "
-            "AND ingested_at <= ?",
-            (*keys, from_turn, before),
+            f"AND ingested_at <= ?{within}",
+            (*keys, from_turn, before, *spaces),
         )}
         turns = 0
         for turn in sorted(stored | set(questions)):

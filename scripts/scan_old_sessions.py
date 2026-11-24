@@ -121,6 +121,7 @@ def load_snapshots_sessions(
 
             sessions.append({
                 "session_id": r["thread_id"],
+                "thread_id": r["thread_id"],
                 "messages": messages,
                 "created_at": r["timestamp"],
                 "updated_at": r["timestamp"],
@@ -146,7 +147,7 @@ def load_sessions(
             logger.info("No 'sessions' table found in %s", db_path)
             return []
 
-        query = "SELECT session_id, messages, created_at, updated_at, title FROM sessions"
+        query = "SELECT session_id, thread_id, messages, created_at, updated_at, title FROM sessions"
         params: list[Any] = []
 
         if since:
@@ -167,6 +168,7 @@ def load_sessions(
                 messages = []
             sessions.append({
                 "session_id": r["session_id"],
+                "thread_id": r["thread_id"] or r["session_id"],
                 "messages": messages,
                 "created_at": r["created_at"],
                 "updated_at": r["updated_at"],
@@ -207,6 +209,19 @@ def extract_turn_pairs(messages: list[dict[str, Any]]) -> list[tuple[str, str]]:
             pairs.append((user_text, content))
             user_text = ""
     return pairs
+
+
+def turns_said_here(session: dict[str, Any], copied: dict[str, float]) -> list[tuple[int, str, str]]:
+    """``(turn number, user text, assistant text)`` of the session's turns. A
+    chat copied here from another space (Spaces S2-12; *copied*:
+    ``threads.copied_threads``) gives only the turns asked since, as turn
+    reconcile does: the rest was said there."""
+    from kazma_core.memory.chat_history import said_since
+
+    every = extract_turn_pairs(session["messages"])
+    since = copied.get(str(session.get("thread_id") or session["session_id"]))
+    pairs = every if since is None else extract_turn_pairs(said_since(session["messages"], since))
+    return [(turn, user, answer) for turn, (user, answer) in enumerate(pairs, start=1 + len(every) - len(pairs))]
 
 
 def run_heuristic_extraction(
@@ -282,7 +297,9 @@ async def scan_session(
     ignore_filler: bool = False,
 ) -> dict[str, int]:
     """Scan one session and extract beliefs. Returns stats dict."""
-    pairs = extract_turn_pairs(session["messages"])
+    from kazma_core.spaces.threads import copied_threads
+
+    pairs = turns_said_here(session, copied_threads())
     if not pairs:
         return {"turns": 0, "beliefs": 0}
 
@@ -292,7 +309,7 @@ async def scan_session(
 
     keys = chat_keys(session["session_id"])
 
-    for turn_idx, (user_text, assistant_text) in enumerate(pairs, start=1):
+    for turn_idx, user_text, assistant_text in pairs:
         # A turn the user forgot, or a chat they keep out of memory, gives no
         # facts -- the snapshots and transcripts still hold the words (Memory
         # audit M08; Time Travel TT-05).

@@ -24,6 +24,11 @@ Y"; ``mutate_belief`` now records an older statement as history (W1). A
 cursor on the episode's rowid picks up every episode this pass has written,
 whatever the turn's own time.
 
+A chat a person moved here from another space (Spaces S2-12) says when it was
+copied (``threads.copied_threads``): its turns from before were said elsewhere
+and are not this space's, so only those asked since are written, none without
+a time, and one left out is never counted as a turn already in memory.
+
 A turn is already in memory when an episode of the same conversation has the
 same question -- counted, so a question asked twice needs two -- or when an
 erased row's stub starts with it (``rehydrate`` owns those).
@@ -49,12 +54,12 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
-from kazma_core.memory.chat_history import STORE_ERRORS
+from kazma_core.memory.chat_history import STORE_ERRORS, epoch_of
 from kazma_core.memory.limits import turn_key
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["STATE_KEY", "read_state", "run_turn_reconcile_pass"]
+__all__ = ["STATE_KEY", "read_state", "reconcile_chat", "run_turn_reconcile_pass"]
 
 #: ConfigStore key: the last pass's report (memory health shows it). The
 #: cursors are in the memory database (:func:`read_state`).
@@ -63,23 +68,13 @@ STATE_KEY = "memory.v2.turn_reconcile"
 #: A turn younger than this belongs to the live pipeline (close_turn hands it
 #: to memory within seconds); reconciling it too would race that write.
 _SETTLE_S = 600.0
+#: The same for a chat about to leave its space (:func:`reconcile_chat`):
+#: no turn of it runs, so a closed turn's hand-over is seconds away at most.
+_LEAVING_SETTLE_S = 60.0
 _PAGE = 100
 #: LLM deep passes queued per 15-minute pass, so ~1,000 reconciled turns reach
 #: the model over hours, never in one burst.
 _DEEP_PER_PASS = 60
-
-
-def _epoch(value: Any) -> float | None:
-    """Epoch seconds of the chat store's ISO timestamps; None when absent."""
-    if not value:
-        return None
-    try:
-        when = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=UTC)
-    return when.timestamp()
 
 
 def _iso(epoch: float) -> str:
@@ -107,7 +102,7 @@ def _turns(messages: list[Any]) -> list[tuple[int, str, str, float | None, str |
         if msg.get("role") == "user":
             index += 1
             last_question = message_text(msg.get("content"))
-            when = _epoch(msg.get("ts"))
+            when = epoch_of(msg.get("ts"))
             author = str(msg.get("author") or "") or None
         closes = end == len(msgs) or msgs[end].get("role") == "user"
         if not (index and closes and last_question):
@@ -142,19 +137,23 @@ def _in_memory(conn: sqlite3.Connection, tenant: str, keys: list[str]) -> tuple[
 
 
 def _reconcile_session(
-    conn: sqlite3.Connection, row: dict[str, Any], settled_before: float
+    conn: sqlite3.Connection, row: dict[str, Any], settled_before: float, copied: dict[str, float]
 ) -> tuple[int, int]:
-    """Write the session's missing settled turns. Returns (written, still young)."""
+    """Write the session's missing settled turns. Returns (written, still
+    young). *copied*: the threads copied here from another space, and when."""
     from kazma_core.memory.dual_write import mirror_episode
 
     thread = row["thread_id"] or row["session_id"]
     keys = list(dict.fromkeys(k for k in (thread, row["session_id"]) if k))
     texts, stubs = _in_memory(conn, row["tenant_id"], keys)
-    fallback = _epoch(row["updated_at"]) or _epoch(row["created_at"])
+    fallback = epoch_of(row["updated_at"]) or epoch_of(row["created_at"])
+    copied_at = copied.get(thread)
     written = young = 0
     from kazma_core.memory.speakers import episode_metadata
 
     for index, question, answer, when, author in _turns(row["messages"]):
+        if copied_at is not None and (when is None or when < copied_at):
+            continue  # said in the space it was copied from
         stored = turn_key(question)
         if texts[stored] > 0:
             texts[stored] -= 1
@@ -192,7 +191,9 @@ def _reconcile(
     conn: sqlite3.Connection, after: tuple[str, str], deadline: float, now: float
 ) -> dict[str, Any]:
     from kazma_core.memory.chat_history import sessions_changed_since
+    from kazma_core.spaces.threads import copied_threads
 
+    copied = copied_threads()
     settled_before = now - _SETTLE_S
     settled_iso = _iso(settled_before)
     report: dict[str, Any] = {"sessions": 0, "turns_written": 0, "turns_waiting": 0,
@@ -207,7 +208,7 @@ def _reconcile(
         for row in rows:
             if time.monotonic() >= deadline:
                 break
-            written, young = _reconcile_session(conn, row, settled_before)
+            written, young = _reconcile_session(conn, row, settled_before, copied)
             report["sessions"] += 1
             report["turns_written"] += written
             report["turns_waiting"] += young
@@ -220,6 +221,25 @@ def _reconcile(
                 cursor = scan
     report["after"] = list(cursor)
     return report
+
+
+def reconcile_chat(row: dict[str, Any]) -> int:
+    """Write the missing turns of ONE chat now (*row* as
+    ``chat_history.sessions_changed_since`` gives it): a chat about to leave
+    its space (Spaces S2-12), whose missed turns no later pass would find. A
+    turn younger than :data:`_LEAVING_SETTLE_S` is the live pipeline's, which
+    holds its own copy of the words. Their facts follow on the next pass.
+    Returns the turns written; raises when a store cannot be read."""
+    from kazma_core.spaces.threads import copied_threads
+
+    conn = _open_primary()
+    if conn is None:
+        return 0
+    try:
+        written, _young = _reconcile_session(conn, row, time.time() - _LEAVING_SETTLE_S, copied_threads())
+        return written
+    finally:
+        conn.close()
 
 
 #: Passes a turn's fact extraction may fail before it is set aside (Memory

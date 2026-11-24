@@ -619,6 +619,7 @@ async def _stream_langgraph_events(
         reset_turn_id,
     )
     from kazma_core.safety.hitl import reset_current_thread_id, set_current_thread_id
+    from kazma_core.spaces.threads import ThreadEnded
 
     # Turn correlation id — binds once per streamed turn so every log line,
     # the terminal done payload, and the stored reply row carry the same
@@ -1718,6 +1719,14 @@ async def _stream_langgraph_events(
             logger.info("SSE stream cancelled by client disconnect (thread=%s)", thread_id)
             raise
 
+        except ThreadEnded:
+            # Deleted, or moved, as this turn was about to run (an approval
+            # answered late, a resume): nothing ran, and nothing is kept.
+            from kazma_ui.sse_chat import chat_gone_text
+
+            logger.info("[SSE] the chat of thread %s was deleted; its turn did not run", thread_id)
+            yield _sse_frame("error", {"content": chat_gone_text(), "code": "chat_deleted"})
+
         except Exception as exc:
             logger.error("SSE stream error: %s", exc, exc_info=True)
             # Layer 2 of the "agent stopped talking" defense: if the stream
@@ -1888,11 +1897,11 @@ async def _sse_attach_stream(
     from kazma_core.spaces import departures
     from kazma_core.spaces.scope import current_scope, spaces_enforced
 
-    from kazma_ui.live_connections import stream_watched
+    from kazma_ui.live_connections import is_gone, stream_watched
 
     whose = current_scope() if spaces_enforced() else None
     asker, space = (whose.asker, whose.space_id) if whose is not None else (None, None)
-    watched = stream_watched(asker, space, queue, SHUTDOWN_WAKE)
+    watched = stream_watched(asker, space, queue, SHUTDOWN_WAKE, chat=thread_id)
     watched.__enter__()
     try:
         frames, gap, head = broker.resume(thread_id, after_seq)
@@ -1936,8 +1945,9 @@ async def _sse_attach_stream(
 
         idle_ticks = 0
         while True:
-            if departures.departed(asker, space):
-                # Their person left the space: nothing more is sent to them.
+            if departures.departed(asker, space) or is_gone(thread_id):
+                # Their person left the space, or the chat moved to another
+                # (Spaces S2-12): nothing more is sent.
                 return
             if is_shutting_down():
                 # Kazma is restarting: the page re-attaches when it is back

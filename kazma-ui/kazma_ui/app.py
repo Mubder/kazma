@@ -1754,6 +1754,17 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Replay] Failed to mount replay API: %s", e)
             self._init_errors.append({"subsystem": "replay_api", "error": str(e)})
+        # ── Moving a chat between one's own space and a shared one (S2-12) ──
+        try:
+            from kazma_ui.chat_move import create_chat_move_router
+
+            self.app.include_router(create_chat_move_router(
+                graph_getter=lambda: self._hitl_state.get("graph") or self._graph_holder.get("graph"),
+                checkpoints_getter=lambda: self._hitl_state.get("checkpointer") or self._checkpointer,
+            ))
+        except ImportError as e:
+            logger.warning("[Spaces] Failed to mount the chat move API: %s", e)
+            self._init_errors.append({"subsystem": "chat_move_api", "error": str(e)})
         try:
             from kazma_ui.research_panel import create_research_router
 
@@ -2231,6 +2242,27 @@ class KazmaAppBuilder:
                 logger.info("[HITL] Approval-timeout watchdog started")
             except Exception as exc:
                 logger.warning("[HITL] Failed to start approval-timeout watchdog: %s", exc)
+
+            # ── Chat moves that did not end (Spaces S2-12) ─────────
+            # A copy under way is taken away, a chat handed over finishes
+            # its delete: before anyone is served, so nothing is written into
+            # a chat that moved. Nothing to do with no move recorded.
+            from kazma_core.db.pg_helpers import store_errors
+
+            try:
+                from kazma_core.spaces import chat_moves
+
+                from kazma_ui.chat_move import settle_chat_moves, settler
+
+                def _move_checkpoints() -> Any:
+                    return self._hitl_state.get("checkpointer") or self._checkpointer
+
+                # And, until it stops, by the maintenance sweep "chat moves".
+                chat_moves.register_settler(settler(asyncio.get_running_loop(), _move_checkpoints))
+                await settle_chat_moves(_move_checkpoints())
+            except (ImportError, *store_errors()) as exc:
+                # The sweep settles them when the store answers.
+                logger.warning("[spaces] cut-off chat moves were not settled at start: %s", exc)
 
             # ── Turns a restart cut off (resilience plan C1) ───────
             # A safe one continues by itself; one whose tool effect is
@@ -2969,7 +3001,9 @@ class KazmaAppBuilder:
         # (VectorMemory close removed with the V1 stack.)
 
         from kazma_core.observability.ops_alerts import bind_server_loop
+        from kazma_core.spaces.chat_moves import register_settler
 
+        register_settler(None)  # this loop settles no chat move from here on
         if self.gateway is None:
             bind_server_loop(None)
             return

@@ -280,6 +280,16 @@
                 next.searchParams.set(QUERY, own.id);
                 win.location.assign(next.toString());
             },
+            /** Open a chat of another space of the person's (a chat they just
+             * moved there, S2-12): the tab moves to that space with it. */
+            openChat: function (id, sessionId) {
+                if (!enforced || !validId(id) || !sessionId) return;
+                remember(storage, id);
+                var next = new URL('/chat', origin + '/');
+                next.searchParams.set('s', String(sessionId));
+                next.searchParams.set(QUERY, id);
+                win.location.assign(next.toString());
+            },
             /** Switch this tab to another space: the page loads again for it. */
             switchTo: function (id) {
                 if (!enforced || !validId(id) || id === state.id) return;

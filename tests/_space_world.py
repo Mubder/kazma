@@ -51,6 +51,11 @@ def _make_stores() -> list[str]:
     # process watches for approvals: on every install that ran one, never by
     # ensure_gate_schema (S1-27's walk refused live's hitl_gates.db for it).
     record_watcher(kind="ui", detail="the space world")
+    # The table of the chats taken out, made by its own code the first time a
+    # chat is (S2-12): in thread_scopes.db, which the list above made.
+    from kazma_core.spaces import chat_moves
+
+    chat_moves._connection().close()
     return made
 
 
@@ -131,7 +136,7 @@ def _plant(space: str, word: str) -> list[str]:
     parents["memory_rows:beliefs"] = f"b-{space}-{uuid.uuid4().hex[:6]}"
     parents["memory_rows"] = parents["memory_rows:episodes"]
     planted: list[str] = []
-    for store, path in space_data._store_paths():
+    for store, path in space_data.store_paths():
         with closing(sqlite3.connect(str(path))) as conn:
             conn.execute("PRAGMA foreign_keys = OFF")
             tables = space_data._tables(conn)
@@ -164,7 +169,7 @@ def _plant(space: str, word: str) -> list[str]:
 
 #: The erase's own map of the stores, taken before a control replaces it:
 #: the scan must read every store whatever the erase was told.
-_EVERY_STORE = space_data._store_paths
+_EVERY_STORE = space_data.store_paths
 
 
 def _databases() -> list[Path]:

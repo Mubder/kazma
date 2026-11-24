@@ -124,6 +124,11 @@ def is_plan_mode(thread_id: str | None) -> bool:
     return bool(raw and raw.get("enabled"))
 
 
+def plan_waits(thread_id: str) -> bool:
+    """Whether the chat is in plan mode, or an approved plan waits to run."""
+    return bool(_load(thread_id))
+
+
 def enable_plan_mode(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]:
     payload = {
         "enabled": True,

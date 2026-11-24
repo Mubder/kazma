@@ -254,6 +254,8 @@ MOVE_RULES: dict[tuple[str, str], MoveRule] = {
     ("chat_sessions_test.db", "sessions"): _moves(),
     ("sessions.db", "sessions"): _out("the old install's chat-app routing"),
     ("thread_scopes.db", "thread_scopes"): _moves(),
+    ("thread_scopes.db", "chat_taken_out"): _out("the old install's line of who took a chat out, and when: it names "
+                                                 "its people"),
     ("answer_quality.db", "answer_quality"): _out(_LEDGER),
     ("hitl_gates.db", "hitl_gates"): _out("the old install's approval cards; a card a moved chat was "
                                           "waiting on arrives expired"),
@@ -1181,7 +1183,7 @@ def _targets(bundle: _Bundle) -> dict[tuple[str, str], _Target]:
     from kazma_core.spaces import row_stores
 
     row_stores.make_row_stores()
-    paths = {name: path for name, path in space_data._store_paths() if "*" not in name}
+    paths = {name: path for name, path in space_data.store_paths() if "*" not in name}
     found: dict[tuple[str, str], _Target] = {}
     for store, tables in bundle.tables.items():
         if store == CHECKPOINTS:

@@ -9,15 +9,15 @@ for the person who made it, and the shared space keeps a line saying it
 was taken out (the document's own record: ``DocumentIngestionService.
 taken_out_documents``).
 
-The one rule (:func:`_move_refusal`): Spaces enforced; the person is a member
+The one rule (:func:`move_rule`): Spaces enforced; the person is a member
 of both spaces; one of them is the person's own personal space and the
 other a shared space; the document is the person's own (checked by the
 document service). A move is always the person's own click on a page,
 never the agent's: a model steered by text it read must not carry a private
 thing into a shared space.
 
-Chats and files are not moved here: a chat's memory belongs to the memory
-session's files (held), and a file in a shared folder records no maker.
+A chat moves by the same rule (``spaces.chat_moves``, ``kazma_ui.chat_move``);
+a file in a shared folder records no maker, so files are not moved.
 
 Blocking (the identity store, the document store): call it off the loop.
 """
@@ -30,7 +30,7 @@ from typing import Any
 from kazma_core.spaces import identity
 from kazma_core.spaces.scope import spaces_enforced
 
-__all__ = ["MoveRefused", "move_document"]
+__all__ = ["MoveRefused", "move_document", "move_rule"]
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class MoveRefused(ValueError):
         self.status = status
 
 
-def _move_refusal(*, from_space: str, to_space: str, by: str) -> tuple[MoveRefused | None, bool]:
+def move_rule(*, from_space: str, to_space: str, by: str) -> tuple[MoveRefused | None, bool]:
     """Why *by* may not move a thing of theirs from *from_space* to
     *to_space*, or None; and whether the move takes it out of a shared space
     (into the person's own)."""
@@ -80,7 +80,7 @@ def move_document(document_id: str, *, from_space: str, to_space: str, by: str,
     """Move *by*'s own document from *from_space* to *to_space* through the
     running document service. Raises :class:`MoveRefused`; the service's
     own refusals (not the person's document) pass through."""
-    refused, taken_out = _move_refusal(from_space=from_space, to_space=to_space, by=by)
+    refused, taken_out = move_rule(from_space=from_space, to_space=to_space, by=by)
     if refused is not None:
         raise refused
     moved = service.move_document(

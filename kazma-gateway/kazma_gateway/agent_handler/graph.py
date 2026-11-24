@@ -133,6 +133,34 @@ def _resolve_thread_in_place(msg: IncomingMessage, sender_key: str) -> str:
     return found if found.endswith(suffix) else found + suffix
 
 
+def _chat_was_deleted(thread_id: str) -> bool:
+    """Whether the chat *thread_id* -- a web chat a chat app had taken over --
+    was deleted (or moved to another space) in this process: nothing brings
+    it back. Memory only."""
+    from kazma_core.spaces.threads import thread_ended
+
+    return thread_ended(thread_id)
+
+
+def _begin_again(thread_id: str) -> None:
+    """A chat app's own chat, named by its sender, starts again with the
+    message that came in: a delete on the web takes the chat that was."""
+    from kazma_core.spaces.threads import begin_again
+    from kazma_ui.session_manager import peek_session_manager
+
+    begin_again(thread_id)
+    store = peek_session_manager()
+    if store is not None:
+        store.begin_again(thread_id)
+
+
+def _forget_mouth(sender: str) -> None:
+    """*sender*'s pointer to a chat that is gone. Blocking (settings)."""
+    from kazma_core.config_store import get_config_store
+
+    get_config_store().delete(f"active_thread.{sender}")
+
+
 def _admin_only_text(user_text: Any) -> str:
     """What a sender who is not the admin is told for a command that changes
     Kazma for everyone, in their language, saying how one becomes able to
@@ -927,6 +955,16 @@ def create_graph_handler(
                 while len(_sessions) > _MAX_DICT_ENTRIES:
                     _sessions.popitem(last=False)
                 thread_id = _sessions[sender]
+            if thread_id.startswith("gw-"):
+                _begin_again(thread_id)
+            elif _chat_was_deleted(thread_id):
+                # The web chat this sender had taken over is gone: their
+                # message starts the chat app's own.
+                _sessions.pop(sender, None)
+                await asyncio.to_thread(_forget_mouth, sender)
+                thread_id = await asyncio.to_thread(_resolve_thread_in_place, msg, sender)
+                _begin_again(thread_id)
+                _sessions[sender] = thread_id
             try:
                 from kazma_core.sessions.directory import remember_sender_thread
 
@@ -1121,6 +1159,22 @@ def create_graph_handler(
             context_metadata=msg.context_metadata,
         )):
             logger.warning("[agent-handler] the %s sender was not told their message waits", msg.platform)
+
+    async def _say_chat_gone(msg: IncomingMessage) -> None:
+        """Tell the sender the chat they had taken over is gone."""
+        logger.info("[agent-handler] a %s message was not run: its chat was deleted", msg.platform)
+        if not await manager.send(OutboundMessage(
+            target_id=_build_target_id(msg.platform, msg.context_metadata),
+            text=language_lock.in_their_language(
+                msg.text,
+                "This chat was deleted or moved to another space, so your message was not run. "
+                "Send it again to start a new chat.",
+                "حُذفت هذه المحادثة أو نُقلت إلى مساحة أخرى، فلم تُنفَّذ رسالتك. "
+                "أرسلها مرة أخرى لتبدأ محادثة جديدة.",
+            ),
+            context_metadata=msg.context_metadata,
+        )):
+            logger.warning("[agent-handler] the %s sender was not told their chat is gone", msg.platform)
 
     async def _waits_on_someone_else(thread_id: str) -> str:
         """The name of the person the thread's paused card waits on, when that
@@ -2021,6 +2075,11 @@ def create_graph_handler(
                 if waiting:
                     await _say_card_waits(msg, waiting)
                     return
+            if _chat_was_deleted(thread_id):
+                # Deleted, or moved to another space, while this message
+                # waited on the lock: never brought back.
+                await _say_chat_gone(msg)
+                return
             # ── Cancel stale HITL if user sent a new normal message ──
             # Without this, LangGraph discards the interrupt silently and
             # incomplete tool_calls get stripped — agent amnesia.
