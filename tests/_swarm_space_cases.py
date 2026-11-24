@@ -186,10 +186,12 @@ class World:
         return self.client.portal.call(as_them)
 
     def settle(self) -> None:
-        """Every task the engine started has ended."""
+        """Every task the engine started has ended, and every result's hand-over
+        (a background task once Spaces is enforced: the request answers first)."""
         async def wait() -> None:
-            for _ in range(250):
-                if not self.engine.list_active_tasks():
+            for _ in range(500):
+                handing_over = any(t.get_name().startswith("swarm-result:") for t in asyncio.all_tasks())
+                if not handing_over and not self.engine.list_active_tasks():
                     return
                 await asyncio.sleep(0.02)
 

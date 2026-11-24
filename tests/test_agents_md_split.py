@@ -196,9 +196,13 @@ PIECES = [
 ]
 
 
+#: A committer of its own: CI has none, and a merge without one stops before it merges.
+_GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.autocrlf=false"]
+
+
 def _git(repo, *args):
     return subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.autocrlf=false", *args],
+        [*_GIT, *args],
         cwd=repo, capture_output=True, check=True,
     ).stdout.decode()
 
@@ -342,7 +346,7 @@ def test_the_whole_procedure_for_two_branches(repo):
     _theirs(repo, ("- rule two\n", "- rule two, theirs\n"))
     _theirs(repo, ("last words", "words of the second"), branch="second")
     for branch in ("theirs", "second"):
-        done = subprocess.run(["git", "merge", "--no-commit", branch], cwd=repo, capture_output=True)
+        done = subprocess.run([*_GIT, "merge", "--no-commit", branch], cwd=repo, capture_output=True)
         assert done.returncode != 0  # a conflict: ours is the core
         assert _cli("merge", "--theirs", "MERGE_HEAD") == 0
         _git(repo, "add", "-A")
@@ -354,7 +358,7 @@ def test_the_whole_procedure_for_two_branches(repo):
 def test_the_split_merged_into_a_branch_that_still_has_the_single_file(repo):
     text = _theirs(repo, ("last words", "their words"), ("- style two", "- style two, theirs"))
     _git(repo, "checkout", "-q", "theirs")
-    done = subprocess.run(["git", "merge", "--no-commit", "main"], cwd=repo, capture_output=True)
+    done = subprocess.run([*_GIT, "merge", "--no-commit", "main"], cwd=repo, capture_output=True)
     assert done.returncode != 0
     assert _cli("merge", "--ours", "MERGE_HEAD", "--theirs", "HEAD") == 0
     _git(repo, "add", "-A")
@@ -368,7 +372,7 @@ def test_a_conflict_settled_during_a_git_merge(repo):
     path.write_bytes(path.read_bytes().replace(b"last words", b"our words"))
     _git(repo, "commit", "-qam", "ours")
     _theirs(repo, ("last words", "their words"))
-    subprocess.run(["git", "merge", "--no-commit", "theirs"], cwd=repo, capture_output=True)
+    subprocess.run([*_GIT, "merge", "--no-commit", "theirs"], cwd=repo, capture_output=True)
     assert _cli("merge", "--theirs", "MERGE_HEAD") == 1
     out = repo / ".git" / "agents_md_merged.md"
     out.write_bytes(re.sub(r"<{7} ours\n.*?\n>{7} theirs\n", "both\n", out.read_bytes().decode(), flags=re.S).encode())
