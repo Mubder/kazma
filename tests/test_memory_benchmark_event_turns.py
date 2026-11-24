@@ -50,6 +50,8 @@ IDEAL: dict[str, tuple[list[dict[str, Any]], ...]] = {
     "13": ([_b("hana", "visited", "Istanbul")], [_b("هناء", "visited", "اسطنبول")]),
     "14": ([_b("user", "ran", "the Muscat marathon", on="2026-03")], [_b("user", "ran", "ماراثون مسقط", on="2026-03")]),
     "15": ([_b("user", "met", "old teacher Adel at the mall")], [_b("user", "met", "مدرسي القديم عادل في المول")]),
+    "16": ([_b("user", "visited", "the dentist", on="2026-05-29", replaces="f1")],
+           [_b("user", "visited", "دكتور الأسنان", on="2026-05-29", replaces="f1")]),
 }
 _OF = {"v": 0, "w": 1}
 
@@ -99,6 +101,7 @@ def _called_by_kazmas_name(monkeypatch):
         clean.pop("event", None)
 
     monkeypatch.setattr(belief_extractor, "_read_days", read)
+    monkeypatch.setattr(belief_extractor, "_tells_an_undated_event", lambda *_a: False)
 
 
 def _same_words_are_one_occasion(monkeypatch):
@@ -113,7 +116,7 @@ def _same_words_are_one_occasion(monkeypatch):
 
 def _an_undated_retelling_takes_its_place(monkeypatch):
     """The retelling replaced the dated entry and kept no day."""
-    monkeypatch.setattr(belief_extractor, "_keep_the_day", lambda entry, clean, method: None)
+    monkeypatch.setattr(belief_extractor, "_keep_the_day", lambda *_a: None)
 
 
 def _a_correction_is_another_occasion(monkeypatch):
@@ -130,7 +133,7 @@ def _a_day_to_come_is_a_day_it_happened(monkeypatch):
 
 def _any_words_are_the_users(monkeypatch):
     """The pasted line is the user's own."""
-    monkeypatch.setattr(belief_extractor, "_in_users_words", lambda value, user_text, told_before="": True)
+    monkeypatch.setattr(belief_extractor, "_in_users_words", lambda value, user_text, *_a: True)
 
 
 #: The pasted lines read as the user's, as a model does now and then.

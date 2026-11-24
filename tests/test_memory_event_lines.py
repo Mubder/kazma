@@ -103,12 +103,16 @@ def test_an_event_is_kept_with_its_day_and_shown_on_it(memory, belief, said, ask
 
 
 def test_a_day_after_the_turn_is_never_one_it_happened(memory):
-    """It is the day it is planned for (the review of W4: test_memory_event_lines_review.py)."""
+    """It is the day a plan is for; a name that says it happened keeps none (the
+    reviews of W4: test_memory_event_lines_review.py)."""
     conn, _ops = memory
-    _apply(memory, [{**EXHIBITION, "on": "2026-06-07"}], user_text="I'm going to a pottery exhibition next week.")
+    said = "I'm going to a pottery exhibition next week."
+    _apply(memory, [{**EXHIBITION, "on": "2026-06-07"}], user_text=said)
     assert _marks(conn) == [(None, None, SUNDAY_THE_31ST)]
+    assert "planned" not in _block(conn, "the pottery exhibition")
+    _apply(memory, [{**EXHIBITION, "predicate": "scheduled_event", "on": "2026-06-07"}], user_text=said, turn=2)
     block = _block(conn, "the pottery exhibition")
-    assert "planned for 7 Jun 2026] user attended a pottery exhibition" in block and "[on " not in block
+    assert "planned for 7 Jun 2026] user scheduled event a pottery exhibition" in block and "[on " not in block
 
 
 def test_an_event_told_again_gains_its_day(memory):

@@ -25,7 +25,7 @@ from collections.abc import Iterable, Mapping
 
 from kazma_core.documents.arabic import fold_for_search
 
-__all__ = ["content_terms", "coverage", "mentions", "search_terms", "word_term"]
+__all__ = ["content_terms", "coverage", "mentions", "normalised_word", "search_terms", "word_term"]
 
 #: A word: letters and digits, hyphen-joined ("wi-fi", "zx4-91q") -- an
 #: underscore separates, as it does in the full-text index, so a slug like
@@ -62,7 +62,9 @@ _AR_ARTICLES = tuple(
 _AR_PROCLITIC = "(?:[وف]?[بك]?ال|[وف]?لل|[وف]?[بكل])?"
 
 
-def _normalise(token: str) -> str:
+def normalised_word(token: str) -> str:
+    """*token* (folded) without a possessive, the Arabic article and what is
+    written before it, or a light English plural."""
     t = token.strip("-_")
     if t.endswith("'s"):
         t = t[:-2]
@@ -87,7 +89,7 @@ def content_terms(text: str, *, digits: bool = False) -> list[str]:
     for raw in _TOKEN.findall(fold_for_search(text or "")):
         if raw in _EN_STOPWORDS or raw in _AR_STOPWORDS:
             continue
-        term = _normalise(raw)
+        term = normalised_word(raw)
         short = len(term) < 2 and not (digits and term.isdigit())
         if short or term in _EN_STOPWORDS or term in _AR_STOPWORDS or term in seen:
             continue
@@ -110,7 +112,7 @@ def search_terms(text: str) -> list[str]:
         folded = fold_for_search(raw)
         if folded in _EN_STOPWORDS or folded in _AR_STOPWORDS:
             continue
-        term = _normalise(folded)
+        term = normalised_word(folded)
         if len(term) < 2 or term in _EN_STOPWORDS or term in _AR_STOPWORDS:
             continue
         for variant in (raw.strip("-_"), term):
@@ -164,7 +166,7 @@ def word_term(word: str, terms: frozenset[str]) -> str | None:
     an Arabic article or one-letter prefix -- :func:`mentions`' rule, so a
     memory's "vaccines" and "وبالقهوة" hold the question's "vaccine" and
     "قهوه". What the recall block cuts a long memory around (W1a)."""
-    term = _normalise(word)
+    term = normalised_word(word)
     if term in terms:
         return term
     pattern = _word_pattern(terms)

@@ -9,6 +9,9 @@ A fact's metadata holds one day, if any:
   last Saturday");
 * ``planned``: the day an event is planned for ("the concert on 3 June"): a
   day after the turn that told it, never a start and never a day it happened;
+* ``day_sure``: the user said the day by counting from the turn's own ("today",
+  "yesterday"): a later turn's day for the event does not move it unless that
+  turn denies it;
 * ``day_source``: the turn and the source that gave the day, when that is not
   the fact's own -- a later turn's ("it was last Saturday"), or the turn of
   the entry this one replaced. ``{"session", "turn", "method", "at"}``;
@@ -30,6 +33,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
+from functools import lru_cache
 from typing import Any
 
 __all__ = [
@@ -40,6 +44,7 @@ __all__ = [
     "day_span",
     "days_method",
     "event_day",
+    "event_key",
     "exact",
     "has_day",
     "metadata_of",
@@ -51,7 +56,7 @@ __all__ = [
 ]
 
 #: What a fact's day is made of, in its metadata.
-DAY_KEYS = ("started", "happened", "planned", "day_source")
+DAY_KEYS = ("started", "happened", "planned", "day_sure", "day_source")
 
 
 def metadata_of(value: Any) -> dict[str, Any]:
@@ -133,20 +138,41 @@ def could_have_happened_by(day: str, told_at: Any) -> bool:
     return str(day)[: len(told)] <= told[: len(str(day))]
 
 
+@lru_cache(maxsize=8192)
+def _event_words(value: str) -> tuple[str, ...]:
+    from kazma_core.memory.query_terms import content_terms
+
+    return tuple(content_terms(value, digits=True)) or (" ".join(value.casefold().split()),)
+
+
+def event_key(subject: Any, predicate: Any, value: Any, meta: dict[str, Any]) -> tuple[Any, ...] | None:
+    """What makes two dated entries occasions of one event ("visited the
+    dentist" in May and in November): the same subject, name and content
+    words, and both happened or both planned. None for an entry that is no
+    event's."""
+    if not event_day(meta):
+        return None
+    return (str(subject), str(predicate), bool(meta.get("happened")), _event_words(str(value or "")))
+
+
 def today(now: float, zone: Any) -> date:
     return datetime.fromtimestamp(now, zone).date()
 
 
 def same_thing(a: str, b: str) -> bool:
-    """Whether two values may name one thing: the same value, or sharing a
-    content word ("a pottery exhibition" and "the pottery show", never
-    "bananas" and "fresh vegetables")."""
+    """Whether two values may name one thing: the same value, or sharing half
+    of the longer one's content words, or two of them ("a pottery exhibition"
+    and "the pottery show"; never "bananas" and "fresh vegetables", nor "a new
+    phone, a Samsung Galaxy S22" and "a black silicone phone case": one
+    shared word is a kind of thing)."""
     from kazma_core.memory.belief_mutation import _same_value
     from kazma_core.memory.query_terms import content_terms
 
     if _same_value(a, b):
         return True
-    return bool(set(content_terms(a)) & set(content_terms(b)))
+    first, second = set(content_terms(a)), set(content_terms(b))
+    shared = len(first & second)
+    return shared >= 2 or (shared == 1 and 2 >= max(len(first), len(second)))
 
 
 def days_method(meta: dict[str, Any], fact_method: str | None) -> str:

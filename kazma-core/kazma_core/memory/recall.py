@@ -1416,31 +1416,31 @@ def _pg_primary_beliefs(
 
     qvec = _encode_query(query)
     backend = _available_vector_backend() if qvec else None
-    dense_pairs = (
-        _backend_search(
-            backend,
-            qvec,
-            tenant_id=tenant_id,
-            tier=None,
-            limit=max(_DENSE_POOL, limit * 3),
-            kind="belief",
-        )
-        if backend is not None and qvec
-        else []
-    )
-    sims = {str(bid): float(sim) for bid, sim in dense_pairs}
     rows: dict[str, dict[str, Any]] = {}
-    for row in search_state_beliefs(" ".join(_belief_search_words(query)), tenant_id=tenant_id,
-                                    limit=limit * 3, strict=True):
-        if row.get("id"):
-            rows[str(row["id"])] = row
     fetch = getattr(state_backend, "fetch_beliefs", None)
-    need = [bid for bid in sims if bid not in rows]
-    if need and callable(fetch):
-        for start in range(0, len(need), 50):
-            for row in fetch(need[start:start + 50], tenant_id=tenant_id) or []:
-                if row.get("id"):
-                    rows[str(row["id"])] = row
+
+    def _hydrated(ids: list[str]) -> dict[str, Any]:
+        need = [bid for bid in ids if bid not in rows]
+        if need and callable(fetch):
+            for start in range(0, len(need), 50):
+                for row in fetch(need[start:start + 50], tenant_id=tenant_id) or []:
+                    if row.get("id"):
+                        rows[str(row["id"])] = row
+        return {bid: rows[bid] for bid in ids if bid in rows}
+
+    def _by_words(k: int) -> list[tuple[str, float]]:
+        found = [row for row in search_state_beliefs(" ".join(_belief_search_words(query)), tenant_id=tenant_id,
+                                                     limit=k, strict=True) if row.get("id")]
+        rows.update({str(row["id"]): row for row in found})
+        return [(str(row["id"]), 0.0) for row in found]
+
+    dense_pairs = _one_per_event(
+        lambda k: _backend_search(backend, qvec, tenant_id=tenant_id, tier=None, limit=k, kind="belief"),
+        _hydrated, max(_DENSE_POOL, limit * 3)) if backend is not None and qvec else []
+    sims = {str(bid): float(sim) for bid, sim in dense_pairs}
+    by_words = [bid for bid, _rank in _one_per_event(_by_words, _hydrated, limit * 3)]
+    wanted = [*by_words, *sims]
+    rows = _hydrated(list(dict.fromkeys(wanted)))
     rows = _primary_belief_rows(rows, local, tenant_id)
     lookup = getattr(backend, "similarities", None)
     unscored = [bid for bid in rows if bid not in sims]
@@ -1457,8 +1457,9 @@ def _pg_primary_beliefs(
     by_meaning = {str(bid) for bid, _sim in dense_pairs}
     candidates = [
         _belief_candidate(bid, rows[bid], sims.get(bid), bid in by_meaning)
-        for bid in dict.fromkeys([*(str(b) for b, _s in dense_pairs), *rows])
-        if bid in rows and _format_belief_text(rows[bid])
+        for bid in _without_other_occasions(
+            {b: rows[b] for b in dict.fromkeys([*(str(b) for b, _s in dense_pairs), *rows]) if b in rows})
+        if _format_belief_text(rows[bid])
     ]
     ranked = _rank_by_evidence(
         query, candidates, _question_background([sim for _b, sim in dense_pairs], kind="belief"),
@@ -1494,7 +1495,7 @@ def _primary_beliefs_as_local(ranked: list[RecallHit], rows: dict[str, Any],
     """The local path's steps after ranking facts (``_recall_beliefs``): the
     question's time ("where was I living in June": June's value, not
     today's) and a list's siblings (read from this install's database)."""
-    ranked = _latest_first(_facts_in_time(ranked, rows, _ASK.get()), rows)
+    ranked = _latest_first(_facts_in_time(_by_event(ranked, rows, local, tenant_id), rows, _ASK.get()), rows)
     if _LISTING.get() and local is not None:
         ranked = _with_list_siblings(local, tenant_id, ranked, rows, limit)
     return ranked
@@ -1840,8 +1841,15 @@ def _recall_beliefs(
         for bid in ids:
             sources.setdefault(str(bid), []).append(channel)
 
-    _found([r["id"] for r in _belief_fts(conn, _belief_search_words(q), tenant_id, limit * 3)], "belief_fts")
-    dense = _belief_dense_scored(conn, q, vector_engine, tenant_id, max(_DENSE_POOL, limit * 3))
+    def _hydrated(ids: list[str]) -> dict[str, Any]:
+        return {str(r["id"]): r for r in _hydrate_beliefs(conn, ids, tenant_id)}
+
+    words = _belief_search_words(q)
+    _found([bid for bid, _rank in _one_per_event(
+        lambda k: [(str(r["id"]), 0.0) for r in _belief_fts(conn, words, tenant_id, k)], _hydrated, limit * 3)],
+        "belief_fts")
+    dense = _one_per_event(lambda k: _belief_dense_scored(conn, q, vector_engine, tenant_id, k), _hydrated,
+                           max(_DENSE_POOL, limit * 3))
     _found([bid for bid, _sim in dense], "dense")
     _found(_beliefs_from_turns(conn, seed_episodes or [], tenant_id), "belief_bridge")
     walk = _belief_graph_ppr(conn, q, tenant_id, seed_episodes=seed_episodes or [])
@@ -1873,13 +1881,14 @@ def _recall_beliefs(
             sims.update(_similarities(conn, missing, qvec, kind="belief"))
     by_meaning = {bid for bid, _sim in dense}
     candidates = [
-        _belief_candidate(bid, row, sims.get(bid), bid in by_meaning) for bid, row in rows.items()
+        _belief_candidate(bid, row, sims.get(bid), bid in by_meaning)
+        for bid, row in _without_other_occasions(rows).items()
     ]
     ranked = _rank_by_evidence(
         q, candidates, _question_background([sim for _bid, sim in dense], kind="belief"), kind="belief",
         named=_named_facts(q, rows),
     )
-    ranked = _latest_first(_facts_in_time(ranked, rows, ask), rows)
+    ranked = _latest_first(_facts_in_time(_by_event(ranked, rows, conn, tenant_id), rows, ask), rows)
     if _LISTING.get():
         ranked = _with_list_siblings(conn, tenant_id, ranked, rows, limit)
     return _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
@@ -2039,6 +2048,104 @@ def _facts_in_time(ranked: list[RecallHit], rows: dict[str, Any], ask: Any) -> l
     return order
 
 
+#: How often a search that its answers' occasions crowd is asked for more.
+_CROWD_ASKS = 3
+#: How many of a name's newest dated entries are read for one event's occasions.
+_OCCASIONS_READ = 500
+
+
+def _event_of(row: Any) -> tuple[Any, ...] | None:
+    """What the fact *row* is an occasion of (``fact_days.event_key``)."""
+    from kazma_core.memory.fact_days import event_key, metadata_of
+
+    meta = metadata_of(_field(row, "metadata_json"))
+    return event_key(_field(row, "subject"), _field(row, "predicate"), _field(row, "object"), meta)
+
+
+def _one_per_event(find: Any, hydrate: Any, want: int) -> list[tuple[str, float]]:
+    """``find(k)``'s best *want* facts, counting the occasions of one event as
+    one (the best of them stands for it), asked for more when they crowd it: a
+    visit to the dentist every week pushed "my dentist is Dr Sara" out of every
+    search, and the background a question is measured against was the visits'
+    own (the second review of W4, 2026-11-24)."""
+    k = want
+    for _ask in range(_CROWD_ASKS + 1):
+        found = [(str(bid), float(sim)) for bid, sim in find(k)]
+        rows = hydrate([bid for bid, _sim in found])
+        taken: set[Any] = set()
+        out: list[tuple[str, float]] = []
+        for bid, sim in found:
+            key = _event_of(rows[bid]) if bid in rows else None
+            if key is not None and key in taken:
+                continue
+            taken.add(key)
+            out.append((bid, sim))
+        if len(out) >= want or len(found) < k or len(out) == len(found):
+            break
+        k *= 8
+    return out[:want]
+
+
+def _without_other_occasions(rows: dict[str, Any]) -> dict[str, Any]:
+    """*rows* with one fact for each event: the first found of it."""
+    taken: set[Any] = set()
+    out: dict[str, Any] = {}
+    for bid, row in rows.items():
+        key = _event_of(row)
+        if key is not None:
+            if key in taken:
+                continue
+            taken.add(key)
+        out[bid] = row
+    return out
+
+
+def _by_event(ranked: list[RecallHit], rows: dict[str, Any], conn: sqlite3.Connection | None,
+              tenant_id: str) -> list[RecallHit]:
+    """*ranked*, where a hit that is an occasion of an event stands for all of
+    them: the latest is shown, with how many more there are (``more``) -- every
+    one of them for a question about a period ("what did I do last month") or
+    one asking for all of a kind. *rows* gains the occasions read."""
+    from kazma_core.memory.fact_days import event_day, metadata_of
+
+    ask = _ASK.get()
+    every = _LISTING.get() or (ask is not None and ask.period)
+    out: list[RecallHit] = []
+    for hit in ranked:
+        row = rows.get(hit.id)
+        key = _event_of(row) if row is not None else None
+        if key is None or _field(row, "valid_until") is not None:
+            out.append(hit)
+            continue
+        held = {bid: r for bid, r in rows.items() if _event_of(r) == key and _field(r, "valid_until") is None}
+        if conn is not None:
+            held.update(_occasions(conn, tenant_id, row, key))
+        order = sorted(held, key=lambda b: event_day(metadata_of(_field(held[b], "metadata_json"))), reverse=True)
+        rows.update(held)
+        for bid in order if every else order[:1]:
+            shown = RecallHit(id=bid, content=_format_belief_text(held[bid]), score=hit.score, kind=hit.kind,
+                              source=hit.source, metadata=dict(hit.metadata))
+            if not every and len(order) > 1:
+                shown.metadata["more"] = len(order) - 1
+            out.append(shown)
+    return out
+
+
+def _occasions(conn: sqlite3.Connection, tenant_id: str, row: Any, key: tuple[Any, ...]) -> dict[str, Any]:
+    """The current facts of the event *key* that *row* is an occasion of."""
+    try:
+        ids = [str(r[0]) for r in conn.execute(
+            "SELECT id FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? "
+            f"AND {BELIEF_ACTIVE_SQL} AND COALESCE(object, '') != '' "  # nosec B608 - fixed clause, values bound
+            "AND (instr(metadata_json, '\"happened\"') > 0 OR instr(metadata_json, '\"planned\"') > 0) "
+            "ORDER BY valid_from DESC LIMIT ?",
+            (tenant_id, _field(row, "subject"), _field(row, "predicate"), _OCCASIONS_READ)).fetchall()]
+    except sqlite3.Error:
+        logger.debug("[recall] an event's occasions could not be read", exc_info=True)
+        return {}
+    return {str(r["id"]): r for r in _hydrate_beliefs(conn, ids, tenant_id) if _event_of(r) == key}
+
+
 def _latest_first(ranked: list[RecallHit], rows: dict[str, Any]) -> list[RecallHit]:
     """*ranked* with the occasions of one event ("visited the dentist", in
     May and in November) in the places they hold, the latest first: they say
@@ -2046,14 +2153,13 @@ def _latest_first(ranked: list[RecallHit], rows: dict[str, Any]) -> list[RecallH
     latest."""
     from kazma_core.memory.fact_days import event_day, metadata_of
 
-    places: dict[tuple[str, str, str], list[int]] = {}
+    places: dict[tuple[Any, ...], list[int]] = {}
     days: dict[str, str] = {}
     for at, hit in enumerate(ranked):
         row = rows.get(hit.id)
-        day = event_day(metadata_of(_field(row, "metadata_json"))) if row is not None else ""
-        if day:
-            days[hit.id] = day
-            key = (str(_field(row, "subject")), str(_field(row, "predicate")), str(_field(row, "object")).casefold())
+        key = _event_of(row) if row is not None else None
+        if key is not None:
+            days[hit.id] = event_day(metadata_of(_field(row, "metadata_json")))
             places.setdefault(key, []).append(at)
     out = list(ranked)
     for held in places.values():
@@ -4176,7 +4282,8 @@ def _dated_line(hit: RecallHit, shown: str) -> str:
         return f"[{meta.get('since') or '?'} to {meta['until']}] {shown}"
     read = _day_read_tag(hit) if meta.get("day_read") else ""
     if meta.get("on"):
-        shown = f"[{meta['on']}{read}] {shown}"
+        more = f", and {int(meta['more'])} more" if meta.get("more") else ""
+        shown = f"[{meta['on']}{read}{more}] {shown}"
     elif meta.get("since"):
         shown = f"[since {meta['since']}{read}] {shown}"
     if meta.get("before"):

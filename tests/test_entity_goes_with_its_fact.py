@@ -10,7 +10,9 @@ a bare entity, on every install. Every caller that holds a fact asks
 ``entity_counts.entity_ids_named`` now.
 
 Through the product: the quick pass writes the fact (and mints the entity),
-then the turn is forgotten, the fact replaced, or the fact invalidated.
+then the turn is forgotten, the fact replaced, invalidated, or said to be no
+longer true (``end_belief``, which retired nothing until the second review of
+dated event lines, 2026-11-24).
 Negative control: the ids taken from the text alone, which loses English only.
 """
 
@@ -83,6 +85,12 @@ def _end(mem, how: str, said: str, then: str) -> None:
         _forget_turn(conn, said)
     elif how == "replaced":
         _say(mem, then, turn=2)
+    elif how == "ended":
+        from kazma_core.memory.belief_mutation import end_belief
+
+        bid = conn.execute("SELECT id FROM beliefs WHERE valid_until IS NULL AND predicate != 'related_to'").fetchone()
+        assert end_belief(conn, str(bid[0]), tenant_id="default", extraction_method="user_explicit", now=TOLD + 9,
+                          ops_conn=mem[1])["action"] == "ended"
     else:
         from kazma_core.memory.hygiene import invalidate_belief
 
@@ -90,7 +98,7 @@ def _end(mem, how: str, said: str, then: str) -> None:
         assert invalidate_belief(str(bid[0]), conn=conn, tenant_id="default")["ok"]
 
 
-@pytest.mark.parametrize("how", ["forgotten", "replaced", "invalidated"])
+@pytest.mark.parametrize("how", ["forgotten", "replaced", "invalidated", "ended"])
 @pytest.mark.parametrize(("said", "value", "then"), SAID)
 def test_an_entity_goes_with_its_last_fact(mem, how, said, value, then):
     conn, _ops = mem

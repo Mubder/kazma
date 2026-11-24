@@ -83,7 +83,7 @@ def _stored_after(turn: dict[str, Any], reply: str,
     shown, other = [tuple(fact) for fact in turn.get("held") or ()], []
 
     def of_this_turn(held: list[dict[str, Any]]) -> str:
-        now = [(h["shown"], h["predicate"], h["object"]) for h in held]
+        now = [(h["shown"], h["predicate"], h["object"], *([h["day"]] if h["day"] else [])) for h in held]
         if now != shown:
             other.append(f"held when the turn came: {now}; the model was asked with {shown}")
         return reply

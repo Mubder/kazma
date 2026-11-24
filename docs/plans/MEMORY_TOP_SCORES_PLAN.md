@@ -751,7 +751,7 @@ reader (48,000 cached) and 82,421 out, 62,850 and 268 for the judges. What fell:
 events. The first rule (half of the event's words in the turn's own words)
 left out 103 and 21, and reading them showed days told of something memory
 holds, by "it" ("I got it in 2018"), so the held fact's words count when the
-day is the user's own (`time_words.names_a_day`); 48 and 4 of the rest stand
+day is the user's own (the second review replaced this rule, below); 48 and 4 of the rest stand
 in the message where `own_words` leaves them out (finding 19). A start of a
 lasting fact ("since 2019") is not carried over to the entry that replaces
 it: the new one may be another thing. Evidence:
@@ -788,8 +788,81 @@ The gap between "right" and "safe" is the pasted text: the model reads it as
 the user's in most askings, and Kazma's own-words rule keeps all but one out
 (finding 20). The one Arabic event missed is one empty reply of five to "I
 went to the farm again yesterday". A move told with no held home named
-("moved_to Porto", an event) is kept as an event and asks nothing; the model
-named the held home in 10 of 10 replies, and then the question is asked.
+("moved_to Porto", an event) is kept as an event; the quick pass asks about
+the home.
+
+**The second review, fixed** (24 Nov, at 174057e52;
+`tests/test_memory_event_lines_second_review.py`: 78 of its 95 cases fail on
+that commit, English and Arabic). What holds now:
+
+* *One line for an event.* Its occasions are one candidate in every lane of
+  recall, on both paths: five visits to the dentist hid "my dentist is Dr
+  Sara" from every search and were the background the question was measured
+  against. The latest is shown with "and N more", all of them for a list or a
+  period question.
+* *Whose words.* The first rule asked that half of an event's words stand in
+  the user's own words, compared exactly: 30 of 30 English travel sentences
+  kept their event and 12 of 30 Arabic. Now an event is somebody else's when
+  its words stand in what `own_words` removed and not in what it kept,
+  compared with what Arabic writes onto them ("لدبي"), for an event with a
+  day and one without (finding 20). A day a paste names and the user does not
+  is dropped, the event kept.
+* *Its day and its name.* A day the user counted from the turn's own
+  ("yesterday") stands against a later turn's unless that turn denies it. A
+  single-valued label with a day holds unless the name is an event's verb ("I
+  weigh 78 kg today"); a plan that came to pass is filed as what happened.
+* *What a retelling closes.* `replaces` on the same day is a correction
+  whatever the words; on another day, only of the same thing (a phone is not
+  closed by its case). Forgetting the retelling opens what it closed; an
+  ending the user confirms retires its bare entity, as a forget does.
+* *Own words after a question to Kazma* (finding 19), in both languages.
+* *The held list shows an event's day* (message form 5), with a prompt rule.
+
+The same cached replies again, against the first review's stores:
+
+| | Qwen replies, dev 200 | DeepSeek replies, pilot 50 |
+|---|---|---|
+| dated events current | 3,049 -> 3,060 | 790 -> 795 |
+| planned | 251 -> 229 | 38 -> 27 |
+| dated events not the user's words | 67 -> 34, and 4 new | 12 -> 2 |
+| undated events the same check leaves out (finding 20's verbs) | 66 -> 18 | 21 -> 7 |
+| a pasted day dropped, the event kept | 25 | 1 |
+| blocks that change (without event facts) | 9 (3) of 200 | 1 (0) of 50 |
+| block tokens p50 / p95 | 1,425 / 1,496 -> 1,421 / 1,496 | 1,459 / 1,498 -> the same |
+| the answer's words in the block | 57 of 129 -> the same | 12 of 37 -> the same |
+| answered, main / noise (second judge) | 0.760 (0.745) / 0.765 (0.75), +0 / -0 in both | 0.72 (0.74) / 0.72 (0.74), +0 / -0 in both |
+
+The 13 changed blocks were asked twice (78 calls, 48,474 prompt tokens, none
+cached, and 13,675 out, on Qwen). The replies are to message form 4: the
+pilots were not extracted again on form 5. DeepSeek's cost $3.95 on the
+shorter prompt and form 5 adds about 4 % to what is not cached, so it would
+pass the $4 set for it: **declared pending**. The 34 and 2 left out are pasted
+lists and texts to rewrite, "Here's the info:" hand-overs read as label lines,
+quotes, "according to", replies the user asks to be written in their name, and
+text past `own_words`' 2,000 characters. Evidence:
+`docs/audits/evidence/memory_event_lines/second_review.json`.
+
+**The recording again, message form 5** (24 Nov): dataset v4 with one shape
+more (a held event spoken of by its day, nothing new to keep; 72 turns), 5 askings,
+deepseek-flash: 360 calls, 673,745 prompt tokens, 597,504 of them from
+DeepSeek's cache, 81,537 completion; the balance went from $5.66 to $5.60.
+
+| | English | Arabic |
+|---|---|---|
+| the event in the reply / its day | 1.000 / 1.000 | 0.980 -> 1.000 / 0.971 -> 1.000 |
+| right | 0.928 -> 0.894 | 0.867 -> 0.894 |
+| quiet | 0.800 -> 0.667 | 0.667 |
+| stored / its days exactly right | 1.000 / 1.000 | 1.000 / 0.975 -> 1.000 |
+| safe / everything about the turn right | 1.000 / 1.000 | 0.980 -> 1.000 / 0.973 -> 1.000 |
+
+What is stored is right on every asking of every event turn in both languages;
+the replies' own "right" and "quiet" are the pasted text, read as the user's
+in every asking and kept out by Kazma. On the 40 turns before: found 0.990 ->
+1.000 and right 0.990 -> 1.000 in English, 0.971 -> 0.986 and 0.972 -> 0.986 in
+Arabic, named 0.819 -> 0.853 and 0.912 -> 0.971; a start 0.80 -> 0.70 in
+English (one asking of ten), replaced 1.00 -> 0.90 and ended 1.00 -> 0.80 in
+Arabic (one asking each), mixed right 1.000 -> 0.962, each inside the spread
+of five askings.
 
 ### W6. Ingestion the product's way (M)
 
@@ -1353,30 +1426,30 @@ alone as the negative controls.
     Arabic questions (q1004, h042), each answered by one memory. Left as it
     is; measured before anything is built, on the parallel set's count
     questions asked in both languages.
-19. **`own_words` drops what the user says after "What do you think about
-    ...?" and "Do you think I ...", in English only.** Found reading what
-    the event rule leaves out (24 Nov): "What do you think about my bathroom
-    rugs? I washed them last Sunday." is read as someone's words ("think"
-    as a reporting verb, the rest of the message as what they reported), and
-    "Do you think I could find one at the fair I attended last month?" keeps
-    "Do you"; Arabic keeps both ("شنو رايك في سجادي؟ غسلته الاحد."). The
-    quick pass, "remember" and the event rule read through it, so such a
-    message teaches nothing: 15 of the 67 events left out on the Qwen
-    replies, 2 of 12 on DeepSeek's. Pasted lists of the user's own ("Here's
-    the info: ...") and the text past 2,000 characters are the rest.
-    `own_words` was reviewed three times as a security rule (a paste is never
-    the user's statement), so its change wants a change and a review of its
-    own.
-20. **An event told with no day is not held to the user's own words.** Found
-    by the event turns (24 Nov): asked about pasted text ("صحح النص: رحت
-    روما ..."), deepseek-flash gave it as the user's in 5 of 5 Arabic
-    askings and 3 of 5 English ones, sixteen facts. The twelve with a day
-    are all refused (not the user's own words); a reply that leaves the day
-    out is no event to Kazma, so one Arabic asking stored "visited Rome" and
-    the bag (the English one's two were held back by their low confidence).
-    The same check on undated events was measured on the pilots' cached
-    replies before building it: 21 of 549 (DeepSeek) and 66 of 2,421 (Qwen)
-    would go, and read one by one most are the user's own, lost to finding
-    19 ("Do you think I could use the apples I bought ...?"). Left as it is:
-    finding 19 first, then this. Evidence:
-    `docs/audits/evidence/memory_event_lines/undated_events.json`.
+19. **`own_words` dropped what the user says after "What do you think about
+    ...?" and "Do you think I ...", in English only. Fixed 24 Nov.** "What do
+    you think about my bathroom rugs? I washed them last Sunday." was read as
+    someone's words ("think" as a reporting verb, the rest as what they
+    reported), and Arabic kept both. A thinking verb whose subject is "you"
+    reports nobody (`_asks_kazma_en`, `_asks_kazma_ar`); a question asks about
+    the text after it only when it names or points at one ("What do you think
+    of this email: ...", "ما رأيك في هذا النص؟ ..."). "Let's add ...", "TV
+    shows, I've ...", "recipe ideas that feature ...? I recently ..." and
+    "بغيت أقولك:" too. The pastes' security cases hold unchanged
+    (`tests/test_memory_own_words.py`); pairs in
+    `tests/test_paired_languages.py`.
+20. **An event told with no day was not held to the user's own words. Fixed
+    24 Nov.** Found by the event turns: asked about pasted text ("صحح النص:
+    رحت روما ..."), deepseek-flash gave it as the user's, and a reply that left
+    the day out was stored. Measured before finding 19's fix, the check would
+    have taken 66 of 2,421 (Qwen) and 21 of 549 (DeepSeek) undated events, most
+    of them the user's own; with finding 19 fixed and the second review's rule
+    it takes 18 and 7. Evidence:
+    `docs/audits/evidence/memory_event_lines/undated_events.json`,
+    `second_review.json`.
+21. **A list question's sibling facts are read in the order of their ids.**
+    Found reading the changed blocks (24 Nov): `_with_list_siblings` takes the
+    newest `limit` of a name and hydrates them in id order, so when the block cuts
+    them the ones shown are random ("how many fish ...?" shows other
+    `interested_in` facts after a rewrite of the same store). Not built: it is
+    not the event lines'.

@@ -357,6 +357,8 @@ _PLANNED: contextvars.ContextVar[str | None] = contextvars.ContextVar("kazma_bel
 #: ``fact_days``' ``day_source`` shape: who gave the day.
 _DAY_SOURCES: contextvars.ContextVar[tuple[dict[str, Any] | None, dict[str, Any] | None]] = contextvars.ContextVar(
     "kazma_belief_day_sources", default=(None, None))
+#: Whether the user said the event's day by counting from the turn's own.
+_DAY_SURE: contextvars.ContextVar[bool] = contextvars.ContextVar("kazma_belief_day_sure", default=False)
 
 
 def _trust_weight(extraction_method: str, cfg: dict[str, Any] | None) -> float:
@@ -458,6 +460,7 @@ def mutate_belief(
     started: str | None = None,
     happened: bool = False,
     planned: str | None = None,
+    day_sure: bool = False,
     day_source: dict[str, Any] | None = None,
     corrects: str | None = None,
 ) -> dict[str, Any]:
@@ -472,7 +475,8 @@ def mutate_belief(
     last Saturday"; the memory plan's W4), kept as ``happened`` beside it,
     so recall shows "[on 13 May 2023]", not "[since ...]". *planned*: the day
     an event is planned for, after the turn that told it. Both are a list
-    entry's only: on a single-valued fact the day is its start. *day_source*
+    entry's only: on a single-valued fact the day is its start. *day_sure*:
+    the user counted to that day ("yesterday"; ``fact_days``). *day_source*
     names who gave the day when it is not this write's own turn
     (``fact_days``: a day taken over from the entry this one replaces).
     *corrects* is the list entry this write tells again, whose day it may
@@ -600,7 +604,7 @@ def mutate_belief(
 
     result: dict[str, Any] | None = None
     own = {"session": source_session, "turn": source_turn, "method": extraction_method, "at": recorded}
-    tokens = _bind_write_context(said_by, started, happened, planned, own, day_source)
+    tokens = _bind_write_context(said_by, started, happened, planned, own, day_source, day_sure)
     try:
         with _mutation_lock:
             # W6: the name the subject already uses for the same words and
@@ -833,15 +837,19 @@ def end_belief(
 
 def _after_ending(conn: sqlite3.Connection, row: Any, *, tenant_id: str) -> None:
     """What follows a fact's end, after its transaction: the entities'
-    counts. The state mirror and the graph copy follow from their outboxes,
+    counts, and an entity it was the last fact of, holding nothing else, goes
+    with it, as a forgotten fact's does (until 2026-11-24 "no longer true"
+    left its value on the map as a bare entity). The state mirror and the graph copy follow from their outboxes,
     which the close queued in its own transaction (``schema_v2``'s
     triggers; the mirror and graph syncs drain them), so a *private*
     database sends nothing anywhere."""
     try:
         from kazma_core.memory.entity_counts import entity_ids_named, recompute_entity_counts
+        from kazma_core.memory.entity_retire import retire_empty_entities
 
-        recompute_entity_counts(conn, entity_ids_named(conn, [row[0], row[2]], tenant_id=tenant_id),
-                                tenant_id=tenant_id)
+        named = entity_ids_named(conn, [row[0], row[2]], tenant_id=tenant_id)
+        recompute_entity_counts(conn, named, tenant_id=tenant_id)
+        retire_empty_entities(conn, named, tenant_id=tenant_id)
         if conn.in_transaction:
             conn.commit()
     except sqlite3.Error:
@@ -876,6 +884,8 @@ def _written_day(*, gained: bool) -> dict[str, Any]:
         day["started"] = _STARTED.get()
         if _HAPPENED.get():
             day["happened"] = True
+            if _DAY_SURE.get():
+                day["day_sure"] = True
     if _PLANNED.get():
         day["planned"] = _PLANNED.get()
     own, others = _DAY_SOURCES.get()
@@ -937,17 +947,18 @@ def _add_named_start(conn: sqlite3.Connection, belief_id: str, tenant_id: str, *
 
 def _bind_write_context(said_by: str | None, started: str | None, happened: bool = False,
                         planned: str | None = None, own: dict[str, Any] | None = None,
-                        day_source: dict[str, Any] | None = None) -> tuple[Any, ...]:
+                        day_source: dict[str, Any] | None = None, day_sure: bool = False) -> tuple[Any, ...]:
     """Bind who said the write in progress and the day its turn named (a
     start, an event's day, a planned day, and whose day it is), read where
     the row is built (:func:`_insert_belief`)."""
     return (_SAID_BY.set(str(said_by) if said_by else None), _STARTED.set(str(started) if started else None),
             _HAPPENED.set(bool(happened and started)), _PLANNED.set(str(planned) if planned else None),
-            _DAY_SOURCES.set((own, day_source)))
+            _DAY_SOURCES.set((own, day_source)), _DAY_SURE.set(bool(day_sure)))
 
 
 def _unbind_write_context(tokens: tuple[Any, ...]) -> None:
-    said, started, happened, planned, sources = tokens
+    said, started, happened, planned, sources, sure = tokens
+    _DAY_SURE.reset(sure)
     _DAY_SOURCES.reset(sources)
     _PLANNED.reset(planned)
     _HAPPENED.reset(happened)
@@ -1529,6 +1540,13 @@ def _normalize_noted_key(obj: str) -> str:
     return re.sub(r"\s+", " ", (obj or "").strip().lower())[:160]
 
 
+#: How many of a name's newest entries a write compares with its value folded
+#: (spelling, case, Arabic letter forms); the same spelling is found among all
+#: of them by the database. Folding every entry of a name with 5,000 held the
+#: mutation lock for 52 ms a write (2026-11-24).
+_FOLDED_ENTRIES = 300
+
+
 def _entry_told_again(conn: sqlite3.Connection, sub: str, pred: str, obj: str, tenant_id: str,
                       corrects: str | None) -> tuple[str | None, bool]:
     """``(the list entry this write tells again, whether its day is
@@ -1546,13 +1564,15 @@ def _entry_told_again(conn: sqlite3.Connection, sub: str, pred: str, obj: str, t
     from kazma_core.memory import fact_days
 
     day = fact_days.event_day(_written_day(gained=False))
-    rows = conn.execute(
-        """SELECT id, object, valid_from, metadata_json FROM beliefs
-           WHERE subject=? AND predicate=? AND tenant_id=?
-             AND valid_until IS NULL AND invalidated_at IS NULL
-           ORDER BY valid_from DESC""",
-        (sub, pred, tenant_id),
-    ).fetchall()
+    current = ("SELECT id, object, valid_from, metadata_json FROM beliefs WHERE subject=? AND predicate=? "
+               "AND tenant_id=? AND valid_until IS NULL AND invalidated_at IS NULL ")
+    rows = conn.execute(current + "AND (object = ? OR id = ?) ORDER BY valid_from DESC",
+                        (sub, pred, tenant_id, obj, corrects or "")).fetchall()
+    found = {str(_col(r, "id", 0)) for r in rows}
+    rows += [r for r in conn.execute(current + "ORDER BY valid_from DESC LIMIT ?",
+                                     (sub, pred, tenant_id, _FOLDED_ENTRIES)).fetchall()
+             if str(_col(r, "id", 0)) not in found]
+    rows.sort(key=lambda r: float(_col(r, "valid_from", 2) or 0.0), reverse=True)
 
     def same_words(r: Any) -> bool:
         if _col(r, "object", 1) == obj:

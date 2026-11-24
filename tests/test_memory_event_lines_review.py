@@ -243,7 +243,7 @@ def test_the_same_words_on_a_later_day_are_another_occasion(mem, obj, said, ques
     mem.tell([event("visited", obj, "2026-11-10")], said, turn=9, on="2026-11-11")
     assert [m.get("started") for _o, m in mem.days()] == ["2026-05-30", "2026-11-10"]
     lines = [line for line in mem.block(question, now="2026-12-01").splitlines() if obj in line]
-    assert ["10 Nov 2026" in line for line in lines] == [True, False] and "30 May 2026" in lines[1]
+    assert len(lines) == 1 and "[on 10 Nov 2026, and 1 more]" in lines[0]
     # Told again, each is the entry it was.
     mem.tell([event("visited", obj, "2026-11-10")], said, turn=10, on="2026-11-12")
     assert len(mem.facts()) == 2
@@ -356,8 +356,8 @@ def test_a_forgotten_correction_gives_the_earlier_day_back(mem):
     mem.tell([event("visited", "the dentist", "2026-05-30")], "I visited the dentist yesterday.")
     held, refs = mem.held()
     mem.tell([event("visited", "the dentist", "2026-05-29", replaces=refs["the dentist"])],
-             "I visited the dentist on the 29th.", turn=2, held=held)
-    eid = mem.episode(2, "I visited the dentist on the 29th.")
+             "No, I visited the dentist on the 29th.", turn=2, held=held)
+    eid = mem.episode(2, "No, I visited the dentist on the 29th.")
     assert mem.days()[0][1]["started"] == "2026-05-29"
     mem.forget(eid)
     meta = mem.days()[0][1]
@@ -464,16 +464,17 @@ def test_a_future_day_never_throws_away_a_valid_start(mem):
 
 
 def test_a_planned_day_that_came_is_the_day_it_happened(mem):
-    mem.tell([event("attended", "the jazz concert", "2026-06-07")], "I'm going to the jazz concert next Sunday.")
+    mem.tell([event("scheduled_event", "the jazz concert", "2026-06-07")],
+             "I'm going to the jazz concert next Sunday.")
     assert mem.days()[0][1].get("planned") == "2026-06-07"
-    mem.tell([event("attended", "the jazz concert", "2026-06-07")], "I attended the jazz concert yesterday.", turn=2,
+    mem.tell([event("scheduled_event", "the jazz concert", "2026-06-07")], "The jazz concert was yesterday.", turn=2,
              on="2026-06-08")
     ((_value, meta),) = mem.days()
     assert (meta.get("started"), meta.get("happened"), meta.get("planned")) == ("2026-06-07", True, None)
 
 
 def test_told_at_no_known_time_a_day_to_come_is_not_one_that_happened(mem):
-    mem.tell([event("attended", "the jazz concert", "2999-06-07")], "I attended the jazz concert.", now=None)
+    mem.tell([event("scheduled_event", "the jazz concert", "2999-06-07")], "I'm going to the jazz concert.", now=None)
     meta = mem.days()[0][1]
     assert not meta.get("happened") and meta.get("planned") == "2999-06-07"
 
@@ -501,24 +502,23 @@ def test_an_event_stands_in_the_users_own_words(mem, said, obj, kept):
     assert stats.get("not_users_words", 0) == (0 if kept else 1)
 
 
-@pytest.mark.parametrize(("obj", "first", "said", "kept"), [
+@pytest.mark.parametrize(("obj", "first", "said", "day", "kept"), [
     # Named by what was told before, the day in the user's own words.
-    ("a gold watch", "I have a gold watch.", "It was a gift, I got it in 2018.", True),
-    ("a gold watch", "I have a gold watch.", "Yeah, I think I got it last Monday.", True),
-    ("ساعة ذهبية", "عندي ساعة ذهبية.", "اشتريتها قبل أسبوعين.", True),
-    ("ساعة ذهبية", "عندي ساعة ذهبية.", "اي والله، كان السبت الماضي.", True),
-    # No day of the user's: the assistant's, or a pasted text's.
-    ("a gold watch", "I have a gold watch.", "Yes, that one. Thank you!", False),
-    ("a gold watch", "I have a gold watch.", "Translate to Dutch: I got it in 2018.", False),
-    ("ساعة ذهبية", "عندي ساعة ذهبية.", "ترجم: اشتريتها قبل أسبوعين.", False),
-    # Nothing held of it: the assistant's alone.
-    ("a gold watch", "", "Yeah, I think I got it last Monday.", False),
+    ("a gold watch", "I have a gold watch.", "It was a gift, I got it in 2018.", "2018", True),
+    ("a gold watch", "I have a gold watch.", "Yeah, I think I got it last Monday.", "2026-05-25", True),
+    ("ساعة ذهبية", "عندي ساعة ذهبية.", "اشتريتها قبل أسبوعين.", "2026-05-17", True),
+    ("ساعة ذهبية", "عندي ساعة ذهبية.", "اي والله، كان السبت الماضي.", "2026-05-30", True),
+    # No day of the user's: the assistant's, a pasted text's, or another day.
+    ("a gold watch", "I have a gold watch.", "Yes, that one. Thank you!", "2018", False),
+    ("a gold watch", "I have a gold watch.", "Yeah, I think I got it last Monday.", "2018", False),
+    ("ساعة ذهبية", "عندي ساعة ذهبية.", "اي والله، كان السبت الماضي.", "2018", False),
+    ("a gold watch", "I have a gold watch.", "Translate to Dutch: I got it in 2018.", "2018", False),
+    ("ساعة ذهبية", "عندي ساعة ذهبية.", "ترجم: اشتريتها قبل أسبوعين.", "2026-05-17", False),
 ])
-def test_a_day_told_of_something_held_need_not_name_it_again(mem, obj, first, said, kept):
-    if first:
-        mem.tell([event("owns", obj, None)], first)
+def test_a_day_told_of_something_held_need_not_name_it_again(mem, obj, first, said, day, kept):
+    mem.tell([event("owns", obj, None)], first)
     held, _refs = mem.held()
-    mem.tell([event("bought", obj, "2018")], said, turn=2, held=held)
+    mem.tell([event("bought", obj, day)], said, turn=2, held=held)
     assert (("bought", obj) in mem.facts()) is kept
 
 
@@ -613,7 +613,7 @@ def test_control_an_entry_matched_by_its_words_alone_drops_the_second_occasion(m
 
 def test_control_without_the_shared_word_bananas_are_closed(mem, monkeypatch):
     """Negative control (H2): any ``replaces`` taken as the same event."""
-    monkeypatch.setattr(belief_extractor, "_same_event", lambda entry, clean: True)
+    monkeypatch.setattr(belief_extractor, "_same_event", lambda entry, clean, user_text="": True)
     mem.tell([event("bought", "bananas", "2026-05-23")], "I bought bananas on the 23rd.")
     held, refs = mem.held()
     mem.tell([event("bought", "fresh vegetables", "2026-05-30", replaces=refs["bananas"])],
@@ -635,6 +635,6 @@ def test_control_a_forget_without_the_step_leaves_the_day(mem, monkeypatch):
 
 def test_control_every_event_kept_takes_the_assistants_for_the_users(mem, monkeypatch):
     """Negative control (M6)."""
-    monkeypatch.setattr(belief_extractor, "_in_users_words", lambda value, user_text, told_before: True)
+    monkeypatch.setattr(belief_extractor, "_in_users_words", lambda value, user_text, *_a: True)
     mem.tell([event("attended", "a pottery exhibition", "2026-05-30")], "What should I do this weekend?")
     assert mem.facts() == [("attended", "a pottery exhibition")]

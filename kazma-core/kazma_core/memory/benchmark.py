@@ -1479,7 +1479,8 @@ def _turn_context(turn: dict[str, Any]) -> dict[str, Any]:
     memory worker reads them from the memory store)."""
     previous = turn.get("previous")
     held = [{"ref": f"f{i}", "id": f"held-{i}", "subject": s, "shown": s, "predicate": p, "predicate_type": "set",
-             "object": o, "method": ""} for i, (s, p, o) in enumerate(turn.get("held") or (), 1)]
+             "object": o, "method": "", "day": day[0] if day else ""}
+            for i, (s, p, o, *day) in enumerate(turn.get("held") or (), 1)]
     return {"said_on": turn.get("said_on"),
             "previous": (previous.get("user", ""), previous.get("assistant", "")) if previous else None,
             "held": held or None}

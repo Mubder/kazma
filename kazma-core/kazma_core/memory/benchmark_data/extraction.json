@@ -1537,7 +1537,8 @@
     [
      "user",
      "visited",
-     "Jahra Farm"
+     "Jahra Farm",
+     "on 2026-05-02"
     ]
    ],
    "stored": {
@@ -1596,7 +1597,8 @@
     [
      "user",
      "visited",
-     "مزرعة الجهراء"
+     "مزرعة الجهراء",
+     "on 2026-05-02"
     ]
    ],
    "stored": {
@@ -1641,7 +1643,8 @@
     [
      "user",
      "bought",
-     "a Canon camera"
+     "a Canon camera",
+     "on 2026-05-16"
     ]
    ],
    "extras": [
@@ -1724,7 +1727,8 @@
     [
      "user",
      "bought",
-     "كاميرا كانون"
+     "كاميرا كانون",
+     "on 2026-05-16"
     ]
    ],
    "extras": [
@@ -1813,7 +1817,8 @@
     [
      "user",
      "attended",
-     "the Nawal concert"
+     "the Nawal concert",
+     "on 2026-05-23"
     ]
    ],
    "stored": {
@@ -1871,7 +1876,8 @@
     [
      "user",
      "attended",
-     "حفلة نوال"
+     "حفلة نوال",
+     "on 2026-05-23"
     ]
    ],
    "stored": {
@@ -2751,6 +2757,180 @@
      }
     ],
     "undated": true
+   }
+  },
+  {
+   "id": "v16",
+   "lang": "en",
+   "user": "The dentist on Saturday really hurt me.",
+   "said_on": "2026-06-02",
+   "new_in": 4,
+   "facts": [],
+   "held": [
+    [
+     "user",
+     "visited",
+     "the dentist",
+     "on 2026-05-30"
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to",
+       "hurt_by",
+       "experienced",
+       "felt"
+      ],
+      "object": "dentist"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "experienced",
+       "felt",
+       "had"
+      ],
+      "object": "pain"
+     },
+     {
+      "subject": "dentist",
+      "predicates": [
+       "hurt"
+      ],
+      "object": "user"
+     }
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-31",
+      "user": "I went to the dentist yesterday.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "visited",
+        "predicate_type": "set",
+        "object": "the dentist",
+        "confidence": 0.9,
+        "on": "2026-05-30"
+       }
+      ]
+     }
+    ],
+    "entries": [
+     {
+      "objects": [
+       "dentist"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ],
+    "once": [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited"
+      ],
+      "object": "dentist"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w16",
+   "lang": "ar",
+   "user": "دكتور الأسنان يوم السبت عورني وايد.",
+   "said_on": "2026-06-02",
+   "new_in": 4,
+   "facts": [],
+   "held": [
+    [
+     "user",
+     "visited",
+     "دكتور الأسنان",
+     "on 2026-05-30"
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to",
+       "hurt_by",
+       "experienced",
+       "felt"
+      ],
+      "object": "دكتور الأسنان"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "experienced",
+       "felt",
+       "had"
+      ],
+      "object": "ألم"
+     },
+     {
+      "subject": "دكتور_الأسنان",
+      "predicates": [
+       "hurt"
+      ],
+      "object": "user"
+     }
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-31",
+      "user": "رحت دكتور الأسنان أمس.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "visited",
+        "predicate_type": "set",
+        "object": "دكتور الأسنان",
+        "confidence": 0.9,
+        "on": "2026-05-30"
+       }
+      ]
+     }
+    ],
+    "entries": [
+     {
+      "objects": [
+       "دكتور الأسنان"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ],
+    "once": [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited"
+      ],
+      "object": "دكتور الأسنان"
+     }
+    ]
    }
   }
  ]
