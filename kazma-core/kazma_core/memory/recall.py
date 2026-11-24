@@ -329,7 +329,7 @@ def recall(
     result.time_named = ask.named if ask is not None else ""
     if not result.failed and not result.empty:
         _keep_sides(result, query, conn=conn, tenant_id=tenant_id)
-        _date_hits(result, conn=conn, tenant_id=tenant_id)
+        _date_hits(result, conn=conn, tenant_id=tenant_id, now=now)
     return result
 
 
@@ -504,21 +504,22 @@ def _month_of(ts: Any, zone: Any) -> str:
 
 def _fact_dates(conn: sqlite3.Connection, ids: list[str], tenant_id: str) -> dict[str, tuple]:
     """``fact id -> (started, kind, replaced value, its from, its until, its id,
-    (where it was said), (where the replaced value was said), happened)``: the
-    start its turn named (``metadata.started``; *happened*: an event's day,
-    ``metadata.happened``), and the fact it replaced
+    (where it was said), (where the replaced value was said), metadata,
+    method)``: the start its turn named (``metadata.started``; the rest of its
+    day is read from its metadata, ``fact_days``), and the fact it replaced
     (``supersedes_id``) when that still holds its value (a forgotten fact
     keeps none); each "where" is its ``(source_session, source_turn)``."""
     marks = ",".join("?" for _ in ids)
     rows = conn.execute(
-        f"SELECT cur.id, json_extract(cur.metadata_json, '$.started'), cur.predicate_type, prev.object, "
+        f"SELECT cur.id, json_extract(CASE WHEN json_valid(cur.metadata_json) THEN cur.metadata_json END, "
+        f"'$.started'), cur.predicate_type, prev.object, "
         f"prev.valid_from, prev.valid_until, prev.id, cur.source_session, cur.source_turn, "
-        f"prev.source_session, prev.source_turn, json_extract(cur.metadata_json, '$.happened') FROM beliefs cur "
+        f"prev.source_session, prev.source_turn, cur.metadata_json, cur.extraction_method FROM beliefs cur "
         f"LEFT JOIN beliefs prev ON prev.id = cur.supersedes_id AND prev.tenant_id = cur.tenant_id "
         f"AND COALESCE(prev.object, '') != '' "
         f"WHERE cur.tenant_id = ? AND cur.id IN ({marks})",
         (tenant_id, *ids)).fetchall()
-    return {str(r[0]): (*r[1:7], (r[7], r[8]), (r[9], r[10]), bool(r[11])) for r in rows}
+    return {str(r[0]): (*r[1:7], (r[7], r[8]), (r[9], r[10]), r[11], r[12]) for r in rows}
 
 
 def _stated_in(conn: sqlite3.Connection, turns: set[tuple[Any, Any]], tenant_id: str) -> dict[tuple[str, int], str]:
@@ -583,7 +584,26 @@ def _started_label(started: Any) -> str:
     return f"{day} {_MONTHS[month - 1]} {year}" if day else f"{_MONTHS[month - 1]} {year}"
 
 
-def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_id: str) -> None:
+def _event_label(meta: dict[str, Any], today: str) -> str:
+    """When an event happened or is planned for, as the block shows it: "on
+    30 May 2026", "in Apr 2026", "in 2005"; "planned for 3 Jun 2026", and
+    "was planned for" once that day has passed (it was planned; that it
+    happened was not told). "" for a fact that is no event."""
+    from kazma_core.memory.fact_days import exact
+
+    if meta.get("happened"):
+        day = str(meta.get("started") or "")
+        label = _started_label(day)
+        return f"{'on' if exact(day) else 'in'} {label}" if label else ""
+    planned = str(meta.get("planned") or "")
+    label = _started_label(planned)
+    if not label:
+        return ""
+    return f"{'was planned' if planned < today[: len(planned)] else 'planned'} for {label}"
+
+
+def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_id: str,
+               now: float | None = None) -> None:
     """Put the dates on what recall shows: ``said_on`` on each turn,
     ``since`` on each fact, and ``before`` (the value it replaced, with its
     months) on a single-valued fact, with the conversations that said each
@@ -626,6 +646,10 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
     finally:
         if own and conn is not None:
             conn.close()
+    from kazma_core.memory import fact_days
+    from kazma_core.memory.provenance import USER_SOURCES
+
+    today = fact_days.today(time.time() if now is None else float(now), zone).isoformat()
     for hit in result.beliefs:
         if hit.id in waiting and not hit.metadata.get("until"):
             # A change the user stated waits for their yes (finding 17).
@@ -633,16 +657,23 @@ def _date_hits(result: RecallResult, *, conn: sqlite3.Connection | None, tenant_
     for hit in result.beliefs:
         if hit.id not in dates or hit.metadata.get("until"):
             continue
-        started, kind, value, start, end, prev_id, where, before_where, happened = dates[hit.id]
+        started, kind, value, start, end, prev_id, where, before_where, meta_json, method = dates[hit.id]
         # The start the turn named ("we moved last month") is the fact's own;
         # the month it was said is the fallback. An event's day is the day
-        # it happened (W4): "[on 13 May 2023]".
+        # it happened (W4): "[on 13 May 2023]" -- a list entry's: on a single
+        # value an older write marked so, the day is its start.
+        meta = fact_days.metadata_of(meta_json)
         label = _started_label(started)
-        if label and happened:
-            hit.metadata["on"] = label
+        event = _event_label(meta, today) if (kind or "set") == "set" else ""
+        if event:
+            hit.metadata["on"] = event
             hit.metadata.pop("since", None)
         elif label:
             hit.metadata["since"] = label
+        if (event or label) and fact_days.days_method(meta, method) not in USER_SOURCES and method in USER_SOURCES:
+            # The user's own fact, with a day the model read (its line is not
+            # tagged as Kazma's reading, the day is).
+            hit.metadata["day_read"] = True
         if value is not None and (kind or (hit.metadata or {}).get("predicate_type")) in ("functional", "state"):
             span = " to ".join(m for m in (_month_of(start, zone), _month_of(end, zone)) if m)
             hit.metadata["before"] = f"{value} ({span})" if span else str(value)
@@ -1385,31 +1416,31 @@ def _pg_primary_beliefs(
 
     qvec = _encode_query(query)
     backend = _available_vector_backend() if qvec else None
-    dense_pairs = (
-        _backend_search(
-            backend,
-            qvec,
-            tenant_id=tenant_id,
-            tier=None,
-            limit=max(_DENSE_POOL, limit * 3),
-            kind="belief",
-        )
-        if backend is not None and qvec
-        else []
-    )
-    sims = {str(bid): float(sim) for bid, sim in dense_pairs}
     rows: dict[str, dict[str, Any]] = {}
-    for row in search_state_beliefs(" ".join(_belief_search_words(query)), tenant_id=tenant_id,
-                                    limit=limit * 3, strict=True):
-        if row.get("id"):
-            rows[str(row["id"])] = row
     fetch = getattr(state_backend, "fetch_beliefs", None)
-    need = [bid for bid in sims if bid not in rows]
-    if need and callable(fetch):
-        for start in range(0, len(need), 50):
-            for row in fetch(need[start:start + 50], tenant_id=tenant_id) or []:
-                if row.get("id"):
-                    rows[str(row["id"])] = row
+
+    def _hydrated(ids: list[str]) -> dict[str, Any]:
+        need = [bid for bid in ids if bid not in rows]
+        if need and callable(fetch):
+            for start in range(0, len(need), 50):
+                for row in fetch(need[start:start + 50], tenant_id=tenant_id) or []:
+                    if row.get("id"):
+                        rows[str(row["id"])] = row
+        return {bid: rows[bid] for bid in ids if bid in rows}
+
+    def _by_words(k: int) -> list[tuple[str, float]]:
+        found = [row for row in search_state_beliefs(" ".join(_belief_search_words(query)), tenant_id=tenant_id,
+                                                     limit=k, strict=True) if row.get("id")]
+        rows.update({str(row["id"]): row for row in found})
+        return [(str(row["id"]), 0.0) for row in found]
+
+    dense_pairs = _one_per_event(
+        lambda k: _backend_search(backend, qvec, tenant_id=tenant_id, tier=None, limit=k, kind="belief"),
+        _hydrated, max(_DENSE_POOL, limit * 3)) if backend is not None and qvec else []
+    sims = {str(bid): float(sim) for bid, sim in dense_pairs}
+    by_words = [bid for bid, _rank in _one_per_event(_by_words, _hydrated, limit * 3)]
+    wanted = [*by_words, *sims]
+    rows = _hydrated(list(dict.fromkeys(wanted)))
     rows = _primary_belief_rows(rows, local, tenant_id)
     lookup = getattr(backend, "similarities", None)
     unscored = [bid for bid in rows if bid not in sims]
@@ -1426,8 +1457,9 @@ def _pg_primary_beliefs(
     by_meaning = {str(bid) for bid, _sim in dense_pairs}
     candidates = [
         _belief_candidate(bid, rows[bid], sims.get(bid), bid in by_meaning)
-        for bid in dict.fromkeys([*(str(b) for b, _s in dense_pairs), *rows])
-        if bid in rows and _format_belief_text(rows[bid])
+        for bid in _without_other_occasions(
+            {b: rows[b] for b in dict.fromkeys([*(str(b) for b, _s in dense_pairs), *rows]) if b in rows})
+        if _format_belief_text(rows[bid])
     ]
     ranked = _rank_by_evidence(
         query, candidates, _question_background([sim for _b, sim in dense_pairs], kind="belief"),
@@ -1463,7 +1495,7 @@ def _primary_beliefs_as_local(ranked: list[RecallHit], rows: dict[str, Any],
     """The local path's steps after ranking facts (``_recall_beliefs``): the
     question's time ("where was I living in June": June's value, not
     today's) and a list's siblings (read from this install's database)."""
-    ranked = _facts_in_time(ranked, rows, _ASK.get())
+    ranked = _latest_first(_facts_in_time(_by_event(ranked, rows, local, tenant_id), rows, _ASK.get()), rows)
     if _LISTING.get() and local is not None:
         ranked = _with_list_siblings(local, tenant_id, ranked, rows, limit)
     return ranked
@@ -1809,8 +1841,15 @@ def _recall_beliefs(
         for bid in ids:
             sources.setdefault(str(bid), []).append(channel)
 
-    _found([r["id"] for r in _belief_fts(conn, _belief_search_words(q), tenant_id, limit * 3)], "belief_fts")
-    dense = _belief_dense_scored(conn, q, vector_engine, tenant_id, max(_DENSE_POOL, limit * 3))
+    def _hydrated(ids: list[str]) -> dict[str, Any]:
+        return {str(r["id"]): r for r in _hydrate_beliefs(conn, ids, tenant_id)}
+
+    words = _belief_search_words(q)
+    _found([bid for bid, _rank in _one_per_event(
+        lambda k: [(str(r["id"]), 0.0) for r in _belief_fts(conn, words, tenant_id, k)], _hydrated, limit * 3)],
+        "belief_fts")
+    dense = _one_per_event(lambda k: _belief_dense_scored(conn, q, vector_engine, tenant_id, k), _hydrated,
+                           max(_DENSE_POOL, limit * 3))
     _found([bid for bid, _sim in dense], "dense")
     _found(_beliefs_from_turns(conn, seed_episodes or [], tenant_id), "belief_bridge")
     walk = _belief_graph_ppr(conn, q, tenant_id, seed_episodes=seed_episodes or [])
@@ -1842,13 +1881,14 @@ def _recall_beliefs(
             sims.update(_similarities(conn, missing, qvec, kind="belief"))
     by_meaning = {bid for bid, _sim in dense}
     candidates = [
-        _belief_candidate(bid, row, sims.get(bid), bid in by_meaning) for bid, row in rows.items()
+        _belief_candidate(bid, row, sims.get(bid), bid in by_meaning)
+        for bid, row in _without_other_occasions(rows).items()
     ]
     ranked = _rank_by_evidence(
         q, candidates, _question_background([sim for _bid, sim in dense], kind="belief"), kind="belief",
         named=_named_facts(q, rows),
     )
-    ranked = _facts_in_time(ranked, rows, ask)
+    ranked = _latest_first(_facts_in_time(_by_event(ranked, rows, conn, tenant_id), rows, ask), rows)
     if _LISTING.get():
         ranked = _with_list_siblings(conn, tenant_id, ranked, rows, limit)
     return _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
@@ -1956,7 +1996,15 @@ def _started_at(row: Any) -> float | None:
 def _held_in(row: Any, ask: Any) -> bool:
     """Whether the fact *row* was true during the question's period: from
     when it began (its turn's own start, else when it was said) to when it
-    stopped (or now)."""
+    stopped (or now). An event is its day: "what did I buy last month" is not
+    what was bought before it (a planned one is the day it is planned for)."""
+    from kazma_core.memory import fact_days
+
+    if str(_field(row, "predicate_type") or "set") == "set":
+        day = fact_days.event_day(fact_days.metadata_of(_field(row, "metadata_json")))
+        span = fact_days.day_span(day, _memory_zone()) if day else None
+        if span is not None:
+            return span[0] < ask.end and span[1] > ask.start
     began = float(_field(row, "valid_from") or 0.0)
     started = _started_at(row)
     if started is not None:
@@ -1998,6 +2046,127 @@ def _facts_in_time(ranked: list[RecallHit], rows: dict[str, Any], ask: Any) -> l
         order.append(hit)
         placed.add(hit.id)
     return order
+
+
+#: How often a search that its answers' occasions crowd is asked for more.
+_CROWD_ASKS = 3
+#: How many of a name's newest dated entries are read for one event's occasions.
+_OCCASIONS_READ = 500
+
+
+def _event_of(row: Any) -> tuple[Any, ...] | None:
+    """What the fact *row* is an occasion of (``fact_days.event_key``)."""
+    from kazma_core.memory.fact_days import event_key, metadata_of
+
+    meta = metadata_of(_field(row, "metadata_json"))
+    return event_key(_field(row, "subject"), _field(row, "predicate"), _field(row, "object"), meta)
+
+
+def _one_per_event(find: Any, hydrate: Any, want: int) -> list[tuple[str, float]]:
+    """``find(k)``'s best *want* facts, counting the occasions of one event as
+    one (the best of them stands for it), asked for more when they crowd it: a
+    visit to the dentist every week pushed "my dentist is Dr Sara" out of every
+    search, and the background a question is measured against was the visits'
+    own (the second review of W4, 2026-11-24)."""
+    k = want
+    for _ask in range(_CROWD_ASKS + 1):
+        found = [(str(bid), float(sim)) for bid, sim in find(k)]
+        rows = hydrate([bid for bid, _sim in found])
+        taken: set[Any] = set()
+        out: list[tuple[str, float]] = []
+        for bid, sim in found:
+            key = _event_of(rows[bid]) if bid in rows else None
+            if key is not None and key in taken:
+                continue
+            taken.add(key)
+            out.append((bid, sim))
+        if len(out) >= want or len(found) < k or len(out) == len(found):
+            break
+        k *= 8
+    return out[:want]
+
+
+def _without_other_occasions(rows: dict[str, Any]) -> dict[str, Any]:
+    """*rows* with one fact for each event: the first found of it."""
+    taken: set[Any] = set()
+    out: dict[str, Any] = {}
+    for bid, row in rows.items():
+        key = _event_of(row)
+        if key is not None:
+            if key in taken:
+                continue
+            taken.add(key)
+        out[bid] = row
+    return out
+
+
+def _by_event(ranked: list[RecallHit], rows: dict[str, Any], conn: sqlite3.Connection | None,
+              tenant_id: str) -> list[RecallHit]:
+    """*ranked*, where a hit that is an occasion of an event stands for all of
+    them: the latest is shown, with how many more there are (``more``) -- every
+    one of them for a question about a period ("what did I do last month") or
+    one asking for all of a kind. *rows* gains the occasions read."""
+    from kazma_core.memory.fact_days import event_day, metadata_of
+
+    ask = _ASK.get()
+    every = _LISTING.get() or (ask is not None and ask.period)
+    out: list[RecallHit] = []
+    for hit in ranked:
+        row = rows.get(hit.id)
+        key = _event_of(row) if row is not None else None
+        if key is None or _field(row, "valid_until") is not None:
+            out.append(hit)
+            continue
+        held = {bid: r for bid, r in rows.items() if _event_of(r) == key and _field(r, "valid_until") is None}
+        if conn is not None:
+            held.update(_occasions(conn, tenant_id, row, key))
+        order = sorted(held, key=lambda b: event_day(metadata_of(_field(held[b], "metadata_json"))), reverse=True)
+        rows.update(held)
+        for bid in order if every else order[:1]:
+            shown = RecallHit(id=bid, content=_format_belief_text(held[bid]), score=hit.score, kind=hit.kind,
+                              source=hit.source, metadata=dict(hit.metadata))
+            if not every and len(order) > 1:
+                shown.metadata["more"] = len(order) - 1
+            out.append(shown)
+    return out
+
+
+def _occasions(conn: sqlite3.Connection, tenant_id: str, row: Any, key: tuple[Any, ...]) -> dict[str, Any]:
+    """The current facts of the event *key* that *row* is an occasion of."""
+    try:
+        ids = [str(r[0]) for r in conn.execute(
+            "SELECT id FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? "
+            f"AND {BELIEF_ACTIVE_SQL} AND COALESCE(object, '') != '' "  # nosec B608 - fixed clause, values bound
+            "AND (instr(metadata_json, '\"happened\"') > 0 OR instr(metadata_json, '\"planned\"') > 0) "
+            "ORDER BY valid_from DESC LIMIT ?",
+            (tenant_id, _field(row, "subject"), _field(row, "predicate"), _OCCASIONS_READ)).fetchall()]
+    except sqlite3.Error:
+        logger.debug("[recall] an event's occasions could not be read", exc_info=True)
+        return {}
+    return {str(r["id"]): r for r in _hydrate_beliefs(conn, ids, tenant_id) if _event_of(r) == key}
+
+
+def _latest_first(ranked: list[RecallHit], rows: dict[str, Any]) -> list[RecallHit]:
+    """*ranked* with the occasions of one event ("visited the dentist", in
+    May and in November) in the places they hold, the latest first: they say
+    the same words, so nothing else orders them, and "last time" is the
+    latest."""
+    from kazma_core.memory.fact_days import event_day, metadata_of
+
+    places: dict[tuple[Any, ...], list[int]] = {}
+    days: dict[str, str] = {}
+    for at, hit in enumerate(ranked):
+        row = rows.get(hit.id)
+        key = _event_of(row) if row is not None else None
+        if key is not None:
+            days[hit.id] = event_day(metadata_of(_field(row, "metadata_json")))
+            places.setdefault(key, []).append(at)
+    out = list(ranked)
+    for held in places.values():
+        for at, hit in zip(held, sorted((ranked[i] for i in held), key=lambda h: days[h.id], reverse=True),
+                           strict=True):
+            out[at] = hit
+    return out
 
 
 def _belief_candidate(
@@ -4080,6 +4249,16 @@ def _reading_tag(hit: RecallHit) -> str:
     return READING_TAG_AR if arabic else READING_TAG_EN
 
 
+def _day_read_tag(hit: RecallHit) -> str:
+    """After the day of a fact the user stated when the day is the model's
+    reading, in the fact's own language: the fact is the user's word, the day
+    is not (``fact_days.days_method``)."""
+    from kazma_core.documents.arabic import is_rtl_dominant
+
+    arabic = is_rtl_dominant(str((hit.metadata or {}).get("object") or shown_text(hit)))
+    return f"، {READING_TAG_AR[1:-1]}" if arabic else f", {READING_TAG_EN[1:-1]}"
+
+
 def _one_line(text: str) -> str:
     """*text* on one line: every run of whitespace (newlines, Unicode line
     separators) one space. A recalled memory is one entry of the block, so a
@@ -4101,10 +4280,12 @@ def _dated_line(hit: RecallHit, shown: str) -> str:
         # An earlier value (part F): the months it held, and no "before
         # that" -- the question asked about this one.
         return f"[{meta.get('since') or '?'} to {meta['until']}] {shown}"
+    read = _day_read_tag(hit) if meta.get("day_read") else ""
     if meta.get("on"):
-        shown = f"[on {meta['on']}] {shown}"
+        more = f", and {int(meta['more'])} more" if meta.get("more") else ""
+        shown = f"[{meta['on']}{read}{more}] {shown}"
     elif meta.get("since"):
-        shown = f"[since {meta['since']}] {shown}"
+        shown = f"[since {meta['since']}{read}] {shown}"
     if meta.get("before"):
         # A changed value: where each value was said, when the space still
         # remembers it (the memory plan's W4).

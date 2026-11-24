@@ -1794,8 +1794,9 @@ EXTRACTION_AVOID: dict[str, list[tuple[str, list[str] | None, str]]] = {
 
 #: The extraction dataset's version: v2 added ``extras`` and ``avoid`` and
 #: the scores read the value (benchmark audit F1); v3 the turns that ask
-#: what part C2 changed (:data:`EXTRACTION_C2_TURNS`).
-EXTRACTION_VERSION = 3
+#: what part C2 changed (:data:`EXTRACTION_C2_TURNS`); v4 the event turns,
+#: scored by what is stored too (:data:`EXTRACTION_EVENT_TURNS`).
+EXTRACTION_VERSION = 4
 
 _EMPLOYER = ["works_at", "employer", "company"]
 _HOME = ["lives_in", "location", "city", "moved_to", "home"]
@@ -1856,7 +1857,8 @@ def _c2_turn(spec: dict[str, Any]) -> dict[str, Any]:
                  for s, p, o, *extra in alts] for alts in rows]
 
     turn: dict[str, Any] = {"id": spec["id"], "lang": spec["lang"], "user": spec["user"],
-                            "said_on": _C2_SAID_ON, "new_in": 3, "facts": facts_of(spec["facts"])}
+                            "said_on": spec.get("said_on") or _C2_SAID_ON, "new_in": spec.get("new_in") or 3,
+                            "facts": facts_of(spec["facts"])}
     if spec.get("previous"):
         turn["previous"] = spec["previous"]
     if spec.get("held"):
@@ -1865,6 +1867,241 @@ def _c2_turn(spec: dict[str, Any]) -> dict[str, Any]:
         turn["extras"] = facts_of(spec["extras"])
     if spec.get("avoid"):
         turn["avoid"] = [{"subject": a, **({"predicates": b} if b else {}), "object": c} for a, b, c in spec["avoid"]]
+    if spec.get("stored"):
+        turn["stored"] = spec["stored"]
+    return turn
+
+
+def _said(subject: str, predicate: str, kind: str, obj: str) -> dict[str, Any]:
+    return {"subject": subject, "predicate": predicate, "predicate_type": kind, "object": obj, "confidence": 0.9}
+
+
+#: The day the event turns were said, a Sunday.
+_EVENTS_SAID_ON = "2026-05-31"
+_WENT = ["visited", "went_to", "attended", "been_to"]
+_BOUGHT = ["bought", "purchased"]
+
+
+def _told(said_on: str, user: str, *facts: dict[str, Any]) -> dict[str, Any]:
+    """A turn of the chat before an event turn, with the reply it got."""
+    return {"said_on": said_on, "user": user, "written": list(facts)}
+
+
+def _did(predicate: str, obj: str, on: str) -> dict[str, Any]:
+    """An event as the model returns it."""
+    return {**_said("user", predicate, "set", obj), "on": on}
+
+
+def _event(days: list[str], *objects: str, kind: str = "event") -> dict[str, Any]:
+    """An event the store must hold: known by *objects*, its dated entries on
+    exactly *days*."""
+    return {"objects": list(objects), "days": days, "kind": kind}
+
+
+def _of_user(predicate: str, obj: str) -> dict[str, Any]:
+    return {"subject": "user", "predicates": [predicate], "object": obj}
+
+
+#: Event turns (v4, the memory plan's W4 and its review, 2026-11-24): each
+#: shape in English and in Arabic, scored by the reply and by what is stored
+#: after it (``kazma_core/memory/benchmark_events.py`` says what ``stored``
+#: holds). The shapes the review found are here: a call with a day (never the
+#: user's name), a move told as an event (never their home), one place on two
+#: days, a retelling without the day, a wrong day corrected, a day to come, a
+#: pasted first-person line, and turns with no event at all. A fact's ``on``
+#: is the day the reply must give; ``held`` the facts the model is shown.
+EXTRACTION_EVENT_TURNS: list[dict[str, Any]] = [
+    # Two events of one day, with a place and a price.
+    {"id": "v01", "lang": "en",
+     "user": "Last Saturday I went to a pottery exhibition at the Sadu House and bought a blue vase for 12 dinars.",
+     "facts": [[("user", _WENT, "pottery exhibition", {"on": "2026-05-30"})],
+               [("user", _BOUGHT, "blue vase", {"on": "2026-05-30"})]],
+     "stored": {"entries": [_event(["2026-05-30"], "pottery exhibition"), _event(["2026-05-30"], "blue vase")]}},
+    {"id": "w01", "lang": "ar", "user": "السبت اللي فات رحت معرض فخار في بيت السدو واشتريت مزهرية زرقا بـ ١٢ دينار.",
+     "facts": [[("user", _WENT, "معرض فخار", {"on": "2026-05-30"})],
+               [("user", _BOUGHT, "مزهرية زرقا", {"on": "2026-05-30"}),
+                ("user", _BOUGHT, "مزهرية زرقاء", {"on": "2026-05-30"})]],
+     "stored": {"entries": [_event(["2026-05-30"], "معرض فخار"),
+                            _event(["2026-05-30"], "مزهرية زرقا", "مزهرية زرقاء")]}},
+    # A call with a day: never the user's name ("called" read as name_is).
+    {"id": "v02", "lang": "en", "user": "I called my mom yesterday.", "held": [("user", "name_is", "Sam")],
+     "facts": [], "extras": [[("user", ["called", "phoned", "spoke_with"], "mom")]],
+     "avoid": [("user", ["name", "name_is", "preferred_name"], "mom")],
+     "stored": {"before": [_told("2026-05-20", "My name is Sam.", _said("user", "name_is", "functional", "Sam"))],
+                "optional": [_event(["2026-05-30"], "mom")], "stands": [_of_user("name_is", "Sam")],
+                "none": [_of_user("name_is", "mom"), _of_user("preferred_name", "mom")],
+                "not_asked": [{"subject": "user", "object": "mom"}]}},
+    {"id": "w02", "lang": "ar", "user": "اتصلت على أمي أمس.", "held": [("user", "name_is", "سالم")],
+     "facts": [], "extras": [[("user", ["called", "phoned", "spoke_with"], "أمي")]],
+     "avoid": [("user", ["name", "name_is", "preferred_name"], "أمي")],
+     "stored": {"before": [_told("2026-05-20", "اسمي سالم.", _said("user", "name_is", "functional", "سالم"))],
+                "optional": [_event(["2026-05-30"], "أمي")], "stands": [_of_user("name_is", "سالم")],
+                "none": [_of_user("name_is", "أمي"), _of_user("preferred_name", "أمي")],
+                "not_asked": [{"subject": "user", "object": "أمي"}]}},
+    # A move told as an event: the stated home stands, the move is asked.
+    {"id": "v03", "lang": "en", "user": "I moved to Porto last Saturday.", "held": [("user", "lives_in", "Lisbon")],
+     "facts": [[("user", [*_HOME, "moved_to"], "Porto", {"on": "2026-05-30"})]],
+     "stored": {"before": [_told("2026-05-20", "I live in Lisbon.", _said("user", "lives_in", "functional", "Lisbon"))],
+                "optional": [_event(["2026-05-30"], "Porto")], "stands": [_of_user("lives_in", "Lisbon")],
+                "none": [_of_user("lives_in", "Porto")], "asks": [{"subject": "user", "object": "Porto"}]}},
+    {"id": "w03", "lang": "ar", "user": "انتقلت إلى بورتو السبت اللي فات.", "held": [("user", "lives_in", "لشبونة")],
+     "facts": [[("user", [*_HOME, "moved_to"], "بورتو", {"on": "2026-05-30"})]],
+     "stored": {"before": [_told("2026-05-20", "أسكن في لشبونة.", _said("user", "lives_in", "functional", "لشبونة"))],
+                "optional": [_event(["2026-05-30"], "بورتو")], "stands": [_of_user("lives_in", "لشبونة")],
+                "none": [_of_user("lives_in", "بورتو")], "asks": [{"subject": "user", "object": "بورتو"}]}},
+    # The same visit on two days: two occasions.
+    {"id": "v04", "lang": "en", "user": "I went to Jahra Farm again yesterday.",
+     "held": [("user", "visited", "Jahra Farm", "on 2026-05-02")],
+     "facts": [[("user", _WENT, "Jahra Farm", {"on": "2026-05-30"})]],
+     "stored": {"before": [_told("2026-05-03", "I went to Jahra Farm yesterday.",
+                                 _did("visited", "Jahra Farm", "2026-05-02"))],
+                "entries": [_event(["2026-05-02", "2026-05-30"], "Jahra Farm")]}},
+    {"id": "w04", "lang": "ar", "user": "رحت مزرعة الجهراء مرة ثانية أمس.",
+     "held": [("user", "visited", "مزرعة الجهراء", "on 2026-05-02")],
+     "facts": [[("user", _WENT, "مزرعة الجهراء", {"on": "2026-05-30"})]],
+     "stored": {"before": [_told("2026-05-03", "رحت مزرعة الجهراء أمس.",
+                                 _did("visited", "مزرعة الجهراء", "2026-05-02"))],
+                "entries": [_event(["2026-05-02", "2026-05-30"], "مزرعة الجهراء")]}},
+    # A retelling without its day: no second entry, and the day stays.
+    {"id": "v05", "lang": "en", "user": "That Canon camera I bought takes great photos.",
+     "held": [("user", "bought", "a Canon camera", "on 2026-05-16")], "facts": [],
+     "extras": [[("user", [*_BOUGHT, "owns", "has", "likes"], "Canon camera"), ("canon_camera", ["takes"], "great photos"),
+                 ("canon_camera", ["takes", "quality"], "photos")]],
+     "stored": {"before": [_told("2026-05-16", "I bought a Canon camera today.",
+                                 _did("bought", "a Canon camera", "2026-05-16"))],
+                "entries": [_event(["2026-05-16"], "Canon camera")], "once": [_of_user("bought", "Canon camera")]}},
+    {"id": "w05", "lang": "ar", "user": "كاميرا كانون اللي اشتريتها تصور حلو.",
+     "held": [("user", "bought", "كاميرا كانون", "on 2026-05-16")], "facts": [],
+     "extras": [[("user", [*_BOUGHT, "owns", "has", "likes"], "كاميرا كانون"), ("كاميرا_كانون", ["takes"], "حلو")]],
+     "stored": {"before": [_told("2026-05-16", "اشتريت كاميرا كانون اليوم.",
+                                 _did("bought", "كاميرا كانون", "2026-05-16"))],
+                "entries": [_event(["2026-05-16"], "كاميرا كانون")], "once": [_of_user("bought", "كاميرا كانون")]}},
+    # A wrong day corrected.
+    {"id": "v06", "lang": "en", "said_on": "2026-05-25",
+     "user": "Sorry, the Nawal concert was on Friday, not Saturday.",
+     "held": [("user", "attended", "the Nawal concert", "on 2026-05-23")],
+     "facts": [[("user", _WENT, "Nawal concert", {"on": "2026-05-22"})]],
+     "stored": {"before": [_told("2026-05-24", "I went to the Nawal concert yesterday.",
+                                 _did("attended", "the Nawal concert", "2026-05-23"))],
+                "entries": [_event(["2026-05-22"], "Nawal concert")]}},
+    {"id": "w06", "lang": "ar", "said_on": "2026-05-25", "user": "عفواً، حفلة نوال كانت يوم الجمعة مو السبت.",
+     "held": [("user", "attended", "حفلة نوال", "on 2026-05-23")],
+     "facts": [[("user", _WENT, "حفلة نوال", {"on": "2026-05-22"})]],
+     "stored": {"before": [_told("2026-05-24", "رحت حفلة نوال أمس.", _did("attended", "حفلة نوال", "2026-05-23"))],
+                "entries": [_event(["2026-05-22"], "حفلة نوال")]}},
+    # A coming appointment: planned, never a day it happened.
+    {"id": "v07", "lang": "en", "user": "I have a dentist appointment on 4 June.",
+     "facts": [[("user", ["has_appointment", "appointment", "has", "scheduled", "dentist_appointment"],
+                 "dentist appointment", {"on": "2026-06-04"}),
+                ("user", ["appointment", "has_appointment", "dentist_appointment"], "dentist", {"on": "2026-06-04"})]],
+     "stored": {"entries": [_event(["2026-06-04"], "dentist appointment", "dentist", kind="planned")]}},
+    {"id": "w07", "lang": "ar", "user": "عندي موعد عند دكتور الأسنان يوم ٤ يونيو.",
+     "facts": [[("user", ["has_appointment", "appointment", "has", "scheduled", "dentist_appointment"],
+                 "دكتور الأسنان", {"on": "2026-06-04"}),
+                ("user", ["has_appointment", "appointment", "has", "scheduled"], "موعد", {"on": "2026-06-04"})]],
+     "stored": {"entries": [_event(["2026-06-04"], "دكتور الأسنان", "موعد", "الأسنان", kind="planned")]}},
+    # A pasted first-person line: not the user's.
+    {"id": "v08", "lang": "en", "user": "Fix the grammar: I goed to Rome last week and buyed a leather bag.",
+     "facts": [], "avoid": [("user", None, "Rome"), ("user", None, "leather bag")],
+     "stored": {"none": [{"subject": "user", "object": "Rome"}, {"subject": "user", "object": "leather bag"}],
+                "undated": True}},
+    {"id": "w08", "lang": "ar", "user": "صحح النص: رحت روما الاسبوع الي فات واشتريت شنطه جلد.",
+     "facts": [], "avoid": [("user", None, "روما"), ("user", None, "شنطه جلد")],
+     "stored": {"none": [{"subject": "user", "object": "روما"}, {"subject": "user", "object": "شنطة جلد"}],
+                "undated": True}},
+    # A pasted chat line, asked about.
+    {"id": "v09", "lang": "en",
+     "user": "What does she mean by this?\n[30/05/2026, 12:01] Dana: I went to Dubai yesterday and met Khaled.",
+     "facts": [], "extras": [[("dana", _WENT, "Dubai"), ("dana", ["met"], "Khaled")]],
+     "avoid": [("user", None, "Dubai"), ("user", None, "Khaled")],
+     "stored": {"none": [{"subject": "user", "object": "Dubai"}, {"subject": "user", "object": "Khaled"}]}},
+    {"id": "w09", "lang": "ar",
+     "user": "شنو تقصد بهالرسالة؟\n[30/05/2026, 12:01] دانة: رحت دبي أمس وقابلت خالد.",
+     "facts": [], "extras": [[("دانة", _WENT, "دبي"), ("دانة", ["met"], "خالد"), ("dana", _WENT, "دبي"),
+                              ("dana", ["met"], "خالد")]],
+     "avoid": [("user", None, "دبي"), ("user", None, "خالد")],
+     "stored": {"none": [{"subject": "user", "object": "دبي"}, {"subject": "user", "object": "خالد"}]}},
+    # No event: a trip asked about, a question, a habit.
+    {"id": "v10", "lang": "en", "user": "What should I pack for a trip to Rome?", "facts": [],
+     "stored": {"undated": True}},
+    {"id": "w10", "lang": "ar", "user": "شنو آخذ معاي لو سافرت روما؟", "facts": [], "stored": {"undated": True}},
+    {"id": "v11", "lang": "en", "user": "How do I renew a passport in Kuwait?", "facts": [],
+     "stored": {"undated": True}},
+    {"id": "w11", "lang": "ar", "user": "كيف أجدد الجواز في الكويت؟", "facts": [], "stored": {"undated": True}},
+    {"id": "v12", "lang": "en", "user": "I swim every Friday morning.",
+     "facts": [[("user", ["swims", "habit", "exercise", "hobby", "routine"], "Friday morning"),
+                ("user", ["habit", "exercise", "hobby", "routine", "activity"], "swim"),
+                ("user", ["habit", "exercise", "hobby", "routine", "activity"], "swimming")]],
+     "stored": {"undated": True}},
+    {"id": "w12", "lang": "ar", "user": "أسبح كل جمعة الصبح.",
+     "facts": [[("user", ["swims", "habit", "exercise", "hobby", "routine"], "جمعة"),
+                ("user", ["habit", "exercise", "hobby", "routine", "activity"], "أسبح"),
+                ("user", ["habit", "exercise", "hobby", "routine", "activity"], "السباحة")]],
+     "stored": {"undated": True}},
+    # Someone else's trip: never the user's.
+    {"id": "v13", "lang": "en", "user": "My sister Hana visited Istanbul last week.",
+     "facts": [[("hana", [*_WENT, "travelled_to", "traveled_to"], "Istanbul"),
+                ("sister", [*_WENT, "travelled_to", "traveled_to"], "Istanbul")]],
+     "extras": [[("user", ["sister", "has_sister"], "Hana"), ("hana", ["relation", "relationship"], "sister")]],
+     "avoid": [("user", None, "Istanbul")],
+     "stored": {"none": [{"subject": "user", "object": "Istanbul"}]}},
+    {"id": "w13", "lang": "ar", "user": "أختي هناء زارت اسطنبول الأسبوع اللي فات.",
+     "facts": [[("هناء", [*_WENT, "travelled_to", "traveled_to"], "اسطنبول"),
+                ("hana", [*_WENT, "travelled_to", "traveled_to"], "اسطنبول"),
+                ("hanaa", [*_WENT, "travelled_to", "traveled_to"], "اسطنبول"),
+                ("sister", [*_WENT, "travelled_to", "traveled_to"], "اسطنبول")]],
+     "extras": [[("user", ["sister", "has_sister"], "هناء"), ("هناء", ["relation", "relationship"], "أخت"),
+                 ("hana", ["relation", "relationship"], "sister"), ("hanaa", ["relation", "relationship"], "sister"),
+                 ("هناء", ["relation", "relationship"], "sister")]],
+     "avoid": [("user", None, "اسطنبول")],
+     "stored": {"none": [{"subject": "user", "object": "اسطنبول"}]}},
+    # A month, and no day at all.
+    {"id": "v14", "lang": "en", "user": "I ran the Muscat marathon in March.",
+     "facts": [[("user", ["ran", "completed", "finished", "participated_in"], "Muscat marathon", {"on": "2026-03"})]],
+     "stored": {"entries": [_event(["2026-03"], "Muscat marathon")]}},
+    {"id": "w14", "lang": "ar", "user": "ركضت ماراثون مسقط في مارس.",
+     "facts": [[("user", ["ran", "completed", "finished", "participated_in"], "ماراثون مسقط", {"on": "2026-03"})]],
+     "stored": {"entries": [_event(["2026-03"], "ماراثون مسقط")]}},
+    {"id": "v15", "lang": "en", "user": "I met my old teacher Adel at the mall.",
+     "facts": [[("user", ["met", "ran_into"], "Adel"), ("user", ["met", "ran_into"], "old teacher")]],
+     "extras": [[("adel", ["relation", "relationship", "role", "occupation"], "teacher"),
+                 ("adel", ["relation", "relationship"], "old teacher"), ("adel", ["former_teacher"], "old teacher"),
+                 ("user", ["teacher", "old_teacher"], "Adel"), ("user", ["former_teacher"], "Adel")]],
+     "stored": {"entries": [_event([], "Adel", "old teacher")], "undated": True}},
+    {"id": "w15", "lang": "ar", "user": "قابلت مدرسي القديم عادل في المول.",
+     "facts": [[("user", ["met", "ran_into"], "عادل"), ("user", ["met", "ran_into"], "مدرسي القديم")]],
+     "extras": [[("عادل", ["relation", "relationship", "role", "occupation"], "مدرس"),
+                 ("adel", ["relation", "relationship", "role", "occupation"], "مدرس"),
+                 ("عادل", ["relation", "relationship"], "مدرسي القديم"),
+                 ("عادل", ["former_teacher"], "مدرسي القديم"),
+                 ("user", ["teacher", "old_teacher"], "عادل"), ("user", ["former_teacher"], "عادل")]],
+     "stored": {"entries": [_event([], "عادل", "مدرسي القديم")], "undated": True}},
+    # A visit spoken of again by its day: the visit it was, never a second one
+    # (the second review, N8: without the held day the model worked out the 29th).
+    {"id": "v16", "lang": "en", "said_on": "2026-06-02", "user": "The dentist on Saturday really hurt me.",
+     "held": [("user", "visited", "the dentist", "on 2026-05-30")], "facts": [],
+     "extras": [[("user", [*_WENT, "hurt_by", "experienced", "felt"], "dentist"),
+                 ("user", ["experienced", "felt", "had"], "pain"), ("dentist", ["hurt"], "user")]],
+     "stored": {"before": [_told("2026-05-31", "I went to the dentist yesterday.",
+                                 _did("visited", "the dentist", "2026-05-30"))],
+                "entries": [_event(["2026-05-30"], "dentist")], "once": [_of_user("visited", "dentist")]}},
+    {"id": "w16", "lang": "ar", "said_on": "2026-06-02", "user": "دكتور الأسنان يوم السبت عورني وايد.",
+     "held": [("user", "visited", "دكتور الأسنان", "on 2026-05-30")], "facts": [],
+     "extras": [[("user", [*_WENT, "hurt_by", "experienced", "felt"], "دكتور الأسنان"),
+                 ("user", ["experienced", "felt", "had"], "ألم"), ("دكتور_الأسنان", ["hurt"], "user")]],
+     "stored": {"before": [_told("2026-05-31", "رحت دكتور الأسنان أمس.",
+                                 _did("visited", "دكتور الأسنان", "2026-05-30"))],
+                "entries": [_event(["2026-05-30"], "دكتور الأسنان")],
+                "once": [_of_user("visited", "دكتور الأسنان")]}},
+]
+
+
+def _event_turn(spec: dict[str, Any]) -> dict[str, Any]:
+    """An :data:`EXTRACTION_EVENT_TURNS` entry as the dataset holds it."""
+    turn = _c2_turn({**spec, "said_on": spec.get("said_on") or _EVENTS_SAID_ON, "new_in": 4})
+    if any(fact.get("predicates") == [] for rows in turn["stored"].values() if isinstance(rows, list)
+           for fact in rows if isinstance(fact, dict)):
+        raise ValueError(f"{spec['id']}: a stored fact with no name")
     return turn
 
 
@@ -1883,6 +2120,7 @@ def build_extraction() -> dict[str, Any]:
                              for a, b, c in EXTRACTION_AVOID[tid]]
         turns.append(turn)
     turns += [_c2_turn(spec) for spec in EXTRACTION_C2_TURNS]
+    turns += [_event_turn(spec) for spec in EXTRACTION_EVENT_TURNS]
     ids = [t["id"] for t in turns]
     if len(set(ids)) != len(ids):
         raise ValueError("duplicate extraction turn id")
@@ -1918,10 +2156,6 @@ def build_extraction() -> dict[str, Any]:
 #: ``pending`` names the corrections that must wait
 #: for the user (``memory/changes.py``), and only those; an ``("", ("answer",
 #: "confirm"))`` turn is the user answering the newest one.
-def _said(subject: str, predicate: str, kind: str, obj: str) -> dict[str, Any]:
-    return {"subject": subject, "predicate": predicate, "predicate_type": kind, "object": obj, "confidence": 0.9}
-
-
 def _update(subject: str, obj: str, replaced: str) -> dict[str, Any]:
     """An update the change log shows with Undo (``updates``): the user's
     fact *replaced* by *obj* (``memory/changes.py``)."""
@@ -3006,15 +3240,16 @@ def _extraction_lock(
         if old.get("recording") and not same:
             problems += _new_recording_problems(replies, identity)
             history.append({"date": _dt.date.today().isoformat(),
-                            "reason": f"a new extraction dataset (v{report['version']})",
+                            "reason": f"a new extraction dataset (v{report['version']})"
+                                      + (f": {new_recording}" if new_recording else ""),
                             "replaced": {"recording": old.get("recording"),
                                          "scores": {k: v for k, v in sorted((old.get("scores") or {}).items())
-                                                    if k.startswith("llm.")}}})
+                                                    if k.startswith(("llm.", "events."))}}})
     elif same:
         if new_recording:
             problems.append("--new-recording: the recording is the one already locked")
         problems += [f"{k}: {now[k]} < {v} on the same recording" for k, v in sorted(was.items())
-                     if k.startswith("llm.") and k in now and now[k] < v]
+                     if k.startswith(("llm.", "events.")) and k in now and now[k] < v]
     elif not new_recording:
         problems.append("the recording of the model's pass changed: a new recording is locked only on purpose, "
                         "with lock --new-recording \"why\" (its scores replace the old ones)")
@@ -3023,7 +3258,7 @@ def _extraction_lock(
         history.append({
             "date": _dt.date.today().isoformat(), "reason": new_recording,
             "replaced": {"recording": old.get("recording"),
-                         "scores": {k: v for k, v in sorted(was.items()) if k.startswith("llm.")}},
+                         "scores": {k: v for k, v in sorted(was.items()) if k.startswith(("llm.", "events."))}},
             # The prompt changes this recording measures for the first time.
             **({"answers": old["pending_recording"]} if old.get("pending_recording") else {}),
         })
@@ -3031,6 +3266,7 @@ def _extraction_lock(
             # How far each model-pass score could move with the model asked
             # again (two standard errors over the askings; R2).
             **({"spread": report["llm_spread"]} if report.get("llm_spread") else {}),
+            **({"events_spread": report["events_spread"]} if report.get("events_spread") else {}),
             # What each row rests on, for the benchmarks page (decision 6).
             "rests_on": extraction_rests_on(report), "recordings": history,
             # A declared prompt change still waiting for its recording.

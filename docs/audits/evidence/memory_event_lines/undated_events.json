@@ -1,0 +1,32 @@
+{
+ "what": "Finding 20 (memory plan, 2026-11-24): what the own-words check would leave out if it read events told with no day too. The two pilots' cached replies, the user's list entries with no day, a confidence of 0.6 or more and one of the verbs; no model call. Counts only.",
+ "verbs": [
+  "attended",
+  "visited",
+  "went",
+  "travelled",
+  "traveled",
+  "bought",
+  "purchased",
+  "sold",
+  "received",
+  "got",
+  "gave",
+  "met",
+  "started",
+  "began",
+  "finished",
+  "completed",
+  "spent"
+ ],
+ "replies": {
+  "qwen3.8-flash, dev 200": {
+   "undated_event_facts": 2421,
+   "not_in_the_users_own_words": 66
+  },
+  "deepseek-flash, pilot 50": {
+   "undated_event_facts": 549,
+   "not_in_the_users_own_words": 21
+  }
+ }
+}

@@ -408,6 +408,24 @@ def _lesson_signal(text: str) -> str | None:
 
 M = "kazma-core/kazma_core/"
 
+def _an_event_of_the_users(case: tuple[str, str]) -> bool:
+    from kazma_core.memory.event_text import stands_elsewhere
+
+    return not stands_elsewhere(case[1], case[0])
+
+
+def _denies(text: str) -> bool:
+    from kazma_core.memory.event_text import denies
+
+    return denies(text)
+
+
+def _says_the_30th(text: str) -> bool:
+    from kazma_core.memory.time_words import says_day
+
+    return says_day(text, "2026-05-30", "2026-05-31")
+
+
 PAIRS: list[Pair] = [
     Pair("lesson_correction", (M + "skills/lesson_signal.py",),
          "No, I meant the config in the other folder.", "لا، قصدي الملف اللي في المجلد الثاني.",
@@ -497,6 +515,32 @@ PAIRS: list[Pair] = [
          "Correct: my name is Ahmad.", "صحح: اسمي أحمد.", _facts, [("user", "name_is")]),
     Pair("own_words_reported_kept_out", (M + "memory/own_words.py",),
          "My sister said: I live in Lyon.", "قالت أختي: ساكنة في ليون.", _facts, []),
+    Pair("own_words_after_asking_kazmas_view", (M + "memory/own_words.py",),
+         "What do you think about my rugs? I live in Dubai.", "شنو رايك في سجادي؟ أنا ساكن في دبي.", _facts,
+         [("user", "lives_in")]),
+    Pair("own_words_after_do_you_think", (M + "memory/own_words.py",),
+         "Do you think so? I live in Dubai.", "تعتقد؟ أنا ساكن في دبي.", _facts, [("user", "lives_in")]),
+    Pair("own_words_after_asking_for_ideas", (M + "memory/own_words.py",),
+         "Do you have recipe ideas that feature cumin? I live in Dubai.",
+         "شنو يناسب هذا الجبن؟ أنا ساكن في دبي.", _facts, [("user", "lives_in")]),
+    Pair("own_words_i_want_to_tell_you", (M + "memory/own_words.py",),
+         "I want to tell you: I live in Dubai.", "بغيت أقولك: أنا ساكن في دبي.", _facts, [("user", "lives_in")]),
+    Pair("own_words_asked_about_a_text_kept_out", (M + "memory/own_words.py",),
+         "What do you think about this text?\nI live in Dubai.", "ما رأيك في هذا النص؟\nأنا ساكن في دبي.", _facts, []),
+    Pair("own_words_asked_what_someone_thinks_kept_out", (M + "memory/own_words.py",),
+         "Do you know what Ali thinks? I live in Dubai.", "شنو يعتقد علي؟ أنا ساكن في دبي.", _facts, []),
+    Pair("an_event_in_the_question_asked", (M + "memory/event_text.py", M + "memory/own_words.py"),
+         ("Do you think I should fertilize the plant I received in the mail?", "a plant in the mail"),
+         ("تعتقد لازم أسمد النبتة اللي وصلتني بالبريد؟", "نبتة بالبريد"), _an_event_of_the_users, True),
+    Pair("an_event_of_a_paste_kept_out", (M + "memory/event_text.py",),
+         ("Translate: I received a plant in the mail.", "a plant in the mail"),
+         ("ترجم: وصلتني نبتة بالبريد.", "نبتة بالبريد"), _an_event_of_the_users, False),
+    Pair("a_correction_denies", (M + "memory/event_text.py",),
+         "Sorry, not Ali, I meant Omar", "عفوا، مو علي، أقصد عمر", _denies, True),
+    Pair("a_day_said_by_its_weekday", (M + "memory/time_words.py",),
+         "It was last Saturday", "كان السبت اللي فات", _says_the_30th, True),
+    Pair("a_day_of_another_date", (M + "memory/time_words.py",),
+         "the email I got last month", "الإيميل اللي وصلني الشهر اللي فات", _says_the_30th, False),
     Pair("speaker_someone_else", (M + "memory/clause_subject.py",),
          "My sister is a nurse and moved", "أختي ممرضة وانتقلت", _named_last, "other"),
     Pair("speaker_sentence_end", (M + "memory/clause_subject.py",),

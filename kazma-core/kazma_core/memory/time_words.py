@@ -30,6 +30,10 @@ words of a question, in English and Arabic (Gulf and MSA), with no model:
   nothing), and a period named after it ("I moved to Porto last month"):
   :data:`TIME_AFTER_EN`, :func:`present_ar_words`.
 
+* **Whether a message says a day** (:func:`says_day`): the day itself, written
+  out, by its weekday or counted from the turn's own ("3 March", "last
+  Saturday", "قبل أسبوعين") -- whose words a day stands in.
+
 The words read here are not content words of the question
 (:attr:`TimeAsk.words`): a month's name matched nothing a memory says about
 the thing asked. Linear patterns only (``tests/test_regexes_stay_linear``):
@@ -40,10 +44,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
-__all__ = ["TIME_AFTER_EN", "TimeAsk", "present_ar_words", "read_time"]
+__all__ = ["TIME_AFTER_EN", "TimeAsk", "present_ar_words", "read_time", "says_day", "says_today_or_yesterday"]
 
 DAY = 86400.0
 
@@ -346,3 +350,249 @@ def read_time(question: str, *, now: float, zone: Any, past: bool | None = None)
     words = frozenset(w for span in (*spans, *now_words) for w in content_terms(span))
     return TimeAsk(start=start, end=end, history=history, said=said and start is not None,
                    words=words, named=", ".join(spans))
+
+# ── The day a message says ───────────────────────────────────────────────
+
+_WEEKDAYS_EN = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
+                "mon": 0, "tue": 1, "tues": 1, "wed": 2, "thu": 3, "thur": 3, "thurs": 3, "fri": 4}
+_WEEKDAYS_AR_RAW = {"الاثنين": 0, "الإثنين": 0, "الثلاثاء": 1, "الثلاثا": 1, "الأربعاء": 2, "الاربعا": 2,
+                    "الخميس": 3, "الجمعة": 4, "السبت": 5, "الأحد": 6}
+#: Days counted from the turn's own, as written; folded before they are read.
+_SAID_DAYS_EN = {"today": 0, "tonight": 0, "this morning": 0, "this afternoon": 0, "this evening": 0,
+                 "yesterday": -1, "last night": -1, "the day before yesterday": -2, "day before yesterday": -2,
+                 "tomorrow": 1}
+_SAID_DAYS_AR_RAW = {"اليوم": 0, "الليلة": 0, "هاليوم": 0, "أمس": -1, "امبارح": -1, "مبارح": -1, "البارحة": -1,
+                     "البارح": -1, "أول أمس": -2, "أمس الأول": -2, "أول امبارح": -2, "قبل أمس": -2, "بكرة": 1,
+                     "باجر": 1, "غدا": 1}
+_WEEKEND_EN = frozenset({"weekend"})
+_WEEKEND_AR_RAW = ("الويكند", "هالويكند", "ويكند", "نهاية الأسبوع", "عطلة الأسبوع")
+#: A period before the turn's: the days back it covers, (nearest, farthest);
+#: a calendar month or year ("last", "this") by its name.
+_LAST_EN: dict[str, tuple[int, int] | str] = {"last week": (1, 14), "past week": (0, 8), "this week": (0, 7),
+            "last month": "last month", "past month": (0, 31), "this month": "this month", "last year": "last year", "this year": "this year"}
+_LAST_AR_RAW: dict[str, tuple[int, int] | str] = {"الأسبوع الماضي": (1, 14), "الأسبوع اللي فات": (1, 14), "الأسبوع اللي طاف": (1, 14),
+                "الأسبوع اللي راح": (1, 14), "الأسبوع السابق": (1, 14), "هالأسبوع": (0, 7), "هذا الأسبوع": (0, 7),
+                "الشهر الماضي": "last month", "الشهر اللي فات": "last month", "الشهر اللي طاف": "last month",
+                "الشهر اللي راح": "last month", "الشهر السابق": "last month", "هالشهر": "this month", "هذا الشهر": "this month",
+                "السنة الماضية": "last year", "السنة اللي فاتت": "last year", "السنة اللي طافت": "last year",
+                "العام الماضي": "last year", "هالسنة": "this year", "هذي السنة": "this year"}
+_FIXED_DAYS = {"christmas eve": (12, 24), "christmas": (12, 25), "new year's eve": (12, 31), "new year": (1, 1),
+               "valentine": (2, 14), "halloween": (10, 31), "الكريسماس": (12, 25), "راس السنه": (1, 1)}
+_AGO_NUMBERS_EN = {**_EN_NUMBERS, "couple of": 2, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+_AGO_SAID_EN = re.compile(
+    r"\b(\d{1,3}|a couple of|couple of|a few|an|a|one|two|three|four|five|six|seven|eight|nine|ten|few) "
+    r"(days?|weeks?|months?|years?) (?:ago|back)\b")
+_AGO_SAID_AR = re.compile(
+    r"(?:^|\s)(?:و|ف)?(?:قبل|من|صار لي|صارلي)\s+(?:حوالي\s+)?(?:(\d{1,3})\s+)?(يومين|اسبوعين|شهرين|سنتين|يوم|ايام|"
+    r"اسبوع|اسابيع|شهر|شهور|اشهر|سنه|سنين|سنوات)(?=\s|$|[؟?.,،!])")
+#: A day of a month, a month, a year; a day of the month alone ("the 23rd").
+_NUM_MONTH_EN = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?(?: of)? ({_MONTH_WORDS})\b(?:,? ((?:19|20)\d\d))?")
+_MONTH_NUM_EN = re.compile(rf"\b({_MONTH_WORDS}) (\d{{1,2}})(?:st|nd|rd|th)?\b(?:,? ((?:19|20)\d\d))?")
+_NUMERIC_DAY = re.compile(r"\b((?:19|20)\d\d)-(\d{1,2})(?:-(\d{1,2}))?\b|\b(\d{1,2})[/.](\d{1,2})(?:[/.](\d{2,4}))?\b")
+_YEAR_SAID = re.compile(r"\b((?:19|20)\d\d)\b")
+_DOM_EN = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)\b")
+_DOM_AR = re.compile(r"يوم (\d{1,2})(?!\d)")
+_PLAIN_MONTH_EN = re.compile(rf"\b(?:in|during|on|since|of|from|by|early|mid|late|last|this) ({_MONTH_WORDS})\b"
+                             rf"(?: ((?:19|20)\d\d))?")
+
+
+class _SaidWords:
+    """The Arabic word tables, folded once."""
+
+    weekdays: dict[str, int] = {}
+    days: dict[str, int] = {}
+    weekend: tuple[str, ...] = ()
+    last: dict[str, tuple[int, int] | str] = {}
+    months: dict[str, int] = {}
+    num_month: re.Pattern[str] | None = None
+    month: re.Pattern[str] | None = None
+
+
+def _said_words() -> type[_SaidWords]:
+    if not _SaidWords.weekdays:
+        from kazma_core.documents.arabic import fold_for_search as fold
+
+        _SaidWords.days = {fold(w): n for w, n in _SAID_DAYS_AR_RAW.items()}
+        _SaidWords.weekend = tuple(fold(w) for w in _WEEKEND_AR_RAW)
+        _SaidWords.last = {fold(w): n for w, n in _LAST_AR_RAW.items()}
+        _SaidWords.months = _ar_months()
+        names = "|".join(sorted(_SaidWords.months, key=len, reverse=True))
+        _SaidWords.num_month = re.compile(rf"(\d{{1,2}})\s+(?:من\s+)?(?:شهر\s+)?({names})(?!\w)(?:\s+((?:19|20)\d\d))?")
+        _SaidWords.month = re.compile(
+            rf"(?:^|\s)(?:في|خلال|شهر|من)\s+(?:شهر\s+)?({names})(?!\w)(?:\s+((?:19|20)\d\d))?"
+            rf"|(?:^|\s)[وف]?ب({names})(?!\w)(?:\s+((?:19|20)\d\d))?")
+        weekdays: dict[str, int] = {}
+        for word, n in _WEEKDAYS_AR_RAW.items():
+            weekdays[fold(word)] = n
+        _SaidWords.weekdays = weekdays
+    return _SaidWords
+
+
+def _weekdays_said(text: str) -> set[int]:
+    words = re.findall(r"\w+", text)
+    arabic = _said_words().weekdays
+    out: set[int] = set()
+    for word in words:
+        if word in _WEEKDAYS_EN:
+            out.add(_WEEKDAYS_EN[word])
+            continue
+        for _prefix in range(3):  # "والسبت", "وبالخميس"; "للخميس"
+            if word in arabic:
+                out.add(arabic[word])
+                break
+            if word.startswith("لل") and "ال" + word[2:] in arabic:
+                out.add(arabic["ال" + word[2:]])
+                break
+            if word[:1] not in ("و", "ف", "ب", "ل"):
+                break
+            word = word[1:]
+    return out
+
+
+def _days_counted(text: str) -> set[int]:
+    """The days counted from the turn's own that *text* (folded) says:
+    "today" 0, "أمس" -1. The longer phrase is read, not the word in it."""
+    out: set[int] = set()
+    for table in (_SAID_DAYS_EN, _said_words().days):
+        for phrase in sorted(table, key=len, reverse=True):
+            pattern = r"(?<!\w)(?:[وف](?=[\u0621-\u064a]))?" + re.escape(phrase) + r"(?!\w)"
+            if re.search(pattern, text):
+                out.add(table[phrase])
+                text = re.sub(pattern, " ", text)
+    return out
+
+
+def _folded(text: str) -> str:
+    from kazma_core.documents.arabic import fold_for_search
+
+    return fold_for_search(text or "").replace("’", "'")
+
+
+def says_today_or_yesterday(text: str, day: str, said_on: str | None) -> bool:
+    """Whether *text* says *day* by counting from the turn's own (*said_on*):
+    "today", "last night", "أمس". The surest way there is to say a day."""
+    when, said = _as_date(day), _as_date(said_on)
+    return bool(when and said) and (when - said).days in _days_counted(_folded(text)) and when <= said
+
+
+def _as_date(value: str | None) -> date | None:
+    try:
+        return date.fromisoformat(str(value or ""))
+    except ValueError:
+        return None
+
+
+def _dates_said(text: str) -> list[tuple[int | None, int | None, int | None]]:
+    """Every date *text* (folded) writes out, as ``(year, month, day)`` with
+    None for what it leaves out. "3/4" is read both ways."""
+    words = _said_words()
+    out: list[tuple[int | None, int | None, int | None]] = []
+    for m in _NUM_MONTH_EN.finditer(text):
+        out.append((int(m[3]) if m[3] else None, _EN_MONTHS[m[2]], int(m[1])))
+    for m in _MONTH_NUM_EN.finditer(text):
+        out.append((int(m[3]) if m[3] else None, _EN_MONTHS[m[1]], int(m[2])))
+    for m in words.num_month.finditer(text):  # type: ignore[union-attr]
+        out.append((int(m[3]) if m[3] else None, words.months[m[2]], int(m[1])))
+    for m in _NUMERIC_DAY.finditer(text):
+        if m[1]:
+            out.append((int(m[1]), int(m[2]), int(m[3]) if m[3] else None))
+            continue
+        year = int(m[6]) + (2000 if len(m[6]) == 2 else 0) if m[6] else None
+        out += [(year, int(m[5]), int(m[4])), (year, int(m[4]), int(m[5]))]
+    for m in _PLAIN_MONTH_EN.finditer(text):
+        out.append((int(m[2]) if m[2] else None, _EN_MONTHS[m[1]], None))
+    for m in words.month.finditer(text):  # type: ignore[union-attr]
+        name, year = m[1] or m[3], m[2] or m[4]
+        out.append((int(year) if year else None, words.months[name], None))
+    for m in _YEAR_SAID.finditer(text):
+        out.append((int(m[1]), None, None))
+    for pattern in (_DOM_EN, _DOM_AR):
+        out += [(None, None, int(m[1])) for m in pattern.finditer(text)]
+    for phrase, (month, dom) in _FIXED_DAYS.items():
+        if phrase in text:
+            out.append((None, month, dom))
+    return out
+
+
+def says_day(text: str, day: str, said_on: str | None) -> bool:
+    """Whether *text*, told on *said_on*, says *day* (``YYYY-MM-DD``, or a
+    month or a year): writes it out ("3 March 2019", "٣ مارس"), names its
+    weekday near the turn ("last Saturday", "السبت اللي فات"), or counts to
+    it ("yesterday", "two weeks ago", "قبل أسبوعين"), in English or Arabic.
+    A word list and a calendar, no model.
+
+    Not merely that it names a day: "check this email I got last week" names
+    one, and the email's own "3 March 2019" passed for the user's day (the
+    second review of W4, 2026-11-24)."""
+    folded = _folded(text)
+    if not folded or not day:
+        return False
+    want = tuple(int(p) for p in str(day).split("-"))
+    year, month, dom = (*want, 0, 0)[:3]
+    for y, m, d in _dates_said(folded):
+        if y is not None and y != year:
+            continue
+        if m is not None and month and m != month:
+            continue
+        if d is not None and dom and d != dom:
+            continue
+        if not dom and d is not None and m is None:
+            continue  # "the 23rd" says no month and no year
+        if not month and y is None:
+            continue
+        if dom and d is None and m is None:
+            continue  # "2018" says no day of it
+        return True
+    said, first = _as_date(said_on), _as_date(f"{year:04d}-{month or 1:02d}-{dom or 1:02d}")
+    if said is None or first is None:
+        return False
+    if not dom:
+        last = date(year + (month == 12 or not month), month % 12 + 1 if month else 1, 1) - timedelta(days=1)
+    else:
+        last = first
+    # How many days before the turn it was: (nearest, farthest).
+    near, far = (said - last).days, (said - first).days
+    if dom and abs(near) <= 21 and first.weekday() in _weekdays_said(folded):
+        return True
+    if any(near <= -n <= far for n in _days_counted(folded)):
+        return True
+    weekend = any(w in folded for w in (*_WEEKEND_EN, *_said_words().weekend))
+    if dom and weekend and abs(near) <= 14 and first.weekday() in (3, 4, 5, 6):
+        return True
+    for table in (_LAST_EN, _said_words().last):
+        for phrase, back in table.items():
+            lo, hi = _days_back(back, said)
+            if phrase in folded and near <= hi and far >= lo:
+                return True
+    for count, unit in _counts_back(folded):
+        slack = 1.0 if unit == 1.0 else unit * 0.75
+        if near <= count * unit + slack and far >= count * unit - slack:
+            return True
+    return False
+
+
+def _days_back(back: tuple[int, int] | str, said: date) -> tuple[int, int]:
+    """The days back from *said* a period of :data:`_LAST_EN` covers."""
+    if not isinstance(back, str):
+        return back
+    first = said.replace(day=1) if back.endswith("month") else said.replace(month=1, day=1)
+    if back.startswith("this"):
+        return 0, (said - first).days
+    end = first - timedelta(days=1)
+    start = end.replace(day=1) if back.endswith("month") else end.replace(month=1, day=1)
+    return (said - end).days, (said - start).days
+
+
+def _counts_back(folded: str) -> list[tuple[float, float]]:
+    """"Two weeks ago", "قبل أسبوعين": (how many, the unit's days)."""
+    out: list[tuple[float, float]] = []
+    for m in _AGO_SAID_EN.finditer(folded):
+        raw = m[1]
+        out.append((float(raw) if raw.isdigit() else float(_AGO_NUMBERS_EN.get(raw, 1)), _EN_UNITS[m[2]]))
+    for m in _AGO_SAID_AR.finditer(folded):
+        if m[2] in _AR_DUALS:
+            count, unit = _AR_DUALS[m[2]]
+            out.append((float(count), unit))
+        else:
+            out.append((float(m[1]) if m[1] else 1.0, _AR_UNITS[m[2]]))
+    return out

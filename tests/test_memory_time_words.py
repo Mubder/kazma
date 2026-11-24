@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from kazma_core.memory.time_words import read_time
+from kazma_core.memory.time_words import read_time, says_day, says_today_or_yesterday
 
 #: Friday 25 September 2026, noon UTC.
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC).timestamp()
@@ -109,3 +109,48 @@ def test_past_true_reads_a_bare_period():
     assert read_time("in August", now=NOW, zone=UTC) is None
     ask = read_time("in August", now=NOW, zone=UTC, past=True)
     assert ask is not None and (ask.start, ask.end) == (_day(2026, 8, 1), _day(2026, 9, 1))
+
+
+#: A Sunday.
+TOLD_ON = "2026-05-31"
+
+
+@pytest.mark.parametrize(("english", "arabic", "day"), [
+    ("I got it in 2018.", "في عام ٢٠١٨", "2018"),
+    ("It was on May 3rd", "يوم ٣ مايو", "2026-05-03"),
+    ("on 3 March 2019", "يوم 3 مارس 2019", "2019-03-03"),
+    ("in April", "في أبريل", "2026-04"), ("in May", "بمايو", "2026-05"),
+    ("I think I started it last Monday.", "الاثنين اللي فات", "2026-05-25"),
+    ("it was last Saturday", "كان السبت الماضي", "2026-05-30"), ("back on Thursday", "وبالخميس رجعت", "2026-05-28"),
+    ("I went yesterday", "رحت أمس", "2026-05-30"), ("the day before yesterday", "أمس الأول", "2026-05-29"),
+    ("I went today", "رحت اليوم", "2026-05-31"),
+    ("two weeks ago", "اشتريتها قبل أسبوعين", "2026-05-17"), ("two weeks ago", "كانت من أسبوعين", "2026-05-18"),
+    ("three weeks ago", "قبل 3 أسابيع", "2026-05-10"), ("two months ago", "قبل شهرين", "2026-03-30"),
+    ("last week", "الأسبوع اللي فات", "2026-05-23"), ("last month", "الشهر الماضي", "2026-04"),
+    ("last year", "السنة اللي فاتت", "2025"), ("on the weekend", "هالويكند", "2026-05-30"),
+    ("the 29th", "يوم ٢٩", "2026-05-29"),
+])
+def test_a_message_says_a_day_in_either_language(english, arabic, day):
+    assert (says_day(english, day, TOLD_ON), says_day(arabic, day, TOLD_ON)) == (True, True)
+
+
+@pytest.mark.parametrize(("english", "arabic", "day"), [
+    # It names a day, another one.
+    ("Check this email I got last week", "شوف هذا الإيميل اللي وصلني الأسبوع الماضي", "2019-03-03"),
+    ("It came today", "وصلني اليوم", "2019-03-03"), ("I went yesterday", "رحت أمس", "2026-05-29"),
+    ("last Saturday", "السبت الماضي", "2026-05-29"), ("in 2018", "في عام 2018", "2018-05-04"),
+    ("the 23rd", "يوم 23", "2018"), ("on Monday", "الاثنين", "2025-05-26"),
+    # It names none.
+    ("Fix these 2 sentences", "صحح هالجملتين", "2019-03-03"), ("Yes, that one. Thank you!", "اي والله، شكرا", "2018"),
+    ("I may march on", "ابوي يحب الشاي", "2026-03"), ("", "", "2026-05-30"),
+])
+def test_a_message_that_says_another_day_or_none(english, arabic, day):
+    assert (says_day(english, day, TOLD_ON), says_day(arabic, day, TOLD_ON)) == (False, False)
+
+
+def test_a_day_said_by_counting_from_the_turns_own():
+    for text in ("I went yesterday", "last night", "رحت أمس", "امبارح"):
+        assert says_today_or_yesterday(text, "2026-05-30", TOLD_ON), text
+    for text in ("last Saturday", "on the 30th", "السبت الماضي", "أمس الأول", "the day before yesterday"):
+        assert not says_today_or_yesterday(text, "2026-05-30", TOLD_ON), text
+    assert not says_today_or_yesterday("bika", "2026-05-30", TOLD_ON)

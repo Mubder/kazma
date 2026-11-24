@@ -1655,15 +1655,11 @@ def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
         # Phase 3: an edit can change subject/object, so recompute counts for
         # the union of old AND new endpoints (a flip changes two entities).
         try:
-            from kazma_core.memory.entity_counts import recompute_entity_counts
+            from kazma_core.memory.entity_counts import entity_ids_named, recompute_entity_counts
 
-            affected = {
-                str(row["subject"]), str(row["object"]),
-                str(subject), str(obj),
-            }
-            recompute_entity_counts(
-                conn, [a for a in affected if a], tenant_id=space_of_record(row["tenant_id"])
-            )
+            owner = space_of_record(row["tenant_id"])
+            named = entity_ids_named(conn, [row["subject"], row["object"], subject, obj], tenant_id=owner)
+            recompute_entity_counts(conn, named, tenant_id=owner)
         except Exception:
             logger.debug("[memory_api] edit count recompute failed", exc_info=True)
         conn.commit()

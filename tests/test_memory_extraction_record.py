@@ -133,6 +133,24 @@ def test_a_file_of_another_prompt_is_not_continued(model, tmp_path, monkeypatch)
         _script().record_to(out, dataset=_dataset(2), limit=2, askings=2)
 
 
+def test_a_new_dataset_version_that_only_adds_turns_goes_on(model, tmp_path):
+    """v4 added turns to v3: the recording goes on with them alone. Changed or
+    dropped turns are another dataset (the negative control)."""
+    out = tmp_path / "extraction_llm.json"
+    older = {**_dataset(3), "version": _dataset(3)["version"] - 1}
+    _script().record_to(out, dataset=older, limit=100, askings=2)
+    assert len(model.asked) == 6
+    _script().record_to(out, dataset=_dataset(5), limit=100, askings=2)
+    recorded = _read(out)
+    assert len(model.asked) == 10 and recorded["extraction_version"] == _dataset(5)["version"]
+    assert recorded["complete"] is True and recorded["usage"]["calls"] == 10
+    for other in ({**_dataset(5), "version": 99, "turns": _dataset(5)["turns"][1:]},
+                  {**_dataset(5), "version": 99,
+                   "turns": [{**_dataset(5)["turns"][0], "user": "Other words."}, *_dataset(5)["turns"][1:]]}):
+        with pytest.raises(benchmark.StaleRecordingError, match="new file"):
+            _script().record_to(out, dataset=other, limit=100, askings=2)
+
+
 def test_a_recording_missing_a_turn_is_refused_not_guessed(model, tmp_path):
     """The negative control: a recording of fewer turns than the benchmark
     asks is an error naming this script, never a pass scored as an outage."""

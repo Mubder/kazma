@@ -1,0 +1,719 @@
+{
+ "what": "The review of W4 (dated event lines), 2026-11-24: the same cached replies of the two pilots written again through the fixed apply step, no model call, and the changed blocks answered. Every reply is replayed by its round, a reply's \"replaces\" by what the fact it named was. before: 81b7a2529's stores and blocks; after: this commit's. Ids and counts only.",
+ "runs": {
+  "qwen_dev_200": {
+   "questions": "dev 200",
+   "extractor": "qwen3.8-flash",
+   "stores": {
+    "before": {
+     "current": 51758,
+     "dated_events": 3271,
+     "dated_events_current": 2976,
+     "day_before": 0,
+     "day_source": 0,
+     "events_on_single_value": 21,
+     "facts": 55226,
+     "lives_in_current": 135,
+     "name_is_current": 64,
+     "planned": 0,
+     "planned_current": 0,
+     "starts": 1471
+    },
+    "after": {
+     "current": 51740,
+     "dated_events": 3343,
+     "dated_events_current": 3049,
+     "day_before": 19,
+     "day_source": 237,
+     "events_on_single_value": 0,
+     "facts": 55187,
+     "lives_in_current": 135,
+     "name_is_current": 63,
+     "planned": 292,
+     "planned_current": 251,
+     "starts": 1464
+    }
+   },
+   "deep_passes": {
+    "written": 48110,
+    "no_reply_kept": 494,
+    "replaces_that_named_a_fact_no_longer_held": 6,
+    "events_not_in_the_users_own_words": 67
+   },
+   "current_dated_events": {
+    "events_kept_both": 2908,
+    "events_only_before": 66,
+    "events_only_after": 139
+   },
+   "why": {
+    "only_before": {
+     "not in the user's own words (not kept)": 44,
+     "another day kept for the same words (corrected, or more exact)": 19,
+     "under the event's own name": 2,
+     "a single value's start": 1
+    },
+    "only_after": {
+     "its day kept (an undated retelling took it before)": 95,
+     "another occasion, or a corrected day": 33,
+     "no longer closed by another event": 10,
+     "under the event's own name": 1
+    }
+   },
+   "blocks": {
+    "before": {
+     "tokens_p50": 1423.5,
+     "tokens_p95": 1496,
+     "facts_mean": 3.87,
+     "event_lines_mean": 0.8,
+     "questions_with_an_event_line": 69,
+     "planned_lines": 0,
+     "answer_text_held": 57,
+     "answer_text_of": 129
+    },
+    "after": {
+     "tokens_p50": 1425.0,
+     "tokens_p95": 1496,
+     "facts_mean": 3.87,
+     "event_lines_mean": 0.83,
+     "questions_with_an_event_line": 72,
+     "planned_lines": 4,
+     "answer_text_held": 57,
+     "answer_text_of": 129
+    },
+    "changed": 45,
+    "without_event_facts_changed": 9,
+    "only_the_word_in_for_on": 31,
+    "otherwise_changed": [
+     "10d9b85a",
+     "2a1811e2",
+     "2ebe6c92",
+     "5a7937c8",
+     "6613b389",
+     "7e974930",
+     "9a707b81",
+     "a11281a2",
+     "d905b33f",
+     "db467c8c",
+     "dcfa8644",
+     "eeda8a6d",
+     "gpt4_68e94288",
+     "gpt4_d84a3211"
+    ]
+   },
+   "answer_text": {
+    "gained": [],
+    "lost": []
+   },
+   "answers": {
+    "main": {
+     "answered": {
+      "kazma": 0.69,
+      "before_without_events": 0.7,
+      "before": 0.755,
+      "after_without_events": 0.7,
+      "after": 0.76
+     },
+     "answered_second_judge": {
+      "kazma": 0.675,
+      "before_without_events": 0.685,
+      "before": 0.74,
+      "after_without_events": 0.685,
+      "after": 0.745
+     },
+     "unasked_or_refused": 0,
+     "changed_blocks_right": {
+      "events": {
+       "before": 34,
+       "after": 35,
+       "blocks": 45
+      },
+      "without_events": {
+       "before": 6,
+       "after": 6,
+       "blocks": 9
+      }
+     },
+     "by_type": {
+      "knowledge-update": {
+       "kazma": 0.839,
+       "before_without_events": 0.871,
+       "before": 0.903,
+       "after_without_events": 0.871,
+       "after": 0.903,
+       "n": 31
+      },
+      "multi-session": {
+       "kazma": 0.396,
+       "before_without_events": 0.491,
+       "before": 0.566,
+       "after_without_events": 0.491,
+       "after": 0.566,
+       "n": 53
+      },
+      "single-session-assistant": {
+       "kazma": 0.826,
+       "before_without_events": 0.826,
+       "before": 0.826,
+       "after_without_events": 0.826,
+       "after": 0.826,
+       "n": 23
+      },
+      "single-session-preference": {
+       "kazma": 1.0,
+       "before_without_events": 1.0,
+       "before": 1.0,
+       "after_without_events": 1.0,
+       "after": 1.0,
+       "n": 12
+      },
+      "single-session-user": {
+       "kazma": 1.0,
+       "before_without_events": 1.0,
+       "before": 1.0,
+       "after_without_events": 1.0,
+       "after": 1.0,
+       "n": 28
+      },
+      "temporal-reasoning": {
+       "kazma": 0.604,
+       "before_without_events": 0.528,
+       "before": 0.642,
+       "after_without_events": 0.528,
+       "after": 0.66,
+       "n": 53
+      }
+     }
+    },
+    "noise": {
+     "answered": {
+      "kazma": 0.69,
+      "before_without_events": 0.71,
+      "before": 0.765,
+      "after_without_events": 0.705,
+      "after": 0.765
+     },
+     "answered_second_judge": {
+      "kazma": 0.675,
+      "before_without_events": 0.7,
+      "before": 0.75,
+      "after_without_events": 0.695,
+      "after": 0.75
+     },
+     "unasked_or_refused": 0,
+     "changed_blocks_right": {
+      "events": {
+       "before": 35,
+       "after": 35,
+       "blocks": 45
+      },
+      "without_events": {
+       "before": 7,
+       "after": 6,
+       "blocks": 9
+      }
+     },
+     "by_type": {
+      "knowledge-update": {
+       "kazma": 0.839,
+       "before_without_events": 0.935,
+       "before": 0.903,
+       "after_without_events": 0.903,
+       "after": 0.903,
+       "n": 31
+      },
+      "multi-session": {
+       "kazma": 0.396,
+       "before_without_events": 0.491,
+       "before": 0.585,
+       "after_without_events": 0.491,
+       "after": 0.585,
+       "n": 53
+      },
+      "single-session-assistant": {
+       "kazma": 0.826,
+       "before_without_events": 0.826,
+       "before": 0.826,
+       "after_without_events": 0.826,
+       "after": 0.826,
+       "n": 23
+      },
+      "single-session-preference": {
+       "kazma": 0.917,
+       "before_without_events": 0.917,
+       "before": 1.0,
+       "after_without_events": 0.917,
+       "after": 1.0,
+       "n": 12
+      },
+      "single-session-user": {
+       "kazma": 1.0,
+       "before_without_events": 1.0,
+       "before": 1.0,
+       "after_without_events": 1.0,
+       "after": 1.0,
+       "n": 28
+      },
+      "temporal-reasoning": {
+       "kazma": 0.623,
+       "before_without_events": 0.547,
+       "before": 0.66,
+       "after_without_events": 0.547,
+       "after": 0.66,
+       "n": 53
+      }
+     }
+    },
+    "changes": {
+     "after vs before": {
+      "main": {
+       "gained": 1,
+       "lost": 0
+      },
+      "noise": {
+       "gained": 0,
+       "lost": 0
+      },
+      "gained_in_both": 0,
+      "lost_in_both": [],
+      "gained_main": [
+       "c9f37c46"
+      ],
+      "lost_main": [],
+      "gained_noise": [],
+      "lost_noise": []
+     },
+     "after_without_events vs before_without_events": {
+      "main": {
+       "gained": 0,
+       "lost": 0
+      },
+      "noise": {
+       "gained": 0,
+       "lost": 1
+      },
+      "gained_in_both": 0,
+      "lost_in_both": [],
+      "gained_main": [],
+      "lost_main": [],
+      "gained_noise": [],
+      "lost_noise": [
+       "4d6b87c8"
+      ]
+     },
+     "after vs after_without_events": {
+      "main": {
+       "gained": 12,
+       "lost": 0
+      },
+      "noise": {
+       "gained": 13,
+       "lost": 1
+      },
+      "gained_in_both": 10,
+      "lost_in_both": []
+     },
+     "after vs kazma": {
+      "main": {
+       "gained": 20,
+       "lost": 6
+      },
+      "noise": {
+       "gained": 22,
+       "lost": 7
+      },
+      "gained_in_both": 20,
+      "lost_in_both": [
+       "4d6b87c8",
+       "88432d0a_abs",
+       "a9f6b44c",
+       "b46e15ed",
+       "gpt4_2d58bcd6"
+      ]
+     }
+    },
+    "flips_main_to_noise": {
+     "kazma": 2,
+     "before_without_events": 4,
+     "before": 4,
+     "after_without_events": 3,
+     "after": 3
+    }
+   }
+  },
+  "deepseek_pilot_50": {
+   "questions": "pilot 50",
+   "extractor": "deepseek-flash",
+   "stores": {
+    "before": {
+     "current": 8728,
+     "dated_events": 853,
+     "dated_events_current": 782,
+     "day_before": 0,
+     "day_source": 0,
+     "events_on_single_value": 11,
+     "facts": 9319,
+     "lives_in_current": 30,
+     "name_is_current": 8,
+     "planned": 0,
+     "planned_current": 0,
+     "starts": 248
+    },
+    "after": {
+     "current": 8724,
+     "dated_events": 863,
+     "dated_events_current": 790,
+     "day_before": 6,
+     "day_source": 50,
+     "events_on_single_value": 0,
+     "facts": 9311,
+     "lives_in_current": 30,
+     "name_is_current": 7,
+     "planned": 44,
+     "planned_current": 38,
+     "starts": 248
+    }
+   },
+   "deep_passes": {
+    "written": 12089,
+    "no_reply_kept": 0,
+    "replaces_that_named_a_fact_no_longer_held": 2,
+    "events_not_in_the_users_own_words": 12
+   },
+   "current_dated_events": {
+    "events_kept_both": 761,
+    "events_only_before": 21,
+    "events_only_after": 29
+   },
+   "why": {
+    "only_before": {
+     "not in the user's own words (not kept)": 10,
+     "another day kept for the same words (corrected, or more exact)": 7,
+     "under the event's own name": 3,
+     "a single value's start": 1
+    },
+    "only_after": {
+     "its day kept (an undated retelling took it before)": 15,
+     "another occasion, or a corrected day": 11,
+     "under the event's own name": 3
+    }
+   },
+   "blocks": {
+    "before": {
+     "tokens_p50": 1459.0,
+     "tokens_p95": 1498,
+     "facts_mean": 3.52,
+     "event_lines_mean": 1.14,
+     "questions_with_an_event_line": 19,
+     "planned_lines": 0,
+     "answer_text_held": 12,
+     "answer_text_of": 37
+    },
+    "after": {
+     "tokens_p50": 1459.0,
+     "tokens_p95": 1498,
+     "facts_mean": 3.52,
+     "event_lines_mean": 1.18,
+     "questions_with_an_event_line": 20,
+     "planned_lines": 0,
+     "answer_text_held": 12,
+     "answer_text_of": 37
+    },
+    "changed": 11,
+    "without_event_facts_changed": 2,
+    "only_the_word_in_for_on": 8,
+    "otherwise_changed": [
+     "2a1811e2",
+     "d905b33f",
+     "gpt4_a56e767c"
+    ]
+   },
+   "answer_text": {
+    "gained": [],
+    "lost": []
+   },
+   "answers": {
+    "main": {
+     "answered": {
+      "kazma": 0.6,
+      "before_without_events": 0.64,
+      "before": 0.72,
+      "after_without_events": 0.64,
+      "after": 0.72
+     },
+     "answered_second_judge": {
+      "kazma": 0.6,
+      "before_without_events": 0.64,
+      "before": 0.74,
+      "after_without_events": 0.64,
+      "after": 0.74
+     },
+     "unasked_or_refused": 0,
+     "changed_blocks_right": {
+      "events": {
+       "before": 8,
+       "after": 8,
+       "blocks": 11
+      },
+      "without_events": {
+       "before": 1,
+       "after": 1,
+       "blocks": 2
+      }
+     },
+     "by_type": {
+      "knowledge-update": {
+       "kazma": 0.857,
+       "before_without_events": 1.0,
+       "before": 1.0,
+       "after_without_events": 1.0,
+       "after": 1.0,
+       "n": 7
+      },
+      "multi-session": {
+       "kazma": 0.375,
+       "before_without_events": 0.438,
+       "before": 0.625,
+       "after_without_events": 0.438,
+       "after": 0.625,
+       "n": 16
+      },
+      "single-session-assistant": {
+       "kazma": 0.5,
+       "before_without_events": 0.5,
+       "before": 0.5,
+       "after_without_events": 0.5,
+       "after": 0.5,
+       "n": 4
+      },
+      "single-session-preference": {
+       "kazma": 1.0,
+       "before_without_events": 1.0,
+       "before": 0.5,
+       "after_without_events": 1.0,
+       "after": 0.5,
+       "n": 2
+      },
+      "single-session-user": {
+       "kazma": 1.0,
+       "before_without_events": 1.0,
+       "before": 1.0,
+       "after_without_events": 1.0,
+       "after": 1.0,
+       "n": 5
+      },
+      "temporal-reasoning": {
+       "kazma": 0.562,
+       "before_without_events": 0.562,
+       "before": 0.688,
+       "after_without_events": 0.562,
+       "after": 0.688,
+       "n": 16
+      }
+     }
+    },
+    "noise": {
+     "answered": {
+      "kazma": 0.6,
+      "before_without_events": 0.66,
+      "before": 0.74,
+      "after_without_events": 0.66,
+      "after": 0.72
+     },
+     "answered_second_judge": {
+      "kazma": 0.62,
+      "before_without_events": 0.66,
+      "before": 0.76,
+      "after_without_events": 0.66,
+      "after": 0.74
+     },
+     "unasked_or_refused": 0,
+     "changed_blocks_right": {
+      "events": {
+       "before": 8,
+       "after": 7,
+       "blocks": 11
+      },
+      "without_events": {
+       "before": 1,
+       "after": 1,
+       "blocks": 2
+      }
+     },
+     "by_type": {
+      "knowledge-update": {
+       "kazma": 0.857,
+       "before_without_events": 1.0,
+       "before": 1.0,
+       "after_without_events": 1.0,
+       "after": 1.0,
+       "n": 7
+      },
+      "multi-session": {
+       "kazma": 0.375,
+       "before_without_events": 0.5,
+       "before": 0.688,
+       "after_without_events": 0.5,
+       "after": 0.625,
+       "n": 16
+      },
+      "single-session-assistant": {
+       "kazma": 0.5,
+       "before_without_events": 0.5,
+       "before": 0.5,
+       "after_without_events": 0.5,
+       "after": 0.5,
+       "n": 4
+      },
+      "single-session-preference": {
+       "kazma": 1.0,
+       "before_without_events": 1.0,
+       "before": 1.0,
+       "after_without_events": 1.0,
+       "after": 1.0,
+       "n": 2
+      },
+      "single-session-user": {
+       "kazma": 1.0,
+       "before_without_events": 1.0,
+       "before": 1.0,
+       "after_without_events": 1.0,
+       "after": 1.0,
+       "n": 5
+      },
+      "temporal-reasoning": {
+       "kazma": 0.562,
+       "before_without_events": 0.562,
+       "before": 0.625,
+       "after_without_events": 0.562,
+       "after": 0.625,
+       "n": 16
+      }
+     }
+    },
+    "changes": {
+     "after vs before": {
+      "main": {
+       "gained": 0,
+       "lost": 0
+      },
+      "noise": {
+       "gained": 0,
+       "lost": 1
+      },
+      "gained_in_both": 0,
+      "lost_in_both": [],
+      "gained_main": [],
+      "lost_main": [],
+      "gained_noise": [],
+      "lost_noise": [
+       "00ca467f"
+      ]
+     },
+     "after_without_events vs before_without_events": {
+      "main": {
+       "gained": 0,
+       "lost": 0
+      },
+      "noise": {
+       "gained": 0,
+       "lost": 0
+      },
+      "gained_in_both": 0,
+      "lost_in_both": [],
+      "gained_main": [],
+      "lost_main": [],
+      "gained_noise": [],
+      "lost_noise": []
+     },
+     "after vs after_without_events": {
+      "main": {
+       "gained": 5,
+       "lost": 1
+      },
+      "noise": {
+       "gained": 4,
+       "lost": 1
+      },
+      "gained_in_both": 3,
+      "lost_in_both": []
+     },
+     "after vs kazma": {
+      "main": {
+       "gained": 8,
+       "lost": 2
+      },
+      "noise": {
+       "gained": 7,
+       "lost": 1
+      },
+      "gained_in_both": 6,
+      "lost_in_both": [
+       "88432d0a_abs"
+      ]
+     }
+    },
+    "flips_main_to_noise": {
+     "kazma": 0,
+     "before_without_events": 1,
+     "before": 3,
+     "after_without_events": 1,
+     "after": 4
+    }
+   }
+  }
+ },
+ "own_words": {
+  "events_told": {
+   "qwen": 3888,
+   "deepseek": 959
+  },
+  "not_kept_with_the_first_rule": {
+   "qwen": 103,
+   "deepseek": 21
+  },
+  "not_kept": {
+   "qwen": 67,
+   "deepseek": 12
+  },
+  "of_those_in_the_message_but_not_in_own_words": {
+   "qwen": 48,
+   "deepseek": 4
+  },
+  "note": "The first rule asked half of the event's words in the turn's own words; the words of the fact held of it count now, when the day is the user's own."
+ },
+ "answers_note": "One reader (qwen3.7-plus), judges qwen3.8-flash then qwen3.7-plus, twice; only the changed blocks were asked (a block that is the same has the same answer).",
+ "answers_usage": {
+  "main": {
+   "asked_per_condition": {
+    "fix_events": 45,
+    "fixds_events": 11,
+    "fix_no_events": 9,
+    "fixds_no_events": 2
+   },
+   "answers": 67,
+   "reader_prompt": 95554,
+   "reader_cached": 35968,
+   "reader_out": 40813,
+   "judge_calls": 134,
+   "judge_prompt": 31663,
+   "judge_cached": 0,
+   "judge_out": 134
+  },
+  "noise": {
+   "asked_per_condition": {
+    "fix_events": 45,
+    "fixds_events": 11,
+    "fix_no_events": 9,
+    "fixds_no_events": 2
+   },
+   "answers": 67,
+   "reader_prompt": 95554,
+   "reader_cached": 12032,
+   "reader_out": 41608,
+   "judge_calls": 134,
+   "judge_prompt": 31187,
+   "judge_cached": 0,
+   "judge_out": 134
+  }
+ }
+}

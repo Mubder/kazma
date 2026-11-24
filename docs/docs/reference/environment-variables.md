@@ -509,7 +509,7 @@ build if the code reads one of these and it is missing from **both**
 | `KAZMA_COMPACT_PRESERVE_TOOL_RESULTS` | `12` | Tool results kept when a conversation is compacted. Dropping them all made the agent repeat the same calls. |
 | `KAZMA_SEMANTIC_COMPACT` | on | When history is trimmed (`/compact`, the 80% budget, a context-overflow error), the dropped part is summarized back into the conversation. `0` drops it without a summary. |
 | `KAZMA_SUMMARIES_MAX_ENTRIES` | `500` | Conversation summaries held in memory, one per thread; the least recently used go first. |
-| `KAZMA_PROMPT_CACHE` | on | Packs system notes into one stable prefix plus one per-turn block, so provider prompt caches hit (Anthropic gets explicit cache breakpoints). `0` restores the old one-message-per-note layout. |
+| `KAZMA_PROMPT_CACHE` | on | Packs system notes into one stable prefix plus one per-turn block, so provider prompt caches hit (Anthropic gets explicit cache breakpoints; on Model Studio, a background call of a measured Qwen model marks its instructions for the explicit cache). `0` restores the old one-message-per-note layout and marks nothing. |
 | `KAZMA_DETACHED_TTL_S` | `300` | A turn whose client disconnected is cancelled after this many seconds, so nobody pays for LLM calls no one will read. The clock starts when the client leaves, not when the turn began. |
 | `KAZMA_TURN_DURABLE_INTERVAL_S` | `2.0` | While an answer streams, its text is saved to the turn journal at least this often (that is what a refresh or reconnect recovers) … |
 | `KAZMA_TURN_DURABLE_CHARS` | `600` | … or after this many new characters, whichever comes first. |

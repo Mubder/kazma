@@ -19,6 +19,24 @@
     return window.KazmaFormat ? window.KazmaFormat.date(ms) : new Date(ms).toISOString().slice(0, 10);
   }
 
+  // A day as told, in the page's language: a day, a month and its year, or a year.
+  function dayOf(iso) {
+    var parts = String(iso || '').split('-').map(Number);
+    if (parts.length < 2 || !window.KazmaFormat) return String(iso || '');
+    if (parts.length < 3) {
+      return window.KazmaFormat.dateTime(new Date(parts[0], parts[1] - 1, 1), { year: 'numeric', month: 'long' });
+    }
+    return window.KazmaFormat.date(new Date(parts[0], parts[1] - 1, parts[2]));
+  }
+
+  var WHEN_TEXT = {
+    on: ['memory.you.when_on', 'On {day} (noted {since})'],
+    in: ['memory.you.when_in', 'In {day} (noted {since})'],
+    planned: ['memory.you.when_planned', 'Planned for {day} (noted {since})'],
+    was_planned: ['memory.you.when_was_planned', 'Was planned for {day} (noted {since})'],
+    since: ['memory.you.since_started', 'Since {started} (noted {since})'],
+  };
+
   var SOURCE_TEXT = {
     you: ['memory.you.source_you', 'You said it'],
     reading: ['memory.you.source_reading', "Kazma's reading of a conversation"],
@@ -86,8 +104,15 @@
       },
 
       datesText(fact) {
-        if (fact.started) return say('memory.you.since_started', 'Since {started} (noted {since})',
-          { started: fact.started, since: day(fact.since) });
+        var when = fact.when || {};
+        var pair = WHEN_TEXT[when.kind];
+        if (pair) {
+          var text = say(pair[0], pair[1],
+            { day: dayOf(when.day), started: dayOf(when.day), since: day(fact.since) });
+          // A day Kazma read into the person's own words (a whole reading says so already).
+          return when.reading && fact.source === 'you'
+            ? text + ' ' + say('memory.you.day_reading', "The date is Kazma's reading.") : text;
+        }
         return say('memory.you.since', 'Since {since}', { since: day(fact.since) });
       },
 

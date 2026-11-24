@@ -117,7 +117,13 @@ related or not.
    ("[12 Jan 2026] User: ..."), every fact with when it began: the start
    you named ("we moved last month", worked out from the day you said it),
    else the month you said it ("[since May 2026] user lives in London").
-   A fact that holds one value is shown with the value it replaced
+   Something you did or that happened to you is shown on its day ("[on 30
+   May 2026] user attended a pottery exhibition", "[in Apr 2026]"), and
+   something ahead as planned ("[planned for 3 Jun 2026]", then "[was
+   planned for ...]"). The same thing done on two days is two entries, the
+   latest shown first. Kazma works the day out from what you said, so on a
+   fact you stated yourself it is marked as Kazma's reading; forgetting the
+   message that gave it takes the day back. A fact that holds one value is shown with the value it replaced
    ("before that: Paris (Jan 2026 to May 2026)"). Dates are in the time
    zone set for scheduled tasks. A value you asked Kazma to forget is never
    shown as "before that".
@@ -129,7 +135,8 @@ related or not.
    my race in August?") is answered only from what was said in that
    period. A question about what was true then ("where did I live in
    June?") is answered from the facts that held then, an earlier value
-   included, with the turns said then first. "At first", "originally",
+   included, with the turns said then first; something you did counts on
+   its own day ("what did I buy last month?"). "At first", "originally",
    "before we moved", "في البداية" and "قبل ما" show a fact's earlier values
    right before the current one, each with the months it held. A question
    about a day ahead ("what's on March 22?") is left as it is.
@@ -148,8 +155,8 @@ related or not.
    telling the model these are only the best matches. The `memory_list`
    tool (a read tool: no approval) lists every memory that holds some words
    or comes from a period, newest first, 30 a page, each with its id: the
-   current facts (for a period, the values that held then) and the
-   conversations. It reads only the space it runs in, never a forgotten
+   current facts (for a period, the values that held then and what
+   happened in it) and the conversations. It reads only the space it runs in, never a forgotten
    memory, and its text reaches the model as data.
 10. **Ids.** Every recalled conversation ends with its id ("(memory
     e_...)"), with the ids of any turns joined to it, so `memory_read` can
@@ -685,7 +692,8 @@ entry, never another member's. Each shows:
 - **where it came from**: you said it, Kazma's reading of a conversation,
   Kazma noted it with a memory tool, or a tool reported it;
 - **since when** it holds, and the start you named for it ("since 2024"),
-  if you did;
+  if you did; for something you did, the day it happened, and for something
+  ahead the day it is planned for;
 - **what it was before**, under "Before", each earlier value with when it
   held.
 

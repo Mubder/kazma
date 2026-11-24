@@ -123,8 +123,10 @@ def merge_same_word_predicates(
     from kazma_core.memory.hygiene import invalidate_belief
 
     groups: dict[tuple[str, str, frozenset[str]], list[dict[str, Any]]] = {}
-    for bid, subject, predicate, ptype, obj, valid_from, method in conn.execute(
-        "SELECT id, subject, predicate, predicate_type, object, valid_from, extraction_method "
+    from kazma_core.memory.fact_days import event_day, metadata_of
+
+    for bid, subject, predicate, ptype, obj, valid_from, method, meta in conn.execute(
+        "SELECT id, subject, predicate, predicate_type, object, valid_from, extraction_method, metadata_json "
         "FROM beliefs WHERE tenant_id = ? AND valid_until IS NULL AND invalidated_at IS NULL",
         (space_named_or_bound(tenant_id),),
     ).fetchall():
@@ -133,6 +135,8 @@ def merge_same_word_predicates(
             groups.setdefault((subject, ptype, key), []).append({
                 "id": bid, "predicate": predicate, "value": (obj or "").strip().lower(),
                 "when": float(valid_from or 0), "user": method in USER_SOURCES,
+                # One event on two days is two entries, whatever its names.
+                "day": event_day(metadata_of(meta)),
             })
 
     retire: list[dict[str, Any]] = []
@@ -145,12 +149,13 @@ def merge_same_word_predicates(
             keep = max(members, key=lambda m: m["when"])
             retire.extend(m for m in members if m is not keep)
         else:
-            seen: set[str] = set()
-            for m in sorted(members, key=lambda m: (not m["user"], m["when"])):
-                if m["value"] in seen:
+            seen: set[tuple[str, str]] = set()
+            for m in sorted(members, key=lambda m: (not m["user"], not m["day"], m["when"])):
+                told = {day for value, day in seen if value == m["value"]}
+                if told and (not m["day"] or m["day"] in told):
                     retire.append(m)
                 else:
-                    seen.add(m["value"])
+                    seen.add((m["value"], m["day"]))
 
     retired: list[str] = []
     for m in retire[: max(0, int(max_merges))]:

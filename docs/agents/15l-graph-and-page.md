@@ -64,7 +64,18 @@ drawing, the rest by extraction.
   (`entity_retire.retire_empty_entities`, from `invalidate_belief` and a
   supersede): a plain concept only -- own name and hash as aliases, no
   metadata, grouping, merge row or redirect onto it; not protected, major
-  or high-stakes. Declared in `tests/test_memory_deletes.py`.
+  or high-stakes. Declared in `tests/test_memory_deletes.py`. **A fact's
+  entities are asked for by their ids** (2026-11-24,
+  `entity_counts.entity_ids_named`: the value, its slug, and the entity of
+  that name): a fact keeps the user's words ("Lisbon") and its entity the id
+  they make ("lisbon"), so a retire asked by the text took the Arabic entity
+  and left every English name with a capital on the map, after a forget, an
+  invalidation and a supersede, and the stored counts were not recomputed.
+  Every caller that holds a fact's text asks it; the merge, purge and repair
+  callers hold ids (declared). A live fact naming the entity in another
+  spelling keeps it. Gate: `tests/test_entity_goes_with_its_fact.py` (EN/AR;
+  the call by text as the negative control, which loses English only; a
+  planted caller).
 - **Which entities no delete, merge or purge takes is one answer**
   (`memory/entity_protection.py`): core ids (`user`, `assistant`, `kazma`),
   the hub's own names (`self_hub.collect_self_entity_ids`: an entity the

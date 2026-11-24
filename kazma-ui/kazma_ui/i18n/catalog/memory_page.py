@@ -555,6 +555,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "memory.you.source_unknown": {"en": "Source unknown", "ar": "مصدر غير معروف"},
     "memory.you.since": {"en": "Since {since}", "ar": "منذ {since}"},
     "memory.you.since_started": {"en": "Since {started} (noted {since})", "ar": "منذ {started} (دُوّنت في {since})"},
+    "memory.you.when_on": {"en": "On {day} (noted {since})", "ar": "في {day} (دُوّنت في {since})"},
+    "memory.you.when_in": {"en": "In {day} (noted {since})", "ar": "خلال {day} (دُوّنت في {since})"},
+    "memory.you.when_planned": {"en": "Planned for {day} (noted {since})", "ar": "مخطط له في {day} (دُوّنت في {since})"},
+    "memory.you.when_was_planned": {
+        "en": "Was planned for {day} (noted {since})", "ar": "كان مخططًا له في {day} (دُوّنت في {since})",
+    },
+    "memory.you.day_reading": {"en": "The date is Kazma's reading.", "ar": "التاريخ قراءة Kazma."},
     "memory.you.period": {"en": "{from} to {until}", "ar": "من {from} إلى {until}"},
     "memory.you.history_count.zero": {"en": "Before: {n} values", "ar": "قبل ذلك: لا قيم"},
     "memory.you.history_count.one": {"en": "Before: 1 value", "ar": "قبل ذلك: قيمة واحدة"},

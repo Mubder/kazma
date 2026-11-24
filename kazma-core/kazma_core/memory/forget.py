@@ -35,7 +35,7 @@ import logging
 import sqlite3
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any, NamedTuple
 
 from kazma_core.db.fts5_purge import purge_deleted_rows
@@ -372,7 +372,8 @@ def _forget_turn(
     second Forget -- once an undo gave its number to another turn, it takes
     nothing that turn stated (:func:`_ledger_until`)."""
     until = _ledger_until(conn, tenant_id=owner, keys=keys, turn=turn) if keys and turn > 0 else None
-    if until is None or not until.reused or _TAKEN_BEFORE.get() is not None             or not _in_ledger(conn, owner=owner, keys=keys, turn=turn, sha=sha):
+    if until is None or not until.reused or _TAKEN_BEFORE.get() is not None or not _in_ledger(
+            conn, owner=owner, keys=keys, turn=turn, sha=sha):
         return _forget_turn_steps(conn, eid=eid, owner=owner, keys=keys, turn=turn, sha=sha, by=by,
                                   purge_index=purge_index, seq=seq)
     token = _TAKEN_BEFORE.set(until.forgotten_at)
@@ -430,6 +431,8 @@ def _forget_turn_steps(
     _scrub_legacy_copies(conn, list(dict.fromkeys([eid, *ids])), texts)
     facts = _forget_turn_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
     _forget_archived_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
+    days = _forget_given_days(conn, tenant_id=owner, keys=keys, turn=turn)
+    reopened = _reopen_replaced(conn, tenant_id=owner, keys=keys, turn=turn)
     # What the turn changed or put to the user (memory/changes.py).
     from kazma_core.memory import changes
 
@@ -451,7 +454,7 @@ def _forget_turn_steps(
     for one in gone:
         remirror_episode_by_id(conn, one)
     remote = [_delete_remote_vector(conn, one, owner) for one in gone]
-    remote += _after_facts(conn, owner=owner, changed=facts, keys=keys, turn=turn)
+    remote += _after_facts(conn, owner=owner, changed=[*facts, *days, *reopened], keys=keys, turn=turn)
     # A lesson the turn taught leaves every later prompt too (roadmap theme
     # 5): after the commit (a settings write, never under the memory write
     # lock, §15 D2), before the entry is marked applied, so a failure here is
@@ -468,6 +471,7 @@ def _forget_turn_steps(
         "episode_id": eid,
         "copies": len(ids),
         "facts_forgotten": len(facts),
+        "days_taken_back": len(days),
         "lessons_removed": lessons,
         "summaries_emptied": len(summaries),
         "chat_keys": keys,
@@ -536,11 +540,13 @@ def replay_turn(conn: sqlite3.Connection, entry: Any) -> None:
     now = time.time()
     facts = _forget_turn_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
     _forget_archived_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
+    days = _forget_given_days(conn, tenant_id=owner, keys=keys, turn=turn)
+    reopened = _reopen_replaced(conn, tenant_id=owner, keys=keys, turn=turn)
     from kazma_core.memory import changes
 
     changes.forget_turn(conn, tenant_id=owner, keys=keys, turn=turn, before=_TAKEN_BEFORE.get())
     conn.commit()
-    _after_facts(conn, owner=owner, changed=facts, keys=keys, turn=turn)
+    _after_facts(conn, owner=owner, changed=[*facts, *days, *reopened], keys=keys, turn=turn)
 
 
 def retire_copy(
@@ -750,7 +756,7 @@ def _forget_chat_facts(
 #: What a forgotten fact keeps of its metadata: where it came from, never
 #: what it said (an operator edit kept the earlier value under
 #: ``operator_edit.previous``; Memory audit M01, 2026-10-13).
-_FACT_PROVENANCE = ("source", "chat", "chat_turn", "forgotten")
+_FACT_PROVENANCE = ("source", "chat", "chat_turn", "forgotten", "closed_by")
 
 #: What a redacted audit field says instead of the value.
 REDACTED = "[redacted: forgotten]"
@@ -859,6 +865,129 @@ def _scrub_archived_rows(conn: sqlite3.Connection, rows: list[Any], *, now: floa
             conn.execute("UPDATE beliefs_archive SET original_belief_json = ? WHERE id = ?", (blob, r[0]))
             changed.append(str(r[0]))
     return changed
+
+
+def _given_by(keys: list[str], turn: int | None, until: _LedgerUntil | None) -> Callable[[dict[str, Any]], bool]:
+    """Whether a source (``session``, ``turn``, ``at``) is the forgotten turn
+    -- with *turn* None, the chat -- as far as *until* reaches."""
+    held, before = set(keys), _TAKEN_BEFORE.get()
+    if until:
+        before = until.forgotten_at if until.reused else None
+
+    def given(source: dict[str, Any]) -> bool:
+        if str(source.get("session") or "") not in held:
+            return False
+        if turn is not None and int(source.get("turn") or 0) != turn:
+            return False
+        return before is None or float(source.get("at") or 0) <= before
+
+    return given
+
+
+def _reopen_replaced(conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[str], turn: int | None,
+                     until: _LedgerUntil | None = None) -> list[str]:
+    """The list entries the forgotten turn -- with *turn* None, the chat --
+    closed by telling them again in other words (``closed_by``, the second
+    review of W4): open again, unless what took their place was itself
+    replaced by a turn that stands (they are that one's then), or their value
+    is held again. *until* as :func:`_forget_turn_facts` takes it. Returns the
+    ids it opened."""
+    from kazma_core.memory.belief_mutation import _same_value
+    from kazma_core.memory.fact_days import metadata_of
+
+    if not keys or (turn is not None and turn <= 0):
+        return []
+    given = _given_by(keys, turn, until)
+    scope, params = ("", []) if tenant_id is None else (" AND tenant_id = ?", [tenant_id])
+    closed = {str(r[0]): (r[1], r[2], r[3], r[4], metadata_of(r[5])) for r in conn.execute(
+        "SELECT id, tenant_id, subject, predicate, object, metadata_json FROM beliefs "
+        "WHERE instr(COALESCE(metadata_json, ''), '\"closed_by\"') > 0" + scope, params).fetchall()}
+    opened: list[str] = []
+    for bid, (owner, subject, predicate, value, meta) in closed.items():
+        by, seen = meta.get("closed_by"), {bid}
+        while isinstance(by, dict) and given(by):
+            took = str(by.get("belief_id") or "")
+            by = closed[took][4].get("closed_by") if took in closed and took not in seen else None
+            seen.add(took)
+        if by == meta.get("closed_by") or not value:
+            continue
+        kept = {k: v for k, v in meta.items() if k != "closed_by"}
+        if isinstance(by, dict):
+            conn.execute("UPDATE beliefs SET metadata_json = ? WHERE id = ? AND tenant_id = ?",
+                         (json.dumps({**kept, "closed_by": by}, ensure_ascii=False), bid, owner))
+            continue
+        again = any(_same_value(r[0], value) for r in conn.execute(
+            "SELECT object FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? AND valid_until IS NULL "
+            "AND invalidated_at IS NULL", (owner, subject, predicate)).fetchall())
+        conn.execute("UPDATE beliefs SET metadata_json = ?, valid_until = CASE WHEN ? THEN valid_until END, "
+                     "invalidated_at = CASE WHEN ? THEN invalidated_at END WHERE id = ? AND tenant_id = ?",
+                     (json.dumps(kept, ensure_ascii=False), again, again, bid, owner))
+        if not again:
+            opened.append(bid)
+    return opened
+
+
+def _forget_given_days(conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[str],
+                       turn: int | None, until: _LedgerUntil | None = None) -> list[str]:
+    """The days the forgotten turn -- with *turn* None, the chat -- gave facts
+    of other turns ("it was last Saturday", told of an exhibition an earlier
+    turn named; the memory plan's W4 review): the fact stays, the day it was
+    given goes, and the day it held before stands again
+    (``fact_days.without_turn``). Archived copies too. *until* as
+    :func:`_forget_turn_facts` takes it. Returns the ids of the facts it
+    changed."""
+    from kazma_core.memory.fact_days import metadata_of, without_turn
+
+    if not keys or (turn is not None and turn <= 0):
+        return []
+    given = _given_by(keys, turn, until)
+    scope, params = ("", []) if tenant_id is None else (" AND tenant_id = ?", [tenant_id])
+    changed: list[str] = []
+    for bid, owner, meta in conn.execute(
+            "SELECT id, tenant_id, metadata_json FROM beliefs "
+            "WHERE instr(COALESCE(metadata_json, ''), '\"day_source\"') > 0" + scope, params).fetchall():
+        kept = without_turn(metadata_of(meta), given)
+        if kept is not None:
+            conn.execute("UPDATE beliefs SET metadata_json = ? WHERE id = ? AND tenant_id = ?",
+                         (json.dumps(kept, ensure_ascii=False), bid, owner))
+            changed.append(str(bid))
+    for rid, owner, blob in conn.execute(
+            "SELECT id, tenant_id, original_belief_json FROM beliefs_archive "
+            "WHERE json_valid(original_belief_json) AND instr(original_belief_json, 'day_source') > 0" + scope,
+            params).fetchall():
+        original = json.loads(blob)
+        kept = without_turn(metadata_of(original.get("metadata_json")), given) if isinstance(original, dict) else None
+        if kept is not None:
+            original["metadata_json"] = json.dumps(kept, ensure_ascii=False)
+            conn.execute("UPDATE beliefs_archive SET original_belief_json = ? WHERE id = ? AND tenant_id = ?",
+                         (json.dumps(original, ensure_ascii=False, default=str), rid, owner))
+    return changed
+
+
+def _ledgered_days(conn: sqlite3.Connection) -> int:
+    """The days turns the ledger forgot gave to facts still held, taken back
+    (:func:`enforce_ledger`): a fact pass that read its turn before the forget
+    landed wrote one after it."""
+    from kazma_core.memory.fact_days import metadata_of
+
+    given: set[tuple[str, str, int]] = set()
+    for tenant, meta in conn.execute(
+            "SELECT tenant_id, metadata_json FROM beliefs "
+            "WHERE instr(COALESCE(metadata_json, ''), '\"day_source\"') > 0 "
+            "OR instr(COALESCE(metadata_json, ''), '\"closed_by\"') > 0").fetchall():
+        held = metadata_of(meta)
+        for source in (held.get("closed_by"), *(d.get("day_source") for d in (held, *(held.get("day_before") or []))
+                                                if isinstance(d, dict))):
+            if isinstance(source, dict) and source.get("session") and int(source.get("turn") or 0) > 0:
+                given.add((space_of_record(tenant), str(source["session"]), int(source["turn"])))
+    taken = 0
+    for tenant, key, turn in sorted(given):
+        keys = list(dict.fromkeys([key, *chat_keys(key)]))
+        until = _ledger_until(conn, tenant_id=tenant, keys=keys, turn=turn)
+        if until:
+            taken += len(_forget_given_days(conn, tenant_id=tenant, keys=keys, turn=turn, until=until))
+            taken += len(_reopen_replaced(conn, tenant_id=tenant, keys=keys, turn=turn, until=until))
+    return taken
 
 
 #: The full-text indexes over memory text (``memory_stores``: erase "index").
@@ -1865,11 +1994,12 @@ def forget_chat(
                 (*keys, FORGOTTEN_TIER, *(() if every else (caller,))),
             ).fetchall()
         ]
-        facts = 0
+        facts = taken_back = 0
         lessons = 0
         for eid in ids:
             one = forget_episode(eid, tenant_id=caller, conn=conn, purge_index=False, journal=False)
             facts += int(one.get("facts_forgotten") or 0)
+            taken_back += int(one.get("days_taken_back") or 0)
             lessons += int(one.get("lessons_removed") or 0)
         # What the agent noted during the chat in turns that left no memory of
         # their own, and every fact naming the chat whatever its turn.
@@ -1892,6 +2022,8 @@ def forget_chat(
         _scrub_legacy_copies(conn, notes, note_texts)
         chat_facts = _forget_chat_facts(conn, tenant_id=owner, keys=keys, now=now)
         _forget_archived_facts(conn, tenant_id=owner, keys=keys, turn=None, now=now)
+        days = _forget_given_days(conn, tenant_id=owner, keys=keys, turn=None)
+        reopened = _reopen_replaced(conn, tenant_id=owner, keys=keys, turn=None)
         # What the chat changed or put to the user (memory/changes.py).
         from kazma_core.memory import changes
 
@@ -1908,7 +2040,7 @@ def forget_chat(
             remirror_episodes(conn, notes)
             for note in notes:
                 _delete_remote_vector(conn, note, note_tenants.get(note, caller))
-        _after_facts(conn, owner=owner, changed=chat_facts, keys=keys, turn=None)
+        _after_facts(conn, owner=owner, changed=[*chat_facts, *days, *reopened], keys=keys, turn=None)
         # Every lesson the chat taught, a turn with no memory of its own
         # included (roadmap theme 5); before the entry is marked applied.
         from kazma_core.skills.self_improvement import forget_lessons_from
@@ -1921,7 +2053,7 @@ def forget_chat(
         # Forgetting the chat takes its Time Travel steps too (TT-05).
         snapshots = _forget_snapshots(keys, turn=None)
         return {"ok": True, "forgotten": len(ids) + len(notes),
-                "facts_forgotten": facts + len(chat_facts), "chat_keys": keys,
+                "facts_forgotten": facts + len(chat_facts), "days_taken_back": taken_back + len(days), "chat_keys": keys,
                 "lessons_removed": lessons, "snapshots_deleted": snapshots}
     finally:
         if own:
@@ -2153,6 +2285,7 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
             conn, tenant_id=owner, keys=keys, turn=int(turn), now=time.time(),
             until=_ledger_until(conn, tenant_id=owner, keys=keys, turn=int(turn)),
         ))
+    days = _ledgered_days(conn)
     stale = [str(r[0]) for r in conn.execute(
         "SELECT DISTINCT src.episode_id FROM memory_summaries s JOIN memory_summary_sources src "
         "ON src.summary_id = s.id JOIN episodes e ON e.id = src.episode_id "
@@ -2161,10 +2294,10 @@ def enforce_ledger(conn: sqlite3.Connection, *, limit: int = 200) -> dict[str, i
     )]
     summaries = on_turns_forgotten(conn, stale, only_active=True) if stale else []
     conn.commit()
-    if forgotten or summaries or facts:
-        logger.warning("[forget] the ledger refused %d stored memorie(s), %d fact(s) and %d active "
-                       "summarie(s): applied", forgotten, facts, len(summaries))
-    return {"memories": forgotten, "facts": facts, "summaries": len(summaries)}
+    if forgotten or summaries or facts or days:
+        logger.warning("[forget] the ledger refused %d stored memorie(s), %d fact(s), %d day(s) given to a fact and "
+                       "%d active summarie(s): applied", forgotten, facts, days, len(summaries))
+    return {"memories": forgotten, "facts": facts + days, "summaries": len(summaries)}
 
 
 def converge(conn: sqlite3.Connection | None = None) -> dict[str, Any]:

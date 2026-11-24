@@ -1,5 +1,5 @@
 {
- "version": 3,
+ "version": 4,
  "turns": [
   {
    "id": "e01",
@@ -1029,6 +1029,1909 @@
      "object": "أتلانتس"
     }
    ]
+  },
+  {
+   "id": "v01",
+   "lang": "en",
+   "user": "Last Saturday I went to a pottery exhibition at the Sadu House and bought a blue vase for 12 dinars.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to"
+      ],
+      "object": "pottery exhibition",
+      "on": "2026-05-30"
+     }
+    ],
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "bought",
+       "purchased"
+      ],
+      "object": "blue vase",
+      "on": "2026-05-30"
+     }
+    ]
+   ],
+   "stored": {
+    "entries": [
+     {
+      "objects": [
+       "pottery exhibition"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     },
+     {
+      "objects": [
+       "blue vase"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w01",
+   "lang": "ar",
+   "user": "السبت اللي فات رحت معرض فخار في بيت السدو واشتريت مزهرية زرقا بـ ١٢ دينار.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to"
+      ],
+      "object": "معرض فخار",
+      "on": "2026-05-30"
+     }
+    ],
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "bought",
+       "purchased"
+      ],
+      "object": "مزهرية زرقا",
+      "on": "2026-05-30"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "bought",
+       "purchased"
+      ],
+      "object": "مزهرية زرقاء",
+      "on": "2026-05-30"
+     }
+    ]
+   ],
+   "stored": {
+    "entries": [
+     {
+      "objects": [
+       "معرض فخار"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     },
+     {
+      "objects": [
+       "مزهرية زرقا",
+       "مزهرية زرقاء"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ]
+   }
+  },
+  {
+   "id": "v02",
+   "lang": "en",
+   "user": "I called my mom yesterday.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "held": [
+    [
+     "user",
+     "name_is",
+     "Sam"
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "called",
+       "phoned",
+       "spoke_with"
+      ],
+      "object": "mom"
+     }
+    ]
+   ],
+   "avoid": [
+    {
+     "subject": "user",
+     "predicates": [
+      "name",
+      "name_is",
+      "preferred_name"
+     ],
+     "object": "mom"
+    }
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-20",
+      "user": "My name is Sam.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "name_is",
+        "predicate_type": "functional",
+        "object": "Sam",
+        "confidence": 0.9
+       }
+      ]
+     }
+    ],
+    "optional": [
+     {
+      "objects": [
+       "mom"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ],
+    "stands": [
+     {
+      "subject": "user",
+      "predicates": [
+       "name_is"
+      ],
+      "object": "Sam"
+     }
+    ],
+    "none": [
+     {
+      "subject": "user",
+      "predicates": [
+       "name_is"
+      ],
+      "object": "mom"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "preferred_name"
+      ],
+      "object": "mom"
+     }
+    ],
+    "not_asked": [
+     {
+      "subject": "user",
+      "object": "mom"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w02",
+   "lang": "ar",
+   "user": "اتصلت على أمي أمس.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "held": [
+    [
+     "user",
+     "name_is",
+     "سالم"
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "called",
+       "phoned",
+       "spoke_with"
+      ],
+      "object": "أمي"
+     }
+    ]
+   ],
+   "avoid": [
+    {
+     "subject": "user",
+     "predicates": [
+      "name",
+      "name_is",
+      "preferred_name"
+     ],
+     "object": "أمي"
+    }
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-20",
+      "user": "اسمي سالم.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "name_is",
+        "predicate_type": "functional",
+        "object": "سالم",
+        "confidence": 0.9
+       }
+      ]
+     }
+    ],
+    "optional": [
+     {
+      "objects": [
+       "أمي"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ],
+    "stands": [
+     {
+      "subject": "user",
+      "predicates": [
+       "name_is"
+      ],
+      "object": "سالم"
+     }
+    ],
+    "none": [
+     {
+      "subject": "user",
+      "predicates": [
+       "name_is"
+      ],
+      "object": "أمي"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "preferred_name"
+      ],
+      "object": "أمي"
+     }
+    ],
+    "not_asked": [
+     {
+      "subject": "user",
+      "object": "أمي"
+     }
+    ]
+   }
+  },
+  {
+   "id": "v03",
+   "lang": "en",
+   "user": "I moved to Porto last Saturday.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in",
+       "location",
+       "city",
+       "moved_to",
+       "home",
+       "moved_to"
+      ],
+      "object": "Porto",
+      "on": "2026-05-30"
+     }
+    ]
+   ],
+   "held": [
+    [
+     "user",
+     "lives_in",
+     "Lisbon"
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-20",
+      "user": "I live in Lisbon.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "lives_in",
+        "predicate_type": "functional",
+        "object": "Lisbon",
+        "confidence": 0.9
+       }
+      ]
+     }
+    ],
+    "optional": [
+     {
+      "objects": [
+       "Porto"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ],
+    "stands": [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in"
+      ],
+      "object": "Lisbon"
+     }
+    ],
+    "none": [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in"
+      ],
+      "object": "Porto"
+     }
+    ],
+    "asks": [
+     {
+      "subject": "user",
+      "object": "Porto"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w03",
+   "lang": "ar",
+   "user": "انتقلت إلى بورتو السبت اللي فات.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in",
+       "location",
+       "city",
+       "moved_to",
+       "home",
+       "moved_to"
+      ],
+      "object": "بورتو",
+      "on": "2026-05-30"
+     }
+    ]
+   ],
+   "held": [
+    [
+     "user",
+     "lives_in",
+     "لشبونة"
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-20",
+      "user": "أسكن في لشبونة.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "lives_in",
+        "predicate_type": "functional",
+        "object": "لشبونة",
+        "confidence": 0.9
+       }
+      ]
+     }
+    ],
+    "optional": [
+     {
+      "objects": [
+       "بورتو"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ],
+    "stands": [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in"
+      ],
+      "object": "لشبونة"
+     }
+    ],
+    "none": [
+     {
+      "subject": "user",
+      "predicates": [
+       "lives_in"
+      ],
+      "object": "بورتو"
+     }
+    ],
+    "asks": [
+     {
+      "subject": "user",
+      "object": "بورتو"
+     }
+    ]
+   }
+  },
+  {
+   "id": "v04",
+   "lang": "en",
+   "user": "I went to Jahra Farm again yesterday.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to"
+      ],
+      "object": "Jahra Farm",
+      "on": "2026-05-30"
+     }
+    ]
+   ],
+   "held": [
+    [
+     "user",
+     "visited",
+     "Jahra Farm",
+     "on 2026-05-02"
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-03",
+      "user": "I went to Jahra Farm yesterday.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "visited",
+        "predicate_type": "set",
+        "object": "Jahra Farm",
+        "confidence": 0.9,
+        "on": "2026-05-02"
+       }
+      ]
+     }
+    ],
+    "entries": [
+     {
+      "objects": [
+       "Jahra Farm"
+      ],
+      "days": [
+       "2026-05-02",
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w04",
+   "lang": "ar",
+   "user": "رحت مزرعة الجهراء مرة ثانية أمس.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to"
+      ],
+      "object": "مزرعة الجهراء",
+      "on": "2026-05-30"
+     }
+    ]
+   ],
+   "held": [
+    [
+     "user",
+     "visited",
+     "مزرعة الجهراء",
+     "on 2026-05-02"
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-03",
+      "user": "رحت مزرعة الجهراء أمس.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "visited",
+        "predicate_type": "set",
+        "object": "مزرعة الجهراء",
+        "confidence": 0.9,
+        "on": "2026-05-02"
+       }
+      ]
+     }
+    ],
+    "entries": [
+     {
+      "objects": [
+       "مزرعة الجهراء"
+      ],
+      "days": [
+       "2026-05-02",
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ]
+   }
+  },
+  {
+   "id": "v05",
+   "lang": "en",
+   "user": "That Canon camera I bought takes great photos.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "held": [
+    [
+     "user",
+     "bought",
+     "a Canon camera",
+     "on 2026-05-16"
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "bought",
+       "purchased",
+       "owns",
+       "has",
+       "likes"
+      ],
+      "object": "Canon camera"
+     },
+     {
+      "subject": "canon_camera",
+      "predicates": [
+       "takes"
+      ],
+      "object": "great photos"
+     },
+     {
+      "subject": "canon_camera",
+      "predicates": [
+       "takes",
+       "quality"
+      ],
+      "object": "photos"
+     }
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-16",
+      "user": "I bought a Canon camera today.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "bought",
+        "predicate_type": "set",
+        "object": "a Canon camera",
+        "confidence": 0.9,
+        "on": "2026-05-16"
+       }
+      ]
+     }
+    ],
+    "entries": [
+     {
+      "objects": [
+       "Canon camera"
+      ],
+      "days": [
+       "2026-05-16"
+      ],
+      "kind": "event"
+     }
+    ],
+    "once": [
+     {
+      "subject": "user",
+      "predicates": [
+       "bought"
+      ],
+      "object": "Canon camera"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w05",
+   "lang": "ar",
+   "user": "كاميرا كانون اللي اشتريتها تصور حلو.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "held": [
+    [
+     "user",
+     "bought",
+     "كاميرا كانون",
+     "on 2026-05-16"
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "bought",
+       "purchased",
+       "owns",
+       "has",
+       "likes"
+      ],
+      "object": "كاميرا كانون"
+     },
+     {
+      "subject": "كاميرا_كانون",
+      "predicates": [
+       "takes"
+      ],
+      "object": "حلو"
+     }
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-16",
+      "user": "اشتريت كاميرا كانون اليوم.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "bought",
+        "predicate_type": "set",
+        "object": "كاميرا كانون",
+        "confidence": 0.9,
+        "on": "2026-05-16"
+       }
+      ]
+     }
+    ],
+    "entries": [
+     {
+      "objects": [
+       "كاميرا كانون"
+      ],
+      "days": [
+       "2026-05-16"
+      ],
+      "kind": "event"
+     }
+    ],
+    "once": [
+     {
+      "subject": "user",
+      "predicates": [
+       "bought"
+      ],
+      "object": "كاميرا كانون"
+     }
+    ]
+   }
+  },
+  {
+   "id": "v06",
+   "lang": "en",
+   "user": "Sorry, the Nawal concert was on Friday, not Saturday.",
+   "said_on": "2026-05-25",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to"
+      ],
+      "object": "Nawal concert",
+      "on": "2026-05-22"
+     }
+    ]
+   ],
+   "held": [
+    [
+     "user",
+     "attended",
+     "the Nawal concert",
+     "on 2026-05-23"
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-24",
+      "user": "I went to the Nawal concert yesterday.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "attended",
+        "predicate_type": "set",
+        "object": "the Nawal concert",
+        "confidence": 0.9,
+        "on": "2026-05-23"
+       }
+      ]
+     }
+    ],
+    "entries": [
+     {
+      "objects": [
+       "Nawal concert"
+      ],
+      "days": [
+       "2026-05-22"
+      ],
+      "kind": "event"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w06",
+   "lang": "ar",
+   "user": "عفواً، حفلة نوال كانت يوم الجمعة مو السبت.",
+   "said_on": "2026-05-25",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to"
+      ],
+      "object": "حفلة نوال",
+      "on": "2026-05-22"
+     }
+    ]
+   ],
+   "held": [
+    [
+     "user",
+     "attended",
+     "حفلة نوال",
+     "on 2026-05-23"
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-24",
+      "user": "رحت حفلة نوال أمس.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "attended",
+        "predicate_type": "set",
+        "object": "حفلة نوال",
+        "confidence": 0.9,
+        "on": "2026-05-23"
+       }
+      ]
+     }
+    ],
+    "entries": [
+     {
+      "objects": [
+       "حفلة نوال"
+      ],
+      "days": [
+       "2026-05-22"
+      ],
+      "kind": "event"
+     }
+    ]
+   }
+  },
+  {
+   "id": "v07",
+   "lang": "en",
+   "user": "I have a dentist appointment on 4 June.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "has_appointment",
+       "appointment",
+       "has",
+       "scheduled",
+       "dentist_appointment"
+      ],
+      "object": "dentist appointment",
+      "on": "2026-06-04"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "appointment",
+       "has_appointment",
+       "dentist_appointment"
+      ],
+      "object": "dentist",
+      "on": "2026-06-04"
+     }
+    ]
+   ],
+   "stored": {
+    "entries": [
+     {
+      "objects": [
+       "dentist appointment",
+       "dentist"
+      ],
+      "days": [
+       "2026-06-04"
+      ],
+      "kind": "planned"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w07",
+   "lang": "ar",
+   "user": "عندي موعد عند دكتور الأسنان يوم ٤ يونيو.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "has_appointment",
+       "appointment",
+       "has",
+       "scheduled",
+       "dentist_appointment"
+      ],
+      "object": "دكتور الأسنان",
+      "on": "2026-06-04"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "has_appointment",
+       "appointment",
+       "has",
+       "scheduled"
+      ],
+      "object": "موعد",
+      "on": "2026-06-04"
+     }
+    ]
+   ],
+   "stored": {
+    "entries": [
+     {
+      "objects": [
+       "دكتور الأسنان",
+       "موعد",
+       "الأسنان"
+      ],
+      "days": [
+       "2026-06-04"
+      ],
+      "kind": "planned"
+     }
+    ]
+   }
+  },
+  {
+   "id": "v08",
+   "lang": "en",
+   "user": "Fix the grammar: I goed to Rome last week and buyed a leather bag.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "avoid": [
+    {
+     "subject": "user",
+     "object": "Rome"
+    },
+    {
+     "subject": "user",
+     "object": "leather bag"
+    }
+   ],
+   "stored": {
+    "none": [
+     {
+      "subject": "user",
+      "object": "Rome"
+     },
+     {
+      "subject": "user",
+      "object": "leather bag"
+     }
+    ],
+    "undated": true
+   }
+  },
+  {
+   "id": "w08",
+   "lang": "ar",
+   "user": "صحح النص: رحت روما الاسبوع الي فات واشتريت شنطه جلد.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "avoid": [
+    {
+     "subject": "user",
+     "object": "روما"
+    },
+    {
+     "subject": "user",
+     "object": "شنطه جلد"
+    }
+   ],
+   "stored": {
+    "none": [
+     {
+      "subject": "user",
+      "object": "روما"
+     },
+     {
+      "subject": "user",
+      "object": "شنطة جلد"
+     }
+    ],
+    "undated": true
+   }
+  },
+  {
+   "id": "v09",
+   "lang": "en",
+   "user": "What does she mean by this?\n[30/05/2026, 12:01] Dana: I went to Dubai yesterday and met Khaled.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "extras": [
+    [
+     {
+      "subject": "dana",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to"
+      ],
+      "object": "Dubai"
+     },
+     {
+      "subject": "dana",
+      "predicates": [
+       "met"
+      ],
+      "object": "Khaled"
+     }
+    ]
+   ],
+   "avoid": [
+    {
+     "subject": "user",
+     "object": "Dubai"
+    },
+    {
+     "subject": "user",
+     "object": "Khaled"
+    }
+   ],
+   "stored": {
+    "none": [
+     {
+      "subject": "user",
+      "object": "Dubai"
+     },
+     {
+      "subject": "user",
+      "object": "Khaled"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w09",
+   "lang": "ar",
+   "user": "شنو تقصد بهالرسالة؟\n[30/05/2026, 12:01] دانة: رحت دبي أمس وقابلت خالد.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "extras": [
+    [
+     {
+      "subject": "دانة",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to"
+      ],
+      "object": "دبي"
+     },
+     {
+      "subject": "دانة",
+      "predicates": [
+       "met"
+      ],
+      "object": "خالد"
+     },
+     {
+      "subject": "dana",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to"
+      ],
+      "object": "دبي"
+     },
+     {
+      "subject": "dana",
+      "predicates": [
+       "met"
+      ],
+      "object": "خالد"
+     }
+    ]
+   ],
+   "avoid": [
+    {
+     "subject": "user",
+     "object": "دبي"
+    },
+    {
+     "subject": "user",
+     "object": "خالد"
+    }
+   ],
+   "stored": {
+    "none": [
+     {
+      "subject": "user",
+      "object": "دبي"
+     },
+     {
+      "subject": "user",
+      "object": "خالد"
+     }
+    ]
+   }
+  },
+  {
+   "id": "v10",
+   "lang": "en",
+   "user": "What should I pack for a trip to Rome?",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "stored": {
+    "undated": true
+   }
+  },
+  {
+   "id": "w10",
+   "lang": "ar",
+   "user": "شنو آخذ معاي لو سافرت روما؟",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "stored": {
+    "undated": true
+   }
+  },
+  {
+   "id": "v11",
+   "lang": "en",
+   "user": "How do I renew a passport in Kuwait?",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "stored": {
+    "undated": true
+   }
+  },
+  {
+   "id": "w11",
+   "lang": "ar",
+   "user": "كيف أجدد الجواز في الكويت؟",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [],
+   "stored": {
+    "undated": true
+   }
+  },
+  {
+   "id": "v12",
+   "lang": "en",
+   "user": "I swim every Friday morning.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "swims",
+       "habit",
+       "exercise",
+       "hobby",
+       "routine"
+      ],
+      "object": "Friday morning"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "habit",
+       "exercise",
+       "hobby",
+       "routine",
+       "activity"
+      ],
+      "object": "swim"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "habit",
+       "exercise",
+       "hobby",
+       "routine",
+       "activity"
+      ],
+      "object": "swimming"
+     }
+    ]
+   ],
+   "stored": {
+    "undated": true
+   }
+  },
+  {
+   "id": "w12",
+   "lang": "ar",
+   "user": "أسبح كل جمعة الصبح.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "swims",
+       "habit",
+       "exercise",
+       "hobby",
+       "routine"
+      ],
+      "object": "جمعة"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "habit",
+       "exercise",
+       "hobby",
+       "routine",
+       "activity"
+      ],
+      "object": "أسبح"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "habit",
+       "exercise",
+       "hobby",
+       "routine",
+       "activity"
+      ],
+      "object": "السباحة"
+     }
+    ]
+   ],
+   "stored": {
+    "undated": true
+   }
+  },
+  {
+   "id": "v13",
+   "lang": "en",
+   "user": "My sister Hana visited Istanbul last week.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "hana",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to",
+       "travelled_to",
+       "traveled_to"
+      ],
+      "object": "Istanbul"
+     },
+     {
+      "subject": "sister",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to",
+       "travelled_to",
+       "traveled_to"
+      ],
+      "object": "Istanbul"
+     }
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "sister",
+       "has_sister"
+      ],
+      "object": "Hana"
+     },
+     {
+      "subject": "hana",
+      "predicates": [
+       "relation",
+       "relationship"
+      ],
+      "object": "sister"
+     }
+    ]
+   ],
+   "avoid": [
+    {
+     "subject": "user",
+     "object": "Istanbul"
+    }
+   ],
+   "stored": {
+    "none": [
+     {
+      "subject": "user",
+      "object": "Istanbul"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w13",
+   "lang": "ar",
+   "user": "أختي هناء زارت اسطنبول الأسبوع اللي فات.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "هناء",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to",
+       "travelled_to",
+       "traveled_to"
+      ],
+      "object": "اسطنبول"
+     },
+     {
+      "subject": "hana",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to",
+       "travelled_to",
+       "traveled_to"
+      ],
+      "object": "اسطنبول"
+     },
+     {
+      "subject": "hanaa",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to",
+       "travelled_to",
+       "traveled_to"
+      ],
+      "object": "اسطنبول"
+     },
+     {
+      "subject": "sister",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to",
+       "travelled_to",
+       "traveled_to"
+      ],
+      "object": "اسطنبول"
+     }
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "sister",
+       "has_sister"
+      ],
+      "object": "هناء"
+     },
+     {
+      "subject": "هناء",
+      "predicates": [
+       "relation",
+       "relationship"
+      ],
+      "object": "أخت"
+     },
+     {
+      "subject": "hana",
+      "predicates": [
+       "relation",
+       "relationship"
+      ],
+      "object": "sister"
+     },
+     {
+      "subject": "hanaa",
+      "predicates": [
+       "relation",
+       "relationship"
+      ],
+      "object": "sister"
+     },
+     {
+      "subject": "هناء",
+      "predicates": [
+       "relation",
+       "relationship"
+      ],
+      "object": "sister"
+     }
+    ]
+   ],
+   "avoid": [
+    {
+     "subject": "user",
+     "object": "اسطنبول"
+    }
+   ],
+   "stored": {
+    "none": [
+     {
+      "subject": "user",
+      "object": "اسطنبول"
+     }
+    ]
+   }
+  },
+  {
+   "id": "v14",
+   "lang": "en",
+   "user": "I ran the Muscat marathon in March.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "ran",
+       "completed",
+       "finished",
+       "participated_in"
+      ],
+      "object": "Muscat marathon",
+      "on": "2026-03"
+     }
+    ]
+   ],
+   "stored": {
+    "entries": [
+     {
+      "objects": [
+       "Muscat marathon"
+      ],
+      "days": [
+       "2026-03"
+      ],
+      "kind": "event"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w14",
+   "lang": "ar",
+   "user": "ركضت ماراثون مسقط في مارس.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "ran",
+       "completed",
+       "finished",
+       "participated_in"
+      ],
+      "object": "ماراثون مسقط",
+      "on": "2026-03"
+     }
+    ]
+   ],
+   "stored": {
+    "entries": [
+     {
+      "objects": [
+       "ماراثون مسقط"
+      ],
+      "days": [
+       "2026-03"
+      ],
+      "kind": "event"
+     }
+    ]
+   }
+  },
+  {
+   "id": "v15",
+   "lang": "en",
+   "user": "I met my old teacher Adel at the mall.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "met",
+       "ran_into"
+      ],
+      "object": "Adel"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "met",
+       "ran_into"
+      ],
+      "object": "old teacher"
+     }
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "adel",
+      "predicates": [
+       "relation",
+       "relationship",
+       "role",
+       "occupation"
+      ],
+      "object": "teacher"
+     },
+     {
+      "subject": "adel",
+      "predicates": [
+       "relation",
+       "relationship"
+      ],
+      "object": "old teacher"
+     },
+     {
+      "subject": "adel",
+      "predicates": [
+       "former_teacher"
+      ],
+      "object": "old teacher"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "teacher",
+       "old_teacher"
+      ],
+      "object": "Adel"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "former_teacher"
+      ],
+      "object": "Adel"
+     }
+    ]
+   ],
+   "stored": {
+    "entries": [
+     {
+      "objects": [
+       "Adel",
+       "old teacher"
+      ],
+      "days": [],
+      "kind": "event"
+     }
+    ],
+    "undated": true
+   }
+  },
+  {
+   "id": "w15",
+   "lang": "ar",
+   "user": "قابلت مدرسي القديم عادل في المول.",
+   "said_on": "2026-05-31",
+   "new_in": 4,
+   "facts": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "met",
+       "ran_into"
+      ],
+      "object": "عادل"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "met",
+       "ran_into"
+      ],
+      "object": "مدرسي القديم"
+     }
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "عادل",
+      "predicates": [
+       "relation",
+       "relationship",
+       "role",
+       "occupation"
+      ],
+      "object": "مدرس"
+     },
+     {
+      "subject": "adel",
+      "predicates": [
+       "relation",
+       "relationship",
+       "role",
+       "occupation"
+      ],
+      "object": "مدرس"
+     },
+     {
+      "subject": "عادل",
+      "predicates": [
+       "relation",
+       "relationship"
+      ],
+      "object": "مدرسي القديم"
+     },
+     {
+      "subject": "عادل",
+      "predicates": [
+       "former_teacher"
+      ],
+      "object": "مدرسي القديم"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "teacher",
+       "old_teacher"
+      ],
+      "object": "عادل"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "former_teacher"
+      ],
+      "object": "عادل"
+     }
+    ]
+   ],
+   "stored": {
+    "entries": [
+     {
+      "objects": [
+       "عادل",
+       "مدرسي القديم"
+      ],
+      "days": [],
+      "kind": "event"
+     }
+    ],
+    "undated": true
+   }
+  },
+  {
+   "id": "v16",
+   "lang": "en",
+   "user": "The dentist on Saturday really hurt me.",
+   "said_on": "2026-06-02",
+   "new_in": 4,
+   "facts": [],
+   "held": [
+    [
+     "user",
+     "visited",
+     "the dentist",
+     "on 2026-05-30"
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to",
+       "hurt_by",
+       "experienced",
+       "felt"
+      ],
+      "object": "dentist"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "experienced",
+       "felt",
+       "had"
+      ],
+      "object": "pain"
+     },
+     {
+      "subject": "dentist",
+      "predicates": [
+       "hurt"
+      ],
+      "object": "user"
+     }
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-31",
+      "user": "I went to the dentist yesterday.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "visited",
+        "predicate_type": "set",
+        "object": "the dentist",
+        "confidence": 0.9,
+        "on": "2026-05-30"
+       }
+      ]
+     }
+    ],
+    "entries": [
+     {
+      "objects": [
+       "dentist"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ],
+    "once": [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited"
+      ],
+      "object": "dentist"
+     }
+    ]
+   }
+  },
+  {
+   "id": "w16",
+   "lang": "ar",
+   "user": "دكتور الأسنان يوم السبت عورني وايد.",
+   "said_on": "2026-06-02",
+   "new_in": 4,
+   "facts": [],
+   "held": [
+    [
+     "user",
+     "visited",
+     "دكتور الأسنان",
+     "on 2026-05-30"
+    ]
+   ],
+   "extras": [
+    [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited",
+       "went_to",
+       "attended",
+       "been_to",
+       "hurt_by",
+       "experienced",
+       "felt"
+      ],
+      "object": "دكتور الأسنان"
+     },
+     {
+      "subject": "user",
+      "predicates": [
+       "experienced",
+       "felt",
+       "had"
+      ],
+      "object": "ألم"
+     },
+     {
+      "subject": "دكتور_الأسنان",
+      "predicates": [
+       "hurt"
+      ],
+      "object": "user"
+     }
+    ]
+   ],
+   "stored": {
+    "before": [
+     {
+      "said_on": "2026-05-31",
+      "user": "رحت دكتور الأسنان أمس.",
+      "written": [
+       {
+        "subject": "user",
+        "predicate": "visited",
+        "predicate_type": "set",
+        "object": "دكتور الأسنان",
+        "confidence": 0.9,
+        "on": "2026-05-30"
+       }
+      ]
+     }
+    ],
+    "entries": [
+     {
+      "objects": [
+       "دكتور الأسنان"
+      ],
+      "days": [
+       "2026-05-30"
+      ],
+      "kind": "event"
+     }
+    ],
+    "once": [
+     {
+      "subject": "user",
+      "predicates": [
+       "visited"
+      ],
+      "object": "دكتور الأسنان"
+     }
+    ]
+   }
   }
  ]
 }

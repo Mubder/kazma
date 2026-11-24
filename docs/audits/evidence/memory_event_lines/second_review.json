@@ -1,0 +1,350 @@
+{
+ "what": "The second review of W4 (dated event lines), 2026-11-24: the same cached replies of the two pilots written again through the apply step, no extraction call. before: f66b95a4a's parent 174057e52's stores and blocks (review_fixes.json's after); after: this commit's. The replies are to message form 4: the form-5 prompt was re-recorded on the extraction set only. Ids and counts only.",
+ "runs": {
+  "qwen_dev_200": {
+   "questions": "dev 200",
+   "extractor": "qwen3.8-flash",
+   "stores": {
+    "before": {
+     "current": 51740,
+     "dated_events": 3343,
+     "dated_events_current": 3049,
+     "day_before": 19,
+     "day_source": 237,
+     "events_on_single_value": 0,
+     "facts": 55187,
+     "lives_in_current": 135,
+     "name_is_current": 63,
+     "planned": 292,
+     "planned_current": 251,
+     "starts": 1464
+    },
+    "after": {
+     "current": 51747,
+     "dated_events": 3349,
+     "dated_events_current": 3060,
+     "day_before": 16,
+     "day_source": 229,
+     "events_on_single_value": 0,
+     "facts": 55192,
+     "lives_in_current": 135,
+     "name_is_current": 63,
+     "planned": 262,
+     "planned_current": 229,
+     "starts": 1477
+    }
+   },
+   "deep_passes": {
+    "before": {
+     "deep": 48110,
+     "deep_failed": 494,
+     "ended": 61,
+     "not_users_words": 67,
+     "pending_changes": 216,
+     "refs_lost": 6,
+     "replace_refused": 399,
+     "replaced_entries": 2320
+    },
+    "after": {
+     "deep": 48110,
+     "deep_failed": 494,
+     "ended": 61,
+     "not_users_words": 73,
+     "pending_changes": 218,
+     "refs_lost": 2,
+     "replace_refused": 399,
+     "replaced_entries": 2315
+    }
+   },
+   "current_dated_events": {
+    "events_kept_both": 3015,
+    "events_only_before": 32,
+    "events_only_after": 44
+   },
+   "blocks": {
+    "before": {
+     "tokens_p50": 1425.0,
+     "tokens_p95": 1496,
+     "facts_mean": 3.87,
+     "event_lines_mean": 0.83,
+     "questions_with_an_event_line": 72,
+     "planned_lines": 4,
+     "answer_text_held": 57,
+     "answer_text_of": 129
+    },
+    "after": {
+     "tokens_p50": 1421.0,
+     "tokens_p95": 1496,
+     "facts_mean": 3.86,
+     "event_lines_mean": 0.81,
+     "questions_with_an_event_line": 70,
+     "planned_lines": 1,
+     "answer_text_held": 57,
+     "answer_text_of": 129
+    },
+    "changed": 9,
+    "without_event_facts_changed": 3
+   },
+   "answer_text": {
+    "gained": [],
+    "lost": []
+   },
+   "answers": {
+    "main": {
+     "kazma": {
+      "answered": 0.69,
+      "judge2": 0.675,
+      "unasked": 0,
+      "n": 200
+     },
+     "fix2_no_events": {
+      "answered": 0.7,
+      "judge2": 0.685,
+      "unasked": 0,
+      "n": 200
+     },
+     "fix2_events": {
+      "answered": 0.76,
+      "judge2": 0.745,
+      "unasked": 0,
+      "n": 200
+     },
+     "against_before": [
+      [
+       0,
+       0
+      ],
+      [
+       0,
+       0
+      ]
+     ]
+    },
+    "noise": {
+     "kazma": {
+      "answered": 0.69,
+      "judge2": 0.675,
+      "unasked": 0,
+      "n": 200
+     },
+     "fix2_no_events": {
+      "answered": 0.705,
+      "judge2": 0.695,
+      "unasked": 0,
+      "n": 200
+     },
+     "fix2_events": {
+      "answered": 0.765,
+      "judge2": 0.75,
+      "unasked": 0,
+      "n": 200
+     },
+     "against_before": [
+      [
+       0,
+       0
+      ],
+      [
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  "deepseek_pilot_50": {
+   "questions": "pilot 50",
+   "extractor": "deepseek-flash",
+   "stores": {
+    "before": {
+     "current": 8724,
+     "dated_events": 863,
+     "dated_events_current": 790,
+     "day_before": 6,
+     "day_source": 50,
+     "events_on_single_value": 0,
+     "facts": 9311,
+     "lives_in_current": 30,
+     "name_is_current": 7,
+     "planned": 44,
+     "planned_current": 38,
+     "starts": 248
+    },
+    "after": {
+     "current": 8727,
+     "dated_events": 869,
+     "dated_events_current": 795,
+     "day_before": 5,
+     "day_source": 48,
+     "events_on_single_value": 0,
+     "facts": 9314,
+     "lives_in_current": 30,
+     "name_is_current": 7,
+     "planned": 29,
+     "planned_current": 27,
+     "starts": 254
+    }
+   },
+   "deep_passes": {
+    "before": {
+     "deep": 12089,
+     "deep_failed": 0,
+     "ended": 18,
+     "not_users_words": 12,
+     "pending_changes": 40,
+     "refs_lost": 2,
+     "replace_refused": 42,
+     "replaced_entries": 380
+    },
+    "after": {
+     "deep": 12089,
+     "deep_failed": 0,
+     "ended": 18,
+     "not_users_words": 13,
+     "pending_changes": 40,
+     "refs_lost": 0,
+     "replace_refused": 42,
+     "replaced_entries": 379
+    }
+   },
+   "current_dated_events": {
+    "events_kept_both": 782,
+    "events_only_before": 8,
+    "events_only_after": 13
+   },
+   "blocks": {
+    "before": {
+     "tokens_p50": 1459.0,
+     "tokens_p95": 1498,
+     "facts_mean": 3.52,
+     "event_lines_mean": 1.18,
+     "questions_with_an_event_line": 20,
+     "planned_lines": 0,
+     "answer_text_held": 12,
+     "answer_text_of": 37
+    },
+    "after": {
+     "tokens_p50": 1459.0,
+     "tokens_p95": 1498,
+     "facts_mean": 3.52,
+     "event_lines_mean": 1.2,
+     "questions_with_an_event_line": 20,
+     "planned_lines": 0,
+     "answer_text_held": 12,
+     "answer_text_of": 37
+    },
+    "changed": 1,
+    "without_event_facts_changed": 0
+   },
+   "answer_text": {
+    "gained": [],
+    "lost": []
+   },
+   "answers": {
+    "main": {
+     "kazma": {
+      "answered": 0.6,
+      "judge2": 0.6,
+      "unasked": 0,
+      "n": 50
+     },
+     "fixds2_no_events": {
+      "answered": 0.64,
+      "judge2": 0.64,
+      "unasked": 0,
+      "n": 50
+     },
+     "fixds2_events": {
+      "answered": 0.72,
+      "judge2": 0.74,
+      "unasked": 0,
+      "n": 50
+     },
+     "against_before": [
+      [
+       0,
+       0
+      ],
+      [
+       0,
+       0
+      ]
+     ]
+    },
+    "noise": {
+     "kazma": {
+      "answered": 0.6,
+      "judge2": 0.62,
+      "unasked": 0,
+      "n": 50
+     },
+     "fixds2_no_events": {
+      "answered": 0.66,
+      "judge2": 0.66,
+      "unasked": 0,
+      "n": 50
+     },
+     "fixds2_events": {
+      "answered": 0.72,
+      "judge2": 0.74,
+      "unasked": 0,
+      "n": 50
+     },
+     "against_before": [
+      [
+       0,
+       0
+      ],
+      [
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  }
+ },
+ "answers_note": "Only the changed blocks were asked: 13 a run (9 and 3 on dev, 1 on the pilot), each judged twice; [gained, lost] with the event facts and without. Nothing gained or lost in either run.",
+ "spend_qwen": {
+  "reader_and_judges_prompt_tokens": 48474,
+  "completion_tokens": 13675,
+  "cached": 0,
+  "calls": 78
+ },
+ "events_not_the_users_words": {
+  "rule": "a user's event is somebody else's when its words stand in what own_words removed and not in what it kept; its day is dropped when a paste names it and the user's own words do not",
+  "dated": {
+   "told": {
+    "qwen": 3880,
+    "deepseek": 953
+   },
+   "dropped_by_the_first_review_rule": {
+    "qwen": 67,
+    "deepseek": 12
+   },
+   "still_dropped": {
+    "qwen": 34,
+    "deepseek": 2
+   },
+   "newly_dropped": {
+    "qwen": 4,
+    "deepseek": 0
+   },
+   "day_dropped_event_kept": {
+    "qwen": 25,
+    "deepseek": 1
+   }
+  },
+  "undated_event_verbs": {
+   "dropped_by_the_rule_finding_20_measured": {
+    "qwen": 66,
+    "deepseek": 21
+   },
+   "still_dropped": {
+    "qwen": 18,
+    "deepseek": 7
+   }
+  },
+  "what_is_left": "pasted lists and texts to rewrite, \"Here's the info:\" hand-overs read as label lines, quotes, \"according to\" and \"told me I\", replies the user asks to be written in their name, text past own_words' 2,000 characters; and 4 to 5 dated and 4 undated Qwen rows whose words the user never says"
+ }
+}
