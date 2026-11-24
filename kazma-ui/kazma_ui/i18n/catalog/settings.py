@@ -3104,6 +3104,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The bundle holds a record of another space, so nothing was brought in.",
         "ar": "تحوي الحزمة سجلًا لمساحة أخرى، فلم يُدخل شيء.",
     },
+    "settings.space_data_err.reserved_name": {
+        "en": "The space's folder holds a file or folder named .kazma-arriving, a name Kazma uses itself, so nothing was moved. Rename it, then make the bundle again.",
+        "ar": "في مجلد المساحة ملف أو مجلد اسمه .kazma-arriving، وهو اسم يستخدمه Kazma نفسه، فلم يُنقل شيء. أعِد تسميته ثم أنشئ الحزمة من جديد.",
+    },
     "settings.space_data_err.foreign_setting": {
         "en": "The bundle holds a setting of another space, so nothing was brought in.",
         "ar": "تحوي الحزمة إعدادًا لمساحة أخرى، فلم يُدخل شيء.",
