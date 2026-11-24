@@ -572,6 +572,7 @@ class TestDocsMatchCode:
         historical = ("removed", "gone", "earlier release", "no longer")
         for doc in (
             "AGENTS.md",
+            *(piece.as_posix() for piece in sorted(pathlib.Path("docs/agents").glob("19*.md"))),
             "docs/docs/guide/document-intelligence.md",
             "docs/docs/ops/document-processing.md",
             "docs/docs/ops/multi-replica-and-saas.md",
