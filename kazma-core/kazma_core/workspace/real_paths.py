@@ -35,12 +35,17 @@ _LINK_TAGS = frozenset(
 
 
 def real_path(path: str | os.PathLike[str]) -> Path:
-    """*path* with every link, junction and short name resolved (never raises)."""
+    """*path* with every link, junction and short name resolved (never raises).
+    Always absolute: Windows answers a drive-relative ``C:x`` for a part it
+    cannot hold, and "is it inside?" asked of that is asked of another file."""
     text = os.fspath(path)
     try:
-        return Path(os.path.realpath(text))
+        real = Path(os.path.realpath(text))
+        if real.is_absolute():
+            return real
     except (OSError, ValueError):
-        return Path(os.path.abspath(text))
+        pass
+    return Path(os.path.abspath(text))
 
 
 def is_linked(path: str | os.PathLike[str]) -> bool:

@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 from pathlib import PureWindowsPath
 
-__all__ = ["device_path_reason", "remote_path_reason"]
+__all__ = ["device_path_reason", "drive_relative_reason", "inner_drive_reason", "remote_path_reason"]
 
 
 def _flat_text(path: str | os.PathLike[str] | None) -> str | None:
@@ -69,8 +69,44 @@ def device_path_reason(path: str | os.PathLike[str] | None) -> str | None:
     return None
 
 
+def inner_drive_reason(path: str | os.PathLike[str] | None) -> str | None:
+    """Why *path* is refused for naming a drive after its first part, or None.
+
+    Windows only (2026-11-25): ``file:///C:/x`` and ``a?b/C:/x`` are relative
+    paths, and ``Path.resolve()`` of one under a workspace answers the
+    drive-relative ``C:x``. The access check read that as the workspace's own
+    ``x`` and allowed it; the tool then opened ``x`` in the server's current
+    folder. A part after the first that Windows reads as a drive (its second
+    character is a colon) names no file that can exist. Reads the text only.
+    """
+    flat = _flat_text(path)
+    if not flat:
+        return None
+    if any(part[1:2] == ":" for part in flat.split("\\")[1:]):
+        return (
+            f"'{flat}' names a drive in the middle of a path. Give a path in the "
+            "workspace, or a full path that begins with its drive."
+        )
+    return None
+
+
+def drive_relative_reason(path: str | os.PathLike[str] | None) -> str | None:
+    """Why *path* is refused as drive-relative (``C:x``), or None.
+
+    Windows only: it means "x in the server's current folder on that drive",
+    and joined to a workspace on the same drive it means the workspace's own
+    ``x``. The access check and the tool read it differently (2026-11-25).
+    """
+    flat = _flat_text(path) if os.name == "nt" else None
+    if flat and flat[1:2] == ":" and flat[2:3] != "\\":
+        return f"'{flat}' is relative to a drive. Give a path in the workspace, or a full path."
+    return None
+
+
 def remote_path_reason(path: str | os.PathLike[str] | None) -> str | None:
-    """Why *path* is refused as a network or device path, or None.
+    """Why *path* is refused as a network or device path, or None. On Windows
+    a path that names a drive after its first part is refused here too
+    (:func:`inner_drive_reason`): every door that takes a path asks this.
 
     Reads the text only: no filesystem or network call is made.
     """
@@ -100,4 +136,4 @@ def remote_path_reason(path: str | os.PathLike[str] | None) -> str | None:
             f"'{text}' is a network path. Kazma reads and writes local files "
             "only; copy the file into the workspace first."
         )
-    return None
+    return inner_drive_reason(text) if os.name == "nt" else None

@@ -215,23 +215,30 @@ def resolve_tool_path(path: str | os.PathLike[str], *, root: Path | None = None)
     whether a tool may touch it. One exception, made on the text before
     ``resolve()``: a network or device path (``\\\\host\\share``) is refused
     with ``RefusedBeforeEffect``, because resolving it already connects to
-    that host (``workspace.remote_paths``, 2026-11-10 audit).
+    that host (``workspace.remote_paths``, 2026-11-10 audit). So is a
+    drive-relative path, given or answered by ``resolve()`` (2026-11-25): it
+    means another file to whoever opens it than to whoever checked it.
     """
-    from kazma_core.workspace.remote_paths import remote_path_reason
+    from kazma_core.workspace.remote_paths import drive_relative_reason, remote_path_reason
 
     reason = remote_path_reason(path)
     p = Path(path).expanduser()
     if reason is None:
-        reason = remote_path_reason(p)
-    if reason is not None:
-        # Imported here: the agent package's __init__ builds the graph, and
-        # this module is imported long before it.
-        from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+        reason = remote_path_reason(p) or drive_relative_reason(p)
+    if reason is None:
+        if not p.is_absolute():
+            p = (root if root is not None else resolve_active_root()) / p
+        p = p.resolve()
+        if p.is_absolute():
+            return p
+        # Windows answers a drive-relative path for a part it cannot hold;
+        # whoever opens that opens it in the server's current folder.
+        reason = f"'{path}' is not a path this computer can hold."
+    # Imported here: the agent package's __init__ builds the graph, and
+    # this module is imported long before it.
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
 
-        raise RefusedBeforeEffect(reason)
-    if not p.is_absolute():
-        p = (root if root is not None else resolve_active_root()) / p
-    return p.resolve()
+    raise RefusedBeforeEffect(reason)
 
 
 def subscribe_root_changed(callback: RootChangedCallback) -> None:

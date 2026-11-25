@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## A file tool opens the file that was checked (Windows, 2026-11-25)
+
+- On Windows, a path that named a drive after its first part could be checked
+  as one file and opened as another, in the server's own folder. Such a path
+  is refused now, by its text, at every place that takes a path, and a path
+  that means a place only relative to a drive is never read as the workspace's.
+
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 
 - Once Spaces is on, a chat you started can move from your own space into a
