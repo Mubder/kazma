@@ -740,7 +740,15 @@ class TaskStore:
         The research panel's Delete ran its own SQL against both tables
         (Postgres by the pool, SQLite through ``_get_conn``); the store is the
         one place that knows its tables.
+
+        What the pipeline log keeps of it goes first (25 Nov 2026): the log
+        names a task by its id alone, so once the row was gone no later erase
+        found its workers' output. A log that cannot be written fails the
+        delete, and the row is there to try again by.
         """
+        from kazma_core.swarm.memory.pipeline_logger import forget_pipeline_logs
+
+        forget_pipeline_logs(task_id)
         with self._lock:
             if self._pg:
                 return bool(_pg_execute(

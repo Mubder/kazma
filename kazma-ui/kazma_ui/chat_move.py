@@ -518,7 +518,7 @@ def _remove_what_it_left(entry: dict[str, Any]) -> None:
     started from it."""
     from kazma_core.swarm.chat_tasks import forget_finished_tasks
 
-    chat_moves.remove_what_it_left(entry["thread"], space_id=entry["source"])
+    chat_moves.remove_what_it_left(entry["thread"], space_id=entry["source"], by=entry["by"])
     forget_finished_tasks(entry["thread"], entry["by"])
 
 

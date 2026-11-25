@@ -59,7 +59,7 @@ from kazma_core.spaces.scope import spaces_enforced
 from starlette.background import BackgroundTask
 from starlette.formparsers import MultiPartException
 
-from kazma_ui import auth, space_binding
+from kazma_ui import auth, session_manager, space_binding
 from kazma_ui.json_body import InvalidJsonBody, invalid_json_response, read_json
 
 __all__ = ["create_spaces_router"]
@@ -268,6 +268,8 @@ def create_spaces_router() -> APIRouter:
             except IdentityUnavailable:
                 return JSONResponse({"ok": False, "error": "identity_unavailable"}, status_code=503,
                                     headers={"Retry-After": "5"})
+            # Nothing this process remembers of the space is of the bundle.
+            session_manager.get_session_manager().space_arrived(str(taken["space"]))
             return JSONResponse({"ok": True, **taken}, status_code=201)
 
         try:
@@ -309,7 +311,9 @@ def create_spaces_router() -> APIRouter:
     def erase(space_id: str, request: Request) -> Any:
         def _run() -> Any:
             by = space_binding.account_of(auth.get_request_principal(request)) or ""
-            return JSONResponse({"ok": True, "erased": space_data.erase_space(space_id, by=by)})
+            erased = space_data.erase_space(
+                space_id, by=by, chats_gone=lambda: session_manager.get_session_manager().space_erased(space_id))
+            return JSONResponse({"ok": True, "erased": erased})
 
         return _guarded(request, space_id, "erase", _run)
 

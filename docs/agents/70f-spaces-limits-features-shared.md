@@ -416,8 +416,9 @@
       then the chat apps' pointers and, on a take-out, the line
       (`chat_moves.record_taken_out`: who, when, the title; only the move
       writes it), the rows of `chat_moves.MOVED_COLUMNS` (drafts, plan,
-      confirmations, decided gates) and the finished swarm tasks its maker
-      started (`swarm/chat_tasks.py`), the mover's own scheduled jobs, which
+      confirmations, decided gates) and its web searches (§70 (3)), the
+      finished swarm tasks its maker started, with their log
+      (`swarm/chat_tasks.py`), the mover's own scheduled jobs, which
       go with them (`chat_moves.follow_jobs`), and the files. On a share all
       of that stays in the person's own space. Either way the old thread's
       grants, YOLO, path grants, `/long` (`space_data.forget_chat_state`),
@@ -505,3 +506,24 @@
   that forgets its deletes as the control: the chat is back, and the reply is
   paged), `tests/test_chat_move_decisions.py` (the thread without its mark
   runs: the control).
+- **A space brought back in the same process is its bundle's (2026-11-25).**
+  Erasing a space and importing it (S4-06) are told to the chat store by the
+  two routes of `spaces_api`, the only callers. `space_erased`: nothing writes
+  a chat of the space from here on (one mark for the whole space: a copy held
+  by a late writer stored an erased chat again), its threads end, its cached
+  chats go, and so does a row or a spooled save written while it was erased.
+  `space_arrived`: the marks of chats deleted there go and its threads run
+  (`threads.space_begins_again`; what was deleted in another space stays
+  deleted), and no cached copy is served or saved (it held what was said after
+  the export). Gate: `tests/test_space_back_in_one_process.py` (the routes,
+  EN/AR; each call taken out as the controls; a caller that does not tell the
+  store, planted). `space_erased` runs before the space leaves the identity
+  store (`erase_space(chats_gone=)`): one that fails leaves it there, and the
+  second DELETE finishes it (it was refused, and late rows stayed). The
+  arrival clears the chat store's own marks first and reads the thread records
+  last: the bundle is in by then, and a busy record store left its chats
+  refusing every answer while `upsert_reply` said "saved". **`transact` raises
+  `ChatDeleted` when the write was refused**: nothing is called saved that was
+  not. A copy read before the arrival (`ChatSession._made`, an order, not a
+  field) is not written over the bundle. Left: a turn running since before the
+  erase reads the chat anew and adds its answer.

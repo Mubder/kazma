@@ -193,7 +193,7 @@ def register_external_tools(registry: Any) -> None:
         async def export_current_session(format: str = "json") -> str:
             """Export this conversation.
 
-            format: "json" (every message) or "markdown" (readable, without system messages)
+            format: "json" or "markdown"; neither holds the system messages (how many is said)
             """
             # The conversation is the turn's own (set by the tool worker),
             # never messages the model passes: offered, `messages` let a

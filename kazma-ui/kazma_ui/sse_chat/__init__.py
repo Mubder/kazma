@@ -916,7 +916,11 @@ def create_sse_chat_router(
                         
                         from kazma_ui.turn_runtime import invoke_turn as _invoke_compact
 
-                        result_state = await _invoke_compact(
+                        # Of the state only: the chat's row keeps what was
+                        # said. It used to be replaced by the model's own
+                        # messages -- the base prompt, "About me", recalled
+                        # memory -- without its authors, times and parts.
+                        await _invoke_compact(
                             live_graph,
                             current_values,
                             config,
@@ -925,18 +929,6 @@ def create_sse_chat_router(
                             persist=False,
                             budget=False,
                         )
-                        
-                        _compacted = _convert_messages_to_dicts(result_state.get("messages", []))
-
-                        def _replace(sess: Any) -> None:
-                            sess.messages = _compacted
-
-                        # AUD-052: the compaction awaited the graph; write
-                        # through the transaction, not the copy read before.
-                        session = await asyncio.to_thread(
-                            _mutate_session, session.session_id, _replace, session
-                        ) or session
-                        
                         confirmation = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
                     else:
                         confirmation = "🗜️ No conversation history found to compact yet."
@@ -946,9 +938,8 @@ def create_sse_chat_router(
             else:
                 confirmation = "⚠️ Live graph not loaded."
 
-            # /compact rewrites the transcript from the compacted checkpoint
-            # and used to stream its confirmation without storing it — the
-            # user reloaded into a compacted history with no sign of why.
+            # Stored, not only streamed: the page reloads into a chat that
+            # says it was compacted.
             await asyncio.to_thread(_persist_instant_turn, session, thread_id, raw_msg, confirmation)
 
             async def _compact_generator() -> AsyncGenerator[str, None]:
@@ -2126,6 +2117,9 @@ def create_sse_chat_router(
                             if extra:
                                 item.update(extra)
                             ui.append(item)
+                        # The checkpoint names no author: each question keeps
+                        # the one it had in the row.
+                        _reply_sink.carry_authors(messages, ui)
                         if ui:
                             # An in-flight turn's row lives only here — the
                             # checkpoint has no reply for it yet — and carries the

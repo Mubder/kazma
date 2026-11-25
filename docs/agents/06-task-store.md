@@ -11,4 +11,12 @@
   outside the helper; Postgres `ADD COLUMN IF NOT EXISTS` is idempotent and
   exempt -- and never swallowed: it aborts the transaction it runs in).
 - Worker filter uses `json_each()` not `LIKE` for exact matching
+- **A deleted task leaves no log** (2026-11-25): `TaskStore.delete_task`
+  removes what the pipeline log keeps of the task first
+  (`pipeline_logger.forget_pipeline_logs`), then the row. The log names a task
+  by its id alone, so a row deleted by itself orphaned its workers' output
+  from every later erase. A log that fails fails the delete (it is tried
+  again by the row); none is made to delete from. Gate:
+  `tests/test_chat_move_leftovers.py` (both callers; the row alone as the
+  control).
 

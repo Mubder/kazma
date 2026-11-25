@@ -1729,8 +1729,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The files Kazma shared in it go with it. Its Time Travel steps, thoughts and approval cards do not come along, and Kazma can no longer open files you attached to it: attach them again. Drafts, reminders and scheduled tasks stay in your own space.",
     },
     "chat.move_take_out_note": {
-        "ar": "وتأتي معها الملفات التي شاركها Kazma فيها. ولا تأتي معها خطوات السفر عبر الزمن ولا الأفكار ولا بطاقات الموافقة، ولن يستطيع Kazma فتح الملفات التي أرفقتها: أرفقها من جديد. وتُزال مسوداتها من المساحة المشتركة، أما التذكيرات والمهام المجدولة التي حجزتها منها فتأتي معك.",
-        "en": "The files Kazma shared in it come with it. Its Time Travel steps, thoughts and approval cards do not come along, and Kazma can no longer open files you attached to it: attach them again. Its drafts are removed from the shared space, and the reminders and scheduled tasks you booked in it come with you.",
+        "ar": "وتأتي معها الملفات التي شاركها Kazma فيها. ولا تأتي معها خطوات السفر عبر الزمن ولا الأفكار ولا بطاقات الموافقة، ولن يستطيع Kazma فتح الملفات التي أرفقتها: أرفقها من جديد. وتُزال مسوداتها وعمليات البحث على الويب التي أجريتها فيها من المساحة المشتركة (وتبقى القديمة التي حُفظت قبل أن يسجّل Kazma محادثتها)، وتبقى تقارير البحث العميق فيها لأنها من ملفاتها. أما التذكيرات والمهام المجدولة التي حجزتها منها فتأتي معك.",
+        "en": "The files Kazma shared in it come with it. Its Time Travel steps, thoughts and approval cards do not come along, and Kazma can no longer open files you attached to it: attach them again. Its drafts and the web searches you made in it are removed from the shared space (older ones, kept before Kazma noted their chat, stay); deep research reports stay there, they are files of the space. The reminders and scheduled tasks you booked in it come with you.",
     },
     "chat.move_err_swarm": {
         "ar": "مهمة سرب بدأتها هذه المحادثة لم تنتهِ بعد. انقل المحادثة بعد أن تنتهي.",

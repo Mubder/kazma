@@ -201,6 +201,17 @@ def prune_pipeline_logs(*, days: int, now: float | None = None) -> int:
     return int(cur.rowcount or 0)
 
 
+def forget_pipeline_logs(correlation_id: str) -> int:
+    """Remove everything the log holds of one task (its correlation id): the
+    task is deleted, and its workers' output with it. A log that was never
+    written is not made. Raises when it cannot be read: the caller's delete
+    is not done."""
+    if not correlation_id or (_conn is None and not Path(_DEFAULT_DB).exists()):
+        return 0
+    cur = _get_conn().execute("DELETE FROM pipeline_logs WHERE correlation_id = ?", (correlation_id,))
+    return int(cur.rowcount or 0)
+
+
 def _row_to_dict(row: tuple) -> dict[str, Any]:
     cols = ["id", "timestamp", "correlation_id", "worker_name", "stage",
             "level", "event_type", "message", "metadata", "raw_output"]

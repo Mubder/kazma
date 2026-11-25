@@ -511,3 +511,45 @@ async def test_backfill_still_heals_a_finished_turn(monkeypatch):
 
     out = await sse_chat._checkpoint_backfill_unanswered(session)
     assert out[-1]["content"].startswith("Here are your resets"), out[-1]
+
+
+_BEFORE, _AFTER = "2026-11-25T08:00:00+00:00", "2026-11-25T08:05:00+00:00"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("rows", "state", "began", "heals"), [
+    # /compact's hidden answer, and the next question's turn not begun yet.
+    ([{"role": "user", "content": "what is a falcon", "ts": _BEFORE}, {"role": "assistant", "content": "a bird"},
+      {"role": "user", "content": "/compact"}, {"role": "assistant", "content": "compacted"},
+      {"role": "user", "content": "and a hawk?", "ts": _AFTER}], "what is a falcon", _BEFORE, False),
+    ([{"role": "user", "content": "what is a falcon"}, {"role": "assistant", "content": "a bird"},
+      {"role": "user", "content": "and a hawk?"}], "what is a falcon", "", False),
+    # The same words again: only the turn's time tells.
+    ([{"role": "user", "content": "continue", "ts": _BEFORE}, {"role": "assistant", "content": "a bird"},
+      {"role": "user", "content": "continue", "ts": _AFTER}], "continue", _BEFORE, False),
+    ([{"role": "user", "content": "ما الصقر"}, {"role": "assistant", "content": "طائر"},
+      {"role": "user", "content": "والباز؟"}], "ما الصقر", "", False),
+    # Still healed: the question itself, its attachment's rewrite, a steer in its turn.
+    ([{"role": "user", "content": "and a hawk?", "ts": _BEFORE}], "and a hawk?", _AFTER, True),
+    ([{"role": "user", "content": "read it", "ts": _BEFORE}], "read it\n\n[attachment: plan.txt] ...", _AFTER, True),
+    ([{"role": "user", "content": "read it"}], "read it\n\n[attachment: plan.txt] ...", "", True),
+    ([{"role": "user", "content": "go", "ts": _BEFORE},
+      {"role": "user", "content": "🔀 faster", "steer": True, "ts": _AFTER}], "go", _BEFORE, True),
+])
+async def test_an_answer_heals_its_own_question_alone(monkeypatch, rows, state, began, heals):
+    """``/compact`` keeps the answer of one more model turn in the state, unseen
+    (review of the chat move's leftovers, L1): a reload before the next turn
+    began stored it as that question's reply."""
+    from kazma_ui import sse_chat
+
+    session = SimpleNamespace(session_id="s1", thread_id="t1", messages=list(rows))
+    store = _FakeStore(session)
+    graph = _fake_graph([])
+    graph.aget_state = MagicMock(return_value=_async_return(SimpleNamespace(values={
+        "created_at": began,
+        "messages": [{"role": "user", "content": state}, {"role": "assistant", "content": "the hidden answer"}]})))
+    _install(monkeypatch, store)
+    monkeypatch.setattr(_sse_helpers, "_module_graph", lambda: graph)
+    out = await sse_chat._checkpoint_backfill_unanswered(session)
+    assert (out[-1]["content"] == "the hidden answer") is heals
+    assert bool(store.puts) is heals

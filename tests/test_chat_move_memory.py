@@ -372,13 +372,13 @@ def test_the_scan_of_old_sessions_takes_the_same_cut(chat) -> None:
     copied = threads.copied_threads()
     (session,) = scan.load_sessions(chat.store().db_path)
     assert session["thread_id"] == chat.thread
-    assert [(n, user) for n, user, _a in scan.turns_said_here(session, copied)] == [(3, "I play the oud.")]
-    assert [n for n, _u, _a in scan.turns_said_here(session, {})] == [1, 2, 3], "an ordinary chat is read whole"
+    assert [(n, user) for n, user, _a, _by in scan.turns_said_here(session, copied)] == [(3, "I play the oud.")]
+    assert [n for n, _u, _a, _by in scan.turns_said_here(session, {})] == [1, 2, 3], "an ordinary chat is read whole"
     # A saved step's messages name no time: none is known to have been said here.
     step = {"session_id": chat.thread, "thread_id": chat.thread, "messages": [
         {"role": "user", "content": "I live in Lisbon."}, {"role": "assistant", "content": "Noted."}]}
     assert scan.turns_said_here(step, copied) == []
-    found = asyncio.run(scan.scan_session(chat.db, chat.team.ops, session, tenant_id=TEAM))
+    found = asyncio.run(scan.scan_session(chat.db, chat.team.ops, session))
     assert found["turns"] == 1 and not any(w in f for w in ("Lisbon", "Initech") for f in chat.facts(TEAM))
 
 

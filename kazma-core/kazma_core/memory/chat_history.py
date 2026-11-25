@@ -22,15 +22,20 @@ scored only the 400 most recent matches, with no tenant filter.
 
 from __future__ import annotations
 
+import functools
+import itertools
 import json
 import logging
+import re
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from kazma_core.db.pg_helpers import store_errors
+from kazma_core.errors import described_error
 from kazma_core.paths import chat_spool_db
 from kazma_core.spaces.scope import OWNER_SPACE_ID, space_named_or_bound, space_of_record
 
@@ -524,136 +529,315 @@ def threads_containing(mark: bytes, *, after: str = "", strict: bool = False) ->
 
 # ── Search across sessions ─────────────────────────────────────────────────
 
+#: How many chats' texts a search holds at once: they are fetched in rank
+#: order, this many at a time, until enough of them are confirmed.
+_TEXTS_AT_ONCE = 15
+#: How many chats' texts one search reads at most: 3,000 that were each read
+#: and refused took 3 to 10 seconds of a turn.
+_TEXTS_READ = 500
+#: A word longer than this is looked for as it stands: nobody spells a token,
+#: a path or a key another way, and a pattern grows with its word (a 16,000
+#: character one is refused by Postgres, and six of 10,000 took 8 seconds).
+LONGEST_SPELLED = 64
 
-def _score(title: str, messages: str, words: list[str]) -> int:
-    """The SQL score below, for a spooled copy: 5 for a title hit, plus the
-    term's occurrences in the messages, at most 4."""
+
+@dataclass(frozen=True, slots=True)
+class _Word:
+    """One spelling a search asks for: a substring of the lower-cased text, or
+    -- a word the fold writes more than one way (``documents.arabic``) -- a
+    pattern over the text as it stands."""
+
+    text: str
+    pattern: str = ""
+
+    def count(self, text: str, lowered: str) -> int:
+        """How often it is there, at most 4 (what the score counts)."""
+        if not self.pattern:
+            return min(4, lowered.count(self.text))
+        return sum(1 for _ in itertools.islice(_compiled(self.pattern).finditer(text), 4))
+
+
+@functools.lru_cache(maxsize=256)
+def _compiled(pattern: str) -> re.Pattern[str]:
+    return re.compile(pattern)
+
+
+def _words(term: str) -> list[_Word]:
+    """How *term* is looked for. Plain English letters have one spelling; a
+    letter of another script, and a digit, may be written in several; a letter
+    only the fold reads is also looked for as it stands."""
+    from kazma_core.documents.arabic import spelling_pattern
+
+    as_it_stands = _Word(term.lower())
+    if len(term) > LONGEST_SPELLED or (term.isascii() and not any(c.isdigit() for c in term)):
+        return [as_it_stands]
+    spelled = _Word(term.lower(), spelling_pattern(term))
+    return [spelled, as_it_stands] if _has_folded_otherwise(term) else [spelled]
+
+
+def _asked(terms: Iterable[str | Iterable[str]]) -> list[list[_Word]]:
+    """Each term's words: a term is one word, or several spellings of one."""
+    asked = []
+    for term in terms:
+        variants = [term] if isinstance(term, str) else term
+        words = {(w.pattern or w.text): w for v in variants if v for w in _words(v)}
+        if words:
+            asked.append(list(words.values()))
+    return asked
+
+
+def _points(title: str, messages: str, asked: list[list[_Word]]) -> list[int]:
+    """The SQL below for a spooled copy: what each term scores."""
     lt, lm = title.lower(), messages.lower()
-    return sum((5 if w in lt else 0) + min(4, lm.count(w)) for w in words)
+    return [sum((5 if w.count(title, lt) else 0) + w.count(messages, lm) for w in words) for words in asked]
+
+
+def _has_folded_otherwise(*texts: str) -> bool:
+    """Whether a text holds a letter only the fold reads
+    (``documents.arabic.folded_otherwise``)."""
+    from kazma_core.documents.arabic import folded_otherwise
+
+    return any(not t.isascii() and _compiled(folded_otherwise()).search(t) for t in texts)
 
 
 def search_sessions(
-    terms: list[str],
+    terms: Iterable[str | Iterable[str]],
     *,
     tenant_id: str | None = None,
     exclude_session_id: str | None = None,
     limit: int = 3,
     sqlite_path: Path | None = None,
-) -> list[dict[str, Any]]:
+    at_least: int = 1,
+    confirm: Callable[[dict[str, Any]], Any] | None = None,
+) -> list[Any]:
     """The tenant's sessions matching *terms*, best first, over EVERY session.
 
-    Score per term: 5 when the title has it, plus its occurrences in the
-    messages (at most 4) -- computed in SQL, so the whole history is ranked
-    and only the best rows come back. A spooled copy (a save the database
-    refused) is scored the same way and replaces the stored row when it
-    scores higher. Rows: ``session_id, thread_id, title, created_at,
-    messages`` (text) and ``score``. *sqlite_path* searches that SQLite chat
-    file whatever the backend.
+    A term is a word, or several spellings of one; a session matches when it
+    holds *at_least* of them. Score per spelling: 5 when the title has it,
+    plus its occurrences in the messages (at most 4) -- computed where the
+    chats are, so the whole history is ranked and no text is read to rank it.
+    A spooled copy (a save the database refused) is scored the same way and
+    replaces the stored row when it scores higher. The best first, then the
+    newest.
+
+    A spelling does not read every letter (``arabic.folded_otherwise``: a
+    ligature, "ß", a full-width digit), so a session whose text has one is
+    ranked when it holds any term, after those that hold enough: *confirm*
+    reads it with the fold.
+
+    *confirm* is asked about each session in rank order and answers what to
+    return for it, or None to pass it over: the search goes on until *limit*
+    are confirmed or none are left. Rows cut off before they were checked hid
+    the chat that held the answer behind 15 that only shared its letters (25
+    Nov 2026). It reads :data:`_TEXTS_READ` of them at most. Rows:
+    ``session_id, thread_id, title, created_at, messages`` (text) and
+    ``score``. *sqlite_path* searches that SQLite chat file whatever the
+    backend. A store that cannot be searched finds nothing, and is said.
     """
     tenant_id = space_named_or_bound(tenant_id)
-    words = [t.lower() for t in terms if t]
-    if not words:
+    asked = _asked(terms)
+    if not asked:
         return []
     try:
-        sessions = _sessions_path(sqlite_path)
-        spooled = [
-            s
-            for s in _spooled(sessions)
-            if s.get("tenant_id") == tenant_id and s.get("session_id") != exclude_session_id
-        ]
-        fetch = int(limit) + len(spooled)
-        if sqlite_path is None and _postgres():
-            rows = _search_postgres(words, tenant_id, exclude_session_id, fetch)
-        else:
-            rows = _search_sqlite(sessions, words, tenant_id, exclude_session_id, fetch)
-        best = {str(r["session_id"]): r for r in rows}
-        for s in spooled:
-            text = json.dumps(s.get("messages") or [], ensure_ascii=False)
-            title = str(s.get("title") or "")
-            score = _score(title, text, words)
-            sid = str(s["session_id"])
-            if score and score > int((best.get(sid) or {}).get("score") or 0):
-                best[sid] = {
-                    "session_id": sid,
-                    "thread_id": str(s.get("thread_id") or ""),
-                    "title": title,
-                    "created_at": str(s.get("created_at") or ""),
-                    "messages": text,
-                    "score": score,
-                }
-        ranked = sorted(
-            best.values(),
-            key=lambda r: (int(r.get("score") or 0), str(r.get("created_at") or "")),
-            reverse=True,
+        return _confirmed(
+            _ranked(asked, tenant_id, exclude_session_id, sqlite_path, at_least),
+            tenant_id, sqlite_path, confirm or (lambda row: row), max(1, int(limit)),
         )
-        return ranked[: max(1, int(limit))]
-    except STORE_ERRORS:  # the fallback is best-effort; an unreadable store finds nothing
-        logger.debug("[chat_history] session search failed", exc_info=True)
+    except STORE_ERRORS as exc:  # the fallback is best-effort; an unreadable store finds nothing
+        if not _never_created(exc):
+            described_error("[chat_history] the past chats could not be searched", exc, level=logging.WARNING)
         return []
+
+
+def _ranked(
+    asked: list[list[_Word]], tenant_id: str, exclude: str | None, sqlite_path: Path | None, at_least: int
+) -> list[dict[str, Any]]:
+    """Every matching session, best first; only a spooled one has its text."""
+    sessions = _sessions_path(sqlite_path)
+    if sqlite_path is None and _postgres():
+        rows = _search_postgres(asked, tenant_id, exclude)
+    else:
+        rows = _search_sqlite(sessions, asked, tenant_id, exclude)
+    best = {str(r["session_id"]): r for r in rows}
+    for s in _spooled(sessions):
+        sid = str(s["session_id"])
+        if s.get("tenant_id") != tenant_id or sid == exclude:
+            continue
+        text = json.dumps(s.get("messages") or [], ensure_ascii=False)
+        title = str(s.get("title") or "")
+        points = _points(title, text, asked)
+        if any(points) and sum(points) > int((best.get(sid) or {}).get("score") or 0):
+            best[sid] = {
+                "session_id": sid,
+                "thread_id": str(s.get("thread_id") or ""),
+                "title": title,
+                "created_at": str(s.get("created_at") or ""),
+                "messages": text,
+                "score": sum(points),
+                "there": sum(map(bool, points)),
+                "otherwise": _has_folded_otherwise(title, text),
+            }
+    return sorted(
+        (r for r in best.values() if r["there"] >= at_least or r["otherwise"]),
+        key=lambda r: (r["there"] >= at_least, int(r["score"]), str(r.get("created_at") or "")),
+        reverse=True,
+    )
+
+
+def _confirmed(
+    ranked: list[dict[str, Any]],
+    tenant_id: str,
+    sqlite_path: Path | None,
+    confirm: Callable[[dict[str, Any]], Any],
+    limit: int,
+) -> list[Any]:
+    """What *confirm* answers for the sessions in rank order, *limit* at most."""
+    found: list[Any] = []
+    for start in range(0, min(len(ranked), _TEXTS_READ), _TEXTS_AT_ONCE):
+        part = ranked[start: min(start + _TEXTS_AT_ONCE, _TEXTS_READ)]
+        texts = _texts_of([str(r["session_id"]) for r in part if "messages" not in r], tenant_id, sqlite_path)
+        for row in part:
+            text = row.get("messages", texts.get(str(row["session_id"])))
+            if text is None:
+                continue  # deleted since it was ranked
+            answer = confirm({**row, "messages": text})
+            if answer is not None:
+                found.append(answer)
+                if len(found) >= limit:
+                    return found
+    if len(ranked) > _TEXTS_READ:
+        logger.info("[chat_history] a search read the %d best of %d past chats that may hold its words",
+                    _TEXTS_READ, len(ranked))
+    return found
+
+
+def _texts_of(session_ids: list[str], tenant_id: str, sqlite_path: Path | None) -> dict[str, str]:
+    """The stored messages (text) of those sessions of *tenant_id*."""
+    if not session_ids:
+        return {}
+    if sqlite_path is None and _postgres():
+        from kazma_core.db.pg_helpers import get_pool
+
+        rows = get_pool().execute(
+            "SELECT session_id, messages::text AS messages FROM kazma_chat_sessions "
+            "WHERE tenant_id = %s AND session_id = ANY(%s)",
+            [tenant_id, session_ids],
+        )
+        return {str(r["session_id"]): str(r["messages"] or "") for r in rows}
+    conn = _ro(_sessions_path(sqlite_path))
+    if conn is None:
+        return {}
+    try:
+        marks = ",".join("?" for _ in session_ids)
+        return {
+            str(r["session_id"]): str(r["messages"] or "")
+            for r in conn.execute(
+                f"SELECT session_id, messages FROM sessions WHERE tenant_id = ? AND session_id IN ({marks})",
+                [tenant_id, *session_ids],
+            )
+        }
+    finally:
+        conn.close()
+
+
+def _sql_times(text: str | None, pattern: str) -> int:
+    """SQLite's count of a spelling pattern (at most 4)."""
+    return _Word("", pattern).count(text or "", "")
+
+
+def _ranking(
+    asked: list[list[_Word]], *, plain: tuple[str, str, str], spelled: tuple[str, str, str], text: str
+) -> tuple[str, str, list[Any], list[Any]]:
+    """(each term's points as columns p0, p1, ..., the condition that any term
+    is there, their parameters), in one dialect.
+
+    *plain* and *spelled*: what a substring and a pattern score in the title
+    and in the messages, and how one is tested on a column."""
+    points: list[str] = []
+    point_params: list[Any] = []
+    there: list[str] = []
+    there_params: list[Any] = []
+    for at, words in enumerate(asked):
+        terms: list[str] = []
+        for w in words:
+            title, messages, test = spelled if w.pattern else plain
+            terms.append(f"({title} + {messages})")
+            point_params += [w.pattern] * 2 if w.pattern else [w.text, w.text, len(w.text)]
+            there += [test.format("title"), test.format(text)]
+            there_params += [w.pattern or w.text] * 2
+        points.append(f"({' + '.join(terms)}) AS p{at}")
+    return (", ".join(points), f"({' OR '.join(there)})", point_params, there_params)
+
+
+def _ranked_row(row: Any, terms: int) -> dict[str, Any]:
+    """A row of the search below, with its score and how many terms it holds."""
+    points = [int(row[f"p{at}"] or 0) for at in range(terms)]
+    return {
+        **{k: row[k] for k in ("session_id", "thread_id", "title", "created_at")},
+        "score": sum(points), "there": sum(map(bool, points)), "otherwise": bool(row["otherwise"]),
+    }
 
 
 def _search_sqlite(
-    path: Path, words: list[str], tenant_id: str, exclude: str | None, limit: int
+    path: Path, asked: list[list[_Word]], tenant_id: str, exclude: str | None
 ) -> list[dict[str, Any]]:
     conn = _ro(Path(path))
     if conn is None:
         return []
-    score_parts: list[str] = []
-    score_params: list[Any] = []
-    match_parts: list[str] = []
-    match_params: list[Any] = []
-    for w in words:
-        score_parts.append(
-            "(CASE WHEN instr(lower(title), ?) > 0 THEN 5 ELSE 0 END"
-            " + min(4, (length(lower(messages)) - length(replace(lower(messages), ?, ''))) / ?))"
-        )
-        score_params.extend([w, w, len(w)])
-        match_parts.append("(lower(title) LIKE ? OR lower(messages) LIKE ?)")
-        match_params.extend([f"%{w}%", f"%{w}%"])
-    where = f"tenant_id = ? AND ({' OR '.join(match_parts)})"
-    params: list[Any] = [*score_params, tenant_id, *match_params]
+    points, there, point_params, there_params = _ranking(
+        asked,
+        plain=("(CASE WHEN instr(lower(title), ?) > 0 THEN 5 ELSE 0 END)",
+               "min(4, (length(lower(messages)) - length(replace(lower(messages), ?, ''))) / ?)",
+               "instr(lower({}), ?) > 0"),
+        spelled=("(CASE WHEN kazma_times(title, ?) > 0 THEN 5 ELSE 0 END)", "kazma_times(messages, ?)",
+                 "kazma_times({}, ?) > 0"),
+        text="messages",
+    )
+    where = f"tenant_id = ? AND {there}"
+    params: list[Any] = [*point_params, tenant_id, *there_params]
     if exclude:
         where += " AND session_id != ?"
         params.append(exclude)
     try:
+        conn.create_function("kazma_times", 2, _sql_times, deterministic=True)
+        conn.create_function("kazma_otherwise", 2, lambda title, text: _has_folded_otherwise(title or "", text or ""),
+                             deterministic=True)
         rows = conn.execute(
-            f"SELECT session_id, thread_id, title, created_at, messages, "
-            f"({' + '.join(score_parts)}) AS score FROM sessions WHERE {where} "
-            "ORDER BY score DESC, created_at DESC LIMIT ?",
-            [*params, int(limit)],
+            "SELECT session_id, thread_id, title, created_at, kazma_otherwise(title, messages) AS otherwise, "
+            f"{points} FROM sessions WHERE {where}",
+            params,
         ).fetchall()
     finally:
         conn.close()
-    return [dict(r) for r in rows]
+    return [_ranked_row(r, len(asked)) for r in rows]
 
 
 def _search_postgres(
-    words: list[str], tenant_id: str, exclude: str | None, limit: int
+    asked: list[list[_Word]], tenant_id: str, exclude: str | None
 ) -> list[dict[str, Any]]:
     from kazma_core.db.pg_helpers import get_pool
+    from kazma_core.documents.arabic import folded_otherwise
 
-    score_parts: list[str] = []
-    score_params: list[Any] = []
-    match_parts: list[str] = []
-    match_params: list[Any] = []
-    for w in words:
-        score_parts.append(
-            "(CASE WHEN position(%s in lower(title)) > 0 THEN 5 ELSE 0 END"
-            " + LEAST(4, (length(lower(messages::text))"
-            " - length(replace(lower(messages::text), %s, ''))) / %s))"
-        )
-        score_params.extend([w, w, len(w)])
-        match_parts.append("(lower(title) LIKE %s OR lower(messages::text) LIKE %s)")
-        match_params.extend([f"%{w}%", f"%{w}%"])
-    where = f"tenant_id = %s AND ({' OR '.join(match_parts)})"
-    params: list[Any] = [*score_params, tenant_id, *match_params]
+    points, there, point_params, there_params = _ranking(
+        asked,
+        plain=("(CASE WHEN position(%s in lower(title)) > 0 THEN 5 ELSE 0 END)",
+               "LEAST(4, (length(lower(messages::text))"
+               " - length(replace(lower(messages::text), %s, ''))) / %s)",
+               "position(%s in lower({})) > 0"),
+        spelled=("(CASE WHEN title ~ %s THEN 5 ELSE 0 END)",
+                 "(SELECT LEAST(4, count(*)) FROM regexp_matches(messages::text, %s, 'g'))",
+                 "{} ~ %s"),
+        text="messages::text",
+    )
+    where = f"tenant_id = %s AND {there}"
+    otherwise = folded_otherwise()
+    params: list[Any] = [otherwise, otherwise, *point_params, tenant_id, *there_params]
     if exclude:
         where += " AND session_id != %s"
         params.append(exclude)
     rows = get_pool().execute(
-        f"SELECT session_id, thread_id, title, created_at, messages::text AS messages, "
-        f"({' + '.join(score_parts)}) AS score FROM kazma_chat_sessions WHERE {where} "
-        "ORDER BY score DESC, created_at DESC LIMIT %s",
-        [*params, int(limit)],
+        "SELECT session_id, thread_id, title, created_at, (title ~ %s OR messages::text ~ %s) AS otherwise, "
+        f"{points} FROM kazma_chat_sessions WHERE {where}",
+        params,
     )
-    return [dict(r) for r in rows]
+    return [_ranked_row(r, len(asked)) for r in rows]

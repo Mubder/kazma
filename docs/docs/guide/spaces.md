@@ -127,8 +127,11 @@ are in, and back out:
   *When you share it,* its drafts and plans, and the reminders and scheduled
   tasks you booked from it, stay in your own space. *When you take it out,*
   the shared space keeps none of its drafts, plans, confirmations or finished
-  swarm tasks, and the reminders and tasks you booked in it come with you
-  (another member's stay). Approvals you gave for the chat, YOLO, `/long` and
+  swarm tasks (nor their workers' log), and none of the web searches you made
+  in it (those from before November 25, 2026 name no chat, and stay); a search
+  another chat there made too stays, and another member's. A deep research report stays:
+  it is a file of the space, read by its members. The reminders and tasks you
+  booked in it come with you (another member's stay). Approvals you gave for the chat, YOLO, `/long` and
   folder grants end with the chat it was.
 
   What you asked Kazma to forget of it stays forgotten where it was said; the

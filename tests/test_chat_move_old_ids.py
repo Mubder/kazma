@@ -124,7 +124,7 @@ def test_another_spaces_rows_and_an_open_gate_are_never_removed(world) -> None:
         from kazma_core.agent.artifacts import get_artifact_store
 
         get_artifact_store().put_scratchpad(i["omars"], thread, "notes", "another space's")
-    assert chat_moves.remove_what_it_left(thread, space_id=i["family"]) == 0
+    assert chat_moves.remove_what_it_left(thread, space_id=i["family"], by=i["reem"]) == 0
     assert len(_rows("hitl_gates.db", "hitl_gates", "gate_id = ?", f"open-{thread}")) == 1
     assert len(_rows("agent_artifacts.db", "agent_artifacts", "thread_id = ?", thread)) == 1
 
@@ -382,7 +382,7 @@ def test_a_step_a_stop_cut_off_is_done_at_settle(world, tmp_path) -> None:
 
 #: The columns that name a chat: its thread, or its session (the chat store's
 #: rows and spool are kept by session).
-_CHAT_COLUMNS = {"thread_id", "session_id"}
+_CHAT_COLUMNS = {"thread_id", "session_id", "thread_ids"}
 
 
 def _threaded_tables(stores: list[tuple[str, Path]]) -> set[tuple[str, str]]:

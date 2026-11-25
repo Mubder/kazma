@@ -139,6 +139,81 @@ def authored(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def carry_authors(existing: list, out: list, author: str = "", *, one_person: bool = False,
+                  among: list | None = None) -> list:
+    """Each user row of *out* keeps the account that sent it (``author``,
+    Spaces S1-08; ``hitl_answerers.whose_turn`` reads it to know whose turn it
+    is, a chat's move whether others wrote in it): the checkpoint holds no
+    author, so a row made from it takes the author of the row it was in
+    *existing*, and the newest user row takes *author*, the sender of the
+    message the turn opens with (left out of the matching: it is not in
+    *existing* yet).
+
+    An author is recorded, never guessed; a row whose author is in doubt names
+    nobody, and is then not the mover's own (``chat_moves.others_wrote``). A
+    text one account asked is that account's. A text several asked is told
+    apart only where *out* begins at *existing*'s first question and holds
+    that text as often: the k-th is then the k-th. A trimmed or compacted
+    state is neither, and which "yes" it kept is not known. *among*: the rows
+    the askers of a text are read from, when *existing* is a part of them.
+    Kazma's own prompts (the state keeps them as ``user`` messages) are
+    nobody's.
+
+    *one_person*: a question *existing* does not hold as written (the state
+    keeps an attachment's rewrite, a steer's note) is that person's too when
+    every question of *existing* names the same one. Mutates and returns
+    *out*. No I/O."""
+    from kazma_core.agent.plan_fence import is_graph_nudge
+
+    users = [i for i, m in enumerate(out) if isinstance(m, dict) and m.get("role") == "user"]
+    newest = users[-1] if author and users else None
+    matched = [i for i in users if i != newest and not is_graph_nudge(_as_said(out[i].get("content")))]
+    before = _askers(existing)
+    askers = before if among is None else _askers(among)
+    everyone = {name for names in before.values() for name in names}
+    only = next(iter(everyone)) if one_person and len(everyone) == 1 else ""
+    first = next((_as_said(m.get("content")) for m in existing or []
+                  if isinstance(m, dict) and m.get("role") == "user"), None)
+    whole = bool(matched) and _as_said(out[matched[0]].get("content")) == first
+    held: dict[str, list[int]] = {}
+    for i in matched:
+        held.setdefault(_as_said(out[i].get("content")), []).append(i)
+    for text, places in held.items():
+        names = before.get(text, [])
+        if len(places) > len(names):
+            sent_by = [only] * len(places)  # one of them is not in *existing*
+        elif len(set(askers.get(text, names))) == 1:
+            sent_by = names[-len(places):]
+        elif whole and len(places) == len(names):
+            sent_by = names
+        else:
+            sent_by = [""] * len(places)
+        for i, name in zip(places, sent_by, strict=True):
+            if name and not out[i].get("author"):
+                out[i]["author"] = name
+    if newest is not None:
+        out[newest]["author"] = author
+    return out
+
+
+def _askers(rows: list | None) -> dict[str, list[str]]:
+    """Each question's text, and who asked it, in order ("": not recorded)."""
+    asked: dict[str, list[str]] = {}
+    for m in rows or []:
+        if isinstance(m, dict) and m.get("role") == "user":
+            asked.setdefault(_as_said(m.get("content")), []).append(str(m.get("author") or ""))
+    return asked
+
+
+def _as_said(content: Any) -> str:
+    """A message's text as a row and the state both hold it (its parts' text
+    when it has parts)."""
+    if isinstance(content, list):
+        content = "".join(p if isinstance(p, str) else str(p.get("text") or "")
+                          for p in content if isinstance(p, (str, dict)))
+    return str(content or "").strip()
+
+
 #: A turn's lifecycle is a JOIN-SEMILATTICE, not a field: it only ever moves
 #: forward, and `closed` absorbs.
 #:

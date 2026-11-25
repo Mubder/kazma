@@ -1122,7 +1122,9 @@ class ChatPanel(Vertical):
                 "system",
                 f"Restored season to step {snapshot_id[:8]} (turn {data.get('turn_index')}, "
                 f"{count_noun(loaded, 'message')}). The later turns were taken back; files written, "
-                "commands run and messages sent are not undone.",
+                "commands run and messages sent are not undone."
+                + (" The chat still shows the later messages: where this step sits among them is not "
+                   "known, so none was removed." if data.get("transcript_kept") else ""),
             )
         except Exception as e:
             self.write("error", f"Replay command failed: {e}")
