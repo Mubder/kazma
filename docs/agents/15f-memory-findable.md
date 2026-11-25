@@ -255,7 +255,17 @@ came up short, and archiving had erased 76 memories.
   matching chat without its text, then asks `confirm` about each in rank
   order, 15 texts at a time, until enough are confirmed: 15 rows cut first
   hid the chat that answered behind 20 with "resize". A chat must hold
-  `at_least` of the terms to be ranked. `system` rows (the old `/compact`
+  `at_least` of the terms to be ranked. **What a spelling cannot read is
+  folded** (review M1): a letter only the fold reads (`arabic.folded_otherwise`,
+  asked of the fold: a decomposed accent, "ﬁ", "ß", "２", "ﷺ") makes its chat
+  ranked on any one term, after the others, and the words that hold such a
+  letter are folded themselves; the two together answer as folding the whole
+  text does (a property test over every script). A word over
+  `LONGEST_SPELLED` (64) is looked for as it stands, uncached: a pattern grows
+  with its word (Postgres refuses a 16,000-letter one). One search reads
+  `_TEXTS_READ` (500) texts at most, best first, then newest, and says so at
+  INFO; a store that cannot be searched is said at WARNING (`described_error`),
+  never DEBUG. `system` rows (the old `/compact`
   wrote the prompt and "About me" as such) are not read, nor exported
   (`export_session`). Gate: `tests/test_past_chats_search.py` (both
   databases; the cut before the checks, and a class taken out of the fold,

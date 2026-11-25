@@ -96,7 +96,7 @@
     owner's), and a session records its author (`asker`, always stamped) and
     the chats it was made in (`thread_ids`, a column never shown; one
     question is one row, whatever chats asked it). A chat taken out of a
-    shared space takes its web searches (`forget_chat_searches`, through
+    shared space takes the web searches its mover made in it (`forget_chat_searches`, through
     `chat_moves.remove_what_it_left`): one another chat made too stays, a
     row from before stays (`""`: a chat not known), a report stays (a file
     of the space). Gate: `tests/test_chat_move_leftovers.py`.

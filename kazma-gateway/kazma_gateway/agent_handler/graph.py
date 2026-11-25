@@ -2821,7 +2821,9 @@ def create_graph_handler(
             "The later turns were taken back: from this chat, from what Kazma remembered of "
             "them, and from its saved steps. Files written, commands run and messages sent "
             "are not undone.\n\n"
-            "Your next message continues from here."
+            + ("The web page still shows this chat's later messages: where this step sits among "
+               "them is not known, so none was removed.\n\n" if out.get("transcript_kept") else "")
+            + "Your next message continues from here."
         )
 
     async def _handle_fork(

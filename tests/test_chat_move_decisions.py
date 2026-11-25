@@ -414,14 +414,14 @@ def test_the_copys_row_is_written_last_and_copied_at_once(world, monkeypatch) ->
                 order.append(name)
                 return real(*args, **kwargs)
         monkeypatch.setattr(owner, name, called)
-    real_put = session_manager.SessionManager.put
+    real_put = session_manager.SessionManager._put
 
     def put(self: Any, chat: Any) -> None:
         if entries and chat.session_id == entries[0]["new_session"]:
             order.append("row")
         real_put(self, chat)
 
-    monkeypatch.setattr(session_manager.SessionManager, "put", put)
+    monkeypatch.setattr(session_manager.SessionManager, "_put", put)
     w.moved("reem", i["mine"], session, i["family"])
     assert order == ["_record_copy", "copy_shared_files", "carry_conversation", "row", "advance_move"]
 

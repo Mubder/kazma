@@ -45,7 +45,7 @@ import logging
 import sqlite3
 import threading
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -327,11 +327,22 @@ def space_begins_again(space_id: str) -> None:
     """The space was brought in (from its bundle): its threads run. The marks
     of threads ended in it go, and one of a thread it holds whose space was
     not known; what was deleted in another space stays ended. Reads the
-    record store."""
-    _own, held = space_threads(space_id)
-    with _spaces_lock:
-        for tid in [t for t, where in _ended.items() if where == space_id or (not where and t in held)]:
-            del _ended[tid]
+    record store for the last; one that cannot be read is said."""
+    def run(ended: Callable[[str, str], bool]) -> None:
+        with _spaces_lock:
+            for tid in [t for t, where in _ended.items() if ended(t, where)]:
+                del _ended[tid]
+
+    run(lambda _tid, where: where == space_id)
+    if "" not in _ended.values():
+        return
+    try:
+        _own, held = space_threads(space_id)
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[spaces] space %s is back, and which of its threads were ended before their space was "
+                       "known could not be read (%s): those run after the next start", space_id, type(exc).__name__)
+        return
+    run(lambda tid, where: not where and tid in held)
 
 
 def _refuse_ended(thread_id: str) -> None:

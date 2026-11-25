@@ -742,11 +742,14 @@ def _erase_secrets(space: str) -> int:
     return vault.erase_space(space)
 
 
-def erase_space(space: str, *, by: str) -> dict[str, Any]:
+def erase_space(space: str, *, by: str, chats_gone: Callable[[], None] = lambda: None) -> dict[str, Any]:
     """Erase the space: its libraries (vectors and fetched pages too), every
     store's rows, its settings, its secrets and its files; then it leaves the
     identity store, recorded. A personal space is erased only once its person
-    was deleted (``account_deleted_at``). Returns the counts erased."""
+    was deleted (``account_deleted_at``). *chats_gone*: the chat store's own
+    end of it, before the space leaves the identity store -- one that fails
+    leaves the space there, and the erase is run again. Returns the counts
+    erased."""
     found_space = _checked(space)
     if found_space.get("personal_of") and not found_space.get("account_deleted_at"):
         raise SpaceDataRefused(
@@ -780,6 +783,7 @@ def erase_space(space: str, *, by: str) -> dict[str, Any]:
     for folder in _folders(space):
         erased["files"] += _file_count([folder])
         shutil.rmtree(folder)
+    chats_gone()
     people.forget_space(space, by=by)
     logger.warning("[spaces] space erased space=%s by=%s rows=%d files=%d", space, by,
                    erased["rows"], erased["files"])

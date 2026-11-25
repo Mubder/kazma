@@ -1301,6 +1301,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "استُعيدت المحادثة إلى الدور {turn}، الخطوة {step} ({n} رسالة)",
         "en": "Restored to turn {turn}, step {step} ({n} messages)",
     },
+    "replay.transcript_kept": {
+        "ar": "ما زالت المحادثة تعرض الرسائل اللاحقة: موضع هذه الخطوة بينها غير معروف، فلم يُحذف منها شيء. تُكمل كاظمه من الخطوة.",
+        "en": "The chat still shows the later messages: where this step sits among them is not known, so none was removed. Kazma continues from the step.",
+    },
     "replay.restore_request_failed": {
         "ar": "فشل طلب الاستعادة",
         "en": "Restore request failed",

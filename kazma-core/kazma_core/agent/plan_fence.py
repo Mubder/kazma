@@ -260,7 +260,8 @@ AUTO_CONTINUE_PROMPT = (
 )
 
 
-def _is_graph_nudge(text: str) -> bool:
+def is_graph_nudge(text: str) -> bool:
+    """Whether a ``user`` message is the graph's own prompt, not a person's."""
     t = (text or "").strip()
     return t.startswith("[KAZMA_") or t == AUTO_CONTINUE_PROMPT
 
@@ -278,7 +279,7 @@ def running_turn(messages: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         if not isinstance(m, dict) or (m.get("role") or m.get("type")) not in ("user", "human"):
             continue
         content = m.get("content")
-        if isinstance(content, str) and _is_graph_nudge(content):
+        if isinstance(content, str) and is_graph_nudge(content):
             continue
         return msgs[i + 1:]
     return msgs

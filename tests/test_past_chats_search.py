@@ -10,10 +10,13 @@ returned its 15 best rows by substring before any was checked: 20 chats with
 from __future__ import annotations
 
 import json
+import logging
 import random
 import re
 import secrets
+import sqlite3
 import time
+import unicodedata
 
 import pytest
 from kazma_core.documents import arabic
@@ -52,6 +55,8 @@ SPELLINGS = [
     ("the article and a preposition", "قهوة", "وبالقهوة"),
     ("an accent in capitals", "café", "CAFÉ"),
     ("Cyrillic in capitals", "привет", "ПРИВЕТ"),
+    ("the Greek final sigma", "οδος", "η οδος"),
+    ("the Greek final sigma, asked in capitals", "ΟΔΟΣ", "η οδος"),
     ("plain Arabic", "بيت", "بيت"),
     ("plain English", "passport", "Passport"),
 ]
@@ -332,3 +337,153 @@ def test_a_chat_whose_words_are_all_forgotten_is_refused(chats, monkeypatch):
 def test_reading_the_json_reads_only_its_escapes():
     stored = json.dumps([{"content": 'a "b"\n\\n C:\\new\té'}], ensure_ascii=False)
     assert 'a "b"\n\\n C:\\new\té' in transcript_recall._readable(stored)
+
+
+# ── What only the fold reads (review M1, 25 Nov 2026) ─────────────────────
+
+#: (what it is, the question, what the chat says): found before the spelling
+#: pattern, and missed by it alone.
+ONLY_THE_FOLD = [
+    ("a decomposed accent", "café reservation", "the cafe\u0301 reservation is at 8"),
+    ("a decomposed accent asked", "cafe\u0301 reservation", "the café reservation is at 8"),
+    ("the ffi ligature", "office lease", "the oﬃce lease ends in May"),
+    ("the fi ligature", "file backup", "the ﬁle backup ran"),
+    ("full-width digits", "invoice 2026", "invoice ２０２６ is paid"),
+    ("full-width letters", "kazma invoice", "ｋａｚｍａ invoice"),
+    ("sharp s", "strasse parking", "Straße parking is free"),
+    ("sharp s asked", "Straße parking", "strasse parking is free"),
+    ("the final sigma", "οδοσ χαρτησ", "η οδος εχει χαρτης χαρτης"),
+    ("the final sigma, capitals", "ΟΔΟΣ αθήνα", "οδος αθήνα"),
+    ("half-width katakana", "カメラ batteries", "ｶﾒﾗ batteries"),
+    ("a voiced half-width katakana", "ガラス window", "ｶﾞﾗｽ window"),
+    ("decomposed Hangul", "한글 keyboard", "한글 keyboard"),
+    ("the prayer ligature", "صلى محمد", "محمد ﷺ"),
+    ("the name ligature", "محمد رسول", "ﷴ رسول"),
+    ("a superscript", "x2 formula", "x² formula"),
+    ("styled letters", "kazma formula", "𝐤𝐚𝐳𝐦𝐚 formula"),
+]
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize(("asked", "said"), [s[1:] for s in ONLY_THE_FOLD], ids=[s[0] for s in ONLY_THE_FOLD])
+def test_what_only_the_fold_reads_is_found(chats, asked, said):
+    chats.save("other", "عن البحر والمطر, reservation lease backup only")
+    chats.save("it", said, title="note")
+    chats.save("wide", "ﬁ ß ２ only odd letters")  # control: an odd letter alone is no hit
+    assert chats.found(asked) == ["it"]
+    (hit,) = search_transcripts(asked, tenant_id=chats.tenant)
+    assert hit["matched"]
+
+
+def test_what_only_the_fold_reads_is_found_in_a_title_and_a_spooled_chat(chats):
+    from kazma_ui.session_spool import SessionSpool, spool_path_for
+
+    chats.save("title", "the lease ends in May", title="oﬃce")
+    spool = SessionSpool(spool_path_for(chats.path))
+    try:
+        spool.save(chats.tenant, "spooled", {"session_id": "spooled", "thread_id": "th", "title": "",
+                                             "messages": [{"role": "user", "content": "the oﬃce lease"}]})
+    finally:
+        spool.close()
+    assert sorted(chats.found("office lease")) == ["spooled", "title"]
+
+
+def test_a_chat_is_read_as_the_fold_reads_it():
+    """The pattern and the folded words together answer as folding the whole
+    text does, for letters of every script and every kind."""
+    from kazma_core.memory.query_terms import content_terms, mentions, search_terms
+
+    rng = random.Random(11)
+    anything = [c for c in map(chr, range(0x21, 0x30000)) if unicodedata.category(c)[0] in "LNM"]
+    odd = [*"ßςﬁﬃ２ｶﾞﷺﷴİſ™½²ǆＡـآأئﻻﷲ…’", "\u0301", "\u0327", "\u0651", "\u064e", "\u0654", "\u200f", "\u00ad", "\u00a0"]
+    agreed = 0
+    for _ in range(12_000):
+        words = []
+        for _word in range(rng.randint(1, 3)):
+            plain = rng.choice(["abcefgiostu0123", "ابتةهىيولمك", anything])
+            words.append("".join(rng.choice(odd if rng.random() < 0.25 else plain) for _ in range(rng.randint(2, 6))))
+        text, word = " ".join(words), rng.choice(words)
+        for term in content_terms(rng.choice([word, word.upper(), unicodedata.normalize("NFD", word), "abc"]))[:2]:
+            folds = mentions(text, search_terms(term) or [term])
+            assert (term in transcript_recall._present([term], text)) == folds, (ascii(term), ascii(text))
+            agreed += folds
+    assert agreed > 5000
+
+
+def test_the_letters_only_the_fold_reads_are_asked_of_it(monkeypatch):
+    """Control: with that class empty, what the pattern alone reads."""
+    assert chat_history._has_folded_otherwise("oﬃce") and not chat_history._has_folded_otherwise("office … → 😀", "قهوة")
+    monkeypatch.setattr(transcript_recall, "_otherwise", lambda: re.compile("(?!)"))
+    assert transcript_recall._present(["office"], "the oﬃce") == {}
+    monkeypatch.undo()
+    assert transcript_recall._present(["office"], "the oﬃce") == {"office": 4}
+
+
+# ── Long words and many chats (review M2, L2, L5) ─────────────────────────
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("length", [65, 10_000, 70_000])
+def test_a_long_word_is_found_and_costs_nothing(chats, length):
+    token = "ab12cd34" * (length // 8) + "é"
+    chats.save("it", f"the key is {token} ok")
+    chats.save("other", "nothing here")
+    started = time.monotonic()
+    arabic.spelling_pattern.cache_clear()
+    assert chats.found(token) == ["it"]
+    assert chats.found(f"{token}x") == []
+    assert time.monotonic() - started < 10
+    assert arabic.spelling_pattern.cache_info().currsize == 0, "no pattern was made of it"
+
+
+def test_the_longest_word_with_spellings(chats):
+    word = "ق" + "هوة" * 21  # 64
+    assert len(word) == chat_history.LONGEST_SPELLED
+    chats.save("it", f"قال {word} امس")
+    assert chats.found(word.replace("ة", "ه")) == ["it"]
+
+
+def test_one_letter_many_times_over(chats):
+    chats.save("it", "ا" * 2_000_000)
+    started = time.monotonic()
+    assert chats.found("ا" * 200) == ["it"]
+    chats.found("ا" * 60 + "ب")
+    assert time.monotonic() - started < 20
+
+
+def test_a_search_reads_a_bounded_number_of_texts(chats, monkeypatch, caplog):
+    monkeypatch.setattr(chat_history, "_TEXTS_READ", 20)
+    for i in range(30):
+        chats.save(f"d{i:02d}", "a resize")
+    asked: list[int] = []
+    real = chat_history._texts_of
+    monkeypatch.setattr(chat_history, "_texts_of", lambda ids, *a: asked.append(len(ids)) or real(ids, *a))
+    with caplog.at_level(logging.INFO, logger="kazma_core.memory.chat_history"):
+        assert chats.found("size") == []
+    assert asked == [15, 5]
+    assert len([r for r in caplog.records if "20 best of 30" in r.getMessage()]) == 1
+    # Equal ones are read newest first, and the better one before them.
+    chats.save("new", "the size")
+    chats.save("z-best", "resize size size", title="size")
+    assert chats.found("size") == ["z-best", "new"]
+
+
+def test_a_store_that_cannot_be_searched_is_said(chats, monkeypatch, caplog):
+    chats.save("it", "a saffron latte")
+
+    def refuses(*_a):
+        raise sqlite3.OperationalError("disk I/O error at C:/secret/place")
+
+    monkeypatch.setattr(chat_history, "_search_sqlite", refuses)
+    monkeypatch.setattr(chat_history, "_search_postgres", refuses)
+    with caplog.at_level(logging.DEBUG):
+        assert chats.found("saffron") == []
+    said = [r for r in caplog.records if "could not be searched" in r.getMessage()]
+    assert [r.levelname for r in said] == ["WARNING"] and not said[0].exc_info
+    caplog.clear()
+    monkeypatch.setattr(chat_history, "_search_sqlite",
+                        lambda *_a: (_ for _ in ()).throw(sqlite3.OperationalError("no such table: sessions")))
+    monkeypatch.setattr(chat_history, "_search_postgres", chat_history._search_sqlite)
+    with caplog.at_level(logging.DEBUG):
+        assert chats.found("saffron") == []
+    assert not [r for r in caplog.records if "could not be searched" in r.getMessage()]

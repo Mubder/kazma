@@ -311,8 +311,8 @@ def create_spaces_router() -> APIRouter:
     def erase(space_id: str, request: Request) -> Any:
         def _run() -> Any:
             by = space_binding.account_of(auth.get_request_principal(request)) or ""
-            erased = space_data.erase_space(space_id, by=by)
-            session_manager.get_session_manager().space_erased(space_id)
+            erased = space_data.erase_space(
+                space_id, by=by, chats_gone=lambda: session_manager.get_session_manager().space_erased(space_id))
             return JSONResponse({"ok": True, "erased": erased})
 
         return _guarded(request, space_id, "erase", _run)

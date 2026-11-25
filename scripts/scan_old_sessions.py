@@ -45,6 +45,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -147,7 +148,7 @@ def load_sessions(
     SQLite file instead. Newest first."""
     from kazma_core.memory.chat_history import sessions_changed_since
 
-    sessions: list[dict[str, Any]] = []
+    sessions: deque[dict[str, Any]] = deque(maxlen=max_sessions or None)  # the newest: they come oldest first
     after = (since or "", "")
     while page := sessions_changed_since(after, limit=200, sqlite_path=Path(db_path) if db_path else None):
         after = (page[-1]["updated_at"], page[-1]["session_id"])
@@ -156,8 +157,7 @@ def load_sessions(
             for row in page
             if tenant_id in (None, row["tenant_id"])
         )
-    sessions.reverse()
-    return sessions[:max_sessions] if max_sessions else sessions
+    return list(reversed(sessions))
 
 
 def extract_turn_pairs(messages: list[dict[str, Any]]) -> list[tuple[str, str]]:

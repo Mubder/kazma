@@ -32,7 +32,8 @@ Design notes:
     from a list that kept "what's", "is" and "my".
   * Every session that may be one is checked, best ranked first, before the
     cut to the hits wanted; a word is looked for in every spelling that folds
-    to it (``documents.arabic.spelling_pattern``) and confirmed with the fold.
+    to it (``documents.arabic.spelling_pattern``) and confirmed with the fold;
+    a word of the chat with a letter only the fold reads is folded itself.
   * A ``system`` row is not conversation: ``/compact`` on the web stored the
     model's own prompt, "About me" and recalled memory as such rows until 25
     Nov 2026, and they are not read.
@@ -105,16 +106,31 @@ def _spelled_anywhere(words: tuple[str, ...]) -> re.Pattern[str]:
     return re.compile("|".join(filter(None, map(spelling_pattern, words))) or r"(?!)")
 
 
+@functools.lru_cache(maxsize=1)
+def _otherwise() -> re.Pattern[str]:
+    """A word that holds a letter only the fold reads."""
+    from kazma_core.documents.arabic import folded_otherwise
+
+    return re.compile(rf"(?<!\S)\S*?{folded_otherwise()}\S*")
+
+
 def _where(term: str, text: str) -> int:
     """Where *text* holds *term* as a whole word (any written form), or -1.
 
     The question is :func:`query_terms.mentions`', which folds what it reads:
     a whole chat is not folded for it (it folds some 9 MB a second), only the
-    words its letters stand in.
+    words its letters stand in. A word longer than ``LONGEST_SPELLED`` is
+    looked for as it stands.
     """
     from kazma_core.memory.query_terms import mentions
 
-    words = _spelled(term)
+    words, long_words = _by_length(term)
+    for word in long_words:
+        at = _as_it_stands(word, text.lower())
+        if at >= 0:
+            return at
+    if not words:
+        return -1
     refused: set[str] = set()
     for match in _spelled_anywhere(tuple(words)).finditer(text):
         start, end = match.span()
@@ -128,6 +144,22 @@ def _where(term: str, text: str) -> int:
     return -1
 
 
+def _by_length(term: str) -> tuple[list[str], list[str]]:
+    """The spellings of *term*: those a pattern is made of, and the longer."""
+    from kazma_core.memory.chat_history import LONGEST_SPELLED
+
+    words = _spelled(term)
+    return [w for w in words if len(w) <= LONGEST_SPELLED], [w for w in words if len(w) > LONGEST_SPELLED]
+
+
+def _as_it_stands(word: str, text: str) -> int:
+    """Where *text* holds *word* at a word's start, or -1."""
+    at = text.find(word)
+    while at > 0 and text[at - 1].isalnum():
+        at = text.find(word, at + len(word))
+    return at
+
+
 def _word_start(text: str, at: int) -> int:
     """Where the word that holds position *at* begins: after the last space or
     quotation mark before it."""
@@ -137,7 +169,30 @@ def _word_start(text: str, at: int) -> int:
 def _present(terms: list[str], text: str) -> dict[str, int]:
     """The *terms* that *text* holds as whole words, and where."""
     found = {t: _where(t, text) for t in terms}
+    missing = [t for t, at in found.items() if at < 0]
+    if missing and not text.isascii():
+        found.update(_folded(missing, text))
     return {t: at for t, at in found.items() if at >= 0}
+
+
+def _folded(terms: list[str], text: str) -> dict[str, int]:
+    """The *terms* that the words of *text* hold which only the fold reads
+    (``arabic.folded_otherwise``), and where."""
+    from kazma_core.documents.arabic import fold_for_search
+    from kazma_core.memory.query_terms import mentions
+
+    words = [(m.start(), m.group()) for m in _otherwise().finditer(text)]
+    if not words:
+        return {}
+    together = " ".join(w for _at, w in words)
+    found: dict[str, int] = {}
+    for term in terms:
+        spelled, long_words = _by_length(term)
+        if spelled and mentions(together, spelled):
+            found[term] = next((at for at, w in words if mentions(w, spelled)), words[0][0])
+        elif any(_as_it_stands(w, fold_for_search(together)) >= 0 for w in long_words):
+            found[term] = words[0][0]
+    return found
 
 
 def _snippet(text: str, at: int) -> str:
@@ -199,8 +254,10 @@ def search_transcripts(
             at_least=reader.enough,
             confirm=reader.hit,
         )
-    except Exception:
-        logger.debug("[transcript-recall] search failed — returning no hits", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 - a fallback: the turn goes on without it, and it is said
+        from kazma_core.errors import described_error
+
+        described_error("[transcript-recall] the past chats could not be searched", exc, level=logging.WARNING)
         return []
 
 

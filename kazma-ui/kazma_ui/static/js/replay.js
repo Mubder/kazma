@@ -338,6 +338,9 @@
             return;
           }
           toast(window.kazmaCount('replay.restored', res.body.message_count || 0, { turn: target.turn, step: target.step }), 'success');
+          if (res.body.transcript_kept) {
+            toast(tx('replay.transcript_kept', 'The chat still shows the later messages: where this step sits among them is not known, so none was removed. Kazma continues from the step.'), 'warning');
+          }
           KazmaReplay.loadTimeline(currentThread);
         })
         .catch(function () { toast(tx('replay.restore_request_failed', 'Restore request failed'), 'error'); });

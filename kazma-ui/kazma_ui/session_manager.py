@@ -14,6 +14,7 @@ can import it from one canonical location.
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import logging
 import os
@@ -94,6 +95,11 @@ class ChatDeleted(KeyError):
     it back."""
 
 
+#: The order in which chats are read from a store (or made) and spaces arrive,
+#: in this process.
+_order = itertools.count(1)
+
+
 @dataclass
 class ChatSession:
     """A chat session with message history.
@@ -123,6 +129,9 @@ class ChatSession:
     pinned: bool = False
 
     def __post_init__(self) -> None:
+        # When this copy was read or made; a copy of it keeps it. No field:
+        # it is never stored.
+        self._made = next(_order)
         now = datetime.now(UTC).isoformat()
         if not self.created_at:
             self.created_at = now
@@ -274,6 +283,9 @@ class SessionManager:
         self._deleted_lock = threading.Lock()
         # The spaces erased in this process, with every chat they held.
         self._erased: set[str] = set()
+        # space -> when it was brought in (``_order``): a copy of one of its
+        # chats made before is of the space that was erased.
+        self._arrived: dict[str, int] = {}
         self._pg = False
         self._conn: sqlite3.Connection | None = None
 
@@ -630,8 +642,9 @@ class SessionManager:
         self._load_all_from_db(limit=limit, target=scratch)
         with self._lock:
             for key, sess in scratch.items():
-                if key not in before and key not in self._sessions:
-                    self._sessions[key] = sess
+                if key in before or key in self._sessions or self._of_before(sess):
+                    continue
+                self._sessions[key] = sess
 
     def _evict_if_needed(self, tenant_id: str) -> None:
         """Evict the oldest session for this tenant if we exceed max_sessions."""
@@ -1044,22 +1057,31 @@ class SessionManager:
                 assert self._conn is not None
                 with self._conn:
                     self._conn.execute("DELETE FROM sessions WHERE tenant_id = ?", (space,))
+            # Not ``_spool_discard``, which only says it: a copy left there
+            # would be written to the store at the next start.
             for owner, session_id in self._spool.keys() if self._spool is not None else ():
                 if owner == space:
-                    self._spool_discard(owner, session_id)
+                    self._spool.discard(owner, session_id)
 
     def space_arrived(self, space: str) -> None:
         """*space* was brought in from its bundle (``spaces_api``): what this
         process remembers of it is of before -- chats deleted there, and
-        copies that hold what was said after the bundle was made. The store's
-        rows are the space. Raises when the thread records cannot be read."""
-        threads.space_begins_again(space)
+        copies that hold what was said after the bundle was made, which are
+        not written any more. The store's rows are the space. Its chats are
+        written from the first step here: the bundle is in already, and the
+        rest (its threads run) reads a store that may be busy."""
         with self._lock:
             with self._deleted_lock:
                 self._erased.discard(space)
                 for key in [k for k in self._deleted if k[0] == space]:
                     del self._deleted[key]
+            self._arrived[space] = next(_order)
             self._let_go(space)
+        threads.space_begins_again(space)
+
+    def _of_before(self, session: ChatSession) -> bool:
+        """Whether this copy was read before its space was brought back."""
+        return self._arrived.get(session.tenant_id or OWNER_SPACE_ID, 0) > session._made
 
     def _let_go(self, space: str) -> None:
         """Drop the space's cached chats. The caller holds the lock."""
@@ -1069,13 +1091,21 @@ class SessionManager:
 
     def put(self, session: ChatSession) -> None:
         """Insert or replace a session in the store. A chat deleted in this
-        process is not written again (:class:`ChatDeleted`'s rule)."""
+        process is not written again (:class:`ChatDeleted`'s rule), nor a copy
+        of one of before its space was erased and brought back."""
+        try:
+            self._put(session)
+        except ChatDeleted:
+            logger.info("[SessionManager] not saved: chat %s was deleted", session.session_id[:12])
+
+    def _put(self, session: ChatSession) -> None:
+        """:meth:`put`, for a caller that says whether it was saved: raises
+        :class:`ChatDeleted` when it is not written."""
         with self._lock:
             tenant_id = session.tenant_id or _space()
             session.tenant_id = tenant_id
-            if self._is_deleted(tenant_id, session.session_id, session.thread_id):
-                logger.info("[SessionManager] not saved: chat %s was deleted", session.session_id[:12])
-                return
+            if self._is_deleted(tenant_id, session.session_id, session.thread_id) or self._of_before(session):
+                raise ChatDeleted(session.session_id)
             session.updated_at = datetime.now(UTC).isoformat()
 
             # Auto-generate a title from the first user message if none set.
@@ -1118,6 +1148,9 @@ class SessionManager:
         persist, and /reset could interleave on the same message list and
         last-write-wins could drop a concurrent update.
 
+        Raises :class:`ChatDeleted` when the chat was deleted, before or while
+        it was changed: what was not written is never called saved.
+
         Usage::
 
             with store.transact(session_id) as sess:
@@ -1130,7 +1163,7 @@ class SessionManager:
                     raise ChatDeleted(session_id)
                 raise KeyError(f"session not found: {session_id}")
             yield session
-            self.put(session)
+            self._put(session)
 
     def _mutation(self, session_id: str) -> threading.Lock:
         """The per-session mutation lock (T4)."""
@@ -1178,8 +1211,11 @@ class SessionManager:
             current = self.get(session_id)
             if current is None or current.messages != messages:
                 return False
-            self.put(dataclasses.replace(to, title=current.title, archived=current.archived,
-                                         pinned=current.pinned, created_at=current.created_at))
+            try:
+                self._put(dataclasses.replace(to, title=current.title, archived=current.archived,
+                                              pinned=current.pinned, created_at=current.created_at))
+            except ChatDeleted:  # its new space was erased
+                return False
             committed = False
             try:
                 committed = commit()

@@ -10,6 +10,7 @@ late writer stored a chat of an erased space again.
 from __future__ import annotations
 
 import copy
+import sqlite3
 import uuid
 from types import SimpleNamespace
 
@@ -209,6 +210,157 @@ def test_an_import_that_is_refused_changes_nothing_remembered(world):
                              files={"bundle": ("a.zip", handle, "application/zip")})
     assert answer.status_code == 409, answer.text  # the space is here
     assert world.texts(chat) is None and not world.runs(chat)
+
+
+# ── the review's M3, L3 and L4 (25 Nov 2026) ───────────────────────────────
+
+
+def _write(world, chat, text: str) -> bool:
+    """An answer stored as a closing turn stores it."""
+    from kazma_ui.reply_sink import upsert_reply
+
+    with world.bound(chat.space):
+        return upsert_reply(chat.sid, f"t-{uuid.uuid4().hex[:6]}", text)
+
+
+def test_its_chats_are_written_while_its_threads_cannot_be_read(world, monkeypatch, caplog):
+    chat = world.chat()
+    world.export()
+    world.delete(chat)
+    threads.end_thread("web-of-nobody-known")  # a thread whose space was not known: the store is asked
+    world.erase()
+
+    def busy(_space):
+        raise sqlite3.OperationalError("database is locked")
+
+    real = space_move.import_bundle
+
+    def imported(*args, **kwargs):  # the import itself read it
+        taken = real(*args, **kwargs)
+        monkeypatch.setattr(threads, "space_threads", busy)
+        return taken
+
+    monkeypatch.setattr(space_move, "import_bundle", imported)
+    world.bring_in()  # and the import is not said to have failed
+    assert "could not be read" in caplog.text
+    assert world.runs(chat)
+    assert _write(world, chat, "an answer") is True
+    world.store._sessions.clear()
+    assert world.texts(chat) == [world.words, "an answer"]
+
+
+def test_no_answer_is_called_saved_that_was_not(world, monkeypatch):
+    """Between the import's own end and the chat store being told."""
+    chat = world.chat()
+    world.export()
+    world.erase()
+    real, said = space_move.import_bundle, []
+
+    def imported(*args, **kwargs):
+        taken = real(*args, **kwargs)
+        with world.bound():
+            assert world.store.get(chat.sid) is not None  # the space is live
+        said.append(_write(world, chat, "an answer"))
+        return taken
+
+    monkeypatch.setattr(space_move, "import_bundle", imported)
+    world.bring_in()
+    stored = world.texts(chat)
+    assert said == [False] and stored == [world.words]
+    assert _write(world, chat, "another") is True
+
+
+def test_a_transaction_that_was_not_written_raises(world):
+    chat = world.chat()
+    with world.bound(), pytest.raises(session_manager.ChatDeleted):
+        with world.store.transact(chat.sid) as row:
+            row.add_message("assistant", "late")
+            world.store.mark_deleted(chat.sid, chat.thread)
+
+
+def test_a_copy_held_since_before_is_not_written_over_the_bundle(world):
+    chat = world.chat()
+    world.export()
+    world.say(chat, world.after)
+    with world.bound():
+        held = world.store.get(chat.sid)
+        copied = copy.deepcopy(held)
+    world.erase()
+    world.bring_in()
+    with world.bound():
+        for late in (held, copied):
+            late.add_message("assistant", "later still")
+            world.store.put(late)
+    assert world.texts(chat) == [world.words]
+    world.store._sessions.clear()
+    assert world.texts(chat) == [world.words]
+    world.say(chat, "more")  # control: one read now is written
+    world.store._sessions.clear()
+    assert world.texts(chat) == [world.words, "more"]
+
+
+def test_a_list_read_across_the_arrival_caches_nothing_of_before(world, monkeypatch):
+    chat = world.chat()
+    world.export()
+    world.say(chat, world.after)
+    real = world.store._load_all_from_db
+
+    def across(limit=None, target=None):
+        real(limit=limit, target=target)
+        monkeypatch.setattr(world.store, "_load_all_from_db", real)
+        world.erase()
+        world.bring_in()
+
+    world.store._sessions.clear()
+    monkeypatch.setattr(world.store, "_load_all_from_db", across)
+    with world.bound():
+        world.store._merge_missing_from_db()
+    assert world.texts(chat) == [world.words]
+    world.say(chat, "more")
+    world.store._sessions.clear()
+    assert world.texts(chat) == [world.words, "more"]
+
+
+@pytest.mark.parametrize("where", ["rows", "spool"])
+def test_an_erase_that_could_not_take_the_chats_is_run_again(world, monkeypatch, where):
+    """Its rows stayed and the second DELETE was refused: the space had left."""
+    chat, late = world.chat(), world.chat()
+    with world.bound():
+        held, waiting = copy.deepcopy(world.store.get(chat.sid)), copy.deepcopy(world.store.get(late.sid))
+    real_secrets = space_data._erase_secrets
+
+    def written_late(space):
+        with world.bound():
+            world.store.put(held)
+            world.store._spool_session(waiting, OSError("refused"))
+        return real_secrets(space)
+
+    monkeypatch.setattr(space_data, "_erase_secrets", written_late)
+    if where == "rows":
+        real = world.store._let_go
+
+        def stuck(_space):
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(world.store, "_let_go", stuck)
+        undo = lambda: monkeypatch.setattr(world.store, "_let_go", real)  # noqa: E731
+    else:
+        spool_discard = world.store._spool.discard
+
+        def stuck_spool(*_a):
+            raise sqlite3.OperationalError("disk I/O error")
+
+        monkeypatch.setattr(world.store._spool, "discard", stuck_spool)
+        undo = lambda: monkeypatch.setattr(world.store._spool, "discard", spool_discard)  # noqa: E731
+    with _client(ADMIN) as client:
+        client_ = client
+        with pytest.raises(sqlite3.OperationalError):
+            client_.delete(f"/api/spaces/{world.space}")
+    monkeypatch.setattr(space_data, "_erase_secrets", real_secrets)
+    undo()
+    world.erase()  # answers 200
+    assert world.stored() == 0
+    assert not [k for k in world.store._spool.keys() if k[0] == world.space]
 
 
 # ── controls: each call taken out ─────────────────────────────────────────

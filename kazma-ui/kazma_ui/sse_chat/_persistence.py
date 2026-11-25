@@ -188,6 +188,43 @@ def _persist_instant_turn(
         getattr(session, "session_id", ""), thread_id, user_text, reply_text, kind
     )
 
+def _answers_the_last_question(messages: list[Any], state: dict[str, Any]) -> bool:
+    """Whether the checkpoint's answer is to the chat's last question.
+
+    The state may end with the answer of an earlier turn -- ``/compact`` runs
+    the model once more and keeps what it answered, unseen -- while the next
+    question is stored and its turn has not begun: a reload there stored that
+    answer as its reply. By the time the state's turn began, else by its last
+    question, which an attachment's rewrite still holds. A steer is a part of
+    the turn it was sent in."""
+    from kazma_core.agent.plan_fence import is_graph_nudge
+    from kazma_core.memory.chat_history import epoch_of
+
+    asked = [m for m in messages if isinstance(m, dict) and m.get("role") == "user" and not m.get("steer")]
+    if not asked:
+        return True
+    began, sent = epoch_of(state.get("created_at")), epoch_of(asked[-1].get("ts"))
+    if began is not None and sent is not None and began < sent:
+        return False
+
+    def said(m: Any) -> str:
+        return " ".join(_reply_text(m.get("content")).split())
+
+    questions = [said(m) for m in state.get("messages") or [] if isinstance(m, dict)
+                 and (m.get("role") or m.get("type") or "").lower() in ("user", "human")]
+    question = next((q for q in reversed(questions) if not is_graph_nudge(q) and not q.startswith("[KAZMA STEER")), "")
+    last = said(asked[-1])
+    if not question or question == last:
+        return True
+    return question not in [said(m) for m in asked[:-1]] and (last in question or question in last)
+
+
+def _reply_text(content: Any) -> str:
+    if isinstance(content, list):
+        return "".join(p if isinstance(p, str) else str(p.get("text") or "") for p in content if isinstance(p, (str, dict)))
+    return str(content or "")
+
+
 async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
     """Surface a checkpointed reply for a session whose last message is the
     user's (live incident 2026-08-21 recovery).
@@ -272,6 +309,8 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
         if isinstance(cp_last, dict):
             cp_last_role = (cp_last.get("role") or cp_last.get("type") or "").lower()
         if not asst or cp_last_role not in ("assistant", "ai"):
+            return messages
+        if not _answers_the_last_question(messages, vals):
             return messages
         _prefix_stale = (
             _role == "assistant"

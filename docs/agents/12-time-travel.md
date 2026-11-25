@@ -81,7 +81,11 @@ D11: nothing is settled behind the human), writes a turn-boundary state
 (`turn_boundary_payload`: nothing pending, tool chains sanitized,
 `SCRATCHPAD_CLEAR` first, written `as_node="respond"` so `next == ()`), takes
 the later turns back from memory (`rewind_memory`, D2), from the transcript
-(`_transcript_cut`: the chat-store rows after the step) and from Time Travel
+(`_transcript_cut`: the chat-store rows after the step, found from the end by
+the step's own time, then by what was said: the state of a trimmed or compacted
+chat holds its newest questions only; None where the place is not known: no row
+is cut, and every surface says so, `transcript_kept`; gate
+`tests/test_rewind_transcript_cut.py`, the old cut as its control) and from Time Travel
 (the steps saved after it), bumps the thread's rewind generation, journals
 `thread_rewound` (every tab reloads; never replayed) and writes an audit row
 (`kazma_core/time_travel_audit.py`, `time_travel_audit.db`, refusals too). A
@@ -101,13 +105,20 @@ author, so rows made from it -- a fork's (`thread_rewind._fork_rows`, of the
 source's rows up to the step), the gateway's sync, the page's hydrate -- take
 them from the row they were in with the one helper,
 `reply_sink.carry_authors`. A question the row does not hold as written takes
-an author only when every question of the source chat is one person's. A
+an author only when every question of the source chat is one person's.
+**In doubt it names nobody** (then the mover cannot take it out): a text
+several people asked is told apart only where the rows made begin at the row's
+first question and hold that text as often; the rows up to a step are read by
+its time alone; Kazma's own prompts (`plan_fence.is_graph_nudge`) are
+nobody's. A trimmed state's "yes" was given to whoever said it first. A
 fork named nobody: in a shared space it could not be taken out and its turns
 were the opener's. **`/compact` is of the state alone, on every install**: on
 the web it replaced the row with the model's own messages (the base prompt,
 "About me", recalled memory as `system` rows; authors, times and parts lost).
 Rows it wrote stay as they are. It still runs a whole model turn whose answer
-nobody sees (the trim is part of the supervisor's call). Gate:
+nobody sees (the trim is part of the supervisor's call), and which the page's
+recovery never shows as the next question's reply
+(`_persistence._answers_the_last_question`). Gate:
 `tests/test_chat_authors_carried.py`: every place that sets a session's
 messages as a whole is declared with how it keeps authors (planted rewrites
 and the fork without the helper as the controls).

@@ -496,12 +496,13 @@ def _chats(held: str) -> list[str]:
     return [str(chat) for chat in chats] if isinstance(chats, list) else [""]
 
 
-def forget_chat_searches(thread_id: str, *, space: str) -> int:
-    """The web searches a chat made leave *space* with it (a chat taken out of
-    a shared space, Spaces S2-12): the questions the person asked Kazma there,
-    which any member read on the Research page. A search another chat made
-    too stays, as that chat's; a report stays, a file of the space. Returns
-    how many were removed. Idempotent. Blocking."""
+def forget_chat_searches(thread_id: str, *, space: str, by: str) -> int:
+    """The web searches *by* made in a chat leave *space* with it (a chat
+    taken out of a shared space, Spaces S2-12): the questions the person asked
+    Kazma there, which any member read on the Research page. One another
+    member made there is theirs, and stays; a search another chat made too
+    stays, as that chat's; a report stays, a file of the space. Returns how
+    many were removed. Idempotent. Blocking."""
     if not thread_id or not _db_path().exists():
         return 0
     removed = 0
@@ -509,7 +510,7 @@ def forget_chat_searches(thread_id: str, *, space: str) -> int:
         c.execute("BEGIN IMMEDIATE")
         rows = c.execute(
             "SELECT id, thread_ids FROM research_sessions WHERE depth = 'chat' AND tenant_id = ? "
-            "AND instr(thread_ids, ?) > 0", (space, json.dumps(thread_id))).fetchall()
+            "AND asker IN (?, '') AND instr(thread_ids, ?) > 0", (space, by, json.dumps(thread_id))).fetchall()
         for row in rows:
             others = [chat for chat in _chats(row["thread_ids"]) if chat != thread_id]
             if others:

@@ -294,16 +294,16 @@ def _open_store(name: str) -> sqlite3.Connection | None:
     return conn
 
 
-def remove_what_it_left(thread_id: str, *, space_id: str) -> int:
+def remove_what_it_left(thread_id: str, *, space_id: str, by: str) -> int:
     """Remove from *space_id* every row of :data:`MOVED_COLUMNS` that names
     the chat's old thread: its drafts and scratchpad, its plan, its
     confirmations (and their events), its decided approval gates; and the web
-    searches it made. A gate still open is left to its own ending. Idempotent;
+    searches *by*, who takes it out, made in it. A gate still open is left to its own ending. Idempotent;
     returns how many."""
     from kazma_core.safety.hitl_gates import LIVE_STATES
     from kazma_core.tools.research_session import forget_chat_searches
 
-    removed = forget_chat_searches(thread_id, space=space_id)
+    removed = forget_chat_searches(thread_id, space=space_id, by=by)
     for (name, table), column in MOVED_COLUMNS.items():
         conn = _open_store(name)
         if conn is None:

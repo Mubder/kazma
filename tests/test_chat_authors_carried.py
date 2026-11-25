@@ -39,10 +39,11 @@ def _state_of(w, space, thread):
     return dict(w.run(space, "reem", read).values)
 
 
-def _fork(w, space, thread, messages, who="reem"):
+def _fork(w, space, thread, messages, who="reem", at="2026-11-25T09:00:00+00:00"):
     """Fork the step whose state holds *messages*, as the routes do."""
     state = {**_state_of(w, space, thread), "messages": messages}
-    record = types.SimpleNamespace(truncated=False, turn_index=1, seq=1, get_state=lambda: state)
+    record = types.SimpleNamespace(truncated=False, turn_index=1, seq=1, get_state=lambda: state,
+                                   timestamp=at)
     recorder = types.SimpleNamespace(get=lambda *a, **k: record)
 
     async def fork():
@@ -64,8 +65,8 @@ def _chat(w, space, *asked):
     session, thread = w.chat("reem", space, mark="open")
     w.turn("reem", space, thread, "open")
     with_rows = []
-    for who, text in asked:
-        with_rows += [{"role": "user", "content": text, "author": w.ids[who], "ts": "2026-11-25T08:00:00+00:00"},
+    for n, (who, text) in enumerate(asked):
+        with_rows += [{"role": "user", "content": text, "author": w.ids[who], "ts": f"2026-11-25T08:{n:02d}:00+00:00"},
                       {"role": "assistant", "content": f"answer to {text}"}]
     from kazma_core.spaces import scope
     from kazma_ui import session_manager
@@ -104,7 +105,7 @@ def test_a_fork_of_an_early_step_reads_the_rows_up_to_it(world):
     """Omar said the same words later: they are not the fork's."""
     w, i = world, world.ids
     _session, thread = _chat(w, i["family"], ("reem", "yes"), ("reem", "the tent"), ("omar", "yes"))
-    fork = _fork(w, i["family"], thread, _said("yes"))
+    fork = _fork(w, i["family"], thread, _said("yes"), at="2026-11-25T08:00:30+00:00")
     assert [r[1] for r in _rows(w, i["family"], fork) if r[0] == "user"] == [i["reem"]]
 
 
@@ -127,9 +128,115 @@ def test_the_fork_without_the_helper_names_nobody(world, monkeypatch):
     """Control: the old fork."""
     w, i = world, world.ids
     _session, thread = _chat(w, i["family"], ("reem", "the tent"))
-    monkeypatch.setattr(thread_rewind, "_fork_rows", lambda _t, state: thread_rewind._projected_transcript(state))
+    monkeypatch.setattr(thread_rewind, "_fork_rows", lambda _t, state, _at: thread_rewind._projected_transcript(state))
     fork = _fork(w, i["family"], thread, _said("the tent"))
     assert w.move("reem", i["family"], fork, i["mine"]).status_code == 409
+
+
+# ── In doubt, nobody (review M4, 25 Nov 2026) ─────────────────────────────
+
+
+@pytest.mark.parametrize("yes", ["yes", "نعم"])
+def test_a_trimmed_state_does_not_make_anothers_question_mine(world, yes):
+    """The state holds its newest question only: Omar's. The fork called it
+    Reem's, who asked the same words once, and let her take it out."""
+    w, i = world, world.ids
+    _session, thread = _chat(w, i["family"], ("reem", yes), ("omar", "my secret plan"), ("omar", yes))
+    fork = _fork(w, i["family"], thread, _said(yes))
+    assert [r[1] for r in _rows(w, i["family"], fork) if r[0] == "user"] == [""]
+    answer = w.move("reem", i["family"], fork, i["mine"])
+    assert answer.status_code == 409 and "others_wrote" in answer.text, answer.text
+    for who in ("omar", "reem"):  # nor is it a mover's own by any other way
+        assert w.move(who, i["family"], fork, i["mine" if who == "reem" else "omars"]).status_code in (403, 409)
+
+
+def test_a_trimmed_state_that_kept_later_questions_is_in_doubt_too(world):
+    w, i = world, world.ids
+    asked = (("reem", "yes"), ("omar", "yes"), ("omar", "the plan"), ("reem", "yes"))
+    _session, thread = _chat(w, i["family"], *asked)
+    fork = _fork(w, i["family"], thread, _said("the plan", "yes"))
+    assert [r[1] for r in _rows(w, i["family"], fork) if r[0] == "user"] == [i["omar"], ""]
+    # Control: the whole state, in order, is not in doubt.
+    fork = _fork(w, i["family"], thread, _said("yes", "yes", "the plan", "yes"))
+    assert [r[1] for r in _rows(w, i["family"], fork) if r[0] == "user"] == [i[who] for who, _t in asked]
+
+
+def test_rows_with_no_time_are_in_doubt(world):
+    """A chat app's rows name no time: where the step stands among them is a
+    guess, so a text two asked is nobody's unless the state holds them all."""
+    from kazma_core.spaces import scope
+    from kazma_ui import session_manager
+
+    w, i = world, world.ids
+    session, thread = _chat(w, i["family"], ("reem", "yes"), ("reem", "the tent"), ("omar", "yes"))
+    with scope.bind_scope(i["family"], i["reem"]), session_manager.get_session_manager().transact(session) as row:
+        row.messages = [{k: v for k, v in m.items() if k != "ts"} for m in row.messages]
+    fork = _fork(w, i["family"], thread, _said("yes"), at="2026-11-25T08:00:30+00:00")
+    assert [r[1] for r in _rows(w, i["family"], fork) if r[0] == "user"] == [""]
+    fork = _fork(w, i["family"], thread, _said("yes", "the tent", "yes"))
+    assert [r[1] for r in _rows(w, i["family"], fork) if r[0] == "user"] == [i["reem"], i["reem"], i["omar"]]
+
+
+def test_kazma_s_own_prompt_is_nobody_s(world):
+    from kazma_core.agent.plan_fence import AUTO_CONTINUE_PROMPT, PLAN_EXECUTE_CONTINUE
+
+    w, i = world, world.ids
+    _session, thread = _chat(w, i["family"], ("reem", "the tent"))
+    state = [*_said("the tent"), {"role": "user", "content": PLAN_EXECUTE_CONTINUE},
+             {"role": "assistant", "content": "working"}, {"role": "user", "content": AUTO_CONTINUE_PROMPT},
+             {"role": "assistant", "content": "done"}]
+    fork = _fork(w, i["family"], thread, state)
+    assert [r[1] for r in _rows(w, i["family"], fork) if r[0] == "user"] == [i["reem"], "", ""]
+    assert "others_wrote" in w.move("reem", i["family"], fork, i["mine"]).text
+
+
+def test_a_question_the_rows_do_not_hold_is_not_the_one_of_the_same_words(world):
+    """The state holds the words twice, the rows once: whose the other is, is
+    not known -- nor which of the two the row is."""
+    out = reply_sink.carry_authors(
+        [{"role": "user", "content": "yes", "author": "r"}, {"role": "user", "content": "no", "author": "o"}],
+        [{"role": "user", "content": "yes"}, {"role": "user", "content": "yes"}])
+    assert [m.get("author") for m in out] == [None, None]
+
+
+def test_a_hydrate_of_a_trimmed_state_names_nobody_in_doubt(world):
+    from kazma_core.spaces import scope
+    from kazma_ui import session_manager
+
+    w, i = world, world.ids
+    thread = "gw-telegram-hydrate2"
+    w.chat("reem", i["family"], session_id=thread, thread_id=thread)
+    with scope.bind_scope(i["family"], i["reem"]), session_manager.get_session_manager().transact(thread) as row:
+        row.messages = [{"role": "user", "content": "yes", "author": i["reem"]},
+                        {"role": "user", "content": "yes", "author": i["omar"]},
+                        {"role": "user", "content": "yes", "author": i["omar"]}]
+
+    async def state():
+        await w.held["graph"].aupdate_state(tt.config(thread), {"messages": _said("yes", "yes")[:3]}, as_node="respond")
+
+    w.run(i["family"], "reem", state)
+    got = w.call("reem", "GET", f"/api/chat/sessions/{thread}/messages", space=i["family"])
+    assert got.status_code == 200, got.text
+    rows = _rows(w, i["family"], thread)
+    assert [r[0] for r in rows] == ["user", "assistant", "user"], "it was hydrated"
+    assert [r[1] for r in rows if r[0] == "user"] == ["", ""]
+
+
+def test_control_the_k_th_newest_named_the_wrong_person(world, monkeypatch):
+    """The matching as it was: the newest row of the same text in the rows cut
+    by the first one."""
+    w, i = world, world.ids
+
+    def guessed(existing, out, author="", *, one_person=False, among=None):
+        for m in out:
+            m["author"] = next((r.get("author", "") for r in existing if r["content"] == m["content"]), "")
+        return out
+
+    monkeypatch.setattr(reply_sink, "carry_authors", guessed)
+    _session, thread = _chat(w, i["family"], ("reem", "yes"), ("omar", "my secret plan"), ("omar", "yes"))
+    fork = _fork(w, i["family"], thread, [m for m in _said("yes")])
+    assert [r[1] for r in _rows(w, i["family"], fork) if r[0] == "user"] == [i["reem"]]
+    w.moved("reem", i["family"], fork, i["mine"])  # the fault: Omar's words leave
 
 
 # ── /compact ──────────────────────────────────────────────────────────────

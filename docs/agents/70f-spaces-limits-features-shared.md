@@ -517,4 +517,13 @@
   deleted), and no cached copy is served or saved (it held what was said after
   the export). Gate: `tests/test_space_back_in_one_process.py` (the routes,
   EN/AR; each call taken out as the controls; a caller that does not tell the
-  store, planted).
+  store, planted). `space_erased` runs before the space leaves the identity
+  store (`erase_space(chats_gone=)`): one that fails leaves it there, and the
+  second DELETE finishes it (it was refused, and late rows stayed). The
+  arrival clears the chat store's own marks first and reads the thread records
+  last: the bundle is in by then, and a busy record store left its chats
+  refusing every answer while `upsert_reply` said "saved". **`transact` raises
+  `ChatDeleted` when the write was refused**: nothing is called saved that was
+  not. A copy read before the arrival (`ChatSession._made`, an order, not a
+  field) is not written over the bundle. Left: a turn running since before the
+  erase reads the chat anew and adds its answer.

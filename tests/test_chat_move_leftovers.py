@@ -106,6 +106,16 @@ def test_the_same_question_of_another_member_is_theirs(world):
     assert _seen(w, "omar", i["family"]) == {"the tent"}
 
 
+def test_another_members_search_in_the_chat_is_theirs(world):
+    """Omar stopped, steered or tried a question there: his search is his."""
+    w, i = world, world.ids
+    session, thread = w.chat("reem", i["family"], mark="one")
+    _search(w, "reem", i["family"], thread, "the tent")
+    _search(w, "omar", i["family"], thread, "omar's own")
+    w.moved("reem", i["family"], session, i["mine"])
+    assert _seen(w, "omar", i["family"]) == {"omar's own"}
+
+
 def test_a_share_removes_nothing(world):
     w, i = world, world.ids
     session, thread = w.chat("reem", i["mine"], mark="share")
@@ -177,7 +187,7 @@ def test_the_dialog_and_the_guide_say_what_stays():
     assert "البحث على الويب" in t("chat.move_take_out_note", "ar")
     assert "تقارير البحث العميق" in t("chat.move_take_out_note", "ar")
     guide = (ROOT / "docs/docs/guide/spaces.md").read_text(encoding="utf-8")
-    assert "web searches it made" in " ".join(guide.split())
+    assert "web searches you made" in " ".join(guide.split())
     assert "deep research report stays" in " ".join(guide.split())
 
 

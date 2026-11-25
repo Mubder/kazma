@@ -35,12 +35,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import logging
 import sqlite3
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
+
+from kazma_core.memory.chat_history import epoch_of
 
 logger = logging.getLogger(__name__)
 
@@ -215,60 +218,101 @@ def _norm(text: str) -> str:
     return " ".join(str(text or "").split())
 
 
-def _transcript_cut(rows: list[Any], restored: list[Any]) -> int:
-    """How many transcript rows a restore to *restored* (the checkpoint's
-    messages) keeps.
+def _role(message: Any) -> str:
+    return str((message.get("role") if isinstance(message, dict) else "") or "")
 
-    The restored state's questions are found in the transcript in order (an
-    instant command, ``/yolo`` or ``/replay``, sits in the transcript only).
+
+def _said(message: Any) -> str:
+    return _norm(_text(message.get("content"))) if isinstance(message, dict) else ""
+
+
+def _transcript_cut(rows: list[Any], restored: list[Any], at: float | None = None) -> int | None:
+    """How many transcript rows a restore to *restored* (the checkpoint's
+    messages) keeps, or None where its place in the transcript is not known:
+    nothing is cut then.
+
+    The place is the restored state's last question, found from the end (a
+    state that was trimmed or compacted holds the newest questions only)
+    among the questions asked by *at*, the step's own time. Rows with no time
+    are told apart by the answer the state gave, then by the state's other
+    questions. One the transcript does not hold as written (an attachment's
+    rewrite, a steer) is the newest asked by then. An instant command
+    (``/yolo``, ``/replay``) sits in the transcript only.
+
     When the restored state answered its last question, the transcript keeps
     that answer and stops before the next question; when it did not (a step
     in the middle of a turn), it keeps the question and drops its answer.
-    A question the transcript does not hold as written (an attachment's
-    rewrite) falls back to counting questions.
     """
-    def role(m: Any) -> str:
-        return str((m.get("role") if isinstance(m, dict) else "") or "")
+    from kazma_core.agent.plan_fence import is_graph_nudge
 
-    asked = [_norm(_text(m.get("content"))) for m in restored if role(m) == "user"]
-    if not asked:
+    if not restored:
         return 0
-    last_user = max(i for i, m in enumerate(restored) if role(m) == "user")
-    answered = any(role(m) == "assistant" and _text(m.get("content")).strip()
-                   for m in restored[last_user + 1:])
-    users = [i for i, m in enumerate(rows) if role(m) == "user"]
-    pos, j = -1, 0
-    for i in users:
-        if j < len(asked) and _norm(_text(rows[i].get("content"))) == asked[j]:
-            pos, j = i, j + 1
-    if j < len(asked):
-        # Count instead: the len(asked)-th question of the transcript.
-        if len(users) < len(asked):
-            return len(rows)
-        pos = users[len(asked) - 1]
-    if not answered:
+    users = [i for i, m in enumerate(rows) if _role(m) == "user"]
+    if not users:
+        return len(rows)
+    times = [epoch_of(rows[i].get("ts")) for i in users]
+    late = next((k for k, t in enumerate(times) if at is not None and t is not None and t > at), len(users))
+    asked_by_then = users[:late]
+    timed = at is not None and None not in times
+    asked = [i for i, m in enumerate(restored) if _role(m) == "user" and not is_graph_nudge(_text(m.get("content")))]
+    last = max((i for i, m in enumerate(restored) if _role(m) == "user"), default=-1)
+    answers = [_said(m) for m in restored[last + 1:] if _role(m) == "assistant" and _said(m)]
+
+    pos = _place(rows, restored, asked, asked_by_then, answers, timed=timed, users=users)
+    if pos is None:
+        return None
+    if not answers:
         return pos + 1
-    later = [i for i in users if i > pos]
+    later = [i for i in users if i > pos and not (timed and i in asked_by_then)]
     return later[0] if later else len(rows)
 
 
-def _rewind_transcript(thread_id: str, restored: list[Any]) -> tuple[str, int]:
+def _place(rows: list[Any], restored: list[Any], asked: list[int], candidates: list[int], answers: list[str],
+           *, timed: bool, users: list[int]) -> int | None:
+    """The row of the restored state's last question, among *candidates*."""
+    same = [i for i in candidates if asked and _said(rows[i]) == _said(restored[asked[-1]])]
+    if timed:  # the newest asked by then, as written or not
+        return (same or candidates or [None])[-1]
+    if len(same) == 1:
+        return same[0]
+    # The question whose answer is the one the state gave.
+    if answers:
+        answered = [i for i in (same or candidates)
+                    if any(_said(m) in answers for m in itertools.takewhile(
+                        lambda m: _role(m) != "user", rows[i + 1:]) if _role(m) == "assistant")]
+        if len(answered) == 1 or (answered and not same):
+            return answered[-1]
+    # The state's questions are the transcript's first ones, in order.
+    found: list[int] = []
+    for i in candidates:
+        if len(found) < len(asked) and _said(rows[i]) == _said(restored[asked[len(found)]]):
+            found.append(i)
+    if asked and len(found) == len(asked) and found[0] == users[0]:
+        return found[-1]
+    if same:
+        return same[-1]
+    # Counted, when the state begins where the transcript does.
+    if len(asked) > 1 and found[:1] == users[:1] and len(asked) <= len(candidates):
+        return candidates[len(asked) - 1]
+    return None
+
+
+def _rewind_transcript(thread_id: str, restored: list[Any], at: float | None = None) -> tuple[str, int | None]:
     """Cut the chat-store transcript of *thread_id* to the restored point.
-    Returns ``(session_id, rows removed)``; ``("", 0)`` with no chat row."""
+    Returns ``(session_id, rows removed)``; None removed: the point is not
+    known and every row was kept; ``("", 0)`` with no chat row."""
     from kazma_ui.session_manager import get_session_manager
 
     store = get_session_manager()
     session = store.get_by_thread_id(thread_id)
     if session is None:
         return "", 0
-    removed = 0
     with store.transact(session.session_id) as sess:
         rows = list(sess.messages or [])
-        cut = _transcript_cut(rows, restored)
-        removed = len(rows) - cut
-        if removed:
+        cut = _transcript_cut(rows, restored, at)
+        if cut is not None and cut < len(rows):
             sess.messages = rows[:cut]
-    return session.session_id, removed
+    return session.session_id, None if cut is None else len(rows) - cut
 
 
 async def rewind_thread(
@@ -317,8 +361,11 @@ async def rewind_thread(
             restored = list(payload.get("messages") or [])
             _ok, (session_id, removed) = await asyncio.to_thread(
                 _best_effort, f"cutting the transcript of {thread_id}", _rewind_transcript, thread_id, restored,
-                default=("", -1),
+                epoch_of(record.timestamp), default=("", -1),
             )
+            if removed is None:
+                logger.warning("[rewind] %s: the step's place in its transcript is not known; its rows were kept",
+                               thread_id[:12])
             _ok, dropped = await asyncio.to_thread(
                 _best_effort, f"deleting the later steps of {thread_id}", rec.forget_after, thread_id, record.seq,
                 default=-1,
@@ -332,16 +379,20 @@ async def rewind_thread(
         "turn_index": record.turn_index,
         "iteration": record.iteration,
         "message_count": len(restored),
-        "transcript_rows_removed": removed,
+        "transcript_rows_removed": removed or 0,
+        # Its place is not known (or the cut failed): the chat still shows the
+        # later turns, and every surface says so.
+        "transcript_kept": removed is None or removed < 0,
         "later_steps_removed": dropped,
         "prior_checkpoint_id": prior,
     }
     _metric("restore", "ok")
     await _audit("restore", "ok", prior_checkpoint_id=prior,
-                 detail={"turn_index": record.turn_index, "transcript_rows_removed": removed,
+                 detail={"turn_index": record.turn_index, "transcript_rows_removed": removed or 0,
+                         "transcript_kept": out["transcript_kept"],
                          "later_steps_removed": dropped}, **audit)
     logger.info("[rewind] %s restored %s to step %s (turn %d): %d transcript row(s), %d later step(s) removed",
-                surface, thread_id[:12], snapshot_id[:12], record.turn_index, removed, dropped)
+                surface, thread_id[:12], snapshot_id[:12], record.turn_index, removed or 0, dropped)
     return out
 
 
@@ -502,12 +553,14 @@ def _save_fork_chat(session_id: str, title: str, messages: list[dict[str, Any]],
     ))
 
 
-def _fork_rows(thread_id: str, state: list[Any]) -> list[dict[str, Any]]:
+def _fork_rows(thread_id: str, state: list[Any], at: float | None = None) -> list[dict[str, Any]]:
     """The fork's chat rows: the step's questions and answers, each question
-    naming who asked it in the source chat -- of the rows up to the step, the
-    later ones are not the fork's. They named nobody, so a fork in a shared
-    space could not be taken out (``others_wrote``) and its turns were the
-    opener's. Blocking: the chat store."""
+    naming who asked it in the source chat -- of the rows up to the step (of
+    all, where its place is not known), the later ones are not the fork's.
+    They named nobody, so a fork in a shared space could not be taken out
+    (``others_wrote``) and its turns were the opener's. One whose asker is in
+    doubt still names nobody (``reply_sink.carry_authors``). Blocking: the
+    chat store."""
     from kazma_ui.reply_sink import carry_authors
     from kazma_ui.session_manager import get_session_manager
 
@@ -515,7 +568,10 @@ def _fork_rows(thread_id: str, state: list[Any]) -> list[dict[str, Any]]:
     _ok, session = _best_effort(f"reading who asked what in {thread_id} (its fork names nobody)",
                                 lambda: get_session_manager().get_by_thread_id(thread_id))
     said = list(getattr(session, "messages", None) or [])
-    return carry_authors(said[:_transcript_cut(said, state)], rows, one_person=_one_person(said))
+    # By the step's own time alone: a place read from the texts is a guess.
+    timed = at is not None and all(epoch_of(m.get("ts")) is not None for m in said if _role(m) == "user")
+    cut = _transcript_cut(said, state, at) if timed else None
+    return carry_authors(said if cut is None else said[:cut], rows, one_person=_one_person(said), among=said)
 
 
 def _one_person(rows: list[Any]) -> bool:
@@ -598,7 +654,8 @@ async def fork_thread(
         from kazma_ui.i18n import current_language
 
         lang = current_language()
-    messages = await asyncio.to_thread(_fork_rows, thread_id, list(payload.get("messages") or []))
+    messages = await asyncio.to_thread(_fork_rows, thread_id, list(payload.get("messages") or []),
+                                        epoch_of(record.timestamp))
     title = await asyncio.to_thread(_fork_title, thread_id, record.turn_index, lang)
     chat_saved, _ = await asyncio.to_thread(
         _best_effort, f"saving the chat of fork {new_id} (it will not show in the chat list)",

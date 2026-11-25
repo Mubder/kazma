@@ -8,17 +8,29 @@
   letters.
 - `/compact` on the web leaves the chat as it was said. It used to replace the
   chat's messages with the model's own, with Kazma's prompt and "About me"
-  among them, and lost their times and who asked. What it stored before stays,
-  and is neither searched nor exported.
+  among them, and lost their times and who asked. What it stored before stays
+  in the chat; the past-chats search and a conversation's export leave it out
+  (a whole space's bundle holds the chat as it is stored).
 - Exporting a conversation leaves out Kazma's own system messages, in JSON
   too, and says how many.
 - With Spaces on, a fork keeps who asked what, so its maker can take it out of
-  a shared space. A chat taken out takes the web searches it made and the log
-  of the swarm tasks it started; deep research reports stay, they are files of
-  the shared space, and the dialog says so.
+  a shared space; a question whose asker is in doubt (a trimmed chat, the same
+  words from two people) names nobody, and then it stays. A chat taken out
+  takes the web searches its owner made in it, from this version on, and the
+  log of the swarm tasks it started; deep research reports stay, they are
+  files of the shared space, and the dialog says so.
 - Deleting a swarm task removes its workers' log too.
 - A space erased and brought back without a restart is what its bundle holds:
-  no chat stays hidden, and nothing said after the export comes back.
+  no chat stays hidden, and no copy of a chat held since before is written
+  over it. A turn still running from before the erase may add its answer to
+  the chat that came back. An erase that could not remove the space's chats
+  can be run again.
+- A Time Travel restore finds the step's place in the chat after `/compact`,
+  with a repeated question or an attachment. Where the place is not known the
+  chat's messages are kept, and Kazma says so.
+- A chat that was deleted while its answer was being saved is never reported
+  as saved, and a reload right after `/compact` no longer shows a hidden
+  answer as the next question's.
 - `scripts/scan_old_sessions.py` files each chat's facts in the chat's own
   space, under the person who asked (it put every space's under one).
 
