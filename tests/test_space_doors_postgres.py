@@ -87,13 +87,13 @@ def test_a_real_refusal_is_one_and_an_away_server_is_not(pool: Any, monkeypatch:
         raise AssertionError("Postgres allowed it")
 
     exc = refused()
-    assert not pg_helpers.is_space_refusal(exc), "Spaces off: as before"
+    assert not pg_helpers._is_space_refusal(exc), "Spaces off: as before"
     monkeypatch.setattr(scope, "_enforced", True)
-    assert pg_helpers.is_space_refusal(exc)
+    assert pg_helpers._is_space_refusal(exc)
     with pytest.raises(Exception) as away:
         with PostgresPool("postgresql://demo@127.0.0.1:1/none", min_size=0, max_size=1).connection(timeout=2):
             pass
-    assert not pg_helpers.is_space_refusal(away.value)
+    assert not pg_helpers._is_space_refusal(away.value)
 
 
 # ── documents ────────────────────────────────────────────────────────────
@@ -178,3 +178,48 @@ def test_recoveries_read_each_row_in_its_own_space(documents: Any, monkeypatch: 
     assert {w.a, w.b, "<install>"} <= set(said) and "" not in said
     # Both jobs are looked up in their own space, whoever's turn this was.
     assert said.count(w.a) >= 2
+
+
+def test_counts_leaving_and_the_collection_say_whose_they_are(documents: Any) -> None:
+    import asyncio
+    import time
+
+    from kazma_core.documents.ingestion import set_ingestion_service
+    from kazma_core.runs.adapters.documents import ADAPTER
+    from kazma_core.spaces import people, space_limits
+
+    w = documents
+    set_ingestion_service(w.svc)
+    try:
+        with bind_scope("default", "owner"):  # the admin's page
+            with watched_pool() as used:
+                assert space_limits._documents_used(w.b) == len("b notes")
+            with watched_pool() as totals:
+                assert w.svc._storage_bytes()[0] >= len("a notes") + len("b notes")
+            with watched_pool() as collection:
+                w.svc.gc.collect(dry_run=True)
+            w.svc.grant_member_access(tenant_id=w.b, member=w.person_a, force=True)
+            with watched_pool() as leaving:
+                people._after_leaving(w.b, w.person_a)
+        with watched_pool() as listed:
+            asyncio.run(ADAPTER.list_runs(time.time(), window_s=3600))
+    finally:
+        set_ingestion_service(None)
+    assert set(_on(w, used)) == {w.b}
+    assert set(_on(w, totals)) == set(_on(w, collection)) == {"<install>"}
+    assert _on(w, leaving) and set(_on(w, leaving)) == {w.b}
+    # Every space's jobs (the database may hold other tests' too), each title
+    # read as its own space's.
+    assert {w.a, w.b, "<install>"} <= set(_on(w, listed)) and "" not in _on(w, listed)
+
+
+def test_a_moves_copy_is_written_in_the_target(documents: Any) -> None:
+    from kazma_core.config_store import get_config_store
+    from kazma_core.documents.ingestion import MOVES_KEY
+
+    w = documents
+    with watched_pool() as calls, bind_scope(w.a, w.person_a):
+        w.svc.move_document(document_id=w.jobs["a"].document_id, from_tenant=w.a, to_tenant=w.b,
+                            actor_id=w.person_a, workspace_id="w", taken_out=False)
+    get_config_store().delete(MOVES_KEY)
+    assert {w.a, w.b} <= set(_on(w, calls)) and "" not in _on(w, calls)

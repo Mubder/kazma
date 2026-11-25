@@ -19,7 +19,7 @@ forms:
   space, or about none. Each use is declared, with its reason, in
   ``tests/test_row_work_gates.py``.
 
-**Nothing reads the variable yet**: the database door is step 1 (report mode),
+**Nothing decides by it yet**: the database door is step 1 (report mode),
 and the tests' stand-in for it is ``tests/_space_door.py``. A step that adds
 the door changes what asks :func:`current_door`, and no caller here.
 
@@ -61,7 +61,6 @@ __all__ = [
     "install_loops",
     "install_statements",
     "resolve_work_of",
-    "statement_space",
     "statements_of",
     "work_of",
     "work_of_async",
@@ -109,13 +108,6 @@ def current_door() -> Door | None:
 
 def _say(door: Door) -> contextvars.Token:
     return _said.set(_Said(door, current_scope(), install_work_reason()))
-
-
-def statement_space() -> str | None:
-    """The space a statement is for now, or None (nothing said, or the
-    install's). No I/O."""
-    door = current_door()
-    return (door.space or None) if door is not None else None
 
 
 @contextmanager

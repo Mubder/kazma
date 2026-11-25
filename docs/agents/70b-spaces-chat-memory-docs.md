@@ -194,7 +194,14 @@
   no space (`install_loops`): a document tool starts them inside a turn, and
   they kept that person's space for good. The queue's fair claim, its leases
   and the intake queue are the install's. Off, nothing is bound and a failure
-  is raised as before. Gates: `tests/test_documents_run_in_their_space.py`,
+  is raised as before. A move's copy, and its taking back, run inside the
+  target as the same person; what goes with a member who leaves runs inside
+  the space they left (`people._after_leaving`); the admin's counts read each
+  space as its own; the garbage collection and the totals are the install's;
+  the runs list is the install's only with nothing bound (a page's stays its
+  space's). An audit row that could not be written is a WARNING. Gates:
+  `tests/test_documents_run_in_their_space.py`,
+  `tests/test_space_rows_from_a_page.py`,
   `tests/test_space_doors_postgres.py`, and in `tests/test_row_work_gates.py`
   every loop over a cross-space listing (`LISTINGS`) enters one per row.
 - **The Knowledge Library follows the space (S1-13, 2026-11-18).** Guards

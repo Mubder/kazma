@@ -36,6 +36,10 @@ INSTALL: dict[str, str] = {
         "the audit's trigger, one for every space's rows",
     "kazma-core/kazma_core/documents/admission.py::IntakeAdmissionStore._transaction":
         "one queue, one mutex and one set of budgets, counted over every space",
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._storage_bytes":
+        "the install's totals, of every space together",
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService.run_maintenance":
+        "the collection's audit row is the install's, under no space",
     "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService.start_workers":
         "loops that serve every space, whoever's turn started them",
     "kazma-core/kazma_core/documents/jobs_pg.py::PostgresDocumentJobRepository._ensure_schema":
@@ -52,8 +56,12 @@ INSTALL: dict[str, str] = {
         "the document tables are made once, for every space",
     "kazma-core/kazma_core/documents/repository_pg.py::PostgresDocumentRepository.active_index_entries":
         "lists what every space must find; each entry is then put back in its own",
+    "kazma-core/kazma_core/documents/retention.py::DocumentGarbageCollector.collect":
+        "what any space refers to decides what may go",
     "kazma-core/kazma_core/memory/health.py::build_memory_health":
         "a ping only: the probes round it read the owner's memory as before",
+    "kazma-core/kazma_core/runs/adapters/documents.py::_DocumentAdapter._read":
+        "the supervisor's list of every space's jobs, with nothing bound only",
     "kazma-core/kazma_core/security/service_exposure.py::_role_answer":
         "the role that signed in, no row of any space",
     "kazma-ui/kazma_ui/health.py::check_database":
@@ -226,7 +234,7 @@ def test_an_undeclared_install_statement_is_seen() -> None:
 # ── a loop over rows of several spaces enters one per row ────────────────
 
 #: What answers rows of every space: the store method, or the function.
-LISTINGS = {"interrupted_intake_jobs", "unpublished", "fenced_recent", "active_index_entries",
+LISTINGS = {"interrupted_intake_jobs", "recent_jobs", "unpublished", "fenced_recent", "active_index_entries",
             "document_index_entries", "_moves_under_way"}
 
 #: A loop over such rows that runs nothing for a row: ``file::function`` ->

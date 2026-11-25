@@ -392,6 +392,21 @@ def test_a_restored_index_is_brought_back_whoevers_turn_started_it(world: Any) -
     assert calls.scopes("index_document_ir") == [Scope(world.a, world.reem)], "as its owner, in its space"
 
 
+def test_an_entry_of_no_space_stops_no_other(world: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An id from before Spaces that is no space: reported, never anyone's."""
+    svc = _restored(world)
+    real = svc.repository.active_index_entries()
+    odd = ("Not A Space!", *real[0][1:])
+    monkeypatch.setattr(svc.repository, "active_index_entries", lambda: [odd, *real])
+    monkeypatch.setattr(svc.repository, "list_document_chunks", lambda **_kw: ["held"])
+    monkeypatch.setattr(svc.repository, "get_document", lambda real=svc.repository.get_document, **kw: real(
+        **{**kw, "tenant_id": world.a}))
+    monkeypatch.setattr(svc.knowledge_adapter.store, "get_library_for_tenant", lambda *_a: {"id": "docs"})
+    monkeypatch.setattr(svc.storage, "for_space", lambda _t, real=svc.storage.for_space: real(world.a))
+    report = svc.reconcile_index()
+    assert [f["code"] for f in report["failed"]] == ["no_space"] and len(report["reindexed"]) == 1, report
+
+
 def test_off_the_index_is_brought_back_with_nothing_bound(off: Any) -> None:
     svc = _restored(off)
     with watched((svc.knowledge_adapter, "index_document_ir")) as calls:

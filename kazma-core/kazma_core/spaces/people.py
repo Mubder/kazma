@@ -728,7 +728,25 @@ def _after_leaving(space_id: str, account_id: str, seq: int | None = None) -> di
 
     Run after the membership is gone, so no turn of theirs files a fact
     there meanwhile. A forget that fails is ``forget_failed`` (503): the
-    membership has changed, and the facts are still there."""
+    membership has changed, and the facts are still there.
+
+    In that space (S4-01), whichever page asked: an account's deletion runs
+    it for several spaces, from the admin's own."""
+    from kazma_core.spaces.row_work import work_of
+
+    try:
+        with work_of(space_id):
+            return _leave_behind(space_id, account_id, seq)
+    except identity.IdentityUnavailable as exc:
+        raise PeopleRefused(
+            "forget_failed", 503,
+            "The person is out of the space, but the facts under their entry there "
+            "could not be forgotten yet.",
+        ) from exc
+
+
+def _leave_behind(space_id: str, account_id: str, seq: int | None) -> dict[str, Any]:
+    """The steps of :func:`_after_leaving`, bound to the space."""
     from kazma_core.documents.principal import take_back_access
     from kazma_core.memory import forget
     from kazma_core.memory.speakers import entry_id

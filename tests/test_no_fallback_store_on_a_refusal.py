@@ -46,35 +46,35 @@ def enforced(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.usefixtures("enforced")
 @pytest.mark.parametrize("refusal", _refusals(), ids=lambda e: type(e).__name__)
 def test_a_refusal_is_found_through_what_wraps_it(refusal: BaseException) -> None:
-    assert pg_helpers.is_space_refusal(refusal)
+    assert pg_helpers._is_space_refusal(refusal)
     try:
         try:
             raise refusal
         except Exception as inner:
             raise RuntimeError("the store could not open") from inner
     except RuntimeError as outer:
-        assert pg_helpers.is_space_refusal(outer)
+        assert pg_helpers._is_space_refusal(outer)
     try:
         try:
             raise refusal
         except Exception:
             raise ValueError("while handling it")
     except ValueError as outer:
-        assert pg_helpers.is_space_refusal(outer)
+        assert pg_helpers._is_space_refusal(outer)
 
 
 @pytest.mark.usefixtures("enforced")
 def test_an_outage_is_no_refusal() -> None:
-    assert not pg_helpers.is_space_refusal(None)
-    assert not pg_helpers.is_space_refusal(RuntimeError("Postgres pool unavailable"))
+    assert not pg_helpers._is_space_refusal(None)
+    assert not pg_helpers._is_space_refusal(RuntimeError("Postgres pool unavailable"))
     away = ConnectionError("refused by the network")
     away.__cause__ = away  # a cycle ends
-    assert not pg_helpers.is_space_refusal(away)
+    assert not pg_helpers._is_space_refusal(away)
 
 
 @pytest.mark.parametrize("refusal", _refusals(), ids=lambda e: type(e).__name__)
 def test_with_spaces_off_nothing_is_a_refusal(refusal: BaseException) -> None:
-    assert not pg_helpers.is_space_refusal(refusal)
+    assert not pg_helpers._is_space_refusal(refusal)
     assert pg_helpers.no_other_store_on_refusal(refusal, "a store") is None
 
 

@@ -204,23 +204,15 @@ def _same_as_kazmas(dsn: str | None, reading: Callable[[str], Any]) -> bool:
     return a is not None and a == reading(ours)
 
 
-def is_kazma_server(dsn: str | None) -> bool:
-    """True when *dsn* reaches the server Kazma's own database is on: whose
-    outage a failure there is.
-
-    A memory mirror on another server is its own outage, never Kazma's.
-    """
-    return _same_as_kazmas(dsn, _server_of)
-
-
-def is_kazma_database(dsn: str | None) -> bool:
+def is_kazma_database(dsn: str | None, *, or_its_server: bool = False) -> bool:
     """True when *dsn* is Kazma's own database, not only on its server.
 
-    A mirror in another database of that server shares its outages
-    (:func:`is_kazma_server`) and none of its tables, roles or policies
-    (S4-01, M8).
+    *or_its_server*: any database of that server. A memory mirror there
+    shares the server's outages, and none of the database's tables, roles or
+    policies (S4-01, M8); one on another server is its own outage, never
+    Kazma's.
     """
-    return _same_as_kazmas(dsn, _database_of)
+    return _same_as_kazmas(dsn, _server_of if or_its_server else _database_of)
 
 
 def _describe(exc: BaseException | None) -> str:

@@ -39,7 +39,7 @@ def store_errors() -> tuple[type[BaseException], ...]:
 _INSUFFICIENT_PRIVILEGE = "42501"
 
 
-def is_space_refusal(exc: BaseException | None) -> bool:
+def _is_space_refusal(exc: BaseException | None) -> bool:
     """Whether *exc*, or what it was raised from, is a refusal and not an
     outage: no space was bound to the work (``NoSpaceBound``), or Postgres
     would not let this role do it. The store is there and said no, so nothing
@@ -62,15 +62,17 @@ def is_space_refusal(exc: BaseException | None) -> bool:
 
 
 def no_other_store_on_refusal(exc: BaseException, what: str) -> None:
-    """Raise *exc* again when it is a refusal (:func:`is_space_refusal`):
+    """Raise *exc* again when it is a refusal (:func:`_is_space_refusal`):
     the first thing a handler that would use another store does. *what* is
     the store, for the log. A fallback made then would last as long as the
     process: documents would list empty, uploads and chat state would be kept
     in two places."""
-    if not is_space_refusal(exc):
+    if not _is_space_refusal(exc):
         return
-    logger.error("%s: Postgres refused this (%s: %s). No other store is used in its place.",
-                 what, type(exc).__name__, exc)
+    from kazma_core.spaces.row_work import current_door
+
+    logger.error("%s: Postgres refused this (%s: %s), said for %s. No other store is used in its place.",
+                 what, type(exc).__name__, exc, current_door() or "no space")
     raise exc
 
 

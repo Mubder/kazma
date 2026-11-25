@@ -17,13 +17,18 @@ from kazma_core.spaces.row_work import (
     install_loops,
     install_statements,
     resolve_work_of,
-    statement_space,
     statements_of,
     work_of,
     work_of_async,
 )
 from kazma_core.spaces.scope import NoSpaceBound, Scope, bind_scope, current_scope, install_work
 from kazma_core.tenant_context import get_current_tenant_id
+
+
+def statement_space() -> str | None:
+    """The space a statement is for now."""
+    door = current_door()
+    return (door.space or None) if door is not None else None
 
 
 @pytest.fixture

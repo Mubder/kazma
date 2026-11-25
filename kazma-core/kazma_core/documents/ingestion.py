@@ -51,8 +51,8 @@ from typing import Any, BinaryIO
 
 from kazma_core.db import availability
 from kazma_core.db.pg_helpers import store_errors
-from kazma_core.spaces.row_work import install_loops, statements_of, work_of
-from kazma_core.spaces.scope import spaces_enforced
+from kazma_core.spaces.row_work import install_loops, install_statements, resolve_work_of, statements_of, work_of
+from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
 
 from . import live_scratch, ocr_progress, telemetry
 from .admission import IntakeAdmissionStore, current_owner, holding, is_live, lease_lapsed, owner_state
@@ -509,7 +509,12 @@ class DocumentIngestionService:
                     continue
                 # The publication is the document's own, in its own space:
                 # Knowledge refuses a page of a library of another (S1-13).
-                with work_of(tenant, record.owner_id):
+                try:
+                    its_space = resolve_work_of(tenant, record.owner_id)
+                except NoSpaceBound:
+                    report["failed"].append({**item, "code": "no_space"})
+                    continue
+                with its_space():
                     result = adapter.index_document_ir(
                         DocumentIR.from_dict(manifest["ir"]),
                         tenant_id=tenant, actor_id=record.owner_id, library_id=library,
@@ -549,7 +554,11 @@ class DocumentIngestionService:
             deleted = record is not None and record.deleted_at is not None
             if not (apply and (prune or deleted)):
                 continue
-            with work_of(tenant), adapter.publication_lock(tenant, document):
+            try:
+                its_space = resolve_work_of(tenant)
+            except NoSpaceBound:
+                continue  # reported: no space of this install to remove it in
+            with its_space(), adapter.publication_lock(tenant, document):
                 if found is not None and library in self.repository.list_indexed_libraries(
                     tenant_id=tenant, document_id=found
                 ):
@@ -2082,12 +2091,13 @@ class DocumentIngestionService:
         with _move_lock(source, str(doc_id)):
             moved = self._move_locked(source=source, target=target, actor=actor, doc_id=doc_id,
                                       workspace_id=workspace_id, taken_out=taken_out)
-        for tenant, action, other in ((source, "moved_out", target), (target, "moved_in", source)):
-            self.audit.record(
-                tenant_id=tenant, event_type="access", action=action, outcome="success",
-                actor_id=actor, document_id=doc_id if tenant == source else moved.document_id,
-                detail={"reason": "taken_out" if taken_out else "shared_to_space"},
-            )
+        for tenant, action, document in ((source, "moved_out", doc_id), (target, "moved_in", moved.document_id)):
+            with statements_of(tenant):
+                self.audit.record(
+                    tenant_id=tenant, event_type="access", action=action, outcome="success",
+                    actor_id=actor, document_id=document,
+                    detail={"reason": "taken_out" if taken_out else "shared_to_space"},
+                )
         logger.info("[documents] a document moved from space %s to %s", source, target)
         return {"document_id": str(moved.document_id), "job_id": str(moved.job_id)}
 
@@ -2114,13 +2124,17 @@ class DocumentIngestionService:
         blob = self.repository.get_blob(tenant_id=source, blob_id=version.source_blob_id) if version else None
         if version is None or blob is None:
             raise DocumentIngestionError("not_movable", "This document's original is not there to move.")
+        # The copy is made, and taken back, inside the target as the same
+        # person (S4-01): the request is bound to the source. Read before
+        # anything moves, so taking back never waits for an answer.
+        in_target = resolve_work_of(target, actor)
         attempt = uuid.uuid4().hex
         key = f"move:{attempt}"
         _record_move(attempt, {"source": source, "target": target, "document_id": str(doc_id),
                                "actor": actor, "key": key, "copy": "", "at": time.time()})
         try:
             original = self.storage.for_space(source).locate_blob(kind=blob.storage_kind, sha256=blob.sha256)
-            with original.open("rb") as stream:
+            with original.open("rb") as stream, in_target():
                 moved = self.ingest_stream(
                     stream, filename=version.original_filename, tenant_id=target,
                     workspace_id=workspace_id, actor_id=actor, title=record.title, idempotency_key=key,
@@ -2137,8 +2151,9 @@ class DocumentIngestionService:
                 # is still there: never the one thing left of the document.
                 if not retired and not moved.reused and self._still_there(source, doc_id):
                     logger.warning("[documents] a move's source could not be retired: the copy is taken back")
-                    self._tombstone(tenant_id=target, actor_id=actor, document_id=moved.document_id,
-                                    reason="user_requested")
+                    with in_target():
+                        self._tombstone(tenant_id=target, actor_id=actor, document_id=moved.document_id,
+                                        reason="user_requested")
         finally:
             _settle_move(attempt)
         return moved
@@ -2899,21 +2914,22 @@ class DocumentIngestionService:
         report = self.gc.collect(dry_run=dry_run)
         data = report.to_dict()
         # Audit under a system tenant so operator GC actions are recorded.
-        self.audit.record(
-            tenant_id="system",
-            event_type="gc",
-            action="dry_run" if dry_run else "collect",
-            outcome="failure" if report.errors else "success",
-            actor_id=actor_id,
-            detail={
-                "dry_run": dry_run,
-                "deleted_blobs": report.deleted_blobs,
-                "deleted_manifests": report.deleted_manifests,
-                "deleted_rows": report.deleted_blob_rows,
-                "reclaimed_bytes": report.reclaimed_bytes,
-                "batch": report.budget,
-            },
-        )
+        with install_statements("the garbage collection's audit row, of no space"):
+            self.audit.record(
+                tenant_id="system",
+                event_type="gc",
+                action="dry_run" if dry_run else "collect",
+                outcome="failure" if report.errors else "success",
+                actor_id=actor_id,
+                detail={
+                    "dry_run": dry_run,
+                    "deleted_blobs": report.deleted_blobs,
+                    "deleted_manifests": report.deleted_manifests,
+                    "deleted_rows": report.deleted_blob_rows,
+                    "reclaimed_bytes": report.reclaimed_bytes,
+                    "batch": report.budget,
+                },
+            )
         return data
 
     @policy_operation
@@ -3014,6 +3030,7 @@ class DocumentIngestionService:
                 ),
             )
 
+    @install_statements("the storage totals, of every space together")
     def _storage_bytes(self) -> tuple[int, int]:
         """Return (logical_referenced_bytes, physical_on_disk_bytes)."""
         logical = 0
@@ -3051,7 +3068,8 @@ class DocumentIngestionService:
                 logical = int(row["logical"])
                 physical = int(row["physical"])
         except Exception:  # noqa: BLE001
-            logger.debug("[documents.ingestion] storage byte accounting failed", exc_info=True)
+            # 0 here is "not known", and the gauges say it as a size.
+            logger.warning("[documents.ingestion] storage byte accounting failed", exc_info=True)
         return logical, physical
 
     def _audited_artifact(

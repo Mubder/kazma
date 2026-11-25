@@ -39,9 +39,9 @@ problem was its database. Each layer now holds on its own:
   (Spaces enforced: logged and raised again, so documents, jobs, the gateway's
   and the agent's checkpointer never run on a second store, and the start
   fails with the reason; off: nothing changes). Gate:
-  `tests/test_no_fallback_store_on_a_refusal.py`. `is_kazma_database` is the
-  narrower question (the same database, M8); whose outage a mirror's failure
-  is stays the server's. Pings and schema statements are
+  `tests/test_no_fallback_store_on_a_refusal.py`. `is_kazma_database` compares
+  the database too (M8); whose outage a mirror's failure is stays the
+  server's (`or_its_server`). Pings and schema statements are
   `install_statements` (§70 (1)), `tests/test_install_probes_say_so.py`; the
   role question reads `session_user`.
 - **One answer to "is the database away"** (`kazma_core/db/availability.py`,
@@ -50,7 +50,7 @@ problem was its database. Each layer now holds on its own:
   logged a WARNING each pass (the pool alone 1,900 lines an hour), the memory
   queue dead-lettered work that had done nothing wrong, and 33 of 34 guard
   restarts were a boot that waited its 13 minutes and exited. Now a failure
-  of Kazma's own database server (`is_kazma_server`; `is_outage`: SQLSTATE class
+  of Kazma's own database server (`is_kazma_database`, `or_its_server`; `is_outage`: SQLSTATE class
   08/28, 57P01-03, 53300, 3D000, a pool timeout, `PostgresUnreachable`,
   through the cause chain -- never a query error, never SQLite) is reported
   with `note_failure`; ONE prober thread then signs in every `PROBE_EVERY_S`

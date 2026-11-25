@@ -379,6 +379,7 @@ class DocumentAuditStore:
                 if pool is None:
                     if required:
                         raise RuntimeError("Document audit backend is unavailable")
+                    logger.warning("[documents.audit] %s/%s was not recorded: no pool", event_type, action)
                     return
                 with pool.connection() as conn:
                     with conn.cursor() as cur:
@@ -408,7 +409,8 @@ class DocumentAuditStore:
         except Exception:  # noqa: BLE001 - audit must never break operations
             if required:
                 raise RuntimeError("Required document audit could not be persisted") from None
-            logger.debug("[documents.audit] failed to record %s/%s", event_type, action, exc_info=True)
+            # The row is lost, and an audit that loses rows silently is none.
+            logger.warning("[documents.audit] %s/%s was not recorded", event_type, action, exc_info=True)
 
     def list_events(
         self,

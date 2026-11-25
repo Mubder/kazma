@@ -15,11 +15,14 @@ Document jobs touch only Kazma's own document store: their effects are none.
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
 from kazma_core.runs.adapters._common import epoch, short_title
 from kazma_core.runs.contract import ActionResult, Run, RunState
+from kazma_core.spaces.row_work import install_statements, statements_of
+from kazma_core.spaces.scope import current_scope
 
 __all__ = ["ADAPTER"]
 
@@ -59,11 +62,18 @@ class _DocumentAdapter:
         since = datetime.fromtimestamp(now - window_s, UTC).isoformat()
         titles: dict[tuple[str, str], str] = {}
         runs: list[Run] = []
-        for job in service.jobs.recent_jobs(since=since):
+        # The supervisor lists every space's jobs, with nothing bound; a page
+        # or a tool lists inside its own space, which stays its lock (S4-01,
+        # H6: an install's statement there would show it every space's).
+        unbound = current_scope() is None
+        with install_statements("every space's document jobs, listed") if unbound else nullcontext():
+            jobs = service.jobs.recent_jobs(since=since)
+        for job in jobs:
             key = (job.tenant_id, str(job.document_id))
             if key not in titles:
-                record = service.repository.get_document(tenant_id=job.tenant_id, document_id=job.document_id,
-                                                         include_deleted=True)
+                with statements_of(job.tenant_id) if unbound else nullcontext():
+                    record = service.repository.get_document(
+                        tenant_id=job.tenant_id, document_id=job.document_id, include_deleted=True)
                 titles[key] = record.title if record is not None else str(job.document_id)
             runs.append(self._run(job, titles[key], ocr_progress.get(str(job.id)), now))
         return runs
