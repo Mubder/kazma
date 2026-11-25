@@ -204,8 +204,12 @@ class FanOutBusAdapter(BusAdapter):
                 logger.warning("[FanOutBus] approval card on %s failed: %s", type(adapter).__name__, exc)
                 return False
 
-        results = await asyncio.gather(*(_one(a) for a in self._adapters))
-        return any(results)
+        # ``return_exceptions`` waits for every card when the request is
+        # cancelled (each edit is bounded, ``shared_approvals.await_card``):
+        # ended at the first card, the others' edits were cut off with the
+        # request and those cards kept their buttons.
+        results = await asyncio.gather(*(_one(a) for a in self._adapters), return_exceptions=True)
+        return any(r is True for r in results)
 
     async def send_alert(
         self,
