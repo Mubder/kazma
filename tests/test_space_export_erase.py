@@ -18,8 +18,12 @@ space, and erases a person's space only once the person is deleted.
 
 from __future__ import annotations
 
+import ast
 import io
+import os
 import sqlite3
+import stat
+import sys
 import zipfile
 from contextlib import closing
 from pathlib import Path
@@ -131,6 +135,119 @@ def test_an_append_only_table_is_erased_and_keeps_its_guard(world) -> None:
     with closing(sqlite3.connect(str(_documents_db()))) as conn:
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             conn.execute("DELETE FROM document_job_events")
+
+
+def test_a_read_only_file_does_not_stop_an_erase(world) -> None:
+    """Windows deletes no read-only file (git's objects are): the erase raised
+    there, and again at every try, with the space closed."""
+    from kazma_core.spaces.files import FILES, moving_dir, space_dir
+
+    for folder in (space_dir(A) / FILES / "repo" / "objects", moving_dir(A) / ("a" * 32)):
+        folder.mkdir(parents=True)
+        (folder / "x").write_bytes(b"x")
+        os.chmod(folder / "x", stat.S_IREAD)
+    erased = space_data.erase_space(A, by=OWNER_ACCOUNT_ID)
+    assert erased["files"] >= 2 and not space_dir(A).exists() and not moving_dir(A).exists()
+    assert A not in identity.read_registry()["spaces"], "it is closed and never erased"
+
+
+def _linked(link: Path, target: Path) -> None:
+    if sys.platform == "win32":
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        os.symlink(target, link, target_is_directory=True)
+
+
+@pytest.mark.parametrize("there", [True, False])
+def test_an_erase_of_a_space_whose_folder_is_a_link_is_refused_loudly(world, tmp_path, there) -> None:
+    """On Windows it answered done, and the words stayed where the link leads:
+    the handler for read-only files took ``rmtree``'s refusal for its own."""
+    from kazma_core.spaces.files import space_dir
+
+    elsewhere = tmp_path / "other-disk"
+    elsewhere.mkdir()
+    (elsewhere / "words.txt").write_bytes(b"the words")
+    space_data.shutil.rmtree(space_dir(A), ignore_errors=True)
+    space_dir(A).parent.mkdir(parents=True, exist_ok=True)
+    _linked(space_dir(A), elsewhere)
+    if not there:
+        elsewhere.rename(tmp_path / "away")
+    before = space_data.count_space(A)["rows"]
+    with pytest.raises(space_data.SpaceDataRefused) as refused:
+        space_data.erase_space(A, by=OWNER_ACCOUNT_ID)
+    assert refused.value.code == "folder_elsewhere"
+    space = identity.read_registry()["spaces"][A]
+    assert not space.get("erasing_at") and space_data.count_space(A)["rows"] == before, "something was erased"
+    kept = elsewhere if there else tmp_path / "away"
+    assert (kept / "words.txt").read_bytes() == b"the words"
+
+
+def test_a_folder_that_cannot_be_removed_keeps_the_space_to_be_erased_again(world, monkeypatch) -> None:
+    from kazma_core.spaces.files import FILES, space_dir
+
+    (space_dir(A) / FILES).mkdir(parents=True, exist_ok=True)
+    (space_dir(A) / FILES / "x").write_bytes(b"x")
+
+    def refuses(_folder) -> None:
+        raise PermissionError("held")
+
+    for broken in (refuses, lambda _folder: None):  # it raises, or it answers done and is not
+        with monkeypatch.context() as patch:
+            patch.setattr(space_data, "_remove_folder", broken)
+            with pytest.raises(space_data.SpaceDataRefused) as refused:
+                space_data.erase_space(A, by=OWNER_ACCOUNT_ID)
+        assert refused.value.code == "files_remain" and A in identity.read_registry()["spaces"]
+    space_data.erase_space(A, by=OWNER_ACCOUNT_ID)
+    assert not space_dir(A).exists() and A not in identity.read_registry()["spaces"]
+
+
+def test_removing_a_folder_that_is_a_link_is_never_answered_done(tmp_path) -> None:
+    """Both of the product's removers that ask a refused delete again."""
+    from kazma_core.backup import universal
+
+    (tmp_path / "there").mkdir()
+    (tmp_path / "there" / "words.txt").write_bytes(b"w")
+    for remove in (space_data._remove_folder, universal._rmtree_force):
+        _linked(tmp_path / "link", tmp_path / "there")
+        with pytest.raises(OSError):
+            remove(tmp_path / "link")
+        os.rmdir(tmp_path / "link") if sys.platform == "win32" else (tmp_path / "link").unlink()
+    assert (tmp_path / "there" / "words.txt").exists()
+
+
+def _asks_again(text: str) -> dict[str, bool]:
+    """``{function: it looks whether the folder is gone}`` of each function of
+    *text* that hands ``rmtree`` a handler of its own."""
+    found = {}
+    tree = ast.parse(text)
+    outer = [*tree.body, *(n for c in tree.body if isinstance(c, ast.ClassDef) for n in c.body)]
+    for node in outer:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        calls = [c for c in ast.walk(node) if isinstance(c, ast.Call)]
+        if any(k.arg in ("onexc", "onerror") for c in calls for k in c.keywords):
+            found[node.name] = any(getattr(c.func, "attr", "") in ("exists", "lexists") for c in calls) or any(
+                isinstance(n, ast.Raise) for n in ast.walk(node))
+    return found
+
+
+def test_every_removal_with_a_handler_of_its_own_says_what_stays() -> None:
+    """Gate: a handler that swallows is followed by a look, or raises."""
+    root = Path(__file__).resolve().parents[1]
+    found: dict[str, bool] = {}
+    for package in ("kazma-core", "kazma-ui", "kazma-cli", "kazma-gateway", "kazma-skills", "kazma-tui"):
+        for path in (root / package).rglob("*.py"):
+            if "tests" not in path.parts and "rmtree" in (text := path.read_text(encoding="utf-8", errors="replace")):
+                found |= {f"{path.stem}.{name}": said for name, said in _asks_again(text).items()}
+    assert {"space_data._remove_folder", "universal._rmtree_force", "restore._force_rmtree"} <= set(found)
+    assert all(found.values()), found
+
+
+def test_control_a_handler_that_swallows_is_caught() -> None:
+    planted = "def gone(p):\n    def again(f, t, e):\n        f(t)\n    shutil.rmtree(p, onexc=again)\n"
+    assert _asks_again(planted) == {"gone": False}
 
 
 def test_control_without_lifting_the_guard_the_erase_fails(world, monkeypatch) -> None:

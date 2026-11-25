@@ -57,7 +57,11 @@ that version beside the one that moved (``kept``); after the end the words go
 with the claimed file, as with any deleted one. Windows refuses to claim a
 file another program holds open. The bytes, the POSIX permission bits and the
 "came from the internet" mark of Windows travel; another stream, an extended
-attribute and Windows' read-only bit do not. One process settles at a time:
+attribute and Windows' read-only bit do not. Only after a stop: a file whose
+time something changed before the ending is not known as the one placed, so
+both spaces hold it and nobody is its maker; and an empty folder another
+member made in the instant before the stop can be taken for the move's own.
+One process settles at a time:
 the server holds the data folder alone (``runtime_ownership``), and nothing
 else calls this.
 
@@ -97,9 +101,11 @@ from kazma_core.workspace.real_paths import is_linked
 __all__ = [
     "AT_ONCE",
     "FileMoveRefused",
+    "holds",
     "move_file",
     "quiet",
     "settle_file_moves",
+    "settled_before_erase",
     "sweep",
 ]
 
@@ -463,7 +469,7 @@ _FIELDS: dict[str, Callable[[Any], bool]] = {
     "target_path": _is_path,
     "by": lambda v: isinstance(v, str) and 0 < len(v) <= 256,
     "sha256": lambda v: isinstance(v, str) and len(v) == 64 and all(c in "0123456789abcdef" for c in v),
-    "size": lambda v: type(v) is int and v >= 0,
+    "size": lambda v: type(v) is int and 0 <= v < 2**53,
     "taken_out": lambda v: isinstance(v, bool),
     "shared_by_attempt": lambda v: isinstance(v, str) and (v == "" or _is_attempt(v)),
     "shared_at": lambda v: type(v) in (int, float) and 0 <= v < 1e12,
@@ -477,9 +483,11 @@ def _read_record(space: str, attempt: str) -> _Move | None:
     """The move *attempt* of *space*, or None: there is no record, or it is
     not one this code wrote. Raises when it cannot be read now, or who the
     spaces' people are cannot be."""
+    text = b""
     try:
-        with open(_holding(space, attempt) / _RECORD, "rb") as record:
-            text = record.read(_RECORD_MAX + 1)
+        if stat.S_ISREG(os.lstat(_holding(space, attempt) / _RECORD).st_mode):  # a folder of that name is no record
+            with open(_holding(space, attempt) / _RECORD, "rb") as record:
+                text = record.read(_RECORD_MAX + 1)
     except FileNotFoundError:
         return None
     try:
@@ -574,7 +582,8 @@ def _take_away(folder: Path) -> None:
     if not _plain(folder):
         return
     for name in (_RECORD, _RECORD_PART, _COPY, _COPY_PART):
-        _unlink(folder / name)
+        if not (folder / name).is_dir():  # a folder of that name is none of its files
+            _unlink(folder / name)
     with suppress(OSError):  # not empty: something is held there
         folder.rmdir()
 
@@ -638,7 +647,7 @@ def _copy_aside(source: Path, info: os.stat_result, aside: Path, copy: Path, max
     else:
         os.chmod(partial, stat.S_IMODE(info.st_mode) & 0o777)
     which = _identity(os.lstat(partial))
-    if not _place(partial, copy) or _identity(os.lstat(copy)) != which:
+    if not which[0] or not _place(partial, copy) or _identity(os.lstat(copy)) != which:
         raise OSError(errno.EOPNOTSUPP, "this disk does not say which file is which after a rename")
     _sync_folder(copy.parent)
     return sha.hexdigest(), size
@@ -1011,9 +1020,10 @@ def _carry(attempt: str, parts: tuple[str, ...], source: str, target: str, by: s
 # ── a move that did not end ──────────────────────────────────────────────
 
 
-def _attempts() -> list[tuple[str, str]]:
+def _attempts(unread: set[str] | None = None) -> list[tuple[str, str]]:
     """``(space, attempt)`` of every holding folder on the disk, none of them
-    a link."""
+    a link. A space's that cannot be read now is said and stops no other's
+    (in *unread*)."""
     root = moving_dir(OWNER_SPACE_ID).parent
     if not os.path.lexists(root):
         return []
@@ -1022,11 +1032,21 @@ def _attempts() -> list[tuple[str, str]]:
         return []
     found: list[tuple[str, str]] = []
     with os.scandir(root) as spaces:
-        names = sorted(entry.name for entry in spaces if valid_space_id(entry.name) and _plain(Path(entry.path)))
+        names = sorted(entry.name for entry in spaces if valid_space_id(entry.name))
     for name in names:
-        with suppress(FileNotFoundError), os.scandir(moving_dir(name)) as held:
-            found.extend((name, entry.name) for entry in held
-                         if _is_attempt(entry.name) and _plain(Path(entry.path)))
+        try:
+            if not _plain(moving_dir(name)):
+                continue
+            with os.scandir(moving_dir(name)) as held:
+                attempts = [entry.name for entry in held if _is_attempt(entry.name) and _plain(Path(entry.path))]
+        except FileNotFoundError:
+            continue
+        except OSError:
+            _say(f"(any of {name})", "cannot be looked for now; it is tried again")
+            if unread is not None:
+                unread.add(name)
+            continue
+        found.extend((name, attempt) for attempt in attempts)
     return found
 
 
@@ -1058,20 +1078,34 @@ def settle_file_moves(*, leaving: str | None = None) -> list[dict[str, str]]:
     its own: one that cannot be ended now is said and tried again. Nothing on
     an install that does not enforce Spaces, and nothing is made. Run at
     start, by the maintenance sweep and by the next move; with *leaving*, only
-    the moves out of that space (before it is closed for its erase, while a
-    file that did not move can still go back to it). Blocking."""
+    the moves out of that space. Blocking."""
+    return _settle(leaving)[0]
+
+
+def settled_before_erase(space: str) -> bool:
+    """End the moves out of *space* before it is closed for its erase, while a
+    file that did not move can still go back to it. False when another
+    settling is still at work: it could put a file in the erased space."""
+    return _settle(space, of=space)[1]
+
+
+def _settle(leaving: str | None, *, of: str | None = None) -> tuple[list[dict[str, str]], bool]:
+    """What was ended, and whether this settling ran (another one may be at
+    work for longer than this one waits) and could look at what is held of
+    the space *of*."""
     if not spaces_enforced():
-        return []
+        return [], True
     settled: list[dict[str, str]] = []
     if not _settling.acquire(timeout=_SETTLING_WAIT_S):
         logger.warning("[spaces] the file moves cut off are being ended elsewhere; not waited for any longer")
-        return []
+        return [], False
     try:
         try:
-            found = _attempts()
+            unread: set[str] = set()
+            found = _attempts(unread)
         except OSError:
             logger.warning("[spaces] the file moves under way could not be read", exc_info=True)
-            return []
+            return [], False
         copies: list[tuple[str, str]] = []
         for space, attempt in found:
             if _is_live(attempt) or leaving not in (None, space):
@@ -1090,7 +1124,7 @@ def settle_file_moves(*, leaving: str | None = None) -> list[dict[str, str]]:
             _forget_orphans(copies)
     finally:
         _settling.release()
-    return settled
+    return settled, of not in unread
 
 
 def _forget_orphans(copies: list[tuple[str, str]]) -> None:
@@ -1112,17 +1146,25 @@ def _forget_orphans(copies: list[tuple[str, str]]) -> None:
             logger.info("[spaces] the copy of file move %s stays until the next settling", attempt, exc_info=True)
 
 
-def quiet(space: str, *, timeout: float = 60.0) -> None:
+def quiet(space: str, *, timeout: float = 60.0) -> bool:
     """Wait for the moves of *space* under way here, then end what a stop
     left: before its files are exported, and after it was closed for its
     erase (a move that asked the rule before is over; one that asks it now is
-    refused)."""
+    refused). False when one is still under way, or what a stop left could
+    not be looked at: the caller refuses, to be tried again."""
     with _changing:
         over = _changing.wait_for(
             lambda: not any(space in (source, target) for source, target, _path in _live.values()), timeout)
     if not over:
         logger.warning("[spaces] a file move of space %s is still under way", space)
-    settle_file_moves()
+    return _settle(None, of=space)[1] and over
+
+
+def holds(space: str) -> bool:
+    """Whether a file of *space* is still held by a move that could not be
+    ended: an export now would leave it out."""
+    return any(space == owner and os.path.lexists(_holding(owner, attempt) / _CLAIMED)
+               for owner, attempt in _attempts())
 
 
 def sweep() -> None:
@@ -1132,7 +1174,8 @@ def sweep() -> None:
         return
     settle_file_moves()
     try:
-        waiting = {space for space, _attempt in _attempts()}
+        unread: set[str] = set()
+        waiting = {space for space, _attempt in _attempts(unread)}
     except OSError:
         return
-    shared_files.forget_gone(waiting | _moving_spaces())
+    shared_files.forget_gone(waiting | unread | _moving_spaces())

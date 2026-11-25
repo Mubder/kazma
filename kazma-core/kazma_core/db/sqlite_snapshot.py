@@ -13,6 +13,7 @@ readers do not block writers, so the cost is a longer-held read lock.
 
 from __future__ import annotations
 
+import errno
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -28,8 +29,12 @@ def snapshot_copy(
     *read_only* opens the source with ``mode=ro`` (a store this process must
     not write). ``closing()``, never a bare ``with sqlite3.connect()``: that
     commits and does not close, and on Windows an open file cannot be renamed
-    or removed.
+    or removed. A source that is a link leading nowhere (its disk is away) is
+    refused: SQLite made a new, empty database where it leads, and the copy of
+    that was a success.
     """
+    if Path(src).is_symlink() and not Path(src).exists():
+        raise FileNotFoundError(errno.ENOENT, "the link leads nowhere", str(src))
     if read_only:
         source = sqlite3.connect(Path(src).resolve().as_uri() + "?mode=ro", uri=True, timeout=timeout_s)
     else:

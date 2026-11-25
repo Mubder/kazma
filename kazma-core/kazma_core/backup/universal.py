@@ -10,6 +10,8 @@ loop (``native_backup``) and manually from the Backup UI / API.
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import json
 import logging
 import os
@@ -447,8 +449,9 @@ def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
             target = dest / name
             if src.is_dir():
                 failures: list[dict[str, str]] = []
-                count = _robust_copytree(src, target, failures)
-                row: dict[str, Any] = {"path": name, "files": count}
+                links: list[Path] = []
+                count = _robust_copytree(src, target, failures, links=links)
+                row: dict[str, Any] = {"path": name, "files": count, **_links_row(links, src.parent, src)}
                 if failures:
                     row["failed"] = len(failures)
                     row["failures"] = failures[:_FAILURES_LISTED]
@@ -763,12 +766,15 @@ def _rmtree_force(path: Path) -> None:
 
     shutil.rmtree on Windows fails with WinError 145 ("directory is not empty")
     when files have read-only attributes or handles are briefly open. This
-    clears the read-only bit on each file before removal.
+    clears the read-only bit on each file before removal. What cannot be
+    removed does not stop the rest; ``OSError`` when the folder is still there
+    at the end (a link, which ``rmtree`` refuses, was answered as deleted).
     """
-    import os
     import stat
 
     def _on_error(func: Any, fpath: str, exc_info: Any) -> None:
+        if func not in (os.unlink, os.rmdir):
+            return  # a check or a listing, not a delete: the end says it
         try:
             os.chmod(fpath, stat.S_IWRITE)
             func(fpath)
@@ -783,6 +789,8 @@ def _rmtree_force(path: Path) -> None:
                 pass  # leave it; not worth crashing the delete
 
     shutil.rmtree(path, onerror=_on_error)
+    if os.path.lexists(path):
+        raise OSError(errno.ENOTEMPTY, "the folder could not be removed whole", str(path))
 
 
 #: How long to wait for a writer to release the database before giving up.
@@ -808,13 +816,17 @@ def selectable_databases(data_root: Path) -> list[Path]:
         parts = f.relative_to(data_root).parts
         return len(parts) > 1 and kept_out_of_backups(parts[0])
 
+    from kazma_core.backup.data_files import linked_files_at_top
     from kazma_core.workspace.real_paths import own_files
 
     if not data_root.is_dir():
         return []
+    # A database that is a link directly in the data folder is the install's
+    # own layout: without it, it was in no backup and the drill judged by the
+    # same list. One whose disk is away is listed, and fails to copy.
     return [
         f
-        for f in sorted(own_files(data_root, unreadable=[], linked_at_top=True))
+        for f in sorted([*own_files(data_root, unreadable=[], linked_at_top=True), *linked_files_at_top(data_root)])
         if f.match("*.db")
         and not any(p in _EXCLUDE_DIRS for p in f.parts)
         # A store the registry keeps out of backups, and says why: the Time
@@ -880,7 +892,7 @@ _FAILURES_LISTED = 20
 
 
 def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | None = None,
-                     skip: frozenset[Path] = frozenset()) -> int:
+                     skip: frozenset[Path] = frozenset(), links: list[Path] | None = None) -> int:
     """Copy a directory tree file-by-file, skipping files that vanish mid-copy.
 
     LibreOffice conversion runs leave ephemeral cache files (.bin under
@@ -901,7 +913,11 @@ def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | Non
     *skip* holds files the backup takes another way: a database nested in an
     asset folder, copied consistently into ``dbs/``, and its sidecars
     (FA-267: it was copied a second time here, raw, with a live ``-wal``).
+
+    *links* gets every link left out (``backup.data_files``): the caller names
+    them.
     """
+    from kazma_core.backup.data_files import links_below
     from kazma_core.workspace.real_paths import own_files
 
     if failures is None:
@@ -924,6 +940,8 @@ def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | Non
             logger.warning("[universal-backup] could not copy %s: %s", item, exc)
             failures.append({"path": item.relative_to(src).as_posix(),
                              "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+    if links is not None:
+        links += links_below(folders, keep=lambda p: not _should_exclude(p.name))
     for folder in folders:  # an empty folder is a person's too
         (dest / folder.relative_to(src)).mkdir(parents=True, exist_ok=True)
     for folder in unread:
@@ -931,6 +949,51 @@ def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | Non
             logger.warning("[universal-backup] could not read the folder %s", folder)
             failures.append({"path": folder.relative_to(src).as_posix(), "error": "the folder could not be read"})
     return count
+
+
+def _links_row(links: list[Path], root: Path, folder: Path) -> dict[str, Any]:
+    """The links a copy left out, for the row of their *folder* (which may be
+    a link itself): each one's path in *root*, and whether it leads to files
+    the backup does not hold."""
+    from kazma_core.backup.data_files import leads_out
+    from kazma_core.workspace.real_paths import real_path
+
+    if not links:
+        return {}
+    return {"links_left_out": [{"path": link.relative_to(root).as_posix(), "leads_to": str(real_path(link)),
+                                "leads_out": leads_out(link, root) and leads_out(link, folder)} for link in links]}
+
+
+def _links_left_out(assets: list[dict[str, Any]], root_artifacts: dict[str, Any]) -> dict[str, Any]:
+    """The manifest's row of every link left out, taken out of the rows of
+    their folders, and the one WARNING that names them."""
+    from kazma_core.backup.data_files import NAMED, named
+
+    found = [link for row in (*assets, *root_artifacts.get("artifacts", [])) for link in row.pop("links_left_out", ())]
+    if found:
+        logger.warning("[universal-backup] %d link(s) are left out (a backup follows none below the data folder): %s",
+                       len(found), named([link["path"] for link in found]))
+    out = {link["path"]: link["leads_to"] for link in found if link["leads_out"]}
+    return {"count": len(found), "items": [link["path"] for link in found][:NAMED], "leading_out": out}
+
+
+def _links_paged_before(dest: Path) -> dict[str, str]:
+    """The links whose page was really sent, each with where it led then
+    (``links_left_out.paged``), as the newest earlier backup that can be read
+    remembers them. The alert pages a link once, and again when it leads
+    elsewhere; the manifest and the log name it at every backup."""
+    try:
+        earlier = sorted((d for d in dest.parent.iterdir() if d != dest and (d / "manifest.json").is_file()),
+                         key=lambda d: d.name, reverse=True)
+    except OSError:
+        return {}
+    for folder in earlier:
+        try:
+            paged = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))["links_left_out"]["paged"]
+            return {str(path): str(target) for path, target in paged.items()}
+        except (OSError, ValueError, KeyError, AttributeError, TypeError):
+            continue  # unreadable, or from before: the one before it remembers
+    return {}
 
 
 def _rebuilt_dirs() -> set[Path]:
@@ -981,8 +1044,9 @@ def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
         try:
             if item.is_dir():
                 failures: list[dict[str, str]] = []
-                count = _robust_copytree(item, target, failures, held)
-                row: dict[str, Any] = {"path": rel, "type": "dir", "files": count}
+                links: list[Path] = []
+                count = _robust_copytree(item, target, failures, held, links)
+                row: dict[str, Any] = {"path": rel, "type": "dir", "files": count, **_links_row(links, src, item)}
                 if failures:
                     row["failed"] = len(failures)
                     row["failures"] = failures[:_FAILURES_LISTED]
@@ -1280,8 +1344,10 @@ def _alert_on_backup_gaps(
     failed_dbs: list[dict[str, Any]] | None = None,
     files_failed: int = 0,
     file_examples: list[str] | None = None,
-) -> None:
+    links_out: list[str] | None = None,
+) -> bool:
     """Tell the operator when a backup silently stopped protecting them.
+    Whether the alert that names *links_out* was sent.
 
     Live, 2026-08-28: 29 of 29 universal backups had
     ``offsite.ok == False`` -- "Token has been expired or revoked" -- going
@@ -1297,6 +1363,7 @@ def _alert_on_backup_gaps(
     turn a completed backup into a failed one.
     """
     failed_dbs = failed_dbs or []
+    sent = False
     try:
         from kazma_core.observability.ops_alerts import alert
 
@@ -1311,24 +1378,39 @@ def _alert_on_backup_gaps(
                 ),
                 severity="critical",
             )
-        if files_failed:
+        if files_failed or links_out:
             # Audit 2026-10-26 AUD-021: a file the copy could not read (a
             # locked document blob) was logged at DEBUG and the backup said
             # complete. It is a hole in every backup until it is fixed.
-            listed = ", ".join((file_examples or [])[:3]) or "unknown"
-            alert(
-                "backup.files_failed",
-                f"{files_failed} file(s) are missing from the backup: {listed}.",
-                (
+            # One alert with the links (one key, so one cooldown): files a
+            # link leads to are in no backup either.
+            from kazma_core.backup.data_files import named
+
+            titles, details = [], []
+            if files_failed:
+                listed = ", ".join((file_examples or [])[:3]) or "unknown"
+                titles.append(f"{files_failed} file(s) are missing from the backup: {listed}.")
+                details.append(
                     "The copy could not read them (a lock held by another "
                     "program, or permissions). The backup is incomplete until "
                     "they copy; the newest complete backup is kept meanwhile."
-                ),
+                )
+            if links_out:
+                titles.append(f"The backup leaves out {len(links_out)} link(s): {named(links_out, most=3)}.")
+                details.append(
+                    "A link inside the data folder is not followed, so the files it leads to are in no "
+                    "backup. Move them into the data folder, or back them up apart. Each link is paged "
+                    "once; every backup's manifest names them."
+                )
+            sent = alert(
+                "backup.files_failed",
+                " ".join(titles),
+                " ".join(details),
                 severity="warn",
                 cooldown_s=_OFFSITE_ALERT_COOLDOWN_S,
             )
         if offsite.get("skipped"):
-            return  # deliberately disabled -- not a failure
+            return sent  # deliberately disabled -- not a failure
         if offsite.get("ok") and offsite.get("prune_error"):
             # The copy was made; the old ones were not deleted. Every run
             # adds one, so the remote grows until this is fixed -- the shape
@@ -1358,7 +1440,7 @@ def _alert_on_backup_gaps(
                 severity="warn",
                 cooldown_s=_OFFSITE_ALERT_COOLDOWN_S,
             )
-            return
+            return sent
         if not offsite.get("ok"):
             alert(
                 "backup.offsite_failed",
@@ -1372,6 +1454,7 @@ def _alert_on_backup_gaps(
             )
     except Exception:  # noqa: BLE001 -- alerting must never fail a backup
         logger.warning("[universal-backup] backup-gap alert failed", exc_info=True)
+    return sent
 
 
 def perform_universal_backup(
@@ -1441,7 +1524,8 @@ def perform_universal_backup(
                 for old in base.iterdir():
                     if old.is_dir() and old != dest and not (old / "manifest.json").is_file():
                         logger.info("[universal-backup] cleaning incomplete dir %s", old.name)
-                        _rmtree_force(old)
+                        with contextlib.suppress(OSError):  # the next run tries again; the others go now
+                            _rmtree_force(old)
         except OSError:
             logger.debug("[universal-backup] incomplete cleanup failed", exc_info=True)
         _set_progress("databases", detail="Preparing backup…", started_ts=time.time())
@@ -1538,6 +1622,13 @@ def perform_universal_backup(
     elapsed = round(time.time() - started, 1)
     # Complete means every database AND every file landed (audit 2026-10-26
     # AUD-021): retention keeps the newest complete backup whatever its age.
+    links_left = _links_left_out(asset_results, root_artifacts)
+    # A link not paged yet, or that leads elsewhere since: what was paged
+    # before and is still so is remembered, the rest when its page is sent.
+    paged_before = _links_paged_before(dest)
+    links_left["paged"] = {path: target for path, target in links_left["leading_out"].items()
+                           if paged_before.get(path) == target}
+    links_new = {path: target for path, target in links_left["leading_out"].items() if path not in links_left["paged"]}
     files_failed, file_examples = _file_failures(asset_results, root_artifacts)
     complete = db_fail == 0 and files_failed == 0
     manifest: dict[str, Any] = {
@@ -1548,6 +1639,7 @@ def perform_universal_backup(
         "complete": complete,
         "databases": {"ok": db_ok, "failed": db_fail, "items": db_results},
         "files": {"failed": files_failed, "examples": file_examples},
+        "links_left_out": links_left,
         "assets": asset_results,
         "root_artifacts": root_artifacts,
         "secret_files_not_restricted": secrets_open,
@@ -1568,10 +1660,13 @@ def perform_universal_backup(
     if restic_result:
         manifest["restic"] = restic_result
         atomic_write_text(manifest_path, json.dumps(manifest, indent=2))
-    _alert_on_backup_gaps(
+    if _alert_on_backup_gaps(
         offsite, db_fail, [r for r in db_results if r.get("error")],
         files_failed=files_failed, file_examples=file_examples,
-    )
+        links_out=list(links_new),
+    ) and links_new:
+        links_left["paged"].update(links_new)
+        atomic_write_text(manifest_path, json.dumps(manifest, indent=2))
 
     # 6. Prune old backups (live-configured retention, env override, >= 1).
     keep = max(1, retention if retention is not None else _read_retention())
