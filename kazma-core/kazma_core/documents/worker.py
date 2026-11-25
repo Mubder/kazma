@@ -97,6 +97,10 @@ _ARRIVING_WAIT_S = 30.0
 #: How long a job waits when whose it is could not be read, or its space is
 #: being erased.
 _IDENTITY_WAIT_S = 30.0
+#: The longest it waits: each time it is given back for the same reason the
+#: wait doubles, or an erase stopped half way would write two job events every
+#: 30 seconds.
+_MAX_GIVEN_BACK_WAIT_S = 300.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +176,8 @@ class DocumentWorker:
         self._tenant_id = tenant_id
         self._shutdown_grace_seconds = float(shutdown_grace_seconds)
         self._stop_event = asyncio.Event()
+        #: (job, reason) -> how often it was given back (said the first time).
+        self._given_back: dict[tuple[str, str], int] = {}
         self._tasks: list[asyncio.Task[None]] = []
 
     @property
@@ -372,9 +378,15 @@ class DocumentWorker:
         (S4-01): the person who asked, else the space's own account. They ran
         with no space bound, or the one of whoever started the workers."""
         from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_core.spaces.scope import spaces_enforced
         from kazma_core.spaces.space_move import importing_spaces
 
         try:
+            # The import journal first, then the identity store
+            # (``importing_spaces`` says why): the other way round, a space
+            # recorded in between read as no space at all, and its job was
+            # rejected for good.
+            arriving = await asyncio.to_thread(importing_spaces) if spaces_enforced() else frozenset()
             its_space = await work_of_async(job.tenant_id, job.actor_id)
         except IdentityUnavailable:
             # Whose job it is cannot be read.
@@ -382,20 +394,34 @@ class DocumentWorker:
         except SpaceErasing:
             await self._not_worked_on(job, owner, "space_erasing", _IDENTITY_WAIT_S)
         except NoSpaceBound:
-            if job.tenant_id in await asyncio.to_thread(importing_spaces):
+            if job.tenant_id in arriving:
                 # Recorded last, when the import has brought its rows in.
-                await self._not_worked_on(job, owner, "space_arriving", _ARRIVING_WAIT_S)
+                await self._not_worked_on(job, owner, "space_arriving", _ARRIVING_WAIT_S, longer=False)
                 return
             with statements_of(job.tenant_id):
                 await self._persist_failure(job, owner, PermanentDocumentError(
                     "no_space", "This document belongs to no space of this install, so it is not processed."))
+        except store_errors() as exc:
+            # The import journal could not be read: as unread people are.
+            logger.debug("Document job's space not read job=%s error_type=%s", job.id, type(exc).__name__)
+            await self._not_worked_on(job, owner, "identity_unavailable", _IDENTITY_WAIT_S)
         else:
             with its_space():
                 await self._process_stages(job, owner)
 
-    async def _not_worked_on(self, job: DocumentJobRecord, owner: str, reason: str, wait: float) -> None:
-        """Give *job* back on the attempt it had, and say why."""
-        logger.warning("Document job given back job=%s reason=%s; tried again in %.0fs", job.id, reason, wait)
+    async def _not_worked_on(self, job: DocumentJobRecord, owner: str, reason: str, wait: float, *,
+                             longer: bool = True) -> None:
+        """Give *job* back on the attempt it had, and say why, once per job
+        and reason; *longer*, each time for longer."""
+        key = (str(job.id), reason)
+        if len(self._given_back) >= 1000:
+            self._given_back.pop(next(iter(self._given_back)))
+        before = self._given_back.pop(key, 0)
+        self._given_back[key] = before + 1
+        if longer:
+            wait = min(wait * 2 ** min(before, 10), _MAX_GIVEN_BACK_WAIT_S)
+        logger.log(logging.DEBUG if before else logging.WARNING,
+                   "Document job given back job=%s reason=%s; tried again in %.0fs", job.id, reason, wait)
         with statements_of(job.tenant_id):
             await asyncio.to_thread(
                 self._repository.hand_back, tenant_id=job.tenant_id, job_id=job.id, owner=owner,

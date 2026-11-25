@@ -893,7 +893,7 @@ _LOOP_STALL_HELPERS = frozenset({
     "update_local_users", "list_accounts", "spaces_of",
     "is_member", "create_space", "add_member", "remove_member", "_update_users",
     # Work for one row (kazma_core/spaces/row_work.py, S4-01): the same reads.
-    "resolve_work_of", "work_of",
+    "resolve_work_of", "resolve_act_of", "work_of",
     # The thread record (kazma_core/spaces/threads.py, S1-07) and the web's
     # space binding (kazma_ui/space_binding.py, S1-04/S1-06): a SQLite file
     # and the identity store.

@@ -34,8 +34,10 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
     The pool is ``saver.conn``; close it with
     :func:`close_postgres_checkpointer`. Autocommit because LangGraph's
     ``setup()`` may run ``CREATE INDEX CONCURRENTLY``, which cannot run in a
-    transaction; ``prepare_threshold=0`` because a pooler in front of Postgres
-    cannot keep prepared statements. Raises when Postgres or the package is
+    transaction; ``prepare_threshold=0`` prepares each statement at its first
+    use (``None`` would never prepare, which a pooler in front of Postgres that
+    cannot keep prepared statements needs). Measured 2026-11-25 on one server:
+    0 and ``None`` take the same time. Raises when Postgres or the package is
     not there -- the callers fall back to SQLite and say so, but never on a
     refusal (``pg_helpers.no_other_store_on_refusal``): that one goes up.
     """

@@ -130,10 +130,70 @@ def test_a_move_is_its_persons_or_refused(world: Any, monkeypatch: pytest.Monkey
         with pytest.raises(ingestion.DocumentIngestionError) as refused:
             moves.move_document(doc.document_id, from_space=world.mine, to_space=world.family, by=world.reem,
                                 workspace_id="w", service=world.svc)
-    assert refused.value.code == "not_movable" and not calls
+    assert refused.value.code == "not_yours" and not calls, "the catalog's words for it, EN and AR"
     assert not get_config_store().get(ingestion.MOVES_KEY), "nothing under way"
     record = world.svc.repository.get_document(tenant_id=world.mine, document_id=doc.document_id)
     assert record is not None and not record.deleted_at, "it is where it was"
+
+
+@pytest.mark.parametrize("meanwhile", ["removed", "erasing", "unreadable"])
+def test_a_copy_made_while_they_were_taken_out_is_taken_back(world: Any, monkeypatch: pytest.MonkeyPatch,
+                                                             meanwhile: str) -> None:
+    """They were taken out while the copy itself was made: the copy stayed in
+    the space they are not in, and the source was retired."""
+    doc = seed_document(world.svc, tenant_id=world.mine, owner=world.reem, marker="trip notes", title="Trip")
+    real = world.svc.ingest_stream
+    copies: list[Any] = []
+
+    def ingest(*args: Any, **kwargs: Any) -> Any:
+        copies.append(real(*args, **kwargs))
+        if meanwhile == "removed":
+            identity.remove_member(world.family, world.reem)
+        elif meanwhile == "erasing":
+            identity.update_registry(lambda reg: reg["spaces"][world.family].update(erasing_at="now"))
+        else:
+            def away(*_a: Any, **_k: Any) -> Any:
+                raise identity.IdentityUnavailable("the settings store is away")
+
+            monkeypatch.setattr(identity, "read_registry", away)
+        return copies[-1]
+
+    monkeypatch.setattr(world.svc, "ingest_stream", ingest)
+    expected = identity.IdentityUnavailable if meanwhile == "unreadable" else ingestion.DocumentIngestionError
+    with bind_scope(world.mine, world.reem), pytest.raises(expected) as refused:
+        moves.move_document(doc.document_id, from_space=world.mine, to_space=world.family, by=world.reem,
+                            workspace_id="w", service=world.svc)
+    if meanwhile != "unreadable":
+        assert refused.value.code == "not_yours"
+    kept = world.svc.repository.get_document(tenant_id=world.mine, document_id=doc.document_id)
+    assert kept is not None and not kept.deleted_at, "it is where it was"
+    copy = world.svc.repository.get_document(tenant_id=world.family, document_id=copies[0].document_id,
+                                             include_deleted=True)
+    assert copy is not None and copy.deleted_at, "and nowhere else"
+
+
+def test_a_person_taken_out_of_the_source_takes_nothing_out(world: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    doc = seed_document(world.svc, tenant_id=world.family, owner=world.reem, marker="trip notes", title="Trip")
+    real = ingestion._move_lock.__enter__
+
+    def waited(self: Any) -> None:
+        real(self)
+        identity.remove_member(world.family, world.reem)
+
+    monkeypatch.setattr(ingestion._move_lock, "__enter__", waited)
+    with bind_scope(world.family, world.reem), pytest.raises(ingestion.DocumentIngestionError) as refused:
+        moves.move_document(doc.document_id, from_space=world.family, to_space=world.mine, by=world.reem,
+                            workspace_id="w", service=world.svc)
+    assert refused.value.code == "not_yours"
+
+
+def test_the_moves_refusal_has_words_and_a_status() -> None:
+    from kazma_ui.documents_api import _STATUS_BY_CODE
+    from kazma_ui.i18n.catalog import documents as catalog
+
+    words = next(v["documents.move_err.not_yours"] for v in vars(catalog).values()
+                 if isinstance(v, dict) and "documents.move_err.not_yours" in v)
+    assert words["en"] and words["ar"] and _STATUS_BY_CODE["not_yours"] == 403
 
 
 def test_off_a_move_binds_nothing(off: Any) -> None:

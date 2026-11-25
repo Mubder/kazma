@@ -44,15 +44,16 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 
 from kazma_core.db import availability
 from kazma_core.db.pg_helpers import store_errors
-from kazma_core.spaces.identity import AskerLeft, IdentityUnavailable
-from kazma_core.spaces.row_work import install_loops, install_statements, resolve_act_of, statements_of, work_of
+from kazma_core.spaces.identity import AskerLeft, IdentityUnavailable, is_member
+from kazma_core.spaces.row_work import SpaceErasing, install_loops, install_statements, resolve_act_of, statements_of, work_of
 from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
 
 from . import live_scratch, ocr_progress, telemetry
@@ -248,6 +249,8 @@ class DocumentIngestionService:
         #: Interrupted intakes whose space's people could not be read: the
         #: sweep tries them again.
         self._interrupted_left = False
+        #: What a pass has said once (:class:`_Pass`): (row, kind of failure).
+        self._said_failures: set[tuple[str, str]] = set()
         self._recover_stranded_intakes()
         self.capacity = DocumentCapacityGuard(
             config=initial,
@@ -288,6 +291,7 @@ class DocumentIngestionService:
         """Start the bounded worker pool (idempotent)."""
         if self.worker_running:
             return
+        self._intake_sweep_stop.clear()  # a stop of before; from here one ends the pass below
         recovered_intake = await asyncio.to_thread(self.recover_interrupted_intake)
         # A move a stop or a crash cut off is settled before any new one
         # (Spaces S2-12 review, finding 5).
@@ -321,7 +325,6 @@ class DocumentIngestionService:
         with install_loops("the document workers, one set for every space"):
             with self._policy.detached():
                 await self._manager.start()
-            self._intake_sweep_stop.clear()
             self._intake_sweeper = spawn_background(
                 self._sweep_stranded_intakes(), name="documents:stranded-intakes", never_completes=True
             )
@@ -357,8 +360,8 @@ class DocumentIngestionService:
                 return
             try:
                 await asyncio.to_thread(self._recover_stranded_intakes)
-                if self._interrupted_left:
-                    await asyncio.to_thread(self.recover_interrupted_intake)
+                if self._interrupted_left and not self._intake_sweep_stop.is_set():
+                    await asyncio.to_thread(self.recover_interrupted_intake, unleased_only=True)
             except store_errors() as exc:
                 logger.warning("[documents.ingestion] stranded intake sweep failed (%s: %s)",
                                type(exc).__name__, exc)
@@ -477,6 +480,7 @@ class DocumentIngestionService:
             return {"tenant_id": tenant, "library_id": library,
                     "document_id": document, "version_id": version}
 
+        rows = _Pass(self._said_failures, "documents put back in the Knowledge index")
         for tenant, library, document, version in wanted:
             if (tenant, library, document, version) in held:
                 continue
@@ -486,20 +490,29 @@ class DocumentIngestionService:
             item = entry(tenant, library, document, version)
             try:
                 self._put_back_in_the_index(adapter, item, report, apply=apply)
+                rows.went_on()
             except _row_errors() as exc:
-                _one_rows_failure(exc, "a document was not put back in the Knowledge index")
+                over = rows.failed(exc, f"document {document} was not put back in the Knowledge index")
                 report["failed"].append({**item, "code": _failed_code(exc)})
+                if over:
+                    report["stopped"] = True
+                    break
 
         wanted_keys = set(wanted)
+        rows = _Pass(self._said_failures, "documents removed from the Knowledge index")
         for tenant, library, document, version in sorted(held - wanted_keys):
             if (tenant, library, document) in wanted_places:
                 continue  # an older version the re-publication above retires
             item = entry(tenant, library, document, version)
             try:
                 self._settle_unrecorded(adapter, item, report, apply=apply, prune=prune)
+                rows.went_on()
             except _row_errors() as exc:
-                _one_rows_failure(exc, "a document the store does not record stayed in the Knowledge index")
+                over = rows.failed(exc, f"document {document} stayed in the Knowledge index")
                 report["failed"].append({**item, "code": _failed_code(exc)})
+                if over:
+                    report["stopped"] = True
+                    break
         return report
 
     def _put_back_in_the_index(self, adapter: DocumentKnowledgeAdapter, item: dict[str, str],
@@ -655,23 +668,39 @@ class DocumentIngestionService:
         )
 
     @policy_operation
-    def recover_interrupted_intake(self) -> int:
-        """Resume pre-worker intake states left behind by a hard process crash."""
+    def recover_interrupted_intake(self, *, unleased_only: bool = False) -> int:
+        """Resume pre-worker intake states left behind by a hard process
+        crash. *unleased_only* (the sweep's pass, while workers run): a job
+        under a lease is a worker's, which its own recovery takes back."""
+
+        from kazma_core.spaces.space_move import importing_spaces
 
         recoverable = getattr(self.jobs, "interrupted_intake_jobs", None)
         if not callable(recoverable):
             return 0
         recovered, left = 0, False
-        for snapshot in recoverable():
+        snapshots = recoverable()
+        # Read after the rows and before the identity store (importing_spaces).
+        arriving = importing_spaces() if spaces_enforced() and snapshots else frozenset()
+        rows = _Pass(self._said_failures, "interrupted intakes")
+        for snapshot in snapshots:
+            if spaces_enforced() and self._intake_sweep_stop.is_set():
+                return recovered  # stopping: the next start takes the rest
+            if unleased_only and snapshot.lease_owner:
+                continue
             try:
                 # Each job in its own space (S4-01): one whose space refuses
                 # is left as it is, and the rest are recovered.
                 with work_of(snapshot.tenant_id, snapshot.actor_id):
                     recovered += self._recover_interrupted_job(snapshot)
+                rows.went_on()
             except _row_errors() as exc:
-                _one_rows_failure(exc, f"interrupted intake job={snapshot.id} was not resumed")
-                left = left or isinstance(exc, IdentityUnavailable)
-        # Whose they are could not be read: the sweep asks again.
+                over = rows.failed(exc, f"interrupted intake job={snapshot.id} was not resumed")
+                left = left or over or isinstance(exc, (IdentityUnavailable, SpaceErasing)) or (
+                    isinstance(exc, NoSpaceBound) and snapshot.tenant_id in arriving)
+                if over:
+                    break
+        # What could not be read, or was coming or going: the sweep asks again.
         self._interrupted_left = left
         return recovered
 
@@ -1145,6 +1174,7 @@ class DocumentIngestionService:
             logger.warning("[documents.ingestion] stranded intake scan failed (%s: %s)", type(exc).__name__, exc)
             return 0
         recovered = 0
+        this_pass = _Pass(self._said_failures, "stranded intakes")
         for row in rows:
             if self._intake_sweep_stop.is_set():
                 return recovered  # stopping: the next start or sweep takes the rest
@@ -1164,19 +1194,24 @@ class DocumentIngestionService:
             try:
                 with statements_of(row["tenant_id"]), holding(token):  # a concurrent sweep here leaves it alone
                     recovered += self._roll_back_stranded(row, owner, expected_heartbeat)
+                this_pass.went_on()
             except _row_errors() as exc:
-                _one_rows_failure(exc, f"stranded intake {token} was not taken over")
+                if this_pass.failed(exc, f"stranded intake {token} was not taken over"):
+                    break
         if recovered:
             logger.info("[documents.ingestion] rolled back %d intake(s) left by a stopped process", recovered)
         if self._intake_sweep_stop.is_set():
             return recovered
+        this_pass = _Pass(self._said_failures, "fenced intakes")
         try:
             for row in self.admissions.fenced_recent():
                 try:
                     with statements_of(row["tenant_id"]):
                         removed = self._discard_tagged(row)
+                    this_pass.went_on()
                 except _row_errors() as exc:
-                    _one_rows_failure(exc, f"rows a fenced intake ({row['token']}) wrote were not removed")
+                    if this_pass.failed(exc, f"rows a fenced intake ({row['token']}) wrote were not removed"):
+                        break
                     continue
                 if removed:
                     logger.info(
@@ -2157,12 +2192,8 @@ class DocumentIngestionService:
         # The copy is made, and taken back, inside the target as the same
         # person (S4-01): the request is bound to the source. Asked here,
         # after the wait for the lock and before anything moves: in the
-        # meantime they may have left the target, or it is being erased.
-        try:
-            in_target = resolve_act_of(target, actor)
-        except AskerLeft as exc:
-            raise DocumentIngestionError(
-                "not_movable", "You are no longer in the space this document would go to.") from exc
+        # meantime they may have left either space, or one is being erased.
+        in_target = self._still_in_both(source, target, actor)
         attempt = uuid.uuid4().hex
         key = f"move:{attempt}"
         _record_move(attempt, {"source": source, "target": target, "document_id": str(doc_id),
@@ -2178,6 +2209,9 @@ class DocumentIngestionService:
             _record_move(attempt, {"copy": str(moved.document_id)})
             retired = False
             try:
+                # Once more, the copy made, as every other move asks: a space
+                # they left meanwhile does not keep what they moved into it.
+                self._still_in_both(source, target, actor)
                 self._tombstone(tenant_id=source, actor_id=actor, document_id=doc_id,
                                 reason="taken_out" if taken_out else "shared_to_space")
                 retired = True
@@ -2185,13 +2219,24 @@ class DocumentIngestionService:
                 # Only a copy this attempt made, and only while the source
                 # is still there: never the one thing left of the document.
                 if not retired and not moved.reused and self._still_there(source, doc_id):
-                    logger.warning("[documents] a move's source could not be retired: the copy is taken back")
+                    logger.warning("[documents] a move's source was not retired: the copy is taken back")
                     with in_target():
                         self._tombstone(tenant_id=target, actor_id=actor, document_id=moved.document_id,
                                         reason="user_requested")
         finally:
             _settle_move(attempt)
         return moved
+
+    @staticmethod
+    def _still_in_both(source: str, target: str, actor: str) -> Callable[[], AbstractContextManager[object]]:
+        """What *actor*'s own act in *target* runs in, while they are in both
+        of the move's spaces; else the move's refusal."""
+        try:
+            if spaces_enforced() and not is_member(actor, source):
+                raise AskerLeft("the person is no longer in the space this document is in")
+            return resolve_act_of(target, actor)
+        except AskerLeft as exc:
+            raise DocumentIngestionError("not_yours", "That is not yours to move there.") from exc
 
     def _still_there(self, tenant: str, document_id: DocumentId | str) -> bool:
         with statements_of(tenant):
@@ -2204,12 +2249,15 @@ class DocumentIngestionService:
         taken back, so the document is where it was; a move whose source was
         retired is done. Blocking; run at every start, before any move."""
         settled: list[dict[str, Any]] = []
+        rows = _Pass(self._said_failures, "cut-off moves")
         for attempt, entry in sorted(_moves_under_way().items()):
             try:
                 outcome = self._settle_one_move(entry)
+                rows.went_on()
             except _row_errors() as exc:
                 # This move stays recorded; the others are settled.
-                _one_rows_failure(exc, "a cut-off move was not settled")
+                if rows.failed(exc, f"a cut-off move ({attempt}) was not settled"):
+                    break
                 continue
             _settle_move(attempt)
             settled.append({"attempt": attempt, "outcome": outcome})
@@ -3569,14 +3617,53 @@ def _row_errors() -> tuple[type[BaseException], ...]:
     return (*store_errors(), LookupError, AttributeError)
 
 
-def _one_rows_failure(exc: BaseException, what: str) -> None:
-    """One row's failure in a pass over rows of several spaces: said, and the
-    pass goes on with the rest. Raised again when it is not the row's alone:
-    an outage -- and any failure while Spaces is off, as before."""
-    if not spaces_enforced() or availability.is_outage(exc):
-        raise exc
-    logger.warning("[documents.ingestion] %s (%s); tried again at the next pass or start", what,
-                   type(exc).__name__, exc_info=exc)
+#: How many rows in a row may fail the way a whole store fails.
+_SAME_IN_A_ROW = 3
+
+
+class _Pass:
+    """A pass over rows of several spaces: one row's failure is said, and the
+    pass goes on with the rest."""
+
+    def __init__(self, said: set[tuple[str, str]], name: str) -> None:
+        self._said = said
+        self._name = name
+        self._kind: type | None = None
+        self._in_a_row = 0
+
+    def went_on(self) -> None:
+        self._kind, self._in_a_row = None, 0
+
+    def failed(self, exc: BaseException, what: str) -> bool:
+        """Say one row's failure, once as a WARNING; True when the pass is
+        over, because the last rows failed as a whole store does. Raised again
+        when it is not the row's alone: an outage -- and any failure while
+        Spaces is off, as before."""
+        if not spaces_enforced() or availability.is_outage(exc):
+            raise exc
+        key = (what, type(exc).__name__)
+        level = logging.DEBUG if key in self._said else logging.WARNING
+        if len(self._said) >= 1000:
+            self._said.clear()
+        self._said.add(key)
+        logger.log(level, "[documents.ingestion] %s (%s); tried again at the next pass or start", what,
+                   type(exc).__name__, exc_info=None if isinstance(exc, IdentityUnavailable) else exc)
+        kind = type(exc) if _fails_every_row(exc) else None
+        self._in_a_row = self._in_a_row + 1 if kind is not None and kind is self._kind else int(kind is not None)
+        self._kind = kind
+        if self._in_a_row < _SAME_IN_A_ROW:
+            return False
+        logger.warning("[documents.ingestion] %s: the pass stopped after %d in a row failed (%s); tried again "
+                       "at the next pass or start", self._name, self._in_a_row, type(exc).__name__)
+        return True
+
+
+def _fails_every_row(exc: BaseException) -> bool:
+    """Whether *exc* is how a store that answers nothing fails (locked, gone,
+    people unreadable), never how one row does (missing, torn, refused)."""
+    from kazma_core.config_store import ConfigStoreUnavailableError
+
+    return isinstance(exc, (IdentityUnavailable, ConfigStoreUnavailableError)) or type(exc).__name__ in ("OperationalError", "InterfaceError")
 
 
 def _failed_code(exc: BaseException) -> str:
