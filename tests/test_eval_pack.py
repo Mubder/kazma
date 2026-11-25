@@ -44,6 +44,13 @@ from typing import Any
 import pytest
 from kazma_core.llm_provider import LLMError, LLMResponse, ToolCall
 
+@pytest.fixture(autouse=True)
+def _x_can_publish(monkeypatch):
+    """An X account that can publish: what is measured here is the card and
+    who answers it. One that cannot gets none (tests/test_x_refused_says_why.py)."""
+    monkeypatch.setattr("kazma_core.x_api.policy.publishing_refusal", lambda cfg=None: None)
+
+
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "eval_pack.json"
 SHIPPED_YAML = Path(__file__).resolve().parents[1] / "kazma.yaml"
 

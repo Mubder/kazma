@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## A refused X post says why (2026-11-25)
+
+- A post, a delete or a booking X never got now tells you the reason. It said
+  "effects are unknown", even when Kazma had not contacted X at all.
+- While publishing to X is paused, switched off or not set up, Kazma says so
+  before asking you to approve a post that could not go out.
+
 ## A file tool opens the file that was checked (Windows, 2026-11-25)
 
 - On Windows, a path that named a drive after its first part could be checked

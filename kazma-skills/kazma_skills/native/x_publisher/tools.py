@@ -282,6 +282,22 @@ def _checked_media_ids(media_ids: object) -> list[str]:
     return clean
 
 
+#: What X's side certainly did not do: Kazma never asked (``not_sent``), X
+#: answered no (``rejected``), or the post was looked for and is not there.
+_NOTHING_HAPPENED = frozenset({"not_sent", "rejected", "not_on_x"})
+
+
+def _published_answer(ok: bool, payload: dict, proposal_id: str = "") -> str:
+    """The answer of a post or a delete. One that certainly did not happen is a
+    refusal in its own words: returned as a plain failure it became "effects
+    unknown", and the reason was lost (live 2026-11-25, a post paused after a
+    restore). An outcome nobody knows stays a failure, never called again."""
+    payload = {**payload, "ok": ok, **({"proposal_id": proposal_id} if proposal_id else {})}
+    if not ok and str(payload.get("outcome") or "") in _NOTHING_HAPPENED:
+        raise RefusedBeforeEffect(_json(payload))
+    return _json(payload)
+
+
 async def x_post(text: str, reply_to_id: str = "", proposal_id: str = "",
                  media_ids: list[str] | None = None) -> str:
     """Post one tweet via official X API v2. HITL is mandatory outside this function.
@@ -303,17 +319,13 @@ async def x_post(text: str, reply_to_id: str = "", proposal_id: str = "",
     ok, payload = await publish_x_post(text=text, reply_to_id=reply_to_id or "",
                                      idempotency_key="proposal:" + proposal_id if proposal_id else "",
                                      metadata={"proposal_id": proposal_id, **({"media_ids": media} if media else {})})
-    payload["ok"] = ok
-    if proposal_id:
-        payload["proposal_id"] = proposal_id
-    return _json(payload)
+    return _published_answer(ok, payload, proposal_id)
 
 
 async def x_delete_post(tweet_id: str) -> str:
     """Delete a tweet by id via official X API v2."""
     ok, payload = await delete_x_post(tweet_id=tweet_id)
-    payload["ok"] = ok
-    return _json(payload)
+    return _published_answer(ok, payload)
 
 
 # ── Scheduled posts ───────────────────────────────────────────────────
@@ -399,7 +411,11 @@ async def x_schedule_post(
             # requested time over a cancelled row (SCH-E08).
             payload = {"ok": False, "scheduled": False, **{k: payload[k] for k in (
                 "error", "code", "operation_id", "state", "fire_at", "tz") if k in payload}}
+            if payload.get("code") != "booking_held":  # a held booking is a row made
+                raise RefusedBeforeEffect(_json(payload))
         return _json(payload)
+    except RefusedBeforeEffect:
+        raise
     except Exception as exc:
         logger.exception("x_schedule_post failed")
         return _json({"ok": False, "scheduled": False, "error": str(exc)})
@@ -456,7 +472,8 @@ async def x_cancel_scheduled_post(post_id: int) -> str:
     try:
         pid = int(post_id)
     except (TypeError, ValueError):
-        return _json({"ok": False, "cancelled": False, "error": "post_id must be a number."})
+        raise RefusedBeforeEffect(
+            _json({"ok": False, "cancelled": False, "error": "post_id must be a number."})) from None
     try:
         # The stores are SQLite: off the loop, the error path too (SCH-S11).
         store = await asyncio.to_thread(get_x_scheduled_store)

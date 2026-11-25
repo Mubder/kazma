@@ -151,7 +151,7 @@ async def test_booking_success_returns_id_and_fire_time(booking_env) -> None:
     t, ledger, sched = booking_env
     import json as _json
 
-    out = _json.loads(await t.x_schedule_post("Kazma ships scheduled posts", "1h"))
+    out = _json.loads(await answer(t.x_schedule_post("Kazma ships scheduled posts", "1h")))
     assert out["ok"] is True and out["scheduled"] is True
     assert out["id"] >= 1 and out["text"] == "Kazma ships scheduled posts"
     assert out["fire_at"]
@@ -165,7 +165,7 @@ async def test_booking_rejects_past_time(booking_env) -> None:
     from datetime import datetime, timedelta
 
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-    out = _json.loads(await t.x_schedule_post("hello", past))
+    out = _json.loads(await answer(t.x_schedule_post("hello", past)))
     assert out["ok"] is False
     assert "past" in out["error"].lower()
 
@@ -175,7 +175,7 @@ async def test_booking_enforces_policy(booking_env) -> None:
     t, _, _ = booking_env
     import json as _json
 
-    out = _json.loads(await t.x_schedule_post("x" * 281, "1h"))
+    out = _json.loads(await answer(t.x_schedule_post("x" * 281, "1h")))
     assert out["ok"] is False and "cap" in out["error"].lower()
 
 
@@ -188,9 +188,9 @@ async def test_booking_reserves_quota(booking_env, monkeypatch: pytest.MonkeyPat
 
     # Tighten the daily cap to 1, then book one and try a second.
     monkeypatch.setattr(config_mod, "get_x_config", lambda: _cfg(max_posts_per_day=1))
-    first = _json.loads(await t.x_schedule_post("first scheduled", "1h"))
+    first = _json.loads(await answer(t.x_schedule_post("first scheduled", "1h")))
     assert first["ok"] is True
-    second = _json.loads(await t.x_schedule_post("a different legal tweet", "2h"))
+    second = _json.loads(await answer(t.x_schedule_post("a different legal tweet", "2h")))
     assert second["ok"] is False
     assert "daily cap" in second["error"].lower()
 
@@ -200,9 +200,9 @@ async def test_booking_dedupe_pending(booking_env) -> None:
     t, _, sched = booking_env
     import json as _json
 
-    first = _json.loads(await t.x_schedule_post("same draft twice", "1h"))
+    first = _json.loads(await answer(t.x_schedule_post("same draft twice", "1h")))
     assert first["ok"] is True
-    dup = _json.loads(await t.x_schedule_post("same draft twice", "2h"))
+    dup = _json.loads(await answer(t.x_schedule_post("same draft twice", "2h")))
     assert dup["ok"] is False
     assert "already scheduled" in dup["error"].lower()
 
@@ -212,7 +212,7 @@ async def test_cancel_scheduled_post(booking_env) -> None:
     t, _, sched = booking_env
     import json as _json
 
-    booked = _json.loads(await t.x_schedule_post("cancel me later", "1h"))
+    booked = _json.loads(await answer(t.x_schedule_post("cancel me later", "1h")))
     pid = booked["id"]
     assert sched.count_pending() == 1
 
@@ -235,7 +235,7 @@ async def test_booking_disabled_by_kill_switch(booking_env, monkeypatch: pytest.
     import json as _json
 
     monkeypatch.setenv("KAZMA_X_SCHEDULE", "0")
-    out = _json.loads(await t.x_schedule_post("hello", "1h"))
+    out = _json.loads(await answer(t.x_schedule_post("hello", "1h")))
     assert out["ok"] is False and "disabled" in out["error"].lower()
 
 
