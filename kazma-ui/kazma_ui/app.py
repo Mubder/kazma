@@ -198,6 +198,11 @@ class KazmaAppBuilder:
         self.app.add_middleware(AmbiguousPathGuard)
         pin_static_types()
         self.app.add_middleware(SecurityHeadersMiddleware)
+        # A client that went away is not a server error: outside every layer
+        # that could raise it on to the catch-all (2026-11-25).
+        from kazma_ui.client_gone import ClientGoneMiddleware
+
+        self.app.add_middleware(ClientGoneMiddleware)
         # Added last, so it is the OUTERMOST layer: it records the TCP peer and
         # then applies forwarded headers from the declared proxies, which the
         # server used to do before the app could see the peer. Every other

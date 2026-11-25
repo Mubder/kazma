@@ -51,6 +51,19 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   (`_route_body_limits`). `upload_limits.UploadSizeLimitMiddleware` is its
   old name. Gate: `tests/test_request_body_limits.py` (the built app's
   routes both ways).
+- **A client that went away is not a server error**
+  (`kazma_ui/client_gone.py`, 2026-11-25): a page closed while it was sending
+  its request was a WARNING, an ERROR with a traceback and uvicorn's
+  "Exception in ASGI application". `ClientGoneMiddleware`, outside everything
+  but the forwarded headers, ends it with one DEBUG line, only when the
+  request's own disconnect message arrived before its answer was complete AND
+  the error is `ClientDisconnect` alone: a group with another member, one
+  raised over a real failure, and `CancelledError` go on as before. A request
+  cut off mid-body is answered nothing, and the activity and memory trails
+  note it as 499. A `try` that reads a body and catches everything re-raises
+  `ClientDisconnect` first (the document upload logged it as a failed
+  upload); a body written to disk as it arrives is removed when it stops (the
+  history import kept half an export). Gate: `tests/test_client_gone.py`.
 - **Every credential but the shared secret carries a role** (API tokens: the
   role chosen at creation, operator by default), enforced in every mode, and
   `admin_decision` gives the same answer. A token handed to another agent
