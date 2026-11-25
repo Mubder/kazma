@@ -14,7 +14,6 @@ from typing import Any
 
 from fastapi import Depends, Request
 from kazma_core.errors import safe_error
-from kazma_core.db.sql_patterns import like_literal
 
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.routes_direct._shared import (
@@ -506,13 +505,14 @@ def register_memory_routes(self: Any) -> None:
             return {"ok": False, "error": safe_error(exc), "beliefs": [], "episodes": []}
     @self.app.get("/api/memory/v2/beliefs")
     def _memory_v2_beliefs(q: str = "", limit: int = 50, offset: int = 0):
-        """Active V2 beliefs (currently valid only), optional FTS filter.
+        """Active V2 beliefs (currently valid only), optional search.
 
-        Search prefers the ``beliefs_fts`` FTS5 index (diacritic-insensitive,
-        tokenized) and falls back to ``LIKE`` if FTS is unavailable or the
-        query has no usable tokens — matching the recall engine's own pattern.
+        Any word of *q*, as the ``beliefs_fts`` index holds it or folded
+        (``word_search``: the index keeps an Arabic word as it was written).
+        The whole of *q* inside a fact's text when the index cannot be read
+        or *q* has no word (one letter, a sign).
         """
-
+        from kazma_core.memory import word_search
 
         def _match_expr(text: str) -> str:
             """Safe FTS5 MATCH expression (alphanumeric tokens OR-joined)."""
@@ -552,27 +552,22 @@ def register_memory_routes(self: Any) -> None:
                         ).fetchall()
                         fts_ids = [str(r["id"]) for r in fts_rows]
                     except Exception:
-                        # FTS unavailable/corrupt → fall back to LIKE.
+                        # FTS unavailable/corrupt → the words alone, below.
                         fts_ids = None
-                # else: no usable tokens → LIKE fallback below.
+                # else: no usable tokens → the query as written, below.
 
             # base_where carries the tenant predicate: its value binds first.
             where = base_where
             params: list = [*tparams]
-            if fts_ids is not None:
-                if not fts_ids:
-                    # FTS matched nothing — short-circuit to empty.
-                    conn.close()
-                    lim = max(1, min(limit, 200))
-                    return {"beliefs": [], "total": 0, "offset": max(0, int(offset or 0)), "limit": lim, "matched_via": "fts"}
-                ph = ",".join("?" for _ in fts_ids)
-                where += f" AND id IN ({ph})"
-                params.extend(fts_ids)
-            elif query:
-                # LIKE fallback (FTS unavailable or no usable tokens).
-                ql = f"%{like_literal(query.lower())}%"
-                where += " AND (LOWER(subject) LIKE ? ESCAPE '!' OR LOWER(predicate) LIKE ? ESCAPE '!' OR LOWER(object) LIKE ? ESCAPE '!')"
-                params.extend([ql, ql, ql])
+            if query:
+                word_search.register(conn, word_search.Asked.of(query, whole=True))
+                either = [word_search.holds("any", "subject", "predicate", "object")]
+                if fts_ids:
+                    either.append(f"id IN ({','.join('?' for _ in fts_ids)})")
+                    params.extend(fts_ids)
+                elif fts_ids is None:
+                    either += [word_search.holds("phrase", c) for c in ("subject", "predicate", "object")]
+                where += f" AND ({' OR '.join(either)})"
 
             # Total count for the pager (same WHERE).
             total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
@@ -907,11 +902,12 @@ def register_memory_routes(self: Any) -> None:
     def _memory_v2_episodes(limit: int = 40, tier: str = "", offset: int = 0, q: str = ""):
         """Episodes for the Memory page and the Dashboard overlay (id, tier,
         preview text), newest first, a page at a time (``total`` counts every
-        match). *q* searches their words (the episodes full-text index): the
+        match). *q* searches their words (the episodes full-text index, and
+        folded beside it when a word has another spelling): the
         panel reached only the newest 30, so an older memory could not be
         forgotten from the page (Memory audit M23).
         """
-
+        from kazma_core.memory import word_search
 
         conn = None
         try:
@@ -932,17 +928,28 @@ def register_memory_routes(self: Any) -> None:
                 match_q = _every_word_match(q.strip()[:500])
                 if not match_q:
                     return {"ok": True, "episodes": [], "total": 0, "offset": 0, "limit": limit, "q": q}
-                where += " AND rowid IN (SELECT rowid FROM episodes_fts WHERE episodes_fts MATCH ?)"
+                indexed = "rowid IN (SELECT rowid FROM episodes_fts WHERE episodes_fts MATCH ?)"
                 params.append(match_q)
-            total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
+                asked = word_search.Asked.of(q.strip()[:500])
+                if asked.needs_folding:
+                    # The index keeps an Arabic word and its digits as they
+                    # were written (``word_search``).
+                    word_search.register(conn, asked)
+                    worded = word_search.holds("every", "user_text", "assistant_text", "summary_text")
+                    indexed = f"({indexed} OR {worded})"
+                where += f" AND {indexed}"
+            # The matches once (a folded search reads every turn's text), then
+            # the page's own rows.
+            matching = [r[0] for r in conn.execute(f"SELECT rowid{where} ORDER BY created_at DESC", params)]
+            total = len(matching)
             lim = max(1, min(int(limit or 40), 100))
             off = max(0, int(offset or 0))
-            sql = (
-                "SELECT id, tier, user_text, assistant_text, summary_text, created_at, session_id"
-                + where
-                + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-            )
-            rows = conn.execute(sql, [*params, lim, off]).fetchall()
+            shown = matching[off:off + lim]
+            rows = conn.execute(
+                "SELECT id, tier, user_text, assistant_text, summary_text, created_at, session_id FROM episodes "
+                f"WHERE rowid IN ({','.join('?' for _ in shown)}) ORDER BY created_at DESC",
+                shown,
+            ).fetchall()
             conn.close()
             from kazma_core.memory.episode_read import episode_full_text
             from kazma_core.memory.episode_text import display_parts

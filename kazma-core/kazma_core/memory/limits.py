@@ -202,9 +202,15 @@ DEEP_PASS_PREVIOUS_ANSWER = 400
 
 #: The facts Kazma holds about a turn's people and things, shown to the deep
 #: pass so it can say which one a new fact replaces (framework audit F4,
-#: second layer): at most this many, each value cut to this length.
+#: second layer; chosen by ``memory.held_facts``): at most this many, each value
+#: cut to this length, and the lines together at most this many characters:
+#: 1,000 tokens of English and 1,600 of Arabic (``summarizer.
+#: estimate_text_tokens``), so an Arabic speaker is not shown fewer facts. A
+#: bound in tokens kept 13 of 19, the one just told not among them (the review
+#: of W6 step 1). Only a store of long values meets it.
 DEEP_PASS_HELD_FACTS = 30
 DEEP_PASS_HELD_VALUE = 200
+DEEP_PASS_HELD_CHARS = 4000
 
 #: A month's or a project's roll-up is written by one model call from its
 #: weekly summaries (part G, ``topic_rollups``): each is shown to the model

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from kazma_core.memory import word_search
 from kazma_core.memory.limits import LIST_PAGE, LIST_SHOW_ANSWER, LIST_SHOW_ONE, LIST_SHOW_QUESTION
 
 __all__ = ["MemoryListing", "list_memories"]
@@ -90,17 +91,16 @@ def _read_when(when: str, *, now: float, zone: Any) -> tuple[float, float] | Non
     return float(ask.start), float(ask.end)
 
 
-def _every_word(column_sql: str, terms: list[str]) -> tuple[str, list[str]]:
-    """A prefilter: every term somewhere in the row (``LIKE``); the whole
-    word is confirmed in Python (``query_terms.mentions``)."""
-    clause = " AND ".join(f"LOWER({column_sql}) LIKE ?" for _ in terms)
-    return clause, [f"%{t}%" for t in terms]
-
-
-def _holds_every(text: str, terms: list[str]) -> bool:
-    from kazma_core.memory.query_terms import mentions
-
-    return all(mentions(text, [t]) for t in terms)
+def _every_word(columns: tuple[str, ...], asked: word_search.Asked) -> tuple[str, list[str]]:
+    """Every word asked for is in the row's *columns*, both sides folded
+    (``word_search``). A word written in ASCII letters is looked for with
+    ``LIKE`` first, which is cheap and, folded or not, the same letters; an
+    Arabic word or a number never is: it was, and the folded word was not in
+    the text as written (W6, 2026-11-25: 0 of 8 Arabic words found)."""
+    held = " || ' ' || ".join(f"COALESCE({c},'')" for c in columns)
+    plain = [t for t in asked.terms if t.isascii() and any(ch.isalpha() for ch in t)]
+    clause = "".join(f"LOWER({held}) LIKE ? AND " for _ in plain) + word_search.holds("every", *columns)
+    return clause, [f"%{t}%" for t in plain]
 
 
 def _day(ts: Any, zone: Any) -> str:
@@ -128,7 +128,6 @@ def list_memories(
     """
     from kazma_core.memory import speakers
     from kazma_core.memory.episode_text import display_parts
-    from kazma_core.memory.query_terms import content_terms
     from kazma_core.memory.tenant_view import narrowed_to
     from kazma_core.memory.vector_engine import RECALLABLE_TIERS
 
@@ -141,7 +140,7 @@ def list_memories(
     if when.strip() and period is None:
         # A time the reader cannot place is never read as "any time".
         return MemoryListing(about=about, when=when, offset=offset)
-    terms = content_terms(about)[:8]
+    asked = word_search.Asked.of(about, words=8)
     only = narrowed_to(tenant_id)
     people = speakers.room(tenant_id)
     own = conn is None
@@ -151,19 +150,18 @@ def list_memories(
         conn = sqlite3.connect(primary_memory_db(), timeout=15)
     conn.row_factory = sqlite3.Row
     try:
-        facts = _facts(conn, only, terms, period, zone)
+        word_search.register(conn, asked)
+        facts = _facts(conn, only, asked, period, zone)
         tiers = ",".join("?" for _ in RECALLABLE_TIERS)
         where, params = [f"tier IN ({tiers})", "(? IS NULL OR tenant_id = ?)"], [*RECALLABLE_TIERS, only, only]
         if period is not None:
             where.append("created_at >= ? AND created_at < ?")
             params.extend(period)
-        if terms:
-            clause, likes = _every_word(
-                "COALESCE(user_text,'') || ' ' || COALESCE(assistant_text,'') || ' ' || COALESCE(summary_text,'')",
-                terms)
+        if asked.terms:
+            clause, likes = _every_word(("user_text", "assistant_text", "summary_text"), asked)
             where.append(clause)
             params.extend(likes)
-        rows = conn.execute(
+        turns = conn.execute(
             "SELECT id, user_text, assistant_text, summary_text, created_at, "
             "json_extract(metadata_json, '$.said_by') AS said_by FROM episodes "
             f"WHERE {' AND '.join(where)} ORDER BY created_at DESC",  # nosec B608 - fixed clauses, '?' placeholders
@@ -172,8 +170,6 @@ def list_memories(
     finally:
         if own:
             conn.close()
-    turns = [r for r in rows if not terms or _holds_every(
-        " ".join(str(r[k] or "") for k in ("user_text", "assistant_text", "summary_text")), terms)]
     from kazma_core.memory.fact_days import today as day_now
     from kazma_core.memory.recall import _event_label
 
@@ -213,9 +209,9 @@ def _event_of(row: sqlite3.Row) -> dict[str, Any]:
 _META = "CASE WHEN json_valid(metadata_json) THEN metadata_json END"
 
 
-def _facts(conn: sqlite3.Connection, only: str | None, terms: list[str],
+def _facts(conn: sqlite3.Connection, only: str | None, asked: word_search.Asked,
            period: tuple[float, float] | None, zone: Any) -> list[sqlite3.Row]:
-    """The facts holding every term: the current ones, and with a period
+    """The facts holding every word asked for: the current ones, and with a period
     every value that held during it (an earlier value included) -- an event
     by its own day, whenever it was told. Never a forgotten fact (its value
     is gone)."""
@@ -235,8 +231,8 @@ def _facts(conn: sqlite3.Connection, only: str | None, terms: list[str],
         params.extend([period[1], period[0]])
         where.append("(invalidated_at IS NULL OR id IN (SELECT supersedes_id FROM beliefs "
                      "WHERE supersedes_id IS NOT NULL))")
-    if terms:
-        clause, likes = _every_word("subject || ' ' || predicate || ' ' || object", terms)
+    if asked.terms:
+        clause, likes = _every_word(("subject", "predicate", "object"), asked)
         where.append(clause)
         params.extend(likes)
     rows = conn.execute(
@@ -251,5 +247,4 @@ def _facts(conn: sqlite3.Connection, only: str | None, terms: list[str],
         span = fact_days.day_span(fact_days.event_day(_event_of(row)), zone)
         return span is None or (span[0] < period[1] and span[1] > period[0])
 
-    return [r for r in rows if in_period(r) and (not terms or _holds_every(
-        f"{r['subject']} {r['predicate']} {r['object']}", terms))]
+    return [r for r in rows if in_period(r)]

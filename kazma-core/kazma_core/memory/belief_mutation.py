@@ -128,6 +128,12 @@ def _kazma_name(predicate: str) -> str | None:
     return None if named is not None and _plural_of(predicate, named) else named
 
 
+def one_value_name(predicate: str) -> str | None:
+    """Kazma's own name for the single value *predicate* says
+    (:func:`_kazma_name`), or None: a favourite, a list, or no name of Kazma's."""
+    return _kazma_name(predicate)
+
+
 def _name_words(predicate: str) -> list[str]:
     return [w for w in (predicate or "").strip().lower().replace(" ", "_").split("_") if w]
 

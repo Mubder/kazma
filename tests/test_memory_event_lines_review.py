@@ -30,6 +30,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from kazma_core.memory import belief_extractor, belief_mutation
 from kazma_core.memory import recall as recall_mod
+from kazma_core.memory.held_facts import held_facts
 from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
 
 KUWAIT = ZoneInfo("Asia/Kuwait")
@@ -68,7 +69,7 @@ class Mem:
 
     def held(self) -> tuple[list[dict], dict[str, str]]:
         """The numbered facts the deep pass is shown now, and each value's number."""
-        rows = belief_extractor.held_facts(self.db, tenant_id="default", text="")
+        rows = held_facts(self.db, tenant_id="default", text="")
         return rows, {r["object"]: r["ref"] for r in rows}
 
     def _current(self) -> list[sqlite3.Row]:

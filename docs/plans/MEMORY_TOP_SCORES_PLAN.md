@@ -962,6 +962,18 @@ every round (cached by content), weekly summaries, dated event lines. A model
 call per round at write time, as every leading system pays; reported as cost.
 Fact names (the old W7) are fixed here, where they can move a number.
 
+Step 1, built 2026-11-25: the facts the deep pass is shown are the ones the
+turn is about (`memory/held_facts.py`, §15 H). It compared lists of words in
+alphabetical order and gave every place to the user's newest facts. Built beside it the same day: memory's
+lists and the Memory page find an Arabic word in any spelling
+(`memory/word_search.py`, §15 G (3)). Found by step 1's review and planned
+with step 2: a person held under a name in one alphabet and spoken of in the
+other ("عمر" and `omar`) is shown, and not replaced when the reply writes the
+name as the user did; it needs a match between a name's two alphabets that
+never joins two people. Next: one
+role for one person and lists by kind, facts found by an Arabic question as by
+an English one, what W4 left, and the benchmark written as Kazma writes.
+
 ### W8. Scale and speed (M)
 
 LongMemEval-M (downloaded 21 Nov, revision `98d7416c24c7`,

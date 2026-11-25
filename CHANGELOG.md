@@ -91,6 +91,31 @@
   is refused now, by its text, at every place that takes a path, and a path
   that means a place only relative to a drive is never read as the workspace's.
 
+## Memory: a change replaces the fact it changes (2026-11-25)
+
+- When you say that something changed or ended ("my sister Noura is a surgeon
+  now", "بطلت السباحة"), Kazma now looks at the fact it holds about that person
+  or thing, however long ago you told it, so that the new one can replace it.
+  It used to look at your thirty newest facts, and at people picked by the
+  alphabet, so an older fact and the new one could both stay current and both
+  be recalled. The same in English, Gulf Arabic and Modern Standard Arabic,
+  for a name held in the alphabet you write it in; one held as "omar" is not
+  yet replaced by what you say of "عمر". Facts already held twice are not
+  merged by this.
+
+## Memory: lists and the Memory page find Arabic words (2026-11-25)
+
+- "List everything you remember about my allergy" in Arabic, and the Memory
+  page's searches (facts, memories, things and the map), now find an Arabic
+  word in any usual spelling, with or without its article, as they found an
+  English one: "قهوه" finds "القهوة", "12" finds "١٢". Kazma's list in a chat
+  found none of eight Arabic words before, in the very spelling they were told.
+- So is a word you call yours ("سيارتي", "حساسيتي", "my allergy").
+- A plural or a possessive finds the word in the facts and things lists too
+  ("coffees", "car's").
+- Typing a second search while the first is still running no longer lets the
+  first one's results replace the second's.
+
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 
 - Once Spaces is on, a chat you started can move from your own space into a

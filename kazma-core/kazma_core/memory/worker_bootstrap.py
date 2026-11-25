@@ -328,6 +328,7 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
         ensure_ops_schema(ops)
         row = primary.execute(
             "SELECT user_text, assistant_text, session_id, turn_number, tenant_id, created_at, "
+            "embedding, embedding_model_version, "
             "json_extract(metadata_json, '$.deep_pass.version') AS deep_pass, "
             "json_extract(metadata_json, '$.said_by') AS said_by "
             "FROM episodes WHERE id=?",
@@ -381,13 +382,32 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
 
             vocabulary = predicate_vocabulary(primary, tenant_id=space_of_record(row["tenant_id"]))
             entities = entity_vocabulary(primary, tenant_id=space_of_record(row["tenant_id"]))
-        keep = True
-        return {"primary": primary, "ops": ops, "row": dict(row), "use_llm": use_llm,
-                "vocabulary": vocabulary, "entities": entities, **_turn_context(primary, row)}
+        prepared = {"primary": primary, "ops": ops, "row": dict(row), "use_llm": use_llm,
+                    "vocabulary": vocabulary, "entities": entities, **_turn_context(primary, row)}
+        keep = True  # only now: a failure above closes both connections
+        return prepared
     finally:
         if not keep:
             primary.close()
             ops.close()
+
+
+def _stored_vector(row: sqlite3.Row) -> list[float] | None:
+    """The turn's own meaning vector, as memory stored it, when the embedding
+    model in use made it. None: not stored yet (vector repair will), or
+    another model's, which no fact's vector can be compared with, or no
+    vector at all (a text, a number cut short): the list is still chosen."""
+    import struct
+
+    from kazma_core.memory.embedder import get_embedding_model_name
+
+    blob = row["embedding"]
+    if not blob or (row["embedding_model_version"] or "") not in ("", get_embedding_model_name()):
+        return None
+    if not isinstance(blob, (bytes, bytearray, memoryview)) or len(blob) % 4:
+        logger.warning("[memory_worker] the stored vector of a turn could not be read; its nearest facts are not shown")
+        return None
+    return list(struct.unpack(f"<{len(blob) // 4}f", blob))
 
 
 def _turn_context(primary: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
@@ -399,7 +419,8 @@ def _turn_context(primary: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
 
     The space is the episode's own (``tenant_id``, NOT NULL): the deep pass
     is a row-named task, bound to its row's space (``task_queue.ROW_NAMED_TASKS``)."""
-    from kazma_core.memory.belief_extractor import _turn_zone, held_facts, said_on_iso
+    from kazma_core.memory.belief_extractor import _turn_zone, said_on_iso
+    from kazma_core.memory.held_facts import held_facts
 
     space = row["tenant_id"]
     before = None
@@ -411,11 +432,12 @@ def _turn_context(primary: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
             "ORDER BY turn_number DESC, created_at DESC LIMIT 1",
             (space, row["session_id"], int(row["turn_number"])),
         ).fetchone()
+    previous = (before[0] or "", before[1] or "") if before else None
     return {"said_on": said_on_iso(row["created_at"], _turn_zone()),
-            "previous": (before[0] or "", before[1] or "") if before else None,
-            "held": held_facts(primary, tenant_id=space,
-                               text=f"{row['user_text'] or ''}\n{row['assistant_text'] or ''}",
-                               said_by=row["said_by"])}
+            "previous": previous,
+            "held": held_facts(primary, tenant_id=space, text=row["user_text"] or "",
+                               answer=row["assistant_text"] or "", said_by=row["said_by"],
+                               vector=_stored_vector(row), previous=previous)}
 
 
 #: The deep pass's rules: an episode marked with this version (``metadata.

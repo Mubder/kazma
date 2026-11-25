@@ -1575,14 +1575,22 @@
     });
   }
 
+  // Each list draws the answer to what was asked last. A search of a large
+  // memory answers after the shorter word typed next, and its rows (with their
+  // Forget buttons) stood under a search box that says something else.
+  let _memAsked = 0;
+  let _beliefsAsked = 0;
+
   async function loadV2Memories() {
     const el = document.getElementById('v2-memories-list');
     if (!el) return;
+    const asked = ++_memAsked;
     try {
       const url = '/api/memory/v2/episodes?limit=' + _MEM_PAGE + '&offset=' + _memOffset +
         (_memQuery ? '&q=' + encodeURIComponent(_memQuery) : '');
       const resp = await fetch(url);
       const data = await resp.json();
+      if (asked !== _memAsked) return;
       if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const eps = data.episodes || [];
       const total = Number(data.total || 0);
@@ -1612,7 +1620,9 @@
         btn.addEventListener('click', function() { _forgetEpisode(btn.getAttribute('data-id')); });
       });
       _bindWholeMemory(el);
-    } catch (e) { el.textContent = _mt('memory.console.memories_load_failed', 'Memories load failed'); }
+    } catch (e) {
+      if (asked === _memAsked) el.textContent = _mt('memory.console.memories_load_failed', 'Memories load failed');
+    }
   }
   document.getElementById('v2-memories-refresh')?.addEventListener('click', loadV2Memories);
   document.getElementById('v2-memories-newer')?.addEventListener('click', function() {
@@ -1885,10 +1895,12 @@
     const list = document.getElementById('v2-belief-list');
     if (!list) return;
     const emptyCta = document.getElementById('v2-belief-empty-cta');
+    const asked = ++_beliefsAsked;
     try {
       const url = '/api/memory/v2/beliefs' + (q ? ('?q=' + encodeURIComponent(q)) : '');
       const resp = await fetch(url);
       const data = await resp.json();
+      if (asked !== _beliefsAsked) return;
       // A refused read is not "No facts yet".
       if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const beliefs = data.beliefs || [];
@@ -1935,6 +1947,7 @@
         });
       });
     } catch (e) {
+      if (asked !== _beliefsAsked) return;
       if (emptyCta) emptyCta.style.display = 'none';
       list.innerHTML = '<div role="alert" style="padding:12px;font-size:0.82rem;color:var(--danger);">' + _esc(_mt('memory.page.known_failed', 'The facts could not be loaded. This is not an empty memory.')) + '</div>';
     }
@@ -5071,7 +5084,8 @@
     var activePred = Object.keys(_v2gFilters.predicate);
     var search = '';
     var searchEl = document.getElementById('v2g-search');
-    if (searchEl) search = searchEl.value.trim().toLowerCase();
+    // Folded, both sides: an Arabic name in any usual spelling.
+    if (searchEl) search = window.kazmaSearchFold(searchEl.value);
 
     var nodes = _v2gRawNodes, links = _v2gRawLinks;
     // LOD: hard-cap node count for paint performance (P2-4)
@@ -5092,7 +5106,7 @@
       links = links.filter(function(l) {
         if (activePred.length && activePred.indexOf(l.type) < 0) return false;
         if (search) {
-          var hay = ((l.label || '') + ' ' + (l.source || '') + ' ' + (l.target || '') + ' ' + (l.object_text || '')).toLowerCase();
+          var hay = window.kazmaSearchFold((l.label || '') + ' ' + (l.source || '') + ' ' + (l.target || '') + ' ' + (l.object_text || ''));
           if (hay.indexOf(search) < 0) return false;
         }
         return true;
@@ -5108,7 +5122,7 @@
     links.forEach(function(l) { nodeIds.add(l.source); nodeIds.add(l.target); });
     if (search) {
       nodes.forEach(function(n) {
-        var nm = (n.name || n.label || n.id || '').toLowerCase();
+        var nm = window.kazmaSearchFold(n.name || n.label || n.id || '');
         if (nm.indexOf(search) >= 0) nodeIds.add(n.id);
       });
     }
@@ -5364,16 +5378,16 @@
   var _v2gShowEpisodes = false;
 
   function _v2gApplyPathFromQuery() {
-    var seeds = (_v2gLastQuerySeeds || []).map(function(s) { return String(s).toLowerCase(); });
+    var seeds = (_v2gLastQuerySeeds || []).map(function(s) { return window.kazmaSearchFold(s); });
     if (!seeds.length) {
       var q = ((document.getElementById('v2g-search') || {}).value || (document.getElementById('v2-probe-input') || {}).value || '').trim();
-      if (q) seeds = q.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
+      if (q) seeds = window.kazmaSearchFold(q).split(/\s+/).filter(function(w) { return w.length > 2; });
     }
     _v2gPathIds = {};
     var matched = 0;
     for (var i = 0; i < _v2gPts.length; i++) {
       var p = _v2gPts[i];
-      var hay = ((p.id || '') + ' ' + (p.fullLabel || '') + ' ' + (p.label || '')).toLowerCase();
+      var hay = window.kazmaSearchFold((p.id || '') + ' ' + (p.fullLabel || '') + ' ' + (p.label || ''));
       for (var s = 0; s < seeds.length; s++) {
         if (seeds[s] && hay.indexOf(seeds[s]) >= 0) {
           _v2gPathIds[p.id] = true;

@@ -29,10 +29,11 @@ folding; no model.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from functools import lru_cache
 
 __all__ = ["corrects", "denies", "days_elsewhere", "is_event_name", "mentions_value", "own_text", "puts_right",
-           "says_once_more", "stands_elsewhere"]
+           "says_once_more", "stands_elsewhere", "value_words", "words_said"]
 
 #: The share of an event's content words one text holds, at least, for the
 #: event to stand in it; measured on the two pilots' replies (2026-11-24).
@@ -108,7 +109,7 @@ def _forms(text: str) -> frozenset[str]:
     return frozenset(out)
 
 
-def _wanted(value: str) -> list[str]:
+def value_words(value: str) -> list[str]:
     """The words *value* is known by: its content words, or every word when it
     has none (the name "علي" folds to "on")."""
     from kazma_core.documents.arabic import fold_for_search
@@ -127,7 +128,9 @@ def _other_forms(word: str) -> frozenset[str]:
     return frozenset(f for f in _forms(word) if len(f) >= 3 or f.isdigit())
 
 
-def _share(wanted: list[str], text: str) -> float:
+def words_said(wanted: Iterable[str], text: str) -> set[str]:
+    """The words of *wanted* (:func:`value_words`) that *text* holds, in any of
+    the forms a word is compared under, both languages."""
     forms = _forms(text)
 
     def said(word: str) -> bool:
@@ -135,7 +138,12 @@ def _share(wanted: list[str], text: str) -> float:
         return (word in forms or _stem(word) in forms or not forms.isdisjoint(_other_forms(word))
                 or (len(parts) > 1 and all(p in forms or _stem(p) in forms for p in parts)))
 
-    return sum(map(said, wanted)) / len(wanted)
+    return {word for word in wanted if said(word)}
+
+
+def _share(wanted: list[str], text: str) -> float:
+    said = words_said(wanted, text)
+    return sum(word in said for word in wanted) / len(wanted)
 
 
 def own_text(user_text: str) -> str:
@@ -201,7 +209,7 @@ def stands_elsewhere(value: str, user_text: str, *, told_before: str = "", day: 
     from kazma_core.memory.time_words import says_day
 
     own, pasted = told_and_pasted(user_text)
-    wanted = _wanted(value)
+    wanted = value_words(value)
     held = _share(wanted, own) if wanted else 1.0
     if not pasted.strip() or held >= EVENT_WORDS:
         return False
@@ -228,7 +236,7 @@ def days_elsewhere(day: str, user_text: str, said_on: str | None) -> bool:
 def mentions_value(value: str, user_text: str) -> bool:
     """Whether the user's message, pastes left out, names *value*: half of its
     words."""
-    wanted = _wanted(value)
+    wanted = value_words(value)
     return bool(wanted) and _share(wanted, own_text(user_text)) >= EVENT_WORDS
 
 
@@ -309,7 +317,7 @@ def _denies_value(folded: str, value: str) -> bool:
     """Whether *folded* denies *value* by name: a denial and, within a few
     words of its clause, a word of it ("not Paris", "مو علي"). "I visited the
     dentist, no cavities" denies no dentist."""
-    wanted = _wanted(value)
+    wanted = value_words(value)
     arabic = _folded_words(_DENIALS_AR_RAW)
     denials = (_DENIALS_EN - {"actually", "correct", "rather", "never"}) | (arabic - _folded_words(("بل", "الصحيح")))
     for clause in _CLAUSE.findall(folded) if wanted else ():

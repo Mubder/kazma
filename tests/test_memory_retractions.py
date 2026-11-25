@@ -28,7 +28,8 @@ import sqlite3
 
 import pytest
 from kazma_core.memory import belief_extractor, changes
-from kazma_core.memory.belief_extractor import _sanitize_belief, held_facts
+from kazma_core.memory.belief_extractor import _sanitize_belief
+from kazma_core.memory.held_facts import held_facts
 from kazma_core.memory.belief_mutation import end_belief, mutate_belief
 from kazma_core.memory.clause_subject import ends_in_own_words, names_no_one_else
 from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema

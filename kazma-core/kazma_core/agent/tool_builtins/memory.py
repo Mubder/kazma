@@ -27,6 +27,11 @@ def _qnorm(q: str) -> str:
     return _re.sub(r"[_\-\s]+", " ", str(q or "").strip().lower()).strip()
 
 
+def _spoken(column: str) -> str:
+    """SQL: *column* with its ``_`` and ``-`` as spaces, as :func:`_qnorm`."""
+    return f"REPLACE(REPLACE({column},'_',' '),'-',' ')"
+
+
 #: What a memory tool answers in a chat the user keeps out of memory.
 _KEPT_OUT = (
     "Not stored: the user keeps this chat out of memory, so nothing from it is "
@@ -265,7 +270,7 @@ def _chat_kept_out(thread: str, tenant_id: str) -> bool:
 
 def register_memory_tools(registry: Any) -> None:
     """Register the memory tools onto *registry*."""
-    from kazma_core.db.sql_patterns import like_literal
+    from kazma_core.memory import word_search
     # Helper closures used by the memory tools below. They carry no
     # @registry.register decorator, so they moved with their callers when
     # this module was split out of tool_builtins.py (audit O5).
@@ -294,14 +299,14 @@ def register_memory_tools(registry: Any) -> None:
             params: list[Any] = [tenant]
             if (q or "").strip():
                 # Word-boundary friendly: normalize _/- to spaces on BOTH
-                # sides so 'memory system' matches user_memory_system.
-                ql = f"%{like_literal(_qnorm(q))}%"
+                # sides so 'memory system' matches user_memory_system. Both
+                # folded, and by words (word_search, W6).
+                word_search.register(conn, word_search.Asked.of(_qnorm(q)))
                 sql += (
-                    " AND (LOWER(REPLACE(REPLACE(subject,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
-                    "OR LOWER(REPLACE(REPLACE(predicate,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
-                    "OR LOWER(REPLACE(REPLACE(object,'_',' '),'-',' ')) LIKE ? ESCAPE '!')"
+                    " AND (" + "".join(f"{word_search.holds('phrase', _spoken(c))} OR "
+                                       for c in ("subject", "predicate", "object"))
+                    + word_search.holds("every", "subject", "predicate", "object") + ")"
                 )
-                params.extend([ql, ql, ql])
             sql += (
                 " ORDER BY (structural_importance * confidence) DESC LIMIT ?"
             )
@@ -345,13 +350,12 @@ def register_memory_tools(registry: Any) -> None:
             """
             params: list[Any] = [tenant]
             if (q or "").strip():
-                ql = f"%{like_literal(_qnorm(q))}%"
+                word_search.register(conn, word_search.Asked.of(_qnorm(q)))
                 sql += (
-                    " AND (LOWER(REPLACE(REPLACE(e.id,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
-                    "OR LOWER(REPLACE(REPLACE(e.name,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
-                    "OR LOWER(REPLACE(REPLACE(e.type,'_',' '),'-',' ')) LIKE ? ESCAPE '!')"
+                    " AND (" + "".join(f"{word_search.holds('phrase', _spoken(c))} OR "
+                                       for c in ("e.id", "e.name", "e.type"))
+                    + word_search.holds("every", "e.id", "e.name", "e.type", word_search.ALIAS_NAMES) + ")"
                 )
-                params.extend([ql, ql, ql])
             sql += " ORDER BY belief_count DESC, e.name ASC LIMIT ?"
             params.append(lim)
             rows = [dict(r) for r in conn.execute(sql, params).fetchall()]

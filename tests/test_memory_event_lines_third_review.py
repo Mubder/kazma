@@ -326,7 +326,7 @@ def test_control_every_occasion_in_its_place_hides_the_other_event(mem, monkeypa
     ("بيت", "كيت", False),
 ])
 def test_a_values_own_clitics_are_read(value, text, stands):
-    assert (event_text._share(event_text._wanted(value), text) >= event_text.EVENT_WORDS) is stands
+    assert (event_text._share(event_text.value_words(value), text) >= event_text.EVENT_WORDS) is stands
 
 
 @pytest.mark.parametrize(("first", "said", "then", "put_right", "kept"), [

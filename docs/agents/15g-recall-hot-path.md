@@ -54,6 +54,24 @@
     `limits.LIST_LIMIT` of each, compact, twice the gap, and a rule naming
     `memory_list` (`memory/memory_list.py`, read tier, fenced, the caller's
     tenant, a forgotten memory never listed).
+  - *A list finds a word in any spelling* (`memory/word_search.py`, W6,
+    2026-11-25): what was typed and memory's text are both folded and compared
+    word by word, in `memory_list`, `memory_list_beliefs`,
+    `memory_list_entities` and the Memory page's three searches; where the
+    full-text index answers, beside it (`OR`), never instead. `memory_list`
+    looked for the folded word in the unfolded text with `LIKE`: 8 of 8
+    English words found, 0-1 of 8 Arabic ones in their own spelling. "My X" is
+    one Arabic word and is taken off both what was typed and what was told
+    ("سيارتي" and "سيارة"); a dual, a broken plural and "our" are other words.
+    Only a word that may be the one asked for is folded, and only for an
+    Arabic word or a number: folding each turn whole took 24 s for "gpt5" in
+    20,000 facts and 50,000 turns (0.3 s now; the share of letters folded is
+    the gate). Columns go to the functions as bytes (`word_search.holds`): one
+    row that is no text ended the search. A `LIKE`,
+    `MATCH` or `instr` over memory's text in a page or tool is declared with
+    why it may compare text as written. Gate:
+    `tests/test_memory_lists_any_spelling.py` (English, Gulf, MSA; its
+    controls lose the Arabic words and no English one).
   - *Ids*: every recalled conversation line ends "(memory e_...)", with the
     ids joined to it. A one-digit number is a word in recall's coverage
     (`content_terms(digits=True)`; off for every other reader).

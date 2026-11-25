@@ -199,14 +199,6 @@ def _merged_into(metadata_json: Any) -> str:
     return str(target) if target else ""
 
 
-def _like_literal(text: str) -> str:
-    """*text* as a LIKE pattern that matches itself (``ESCAPE '!'``): a ``_``
-    in an entity id is a character, not "any one character"."""
-    from kazma_core.db.sql_patterns import like_literal
-
-    return like_literal(text)
-
-
 def _conn() -> sqlite3.Connection:
     """The memory database, its schema made ready once per process
     (``routes_direct._shared.open_memory_db``). It ran ``ensure_primary_schema``
@@ -603,6 +595,8 @@ async def list_entities(
 
 def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isolated_only: bool) -> dict[str, Any]:
     """Blocking half of :func:`list_entities` -- runs off the event loop."""
+    from kazma_core.memory import word_search
+
     try:
         conn = _conn()
         lim = max(1, min(int(limit or 100), 300))
@@ -635,9 +629,11 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
         matched_via: str | None = None
         query = (q or "").strip()
         if query:
-            # Prefer entities_fts (name + type + aliases_json) for diacritic-
-            # insensitive, alias-aware search; fall back to LIKE if FTS is
-            # unavailable or the query has no usable tokens.
+            # entities_fts (name + type + aliases_json), and beside it the words
+            # folded (word_search: the index keeps an Arabic word as written,
+            # and an alias's Arabic JSON-escaped); the query as written if FTS
+            # is unavailable or the query has no usable tokens.
+            word_search.register(conn, word_search.Asked.of(query, whole=True))
             match_q = _fts_match_expr(query)
             fts_rowids: list[int] | None = None
             if match_q:
@@ -653,8 +649,9 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
                     ).fetchall()
                     fts_rowids = [int(r["rowid"]) for r in fts_rows]
                 except Exception:
-                    fts_rowids = None  # FTS unavailable → LIKE fallback
-            ql = f"%{_like_literal(query.lower())}%"
+                    fts_rowids = None  # FTS unavailable → the words alone
+            worded = word_search.holds("any", "e.id", "e.name", "e.type", word_search.ALIAS_NAMES)
+            written = {c: word_search.holds("phrase", f"e.{c}") for c in ("id", "name", "type")}
             if fts_rowids is not None:
                 matched_via = "fts"
                 # The id itself matches too (ids aren't in FTS) -- also when
@@ -662,16 +659,11 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
                 # returned no rows, so an entity's own id found nothing.
                 ph = ",".join("?" for _ in fts_rowids)
                 rowid_match = f"e.rowid IN ({ph}) OR " if fts_rowids else ""
-                where += f" AND ({rowid_match}LOWER(e.id) LIKE ? ESCAPE '!')"
+                where += f" AND ({rowid_match}{written['id']} OR {worded})"
                 params.extend(fts_rowids)
-                params.append(ql)
             else:
-                # FTS unavailable or no usable tokens → LIKE on id/name/type.
-                where += (
-                    " AND (LOWER(e.id) LIKE ? ESCAPE '!' OR LOWER(e.name) LIKE ? ESCAPE '!'"
-                    " OR LOWER(e.type) LIKE ? ESCAPE '!')"
-                )
-                params.extend([ql, ql, ql])
+                # FTS unavailable or no usable tokens → id/name/type as written.
+                where += f" AND ({' OR '.join(written.values())} OR {worded})"
                 matched_via = "like"
         if empty_only:
             where += f" AND {count_expr} = 0 AND {_MERGED_INTO_SQL} = ''"
@@ -689,8 +681,8 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
         exact_first = ""
         order_params: list[Any] = []
         if query:
-            exact_first = "(LOWER(e.id) IN (?, ?) OR LOWER(e.name) = ?) DESC, "
-            order_params = [query.lower(), _entity_slug(query), query.lower()]
+            exact_first = "(LOWER(e.id) IN (?, ?) OR kazma_folded(CAST(e.name AS BLOB)) = ?) DESC, "
+            order_params = [query.lower(), _entity_slug(query), word_search.fold(query)]
         sql = (
             f"SELECT e.id, e.type, e.name, e.is_high_stakes, e.is_protected,"
             f" e.aliases_json, e.metadata_json, {count_expr} AS belief_count,"

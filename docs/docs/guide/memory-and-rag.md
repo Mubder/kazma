@@ -161,7 +161,9 @@ related or not.
    tool (a read tool: no approval) lists every memory that holds some words
    or comes from a period, newest first, 30 a page, each with its id: the
    current facts (for a period, the values that held then and what
-   happened in it) and the conversations. It reads only the space it runs in, never a forgotten
+   happened in it) and the conversations. An Arabic word is found in any usual spelling, with or
+   without its article ("قهوه" finds "القهوة"), as an English one is in any case, singular or plural.
+   It reads only the space it runs in, never a forgotten
    memory, and its text reaches the model as data.
 10. **Ids.** Every recalled conversation ends with its id ("(memory
     e_...)"), with the ids of any turns joined to it, so `memory_read` can
@@ -302,7 +304,12 @@ it, and a text past it keeps its start with a warning in the log.
   counts as the same turn and is never written a second time.
 - **Model inputs stay bounded.** The deep pass reads the first 1,500
   characters of a message and 800 of the answer; a weekly summary reads 400
-  and 600 of each turn.
+  and 600 of each turn. With a turn the deep pass is shown up to 30 facts
+  Kazma holds (4,000 characters at most, as many in Arabic as in English) so
+  that a new one can replace an old one: the facts of the people and things
+  the turn names (and the turn before, for "she" and "it"), yours that it
+  speaks of by word or by meaning, your home, employer, name and role, and the
+  ones you told last.
 
 ### Post-turn
 
@@ -503,7 +510,8 @@ You decide what Kazma keeps:
 - **Forget one memory.** The Memory page lists what Kazma remembers of your
   conversations ("Memories of conversations"), newest first, a page at a
   time ("1–30 of 412", **Older** and **Newer**), with a search box that finds
-  the memories holding every word you type. **Forget** removes one, from
+  the memories holding every word you type, an Arabic word in any usual
+  spelling. **Forget** removes one, from
   that list or from a search result on the same page (the memory search and
   "Search both stores"); weekly summaries page and forget the same way. Kazma
   keeps nothing it said -- the question, the answer, the search vector --

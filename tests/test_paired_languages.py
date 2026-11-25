@@ -460,6 +460,24 @@ def _says_the_30th(text: str) -> bool:
     return says_day(text, "2026-05-30", "2026-05-31")
 
 
+def _names_subject(case: tuple[str, str]) -> bool:
+    from kazma_core.memory.held_facts import _Said
+
+    return _Said(case[0]).names(case[1]) is not None
+
+
+def _list_finds(case: tuple[str, str]) -> bool:
+    from kazma_core.memory.word_search import Asked
+
+    return Asked.of(case[1], whole=True).any(case[0])
+
+
+def _names_person(case: tuple[str, str]) -> bool:
+    from kazma_core.memory.held_facts import _Said
+
+    return _Said(case[0]).names(case[1], person=True) is not None
+
+
 PAIRS: list[Pair] = [
     Pair("lesson_correction", (M + "skills/lesson_signal.py",),
          "No, I meant the config in the other folder.", "لا، قصدي الملف اللي في المجلد الثاني.",
@@ -715,6 +733,53 @@ PAIRS: list[Pair] = [
          "Where does Omar live?", "وين ساكن عمر؟", _asker_meant, False),
     Pair("member_named", (M + "memory/speakers.py",),
          "When is Omar's birthday?", "متى عيد ميلاد عمر؟", _members_named, ["omar"]),
+    # Whose facts the deep pass is shown (the memory plan's W6, step 1).
+    Pair("held_subject_named", (M + "memory/held_facts.py",),
+         ("My sister Noura is a surgeon now.", "noura"), ("أختي نورة صارت جراحة", "نورة"), _names_subject, True),
+    Pair("held_subject_not_named", (M + "memory/held_facts.py",),
+         ("What should I cook tonight?", "acme"), ("شنو أطبخ اليوم؟", "سارة"), _names_subject, False),
+    Pair("held_small_word_name", (M + "memory/held_facts.py",),
+         ("I told Will yesterday", "will"), ("كلمت علي أمس", "علي"), _names_subject, True),
+    Pair("held_small_word_no_name", (M + "memory/held_facts.py",),
+         ("I will call later", "will"), ("الكتاب على الطاولة", "علي"), _names_subject, False),
+    # A list of memory finds a word as the user says it (W6).
+    Pair("list_word_of_mine", (M + "memory/word_search.py",),
+         ("a blue car", "my car"), ("سيارة زرقاء", "سيارتي"), _list_finds, True),
+    Pair("list_word_told_as_mine", (M + "memory/word_search.py",),
+         ("my car is blue", "cars"), ("سيارتي زرقاء", "السيارة"), _list_finds, True),
+    Pair("list_word_inside_another", (M + "memory/word_search.py",),
+         ("a new carpet", "car"), ("مقهوة جديدة", "قهوة"), _list_finds, False),
+    # One name is not another, and a thing is said with its article (the reviews of step 1).
+    Pair("held_name_not_another", (M + "memory/held_facts.py",),
+         ("I maxed out the card", "max"), ("كلمت كريمة", "كريم"), _names_person, False),
+    Pair("held_name_not_another_shorter", (M + "memory/held_facts.py",),
+         ("Max called", "maxine"), ("كلمت خالد", "خالدة"), _names_person, False),
+    Pair("held_name_not_a_verb", (M + "memory/held_facts.py",),
+         ("The car willed itself on", "will"), ("سارت السيارة", "سارة"), _names_person, False),
+    Pair("held_name_not_a_place", (M + "memory/held_facts.py",),
+         ("I flew to Indiana", "india"), ("سافرت الهند", "هند"), _names_person, False),
+    Pair("held_name_not_a_plant", (M + "memory/held_facts.py",),
+         ("I bought roses", "rosalynn"), ("شريت وردة", "ورد"), _names_person, False),
+    Pair("held_two_word_name", (M + "memory/held_facts.py",),
+         ("I met Abu Dhabi Bank", "abu_dhabi_bank"), ("كلمت عبدالله", "عبد_الله"), _names_person, True),
+    Pair("held_two_word_name_joined", (M + "memory/held_facts.py",),
+         ("Mary Ann called", "mary_ann"), ("أبو فهد وصل", "بو_فهد"), _names_person, True),
+    Pair("held_role_of_mine", (M + "memory/held_facts.py",),
+         ("My manager moved to Jabriya", "manager"), ("مديري نقل الجابرية", "مدير"), _names_person, True),
+    Pair("held_role_of_mine_msa", (M + "memory/held_facts.py",),
+         ("My manager moved to Jabriya", "manager"), ("انتقل مديري إلى الجابرية.", "مدير"), _names_person, True),
+    Pair("held_role_neighbor", (M + "memory/held_facts.py",),
+         ("My neighbor retired", "neighbor"), ("جاري تقاعد", "جار"), _names_person, True),
+    Pair("held_role_with_the_article", (M + "memory/held_facts.py",),
+         ("The doctor moved", "doctor"), ("الدكتور نقل", "دكتور"), _names_person, True),
+    Pair("held_thing_of_mine", (M + "memory/held_facts.py",),
+         ("My car broke down", "car"), ("سيارتي خربت", "سيارة"), _names_subject, True),
+    Pair("held_thing_with_the_article", (M + "memory/held_facts.py",),
+         ("The car broke down", "car"), ("السيارة خربت", "سيارة"), _names_subject, True),
+    Pair("held_one_digit", (M + "memory/held_facts.py",),
+         ("Room 7 is booked now.", "room_7"), ("غرفة 7 محجوزة", "غرفة_7"), _names_subject, True),
+    Pair("held_another_digit", (M + "memory/held_facts.py",),
+         ("Room 7 is booked now.", "room_1"), ("غرفة 7 محجوزة", "غرفة_1"), _names_subject, False),
 ]
 
 
@@ -823,6 +888,9 @@ DECLARED: dict[str, str] = {
     M + "memory/benchmark.py": "the statements and questions of finding 10's gate, told and asked in "
                                "both languages (FACT_LANGUAGES): data the benchmark runs, nothing decided "
                                "by Arabic text; tests/test_memory_fact_languages.py",
+    M + "memory/benchmark_held.py": "the changes told in English, Gulf and MSA (HELD_PAIRS): data the "
+                                    "benchmark runs, nothing decided by Arabic text; "
+                                    "tests/test_memory_held_facts_shown.py",
     M + "agent/command_catalog.py": "each command's description in both languages (description / "
                                     "description_ar); tests/test_slash_help_and_menu.py",
     M + "safety/card_notes.py": "the approval cards' notes worded in both languages (NOTE_TEXT); "

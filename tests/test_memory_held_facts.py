@@ -25,7 +25,8 @@ from unittest import mock
 
 import pytest
 from kazma_core.memory import belief_extractor, worker_bootstrap
-from kazma_core.memory.belief_extractor import _sanitize_belief, held_facts, turn_message
+from kazma_core.memory.belief_extractor import _sanitize_belief, turn_message
+from kazma_core.memory.held_facts import held_facts
 from kazma_core.memory.belief_mutation import mutate_belief
 from kazma_core.memory.limits import DEEP_PASS_HELD_FACTS, DEEP_PASS_HELD_VALUE
 from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
