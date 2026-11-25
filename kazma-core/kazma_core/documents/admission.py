@@ -34,6 +34,7 @@ from functools import lru_cache
 from typing import Any
 
 from kazma_core.db.pg_helpers import store_errors
+from kazma_core.spaces.row_work import install_statements
 
 from .capacity import CapacityError
 from .config import DocumentConfig
@@ -212,7 +213,8 @@ class IntakeAdmissionStore:
     @contextmanager
     def _transaction(self):
         if self._postgres:
-            with self._jobs._pool.connection() as conn:
+            # One queue, one mutex and one set of budgets for every space.
+            with install_statements("the intake queue, one for every space"), self._jobs._pool.connection() as conn:
                 try:
                     with conn.cursor() as cur:
                         yield cur

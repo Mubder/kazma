@@ -34,10 +34,24 @@ INSTALL: dict[str, str] = {
         "which tables the database has, no row of any space",
     "kazma-core/kazma_core/documents/audit.py::DocumentAuditStore._ensure_pg_guard":
         "the audit's trigger, one for every space's rows",
+    "kazma-core/kazma_core/documents/admission.py::IntakeAdmissionStore._transaction":
+        "one queue, one mutex and one set of budgets, counted over every space",
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService.start_workers":
+        "loops that serve every space, whoever's turn started them",
     "kazma-core/kazma_core/documents/jobs_pg.py::PostgresDocumentJobRepository._ensure_schema":
         "the job tables are made once, for every space",
+    "kazma-core/kazma_core/documents/jobs_pg.py::PostgresDocumentJobRepository.claim_next":
+        "the fair claim reads every space's queue; the job's stages then run in its own",
+    "kazma-core/kazma_core/documents/jobs_pg.py::PostgresDocumentJobRepository.interrupted_intake_jobs":
+        "lists every space's jobs; each is then recovered in its own",
+    "kazma-core/kazma_core/documents/jobs_pg.py::PostgresDocumentJobRepository.recover_expired_leases":
+        "leases that ran out, whoever's jobs they hold",
+    "kazma-core/kazma_core/documents/jobs_pg.py::PostgresDocumentJobRepository.release_leases":
+        "a stopping worker's leases, whoever's jobs they hold",
     "kazma-core/kazma_core/documents/repository_pg.py::PostgresDocumentRepository._ensure_schema":
         "the document tables are made once, for every space",
+    "kazma-core/kazma_core/documents/repository_pg.py::PostgresDocumentRepository.active_index_entries":
+        "lists what every space must find; each entry is then put back in its own",
     "kazma-core/kazma_core/memory/health.py::build_memory_health":
         "a ping only: the probes round it read the owner's memory as before",
     "kazma-core/kazma_core/security/service_exposure.py::_role_answer":
@@ -207,3 +221,82 @@ def test_a_right_use_is_not_a_finding(source: str) -> None:
 def test_an_undeclared_install_statement_is_seen() -> None:
     uses = uses_in("class A:\n    @install_statements('x')\n    def f(self):\n        return 1\n", "x.py")
     assert [u.where for u in uses] == ["x.py::A.f"]
+
+
+# ── a loop over rows of several spaces enters one per row ────────────────
+
+#: What answers rows of every space: the store method, or the function.
+LISTINGS = {"interrupted_intake_jobs", "unpublished", "fenced_recent", "active_index_entries",
+            "document_index_entries", "_moves_under_way"}
+
+#: A loop over such rows that runs nothing for a row: ``file::function`` ->
+#: what it does instead.
+NO_ROW_WORK: dict[str, str] = {}
+
+#: What a row's work is entered by.
+ROW_FORMS = {"work_of", "statements_of", "bind_scope"}
+
+
+def loops_without_a_space(source: str, rel: str) -> set[str]:
+    """Functions of *source* that loop over a listing and enter no row's space
+    in the loop's body, nor in a method of theirs the body calls."""
+    tree = ast.parse(source)
+    functions = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)}
+    found: set[str] = set()
+
+    def enters(nodes: list[ast.stmt], seen: frozenset[str] = frozenset()) -> bool:
+        for node in (n for stmt in nodes for n in ast.walk(stmt)):
+            if isinstance(node, ast.Call):
+                name = _name(node)
+                if name in ROW_FORMS:
+                    return True
+                if name in functions and name not in seen and enters(functions[name].body, seen | {name}):
+                    return True
+        return False
+
+    def visit(node: ast.AST, stack: list[str]) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = [*stack, child.name] if isinstance(
+                child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) else stack
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                own = _own(child)
+                listed = {t.id for n in own if isinstance(n, ast.Assign) and _lists(n.value)
+                          for t in n.targets if isinstance(t, ast.Name)}
+                for loop in own:
+                    if isinstance(loop, ast.For | ast.AsyncFor) and (
+                            _lists(loop.iter) or listed & {n.id for n in ast.walk(loop.iter) if isinstance(n, ast.Name)}):
+                        if not enters(loop.body):
+                            found.add(f"{rel}::{'.'.join(inner)}")
+            visit(child, inner)
+
+    visit(tree, [])
+    return found
+
+
+def _lists(expr: ast.AST) -> bool:
+    """Whether *expr* calls a listing, or reads one by its name (``getattr``)."""
+    return any((isinstance(n, ast.Call) and _name(n) in LISTINGS)
+               or (isinstance(n, ast.Constant) and n.value in LISTINGS) for n in ast.walk(expr))
+
+
+def test_a_loop_over_every_spaces_rows_enters_one_per_row() -> None:
+    found: set[str] = set()
+    for rel in _product_files():
+        text = (REPO / rel).read_text(encoding="utf-8", errors="replace")
+        if any(name in text for name in LISTINGS):
+            found |= loops_without_a_space(text, rel)
+    assert found - set(NO_ROW_WORK) == set(), "enter work_of or statements_of for each row"
+    assert set(NO_ROW_WORK) - found == set(), "declared, and no longer so"
+
+
+@pytest.mark.parametrize(("source", "found"), [
+    ("def f(s):\n    for j in s.interrupted_intake_jobs():\n        s.get(j)\n", True),
+    ("def f(s):\n    rows = s.unpublished()\n    for r in sorted(rows):\n        s.claim(r)\n", True),
+    ("def f(s):\n    rows = getattr(s, 'unpublished', None)\n    for r in rows():\n        s.claim(r)\n", True),
+    ("def f(s):\n    with work_of('a'):\n        for r in s.unpublished():\n            s.claim(r)\n", True),
+    ("def f(s):\n    for r in s.unpublished():\n        with statements_of(r.t):\n            s.claim(r)\n", False),
+    ("def f(s):\n    for r in s.unpublished():\n        one(r)\ndef one(r):\n    with work_of(r.t):\n        go()\n", False),
+    ("def f(s):\n    for r in s.mine():\n        s.claim(r)\n", False),
+])
+def test_a_planted_loop_is_found(source: str, found: bool) -> None:
+    assert loops_without_a_space(source, "x.py") == ({"x.py::f"} if found else set())

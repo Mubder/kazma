@@ -1031,6 +1031,7 @@ class PostgresDocumentRepository:
             conn.commit()
         return int(count or 0)
 
+    @install_statements("what is searchable in every space, listed")
     def active_index_entries(self) -> list[tuple[str, str, str, str]]:
         """Every ``(tenant, library, document, version)`` this store records
         as searchable: what the knowledge index must hold."""

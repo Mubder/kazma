@@ -49,7 +49,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from kazma_core.db import availability
 from kazma_core.db.pg_helpers import store_errors
+from kazma_core.spaces.row_work import install_loops, statements_of, work_of
+from kazma_core.spaces.scope import spaces_enforced
 
 from . import live_scratch, ocr_progress, telemetry
 from .admission import IntakeAdmissionStore, current_owner, holding, is_live, lease_lapsed, owner_state
@@ -306,21 +309,25 @@ class DocumentIngestionService:
             heartbeat_interval=float(self.config.worker_heartbeat_seconds),
         )
         self._manager = DocumentWorkerManager(worker)
-        with self._policy.detached():
-            await self._manager.start()
         from kazma_core.background import spawn_background
 
-        self._intake_sweep_stop.clear()
-        self._intake_sweeper = spawn_background(
-            self._sweep_stranded_intakes(), name="documents:stranded-intakes", never_completes=True
-        )
-        if self.knowledge_adapter is not None:
-            self._reconcile_stop.clear()
-            self._index_reconcile = spawn_background(
-                self._reconcile_index_once(), name="documents:index-reconcile"
+        # The first document tool of a turn starts these too: a task keeps
+        # the context it was made in, so without this they would hold that
+        # person's space for good (S4-01).
+        with install_loops("the document workers, one set for every space"):
+            with self._policy.detached():
+                await self._manager.start()
+            self._intake_sweep_stop.clear()
+            self._intake_sweeper = spawn_background(
+                self._sweep_stranded_intakes(), name="documents:stranded-intakes", never_completes=True
             )
-        self._space_files_stop.clear()
-        self._space_files = spawn_background(self._copy_space_files_once(), name="documents:space-files")
+            if self.knowledge_adapter is not None:
+                self._reconcile_stop.clear()
+                self._index_reconcile = spawn_background(
+                    self._reconcile_index_once(), name="documents:index-reconcile"
+                )
+            self._space_files_stop.clear()
+            self._space_files = spawn_background(self._copy_space_files_once(), name="documents:space-files")
         logger.info(
             "[documents.ingestion] worker pool started concurrency=%d",
             self.config.worker_concurrency,
@@ -335,7 +342,6 @@ class DocumentIngestionService:
         proven dead are touched, so a live intake -- here or elsewhere -- is
         never raced.
         """
-        from kazma_core.db import availability
         from kazma_core.shutdown import sleep_or_shutdown
 
         while not self._intake_sweep_stop.is_set():
@@ -473,7 +479,7 @@ class DocumentIngestionService:
                 break
             item = entry(tenant, library, document, version)
             doc_id = DocumentId(document)
-            with adapter.publication_lock(tenant, doc_id):
+            with statements_of(tenant), adapter.publication_lock(tenant, doc_id):
                 still = self.repository.list_document_chunks(
                     tenant_id=tenant, library_id=library, document_id=doc_id,
                     version_id=VersionId(version),
@@ -501,19 +507,22 @@ class DocumentIngestionService:
                 report["needs_reindex"].append(item)
                 if not apply:
                     continue
-                result = adapter.index_document_ir(
-                    DocumentIR.from_dict(manifest["ir"]),
-                    tenant_id=tenant, actor_id=record.owner_id, library_id=library,
-                )
-                if not result.ok:
-                    report["failed"].append({**item, "code": result.code})
-                    continue
-                report["reindexed"].append(item)
-                self.audit.record(
-                    tenant_id=tenant, event_type="index", action="reconcile",
-                    outcome="success", actor_id=record.owner_id, document_id=doc_id,
-                    version_id=record.current_version_id, detail={"library_id": library},
-                )
+                # The publication is the document's own, in its own space:
+                # Knowledge refuses a page of a library of another (S1-13).
+                with work_of(tenant, record.owner_id):
+                    result = adapter.index_document_ir(
+                        DocumentIR.from_dict(manifest["ir"]),
+                        tenant_id=tenant, actor_id=record.owner_id, library_id=library,
+                    )
+                    if not result.ok:
+                        report["failed"].append({**item, "code": result.code})
+                        continue
+                    report["reindexed"].append(item)
+                    self.audit.record(
+                        tenant_id=tenant, event_type="index", action="reconcile",
+                        outcome="success", actor_id=record.owner_id, document_id=doc_id,
+                        version_id=record.current_version_id, detail={"library_id": library},
+                    )
 
         wanted_keys = set(wanted)
         for tenant, library, document, version in sorted(held - wanted_keys):
@@ -524,10 +533,11 @@ class DocumentIngestionService:
                 found: DocumentId | None = DocumentId(document)
             except ValueError:
                 found = None
-            record = (
-                self.repository.get_document(tenant_id=tenant, document_id=found, include_deleted=True)
-                if found is not None else None
-            )
+            with statements_of(tenant):
+                record = (
+                    self.repository.get_document(tenant_id=tenant, document_id=found, include_deleted=True)
+                    if found is not None else None
+                )
             kind = "extra" if record is not None and record.deleted_at is None else "orphaned"
             report[kind].append(item)
             # A document this store records as DELETED is unindexed whatever
@@ -539,7 +549,7 @@ class DocumentIngestionService:
             deleted = record is not None and record.deleted_at is not None
             if not (apply and (prune or deleted)):
                 continue
-            with adapter.publication_lock(tenant, document):
+            with work_of(tenant), adapter.publication_lock(tenant, document):
                 if found is not None and library in self.repository.list_indexed_libraries(
                     tenant_id=tenant, document_id=found
                 ):
@@ -624,46 +634,61 @@ class DocumentIngestionService:
             return 0
         recovered = 0
         for snapshot in recoverable():
-            current = self.jobs.get(tenant_id=snapshot.tenant_id, job_id=snapshot.id)
-            if current is None or current.state not in {
-                DocumentJobState.RECEIVED,
-                DocumentJobState.QUARANTINED,
-                DocumentJobState.VALIDATING,
-            }:
-                continue
-            if self._intake_owner_is_live(current):
-                # Another process (the server validating an upload, while a
-                # CLI or a second replica starts its workers) still owns it.
-                continue
-            version = self.repository.get_version(
-                tenant_id=current.tenant_id,
-                version_id=current.version_id,
-            )
-            force_ocr = current.force_ocr if current.request_digest else bool(version and version.metadata.get("force_ocr"))
             try:
-                result = self._advance_intake(
-                    current,
-                    tenant=current.tenant_id,
-                    actor=None,
-                    force_ocr=force_ocr,
+                # Each job in its own space (S4-01): one whose space refuses
+                # is left as it is, and the rest are recovered.
+                with work_of(snapshot.tenant_id, snapshot.actor_id):
+                    recovered += self._recover_interrupted_job(snapshot)
+            except store_errors() as exc:
+                if not spaces_enforced() or availability.is_outage(exc):
+                    raise
+                logger.warning(
+                    "[documents.ingestion] interrupted intake job=%s not recovered (%s); the next start "
+                    "tries again", snapshot.id, type(exc).__name__,
                 )
-            except JobConflictError as exc:
-                # Another actor moved the job first (audit 2026-10-26
-                # AUD-022): losing the compare-and-swap raises
-                # StaleJobUpdateError, a sibling of the transition error this
-                # caught, and it failed the whole start_workers().
-                logger.info(
-                    "[documents.ingestion] intake recovery skipped job=%s: %s",
-                    current.id, type(exc).__name__,
-                )
-                continue
-            if result.state not in {
-                DocumentJobState.RECEIVED,
-                DocumentJobState.QUARANTINED,
-                DocumentJobState.VALIDATING,
-            }:
-                recovered += 1
         return recovered
+
+    def _recover_interrupted_job(self, snapshot: DocumentJobRecord) -> bool:
+        """Resume one job :meth:`recover_interrupted_intake` listed; True
+        when it left its intake states."""
+        current = self.jobs.get(tenant_id=snapshot.tenant_id, job_id=snapshot.id)
+        if current is None or current.state not in {
+            DocumentJobState.RECEIVED,
+            DocumentJobState.QUARANTINED,
+            DocumentJobState.VALIDATING,
+        }:
+            return False
+        if self._intake_owner_is_live(current):
+            # Another process (the server validating an upload, while a
+            # CLI or a second replica starts its workers) still owns it.
+            return False
+        version = self.repository.get_version(
+            tenant_id=current.tenant_id,
+            version_id=current.version_id,
+        )
+        force_ocr = current.force_ocr if current.request_digest else bool(version and version.metadata.get("force_ocr"))
+        try:
+            result = self._advance_intake(
+                current,
+                tenant=current.tenant_id,
+                actor=None,
+                force_ocr=force_ocr,
+            )
+        except JobConflictError as exc:
+            # Another actor moved the job first (audit 2026-10-26
+            # AUD-022): losing the compare-and-swap raises
+            # StaleJobUpdateError, a sibling of the transition error this
+            # caught, and it failed the whole start_workers().
+            logger.info(
+                "[documents.ingestion] intake recovery skipped job=%s: %s",
+                current.id, type(exc).__name__,
+            )
+            return False
+        return result.state not in {
+            DocumentJobState.RECEIVED,
+            DocumentJobState.QUARANTINED,
+            DocumentJobState.VALIDATING,
+        }
 
     # ── Intake ──────────────────────────────────────────────────────────
 
@@ -1107,7 +1132,9 @@ class DocumentIngestionService:
                 expected_heartbeat = float(row["heartbeat_epoch"])
             else:
                 continue
-            with holding(token):  # a concurrent sweep here leaves it alone
+            # Its own space's statements (S4-01): looked up in another's, a
+            # published intake's job reads as missing and it would be removed.
+            with statements_of(row["tenant_id"]), holding(token):  # a concurrent sweep here leaves it alone
                 if not self.admissions.claim(
                     token, expected_owner=owner, expected_heartbeat=expected_heartbeat
                 ):
@@ -1127,7 +1154,9 @@ class DocumentIngestionService:
             return recovered
         try:
             for row in self.admissions.fenced_recent():
-                if self._discard_tagged(row):
+                with statements_of(row["tenant_id"]):
+                    removed = self._discard_tagged(row)
+                if removed:
                     logger.info(
                         "[documents.ingestion] removed rows a fenced intake wrote after its takeover (%s)",
                         row["token"],
@@ -2115,7 +2144,8 @@ class DocumentIngestionService:
         return moved
 
     def _still_there(self, tenant: str, document_id: DocumentId | str) -> bool:
-        record = self.repository.get_document(tenant_id=tenant, document_id=DocumentId(document_id))
+        with statements_of(tenant):
+            record = self.repository.get_document(tenant_id=tenant, document_id=DocumentId(document_id))
         return record is not None and not record.deleted_at
 
     def settle_moves(self) -> list[dict[str, Any]]:
@@ -2125,23 +2155,38 @@ class DocumentIngestionService:
         retired is done. Blocking; run at every start, before any move."""
         settled: list[dict[str, Any]] = []
         for attempt, entry in sorted(_moves_under_way().items()):
-            source, target = str(entry.get("source") or ""), str(entry.get("target") or "")
-            doc_id, actor = str(entry.get("document_id") or ""), str(entry.get("actor") or "")
-            copy = str(entry.get("copy") or "")
-            if not copy and target and entry.get("key"):
-                job = self.jobs.get_by_idempotency_key(tenant_id=target, idempotency_key=str(entry["key"]))
-                copy = str(job.document_id) if job is not None else ""
-            outcome = "done"
-            if copy and source and doc_id and self._still_there(source, doc_id) \
-                    and self._still_there(target, copy):
-                self._tombstone(tenant_id=target, actor_id=actor, document_id=copy, reason="user_requested")
-                outcome = "copy_taken_back"
-            elif not copy:
-                outcome = "nothing_copied"
+            try:
+                outcome = self._settle_one_move(entry)
+            except store_errors() as exc:
+                if not spaces_enforced():
+                    raise
+                # This move stays recorded; the others are settled.
+                logger.warning("[documents] a cut-off move was not settled (%s); the next start tries again",
+                               type(exc).__name__)
+                continue
             _settle_move(attempt)
             settled.append({"attempt": attempt, "outcome": outcome})
             logger.info("[documents] a cut-off move settled: %s", outcome)
         return settled
+
+    def _settle_one_move(self, entry: Mapping[str, Any]) -> str:
+        """Settle one move :meth:`settle_moves` found; what came of it. Each
+        half in its own space (S4-01): the source's is only read, the copy is
+        taken back as its person, where it is."""
+        source, target = str(entry.get("source") or ""), str(entry.get("target") or "")
+        doc_id, actor = str(entry.get("document_id") or ""), str(entry.get("actor") or "")
+        copy = str(entry.get("copy") or "")
+        if not copy and target and entry.get("key"):
+            with statements_of(target):
+                job = self.jobs.get_by_idempotency_key(tenant_id=target, idempotency_key=str(entry["key"]))
+            copy = str(job.document_id) if job is not None else ""
+        if not copy:
+            return "nothing_copied"
+        if not (source and doc_id and self._still_there(source, doc_id) and self._still_there(target, copy)):
+            return "done"
+        with work_of(target, actor):
+            self._tombstone(tenant_id=target, actor_id=actor, document_id=copy, reason="user_requested")
+        return "copy_taken_back"
 
     def taken_out_documents(self, *, tenant_id: str, limit: int = 50) -> list[dict[str, Any]]:
         """The documents taken out of the space *tenant_id* by the people who

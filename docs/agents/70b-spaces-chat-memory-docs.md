@@ -183,6 +183,20 @@
   asker in its space on every surface, the refusal of chat and the agent
   lifted where Spaces is enforced, each space's files in its own folder once
   it is (the root keeps every tenant's copy in this release, for a revert).
+- **A document's work runs in the document's space (S4-01 step 0a,
+  2026-11-25).** The worker binds each job's scope before its first stage
+  (`DocumentWorker._process_claimed`: heartbeat, stages and outcome; an
+  identity store that cannot be read hands the job back on the attempt it
+  had; a tenant that is no space id fails it, `no_space`). The recoveries at
+  start (interrupted intakes, cut-off moves, stranded intakes) and the
+  Knowledge reconcile enter each row's own space: one row's failure is said
+  and the rest go on, an outage still fails the start. The loops start with
+  no space (`install_loops`): a document tool starts them inside a turn, and
+  they kept that person's space for good. The queue's fair claim, its leases
+  and the intake queue are the install's. Off, nothing is bound and a failure
+  is raised as before. Gates: `tests/test_documents_run_in_their_space.py`,
+  `tests/test_space_doors_postgres.py`, and in `tests/test_row_work_gates.py`
+  every loop over a cross-space listing (`LISTINGS`) enters one per row.
 - **The Knowledge Library follows the space (S1-13, 2026-11-18).** Guards
   act only where Spaces is enforced; the older multi-user mode keeps its
   refusal (`knowledge_lifecycle.kb_refusal`), and work bound to no space is

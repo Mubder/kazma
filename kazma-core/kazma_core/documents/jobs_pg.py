@@ -363,6 +363,7 @@ class PostgresDocumentJobRepository:
             conn.commit()
         return _row_to_record(row) if row is not None else None
 
+    @install_statements("every space's interrupted intakes, listed")
     def interrupted_intake_jobs(
         self, *, tenant_id: str | None = None
     ) -> list[DocumentJobRecord]:
@@ -389,6 +390,7 @@ class PostgresDocumentJobRepository:
 
     # ── Claim (multi-replica) ────────────────────────────────────────────
 
+    @install_statements("the fair claim, across every space's jobs")
     def claim_next(
         self,
         *,
@@ -652,6 +654,7 @@ class PostgresDocumentJobRepository:
                 raise
         return _row_to_record(updated)
 
+    @install_statements("a stopping worker's leases, whoever's jobs they hold")
     def release_leases(self, owners: list[str]) -> int:
         """Give back the jobs *owners* hold, for a graceful stop, on the
         attempt they had (FA-264; the SQLite store's rule)."""
@@ -726,6 +729,7 @@ class PostgresDocumentJobRepository:
                     conn.rollback()
         return row is not None
 
+    @install_statements("expired leases, whoever's jobs they hold")
     def recover_expired_leases(self, *, tenant_id: str | None = None) -> int:
         tenant = _required(tenant_id, "tenant_id") if tenant_id is not None else None
         now = self._clock()
