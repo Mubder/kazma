@@ -565,6 +565,36 @@ def test_every_card_shows_the_final_outcome(ending: str, monkeypatch: pytest.Mon
     }[ending]
 
 
+def test_a_cancelled_request_ends_when_every_card_shows_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The request ended at the first card: an edit that takes a moment was
+    cut off with it, and that card kept its buttons (CI, 2026-11-25)."""
+    from kazma_core.swarm.bus import ApprovalRequest, FanOutBusAdapter
+
+    cards = [_Card(p, monkeypatch) for p in PLATFORMS]
+    slow = cards[1]
+    real = slow.adapter._patch_message
+
+    async def edited_slowly(message_id: str, payload: dict[str, Any]) -> None:
+        await asyncio.sleep(0.2)
+        await real(message_id, payload)
+
+    monkeypatch.setattr(slow.adapter, "_patch_message", edited_slowly)
+    fan = FanOutBusAdapter([c.adapter for c in cards])
+    approval_id = _open()
+
+    async def go() -> list[int]:
+        task = asyncio.create_task(fan.request_approval(
+            ApprovalRequest("w", "Tool: git_push", "remote: origin", task_id=approval_id), timeout=10))
+        await _until(lambda: all(c.posts for c in cards))
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return [len(c.edits) for c in cards]
+
+    assert asyncio.run(go()) == [1, 1, 1]
+    assert all("CANCELLED" in c.edits[-1] for c in cards)
+
+
 def test_a_platform_button_decides_with_the_user_who_pressed() -> None:
     from kazma_core.swarm import shared_approvals as sa
     from kazma_gateway.adapters import discord_callbacks, slack_callbacks

@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import secrets
+import sqlite3
 import tempfile
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable
@@ -187,8 +188,15 @@ def fails(error: BaseException) -> Any:
 
 
 def psycopg_error() -> Exception:
-    psycopg = pytest.importorskip("psycopg")
-    return psycopg.OperationalError("server closed the connection unexpectedly")
+    """The database's own error. SQLite's where psycopg is not installed (CI's
+    test job): skipped for it here, a test was skipped from inside the request
+    it makes, and failed."""
+    said = "server closed the connection unexpectedly"
+    try:
+        import psycopg
+    except ImportError:
+        return sqlite3.OperationalError(said)
+    return psycopg.OperationalError(said)
 
 
 def entries_of(monkeypatch) -> list[dict[str, Any]]:
