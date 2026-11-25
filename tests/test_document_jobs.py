@@ -445,6 +445,11 @@ def test_claim_next_dead_letters_exhausted_rows_and_claims_healthy_work(
 def test_transient_intake_failure_lands_in_claimable_retry_wait(
     tmp_path, monkeypatch
 ) -> None:
+    # This test hands the service its own SQLite stores and clock; with a
+    # database configured the service took the Postgres queue beside them, and
+    # the job was looked for where it was not.
+    monkeypatch.setenv("KAZMA_DOCUMENTS_JOBS_BACKEND", "sqlite")
+    monkeypatch.setenv("KAZMA_DOCUMENTS_METADATA_BACKEND", "sqlite")
     clock = MutableClock()
     config = DocumentConfig(storage_root=tmp_path / "store")
     metadata = DocumentRepository(

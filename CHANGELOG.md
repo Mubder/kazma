@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## What a moved chat left behind, and finding old chats (2026-11-25)
+
+- Asking about something said in an old chat finds it however the Arabic word
+  is spelled (ة or ه, أ or ا, ى or ي, tatweel, vowel marks, Arabic digits), and
+  the chat that answers is no longer hidden behind others that only share some
+  letters.
+- `/compact` on the web leaves the chat as it was said. It used to replace the
+  chat's messages with the model's own, with Kazma's prompt and "About me"
+  among them, and lost their times and who asked. What it stored before stays,
+  and is neither searched nor exported.
+- Exporting a conversation leaves out Kazma's own system messages, in JSON
+  too, and says how many.
+- With Spaces on, a fork keeps who asked what, so its maker can take it out of
+  a shared space. A chat taken out takes the web searches it made and the log
+  of the swarm tasks it started; deep research reports stay, they are files of
+  the shared space, and the dialog says so.
+- Deleting a swarm task removes its workers' log too.
+- A space erased and brought back without a restart is what its bundle holds:
+  no chat stays hidden, and nothing said after the export comes back.
+- `scripts/scan_old_sessions.py` files each chat's facts in the chat's own
+  space, under the person who asked (it put every space's under one).
+
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 
 - Once Spaces is on, a chat you started can move from your own space into a

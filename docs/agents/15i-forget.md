@@ -87,7 +87,12 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   failed (`forget_remote_pending`, also in the journal file). The writer's
   ledger check and insert are one `BEGIN IMMEDIATE`, and it pushes the row
   as it is now to the mirror and the remote index, never its arguments.
-  Recovery and `scripts/scan_old_sessions.py` ask the ledger. A tombstone
+  Recovery and `scripts/scan_old_sessions.py` ask the ledger. The scan files
+  a chat's facts in the chat's own space, under its speaker (2026-11-25: it
+  put every space's under one `--tenant-id`, the owner's): the chats through
+  `chat_history.sessions_changed_since`, a saved step by its thread's record,
+  each turn bound as the live extraction binds it (a person who left gives
+  none); gate `tests/test_scan_old_sessions_spaces.py`. A tombstone
   keeps a note's chat and turn (provenance, not content). The restore drill
   reports the forgets a backup would replay. Gate:
   `tests/test_memory_forget_converges.py` (a fault after each of ten steps,
