@@ -410,19 +410,23 @@ def _export_data_dir_files(
 
 def _copy_carried(src: Path, dest: Path, rel: str, failures: list[str], skip: Path) -> None:
     """Copy one carried file or folder; what cannot be read goes in *failures*."""
-    if src.is_dir():
-        try:
-            children = sorted(src.iterdir())
-        except OSError as exc:
-            if src.exists():
-                failures.append(f"{rel}/ ({exc.strerror or exc})")
-            return
-        dest.mkdir(parents=True, exist_ok=True)
-        for child in children:
-            if child.is_symlink() or child.name in _SKIP_INSIDE:
-                continue
-            _copy_carried(child, dest / child.name, f"{rel}/{child.name}", failures, skip)
+    from kazma_core.workspace.real_paths import own_files
+
+    if not src.is_dir():
+        _copy_file(src, dest, rel, failures, skip)
         return
+    unread: list[Path] = []
+    folders: list[Path] = []
+    for child in own_files(src, unreadable=unread, folders_seen=folders, keep=lambda p: p.name not in _SKIP_INSIDE):
+        inside = child.relative_to(src)
+        _copy_file(child, dest / inside, f"{rel}/{inside.as_posix()}", failures, skip)
+    for folder in folders:
+        (dest / folder.relative_to(src)).mkdir(parents=True, exist_ok=True)
+    failures += [f"{rel}/{folder.relative_to(src).as_posix()}/ (it could not be read)"
+                 for folder in unread if os.path.lexists(folder)]
+
+
+def _copy_file(src: Path, dest: Path, rel: str, failures: list[str], skip: Path) -> None:
     if not src.is_file() or src == skip:
         return
     try:

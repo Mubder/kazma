@@ -20,6 +20,9 @@
 - Exporting a space, its bundle for another install and its size read the
   space's own files only. A link or a junction inside its folder to another
   place is left alone; before, the file it led to went into the export.
+- So do the backups and the migration bundle of the whole install: a junction
+  inside the data folder was followed, and the files it led to were copied. A
+  folder directly in the data folder may still be on another disk.
 
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 

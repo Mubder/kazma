@@ -43,6 +43,22 @@ def _private_zip(path: Path) -> bool:
     return bool(module.restrict(path))
 
 
+def _own_files(folder: Path) -> list[Path]:
+    """Every file of *folder*, no link and no junction followed below it: the one walk
+    (kazma_core/workspace/real_paths.py, standard library only), loaded by
+    path as above."""
+    import importlib.util
+
+    source = Path(__file__).resolve().parents[1] / "kazma-core" / "kazma_core" / "workspace" / "real_paths.py"
+    spec = importlib.util.spec_from_file_location("kazma_backup_real_paths", source)
+    if spec is None or spec.loader is None:
+        raise OSError(f"{source} cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["kazma_backup_real_paths"] = module
+    spec.loader.exec_module(module)
+    return list(module.own_files(folder, linked_at_top=True))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backup Kazma data for DR")
     parser.add_argument(
@@ -102,11 +118,10 @@ def main() -> int:
               "the archive (it holds the vault) was not written", file=sys.stderr)
         return 1
     with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for path in data_dir.rglob("*"):
-            if path.is_file():
-                arc = Path("kazma-data") / path.relative_to(data_dir)
-                zf.write(path, arcname=str(arc).replace("\\", "/"))
-                manifest["files"].append(str(arc).replace("\\", "/"))
+        for path in _own_files(data_dir):
+            arc = Path("kazma-data") / path.relative_to(data_dir)
+            zf.write(path, arcname=str(arc).replace("\\", "/"))
+            manifest["files"].append(str(arc).replace("\\", "/"))
         if args.include_env:
             env = root / ".env"
             if env.is_file():
