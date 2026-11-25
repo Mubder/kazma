@@ -466,6 +466,12 @@ def _names_subject(case: tuple[str, str]) -> bool:
     return _Said(case[0]).names(case[1]) is not None
 
 
+def _list_finds(case: tuple[str, str]) -> bool:
+    from kazma_core.memory.word_search import Asked
+
+    return Asked.of(case[1], whole=True).any(case[0])
+
+
 def _names_person(case: tuple[str, str]) -> bool:
     from kazma_core.memory.held_facts import _Said
 
@@ -736,7 +742,14 @@ PAIRS: list[Pair] = [
          ("I told Will yesterday", "will"), ("كلمت علي أمس", "علي"), _names_subject, True),
     Pair("held_small_word_no_name", (M + "memory/held_facts.py",),
          ("I will call later", "will"), ("الكتاب على الطاولة", "علي"), _names_subject, False),
-    # One name is not another, and a thing is said with its article (the review of step 1).
+    # A list of memory finds a word as the user says it (W6).
+    Pair("list_word_of_mine", (M + "memory/word_search.py",),
+         ("a blue car", "my car"), ("سيارة زرقاء", "سيارتي"), _list_finds, True),
+    Pair("list_word_told_as_mine", (M + "memory/word_search.py",),
+         ("my car is blue", "cars"), ("سيارتي زرقاء", "السيارة"), _list_finds, True),
+    Pair("list_word_inside_another", (M + "memory/word_search.py",),
+         ("a new carpet", "car"), ("مقهوة جديدة", "قهوة"), _list_finds, False),
+    # One name is not another, and a thing is said with its article (the reviews of step 1).
     Pair("held_name_not_another", (M + "memory/held_facts.py",),
          ("I maxed out the card", "max"), ("كلمت كريمة", "كريم"), _names_person, False),
     Pair("held_name_not_another_shorter", (M + "memory/held_facts.py",),
@@ -751,6 +764,14 @@ PAIRS: list[Pair] = [
          ("I met Abu Dhabi Bank", "abu_dhabi_bank"), ("كلمت عبدالله", "عبد_الله"), _names_person, True),
     Pair("held_two_word_name_joined", (M + "memory/held_facts.py",),
          ("Mary Ann called", "mary_ann"), ("أبو فهد وصل", "بو_فهد"), _names_person, True),
+    Pair("held_role_of_mine", (M + "memory/held_facts.py",),
+         ("My manager moved to Jabriya", "manager"), ("مديري نقل الجابرية", "مدير"), _names_person, True),
+    Pair("held_role_of_mine_msa", (M + "memory/held_facts.py",),
+         ("My manager moved to Jabriya", "manager"), ("انتقل مديري إلى الجابرية.", "مدير"), _names_person, True),
+    Pair("held_role_neighbor", (M + "memory/held_facts.py",),
+         ("My neighbor retired", "neighbor"), ("جاري تقاعد", "جار"), _names_person, True),
+    Pair("held_role_with_the_article", (M + "memory/held_facts.py",),
+         ("The doctor moved", "doctor"), ("الدكتور نقل", "دكتور"), _names_person, True),
     Pair("held_thing_of_mine", (M + "memory/held_facts.py",),
          ("My car broke down", "car"), ("سيارتي خربت", "سيارة"), _names_subject, True),
     Pair("held_thing_with_the_article", (M + "memory/held_facts.py",),

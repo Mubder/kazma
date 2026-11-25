@@ -93,13 +93,13 @@ def _read_when(when: str, *, now: float, zone: Any) -> tuple[float, float] | Non
 
 def _every_word(columns: tuple[str, ...], asked: word_search.Asked) -> tuple[str, list[str]]:
     """Every word asked for is in the row's *columns*, both sides folded
-    (``word_search``). A word of plain English letters is looked for with
+    (``word_search``). A word written in ASCII letters is looked for with
     ``LIKE`` first, which is cheap and, folded or not, the same letters; an
-    Arabic word never is: it was, and the folded word was not in the text as
-    written (W6, 2026-11-25: 0 of 8 Arabic words found)."""
+    Arabic word or a number never is: it was, and the folded word was not in
+    the text as written (W6, 2026-11-25: 0 of 8 Arabic words found)."""
     held = " || ' ' || ".join(f"COALESCE({c},'')" for c in columns)
-    plain = [t for t in asked.terms if t.isascii() and t.isalpha()]
-    clause = "".join(f"LOWER({held}) LIKE ? AND " for _ in plain) + f"kazma_asked_every({', '.join(columns)})"
+    plain = [t for t in asked.terms if t.isascii() and any(ch.isalpha() for ch in t)]
+    clause = "".join(f"LOWER({held}) LIKE ? AND " for _ in plain) + word_search.holds("every", *columns)
     return clause, [f"%{t}%" for t in plain]
 
 
@@ -140,7 +140,7 @@ def list_memories(
     if when.strip() and period is None:
         # A time the reader cannot place is never read as "any time".
         return MemoryListing(about=about, when=when, offset=offset)
-    asked = word_search.Asked.of(about)
+    asked = word_search.Asked.of(about, words=8)
     only = narrowed_to(tenant_id)
     people = speakers.room(tenant_id)
     own = conn is None

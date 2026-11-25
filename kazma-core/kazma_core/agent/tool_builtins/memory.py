@@ -27,6 +27,11 @@ def _qnorm(q: str) -> str:
     return _re.sub(r"[_\-\s]+", " ", str(q or "").strip().lower()).strip()
 
 
+def _spoken(column: str) -> str:
+    """SQL: *column* with its ``_`` and ``-`` as spaces, as :func:`_qnorm`."""
+    return f"REPLACE(REPLACE({column},'_',' '),'-',' ')"
+
+
 #: What a memory tool answers in a chat the user keeps out of memory.
 _KEPT_OUT = (
     "Not stored: the user keeps this chat out of memory, so nothing from it is "
@@ -298,10 +303,9 @@ def register_memory_tools(registry: Any) -> None:
                 # folded, and by words (word_search, W6).
                 word_search.register(conn, word_search.Asked.of(_qnorm(q)))
                 sql += (
-                    " AND (kazma_asked_phrase(REPLACE(REPLACE(subject,'_',' '),'-',' ')) "
-                    "OR kazma_asked_phrase(REPLACE(REPLACE(predicate,'_',' '),'-',' ')) "
-                    "OR kazma_asked_phrase(REPLACE(REPLACE(object,'_',' '),'-',' ')) "
-                    "OR kazma_asked_every(subject, predicate, object))"
+                    " AND (" + "".join(f"{word_search.holds('phrase', _spoken(c))} OR "
+                                       for c in ("subject", "predicate", "object"))
+                    + word_search.holds("every", "subject", "predicate", "object") + ")"
                 )
             sql += (
                 " ORDER BY (structural_importance * confidence) DESC LIMIT ?"
@@ -348,10 +352,9 @@ def register_memory_tools(registry: Any) -> None:
             if (q or "").strip():
                 word_search.register(conn, word_search.Asked.of(_qnorm(q)))
                 sql += (
-                    " AND (kazma_asked_phrase(REPLACE(REPLACE(e.id,'_',' '),'-',' ')) "
-                    "OR kazma_asked_phrase(REPLACE(REPLACE(e.name,'_',' '),'-',' ')) "
-                    "OR kazma_asked_phrase(REPLACE(REPLACE(e.type,'_',' '),'-',' ')) "
-                    "OR kazma_asked_every(e.id, e.name, e.type, kazma_alias_names(e.aliases_json)))"
+                    " AND (" + "".join(f"{word_search.holds('phrase', _spoken(c))} OR "
+                                       for c in ("e.id", "e.name", "e.type"))
+                    + word_search.holds("every", "e.id", "e.name", "e.type", word_search.ALIAS_NAMES) + ")"
                 )
             sql += " ORDER BY belief_count DESC, e.name ASC LIMIT ?"
             params.append(lim)

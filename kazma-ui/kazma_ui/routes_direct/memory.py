@@ -561,12 +561,12 @@ def register_memory_routes(self: Any) -> None:
             params: list = [*tparams]
             if query:
                 word_search.register(conn, word_search.Asked.of(query, whole=True))
-                either = ["kazma_asked_any(subject, predicate, object)"]
+                either = [word_search.holds("any", "subject", "predicate", "object")]
                 if fts_ids:
                     either.append(f"id IN ({','.join('?' for _ in fts_ids)})")
                     params.extend(fts_ids)
                 elif fts_ids is None:
-                    either += [f"kazma_asked_phrase({c})" for c in ("subject", "predicate", "object")]
+                    either += [word_search.holds("phrase", c) for c in ("subject", "predicate", "object")]
                 where += f" AND ({' OR '.join(either)})"
 
             # Total count for the pager (same WHERE).
@@ -935,7 +935,8 @@ def register_memory_routes(self: Any) -> None:
                     # The index keeps an Arabic word and its digits as they
                     # were written (``word_search``).
                     word_search.register(conn, asked)
-                    indexed = f"({indexed} OR kazma_asked_every(user_text, assistant_text, summary_text))"
+                    worded = word_search.holds("every", "user_text", "assistant_text", "summary_text")
+                    indexed = f"({indexed} OR {worded})"
                 where += f" AND {indexed}"
             # The matches once (a folded search reads every turn's text), then
             # the page's own rows.

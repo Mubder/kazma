@@ -4,9 +4,11 @@
  * The browser's copy of kazma_core.documents.arabic.fold_for_search: the same
  * Arabic word in any usual spelling (hamza, taa marbuta, alef maqsura, marks,
  * stretch, Arabic digits) is one text, and so is a Latin word in any case.
+ * The same for every character of the Arabic blocks, the digits and the Latin
+ * ones; a few hundred elsewhere (other alphabets' case, controls) differ.
  * The Memory page's map compared lower-cased text, so it found an Arabic name
  * only in the spelling it was stored in (memory plan W6). Held to the Python
- * fold, character by character, by tests/test_search_fold_js.py.
+ * fold over those blocks by tests/test_search_fold_js.py.
  */
 (function () {
   'use strict';

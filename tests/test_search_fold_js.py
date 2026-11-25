@@ -1,10 +1,12 @@
-"""The pages' search fold is the Python one, character by character (W6).
+"""The pages' search fold is the Python one for what Kazma's users write (W6).
 
 The Memory page's map filtered its names by lower-cased text: an Arabic name
 was found only in the spelling it was stored in, as the lists were. The map's
 search is in the browser, so the fold is there too
 (``static/js/search_fold.js``); this holds it to
-``documents.arabic.fold_for_search``.
+``documents.arabic.fold_for_search`` over the Arabic blocks, the digits and
+the Latin letters. 375 other characters fold differently (a casefold
+JavaScript does not have); a name in one of them is found as it is written.
 """
 
 from __future__ import annotations

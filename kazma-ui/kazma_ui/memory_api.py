@@ -650,7 +650,8 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
                     fts_rowids = [int(r["rowid"]) for r in fts_rows]
                 except Exception:
                     fts_rowids = None  # FTS unavailable → the words alone
-            worded = "kazma_asked_any(e.id, e.name, e.type, kazma_alias_names(e.aliases_json))"
+            worded = word_search.holds("any", "e.id", "e.name", "e.type", word_search.ALIAS_NAMES)
+            written = {c: word_search.holds("phrase", f"e.{c}") for c in ("id", "name", "type")}
             if fts_rowids is not None:
                 matched_via = "fts"
                 # The id itself matches too (ids aren't in FTS) -- also when
@@ -658,14 +659,11 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
                 # returned no rows, so an entity's own id found nothing.
                 ph = ",".join("?" for _ in fts_rowids)
                 rowid_match = f"e.rowid IN ({ph}) OR " if fts_rowids else ""
-                where += f" AND ({rowid_match}kazma_asked_phrase(e.id) OR {worded})"
+                where += f" AND ({rowid_match}{written['id']} OR {worded})"
                 params.extend(fts_rowids)
             else:
                 # FTS unavailable or no usable tokens → id/name/type as written.
-                where += (
-                    " AND (kazma_asked_phrase(e.id) OR kazma_asked_phrase(e.name)"
-                    f" OR kazma_asked_phrase(e.type) OR {worded})"
-                )
+                where += f" AND ({' OR '.join(written.values())} OR {worded})"
                 matched_via = "like"
         if empty_only:
             where += f" AND {count_expr} = 0 AND {_MERGED_INTO_SQL} = ''"
@@ -683,7 +681,7 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
         exact_first = ""
         order_params: list[Any] = []
         if query:
-            exact_first = "(LOWER(e.id) IN (?, ?) OR kazma_folded(e.name) = ?) DESC, "
+            exact_first = "(LOWER(e.id) IN (?, ?) OR kazma_folded(CAST(e.name AS BLOB)) = ?) DESC, "
             order_params = [query.lower(), _entity_slug(query), word_search.fold(query)]
         sql = (
             f"SELECT e.id, e.type, e.name, e.is_high_stakes, e.is_protected,"

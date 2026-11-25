@@ -894,6 +894,7 @@ jobs:
             tests/e2e/test_memory_about_you_browser.py \
             tests/e2e/test_memory_page_browser.py \
             tests/e2e/test_memory_map_radial.py \
+            tests/e2e/test_memory_map_any_spelling_browser.py \
             tests/e2e/test_sidebar_brand_and_build.py \
             tests/e2e/test_settings_areas_browser.py \
             tests/e2e/test_people_page_browser.py \

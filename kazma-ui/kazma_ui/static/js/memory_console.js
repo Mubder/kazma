@@ -1575,14 +1575,22 @@
     });
   }
 
+  // Each list draws the answer to what was asked last. A search of a large
+  // memory answers after the shorter word typed next, and its rows (with their
+  // Forget buttons) stood under a search box that says something else.
+  let _memAsked = 0;
+  let _beliefsAsked = 0;
+
   async function loadV2Memories() {
     const el = document.getElementById('v2-memories-list');
     if (!el) return;
+    const asked = ++_memAsked;
     try {
       const url = '/api/memory/v2/episodes?limit=' + _MEM_PAGE + '&offset=' + _memOffset +
         (_memQuery ? '&q=' + encodeURIComponent(_memQuery) : '');
       const resp = await fetch(url);
       const data = await resp.json();
+      if (asked !== _memAsked) return;
       if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const eps = data.episodes || [];
       const total = Number(data.total || 0);
@@ -1612,7 +1620,9 @@
         btn.addEventListener('click', function() { _forgetEpisode(btn.getAttribute('data-id')); });
       });
       _bindWholeMemory(el);
-    } catch (e) { el.textContent = _mt('memory.console.memories_load_failed', 'Memories load failed'); }
+    } catch (e) {
+      if (asked === _memAsked) el.textContent = _mt('memory.console.memories_load_failed', 'Memories load failed');
+    }
   }
   document.getElementById('v2-memories-refresh')?.addEventListener('click', loadV2Memories);
   document.getElementById('v2-memories-newer')?.addEventListener('click', function() {
@@ -1885,10 +1895,12 @@
     const list = document.getElementById('v2-belief-list');
     if (!list) return;
     const emptyCta = document.getElementById('v2-belief-empty-cta');
+    const asked = ++_beliefsAsked;
     try {
       const url = '/api/memory/v2/beliefs' + (q ? ('?q=' + encodeURIComponent(q)) : '');
       const resp = await fetch(url);
       const data = await resp.json();
+      if (asked !== _beliefsAsked) return;
       // A refused read is not "No facts yet".
       if (!resp.ok || data.error) throw new Error('HTTP ' + resp.status);
       const beliefs = data.beliefs || [];
@@ -1935,6 +1947,7 @@
         });
       });
     } catch (e) {
+      if (asked !== _beliefsAsked) return;
       if (emptyCta) emptyCta.style.display = 'none';
       list.innerHTML = '<div role="alert" style="padding:12px;font-size:0.82rem;color:var(--danger);">' + _esc(_mt('memory.page.known_failed', 'The facts could not be loaded. This is not an empty memory.')) + '</div>';
     }

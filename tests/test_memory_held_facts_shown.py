@@ -201,6 +201,48 @@ def test_an_arabic_name_is_matched_as_a_name(text, subject, named):
     assert (held_facts._Said(text).names(subject, person=True) is not None) is named
 
 
+#: A person called by what they are: said with the article and with whose they
+#: are, as "my manager" and "the doctor" are. (English, Gulf, MSA, the subject.)
+_ROLES = (
+    ("My manager moved to Jabriya", "مديري نقل الجابرية", "انتقل مديري إلى الجابرية.", "manager", "مدير"),
+    ("My neighbor retired", "جاري تقاعد", "تقاعد جاري.", "neighbor", "جار"),
+    ("The doctor moved", "الدكتور نقل", "انتقل الطبيب.", "doctor", ("دكتور", "طبيب")),
+    ("The driver went back to India", "السائق رجع الهند", "عاد السائق إلى الهند.", "driver", "سائق"),
+    ("My wife became a manager", "زوجتي صارت مديرة", "أصبحت زوجتي مديرة.", "wife", "زوجة"),
+    ("My sister graduated", "أختي تخرجت", "تخرجت أختي.", "sister", "أخت"),
+    ("My father retired", "أبوي تقاعد", "تقاعد أبي.", "father", "أب"),
+    ("My brother's job changed", "أخوي تغير دوامه", "تغير عمل أخي.", "brother", "أخ"),
+)
+
+
+@pytest.mark.parametrize(("text", "subject"), [
+    (row[n], row[4] if isinstance(row[4], str) and n else row[3] if not n else row[4][n - 1])
+    for row in _ROLES for n in range(3)])
+def test_a_person_called_by_what_they_are_is_named_in_each_dialect(conn, text, subject):
+    """The review of step 1's fixes: with a person's single word matched
+    exactly, "مديري نقل" named no "مدير"."""
+    assert held_facts._Said(text).names(subject, person=True) is not None
+    _hold(conn, subject, "lives_in", "السالمية", 1.0)
+    for n in range(40):
+        _hold(conn, "user", "visited", f"city {n}", 100.0 + n)
+    held = held_facts.held_facts(conn, tenant_id="default", text=text)
+    assert subject in {h["subject"] for h in held}
+
+
+@pytest.mark.parametrize(("text", "subject"), [
+    ("المديرة وصلت", "مدير"), ("المدرسة سكرت", "مدرس"), ("الجارية طويلة", "جار"), ("سافرت الهند", "هند"),
+    ("المدير وصل", "مديرة"), ("الكاتبة وصلت", "كاتب")])
+def test_what_they_are_is_still_one_word(text, subject):
+    assert held_facts._Said(text).names(subject, person=True) is None
+
+
+def test_control_without_the_words_of_what_people_are_they_are_lost(monkeypatch):
+    monkeypatch.setattr(held_facts, "_roles", frozenset)
+    lost = [text for _en, gulf, msa, _s, ar in _ROLES for n, text in ((0, gulf), (1, msa))
+            if held_facts._Said(text).names(ar if isinstance(ar, str) else ar[n], person=True) is None]
+    assert len(lost) == 2 * len(_ROLES)
+
+
 @pytest.mark.parametrize(("text", "subject", "named"), [
     ("سيارتي خربت", "سيارة", True), ("السيارة خربت", "سيارة", True), ("سيارتها بيضاء", "سيارة", True),
     ("رحت بالسيارة", "سيارة", True), ("مكتبنا انتقل", "مكتب", True), ("المكتبة سكرت", "مكتب", False),

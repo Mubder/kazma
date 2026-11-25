@@ -13,11 +13,17 @@ spelling).
 
 Here both sides are folded with ``documents.arabic.fold_for_search`` and
 compared word by word, as recall reads a question (``query_terms``): a word's
-article, one-letter prefix, possessive or light plural is no difference.
+article, one-letter prefix, possessive or light plural is no difference, nor
+is the Arabic "my" at its end ("سيارتي", "سيارة"). An Arabic dual ("سيارتين"),
+a broken plural and "our" at a typed word's end ("سيارتنا") are other words.
+Only a word that may be the one asked for is folded (a text of 50,000 turns
+took 24 seconds folded whole, for "gpt5").
 :func:`register` puts the tests on a SQLite connection as functions, so a
 statement asks them over the rows it already narrowed to: no index, nothing
 stored. A list whose full-text index answered asks them beside it (``OR``), so
 what the index finds is still found.
+
+Asked through :func:`holds`, which hands the columns over as bytes:
 
 * ``kazma_asked_every(text, ...)``: the texts together hold every content word.
 * ``kazma_asked_any(text, ...)``: they hold one of them.
@@ -31,15 +37,22 @@ what the index finds is still found.
 from __future__ import annotations
 
 import functools
+import os
 import re
 import sqlite3
+import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-__all__ = ["Asked", "fold", "register"]
+__all__ = ["Asked", "fold", "holds", "register"]
 
-#: The most words of a query that are looked for: a list that wants every word
-#: would find less with more of them.
-_WORDS_MAX = 8
+#: The most words of a query that are looked for, as the memories panel asks
+#: its index; a list that wants every word asks fewer (``of``'s *words*).
+_WORDS_MAX = 12
+
+#: The longest a word is looked for: no word is longer, and a pattern of a
+#: thousand letters cost four milliseconds a row.
+_WORD_CHARS = 80
 
 
 def fold(text: object) -> str:
@@ -61,8 +74,8 @@ def _span(*spans: tuple[int, int]) -> str:
 
 #: Characters outside the Arabic block, or of two letters in one, that fold to
 #: an Arabic letter or a digit (NFKC): presentation forms, high-hamza letters,
-#: raised, circled, fullwidth and mathematical forms. A text holding one is
-#: folded whole; ``tests/test_memory_lists_any_spelling.py`` holds this list
+#: raised, circled, fullwidth and mathematical forms. The word holding one is
+#: folded whatever it looks like; ``tests/test_memory_lists_any_spelling.py`` holds this list
 #: to every character there is.
 _COMPAT = re.compile("[" + _span(
     (0xB2, 0xB3), (0xB9, 0xB9), (0xBC, 0xBE), (0x675, 0x678), (0x2070, 0x209C), (0x2150, 0x2189), (0x2460, 0x24FF),
@@ -90,27 +103,88 @@ def _spellings() -> dict[str, str]:
     return out
 
 
-def _may_hold(term: str) -> re.Pattern[str] | None:
-    """What a text that holds the folded *term* holds somewhere as written:
-    its letters in any spelling. None for a term with a Latin letter (more
-    spellings than one block holds). Most texts hold none of it, and looking
-    costs a tenth of folding a long turn."""
+def _folds(term: str) -> bool:
+    """Whether a text may hold *term* in another spelling than it is written
+    in: an Arabic word, or a number. A Latin word, with digits or a hyphen in
+    it or not, is in the index and in the text as it is written."""
+    return any(ch.isalpha() and not ch.isascii() and ch in _spellings() for ch in term) or not any(
+        ch.isalpha() for ch in term)
+
+
+def _look(term: str, forms: Sequence[str]) -> re.Pattern[str]:
+    """What an unfolded text that holds *term*, or one of its *forms*, holds
+    somewhere: the letters they all begin with, in any spelling. Every text is
+    looked at; only a word around a find is folded."""
+    if not _folds(term):
+        return re.compile(re.escape(term), re.IGNORECASE)
+    begin = os.path.commonprefix([f[:-1] if f.endswith((_TAA, _MY)) and len(f) > 2 else f for f in forms]) or term[:1]
     spellings = _spellings()
-    if not all(ch in spellings for ch in term):
-        return None
-    return re.compile(_DROPPED.join(f"[{spellings[ch]}]" for ch in term))
+    return re.compile(_DROPPED.join(f"[{spellings[ch]}]" if ch in spellings else re.escape(ch) for ch in begin),
+                      re.IGNORECASE)
 
 
-def _word_pattern(term: str, *, whole: bool) -> re.Pattern[str]:
+#: A taa marbuta, folded; what it is written as before whose it is; "my"; and
+#: the endings that say whose it is.
+_TAA, _OPEN_TAA, _MY = "ه", "ت", "ي"
+_WHOSE = "(?:هما|كما|نا|كم|هم|ها|ي|ك|ه)"
+
+
+def _forms(written: str, term: str) -> list[str]:
+    """The folded *term*, and, when it was *written* with the ending "my", the
+    word without it: "سيارتي" is "سياره", "بيتي" is "بيت", "مستشفاي" is
+    "مستشفى". "منى" and "مستشفى" end in no "my"."""
+    from kazma_core.memory.query_terms import content_terms
+
+    if term.isascii() or len(term) < 3 or not written.endswith((_MY, "ی")) or not term.endswith(_MY):
+        return [term]
+    bare = term[:-1]
+    if bare.endswith("ا") and len(bare) >= 4:  # an alef maqsura before "my"
+        return [term, bare[:-1] + _MY]
+    without = [bare, bare[:-1] + _TAA] if bare.endswith(_OPEN_TAA) and len(bare) >= 3 else [bare]
+    # A word that says nothing alone ("من") is not what was asked for.
+    return [term, *(f for f in without if content_terms(f))]
+
+
+def _word_pattern(term: str, forms: Sequence[str], *, whole: bool) -> re.Pattern[str]:
     """``query_terms.mentions``' rule for one word: at the start of a word, an
     Arabic word of three letters or more with its article or a one-letter
-    prefix before it. *whole*: to the word's end (a light plural or a
-    possessive aside), not only its start."""
+    prefix before it, and -- either side -- with "my" at its end ("سيارتي" and
+    "سيارة"). *whole*: to the word's end (a light plural or a possessive
+    aside), not only its start; a word "my" was taken off is always whole."""
     from kazma_core.memory.query_terms import _AR_PROCLITIC
 
-    before = _AR_PROCLITIC if len(term) >= 3 else ""
-    end = r"(?:'?s)?(?!\w)" if whole and term.isascii() else r"(?!\w)" if whole else ""
-    return re.compile(r"(?<!\w)" + before + re.escape(term) + end, re.UNICODE)
+    def one(form: str) -> str:
+        if form.isascii():
+            return re.escape(form) + (r"(?:'?s)?(?!\w)" if whole else "")
+        before = _AR_PROCLITIC if len(form) >= 3 else ""
+        if form.endswith(_TAA) and len(form) >= 3:
+            body = re.escape(form[:-1]) + f"(?:{_TAA}|{_OPEN_TAA}{_WHOSE})"
+        elif form.endswith(_MY) and len(form) >= 4:
+            body = re.escape(form[:-1]) + f"(?:{_MY}|ا{_MY})"
+        else:
+            body = re.escape(form) + f"{_MY}?" if whole or form != term else re.escape(form)
+        return before + body + (r"(?!\w)" if whole or form != term else "")
+
+    return re.compile(r"(?<!\w)(?:" + "|".join(one(f) for f in forms) + ")", re.UNICODE)
+
+
+_fold_word = functools.lru_cache(maxsize=32768)(fold)
+
+
+def _text(value: object) -> str:
+    """*value* as text. A row's columns come as bytes (:func:`holds`): one
+    stored with bytes that are no text is read as far as it is text, and does
+    not end the search."""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return str(value or "")
+
+
+@dataclass(frozen=True)
+class _Word:
+    look: re.Pattern[str]
+    pattern: re.Pattern[str]
+    folds: bool
 
 
 @dataclass(frozen=True)
@@ -119,56 +193,106 @@ class Asked:
 
     phrase: str
     terms: tuple[str, ...]
-    patterns: tuple[re.Pattern[str], ...]
-    #: Per word, what a text must hold unfolded to be worth folding.
-    looks: tuple[re.Pattern[str] | None, ...]
+    words: tuple[_Word, ...]
+    #: The words typed as one ("user_memory_system"), by their place: together
+    #: they are one thing that is asked for.
+    together: tuple[tuple[int, ...], ...]
 
     @classmethod
-    def of(cls, query: str, *, whole: bool = False) -> Asked:
+    def of(cls, query: str, *, whole: bool = False, words: int = _WORDS_MAX) -> Asked:
         """*whole*: a word is found as a whole word (a list that answers
-        with any of the words), else from its start (a list that wants all)."""
-        from kazma_core.memory.query_terms import content_terms
+        with any of the words), else from its start (a list that wants all).
+        *words*: the most words that are looked for."""
+        from kazma_core.memory.query_terms import _TOKEN, content_terms
 
-        terms = tuple(content_terms(query or "")[:_WORDS_MAX])
-        return cls(fold(query), terms, tuple(_word_pattern(t, whole=whole) for t in terms),
-                   tuple(_may_hold(t) for t in terms))
+        terms: list[str] = []
+        read: list[_Word] = []
+        together: list[tuple[int, ...]] = []
+        for piece in (query or "").split():
+            here: list[int] = []
+            for written in _TOKEN.findall("".join(ch for ch in piece if unicodedata.category(ch) != "Mn" and ch != "ـ")):
+                for term in content_terms(written):
+                    term = term[:_WORD_CHARS]
+                    if term not in terms:
+                        if len(terms) >= words:
+                            continue
+                        forms = _forms(written, term)
+                        terms.append(term)
+                        read.append(_Word(_look(term, forms), _word_pattern(term, forms, whole=whole), _folds(term)))
+                    here.append(terms.index(term))
+            if "_" in piece and len(here) > 1:
+                together.append(tuple(here))
+            else:
+                together += [(n,) for n in here]
+        return cls(fold(query), tuple(terms), tuple(read), tuple(dict.fromkeys(together)))
 
     @property
     def needs_folding(self) -> bool:
         """Whether a text may hold a word in another spelling than the index
-        keeps: not when every word is plain English letters."""
-        return any(not (t.isascii() and t.isalpha()) for t in self.terms)
+        keeps (:func:`_folds`)."""
+        return any(w.folds for w in self.words)
 
-    def _found(self, parts: tuple[object, ...], *, every: bool) -> bool:
-        raw = " ".join(str(p) for p in parts if p)
-        if not self.terms or not raw:
-            return False
-        if not _COMPAT.search(raw):
-            possible = [look is None or look.search(raw) is not None for look in self.looks]
-            if not (all(possible) if every else any(possible)):
-                return False
-        # A slug's words are words: an underscore separates them.
-        text = fold(raw.replace("_", " "))
-        found = (p.search(text) is not None for p in self.patterns)
-        return all(found) if every else any(found)
+    def _held(self, parts: tuple[object, ...]) -> list[bool]:
+        """Which of the words the texts *parts* hold."""
+        raw = " ".join(_text(p) for p in parts if p)
+        compat: list[str] | None = None
+        flat = ""
+        held: list[bool] = []
+        for word in self.words:
+            found, at = False, 0
+            if word.look.search(raw):
+                flat = flat or " ".join(raw.split())
+                while not found and (m := word.look.search(flat, at)):
+                    start = flat.rfind(" ", 0, m.start()) + 1
+                    at = flat.find(" ", m.end())
+                    at = len(flat) if at < 0 else at
+                    found = word.pattern.search(_folded(flat[start:at])) is not None
+            if not found and word.folds:
+                if compat is None:
+                    compat = [_folded(c) for c in raw.split() if _COMPAT.search(c)] if _COMPAT.search(raw) else []
+                found = any(word.pattern.search(text) for text in compat)
+            held.append(found)
+        return held
 
     def every(self, *parts: object) -> bool:
         """The texts *parts* together hold every content word (and there is one)."""
-        return self._found(parts, every=True)
+        return bool(self.words) and all(self._held(parts))
 
     def any(self, *parts: object) -> bool:
-        """They hold one of the content words."""
-        return self._found(parts, every=False)
+        """They hold one of the things asked for: a word, or every word of
+        one typed together."""
+        if not self.words:
+            return False
+        held = self._held(parts)
+        return any(all(held[n] for n in group) for group in self.together)
 
     def as_written(self, value: object) -> bool:
         """The whole query is in *value*, both folded."""
-        return bool(self.phrase) and value is not None and self.phrase in fold(value)
+        return bool(self.phrase) and value is not None and self.phrase in fold(_text(value))
+
+
+def _folded(chunk: str) -> str:
+    """One run of a text without a space in it, folded; a slug's words are
+    words (an underscore separates them)."""
+    words = chunk.replace("_", " ")
+    return _fold_word(words) if len(words) <= _WORD_CHARS else fold(words)
 
 
 def _alias_names(raw: object) -> str:
     from kazma_core.memory.self_hub import parse_aliases
 
-    return " ".join(parse_aliases(raw))
+    return " ".join(parse_aliases(_text(raw)))
+
+
+#: SQL: an entity's aliases as text (the outer row's name is ``e``).
+ALIAS_NAMES = "kazma_alias_names(CAST(e.aliases_json AS BLOB))"
+
+
+def holds(test: str, *columns: str) -> str:
+    """SQL: the function ``kazma_asked_`` + *test* over *columns*, as bytes (a
+    column SQLite cannot hand over as text would fail the whole statement).
+    The columns are the caller's own SQL, never what was typed."""
+    return f"kazma_asked_{test}({', '.join(f'CAST({c} AS BLOB)' for c in columns)})"
 
 
 def register(conn: sqlite3.Connection, asked: Asked) -> None:
@@ -176,5 +300,5 @@ def register(conn: sqlite3.Connection, asked: Asked) -> None:
     conn.create_function("kazma_asked_every", -1, lambda *v: int(asked.every(*v)), deterministic=True)
     conn.create_function("kazma_asked_any", -1, lambda *v: int(asked.any(*v)), deterministic=True)
     conn.create_function("kazma_asked_phrase", 1, lambda v: int(asked.as_written(v)), deterministic=True)
-    conn.create_function("kazma_folded", 1, fold, deterministic=True)
+    conn.create_function("kazma_folded", 1, lambda v: fold(_text(v)), deterministic=True)
     conn.create_function("kazma_alias_names", 1, _alias_names, deterministic=True)

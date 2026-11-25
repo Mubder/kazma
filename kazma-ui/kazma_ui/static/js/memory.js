@@ -14,6 +14,8 @@ function memoryPage() {
     if (vars) for (const k in vars) text = text.split("{" + k + "}").join(String(vars[k]));
     return text;
   }
+  // Which read of each table was asked last, and which has answered.
+  const tableReads = {};
   const num = (n) => (window.KazmaFormat ? window.KazmaFormat.number(n) : Number(n).toLocaleString());
 
   // A server error code, worded in the page's language (Memory audit M32:
@@ -377,10 +379,23 @@ function memoryPage() {
 
     // One read of a table. A network failure marks the table failed as an
     // error answer does, and still reaches the caller (loadAll's banner).
+    // null: the table was asked for anew meanwhile, and that answer is the one
+    // to show (a search of a large memory answers after the next one's). More
+    // rows are not added to a table that is being read anew.
     async _readTable(name, append, url) {
+      const read = tableReads[name] || (tableReads[name] = { asked: 0, answered: 0 });
+      if (append && read.answered !== read.asked) return null;
+      if (!append) read.asked += 1;
+      const asked = read.asked;
+      const stale = () => asked !== read.asked;
+      const done = () => { if (!append && !stale()) read.answered = asked; };
       try {
-        return await api(url);
+        const answer = await api(url);
+        done();
+        return stale() ? null : answer;
       } catch (e) {
+        done();
+        if (stale()) return null;
         if (!append) {
           this[name + "Loaded"] = false;
           this[name + "Failed"] = true;
@@ -395,6 +410,7 @@ function memoryPage() {
       const d = await this._readTable("beliefs", append,
         "/api/memory/v2/beliefs?q=" + q + "&limit=" + this.beliefsPage.pageSize + "&offset=" + off
       );
+      if (!d) return;
       const rows = d.beliefs || [];
       this.beliefsPage = {
         offset: Number(d.offset || off),
@@ -417,6 +433,7 @@ function memoryPage() {
         isolated_only: this.isolatedOnly ? "true" : "false",
       });
       const d = await this._readTable("entities", append, "/api/memory/v2/entities?" + params.toString());
+      if (!d) return;
       const rows = d.entities || [];
       this.entitiesPage = {
         offset: Number(d.offset || off),
@@ -433,6 +450,7 @@ function memoryPage() {
       const d = await this._readTable("merges", append,
         "/api/memory/v2/entity-merges?limit=" + this.mergesPage.pageSize + "&offset=" + off
       );
+      if (!d) return;
       const rows = d.merges || [];
       this.mergesPage = {
         offset: Number(d.offset || off),

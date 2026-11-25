@@ -8,10 +8,10 @@ letter, so it found a word only as stored. English lost nothing. Measured
 and 0 in Arabic, in the same spelling.
 
 Each list is asked here through its own route or tool, for eight memories told
-in English, Gulf and Modern Standard Arabic, in three ways: the stored
+in English, Gulf and Modern Standard Arabic, in four ways: the stored
 spelling, the other usual spelling (in English: capitals), and the word as a
 sentence carries it (the article or a prefix; in English a plural or a
-possessive). No list may answer with a memory the query does not name.
+possessive), and as the user's own ("my car", "سيارتي"). No list may answer with a memory the query does not name.
 """
 
 from __future__ import annotations
@@ -28,40 +28,41 @@ from kazma_core.memory.schema_v2 import ensure_primary_schema
 
 TENANT = "default"
 
-#: (the stored words, asked as stored, asked in the other spelling, asked as a sentence carries it)
+#: (the stored words, asked as stored, asked in the other spelling, asked as a sentence carries it, asked as
+#: "my X": one word in Arabic)
 MEMORIES = {
     "english": (
-        ("turkish coffee", "coffee", "Coffee", "coffees"),
-        ("the hope hospital", "hospital", "HOSPITAL", "hospitals"),
-        ("ahmad almutairi", "ahmad", "Ahmad", "ahmad's"),
-        ("a blue car", "car", "Car", "cars"),
-        ("istanbul trip", "istanbul", "Istanbul", "trips"),
-        ("fish allergy", "allergy", "Allergy", "allergy's"),
-        ("12 march", "march", "March", "12"),
-        ("fintas beach", "fintas", "Fintas", "fintas's"),
+        ("turkish coffee", "coffee", "Coffee", "coffees", "my coffee"),
+        ("the hope hospital", "hospital", "HOSPITAL", "hospitals", "my hospital"),
+        ("ahmad almutairi", "ahmad", "Ahmad", "ahmad's", "my ahmad"),
+        ("a blue car", "car", "Car", "cars", "my car"),
+        ("istanbul trip", "istanbul", "Istanbul", "trips", "my trip"),
+        ("fish allergy", "allergy", "Allergy", "allergy's", "my allergy"),
+        ("12 march", "march", "March", "12", "my march"),
+        ("fintas beach", "fintas", "Fintas", "fintas's", "my beach"),
     ),
     "gulf": (
-        ("قهوة كرك بالهيل", "قهوة", "قهوه", "القهوة"),
-        ("مستشفى العدان", "مستشفى", "مستشفي", "بالمستشفى"),
-        ("ربعي أحمد العازمي", "أحمد", "احمد", "عازمي"),
-        ("سيارة حمرة", "سيارة", "سياره", "السيارة"),
-        ("سفرة إسطنبول", "إسطنبول", "اسطنبول", "السفرة"),
-        ("حساسية من الروبيان", "حساسية", "حساسيه", "الحساسية"),
-        ("موعد ١٢ مارس", "١٢", "12", "الموعد"),
-        ("شاليه الخيران", "شاليه", "شالية", "الشاليه"),
+        ("قهوة كرك بالهيل", "قهوة", "قهوه", "القهوة", "قهوتي"),
+        ("مستشفى العدان", "مستشفى", "مستشفي", "بالمستشفى", "مستشفاي"),
+        ("ربعي أحمد العازمي", "أحمد", "احمد", "عازمي", "ربعي"),
+        ("سيارة حمرة", "سيارة", "سياره", "السيارة", "سيارتي"),
+        ("سفرة إسطنبول", "إسطنبول", "اسطنبول", "السفرة", "سفرتي"),
+        ("حساسية من الروبيان", "حساسية", "حساسيه", "الحساسية", "حساسيتي"),
+        ("موعد ١٢ مارس", "١٢", "12", "الموعد", "موعدي"),
+        ("شاليه الخيران", "شاليه", "شالية", "الشاليه", "شاليهي"),
     ),
     "msa": (
-        ("قهوة تركية", "قهوة", "قهوه", "القهوة"),
-        ("مستشفى الأمل", "مستشفى", "مستشفي", "المستشفى"),
-        ("أحمد المطيري", "أحمد", "احمد", "مطيري"),
-        ("سيارة زرقاء", "سيارة", "سياره", "السيارة"),
-        ("رحلة إسطنبول", "إسطنبول", "اسطنبول", "الرحلة"),
-        ("حساسية من الأسماك", "حساسية", "حساسيه", "الحساسية"),
-        ("موعد ١٢ مارس", "١٢", "12", "الموعد"),
-        ("شاطئ الفنطاس", "شاطئ", "شاطي", "الشاطئ"),
+        ("قهوة تركية", "قهوة", "قهوه", "القهوة", "قهوتي"),
+        ("مستشفى الأمل", "مستشفى", "مستشفي", "المستشفى", "مستشفاي"),
+        ("أحمد المطيري", "أحمد", "احمد", "مطيري", "أحمدي"),
+        ("سيارة زرقاء", "سيارة", "سياره", "السيارة", "سيارتي"),
+        ("رحلة إسطنبول", "إسطنبول", "اسطنبول", "الرحلة", "رحلتي"),
+        ("حساسية من الأسماك", "حساسية", "حساسيه", "الحساسية", "حساسيتي"),
+        ("موعد ١٢ مارس", "١٢", "12", "الموعد", "موعدي"),
+        ("شاطئ الفنطاس", "شاطئ", "شاطي", "الشاطئ", "شاطئي"),
     ),
 }
-WAYS = ("as stored", "other spelling", "in a sentence")
+WAYS = ("as stored", "other spelling", "in a sentence", "my")
 
 #: Memories no query above names.
 _OTHERS = ("likes hiking on fridays", "works at the port", "owns a telescope", "reads old novels", "plays chess",
@@ -200,22 +201,37 @@ def _lost(ask, language: str, way: str) -> list[str]:
     return sorted(p for p in PLACES if table[p, way][0] < 8)
 
 
-@pytest.mark.parametrize("language", ["gulf", "msa"])
-def test_without_the_fold_every_list_loses_arabic_words(lists, monkeypatch, language):
+def _without_fold(monkeypatch) -> None:
     from kazma_core.memory import word_search
 
-    monkeypatch.setattr(word_search, "fold", lambda text: " ".join(str(text or "").lower().split()))
+    def lower(text):
+        return " ".join(word_search._text(text).lower().split())
+
+    monkeypatch.setattr(word_search, "fold", lower)
+    monkeypatch.setattr(word_search, "_folded", lambda chunk: lower(chunk.replace("_", " ")))
+
+
+@pytest.mark.parametrize("language", ["gulf", "msa"])
+def test_without_the_my_ending_every_list_loses_it(lists, monkeypatch, language):
+    from kazma_core.memory import word_search
+
+    monkeypatch.setattr(word_search, "_forms", lambda _written, term: [term])
+    lists.told(tuple(m[0] for m in MEMORIES[language]))
+    assert _lost(lists, language, "my") == sorted(PLACES)
+
+
+@pytest.mark.parametrize("language", ["gulf", "msa"])
+def test_without_the_fold_every_list_loses_arabic_words(lists, monkeypatch, language):
+    _without_fold(monkeypatch)
     lists.told(tuple(m[0] for m in MEMORIES[language]))
     assert _lost(lists, language, "other spelling") == sorted(PLACES)
 
 
 def test_without_the_fold_english_loses_nothing(lists, monkeypatch):
     """Why nobody saw it."""
-    from kazma_core.memory import word_search
-
-    monkeypatch.setattr(word_search, "fold", lambda text: " ".join(str(text or "").lower().split()))
+    _without_fold(monkeypatch)
     lists.told(tuple(m[0] for m in MEMORIES["english"]))
-    assert [_lost(lists, "english", way) for way in WAYS] == [[], [], []]
+    assert [_lost(lists, "english", way) for way in WAYS] == [[], [], [], []]
 
 
 @pytest.mark.parametrize("language", ["gulf", "msa"])
@@ -239,6 +255,13 @@ def test_without_the_article_rule_the_name_after_it_is_lost(lists, monkeypatch, 
     ("number 050123", "٥٠١٢٣", False),
     ("carpet", "car", False),  # a whole word only, where a list answers with any of them
     ("the car's door", "car", True),
+    # "my X": taken off what was typed, and off what was told.
+    ("سيارة زرقاء", "سيارتي", True), ("سيارتي الزرقاء", "السيارة", True), ("سيارتي", "سيارتي", True),
+    ("مستشفاي المفضل", "المستشفى", True), ("مستشفى الأمل", "مستشفاي", True),
+    ("بيت في السالمية", "بيتي", True), ("بيتي في السالمية", "البيت", True), ("شقة", "شقتي", True),
+    ("من هناك", "منى", False), ("ليل طويل", "ليلى", False), ("كرسي", "كرسي", True), ("مصر", "مستشفى", False),
+    ("سيارتها بيضاء", "سيارة", True), ("ذهب من هنا", "مني", False),
+    ("قهوجي", "قهوتي", False),  # a word "my" was taken off is whole
     ("blue_heron", "heron", True),
 ])
 def test_a_word_is_found_as_a_word(stored, query, held):
@@ -271,8 +294,9 @@ def test_the_look_before_the_fold_loses_nothing():
     assert [hex(c) for c in unknown if not word_search._COMPAT.search(chr(c))] == []
     assert any(0xFB50 <= c <= 0xFDFF for c in unknown), "the control: that range is needed"
     dropped = [c for c in range(0x110000) if not 0xD800 <= c <= 0xDFFF and fold_for_search(f"ق{chr(c)}ه") == "قه"]
-    look = word_search._may_hold("قه")
-    assert dropped and [hex(c) for c in dropped if not (look.search(f"ق{chr(c)}ه") or word_search._COMPAT.search(chr(c)))] == []
+    look = word_search._look("قهك", ["قهك"])
+    assert dropped and [hex(c) for c in dropped
+                        if not (look.search(f"ق{chr(c)}هك") or word_search._COMPAT.search(chr(c)))] == []
 
 
 # ── the rest of what each list answers ───────────────────────────────────
@@ -303,6 +327,57 @@ def test_the_thing_named_exactly_comes_first_in_either_spelling(lists):
         conn.execute("UPDATE entities SET belief_count = 0, graph_degree = 0 WHERE belief_count = -1")
     got = memory_api._list_entities_sync("مكتبه", 10, 0, False, False)
     assert [e["id"] for e in got["entities"]] == ["zzy", "zzx"]
+
+
+@pytest.mark.parametrize("query", ["gpt5", "wi-fi", "covid19", "x-ray", "café"])
+def test_a_latin_word_with_a_digit_a_hyphen_or_an_accent_is_found_in_every_list(lists, query):
+    lists.told((f"about {query} today",))
+    for place in PLACES:
+        assert lists(place, query) == {_id(0)}, place
+
+
+def test_an_id_typed_whole_is_one_thing_not_each_of_its_words(lists):
+    """"user_memory_system" listed every fact: the subject of each is ``user``."""
+    lists.told(("tea", "the memory system"))
+    assert lists("page: facts", "user_memory_system") == {_id(1)}
+    assert lists("page: facts", "memory tea") == {_id(0), _id(1)}
+
+
+@pytest.mark.parametrize("query", ["memory system", "user memory system", "Memory-System"])
+def test_the_tools_read_an_id_as_its_words(lists, query):
+    lists.told(("tea",))
+    with sqlite3.connect(lists.path) as conn:
+        conn.execute("UPDATE beliefs SET subject = 'user_memory_system' WHERE id = ?", (_id(0),))
+        conn.execute("UPDATE entities SET name = 'user_memory_system' WHERE id = ?", (_id(0),))
+    for place in ("memory_list_beliefs", "memory_list_entities"):
+        assert lists(place, query) == {_id(0)}, place
+
+
+def test_the_panel_wants_every_word_of_a_long_query(lists):
+    """Folded, only the first eight were looked for."""
+    words = "قهوة سيارة رحلة موعد شاطئ مدرسة حديقة مكتبة سوق مسجد".split()
+    lists.told((" ".join(words), " ".join(words[:8])))
+    asked = " ".join(words).replace("ة", "ه")
+    assert lists("page: memories", asked) == {_id(0)}
+
+
+def test_a_row_whose_text_is_no_text_does_not_end_the_search(lists):
+    lists.told(("قهوة تركية", "turkish coffee"))
+    with sqlite3.connect(lists.path) as conn:
+        conn.execute("UPDATE beliefs SET object = CAST(x'ff616263' AS TEXT) WHERE id = ?", (_id(3),))
+        conn.execute("UPDATE episodes SET user_text = CAST(x'ff616263' AS TEXT) WHERE id = ?", (_id(3),))
+        conn.execute("UPDATE entities SET name = CAST(x'ff616263' AS TEXT) WHERE id = ?", (_id(3),))
+    for place in PLACES:
+        assert lists(place, "قهوه") == {_id(0)}, place
+        assert lists(place, "coffees") == {_id(1)}, place
+
+
+def test_a_word_of_a_thousand_letters_is_no_thousand_letter_search():
+    from kazma_core.memory.word_search import _WORD_CHARS, Asked
+
+    asked = Asked.of("ق" * 1000 + " coffee", whole=True)
+    assert [len(t) for t in asked.terms] == [_WORD_CHARS, 6]
+    assert asked.any("turkish coffee") and not asked.every("turkish coffee")
 
 
 def test_a_query_with_no_word_is_found_as_written(lists):
@@ -337,17 +412,51 @@ def test_the_memories_panel_pages_and_counts_folded_matches(lists):
         [_id(4), _id(3)], [_id(2), _id(1)], [_id(0)], []]
 
 
-def test_a_search_of_ten_thousand_turns_is_seconds_not_minutes():
-    from kazma_core.memory.word_search import Asked, register
+@pytest.mark.parametrize(("query", "at_most"), [
+    # A Latin word is looked for as it is written: no turn is folded for it.
+    ("gpt5", 0.0), ("wi-fi", 0.0), ("covid19", 0.0), ("x-ray", 0.0), ("café", 0.0),
+    # Two letters that begin, end and stand in many words: those words alone.
+    ("عم", 0.12), ("قهوه", 0.02), ("050123", 0.0)])
+def test_a_search_folds_the_words_that_may_be_it_and_no_turn_whole(monkeypatch, query, at_most):
+    """Folding is what a search costs (24 seconds for "gpt5" in a memory of
+    20,000 facts and 50,000 turns, 12 for "عم"): the share of the letters of a
+    bilingual memory that a search folds is counted, and its time is bounded."""
+    from kazma_core.memory import word_search
 
-    conn = sqlite3.connect(":memory:")
-    conn.execute("CREATE TABLE t (a TEXT)")
-    text = "ذهبنا إلى السوق مع الأصدقاء في الصيف الماضي وكانت الرحلة ممتعة جداً " * 20
-    conn.executemany("INSERT INTO t VALUES (?)", [(text + str(n),) for n in range(10_000)])
-    register(conn, Asked.of("قهوه"))
+    folded = [0]
+    fold = word_search.fold
+
+    def counted(text):
+        folded[0] += len(str(text))
+        return fold(text)
+
+    arabic = ("ذهبنا مع العم خالد إلى السوق ثم طعمنا الغداء، نعم كان الطعم طيب وعمر معنا والعمل كثير ولكن معظم الناس "
+              "عملوا بجد وشربنا شاي ")
+    english = "we went to the market with friends and bought tea, then worked on the garden until late in the evening "
+    turns = [(arabic if n % 2 else english) * 12 + str(n) for n in range(4_000)]
+    asked = word_search.Asked.of(query)
+    monkeypatch.setattr(word_search, "fold", counted)
+    monkeypatch.setattr(word_search, "_fold_word", counted)  # no cache: each word that is folded counts
     started = time.perf_counter()
-    assert conn.execute("SELECT COUNT(*) FROM t WHERE kazma_asked_every(a)").fetchone()[0] == 0
-    assert time.perf_counter() - started < 20  # 0.4 s measured; a slow runner's room
+    for turn in turns:
+        asked.every(turn)
+    took = time.perf_counter() - started
+    assert folded[0] <= at_most * sum(map(len, turns)), folded[0] / sum(map(len, turns))
+    assert took < 20  # 0.1 to 0.6 s measured; a slow runner's room
+
+
+def test_control_a_turn_folded_whole_is_seen(monkeypatch):
+    from kazma_core.memory import word_search
+
+    whole = word_search.Asked._held
+
+    def held(self, parts):
+        word_search.fold(" ".join(map(str, parts)))
+        return whole(self, parts)
+
+    monkeypatch.setattr(word_search.Asked, "_held", held)
+    with pytest.raises(AssertionError):
+        test_a_search_folds_the_words_that_may_be_it_and_no_turn_whole(monkeypatch, "gpt5", 0.0)
 
 
 # ── the class gate ───────────────────────────────────────────────────────

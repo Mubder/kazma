@@ -75,8 +75,11 @@
   what the model reads of the turn names anyone. An Arabic subject is matched
   by whole words: what is written before a name comes off; the article and
   whose-it-is endings only when the subject is no person (`_a_person`, by the
-  facts held), and never a taa marbuta or a bare taa ("كريمة" is not "كريم",
-  "الهند" not Hind); "عبد الله" and "بو فهد" are the one word they are also
+  facts held) or is one called by what they are ("مديري", "الدكتور";
+  `_roles`, a short list), and never a taa marbuta or a bare taa ("كريمة" is
+  not "كريم", "الهند" not Hind). A letter that may be written before a name is
+  taken off a name that begins with it ("كريم" also names "ريم", "وسام"
+  "سام"): places are spent, nothing is closed; "عبد الله" and "بو فهد" are the one word they are also
   written as. The hub link Kazma writes (`ego_anchor.ANCHOR_PREDICATE`,
   `system_tool`) is nobody's statement and is not shown; one the user told is.
   Values are cut at `DEEP_PASS_HELD_VALUE` and the lines together at

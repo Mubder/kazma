@@ -34,6 +34,7 @@ letters cost fewer tokens), the newest three kept first.
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import re
@@ -118,6 +119,24 @@ _A_PERSONS = frozenset(
     "uncle wife works".split())
 
 
+#: What a person is called by what they are, not by a name: these are said with
+#: the article and with whose they are ("مديري", "الدكتور"), as "my manager" and
+#: "the doctor" are. The feminine ("مديرة") goes with each.
+_BY_WHAT_THEY_ARE = (
+    "مدير جار دكتور طبيب سائق سواق دريول مدرس معلم أستاذ صديق رفيق زميل شريك زوج أخ أخت أم أب ابن بنت ولد والد عم خال "
+    "جد خطيب رئيس مسؤول موظف محامي مهندس مدرب حارس بواب خادم شغال عامل مربي طباخ مندوب محاسب ممرض صيدلي قريب نسيب "
+    "كفيل مؤجر مستأجر عميل زبون مشرف مرشد طالب تلميذ ضيف شيخ إمام حلاق خياط نجار سباك كهربائي ميكانيكي مقاول سكرتير "
+    "مساعد مترجم كاتب طفل حفيد توأم")
+
+
+@functools.lru_cache(maxsize=1)
+def _roles() -> frozenset[str]:
+    from kazma_core.documents.arabic import fold_for_search
+
+    words = fold_for_search(_BY_WHAT_THEY_ARE).split()
+    return frozenset(words) | frozenset(f"{w}ه" for w in words)
+
+
 def _a_person(facts: Sequence[Mapping[str, Any]]) -> bool:
     """Whether the *facts* held about a subject are ones a person has."""
     return any(not _A_PERSONS.isdisjoint(str(f["predicate"]).lower().split("_")) for f in facts)
@@ -172,7 +191,9 @@ class _Said:
             if not written.endswith("ة"):
                 for form in tuple(things):
                     bare = _WHOSE.sub("", form)
-                    if len(bare) >= 3 and bare != form:
+                    if bare in ("ابو", "اخو"):  # "أبوي", "أخوها": "أب" and "أخ" before whose they are
+                        bare = bare[:-1]
+                    if bare != form and (len(bare) >= 3 or bare in _roles()):
                         # "سيارتها" is "سياره" once whose it is comes off.
                         things |= {bare, bare[:-1] + "ه"} if bare.endswith("ت") else {bare}
             for form in names:
@@ -199,8 +220,8 @@ class _Said:
         ("berlin_office", "نورة", "user_sister" as "sister"); None when it does
         not. An English word as a word of its own, never as a stem ("max" is
         not in "maxed"); an Arabic one with what Arabic writes before it, and
-        unless the subject is a *person* with its article and whose it is
-        ("السيارة", "سيارتي"; "الهند" is not Hind). A subject whose name is
+        unless the subject is a *person* by a name with its article and whose
+        it is ("السيارة", "سيارتي", "مديري"; "الهند" is not Hind). A subject whose name is
         also a small word ("Will", "علي") as it is written."""
         from kazma_core.documents.arabic import fold_for_search
         from kazma_core.memory.query_terms import content_terms
@@ -216,8 +237,9 @@ class _Said:
 
     def _all(self, words: Sequence[tuple[str, str]], person: bool) -> tuple[int, int] | None:
         # The first name of a person's two settles who it is: the second may
-        # be said without its article ("أحمد عازمي").
-        strict = person and len(words) == 1
+        # be said without its article ("أحمد عازمي"). One called by what they
+        # are has no name that a word could be taken for ("مديري", "الدكتور").
+        strict = person and len(words) == 1 and words[0][1] not in _roles()
         found = [self._name.get(word) if strict and not word.isascii()
                  else self._name.get(word) or self._thing.get(plain) for word, plain in words]
         return (min(len(f) for f in found if f), min(f[0] for f in found if f)) if found and all(found) else None
