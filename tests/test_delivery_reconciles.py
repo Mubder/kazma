@@ -246,10 +246,10 @@ class TestCatchUpCannotDecline:
 
     def test_on_error_during_hitl_still_resyncs(self, chat: str) -> None:
         default_err = js_function_body(chat, "function _defaultAttachCallbacks(epoch)")
-        on_err = default_err.split("onError: function()", 1)[1]
+        on_err = default_err.split("onError: function(", 1)[1]
         assert "if (_awaitingApproval) return;" not in on_err
         assert "_resyncDelivery('sse-fail')" in on_err
-        send_on_err = chat.split("onError: function(msg)", 1)[1].split(
+        send_on_err = chat.split("onError: function(msg", 1)[1].split(
             "function retry()", 1
         )[0]
         assert "_resyncDelivery('sse-fail')" in send_on_err
