@@ -177,5 +177,7 @@ with a test that fails on the old code and a gate for its class:
     command-line arguments in `kazma migrate` and `scripts/` (S8705, S8707),
     and two S3516 whose one returned object is built or edited before it is
     returned (`research_pipeline._candidate_report_roots`, an
-    `atomic_update` updater in `space_data._erase_settings`).
+    `atomic_update` updater in `space_data._erase_settings`). So is
+    `scripts/prepush.py` starting itself again with its own command line under
+    the virtualenv's Python (S8705, 2026-11-26).
 

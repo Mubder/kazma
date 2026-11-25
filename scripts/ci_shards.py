@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -111,7 +112,20 @@ def durations_of(junit: Path) -> dict[str, float]:
 JUNIT_OPTIONS = ("-o", "junit_family=xunit1", "-o", "junit_duration_report=total")
 
 
+def contained(path: Path) -> Path:
+    """*path*, inside the repository or a temporary folder: what these scripts
+    read and write by a path on their command line is there, or refused."""
+    roots = [REPO, Path(tempfile.gettempdir())]
+    if os.environ.get("RUNNER_TEMP"):
+        roots.append(Path(os.environ["RUNNER_TEMP"]))
+    full = Path(path).resolve()
+    if not any(full.is_relative_to(root.resolve()) for root in roots):
+        raise SystemExit(f"[ci-shards] refused: {full} is not inside the repository or a temporary folder")
+    return full
+
+
 def write_durations(path: Path, kind: str, seconds: dict[str, float]) -> None:
+    path = contained(path)
     text = json.dumps({kind: {k: round(v, 2) for k, v in sorted(seconds.items())}}, indent=1)
     path.write_text(text + "\n", encoding="utf-8", newline="\n")
 
@@ -151,10 +165,10 @@ def e2e_files() -> list[str]:
     return sorted(f.relative_to(REPO).as_posix() for f in (REPO / "tests" / "e2e").glob("test_*.py"))
 
 
-def update(run_id: str) -> int:
+def update(run_id: int) -> int:
     """Merge the durations a CI run's shards uploaded into the table."""
     with tempfile.TemporaryDirectory(prefix="kazma-durations-") as folder:
-        done = subprocess.run(["gh", "run", "download", run_id, "--pattern", "test-durations-*", "--dir", folder],
+        done = subprocess.run(["gh", "run", "download", str(run_id), "--pattern", "test-durations-*", "--dir", folder],
                               cwd=str(REPO))
         if done.returncode:
             return done.returncode
@@ -193,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--durations-json", type=Path, default=None)
     run.add_argument("files", nargs="+")
     up = sub.add_parser("update", help="refresh the durations table from a CI run")
-    up.add_argument("run_id")
+    up.add_argument("run_id", type=int)
     listing = sub.add_parser("show", help="the balance the table gives")
     listing.add_argument("count", type=int)
     listing.add_argument("--kind", choices=KINDS, default="unit")

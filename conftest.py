@@ -319,6 +319,44 @@ def _helper_tool_registry_put_back(request):
         )
 
 
+# ── No test leaves a link in the data folder every test shares ─────────────
+# A test planted a link named swarm_tasks.db there, leading to a disk that is
+# away, and skipped before its cleanup when an earlier file had made the next
+# store: 46 tests of another file then failed to open the swarm store (CI's
+# first sharded run, 2026-11-25; a symbolic link, so on Linux only). A link is
+# removed after its test, and the test fails, named: a folder that is a test's
+# own is where it goes. KAZMA_TEST_ISOLATION=0 turns it off
+# (tests/test_data_folder_links.py, the negative control).
+def _links_directly_in(folder: str) -> list[str]:
+    is_junction = getattr(os.path, "isjunction", lambda path: False)  # Python 3.12
+    try:
+        with os.scandir(folder) as entries:
+            return sorted(e.path for e in entries if e.is_symlink() or is_junction(e.path))
+    except OSError:
+        return []  # a test removed the folder: it holds no link
+
+
+@_pytest.fixture(autouse=True)
+def _no_link_left_in_the_data_folder(request):
+    yield
+    if os.environ.get("KAZMA_TEST_ISOLATION") == "0":
+        return
+    left = _links_directly_in(_TEST_DATA_DIR)
+    if not left:
+        return
+    for link in left:
+        try:
+            os.unlink(link)
+        except OSError:  # a junction, or a link to a folder (Windows)
+            os.rmdir(link)
+    _pytest.fail(
+        f"{request.node.nodeid} left links in the data folder every test shares: "
+        f"{', '.join(os.path.basename(link) for link in left)}. Removed; plant them in a folder of the test's own "
+        "(monkeypatch KAZMA_DATA_DIR).",
+        pytrace=False,
+    )
+
+
 # ── Every product module is imported before the first test ─────────────────
 # Which test first imported a module used to decide what that module held for
 # the rest of the process. A module first imported while a test's patch was

@@ -18,6 +18,7 @@ import sqlite3
 import subprocess
 import sys
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -418,27 +419,24 @@ def test_no_copy_of_a_database_is_made_from_a_dangling_link(tmp_path) -> None:
     assert not (tmp_path / "away" / "a.db").exists() and not (tmp_path / "copy.db").exists()
 
 
-def test_a_bundle_names_a_database_whose_disk_is_away(tmp_path, caplog) -> None:
-    """The whole export: its check refuses the bundle, and says which."""
-    from kazma_core import paths
-
-    data = paths.data_dir()
-    held = [data / "swarm_tasks.db", data / "knowledge.db"]
-    for place in held:
-        if place.exists():
-            pytest.skip("this test's data folder holds the store")
-        _file_link(place, tmp_path / "away" / place.name)
-    try:
-        with caplog.at_level("WARNING", logger="kazma_core.migration.exporter"):
-            made = exporter.export_bundle(tmp_path / "x.zip")
-        bundle = KazmaBundle(made)
-        assert {"swarm_tasks.db", "knowledge.db"} <= set(bundle.manifest.links_left_out)
-        report = bundle.verify(check_hashes=False)
-        assert not report.ok and any("swarm_tasks.db" in error for error in report.errors), report.errors
-        assert any("swarm_tasks.db" in r.getMessage() for r in caplog.records)
-    finally:
-        for place in held:
-            place.unlink(missing_ok=True)
+def test_a_bundle_names_a_database_whose_disk_is_away(tmp_path, monkeypatch, caplog) -> None:
+    """The whole export: its check refuses the bundle, and says which. In a
+    data folder of its own: in the shared one it skipped whenever an earlier
+    file had made a store, and left its first link there."""
+    data = tmp_path / "kazma-data"
+    data.mkdir()
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(data))
+    with closing(sqlite3.connect(data / "agent_artifacts.db")) as conn, conn:
+        conn.execute("CREATE TABLE t (v)")  # a store: the folder is an installation's
+    for name in ("swarm_tasks.db", "knowledge.db"):
+        _file_link(data / name, tmp_path / "away" / name)
+    with caplog.at_level("WARNING", logger="kazma_core.migration.exporter"):
+        made = exporter.export_bundle(tmp_path / "x.zip")
+    bundle = KazmaBundle(made)
+    assert {"swarm_tasks.db", "knowledge.db"} <= set(bundle.manifest.links_left_out)
+    report = bundle.verify(check_hashes=False)
+    assert not report.ok and any("swarm_tasks.db" in error for error in report.errors), report.errors
+    assert any("swarm_tasks.db" in r.getMessage() for r in caplog.records)
 
 
 def test_a_failed_file_and_a_link_are_one_alert(backups, monkeypatch) -> None:
