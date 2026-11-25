@@ -22,6 +22,7 @@ import logging
 import time
 from typing import Any
 
+from kazma_core.agent.content_refusal import is_content_refused, other_vendor
 from kazma_core.observability.llm_ledger import answered_with_own_key, provider_of
 
 __all__ = ["reset_failover_cache", "resilient_chat"]
@@ -158,6 +159,16 @@ def _kwargs_for(client: Any, chat_kwargs: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in chat_kwargs.items() if key != "reasoning"}
 
 
+def _failed(exc: BaseException, model: str, until: float, refused: BaseException | None) -> None:
+    """A backup failed: it rests until *until*, unless its own content filter
+    refused the message (it is not down). *refused*: the refusal it was asked
+    over, which then says a backup was tried."""
+    if refused is not None:
+        refused.backup_tried = True  # type: ignore[attr-defined]
+    if not is_content_refused(exc):
+        _cooldowns[model] = until
+
+
 def _backups(ns: Any, frozen: Any) -> tuple[tuple[str, ...], float]:
     """The backup models of a call and how long a failed one rests: the ones
     frozen for it, else the settings'."""
@@ -201,7 +212,6 @@ async def resilient_chat(
     Returns the first successful response. Raises the last error when the
     primary and all failover models fail.
     """
-    from kazma_core.agent.content_refusal import is_content_refused, other_vendor
     from kazma_core.llm_provider import LLMError
     from kazma_core.spaces import daily_limits
 
@@ -342,7 +352,7 @@ async def resilient_chat(
                     )
                     return response
                 except Exception as fb_exc:
-                    _cooldowns[fb_model] = now + cooldown_seconds
+                    _failed(fb_exc, fb_model, now + cooldown_seconds, last_exc if refused else None)
                     logger.warning(
                         "[%s] failover model '%s' failed: %s (cooldown %.0fs)",
                         label or "resilient-chat",

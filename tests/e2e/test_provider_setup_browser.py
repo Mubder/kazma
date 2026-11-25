@@ -325,6 +325,93 @@ def test_one_row_per_provider_and_the_list_is_tidied(kazma, provider, lang) -> N
     assert errors == [], errors
 
 
+@pytest.mark.parametrize("lang", ["en", "ar"])
+def test_a_key_goes_to_its_own_provider_alone(kazma, provider, lang) -> None:  # noqa: F811
+    """The review of 470f10299, M3: a key pasted for OpenRouter was carried to
+    a custom endpoint and sent there by "Find the models". And a name that is
+    taken is refused before anything is sent (M2)."""
+    from playwright.sync_api import sync_playwright
+
+    base, _ = kazma
+    url, server = provider
+    assert httpx.post(f"{base}/api/providers", timeout=10, json={
+        "name": "gateway", "base_url": "https://one.example/v1", "api_key": "demo-gateway-key"}).status_code == 200
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = _open_settings(browser, base, lang, errors)
+            page.locator("#provider-add").click()
+            page.locator("#setup-search").fill(KEY)
+            page.locator("#setup-guess button", has_text="OpenRouter").click()
+            page.locator("#setup-next").click()
+            page.locator("#setup-key").wait_for(state="visible", timeout=15000)
+            assert page.locator("#setup-key").input_value() == KEY
+            page.locator("#setup-back").click()
+            page.locator("#setup-back").click()
+            page.locator(".ps-tile[data-provider='custom']").click()
+            page.locator("#setup-custom-url").fill(url)
+            page.locator("#setup-next").click()
+            page.locator("#setup-key").wait_for(state="visible", timeout=15000)
+            assert page.locator("#setup-key").input_value() == ""
+            page.locator("#setup-name").fill("Gateway")
+            page.locator("#setup-next").click()
+            page.locator("#setup-error").wait_for(state="visible", timeout=15000)
+            assert server.asked == []
+            page.locator("#setup-name").fill("mine")
+            page.locator("#setup-next").click()
+            page.locator("#setup-test").wait_for(state="visible", timeout=30000)
+            assert [a for a, _k in server.asked] == ["GET /v1/models"]
+            assert KEY not in str(server.asked)
+
+            # Another host clears what was typed for this one, and says so.
+            page.locator("#setup-back").click()
+            page.locator("#setup-key").fill("demo-key-of-one")
+            page.locator("#setup-back").click()
+            page.locator("#setup-custom-url").fill("http://localhost:9/v1")
+            page.locator("#setup-next").click()
+            page.locator("#setup-cleared").wait_for(state="visible", timeout=15000)
+            assert page.locator("#setup-key").input_value() == ""
+            assert "{host}" not in page.locator("#setup-cleared").inner_text()
+
+            # Tab stays in the dialog, both ways.
+            for key in ("Tab", "Shift+Tab"):
+                for _ in range(45):
+                    page.keyboard.press(key)
+                    assert page.evaluate("document.querySelector('#provider-setup').contains(document.activeElement)"), key
+        finally:
+            browser.close()
+    assert errors == [], errors
+
+
+def test_a_row_that_takes_no_key_is_shown_instead(kazma, provider, monkeypatch) -> None:  # noqa: F811
+    """One that lives on a key of the environment, and a server on this
+    network with none (it ended in "Paste the key")."""
+    from playwright.sync_api import sync_playwright
+
+    base, _ = kazma
+    url, _server = provider
+    assert httpx.post(f"{base}/api/providers", timeout=10, json={
+        "name": "My LM", "preset": "lm-studio", "base_url": url, "models": ["model-a"]}).status_code == 200
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = _open_settings(browser, base, "en", errors)
+            page.locator("#provider-add").click()
+            page.locator(".ps-tile[data-provider='lm-studio']").click()
+            page.locator("#setup-custom-url").fill(url)
+            page.locator("#setup-next").click()
+            page.locator("#setup-same").wait_for(state="visible", timeout=15000)
+            assert not page.locator(".ps-use-row").is_visible()
+            page.locator(".ps-show-row").click()
+            page.locator("#provider-setup").wait_for(state="hidden", timeout=5000)
+            page.wait_for_function("document.querySelector('.pc-row[aria-selected=true]').textContent.includes('My LM')", timeout=5000)
+        finally:
+            browser.close()
+    assert errors == [], errors
+
+
 def test_a_refused_key_is_said_and_nothing_is_saved(kazma, provider) -> None:  # noqa: F811
     from playwright.sync_api import sync_playwright
 

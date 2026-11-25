@@ -151,15 +151,32 @@ async def test_a_path_with_a_space_is_same_origin(path):
     assert (await mw(bad, _call_next)).status_code == 403
 
 
+def _origins_from_a_path(source: str) -> list[str]:
+    """The calls of ``normalize_origin`` given a request's whole URL, in any
+    spelling but a name it was put in first (not read)."""
+    import ast
+
+    return [ast.unparse(node) for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) == "normalize_origin"
+            and any(isinstance(part, ast.Attribute) and part.attr in ("url", "path", "raw_path")
+                    and not (isinstance(parent, ast.Attribute) and parent.attr in ("scheme", "netloc", "hostname", "port"))
+                    for arg in [*node.args, *(k.value for k in node.keywords)]
+                    for parent in [None, *ast.walk(arg)]
+                    for part in (ast.iter_child_nodes(parent) if parent is not None else [arg]))]
+
+
 def test_no_origin_is_read_from_a_decoded_path():
     """The class: an origin is read from ``base_url``, never ``request.url``."""
     from pathlib import Path
 
     import kazma_ui
 
-    def wrong(source: str) -> bool:
-        return "normalize_origin(str(request.url)" in source
-
     root = Path(kazma_ui.__file__).parent
-    assert [p.name for p in root.rglob("*.py") if wrong(p.read_text(encoding="utf-8"))] == []
-    assert wrong("served = normalize_origin(str(request.url), allow_path=True)")  # the old line
+    found = {p.name: _origins_from_a_path(p.read_text(encoding="utf-8")) for p in root.rglob("*.py")}
+    assert {k: v for k, v in found.items() if v} == {}
+    for planted in ("normalize_origin(str(request.url), allow_path=True)", "normalize_origin(f'{req.url}')",
+                    "normalize_origin(request.url)", "browser_origins.normalize_origin(value=str(request.url))",
+                    "normalize_origin('http://h' + request.url.path)"):
+        assert _origins_from_a_path(planted), planted
+    assert not _origins_from_a_path("normalize_origin(str(request.base_url), allow_path=True)")
+    assert not _origins_from_a_path("normalize_origin(f'{request.url.scheme}://{request.url.netloc}')")

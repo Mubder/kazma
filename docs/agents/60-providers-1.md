@@ -112,7 +112,8 @@ provider list as data with per-type forms, per-model details with
   - `backup_status` gives each chain entry, the provider the runtime would
     send it to, and whether that provider can be called.
   - `suggest_backups` offers a model of each usable provider of another
-    vendor, only one the runtime would route there, never a provider
+    vendor (the preset's, in whatever region: `provider_endpoints.vendor_of`;
+    `?beside=` a provider about to be the default), only one the runtime would route there, never a provider
     whose last check failed (`down`, `chat_failing`).
   - Saving a backup nothing serves is a 400. Settings shows the status and
     one-click suggestions (`/api/settings/failover-backup`).

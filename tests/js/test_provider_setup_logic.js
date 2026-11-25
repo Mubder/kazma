@@ -80,6 +80,67 @@ app.keepSetupDraft();
 ok("what is stored holds no key", Object.keys(stored).length === 1 && JSON.stringify(stored).indexOf("sk-or-demo") === -1);
 ok("the key is still in the dialog", app.setup.apiKey === "sk-or-demo-key");
 
+// ── A key put in a wrong box is not kept ──
+["name", "displayName", "models", "model", "projectId"].forEach((f) =>
+  ok("no key from the box " + f, JSON.stringify(S.draft(Object.assign({}, typed, { [f]: "sk-or-demo-wrong-box" }), shapes)).indexOf("wrong-box") === -1));
+ok("nor in a workspace", JSON.stringify(S.draft(Object.assign({}, typed, { values: { workspace_id: "sk-demo-wrong-box" } }), shapes)).indexOf("wrong-box") === -1);
+ok("nor in an address's path", S.draft(Object.assign({}, typed, { customUrl: "https://api.example/sk-or-demo-wrong-box/v1" }), shapes).customUrl === "");
+ok("nor one of no known shape", S.draft(Object.assign({}, typed, { name: "demo0aA1bB2cC3dD4eE5fF6gG7" }), shapes).name === "");
+ok("a name and a model stay", (() => { const d = S.draft(Object.assign({}, typed, { name: "Qwen 1", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+  values: { workspace_id: "llm-abc123" } }), shapes); return d.name === "Qwen 1" && d.model.indexOf("Llama") !== -1 && d.values.workspace_id === "llm-abc123"; })());
+
+// ── Names that are taken ──
+const rows = [{ name: "gateway", enabled: true }, { name: "openai", enabled: false, api_key: "" }, { name: "kept", enabled: true, aliases: ["Old"] }];
+ok("a set-up row's name is taken in any case", S.nameTaken("GateWay ", rows) && S.nameTaken("old", rows));
+ok("a catalog row's is not", !S.nameTaken("openai", rows) && !S.nameTaken("new", rows));
+
+// ── Whose key goes where ──
+const PM = sandbox.window.ProvidersManager;
+PM.setCatalog([{ id: "openrouter", name: "OpenRouter", base_url: "https://openrouter.ai/api/v1", form: "key" },
+  { id: "deepseek", name: "DeepSeek", base_url: "https://api.deepseek.com/v1", form: "key" },
+  { id: "custom", name: "Custom", base_url: "", form: "key" }]);
+function fresh() {
+  const a = sandbox.window.KazmaSettingsMixins.providerSetup();
+  a.hubProviders = [];
+  a.setupData = { groups: ["api"], fields: {}, regions: {}, key_shapes: shapes };
+  a.setup.open = true;
+  return a;
+}
+let a = fresh();
+a.setup.query = "sk-or-demo-key-1";
+a.chooseSetupProvider("openrouter");
+ok("a key pasted in the search is carried", a.setup.apiKey === "sk-or-demo-key-1");
+a.chooseSetupProvider("custom");
+ok("a key is not carried to another provider", a.setup.apiKey === "" && a.setup.preset === "custom");
+a = fresh();
+a.chooseSetupProvider("deepseek");
+a.setup.apiKey = "sk-or-demo-key-1";
+a.chooseSetupProvider("openrouter", true);
+ok("the looks-like button carries it", a.setup.apiKey === "sk-or-demo-key-1" && a.setup.preset === "openrouter");
+a = fresh();
+a.chooseSetupProvider("custom");
+Object.assign(a.setup, { baseUrl: "https://one.example/v1" });
+a._toSetupKey();
+Object.assign(a.setup, { apiKey: "demo-key-1", headerRows: [{ name: "X", value: "demo" }] });
+Object.assign(a.setup, { baseUrl: "https://one.example/v2" });
+a._toSetupKey();
+ok("another path of the host keeps it", a.setup.apiKey === "demo-key-1" && a.setup.headerRows.length === 1);
+Object.assign(a.setup, { baseUrl: "https://two.example/v1" });
+a._toSetupKey();
+ok("another host clears key and headers, and says so", a.setup.apiKey === "" && a.setup.headerRows.length === 0 && a.setup.cleared === "one.example");
+
+// ── Rows that take no key here, and what a tidy ticks ──
+a = fresh();
+a.setup.preset = "openrouter";
+ok("an environment key's row takes none", !a.setupRowTakesKey({ env_key: true }) && a.setupRowTakesKey({ env_key: false, local: false }));
+(async () => {
+  a._fetch = async () => ({ merges: [{ keep: "A", display_name: "A", merge: [
+    { name: "on", enabled: true, keys: 1 }, { name: "off-key", enabled: false, keys: 1 }, { name: "off", enabled: false, keys: 0 }], kept: [] }], unused: [{ name: "u" }] });
+  await a.loadProviderTidy();
+  ok("a row that is off and holds a key is not ticked", a.tidy.picked.on && a.tidy.picked.off && !a.tidy.picked["off-key"] && !a.tidy.picked.u);
+  ok("what changes is said", a.tidyMergeNote(a.tidy.merges[0]).indexOf("A") !== -1);
+})();
+
 // ── A late answer about an earlier key is dropped ──
 (async () => {
   let release;

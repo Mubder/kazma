@@ -848,6 +848,11 @@ async def _stream_langgraph_events(
                                     yield await emit_j(
                                         "token", {"content": str(_txt)}
                                     )
+                            elif _k == "on_chat_model_retract":
+                                # Thinking that had no opening tag: not the
+                                # turn's words (llm_stream.emit_retraction).
+                                content_acc = content_acc.removesuffix(str(_d.get("text") or ""))
+                                await _durable.commit(content_acc)
                             elif _k == "on_tool_start":
                                 _after_tool = True
                                 _durable.note({
@@ -1136,6 +1141,12 @@ async def _stream_langgraph_events(
                                     ):
                                         await _durable.commit(content_acc)
                                     yield await emit_j("token", {"content": token_text})
+
+                        # ── thinking that had no opening tag: what it streamed
+                        # is not the turn's words (llm_stream.emit_retraction) ──
+                        elif kind == "on_chat_model_retract":
+                            content_acc = content_acc.removesuffix(str(data.get("text") or ""))
+                            await _durable.commit(content_acc)
 
                         # ── on_chat_model_start: a new LLM invocation ────────
                         elif kind == "on_chat_model_start":

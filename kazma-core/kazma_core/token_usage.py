@@ -57,7 +57,7 @@ def token_counts(usage: Any) -> _TokenCounts:
     cached = 0
     if isinstance(details, Mapping):
         cached = _count(details.get("cached_tokens")) or _count(details.get("cache_read_input_tokens"))
-    if "prompt_tokens" in usage:
+    if usage.get("prompt_tokens") is not None:
         prompt = _count(usage.get("prompt_tokens"))
         cached = (cached or _count(usage.get("prompt_cache_hit_tokens")) or _count(usage.get("cached_tokens"))
                   or _count(usage.get("cache_read_input_tokens")))
@@ -78,6 +78,6 @@ def cache_write_tokens(usage: Any) -> int:
         return 0
     details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
     written = _count(details.get("cache_creation_input_tokens")) if isinstance(details, Mapping) else 0
-    if written or "prompt_tokens" in usage:
+    if written or usage.get("prompt_tokens") is not None:
         return written
     return _count(usage.get("cache_creation_input_tokens"))

@@ -13,17 +13,24 @@
   dialogs, and a half-done setup is resumed. Keys are never written to the
   browser's storage.
 - **One row per provider and address**: a second setup adds the key to the row
-  that is there, and rows that repeat each other, or that nothing uses, can be
-  tidied without losing a key.
+  that is there, and rows that repeat each other, or are off with no key, can
+  be tidied without losing a stored key; a row that lives on a key from the
+  environment is left as it is.
+- **A key goes to its own provider and address alone**: saving a provider at
+  another address without its key is refused (an empty key kept the stored one
+  and sent it there), its extra keys and headers are dropped with the move, and
+  a refused request never answers a key back.
 - **Cached input has its own price** in Model prices. DeepSeek's cached tokens
   were billed at the full input price; Anthropic's made the rest of the prompt
   free; Bedrock's were not counted.
-- **A model's thinking text is never in its answer**, for any provider: a
-  `<think>` block, a stray `</think>` (Qwen showed one, with the answer
-  twice), or reasoning parts of a list.
+- **A model's thinking text is kept out of its answer** when it is certainly
+  thinking: a `<think>` block, a stray `</think>` (Qwen showed one, with the
+  answer twice), or reasoning parts of a list. An answer that names the tags is
+  left whole.
 - **A message a provider's content filter refuses goes to a backup model of
-  another vendor**, and the answer says why. It used to end the turn in an
-  error.
+  another vendor** (Qwen, OpenAI, Azure, DeepSeek, Anthropic, Bedrock), and the
+  answer says why. It used to end the turn in an error. The closing summary of
+  a turn with no answer text is still asked of its own model only.
 - A provider whose name has a space ("Qwen 1") can be changed from the page:
   every such change was refused as coming from another site.
 

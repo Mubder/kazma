@@ -19,8 +19,8 @@ TEMPLATES = "kazma-ui/kazma_ui/templates"
 #: Overlays a click outside closes as before, by template and a mark of the
 #: overlay, with why.
 DECLARED = {
-    ("components/modal.html", "$store.modal.close()"):
-        "the shared question: a prompt with something typed in it stays open (its own rule)",
+    ("components/modal.html", "$store.modal.dismiss()"):
+        "the shared question: one with something typed in it stays open (the store's dismiss, tests/js/test_modal_store.js)",
     ("components/provider_setup.html", "tidy.open = false"): "ticks only; nothing is typed",
     ("swarm.html", "closeTaskDetail"): "shows a task; nothing is typed",
     ("swarm.html", "closeLogs"): "shows a log; nothing is typed",

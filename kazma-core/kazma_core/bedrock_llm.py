@@ -32,7 +32,9 @@ from kazma_core.llm_provider import (
     LLMResponse,
     ToolCall,
     own_key_answer,
+    content_refusal,
     cost_from_usage,
+    refused_by_finish,
     own_key_delta,
 )
 from kazma_core.llm_stream import StreamDelta
@@ -245,6 +247,9 @@ class BedrockProvider(LLMProvider):
                     # Context overflow must carry kind="context_overflow" so
                     # the watchdog routes to compaction instead of failing the
                     # turn (mirrors the generic provider).
+                    refused = content_refusal("Bedrock", 400, {"message": err_msg}) if code == "ValidationException" else None
+                    if refused is not None:
+                        raise refused from exc
                     _err_l = (code + " " + err_msg).lower()
                     if any(
                         marker in _err_l
@@ -333,8 +338,13 @@ class BedrockProvider(LLMProvider):
             usage_blob, input_cost_per_1m=in_cost, output_cost_per_1m=out_cost,
             cached_input_cost_per_1m=self.config.cached_input_cost_per_1m) if cost_known else 0.0
 
+        content, hidden = split_reasoning("".join(text_parts), cut=stop_reason == "max_tokens")
+        refused = refused_by_finish("Bedrock", stop_reason, content, tool_calls)
+        if refused is not None:
+            raise refused
         return LLMResponse(
-            content=split_reasoning("".join(text_parts))[0],
+            content=content,
+            reasoning_chars=len(hidden),
             tool_calls=tool_calls,
             finish_reason=finish,
             model=model_id,
@@ -454,9 +464,11 @@ class BedrockProvider(LLMProvider):
                 loop.call_soon_threadsafe(queue.put_nowait, exc)
                 loop.call_soon_threadsafe(queue.put_nowait, None)
                 return
-            shown = thinking.finish()
+            shown = thinking.finish(cut=stop_reason == "max_tokens")
             if shown:
                 loop.call_soon_threadsafe(queue.put_nowait, StreamDelta(content=shown))
+            if thinking.retracted:
+                loop.call_soon_threadsafe(queue.put_nowait, StreamDelta(retract=thinking.retracted))
             fake = {
                 "output": {
                     "message": {

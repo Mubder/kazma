@@ -862,6 +862,7 @@ class KazmaAgent:
             "timeout": self.llm_config.timeout,
             "input_cost_per_1m": self.llm_config.input_cost_per_1m,
             "output_cost_per_1m": self.llm_config.output_cost_per_1m,
+            "cached_input_cost_per_1m": self.llm_config.cached_input_cost_per_1m,
         }
 
     async def get_llm_client(self) -> Any:

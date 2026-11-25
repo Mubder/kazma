@@ -242,6 +242,15 @@ def _apply_param_fixes(payload: dict[str, Any], fixes: frozenset[str] | set[str]
         payload.pop("temperature", None)
 
 
+def _numbers(usage: Any) -> Any:
+    """*usage* with a count written as text ("100") as its number, one level
+    down too: some proxies answer so, and a call billed at $0 is not free."""
+    if not isinstance(usage, dict):
+        return usage
+    return {k: (int(v) if isinstance(v, str) and v.strip().isdecimal() else
+                _numbers(v) if isinstance(v, dict) else v) for k, v in usage.items()}
+
+
 def cost_from_usage(
     usage: dict[str, Any] | None,
     *,
@@ -262,6 +271,7 @@ def cost_from_usage(
     its ``input_tokens`` leaves out, were taken out of the uncached ones: a
     long cached prompt cost almost nothing on the page (2026-11-25).
     """
+    usage = _numbers(usage)
     counts = token_counts(usage)
     cached_price = (
         input_cost_per_1m * cache_read_multiplier
@@ -277,31 +287,70 @@ def cost_from_usage(
     ) / 1_000_000
 
 
-#: What a provider's content filter says when it refuses a message, lower
-#: case: Qwen (``data_inspection_failed``), Azure and OpenAI, DeepSeek, Z.AI
-#: and Moonshot. Their own words and codes, never a guess from a 400 alone.
-_CONTENT_REFUSALS = (
-    "data_inspection_failed", "datainspectionfailed", "data may contain inappropriate content",
-    "responsibleaipolicyviolation", "content_policy_violation", "content exists risk",
-    '"content_filter"', "'content_filter'", "content management policy",
-    "potentially unsafe or sensitive content", "considered high risk",
+#: The codes a provider's content filter refuses with, exactly, lower case:
+#: Qwen, Azure and OpenAI, Moonshot.
+_REFUSAL_CODES = frozenset({
+    "data_inspection_failed", "datainspectionfailed", "content_filter", "responsibleaipolicyviolation",
+    "content_policy_violation",
+})
+
+#: What a filter's message says where its code says nothing: Qwen's native
+#: answer, DeepSeek, Anthropic and Bedrock, Z.AI.
+_REFUSAL_PHRASES = (
+    "algo.datainspectionfailed", "data may contain inappropriate content", "content exists risk",
+    "blocked by content filtering policy", "unsafe or sensitive content",
 )
 
+#: The finish reasons that say a filter kept the whole answer back.
+_REFUSAL_FINISHES = frozenset({"content_filter", "refusal", "content_filtered", "guardrail_intervened"})
 
-def _is_content_refusal(status_code: int, detail: str) -> bool:
+
+def _is_content_refusal(status_code: int, detail: Any) -> bool:
     """True when a refused request was refused by the provider's content
     filter (Qwen answered a harmless Arabic question so, and the turn ended in
-    an error: the real-use runs of 2026-11-22)."""
-    if status_code not in (400, 421, 422, 451):
+    an error: the real-use runs of 2026-11-22). Read from the error's own
+    code, type and message, never from the whole body: a refused parameter
+    named ``content_filter``, or a body that echoes the person's words, is no
+    refusal of theirs."""
+    if status_code not in (0, 400, 421, 451):
         return False
-    low = str(detail or "").lower()
-    return any(mark in low for mark in _CONTENT_REFUSALS)
+    body: Any = detail
+    if isinstance(detail, str):
+        try:
+            body = json.loads(detail)
+        except ValueError:
+            body = {"message": detail}
+    if not isinstance(body, dict):
+        return False
+    error = body.get("error") if isinstance(body.get("error"), dict) else body
+    inner = error.get("innererror") if isinstance(error.get("innererror"), dict) else {}
+    named = {str(part.get(key) or "").strip().lower() for part in (body, error, inner) for key in ("code", "type")}
+    if named & _REFUSAL_CODES:
+        return True
+    said = error.get("message") or (body["error"] if isinstance(body.get("error"), str) else "")
+    return any(phrase in str(said or "")[:300].lower() for phrase in _REFUSAL_PHRASES)
 
 
-def _content_refused(endpoint: str, status_code: int, detail: str) -> LLMError:
+def content_refusal(endpoint: str, status_code: int, detail: Any) -> LLMError | None:
+    """The error of a message *endpoint*'s content filter refused (0: said in
+    the stream), or None when it is another failure. Every client asks it
+    before it reads a refused request any other way."""
+    if not _is_content_refusal(status_code, detail):
+        return None
     where = f" (HTTP {status_code})" if status_code else ""
     return LLMError(
         f"The content filter of {endpoint} refused the message{where}: {str(detail or '')[:200]}",
+        transient=False, kind="content_refused",
+    )
+
+
+def refused_by_finish(endpoint: str, finish: str, content: str, tool_calls: Any) -> LLMError | None:
+    """The same for an answer a filter kept back whole: a finish reason that
+    says so, and nothing in the answer."""
+    if str(finish or "").lower() not in _REFUSAL_FINISHES or str(content or "").strip() or tool_calls:
+        return None
+    return LLMError(
+        f"The content filter of {endpoint} kept the answer back ({finish}).",
         transient=False, kind="content_refused",
     )
 
@@ -1454,8 +1503,9 @@ class LLMProvider:
             # another vendor's backup where there is one (agent/content_refusal.py).
             # Before the tool branches: a refusal that mentions a "function"
             # was retried with no tools.
-            if _is_content_refusal(status_code, detail):
-                raise _content_refused(self._describe_endpoint(), status_code, detail) from e
+            refused = content_refusal(self._describe_endpoint(), status_code, detail)
+            if refused is not None:
+                raise refused from e
 
             # ── A refused request field (providers stage 1) ─────────────
             # o-series / GPT-5 models (and an endpoint serving them) refuse
@@ -2103,8 +2153,10 @@ class LLMProvider:
                         msg = err if isinstance(err, str) else str(
                             (err or {}).get("message") or err
                         )
-                        if _is_content_refusal(400, str(err)):
-                            raise _content_refused(self._describe_endpoint(), 0, str(err))
+                        refused = content_refusal(
+                            self._describe_endpoint(), 0, err if isinstance(err, dict) else {"message": msg})
+                        if refused is not None:
+                            raise refused
                         raise LLMError(
                             f"LLM stream error: {msg[:300]}",
                             transient=_inband_stream_error_is_transient(err, msg),
@@ -2166,9 +2218,11 @@ class LLMProvider:
                     kind="stream_truncated",
                 )
             duration_ms = (time.monotonic() - start) * 1000
-            shown = thinking.finish()
+            shown = thinking.finish(cut=finish_reason == "length")
             if shown:
                 yield StreamDelta(content=shown)
+            if thinking.retracted:
+                yield StreamDelta(retract=thinking.retracted)
             assembled = self._response_from_stream_acc(
                 content="".join(content_parts),
                 tool_acc=tool_acc,
@@ -2241,8 +2295,9 @@ class LLMProvider:
                             retry_exc,
                         )
 
-                if _is_content_refusal(status_code, detail):
-                    raise _content_refused(self._describe_endpoint(), status_code, detail) from e
+                refused = content_refusal(self._describe_endpoint(), status_code, detail)
+                if refused is not None:
+                    raise refused from e
 
                 # 4xx (except 429): fall back to blocking chat() which already
                 # classifies 404-function, context overflow, schema errors.
@@ -2353,7 +2408,7 @@ class LLMProvider:
         finish_reason = choice.get("finish_reason", "")
 
         # Reasoning a provider sent inside the content is not the answer.
-        content, hidden = split_reasoning(text_of_parts(message.get("content")))
+        content, hidden = split_reasoning(text_of_parts(message.get("content")), cut=finish_reason == "length")
         hidden_chars = len(hidden) or len(str(message.get("reasoning_content") or message.get("reasoning") or ""))
         tool_calls: list[ToolCall] = []
 
@@ -2392,6 +2447,9 @@ class LLMProvider:
             )
 
         usage = data.get("usage", {}) or {}
+        refused = refused_by_finish(self._describe_endpoint(), finish_reason, content, tool_calls)
+        if refused is not None:
+            raise refused
         counts = token_counts(usage)
         if counts.cached:
             logger.info(
@@ -2700,6 +2758,8 @@ class LLMError(Exception):
         super().__init__(*args)
         self.transient = bool(transient)
         self.kind = str(kind or "")
+        #: For ``content_refused``: a backup of another vendor was asked too.
+        self.backup_tried = False
         #: For ``unusable_answer``: what the provider sent instead (FA-211).
         self.answer = str(answer or "")
         #: For ``rate_limit_exhausted``: the requests the provider refused and

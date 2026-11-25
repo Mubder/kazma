@@ -10,9 +10,12 @@ Data only, no I/O. ``kazma_core.providers.catalog`` serves it with each
 provider; ``kazma_core.provider_setup`` checks what was typed against it. The
 words (region names, field names, hints) are the pages' catalog's, by id.
 
-Addresses: each from the vendor's own documentation, read on 2026-11-25. The
-FIRST is the preset's own address, so a provider set up before this keeps its
-row and its place in the list.
+Addresses: OpenAI's, Alibaba's, Moonshot's, MiniMax's, SiliconFlow's and Z.AI's
+were checked against the vendors' own pages on 2026-11-26; Azure's and
+Cloudflare's are the patterns their documentation gives. The FIRST is the
+preset's own address, so a provider set up before this keeps its row and its
+place in the list. A region no vendor page lists is not here: the custom
+address takes it.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ import re
 from typing import Any
 
 __all__ = ["ENDPOINTS", "FIELDS", "FORM_FIELDS", "GROUPS", "KEY_PAGES", "KEY_SHAPES", "REGIONS", "endpoint_fields", "group_of",
-           "key_page_for", "setup_data"]
+           "key_page_for", "setup_data", "vendor_of"]
 
 #: The groups the setup lists providers under, in order.
 GROUPS: tuple[str, ...] = ("api", "host", "platform", "local", "other")
@@ -102,15 +105,14 @@ ENDPOINTS: dict[str, tuple[tuple[str, str], ...]] = {
         ("ca", "https://ca.api.openai.com/v1"),
     ),
     "xai": (
-        ("global", "https://api.x.ai/v1"), ("eu", "https://eu-west-1.api.x.ai/v1"),
-        ("us", "https://us.api.x.ai/v1"),
+        ("global", "https://api.x.ai/v1"), ("us", "https://us.api.x.ai/v1"),
     ),
     "zai": (
         ("global", "https://api.z.ai/api/paas/v4"), ("coding_plan", "https://api.z.ai/api/coding/paas/v4"),
         ("china", "https://open.bigmodel.cn/api/paas/v4"),
     ),
     "moonshot": (("global", "https://api.moonshot.ai/v1"), ("china", "https://api.moonshot.cn/v1")),
-    "minimax": (("global", "https://api.minimax.io/v1"), ("china", "https://api.minimaxi.com/v1")),
+    "minimax": (("global", "https://api.minimax.io/v1"), ("china", "https://api.minimax.cn/v1")),
     "siliconflow": (("global", "https://api.siliconflow.com/v1"), ("china", "https://api.siliconflow.cn/v1")),
     "dashscope": (
         ("singapore", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
@@ -133,7 +135,7 @@ KEY_PAGES: dict[str, dict[str, str]] = {
     "moonshot": {"china": "https://platform.moonshot.cn/console/api-keys"},
     "siliconflow": {"china": "https://cloud.siliconflow.cn/account/ak"},
     "zai": {"china": "https://open.bigmodel.cn/usercenter/apikeys"},
-    "minimax": {"china": "https://platform.minimaxi.com/user-center/basic-information/interface-key"},
+    "minimax": {"china": "https://platform.minimax.cn"},
     "dashscope": {"china_beijing": "https://bailian.console.aliyun.com/?tab=model#/api-key"},
     "azure": {"azure_public": "https://portal.azure.com/#view/Microsoft_Azure_ProjectOxford/CognitiveServicesHub"},
     "bedrock": {"": "https://console.aws.amazon.com/iam/home#/security_credentials"},
@@ -174,6 +176,54 @@ _PLACEHOLDER = re.compile(r"\{([a-z_]{1,40})\}")
 def endpoint_fields(address: str) -> list[str]:
     """The fields *address* is filled with, in order."""
     return _PLACEHOLDER.findall(str(address or ""))
+
+
+#: Domains that are one vendor's under any host, beside the addresses above.
+_VENDOR_DOMAINS: tuple[tuple[str, str], ...] = (("qwencloudapi.com", "dashscope"), ("aliyuncs.com", "dashscope"))
+
+
+def _hosts() -> list[tuple[re.Pattern[str], str]]:
+    """Every catalog address's host, as ``(pattern, preset)``: a template's
+    fields match one label each."""
+    from urllib.parse import urlsplit
+
+    from kazma_core.providers import PROVIDER_PRESETS
+
+    out = []
+    for pid, meta in PROVIDER_PRESETS.items():
+        if meta.get("local") or pid == "custom":
+            continue
+        for url in {str(meta.get("base_url") or ""), *(u for _e, u in ENDPOINTS.get(pid, ()))}:
+            host = urlsplit(_PLACEHOLDER.sub("0field0", url)).hostname
+            if host:
+                out.append((re.compile(re.escape(host).replace("0field0", "[a-z0-9-]{1,63}")), pid))
+    return out
+
+
+def vendor_of(preset: str, name: str, base_url: str) -> str:
+    """Whose service a row or client is, in whatever region: the preset it was
+    made from (its own name when that is one), else the catalog provider its
+    address is of, else its host. No I/O."""
+    from urllib.parse import urlsplit
+
+    from kazma_core.providers import PROVIDER_PRESETS
+
+    for candidate in (preset, name):
+        pid = str(candidate or "").strip().lower()
+        if pid in PROVIDER_PRESETS and pid != "custom":
+            return pid
+    try:
+        parts = urlsplit(str(base_url or ""))
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return str(name or "").strip().lower()
+    for pattern, pid in _hosts():
+        if pattern.fullmatch(host):
+            return pid
+    for domain, pid in _VENDOR_DOMAINS:
+        if host == domain or host.endswith("." + domain):
+            return pid
+    return (parts.netloc.rpartition("@")[2].lower() if host else "") or str(name or "").strip().lower()
 
 
 def key_page_for(preset_id: str, base_url: str, meta: dict[str, Any]) -> str:

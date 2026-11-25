@@ -29,7 +29,9 @@ from kazma_core.llm_provider import (
     LLMProvider,
     LLMResponse,
     ToolCall,
+    content_refusal,
     cost_from_usage,
+    refused_by_finish,
     own_key_answer,
     own_key_delta,
     retry_after_seconds,
@@ -395,6 +397,9 @@ class AnthropicProvider(LLMProvider):
                     kind="rate_limit_exhausted",
                 ) from exc
             transient = status_code >= 500
+            refused = content_refusal("Anthropic", status_code, body)
+            if refused is not None:
+                raise refused from exc
             # Context overflow must carry kind="context_overflow" so the
             # watchdog routes to compaction instead of failing the turn
             # (mirrors the generic provider's marker list).
@@ -533,6 +538,9 @@ class AnthropicProvider(LLMProvider):
                     except Exception:
                         body = ""
                     transient = resp.status_code == 429 or resp.status_code >= 500
+                    refused = content_refusal("Anthropic", resp.status_code, body)
+                    if refused is not None:
+                        raise refused
                     raise LLMError(
                         f"Anthropic stream error (HTTP {resp.status_code}): {body[:400]}",
                         transient=transient,
@@ -655,11 +663,18 @@ class AnthropicProvider(LLMProvider):
             "cache_creation_input_tokens": cache_written,
         }
         cost, cost_known = self._anthropic_cost(payload["model"], usage_blob)
-        shown = thinking.finish()
+        shown = thinking.finish(cut=stop_reason == "max_tokens")
         if shown:
             yield StreamDelta(content=shown)
+        if thinking.retracted:
+            yield StreamDelta(retract=thinking.retracted)
+        content, hidden = split_reasoning("".join(text_parts), cut=stop_reason == "max_tokens")
+        refused = refused_by_finish("Anthropic", stop_reason, content, tool_calls)
+        if refused is not None:
+            raise refused
         assembled = LLMResponse(
-            content=split_reasoning("".join(text_parts))[0],
+            content=content,
+            reasoning_chars=len(hidden),
             tool_calls=tool_calls,
             finish_reason=finish,
             model=payload["model"],
@@ -711,8 +726,13 @@ class AnthropicProvider(LLMProvider):
         }
         cost, cost_known = self._anthropic_cost(model, usage_blob)
 
+        content, hidden = split_reasoning("".join(text_parts), cut=stop_reason == "max_tokens")
+        refused = refused_by_finish("Anthropic", stop_reason, content, tool_calls)
+        if refused is not None:
+            raise refused
         return LLMResponse(
-            content=split_reasoning("".join(text_parts))[0],
+            content=content,
+            reasoning_chars=len(hidden),
             tool_calls=tool_calls,
             finish_reason=finish,
             model=model,

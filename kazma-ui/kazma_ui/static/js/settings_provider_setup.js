@@ -35,7 +35,7 @@
                 googleMode: "ai_studio", region: "", apiVersion: "", projectId: "", location: "",
                 apiKey: "", awsKeyId: "", awsSecret: "", awsToken: "", showKey: false,
                 name: "", displayName: "", models: "", model: "", kind: "chat", urlAsTyped: false, headerRows: [],
-                baseUrl: "", problems: [], same: [], addTo: "", separate: false,
+                baseUrl: "", problems: [], same: [], addTo: "", separate: false, keyHost: "", cleared: "",
                 busy: "", found: null, findError: "", test: null, saved: "", savedLabel: "", error: "",
                 shown: {}, shownQuery: "", makeDefault: "", backup: "", backups: [],
             };
@@ -108,14 +108,44 @@
             }
         },
 
+        /** True when a row that is set up has *name*, in any case, or
+         *  answers to it since a merge. */
+        nameTaken(name, rows) {
+            var wanted = String(name || "").trim().toLowerCase();
+            return (rows || []).some(function (r) {
+                if ((r.aliases || []).some(function (a) { return String(a).trim().toLowerCase() === wanted; })) return true;
+                return String(r.name || "").trim().toLowerCase() === wanted
+                    && (!!r.enabled || (!!r.api_key && r.api_key !== "—"));
+            });
+        },
+
+        /** The host an address names, "" when it names none. */
+        hostOf(url) {
+            try { return new URL(String(url || "").trim()).host.toLowerCase(); } catch (e) { return ""; }
+        },
+
+        /** Text that may hold a key: a known key's shape, or a long run of
+         *  letters and digits no name or model id is. */
+        mayHoldKey(text, shapes) {
+            return String(text || "").split(/[\s,;/?#&=@]+/).some(function (part) {
+                if (Logic.guess(part, shapes).length) return true;
+                return /^[A-Za-z0-9_.-]{24,}$/.test(part) && /[A-Za-z0-9]{20,}/.test(part) && /\d/.test(part) && /[A-Za-z]/.test(part);
+            });
+        },
+
         /** The draft a half-done setup is resumed from; null when there is
-         *  nothing worth keeping. An address with a password in it is not
-         *  kept, nor one with a query (a key can stand there). */
-        draft(setup) {
+         *  nothing worth keeping. An address with a password or a query in it
+         *  is not kept, nor any value that may be a key put in a wrong box. */
+        draft(setup, shapes) {
             if (!setup || !setup.preset || setup.saved) return null;
             var out = {};
-            DRAFT_FIELDS.forEach(function (f) { out[f] = setup[f]; });
-            out.values = Object.assign({}, setup.values);
+            DRAFT_FIELDS.forEach(function (f) {
+                out[f] = typeof setup[f] === "string" && Logic.mayHoldKey(setup[f], shapes) ? "" : setup[f];
+            });
+            out.values = {};
+            Object.keys(setup.values || {}).forEach(function (f) {
+                if (!Logic.mayHoldKey(setup.values[f], shapes)) out.values[f] = setup.values[f];
+            });
             if (/[@?#]/.test(String(out.customUrl || ""))) out.customUrl = "";
             // The key is not kept: back to its step, where it is typed again.
             out.step = Math.min(Number(setup.step) || 1, 3);
@@ -167,7 +197,7 @@
 
             /** Keeps the draft in step with the dialog (x-effect). */
             keepSetupDraft() {
-                const draft = Logic.draft(this.setup);
+                const draft = Logic.draft(this.setup, this.setupData.key_shapes);
                 if (!this.setup.open) return;
                 try {
                     if (draft) root.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
@@ -346,11 +376,14 @@
 
             // ── choosing ────────────────────────────────────────────
 
-            chooseSetupProvider(id) {
+            /** *ofKey*: the provider a typed key looks like was pressed, so the
+             *  key is its. A key typed for one provider is never carried to
+             *  another otherwise: it would be sent to that one's address. */
+            chooseSetupProvider(id, ofKey) {
                 const s = this.setup;
                 const preset = ProvidersManager.getPreset(id);
                 if (!preset) return;
-                const pasted = this.setupGuess(s.query).length ? s.query.trim() : s.apiKey;
+                const pasted = this.setupGuess(s.query).length ? s.query.trim() : (ofKey === true ? s.apiKey : '');
                 this._setupTicket++;
                 if (s.preset !== id) {
                     const name = id === 'custom' ? '' : Logic.freeName(id, this.hubProviders);
@@ -377,10 +410,27 @@
                 });
             },
 
+            /** To the key's step. A key or header typed for another host does
+             *  not go with it. */
+            _toSetupKey() {
+                const s = this.setup;
+                const host = Logic.hostOf(s.baseUrl);
+                if (s.keyHost && s.keyHost !== host && (s.apiKey || s.awsSecret || s.headerRows.length)) {
+                    s.cleared = s.keyHost;
+                    Object.assign(s, { apiKey: '', awsKeyId: '', awsSecret: '', awsToken: '', headerRows: [] });
+                    this.setupKeyChanged();
+                } else if (!s.keyHost || s.keyHost === host) {
+                    s.cleared = '';
+                }
+                s.keyHost = host;
+                s.step = 3;
+            },
+
             /** The key changed: what it was checked with is gone, not where
              *  it goes. */
             setupKeyChanged() {
                 this._setupTicket++;
+                if (this.setup.apiKey) this.setup.cleared = '';
                 Object.assign(this.setup, { found: null, findError: '', test: null, error: '', busy: '' });
             },
 
@@ -490,7 +540,7 @@
             async _setupLook() {
                 const s = this.setup;
                 if (s.same.length) {
-                    if (s.addTo || s.separate) s.step = 3;  // asked and answered
+                    if (s.addTo || s.separate) this._toSetupKey();  // asked and answered
                     return;
                 }
                 const body = this.setupBody();
@@ -506,11 +556,23 @@
                 if (s.problems.length) return;
                 s.baseUrl = answer.data.base_url || '';
                 s.same = answer.data.same || [];
-                if (!s.same.length) s.step = 3;
+                if (!s.same.length) this._toSetupKey();
             },
 
             useSetupRow(row) {
-                Object.assign(this.setup, { addTo: row.name, separate: false, step: 3 });
+                Object.assign(this.setup, { addTo: row.name, separate: false });
+                this._toSetupKey();
+            },
+
+            /** A row that takes no key here: one on this network, or one whose
+             *  key is the environment's. It is shown instead. */
+            setupRowTakesKey(row) {
+                return !row.env_key && !(row.local && this.setupPreset().form === 'local');
+            },
+
+            showSetupRow(row) {
+                this._dropSetup();
+                this.hubSelectedProvider = row.name;
             },
 
             makeSetupSeparate() {
@@ -518,13 +580,21 @@
                 s.separate = true;
                 s.addTo = '';
                 s.name = Logic.freeName(s.name || s.preset, this.hubProviders);
-                s.step = 3;
+                this._toSetupKey();
             },
 
             async _setupFind() {
                 const s = this.setup;
                 if (!s.addTo && !s.name.trim()) {
                     s.error = _k('settings.setup.need_name', 'Give the provider a name.');
+                    return;
+                }
+                if (!s.addTo && Logic.nameTaken(s.name, this.hubProviders)) {
+                    s.error = _k('settings.provider_check.name_taken', 'There is already a provider with this name. Give this one another.');
+                    return;
+                }
+                if (s.addTo && !s.apiKey.trim()) {
+                    s.error = _k('settings.setup.need_key', 'Paste the key first.');
                     return;
                 }
                 if (this.setupNeedsKey() && !s.apiKey.trim() && !s.headerRows.some(r => String(r.value || '').trim())) {
@@ -572,7 +642,7 @@
                 const data = answer.data || {};
                 s.test = {
                     ok: !!data.success, speech: data.error_code === 'speech_provider',
-                    ms: data.chat_ms, answer: data.answer || '', price: data.price || this.setupListedPrice(),
+                    ms: data.chat_ms, answer: data.answer || '', thinking: !!data.thinking, price: data.price || this.setupListedPrice(),
                     error: data.success ? '' : this.setupError(answer),
                 };
                 if (s.test.speech) s.kind = 'speech';
@@ -622,11 +692,11 @@
                 let answer;
                 if (s.addTo) {
                     answer = await this._setupPost('/api/providers/' + encodeURIComponent(s.addTo) + '/keys',
-                        { api_key: s.apiKey.trim() }, 'save');
+                        { api_key: s.apiKey.trim(), base_url: s.baseUrl }, 'save');
                 } else {
                     const typed = s.models.split(',').map(m => m.trim()).filter(Boolean);
                     answer = await this._setupPost('/api/providers', Object.assign(this.setupBody(), {
-                        enabled: true, models: typed.length ? typed : (s.model.trim() ? [s.model.trim()] : []),
+                        create: true, enabled: true, models: typed.length ? typed : (s.model.trim() ? [s.model.trim()] : []),
                     }), 'save');
                 }
                 if (!answer) return;
@@ -671,8 +741,17 @@
                 const shown = {};
                 all.forEach(m => { shown[m] = chosen.length ? chosen.indexOf(m) !== -1 : (all.length <= 12 || m === s.model); });
                 s.shown = shown;
-                const backup = await this._fetch('/api/settings/failover-backup');
+                await this.loadSetupBackups();
+            },
+
+            /** Backups of another vendor than the model that will be the
+             *  default: the one in use, or this provider's. */
+            async loadSetupBackups() {
+                const s = this.setup;
+                const beside = s.makeDefault ? '?beside=' + encodeURIComponent(s.saved) : '';
+                const backup = await this._fetch('/api/settings/failover-backup' + beside);
                 s.backups = ((backup && backup.suggestions) || []).filter(b => b.model);
+                if (!s.backups.some(b => b.model === s.backup)) s.backup = '';
             },
 
             setupShownList() {
@@ -746,8 +825,17 @@
                 this.tidy.unused = ok ? (data.unused || []) : [];
                 this.tidy.loaded = ok;
                 const picked = {};
-                this.tidy.merges.forEach(g => g.merge.forEach(m => { picked[m.name] = true; }));
+                // A row that is off but holds a key is the owner's to tick: its
+                // key would be put back in use.
+                this.tidy.merges.forEach(g => g.merge.forEach(m => { if (m.enabled || !m.keys) picked[m.name] = true; }));
                 this.tidy.picked = picked;
+            },
+
+            /** What merging changes, said before it is done. */
+            tidyMergeNote(g) {
+                return _k('settings.setup.tidy_note',
+                    'Work that named a merged row uses {name} from now on: its own key first, the merged ones when that fails.',
+                    { name: g.display_name });
             },
 
             tidyCount() {
@@ -779,7 +867,9 @@
                     title: _k('settings.setup.tidy_title', 'Tidy the provider list'),
                     message: _k('settings.setup.tidy_confirm',
                         'Merged: {merge}. Removed: {remove}. Every key moves to the row that stays. This cannot be undone.',
-                        { merge: merge.join(', ') || '—', remove: remove.join(', ') || '—' }),
+                        { merge: merge.join(', ') || '—', remove: remove.join(', ') || '—' })
+                        + this.tidy.merges.filter(g => g.merge.some(m => !!this.tidy.picked[m.name]))
+                            .map(g => '\n' + this.tidyMergeNote(g)).join(''),
                     confirmText: _k('settings.setup.tidy_do', 'Tidy'),
                     danger: true,
                 }))) return;

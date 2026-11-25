@@ -133,21 +133,39 @@ code before styles, links and images. Gate: `tests/js/test_markdown_render.js`.
   that handle system messages natively — do NOT hoist there.
 
 
-- **A model's thinking text is never part of its answer** (2026-11-25,
-  `kazma_core/reasoning_text.py`): a `<think>` block at the start of the
-  content, a stray `</think>` alone on its line or with the same text on both
-  sides (Qwen, once in 36 streamed replies), and a content list's reasoning
-  parts are taken out, whole (`split_reasoning`) and streamed (`ThinkFilter`),
-  by every client class; a reply that names the tag in prose or code is not
-  cut. A new client streams `shown = filter.feed(piece)`, never the
-  provider's piece. Gate: `tests/test_reasoning_is_never_the_answer.py` (a
-  recorded Qwen-shaped stream; the old stream as the control).
+- **Thinking text is kept out of the answer when it is certainly thinking**
+  (2026-11-25, `kazma_core/reasoning_text.py`). Cutting a real answer is worse
+  than showing thinking (the owner's rule, 2026-11-26), so only the shapes its
+  docstring lists are taken out, whole (`split_reasoning`) and streamed
+  (`ThinkFilter`), by every client class: a block at the start whose opening
+  tag is alone on its line (or is glued to its first word, its closing tag
+  ending a line with text after it); a `</think>` with no opening tag before
+  it, outside code, alone on its line and not introduced by a colon, closing a
+  sentence at a line's end, or with the same text on both sides; a content
+  list's reasoning parts. Every other text is the answer, tags and all: a
+  `<think>...</think>` on one line with the answer is shown as it came.
+  **What is not so:** thinking with no opening tag (vLLM with no reasoning
+  parser) streams to the page until its closing tag, since nothing says what
+  it is before; then the rest is held, the streamed part is taken back
+  (`StreamDelta.retract`, `on_chat_model_retract`) and neither the saved row,
+  its narration nor the final frame holds it; the running turn's own token
+  frames, and a surface that reads tokens alone (the CLI), still do. Gate:
+  `tests/test_reasoning_is_never_the_answer.py` (a recorded Qwen-shaped
+  stream; the old stream as the control; every client's streamed and whole
+  text, in nested files too, positional or named).
 - **A content filter's refusal is another vendor's to answer**
-  (`agent/content_refusal.py`, `llm_provider._is_content_refusal`): an
+  (`agent/content_refusal.py`, `llm_provider.content_refusal`): an
   `LLMError` of kind `content_refused`, permanent, asked once (never again
-  with no tools). `_try_failover_models` and `resilient_chat` take it to the
+  with no tools), read from the error's own code, type and message (never the
+  whole body, which may echo the person's words) or a finish reason with
+  nothing in the answer, by every client class. A vendor is the preset's, in
+  whatever region and behind the egress proxy
+  (`provider_endpoints.vendor_of`; the backup suggestions read it too). `_try_failover_models` and `resilient_chat` take it to the
   first backup of ANOTHER vendor (the address's host), the chat's answer
-  begins with a line saying so in the message's language, and no alert is
-  raised: nothing is broken. With no such backup the turn says what refused it
-  and what to do. Every other 4xx still fails fast. Gate:
+  begins with a line saying so in the person's own language, once a turn, and
+  no alert is raised: nothing is broken. A backup that refuses too does not
+  rest. With no such backup the turn says what refused it and what can be
+  done, in the person's language. Every other 4xx still fails fast. The final
+  synthesis of a turn that ended with no answer text (`graph_respond`) is
+  asked of the turn's own client only. Gate:
   `tests/test_content_refusal_failover.py`.

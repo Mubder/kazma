@@ -20,6 +20,7 @@ REFUSALS = [
     {"error": {"code": "content_filter", "message": "The response was filtered", "innererror": {"code": "ResponsibleAIPolicyViolation"}}},
     {"error": {"message": "Content Exists Risk", "type": "invalid_request_error"}},
     {"error": {"code": "content_policy_violation", "message": "Your function call was rejected"}},
+    {"code": "DataInspectionFailed", "message": "Input data may contain inappropriate content."},
 ]
 
 
@@ -61,18 +62,108 @@ async def test_a_refusal_is_named_and_asked_once(body, stream, monkeypatch):
 def test_only_a_filters_own_words_are_a_refusal():
     for status, text in ((400, "maximum context length"), (400, "tools: maximum number of items is 128"),
                          (401, "data_inspection_failed"), (429, "content_filter"), (500, "data_inspection_failed"),
-                         (400, "invalid model"), (400, "")):
+                         (400, "invalid model"), (400, ""),
+                         # A parameter of that name, and bodies that echo the person's words.
+                         (400, '{"error": {"code": "invalid_value", "message": "Invalid value: \'content_filter\'"}}'),
+                         (422, '{"detail": [{"msg": "bad", "input": "content exists risk"}]}'),
+                         (400, '{"error": {"code": "bad_request", "message": "x", "param": "data_inspection_failed"}}'),
+                         (400, '{"error": {"message": "' + "a" * 400 + ' content exists risk"}}')):
         assert not _is_content_refusal(status, text), text
 
 
-def test_another_vendor_is_another_host():
-    def at(host, name=""):
-        return SimpleNamespace(config=SimpleNamespace(base_url=f"https://{host}/v1" if host else ""), provider_name=name)
+def _at(host, name="", preset="", proxy=""):
+    direct = f"https://{host}/v1" if host else ""
+    return SimpleNamespace(config=SimpleNamespace(base_url=proxy or direct), _direct_base_url=direct,
+                           provider_name=name, provider_preset=preset)
 
-    assert other_vendor(at("dashscope-intl.aliyuncs.com"), at("api.deepseek.com"))
-    assert not other_vendor(at("api.deepseek.com"), at("API.deepseek.com"))
-    assert not other_vendor(at("api.deepseek.com"), at(""))
-    assert other_vendor(at("api.deepseek.com"), at("", "bedrock"))
+
+@pytest.mark.parametrize(("one", "two", "other"), [
+    (_at("dashscope-intl.aliyuncs.com"), _at("api.deepseek.com"), True),
+    (_at("api.deepseek.com"), _at("API.deepseek.com"), False),
+    (_at("api.deepseek.com"), _at(""), False),
+    (_at("api.deepseek.com"), _at("", "bedrock"), True),
+    # Another region, plan or address of one vendor is not another vendor.
+    (_at("dashscope-intl.aliyuncs.com"), _at("dashscope-us.aliyuncs.com"), False),
+    (_at("dashscope-intl.aliyuncs.com"), _at("cn-hongkong.dashscope.aliyuncs.com"), False),
+    (_at("dashscope-intl.aliyuncs.com"), _at("llm-1.ap-southeast-1.maas.aliyuncs.com"), False),
+    (_at("dashscope-intl.aliyuncs.com"), _at("ap-southeast-1.maas.qwencloudapi.com"), False),
+    (_at("api.openai.com"), _at("eu.api.openai.com"), False),
+    (_at("api.moonshot.ai"), _at("api.moonshot.cn"), False),
+    (_at("one.openai.azure.com"), _at("two.openai.azure.us"), False),
+    (_at("gate.example", "Work", "dashscope"), _at("dashscope.aliyuncs.com"), False),
+    (_at("gate.example", "Work", "dashscope"), _at("gate.example", "Work 2", "deepseek"), True),
+    # Through the egress proxy every client has the proxy's host.
+    (_at("api.openai.com", proxy="http://127.0.0.1:4000/v1"), _at("api.deepseek.com", proxy="http://127.0.0.1:4000/v1"), True),
+])
+def test_another_vendor_is_another_preset(one, two, other):
+    assert other_vendor(one, two) is other
+
+
+def test_a_built_client_knows_whose_it_is():
+    from kazma_core.provider_adapters import build_client
+
+    def built(name, url, preset=""):
+        return build_client(name, LLMConfig(base_url=url, api_key="k", model="m"), {"name": name, "preset": preset})
+
+    assert not other_vendor(built("Qwen EU", "https://x.example/v1", "dashscope"), built("dashscope", "https://y.example/v1"))
+    assert other_vendor(built("Qwen EU", "https://x.example/v1", "dashscope"), built("z", "https://x.example/v1"))
+
+
+def test_step_five_offers_another_vendor():
+    from kazma_core.failover_backup import suggest_backups
+
+    rows = [{"name": "Qwen", "preset": "dashscope", "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"},
+            {"name": "Qwen US", "preset": "dashscope", "base_url": "https://dashscope-us.aliyuncs.com/compatible-mode/v1"},
+            {"name": "deepseek", "base_url": "https://api.deepseek.com/v1"}]
+
+    class _Registry:
+        def list_providers(self):
+            return [{**r, "enabled": True, "api_key": "demo-key-1"} for r in rows]
+
+        def get_provider(self, name):
+            return next((r for r in self.list_providers() if r["name"] == name), None)
+
+        def get_active_profile(self):
+            return {"provider": "Qwen"}
+
+        def resolve_provider_credentials(self, name):
+            return "", "demo-key-1"
+
+        def get_visible_models(self, name):
+            return [name.lower() + "-model"]
+
+        def find_provider_for_model(self, model):
+            return next(r for r in self.list_providers() if model == r["name"].lower() + "-model")
+
+    assert [b["provider"] for b in suggest_backups(_Registry())] == ["deepseek"]
+    assert [b["provider"] for b in suggest_backups(_Registry(), beside="deepseek")] == ["Qwen"]
+
+
+PICTURE = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+
+
+def test_the_line_follows_the_persons_own_last_message():
+    from kazma_core.agent.content_refusal import already_told, person_text
+    from kazma_core.agent.plan_fence import AUTO_CONTINUE_PROMPT
+
+    asked = {"role": "user", "content": [{"type": "text", "text": "ما هذا؟"}, PICTURE]}
+    assert person_text([asked]) == "ما هذا؟"
+    assert refusal_line(person_text([asked]), "a", "b").startswith("> رفض")
+    nudged = [asked, {"role": "assistant", "content": refusal_line("ما هذا؟", "a", "b") + "\n\nx"},
+              {"role": "user", "content": AUTO_CONTINUE_PROMPT}]
+    assert person_text(nudged) == "ما هذا؟" and already_told(nudged)
+    assert not already_told([*nudged, {"role": "user", "content": "وهذا؟"}])  # another turn
+    assert not already_told([asked])
+
+
+def test_the_failure_says_what_was_done_in_the_messages_language():
+    alone, tried = LLMError("x", kind="content_refused"), LLMError("x", kind="content_refused")
+    tried.backup_tried = True
+    both = friendly_llm_error(alone)
+    assert "content filter" in both and "مرشّح المحتوى" in both and "set a backup model" in both
+    english = friendly_llm_error(tried, user_text="what is it?")
+    assert "مرشّح" not in english and "set a backup" not in english and "did not answer either" in english
+    assert "The content filter" not in friendly_llm_error(tried, user_text="ما هذا السؤال؟")
 
 
 def test_the_line_is_in_the_messages_language():
@@ -126,6 +217,128 @@ async def test_a_refused_call_goes_to_the_other_vendor_at_once(quiet):
     answer = await rc.resilient_chat(primary, messages=[{"role": "user", "content": "x"}], frozen_failover=frozen)
     assert answer.content == "answered" and (primary.calls, same.calls, other.calls) == (1, 0, 1)
     assert quiet == [], "a filter's refusal is no failure to alert on"
+
+
+async def test_a_backup_that_refuses_too_does_not_rest(quiet):
+    """It is not down: the next outage asks it."""
+    refusing = _Refusing("api.deepseek.com")
+    frozen = SimpleNamespace(clients=(("other", refusing),), cooldown_seconds=300)
+    with pytest.raises(LLMError) as raised:
+        await rc.resilient_chat(_Refusing("dashscope-intl.aliyuncs.com"),
+                                messages=[{"role": "user", "content": "x"}], frozen_failover=frozen)
+    assert refusing.calls == 1 and rc._cooldowns == {} and raised.value.backup_tried
+    wrong = _Wrong("api.deepseek.com")  # the control: one that failed rests
+    with pytest.raises(LLMError):
+        await rc.resilient_chat(_Refusing("dashscope-intl.aliyuncs.com"), messages=[{"role": "user", "content": "x"}],
+                                frozen_failover=SimpleNamespace(clients=(("wrong", wrong),), cooldown_seconds=300))
+    assert "wrong" in rc._cooldowns
+    rc._cooldowns.clear()
+
+
+# ── Every client's refusals ─────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_anthropics_refusals(monkeypatch, stream):
+    from kazma_core.anthropic_llm import AnthropicProvider
+
+    monkeypatch.setenv("KAZMA_LLM_STREAM", "1")
+    body = {"type": "error", "error": {"type": "invalid_request_error", "message": "Output blocked by content filtering policy"}}
+    client = AnthropicProvider(LLMConfig(base_url="https://api.anthropic.com/v1", api_key="k", model="claude-x"))
+    wired = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(400, json=body)),
+                              base_url="https://api.anthropic.com/v1")
+
+    async def _wired():
+        return wired
+
+    client._get_client = _wired
+    with pytest.raises(LLMError) as raised:
+        if stream:
+            async for _delta in client.chat_stream([{"role": "user", "content": "x"}]):
+                pass
+        else:
+            await client.chat([{"role": "user", "content": "x"}])
+    assert is_content_refused(raised.value)
+    with pytest.raises(LLMError) as raised:
+        client._parse_response({"content": [], "stop_reason": "refusal", "usage": {}}, "claude-x", 0.0)
+    assert is_content_refused(raised.value)
+    kept = client._parse_response({"content": [{"type": "text", "text": "I will not."}], "stop_reason": "refusal", "usage": {}}, "c", 0.0)
+    assert kept.content == "I will not."
+
+
+async def test_bedrocks_refusals():
+    from kazma_core.bedrock_llm import BedrockProvider
+
+    class _Boto:
+        def converse(self, **kw):
+            exc = RuntimeError("ValidationException")
+            exc.response = {"Error": {"Code": "ValidationException",
+                                      "Message": "The model returned the following errors: Output blocked by content filtering policy"},
+                            "ResponseMetadata": {"HTTPStatusCode": 400}}
+            raise exc
+
+    client = BedrockProvider(LLMConfig(model="m"), region="us-east-1")
+    client._get_client = lambda: _Boto()
+    with pytest.raises(LLMError) as raised:
+        await client.chat([{"role": "user", "content": "x"}])
+    assert is_content_refused(raised.value)
+    with pytest.raises(LLMError) as raised:
+        client._parse({"output": {"message": {"content": []}}, "stopReason": "content_filtered"}, "m", 0.0)
+    assert is_content_refused(raised.value)
+
+
+async def test_an_answer_kept_back_whole():
+    client = _client(lambda req: httpx.Response(200, json={
+        "choices": [{"message": {"role": "assistant", "content": ""}, "finish_reason": "content_filter"}], "usage": {}}))
+    with pytest.raises(LLMError) as raised:
+        await client.chat([{"role": "user", "content": "x"}])
+    assert is_content_refused(raised.value)
+
+
+def _unasked(source: str) -> list[str]:
+    """The functions of a client that raise on a refused request and never ask
+    ``content_refusal`` (nested functions with the one they are in)."""
+    import ast
+
+    out = []
+
+    def walk(body, prefix=""):
+        for node in body:
+            if isinstance(node, ast.ClassDef):
+                walk(node.body, node.name + ".")
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                text = ast.unparse(node)
+                reads = any(mark in text for mark in ("resp.status_code >= 400", "except httpx.HTTPStatusError",
+                                                      "err_resp.get('Error')"))
+                if reads and "LLMError" in text and "content_refusal(" not in text:
+                    out.append(prefix + node.name)
+
+    walk(ast.parse(source).body)
+    return out
+
+
+def test_every_client_asks_whether_a_filter_refused():
+    """Reads: functions of every file that defines a client class, by how they
+    meet a refused request (an HTTP status, a boto error). Does not read: a
+    client that meets one any other way."""
+    from pathlib import Path
+
+    import kazma_core
+
+    root = Path(kazma_core.__file__).parent
+    files = [p for p in sorted(root.rglob("*_llm.py")) + [root / "llm_provider.py"]
+             if "(LLMProvider)" in p.read_text(encoding="utf-8") or p.name == "llm_provider.py"]
+    assert len(files) >= 5
+    # Azure's, Google's and the retry helpers hand the call to the parent or re-raise what it classed.
+    declared = {"LLMProvider._retry_refused_parameters", "LLMProvider._retry_direct_after_gateway_fail"}
+    found = {p.name: [f for f in _unasked(p.read_text(encoding="utf-8")) if f not in declared] for p in files}
+    assert {k: v for k, v in found.items() if v} == {}
+
+
+def test_the_gate_sees_a_client_that_does_not_ask():
+    planted = ("class C(LLMProvider):\n    async def chat(self):\n        if resp.status_code >= 400:\n"
+               "            raise LLMError('x')\n")
+    assert _unasked(planted) == ["C.chat"]
 
 
 async def test_another_permanent_error_still_fails_fast(quiet):
@@ -183,3 +396,30 @@ def test_a_turn_is_answered_by_the_other_vendor_and_says_why(monkeypatch, tmp_pa
         assert done["model"] == backup and row["content"] == done["content"]
     else:  # the control: any other permanent refusal is not asked elsewhere
         assert "Answered by" not in done["content"] and done["content"].startswith("⚠️")
+
+
+def test_a_backup_that_refuses_a_turn_too_does_not_rest_and_the_failure_says_so(monkeypatch, tmp_path):
+    from kazma_core.agent import graph_supervisor, nonstop
+    from kazma_core.model_registry import get_model_registry
+
+    from tests.test_done_frame_names_the_answering_model import _turn
+
+    backup = "backup-that-refuses"
+    real = nonstop.get_nonstop_config
+
+    def with_failover(*args, **kwargs):
+        cfg = real(*args, **kwargs)
+        cfg.failover.enabled, cfg.failover.chain, cfg.failover.cooldown_seconds = True, [backup], 300.0
+        return cfg
+
+    class _Refused(_Backup):
+        async def chat(self, messages=None, tools=None, *args, **kwargs):
+            raise LLMError("refused", transient=False, kind="content_refused")
+
+    monkeypatch.setattr(nonstop, "get_nonstop_config", with_failover)
+    monkeypatch.setattr(graph_supervisor, "_failover_cooldowns", {})
+    monkeypatch.setitem(graph_supervisor._failover_clients, backup, _Refused("api.deepseek.com"))
+    monkeypatch.setattr(graph_supervisor, "_failover_built_for", get_model_registry().generation)
+    done, _row = _turn(monkeypatch, tmp_path, _Refused("dashscope-intl.aliyuncs.com"), "refusal-both")
+    assert graph_supervisor._failover_cooldowns == {}
+    assert "did not answer either" in done["content"] and "set a backup" not in done["content"]

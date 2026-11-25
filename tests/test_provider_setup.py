@@ -212,24 +212,12 @@ def test_duplicates_become_one_row_and_nothing_is_lost(registry):
     assert tidy_report(registry)["merges"] == []
 
 
-def test_a_key_that_cannot_be_read_is_never_lost(registry, monkeypatch):
+def test_a_key_that_cannot_be_read_is_never_lost(registry, vault_env):
     """The old way of merging by hand (delete the second row) loses its key;
     a row whose stored key does not open is not merged."""
     _three_qwens(registry)
-    real = registry.list_providers
-
-    def unreadable():
-        return [{**r, "api_key": ""} if r["name"] == "QwenCloud" else r for r in real()]
-
-    from kazma_core import model_registry_store
-
-    raw = model_registry_store.load_providers_unresolved
-
-    def pointers(store):
-        return [{**r, "api_key": "vault://cfg:x"} if r["name"] == "QwenCloud" else r for r in raw(store)]
-
-    monkeypatch.setattr(registry, "list_providers", unreadable)
-    monkeypatch.setattr(model_registry_store, "load_providers_unresolved", pointers)
+    assert vault_env.delete("cfg:providers.list.QwenCloud.api_key", every_scope=True)
+    registry.config_store._cache.clear()
     [group] = tidy_report(registry)["merges"]
     assert [(k["name"], k["why"]) for k in group["kept"]] == [("QwenCloud", "key_undecryptable")]
     with pytest.raises(SetupRefused):

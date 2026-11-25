@@ -256,6 +256,16 @@ class ModelRegistry:
         """Drop the cached client of the provider *name* (its row changed)."""
         self._clients.pop((name or "").strip(), None)
 
+    def resolve_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Stored provider *rows* with their vault references read now (a
+        reference that does not open is empty), normalized. Blocking."""
+        resolve = getattr(self._config_store, "_resolve_vault_value", None)
+        out = []
+        for row in rows:
+            held = resolve("providers.list", row, migrate=False) if callable(resolve) else row
+            out.append(self._normalize_provider_entry(held if isinstance(held, dict) else row))
+        return out
+
     def update_provider_rows(self, updater: Any, *, removed_presets: Any = ()) -> None:
         """Change the stored provider list in one read-modify-write
         (``atomic_update``): *updater* takes the rows as stored -- vault
@@ -1613,6 +1623,15 @@ class ModelRegistry:
         providers = self.list_providers()
         for provider in providers:
             if provider.get("name") == name:
+                from kazma_core.provider_check import STORED_SECRET_FIELDS, address_moved
+
+                if address_moved(str(data.get("base_url") or ""), provider):
+                    # A secret goes to the address it was saved with alone: an
+                    # extra key the caller did not name was sent to the new one.
+                    for secret in STORED_SECRET_FIELDS:
+                        if secret != "api_key" and not data.get(secret):
+                            provider.pop(secret, None)
+                            data.pop(secret, None)
                 for key, value in data.items():
                     if key == "models":
                         provider["models"] = self._normalize_models(value)

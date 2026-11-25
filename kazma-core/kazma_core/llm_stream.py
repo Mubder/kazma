@@ -54,6 +54,9 @@ class StreamDelta:
     """
 
     content: str = ""
+    #: Text this call streamed that was thinking after all (a model that
+    #: thinks with no opening tag): no longer the turn's words.
+    retract: str = ""
     response: Any = None
     finish_reason: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
@@ -223,6 +226,19 @@ def emit_token_delta(content: str, *, thread_id: str | None = None) -> None:
         logger.debug("[llm_stream] emit failed thread=%s", tid[:12], exc_info=True)
 
 
+def emit_retraction(text: str, *, thread_id: str | None = None) -> None:
+    """Tell the stream's consumer that *text*, the end of what it was sent as
+    tokens, was thinking after all (``on_chat_model_retract``). Never raises."""
+    tid = _resolve_stream_thread(thread_id)
+    queue = _delta_queues.get(tid) if tid and text else None
+    if queue is None:
+        return
+    try:
+        queue.put_nowait({"event": "on_chat_model_retract", "name": "llm", "data": {"text": str(text)}})
+    except asyncio.QueueFull:
+        logger.debug("[llm_stream] delta queue full, a retraction dropped (thread=%s)", tid[:12])
+
+
 def _has_chat_stream(client: Any) -> bool:
     """True when *client*'s class implements an async-generator ``chat_stream``.
 
@@ -257,6 +273,8 @@ async def invoke_llm_chat(
             async for delta in client.chat_stream(*args, **kwargs):
                 if getattr(delta, "content", None) and emit_deltas:
                     emit_token_delta(delta.content)
+                if getattr(delta, "retract", None) and emit_deltas:
+                    emit_retraction(delta.retract)
                 if getattr(delta, "response", None) is not None:
                     response = delta.response
         except TypeError:

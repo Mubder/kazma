@@ -10,8 +10,9 @@ and :mod:`kazma_core.provider_endpoints` (the data). Here:
 * :func:`rows_at` -- the rows that already are this provider at this address;
 * :func:`add_key` -- one more key on a row (``provider_keys`` tries each);
 * :func:`tidy_report` and :func:`tidy` -- rows that repeat each other, made
-  one, and rows that are off, keyless and used by nothing, removed. No key is
-  ever lost by it: a key that cannot be read refuses the whole change.
+  one, and rows that are off with no key, removed. A key stored in a row is
+  never lost by it (one that cannot be read, or that changed meanwhile, stops
+  it), and a row that lives on a key of the environment stays as it is.
 
 Every function reads or writes settings: off the event loop.
 """
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "SetupRefused",
     "add_key",
+    "address_of",
     "endpoint_address",
     "field_problems",
     "rows_at",
@@ -91,10 +93,6 @@ def field_problems(entry: dict[str, Any], stored: dict[str, Any] | None = None) 
     "code"}`` (``missing`` or ``malformed``): the address, and what its form
     asks (:data:`FORM_FIELDS`). A value unchanged from *stored* is not judged:
     a row saved before this stays as it is."""
-    from urllib.parse import urlsplit
-
-    from kazma_core.url_utils import normalize_provider_url
-
     form = str(_preset_of(entry).get("form") or "key")
     stored = stored or {}
     problems: list[dict[str, str]] = []
@@ -113,29 +111,53 @@ def field_problems(entry: dict[str, Any], stored: dict[str, Any] | None = None) 
         for field, required in FORM_FIELDS.get(form, ()):
             judge(field, required)
     base = str(entry.get("base_url") or "").strip()
-    if base and base != str(stored.get("base_url") or "").strip():
-        try:
-            # As the client will use it: an address typed without its scheme
-            # is completed by the one normalizer.
-            parts = urlsplit(normalize_provider_url(base))
-            named = parts.scheme in ("http", "https") and bool(parts.hostname) and not any(c.isspace() for c in base)
-        except ValueError:
-            named = False
-        if not named or "{" in base or "}" in base:
-            problems.append({"field": "base_url", "code": "malformed"})
+    if base and base != str(stored.get("base_url") or "").strip() and not _named_address(base):
+        problems.append({"field": "base_url", "code": "malformed"})
     return problems
+
+
+def _named_address(base: str) -> bool:
+    """Whether *base* names a web server: http or https (or no scheme, which
+    the one normalizer completes), a host, and no control character, space or
+    unfilled placeholder in it."""
+    from urllib.parse import urlsplit
+
+    from kazma_core.url_utils import normalize_provider_url
+
+    if any(ord(c) <= 32 or ord(c) == 127 for c in base) or "{" in base or "}" in base:
+        return False
+    try:
+        typed = urlsplit(base)
+        if "://" in base and typed.scheme.lower() not in ("http", "https"):
+            return False
+        parts = urlsplit(normalize_provider_url(base))
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.hostname)
 
 
 # ── One row per provider and address ────────────────────────────────────
 
 
-def _address(url: str) -> str:
+def address_of(url: str) -> str:
+    """An address as two rows are compared by it: normalized, its scheme and
+    host in lower case -- never its path, its query or a password in it, which
+    tell two accounts of one server apart."""
+    from urllib.parse import urlsplit
+
     from kazma_core.url_utils import normalize_provider_url
 
+    text = str(url or "").strip()
+    scheme, sep, rest = text.partition("://")
+    text = scheme.lower() + sep + rest if sep else text
     try:
-        return normalize_provider_url(url).rstrip("/").lower()
+        parts = urlsplit(normalize_provider_url(text))
     except ValueError:  # a port out of range: compared as typed
-        return url.strip().rstrip("/").lower()
+        return text.rstrip("/")
+    user, at, host = parts.netloc.rpartition("@")
+    path = parts.path.rstrip("/")
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{parts.scheme.lower()}://{user}{at}{host.lower()}{path}{query}"
 
 
 def _identity_of(entry: dict[str, Any]) -> tuple[str, ...] | None:
@@ -155,19 +177,37 @@ def _identity_of(entry: dict[str, Any]) -> tuple[str, ...] | None:
         if _is_vertex(entry, "google"):
             project = str(entry.get("project_id") or "").strip().lower()
             return (style, kind, project, str(entry.get("location") or "").lower()) if project else None
-        return (style, kind, _address(base)) if base else (style, kind, "ai_studio")
+        return (style, kind, address_of(base)) if base else (style, kind, "ai_studio")
     if not base:
         return None
     if style == "azure":
-        return style, kind, _address(base), str(entry.get("api_version") or "").strip().lower()
-    return style, kind, _address(base)
+        return style, kind, address_of(base), str(entry.get("api_version") or "").strip().lower()
+    return style, kind, address_of(base)
+
+
+def _stored_keys(row: dict[str, Any]) -> list[tuple[str, str]]:
+    from kazma_core.provider_keys import keys_of
+
+    return keys_of(str(row.get("api_key") or ""), row)
+
+
+def _on_env_key(registry: Any, row: dict[str, Any]) -> bool:
+    """True when *row* holds no key of its own and the runtime sends one all
+    the same (``<PROVIDER>_API_KEY``, ``KAZMA_API_KEY``): a key put in the row
+    would take its place, so a setup or a tidy never does it silently."""
+    from kazma_core.runtime.live_llm import coerce_api_key, key_is_usable
+
+    if _stored_keys(row):
+        return False
+    _url, key = registry.resolve_provider_credentials(str(row.get("name") or ""))
+    return key_is_usable(coerce_api_key(key))
 
 
 def rows_at(registry: Any, entry: dict[str, Any], *, exclude: str = "") -> list[dict[str, Any]]:
     """The rows that already are *entry*'s provider at its address, the ones
-    in use first: ``{"name", "display_name", "enabled", "has_key",
-    "keys"}`` -- never a key."""
-    from kazma_core.provider_keys import keys_of
+    in use first: ``{"name", "display_name", "enabled", "has_key", "keys",
+    "env_key", "local"}`` -- never a key."""
+    from kazma_core.runtime.live_llm import url_is_local
 
     here = _identity_of(entry)
     if here is None:
@@ -178,13 +218,14 @@ def rows_at(registry: Any, entry: dict[str, Any], *, exclude: str = "") -> list[
         name = str(row.get("name") or "")
         if name == exclude or _identity_of(row) != here:
             continue
-        keys = len(keys_of(str(row.get("api_key") or ""), row))
+        keys = len(_stored_keys(row))
         if not keys and not row.get("enabled"):
             continue  # a catalog row nobody set up: the setup fills it in
         out.append({
             "name": name, "display_name": str(row.get("display_name") or name),
             "enabled": bool(row.get("enabled")), "has_key": keys > 0, "keys": keys,
-            "in_use": name == active,
+            "in_use": name == active, "env_key": _on_env_key(registry, row),
+            "local": url_is_local(str(row.get("base_url") or "")),
         })
     return sorted(out, key=lambda r: (not r["in_use"], not r["enabled"], not r["has_key"], r["name"]))
 
@@ -238,12 +279,12 @@ def _raw_rows(current: Any) -> list[dict[str, Any]]:
     return [dict(r) for r in current if isinstance(r, dict)]
 
 
-def add_key(registry: Any, name: str, key: str, label: str = "") -> dict[str, Any]:
+def add_key(registry: Any, name: str, key: str, label: str = "", *, base_url: str = "") -> dict[str, Any]:
     """Put *key* on the row *name*: its own key when it has none (and the row
     is switched on), else one more, tried when the others fail
     (``provider_keys``). ``{"added": bool, "keys": n}``; a key it has already
-    is not added twice."""
-    from kazma_core.provider_keys import keys_of
+    is not added twice. *base_url*: the address the key was offered for -- a
+    row that is not there (any more) takes none."""
     from kazma_core.runtime.live_llm import coerce_api_key, key_is_usable
 
     clean = coerce_api_key(key)
@@ -254,23 +295,30 @@ def add_key(registry: Any, name: str, key: str, label: str = "") -> dict[str, An
         raise SetupRefused("unknown_provider", "There is no such provider.")
     if registry.stored_key_is_undecryptable(name):
         raise SetupRefused("key_undecryptable", "This provider's saved key cannot be read, so nothing is added to it.")
-    held = {k for _label, k in keys_of(str(row.get("api_key") or ""), row)}
-    outcome = {"added": False}
+    if _on_env_key(registry, row):
+        raise SetupRefused(
+            "env_key", "This provider uses a key from the environment; a key added here would take its place.")
+    outcome: dict[str, Any] = {"added": False, "keys": 0}
 
     def update(current: Any) -> list[dict[str, Any]]:
         rows = _raw_rows(current)
         target = next((r for r in rows if str(r.get("name") or "") == name), None)
         if target is None:
             raise SetupRefused("unknown_provider", "There is no such provider.")
+        fresh = registry.resolve_rows([target])[0]
+        if base_url.strip() and address_of(str(fresh.get("base_url") or "")) != address_of(base_url):
+            raise SetupRefused("row_moved", "This provider is not at that address any more; nothing was added.")
+        held = {k for _label, k in _stored_keys(fresh)}
+        outcome["keys"] = len(held | {clean})
         first = not str(target.get("api_key") or "").strip()
-        outcome["added"] = _with_key(target, clean, str(label or "").strip()[:60], set(held))
+        outcome["added"] = _with_key(target, clean, str(label or "").strip()[:60], held)
         if first and outcome["added"]:
             target["enabled"] = True
         return rows
 
     registry.update_provider_rows(update)
     _changed(registry, name)
-    return {"added": outcome["added"], "keys": len(held | {clean})}
+    return outcome
 
 
 # ── Tidying rows that repeat each other ─────────────────────────────────
@@ -311,7 +359,9 @@ def _enforced() -> bool:
     return spaces_enforced()
 
 
-def _why_kept(raw: dict[str, Any], row: dict[str, Any], keep: dict[str, Any], named: set[str]) -> str:
+def _why_kept(
+    registry: Any, raw: dict[str, Any], row: dict[str, Any], keep: dict[str, Any], named: set[str],
+) -> str:
     """Why *row* is not merged into *keep*, as a code, or ""."""
     name = str(row.get("name") or "")
     if name.lower() in named:
@@ -320,6 +370,8 @@ def _why_kept(raw: dict[str, Any], row: dict[str, Any], keep: dict[str, Any], na
         return "members_may_hold_keys"  # a member's own key is kept by the row's name
     if _unreadable_key(raw, row):
         return "key_undecryptable"
+    if _on_env_key(registry, row) or _on_env_key(registry, keep):
+        return "env_key"
     if (row.get("secret_headers") or {}) != (keep.get("secret_headers") or {}):
         return "own_headers"
     for field in ("aws_access_key_id", "aws_secret_access_key", "aws_session_token", "url_as_typed"):
@@ -329,10 +381,8 @@ def _why_kept(raw: dict[str, Any], row: dict[str, Any], keep: dict[str, Any], na
 
 
 def _rank(row: dict[str, Any], active: str) -> tuple[Any, ...]:
-    from kazma_core.provider_keys import keys_of
-
     name = str(row.get("name") or "")
-    keys = keys_of(str(row.get("api_key") or ""), row)
+    keys = _stored_keys(row)
     return (name != active, not (row.get("enabled") and keys), not keys, not row.get("enabled"),
             -len(row.get("models") or []), name)
 
@@ -341,17 +391,19 @@ def _plan(registry: Any) -> dict[str, Any]:
     """What :func:`tidy_report` shows and :func:`tidy` does, one reading."""
     from kazma_core.model_registry_store import SEEDED_PRESETS, load_providers_unresolved
     from kazma_core.provider_check import credentials_problem
-    from kazma_core.provider_keys import keys_of
 
-    rows = registry.list_providers()
     raw = {str(r.get("name") or ""): r for r in load_providers_unresolved(registry.config_store) if isinstance(r, dict)}
+    # Each stored row as it is now, its keys read again (the settings cache
+    # holds a key another process replaced).
+    stored = {str(r.get("name") or ""): r for r in registry.resolve_rows(list(raw.values()))}
+    rows = [stored.get(str(r.get("name") or ""), r) for r in registry.list_providers()]
     active = str((registry.get_active_profile() or {}).get("provider") or "")
     named = _person_lists()
     by_identity: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     for row in rows:
         name = str(row.get("name") or "")
         here = _identity_of(row)
-        set_up = bool(row.get("enabled")) or bool(keys_of(str(row.get("api_key") or ""), row))
+        set_up = bool(row.get("enabled")) or bool(_stored_keys(row))
         # A catalog row nobody set up repeats nothing unless another row does
         # its work under another name (live's "zai" beside "Z.AI").
         if here is not None and name in raw:
@@ -365,11 +417,11 @@ def _plan(registry: Any) -> dict[str, Any]:
         keep, rest = ranked[0], ranked[1:]
         merge, kept = [], []
         for row in rest:
-            why = _why_kept(raw.get(str(row["name"])) or {}, row, keep, named)
+            why = _why_kept(registry, raw.get(str(row["name"])) or {}, row, keep, named)
             if not why and _unreadable_key(raw.get(str(keep["name"])) or {}, keep):
                 why = "key_undecryptable"
             entry = {"name": str(row["name"]), "display_name": str(row.get("display_name") or row["name"]),
-                     "enabled": bool(row.get("enabled")), "keys": len(keys_of(str(row.get("api_key") or ""), row))}
+                     "enabled": bool(row.get("enabled")), "keys": len(_stored_keys(row))}
             (kept if why else merge).append({**entry, "why": why} if why else entry)
         in_merge.update(str(r["name"]) for r in group)
         merges.append({"keep": str(keep["name"]), "display_name": str(keep.get("display_name") or keep["name"]),
@@ -388,9 +440,9 @@ def _plan(registry: Any) -> dict[str, Any]:
 
 def tidy_report(registry: Any) -> dict[str, Any]:
     """The rows that repeat each other (``merges``: the row kept, the rows
-    merged into it, and those that stay with the reason) and the rows nothing
-    uses (``unused``: off, without what their sign-in needs, not a catalog
-    row every install has). Never a key. Raises ``IdentityUnavailable``."""
+    merged into it, and those that stay with the reason) and the rows that are
+    off and lack what their sign-in needs (``unused``; a catalog row every
+    install has is not one). Never a key. Raises ``IdentityUnavailable``."""
     from kazma_core.security.url_credentials import mask_url_credentials
 
     plan = _plan(registry)
@@ -400,9 +452,11 @@ def tidy_report(registry: Any) -> dict[str, Any]:
     return {"merges": plan["merges"], "unused": plan["unused"]}
 
 
-def _move_settings(registry: Any, names: list[str], keep: str) -> None:
-    """The owner's prices and details kept under a merged row's name, moved
-    to the kept row's (its own entry wins)."""
+def _copy_settings(registry: Any, names: list[str], keep: str, *, drop: bool) -> None:
+    """The owner's prices and details kept under a merged row's name, put
+    under the kept row's too (its own entry wins); *drop*: and taken from the
+    old name. Copied before the rows are written and dropped after, each any
+    number of times: a tidy cut between the two leaves every price in force."""
     from kazma_core.model_details import OVERRIDES_KEY
     from kazma_core.model_prices import OWNER_PRICES_KEY
 
@@ -418,7 +472,8 @@ def _move_settings(registry: Any, names: list[str], keep: str) -> None:
                 for prefix in prefixes:
                     if str(ref).lower().startswith(prefix):
                         held.setdefault(f"{keep.lower()}:{str(ref)[len(prefix):]}", held[ref])
-                        held.pop(ref, None)
+                        if drop:
+                            held.pop(ref, None)
             return held
 
         registry.config_store.atomic_update(key, move, category="models")
@@ -429,9 +484,9 @@ def tidy(registry: Any, *, merge: list[str] | None = None, remove: list[str] | N
     rows *remove*; only what :func:`tidy_report` offers now. The kept row
     takes every key (as extra keys), the models, and the merged names as
     ``aliases``, so a chat, a backup or a saved profile naming one still
-    finds it. A row that changed meanwhile refuses the whole change."""
+    finds it. A row that changed meanwhile, its keys included (with the vault
+    on, a new key leaves the stored row as it was), refuses the whole change."""
     from kazma_core.model_registry_store import SEEDED_PRESETS
-    from kazma_core.provider_keys import keys_of
 
     plan = _plan(registry)
     wanted, dropped = set(merge or []), set(remove or [])
@@ -441,26 +496,27 @@ def tidy(registry: Any, *, merge: list[str] | None = None, remove: list[str] | N
         raise SetupRefused("plan_changed", "These rows changed meanwhile; nothing was changed. Look again.")
     rows, raw = plan["rows"], plan["raw"]
     moved: dict[str, list[tuple[str, str]]] = {}
-    held: dict[str, set[str]] = {}
     for name, keep in into.items():
-        held.setdefault(keep, {k for _l, k in keys_of(str(rows[keep].get("api_key") or ""), rows[keep])})
         label = str(rows[name].get("display_name") or name)
-        moved.setdefault(keep, []).extend(
-            (own or label, key) for own, key in keys_of(str(rows[name].get("api_key") or ""), rows[name]))
-    involved = set(into) | set(into.values()) | dropped
+        moved.setdefault(keep, []).extend((own or label, key) for own, key in _stored_keys(rows[name]))
+    involved = sorted(set(into) | set(into.values()) | dropped)
     gone = set(into) | dropped
+    merged_into = {keep: [n for n, k in into.items() if k == keep] for keep in sorted(set(into.values()))}
+    for keep, merged in merged_into.items():
+        _copy_settings(registry, merged, keep, drop=False)
 
     def update(current: Any) -> list[dict[str, Any]]:
         listed = _raw_rows(current)
         now = {str(r.get("name") or ""): r for r in listed}
-        if any(now.get(n) != raw.get(n) for n in involved):
+        fresh = {str(r.get("name") or ""): r for r in registry.resolve_rows([now[n] for n in involved if n in now])}
+        if any(now.get(n) != raw.get(n) or n not in fresh or _stored_keys(fresh[n]) != _stored_keys(rows[n])
+               for n in involved):
             raise SetupRefused("plan_changed", "These rows changed meanwhile; nothing was changed. Look again.")
-        for keep in sorted(set(into.values())):
+        for keep, merged in merged_into.items():
             target = now[keep]
-            have = set(held[keep])
+            have = {k for _l, k in _stored_keys(fresh[keep])}
             for label, key in moved.get(keep, []):
                 _with_key(target, key, label[:60], have)
-            merged = [n for n, k in into.items() if k == keep]
             models = {str(m) for n in [keep, *merged] for m in (now[n].get("models") or []) if str(m).strip()}
             target["models"] = sorted(models)
             aliases = [str(a) for a in (target.get("aliases") or [])]
@@ -476,9 +532,8 @@ def tidy(registry: Any, *, merge: list[str] | None = None, remove: list[str] | N
         return [r for r in listed if str(r.get("name") or "") not in gone]
 
     registry.update_provider_rows(update, removed_presets=gone & SEEDED_PRESETS)
-    for keep in sorted(set(into.values())):
-        merged = [n for n, k in into.items() if k == keep]
-        _move_settings(registry, merged, keep)
+    for keep, merged in merged_into.items():
+        _copy_settings(registry, merged, keep, drop=True)
         chosen = registry.get_selected_models(keep)
         also = [m for n in merged for m in registry.get_selected_models(n)]
         if chosen and also:
@@ -488,4 +543,4 @@ def tidy(registry: Any, *, merge: list[str] | None = None, remove: list[str] | N
     for name in gone:
         registry.forget_client(name)
     logger.info("[provider-setup] tidied: %d merged, %d removed", len(into), len(dropped))
-    return {"merged": len(into), "removed": len(dropped), "kept": sorted(set(into.values()))}
+    return {"merged": len(into), "removed": len(dropped), "kept": sorted(merged_into)}

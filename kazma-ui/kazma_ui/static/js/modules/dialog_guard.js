@@ -76,6 +76,28 @@ function escape(event, overlay, done) {
     return close(overlay, done);
 }
 
+/** Tab stays in an open dialog: from its last control to its first, and
+ *  back (aria-modal says the page behind it is not there), and into it from a
+ *  control that was disabled while it had the focus. A question above it keeps
+ *  its own. */
+function keepFocus(event, dialog) {
+    if (storeOpen('modal') || storeOpen('search')) return;
+    const controls = [...dialog.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+    )].filter((el) => el.offsetParent !== null);
+    if (!controls.length) return;
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    const at = document.activeElement;
+    if (event.shiftKey && (at === first || !dialog.contains(at))) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && (at === last || !dialog.contains(at))) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+
 export function installDialogGuard() {
     if (window.KazmaDialogGuard) return;
     document.addEventListener('input', markTyped, true);
@@ -89,6 +111,7 @@ export function installDialogGuard() {
         /** True when this Escape is not for the dialog. */
         escapeIsTaken() { return escapeTaken; },
         ask: ask,
+        keepFocus: keepFocus,
         close: close,
         escape: escape,
     };

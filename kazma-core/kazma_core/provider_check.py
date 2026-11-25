@@ -397,10 +397,14 @@ async def check_model(
             except Exception:  # noqa: BLE001 - a client that cannot close changes no answer
                 logger.debug("[provider-check] client close failed", exc_info=True)
     await _ledger_own_key_check(own_key_of, entry, model, resp, started, "")
-    if not str(getattr(resp, "content", "") or "").strip() and not getattr(resp, "tool_calls", None):
+    empty = not str(getattr(resp, "content", "") or "").strip() and not getattr(resp, "tool_calls", None)
+    thinking = empty and int(getattr(resp, "reasoning_chars", 0) or 0) > 0
+    if empty and not thinking:
         return {"ok": False, "model": model, "reachable": True, "error_code": "empty",
                 "error": "The provider returned an empty completion."}
     return {"ok": True, "ms": int((time.monotonic() - started) * 1000), "model": model, "reachable": True,
+            # A model cut at the check's own limit while it was thinking works.
+            "thinking": thinking,
             "answer": str(getattr(resp, "content", "") or "").strip()[:ANSWER_MAX], "price": price,
             "cost_usd": float(resp.cost_usd) if getattr(resp, "cost_known", False) else None}
 

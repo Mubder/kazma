@@ -125,6 +125,9 @@ def test_openrouters_list_states_the_cached_price():
 
 
 def _calls_without_the_cached_price(source: str) -> list[int]:
+    """The calls of ``cost_from_usage``, by name or as an attribute, with no
+    cached price named. Not read: a call through another name or a partial, a
+    price computed with no call of it."""
     return [n.lineno for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Call)
             and getattr(n.func, "id", getattr(n.func, "attr", "")) == "cost_from_usage"
             and not any(k.arg == "cached_input_cost_per_1m" for k in n.keywords)]

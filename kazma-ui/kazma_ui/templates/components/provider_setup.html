@@ -5,7 +5,7 @@
      x-effect="keepSetupDraft()"
      @click.self="closeProviderSetup()"
      @keydown.escape.window="setup.open && !KazmaDialogGuard.escapeIsTaken() && closeProviderSetup()">
-    <div class="modal modal-lg ps-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-setup-title">
+    <div class="modal modal-lg ps-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-setup-title" @keydown.tab.window="setup.open && KazmaDialogGuard.keepFocus($event, $el)">
         <div class="modal-header">
             <h2 id="provider-setup-title">{{ t('settings.add_provider') }}</h2>
             <button type="button" class="modal-close" @click="closeProviderSetup()" aria-label="{{ t('common.close') }}"><span class="ki" x-html="KazmaIcons.get('x')" aria-hidden="true"></span></button>
@@ -119,8 +119,10 @@
                     <template x-for="row in setup.same" :key="row.name">
                         <div class="ps-same-row">
                             <bdi translate="no" x-text="row.display_name"></bdi>
-                            <button type="button" class="btn btn-primary btn-sm ps-use-row" @click="useSetupRow(row)"
+                            <button type="button" class="btn btn-primary btn-sm ps-use-row" x-show="setupRowTakesKey(row)" @click="useSetupRow(row)"
                                     x-text="row.has_key ? t('settings.setup.same_add_key') : t('settings.setup.same_set_key')"></button>
+                            <button type="button" class="btn btn-secondary btn-sm ps-show-row" x-show="!setupRowTakesKey(row)" x-cloak @click="showSetupRow(row)">{{ t('settings.setup.same_show') }}</button>
+                            <p class="setting-desc" x-show="row.env_key" x-cloak>{{ t('settings.setup.same_env_key') }}</p>
                         </div>
                     </template>
                     <button type="button" class="btn btn-ghost btn-sm" id="setup-separate" @click="makeSetupSeparate()">{{ t('settings.setup.same_separate') }}</button>
@@ -167,10 +169,11 @@
                         <span>{{ t('settings.setup.looks_like') }}</span>
                         <span class="ps-guesses">
                             <template x-for="id in setupKeyMismatch()" :key="id">
-                                <button type="button" class="btn btn-secondary btn-sm" translate="no" @click="chooseSetupProvider(id)" x-text="setupName(id)"></button>
+                                <button type="button" class="btn btn-secondary btn-sm" translate="no" @click="chooseSetupProvider(id, true)" x-text="setupName(id)"></button>
                             </template>
                         </span>
                     </div>
+                    <p class="notice tone-info" id="setup-cleared" x-show="setup.cleared" x-cloak x-text="t('settings.setup.cleared', { host: setup.cleared })"></p>
                     <p class="setting-desc">{{ t('settings.setup.key_stays') }}</p>
                 </div>
                 <div class="form-group" x-show="['azure', 'bedrock'].includes(setupPreset().form)" x-cloak>
@@ -228,7 +231,8 @@
                 <p class="setting-desc">{{ t('settings.setup.test_note') }}</p>
                 <div class="notice tone-success ps-answer" id="setup-answer" x-show="setup.test && setup.test.ok" x-cloak>
                     <p x-text="setupAnsweredLabel()"></p>
-                    <blockquote class="ps-answer-text" translate="no" dir="auto" x-text="setup.test ? setup.test.answer : ''"></blockquote>
+                    <blockquote class="ps-answer-text" x-show="setup.test && setup.test.answer" x-cloak translate="no" dir="auto" x-text="setup.test ? setup.test.answer : ''"></blockquote>
+                    <p id="setup-thinking" x-show="setup.test && setup.test.thinking" x-cloak>{{ t('settings.setup.thinking') }}</p>
                     <p class="setting-desc" x-text="setupPriceLabel(setup.test ? setup.test.price : null)"></p>
                 </div>
                 <div class="notice tone-danger" id="setup-test-failed" x-show="setup.test && !setup.test.ok && !setup.test.speech" x-cloak>
@@ -254,7 +258,7 @@
                 </div>
                 <div class="form-group" x-show="setupShownList().length" x-cloak>
                     <label class="form-label" for="setup-default">{{ t('settings.setup.default_label') }}</label>
-                    <select id="setup-default" class="form-select" x-model="setup.makeDefault">
+                    <select id="setup-default" class="form-select" x-model="setup.makeDefault" @change="loadSetupBackups()">
                         <option value="">{{ t('settings.setup.default_keep') }}</option>
                         <template x-for="m in setupChosenModels().slice(0, 200)" :key="m"><option :value="m" translate="no" x-text="m"></option></template>
                     </select>
@@ -283,7 +287,7 @@
    as shown (kazma_core.provider_setup.tidy). #}
 <div x-show="tidy.open" x-cloak class="modal-overlay" id="provider-tidy"
      @click.self="tidy.open = false" @keydown.escape.window="if (!KazmaDialogGuard.escapeIsTaken()) tidy.open = false">
-    <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="provider-tidy-title">
+    <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="provider-tidy-title" @keydown.tab.window="tidy.open && KazmaDialogGuard.keepFocus($event, $el)">
         <div class="modal-header">
             <h2 id="provider-tidy-title">{{ t('settings.setup.tidy_title') }}</h2>
             <button type="button" class="modal-close" @click="tidy.open = false" aria-label="{{ t('common.close') }}"><span class="ki" x-html="KazmaIcons.get('x')" aria-hidden="true"></span></button>
@@ -296,8 +300,10 @@
                     <template x-for="m in g.merge" :key="m.name">
                         <label class="ps-check tidy-merge"><input type="checkbox" :checked="!!tidy.picked[m.name]" @change="tidy.picked[m.name] = $event.target.checked">
                             <span>{{ t('settings.setup.tidy_merge') }}</span> <bdi translate="no" x-text="m.display_name"></bdi>
-                            <span class="setting-desc" x-text="tidyKeys(m)"></span></label>
+                            <span class="setting-desc" x-text="tidyKeys(m)"></span>
+                            <span class="setting-desc" x-show="!m.enabled && m.keys" x-cloak>{{ t('settings.setup.tidy_off_with_key') }}</span></label>
                     </template>
+                    <p class="setting-desc" x-show="g.merge.length" x-cloak x-text="tidyMergeNote(g)"></p>
                     <template x-for="m in g.kept" :key="m.name">
                         <p class="setting-desc"><bdi translate="no" x-text="m.display_name"></bdi> <span x-text="tidyWhy(m.why)"></span></p>
                     </template>

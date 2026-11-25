@@ -57,6 +57,8 @@ class _NewKey(BaseModel):
 
     api_key: str = Field(max_length=8000)
     label: str = Field(default="", max_length=60)
+    #: Where the key was offered for: a row that moved meanwhile takes none.
+    base_url: str = Field(default="", max_length=2000)
 
 
 class _TidyRows(BaseModel):
@@ -183,9 +185,10 @@ def add_provider_setup_routes(router: APIRouter) -> None:
         from kazma_core.provider_setup import SetupRefused, add_key
 
         try:
-            return {"ok": True, **add_key(_registry(), name, req.api_key, req.label)}
+            return {"ok": True, **add_key(
+                _registry(), name, req.api_key, req.label, base_url=req.base_url)}
         except SetupRefused as exc:
-            raise _refuse(exc, 404 if exc.code == "unknown_provider" else 400) from None
+            raise _refuse(exc, {"unknown_provider": 404, "row_moved": 409, "env_key": 409}.get(exc.code, 400)) from None
 
     @router.get("/api/providers/tidy")
     def tidy_list() -> dict[str, Any]:
