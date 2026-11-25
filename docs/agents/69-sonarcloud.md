@@ -178,4 +178,12 @@ with a test that fails on the old code and a gate for its class:
     and two S3516 whose one returned object is built or edited before it is
     returned (`research_pipeline._candidate_report_roots`, an
     `atomic_update` updater in `space_data._erase_settings`).
+- **The third look (2026-11-25), the new issues outside memory code, all
+  false alarms**, for the owner to mark: `sqlite_snapshot.snapshot_copy`
+  (S6549 x2: the path comes from a plan file a soak script writes for its own
+  child, and the next line opens that same path, so the link check tells
+  nobody more); `thread_rewind.rewind_thread` and
+  `chat_delete.remove_chat_remains` (S5145 x3: every record passes
+  `_LogQueueHandler.prepare`; each line, with a hostile id in the message and
+  in the traceback, was written as one record in all three formats).
 
