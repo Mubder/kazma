@@ -921,7 +921,8 @@ def export_bundle(space: str, target: Path, password: str, *, by: str) -> dict[s
     registry = _must_own(space, by)
     from kazma_core.spaces import file_moves
 
-    file_moves.quiet(space)  # a file being moved is where it belongs first
+    if not file_moves.quiet(space) or file_moves.holds(space):  # a file being moved is where it belongs first
+        raise SpaceMoveRefused("files_moving", 503, "A file of the space is being moved. Try again in a minute.")
     if sum(path.stat().st_size for _part, _where, path in _moving_files(space)) > MAX_BUNDLE_BYTES:
         raise SpaceMoveRefused("too_big", 413, "The space's files are bigger than a bundle another install takes.")
     keys, rows = _space_secrets(space, by)

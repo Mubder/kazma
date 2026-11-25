@@ -12,6 +12,7 @@ a link; an owner's copy of a folder can.
 from __future__ import annotations
 
 import ast
+import json
 import os
 import sqlite3
 import subprocess
@@ -22,6 +23,7 @@ from pathlib import Path
 import pytest
 from kazma_core.backup import universal
 from kazma_core.migration import exporter
+from kazma_core.migration.bundle import KazmaBundle, Manifest
 from kazma_core.spaces import files as space_files
 from kazma_core.spaces import space_data, space_limits, space_move
 from kazma_core.spaces.files import FILES, own_files, space_dir
@@ -164,7 +166,7 @@ def test_a_backup_never_follows_a_link_out_of_a_space(tmp_path) -> None:
 def test_a_migration_bundle_never_follows_a_link_out_of_a_space(tmp_path) -> None:
     data = _linked_data(tmp_path)
     failures: list[str] = []
-    exporter._copy_carried(data / "spaces", tmp_path / "out", "spaces", failures, tmp_path / "x.zip")
+    exporter._copy_carried(data / "spaces", tmp_path / "out", "spaces", failures, tmp_path / "x.zip", [])
     assert OUTSIDE not in _all_bytes(tmp_path / "out"), "a linked file is in the bundle"
     assert failures == [] and (tmp_path / "out" / "s0123456789ab" / FILES / "mine.txt").is_file()
     assert (tmp_path / "out" / "s0123456789ab" / FILES / "empty").is_dir()
@@ -196,6 +198,199 @@ def test_a_folder_of_the_data_folder_may_be_on_another_disk(tmp_path) -> None:
     assert [p.relative_to(data).as_posix() for p in found] == ["document-store/documents.db"]
 
 
+# ── a link directly in the data folder is taken, one below is named ───────
+
+
+def _file_link(link: Path, target: Path) -> None:
+    try:
+        os.symlink(target, link)
+    except OSError:
+        pytest.skip("this account makes no link to a file (Windows)")
+
+
+def _other_disk(tmp_path: Path) -> Path:
+    """A data folder whose memory database, notes and document store are on
+    another disk, by links directly in it."""
+    data, other = tmp_path / "kazma-data", tmp_path / "other-disk"
+    (other / "store").mkdir(parents=True)
+    data.mkdir()
+    for place in (other / "memory_state.db", data / "settings.db", other / "store" / "documents.db"):
+        with sqlite3.connect(place) as conn:
+            conn.execute("CREATE TABLE t (x)")
+        conn.close()
+    (other / "notes.txt").write_bytes(b"the operator's notes")
+    (other / "store" / "blob.bin").write_bytes(b"a blob")
+    _file_link(data / "memory_state.db", other / "memory_state.db")
+    _file_link(data / "notes.txt", other / "notes.txt")
+    _junction(data / "document-store", other / "store")
+    return data
+
+
+def test_a_database_that_is_a_link_in_the_data_folder_stays_in_every_backup(tmp_path) -> None:
+    """The old list against the new one: ``rglob`` listed a linked database,
+    the one walk does not, and nothing said it was gone."""
+    data = _other_disk(tmp_path)
+    old = {p.relative_to(data).as_posix() for p in data.rglob("*.db")}
+    new = {p.relative_to(data).as_posix() for p in universal.selectable_databases(data)}
+    assert old <= new and "memory_state.db" in new, old - new
+    assert universal._backup_one_db(data / "memory_state.db", tmp_path / "copy.db")
+    copied = {row["path"]: row["type"] for row in universal._copy_assets(data, _made(tmp_path / "assets"))}
+    assert copied == {"document-store": "dir", "notes.txt": "file"}
+    assert (tmp_path / "assets" / "notes.txt").read_bytes() == b"the operator's notes"
+    assert (tmp_path / "assets" / "document-store" / "blob.bin").is_file()
+
+
+def _made(folder: Path) -> Path:
+    folder.mkdir(parents=True)
+    return folder
+
+
+def test_the_script_and_the_bundle_take_what_a_link_in_the_data_folder_leads_to(tmp_path) -> None:
+    data = _other_disk(tmp_path)
+    done = _script(data, tmp_path / "to")
+    assert done.returncode == 0, done.stdout + done.stderr
+    with zipfile.ZipFile(next((tmp_path / "to").glob("*.zip"))) as zipped:
+        names = set(zipped.namelist())
+    assert {f"kazma-data/{n}" for n in ("memory_state.db", "settings.db", "notes.txt", "document-store/blob.bin",
+                                        "document-store/documents.db")} <= names
+    manifest = Manifest()
+    exporter._export_data_dir_files(data, tmp_path / "bundle", manifest, print, lean=False, skip=tmp_path / "x.zip")
+    assert (tmp_path / "bundle" / "notes.txt").read_bytes() == b"the operator's notes"
+    assert manifest.links_left_out == [] and not (tmp_path / "bundle" / "notes.txt").is_symlink()
+
+
+def test_a_database_whose_disk_is_away_is_a_failed_database(tmp_path) -> None:
+    data = _other_disk(tmp_path)
+    (tmp_path / "other-disk" / "memory_state.db").unlink()
+    assert data / "memory_state.db" in universal.selectable_databases(data)
+    assert not universal._backup_one_db(data / "memory_state.db", tmp_path / "copy.db")
+    assert not (tmp_path / "other-disk" / "memory_state.db").exists(), "an empty database was made where the link leads"
+
+
+def _script(data: Path, to: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(REPO / "scripts" / "backup_kazma.py"), "--data-dir", str(data),
+                           "--dest", str(to)], capture_output=True, text=True, timeout=120, check=False)
+
+
+def _linked_below(tmp_path: Path) -> Path:
+    """Links below the data folder: a space's whole folder, the uploads'
+    originals and a project are on another disk."""
+    data = tmp_path / "kazma-data"
+    for rel in ("spaces/s0123456789ab", "attachments/originals", "workspace/proj"):
+        there = tmp_path / "other-disk" / rel.replace("/", "-")
+        there.mkdir(parents=True)
+        (there / "words.txt").write_bytes(b"words")
+        (data / rel).parent.mkdir(parents=True, exist_ok=True)
+        _junction(data / rel, there)
+    (data / "workspace" / "here").mkdir()
+    _junction(data / "workspace" / "again", data / "workspace" / "here")  # it leads to what the backup holds
+    (data / "attachments" / "a.txt").write_bytes(b"a")
+    return data
+
+
+OUT_LINKS = ["attachments/originals", "spaces/s0123456789ab", "workspace/proj"]
+
+
+@pytest.fixture
+def backups(monkeypatch, tmp_path):
+    """``run()`` makes a universal backup of the linked data folder: its
+    manifest, and the alerts sent."""
+    data = _linked_below(tmp_path)
+    base = data / "backups" / "universal"
+    base.mkdir(parents=True)
+    for name, value in (("_data_dir", lambda: data), ("_universal_dir", lambda: base),
+                        ("_offsite_sync", lambda dest: {"skipped": "test"}), ("_snapshot_to_restic", lambda dest: None),
+                        ("_pg_dump_state", dict), ("_rebuilt_dirs", set),
+                        ("_copy_root_artifacts", lambda dest: {"artifacts": []})):
+        monkeypatch.setattr(universal, name, value)
+    import kazma_core.backup.neo4j_backup as neo
+    from kazma_core.observability import ops_alerts
+
+    monkeypatch.setattr(neo, "export_graph", lambda dest: type("R", (), {"as_dict": lambda self: {}})())
+    sent: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(ops_alerts, "alert", lambda key, title, detail="", **_k: sent.append((key, title, detail)))
+    clock = [1_800_000_000]
+
+    def run():
+        clock[0] += 60
+        monkeypatch.setattr(universal, "_backup_progress", {"phase": "idle"})
+        monkeypatch.setattr(universal.time, "time", lambda: float(clock[0]))
+        sent.clear()
+        summary = universal.perform_universal_backup(retention=5, trigger="manual")
+        manifest = json.loads((Path(summary["backup_dir"]) / "manifest.json").read_text(encoding="utf-8"))
+        return manifest, summary, list(sent)
+
+    run.data = data
+    return run
+
+
+def test_every_link_a_backup_leaves_out_is_named(backups, caplog) -> None:
+    with caplog.at_level("WARNING", logger="kazma_core.backup.universal"):
+        manifest, summary, sent = backups()
+    row = manifest["links_left_out"]
+    assert sorted(row["items"]) == sorted([*OUT_LINKS, "workspace/again"]) and row["count"] == 4
+    assert sorted(row["leading_out"]) == OUT_LINKS, "a link to what the backup holds is no gap"
+    assert "links_left_out" not in json.dumps(manifest["assets"])
+    said = [r.getMessage() for r in caplog.records if "left out" in r.getMessage()]
+    assert len(said) == 1 and all(link in said[0] for link in row["items"]), said
+    assert [key for key, _t, _d in sent] == ["backup.files_failed"]
+    assert "3 link(s)" in sent[0][1] and "spaces/s0123456789ab" in sent[0][1], sent
+    assert summary["complete"] is True, "a link left out is no failed copy"
+
+
+def test_a_link_is_paged_once_and_named_every_time(backups, caplog, tmp_path) -> None:
+    backups()
+    with caplog.at_level("WARNING", logger="kazma_core.backup.universal"):
+        manifest, _summary, sent = backups()
+    assert sent == [] and sorted(manifest["links_left_out"]["leading_out"]) == OUT_LINKS
+    assert [r for r in caplog.records if "left out" in r.getMessage()]
+    _junction(backups.data / "workspace" / "later", tmp_path / "other-disk")
+    _manifest, _summary, sent = backups()
+    assert len(sent) == 1 and "workspace/later" in sent[0][1] and "attachments" not in sent[0][1]
+
+
+def test_a_failed_file_and_a_link_are_one_alert(backups, monkeypatch) -> None:
+    real = universal.shutil.copy2
+
+    def locked(src, dst, *args, **kwargs):
+        if Path(src).name == "a.txt":
+            raise PermissionError(13, "held", str(src))
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(universal.shutil, "copy2", locked)
+    _manifest, summary, sent = backups()
+    assert len(sent) == 1 and "1 file(s)" in sent[0][1] and "3 link(s)" in sent[0][1] and summary["complete"] is False
+
+
+def test_the_script_and_the_bundle_name_every_link_they_leave_out(tmp_path, caplog) -> None:
+    data = _linked_below(tmp_path)
+    done = _script(data, tmp_path / "to")
+    assert done.returncode == 0, done.stdout + done.stderr
+    with zipfile.ZipFile(next((tmp_path / "to").glob("*.zip"))) as zipped:
+        named = json.loads(zipped.read("MANIFEST.json"))["links_left_out"]
+    assert sorted(named) == sorted([*OUT_LINKS, "workspace/again"])
+    assert all(link in done.stderr for link in named), done.stderr
+    manifest, said = Manifest(), []
+    _junction(data / "whole", tmp_path)  # it leads to the folder that holds the data folder
+    with caplog.at_level("WARNING", logger="kazma_core.migration.exporter"):
+        exporter._export_data_dir_files(data, tmp_path / "bundle", manifest, said.append, lean=False,
+                                        skip=tmp_path / "x.zip")
+    assert sorted(manifest.links_left_out) == sorted([*OUT_LINKS, "workspace/again", "whole"])
+    assert any("left out" in line for line in said)
+    assert len([r for r in caplog.records if "left out" in r.getMessage()]) == 1
+    again = Manifest.from_json(manifest.to_json())
+    assert again.links_left_out == manifest.links_left_out
+
+
+def test_the_bundles_check_says_which_links_are_not_in_it(tmp_path) -> None:
+    manifest = Manifest(links_left_out=["workspace/proj"])
+    path = tmp_path / "x.zip"
+    with zipfile.ZipFile(path, "w") as zipped:
+        zipped.writestr("manifest.json", manifest.to_json())
+    report = KazmaBundle(path).verify(check_hashes=False)
+    assert any("workspace/proj" in warning for warning in report.warnings), report.warnings
+
+
 # ── the gate: one walk of a space's files ────────────────────────────────
 
 #: What a module names when a space's folder, or the data folder that holds
@@ -212,6 +407,7 @@ REVIEWED: dict[str, frozenset[str]] = {
         "kazma-core/kazma_core/backup/restore.py::_flatten_into_data_dir",
         "kazma-core/kazma_core/backup/restore.py::_next_steps",
         "kazma-core/kazma_core/backup/restore.py::restore_files",
+        "kazma-core/kazma_core/backup/universal.py::_links_named_before",
         "kazma-core/kazma_core/backup/universal.py::_offsite_files",
         "kazma-core/kazma_core/backup/universal.py::_offsite_rclone_excludes",
         "kazma-core/kazma_core/backup/universal.py::archive_universal_backup",

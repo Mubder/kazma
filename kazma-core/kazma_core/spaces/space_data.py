@@ -73,6 +73,11 @@ _FTS_SHADOWS = ("_data", "_idx", "_content", "_docsize", "_config")
 _CHUNK = 400
 
 
+#: Said when a file move of the space could not be waited for: its export
+#: would miss the file, its erase could be put back.
+_FILES_MOVING = "A file of the space is being moved. Try again in a minute."
+
+
 class SpaceDataRefused(ValueError):
     """Nothing was counted, exported or erased; ``code`` says why."""
 
@@ -610,7 +615,8 @@ def export_space(space: str, target: Path, *, password: str | None = None) -> di
         return manifest
     from kazma_core.spaces import file_moves
 
-    file_moves.quiet(space)  # a file being moved is where it belongs first
+    if not file_moves.quiet(space) or file_moves.holds(space):  # a file being moved is where it belongs first
+        raise SpaceDataRefused("files_moving", 503, _FILES_MOVING)
     ctx, found = _walk(space)
     from kazma_core.config_store import get_config_store
     from kazma_core.spaces.files import own_files
@@ -766,10 +772,12 @@ def erase_space(space: str, *, by: str) -> dict[str, Any]:
     from kazma_core.spaces.files import moving_dir
 
     # A file whose move out of it was cut off goes where it belongs first.
-    file_moves.settle_file_moves(leaving=space)
+    if not file_moves.settled_before_erase(space):
+        raise SpaceDataRefused("files_moving", 503, _FILES_MOVING)
     # Nobody new can start work in it: its members go first.
     people.close_space(space, by=by)
-    file_moves.quiet(space)  # no file moves in or out from here on
+    if not file_moves.quiet(space):  # no file moves in or out from here on
+        raise SpaceDataRefused("files_moving", 503, _FILES_MOVING)
     before, first = _walk(space)
     from kazma_core.stores.knowledge_lifecycle import delete_library
 

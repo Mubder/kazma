@@ -29,7 +29,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from kazma_core.spaces import chat_moves, file_moves, moves, people, scope, shared_files, space_data
+from kazma_core.spaces import chat_moves, file_moves, identity, moves, people, scope, shared_files, space_data
 from kazma_core.spaces.files import FILES, moving_dir, space_dir
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
 from kazma_ui import auth, space_binding
@@ -767,6 +767,143 @@ def test_a_settling_waits_for_another_only_so_long(world: Files, monkeypatch) ->
     waiting.join(10)
     file_moves.settle_file_moves()
     assert w.where() == [f"own:{REL}"]
+
+
+# ── the delta check (N3 to N5, N8) ────────────────────────────────────────
+
+
+def _busy(monkeypatch) -> None:
+    monkeypatch.setattr(file_moves, "_SETTLING_WAIT_S", 0.1)
+
+
+def test_an_erase_that_cannot_wait_for_a_settling_is_refused(world: Files, monkeypatch) -> None:
+    """Another settling is at work: it could put a file back into the erased
+    space. Nothing is closed, and the erase is tried again."""
+    w = world
+    _cut(w, monkeypatch)
+    _busy(monkeypatch)
+    with file_moves._settling, pytest.raises(space_data.SpaceDataRefused) as refused:
+        space_data.erase_space(w.family, by=OWNER_ACCOUNT_ID)
+    assert refused.value.code == "files_moving" and refused.value.status == 503
+    assert not (identity.read_registry()["spaces"][w.family].get("erasing_at")), "it is closed, and not erased"
+    space_data.erase_space(w.family, by=OWNER_ACCOUNT_ID)
+    assert not space_dir(w.family).exists() and w.where() == [f"own:{REL}"]
+
+
+def test_an_erase_that_meets_a_settling_after_it_closed_stops_there(world: Files, monkeypatch) -> None:
+    w = world
+    _cut(w, monkeypatch)
+    _busy(monkeypatch)
+    real = people.close_space
+
+    def close(space: str, *, by: str) -> None:
+        real(space, by=by)
+        assert file_moves._settling.acquire(timeout=5)
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(people, "close_space", close)
+            with pytest.raises(space_data.SpaceDataRefused):
+                space_data.erase_space(w.family, by=OWNER_ACCOUNT_ID)
+    finally:
+        file_moves._settling.release()
+    assert identity.read_registry()["spaces"][w.family].get("erasing_at"), "its people are out, nothing moves in"
+    space_data.erase_space(w.family, by=OWNER_ACCOUNT_ID)
+    assert not space_dir(w.family).exists() and w.where() == [f"own:{REL}"]
+
+
+@pytest.mark.parametrize("why", ["another settling", "its move cannot be ended"])
+def test_an_export_that_would_miss_a_held_file_says_so(world: Files, monkeypatch, tmp_path, why) -> None:
+    w = world
+    _cut(w, monkeypatch)
+    _busy(monkeypatch)
+
+    def fails(_move: Any) -> str:
+        raise OSError("not now")
+
+    with monkeypatch.context() as patch:
+        if why == "another settling":
+            assert file_moves._settling.acquire(timeout=5)
+        else:
+            patch.setattr(file_moves, "_end", fails)
+        try:
+            with pytest.raises(space_data.SpaceDataRefused) as refused:
+                space_data.export_space(w.mine, tmp_path / "mine.zip")
+        finally:
+            if why == "another settling":
+                file_moves._settling.release()
+    assert refused.value.code == "files_moving" and not (tmp_path / "mine.zip").exists()
+    space_data.export_space(w.mine, tmp_path / "mine.zip")
+
+
+def test_a_bundle_that_would_miss_a_held_file_says_so(world: Files, monkeypatch, tmp_path) -> None:
+    from kazma_core.spaces import space_move
+
+    w = world
+    w.share(REL)
+    _busy(monkeypatch)
+    with file_moves._settling, pytest.raises(space_move.SpaceMoveRefused) as refused:
+        space_move.export_bundle(w.family, tmp_path / "x.kazmaspace", "a-long-enough-password", by=w.omar)
+    assert refused.value.code == "files_moving"
+
+
+def test_one_holding_folder_that_cannot_be_read_stops_no_other(world: Files, monkeypatch) -> None:
+    w = world
+    _cut(w, monkeypatch)
+    moving_dir(w.omars).mkdir(parents=True)
+    real = os.scandir
+
+    def refuses(path: Any) -> Any:
+        if Path(path) == moving_dir(w.omars):
+            raise PermissionError("not now")
+        return real(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", refuses)
+        file_moves.settle_file_moves()
+        assert w.where() == [f"own:{REL}"], "one folder stopped every settling"
+        assert file_moves.quiet(w.family) is True and file_moves.quiet(w.omars) is False
+
+
+@pytest.mark.parametrize("what", ["a size", "a folder"])
+def test_a_record_nobody_writes_holds_nothing_for_ever(world: Files, what) -> None:
+    w = world
+    placed = w.put(w.family, "trip.txt", PLAN)
+    held = moving_dir(w.mine) / ATTEMPT
+    if what == "a size":
+        _plant(w.mine, _record(w, size=10**30, copy_id=_ids(placed)), claimed=b"hers")
+    else:
+        (held / "move.json" / "x").mkdir(parents=True)
+        (held / "claimed").write_bytes(b"hers")
+    for _ in range(2):
+        file_moves.settle_file_moves()
+    assert [p.startswith("own:moved file ") for p in w.where(b"hers")] == [True], "it is held for ever"
+    assert w.maker(w.family, "trip.txt") is None
+
+
+def test_a_disk_that_does_not_say_which_file_is_which_is_refused(world: Files, monkeypatch) -> None:
+    w = world
+    w.put(w.mine, REL)
+    with monkeypatch.context() as patch:
+        patch.setattr(file_moves, "_identity", lambda info: [0, int(info.st_mtime_ns)])
+        assert w.refused(REL, w.mine, w.family) == "move_failed"
+    assert w.where() == [f"own:{REL}"] and w.held() == []
+
+
+def test_a_space_on_another_disk_moves_no_file(world: Files, monkeypatch) -> None:
+    w = world
+    w.put(w.mine, REL)
+    real = os.rename
+
+    def another_disk(src: Any, dst: Any, *args: Any, **kwargs: Any) -> None:
+        if Path(dst).name == "claimed":
+            raise OSError(errno.EXDEV, "another disk")
+        real(src, dst, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "rename", another_disk)
+        assert w.refused(REL, w.mine, w.family) == "move_failed"
+    assert w.where() == [f"own:{REL}"] and w.held() == []
 
 
 # ── L10: a disabled account moves nothing ─────────────────────────────────

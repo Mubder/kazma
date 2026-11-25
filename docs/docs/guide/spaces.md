@@ -146,7 +146,9 @@ are in, and back out:
   changed it. A name already taken in the other space is refused: nothing is
   ever overwritten. One file at a time, up to 20 MB. If something goes wrong
   on the way, the file goes back to where it was, or beside it as "name (2)"
-  when that name was taken meanwhile. The owner's space and a space with a
+  when that name was taken meanwhile. A space whose folder you keep on another
+  disk than the others moves no file ("The file could not be moved. It is where
+  it was"). The owner's space and a space with a
   project folder have no such panel: those folders are this computer's own
   files and a repository.
 

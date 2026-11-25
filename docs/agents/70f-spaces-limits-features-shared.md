@@ -519,6 +519,10 @@
     - **An erase ends** the moves that left its space, closes it, then
       **waits** for those under way (`file_moves.quiet`); the target keeps
       nothing of a file that did not move. An export ends what is left first.
+      An erase or an export that could not wait for a settling (or would miss
+      a file still held) is refused, `files_moving`, to be tried again: the
+      settling put a file back into the erased space. One holding folder that
+      cannot be read stops no other space's.
       A line of a file taken out has an id of its own, never its move's. Who
       shared a file is asked as `not_the_sharer`; `not_yours` is the spaces'
       rule. Failures are

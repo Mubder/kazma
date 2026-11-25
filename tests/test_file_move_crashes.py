@@ -609,7 +609,7 @@ def test_an_export_and_a_bundle_never_carry_a_held_file(world: Files, monkeypatc
     w = world
     _cut(w, monkeypatch, "share", "_put_in_place", "before")
     with monkeypatch.context() as patch:
-        patch.setattr(file_moves, "settle_file_moves", lambda **_k: [])
+        patch.setattr(file_moves, "_settle", lambda *_a, **_k: ([], True))
         counted = space_data.count_space(w.family)["files"]
         space_data.export_space(w.family, tmp_path / "held.zip")
         travelling = [p.name for _part, _where, p in space_move._moving_files(w.family)]

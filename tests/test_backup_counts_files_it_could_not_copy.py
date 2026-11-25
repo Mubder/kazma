@@ -80,7 +80,7 @@ def test_the_backup_is_incomplete_and_the_gap_is_alerted(tmp_path, monkeypatch):
     gaps: list[dict] = []
     monkeypatch.setattr(
         universal, "_alert_on_backup_gaps",
-        lambda offsite, db_fail, failed_dbs=None, files_failed=0, file_examples=None:
+        lambda offsite, db_fail, failed_dbs=None, files_failed=0, file_examples=None, links_out=None:
             gaps.append({"files_failed": files_failed, "examples": file_examples}),
     )
 

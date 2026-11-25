@@ -3194,6 +3194,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "The vault cannot be opened, so nothing was deleted. Try again later.",
         "ar": "تعذّر فتح الخزنة، فلم يُحذف شيء. حاول لاحقًا.",
     },
+    "settings.space_data_err.files_moving": {
+        "en": "A file of this space is being moved right now. Try again in a minute.",
+        "ar": "يُنقل ملف من هذه المساحة الآن. حاول مجددًا بعد دقيقة.",
+    },
     "settings.space_data_err.unknown_table": {
         "en": "Kazma does not know how to find this space's records in one of its stores, so nothing was done. Report this problem.",
         "ar": "لا يعرف Kazma كيف يجد سجلات هذه المساحة في أحد مخازنه، فلم يُفعل شيء. أبلغ عن هذه المشكلة.",

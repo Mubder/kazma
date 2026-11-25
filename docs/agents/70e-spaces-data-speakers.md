@@ -47,8 +47,13 @@
     nothing of another place is counted, exported, moved or backed up as its.
     `rglob` with `is_file` followed a link to a file, and entered a junction
     on Python 3.11; the backups asked `is_symlink`, which a junction passes.
-    A folder directly in the data folder may be a link (an install's own
-    layout). Gate: `tests/test_space_file_walks.py` reads the whole product:
+    **A link directly in the data folder is the install's own layout** (a
+    database, a file or a folder on another disk): every copy takes what it
+    leads to (`backup/data_files.py`; a linked `memory_state.db` was in no
+    backup, and the drill judged by the same list). **A link below is left out
+    and named**: the manifest's `links_left_out`, one WARNING, and for one
+    that leads to files the copy does not hold the `backup.files_failed`
+    alert, once per link. Gate: `tests/test_space_file_walks.py` reads the whole product:
     in a module that names a space's folder or the data folder, every other
     walk is in `REVIEWED` with its reason (planted walks and the old walk as
     controls).

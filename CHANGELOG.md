@@ -26,7 +26,11 @@
   place is left alone; before, the file it led to went into the export.
 - So do the backups and the migration bundle of the whole install: a junction
   inside the data folder was followed, and the files it led to were copied. A
-  folder directly in the data folder may still be on another disk.
+  database, a file or a folder directly in the data folder may still be a link
+  to another disk: it is in every backup. Each link left out is named in the
+  backup's manifest and in the log, and the backup alert says it once.
+- Exporting or deleting a space while a file of it is being moved says so and
+  asks to try again, instead of leaving the file out.
 
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 

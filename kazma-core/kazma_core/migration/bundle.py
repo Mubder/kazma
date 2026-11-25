@@ -120,6 +120,9 @@ class Manifest:
     # The source workspace root + data dir, captured for path translation.
     source_workspace_root: str = ""
     source_data_dir: str = ""
+    # The links of the data dir no bundle follows: what they lead to is not
+    # in it (``migration.exporter``); ``verify`` says so.
+    links_left_out: list[str] = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, sort_keys=True)
@@ -298,6 +301,10 @@ class KazmaBundle:
             report.add_error(f"corrupt zip: {exc}")
 
         report.table_counts = dict(self.manifest.table_counts)
+        if self.manifest.links_left_out:
+            left = [str(path) for path in self.manifest.links_left_out]
+            report.add_warning(f"{len(left)} link(s) are not in the bundle, nor what they lead to: "
+                               + ", ".join(left[:10]))
         # A part the exporter could not take whole makes the bundle unusable:
         # importing it would report success over what it left behind.
         for key, label in _INCOMPLETE_PARTS.items():
