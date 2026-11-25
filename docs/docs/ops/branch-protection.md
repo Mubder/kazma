@@ -26,12 +26,12 @@ checks for `.github/workflows/ci.yml`:
 
 | Check | What it holds |
 |---|---|
-| `Tests` | the full suite (`scripts/fast_test.py --chunks 4 --files-per-process 60`: four chunks, each run as consecutive pytest processes of at most 60 files) |
+| `Tests` | the full suite, in six shards (`scripts/fast_test.py --shard K/6 --chunks 4 --files-per-process 60`), and the README metrics gate: it passes only when every one of them did |
 | `Tests (Postgres backend)` | every `@pytest.mark.postgres` test on a real Postgres |
 | `Tests (pgvector)` | the Postgres-primary memory benchmark on a real pgvector, pgvector's own search beside the exact comparison; its floors report until they are locked from a named run, and a named test that skips fails it |
 | `Document worker container profile (real Docker)` | the worker and broker images build, the container policy attests from inside the image, the container-profile qualification suite passes with no skips, and the compose-shaped broker topology leaves no container behind |
 | `Unified turn lifecycle (GATE)` | the chat turn in real browsers: approvals, reloads, watchers, chunked delivery |
-| `Playwright smoke` | health, composer, HITL view model, every page loads clean |
+| `Playwright smoke` | every browser file but the unified turn's, in four shards (`scripts/ci_shards.py e2e`): it passes only when every shard did |
 | `Windows selector-loop subset` | the Windows event-loop rules (§23) |
 | `Compile Check` | `py_compile` over every `.py` |
 | `Every module imports on its own` | each product module imported alone, in a fresh interpreter (`scripts/check_fresh_imports.py`) |
@@ -61,7 +61,10 @@ added to CI on 2026-10-05, then to the ruleset. The document worker check was
 the last one added to the ruleset, on 2026-10-15, with the owner's approval
 (`gh api -X PUT`, section 2). Only that approval changed the setting; this
 page itself does not. Matrix templates are expanded here: a literal `${{ matrix.os }}`
-is not a check name GitHub will report.
+is not a check name GitHub will report. The shards (`Tests, shard 1`,
+`Playwright, shard 1`, ...) and `README metrics` are not required themselves:
+their number may change, and the two aggregate checks above fail when any of
+them failed, was cancelled or was skipped (`tests/test_ci_shards.py`).
 
 ## 2. The ruleset
 

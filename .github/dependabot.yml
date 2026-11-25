@@ -66,6 +66,21 @@ updates:
       - dependency-name: "python"
         versions: [">= 3.15"]
 
+  # The checks before a push (scripts/prepush.py): CI's own Python, 3.11.
+  - package-ecosystem: "docker"
+    directory: "/deploy/prepush"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"
+    ignore:
+      - dependency-name: "python"
+        versions: [">= 3.12"]
+
   # The images Kazma's compose files run (2026-11-13): SearXNG and Neo4j are
   # pinned by version and digest (tests/test_container_services.py), so a new
   # one reaches an install only as a reviewed pull request.

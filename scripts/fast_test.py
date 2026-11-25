@@ -24,6 +24,8 @@ Usage:
     python scripts/fast_test.py --files-per-process 60   # 0: one process per chunk
     python scripts/fast_test.py --foreground    # normal priority (default: lowered)
     python scripts/fast_test.py --cores 8       # use at most 8 CPU cores (0: all)
+    python scripts/fast_test.py --shard 2/6     # CI: one of six shards (scripts/ci_shards.py)
+    python scripts/fast_test.py --files-from F  # only the test files F names, one a line
 
 A schedule of quiet hours can be kept beside the checkout, in
 ``.kazma/fast_test.json`` (git ignores ``.kazma/``), so it applies to that
@@ -48,6 +50,10 @@ import threading
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+if str(Path(__file__).resolve().parent) not in sys.path:  # beside this file, whatever the working folder
+    sys.path.append(str(Path(__file__).resolve().parent))
+
+import ci_shards  # noqa: E402 - found by the line above
 
 # Directories that contain test files — sourced from pyproject testpaths so
 # the runner can never drift from what bare `pytest` collects.
@@ -97,6 +103,32 @@ def chunk_files(files: list[Path], chunks: int) -> list[list[Path]]:
     for i, f in enumerate(files):
         out[i % chunks].append(f)
     return [c for c in out if c]
+
+
+def chunk_by_duration(files: list[Path], chunks: int) -> list[list[Path]]:
+    """Chunks of about the same measured length (``scripts/ci_shards.py``'s
+    table; a file it does not know counts as the median one), each in the
+    files' own order. A shard has too few files for the round robin to even
+    out: one file of several minutes decided how long the shard took."""
+    table = ci_shards.load_table("unit")
+    known = sorted(table.values())
+    median = known[len(known) // 2] if known else 1.0
+    names = {f.relative_to(REPO).as_posix(): f for f in files}
+    bins = ci_shards.balance({n: table.get(n, median) for n in names}, max(1, chunks))
+    out: list[list[Path]] = [[] for _ in range(max(1, chunks))]
+    for name, f in names.items():
+        out[bins[name]].append(f)
+    return [c for c in out if c]
+
+
+def files_named_in(path: Path) -> list[Path]:
+    """The test files *path* names, one repository path a line."""
+    wanted = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    files = [REPO / name for name in dict.fromkeys(wanted)]
+    missing = [str(f) for f in files if not f.is_file()]
+    if missing:
+        raise SystemExit(f"[fast-test] no such test file: {', '.join(missing)}")
+    return files
 
 
 #: pytest's final tally, e.g. "==== 2526 passed, 12 skipped in 84.21s ====".
@@ -555,6 +587,12 @@ def last_file_reached(log: str) -> str | None:
     return names[-1].replace("\\", "/") if names else None
 
 
+#: Seconds per test file, gathered when ``--durations-json`` is given
+#: (``main`` sets it): CI's shards upload it, and scripts/ci_shards.py makes
+#: the next table of shards from it.
+DURATIONS: dict[str, float] | None = None
+
+
 def run_chunk(idx: int, files: list[Path], timeout: float) -> dict:
     args = [
         *[str(f.relative_to(REPO)) for f in files],
@@ -562,7 +600,16 @@ def run_chunk(idx: int, files: list[Path], timeout: float) -> dict:
         "--timeout=120",
         "--continue-on-collection-errors",
     ]
-    code, log = run_pytest(args, timeout)
+    if DURATIONS is None:
+        code, log = run_pytest(args, timeout)
+    else:
+        with tempfile.TemporaryDirectory(prefix="kazma-durations-", ignore_cleanup_errors=True) as folder:
+            report = Path(folder) / "junit.xml"
+            code, log = run_pytest([*args, f"--junitxml={report}", *ci_shards.JUNIT_OPTIONS], timeout)
+            if report.is_file():  # a process that crashed wrote none
+                measured = ci_shards.durations_of(report)
+                with _PRINT_LOCK:
+                    DURATIONS.update(measured)
     counts = _parse_summary(log)
     fail_ids = sorted({m.group(2) for m in _FAILED_RE.finditer(log)})
     return {
@@ -687,15 +734,19 @@ def suite_exit_code(
     *,
     failed: list[str],
     poison: list[str],
+    named_files: bool = False,
 ) -> int:
     """Exit code for the aggregated run.
 
     0 = green and the suite actually ran. 1 = test failures or poison.
-    2 = ran effectively nothing (or below the sanity floor).
+    2 = ran effectively nothing (or below the sanity floor). A run of named
+    files (``--files-from``) has no floor but one: some test was collected.
     """
     passed = int(totals.get("passed", 0) or 0)
     if poison or failed:
         return 1
+    if named_files:
+        return 0 if sum(totals.values()) else 2
     if passed < MIN_EXPECTED_PASSED:
         return 2
     return 0
@@ -867,10 +918,35 @@ def main() -> int:
     ap.add_argument("--foreground", action="store_true",
                     help="run pytest at normal priority (default: below a normal program, "
                          "so a run never starves a Kazma server on the same machine)")
+    ap.add_argument("--shard", type=ci_shards.parse_shard, default=None, metavar="K/N",
+                    help="run only shard K of N of the suite (scripts/ci_shards.py decides which files)")
+    ap.add_argument("--files-from", type=Path, default=None, metavar="FILE",
+                    help="run only the test files FILE names, one repository path a line")
+    ap.add_argument("--durations-json", type=Path, default=None, metavar="FILE",
+                    help="write the seconds each test file took to FILE")
+    ap.add_argument("--list", action="store_true", help="print the test files of the run, and run nothing")
     args = ap.parse_args()
+    if args.shard and args.files_from:
+        ap.error("--shard and --files-from are two answers to one question")
     if args.files_per_process < 0:
         ap.error("--files-per-process must be 0 (one process per chunk) or more")
-    global BACKGROUND, THREADS_PER_PROCESS, BUDGET_FACTOR
+    global BACKGROUND, THREADS_PER_PROCESS, BUDGET_FACTOR, DURATIONS
+    if args.files_from:
+        files = files_named_in(args.files_from)
+    else:
+        files = discover_test_files()
+    if args.shard:
+        by_name = {f.relative_to(REPO).as_posix(): f for f in files}
+        which, count = args.shard
+        files = [by_name[name] for name in ci_shards.assign(by_name, count, "unit")[which - 1]]
+    if args.list:
+        for f in files:
+            print(f.relative_to(REPO).as_posix())
+        return 0
+    if not files:
+        print("[fast-test] no test files")
+        return 2
+    DURATIONS = {} if args.durations_json else None
     BACKGROUND = not args.foreground
     cpus = os.cpu_count() or 4
     if args.cores is not None:
@@ -893,8 +969,8 @@ def main() -> int:
     removed = remove_ended_run_folders()
     if removed:
         print(f"[fast-test] removed {removed} run folder(s) earlier runs left")
-    files = discover_test_files()
-    chunks = chunk_files(files, args.chunks)
+    balanced = args.shard or args.files_from
+    chunks = chunk_by_duration(files, args.chunks) if balanced else chunk_files(files, args.chunks)
     plan = [split_into_pieces(c, args.files_per_process) for c in chunks]
     processes = sum(len(p) for p in plan)
     budget = max(chunk_timeout_for(len(piece), args.chunk_timeout) for p in plan for piece in p)
@@ -1158,12 +1234,14 @@ def main() -> int:
             print(f"\n[fast-test] --- {rel}: last 40 lines of the diagnostic rerun ---")
             for ln in tail:
                 _safe_print(f"  | {ln}")
-    code = suite_exit_code(totals, failed=all_failed, poison=poison)
+    if args.durations_json:
+        ci_shards.write_durations(args.durations_json, "unit", DURATIONS or {})
+    code = suite_exit_code(totals, failed=all_failed, poison=poison, named_files=bool(args.files_from))
     passed = int(totals.get("passed", 0) or 0)
     if code == 2:
         print(
             f"\n[fast-test] suite ran no tests "
-            f"(passed={passed} < MIN_EXPECTED={MIN_EXPECTED_PASSED})"
+            f"(passed={passed} < MIN_EXPECTED={1 if args.files_from else MIN_EXPECTED_PASSED})"
         )
     return code
 

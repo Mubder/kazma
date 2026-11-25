@@ -116,7 +116,12 @@ From AGENTS.md:
 # JS syntax check
 node --check "kazma-ui/kazma_ui/static/js/chat.js"
 
-# Run tests — prefer the crash-tolerant chunked runner (full suite ~10 min;
+# Before a push: what CI would say, in about 15 minutes (the tests near the
+# change here and in a Linux container, the source gates, the browser files,
+# ruff, bandit, README). Needs Docker for the Linux part (--skip linux).
+python scripts/prepush.py
+
+# Run tests — prefer the crash-tolerant chunked runner (the full suite;
 # one chunk per CPU, at most 8; each chunk runs as consecutive pytest
 # processes of at most 60 files, --files-per-process, so none grows too big)
 python scripts/fast_test.py

@@ -145,17 +145,17 @@ come from `kazma_core.paths` (§37, §38).
 
 **Tests and commits**
 
-- Run the tests near the change, and the gates that read source; the full
-  suite once, when a change set is finished: `python scripts/fast_test.py`
-  (no `--chunks`, never pytest-xdist; it skips `tests/e2e`, so run the browser
-  files near the change too). Never start a second suite over a running one,
-  and do not edit files while it runs (testing-2).
+- Before every push: `python scripts/prepush.py` (about 15 minutes: the tests
+  near the change here and on Linux, the gates that read source, every browser
+  file, ruff, bandit, README). A whole stage also runs the full suite once:
+  `python scripts/fast_test.py` (no `--chunks`, never pytest-xdist) or
+  `prepush.py --whole`. Never start a second suite over a running one, and do
+  not edit files while it runs (testing-2).
 - A test never touches an install's data, the network, a real provider, the
   real embedder or the running Kazma; stub them (testing-1). Never mark or
   skip a test to get a pass.
-- Before a push: ruff, `scripts/generate_metrics.py --write --require-collected`
-  staged when tests changed, `--check-readme`, CI's gates. A red check on
-  `main` is fixed at once (§31 E).
+- Before that: `scripts/generate_metrics.py --write --require-collected`, staged,
+  when tests changed. A red check on `main` is fixed at once (§31 E).
 - Measure before you claim, and report a failure as a failure. A change to
   what a page, command or guide says is made with the code it describes.
 <!-- piece: test-commands -->
@@ -354,7 +354,7 @@ Paths are short: `core/` is `kazma-core/kazma_core/`, `gw/`
 - `server-deploy-details.md` Update before reload, image rebuild, what `scripts/deploy_live.py` does and reverts
 - `testing-1-isolation.md` **Testing (1)** Answer-quality ledger, runtime ownership, temp folders, data shield, egress guard, `real_docker`, published files, diagrams: `conftest.py`, `tests/`
 - `#test-commands` compile check, syntax check, one test file (above)
-- `testing-2-full-suite.md` **Testing (2)** `scripts/fast_test.py`: processes, budgets, priorities, quiet hours
+- `testing-2-full-suite.md` **Testing (2)** `scripts/prepush.py`, CI's shards (`scripts/ci_shards.py`), `scripts/fast_test.py`
 - `#manual-verification` manual verification (above)
 - `key-references.md` Every document worth knowing: guides, audits, trackers, plans, and the rules of the docs folders
 <!-- /index -->
