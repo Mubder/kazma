@@ -93,7 +93,13 @@
     `research_session.session_here` (another space's answers as an unknown
     one); never `get_session` where a request names the id. Once enforced,
     work bound to no space makes no session (`NoSpaceBound`: it became the
-    owner's), and a session records its author (`asker`, always stamped).
+    owner's), and a session records its author (`asker`, always stamped) and
+    the chats it was made in (`thread_ids`, a column never shown; one
+    question is one row, whatever chats asked it). A chat taken out of a
+    shared space takes its web searches (`forget_chat_searches`, through
+    `chat_moves.remove_what_it_left`): one another chat made too stays, a
+    row from before stays (`""`: a chat not known), a report stays (a file
+    of the space). Gate: `tests/test_chat_move_leftovers.py`.
   - **Shared research is read by every member and changed by two**
     (decision N32, the S1-16 follow-up): its author and the space's owner
     archive, restore, delete, cancel or resume it; another member reads it

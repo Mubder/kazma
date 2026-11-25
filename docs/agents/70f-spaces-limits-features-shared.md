@@ -416,8 +416,9 @@
       then the chat apps' pointers and, on a take-out, the line
       (`chat_moves.record_taken_out`: who, when, the title; only the move
       writes it), the rows of `chat_moves.MOVED_COLUMNS` (drafts, plan,
-      confirmations, decided gates) and the finished swarm tasks its maker
-      started (`swarm/chat_tasks.py`), the mover's own scheduled jobs, which
+      confirmations, decided gates) and its web searches (§70 (3)), the
+      finished swarm tasks its maker started, with their log
+      (`swarm/chat_tasks.py`), the mover's own scheduled jobs, which
       go with them (`chat_moves.follow_jobs`), and the files. On a share all
       of that stays in the person's own space. Either way the old thread's
       grants, YOLO, path grants, `/long` (`space_data.forget_chat_state`),

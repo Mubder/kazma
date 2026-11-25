@@ -7032,7 +7032,7 @@
         : ti('move_share_body', 'It moves to the shared space: everyone in that space can read it.')) +
         ' ' + ti('move_memory_note', 'Moving a chat moves the conversation. What Kazma remembered from it stays where it was said, and from now on it remembers what you say in the new space. Taking a chat out of a shared space makes that space forget it.') +
         ' ' + (takeOut
-          ? ti('move_take_out_note', 'The files Kazma shared in it come with it. Its Time Travel steps, thoughts and approval cards do not come along, and Kazma can no longer open files you attached to it: attach them again. Its drafts are removed from the shared space, and the reminders and scheduled tasks you booked in it come with you.')
+          ? ti('move_take_out_note', 'The files Kazma shared in it come with it. Its Time Travel steps, thoughts and approval cards do not come along, and Kazma can no longer open files you attached to it: attach them again. Its drafts and the web searches it made are removed from the shared space; deep research reports stay there, they are files of the space. The reminders and scheduled tasks you booked in it come with you.')
           : ti('move_share_note', 'The files Kazma shared in it go with it. Its Time Travel steps, thoughts and approval cards do not come along, and Kazma can no longer open files you attached to it: attach them again. Drafts, reminders and scheduled tasks stay in your own space.')),
       confirmText: takeOut ? ti('move_take_out_ok', 'Take out') : ti('move_share_ok', 'Share'),
     });

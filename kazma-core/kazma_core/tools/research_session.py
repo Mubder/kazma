@@ -16,7 +16,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -202,7 +202,8 @@ def _conn() -> sqlite3.Connection:
             meta_json TEXT DEFAULT '{}',
             archived INTEGER DEFAULT 0,
             tenant_id TEXT DEFAULT '',
-            asker TEXT DEFAULT ''
+            asker TEXT DEFAULT '',
+            thread_ids TEXT DEFAULT ''
         )
         """
     )
@@ -218,6 +219,7 @@ def _conn() -> sqlite3.Connection:
             ("archived", "INTEGER DEFAULT 0"),
             ("tenant_id", "TEXT DEFAULT ''"),
             ("asker", "TEXT DEFAULT ''"),
+            ("thread_ids", "TEXT DEFAULT ''"),
         ),
     )
     c.commit()
@@ -392,8 +394,8 @@ def create_session(
             INSERT INTO research_sessions
             (id, topic, depth, status, stage, message, log_json, report_path,
              summary, error, sources, max_sources, rubric_score, rubric_ok,
-             created_at, updated_at, meta_json, archived, tenant_id, asker)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             created_at, updated_at, meta_json, archived, tenant_id, asker, thread_ids)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 sess.id,
@@ -416,6 +418,7 @@ def create_session(
                 0,
                 sess.tenant_id,
                 sess.asker,
+                _with_chat(None),
             ),
         )
         c.commit()
@@ -464,6 +467,56 @@ def _session_author() -> str:
     from kazma_core.spaces.scope import bound_asker
 
     return bound_asker() or ""
+
+
+#: How many chats a row names. A question asked in more than that is a row no
+#: take-out removes.
+_CHATS_NAMED = 200
+
+
+def _with_chat(held: str | None) -> str:
+    """The chats (threads) a session was made in, as its row keeps them, with
+    the running one added; *held* None: a new row. ``""`` in the list is a chat
+    that is not known -- a row from before 25 Nov 2026, a search outside a
+    chat. Never shown. A ContextVar read: no I/O."""
+    from kazma_core.safety.hitl import get_current_thread_id
+
+    chats = [] if held is None else _chats(held)
+    asked_in = str(get_current_thread_id() or "")
+    if asked_in not in chats:
+        chats.append(asked_in)
+    return json.dumps(["", *chats[-_CHATS_NAMED:]] if len(chats) > _CHATS_NAMED else chats)
+
+
+def _chats(held: str) -> list[str]:
+    try:
+        chats = json.loads(held or "")
+    except ValueError:
+        return [""]
+    return [str(chat) for chat in chats] if isinstance(chats, list) else [""]
+
+
+def forget_chat_searches(thread_id: str, *, space: str) -> int:
+    """The web searches a chat made leave *space* with it (a chat taken out of
+    a shared space, Spaces S2-12): the questions the person asked Kazma there,
+    which any member read on the Research page. A search another chat made
+    too stays, as that chat's; a report stays, a file of the space. Returns
+    how many were removed. Idempotent. Blocking."""
+    if not thread_id or not _db_path().exists():
+        return 0
+    removed = 0
+    with closing(_conn()) as c, c:
+        c.execute("BEGIN IMMEDIATE")
+        rows = c.execute(
+            "SELECT id, thread_ids FROM research_sessions WHERE depth = 'chat' AND tenant_id = ? "
+            "AND instr(thread_ids, ?) > 0", (space, json.dumps(thread_id))).fetchall()
+        for row in rows:
+            others = [chat for chat in _chats(row["thread_ids"]) if chat != thread_id]
+            if others:
+                c.execute("UPDATE research_sessions SET thread_ids = ? WHERE id = ?", (json.dumps(others), row["id"]))
+            else:
+                removed += c.execute("DELETE FROM research_sessions WHERE id = ?", (row["id"],)).rowcount
+    return removed
 
 
 def session_to_change(session_id: str) -> tuple[ResearchSession | None, str]:
@@ -1063,7 +1116,8 @@ def record_chat_research(
                     sess.summary = new_summary
                     if result_count is not None:
                         sess.meta = {**(sess.meta or {}), "results": int(result_count)}
-            c.rollback()
+            c.execute("UPDATE research_sessions SET thread_ids=? WHERE id=?", (_with_chat(row["thread_ids"]), sess.id))
+            c.commit()
             update_session(sess.id, status=sess.status, stage=sess.stage, message=sess.message, sources=sess.sources, summary=sess.summary, meta=sess.meta)
             return sess
         else:
@@ -1093,8 +1147,8 @@ def record_chat_research(
                 INSERT INTO research_sessions
                 (id, topic, depth, status, stage, message, log_json, report_path,
                  summary, error, sources, max_sources, rubric_score, rubric_ok,
-                 created_at, updated_at, meta_json, archived, tenant_id, asker)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 created_at, updated_at, meta_json, archived, tenant_id, asker, thread_ids)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     sess.id,
@@ -1117,6 +1171,7 @@ def record_chat_research(
                     0,
                     sess.tenant_id,
                     sess.asker,
+                    _with_chat(None),
                 ),
             )
             c.commit()

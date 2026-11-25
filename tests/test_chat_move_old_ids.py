@@ -382,7 +382,7 @@ def test_a_step_a_stop_cut_off_is_done_at_settle(world, tmp_path) -> None:
 
 #: The columns that name a chat: its thread, or its session (the chat store's
 #: rows and spool are kept by session).
-_CHAT_COLUMNS = {"thread_id", "session_id"}
+_CHAT_COLUMNS = {"thread_id", "session_id", "thread_ids"}
 
 
 def _threaded_tables(stores: list[tuple[str, Path]]) -> set[tuple[str, str]]:
