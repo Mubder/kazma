@@ -38,6 +38,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kazma_core.spaces.row_work import install_statements
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -394,6 +396,7 @@ def latest_pg_backup() -> Path | None:
     return files[0] if files else None
 
 
+@install_statements("which of Kazma's tables the database has")
 def verify_required_pg_tables(pool: Any) -> list[str] | None:
     """Return the list of KAZMA_PG_TABLES missing from the connected PG.
 

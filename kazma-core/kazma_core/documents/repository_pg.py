@@ -18,6 +18,8 @@ from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from kazma_core.spaces.row_work import install_statements
+
 from .models import (
     ArtifactId,
     BlobId,
@@ -296,6 +298,7 @@ class PostgresDocumentRepository:
         self._conn = None  # type: ignore[assignment]
         self._ensure_schema()
 
+    @install_statements("the document tables, made for every space")
     def _ensure_schema(self) -> None:
         from kazma_core.db.pg_schema import ensure_schema
 
@@ -1586,9 +1589,9 @@ def resolve_document_repository(
 
     if document_metadata_backend_name() != "postgres":
         return sqlite_repo
-    try:
-        from kazma_core.db.pg_helpers import get_pool
+    from kazma_core.db.pg_helpers import get_pool, no_other_store_on_refusal
 
+    try:
         quota = tenant_quota_bytes
         if quota is None:
             from .config import get_document_config
@@ -1599,6 +1602,7 @@ def resolve_document_repository(
         logger.info("[documents.metadata] using Postgres multi-replica metadata repository")
         return repo
     except Exception as exc:  # noqa: BLE001
+        no_other_store_on_refusal(exc, "[documents.metadata]")
         logger.warning(
             "[documents.metadata] Postgres metadata repo unavailable (%s); "
             "falling back to SQLite",

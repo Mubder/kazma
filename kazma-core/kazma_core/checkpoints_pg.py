@@ -16,6 +16,8 @@ import logging
 import sys
 from typing import Any
 
+from kazma_core.spaces.row_work import install_statements
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["close_postgres_checkpointer", "open_postgres_checkpointer"]
@@ -34,7 +36,8 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
     ``setup()`` may run ``CREATE INDEX CONCURRENTLY``, which cannot run in a
     transaction; ``prepare_threshold=0`` because a pooler in front of Postgres
     cannot keep prepared statements. Raises when Postgres or the package is
-    not there -- the callers fall back to SQLite and say so.
+    not there -- the callers fall back to SQLite and say so, but never on a
+    refusal (``pg_helpers.no_other_store_on_refusal``): that one goes up.
     """
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
     from psycopg.rows import dict_row  # type: ignore
@@ -63,7 +66,8 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
     try:
         await pool.open()
         saver = AsyncPostgresSaver(conn=pool, serde=kazma_checkpoint_serde())  # type: ignore[arg-type]
-        await saver.setup()
+        with install_statements("the checkpoint tables, made for every space"):
+            await saver.setup()
         ready = True
         availability.note_success("checkpoints", since=began)
     finally:

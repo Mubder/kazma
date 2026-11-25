@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from kazma_core.diagnostic_scope import read_only_diagnostic
+from kazma_core.spaces.row_work import install_statements
 
 logger = logging.getLogger(__name__)
 
@@ -363,7 +364,8 @@ def check_database() -> dict[str, Any]:
                 "backend": backend,
                 "error": "pool unavailable",
             }
-        row = pool.execute_one("SELECT 1 AS ok")
+        with install_statements("a ping: whether the database answers"):
+            row = pool.execute_one("SELECT 1 AS ok")
         if not row:
             return {
                 "status": "failed",
@@ -885,18 +887,22 @@ async def _check_memory_recall() -> dict[str, Any]:
     t0 = time.perf_counter()
     try:
         from kazma_core.memory.recall import recall
-        from kazma_core.spaces.scope import OWNER_SPACE_ID
+        from kazma_core.spaces.row_work import statements_of
+        from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, bind_scope, spaces_enforced
 
-        result = await asyncio.to_thread(
-            recall,
-            "health canary probe",
-            limit=1,
-            session_id="health-canary",
-            # The install's own canary, in a read-only scope: the owner's
-            # space, never a member's (Spaces S1-02).
-            tenant_id=OWNER_SPACE_ID,
-            explain=False,
-        )
+        # The install's own canary, in a read-only scope: the owner's space,
+        # never a member's (Spaces S1-02), whoever asks and with nobody asking.
+        # Not enforced: nothing is bound, as before.
+        with (bind_scope(OWNER_SPACE_ID, OWNER_ACCOUNT_ID) if spaces_enforced()
+              else statements_of(OWNER_SPACE_ID)):
+            result = await asyncio.to_thread(
+                recall,
+                "health canary probe",
+                limit=1,
+                session_id="health-canary",
+                tenant_id=OWNER_SPACE_ID,
+                explain=False,
+            )
         beliefs = getattr(result, "beliefs", None)
         episodes = getattr(result, "episodes", None)
         if getattr(result, "failed", False) is True:

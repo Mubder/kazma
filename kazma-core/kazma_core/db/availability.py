@@ -35,6 +35,7 @@ says nothing about whether the database server answers (:func:`is_outage`).
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -171,11 +172,22 @@ def _server_of(dsn: str) -> tuple[str, str] | None:
     return host, str(info.get("port") or "5432").split(",")[0].strip()
 
 
-def is_kazma_database(dsn: str | None) -> bool:
-    """True when *dsn* reaches the server Kazma's own database is on.
+def _database_of(dsn: str) -> tuple[str, str, str] | None:
+    """(host, port, database) a DSN signs in to, or None when it cannot be
+    read. A DSN that names no database means the one named as its user
+    (libpq's own rule, and ``PGDATABASE`` before it)."""
+    server = _server_of(dsn)
+    if server is None:
+        return None
+    from psycopg.conninfo import conninfo_to_dict
 
-    A memory mirror on another server is its own outage, never Kazma's.
-    """
+    info = conninfo_to_dict(dsn)
+    name = info.get("dbname") or os.environ.get("PGDATABASE") or info.get("user") or ""
+    return *server, str(name)
+
+
+def _same_as_kazmas(dsn: str | None, reading: Callable[[str], Any]) -> bool:
+    """Whether *reading* answers the same for *dsn* and for Kazma's own."""
     if not dsn:
         return False
     from kazma_core.db.backend import get_database_url
@@ -188,8 +200,27 @@ def is_kazma_database(dsn: str | None) -> bool:
             dsn = "postgresql://" + dsn[len(prefix):]
         if ours.startswith(prefix):
             ours = "postgresql://" + ours[len(prefix):]
-    a, b = _server_of(dsn), _server_of(ours)
-    return a is not None and a == b
+    a = reading(dsn)
+    return a is not None and a == reading(ours)
+
+
+def is_kazma_server(dsn: str | None) -> bool:
+    """True when *dsn* reaches the server Kazma's own database is on: whose
+    outage a failure there is.
+
+    A memory mirror on another server is its own outage, never Kazma's.
+    """
+    return _same_as_kazmas(dsn, _server_of)
+
+
+def is_kazma_database(dsn: str | None) -> bool:
+    """True when *dsn* is Kazma's own database, not only on its server.
+
+    A mirror in another database of that server shares its outages
+    (:func:`is_kazma_server`) and none of its tables, roles or policies
+    (S4-01, M8).
+    """
+    return _same_as_kazmas(dsn, _database_of)
 
 
 def _describe(exc: BaseException | None) -> str:

@@ -29,6 +29,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from kazma_core.spaces.row_work import install_statements
+
 from .jobs import (
     _ACTIVE_STATE_VALUES,
     fair_claim_order,
@@ -190,6 +192,7 @@ class PostgresDocumentJobRepository:
         if ensure_schema:
             self._ensure_schema()
 
+    @install_statements("the document job tables, made for every space")
     def _ensure_schema(self) -> None:
         from kazma_core.db.pg_schema import ensure_schema
 
@@ -1143,9 +1146,9 @@ def resolve_job_repository(
     """
     if document_jobs_backend() != "postgres":
         return sqlite_repo
-    try:
-        from kazma_core.db.pg_helpers import get_pool
+    from kazma_core.db.pg_helpers import get_pool, no_other_store_on_refusal
 
+    try:
         pool = get_pool()
         repo = PostgresDocumentJobRepository(
             pool, retry_base_seconds=retry_base_seconds, retry_max_seconds=retry_max_seconds
@@ -1153,6 +1156,7 @@ def resolve_job_repository(
         logger.info("[documents.jobs] using Postgres multi-replica job repository")
         return repo
     except Exception as exc:  # noqa: BLE001
+        no_other_store_on_refusal(exc, "[documents.jobs]")
         logger.warning(
             "[documents.jobs] Postgres job repo unavailable (%s); "
             "falling back to single-node SQLite queue",

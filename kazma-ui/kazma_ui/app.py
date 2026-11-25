@@ -2346,6 +2346,12 @@ class KazmaAppBuilder:
                 self.gateway.on_message(brain_handler)
                 logger.info("[Checkpoint] Brain handler re-registered with live graph_getter")
         except Exception as e:
+            if self._checkpointer is None:
+                # Refused (Spaces enforced): the start fails with the reason,
+                # never a Kazma running on no chat state (S4-01, H2).
+                from kazma_core.db.pg_helpers import no_other_store_on_refusal
+
+                no_other_store_on_refusal(e, "[Checkpoint]")
             logger.warning("[Checkpoint] Checkpointer not available: %s", e)
 
         if self.gateway is not None:

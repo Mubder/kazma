@@ -27,11 +27,30 @@ ROW_WORK = "kazma-core/kazma_core/spaces/row_work.py"
 
 #: The install's own statements: ``file::function`` -> why no one space is the
 #: answer. A name is a function, and everything it calls is the install's.
-INSTALL: dict[str, str] = {}
+INSTALL: dict[str, str] = {
+    "kazma-core/kazma_core/checkpoints_pg.py::open_postgres_checkpointer":
+        "the checkpoint tables are made once, for every space",
+    "kazma-core/kazma_core/db/pg_backup.py::verify_required_pg_tables":
+        "which tables the database has, no row of any space",
+    "kazma-core/kazma_core/documents/audit.py::DocumentAuditStore._ensure_pg_guard":
+        "the audit's trigger, one for every space's rows",
+    "kazma-core/kazma_core/documents/jobs_pg.py::PostgresDocumentJobRepository._ensure_schema":
+        "the job tables are made once, for every space",
+    "kazma-core/kazma_core/documents/repository_pg.py::PostgresDocumentRepository._ensure_schema":
+        "the document tables are made once, for every space",
+    "kazma-core/kazma_core/memory/health.py::build_memory_health":
+        "a ping only: the probes round it read the owner's memory as before",
+    "kazma-core/kazma_core/security/service_exposure.py::_role_answer":
+        "the role that signed in, no row of any space",
+    "kazma-ui/kazma_ui/health.py::check_database":
+        "a ping: whether the database answers, no row of any space",
+}
 
 #: The forms, by the name they are called by.
 INSTALL_FORMS = {"install_statements", "install_loops"}
 FORMS = INSTALL_FORMS | {"statements_of", "work_of"}
+#: What answers something to enter: a call inside the ``with``, or kept for one.
+RESOLVERS = {"resolve_work_of", "work_of_async"}
 
 
 @dataclass(frozen=True)
@@ -98,10 +117,11 @@ def uses_in(source: str, rel: str) -> list[Use]:
                                          _kind(node), _yields(node), mark.lineno))
         if isinstance(node, ast.With | ast.AsyncWith):
             for item in node.items:
-                if isinstance(item.context_expr, ast.Call) and _name(item.context_expr) in FORMS:
-                    taken.add(id(item.context_expr))
-                    found.append(Use(f"{rel}::{'.'.join(stack)}", _name(item.context_expr), "with",
-                                     _kind(function), _yields(node), node.lineno))
+                for call in ast.walk(item.context_expr):
+                    if isinstance(call, ast.Call) and _name(call) in FORMS | RESOLVERS:
+                        taken.add(id(call))
+                        found.append(Use(f"{rel}::{'.'.join(stack)}", _name(call), "with",
+                                         _kind(function), _yields(node), node.lineno))
         if isinstance(node, ast.Call) and _name(node) in FORMS and id(node) not in seen:
             found.append(Use(f"{rel}::{'.'.join(stack)}", _name(node), "call", _kind(function), False, node.lineno))
         seen.update(taken)
@@ -125,7 +145,7 @@ def _uses() -> list[Use]:
         if rel == ROW_WORK:
             continue
         text = (REPO / rel).read_text(encoding="utf-8", errors="replace")
-        if any(form in text for form in FORMS):
+        if any(form in text for form in FORMS | RESOLVERS):
             found += uses_in(text, rel)
     return found
 
@@ -162,6 +182,7 @@ def test_the_installs_statements_are_the_declared_ones() -> None:
     ("async def f():\n    with statements_of('a'):\n        async for x in g():\n            yield x\n",
      "held across a yield"),
     ("def f():\n    with work_of('a'):\n        yield from g()\n", "held across a yield"),
+    ("async def f():\n    with (await work_of_async('a'))():\n        yield 1\n", "held across a yield"),
 ])
 def test_a_planted_wrong_use_is_found(source: str, said: str) -> None:
     problems = _problems(uses_in(source, "x.py"))
@@ -170,6 +191,7 @@ def test_a_planted_wrong_use_is_found(source: str, said: str) -> None:
 
 @pytest.mark.parametrize("source", [
     "def f():\n    with statements_of('a'):\n        return g()\n",
+    "def f():\n    with (bind_scope('a', 'b') if on() else statements_of('a')):\n        return g()\n",
     "@install_statements('x')\ndef f():\n    return 1\n",
     "async def f():\n    with statements_of('a'):\n        await g()\n",
     "@contextmanager\ndef f():\n    with statements_of('a'):\n        yield\n",

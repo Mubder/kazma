@@ -38,6 +38,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from kazma_core.spaces.row_work import install_statements
+
 from .repository import DocumentRepository
 
 logger = logging.getLogger(__name__)
@@ -292,6 +294,7 @@ class DocumentAuditStore:
             self._conn = None
             self._ensure_pg_guard()
 
+    @install_statements("the document audit's guard, one for every space")
     def _ensure_pg_guard(self) -> None:
         """The Postgres side of the SQLite triggers: no update, and delete only
         inside the retention prune. Created when missing, under the schema

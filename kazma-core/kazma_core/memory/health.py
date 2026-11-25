@@ -14,6 +14,8 @@ import threading
 import time
 from typing import Any
 
+from kazma_core.spaces.row_work import install_statements
+
 __all__ = ["build_memory_health", "mark_recall_degraded", "recall_degraded"]
 
 logger = logging.getLogger(__name__)
@@ -828,7 +830,8 @@ def build_memory_health() -> dict[str, Any]:
                         meta={"backend": "postgres"},
                     )
                 else:
-                    pool.execute_one("SELECT 1 AS ok")
+                    with install_statements("a ping: whether the database answers"):
+                        pool.execute_one("SELECT 1 AS ok")
             except Exception as exc:
                 components[-1] = _comp(
                     "store_config", "ConfigStore",
