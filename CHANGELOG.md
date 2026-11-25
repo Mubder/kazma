@@ -101,6 +101,28 @@
   is refused now, by its text, at every place that takes a path, and a path
   that means a place only relative to a drive is never read as the workspace's.
 
+## Memory: an Arabic question finds a fact as an English one does (2026-11-25)
+
+- Asking in Arabic for your plans, goals, interests, what you bought, received,
+  attended or finished, whom you met, your age, birthday, doctor, diet, work,
+  study or children finds it as asking in English does, whichever language it
+  was told in ("شنو خططي؟", "ماذا اشتريت؟", "منو دكتوري؟"). Of 138 such questions
+  Gulf Arabic missed 59 and Modern Standard Arabic 55; English missed 11. None
+  is missed now.
+- "List all my plans" shows them all, whatever words they were kept under
+  ("plans to", "intends to", "planning"); so do goals, interests, purchases,
+  what you attended and habits. "عطني كل خططي", "قائمة" and "لستة" ask for a list,
+  and "ومتى؟" goes on from what was said, as "list" and "And when?" did.
+- A person's new job or employer takes the place of the old one whatever words
+  each was told in, and your own one job or age does too. Several jobs told as
+  a list stay a list, and what you said yourself is not changed by a reading.
+- A change about a person kept in one alphabet and spoken of in the other
+  ("عمر" and Omar) replaces the fact it changes, for names that are one
+  person's in both; a name that could be two people's ("Hassan") is left alone.
+- In memory's lists, "سامي" no longer lists "سام" where a Sami is held, and a
+  word typed with a separate accent, or with Arabic digits beside Latin letters
+  ("iphone١٥"), finds itself.
+
 ## Memory: a change replaces the fact it changes (2026-11-25)
 
 - When you say that something changed or ended ("my sister Noura is a surgeon

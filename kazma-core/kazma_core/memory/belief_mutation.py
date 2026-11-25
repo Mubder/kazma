@@ -617,6 +617,7 @@ def mutate_belief(
             # type (memory/predicates.py) -- so the same value is a no-op, a
             # new value supersedes and a set appends, instead of a second
             # name holding a second, conflicting value.
+            from kazma_core.memory.fact_names import name_in_use
             from kazma_core.memory.predicates import canonical_predicate
 
             try:
@@ -624,6 +625,10 @@ def mutate_belief(
                     primary_conn, tenant_id=tenant_id, subject=sub,
                     predicate=pred, predicate_type=ptype,
                 )
+                # ... and a person's role or employer under the name they
+                # already have one under, whatever words name it.
+                pred = name_in_use(primary_conn, tenant_id=tenant_id, subject=sub, predicate=pred,
+                                   predicate_type=ptype, value=obj, extraction_method=extraction_method)
             except sqlite3.Error:
                 logger.debug("[belief_mutate] predicate names unreadable; keeping %r", pred)
             ptype = _established_kind(primary_conn, tenant_id=tenant_id, subject=sub,

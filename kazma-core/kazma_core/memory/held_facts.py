@@ -21,7 +21,8 @@ step 1, 2026-11-25):
   every friday", and an Arabic turn is near a fact held in English. Nothing
   is embedded here;
 * the nearest facts of a subject whose name is in **another alphabet** than
-  the turn ("عمر" and ``omar``), which no word of it can name;
+  the turn, which no word of it names. A person whose name Kazma knows in both
+  ("عمر" and ``omar``: ``name_alphabets``) is named by it;
 * the speaker's **newest** facts: what was just said is what is most often
   put right. They used to take all the places.
 
@@ -163,6 +164,7 @@ class _Said:
 
     def __init__(self, text: str) -> None:
         from kazma_core.documents.arabic import fold_for_search
+        from kazma_core.memory.name_alphabets import arabic_names_in
         from kazma_core.memory.query_terms import normalised_word
 
         #: A word as it was written -> where; then folded, with only what can be
@@ -170,6 +172,8 @@ class _Said:
         self._raw: dict[str, list[int]] = {}
         self._name: dict[str, list[int]] = {}
         self._thing: dict[str, list[int]] = {}
+        #: An Arabic name -> where its Latin spelling stands.
+        self._spelled = arabic_names_in(text)
         for at, m in enumerate(_RAW_WORD.finditer(text)):
             self._raw.setdefault(m.group(), []).append(at)
         plain = unicodedata.normalize("NFKC", text)
@@ -233,7 +237,23 @@ class _Said:
             return self._small_words([w for w in _RAW_WORD.findall(spoken) if w not in ("user", "my", "s")])
         whole = _whole_names(tokens)
         as_told = None if len(whole) < len(tokens) else self._all(told, person)
-        return as_told or (self._all([(w, w) for w in whole], person) if whole != tokens else None)
+        return (as_told or (self._all([(w, w) for w in whole], person) if whole != tokens else None)
+                or self._in_the_other_alphabet(subject))
+
+    def _in_the_other_alphabet(self, subject: str) -> tuple[int, int] | None:
+        """Where the text holds *subject*'s name as the other alphabet writes
+        it ("عمر" names ``omar``, "Omar" names ``عمر``)."""
+        from kazma_core.memory.name_alphabets import _arabic_words, in_arabic
+        from kazma_core.memory.query_terms import content_terms
+
+        read = in_arabic(subject)
+        if read is None:
+            found = [self._spelled.get(word) for word in _arabic_words(subject)]
+        else:
+            # A name that is also a small word ("علي") as it is written.
+            found = [self._name.get(word) if content_terms(word) else
+                     (where and [where[1]]) if (where := self._small_words([word])) else None for word in read]
+        return (min(len(f) for f in found if f), min(f[0] for f in found if f)) if found and all(found) else None
 
     def _all(self, words: Sequence[tuple[str, str]], person: bool) -> tuple[int, int] | None:
         # The first name of a person's two settles who it is: the second may

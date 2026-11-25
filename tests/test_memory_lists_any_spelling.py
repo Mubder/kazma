@@ -270,6 +270,44 @@ def test_a_word_is_found_as_a_word(stored, query, held):
     assert Asked.of(query, whole=True).any(stored) is held
 
 
+@pytest.mark.parametrize("stored, query, held", [
+    # A letter typed as a letter and its mark (the last check of step 1).
+    ("the café by the sea", "café", True), ("my résumé", "résumé", True),
+    ("the cafe by the sea", "café", False), ("قرأت كتاب", "قرأت", True),
+    # A digit in another script, inside a Latin word.
+    ("٣G router", "٣G", True), ("bought an iphone١٥", "iphone١٥", True), ("bought an iPhone15", "iphone١٥", True),
+    ("GPT٥ is out", "gpt5", True), ("gpt6 is out", "gpt5", False), ("٣G", "4g", False),
+])
+def test_a_word_is_found_as_it_was_typed(stored, query, held):
+    from kazma_core.memory.word_search import Asked
+
+    assert Asked.of(query).every(stored) is held
+
+
+#: What is held, what is typed, the rows listed: a final ي that may be "my".
+MY = [
+    (("سامي اتصل", "سام زارنا"), "سامي", {0}), (("عادي جدا", "عاد من السفر"), "عادي", {0}),
+    (("رامي في البيت", "رام الله مدينة"), "رامي", {0}), (("سيارة زرقاء", "بيت كبير"), "سيارتي", {0}),
+    (("سيارتي تعطلت", "بيت كبير"), "سيارتي", {0}), (("حساسية من الفول", "بيت كبير"), "حساسيتي", {0}),
+]
+
+
+@pytest.mark.parametrize("held, typed, listed", MY)
+@pytest.mark.parametrize("place", PLACES)
+def test_my_is_taken_off_only_where_the_word_itself_is_nowhere(lists, place, held, typed, listed):
+    lists.told(held)
+    assert lists(place, typed) == {_id(n) for n in listed}
+
+
+def test_control_my_taken_off_at_once_lists_another(lists, monkeypatch):
+    from kazma_core.memory import word_search
+
+    monkeypatch.setattr(word_search, "asked_in", lambda conn, query, places, **kw: (
+        word_search.register(conn, asked := word_search.Asked.of(query, **kw)), asked)[1])
+    lists.told(MY[0][0])
+    assert lists("page: facts", "سامي") == {_id(0), _id(1)}
+
+
 def test_a_list_that_wants_every_word_takes_a_words_start():
     from kazma_core.memory.word_search import Asked
 

@@ -338,6 +338,13 @@ moved the study (`results.json`). The chosen design's numbers do not move.
   (11655e4df): quick-pass facts 19 to 20 (section 4.4), English recall
   0.4615 to 0.5385 in the untagged and tagged runs.
 
+**Re-run on 2026-11-25.** The memory plan's W6, step 2, reads "ما هي سيارتي؟"
+(q21, Omar's) as asking the asker's own car whatever meaning makes of it. No
+design's number moves but `control`'s (today's single entry, every member filed
+as one `user`): there "my car" is anyone's, so Layla's fact is shown before the
+turns. Its mrr 0.624 to 0.608, precision 0.453 to 0.450, misattributed 80 items
+to 81, a wrong fact first 14 to 15 (Arabic mrr 0.648 to 0.593).
+
 By kind of question, chosen design (today in brackets): about the asker,
 fact hit 0.957 (0.522) and mrr 0.971 (0.621); the asker never said, 3 of 3
 show nothing as the asker's (0 of 3); another member by name, hit 1.000

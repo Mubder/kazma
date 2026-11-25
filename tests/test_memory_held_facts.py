@@ -137,6 +137,8 @@ def test_control_with_replaces_ignored_both_stay(memory, monkeypatch):
     _fact(conn, "hana", "occupation", "pilot")
     held = held_facts(conn, tenant_id="default", text="Hana is a captain now.")
     monkeypatch.setattr(belief_extractor, "_take_replaces", lambda clean, *_a: clean.pop("replaces", None) and None)
+    # A person's job under another name is one value by the name too (W6, step 2).
+    monkeypatch.setattr("kazma_core.memory.fact_names.name_in_use", lambda conn, *, predicate, **_kw: predicate)
     _apply(memory, [{"subject": "hana", "predicate": "works_as", "predicate_type": "functional",
                      "object": "captain", "replaces": held[0]["ref"]}], held)
     assert _current(conn) == [("hana", "occupation", "pilot"), ("hana", "works_as", "captain")]

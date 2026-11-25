@@ -633,7 +633,8 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
             # folded (word_search: the index keeps an Arabic word as written,
             # and an alias's Arabic JSON-escaped); the query as written if FTS
             # is unavailable or the query has no usable tokens.
-            word_search.register(conn, word_search.Asked.of(query, whole=True))
+            word_search.asked_in(conn, query, [
+                (where, (only, only), ("e.id", "e.name", "e.type", word_search.ALIAS_NAMES))], whole=True)
             match_q = _fts_match_expr(query)
             fts_rowids: list[int] | None = None
             if match_q:

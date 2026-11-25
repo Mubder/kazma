@@ -100,7 +100,8 @@ def _every_word(columns: tuple[str, ...], asked: word_search.Asked) -> tuple[str
     held = " || ' ' || ".join(f"COALESCE({c},'')" for c in columns)
     plain = [t for t in asked.terms if t.isascii() and any(ch.isalpha() for ch in t)]
     clause = "".join(f"LOWER({held}) LIKE ? AND " for _ in plain) + word_search.holds("every", *columns)
-    return clause, [f"%{t}%" for t in plain]
+    # A digit may stand in another script in the text ("iphone١٥", "٣G").
+    return clause, ["%" + "".join("_" if ch.isdigit() else ch for ch in t) + "%" for t in plain]
 
 
 def _day(ts: Any, zone: Any) -> str:
@@ -140,7 +141,6 @@ def list_memories(
     if when.strip() and period is None:
         # A time the reader cannot place is never read as "any time".
         return MemoryListing(about=about, when=when, offset=offset)
-    asked = word_search.Asked.of(about, words=8)
     only = narrowed_to(tenant_id)
     people = speakers.room(tenant_id)
     own = conn is None
@@ -150,15 +150,20 @@ def list_memories(
         conn = sqlite3.connect(primary_memory_db(), timeout=15)
     conn.row_factory = sqlite3.Row
     try:
-        word_search.register(conn, asked)
-        facts = _facts(conn, only, asked, period, zone)
         tiers = ",".join("?" for _ in RECALLABLE_TIERS)
+        texts = ("user_text", "assistant_text", "summary_text")
+        asked = word_search.asked_in(conn, about, [
+            ("FROM beliefs WHERE (? IS NULL OR tenant_id = ?) AND valid_until IS NULL AND invalidated_at IS NULL",
+             (only, only), _FACT_WORDS),
+            (f"FROM episodes WHERE tier IN ({tiers}) AND (? IS NULL OR tenant_id = ?)",
+             (*RECALLABLE_TIERS, only, only), texts)], words=8)
+        facts = _facts(conn, only, asked, period, zone)
         where, params = [f"tier IN ({tiers})", "(? IS NULL OR tenant_id = ?)"], [*RECALLABLE_TIERS, only, only]
         if period is not None:
             where.append("created_at >= ? AND created_at < ?")
             params.extend(period)
         if asked.terms:
-            clause, likes = _every_word(("user_text", "assistant_text", "summary_text"), asked)
+            clause, likes = _every_word(texts, asked)
             where.append(clause)
             params.extend(likes)
         turns = conn.execute(
@@ -209,6 +214,10 @@ def _event_of(row: sqlite3.Row) -> dict[str, Any]:
 _META = "CASE WHEN json_valid(metadata_json) THEN metadata_json END"
 
 
+#: A fact's words.
+_FACT_WORDS = ("subject", "predicate", "object")
+
+
 def _facts(conn: sqlite3.Connection, only: str | None, asked: word_search.Asked,
            period: tuple[float, float] | None, zone: Any) -> list[sqlite3.Row]:
     """The facts holding every word asked for: the current ones, and with a period
@@ -232,7 +241,7 @@ def _facts(conn: sqlite3.Connection, only: str | None, asked: word_search.Asked,
         where.append("(invalidated_at IS NULL OR id IN (SELECT supersedes_id FROM beliefs "
                      "WHERE supersedes_id IS NOT NULL))")
     if asked.terms:
-        clause, likes = _every_word(("subject", "predicate", "object"), asked)
+        clause, likes = _every_word(_FACT_WORDS, asked)
         where.append(clause)
         params.extend(likes)
     rows = conn.execute(

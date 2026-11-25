@@ -41,7 +41,7 @@ _OPENERS_EN = re.compile(
 #: Arabic openers, folded: "و" written onto the first word ("ووين", "وشنو",
 #: "وأي", "ومتى", "وكم"), or a word that goes on from what was said.
 _OPENERS_AR = re.compile(
-    r"^\W*(?:و(?:وين|شنو|ش|اي|متى|كم|منو|ليش|شلون|كيف|هل|بعدين|بعد)|طيب|زين|اوكي|اوك|خلاص|ايوه|"
+    r"^\W*(?:و(?:وين|شنو|ش|اي|متي|كم|منو|ليش|شلون|كيف|هل|بعدين|بعد)|طيب|زين|اوكي|اوك|خلاص|ايوه|"
     r"اي نعم|نعم|لا|يعني|بعدين|عيل|اجل|تمام|ماشي|يلا)(?=\s|$|[؟?.,،!])"
 )
 #: A word that points back at something said before.
@@ -112,8 +112,10 @@ _ALL_EN = re.compile(
     r"every\s+(?:time|one|single|\w+)|everything|each (?:time|one|of)|all of them|all the times)",
     re.IGNORECASE,
 )
+#: Folded, as the text is read ("قائمة" is "قايمه": ``tests/test_arabic_patterns_folded.py``).
+#: "كل خططي" is "all my plans": whose they are is in the word.
 _ALL_AR = re.compile(
-    r"(?:^|\s)(?:كم مره|كم مرة|كل\s+(?:ال|ا)\S+|كلها|كلهم|جميع|اذكر لي|اذكرلي|عدد|قائمه|قائمة|لستة|ليست)"
+    r"(?:^|\s)(?:كم مره|كل\s+(?:ال|ا)\S+|كل\s+\S{3,30}(?:ي|نا)|كلها|كلهم|جميع|اذكر لي|اذكرلي|عدد|قايمه|لسته|ليست|ليسته)"
     r"(?=\s|$|[؟?.,،!])"
 )
 

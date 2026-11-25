@@ -486,9 +486,9 @@ def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
     on = _since_value(b.get("on"))
     if on:
         clean["on"] = on
-    replaces = _REF_RE.fullmatch(str(b.get("replaces") or "").strip().lower())
+    replaces = _ref_of(b)
     if replaces:
-        clean["replaces"] = f"f{int(replaces[1])}"
+        clean["replaces"] = replaces
     if b.get("ended") is True:
         clean["ended"] = True
     return clean
@@ -509,8 +509,8 @@ _REF_RE = re.compile(r"f([0-9]{1,3})")
 def _take_replaces(clean: dict[str, Any], held: list[dict[str, Any]] | None, conn: Any,
                    tenant_id: str, user_text: str = "") -> dict[str, Any] | None:
     """The held fact *clean* replaces (its ``replaces`` number), when it is
-    about the same subject and still current: *clean* then goes by that
-    fact's name and kind, so the trust gate decides as for any change of it
+    about the same subject (:func:`_who_is_meant`) and still current: *clean*
+    then goes by that fact's name and kind, so the trust gate decides as for any change of it
     (a fact the user stated yields only to the user's own words). Anything
     else is ignored: the fact is written as it came."""
     ref = clean.pop("replaces", None)
@@ -537,6 +537,57 @@ def _take_replaces(clean: dict[str, Any], held: list[dict[str, Any]] | None, con
         clean["predicate"] = entry["predicate"]
     clean["predicate_type"] = "set" if clean.get("event") else entry["predicate_type"]
     return entry
+
+
+def _who_is_meant(raw_beliefs: list[dict[str, Any]], held: list[dict[str, Any]] | None, conn: Any,
+                  tenant_id: str) -> dict[str, str]:
+    """The names a reply gives to subjects that are held under another
+    spelling: the id of the name as the reply writes it -> the subject held
+    (the memory plan's W6, step 2). Only where the reply says itself that a
+    fact of it replaces one of theirs, and the name is the same one: in another
+    case ("Noura", ``noura``), or in the other alphabet ("عمر", ``omar``). The
+    reply's other facts of that name are the same person's.
+
+    Never two people: the name must be one Kazma knows to be one person's in
+    both alphabets (``name_alphabets``), no other subject held may be the one
+    meant (``omar`` beside ``umar``), and nobody may be held under the name as
+    it was said (a ``عمر`` with facts of his own is himself). Else the fact is
+    written as it came, and both stay."""
+    from kazma_core.memory.entity_resolution import slug
+    from kazma_core.memory.name_alphabets import may_be, same_name
+    from kazma_core.memory.speakers import is_member_entry
+
+    shown = {h["ref"]: h["subject"] for h in held or ()}
+    out: dict[str, str] = {}
+    subjects: set[str] | None = None
+    for b in raw_beliefs:
+        fact = b if isinstance(b, dict) else {}
+        said, theirs = str(fact.get("subject") or "").strip(), shown.get(_ref_of(fact))
+        if not said or not theirs or said == theirs or "user" in (said.casefold(), theirs) or is_member_entry(theirs):
+            continue
+        if slug(said) == theirs:
+            out[slug(said)] = theirs
+        elif same_name(said, theirs):
+            if subjects is None:
+                subjects = {str(r[0]) for r in conn.execute(
+                    "SELECT DISTINCT subject FROM beliefs WHERE tenant_id = ? AND valid_until IS NULL "
+                    "AND invalidated_at IS NULL", (tenant_id,)).fetchall()}
+            if slug(said) not in subjects and not any(may_be(said, other) for other in subjects - {theirs}):
+                out[slug(said)] = theirs
+    return out
+
+
+def _held_as(said: str, meant: dict[str, str]) -> str:
+    """*said* as the subject it is held under (:func:`_who_is_meant`)."""
+    from kazma_core.memory.entity_resolution import slug
+
+    return meant.get(slug(said), said) if meant else said
+
+
+def _ref_of(belief: dict[str, Any]) -> str | None:
+    """The held fact a reply's belief says it replaces, as it is numbered."""
+    ref = _REF_RE.fullmatch(str(belief.get("replaces") or "").strip().lower())
+    return f"f{int(ref[1])}" if ref else None
 
 
 def _holds_one_value(entry: dict[str, Any]) -> bool:
@@ -702,12 +753,13 @@ def _apply_ending(clean: dict[str, Any], replaced: dict[str, Any] | None, method
 def _current_fact(conn: Any, clean: dict[str, Any], tenant_id: str) -> str | None:
     """The current fact of *clean*'s subject that holds its value under the
     same name (the same words: ``predicates._predicate_key``), if any."""
+    from kazma_core.memory.entity_resolution import slug
     from kazma_core.memory.predicates import _predicate_key
 
     for fact_id, predicate, value in conn.execute(
-            "SELECT id, predicate, object FROM beliefs WHERE tenant_id = ? AND subject = ? AND valid_until IS NULL "
+            "SELECT id, predicate, object FROM beliefs WHERE tenant_id = ? AND subject IN (?, ?) AND valid_until IS NULL "
             "AND invalidated_at IS NULL AND COALESCE(object, '') != '' ORDER BY valid_from DESC",
-            (tenant_id, clean["subject"])).fetchall():
+            (tenant_id, clean["subject"], slug(clean["subject"]))).fetchall():
         if _predicate_key(predicate) == _predicate_key(clean["predicate"]) and _same_value_text(value, clean["object"]):
             return str(fact_id)
     return None
@@ -1395,11 +1447,14 @@ def _apply_beliefs_to_v2(
     # (Memory audit M18 -- 93 names, seconds of CPU a turn on live).
     candidate_vecs = None
 
+    meant = _who_is_meant(raw_beliefs, held, primary_conn, tenant_id)
+
     for b in raw_beliefs:
         clean = _sanitize_belief(b)
         if clean is None:
             stats["rejected"] += 1
             continue
+        clean["subject"] = _held_as(clean["subject"], meant)
         # Commitment Layer §6.2 — conservative auto-store: throttle low-
         # confidence INFERRED beliefs so post-turn extraction doesn't pollute
         # the belief graph with noise (incl. dates the assistant invented in

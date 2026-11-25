@@ -127,7 +127,7 @@ def test_a_poisoned_reply_stores_nothing(memory):
 def test_control_without_the_screen_the_poisoned_facts_are_stored(memory, monkeypatch):
     monkeypatch.setattr(belief_extractor, "_carries_injection", lambda _text: False)
     _deep_pass(POISONED)
-    assert {p for p, _o, _m in _facts(memory)} >= {"role", "note"}
+    assert {p for p, _o, _m in _facts(memory)} >= {"current_role", "note"}
 
 
 def test_a_value_only_the_reply_holds_is_kazmas_reading_when_recalled(memory, monkeypatch):
