@@ -903,7 +903,7 @@ def _reopen_replaced(conn: sqlite3.Connection, *, tenant_id: str | None, keys: l
     closed = {str(r[0]): (r[1], r[2], r[3], r[4], metadata_of(r[5])) for r in conn.execute(
         "SELECT id, tenant_id, subject, predicate, object, metadata_json FROM beliefs "
         "WHERE instr(COALESCE(metadata_json, ''), '\"closed_by\"') > 0" + scope, params).fetchall()}
-    archived = _archived_closed(conn, scope, params)
+    archived = {bid: o for bid, o in _archived_closed(conn, scope, params).items() if bid not in closed}
     closed = {**{bid: (o.get("tenant_id"), o.get("subject"), o.get("predicate"), o.get("object"),
                        metadata_of(o.get("metadata_json"))) for bid, o in archived.items()}, **closed}
     opened: list[str] = []
@@ -928,11 +928,10 @@ def _reopen_replaced(conn: sqlite3.Connection, *, tenant_id: str | None, keys: l
             "SELECT object FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? AND valid_until IS NULL "
             "AND invalidated_at IS NULL", (owner, subject, predicate)).fetchall())
         if bid in archived:
-            if again:
-                _rewrite_archived(conn, bid, archived[bid], kept)
-            else:
-                _from_archive(conn, bid, archived[bid], kept)
+            if not again and _from_archive(conn, bid, archived[bid], kept):
                 opened.append(bid)
+            else:
+                _rewrite_archived(conn, bid, archived[bid], kept)
             continue
         conn.execute("UPDATE beliefs SET metadata_json = ?, valid_until = CASE WHEN ? THEN valid_until END, "
                      "invalidated_at = CASE WHEN ? THEN invalidated_at END WHERE id = ? AND tenant_id = ?",
@@ -965,15 +964,33 @@ def _rewrite_archived(conn: sqlite3.Connection, bid: str, original: dict[str, An
                  (blob, bid, original["tenant_id"]))
 
 
-def _from_archive(conn: sqlite3.Connection, bid: str, original: dict[str, Any], meta: dict[str, Any]) -> None:
-    """The archived list entry *bid* current again in ``beliefs``; its vector
-    is made anew (the archive keeps none)."""
-    row = {**original, "id": bid, "predicate_type": "set", "valid_until": None, "invalidated_at": None,
+def _from_archive(conn: sqlite3.Connection, bid: str, original: dict[str, Any], meta: dict[str, Any]) -> bool:
+    """The archived fact *bid* current again in ``beliefs``, of the kind it was
+    (an event may have closed a fact of one value). Its vector is made anew:
+    the nightly archive keeps none, the Memory page's its bytes as text. It
+    names the fact it replaced only while that one is in ``beliefs`` (a chain
+    archived with it broke the foreign key, and the forget raised). False, and
+    nothing leaves the archive, when ``beliefs`` did not take the row."""
+    from kazma_core.memory.belief_mutation import _classify_predicate
+
+    row = {**original, "id": bid, "valid_until": None, "invalidated_at": None,
            "metadata_json": json.dumps(meta, ensure_ascii=False)}
+    if not row.get("predicate_type"):  # archived before the sweep kept it
+        row["predicate_type"] = _classify_predicate(str(row.get("predicate") or ""), None)
+    row.pop("embedding", None)
+    replaced = row.get("supersedes_id")
+    if replaced and conn.execute("SELECT 1 FROM beliefs WHERE id = ? AND tenant_id = ?",
+                                 (replaced, original["tenant_id"])).fetchone() is None:
+        row["supersedes_id"] = None
     columns = [c for c in row if c in _table_columns(conn, "beliefs")]
-    conn.execute(f"INSERT OR IGNORE INTO beliefs({', '.join(columns)}) "  # nosec B608 - column names of the table itself
-                 f"VALUES ({', '.join('?' * len(columns))})", [row[c] for c in columns])
+    taken = conn.execute(
+        f"INSERT OR IGNORE INTO beliefs({', '.join(columns)}) "  # nosec B608 - column names of the table itself
+        f"VALUES ({', '.join('?' * len(columns))})", [row[c] for c in columns]).rowcount
+    if taken != 1:
+        logger.warning("[memory] forget: archived fact %s was not put back; it stays in the archive", bid)
+        return False
     conn.execute("DELETE FROM beliefs_archive WHERE id = ? AND tenant_id = ?", (bid, original["tenant_id"]))
+    return True
 
 
 def _forget_given_days(conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[str],
@@ -1020,10 +1037,16 @@ def _ledgered_days(conn: sqlite3.Connection) -> int:
     from kazma_core.memory.fact_days import metadata_of
 
     given: set[tuple[str, str, int]] = set()
-    for tenant, meta in conn.execute(
-            "SELECT tenant_id, metadata_json FROM beliefs "
-            "WHERE instr(COALESCE(metadata_json, ''), '\"day_source\"') > 0 "
-            "OR instr(COALESCE(metadata_json, ''), '\"closed_by\"') > 0").fetchall():
+    held_meta = conn.execute(
+        "SELECT tenant_id, metadata_json FROM beliefs "
+        "WHERE instr(COALESCE(metadata_json, ''), '\"day_source\"') > 0 "
+        "OR instr(COALESCE(metadata_json, ''), '\"closed_by\"') > 0").fetchall()
+    if _table_columns(conn, "beliefs_archive") >= {"tenant_id", "original_belief_json"}:
+        held_meta += conn.execute(
+            "SELECT tenant_id, json_extract(original_belief_json, '$.metadata_json') FROM beliefs_archive "
+            "WHERE json_valid(original_belief_json) AND (instr(original_belief_json, 'day_source') > 0 "
+            "OR instr(original_belief_json, 'closed_by') > 0)").fetchall()
+    for tenant, meta in held_meta:
         held = metadata_of(meta)
         for source in (held.get("closed_by"), *(d.get("day_source") for d in (held, *(held.get("day_before") or []))
                                                 if isinstance(d, dict))):

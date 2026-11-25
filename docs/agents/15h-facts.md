@@ -141,14 +141,29 @@
     or another person's and not in the rest (`memory/pasted_text.py`: a data
     fence, a code fence, `>` lines, a forward or a mail with its header, a
     chat, words after "X said:", a sentence quoted, an instruction's own text
-    up to a blank line). Everything else stays as Kazma's reading: reported,
+    to its line's end or the blank line under it). **In doubt it is the
+    user's** (the re-check of f68b21ae5: what it read as a chat or a mail took
+    48 to 57 of 249 events of openings nobody had shown it, Arabic more): a
+    paste let in is filed as Kazma's reading, a line of theirs dropped is
+    lost, so a signal is added only with its count on
+    `tests/fixtures/memory_events/own_words_openings.json` in English, Gulf
+    and MSA. Everything else stays as Kazma's reading: reported,
     supposed, long, behind one label, or in the model's words. **Never
     `own_words`**: it is for trust, takes out what it is unsure of, and as the
     gate dropped 12 of 135 ordinary English openings and 60 Arabic ones ("لو
     سمحت، بعت سيارتي" read as "if", "القصة:" as who spoke: Arabic has no
-    capitals to tell a heading from a name). One labelled line is a speaker's
-    when the label is no heading's (a role, a number, a time) or the message
-    shows a conversation. Words are compared with what Arabic writes onto
+    capitals to tell a heading from a name). A labelled line is a speaker's
+    when the label is a time's, a phone number, a handle, or the message shows
+    a conversation: "Me:" after another's line, A, B, A, a first word that
+    answers ("congrats", "مبروك"), a question to Kazma about that person.
+    Never a role or a name alone ("Doctor:", "بنتي:", "جدة:" is a city), one
+    named again, a "no" or a "?". A mail's header is "From:" with an address
+    or "Subject:" ("From: Kuwait / To: Dubai" is a journey); a letter ends at
+    the paragraph that asks Kazma about it; a line after a chat export is the
+    user's; a head with "my", "our", "I" ("My caption:", "لخص اللي سويته:")
+    hands over the user's own words, unless it is their person's ("my boss").
+    What the user points at is theirs ("Just bought these!"), dated or not.
+    Words are compared with what Arabic writes onto
     them, on the message's side and the value's ("لدبي" holds "دبي",
     "سيارتي" is "السيارة", "بـ٩٥" holds "٩٥").
   - *Its day* (`event_text.days_elsewhere`, `time_words.says_day`: the day
@@ -160,7 +175,9 @@
     occasion. `event_text.corrects` ("sorry, I meant", "آسف أقصد") with
     `replaces` is enough to put an event right; `denies` ("no", "not", "لا",
     "مو") needs the old value named, is no "no" before a noun and nothing
-    beside "also" or "again"; "I also bought a lamp" closes nothing.
+    beside "also" or "again" -- unless it denies the old value by name
+    (`puts_right`: "Not Paris, it was Lyon again") or begins the message;
+    "I also bought a lamp", "شريت لمبة برضه" close nothing.
   - *Its name* (`event_text.is_event_name`, a verb list): a functional or
     state label with a day holds unless the name is an event's verb ("I
     weigh 78 kg today", "delivered yesterday"); such a name keeps a day to
@@ -169,7 +186,9 @@
     read (`_since_value`: a model's "9999" lost its reply's every fact);
     "called"/"named" in a list is an event without a day too, unless
     the message says what the user is called. A plan that came to pass is
-    filed as what happened, under its own name (`_came_to_pass`).
+    filed as what happened, under its own name (`_came_to_pass`). `says_to_come` reads the
+    future and the past of "I" in each language ("سأحضر", "بعد غد", "كنت
+    رايح" is no plan).
   - *The held list shows an event's day* ("(on 2026-05-30)", message form
     5), with a prompt rule on its use.
   - *One line for an event* (`recall._one_per_event`, `_by_event`,
@@ -184,8 +203,12 @@
     Postgres-primary path takes the same steps (`fetch_beliefs` reads the
     metadata).
   - *Forgetting a retelling opens the entry it closed* (`closed_by`,
-    `forget._reopen_replaced`; one the nightly archive moved out comes back), unless what took its place was replaced by a
-    turn that stands. A write compares `_FOLDED_ENTRIES` of a name's newest
+    `forget._reopen_replaced`), unless what took its place was replaced by a
+    turn that stands. One either archive moved out (the nightly sweep's, the
+    Memory page's) comes back as the kind it was, with no vector, naming no
+    predecessor that is not in `beliefs` (a foreign key made the forget
+    raise), and leaves the archive only when `beliefs` took it
+    (`_from_archive`); the ledger pass reads the archive too. A write compares `_FOLDED_ENTRIES` of a name's newest
     entries folded, and all of them in their own spelling.
   - *Own words after a question to Kazma* ("What do you think about my rugs?
     I washed them"): a thinking verb whose subject is "you" reports nobody
@@ -197,7 +220,9 @@
   `tests/test_memory_event_lines_third_review.py` (119 of its 233 fail on
   0bbecc655; the twinned openings and pasted texts in
   `tests/fixtures/memory_events/openings.json`: main keeps every opening's
-  event in each language and so must this), the pairs in
+  event in each language and so must this),
+  `tests/test_memory_event_lines_recheck.py` (117 of its 182 fail on
+  f68b21ae5), the pairs in
   `tests/test_paired_languages.py`.
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured

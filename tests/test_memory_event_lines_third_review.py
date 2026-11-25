@@ -127,8 +127,8 @@ def test_the_users_own_lists_and_stories_stay(mem, said):
     ("عمر: شريت رولكس أمس\nسارة: مبروك", False),
     ("Omar: I bought a Rolex yesterday\nShould I believe Omar?", False),
     ("عمر: شريت رولكس أمس\nأصدق عمر؟", False),
-    ("My brother: I bought a Rolex yesterday", False),
-    ("أخوي: شريت رولكس أمس", False),
+    ("My brother: I bought a Rolex yesterday", True),  # "My daughter:" heads a line of news as often
+    ("أخوي: شريت رولكس أمس", True),
 ])
 def test_a_label_is_a_speakers_when_the_message_shows_it(said, told):
     own, pasted = pasted_text.told_and_pasted(said)
@@ -391,7 +391,8 @@ def test_one_more_closes_nothing(mem, first, said, then, told, day):
 
 
 @pytest.mark.parametrize(("said", "denies", "corrects"), [
-    ("No, it was Friday", True, False), ("لا، كان الجمعة", True, False),
+    ("No, it was Friday", True, True), ("لا، كان الجمعة", True, True),
+    ("No, Friday", True, False), ("لا، الجمعة", True, False),
     ("It was not Paris", True, False), ("ما كان باريس، مو باريس", True, False),
     ("Sorry, I meant Friday", True, True), ("آسف، أقصد الجمعة", True, True),
     ("I went to the gym, no pain", False, False), ("رحت النادي، لا ألم ولا شي", False, False),

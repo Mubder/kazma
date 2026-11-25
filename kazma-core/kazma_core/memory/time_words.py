@@ -367,12 +367,13 @@ _BARE_WEEKDAY_AR = re.compile(
 #: Days counted from the turn's own, as written; folded before they are read.
 _SAID_DAYS_EN = {"today": 0, "tonight": 0, "this morning": 0, "this afternoon": 0, "this evening": 0,
                  "yesterday": -1, "last night": -1, "the day before yesterday": -2, "day before yesterday": -2,
-                 "tomorrow": 1}
+                 "tomorrow": 1, "the day after tomorrow": 2, "day after tomorrow": 2}
 _SAID_DAYS_AR_RAW = {"اليوم": 0, "الليلة": 0, "هاليوم": 0, "أمس": -1, "امبارح": -1, "مبارح": -1, "البارحة": -1,
                      "البارح": -1, "أول أمس": -2, "أمس الأول": -2, "أول امبارح": -2, "قبل أمس": -2, "بكرة": 1,
                      "باجر": 1, "باكر": 1, "غدا": 1, "أول البارحة": -2, "أول البارح": -2, "قبل البارحة": -2,
                      "قبل البارح": -2, "هالصبح": 0, "الصبح": 0, "هالليلة": 0, "أمس الصبح": -1, "البارحة الصبح": -1,
-                     "بكرة الصبح": 1}
+                     "بكرة الصبح": 1, "بعد بكرة": 2, "عقب بكرة": 2, "بعد باجر": 2, "عقب باجر": 2, "بعد باكر": 2, "بعد غد": 2,
+                 "عقب باكر": 2}
 _WEEKEND_EN = frozenset({"weekend"})
 _WEEKEND_AR_RAW = ("الويكند", "هالويكند", "ويكند", "نهاية الأسبوع", "عطلة الأسبوع")
 #: A period before the turn's: the days back it covers, (nearest, farthest);
@@ -607,21 +608,54 @@ _NAMED_FRIDAYS = re.compile(r"\b(?:black|good|white) friday\b|\bcyber monday\b"
 _PAST_MARK = re.compile(r"\b(?:last|past|ago|yesterday|earlier|previous|recently|already)\b"
                         r"|(?<!\w)(?:امس|البارح|البارحه|امبارح|الماضي|الماضيه|فات|فاتت|طاف|طافت|اللي راح|"
                         r"اللي راحت|السابق|السابقه)(?!\w)")
-#: "I attended", "we just got": what is told is done, whatever day it names.
+#: "I attended", "we just got", "بعت", "كنت رايح": what is told is done,
+#: whatever day it names.
 _TOLD_DONE = re.compile(r"\b(?:i|we)(?:'ve| have| had| just| also| actually| finally| only){0,3} "
-                        r"(?:\w{2,12}ed|got|bought|went|had|made|met|ran|saw|sold|took|won|found|ate|came|did)\b")
+                        r"(?:\w{2,12}ed|got|bought|went|had|made|met|ran|saw|sold|took|won|found|ate|came|did)\b"
+                        r"|(?<!\w)[وف]?(?:(?:كن|بع|شري|اشتري|رح|ذهب|زر|حضر|خلص|انهي|قابل|التقي|شف|راي|سافر|دفع|استلم|حصل|"
+                        r"فز|اخذ|خذي|سوي|عمل|فعل|قدم|وصل|رجع|عد|كمل|اكمل|تخرج|تزوج|انتقل|بدي|بدا|ركب|جري|اكل|طلع|دخل|"
+                        r"حجز|سجل|قرر|لقي|وجد)(?:ت|نا)(?:ه|ها|هم)?|كان|كانت)(?!\w)")
 #: Words that say it is to come: "I will", "I'm visiting", "راح أبيع", "بزور".
 _TO_COME = re.compile(
-    r"\b(?:will|shall|gonna|upcoming|next|coming|planning|plan to|about to|scheduled|booked)\b|\b(?:i|we|it|he|she|they)'ll\b"
+    r"\b(?:will|shall|gonna|upcoming|next|coming|planning|plan to|about to|scheduled|booked|intend to|intending to)\b"
+    r"|\b(?:i|we|it|he|she|they)'ll\b"
     r"|\b(?:i'm|i am|we're|we are) (?:going|\w{2,12}ing)\b"
     r"|(?<!اللي )(?<!\w)راح (?=[انتي]\w)|(?<!\w)(?:سوف|رح|بنروح|بروح|بزور|بنزور|بسافر|بنسافر|بشتري|باشتري|ببيع|بابيع|"
-    r"بحضر|باحضر|بشوف|بقابل|باخذ|رايح|رايحه|رايحين|ناوي|ناويه|ناوين|القادم|القادمه|المقبل|المقبله|الجاي|الجايه)(?!\w)")
+    r"بحضر|باحضر|بشوف|بقابل|باخذ|رايح|رايحه|رايحين|ناوي|ناويه|ناوين|القادم|القادمه|المقبل|المقبله|الجاي|الجايه|"
+    r"بكون|باكون|بنكون|بنحضر|بنبيع|بنشتري|بنشوف|بنقابل|بناخذ|بطلع|بنطلع|برجع|بنرجع|بنتقل|بننتقل|بتزوج|ببدا|بنبدا|"
+    r"مسافر|مسافره|مسافرين|انوي|ننوي|اعتزم|نعتزم|اخطط|نخطط|وسوف|فسوف)(?!\w)"
+    r"|(?<!\w)[وف]?س[ان](?:سافر|زور|حضر|بيع|شتري|ذهب|كون|قابل|لتقي|تزوج|نتقل|بدا|شارك|غادر|سكن|درس|جري|خضع|ستلم|"
+    r"لتحق|تخرج|فتح|نهي|قدم|عود|رجع|روح|شوف|اخذ|سجل|دفع|قيم|طير|حجز|عمل|نضم|حتفل|ستضيف|زوج|كمل)\w{0,3}(?!\w)")
+#: "سأ" is the future's of "I" and begins no noun; folded, "سا" begins many.
+_WILL_AR = re.compile(r"(?<!\w)([وف]?)سأ(?=\w\w)(?!ل(?!تق))")
+#: Days counted ahead by their number: "in two days", "بعد ٣ أيام".
+_IN_DAYS_EN = re.compile(r"\bin (\d{1,2}|an?|one|two|three|four|five|six|seven|eight|nine|ten|a couple of|a few) "
+                         r"(days?|weeks?)\b(?! ago)")
+_IN_DAYS_AR = re.compile(r"(?<!\w)(?:بعد|عقب) (?:(\d{1,2}|" + "|".join(_AGO_NUMBERS_AR) + r") )?"
+                         r"(يومين|يوم|ايام|اسبوعين|اسبوع|اسابيع)(?!\w)")
 _SENTENCE = re.compile(r"[^.!?؟:;؛\n]+")
+
+
+def _days_ahead(folded: str) -> set[int]:
+    """The days a sentence counts ahead by number: "in two days", "بعد ٣
+    أيام". Exact for days; a week is its seventh day."""
+    out: set[int] = set()
+    for m in _IN_DAYS_EN.finditer(folded):
+        count = int(m[1]) if m[1].isdigit() else _AGO_NUMBERS_EN.get(m[1].removeprefix("a "), 1)
+        out.add(count * (7 if m[2].startswith("week") else 1))
+    for m in _IN_DAYS_AR.finditer(folded):
+        if m[2] in _AR_DUALS:
+            count, unit = _AR_DUALS[m[2]]
+        else:
+            said = m[1] or "1"
+            count, unit = int(said) if said.isdigit() else _AGO_NUMBERS_AR[said], _AR_UNITS[m[2]]
+        out.add(int(count * unit))
+    return out
 
 
 def says_to_come(text: str, day: str, said_on: str | None) -> bool:
     """Whether *text*, told on *said_on*, says *day* as one to come: counts
-    ahead to it ("tomorrow", "بكرة"), or says it in a sentence that speaks of
+    ahead to it ("tomorrow", "in two days", "بكرة", "بعد يومين"), or says it in a sentence that speaks of
     what is to come ("I'm visiting Dubai on 3 June", "راح أبيع سيارتي الجمعة
     الجاية") and of nothing done. A date ahead told as done is none: "I
     finished it on 20 March", told on 15 March, is a year left out or a slip
@@ -631,12 +665,16 @@ def says_to_come(text: str, day: str, said_on: str | None) -> bool:
     if said is None or first is None or str(day) <= str(said_on)[: len(str(day))]:
         return False
     ahead = (first - said).days
-    for sentence in _SENTENCE.findall(_NAMED_FRIDAYS.sub(" ", _folded(text))):
-        if not says_day(sentence, day, said_on):
-            continue
-        if len(str(day)) == 10 and ahead in _days_counted(sentence):
+    exact = len(str(day)) == 10
+    whole = _WILL_AR.sub(r"\1سوف أ", text or "")
+    for sentence in _SENTENCE.findall(_NAMED_FRIDAYS.sub(" ", _folded(whole))):
+        if exact and ahead in _days_counted(sentence):
             return True
-        if _TO_COME.search(sentence) and not _PAST_MARK.search(sentence) and not _TOLD_DONE.search(sentence):
+        if _PAST_MARK.search(sentence) or _TOLD_DONE.search(sentence):
+            continue
+        if exact and ahead in _days_ahead(sentence):
+            return True
+        if _TO_COME.search(sentence) and says_day(sentence, day, said_on):
             return True
     return False
 

@@ -1,0 +1,244 @@
+{
+ "what": "The re-check of W4's third review's fixes, fixed (2026-11-25): the same cached replies of the two pilots written again through the apply step, the blocks built again; no model call. before: f68b21ae5's stores and blocks; after: this commit's. Ids and counts only.",
+ "runs": {
+  "qwen_dev_200": {
+   "questions": "dev 200",
+   "extractor": "qwen3.8-flash",
+   "stores": {
+    "before": {
+     "current": 51805,
+     "dated_events": 3374,
+     "dated_events_current": 3084,
+     "day_before": 17,
+     "day_source": 231,
+     "events_on_single_value": 0,
+     "facts": 55249,
+     "lives_in_current": 135,
+     "name_is_current": 63,
+     "planned": 265,
+     "planned_current": 231,
+     "starts": 1479
+    },
+    "after": {
+     "current": 51805,
+     "dated_events": 3374,
+     "dated_events_current": 3084,
+     "day_before": 17,
+     "day_source": 231,
+     "events_on_single_value": 0,
+     "facts": 55250,
+     "lives_in_current": 135,
+     "name_is_current": 63,
+     "planned": 265,
+     "planned_current": 231,
+     "starts": 1481
+    }
+   },
+   "deep_passes": {
+    "before": {
+     "deep": 48110,
+     "deep_failed": 494,
+     "ended": 61,
+     "not_users_words": 2,
+     "pending_changes": 218,
+     "refs_lost": 1,
+     "replace_refused": 399,
+     "replaced_entries": 2314
+    },
+    "after": {
+     "deep": 48110,
+     "deep_failed": 494,
+     "ended": 61,
+     "not_users_words": 1,
+     "pending_changes": 218,
+     "refs_lost": 1,
+     "replace_refused": 399,
+     "replaced_entries": 2315
+    }
+   },
+   "current_dated_events": {
+    "events_kept_both": 3081,
+    "events_only_before": 2,
+    "events_only_after": 2
+   },
+   "blocks": {
+    "before": {
+     "tokens_p50": 1426.0,
+     "tokens_p95": 1496,
+     "facts_mean": 3.86,
+     "event_lines_mean": 0.82,
+     "questions_with_an_event_line": 71,
+     "planned_lines": 3,
+     "answer_text_held": 57,
+     "answer_text_of": 129
+    },
+    "after": {
+     "tokens_p50": 1426.0,
+     "tokens_p95": 1496,
+     "facts_mean": 3.86,
+     "event_lines_mean": 0.82,
+     "questions_with_an_event_line": 71,
+     "planned_lines": 3,
+     "answer_text_held": 57,
+     "answer_text_of": 129
+    },
+    "changed": 10,
+    "without_event_facts_changed": 16
+   },
+   "answer_text": {
+    "gained": [],
+    "lost": []
+   }
+  },
+  "deepseek_pilot_50": {
+   "questions": "pilot 50",
+   "extractor": "deepseek-flash",
+   "stores": {
+    "before": {
+     "current": 8741,
+     "dated_events": 871,
+     "dated_events_current": 797,
+     "day_before": 5,
+     "day_source": 48,
+     "events_on_single_value": 0,
+     "facts": 9327,
+     "lives_in_current": 30,
+     "name_is_current": 7,
+     "planned": 30,
+     "planned_current": 28,
+     "starts": 255
+    },
+    "after": {
+     "current": 8741,
+     "dated_events": 871,
+     "dated_events_current": 797,
+     "day_before": 5,
+     "day_source": 48,
+     "events_on_single_value": 0,
+     "facts": 9327,
+     "lives_in_current": 30,
+     "name_is_current": 7,
+     "planned": 30,
+     "planned_current": 28,
+     "starts": 255
+    }
+   },
+   "deep_passes": {
+    "before": {
+     "deep": 12089,
+     "deep_failed": 0,
+     "ended": 18,
+     "not_users_words": 0,
+     "pending_changes": 40,
+     "refs_lost": 0,
+     "replace_refused": 42,
+     "replaced_entries": 378
+    },
+    "after": {
+     "deep": 12089,
+     "deep_failed": 0,
+     "ended": 18,
+     "not_users_words": 0,
+     "pending_changes": 40,
+     "refs_lost": 0,
+     "replace_refused": 42,
+     "replaced_entries": 378
+    }
+   },
+   "current_dated_events": {
+    "events_kept_both": 797,
+    "events_only_before": 0,
+    "events_only_after": 0
+   },
+   "blocks": {
+    "before": {
+     "tokens_p50": 1459.0,
+     "tokens_p95": 1498,
+     "facts_mean": 3.52,
+     "event_lines_mean": 1.18,
+     "questions_with_an_event_line": 20,
+     "planned_lines": 0,
+     "answer_text_held": 12,
+     "answer_text_of": 37
+    },
+    "after": {
+     "tokens_p50": 1459.0,
+     "tokens_p95": 1498,
+     "facts_mean": 3.52,
+     "event_lines_mean": 1.18,
+     "questions_with_an_event_line": 20,
+     "planned_lines": 0,
+     "answer_text_held": 12,
+     "answer_text_of": 37
+    },
+    "changed": 2,
+    "without_event_facts_changed": 2
+   },
+   "answer_text": {
+    "gained": [],
+    "lost": []
+   }
+  }
+ },
+ "kept": {
+  "what": "events of the user's own lines kept, main keeps all",
+  "review_83x3": {
+   "f68b21ae5": {
+    "en": 201,
+    "gulf": 192,
+    "msa": 198
+   },
+   "this": {
+    "en": 249,
+    "gulf": 249,
+    "msa": 249
+   }
+  },
+  "fresh_78x3": {
+   "f68b21ae5": {
+    "en": 204,
+    "gulf": 198,
+    "msa": 192
+   },
+   "this": {
+    "en": 234,
+    "gulf": 234,
+    "msa": 234
+   }
+  },
+  "fresh_after_40x3": {
+   "first form of this": {
+    "en": 105,
+    "gulf": 114,
+    "msa": 114
+   },
+   "this": {
+    "en": 114,
+    "gulf": 117,
+    "msa": 117
+   }
+  },
+  "beside_a_paste_12x3": {
+   "f68b21ae5": {
+    "en": 30,
+    "gulf": 30,
+    "msa": 30
+   },
+   "this": {
+    "en": 36,
+    "gulf": 36,
+    "msa": 36
+   }
+  },
+  "reviews_pastes_let_in_44x3": {
+   "f68b21ae5": {
+    "en": 63,
+    "ar": 81
+   },
+   "this": {
+    "en": 69,
+    "ar": 90
+   }
+  }
+ }
+}

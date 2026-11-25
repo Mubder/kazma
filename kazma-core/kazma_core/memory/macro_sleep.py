@@ -260,7 +260,7 @@ def run_macro_sleep(
 
         # ── Archive old superseded beliefs ──
         old_superseded = primary_conn.execute(
-            """SELECT id, tenant_id, subject, predicate, object, confidence,
+            """SELECT id, tenant_id, agent_id, visibility, subject, predicate, predicate_type, object, confidence,
                       structural_importance, source_trust_weight, valid_from,
                       valid_until, ingested_at, invalidated_at, supersedes_id,
                       source_session, source_turn, extraction_method,

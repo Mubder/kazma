@@ -14,19 +14,28 @@ from a person). So the event gate (``event_text``) asks this module instead:
 only text whose SHAPE says it is not the user telling.
 
 * a data fence, an attachment's line, a code fence, ``>`` lines;
-* a forwarded message or a mail with its header, to its sign-off, to an aside
-  ("By the way, ...", "بالمناسبة ..."), or to the end;
+* a forwarded message or a mail with its header ("From:" with an address or
+  "Subject:"; "From: Kuwait / To: Dubai" is a journey), to its sign-off, to an
+  aside ("By the way, ...", "بالمناسبة ..."), to the paragraph that asks Kazma
+  about it ("I already sold it. Help me reply."), or to the end;
 * a chat export's lines, a copied chat's header and the message under it, the
   lines of a transcript -- a line is a speaker's when the label is one no
-  heading is (a time, a phone number, a role: "my sister:", "أختي:"), or the
-  message shows a conversation (a label used twice, a "Me:" line, a line that
-  answers another, the label named again). One labelled line alone ("The
-  story: ...", "القصة: ...") says nothing;
+  heading is (a time, a phone number, a handle), or the message shows a
+  conversation: a "Me:" line after another's, a label that comes back after
+  another one, a line whose first word answers ("congrats", "مبروك"), a
+  question to Kazma about that person ("What should I tell Omar?"). A label
+  alone ("The story:", "Doctor:", "جدة:"), one that is named again, a "no" or
+  a "?" say nothing;
 * what another person is quoted as saying, after a colon ("My sister said:
   ...") or as a whole sentence in quotation marks, never what the user quotes
-  themself saying ("I emailed my landlord: "I paid the rent"");
+  themself saying ("I emailed my landlord: "I paid the rent"", "My caption:
+  ...", "كلامي بالضبط: ...");
 * the text an instruction works on ("Translate to French: ...", "صحح النص:
-  ..."), to the blank line that ends it.
+  ..."), to its line's end or the blank line under it -- unless the head says
+  it is the user's own ("Improve my sentence:", "لخص اللي سويته:").
+
+In doubt it is the user's (the re-check of f68b21ae5, 2026-11-25): a paste
+let in is filed as Kazma's reading, a line of theirs dropped is lost.
 
 What is merely reported ("My manager told me I got the promotion"), supposed
 ("If I remember right, ..."), asked, or long is the user telling. A list of
@@ -77,6 +86,7 @@ _OWN_TELLING_AR = frozenset({"قصتي", "قصتنا", "تجربتي", "تجار
                              "انجازاتي", "يومياتي", "مذكراتي"})
 #: "My CV", "my email": a text named, not shown ("Can you review my CV?").
 _MY_TEXT_AR = frozenset({"رسالتي", "رسايلي", "ايميلي", "ايميلاتي", "سيرتي", "مقالي", "نصي", "تغريدتي", "منشوري"})
+_COMPOSE_AR = frozenset({"اكتب", "اكتبي", "صغ", "صوغ", "جهز", "سو", "سوي", "انشر", "الف"})
 _REPLY_AR = frozenset({"رد", "ردي", "ارد", "ترد", "تردين", "جاوب", "جاوبي", "تجاوب", "اجاوب"})
 _POINTS_AR = frozenset({"هذا", "هذي", "هذه", "هاذا", "هاذي", "التالي", "التاليه"})
 #: Written alike for "I" and for "she": "كتبت لأخوي: بعت سيارتي".
@@ -88,7 +98,7 @@ _I_SAID_EN = re.compile(
     r"(?:say|tell|write|text|reply|send|said|told|wrote|emailed|e-mailed|texted|messaged|sent|replied|answered|"
     r"posted|tweeted|noted|mentioned|announced|shouted|typed|wrote down|put|captioned)\b")
 _I_SAID_AR = frozenset({"قلت", "قلنا", "كتبت", "كتبنا", "ارسلت", "رسلت", "طرشت", "دزيت", "رديت", "نشرت", "غردت",
-                        "سجلت", "ذكرت", "خبرت", "بلغت", "اخبرت"})
+                        "سجلت", "ذكرت", "خبرت", "بلغت", "اخبرت", "اجبت", "جاوبت", "حطيت", "نزلت", "علقت"})
 #: Headings an Arabic line starts with: with or without the article, "ب" or a
 #: pronoun ("القصة", "بصراحة", "وضعي"). And days, in both languages, which
 #: head a diary's lines.
@@ -101,7 +111,8 @@ _HEADINGS_AR_RAW = (
     "مفيد", "تفاصيل", "موضوع", "طلب", "مني", "عني", "إضافة", "توضيح", "تنبيه", "خطوة", "مرحلة", "أسبوع", "شهر", "سنة",
     "أمس", "بكرة", "اليوم", "الحين", "قبل", "بعد", "الآن", "واقع", "مفاجأة", "تخيل", "بشارة", "نقطة", "ملخص",
     "نوع", "ماركة", "لون", "مقاس", "حجم", "تاريخ", "وقت", "سعر", "تكلفة", "مجموع", "كمية", "مكان", "محل", "فئة", "مبلغ",
-    "مدة", "مسافة")
+    "مدة", "مسافة", "سيارة", "عيال", "أولاد", "مدرسة", "نادي", "أكل", "نوم", "مزاج", "جو", "وظيفة", "تلفون", "حديقة",
+    "قطوة", "قطة", "كلب", "حفلة", "عرس", "رحلة", "سفرة", "ويكند", "عطلة", "ربع")
 _HEADINGS_EN = frozenset({
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "morning", "afternoon", "evening",
     "night", "noon", "midnight", "january", "february", "march", "april", "may", "june", "july", "august",
@@ -110,21 +121,35 @@ _HEADINGS_EN = frozenset({
     "shopping", "bought", "sold", "visited", "met", "done", "before", "after", "then", "earlier", "later", "wins",
     "type", "brand", "color", "colour", "size", "date", "time", "item", "cost", "price", "total", "condition",
     "quantity", "qty", "model", "place", "store", "shop", "notes", "category", "amount", "duration", "distance",
+    "car", "house", "home", "work", "kids", "school", "gym", "food", "sleep", "mood", "weather", "job", "study", "sport",
+    "phone", "garden", "pet", "pets", "cat", "dog", "party", "wedding", "trip", "plan", "weekend", "q1", "q2", "q3", "q4",
     "win", "loss", "losses", "reality", "surprise", "announcement", "diary", "journal", "log", "everything"})
-#: Who a line is said by, in Arabic, as ``own_words._ROLES_EN`` in English:
-#: with the article or a pronoun ("أختي:", "الزبون:").
-_ROLES_AR_RAW = (
-    "أخت", "أخو", "أخ", "أم", "أمي", "أب", "أبو", "والد", "والدة", "زوج", "زوجة", "بنت", "ولد", "ابن", "عم", "خال",
-    "عمة", "خالة", "جد", "جدة", "صديق", "صديقة", "صاحب", "صاحبة", "ربيع", "مدير", "مديرة", "زميل", "زميلة", "دكتور",
-    "دكتورة", "عميل", "زبون", "موظف", "بائع", "مشتري", "مالك", "مستأجر", "سائق", "مدرس", "مدرسة", "جار", "جارة",
-    "محامي", "ممرضة", "طالب")
+#: Someone of the user's: only with "my" written onto it ("أختي", "مديري"), as
+#: English asks "my" of its roles. Never a stem: "جدة" and "أبها" are cities,
+#: "المدرسة" a heading, "الربيع" a season.
+_MY_PEOPLE_AR_RAW = (
+    "أختي", "أخوي", "أخي", "أمي", "أبوي", "أبي", "والدي", "والدتي", "زوجي", "زوجتي", "بنتي", "ابنتي", "ولدي", "ابني",
+    "عمي", "خالي", "عمتي", "خالتي", "جدي", "جدتي", "صديقي", "صديقتي", "صاحبي", "صاحبتي", "ربعي", "مديري", "مديرتي",
+    "زميلي", "زميلتي", "دكتوري", "دكتورتي", "طبيبي", "طبيبتي", "عميلي", "زبوني", "جاري", "جارتي", "محاميي", "مدرسي",
+    "أستاذي", "أخواتي", "إخواني", "أهلي", "أصدقائي", "طالبي", "مستأجري", "موظفي", "خطيبتي", "خطيبي")
 _SUFFIXES_AR = ("ي", "ه", "ها", "هم", "نا", "ك", "تي", "ته", "تها", "تهم", "تنا", "تك")
 _ME = frozenset({"me", "myself", "انا"})
-#: A labelled line that answers another, or addresses someone: a conversation.
+#: A labelled line whose first word answers another: a conversation.
 _ANSWERS = re.compile(
-    r"\b(?:congrats|congratulations|thanks|thank you|thx|lol|haha|nice|wow|you|your|u|ok|okay|yes|no|hi|hello|hey)\b"
-    r"|[?؟]|(?:^|\W)(?:مبروك|مبارك|شكرا|مشكور|مشكوره|تسلم|تسلمين|هلا|اهلا|انت|انتي|عليك|ههه\w*|تمام|اوكي|نعم|لا|"
-    r"الله يبارك|ما شاء الله|ماشاء الله|يا)(?:\W|$)", re.IGNORECASE)
+    r"[ \t]{0,4}(?:congrats|congratulations|thanks(?! (?:to|god))|thank you|thx|lol|haha|"
+    r"مبروك|مبارك(?! (?:عليكم|عيدكم))|شكرا(?! (?:لله|ل\w))|مشكور|مشكوره|تسلم|تسلمين|الله يبارك|ههه\w{0,9})(?!\w)",
+    re.IGNORECASE)
+#: The user asking Kazma what to say or do about what they show.
+_ASKS_KAZMA = re.compile(
+    r"\bhelp me (?:to )?(?:reply|answer|respond|write|say)\b"
+    r"|\b(?:what|how|what else) (?:should|do|can|could|would|shall|must) (?:i|we) (?:\w{2,10} ){0,2}"
+    r"(?:answer|reply|respond|say|tell|write|do)\b"
+    r"|\b(?:should|can|shall) i (?:reply|answer|tell|mention)\b"
+    r"|\b(?:draft|write|suggest) (?:me )?(?:a reply|an answer)\b|\breply for me\b"
+    r"|(?<!\w)(?:ساعدني|ساعديني)(?: في)? (?:ال)?(?:ارد|رد|اجاوب|اكتب|اجيب)"
+    r"|(?<!\w)(?:شنو|وش|ايش|شو|ماذا|بماذا|شلون|كيف|هل|بم) (?:ممكن |اقدر |لازم |يجب ان |علي ان )?"
+    r"(?:ارد|اقول|اجاوب|اجيب|اكتب|اسوي|افعل|اخبر)\w{0,3}(?!\w)"
+    r"|(?<!\w)(?:اكتب|جهز|صغ) (?:لي )?(?:رد|ردا|جواب|جوابا)(?!\w)")
 
 _SIGN_OFF = re.compile(
     r"[ \t]*(?:(?:best|kind|warm|many)(?: (?:regards|wishes|thanks))?|regards|cheers|sincerely|yours(?: \w+)?|"
@@ -186,25 +211,69 @@ def _somebody(label: str) -> bool:
     return not _is_heading(label) and _own._names_a_speaker(label)
 
 
+def _my_person(words: list[str]) -> bool:
+    """"My sister", "أختي": someone of the user's."""
+    if any(not w.isascii() for w in words):
+        people = _folded_set(_MY_PEOPLE_AR_RAW)
+        return any(w in people or (len(w) > 4 and w[0] in "لوبك" and w[1:] in people) for w in words)
+    return any(w in ("my", "our") and any(x in _own._ROLES_EN or x.endswith("'s") for x in words[at + 1:at + 4])
+               for at, w in enumerate(words))
+
+
 def _certain_speaker(label: str) -> bool:
-    """A label no heading looks like: a role ("my sister", "أختي"), a phone
-    number, an ``@handle``, a numbered role."""
+    """A label only a speaker has: a phone number, an ``@handle``, a numbered
+    role. A name or a role ("Omar", "my sister", "الدكتور") is a heading as
+    often, so it needs a conversation (:func:`_speaker_lines`)."""
     label = label.strip()
-    words = _own._WORD_RE.findall(_own._bare_label(label) or label)
     if label.startswith("@") and _own._handle(label):
         return True
     if _own._PHONE_RE.fullmatch(label) and sum(ch.isdigit() for ch in label) >= 7:
         return True
-    if _own._numbered_role(label) or _own._names_a_role(words):
+    return bool(_own._numbered_role(label))
+
+
+# ── Whose words a head hands over ────────────────────────────────────────
+
+#: What came to the user: "the email I got" is another's.
+_CAME_EN = ("got get receive received copied copy found find saw see read pasted paste have had need want am was were "
+            "don't didn't can't cannot can could should would will must may might understand").split()
+_I_VERB_EN = re.compile(r"\b(?:i|we)(?:'ve|'d)? (?:(?:have|had|just|already|also) ){0,2}([a-z']{2,14})")
+_YOU_SAID_EN = re.compile(r"\byou(?:'ve| have| had| just)? (?:asked|ask|said|told|mentioned|wrote|suggested)\b")
+_SAID_YES_NO = re.compile(r"\b(?:said|says|answered|replied) (?:no|yes|ok|okay)\b"
+                          r"|(?<!\w)[وف]?(?:قال|قالت|قالوا|يقول|تقول) (?:لا|اي|ايه|نعم|اوكي|تمام)(?!\w)")
+_OF_YOU_AR = frozenset({"انك", "بانك", "انت", "سوالك", "سؤالك", "كلامك", "رسالتك", "سالتني", "طلبت"})
+_WHAT_I_DID_AR = re.compile(r"(?<!\w)(?:اللي|الذي|التي|ما|عما|باللي|بما) (?!\w?ا)(\w{2,8})(?:ت|نا)(?:ه|ها)?(?!\w)")
+_CAME_AR = frozenset({"وصل", "جا", "لقي", "شف", "قري", "قرا", "نسخ", "استلم"})
+_NOT_MINE_AR = frozenset({"الذي", "اللي", "هذي", "هاذي", "التالي", "حالي", "عالي", "عربي", "انجليزي", "فرنسي", "الماني",
+                          "رسمي", "ثاني", "سمحتي", "تكفي", "نادي", "لي", "الي", "علي", "في", "حقي", "بعدي", "شوي",
+                          "تستطيعي", "ممكني", "اضافي", "اصلي", "نهائي", "قانوني", "تسويقي"})
+_MINE_AR = frozenset({"مالي", "مالتي", "تبعي", "حقتي"})
+
+
+def _the_users_own(head: str) -> bool:
+    """Whether *head* says the words it hands over are the user's own: "My
+    caption:", "Improve my sentence:", "Summarize what I did:", "كلامي
+    بالضبط:", "لخص اللي سويته:". Never somebody's of theirs ("My boss
+    wrote:", "رسالة أختي:"), nor what came to them ("the email I got")."""
+    lowered = head.lower().replace("’", "'")
+    words = re.findall(r"[a-z']+", lowered)
+    folded = [_own._fold(w) for w in _own._WORD_RE.findall(head)]
+    if _my_person(words) or _my_person(folded):
+        return False
+    if any(w in ("my", "our") for w in words):
         return True
-    folded = [_own._fold(w) for w in words]
-    if not 1 <= len(folded) <= 2 or any(w.isascii() for w in folded) or not all(w.startswith("ال") for w in folded[1:]):
-        return False  # "أختي:", "صديقي المقرب:"; never "صديقي يدري:"
-    first = folded[0]
-    # Said of someone: the article or a pronoun written onto it; "دكتور:" alone
-    # may be a list's heading.
-    bound = first.startswith("ال") or any(first.endswith(s) for s in _SUFFIXES_AR)
-    return bound and bool(_arabic_stems(first) & _folded_set(_ROLES_AR_RAW))
+    if any(m[1] not in _CAME_EN for m in _I_VERB_EN.finditer(lowered)):
+        return True
+    if any(w in _MINE_AR for w in folded):
+        return True
+    if any(m[1] not in _CAME_AR for m in _WHAT_I_DID_AR.finditer(_own._fold(head))):
+        return True
+    # "جملتي", "كلامي": a noun of mine, never "وصلني", a feminine order, or an
+    # adjective under its article. Read as written: "معنى" folds to "معني".
+    return any(len(w) > 3 and raw.endswith("ي") and not w.endswith("ني") and w not in _NOT_MINE_AR
+               and not w.startswith(("ال", "لل", "بال", "وال"))
+               and not (at == 0 and any(v[:-1] in _own._AR_VERBS or v in _own._AR_VERBS for v in _own._ar_verb_forms(w)))
+               for at, (raw, w) in enumerate(zip(_own._WORD_RE.findall(head), folded, strict=True)))
 
 
 # ── The parts ────────────────────────────────────────────────────────────
@@ -217,6 +286,8 @@ class _Message:
         self.body = body
         self.pasted = bytearray(len(body))
         self.lines: list[tuple[int, int]] = []
+        self.headers: dict[int, bool] = {}
+        self._signed: int | None = None
         at = 0
         for line in body.split("\n"):
             self.lines.append((at, at + len(line)))
@@ -259,10 +330,32 @@ class _Message:
 
         return bisect_right(self.lines, (at, len(self.body) + 1)) - 1
 
+    def signed_after(self, number: int) -> bool:
+        """Whether a sign-off stands at or after line *number*."""
+        if self._signed is None:
+            self._signed = max((n for n in range(len(self.lines))
+                                if _SIGN_OFF.fullmatch(_own._fold(self.text(n)).strip().lower())), default=-1)
+        return self._signed >= number
+
     def parted(self) -> tuple[str, str]:
         told = "".join(" " if gone else ch for ch, gone in zip(self.body, self.pasted, strict=True))
         kept = "".join(ch if gone else " " for ch, gone in zip(self.body, self.pasted, strict=True))
         return told, kept
+
+
+#: "Also I sold my car", "وبعد بعت سيارتي", after a text handed over.
+_ALSO_I = re.compile(r"[ \t]{0,4}(?:also|and|plus|then)[ ,]{1,3}(?:i|i'm|i've|we|my)\b"
+                     r"|[ \t]{0,4}(?:وبعد|وكمان|وايضا|وكذلك|وانا|وبعدين)[ ،](?!ال)", re.IGNORECASE)
+
+
+def _asks_kazma(text: str) -> bool:
+    return bool(_ASKS_KAZMA.search(_own._fold(text).lower().replace("’", "'")))
+
+
+#: ... or about who said it: "Should I believe Omar?", "شنو يقصد عمر؟".
+_ASKS_ABOUT_THEM = re.compile(
+    r"\b(?:should|can|do) i (?:\w{2,10} )?(?:believe|trust|ask)\b|\bwhat (?:does|did) \w{2,20} (?:mean|want)\b"
+    r"|(?<!\w)(?:اصدق|اصدقه|اصدقها|اثق)(?!\w)|(?<!\w)(?:شنو|وش|ايش|ماذا) (?:يقصد|يبي|يريد|تقصد|تبي|تريد)(?!\w)")
 
 
 def _aside(line: str) -> bool:
@@ -272,12 +365,18 @@ def _aside(line: str) -> bool:
 
 def _letter_end(msg: _Message, first: int) -> int:
     """Where the letter that starts at line *first* ends (a line number): after
-    its sign-off and the name under it, before an aside, or the end."""
+    its sign-off and the name under it, before an aside or the paragraph that
+    asks Kazma about it ("I already sold it. Help me reply."), or the end."""
     number = first
+    written = False  # a line of the letter itself, past its header
     while number < len(msg.lines):
         line = msg.text(number)
-        if number > first and (number == 0 or msg.blank(number - 1)) and _aside(line):
+        starts = number > first and msg.blank(number - 1) and bool(line.strip())
+        if starts and _aside(line):
             return number
+        if starts and written and _asks_kazma(msg.text(msg.paragraph_end(number) - 1)):
+            return number
+        written = written or (number > first and bool(line.strip()) and not _is_header(msg, number))
         if number > first and _SIGN_OFF.fullmatch(_own._fold(line).strip().lower()):
             end = msg.paragraph_end(number)
             name = msg.next_text(end)
@@ -291,6 +390,8 @@ def _letter_end(msg: _Message, first: int) -> int:
 
 def _code_fences(msg: _Message) -> None:
     fence = ""
+    closes = {mark: max((n for n in range(len(msg.lines)) if len(msg.text(n).strip()) >= 3
+                         and set(msg.text(n).strip()) == {mark}), default=-1) for mark in "`~"}
     for number in range(len(msg.lines)):
         line = msg.text(number)
         mark = line.lstrip(" \t")[:3]
@@ -299,6 +400,9 @@ def _code_fences(msg: _Message) -> None:
             if line.strip().startswith(fence) and set(line.strip()) <= {fence[0]}:
                 fence = ""
         elif mark in ("```", "~~~"):
+            if closes[mark[0]] <= number:
+                msg.mark_lines(number, msg.paragraph_end(number))  # never closed
+                return
             msg.mark_lines(number, number + 1)
             fence = mark
 
@@ -323,20 +427,41 @@ def _is_forward(line: str) -> bool:
     return _own._starts_with(bare, _own._FORWARD_EN[:5], _own._FORWARD_AR)
 
 
-def _mail_header(msg: _Message, number: int) -> bool:
-    """Whether a mail's header starts at line *number*: two header lines, or
-    "From:" and an address or a name."""
-    def is_header(n: int) -> bool:
-        return n < len(msg.lines) and bool(_MAIL_HEADER.match(_own._fold(msg.text(n)).lstrip(" \t>-*_")))
-
-    if not is_header(number):
+def _is_header(msg: _Message, number: int) -> bool:
+    """Whether line *number* is a mail header's ("Subject: ..."); read once."""
+    if number >= len(msg.lines):
         return False
-    if is_header(number + 1):
+    if number not in msg.headers:
+        msg.headers[number] = bool(_MAIL_HEADER.match(_own._fold(msg.text(number)).lstrip(" \t>-*_")))
+    return msg.headers[number]
+
+
+_FROM = re.compile(r"(?:from|من)[ \t]*:", re.IGNORECASE)
+_SUBJECT = re.compile(r"(?:subject|الموضوع)[ \t]*:", re.IGNORECASE)
+
+
+def _mail_header(msg: _Message, number: int) -> bool:
+    """Whether a mail's header starts at line *number*: "From:" with an
+    address; "From:" and "Subject:"; or a "Subject:" over a letter (its
+    greeting or its sign-off). "From: Kuwait / To: Dubai" is a journey,
+    "Date: 30 May / To: my diary" the user's own page."""
+    if not _is_header(msg, number) or (number and _is_header(msg, number - 1)):
+        return False  # read from the run's first line
+    end = number
+    while _is_header(msg, end):
+        end += 1
+    heads = [_own._fold(msg.text(n)).lstrip(" \t>-*_") for n in range(number, end)]
+    sent = any(_FROM.match(h) for h in heads)
+    if sent and any("@" in h for h in heads):
         return True
-    line = msg.text(number).lstrip(" \t>-*_")
-    name = line.partition(":")[2].strip()
-    lone = line.lower().startswith("from") or _own._fold(line).startswith("من")
-    return lone and bool(name) and not msg.blank(number + 1) and ("@" in name or _somebody(name))
+    if not any(_SUBJECT.match(h) for h in heads):
+        return False
+    if sent and len(heads) > 1:
+        return True
+    first = msg.next_text(end)
+    return end < len(msg.lines) and msg.blank(end) and (
+        bool(_LETTER_OPENS.fullmatch(_own._fold(msg.text(first)) if first < len(msg.lines) else ""))
+        or msg.signed_after(first))
 
 
 def _mails(msg: _Message) -> None:
@@ -376,8 +501,14 @@ def _chats(msg: _Message) -> None:
         line = msg.text(number)
         if not msg.taken(number) and line.strip():
             if _own._EXPORT_LINE_RE.match(line):
-                end = msg.paragraph_end(number)
-                msg.mark_lines(number, end)
+                # A line between two exported ones is the first's; after the
+                # last it is the user's ("[...] Me: thanks / I sold my car").
+                end = last = number
+                while not msg.blank(end):
+                    if _own._EXPORT_LINE_RE.match(msg.text(end)):
+                        last = end
+                    end += 1
+                msg.mark_lines(number, last + 1)
                 number = end
                 continue
             if _copy_header(msg, number):
@@ -408,7 +539,7 @@ def _speaker_lines(msg: _Message) -> None:
         if match is not None:
             label, rest = match.group(2), bare[match.end():]
             if _own._fold(label).strip().lower() in _ME:
-                mine = True
+                mine = mine or bool(spoken)  # "Omar: ... / Me: ...", not "Me: tired / Toyota: ..."
             elif _own._copied_label(match):
                 spoken.append((number, label, rest, True))
             elif _certain_speaker(label) or _somebody(label):
@@ -418,15 +549,40 @@ def _speaker_lines(msg: _Message) -> None:
     if not spoken:
         return
     labels = [_own._fold(label).strip().lower() for _n, label, _r, _c in spoken]
-    chat = mine or len(set(labels)) < len(labels) or (
-        len(labels) > 1 and any(_ANSWERS.search(_own._fold(rest)) for _n, _l, rest, _c in spoken))
+    chat = mine or _comes_back(labels) or (
+        len(set(labels)) > 1 and any(_ANSWERS.match(_own._fold(rest)) for _n, _l, rest, _c in spoken))
     lines = {number for number, *_rest in spoken}
-    others = " ".join(_own._fold(msg.text(n)).lower() for n in range(len(msg.lines)) if n not in lines)
-    others_words = set(_own._WORD_RE.findall(others))
-    for (number, _label, _rest, certain), label in zip(spoken, labels, strict=True):
-        named_again = bool(set(_own._WORD_RE.findall(label)) & others_words)
-        if chat or certain or named_again:
+    asked = set() if chat else _asked_about(msg, lines)
+    for (number, label, _rest, certain), name in zip(spoken, labels, strict=True):
+        if chat or certain or (asked and (asked & set(_own._WORD_RE.findall(name))
+                                          or _my_person(_own._WORD_RE.findall(_own._fold(label).lower())))):
             msg.mark_lines(number, number + 1)
+
+
+def _comes_back(labels: list[str]) -> bool:
+    """A, B, A: one label speaks again after another one."""
+    seen: set[str] = set()
+    for at, label in enumerate(labels):
+        if label in seen and labels[at - 1] != label:
+            return True
+        seen.add(label)
+    return False
+
+
+def _asked_about(msg: _Message, spoken: set[int]) -> set[str]:
+    """The words of the lines that ask Kazma what to say ("What should I tell
+    Omar?"; "What should I do in London?" asks of no one): who a labelled line
+    is by, when nothing else says so."""
+    out: set[str] = set()
+    for number in range(len(msg.lines)):
+        if number in spoken:
+            continue
+        line = _own._fold(msg.text(number)).lower()
+        says = any(not m[0].endswith((" do", "اسوي", "افعل")) for m in _ASKS_KAZMA.finditer(line))
+        if says or _ASKS_ABOUT_THEM.search(line):
+            words = _own._WORD_RE.findall(line)
+            out.update(words, (w[1:] for w in words if len(w) > 3 and w[0] in "لوب"))  # "لعمر"
+    return out
 
 
 # ── Heads: an instruction's text, someone's words ────────────────────────
@@ -456,10 +612,21 @@ def _clear_reported(words: list[str], folded: list[str]) -> bool:
     said_en = {w for w in words if w in _own._REPORTING_EN}
     if said == folded[:1] and said[0] in _I_OR_SHE_AR and not said_en:
         return bool(_TO_ME_AR & set(folded))  # "كتبت لي:" is she; "دانة كتبت:" names who
-    if (_own._THAT_I_AR | _own._I_AR) & set(folded):
+    if (_own._THAT_I_AR | _own._I_AR | _OF_YOU_AR) & set(folded):
         return False
     of_you = {"you", "you'll", "you'd"} & set(words)
     return not (said_en and not said and of_you and not said_en - _own._MORE_THINKING_EN)
+
+
+def _speaks_a_part(words: list[str], folded: list[str]) -> bool:
+    """A part to play that says something: "a rich man who says ..."."""
+    return bool({"say", "says", "saying", "speak", "speaks", "tells", "telling"} & set(words)
+                or {"يقول", "تقول", "قل", "قول", "يحكي"} & set(folded))
+
+
+#: "Write a tweet about this: ...": a subject, not a text.
+_ABOUT_EN = re.compile(r"(?:write|draft|compose|make|create|post)\b.{0,60}\b(?:about|on)\b")
+_ABOUT_AR = frozenset({"عن", "حول"})
 
 
 def _clear_instruction(head: str, plain: str, folded: list[str], mark: str, inline: bool) -> bool:
@@ -470,10 +637,17 @@ def _clear_instruction(head: str, plain: str, folded: list[str], mark: str, inli
     first = _own._ar_verb_forms(folded[0]) if folded else ()
     transform = _starts(plain, _TRANSFORM_EN) or any(v in _TRANSFORM_AR for v in first)
     mine = bool({"my", "our"} & set(words) or _MY_TEXT_AR & set(folded))
-    if _of_their_own(words, folded):
+    if _of_their_own(words, folded) or (mark and _the_users_own(head)) or _OF_YOU_AR & set(folded) or (
+            "your" in words and {"question", "message", "reply", "answer"} & set(words)):
+        return False
+    if _starts(plain, _ROLES_PLAYED_EN) or any(v in _ROLES_PLAYED_AR for v in first):
+        return _speaks_a_part(words, folded)
+    if plain.startswith(("summary", "quick summary", "in summary", "short summary")):
+        return False  # a heading, as "ملخص:" is
+    if _ABOUT_EN.match(plain) or (_ABOUT_AR & set(folded) and folded[:1] and folded[0] in _COMPOSE_AR):
         return False
     if not mark:
-        return _starts(plain, _ROLES_PLAYED_EN) or any(v in _ROLES_PLAYED_AR for v in first) or (transform and not mine)
+        return transform and not mine
     if colon and transform:
         return True
     if plain.startswith(_own._HANDS_OVER_EN) or folded[:1] and folded[0] in _own._HANDS_OVER_AR:
@@ -505,10 +679,13 @@ def _clear_kind(head: str, mark: str, inline: bool) -> str | None:
     if _starts(plain, _SUPPOSING_EN, " ,!") or any(v in _SUPPOSING_AR for v in first):
         return None
     if any(v in _REPLY_AR for v in first) and folded[1:2] == ["علي"] and any(
-            w in _POINTS_AR or w in _TEXT_NOUNS_AR for w in folded[2:5]):
+            w in _POINTS_AR or w in _TEXT_NOUNS_AR for w in folded[2:5]) and not _OF_YOU_AR & set(folded):
         return None if inline and not colon else _own._INSTRUCTION  # "رد على هذا:"
     kind = _own._head_kind(head, colon=colon or question, question=question)
     if kind == _own._REPORTED:
+        lowered = head.lower().replace("’", "'")
+        if _YOU_SAID_EN.search(lowered) or _SAID_YES_NO.search(_own._fold(lowered)):
+            return None
         return kind if colon and _clear_reported(_own._words(head), folded) else None
     if kind is None or not _clear_instruction(head, plain, folded, mark, inline):
         return None
@@ -559,9 +736,10 @@ def _text_end(msg: _Message, number: int, after: int, inline: bool, kind: str) -
     if inline and kind == _own._REPORTED:
         return _own._sentence_end(body, after)
     if inline:
-        end = msg.lines[msg.paragraph_end(number) - 1][1]
+        end = msg.lines[number][1]  # the line after it is the user's
         for place in _own._head_starts(body[after:end])[1:]:
-            if _own._is_aside(body, after + place) or _aside(body[after + place:after + place + 40]):
+            if _own._is_aside(body, after + place) or _aside(body[after + place:after + place + 40]) \
+                    or _ALSO_I.match(_own._fold(body[after + place:after + place + 40]).replace("’", "'")):
                 return after + place
         return end
     first = msg.next_text(number + 1)
@@ -606,11 +784,30 @@ def _whole_sentence(span: str) -> bool:
         bool(_VERB_OF_I_AR.fullmatch(first)) and first not in _NOUNS_IN_T and not first.startswith("ال"))
 
 
+#: What the user calls their own words: "My answer was "...", «جوابي كان»".
+_MY_WORDS_EN = re.compile(r"\b(?:my|our)(?: [a-z]{2,12}){1,4}(?: (?:is|was|were|says|said|reads|read)[ :,]{0,3}| ?:)$")
+
+
 def _says_so_themself(before: str) -> bool:
-    if _I_SAID_EN.search(before.lower().replace("’", "'")):
+    lowered = before.lower().replace("’", "'")
+    if _I_SAID_EN.search(lowered):
         return True
+    if _MY_WORDS_EN.search(lowered.rstrip("\"'“”«( ")):
+        return not _my_person(re.findall(r"[a-z']+", lowered))
     folded = _own._WORD_RE.findall(_own._fold(before))
-    return any(w in _I_SAID_AR and not set(folded[k + 1:k + 2]) & {"لي", "لنا"} for k, w in enumerate(folded))
+    if any(_of_mine(w) and not set(folded[k + 1:k + 2]) & {"لي", "لنا"} for k, w in enumerate(folded)):
+        return True
+    last = [w for w in before.split() if not w.isascii()][-4:]
+    said = {_own._fold(w).strip(" :،") for w in last}
+    return bool(last) and not said & {"قال", "قالت", "قالوا", "كتب", "كتبوا", "ارسل", "طرش"} and _the_users_own(" ".join(last))
+
+
+def _of_mine(word: str) -> bool:
+    """"قلت", "كتبنا", with a pronoun or not ("أجبتهم", "قلتله")."""
+    if word[:1] in "وف" and word[1:] in _I_SAID_AR:
+        return True
+    return word in _I_SAID_AR or any(
+        word[:-len(x)] in _I_SAID_AR for x in ("ه", "ها", "هم", "ك", "له", "لها", "لهم") if word.endswith(x))
 
 
 def _quotations(msg: _Message) -> None:
@@ -631,7 +828,9 @@ def _quotations(msg: _Message) -> None:
 #: A sentence that ends by naming who says it, and nothing more: "..., he
 #: says.", "..., says the mayor", "..., قالت أختي".
 _SAYS_WHO_EN = re.compile(r"(?:he|she|they) (?:says|said|writes|wrote|adds|added)|(?:says|said) (?:the|his|her) [\w-]+")
-_SAYS_WHO_AR = re.compile(r"(?:قال|قالت|يقول|تقول) (\w+)")
+_SAYS_WHO_AR = re.compile(r"(?:قال|قالت|يقول|تقول) (\w{1,20})")
+_SAYERS_AR = frozenset({"المدير", "المديره", "الدكتور", "الدكتوره", "الطبيب", "العمده", "المحافظ", "الوزير", "الرئيس",
+                        "الرجل", "المراه", "الولد", "البنت", "الكاتب", "المتحدث", "الممثل", "اللاعب", "المحامي"})
 
 
 def _direct_speech(msg: _Message) -> None:
@@ -644,7 +843,7 @@ def _direct_speech(msg: _Message) -> None:
         tail = sentence[comma + 1:].strip().rstrip(".!؟?").lower()
         who = _SAYS_WHO_AR.fullmatch(_own._fold(tail))
         if _SAYS_WHO_EN.fullmatch(tail) or (who is not None and (
-                who[1].startswith("ال") or _arabic_stems(who[1]) & _folded_set(_ROLES_AR_RAW))):
+                who[1] in _SAYERS_AR or _my_person([who[1]]))):
             msg.mark(start, at)
 
 

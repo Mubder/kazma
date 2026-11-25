@@ -918,6 +918,43 @@ mail with no header; one word shared between what the user asks and what is
 pasted; two unmarked-paste turns and a prompt line for the next recording.
 Evidence: `docs/audits/evidence/memory_event_lines/third_review.json`.
 
+**The re-check of those fixes, fixed** (25 Nov, of f68b21ae5: 0 H, 4 M, 7 L;
+`tests/test_memory_event_lines_recheck.py`, English, Gulf and MSA: 117 of its
+182 cases failed on that commit; no model call). A forget finishes on its
+first call whatever either archive holds (it raised a foreign-key error when
+the fact it opened again named an archived predecessor). "Too" and "again"
+undo no correction that names the old value. The user's own line is kept
+before anything else:
+
+| events kept (main keeps all) | EN | Gulf | MSA |
+|---|---|---|---|
+| the reviewer's 83 openings x 3: f68b21ae5 | 201 | 192 | 198 |
+| ... now, of 249 | 249 | 249 | 249 |
+| 78 written before the fix x 3: f68b21ae5 | 204 | 198 | 192 |
+| ... now, of 234 | 234 | 234 | 234 |
+| 40 written after its first form x 3: that form | 105 | 114 | 114 |
+| ... now, of 120 | 114 | 117 | 117 |
+| 12 beside a paste x 3: f68b21ae5 | 30 | 30 | 30 |
+| ... now, of 36 | 36 | 36 | 36 |
+| the reviewer's pastes let in, of 132: f68b21ae5 | 63 | 81 | - |
+| ... now (accepted: filed as Kazma's reading) | 69 | 90 | - |
+
+The third row is what to expect of shapes nobody has tried. The cached
+replies replayed, against f68b21ae5: the answer's words are in 57 of 129 and
+12 of 37 blocks, as before, none lost; current dated events 3,084 and 797,
+planned 231 and 28, tokens, all unchanged; one event fewer is left out (2 ->
+1); 10 and 2 blocks change, mostly by order. Five facts differ in the stores,
+read one by one: a trip told again closes its first telling ("a bit too small"
+had read as "too"); a sentence of a text to proofread is let in; a start read
+from the user's own resume, and one from a post they drafted, stay; and a
+retelling closes another of three occasions that tie.
+Left of the re-check: L-d (pastes let in: "My brother sent me this:", a label
+alone, "Customer review:", a text above "Translate the above"), L-f (a list of
+a kind in Arabic finds nothing: the same on main), L-g (the parts of a message
+are quadratic in lines under the 6,000-character cap), and of M3 what is
+honestly unclear (a doctor's letter, an order, an offer quoted in the second
+person). Evidence: `docs/audits/evidence/memory_event_lines/recheck.json`.
+
 ### W6. Ingestion the product's way (M)
 
 The benchmark's memories written as Kazma writes them: the deep pass on

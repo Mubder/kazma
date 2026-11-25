@@ -620,27 +620,29 @@ def _same_event(entry: dict[str, Any], clean: dict[str, Any], user_text: str = "
     * when one of them has no day: a switch ("from vim to emacs yesterday"),
       or the same thing, or what the user puts right ("sorry, I meant Omar",
       "آسف أقصد عمر") or says it was not ("مو علي، عمر")."""
-    from kazma_core.memory.event_text import corrects, denies, is_event_name, mentions_value, own_text, says_once_more
+    from kazma_core.memory.event_text import (denies, is_event_name, mentions_value, own_text, puts_right,
+                                              says_once_more)
     from kazma_core.memory.fact_days import compatible, could_have_happened_by, event_day, same_thing
     from kazma_core.memory.time_words import says_day
 
     meta, held, told = entry["meta"], event_day(entry["meta"]), event_day(clean.get("day") or {})
-    same = same_thing(str(entry["object"] or ""), str(clean["object"]))
+    old = str(entry["object"] or "")
+    same = same_thing(old, str(clean["object"]))
     event = is_event_name(entry["predicate"]) or is_event_name(clean["predicate"])
     if held == told:
-        return same or not event or corrects(user_text) or not says_once_more(user_text)
+        return same or not event or puts_right(user_text, old) or not says_once_more(user_text)
     if not held or not told:
         if not event:
             return True
-        return same or corrects(user_text) or (denies(user_text)
-                                               and mentions_value(str(entry["object"] or ""), user_text))
+        return same or puts_right(user_text, old) or (denies(user_text, old) and mentions_value(old, user_text))
     if not same or compatible(held, told):
         return same
     if meta.get("planned"):
         return True
     if not could_have_happened_by(told, entry["told_at"]):
         return False
-    return not (meta.get("day_sure") and not denies(user_text) and says_day(own_text(user_text), told, clean.get("said_on")))
+    return not (meta.get("day_sure") and not denies(user_text, old)
+                and says_day(own_text(user_text), told, clean.get("said_on")))
 
 
 def _came_to_pass(entry: dict[str, Any], clean: dict[str, Any]) -> bool:
@@ -669,7 +671,8 @@ def _keep_the_day(entry: dict[str, Any], clean: dict[str, Any], method: str, use
     held, told = event_day(entry["meta"]), event_day(clean.get("day") or {})
     if not held or not may_overrule(entry["method"], method):
         return
-    stands = bool(entry["meta"].get("day_sure") and told and not compatible(held, told) and not denies(user_text))
+    stands = bool(entry["meta"].get("day_sure") and told and not compatible(held, told)
+                  and not denies(user_text, str(entry["object"] or "")))
     if not stands and not vaguer(told, held):
         return
     passed = _came_to_pass(entry, clean)

@@ -124,7 +124,8 @@ related or not.
    latest shown first; a question about a period, or for all of a kind,
    shows each thing once before the other times it happened, and counts the
    ones it has no room for ("and 3 more"). Text you pasted, quoted or asked
-   Kazma to translate or correct is not taken as something you did. Kazma
+   Kazma to translate or correct is not taken as something you did; where it
+   is not clear whose words they are, it is kept as Kazma's reading. Kazma
    works the day out from what you said, so on a fact you stated yourself it
    is marked as Kazma's reading; forgetting the message that gave it takes
    the day back. A fact that holds one value is shown with the value it replaced
