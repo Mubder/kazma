@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 from pathlib import PureWindowsPath
 
-__all__ = ["device_path_reason", "drive_relative_reason", "inner_drive_reason", "remote_path_reason"]
+__all__ = ["device_path_reason", "drive_relative_reason", "remote_path_reason"]
 
 
 def _flat_text(path: str | os.PathLike[str] | None) -> str | None:
@@ -69,7 +69,7 @@ def device_path_reason(path: str | os.PathLike[str] | None) -> str | None:
     return None
 
 
-def inner_drive_reason(path: str | os.PathLike[str] | None) -> str | None:
+def _inner_drive_reason(path: str | os.PathLike[str] | None) -> str | None:
     """Why *path* is refused for naming a drive after its first part, or None.
 
     Windows only (2026-11-25): ``file:///C:/x`` and ``a?b/C:/x`` are relative
@@ -106,7 +106,7 @@ def drive_relative_reason(path: str | os.PathLike[str] | None) -> str | None:
 def remote_path_reason(path: str | os.PathLike[str] | None) -> str | None:
     """Why *path* is refused as a network or device path, or None. On Windows
     a path that names a drive after its first part is refused here too
-    (:func:`inner_drive_reason`): every door that takes a path asks this.
+    (:func:`_inner_drive_reason`): every door that takes a path asks this.
 
     Reads the text only: no filesystem or network call is made.
     """
@@ -136,4 +136,4 @@ def remote_path_reason(path: str | os.PathLike[str] | None) -> str | None:
             f"'{text}' is a network path. Kazma reads and writes local files "
             "only; copy the file into the workspace first."
         )
-    return inner_drive_reason(text) if os.name == "nt" else None
+    return _inner_drive_reason(text) if os.name == "nt" else None

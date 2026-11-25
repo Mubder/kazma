@@ -219,26 +219,35 @@ def resolve_tool_path(path: str | os.PathLike[str], *, root: Path | None = None)
     drive-relative path, given or answered by ``resolve()`` (2026-11-25): it
     means another file to whoever opens it than to whoever checked it.
     """
+    found = tool_path_or_reason(path, root=root)
+    if isinstance(found, Path):
+        return found
+    # Imported here: the agent package's __init__ builds the graph, and
+    # this module is imported long before it.
+    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+    raise RefusedBeforeEffect(found)
+
+
+def tool_path_or_reason(path: str | os.PathLike[str], *, root: Path | None = None) -> Path | str:
+    """:func:`resolve_tool_path`, answering why the path is refused instead of
+    raising it (``path_policy.check_path_access`` answers a denial)."""
     from kazma_core.workspace.remote_paths import drive_relative_reason, remote_path_reason
 
     reason = remote_path_reason(path)
     p = Path(path).expanduser()
     if reason is None:
         reason = remote_path_reason(p) or drive_relative_reason(p)
-    if reason is None:
-        if not p.is_absolute():
-            p = (root if root is not None else resolve_active_root()) / p
-        p = p.resolve()
-        if p.is_absolute():
-            return p
-        # Windows answers a drive-relative path for a part it cannot hold;
-        # whoever opens that opens it in the server's current folder.
-        reason = f"'{path}' is not a path this computer can hold."
-    # Imported here: the agent package's __init__ builds the graph, and
-    # this module is imported long before it.
-    from kazma_core.agent.tool_refusal import RefusedBeforeEffect
-
-    raise RefusedBeforeEffect(reason)
+    if reason is not None:
+        return reason
+    if not p.is_absolute():
+        p = (root if root is not None else resolve_active_root()) / p
+    p = p.resolve()
+    if p.is_absolute():
+        return p
+    # Windows answers a drive-relative path for a part it cannot hold;
+    # whoever opens that opens it in the server's current folder.
+    return f"'{path}' is not a path this computer can hold."
 
 
 def subscribe_root_changed(callback: RootChangedCallback) -> None:

@@ -131,7 +131,7 @@ the old code:
     the workspace routes): resolving `\\host\share` connects to that host.
     `/api/research/download` takes a name, never an absolute path. On Windows
     the same check refuses a path that names a drive after its first part
-    (`inner_drive_reason`, 2026-11-25): `Path.resolve()` of one answers a
+    (`_inner_drive_reason`, 2026-11-25): `Path.resolve()` of one answers a
     drive-relative path, which the access check joined to the workspace and
     the tool opened in the server's current folder. A drive-relative path,
     given or answered, is refused by `resolve_tool_path` and

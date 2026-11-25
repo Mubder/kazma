@@ -274,7 +274,7 @@ def _unchecked_resolutions(source: str) -> list[str]:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         called = _called_names(node)
-        if "resolve_tool_path" in called and not (called & _ACCESS_CHECKS):
+        if called & {"resolve_tool_path", "tool_path_or_reason"} and not (called & _ACCESS_CHECKS):
             found.append(node.name)
     return found
 

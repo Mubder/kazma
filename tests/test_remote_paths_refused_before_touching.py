@@ -277,17 +277,17 @@ NO_INNER_DRIVE = ["C:/work/a.txt", "C:\\work\\ab:c", "C:a.txt", "a.txt", "rel/ab
 
 @pytest.mark.parametrize("text", INNER_DRIVE)
 def test_a_drive_after_the_first_part_is_named(text):
-    from kazma_core.workspace.remote_paths import inner_drive_reason
+    from kazma_core.workspace.remote_paths import _inner_drive_reason
 
-    assert inner_drive_reason(text)
+    assert _inner_drive_reason(text)
     assert bool(remote_path_reason(text)) is (os.name == "nt"), "every door asks it, on Windows"
 
 
 @pytest.mark.parametrize("text", NO_INNER_DRIVE)
 def test_a_path_with_one_drive_or_none_passes(text):
-    from kazma_core.workspace.remote_paths import inner_drive_reason
+    from kazma_core.workspace.remote_paths import _inner_drive_reason
 
-    assert inner_drive_reason(text) is None
+    assert _inner_drive_reason(text) is None
 
 
 @pytest.fixture
@@ -349,7 +349,7 @@ def test_a_drive_relative_path_is_refused_by_the_resolver_the_policy_and_the_ide
         with pytest.raises(ValueError, match="drive"):
             service.IdeService().resolve(text)
     # A resolve that still answers a drive-relative path is not believed.
-    monkeypatch.setattr(remote_paths, "inner_drive_reason", lambda _path: None)
+    monkeypatch.setattr(remote_paths, "_inner_drive_reason", lambda _path: None)
     with pytest.raises(RefusedBeforeEffect, match="can hold"):
         resolve_tool_path(spelled[0], root=workspace)
     answer = path_policy.check_path_access(spelled[0], "read")
