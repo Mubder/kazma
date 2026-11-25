@@ -388,7 +388,11 @@
       compare-and-set the settling makes too), and the chat here is marked
       deleted. A message that landed meanwhile refuses the move (`changed`),
       nothing changed; one that lands after is refused as a message to a
-      deleted chat.
+      deleted chat. The spaces' rule is asked again right before it: one taken
+      out of the shared space while the files were copied moves nothing.
+      Settling (a start, the sweep, the next move) does not ask: it goes by
+      what the two chats hold, and takes back a copy that was not handed over
+      unless someone wrote in it.
     - *The fingerprint.* The journal (`chat_moves.MOVES_KEY`) holds what was
       copied -- how many messages, the last one's time, the checkpoint --
       and the copy's own. Compared right before the delete (the row in the

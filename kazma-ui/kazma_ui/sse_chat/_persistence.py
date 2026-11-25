@@ -194,7 +194,8 @@ def _answers_the_last_question(messages: list[Any], state: dict[str, Any]) -> bo
     The state may end with the answer of an earlier turn -- ``/compact`` runs
     the model once more and keeps what it answered, unseen -- while the next
     question is stored and its turn has not begun: a reload there stored that
-    answer as its reply. By the time the state's turn began, else by its last
+    answer as its reply. By the time the state's turn began, else (a chat
+    app's rows name none) by its last
     question, which an attachment's rewrite still holds. A steer is a part of
     the turn it was sent in."""
     from kazma_core.agent.plan_fence import is_graph_nudge
@@ -204,8 +205,8 @@ def _answers_the_last_question(messages: list[Any], state: dict[str, Any]) -> bo
     if not asked:
         return True
     began, sent = epoch_of(state.get("created_at")), epoch_of(asked[-1].get("ts"))
-    if began is not None and sent is not None and began < sent:
-        return False
+    if began is not None and sent is not None:
+        return began >= sent
 
     def said(m: Any) -> str:
         return " ".join(_reply_text(m.get("content")).split())

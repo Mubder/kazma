@@ -622,8 +622,7 @@ def search_sessions(
 
     A spelling does not read every letter (``arabic.folded_otherwise``: a
     ligature, "ß", a full-width digit), so a session whose text has one is
-    ranked when it holds any term, after those that hold enough: *confirm*
-    reads it with the fold.
+    ranked when it holds any term: *confirm* reads it with the fold.
 
     *confirm* is asked about each session in rank order and answers what to
     return for it, or None to pass it over: the search goes on until *limit*
@@ -679,7 +678,7 @@ def _ranked(
             }
     return sorted(
         (r for r in best.values() if r["there"] >= at_least or r["otherwise"]),
-        key=lambda r: (r["there"] >= at_least, int(r["score"]), str(r.get("created_at") or "")),
+        key=lambda r: (int(r["score"]), str(r.get("created_at") or "")),
         reverse=True,
     )
 

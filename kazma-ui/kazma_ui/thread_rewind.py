@@ -282,12 +282,14 @@ def _place(rows: list[Any], restored: list[Any], asked: list[int], candidates: l
                         lambda m: _role(m) != "user", rows[i + 1:]) if _role(m) == "assistant")]
         if len(answered) == 1 or (answered and not same):
             return answered[-1]
-    # The state's questions are the transcript's first ones, in order.
+    # The state's questions are the transcript's first ones, in order (an
+    # instant command before them is in the transcript only).
+    firsts = {users[0], next((i for i in users if not _said(rows[i]).startswith("/")), users[0])}
     found: list[int] = []
     for i in candidates:
         if len(found) < len(asked) and _said(rows[i]) == _said(restored[asked[len(found)]]):
             found.append(i)
-    if asked and len(found) == len(asked) and found[0] == users[0]:
+    if asked and len(found) == len(asked) and found[0] in firsts:
         return found[-1]
     if same:
         return same[-1]
@@ -561,6 +563,8 @@ def _fork_rows(thread_id: str, state: list[Any], at: float | None = None) -> lis
     (``others_wrote``) and its turns were the opener's. One whose asker is in
     doubt still names nobody (``reply_sink.carry_authors``). Blocking: the
     chat store."""
+    from kazma_core.agent.plan_fence import is_graph_nudge
+
     from kazma_ui.reply_sink import carry_authors
     from kazma_ui.session_manager import get_session_manager
 
@@ -568,6 +572,11 @@ def _fork_rows(thread_id: str, state: list[Any], at: float | None = None) -> lis
     _ok, session = _best_effort(f"reading who asked what in {thread_id} (its fork names nobody)",
                                 lambda: get_session_manager().get_by_thread_id(thread_id))
     said = list(getattr(session, "messages", None) or [])
+    # A prompt of Kazma's own is nobody's question: the fork does not show it
+    # (it kept its maker's own fork in the space). Words a person wrote stay.
+    written = {_said(m) for m in said if _role(m) == "user"}
+    rows = [m for m in rows if not (m["role"] == "user" and is_graph_nudge(m["content"])
+                                    and _norm(m["content"]) not in written)]
     # By the step's own time alone: a place read from the texts is a guess.
     timed = at is not None and all(epoch_of(m.get("ts")) is not None for m in said if _role(m) == "user")
     cut = _transcript_cut(said, state, at) if timed else None

@@ -113,6 +113,15 @@ def test_rows_with_no_time_are_told_apart_by_what_was_said(rows, state, stays):
     assert _transcript_cut(rows, state) == stays
 
 
+def test_an_instant_command_as_the_first_row():
+    rows = _rows("/yolo on", "yes", "two", "yes", timed=False)
+    for m in rows:
+        if m["role"] == "assistant":
+            m["content"] = "ok"  # the answers tell nothing
+    state = [{"role": "user", "content": "yes"}, {"role": "assistant", "content": "ok"}]
+    assert _transcript_cut(rows, state) == 4, "the state begins at the first question, not the command"
+
+
 @pytest.mark.parametrize("at", [None, _at(3.5)])
 def test_no_place_cuts_nothing(at):
     rows = _rows("one", "two", "three", "the plan", timed=False)

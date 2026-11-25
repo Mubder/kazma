@@ -388,6 +388,16 @@ def test_what_only_the_fold_reads_is_found_in_a_title_and_a_spooled_chat(chats):
     assert sorted(chats.found("office lease")) == ["spooled", "title"]
 
 
+@pytest.mark.postgres
+def test_the_score_alone_orders_the_hits(chats):
+    """A chat that holds a word only the fold reads is not behind those whose
+    words all have a spelling."""
+    chats.save("plain", "the office lease", title="note")
+    chats.save("best", "the oﬃce lease, the lease, the lease", title="lease")
+    assert chats.found("office lease") == ["best", "plain"]
+    assert chats.found("office lease", limit=1) == ["best"]
+
+
 def test_a_chat_is_read_as_the_fold_reads_it():
     """The pattern and the folded words together answer as folding the whole
     text does, for letters of every script and every kind."""

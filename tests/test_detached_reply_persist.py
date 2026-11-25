@@ -532,6 +532,10 @@ _BEFORE, _AFTER = "2026-11-25T08:00:00+00:00", "2026-11-25T08:05:00+00:00"
     # Still healed: the question itself, its attachment's rewrite, a steer in its turn.
     ([{"role": "user", "content": "and a hawk?", "ts": _BEFORE}], "and a hawk?", _AFTER, True),
     ([{"role": "user", "content": "read it", "ts": _BEFORE}], "read it\n\n[attachment: plan.txt] ...", _AFTER, True),
+    # Both times known: they decide, whatever the words (a rewrite that holds none of them).
+    ([{"role": "user", "content": "go", "ts": _BEFORE}], "[attachment: plan.txt] ...", _AFTER, True),
+    ([{"role": "user", "content": "go"}, {"role": "assistant", "content": "a"},
+      {"role": "user", "content": "go on", "ts": _BEFORE}], "go", _AFTER, True),
     ([{"role": "user", "content": "read it"}], "read it\n\n[attachment: plan.txt] ...", "", True),
     ([{"role": "user", "content": "go", "ts": _BEFORE},
       {"role": "user", "content": "🔀 faster", "steer": True, "ts": _AFTER}], "go", _BEFORE, True),
