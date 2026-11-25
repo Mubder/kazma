@@ -1465,11 +1465,11 @@ def _pg_primary_beliefs(
         query, candidates, _question_background([sim for _b, sim in dense_pairs], kind="belief"),
         kind="belief", named=_named_facts(query, rows),
     )
-    ranked = _primary_beliefs_as_local(ranked, rows, local, tenant_id, limit)
+    ranked = _primary_beliefs_as_local(query, ranked, rows, local, tenant_id, limit)
     sources = {
         bid: (["dense", "pgvector"] if bid in by_meaning else ["postgres_state"]) for bid in rows
     }
-    hits = _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
+    hits = _with_the_rest(_finish_beliefs(ranked, rows, sources if explain else None), rows, limit)
     _add_local_methods(hits, tenant_id=tenant_id)
     return hits
 
@@ -1490,15 +1490,12 @@ def _primary_belief_rows(rows: dict[str, Any], local: sqlite3.Connection | None,
     return rows
 
 
-def _primary_beliefs_as_local(ranked: list[RecallHit], rows: dict[str, Any],
+def _primary_beliefs_as_local(query: str, ranked: list[RecallHit], rows: dict[str, Any],
                               local: sqlite3.Connection | None, tenant_id: str, limit: int) -> list[RecallHit]:
-    """The local path's steps after ranking facts (``_recall_beliefs``): the
-    question's time ("where was I living in June": June's value, not
-    today's) and a list's siblings (read from this install's database)."""
-    ranked = _latest_first(_facts_in_time(_by_event(ranked, rows, local, tenant_id), rows, _ASK.get()), rows)
-    if _LISTING.get() and local is not None:
-        ranked = _with_list_siblings(local, tenant_id, ranked, rows, limit)
-    return ranked
+    """The local path's steps after ranking facts (:func:`_in_order`), an
+    event's occasions and a list's siblings read from this install's
+    database."""
+    return _in_order(query, ranked, rows, local, tenant_id, limit)
 
 
 def _add_local_methods(hits: list[RecallHit], *, tenant_id: str) -> None:
@@ -1888,10 +1885,62 @@ def _recall_beliefs(
         q, candidates, _question_background([sim for _bid, sim in dense], kind="belief"), kind="belief",
         named=_named_facts(q, rows),
     )
-    ranked = _latest_first(_facts_in_time(_by_event(ranked, rows, conn, tenant_id), rows, ask), rows)
-    if _LISTING.get():
-        ranked = _with_list_siblings(conn, tenant_id, ranked, rows, limit)
-    return _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
+    ranked = _in_order(q, ranked, rows, conn, tenant_id, limit)
+    return _with_the_rest(_finish_beliefs(ranked, rows, sources if explain else None), rows, limit)
+
+
+def _in_order(query: str, ranked: list[RecallHit], rows: dict[str, Any], conn: sqlite3.Connection | None,
+              tenant_id: str, limit: int) -> list[RecallHit]:
+    """*ranked* facts as a question shows them, on the local path and the
+    Postgres-primary one (*conn* is this install's database, if any): by the
+    question's time ("where was I living in June": June's value, not today's),
+    and, for a list, with their siblings.
+
+    An event's other occasions come after everything found has been shown
+    once: six visits to the dentist filled the block of "did I visit the
+    dentist or the eye doctor last month?" and the eye doctor was not shown
+    (the third review of W4). A list's siblings that are events are shown once
+    before that too; only the occasions of an event the question names come
+    before them."""
+    from kazma_core.memory.event_text import is_event_name
+
+    firsts, others = _by_event(ranked, rows, conn, tenant_id)
+    firsts = _facts_in_time(firsts, rows, _ASK.get())
+    if not _LISTING.get() or conn is None:
+        return _latest_first([*firsts, *others], rows)
+    asked = _named_by(query)
+    named = [h for h in others if asked(rows[h.id])]
+    out = [*firsts, *named]
+    siblings, more = _list_siblings(conn, tenant_id, query, out, others, rows, limit)
+    rest = [h for h in others if h not in named]
+    happened = {h.id for h in siblings
+                if _event_of(rows[h.id]) or is_event_name(str(_field(rows[h.id], "predicate") or ""))}
+    return _latest_first([*out, *(h for h in siblings if h.id in happened), *rest,
+                          *(h for h in siblings if h.id not in happened), *more], rows)
+
+
+def _named_by(query: str) -> Any:
+    """Whether a fact's value holds a word of the question's."""
+    from kazma_core.memory.query_terms import content_terms
+
+    asked = set(_without_time_words(content_terms(query)))
+    return lambda row: bool(asked & set(_without_time_words(content_terms(str(_field(row, "object") or "")))))
+
+
+def _with_the_rest(hits: list[RecallHit], rows: dict[str, Any], limit: int) -> list[RecallHit]:
+    """The first *limit* of *hits*; an event some of whose occasions are past
+    them says how many ("and 4 more")."""
+    shown = hits[:limit]
+    first: dict[Any, RecallHit] = {}
+    for hit in shown:
+        key = _event_of(rows.get(hit.id))
+        if key is not None:
+            first.setdefault(key, hit)
+    for hit in hits[limit:]:
+        of = first.get(_event_of(rows.get(hit.id)))
+        if of is not None:
+            of.metadata["more"] = int(of.metadata.get("more") or 0) + 1
+    return shown
 
 
 #: A question asking for every memory of a kind: the best facts' siblings --
@@ -1900,42 +1949,63 @@ def _recall_beliefs(
 _LIST_SIBLINGS_OF = 3
 
 
-def _with_list_siblings(conn: sqlite3.Connection, tenant_id: str, ranked: list[RecallHit],
-                        rows: dict[str, Any], limit: int) -> list[RecallHit]:
-    """*ranked* with every current fact sharing a subject and a name with
-    one of its best (:data:`_LIST_SIBLINGS_OF`), each right after the hits
-    of its kind, up to *limit*. "List every note I asked you to keep" finds
-    one note by meaning; the notes are the facts ``user noted ...``. A
-    sibling stands on its kind's evidence, never on its own words."""
-    out = list(ranked)
-    seen = {h.id for h in out}
+def _list_siblings(conn: sqlite3.Connection, tenant_id: str, query: str, ranked: list[RecallHit],
+                   others: list[RecallHit], rows: dict[str, Any],
+                   limit: int) -> tuple[list[RecallHit], list[RecallHit]]:
+    """The current facts sharing a subject and a name with one of *ranked*'s
+    best (:data:`_LIST_SIBLINGS_OF`), kind by kind, and the other occasions of
+    those that are events. "List every note I asked you to keep" finds one
+    note by meaning; the notes are the facts ``user noted ...``. A sibling
+    stands on its kind's evidence, never on its own words: those holding a
+    word of the question come first, then the newest (an event by its day).
+    They were read in the order of their ids, so which ones a full block
+    showed was chance (the memory plan's finding 21)."""
+    out: list[RecallHit] = []
+    more: list[RecallHit] = []
+    seen = {h.id for h in (*ranked, *others)}
+    taken = {_event_of(rows.get(h.id)) for h in ranked} - {None}
     keep = _BELIEF_KEEP.get()
+    asked = _named_by(query)
     for best in ranked[:_LIST_SIBLINGS_OF]:
         row = rows.get(best.id)
         sub, pred = _field(row, "subject"), _field(row, "predicate")
         if not sub or not pred or _field(row, "valid_until") is not None:
             continue
         try:
-            siblings = conn.execute(
+            found = conn.execute(
                 "SELECT id FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? "
-                f"AND {BELIEF_ACTIVE_SQL} AND COALESCE(object, '') != '' ORDER BY valid_from DESC LIMIT ?",
-                (tenant_id, sub, pred, limit),
+                f"AND {BELIEF_ACTIVE_SQL} AND COALESCE(object, '') != '' "  # nosec B608 - fixed clause, values bound
+                "ORDER BY valid_from DESC LIMIT ?",
+                (tenant_id, sub, pred, _OCCASIONS_READ),
             ).fetchall()
         except sqlite3.Error:
             logger.debug("[recall] a fact's siblings could not be read", exc_info=True)
             continue
-        fresh = [str(r[0]) for r in siblings if str(r[0]) not in seen]
-        for sib in _hydrate_beliefs(conn, fresh, tenant_id):
-            sid = str(sib["id"])
+        fresh = _hydrate_beliefs(conn, [str(r[0]) for r in found if str(r[0]) not in seen], tenant_id)
+        for sib in sorted(fresh, key=lambda r: (asked(r), _told_or_happened(r), str(r["id"])), reverse=True):
+            sid, key = str(sib["id"]), _event_of(sib)
             if keep is not None and not keep(str(_field(sib, "subject") or "")):
                 continue
             rows[sid] = sib
             seen.add(sid)
-            out.append(RecallHit(id=sid, content=_format_belief_text(sib), score=best.score, kind="belief",
-                                 source="belief_sibling",
-                                 metadata={k: v for k, v in best.metadata.items()
-                                           if k in ("strength", "evidence")}))
-    return out[: max(limit, len(ranked))]
+            hit = RecallHit(id=sid, content=_format_belief_text(sib), score=best.score, kind="belief",
+                            source="belief_sibling",
+                            metadata={k: v for k, v in best.metadata.items() if k in ("strength", "evidence")})
+            if key is not None and key in taken:
+                more.append(hit)
+                continue
+            taken.add(key)
+            out.append(hit)
+    return out, more
+
+
+def _told_or_happened(row: Any) -> float:
+    """When the event *row* happened, else when the fact was told."""
+    from kazma_core.memory import fact_days
+
+    day = fact_days.event_day(fact_days.metadata_of(_field(row, "metadata_json")))
+    span = fact_days.day_span(day, _memory_zone()) if day else None
+    return span[0] if span is not None else float(_field(row, "valid_from") or 0.0)
 
 
 #: The steps back a fact's history is followed (a value it replaced, the one
@@ -2058,6 +2128,8 @@ def _event_of(row: Any) -> tuple[Any, ...] | None:
     """What the fact *row* is an occasion of (``fact_days.event_key``)."""
     from kazma_core.memory.fact_days import event_key, metadata_of
 
+    if row is None:
+        return None
     meta = metadata_of(_field(row, "metadata_json"))
     return event_key(_field(row, "subject"), _field(row, "predicate"), _field(row, "object"), meta)
 
@@ -2101,19 +2173,22 @@ def _without_other_occasions(rows: dict[str, Any]) -> dict[str, Any]:
 
 
 def _by_event(ranked: list[RecallHit], rows: dict[str, Any], conn: sqlite3.Connection | None,
-              tenant_id: str) -> list[RecallHit]:
+              tenant_id: str) -> tuple[list[RecallHit], list[RecallHit]]:
     """*ranked*, where a hit that is an occasion of an event stands for all of
-    them: the latest is shown, with how many more there are (``more``) -- every
-    one of them for a question about a period ("what did I do last month") or
-    one asking for all of a kind. *rows* gains the occasions read."""
+    them: the latest is shown, with how many more there are (``more``) -- for a
+    question about a period ("what did I do last month") or one asking for all
+    of a kind, the latest of that period, and beside it the list of the other
+    occasions, the events' in turn (each one's second, then each one's third).
+    *rows* gains the occasions read."""
     from kazma_core.memory.fact_days import event_day, metadata_of
 
     ask = _ASK.get()
     every = _LISTING.get() or (ask is not None and ask.period)
     out: list[RecallHit] = []
+    others: list[list[RecallHit]] = []
     for hit in ranked:
         row = rows.get(hit.id)
-        key = _event_of(row) if row is not None else None
+        key = _event_of(row)
         if key is None or _field(row, "valid_until") is not None:
             out.append(hit)
             continue
@@ -2122,13 +2197,18 @@ def _by_event(ranked: list[RecallHit], rows: dict[str, Any], conn: sqlite3.Conne
             held.update(_occasions(conn, tenant_id, row, key))
         order = sorted(held, key=lambda b: event_day(metadata_of(_field(held[b], "metadata_json"))), reverse=True)
         rows.update(held)
-        for bid in order if every else order[:1]:
-            shown = RecallHit(id=bid, content=_format_belief_text(held[bid]), score=hit.score, kind=hit.kind,
-                              source=hit.source, metadata=dict(hit.metadata))
-            if not every and len(order) > 1:
-                shown.metadata["more"] = len(order) - 1
-            out.append(shown)
-    return out
+        hits = [RecallHit(id=bid, content=_format_belief_text(held[bid]), score=hit.score, kind=hit.kind,
+                          source=hit.source, metadata=dict(hit.metadata)) for bid in order]
+        if not every:
+            if len(hits) > 1:
+                hits[0].metadata["more"] = len(hits) - 1
+            out.append(hits[0])
+            continue
+        hits = _facts_in_time(hits, rows, ask)
+        out.extend(hits[:1])
+        others.append(hits[1:])
+    turns = max(map(len, others), default=0)
+    return out, [h[turn] for turn in range(turns) for h in others if turn < len(h)]
 
 
 def _occasions(conn: sqlite3.Connection, tenant_id: str, row: Any, key: tuple[Any, ...]) -> dict[str, Any]:

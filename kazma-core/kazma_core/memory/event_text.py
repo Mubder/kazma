@@ -1,26 +1,29 @@
-"""Whether an event and its day are the user's own words, and what an event's
-name is (the memory plan's W4; the second review, 2026-11-24).
+"""Whether an event and its day are the user's to tell, and what an event's
+name is (the memory plan's W4; the second review, 2026-11-24, and the third,
+2026-11-25).
 
-A model reads a whole turn: the user's message, what they pasted or quoted in
-it, and the assistant's reply. Only what the user tells is something the user
-did. ``own_words`` says which part of the message that is; these say where an
-event's words, and its day, stand:
+A model reads a whole turn: the user's message and what they pasted or quoted
+in it. What it reads is filed as Kazma's reading, never as the user's own
+statement, so an event is left out only when its words stand in text that is
+clearly pasted or another person's (``pasted_text.told_and_pasted``) and not
+in the rest. Everything else stays: what is reported ("my manager told me I
+got the promotion"), supposed, long, or told in words of the model's
+("decluttering", "a promotion" for "ترقيت").
 
-* **Its words** (:func:`stands_elsewhere`). An event is somebody else's when
-  its words stand in the part ``own_words`` removed (a paste, a quote, a text
-  to translate) and not in what it kept. Words in neither are the model's way
-  of saying it ("decluttering", "عشاء" for "تعشينا"): such an event is the
-  user's when they tell something of it -- one of its words, or its day --
-  and is not when the message says nothing of it at all (the assistant's
-  reply told it).
+* **Its words** (:func:`stands_elsewhere`). Until 2026-11-25 this asked
+  ``own_words``, which is for trust and takes out whatever it is unsure of:
+  12 of 135 ordinary English events were lost by it, and 60 Arabic ones. A
+  thing the user points at ("I bought these yesterday" under a pasted product
+  page) is theirs, and so is one memory holds and they name by "it".
 * **Its day** (:func:`days_elsewhere`): a day the pasted text names and the
-  user's own words do not is not the user's day. "Check this email I got last
-  week: I bought it on 3 March 2019" names 2019 in the email only.
+  rest of the message does not is not the user's day. "Check this email I got
+  last week: > I bought it on 3 March 2019" names 2019 in the email only.
 
 Words are compared as search compares them, with the letters Arabic writes
-onto a word: "لدبي", "بدبي" hold "دبي" and "سيارتي" is "السيارة", as "to Dubai"
-and "my car" are. Compared exactly, 30 of 30 English travel sentences kept
-their event and 12 of 30 Arabic ones. Word lists and folding; no model.
+onto a word, on either side: "لدبي", "بدبي" hold "دبي", "سيارتي" is "السيارة",
+and the value "دراجة بـ٩٥ دينار" holds "٩٥". Compared exactly, 30 of 30 English
+travel sentences kept their event and 12 of 30 Arabic ones. Word lists and
+folding; no model.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 
-__all__ = ["denies", "days_elsewhere", "is_event_name", "mentions_value", "own_text",
+__all__ = ["corrects", "denies", "days_elsewhere", "is_event_name", "mentions_value", "own_text", "says_once_more",
            "stands_elsewhere"]
 
 #: The share of an event's content words one text holds, at least, for the
@@ -40,16 +43,18 @@ EVENT_WORDS = 0.5
 #: whatever the reply labelled it, and is never the name of a value that
 #: changes ("weight", "order_status", "follower_count").
 _EVENT_VERBS = frozenset(
-    "accepted achieved adopted arrived asked ate attended baked became began booked borrowed bought broke brought built "
-    "called came canceled cancelled caught celebrated checked cleaned climbed completed cooked crossed cycled "
-    "danced decorated deleted delivered discovered donated drank drove earned enjoyed enrolled exchanged explored "
-    "fell finished fixed flew found gave got graduated grew had harvested hiked hired hosted installed interviewed "
-    "joined kayaked launched lost learned left lent listened made married met moved named opened ordered organized "
-    "paid painted participated passed performed picked planted played posted prepared presented published purchased "
-    "quit raised ran reached read received redeemed registered renewed repaired replaced reserved resigned returned "
-    "rode sang saw sent shared shipped signed skipped sold spent spoke started stayed stopped studied submitted "
-    "subscribed survived swam switched talked took toured traded trained travelled traveled tried underwent "
-    "upgraded visited volunteered walked washed watched went won wrote".split())
+    "accepted achieved acquired adopted applied arrived asked ate attended baked became began boarded booked "
+    "borrowed bought broke brought built called came canceled cancelled caught celebrated checked cleaned climbed "
+    "completed cooked cracked crossed cycled danced decorated deleted delivered dined discovered donated "
+    "downloaded drank drove earned enjoyed enrolled exchanged experienced explored fell finished fixed flew found "
+    "gave gifted got graduated grew had harvested helped hiked hired hosted injured installed interviewed joined "
+    "kayaked launched learned left lent listened lost made married met misplaced missed moved named opened ordered "
+    "organized paid painted participated passed performed picked planted played posted prepared presented "
+    "published purchased quit raised ran reached read rearranged received redeemed registered renewed rented "
+    "repaired replaced repotted reserved resigned returned rode sang saw sent shared shipped signed skipped sold "
+    "spent spilled spoke sprained started stayed stopped studied submitted subscribed survived swam switched "
+    "talked took toured traded trained traveled travelled tried underwent upgraded visited volunteered walked "
+    "washed watched went won wore wrote".split())
 
 
 @lru_cache(maxsize=512)
@@ -112,89 +117,164 @@ def _wanted(value: str) -> list[str]:
     return content_terms(value) or _WORD.findall(fold_for_search(value or ""))
 
 
+@lru_cache(maxsize=512)
+def _other_forms(word: str) -> frozenset[str]:
+    """The forms of a value's own *word* with what Arabic writes onto its front
+    taken off ("بمطعم": "مطعم", "ب95": "95"): three letters or more, or a
+    number -- two letters are in anything."""
+    if word.isascii():
+        return frozenset()
+    return frozenset(f for f in _forms(word) if len(f) >= 3 or f.isdigit())
+
+
 def _share(wanted: list[str], text: str) -> float:
     forms = _forms(text)
 
     def said(word: str) -> bool:
         parts = [p for p in word.split("-") if p]
-        return (word in forms or _stem(word) in forms
+        return (word in forms or _stem(word) in forms or not forms.isdisjoint(_other_forms(word))
                 or (len(parts) > 1 and all(p in forms or _stem(p) in forms for p in parts)))
 
     return sum(map(said, wanted)) / len(wanted)
 
 
 def own_text(user_text: str) -> str:
-    """The user's own words of a whole message, what they ask included
-    ("I bought a bike yesterday, which lock should I get?"); the end of one
-    longer than ``own_words`` reads too."""
-    from kazma_core.memory.own_words import last_words, own_words
+    """The message without what is clearly pasted or another person's
+    (``pasted_text``), what they ask, report and suppose included."""
+    from kazma_core.memory.pasted_text import told_and_pasted
 
-    return f"{own_words(user_text, questions=True)}\n{last_words(user_text)}".strip()
+    return told_and_pasted(user_text)[0]
+
+
+#: The user points at something: "I bought these", "I've already started it".
+_POINTS_EN = re.compile(
+    r"(?:\b(?:i|we)(?:'[a-z]{1,3})?[ \t]|(?:^|[.!?\n])[ \t]{0,4})(?:(?:have|had|just|already|also|finally|both) ){0,3}"
+    r"([a-z]{3,14})(?: [a-z]{2,6})? (?:it|this|these|those|them|that|one)\b"
+    r"(?! (?:email|e-mail|mail|message|text|page|article|letter|note|post))")
+#: ... in Arabic, the pronoun is written onto a verb of "I" or "we" ("شريتها",
+#: "خلصناه"), as it is onto a noun ("رسالتها").
+_POINTS_AR = re.compile(r"(?<!\w)[وف]?(?!رسال|تغريد|صور|قصت|كتاب|محادث|سيار|بيت|بنت|اخت|خالت|عمت|جدت|زوجت|صديق|مقال)"
+                        r"\w{2,8}(?:ت|نا)(?:ها|هم|هن|ه)(?!\w)")
+#: Verbs of an event that also point at a text ("I got this", "I read it").
+_OF_A_TEXT = frozenset("asked checked fixed found got had read received saw sent shared took wrote".split())
+
+
+def _points(own: str) -> bool:
+    from kazma_core.documents.arabic import fold_for_search
+
+    lowered = (own or "").lower().replace("’", "'")
+    for m in _POINTS_EN.finditer(lowered):
+        if m[1] in _EVENT_VERBS and m[1] not in _OF_A_TEXT:
+            return True
+    return bool(_POINTS_AR.search(fold_for_search(own or "")))
 
 
 def stands_elsewhere(value: str, user_text: str, *, told_before: str = "", day: str = "",
-                     said_on: str | None = None) -> bool:
+                     said_on: str | None = None, pasted_day: bool = False) -> bool:
     """Whether the event *value* is not the user's to tell: see the module's
     docstring. *day* is the day it was given and *said_on* the turn's (both
     ``YYYY-MM-DD`` or less exact).
 
     *told_before* is the fact memory holds of it, if any: "I bought it in
     2018", "I think I started it last Monday" name the thing by what was told
-    before, so its words count -- when the day itself is in the user's own
-    words."""
-    from kazma_core.memory.own_words import own_words
+    before, so its words count -- when the day itself is in the rest of the
+    message. A thing a paste names is the user's when they point at it on a
+    day they say ("I bought these yesterday"). *pasted_day*: its day was the
+    paste's alone (:func:`days_elsewhere`); with no word of it in the rest,
+    the paste is all that tells it ("Translate: I got it in 2018")."""
+    from kazma_core.memory.pasted_text import told_and_pasted
     from kazma_core.memory.time_words import says_day
 
+    own, pasted = told_and_pasted(user_text)
     wanted = _wanted(value)
-    if not wanted:
+    held = _share(wanted, own) if wanted else 1.0
+    if not pasted.strip() or held >= EVENT_WORDS:
         return False
-    own = own_text(user_text)
-    held = _share(wanted, own)
-    if held >= EVENT_WORDS:
-        return False
+    if _share(wanted, pasted) < EVENT_WORDS:
+        return pasted_day and not held
     day_said = bool(day) and says_day(own, day, said_on)
-    if day_said and told_before and _share(wanted, f"{own} {told_before}") >= EVENT_WORDS:
-        return False
-    if _share(wanted, user_text) >= EVENT_WORDS:
+    if not day_said:
         return True
-    # A day in what they ask is none they tell: "What should I do this weekend?"
-    return not held and not (day_said and says_day(own_words(user_text), day, said_on))
+    return not _points(own) and not (told_before and _share(wanted, f"{own} {told_before}") >= EVENT_WORDS)
 
 
 def days_elsewhere(day: str, user_text: str, said_on: str | None) -> bool:
-    """Whether *day* stands in the part of *user_text* that is not the user's
-    own words (a paste, a quote) and not in what is."""
+    """Whether *day* stands in what is clearly pasted or another person's in
+    *user_text* and not in the rest."""
+    from kazma_core.memory.pasted_text import told_and_pasted
     from kazma_core.memory.time_words import says_day
 
-    return bool(day) and says_day(user_text, day, said_on) and not says_day(own_text(user_text), day, said_on)
+    own, pasted = told_and_pasted(user_text)
+    return bool(day) and says_day(pasted, day, said_on) and not says_day(own, day, said_on)
 
 
 def mentions_value(value: str, user_text: str) -> bool:
-    """Whether the user's own words name *value*: half of its words."""
+    """Whether the user's message, pastes left out, names *value*: half of its
+    words."""
     wanted = _wanted(value)
     return bool(wanted) and _share(wanted, own_text(user_text)) >= EVENT_WORDS
 
 
 # ── Denials ──────────────────────────────────────────────────────────────
 
-_DENIALS_EN = frozenset("no not nope never wasn't wasnt isn't isnt didn't didnt weren't werent actually sorry wrong "
-                        "mistake mistaken correction correct instead meant rather oops".split())
-_DENIALS_AR_RAW = ("لا", "مو", "مب", "مش", "ليس", "ليست", "لم", "غلط", "أقصد", "قصدي", "آسف", "آسفة", "عفوا", "عفواً",
-                   "بل", "تصحيح", "الصحيح", "صححها", "أخطأت", "غلطت", "ماكان", "ماكانت", "معليش", "السموحة")
+#: Words that put something right whatever else is said: "sorry, I meant ...".
+_CORRECTING_EN = frozenset("sorry wrong mistake mistaken mistyped typo correction correcting meant oops".split())
+_CORRECTING_AR_RAW = ("غلط", "أقصد", "قصدي", "آسف", "آسفة", "عفوا", "عفواً", "تصحيح", "صححها", "أخطأت", "غلطت",
+                      "معليش", "السموحة", "متأسف", "متأسفة", "أعني")
+#: Words that deny, and may deny something else: "not Paris", "مو علي".
+_DENIALS_EN = frozenset("not nope never wasn't wasnt isn't isnt didn't didnt weren't werent actually correct instead "
+                        "rather".split())
+_DENIALS_AR_RAW = ("مو", "مب", "موب", "مهب", "مهو", "ماهو", "ماهي", "مش", "ليس", "ليست", "لم", "بل", "الصحيح", "ماكان",
+                   "ماكانت")
+#: "No" and "لا" as an answer, never before a noun ("no cavities", "لا تسوس"):
+#: they begin a sentence, or a comma, a stop or "wait" follows.
+_NO = re.compile(r"(?:^|[.!?؟\n][ \t]{0,4})(?:(?:oh|well|ah|hmm|اوه|اه|والله)[ ,،]+)?(?:no|لا)(?!\w)"
+                 r"|(?<!\w)(?:no|لا)(?=[ \t]{0,3}(?:[,،.!]|$)|[ \t]{1,3}(?:wait|لحظه|صبر)(?!\w))")
+#: The same thing once more is another occasion, not a correction.
+_ONCE_MORE = re.compile(r"\b(?:also|again|another|too|as well|second time)\b"
+                        r"|(?<!\w)(?:كمان|وكمان|ايضا|وايضا|مره ثانيه|مره اخري|مره ثالثه|بعد مره)(?!\w)"
+                        r"|(?<!\w)و\w{2,8}(?:ت|نا) بعد(?!\w)")
 
 
-@lru_cache(maxsize=1)
-def _denials_ar() -> frozenset[str]:
+@lru_cache(maxsize=2)
+def _folded_words(raw: tuple[str, ...]) -> frozenset[str]:
     from kazma_core.documents.arabic import fold_for_search
 
-    return frozenset(fold_for_search(w) for w in _DENIALS_AR_RAW)
+    return frozenset(fold_for_search(w) for w in raw)
+
+
+def _says_one_of(folded: str, english: frozenset[str], arabic: frozenset[str]) -> bool:
+    words = re.findall(r"[\w']+", folded)
+    return any(w in english or w in arabic or (w[:1] in "وف" and w[1:] in arabic) for w in words)
+
+
+def _own_folded(user_text: str) -> str:
+    from kazma_core.documents.arabic import fold_for_search
+
+    return fold_for_search(own_text(user_text).replace("’", "'")).lower().strip()
+
+
+def corrects(user_text: str) -> bool:
+    """Whether the user says they put something right: "sorry, I meant Omar",
+    "آسف أقصد عمر". Enough by itself with the fact it replaces named; a
+    denial (:func:`denies`) is not."""
+    return _says_one_of(_own_folded(user_text), _CORRECTING_EN, _folded_words(_CORRECTING_AR_RAW))
+
+
+def says_once_more(user_text: str) -> bool:
+    """Whether the user tells another one, not the same again: "I also bought
+    a lamp", "وشريت بعد لمبة"."""
+    return bool(_ONCE_MORE.search(_own_folded(user_text)))
 
 
 def denies(user_text: str) -> bool:
-    """Whether the user's own words put something right: "No, it was ...",
-    "not Paris, Lyon", "sorry, I meant ...", "لا، كان ...", "مو علي، عمر"."""
-    from kazma_core.documents.arabic import fold_for_search
-
-    words = re.findall(r"[\w']+", fold_for_search(own_text(user_text).replace("’", "'")))
-    return any(w in _DENIALS_EN or w in _denials_ar() or (w[:1] in "وف" and w[1:] in _denials_ar()) for w in words)
-
+    """Whether the user puts something right or denies it: "No, it was ...",
+    "not Paris, Lyon", "sorry, I meant ...", "لا، كان ...", "مو علي، عمر".
+    Not a "no" before a noun, and not a denial beside "also" or "again": "I
+    also visited the dentist on 2 May, no cavities" is another visit."""
+    folded = _own_folded(user_text)
+    if _says_one_of(folded, _CORRECTING_EN, _folded_words(_CORRECTING_AR_RAW)):
+        return True
+    if says_once_more(user_text):
+        return False
+    return bool(_NO.search(folded)) or _says_one_of(folded, _DENIALS_EN, _folded_words(_DENIALS_AR_RAW))

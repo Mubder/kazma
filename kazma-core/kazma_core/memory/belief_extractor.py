@@ -609,7 +609,8 @@ def _same_event(entry: dict[str, Any], clean: dict[str, Any], user_text: str = "
 
     * neither has an event's day, or both have the SAME one: yes, whatever
       the words -- "not Paris, I went to Lyon last week" puts right what
-      happened that day;
+      happened that day -- unless the user tells another one ("I also bought
+      a lamp yesterday");
     * with another day, only in words that name the same thing
       (``fact_days.same_thing``: "bananas" was closed by "fresh vegetables"),
       and only when what was told then can have happened on that day: told in
@@ -617,19 +618,22 @@ def _same_event(entry: dict[str, Any], clean: dict[str, Any], user_text: str = "
       is not moved by another day they say without denying it: that is
       another occasion;
     * when one of them has no day: a switch ("from vim to emacs yesterday"),
-      or the same thing, or what the user says it was not ("مو علي، عمر")."""
-    from kazma_core.memory.event_text import denies, is_event_name, mentions_value, own_text
+      or the same thing, or what the user puts right ("sorry, I meant Omar",
+      "آسف أقصد عمر") or says it was not ("مو علي، عمر")."""
+    from kazma_core.memory.event_text import corrects, denies, is_event_name, mentions_value, own_text, says_once_more
     from kazma_core.memory.fact_days import compatible, could_have_happened_by, event_day, same_thing
     from kazma_core.memory.time_words import says_day
 
     meta, held, told = entry["meta"], event_day(entry["meta"]), event_day(clean.get("day") or {})
-    if held == told:
-        return True
     same = same_thing(str(entry["object"] or ""), str(clean["object"]))
+    event = is_event_name(entry["predicate"]) or is_event_name(clean["predicate"])
+    if held == told:
+        return same or not event or corrects(user_text) or not says_once_more(user_text)
     if not held or not told:
-        if not is_event_name(entry["predicate"]) and not is_event_name(clean["predicate"]):
+        if not event:
             return True
-        return same or (denies(user_text) and mentions_value(str(entry["object"] or ""), user_text))
+        return same or corrects(user_text) or (denies(user_text)
+                                               and mentions_value(str(entry["object"] or ""), user_text))
     if not same or compatible(held, told):
         return same
     if meta.get("planned"):
@@ -642,11 +646,12 @@ def _same_event(entry: dict[str, Any], clean: dict[str, Any], user_text: str = "
 def _came_to_pass(entry: dict[str, Any], clean: dict[str, Any]) -> bool:
     """Whether *clean* tells that the plan *entry* happened ("I went to the
     concert yesterday", of one planned for that day): it is filed as what
-    happened, under its own name, not as the plan."""
+    happened, under its own name, not as the plan. Never one planned again
+    ("I'm attending it on the 10th")."""
     from kazma_core.memory.event_text import is_event_name
 
-    return bool(entry["meta"].get("planned")) and is_event_name(clean["predicate"]) and not is_event_name(
-        entry["predicate"])
+    return bool(entry["meta"].get("planned")) and is_event_name(clean["predicate"]) and not (
+        clean.get("day") or {}).get("planned")
 
 
 def _keep_the_day(entry: dict[str, Any], clean: dict[str, Any], method: str, user_text: str = "") -> None:
@@ -667,12 +672,13 @@ def _keep_the_day(entry: dict[str, Any], clean: dict[str, Any], method: str, use
     stands = bool(entry["meta"].get("day_sure") and told and not compatible(held, told) and not denies(user_text))
     if not stands and not vaguer(told, held):
         return
-    if _same_value_text(entry["object"], clean["object"]) and not _came_to_pass(entry, clean):
+    passed = _came_to_pass(entry, clean)
+    if _same_value_text(entry["object"], clean["object"]) and not passed:
         if stands:
             clean["day"] = {}  # the same entry, told again: its own day stands
         return
     clean["day"] = {k: entry["meta"][k] for k in DAY_KEYS if entry["meta"].get(k) and k != "day_source"}
-    if _came_to_pass(entry, clean):
+    if passed:
         # Not before its day: what is to come has not happened.
         past = _started_on(held, clean.get("told_at"), _turn_zone())
         clean["day"] = {"started": held, "happened": True} if past else {}
@@ -801,13 +807,16 @@ def _users_spelling(value: Any, text: str | None) -> Any:
 
 #: The forms a fact's start may take (``since``): a year, a month or a day.
 _SINCE_RE = re.compile(r"([0-9]{4})(?:-([0-9]{2})(?:-([0-9]{2}))?)?")
+#: No day past it is anyone's: a model's "9999" crashed the calendar, and every
+#: fact of its reply was lost (the third review of W4).
+_LAST_YEAR = 2199
 #: Arabic-Indic and Persian digits, read as the same numbers.
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
 
 def _since_value(value: Any) -> str | None:
     """*value* as a start the model may give a fact (``YYYY``, ``YYYY-MM`` or
-    ``YYYY-MM-DD``, a real date from 1900 on, in any digits), else None: a
+    ``YYYY-MM-DD``, a real date of 1900 to 2199, in any digits), else None: a
     start is never guessed from words ("last month" is the model's to work
     out)."""
     from datetime import date
@@ -820,7 +829,7 @@ def _since_value(value: Any) -> str | None:
         date(year, month, day)
     except ValueError:
         return None
-    return match[0] if year >= 1900 else None
+    return match[0] if 1900 <= year <= _LAST_YEAR else None
 
 
 def _started_on(since: str | None, said_at: float | None, zone: Any) -> str | None:
@@ -834,7 +843,7 @@ def _started_on(since: str | None, said_at: float | None, zone: Any) -> str | No
     return since
 
 
-def _read_days(clean: dict[str, Any], said_at: float | None) -> None:
+def _read_days(clean: dict[str, Any], said_at: float | None, user_text: str = "") -> None:
     """Sort *clean*'s dates into ``day`` (``fact_days``): a start ("since"),
     the day an event happened ("on"), or -- a day after the turn -- the day
     it is planned for, which never throws away a start. An event is a list
@@ -844,10 +853,13 @@ def _read_days(clean: dict[str, Any], said_at: float | None) -> None:
     weigh 78 kg today", "my order was delivered yesterday") -- "on" is when
     it began (the reviews of W4, 2026-11-24). Told at no known time, it is
     told now: a day to come is never one that happened, and a name that says
-    it happened ("bought") keeps no day to come: the model worked out the
-    wrong year of "Black Friday"."""
-    from kazma_core.memory.event_text import is_event_name
+    it happened ("bought") keeps a day to come only as a plan the user told
+    ("I'm going to the concert tomorrow", read as attended:
+    ``time_words.says_to_come``); one they did not say is the model's working
+    out (the wrong year of "Black Friday")."""
+    from kazma_core.memory.event_text import is_event_name, own_text
     from kazma_core.memory.fact_names import names_one_value
+    from kazma_core.memory.time_words import says_to_come
 
     since, on = clean.pop("since", None), clean.pop("on", None)
     clean["day"] = {}
@@ -866,34 +878,37 @@ def _read_days(clean: dict[str, Any], said_at: float | None) -> None:
     clean["event"], clean["predicate_type"] = True, "set"
     if _started_on(on, at, zone):
         clean["day"] = {"started": on, "happened": True}
-    elif not happens:
+    elif not happens or says_to_come(own_text(user_text), on, said_on_iso(at, zone)):
         clean["day"]["planned"] = on
 
 
 def _in_users_words(value: str, user_text: str, told_before: str = "", day: str = "",
-                    said_on: str | None = None) -> bool:
-    """Whether an event is the user's to tell (``event_text``): what the
-    assistant's reply, a pasted page or a quote tells is not something the
-    user did."""
+                    said_on: str | None = None, pasted_day: bool = False) -> bool:
+    """Whether an event is the user's to tell (``event_text``): what a pasted
+    page, a quote or another person's lines tell is not something the user
+    did."""
     from kazma_core.memory.event_text import stands_elsewhere
 
-    return not stands_elsewhere(value, user_text, told_before=told_before, day=day, said_on=said_on)
+    return not stands_elsewhere(value, user_text, told_before=told_before, day=day, said_on=said_on,
+                                pasted_day=pasted_day)
 
 
-def _the_users_day(clean: dict[str, Any], user_text: str) -> None:
+def _the_users_day(clean: dict[str, Any], user_text: str) -> bool:
     """Only a day the user gives: one that stands in a pasted or quoted part
     of the message and not in their own words is dropped (a pasted email's
-    2019 replaced the user's 2026). ``day_sure``: they said it by counting
-    from the turn's own ("yesterday")."""
+    2019 replaced the user's 2026). Whether one was. ``day_sure``: they said it
+    by counting from the turn's own ("yesterday")."""
     from kazma_core.memory.event_text import days_elsewhere, own_text
     from kazma_core.memory.time_words import says_today_or_yesterday
 
-    day, said_on = clean["day"], clean.get("said_on")
+    day, said_on, dropped = clean["day"], clean.get("said_on"), False
     for key in ("started", "planned"):
         if day.get(key) and days_elsewhere(day[key], user_text, said_on):
             clean["day"] = day = {k: v for k, v in day.items() if k not in (key, "happened")}
+            dropped = True
     if day.get("happened") and says_today_or_yesterday(own_text(user_text), day["started"], said_on):
         day["day_sure"] = True
+    return dropped
 
 
 def _told_before(clean: dict[str, Any], held: list[dict[str, Any]] | None) -> str:
@@ -1297,11 +1312,10 @@ def _filed(clean: dict[str, Any], named: str, method: str, *, people: Any, said_
     from kazma_core.memory.fact_names import users_predicate
     from kazma_core.memory.speakers import is_member_entry
 
-    _read_days(clean, now)
+    _read_days(clean, now, user_text)
     clean["told_at"] = now
     clean["said_on"] = said_on_iso(time.time() if now is None else now, _turn_zone())
-    if user_text:
-        _the_users_day(clean, user_text)
+    pasted_day = bool(user_text) and _the_users_day(clean, user_text)
     event = bool(clean.get("event"))
     if not event and not _tells_an_undated_event(clean, named, user_text):
         clean["predicate"] = named
@@ -1327,7 +1341,7 @@ def _filed(clean: dict[str, Any], named: str, method: str, *, people: Any, said_
     if (told and user_text and not clean.get("ended")
             and (clean["subject"] == "user" or is_member_entry(clean["subject"]))
             and not _in_users_words(str(clean["object"]), user_text, _told_before(clean, held),
-                                    fact_days.event_day(clean["day"]), clean["said_on"])):
+                                    fact_days.event_day(clean["day"]), clean["said_on"], pasted_day)):
         stats["not_users_words"] = stats.get("not_users_words", 0) + 1
         return None
     return method

@@ -420,6 +420,40 @@ def _denies(text: str) -> bool:
     return denies(text)
 
 
+def _corrects(text: str) -> bool:
+    from kazma_core.memory.event_text import corrects
+
+    return corrects(text)
+
+
+def _pasted(text: str) -> bool:
+    """Whether the message's last word stands in what is clearly pasted or
+    another person's."""
+    from kazma_core.memory.pasted_text import told_and_pasted
+
+    last = text.split()[-1]
+    return last in told_and_pasted(text)[1]
+
+
+def _to_come(case: tuple[str, str]) -> bool:
+    from kazma_core.memory.time_words import says_to_come
+
+    return says_to_come(case[0], case[1], "2026-05-31")
+
+
+def _events_lost(lang: int) -> int:
+    """Of the openings twinned in ``fixtures/memory_events/openings.json`` and
+    the events told after each, how many one language loses."""
+    import json
+
+    from kazma_core.memory.event_text import stands_elsewhere
+
+    cases = json.loads((ROOT / "tests/fixtures/memory_events/openings.json").read_text(encoding="utf-8"))
+    return sum(stands_elsewhere(told["value"][lang], opening[lang].format(told["said"][lang]), day=told["day"] or "",
+                                said_on="2026-05-31")
+               for opening in (*cases["openings"]["review"], *cases["openings"]["more"]) for told in cases["events"])
+
+
 def _says_the_30th(text: str) -> bool:
     from kazma_core.memory.time_words import says_day
 
@@ -535,6 +569,30 @@ PAIRS: list[Pair] = [
     Pair("an_event_of_a_paste_kept_out", (M + "memory/event_text.py",),
          ("Translate: I received a plant in the mail.", "a plant in the mail"),
          ("ترجم: وصلتني نبتة بالبريد.", "نبتة بالبريد"), _an_event_of_the_users, False),
+    Pair("an_event_after_any_opening", (M + "memory/event_text.py", M + "memory/pasted_text.py"), 0, 1, _events_lost, 0),
+    Pair("pasted_after_an_instruction", (M + "memory/pasted_text.py",),
+         "Translate this: I sold my car", "ترجم هذا: بعت سيارتي", _pasted, True),
+    Pair("pasted_in_a_mail", (M + "memory/pasted_text.py",),
+         "From: Omar\nSubject: news\n\nI sold my car", "من: عمر\nالموضوع: أخبار\n\nبعت سيارتي", _pasted, True),
+    Pair("pasted_said_by_a_sister", (M + "memory/pasted_text.py",),
+         "My sister said: I sold my car", "أختي قالت: بعت سيارتي", _pasted, True),
+    Pair("not_pasted_after_please", (M + "memory/pasted_text.py",),
+         "Please, I sold my car", "لو سمحت، بعت سيارتي", _pasted, False),
+    Pair("not_pasted_under_a_heading", (M + "memory/pasted_text.py",),
+         "The story: I sold my car", "القصة: بعت سيارتي", _pasted, False),
+    Pair("not_pasted_when_imagined", (M + "memory/pasted_text.py",),
+         "Imagine, I sold my car", "تخيل، بعت سيارتي", _pasted, False),
+    Pair("a_correction_corrects", (M + "memory/event_text.py",), "Sorry, I meant Omar", "آسف أقصد عمر", _corrects, True),
+    Pair("a_no_before_a_noun", (M + "memory/event_text.py",),
+         "I saw the dentist on 2 May, no cavities", "زرت دكتور الأسنان يوم ٢ مايو، لا تسوس", _denies, False),
+    Pair("a_denial_beside_also", (M + "memory/event_text.py",),
+         "Not Paris, and I also went to Lyon", "مو باريس، ورحت ليون كمان", _denies, False),
+    Pair("a_day_to_come", (M + "memory/time_words.py",),
+         ("I'm going to the concert tomorrow", "2026-06-01"), ("رايح الحفلة بكرة", "2026-06-01"), _to_come, True),
+    Pair("a_day_nearer_behind", (M + "memory/time_words.py",),
+         ("I finished it on 10 December", "2026-12-10"), ("خلصته يوم 10 ديسمبر", "2026-12-10"), _to_come, False),
+    Pair("a_weekday_gone_by", (M + "memory/time_words.py",),
+         ("I sold it last Friday", "2026-06-05"), ("بعته الجمعة اللي فاتت", "2026-06-05"), _to_come, False),
     Pair("a_correction_denies", (M + "memory/event_text.py",),
          "Sorry, not Ali, I meant Omar", "عفوا، مو علي، أقصد عمر", _denies, True),
     Pair("a_day_said_by_its_weekday", (M + "memory/time_words.py",),

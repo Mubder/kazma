@@ -474,9 +474,9 @@ def test_a_planned_day_that_came_is_the_day_it_happened(mem):
 
 
 def test_told_at_no_known_time_a_day_to_come_is_not_one_that_happened(mem):
-    mem.tell([event("scheduled_event", "the jazz concert", "2999-06-07")], "I'm going to the jazz concert.", now=None)
+    mem.tell([event("scheduled_event", "the jazz concert", "2199-06-07")], "I'm going to the jazz concert.", now=None)
     meta = mem.days()[0][1]
-    assert not meta.get("happened") and meta.get("planned") == "2999-06-07"
+    assert not meta.get("happened") and meta.get("planned") == "2199-06-07"
 
 
 # ── M6: an event is the user's to tell ───────────────────────────────────
@@ -488,12 +488,13 @@ def test_told_at_no_known_time_a_day_to_come_is_not_one_that_happened(mem):
     # In a question, and in other words for a few.
     ("Can you suggest a lock for the road bike I bought yesterday in Leiden?", "a road bike in Leiden", True),
     ("اشتريت دراجة هوائية أمس من ليدن، أي قفل تنصحني؟", "دراجة هوائية من ليدن", True),
-    # The assistant's, a pasted page's, someone else's.
-    ("What should I do this weekend?", "a pottery exhibition at the craft centre", False),
+    # A pasted page's, someone else's. Not "in neither" (the third review: only
+    # what is clearly another's is dropped; the prompt says the rest).
+    ("What should I do this weekend?", "a pottery exhibition at the craft centre", True),
     ("Translate to Dutch: I bought a road bike yesterday in Leiden.", "a road bike in Leiden", False),
     ("My sister said: I bought a road bike yesterday in Leiden.", "a road bike in Leiden", False),
     ("ترجم: اشتريت دراجة هوائية أمس من ليدن.", "دراجة هوائية من ليدن", False),
-    ("شنو أسوي هالويكند؟", "معرض فخار في مركز الحرف", False),
+    ("شنو أسوي هالويكند؟", "معرض فخار في مركز الحرف", True),
 ])
 def test_an_event_stands_in_the_users_own_words(mem, said, obj, kept):
     stats = {"skipped_filler": False, "source": "llm", "applied": 0, "rejected": 0, "actions": []}
@@ -508,10 +509,11 @@ def test_an_event_stands_in_the_users_own_words(mem, said, obj, kept):
     ("a gold watch", "I have a gold watch.", "Yeah, I think I got it last Monday.", "2026-05-25", True),
     ("ساعة ذهبية", "عندي ساعة ذهبية.", "اشتريتها قبل أسبوعين.", "2026-05-17", True),
     ("ساعة ذهبية", "عندي ساعة ذهبية.", "اي والله، كان السبت الماضي.", "2026-05-30", True),
-    # No day of the user's: the assistant's, a pasted text's, or another day.
-    ("a gold watch", "I have a gold watch.", "Yes, that one. Thank you!", "2018", False),
-    ("a gold watch", "I have a gold watch.", "Yeah, I think I got it last Monday.", "2018", False),
-    ("ساعة ذهبية", "عندي ساعة ذهبية.", "اي والله، كان السبت الماضي.", "2018", False),
+    # Told in neither: the user's, as Kazma's reading (the third review).
+    ("a gold watch", "I have a gold watch.", "Yes, that one. Thank you!", "2018", True),
+    ("a gold watch", "I have a gold watch.", "Yeah, I think I got it last Monday.", "2018", True),
+    ("ساعة ذهبية", "عندي ساعة ذهبية.", "اي والله، كان السبت الماضي.", "2018", True),
+    # Told in a pasted text alone.
     ("a gold watch", "I have a gold watch.", "Translate to Dutch: I got it in 2018.", "2018", False),
     ("ساعة ذهبية", "عندي ساعة ذهبية.", "ترجم: اشتريتها قبل أسبوعين.", "2026-05-17", False),
 ])
@@ -636,5 +638,6 @@ def test_control_a_forget_without_the_step_leaves_the_day(mem, monkeypatch):
 def test_control_every_event_kept_takes_the_assistants_for_the_users(mem, monkeypatch):
     """Negative control (M6)."""
     monkeypatch.setattr(belief_extractor, "_in_users_words", lambda value, user_text, *_a: True)
-    mem.tell([event("attended", "a pottery exhibition", "2026-05-30")], "What should I do this weekend?")
+    mem.tell([event("attended", "a pottery exhibition", "2026-05-30")],
+             "Translate to Dutch: I attended a pottery exhibition yesterday.")
     assert mem.facts() == [("attended", "a pottery exhibition")]

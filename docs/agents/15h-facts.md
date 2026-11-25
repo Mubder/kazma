@@ -136,24 +136,38 @@
 - **Whose words an event and its day are, what its name is, and one line
   for it** (the second review of W4, 2026-11-24).
   - *Its words* (`memory/event_text.stands_elsewhere`, asked for every event
-    of the user's, dated or not): somebody else's when they stand in what
-    `own_words` removed and not in what it kept; in neither, they are the
-    model's way of saying it, and the event is the user's when they tell
-    something of it -- one of its words, or its day, in what they state.
-    Words are compared with what Arabic writes onto them ("لدبي" holds
-    "دبي", "سيارتي" is "السيارة"): compared exactly, 30 of 30 English travel
-    sentences kept their event and 12 of 30 Arabic.
+    of the user's, dated or not; the rule of the third review, 2026-11-25): an
+    event is left out only when its words stand in text that is clearly pasted
+    or another person's and not in the rest (`memory/pasted_text.py`: a data
+    fence, a code fence, `>` lines, a forward or a mail with its header, a
+    chat, words after "X said:", a sentence quoted, an instruction's own text
+    up to a blank line). Everything else stays as Kazma's reading: reported,
+    supposed, long, behind one label, or in the model's words. **Never
+    `own_words`**: it is for trust, takes out what it is unsure of, and as the
+    gate dropped 12 of 135 ordinary English openings and 60 Arabic ones ("لو
+    سمحت، بعت سيارتي" read as "if", "القصة:" as who spoke: Arabic has no
+    capitals to tell a heading from a name). One labelled line is a speaker's
+    when the label is no heading's (a role, a number, a time) or the message
+    shows a conversation. Words are compared with what Arabic writes onto
+    them, on the message's side and the value's ("لدبي" holds "دبي",
+    "سيارتي" is "السيارة", "بـ٩٥" holds "٩٥").
   - *Its day* (`event_text.days_elsewhere`, `time_words.says_day`: the day
-    itself written out, by its weekday or counted to, in either language;
-    it replaced "names a day at all"): a day a paste names and the user's
-    own words do not is dropped. A day the user counted from the turn's own
+    itself written out, by its weekday or counted to, in either language; it
+    replaced "names a day at all"): a day a paste names and the rest of the
+    message does not is dropped. A day the user counted from the turn's own
     ("today", "yesterday": `day_sure`) stands against a later turn's unless
     that turn denies it; said without a denial, the other day is another
-    occasion.
+    occasion. `event_text.corrects` ("sorry, I meant", "آسف أقصد") with
+    `replaces` is enough to put an event right; `denies` ("no", "not", "لا",
+    "مو") needs the old value named, is no "no" before a noun and nothing
+    beside "also" or "again"; "I also bought a lamp" closes nothing.
   - *Its name* (`event_text.is_event_name`, a verb list): a functional or
     state label with a day holds unless the name is an event's verb ("I
-    weigh 78 kg today", "delivered yesterday"); such a name keeps no day to
-    come; "called"/"named" in a list is an event without a day too, unless
+    weigh 78 kg today", "delivered yesterday"); such a name keeps a day to
+    come only as a plan the user told ("I'm going to the concert tomorrow",
+    read as attended: `time_words.says_to_come`), and no day past 2199 is
+    read (`_since_value`: a model's "9999" lost its reply's every fact);
+    "called"/"named" in a list is an event without a day too, unless
     the message says what the user is called. A plan that came to pass is
     filed as what happened, under its own name (`_came_to_pass`).
   - *The held list shows an event's day* ("(on 2026-05-30)", message form
@@ -161,12 +175,16 @@
   - *One line for an event* (`recall._one_per_event`, `_by_event`,
     `fact_days.event_key`): its occasions are one candidate in every lane,
     the latest shown with "and N more", every one for a list or a period
-    question. Five visits hid "my dentist is Dr Sara" from every search and
+    question -- after everything found has been shown once (`recall._in_order`:
+    six visits to the dentist hid the eye doctor of a question naming both),
+    the ones the block has no room for counted; a list's siblings are those
+    holding a word of the question, then the newest, never in the order of
+    their ids. Five visits hid "my dentist is Dr Sara" from every search and
     were the background the question was measured against. The
     Postgres-primary path takes the same steps (`fetch_beliefs` reads the
     metadata).
   - *Forgetting a retelling opens the entry it closed* (`closed_by`,
-    `forget._reopen_replaced`), unless what took its place was replaced by a
+    `forget._reopen_replaced`; one the nightly archive moved out comes back), unless what took its place was replaced by a
     turn that stands. A write compares `_FOLDED_ENTRIES` of a name's newest
     entries folded, and all of them in their own spelling.
   - *Own words after a question to Kazma* ("What do you think about my rugs?
@@ -175,7 +193,11 @@
     about the text after it only when it names or points at one
     (`_asks_about_a_text_en`, `_asks_about_a_text_ar`).
   Gate: `tests/test_memory_event_lines_second_review.py` (78 of its cases
-  fail on 174057e52; EN/AR pairs, controls), the pairs in
+  fail on 174057e52; EN/AR pairs, controls),
+  `tests/test_memory_event_lines_third_review.py` (119 of its 233 fail on
+  0bbecc655; the twinned openings and pasted texts in
+  `tests/fixtures/memory_events/openings.json`: main keeps every opening's
+  event in each language and so must this), the pairs in
   `tests/test_paired_languages.py`.
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured

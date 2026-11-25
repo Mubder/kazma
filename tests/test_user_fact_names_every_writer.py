@@ -41,6 +41,8 @@ DECLARED = {
         "named them, filed by speakers.Room as live facts are; its ratchet is measured on them",
     ("kazma-core/kazma_core/memory/eval_golden.py", "_seed_belief"):
         "the golden eval's fixture: a case's fact as the case names it, on a private database",
+    ("kazma-core/kazma_core/memory/forget.py", "_from_archive"):
+        "puts an archived row back as it was filed, under the name its writer gave it",
 }
 
 

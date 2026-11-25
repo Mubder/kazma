@@ -986,7 +986,7 @@
    },
    {
     "date": "2026-11-24",
-    "reason": "message form 5 (the held list shows an event's day) and its prompt rule, and two event turns more (72): the whole set asked again, 5 askings each on deepseek-flash. Against 2026-11-24's earlier recording the English dated (0.8 to 0.7, one asking of ten) and quiet event turns (two askings) and the Arabic replaced and ended (one asking each) fell; found, right and named rose in English, and what the store holds after an event is whole in both languages",
+    "reason": "message form 5 (the held list shows an event's day) and its prompt rule, and two event turns more (72): the whole set asked again, 5 askings each on deepseek-flash. Against 2026-11-24's earlier recording the English dated (0.8 to 0.7, one asking of ten) and quiet event turns (two askings), the English event turns' right (0.928 to 0.894: all of it and of quiet is one turn, v08, pasted text to fix, now kept in 5 of 5 askings), the mixed right (1.0 to 0.962) and the Arabic replaced and ended (one asking each) fell; found and named rose in English, and what the store holds after an event is whole in both languages, safe 1.0 on the paste shapes the set asks (a bare mail with no header is none of them; the next recording adds two, and a prompt line on pasted text)",
     "replaced": {
      "recording": {
       "sha256": "ee8fc32951640735f2c78ef30cded299ab4e33b607fa1bd591734ef5bc040acd",

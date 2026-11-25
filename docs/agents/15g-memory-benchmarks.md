@@ -36,7 +36,7 @@
   new. The page prints the last look apart. Gate:
   `tests/test_memory_benchmark_sealed.py` (a planted set; a test that scores
   the sealed file as the negative control). An extraction benchmark
-  (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 70 turns
+  (`benchmark_data/extraction.json`, `run_extraction_benchmark`: 72 turns
   EN/AR/mixed; the heuristic pass in CI, the model's deep pass from
   recorded replies, `tests/fixtures/memory_bench/extraction_llm.json`,
   recorded with `scripts/memory_extraction_record.py --out <fixture>
@@ -54,14 +54,14 @@
   recording's `extraction_version`. A relabel is a file holding every
   locked reply (`reply_hashes`), re-keyed or extended. **The recording**
   (2026-11-24, the dated event lines' prompt; the one before, 2026-11-20,
-  is in git): deepseek-flash, all 70 turns of v4, 5 askings each, 350
-  calls; the file says what the provider counted (`usage`: 634,210 prompt
-  tokens, 572,368 of them cache hits, 76,193 completion tokens, 58,036 of
+  is in git): deepseek-flash, all 72 turns of v4, 5 askings each, 360
+  calls; the file says what the provider counted (`usage`: 673,745 prompt
+  tokens, 597,504 of them cache hits, 81,537 completion tokens, 62,583 of
   them reasoning) and names the message each turn was asked (`asked`, which
   a drift check replays by after a later message form, `_reply_key`). A
   recording of an earlier version that today's only added turns to goes on
   with those (`record_llm_extraction`). **Dataset v4 asks what an event
-  leaves stored** (2026-11-24, `memory_bench.EXTRACTION_EVENT_TURNS`, fifteen
+  leaves stored** (2026-11-24, `memory_bench.EXTRACTION_EVENT_TURNS`, sixteen
   shapes EN/AR, `new_in: 4`): a turn with `stored` is an event turn
   (`benchmark_events.is_event_turn`), scored apart from the others (the
   quick pass reads no events, and the v3 scores stay comparable) by its reply

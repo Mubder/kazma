@@ -96,8 +96,8 @@ def _called_by_kazmas_name(monkeypatch):
     """An event went by Kazma's name for its verb: "called" is name_is."""
     real = belief_extractor._read_days
 
-    def read(clean, said_at):
-        real(clean, said_at)
+    def read(clean, said_at, *rest):
+        real(clean, said_at, *rest)
         clean.pop("event", None)
 
     monkeypatch.setattr(belief_extractor, "_read_days", read)

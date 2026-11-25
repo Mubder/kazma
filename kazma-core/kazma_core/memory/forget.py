@@ -890,8 +890,9 @@ def _reopen_replaced(conn: sqlite3.Connection, *, tenant_id: str | None, keys: l
     closed by telling them again in other words (``closed_by``, the second
     review of W4): open again, unless what took their place was itself
     replaced by a turn that stands (they are that one's then), or their value
-    is held again. *until* as :func:`_forget_turn_facts` takes it. Returns the
-    ids it opened."""
+    is held again. One the nightly archive has moved out since
+    (``beliefs_archive``, after 180 days) comes back. *until* as
+    :func:`_forget_turn_facts` takes it. Returns the ids it opened."""
     from kazma_core.memory.belief_mutation import _same_value
     from kazma_core.memory.fact_days import metadata_of
 
@@ -902,6 +903,9 @@ def _reopen_replaced(conn: sqlite3.Connection, *, tenant_id: str | None, keys: l
     closed = {str(r[0]): (r[1], r[2], r[3], r[4], metadata_of(r[5])) for r in conn.execute(
         "SELECT id, tenant_id, subject, predicate, object, metadata_json FROM beliefs "
         "WHERE instr(COALESCE(metadata_json, ''), '\"closed_by\"') > 0" + scope, params).fetchall()}
+    archived = _archived_closed(conn, scope, params)
+    closed = {**{bid: (o.get("tenant_id"), o.get("subject"), o.get("predicate"), o.get("object"),
+                       metadata_of(o.get("metadata_json"))) for bid, o in archived.items()}, **closed}
     opened: list[str] = []
     for bid, (owner, subject, predicate, value, meta) in closed.items():
         by, seen = meta.get("closed_by"), {bid}
@@ -913,18 +917,63 @@ def _reopen_replaced(conn: sqlite3.Connection, *, tenant_id: str | None, keys: l
             continue
         kept = {k: v for k, v in meta.items() if k != "closed_by"}
         if isinstance(by, dict):
+            kept = {**kept, "closed_by": by}
+            if bid in archived:
+                _rewrite_archived(conn, bid, archived[bid], kept)
+                continue
             conn.execute("UPDATE beliefs SET metadata_json = ? WHERE id = ? AND tenant_id = ?",
-                         (json.dumps({**kept, "closed_by": by}, ensure_ascii=False), bid, owner))
+                         (json.dumps(kept, ensure_ascii=False), bid, owner))
             continue
         again = any(_same_value(r[0], value) for r in conn.execute(
             "SELECT object FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? AND valid_until IS NULL "
             "AND invalidated_at IS NULL", (owner, subject, predicate)).fetchall())
+        if bid in archived:
+            if again:
+                _rewrite_archived(conn, bid, archived[bid], kept)
+            else:
+                _from_archive(conn, bid, archived[bid], kept)
+                opened.append(bid)
+            continue
         conn.execute("UPDATE beliefs SET metadata_json = ?, valid_until = CASE WHEN ? THEN valid_until END, "
                      "invalidated_at = CASE WHEN ? THEN invalidated_at END WHERE id = ? AND tenant_id = ?",
                      (json.dumps(kept, ensure_ascii=False), again, again, bid, owner))
         if not again:
             opened.append(bid)
     return opened
+
+
+def _archived_closed(conn: sqlite3.Connection, scope: str, params: list[Any]) -> dict[str, dict[str, Any]]:
+    """The archived list entries a retelling closed, by id."""
+    if not _table_columns(conn, "beliefs_archive") >= {"tenant_id", "original_belief_json"}:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for bid, owner, blob in conn.execute(
+            "SELECT id, tenant_id, original_belief_json FROM beliefs_archive "
+            "WHERE instr(COALESCE(original_belief_json, ''), 'closed_by') > 0" + scope, params).fetchall():
+        try:
+            original = json.loads(blob)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(original, dict):
+            out[str(bid)] = {**original, "tenant_id": owner}
+    return out
+
+
+def _rewrite_archived(conn: sqlite3.Connection, bid: str, original: dict[str, Any], meta: dict[str, Any]) -> None:
+    blob = json.dumps({**original, "metadata_json": json.dumps(meta, ensure_ascii=False)}, ensure_ascii=False)
+    conn.execute("UPDATE beliefs_archive SET original_belief_json = ? WHERE id = ? AND tenant_id = ?",
+                 (blob, bid, original["tenant_id"]))
+
+
+def _from_archive(conn: sqlite3.Connection, bid: str, original: dict[str, Any], meta: dict[str, Any]) -> None:
+    """The archived list entry *bid* current again in ``beliefs``; its vector
+    is made anew (the archive keeps none)."""
+    row = {**original, "id": bid, "predicate_type": "set", "valid_until": None, "invalidated_at": None,
+           "metadata_json": json.dumps(meta, ensure_ascii=False)}
+    columns = [c for c in row if c in _table_columns(conn, "beliefs")]
+    conn.execute(f"INSERT OR IGNORE INTO beliefs({', '.join(columns)}) "  # nosec B608 - column names of the table itself
+                 f"VALUES ({', '.join('?' * len(columns))})", [row[c] for c in columns])
+    conn.execute("DELETE FROM beliefs_archive WHERE id = ? AND tenant_id = ?", (bid, original["tenant_id"]))
 
 
 def _forget_given_days(conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[str],

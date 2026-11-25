@@ -44,10 +44,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import MAXYEAR, MINYEAR, date, datetime, timedelta
 from typing import Any
 
-__all__ = ["TIME_AFTER_EN", "TimeAsk", "present_ar_words", "read_time", "says_day", "says_today_or_yesterday"]
+__all__ = ["TIME_AFTER_EN", "TimeAsk", "is_weekday", "present_ar_words", "read_time", "says_day", "says_to_come",
+           "says_today_or_yesterday"]
 
 DAY = 86400.0
 
@@ -356,14 +357,22 @@ def read_time(question: str, *, now: float, zone: Any, past: bool | None = None)
 _WEEKDAYS_EN = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
                 "mon": 0, "tue": 1, "tues": 1, "wed": 2, "thu": 3, "thur": 3, "thurs": 3, "fri": 4}
 _WEEKDAYS_AR_RAW = {"الاثنين": 0, "الإثنين": 0, "الثلاثاء": 1, "الثلاثا": 1, "الأربعاء": 2, "الاربعا": 2,
-                    "الخميس": 3, "الجمعة": 4, "السبت": 5, "الأحد": 6}
+                    "الخميس": 3, "الجمعة": 4, "السبت": 5, "الأحد": 6, "الربوع": 2, "الاربع": 2, "الثلوث": 1}
+#: A weekday without its article is one only beside a word that says so:
+#: "خميس" is also a name, "احد" is "someone".
+_BARE_WEEKDAY_AR = re.compile(
+    r"(?:(?<!\w)(?:يوم|ليله)\s+)(اثنين|ثلاثاء?|اربعاء?|ربوع|خميس|جمعه|سبت|احد)(?!\w)"
+    r"|(?<!\w)(اثنين|ثلاثاء?|اربعاء?|ربوع|خميس|جمعه|سبت|احد)"
+    r"(?=\s+(?:الماضي|الماضيه|اللي|الفايت|الفايته|الفائت|السابق|القادم|القادمه|الجاي|الجايه|هذا|هذي)(?!\w))")
 #: Days counted from the turn's own, as written; folded before they are read.
 _SAID_DAYS_EN = {"today": 0, "tonight": 0, "this morning": 0, "this afternoon": 0, "this evening": 0,
                  "yesterday": -1, "last night": -1, "the day before yesterday": -2, "day before yesterday": -2,
                  "tomorrow": 1}
 _SAID_DAYS_AR_RAW = {"اليوم": 0, "الليلة": 0, "هاليوم": 0, "أمس": -1, "امبارح": -1, "مبارح": -1, "البارحة": -1,
                      "البارح": -1, "أول أمس": -2, "أمس الأول": -2, "أول امبارح": -2, "قبل أمس": -2, "بكرة": 1,
-                     "باجر": 1, "غدا": 1}
+                     "باجر": 1, "باكر": 1, "غدا": 1, "أول البارحة": -2, "أول البارح": -2, "قبل البارحة": -2,
+                     "قبل البارح": -2, "هالصبح": 0, "الصبح": 0, "هالليلة": 0, "أمس الصبح": -1, "البارحة الصبح": -1,
+                     "بكرة الصبح": 1}
 _WEEKEND_EN = frozenset({"weekend"})
 _WEEKEND_AR_RAW = ("الويكند", "هالويكند", "ويكند", "نهاية الأسبوع", "عطلة الأسبوع")
 #: A period before the turn's: the days back it covers, (nearest, farthest);
@@ -382,8 +391,13 @@ _AGO_NUMBERS_EN = {**_EN_NUMBERS, "couple of": 2, "seven": 7, "eight": 8, "nine"
 _AGO_SAID_EN = re.compile(
     r"\b(\d{1,3}|a couple of|couple of|a few|an|a|one|two|three|four|five|six|seven|eight|nine|ten|few) "
     r"(days?|weeks?|months?|years?) (?:ago|back)\b")
+#: Folded, the masculine and the feminine; "a few" as English counts it.
+_AGO_NUMBERS_AR = {"ثلاثه": 3, "ثلاث": 3, "اربعه": 4, "اربع": 4, "خمسه": 5, "خمس": 5, "سته": 6, "ست": 6, "سبعه": 7,
+                   "سبع": 7, "ثمانيه": 8, "ثماني": 8, "ثمان": 8, "تسعه": 9, "تسع": 9, "عشره": 10, "عشر": 10, "كم": 3,
+                   "بضعه": 3, "عده": 3, "كذا": 3}
 _AGO_SAID_AR = re.compile(
-    r"(?:^|\s)(?:و|ف)?(?:قبل|من|صار لي|صارلي)\s+(?:حوالي\s+)?(?:(\d{1,3})\s+)?(يومين|اسبوعين|شهرين|سنتين|يوم|ايام|"
+    r"(?:^|\s)(?:و|ف)?(?:قبل|من|صار لي|صارلي)\s+(?:حوالي\s+)?"
+    r"(?:(\d{1,3}|" + "|".join(_AGO_NUMBERS_AR) + r")\s+)?(يومين|اسبوعين|شهرين|سنتين|يوم|ايام|"
     r"اسبوع|اسابيع|شهر|شهور|اشهر|سنه|سنين|سنوات)(?=\s|$|[؟?.,،!])")
 #: A day of a month, a month, a year; a day of the month alone ("the 23rd").
 _NUM_MONTH_EN = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?(?: of)? ({_MONTH_WORDS})\b(?:,? ((?:19|20)\d\d))?")
@@ -392,6 +406,8 @@ _NUMERIC_DAY = re.compile(r"\b((?:19|20)\d\d)-(\d{1,2})(?:-(\d{1,2}))?\b|\b(\d{1
 _YEAR_SAID = re.compile(r"\b((?:19|20)\d\d)\b")
 _DOM_EN = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)\b")
 _DOM_AR = re.compile(r"يوم (\d{1,2})(?!\d)")
+#: A month by its number: "شهر ٥".
+_MONTH_NUMBER_AR = re.compile(r"(?<!\w)(?:[بفو])?شهر (\d{1,2})(?!\d)(?:\s+((?:19|20)\d\d))?")
 _PLAIN_MONTH_EN = re.compile(rf"\b(?:in|during|on|since|of|from|by|early|mid|late|last|this) ({_MONTH_WORDS})\b"
                              rf"(?: ((?:19|20)\d\d))?")
 
@@ -446,7 +462,15 @@ def _weekdays_said(text: str) -> set[int]:
             if word[:1] not in ("و", "ف", "ب", "ل"):
                 break
             word = word[1:]
+    for m in _BARE_WEEKDAY_AR.finditer(text):
+        bare = m[1] or m[2]
+        out.update(n for name, n in arabic.items() if name == "ال" + bare)
     return out
+
+
+def is_weekday(word: str) -> bool:
+    """Whether *word* (folded) is an Arabic weekday, with its article."""
+    return word in _said_words().weekdays
 
 
 def _days_counted(text: str) -> set[int]:
@@ -504,6 +528,9 @@ def _dates_said(text: str) -> list[tuple[int | None, int | None, int | None]]:
     for m in words.month.finditer(text):  # type: ignore[union-attr]
         name, year = m[1] or m[3], m[2] or m[4]
         out.append((int(year) if year else None, words.months[name], None))
+    for m in _MONTH_NUMBER_AR.finditer(text):
+        if 1 <= int(m[1]) <= 12:
+            out.append((int(m[2]) if m[2] else None, int(m[1]), None))
     for m in _YEAR_SAID.finditer(text):
         out.append((int(m[1]), None, None))
     for pattern in (_DOM_EN, _DOM_AR):
@@ -529,6 +556,8 @@ def says_day(text: str, day: str, said_on: str | None) -> bool:
         return False
     want = tuple(int(p) for p in str(day).split("-"))
     year, month, dom = (*want, 0, 0)[:3]
+    if not MINYEAR < year < MAXYEAR:
+        return False  # the calendar ends there ("9999": the review of 0bbecc655)
     for y, m, d in _dates_said(folded):
         if y is not None and y != year:
             continue
@@ -571,6 +600,47 @@ def says_day(text: str, day: str, said_on: str | None) -> bool:
     return False
 
 
+#: A named day, no weekday: "Black Friday" told in May is last November's.
+_NAMED_FRIDAYS = re.compile(r"\b(?:black|good|white) friday\b|\bcyber monday\b"
+                            r"|الجمعه (?:البيضاء|البيضا|السوداء|السودا|العظيمه)")
+#: Words that say it is past ("last Friday", "الجمعة اللي فاتت").
+_PAST_MARK = re.compile(r"\b(?:last|past|ago|yesterday|earlier|previous|recently|already)\b"
+                        r"|(?<!\w)(?:امس|البارح|البارحه|امبارح|الماضي|الماضيه|فات|فاتت|طاف|طافت|اللي راح|"
+                        r"اللي راحت|السابق|السابقه)(?!\w)")
+#: "I attended", "we just got": what is told is done, whatever day it names.
+_TOLD_DONE = re.compile(r"\b(?:i|we)(?:'ve| have| had| just| also| actually| finally| only){0,3} "
+                        r"(?:\w{2,12}ed|got|bought|went|had|made|met|ran|saw|sold|took|won|found|ate|came|did)\b")
+#: Words that say it is to come: "I will", "I'm visiting", "راح أبيع", "بزور".
+_TO_COME = re.compile(
+    r"\b(?:will|shall|gonna|upcoming|next|coming|planning|plan to|about to|scheduled|booked)\b|\b(?:i|we|it|he|she|they)'ll\b"
+    r"|\b(?:i'm|i am|we're|we are) (?:going|\w{2,12}ing)\b"
+    r"|(?<!اللي )(?<!\w)راح (?=[انتي]\w)|(?<!\w)(?:سوف|رح|بنروح|بروح|بزور|بنزور|بسافر|بنسافر|بشتري|باشتري|ببيع|بابيع|"
+    r"بحضر|باحضر|بشوف|بقابل|باخذ|رايح|رايحه|رايحين|ناوي|ناويه|ناوين|القادم|القادمه|المقبل|المقبله|الجاي|الجايه)(?!\w)")
+_SENTENCE = re.compile(r"[^.!?؟:;؛\n]+")
+
+
+def says_to_come(text: str, day: str, said_on: str | None) -> bool:
+    """Whether *text*, told on *said_on*, says *day* as one to come: counts
+    ahead to it ("tomorrow", "بكرة"), or says it in a sentence that speaks of
+    what is to come ("I'm visiting Dubai on 3 June", "راح أبيع سيارتي الجمعة
+    الجاية") and of nothing done. A date ahead told as done is none: "I
+    finished it on 20 March", told on 15 March, is a year left out or a slip
+    (29 of the pilots' 40 were)."""
+    said = _as_date(said_on)
+    first = _as_date((str(day) + "-01-01")[:10] if len(str(day)) < 10 else day)
+    if said is None or first is None or str(day) <= str(said_on)[: len(str(day))]:
+        return False
+    ahead = (first - said).days
+    for sentence in _SENTENCE.findall(_NAMED_FRIDAYS.sub(" ", _folded(text))):
+        if not says_day(sentence, day, said_on):
+            continue
+        if len(str(day)) == 10 and ahead in _days_counted(sentence):
+            return True
+        if _TO_COME.search(sentence) and not _PAST_MARK.search(sentence) and not _TOLD_DONE.search(sentence):
+            return True
+    return False
+
+
 def _days_back(back: tuple[int, int] | str, said: date) -> tuple[int, int]:
     """The days back from *said* a period of :data:`_LAST_EN` covers."""
     if not isinstance(back, str):
@@ -594,5 +664,6 @@ def _counts_back(folded: str) -> list[tuple[float, float]]:
             count, unit = _AR_DUALS[m[2]]
             out.append((float(count), unit))
         else:
-            out.append((float(m[1]) if m[1] else 1.0, _AR_UNITS[m[2]]))
+            said = m[1] or "1"
+            out.append((float(said) if said.isdigit() else float(_AGO_NUMBERS_AR[said]), _AR_UNITS[m[2]]))
     return out

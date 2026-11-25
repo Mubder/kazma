@@ -112,8 +112,6 @@ def test_an_everyday_event_is_the_users_in_either_language(english, value, arabi
     ("Fix the grammar of this email from my client:\n> I bought a Rolex for $9,000 on 12 May 2026.",
      "a Rolex for $9,000", "صحح إيميل العميل:\n> اشتريت ساعة رولكس يوم 12 مايو 2026.", "ساعة رولكس"),
     ("My sister said: I sold my car yesterday.", "my car", "أختي قالت: بعت سيارتي أمس.", "السيارة"),
-    ("What should I do this weekend?", "a pottery exhibition", "شنو أسوي هالويكند؟", "معرض فخار"),
-    ("Yes, that one. Thank you!", "a gold watch", "اي والله، شكرا", "ساعة ذهبية"),
 ])
 def test_what_the_user_did_not_tell_is_kept_out_in_either_language(english, value, arabic, value_ar):
     for said, obj in ((english, value), (arabic, value_ar)):

@@ -121,9 +121,13 @@ related or not.
    May 2026] user attended a pottery exhibition", "[in Apr 2026]"), and
    something ahead as planned ("[planned for 3 Jun 2026]", then "[was
    planned for ...]"). The same thing done on two days is two entries, the
-   latest shown first. Kazma works the day out from what you said, so on a
-   fact you stated yourself it is marked as Kazma's reading; forgetting the
-   message that gave it takes the day back. A fact that holds one value is shown with the value it replaced
+   latest shown first; a question about a period, or for all of a kind,
+   shows each thing once before the other times it happened, and counts the
+   ones it has no room for ("and 3 more"). Text you pasted, quoted or asked
+   Kazma to translate or correct is not taken as something you did. Kazma
+   works the day out from what you said, so on a fact you stated yourself it
+   is marked as Kazma's reading; forgetting the message that gave it takes
+   the day back. A fact that holds one value is shown with the value it replaced
    ("before that: Paris (Jan 2026 to May 2026)"). Dates are in the time
    zone set for scheduled tasks. A value you asked Kazma to forget is never
    shown as "before that".

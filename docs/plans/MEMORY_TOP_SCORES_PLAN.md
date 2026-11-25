@@ -864,6 +864,60 @@ English (one asking of ten), replaced 1.00 -> 0.90 and ended 1.00 -> 0.80 in
 Arabic (one asking each), mixed right 1.000 -> 0.962, each inside the spread
 of five askings.
 
+**The third review, fixed** (25 Nov, of 0bbecc655;
+`tests/test_memory_event_lines_third_review.py`: 119 of its 233 cases failed on
+that commit, English and Arabic; no model call, the prompt and the recording
+unchanged). What holds now:
+
+* *An event is left out only when its words stand in text that is clearly
+  pasted or another person's* (`memory/pasted_text.py`), dated or not.
+  `own_words`, which is for trust, was the gate and lost ordinary statements:
+  of the review's 45 openings with three events each, 123 English and 75
+  Arabic events of 135 were kept; now 135 and 135, as on main, and 177 and 177
+  of 59 openings more in Gulf Arabic and MSA. Of 34 pasted shapes with the
+  same events (a mail, a chat, a quote, a text to translate), none is kept in
+  either language (12 Arabic were). What is in neither text stays, as Kazma's
+  reading: an event told only by the assistant's reply is now the prompt's to
+  keep out, as on main.
+* *A period or a list shows everything once first* (`recall._in_order`): six
+  visits to the dentist hid the eye doctor of a question naming both. The
+  occasions with no room are counted ("and 2 more"). Finding 21 with it.
+* *A value's own clitics* ("بـ٩٥"), *a correction that names no old value*
+  ("sorry, I meant Omar", "آسف أقصد عمر"), *a plan told as done* ("I'm going
+  to the concert tomorrow", read as attended: planned), *a model's "9999"*
+  (it lost its reply's every fact).
+* *Smaller:* what Arabic says a day by ("قبل ثلاث أيام", "الربوع", "خميس
+  الماضي", "أول البارح", "شهر ٥", "الصبح"); a "no" before a noun and a denial
+  beside "also" move no day; "I also bought a lamp" closes nothing; forgetting
+  a retelling brings back the entry it closed from the archive; "missed",
+  "acquired", "rented" and other names the pilots gave are events.
+
+The same cached replies again, against the second review's stores:
+
+| | Qwen replies, dev 200 | DeepSeek replies, pilot 50 |
+|---|---|---|
+| dated events current | 3,060 -> 3,084 | 795 -> 797 |
+| planned | 229 -> 231 | 27 -> 28 |
+| dated events left out | 34 -> 1 of 3,880 | 2 -> 0 of 953 |
+| undated ones left out | 18 -> 1 of 3,893 | 7 -> 0 of 888 |
+| blocks that change (without event facts) | 42 (38) of 200 | 10 (7) of 50 |
+| block tokens p50 / p95 | 1,421 / 1,496 -> 1,426 / 1,496 | 1,459 / 1,498 -> the same |
+| the answer's words in the block | 57 of 129 -> the same, none lost | 12 of 37 -> the same, none lost |
+
+The two events left out are quotations. The first form of the rule left out 9
+and 1, and reading them showed 7 and 1 of the user's own (a list's fields read
+as a chat's speakers, "write my story: ..."); the first form of the plan rule
+made 29 and 11 new plans, nearly all past events whose year was left out
+("which I finished on March 20th", told on the 15th), so it asks the sentence
+to speak of what is to come. The blocks change by the order of a list's
+siblings; the changed ones were not asked again (no model call). Left: two
+undated events with a wrong `replaces` and no "also" (17 such closings of
+different words in the replays, read one by one: 15 or more were the same
+thing told more exactly, so a stricter rule would leave those twice); a bare
+mail with no header; one word shared between what the user asks and what is
+pasted; two unmarked-paste turns and a prompt line for the next recording.
+Evidence: `docs/audits/evidence/memory_event_lines/third_review.json`.
+
 ### W6. Ingestion the product's way (M)
 
 The benchmark's memories written as Kazma writes them: the deep pass on
@@ -1451,5 +1505,7 @@ alone as the negative controls.
     Found reading the changed blocks (24 Nov): `_with_list_siblings` takes the
     newest `limit` of a name and hydrates them in id order, so when the block cuts
     them the ones shown are random ("how many fish ...?" shows other
-    `interested_in` facts after a rewrite of the same store). Not built: it is
-    not the event lines'.
+    `interested_in` facts after a rewrite of the same store). **Fixed 25 Nov**
+    with the third review's M2: a sibling that holds a word of the question
+    first, then the newest (an event by its day), in both languages
+    (`recall._list_siblings`).
