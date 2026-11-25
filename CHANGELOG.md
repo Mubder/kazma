@@ -32,7 +32,11 @@
 - Exporting or deleting a space while a file of it is being moved says so and
   asks to try again, instead of leaving the file out.
 - Deleting a space ends when a file in it is read-only (Windows). It stopped
-  there, with the space closed.
+  there, with the space closed. A space whose folder is a link to another
+  place is refused: its files would stay there.
+- A backup of a database whose disk is away says it failed, instead of making
+  an empty database where its link leads (`scripts/backup_kazma.py` too, which
+  then exits with 1). A migration bundle without it is refused by its check.
 
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 

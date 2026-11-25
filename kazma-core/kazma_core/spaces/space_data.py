@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.spaces.scope import OWNER_SPACE_ID, valid_space_id
+from kazma_core.workspace.real_paths import is_linked
 
 __all__ = [
     "SpaceDataRefused",
@@ -79,6 +80,11 @@ _CHUNK = 400
 #: Said when a file move of the space could not be waited for: its export
 #: would miss the file, its erase could be put back.
 _FILES_MOVING = "A file of the space is being moved. Try again in a minute."
+
+
+#: Said when the erase could not remove a file: the space stays closed, and the
+#: erase is run again.
+_FILES_REMAIN = "A file of the space could not be deleted. Nobody can open the space; erase it again to finish."
 
 
 class SpaceDataRefused(ValueError):
@@ -504,7 +510,9 @@ def _erase_workspaces(space: str) -> int:
 # ── files ───────────────────────────────────────────────────────────────
 
 
-def _folders(space: str) -> list[Path]:
+def _folder_places(space: str) -> list[Path]:
+    """Where the space's own files and its document files are kept, there or
+    not."""
     from kazma_core.spaces import files as space_files
 
     out = [space_files.space_dir(space)]
@@ -517,7 +525,11 @@ def _folders(space: str) -> list[Path]:
             out.append(Path(get_document_storage_root()) / relative)
     except (ImportError, OSError, ValueError):
         logger.warning("[spaces] the document store's folder of a space could not be found", exc_info=True)
-    return [p for p in out if p.exists()]
+    return out
+
+
+def _folders(space: str) -> list[Path]:
+    return [p for p in _folder_places(space) if p.exists()]
 
 
 def _file_count(folders: list[Path]) -> int:
@@ -759,9 +771,14 @@ def _erase_secrets(space: str) -> int:
 def _remove_folder(folder: Path) -> None:
     """*folder* goes, with everything in it. Windows deletes no read-only file
     (git's own objects are): the mark is taken off and the delete asked again.
-    It stopped the erase there, with the space closed, at every try."""
+    It stopped the erase there, with the space closed, at every try. Only a
+    refused delete is asked again: anything else ``rmtree`` refuses (a link,
+    which it answers with a check, never a delete) is raised."""
 
-    def _writable_and_again(func: Any, target: str, _exc: Any) -> None:
+    def _writable_and_again(func: Any, target: str, exc: Any) -> None:
+        error = exc if isinstance(exc, BaseException) else exc[1]  # onexc, or 3.11's onerror
+        if func not in (os.unlink, os.rmdir) or not isinstance(error, PermissionError) or is_linked(target):
+            raise error
         os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
         func(target)
 
@@ -791,6 +808,13 @@ def erase_space(space: str, *, by: str) -> dict[str, Any]:
     from kazma_core.spaces import file_moves, people
     from kazma_core.spaces.files import moving_dir
 
+    moving = moving_dir(space)
+    places = [*_folder_places(space), *([] if is_linked(moving.parent) else [moving])]  # a link there is no one's
+    if any(is_linked(place) for place in places):
+        # What a link leads to is never deleted by its name, so its words
+        # would stay: refused before anything is changed.
+        raise SpaceDataRefused("folder_elsewhere", 409, "The space's folder is a link to another place; its files "
+                                                        "would stay there. Nothing was erased.")
     # A file whose move out of it was cut off goes where it belongs first.
     if not file_moves.settled_before_erase(space):
         raise SpaceDataRefused("files_moving", 503, _FILES_MOVING)
@@ -814,10 +838,16 @@ def erase_space(space: str, *, by: str) -> dict[str, Any]:
         "libraries": len(ctx.ids["libraries"]),
         "files": 0,
     }
-    for folder in (*_folders(space), moving_dir(space)):
+    for folder in places:
         if folder.exists():
             erased["files"] += _file_count([folder])
-            _remove_folder(folder)
+            try:
+                _remove_folder(folder)
+            except OSError as exc:
+                logger.warning("[spaces] a folder of space %s could not be removed", space, exc_info=True)
+                raise SpaceDataRefused("files_remain", 503, _FILES_REMAIN) from exc
+    if any(os.path.lexists(place) for place in places):
+        raise SpaceDataRefused("files_remain", 503, _FILES_REMAIN)
     people.forget_space(space, by=by)
     logger.warning("[spaces] space erased space=%s by=%s rows=%d files=%d", space, by,
                    erased["rows"], erased["files"])

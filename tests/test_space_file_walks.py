@@ -308,7 +308,14 @@ def backups(monkeypatch, tmp_path):
 
     monkeypatch.setattr(neo, "export_graph", lambda dest: type("R", (), {"as_dict": lambda self: {}})())
     sent: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(ops_alerts, "alert", lambda key, title, detail="", **_k: sent.append((key, title, detail)))
+    quiet: list[bool] = []
+
+    def alert(key, title, detail="", **_k):
+        if not quiet:
+            sent.append((key, title, detail))
+        return not quiet
+
+    monkeypatch.setattr(ops_alerts, "alert", alert)
     clock = [1_800_000_000]
 
     def run():
@@ -320,7 +327,7 @@ def backups(monkeypatch, tmp_path):
         manifest = json.loads((Path(summary["backup_dir"]) / "manifest.json").read_text(encoding="utf-8"))
         return manifest, summary, list(sent)
 
-    run.data = data
+    run.data, run.quiet = data, quiet
     return run
 
 
@@ -329,7 +336,7 @@ def test_every_link_a_backup_leaves_out_is_named(backups, caplog) -> None:
         manifest, summary, sent = backups()
     row = manifest["links_left_out"]
     assert sorted(row["items"]) == sorted([*OUT_LINKS, "workspace/again"]) and row["count"] == 4
-    assert sorted(row["leading_out"]) == OUT_LINKS, "a link to what the backup holds is no gap"
+    assert sorted(row["leading_out"]) == OUT_LINKS and row["paged"] == row["leading_out"], "a link to what the backup holds is no gap"
     assert "links_left_out" not in json.dumps(manifest["assets"])
     said = [r.getMessage() for r in caplog.records if "left out" in r.getMessage()]
     assert len(said) == 1 and all(link in said[0] for link in row["items"]), said
@@ -347,6 +354,91 @@ def test_a_link_is_paged_once_and_named_every_time(backups, caplog, tmp_path) ->
     _junction(backups.data / "workspace" / "later", tmp_path / "other-disk")
     _manifest, _summary, sent = backups()
     assert len(sent) == 1 and "workspace/later" in sent[0][1] and "attachments" not in sent[0][1]
+
+
+def test_a_link_whose_page_was_not_sent_is_paged_at_the_next_backup(backups) -> None:
+    """Inside the alert's quiet period the page is not sent."""
+    backups.quiet.append(True)
+    manifest, _summary, sent = backups()
+    assert sent == [] and manifest["links_left_out"]["paged"] == {}
+    backups.quiet.clear()
+    _manifest, _summary, sent = backups()
+    assert len(sent) == 1 and "3 link(s)" in sent[0][1], "a link inside the quiet period is never paged"
+
+
+def test_a_link_that_leads_elsewhere_now_is_paged_again(backups, tmp_path) -> None:
+    backups()
+    link, there = backups.data / "workspace" / "proj", tmp_path / "other-disk" / "moved"
+    there.mkdir()
+    _unlink_link(link)
+    _junction(link, there)
+    manifest, _summary, sent = backups()
+    assert len(sent) == 1 and "1 link(s)" in sent[0][1] and "workspace/proj" in sent[0][1]
+    assert manifest["links_left_out"]["paged"]["workspace/proj"].endswith("moved")
+    assert backups()[2] == []
+
+
+def test_more_links_than_a_manifest_names_are_each_paged_once(backups, monkeypatch) -> None:
+    from kazma_core.backup import data_files
+
+    monkeypatch.setattr(data_files, "NAMED", 1)
+    manifest, _summary, sent = backups()
+    assert len(manifest["links_left_out"]["items"]) == 1 and manifest["links_left_out"]["count"] == 4
+    assert len(sent) == 1 and backups()[2] == []
+
+
+def _unlink_link(link: Path) -> None:
+    if sys.platform == "win32":
+        os.rmdir(link)
+    else:
+        link.unlink()
+
+
+def test_the_script_makes_no_database_where_a_dangling_link_leads(tmp_path) -> None:
+    data = _other_disk(tmp_path)
+    (tmp_path / "other-disk" / "memory_state.db").unlink()
+    done = _script(data, tmp_path / "to")
+    assert done.returncode == 1 and "memory_state.db" in done.stderr and "incomplete" in done.stderr, done.stderr
+    assert not (tmp_path / "other-disk" / "memory_state.db").exists(), "an empty database was made where the link leads"
+    with zipfile.ZipFile(next((tmp_path / "to").glob("*.zip"))) as zipped:
+        names = zipped.namelist()
+        manifest = json.loads(zipped.read("MANIFEST.json"))
+    assert "kazma-data/memory_state.db" not in names and "kazma-data/settings.db" in names
+    assert manifest["databases_missing"] == ["memory_state.db"] and "memory_state.db" in manifest["links_left_out"]
+
+
+def test_no_copy_of_a_database_is_made_from_a_dangling_link(tmp_path) -> None:
+    """Every copier is the one helper (``tests/test_sqlite_snapshot.py``)."""
+    from kazma_core.db.sqlite_snapshot import snapshot_copy
+
+    _file_link(tmp_path / "a.db", tmp_path / "away" / "a.db")
+    (tmp_path / "away").mkdir()
+    with pytest.raises(FileNotFoundError):
+        snapshot_copy(tmp_path / "a.db", tmp_path / "copy.db")
+    assert not (tmp_path / "away" / "a.db").exists() and not (tmp_path / "copy.db").exists()
+
+
+def test_a_bundle_names_a_database_whose_disk_is_away(tmp_path, caplog) -> None:
+    """The whole export: its check refuses the bundle, and says which."""
+    from kazma_core import paths
+
+    data = paths.data_dir()
+    held = [data / "swarm_tasks.db", data / "knowledge.db"]
+    for place in held:
+        if place.exists():
+            pytest.skip("this test's data folder holds the store")
+        _file_link(place, tmp_path / "away" / place.name)
+    try:
+        with caplog.at_level("WARNING", logger="kazma_core.migration.exporter"):
+            made = exporter.export_bundle(tmp_path / "x.zip")
+        bundle = KazmaBundle(made)
+        assert {"swarm_tasks.db", "knowledge.db"} <= set(bundle.manifest.links_left_out)
+        report = bundle.verify(check_hashes=False)
+        assert not report.ok and any("swarm_tasks.db" in error for error in report.errors), report.errors
+        assert any("swarm_tasks.db" in r.getMessage() for r in caplog.records)
+    finally:
+        for place in held:
+            place.unlink(missing_ok=True)
 
 
 def test_a_failed_file_and_a_link_are_one_alert(backups, monkeypatch) -> None:
@@ -407,7 +499,7 @@ REVIEWED: dict[str, frozenset[str]] = {
         "kazma-core/kazma_core/backup/restore.py::_flatten_into_data_dir",
         "kazma-core/kazma_core/backup/restore.py::_next_steps",
         "kazma-core/kazma_core/backup/restore.py::restore_files",
-        "kazma-core/kazma_core/backup/universal.py::_links_named_before",
+        "kazma-core/kazma_core/backup/universal.py::_links_paged_before",
         "kazma-core/kazma_core/backup/universal.py::_offsite_files",
         "kazma-core/kazma_core/backup/universal.py::_offsite_rclone_excludes",
         "kazma-core/kazma_core/backup/universal.py::archive_universal_backup",

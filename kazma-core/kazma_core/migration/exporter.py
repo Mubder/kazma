@@ -237,12 +237,17 @@ def export_bundle(
     manifest.source_data_dir = str(data_dir)
 
     # 3. SQLite data files — WAL-safe online copy.
+    #    One that is a link leading nowhere (its disk is away) is not in the
+    #    bundle, and the bundle is not whole.
+    away: list[str] = []
     for resolver_name, arc_name in _DATA_DBS:
         try:
             src = Path(getattr(paths, resolver_name)())
         except Exception:
             continue
         if not src.exists():
+            if src.is_symlink():
+                away.append(src.name)
             continue
         _log(f"Copying {src.name}…")
         if _safe_copy(src, staging / "data" / arc_name):
@@ -257,6 +262,8 @@ def export_bundle(
     )
     for name in (*_DATA_DIR_DBS, *family_files):
         src = data_dir / name
+        if src.is_symlink() and not src.exists():
+            away.append(name)
         if src.exists():
             _log(f"Copying {name}…")
             if _safe_copy(src, staging / "data" / name):
@@ -276,7 +283,7 @@ def export_bundle(
     #    folders, and everything else stayed behind.
     _export_data_dir_files(
         data_dir, staging / "assets", manifest, _log,
-        lean=not include_assets, skip=out_path.resolve(),
+        lean=not include_assets, skip=out_path.resolve(), away=sorted(set(away)),
     )
 
     # 6b. Document store — documents.db (consistent snapshot) + the immutable
@@ -378,6 +385,7 @@ def _export_data_dir_files(
     *,
     lean: bool,
     skip: Path,
+    away: list[str] | None = None,
 ) -> None:
     """Copy every data-dir entry a bundle carries into *dest* (``assets/``).
 
@@ -389,14 +397,16 @@ def _export_data_dir_files(
     never followed (one in the workspace can point anywhere on the machine)
     and each one is named (``links_left_out``), special files are not
     data, and *skip* -- the bundle being written, should the operator put it
-    inside the data dir -- is never copied into itself.
+    inside the data dir -- is never copied into itself. *away* are the
+    databases the bundle should hold whose link leads nowhere.
     """
     from kazma_core.backup.data_files import NAMED, named
     from kazma_core.store_registry import carried_in_bundle
     from kazma_core.workspace.real_paths import inside, is_linked
 
     failures: list[str] = []
-    links: list[str] = []
+    links: list[str] = list(away or ())
+    failures += [f"{name} (a link that leads nowhere: is its disk away?)" for name in away or ()]
     root = data_dir.resolve()
     for item in sorted(root.iterdir()):
         if not carried_in_bundle(item.name, lean=lean):

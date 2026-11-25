@@ -95,11 +95,20 @@ def main() -> int:
     zip_path = dest_dir / f"kazma-backup-{stamp}.zip"
 
     # Checkpoint WAL files so SQLite copies are consistent-ish
-    for db in data_dir.glob("*.db"):
+    away: list[str] = []
+    for db in sorted(data_dir.glob("*.db")):
+        if db.is_symlink() and not db.exists():
+            # Its disk is away. Opened, SQLite would make a new, empty
+            # database where the link leads, and the archive would hold that.
+            away.append(db.name)
+            print(f"ERROR: {db.name} is a link that leads nowhere (is its disk away?): "
+                  "this database is not in the archive", file=sys.stderr)
+            continue
         try:
             import sqlite3
 
-            conn = sqlite3.connect(str(db))
+            # Never made: the database is there, or the open fails.
+            conn = sqlite3.connect(db.resolve().as_uri() + "?mode=rw", uri=True)
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             conn.close()
         except Exception as exc:
@@ -128,6 +137,7 @@ def main() -> int:
             arc = Path("kazma-data") / path.relative_to(data_dir)
             zf.write(path, arcname=str(arc).replace("\\", "/"))
             manifest["files"].append(str(arc).replace("\\", "/"))
+        manifest["databases_missing"] = away
         manifest["links_left_out"] = [link.relative_to(data_dir).as_posix() for link in left_out]
         for link in manifest["links_left_out"]:
             print(f"WARN: a link is left out, and what it leads to is not in the archive: {link}", file=sys.stderr)
@@ -143,6 +153,9 @@ def main() -> int:
     size_mb = zip_path.stat().st_size / (1024 * 1024)
     print(f"OK backup written: {zip_path} ({size_mb:.2f} MiB, {len(manifest['files'])} files)")
     print("Remember: store KAZMA_SECRET + KAZMA_VAULT_KEY separately.")
+    if away:
+        print(f"ERROR: the backup is incomplete: {', '.join(away)} could not be read", file=sys.stderr)
+        return 1
     return 0
 
 

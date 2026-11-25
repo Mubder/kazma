@@ -53,10 +53,20 @@
     backup, and the drill judged by the same list). **A link below is left out
     and named**: the manifest's `links_left_out`, one WARNING, and for one
     that leads to files the copy does not hold the `backup.files_failed`
-    alert, once per link. Gate: `tests/test_space_file_walks.py` reads the whole product:
+    alert, once per link and where it leads (remembered when the page was
+    really sent, `links_left_out.paged`). A database whose link leads nowhere
+    is refused by the one copier (`db/sqlite_snapshot`: SQLite made an empty
+    one there), fails the script, and makes a bundle not whole. Gate: `tests/test_space_file_walks.py` reads the whole product:
     in a module that names a space's folder or the data folder, every other
     walk is in `REVIEWED` with its reason (planted walks and the old walk as
     controls).
+  - **An erase never answers done over files that stay (2026-11-25).** A
+    space whose folder is a link is refused before anything changes
+    (`folder_elsewhere`); every folder is looked for after its removal, and
+    `forget_space` is not reached while one is there (`files_remain`). The
+    handler for Windows' read-only files asks only a refused `unlink` or
+    `rmdir` again and raises everything else: it took `rmtree`'s refusal of a
+    link for its own, and the words stayed where the link led.
   - Gates: `tests/test_space_export_erase.py` (a word planted in every table
     of A and of B; A's export holds A's only; erasing A leaves no column or
     file holding A's word, B whole; yesterday's erase that misses a store, a
