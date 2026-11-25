@@ -144,13 +144,14 @@ def test_provider_settings_in_a_browser(kazma) -> None:
             row = prices.locator(".model-price-row").last
             assert row.locator("input[type=text]").input_value() == "mystery-model"
             row.locator("input[type=number]").nth(0).fill("0.27")
-            row.locator("input[type=number]").nth(1).fill("1.1")
+            row.locator("input.model-price-cached").fill("0.027")
+            row.locator("input[type=number]").nth(2).fill("1.1")
             pg.locator("#model-prices-save").click()
             pg.wait_for_function(
                 "fetch('/api/settings/model-prices').then(r => r.json()).then(d => d.prices.length === 1)",
                 timeout=15000)
             saved = httpx.get(f"{base}/api/settings/model-prices", timeout=10).json()["prices"]
-            assert saved == [{"model": "mystery-model", "input": 0.27, "output": 1.1}]
+            assert saved == [{"model": "mystery-model", "input": 0.27, "output": 1.1, "cached_input": 0.027}]
 
             # The dialog: Save opens only when the test answered.
             pg.locator("#hub-subtab-providers").click()

@@ -889,7 +889,7 @@
                 this.modelPricesFailed = true;
                 return;
             }
-            this.modelPrices = (data.prices || []).map((p) => ({ model: p.model, input: p.input, output: p.output }));
+            this.modelPrices = (data.prices || []).map((p) => ({ model: p.model, input: p.input, output: p.output, cached: p.cached_input }));
             this.modelPricesUnpriced = Array.isArray(data.unpriced) ? data.unpriced : null;
             this.modelPricesMax = Number(data.max) || 1000;
             this.modelPricesLoaded = true;
@@ -898,7 +898,7 @@
         addModelPrice(model) {
             const name = String(model || '').trim().toLowerCase();
             if (name && this.modelPrices.some((p) => String(p.model || '').trim().toLowerCase() === name)) return;
-            this.modelPrices.push({ model: name, input: '', output: '' });
+            this.modelPrices.push({ model: name, input: '', output: '', cached: '' });
         },
 
         removeModelPrice(index) {
@@ -916,6 +916,7 @@
                     return;
                 }
                 value[name] = { input: Number(p.input), output: Number(p.output) };
+                if (!blank(p.cached)) value[name].cached_input = Number(p.cached);
             }
             this.modelPricesSaving = true;
             try {

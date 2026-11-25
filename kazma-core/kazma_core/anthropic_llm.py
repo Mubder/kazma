@@ -515,6 +515,7 @@ class AnthropicProvider(LLMProvider):
         usage_in = 0
         usage_out = 0
         cache_read = 0
+        cache_written = 0
         # Duplicated-prefix invariant (§29F): once any user-visible delta has
         # been emitted, a recovery attempt of the same call must not emit
         # content again — the authoritative text arrives via the final
@@ -561,6 +562,8 @@ class AnthropicProvider(LLMProvider):
                         msg_usage = (data.get("message") or {}).get("usage") or {}
                         if msg_usage.get("input_tokens") is not None:
                             usage_in = int(msg_usage.get("input_tokens") or 0)
+                        cache_read = int(msg_usage.get("cache_read_input_tokens") or cache_read)
+                        cache_written = int(msg_usage.get("cache_creation_input_tokens") or cache_written)
                     elif etype == "content_block_start":
                         block = data.get("content_block") or {}
                         if block.get("type") == "tool_use":
@@ -608,6 +611,8 @@ class AnthropicProvider(LLMProvider):
                             usage_out = int(usage.get("output_tokens") or usage_out)
                         if usage.get("cache_read_input_tokens") is not None:
                             cache_read = int(usage.get("cache_read_input_tokens") or 0)
+                        if usage.get("cache_creation_input_tokens") is not None:
+                            cache_written = int(usage.get("cache_creation_input_tokens") or 0)
         except LLMError:
             raise
         except (
@@ -643,6 +648,7 @@ class AnthropicProvider(LLMProvider):
             "input_tokens": usage_in,
             "output_tokens": usage_out,
             "cache_read_input_tokens": cache_read,
+            "cache_creation_input_tokens": cache_written,
         }
         cost, cost_known = self._anthropic_cost(payload["model"], usage_blob)
         assembled = LLMResponse(
@@ -650,12 +656,7 @@ class AnthropicProvider(LLMProvider):
             tool_calls=tool_calls,
             finish_reason=finish,
             model=payload["model"],
-            usage={
-                "input_tokens": usage_in,
-                "output_tokens": usage_out,
-                "total_tokens": usage_in + usage_out,
-                "cache_read_input_tokens": usage_blob["cache_read_input_tokens"],
-            },
+            usage={**usage_blob, "total_tokens": usage_in + usage_out},
             cost_usd=cost,
             cost_known=cost_known,
             duration_ms=(time.monotonic() - start) * 1000,
@@ -686,6 +687,7 @@ class AnthropicProvider(LLMProvider):
         usage_in = usage_raw.get("input_tokens", 0)
         usage_out = usage_raw.get("output_tokens", 0)
         cache_read = int(usage_raw.get("cache_read_input_tokens") or 0)
+        cache_written = int(usage_raw.get("cache_creation_input_tokens") or 0)
         # Map Anthropic stop_reason → OpenAI finish_reason.
         finish = {
             "end_turn": "stop",
@@ -694,23 +696,20 @@ class AnthropicProvider(LLMProvider):
             "stop_sequence": "stop",
         }.get(stop_reason, stop_reason or "stop")
 
-        cost, cost_known = self._anthropic_cost(model, {
+        usage_blob = {
             "input_tokens": usage_in,
             "output_tokens": usage_out,
             "cache_read_input_tokens": cache_read,
-        })
+            "cache_creation_input_tokens": cache_written,
+        }
+        cost, cost_known = self._anthropic_cost(model, usage_blob)
 
         return LLMResponse(
             content="".join(text_parts),
             tool_calls=tool_calls,
             finish_reason=finish,
             model=model,
-            usage={
-                "input_tokens": usage_in,
-                "output_tokens": usage_out,
-                "total_tokens": usage_in + usage_out,
-                "cache_read_input_tokens": cache_read,
-            },
+            usage={**usage_blob, "total_tokens": usage_in + usage_out},
             cost_usd=cost,
             cost_known=cost_known,
             duration_ms=(time.monotonic() - start) * 1000,
@@ -728,7 +727,9 @@ class AnthropicProvider(LLMProvider):
             if found is None:
                 return 0.0, False
             inp, outp = found
-        return cost_from_usage(usage, input_cost_per_1m=inp, output_cost_per_1m=outp), True
+        return cost_from_usage(
+            usage, input_cost_per_1m=inp, output_cost_per_1m=outp,
+            cached_input_cost_per_1m=self.config.cached_input_cost_per_1m), True
 
     async def close(self) -> None:
         if self._http is not None:

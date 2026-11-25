@@ -4853,7 +4853,7 @@ details.kazma-working > summary {
 .mc-price-head,
 .mc-price-row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) 36px;
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)) 36px;
   gap: 8px;
   align-items: center;
 }
@@ -4906,7 +4906,7 @@ details.kazma-working > summary {
   }
   .mc-edit { grid-template-columns: 1fr 1fr; }
   .mc-price-head { display: none; }
-  .mc-price-row { grid-template-columns: 1fr 1fr 36px; }
+  .mc-price-row { grid-template-columns: 1fr 1fr 1fr 36px; }
   .mc-price-row > input[type="text"] { grid-column: 1 / -1; }
 }
 

@@ -528,6 +528,7 @@
                             <div class="mc-price-head" x-show="modelPrices.length" x-cloak>
                                 <span>{{ t('settings.model_prices_model') }}</span>
                                 <span>{{ t('settings.model_prices_input') }}</span>
+                                <span>{{ t('settings.model_prices_cached') }}</span>
                                 <span>{{ t('settings.model_prices_output') }}</span>
                                 <span></span>
                             </div>
@@ -537,6 +538,8 @@
                                            aria-label="{{ t('settings.model_prices_model') }}">
                                     <input class="form-input" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.input"
                                            aria-label="{{ t('settings.model_prices_input') }}">
+                                    <input class="form-input model-price-cached" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.cached"
+                                           aria-label="{{ t('settings.model_prices_cached') }}" placeholder="{{ t('settings.model_prices_cached_ph') }}">
                                     <input class="form-input" type="number" min="0" :max="modelPricesMax" step="0.0001" dir="ltr" x-model="p.output"
                                            aria-label="{{ t('settings.model_prices_output') }}">
                                     <button type="button" class="btn btn-ghost btn-sm" @click="removeModelPrice(i)"

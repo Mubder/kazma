@@ -32,6 +32,7 @@ from kazma_core.llm_provider import (
     LLMResponse,
     ToolCall,
     own_key_answer,
+    cost_from_usage,
     own_key_delta,
 )
 from kazma_core.llm_stream import StreamDelta
@@ -45,6 +46,13 @@ logger = logging.getLogger(__name__)
 _SERVICE = "bedrock-runtime"
 
 # Approx cost per 1M tokens (USD) for common Bedrock models. Input/Output.
+#: Converse's cache counts, by the Anthropic-shaped name Kazma's usage holds.
+#: Beside ``inputTokens``, never inside it.
+_CACHE_COUNTS = (
+    ("cache_read_input_tokens", "cacheReadInputTokens"),
+    ("cache_creation_input_tokens", "cacheWriteInputTokens"),
+)
+
 _MODEL_COSTS: dict[str, tuple[float, float]] = {
     "claude-3-5-sonnet": (3.0, 15.0),
     "claude-3-7-sonnet": (3.0, 15.0),
@@ -307,6 +315,10 @@ class BedrockProvider(LLMProvider):
         usage = resp.get("usage") or {}
         usage_in = usage.get("inputTokens", 0)
         usage_out = usage.get("outputTokens", 0)
+        usage_blob = {"input_tokens": usage_in, "output_tokens": usage_out}
+        for ours, theirs in _CACHE_COUNTS:
+            if usage.get(theirs):
+                usage_blob[ours] = int(usage[theirs])
         # The configured price (the owner's), else this module's table
         # (kazma_core.model_prices.table_price), else unknown: an unlisted
         # model was priced as Sonnet ($3 / $15).
@@ -316,18 +328,16 @@ class BedrockProvider(LLMProvider):
         if in_cost is None or out_cost is None:
             in_cost, out_cost = table_price(_MODEL_COSTS, model_id) or (None, None)
         cost_known = in_cost is not None and out_cost is not None
-        cost = ((usage_in / 1_000_000) * in_cost + (usage_out / 1_000_000) * out_cost) if cost_known else 0.0
+        cost = cost_from_usage(
+            usage_blob, input_cost_per_1m=in_cost, output_cost_per_1m=out_cost,
+            cached_input_cost_per_1m=self.config.cached_input_cost_per_1m) if cost_known else 0.0
 
         return LLMResponse(
             content="".join(text_parts),
             tool_calls=tool_calls,
             finish_reason=finish,
             model=model_id,
-            usage={
-                "input_tokens": usage_in,
-                "output_tokens": usage_out,
-                "total_tokens": usage_in + usage_out,
-            },
+            usage={**usage_blob, "total_tokens": usage_in + usage_out},
             cost_usd=cost,
             cost_known=cost_known,
             duration_ms=(time.monotonic() - start) * 1000,
@@ -390,6 +400,7 @@ class BedrockProvider(LLMProvider):
             tool_calls: list[ToolCall] = []
             usage_in = 0
             usage_out = 0
+            usage_cache: dict[str, int] = {}
             stop_reason = ""
             current_tool: dict[str, Any] | None = None
             try:
@@ -434,6 +445,7 @@ class BedrockProvider(LLMProvider):
                     if usage:
                         usage_in = int(usage.get("inputTokens") or usage_in or 0)
                         usage_out = int(usage.get("outputTokens") or usage_out or 0)
+                        usage_cache.update({t: int(usage[t]) for _o, t in _CACHE_COUNTS if usage.get(t)})
             except Exception as exc:  # noqa: BLE001
                 loop.call_soon_threadsafe(queue.put_nowait, exc)
                 loop.call_soon_threadsafe(queue.put_nowait, None)
@@ -457,7 +469,7 @@ class BedrockProvider(LLMProvider):
                     }
                 },
                 "stopReason": stop_reason,
-                "usage": {"inputTokens": usage_in, "outputTokens": usage_out},
+                "usage": {"inputTokens": usage_in, "outputTokens": usage_out, **usage_cache},
             }
             parsed_resp = self._parse(fake, model_id, start)
             loop.call_soon_threadsafe(

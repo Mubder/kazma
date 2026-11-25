@@ -28,6 +28,7 @@ from typing import Any
 import httpx
 
 from kazma_core.llm_stream import StreamDelta
+from kazma_core.token_usage import cache_write_tokens, token_counts
 from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
 
 __all__ = [
@@ -245,40 +246,34 @@ def cost_from_usage(
     *,
     input_cost_per_1m: float,
     output_cost_per_1m: float,
+    cached_input_cost_per_1m: float | None = None,
     cache_read_multiplier: float = 0.1,
     cache_write_multiplier: float = 1.25,
 ) -> float:
-    """USD from token usage. Cached prompt tokens bill at ``cache_read_multiplier``,
-    prompt tokens written to the cache (``cache_creation_input_tokens`` among
-    the prompt's details: Model Studio's explicit cache) at
-    ``cache_write_multiplier``.
+    """USD from token usage, whatever the provider's shape (the one reading,
+    :func:`kazma_core.token_usage.token_counts`).
 
-    Anthropic cache reads are ~0.1× input; OpenAI cached_tokens are similar.
-    Unknown usage keys are treated as zero. Both counts are clamped to prompt.
+    Prompt tokens served from the cache bill at *cached_input_cost_per_1m*
+    (the owner's cached price, or the model's known one), else at
+    ``cache_read_multiplier`` of the input price; prompt tokens written to the
+    cache at ``cache_write_multiplier``. DeepSeek's ``prompt_cache_hit_tokens``
+    were billed at the full input price, and Anthropic's cached tokens, which
+    its ``input_tokens`` leaves out, were taken out of the uncached ones: a
+    long cached prompt cost almost nothing on the page (2026-11-25).
     """
-    usage = usage or {}
-    prompt = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-    completion = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
-    details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
-    cached = 0
-    if isinstance(details, dict):
-        cached = int(details.get("cached_tokens") or details.get("cache_read_input_tokens") or 0)
-    if not cached:
-        cached = int(
-            usage.get("cache_read_input_tokens")
-            or usage.get("cached_tokens")
-            or 0
-        )
-    cached = max(0, min(cached, prompt) if prompt else cached)
-    written = int(details.get("cache_creation_input_tokens") or 0) if isinstance(details, dict) else 0
-    written = max(0, min(written, prompt - cached))
-    billable = max(prompt - cached - written, 0)
-    return (
-        (billable * input_cost_per_1m / 1_000_000)
-        + (written * input_cost_per_1m * cache_write_multiplier / 1_000_000)
-        + (cached * input_cost_per_1m * cache_read_multiplier / 1_000_000)
-        + (completion * output_cost_per_1m / 1_000_000)
+    counts = token_counts(usage)
+    cached_price = (
+        input_cost_per_1m * cache_read_multiplier
+        if cached_input_cost_per_1m is None else cached_input_cost_per_1m
     )
+    written = min(cache_write_tokens(usage), counts.prompt - counts.cached)
+    billable = counts.prompt - counts.cached - written
+    return (
+        (billable * input_cost_per_1m)
+        + (written * input_cost_per_1m * cache_write_multiplier)
+        + (counts.cached * cached_price)
+        + (counts.completion * output_cost_per_1m)
+    ) / 1_000_000
 
 
 #: Waits after a 429 before the request is given up: each waits the
@@ -342,6 +337,9 @@ class LLMConfig:
     # It was gpt-4o-mini's $0.15 / $0.60, applied to every model.
     input_cost_per_1m: float | None = None
     output_cost_per_1m: float | None = None
+    # The price of input served from the provider's cache; None: a tenth of
+    # the input price (``cost_from_usage``).
+    cached_input_cost_per_1m: float | None = None
     # LiteLLM router support
     router: str | None = None
     fallback_model: str | None = None
@@ -395,6 +393,7 @@ class LLMConfig:
             timeout=d.get("timeout", cls.timeout),
             input_cost_per_1m=d.get("input_cost_per_1m", cls.input_cost_per_1m),
             output_cost_per_1m=d.get("output_cost_per_1m", cls.output_cost_per_1m),
+            cached_input_cost_per_1m=d.get("cached_input_cost_per_1m", cls.cached_input_cost_per_1m),
             router=d.get("router", cls.router),
             fallback_model=d.get("fallback_model", cls.fallback_model),
             api_version=str(d.get("api_version", cls.api_version) or ""),
@@ -2355,18 +2354,12 @@ class LLMProvider:
             )
 
         usage = data.get("usage", {}) or {}
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        cached = 0
-        details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
-        if isinstance(details, dict):
-            cached = int(details.get("cached_tokens") or details.get("cache_read_input_tokens") or 0)
-        if not cached:
-            cached = int(usage.get("cache_read_input_tokens") or 0)
-        if cached:
+        counts = token_counts(usage)
+        if counts.cached:
             logger.info(
                 "[LLMProvider] prompt cache hit cached_tokens=%s / prompt=%s",
-                cached,
-                prompt_tokens,
+                counts.cached,
+                counts.prompt,
             )
 
         cost, cost_known = self._call_cost(usage)
@@ -2439,7 +2432,9 @@ class LLMProvider:
         inp, outp = self.config.input_cost_per_1m, self.config.output_cost_per_1m
         if inp is None or outp is None:
             return 0.0, False
-        return cost_from_usage(usage, input_cost_per_1m=inp, output_cost_per_1m=outp), True
+        return cost_from_usage(
+            usage, input_cost_per_1m=inp, output_cost_per_1m=outp,
+            cached_input_cost_per_1m=self.config.cached_input_cost_per_1m), True
 
     async def _retry_direct_after_gateway_fail(
         self, payload: dict[str, Any], exc: BaseException

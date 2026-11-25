@@ -846,6 +846,7 @@ class ModelRegistry:
         if price is not None:
             fields["input_cost_per_1m"] = price.input_per_1m
             fields["output_cost_per_1m"] = price.output_per_1m
+            fields["cached_input_cost_per_1m"] = price.cached_input_per_1m
         return LLMConfig.from_dict(fields)
 
     def _active_model_if_owned_by(self, provider_name: str) -> str:

@@ -496,7 +496,8 @@ class SettingsRouterBuilder:
             return {
                 "key": OWNER_PRICES_KEY,
                 "prices": [
-                    {"model": name, "input": p.input_per_1m, "output": p.output_per_1m}
+                    {"model": name, "input": p.input_per_1m, "output": p.output_per_1m,
+                     "cached_input": p.cached_input_per_1m}
                     for name, p in sorted(prices.items())
                 ],
                 "unpriced": None if unpriced is None else _still_to_price(unpriced, prices),

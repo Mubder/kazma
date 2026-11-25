@@ -125,4 +125,6 @@ def test_cost_from_usage_discounts_cached_tokens() -> None:
         input_cost_per_1m=3.0,
         output_cost_per_1m=15.0,
     )
-    assert anth == pytest.approx(0.0003)
+    # Anthropic's input_tokens leaves the cached ones out: both are billed
+    # (the cached ones replaced the uncached until 2026-11-25).
+    assert anth == pytest.approx(0.003 + 0.0003)

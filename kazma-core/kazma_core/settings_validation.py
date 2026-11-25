@@ -184,11 +184,13 @@ def _model_prices(value: Any) -> dict[str, dict[str, float]]:
         key = str(name or "").strip().lower()
         if not key or len(key) > 200 or key not in parsed:
             raise SettingRejected(
-                f"Each model needs a name and two prices from 0 to {int(MAX_PRICE_PER_1M)} US dollars "
-                f"per million tokens ({str(name)[:80]!r} has not)."
+                f"Each model needs a name and two prices (and, if you like, a cached-input price) from 0 to "
+                f"{int(MAX_PRICE_PER_1M)} US dollars per million tokens ({str(name)[:80]!r} has not)."
             )
         price = parsed[key]
         out[key] = {"input": price.input_per_1m, "output": price.output_per_1m}
+        if price.cached_input_per_1m is not None:
+            out[key]["cached_input"] = price.cached_input_per_1m
     return out
 
 
