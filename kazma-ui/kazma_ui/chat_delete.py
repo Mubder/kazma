@@ -11,7 +11,9 @@ row: the thread's checkpoints, its Time Travel steps and, last, its space
 record. What Kazma learned is memory and is kept (AGENTS.md section 15I).
 Safe to run twice. A thread another chat of the space is on (a chat app's
 archived twin, :meth:`SessionManager.another_chat_on`) stays that chat's: only
-the row deleted goes.
+the row deleted goes -- and, when the chat that showed is deleted and only
+archived ones are left, the thread's state with it (what Kazma answers from is
+the conversation the person deleted), never ending the thread.
 """
 
 from __future__ import annotations
@@ -43,11 +45,29 @@ def _remove_row(session_id: str, thread_id: str, unchanged: Callable[[Any], bool
     return chats.delete_if(session_id, unchanged)
 
 
-def _is_another_chats(thread_id: str, session_id: str) -> bool:
-    """Whether the thread is another chat's too. Blocking."""
+def _shows(session_id: str) -> bool:
+    """Whether the chat is there and not archived. Raises when the store
+    cannot be read. Blocking."""
     from kazma_ui.session_manager import get_session_manager
 
-    return get_session_manager().another_chat_on(thread_id, session_id)
+    chats = get_session_manager()
+    row = chats.get(session_id) or chats.held(session_id)
+    return row is not None and not row.archived
+
+
+def _is_another_chats(thread_id: str, session_id: str, *, showing: bool = False) -> bool:
+    """Whether the thread is another chat's too (with *showing*: one that is
+    not archived). Blocking."""
+    from kazma_ui.session_manager import get_session_manager
+
+    return get_session_manager().another_chat_on(thread_id, session_id, showing=showing)
+
+
+def _bump_generation(thread_id: str) -> None:
+    """No turn prepared from the thread's state starts."""
+    from kazma_ui.thread_locks import bump_rewind_generation
+
+    bump_rewind_generation(thread_id)
 
 
 def end_chat(session_id: str, thread_id: str, *, reason: str = "deleted") -> None:
@@ -56,10 +76,9 @@ def end_chat(session_id: str, thread_id: str, *, reason: str = "deleted") -> Non
     from kazma_core.spaces.scope import require_space_id
 
     from kazma_ui.live_connections import chat_gone
-    from kazma_ui.thread_locks import bump_rewind_generation
 
     if thread_id:
-        bump_rewind_generation(thread_id)
+        _bump_generation(thread_id)
     chat_gone(session_id=session_id, thread_id=thread_id, space=require_space_id(), reason=reason)
 
 
@@ -78,11 +97,17 @@ async def delete_chat(
     from kazma_core.spaces.scope import bind_scope
 
     with bind_scope(*scope) if scope else contextlib.nullcontext():
+        shown = scope is None and await asyncio.to_thread(_shows, session_id)
         if not await asyncio.to_thread(_remove_row, session_id, thread_id, unchanged):
             return None
         if scope is None and await asyncio.to_thread(_is_another_chats, thread_id, session_id):
             # A person's delete of one of two chats on one thread.
             end_chat(session_id, "", reason=reason)
+            if shown and not await asyncio.to_thread(_is_another_chats, thread_id, session_id, showing=True):
+                # The archived one's rows stay; what the thread holds was the
+                # conversation deleted. Its next turn starts from nothing.
+                _bump_generation(thread_id)
+                return await remove_chat_remains(session_id, thread_id, checkpoints, thread_ends=False)
             return await remove_chat_remains(session_id if session_id != thread_id else "", "", checkpoints)
         end_chat(session_id, thread_id, reason=reason)
         # The record goes last, so a thread recorded elsewhere, or nowhere,
@@ -102,12 +127,13 @@ def _forget_thread_record(thread_id: str) -> None:
         logger.warning("[chat] the space record of thread %s was not removed", thread_id, exc_info=True)
 
 
-async def remove_chat_remains(session_id: str, thread_id: str, checkpoints: Any) -> bool:
+async def remove_chat_remains(session_id: str, thread_id: str, checkpoints: Any, *,
+                              thread_ends: bool = True) -> bool:
     """Remove what the deleted chat *session_id* (thread *thread_id*) leaves:
     its checkpoints (in *checkpoints*, the checkpoint manager), its saved
     steps under each of its keys, and its thread's record. True when nothing
     is left; a part that could not be removed is a WARNING, and the record
-    stays with it."""
+    stays with it -- as it does where the thread goes on (*thread_ends* False)."""
     leftovers = False
     if thread_id:
         try:
@@ -136,7 +162,7 @@ async def remove_chat_remains(session_id: str, thread_id: str, checkpoints: Any)
     except (SnapshotStoreError, sqlite3.Error, OSError):
         leftovers = True
         logger.warning("[chat] %s deleted, but its saved steps were NOT", session_id, exc_info=True)
-    if thread_id and not leftovers:
+    if thread_id and thread_ends and not leftovers:
         # The thread's space record goes last, and only when nothing of the
         # chat is left: while a copy remains, the record is what keeps it in
         # its space.

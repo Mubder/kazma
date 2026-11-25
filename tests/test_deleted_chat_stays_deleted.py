@@ -579,6 +579,26 @@ def test_deleting_the_last_chat_of_a_thread_ends_it(store, web) -> None:
     assert threads.thread_ended(thread) and web.saved.deleted == [thread]
 
 
+def test_deleting_the_chat_that_shows_takes_the_state_an_archived_twin_was_on(store, web) -> None:
+    """Only the archived twin is left: Kazma still answered from the deleted
+    conversation, and its saved steps stayed. The twin's rows and the thread
+    stay."""
+    named, twin, thread = _twins(store)
+    threads.record_thread(thread, "owner", "owner")
+    assert web.client.delete(f"/api/chat/sessions/{named}").json() == {"status": "ok"}
+    assert web.saved.deleted == [thread]
+    assert store.held(named) is None and store.held(twin).messages
+    assert not threads.thread_ended(thread) and threads.record_of(thread) is not None
+    assert '"code": "chat_deleted"' not in _send(web.client, twin)
+
+
+def test_two_chats_that_show_keep_the_state_when_one_is_deleted(store, web) -> None:
+    named, twin, thread = _twins(store)
+    store.set_archived(twin, False)
+    web.client.delete(f"/api/chat/sessions/{named}")
+    assert web.saved.deleted == [] and store.held(twin) is not None
+
+
 @pytest.mark.postgres
 def test_a_twin_is_found_on_real_postgres(store) -> None:
     from tests import _tt_graph as tt
@@ -589,6 +609,7 @@ def test_a_twin_is_found_on_real_postgres(store) -> None:
     named, twin, thread = _twins(store)
     store._sessions.clear()  # as the table says
     assert store.another_chat_on(thread, twin) and store.another_chat_on(thread, named)
+    assert store.another_chat_on(thread, twin, showing=True) and not store.another_chat_on(thread, named, showing=True)
     store.delete(twin)
     assert not threads.thread_ended(thread) and not store.another_chat_on(thread, named)
     store.delete(named)
@@ -605,7 +626,7 @@ def test_the_dashboards_delete_takes_every_chat_of_the_thread(store, dashboard_c
 
 
 def test_control_an_end_that_does_not_ask_ends_the_other_chat(store, web, monkeypatch) -> None:
-    monkeypatch.setattr(SessionManager, "another_chat_on", lambda *_a: False)
+    monkeypatch.setattr(SessionManager, "another_chat_on", lambda *_a, **_k: False)
     named, twin, thread = _twins(store)
     web.client.delete(f"/api/chat/sessions/{twin}")
     assert threads.thread_ended(thread) and '"code": "chat_deleted"' in _send(web.client, named)

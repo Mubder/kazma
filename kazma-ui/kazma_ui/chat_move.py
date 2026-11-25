@@ -433,9 +433,7 @@ def _unmark(entry: dict[str, Any]) -> None:
     from kazma_ui.session_manager import get_session_manager
 
     with bind_scope(entry["source"], entry["by"]):
-        store = get_session_manager()
-        if store.held(entry["session"]) is not None:
-            store.unmark_deleted(entry["session"], entry["thread"])
+        get_session_manager().unmark_if_held(entry["session"], entry["thread"])
 
 
 def _before_the_delete(entry: dict[str, Any]) -> None:

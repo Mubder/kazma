@@ -479,7 +479,9 @@
   taken back, a thread that is no chat's deleted on the Dashboard -- is
   `release_thread`d) unless another chat of the space is on it
   (`SessionManager.another_chat_on`: a chat app's chat and its archived twin;
-  deleting one leaves the other, its thread and its state):
+  deleting one leaves the other and its thread; its state goes only when the
+  one deleted showed and only archived ones are left, since what Kazma answers
+  from is then the conversation the person deleted):
   `scope_for_turn` and `record_thread` raise `ThreadEnded`, and the delete
   bumps the thread's rewind generation and ends its sockets and streams
   (`chat_delete.end_chat`). The stream refuses it before the graph starts (an

@@ -996,6 +996,14 @@ class SessionManager:
             self._deleted.pop((_space(), session_id), None)
         threads.begin_again(thread_id)
 
+    def unmark_if_held(self, session_id: str, thread_id: str) -> None:
+        """As :meth:`unmark_deleted`, while the row is still there: a chat its
+        person deleted stays deleted. One step under the store's lock, as a
+        delete is, so none comes between. Raises when the store cannot say."""
+        with self._lock:
+            if self.held(session_id) is not None:
+                self.unmark_deleted(session_id, thread_id)
+
     def chat_deleted(self, session_id: str = "", thread_id: str = "") -> bool:
         """Whether a chat was deleted in this process: *session_id* in the
         bound space, or *thread_id* in any (a thread is one chat's). Memory
@@ -1174,37 +1182,39 @@ class SessionManager:
                 # A thread another chat of the space is on runs on.
                 self.mark_deleted(session_id, "" if self.another_chat_on(thread_id, session_id) else thread_id)
 
-    def another_chat_on(self, thread_id: str, session_id: str) -> bool:
+    def another_chat_on(self, thread_id: str, session_id: str, *, showing: bool = False) -> bool:
         """Whether a chat of the bound space other than *session_id* is on the
         thread: a chat app's auto-titled twin and the named chat it was kept
         for (``sessions.directory.prune_twin_sessions`` archives the twin).
-        Deleting one leaves the other, and its thread, as they are. Raises
-        when the store cannot be read."""
+        Deleting one leaves the other, and its thread, as they are. With
+        *showing*, one that is not archived. Raises when the store cannot be
+        read."""
         tenant_id = _space()
         if not thread_id:
             return False
 
-        def another(sid: str, tid: str) -> bool:
-            return sid != session_id and (tid or sid) == thread_id and (tenant_id, sid) not in self._deleted
+        def another(sid: str, tid: str, archived: Any) -> bool:
+            return (sid != session_id and (tid or sid) == thread_id and not (showing and archived)
+                    and (tenant_id, sid) not in self._deleted)
 
         with self._lock:
-            if any(another(s.session_id, s.thread_id) for s in self._sessions.values()
+            if any(another(s.session_id, s.thread_id, s.archived) for s in self._sessions.values()
                    if (s.tenant_id or OWNER_SPACE_ID) == tenant_id):
                 return True
             if self._pg:
                 from kazma_core.db.pg_helpers import get_pool
 
-                rows = [(r["session_id"], r["thread_id"]) for r in get_pool().execute(
-                    "SELECT session_id, thread_id FROM kazma_chat_sessions "
+                rows = [(r["session_id"], r["thread_id"], r["archived"]) for r in get_pool().execute(
+                    "SELECT session_id, thread_id, archived FROM kazma_chat_sessions "
                     "WHERE tenant_id = %s AND (thread_id = %s OR session_id = %s)",
                     (tenant_id, thread_id, thread_id))]
             else:
                 assert self._conn is not None
                 rows = self._conn.execute(
-                    "SELECT session_id, thread_id FROM sessions "
+                    "SELECT session_id, thread_id, archived FROM sessions "
                     "WHERE tenant_id = ? AND (thread_id = ? OR session_id = ?)",
                     (tenant_id, thread_id, thread_id)).fetchall()
-            return any(another(str(sid), str(tid or "")) for sid, tid in rows)
+            return any(another(str(sid), str(tid or ""), archived) for sid, tid, archived in rows)
 
     def delete_if(self, session_id: str, unchanged: Callable[[ChatSession], bool]) -> bool:
         """Remove the bound space's *session_id* -- marked deleted already, so

@@ -91,6 +91,7 @@ def _uses(s: SessionManager) -> dict[str, Callable[[], Any]]:
         "get_by_thread_id": cold(lambda: s.get_by_thread_id("u-t")),
         "thread_is_exclusive": cold(lambda: s.thread_is_exclusive("u-t")),
         "another_chat_on": cold(lambda: s.another_chat_on("u-t", "x")),
+        "unmark_if_held": cold(lambda: s.unmark_if_held("u-1", "u-t")),
         "add_usage": cold(lambda: s.add_usage("u-1", 1, 0.0)),
         "rename": cold(lambda: s.rename("u-1", "r")),
         "set_archived": cold(lambda: s.set_archived("u-1", True)),
@@ -104,6 +105,27 @@ def _uses(s: SessionManager) -> dict[str, Callable[[], Any]]:
         "clear": s.clear,
         "close": s.close,
     }
+
+
+def test_no_delete_comes_between_an_unmarks_question_and_its_answer(chats, monkeypatch) -> None:
+    """A move put back asks whether the chat is there, and takes the mark
+    away: a person's delete between the two was undone."""
+    chats.put(ChatSession(session_id="u-1", thread_id="u-t", messages=[{"role": "user", "content": "q"}]))
+    chats.mark_deleted("u-1", "u-t")
+    real, deletes = SessionManager.held, []
+
+    def held(self: SessionManager, session_id: str) -> ChatSession | None:
+        found = real(self, session_id)
+        if not deletes:
+            deletes.append(threading.Thread(target=self.delete, args=("u-1",)))
+            deletes[0].start()
+            deletes[0].join(timeout=0.5)
+        return found
+
+    monkeypatch.setattr(SessionManager, "held", held)
+    chats.unmark_if_held("u-1", "u-t")
+    deletes[0].join(timeout=30)
+    assert real(chats, "u-1") is None and chats.chat_deleted("u-1")
 
 
 #: What is asked of the store on the event loop: memory only (M3).
