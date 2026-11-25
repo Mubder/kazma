@@ -244,6 +244,12 @@ class ProviderTestResponse(BaseModel):
     error_code: str | None = None
     #: The models the check listed when none was given to try.
     models: list[str] | None = None
+    #: What the model said (a success only), and what it costs: the price per
+    #: million tokens Kazma knows ({input, output, cached_input, source}), and
+    #: this message's cost when it is known.
+    answer: str | None = None
+    price: dict[str, Any] | None = None
+    cost_usd: float | None = None
 
 
 class ConnectorTestResponse(BaseModel):

@@ -153,3 +153,41 @@ Gates: `tests/test_provider_keys.py`, and in a browser (by the sidebar)
 the setup wall stayed up over a network server in use: readiness now
 counts the active provider's address (`setup_api.compute_setup_status`).
 
+
+**Stage 5: the guided setup** (2026-11-25; the owner: "the add provider tab
+is so basic ... if I clicked outside the card the card gone").
+- **The data is `kazma_core/provider_endpoints.py`**: groups, each provider's
+  endpoints (the first is the preset's own address), the fields an address or
+  a row is made of (anchored, linear patterns: a typed value cannot name
+  another host), key pages, key shapes. `providers.catalog()` serves it;
+  `GET /api/providers/setup` the rest. A new provider takes its group and
+  endpoints there, and its words `settings.setup.endpoint_<id>` /
+  `field_<id>` in `i18n/catalog/provider_setup.py`.
+- **The rules are `kazma_core/provider_setup.py`**: `endpoint_address`,
+  `field_problems` (asked by the check and the save; a value a row already
+  has is never judged), `identity_of` / `rows_at` (one row per provider and
+  address), `add_key` and `tidy`. Both writers go through
+  `ModelRegistry.update_provider_rows` (one `atomic_update` of the rows as
+  stored). A merge keeps every key as an extra key, records the merged names
+  as the kept row's `aliases` (`get_provider` and `split_model_ref` answer
+  them) and is refused whole when a row changed meanwhile; a row a person's
+  list names, a member may hold a key for (Spaces on), or with a key that
+  does not open, its own headers or sign-in, stays with the reason.
+- **The page** (`settings_provider_setup.js`,
+  `components/provider_setup.html`): a key is matched to a provider in the
+  page; nothing is sent to a provider before **Find the models**, and the one
+  test message only when it is pressed; a late answer about an earlier key is
+  dropped; the resumable draft (`localStorage`) holds only `DRAFT_FIELDS`,
+  never a key, a secret, a header or an address that can hold one.
+- **A dialog typed into asks before a click outside or Escape closes it**
+  (`modules/dialog_guard.js`, `KazmaDialogGuard`): every overlay a click
+  outside closes carries the guard or is declared in
+  `tests/test_dialogs_keep_typed_input.py` with its reason.
+- **An origin is read from `request.base_url`, never `request.url`**
+  (`csrf.py`, `same_origin.py`): the whole URL holds the decoded path, and a
+  space in it (a provider named "Qwen 1") made every browser write to that
+  provider's routes a cross-origin one. Gate: `tests/test_csrf.py`.
+
+Gates: `tests/test_provider_setup.py`, `tests/js/test_provider_setup_logic.js`,
+and in a browser (by the sidebar, EN/AR)
+`tests/e2e/test_provider_setup_browser.py`.

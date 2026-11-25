@@ -40,6 +40,7 @@ OPTIONAL_FIELDS: tuple[str, ...] = (
     "api_version",  # Azure
     "region", "aws_access_key_id", "aws_secret_access_key", "aws_session_token",  # Bedrock
     "api_keys",  # [{"id", "label", "api_key"}]: keys tried after the first
+    "aliases",  # names of rows merged into this one (provider_setup.tidy)
 )
 
 
@@ -51,6 +52,11 @@ def _optional_fields(provider: dict[str, Any]) -> dict[str, Any]:
             continue
         if field == "url_as_typed":
             out[field] = bool(value)
+        elif field == "aliases":
+            if isinstance(value, list):
+                names = sorted({str(n).strip() for n in value if str(n).strip()})
+                if names:
+                    out[field] = names
         elif field == "kind":
             kind = str(value).strip().lower()
             if kind in ("chat", "speech"):

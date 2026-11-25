@@ -93,9 +93,42 @@ Azure") keeps the type it was made from, and speaks that type's format.
 A provider you delete stays deleted, one Kazma lists by itself included:
 it is not listed or added back at the next start until you add it again.
 
+### Adding one, step by step
+
+**Add provider** asks one thing at a time:
+
+1. **Provider**: search the list (cloud APIs, model hosts, cloud platforms,
+   servers on your network), or paste a key and Kazma says whose it looks
+   like. The key is recognised in your browser; it is sent nowhere for that.
+2. **Address**: the provider's own regions and endpoints (Qwen's Singapore,
+   US, Beijing, Hong Kong and per-workspace addresses, OpenAI's data regions,
+   an Azure resource, a Bedrock region, a Vertex AI project and region...),
+   and a custom address last. A value that is missing or malformed is said
+   before anything is sent.
+3. **Key**: with a link to the page where the provider makes one. The key is
+   kept in Kazma's vault when you save, and sent to that provider alone.
+4. **Check**: Kazma lists the models, then sends one test message when you
+   press **Send one test message** (never your chat), and shows the answer and
+   the price it knows.
+5. **Use it**: which models the pickers show, the default model, and a backup
+   model from another vendor.
+
+Nothing you typed is lost: a click outside or Escape asks first, and a
+half-done setup is there when you come back. A key is never written to the
+browser's storage, so after a reload it has to be pasted again.
+
+A provider that is already there at that address takes the key as one more
+key instead of a second row (**Make a separate row** is still offered). Rows
+that already repeat each other, and rows that are off, keyless and used by
+nothing, are listed by **rows to tidy** above the list: merging moves every
+key and model to the row that stays, and a chat, a backup or a saved profile
+naming a merged row still finds it. A row stays, with the reason, when a
+person's model list names it, a member may hold a key of their own for it, its
+saved key cannot be read, or it has its own headers or sign-in.
+
 ### Headers, and an address as typed
 
-Under **Advanced** in the dialog:
+Under **Advanced** in the setup's key step, and in **Edit**:
 
 - **Headers** are sent with every request to the provider: a gateway's own
   sign-in, an organisation id, OpenRouter's app name. Their values are kept
@@ -137,7 +170,7 @@ anywhere in its path (DeepInfra's `/v1/openai`, Z.AI's `/api/paas/v4`);
 
 **Test Connection** sends the model one short message through the same client
 chat uses for the provider (Anthropic's own messages API for Anthropic,
-Bedrock's for Bedrock, and so on). In the Add / Edit dialog it checks the
+Bedrock's for Bedrock, and so on). In the setup and in **Edit** it checks the
 values as typed, without saving them; **Save** opens once the test answered,
 and a failed test offers **Save anyway** behind a confirmation. A failure says
 what failed (the key was refused, no such model, rate limited, unreachable,
@@ -145,12 +178,18 @@ an empty answer) and the HTTP status, never the provider's reply text. A
 cloud provider with no key is saved switched off, and cannot be switched on
 until it has one. Two providers at one address are named on the list.
 
+A dialog you typed into (this one, a connector, a profile, an MCP server, a
+scheduled task, a workspace) asks before a click outside it or Escape drops
+what you typed.
+
 ### Prices
 
 A call's cost is the model's own price, or it is shown as **unknown**:
 
 1. your price for the model (**Settings → Providers & Connectors → Models →
-   Model prices**, in US dollars per million tokens). That card also lists the
+   Model prices**, in US dollars per million tokens: input, output and, if you
+   like, cached input -- the tokens the provider served from its cache, which
+   cost a tenth of the input price when you set none). That card also lists the
    models used in the last 30 days that a working provider serves with no
    known price;
 2. free, for a server on this computer or your network;

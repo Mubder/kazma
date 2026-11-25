@@ -39,6 +39,15 @@ provider list as data with per-type forms, per-model details with
   `unpriced_llm_calls`): it said `$0.0000` beside "Spent today"'s "—" (live
   2026-11-15). `dashboard._cost_text` and `dashboard.js` `costText` are one rule
   (`tests/test_dashboard_total_cost.py`).
+- **Cached input has its own price** (2026-11-25): the owner's price, the
+  catalog and OpenRouter's list carry `cached_input`, and
+  `llm_provider.cost_from_usage` reads the cached and written tokens through
+  the ledger's own reading (`token_usage.token_counts`,
+  `cache_write_tokens`). DeepSeek's `prompt_cache_hit_tokens` were billed in
+  full; Anthropic's cached tokens, left out of its `input_tokens`, replaced
+  the uncached ones; Bedrock's were not read. No cached price: a tenth of the
+  input price. Gate: `tests/test_cached_input_price.py` (each usage shape; the
+  old rule as the control; every caller passes the cached price).
 - **Requests newer models take**: OpenAI's own API gets
   `max_completion_tokens`. A 400 that refuses `max_tokens`, or any
   temperature but the default, is asked once more without it, and the fix is

@@ -5,8 +5,9 @@
 
 {# Global modal (controlled via Alpine store) #}
 <template x-if="$store.modal.open" x-transition>
+    {# A question with something typed in it stays open on a click outside #}
     <div class="modal-overlay"
-         @click.self="$store.modal.close()"
+         @click.self="$store.modal.input && $store.modal.inputValue ? null : $store.modal.close()"
          @keydown.escape.window="$store.modal.close()">
         <div class="modal"
              :class="{

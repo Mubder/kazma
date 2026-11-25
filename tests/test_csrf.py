@@ -133,3 +133,33 @@ async def test_originless_client_bypasses():
     req = _make_request()
     resp = await mw(req, _call_next)
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/providers/Qwen 1/toggle", "/api/providers/قوين/keys", "/api/providers/a?b/keys"])
+async def test_a_path_with_a_space_is_same_origin(path):
+    """A provider named "Qwen 1": every browser write to its routes was
+    refused, its decoded path read as no origin at all (2026-11-25)."""
+    from kazma_ui.same_origin import _allowed_origins
+
+    mw = create_csrf_middleware()
+    served = {"origin": "http://127.0.0.1:9090", "host": "127.0.0.1:9090", "referer": "http://127.0.0.1:9090/settings"}
+    req = _make_request(path=path, headers=served)
+    assert (await mw(req, _call_next)).status_code == 200
+    assert "http://127.0.0.1:9090" in _allowed_origins(_make_request(path=path))
+    bad = _make_request(path=path, headers={"origin": "http://evil.example", "host": "127.0.0.1:9090"})
+    assert (await mw(bad, _call_next)).status_code == 403
+
+
+def test_no_origin_is_read_from_a_decoded_path():
+    """The class: an origin is read from ``base_url``, never ``request.url``."""
+    from pathlib import Path
+
+    import kazma_ui
+
+    def wrong(source: str) -> bool:
+        return "normalize_origin(str(request.url)" in source
+
+    root = Path(kazma_ui.__file__).parent
+    assert [p.name for p in root.rglob("*.py") if wrong(p.read_text(encoding="utf-8"))] == []
+    assert wrong("served = normalize_origin(str(request.url), allow_path=True)")  # the old line

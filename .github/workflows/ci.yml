@@ -930,6 +930,7 @@ jobs:
             tests/e2e/test_setup_guide_browser.py \
             tests/e2e/test_packages_not_in_place_browser.py \
             tests/e2e/test_provider_settings_browser.py \
+            tests/e2e/test_provider_setup_browser.py \
             tests/e2e/test_bell_opens_the_page.py \
             tests/e2e/test_soft_nav_icons.py \
             tests/e2e/test_settings_alerts_browser.py \

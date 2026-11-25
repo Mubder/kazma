@@ -8,7 +8,7 @@
  */
 function settingsApp() {
     var bag = (typeof window !== "undefined" && window.KazmaSettingsMixins) || {};
-    var names = ["core", "hub", "agent", "integrations", "ops", "alerts"];
+    var names = ["core", "hub", "providerSetup", "agent", "integrations", "ops", "alerts"];
     var parts = names.map(function (n) {
         return typeof bag[n] === "function" ? bag[n]() : {};
     });

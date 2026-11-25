@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Adding a provider, step by step (2026-11-25)
+
+- **Add provider is a guided setup**: the provider (searchable, grouped, or by
+  pasting its key), its own regions and endpoints with a custom address last,
+  the key with a link to where it is made, one test message with the answer
+  and the price, then the models to show, the default and a backup from
+  another vendor. Azure, Bedrock, Vertex AI and the rest ask for the fields
+  they need, checked before anything is sent or saved.
+- **Nothing typed is lost**: a click outside or Escape asks first, here and in
+  the connector, profile, MCP, scheduled, workspace and problem-report
+  dialogs, and a half-done setup is resumed. Keys are never written to the
+  browser's storage.
+- **One row per provider and address**: a second setup adds the key to the row
+  that is there, and rows that repeat each other, or that nothing uses, can be
+  tidied without losing a key.
+- **Cached input has its own price** in Model prices. DeepSeek's cached tokens
+  were billed at the full input price; Anthropic's made the rest of the prompt
+  free; Bedrock's were not counted.
+- A provider whose name has a space ("Qwen 1") can be changed from the page:
+  every such change was refused as coming from another site.
+
 ## Spaces: background work runs in the space it is for (2026-11-25)
 
 - Once Spaces is on, a document is processed, recovered after a crash and put

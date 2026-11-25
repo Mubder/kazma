@@ -130,9 +130,9 @@ def _can_be_called(registry: Any, name: str) -> bool:
 
 def _same_address(providers: list[dict[str, Any]], name: str, base_url: str) -> list[str]:
     """The other providers at *base_url* (normalized): a second row for one
-    service (Z.AI and zai on the live install) -- said, not refused, since a
-    second account of a vendor is saved this way until providers have
-    several keys."""
+    service (Z.AI and zai on the live install) -- said, not refused: the
+    guided setup offers to add the key to the first row, and the page to tidy
+    the ones already there (kazma_core.provider_setup)."""
     from kazma_core.url_utils import normalize_provider_url
 
     def address(url: str) -> str:
@@ -184,6 +184,18 @@ def _provider_fields(data: dict[str, Any], existing: dict[str, Any]) -> dict[str
         raise HTTPException(status_code=400, detail=f"preset: no such preset {preset!r}")
     data["preset"] = preset
     return data
+
+
+def _refuse_bad_fields(data: dict[str, Any], existing: dict[str, Any]) -> None:
+    """Raise 400 for a provider type's own field that is malformed (Azure's
+    version, Bedrock's region, Vertex's project, the address). A value the
+    stored row has already is never judged (kazma_core.provider_setup)."""
+    from kazma_core.provider_setup import field_problems
+
+    entry = {**data, "preset": data.get("preset") or existing.get("preset") or ""}
+    bad = [p for p in field_problems(entry, existing) if p["code"] == "malformed"]
+    if bad:
+        raise HTTPException(status_code=400, detail=f"{bad[0]['field']}: not a value this provider takes")
 
 
 def _restore_url(field: str, posted: Any, stored: Any) -> Any:
@@ -386,6 +398,11 @@ async def _adapter_from_saved_settings(platform: str) -> None:
 def create_providers_router(config_store: ConfigStore) -> APIRouter:
     """Create the unified providers & connectors router."""
     router = APIRouter(tags=["providers"])
+    # Before this router's /api/providers/{name}/...: the guided setup and the
+    # tidying of rows that repeat each other.
+    from kazma_ui.provider_setup_api import add_provider_setup_routes
+
+    add_provider_setup_routes(router)
 
     # ── LLM Providers ──────────────────────────────────────────────────
 
@@ -482,6 +499,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         data["api_key"] = _sanitize_api_key(str(data.get("api_key") or ""))
 
         existing = registry.get_provider(data["name"]) or {}
+        _refuse_bad_fields(data, existing)
         data["base_url"] = _restore_url("base_url", data.get("base_url"), existing.get("base_url"))
         # A stored secret is kept only for the address it was saved with: a
         # key posted masked beside another address is refused, and no stored
@@ -572,6 +590,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         }
         if check["ok"]:
             out["chat_ms"] = out["latency_ms"] = int(check.get("ms") or 0)
+            for said in ("answer", "price", "cost_usd"):
+                out[said] = check.get(said)
         else:
             out["error_code"] = check.get("error_code")
             out["error"] = check.get("error")

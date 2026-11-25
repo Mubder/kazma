@@ -36,6 +36,7 @@ __all__ = [
     "CandidateRefused",
     "candidate_entry",
     "check_model",
+    "known_price",
     "list_models",
 ]
 
@@ -51,6 +52,9 @@ LOCAL_NAMES = _local_names()
 
 #: How long one check may wait for the model's answer.
 CHECK_TIMEOUT_S = 60.0
+
+#: How much of the model's answer the page shows.
+ANSWER_MAX = 400
 
 #: The one message a check sends.
 CHECK_PROMPT = "Reply with the word OK."
@@ -77,7 +81,7 @@ def _masked(key: str) -> bool:
 #: (providers stage 2: the dialog's Azure, Bedrock, Google and header fields).
 TYPED_FIELDS: tuple[str, ...] = (
     "preset", "url_as_typed", "secret_headers", "api_version", "region", "aws_access_key_id",
-    "aws_secret_access_key", "aws_session_token", "google_mode", "project_id", "location",
+    "aws_secret_access_key", "aws_session_token", "google_mode", "project_id", "location", "kind",
 )
 
 #: Typed fields that hold a secret: masked or empty means the stored one.
@@ -172,6 +176,19 @@ def credentials_problem(registry: Any, entry: dict[str, Any], key: str = "") -> 
     return "api_key_required"
 
 
+def _refuse_fields(entry: dict[str, Any], stored: dict[str, Any] | None) -> None:
+    """Refuse a candidate whose own fields are missing or malformed
+    (:func:`kazma_core.provider_setup.field_problems`), before anything is
+    sent to the address they would make."""
+    from kazma_core.provider_setup import field_problems
+
+    problems = field_problems(entry, stored)
+    if problems:
+        first = problems[0]
+        words = "is needed" if first["code"] == "missing" else "does not look right"
+        raise CandidateRefused(f"field_{first['code']}", f"{first['field']} {words}.")
+
+
 def _refuse_credentials(problem: str, registry: Any, pid: str, *, stored: bool, moved: bool) -> None:
     """Raise the :class:`CandidateRefused` for a credentials *problem*."""
     if problem == "api_key_required" and moved:
@@ -237,6 +254,7 @@ def candidate_entry(
     if preset is not None and preset_id != pid.lower():
         entry["preset"] = preset_id
     entry.setdefault("display_name", str((preset or {}).get("name") or pid))
+    _refuse_fields(entry, stored)
     # Moved: the stored key is not this address's, so it cannot count.
     problem = credentials_problem(None if moved else registry, entry, key)
     if problem is not None:
@@ -338,6 +356,10 @@ async def check_model(
         "extra_headers": entry.get("secret_headers") or {},
         "api_version": str(entry.get("api_version") or ""),
     })
+    price = await asyncio.to_thread(known_price, entry, model)
+    if price is not None:
+        config.input_cost_per_1m, config.output_cost_per_1m = price["input"], price["output"]
+        config.cached_input_cost_per_1m = price["cached_input"]
     direct_url = str(config.base_url or "")
     typed_key = str(config.api_key or "")
     # A Google client may read Application Default Credentials: off the loop.
@@ -376,7 +398,30 @@ async def check_model(
     if not str(getattr(resp, "content", "") or "").strip() and not getattr(resp, "tool_calls", None):
         return {"ok": False, "model": model, "reachable": True, "error_code": "empty",
                 "error": "The provider returned an empty completion."}
-    return {"ok": True, "ms": int((time.monotonic() - started) * 1000), "model": model, "reachable": True}
+    return {"ok": True, "ms": int((time.monotonic() - started) * 1000), "model": model, "reachable": True,
+            "answer": str(getattr(resp, "content", "") or "").strip()[:ANSWER_MAX], "price": price,
+            "cost_usd": float(resp.cost_usd) if getattr(resp, "cost_known", False) else None}
+
+
+def known_price(entry: dict[str, Any], model: str, listed: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """What *model* costs at the candidate *entry*, as the pages show it
+    (dollars per million tokens, and where the price is from), or None: the
+    owner's price, free on this network, what its own list said (*listed*),
+    Kazma's dated catalog. Reads the settings store: off the event loop."""
+    from kazma_core.model_details import ModelDetails, details_for
+    from kazma_core.model_prices import price_for
+
+    name = str(entry.get("name") or "")
+    details = ModelDetails()
+    details.fill(listed or {}, "provider")
+    known = details_for(name, model, preset=str(entry.get("preset") or ""))
+    details.fill(known.as_dict(), "catalog")
+    details.sources = {**known.sources, **{k: "provider" for k in (listed or {})}}
+    price = price_for(name, str(entry.get("base_url") or ""), model, details=details)
+    if price is None:
+        return None
+    return {"input": price.input_per_1m, "output": price.output_per_1m,
+            "cached_input": price.cached_input_per_1m, "source": price.source}
 
 
 def _go_direct(client: Any, url: str, key: str) -> None:

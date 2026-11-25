@@ -29,9 +29,7 @@
         // parallel set (`providers`, `newProvider`, `showProviderModal`,
         // `testingProvider`, `providerTestResult`) reached
         // /api/settings/providers and was rendered by no template — a whole
-        // second provider page that had stopped existing. It is gone; only
-        // `providerPresets`, which the Add dialog reads, survives.
-        providerPresets: [],
+        // second provider page that had stopped existing. It is gone.
         // Master-detail: which provider the right-hand pane is showing.
         // Held by name, so the selection survives the list reload that
         // Toggle and Discover trigger.
@@ -382,6 +380,8 @@
         ownKeysLoaded: false,
         ownKeysFailed: false,
         ownKeyDraft: {},
+        ownKeyShapes: [],
+        ownKeyAnswer: {},
         ownKeyBusy: {},
         passwordForm: { old_password: '', new_password: '', confirm_password: '' },
         tokenName: '',
@@ -739,9 +739,6 @@
                 const catalog = await self._fetch('/api/providers/catalog');
                 if (window.ProvidersManager && typeof ProvidersManager.setCatalog === 'function') {
                     ProvidersManager.setCatalog(catalog);
-                    self.providerPresets = ProvidersManager.getPresetKeys();
-                } else {
-                    self.providerPresets = [];
                 }
 
                 try {
@@ -785,6 +782,7 @@
                 if (typeof self.loadHubProviders === 'function') {
                     await Promise.all([
                         self.loadHubProviders(),
+                        self.loadProviderTidy(),
                         self.loadHubConnectors(),
                         self.loadHubProfiles(),
                         self.loadAdapterRouting(),
@@ -995,6 +993,7 @@
                 case 'providers_connectors':
                     await Promise.all([
                         this.loadHubProviders(),
+                        this.loadProviderTidy(),
                         this.loadHubConnectors(),
                         this.loadHubProfiles(),
                         this.loadModelPrices(),

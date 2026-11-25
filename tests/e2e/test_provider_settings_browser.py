@@ -3,9 +3,10 @@
 
 - Model prices lists a model used with no known price; "Set its price" and
   Save keep the price.
-- The Add provider dialog tests the values as typed: Save opens only when the
-  test answered (a model server on this computer, no key), and a test that
-  fails leaves Save shut and offers "Save anyway".
+- Add a provider (the guided setup; its own cases are in
+  test_provider_setup_browser.py): Save opens only when the test answered (a
+  model server on this computer, no key), and a test that fails leaves Save
+  shut and offers "Save anyway".
 - The card reads in Arabic, right to left.
 """
 
@@ -155,28 +156,34 @@ def test_provider_settings_in_a_browser(kazma) -> None:
 
             # The dialog: Save opens only when the test answered.
             pg.locator("#hub-subtab-providers").click()
-            pg.locator("#provider-add").click()
-            pg.locator("#provider-name").fill("fakeserver")
-            pg.locator("#provider-base-url").fill(fake_url)
-            pg.locator("#provider-models").fill(MODEL)
-            assert pg.locator("#provider-save").is_disabled()
-            pg.locator("#provider-test").click()
-            pg.wait_for_function("!document.querySelector('#provider-save').disabled", timeout=30000)
+            def custom(name: str, url: str) -> None:
+                pg.locator("#provider-add").click()
+                pg.locator(".ps-tile[data-provider='custom']").click()
+                pg.locator("#setup-custom-url").fill(url)
+                pg.locator("#setup-next").click()
+                pg.locator("#setup-name").fill(name)
+                pg.locator("#setup-next").click()
+                pg.locator("#setup-model").wait_for(state="visible", timeout=30000)
+                pg.locator("#setup-model").fill(MODEL)
+                assert pg.locator("#setup-next").is_disabled()
+                pg.locator("#setup-test").click()
+
+            custom("fakeserver", fake_url)
+            pg.wait_for_function("!document.querySelector('#setup-next').disabled", timeout=30000)
             names = {p_["name"] for p_ in httpx.get(f"{base}/api/providers", timeout=10).json()}
             assert "fakeserver" not in names, "the test saved the provider"
-            pg.locator("#provider-save").click()
+            pg.locator("#setup-next").click()
             pg.wait_for_function(
                 "fetch('/api/providers').then(r => r.json()).then(l => l.some(p => p.name === 'fakeserver' && p.enabled))",
                 timeout=15000)
+            pg.locator("#setup-default").wait_for(state="visible", timeout=15000)
+            pg.locator("#setup-next").click()
+            pg.locator("#provider-setup").wait_for(state="hidden", timeout=15000)
 
             # A test that fails: Save stays shut, "Save anyway" is offered.
-            pg.locator("#provider-add").click()
-            pg.locator("#provider-name").fill("deadserver")
-            pg.locator("#provider-base-url").fill(f"http://127.0.0.1:{_free_port()}/v1")
-            pg.locator("#provider-models").fill(MODEL)
-            pg.locator("#provider-test").click()
-            pg.locator("#provider-save-anyway").wait_for(state="visible", timeout=30000)
-            assert pg.locator("#provider-save").is_disabled()
+            custom("deadserver", f"http://127.0.0.1:{_free_port()}/v1")
+            pg.locator("#setup-save-anyway").wait_for(state="visible", timeout=30000)
+            assert pg.locator("#setup-next").is_disabled()
 
             # Arabic: the card reads right to left.
             ctx = browser.new_context(viewport={"width": 1280, "height": 900})
@@ -213,23 +220,26 @@ def test_stage_two_to_four_in_a_browser(kazma) -> None:
             pg.locator("a.nav-link[href='/settings']").first.click()
             pg.wait_for_function("location.pathname === '/settings'", timeout=15000)
 
-            # The dialog's presets are the server's catalog, each with its form.
+            # The setup's providers are the server's catalog, each with its form.
             pg.locator("#provider-add").click()
-            preset = pg.locator(".modal select.form-select").first
-            preset.locator("option[value='cerebras']").wait_for(state="attached", timeout=15000)
-            preset.select_option("cerebras")
-            assert pg.locator("#provider-base-url").input_value() == "https://api.cerebras.ai/v1"
-            preset.select_option("bedrock")
-            pg.locator("#provider-region").wait_for(state="visible", timeout=5000)
-            assert not pg.locator("#provider-base-url").is_visible()
-            preset.select_option("openrouter")
-            pg.locator(".provider-advanced summary").click()
+            pg.locator(".ps-tile[data-provider='cerebras']").click()
+            pg.locator(".ps-endpoint", has_text="https://api.cerebras.ai/v1").wait_for(state="visible", timeout=15000)
+            pg.locator("#setup-back").click()
+            pg.locator(".ps-tile[data-provider='bedrock']").click()
+            pg.locator("#setup-field-region").wait_for(state="visible", timeout=5000)
+            assert not pg.locator("#setup-custom-url").is_visible()
+            pg.locator("#provider-setup").evaluate("e => e.click()")
+            pg.locator(".modal-checkbox input").check()
+            pg.locator(".modal-overlay:has(#modal-title) .modal-footer .btn").last.click()
+            # Editing a saved one keeps every field: its headers, its extra keys.
+            pg.locator(".pc-row", has_text="fakeserver").first.click()
+            pg.locator(".pc-actions .btn-secondary", has_text="Edit").click()
+            pg.locator("details.provider-advanced summary:visible").first.click()
             pg.locator("#provider-add-header").click()
             assert pg.locator(".provider-header-row").count() == 1
             pg.locator("#provider-add-key").click()
             assert pg.locator(".provider-key-row").count() == 1
-            pg.keyboard.press("Escape")
-            pg.locator(".modal-overlay").first.evaluate("e => e.click()")
+            pg.locator(".modal-actions .btn-secondary").first.click()
 
             # Model details and the default model, on the Models sub-tab.
             pg.locator("#hub-subtab-models").click()

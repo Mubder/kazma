@@ -1003,31 +1003,12 @@
                     };
                     this.hubProviderTested = true; // editing an existing tested provider is acceptable
                 }
-            } else {
-                this.hubEditingProvider = { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, google_mode: 'ai_studio', project_id: '', location: 'us-central1', preset: '', form: 'key', kind: 'chat', url_as_typed: false, headerRows: [], api_version: '', region: '', aws_access_key_id: '', aws_secret_access_key: '', aws_session_token: '', extraKeys: [], url_hint: '', _existing: false, _has_stored_key: false };
             }
             this.hubProviderModal = true;
         },
 
         editHubProvider(name) {
             this.openHubProviderModal(name);
-        },
-
-        applyHubProviderPreset(presetKey) {
-            const preset = ProvidersManager.getPreset(presetKey);
-            if (preset) {
-                const p = this.hubEditingProvider;
-                // A second account of one preset needs its own name.
-                const taken = this.hubProviders.some(x => x.name === presetKey);
-                p.name = presetKey === 'custom' ? '' : (taken ? presetKey + '-2' : presetKey);
-                p.display_name = presetKey === 'custom' ? '' : preset.name;
-                p.base_url = preset.base_url || '';
-                p.preset = presetKey;
-                p.form = preset.form || 'key';
-                p.url_hint = preset.url_hint || '';
-                p.models = preset.default_model || '';
-                this.hubProviderTested = false;
-            }
         },
 
         /** The dialog's fields as the save and the check take them

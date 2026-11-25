@@ -7561,3 +7561,112 @@ html.kazma-soft-nav #main-content {
   .turn-approvals-head { font-size: 0.76rem; padding: 4px 8px; }
   .turn-approvals-rows { padding: 6px; gap: 5px; }
 }
+
+/* ── The guided provider setup (components/provider_setup.html) ─────────
+   One dialog of five steps; each provider is a tile with its two letters in
+   one of the theme's category colours. */
+.ps-dialog { max-height: 90vh; }
+.ps-steps {
+  display: flex;
+  gap: var(--sp-2);
+  list-style: none;
+  margin: 0;
+  padding: var(--sp-3) var(--sp-6);
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.ps-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 0 auto;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.ps-step-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.ps-step.is-current { color: var(--text-primary); font-weight: 600; }
+.ps-step.is-current .ps-step-n { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.ps-step.is-done .ps-step-n { background: var(--success-subtle); border-color: var(--success-border); color: var(--success); }
+.ps-part { display: flex; flex-direction: column; gap: var(--sp-3); }
+.ps-part > .form-group { margin: 0; }
+.ps-part > .btn { align-self: flex-start; }
+.ps-title { margin: 0; font-size: 1rem; font-weight: 600; text-align: start; }
+.ps-group { margin-top: var(--sp-2); }
+.ps-group-title { margin: 0 0 var(--sp-2); font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); }
+.ps-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--sp-2); }
+.ps-tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: start;
+  cursor: pointer;
+}
+.ps-tile:hover { background: var(--tint-strong); }
+.ps-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ps-tile[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-subtle); }
+.ps-tile .icon-tile { font-size: 0.72rem; }
+.ps-tile-name { min-width: 0; overflow-wrap: anywhere; }
+.ps-tile-1 { --tone: var(--cat-1); --tone-subtle: color-mix(in srgb, var(--cat-1) 14%, transparent); }
+.ps-tile-2 { --tone: var(--cat-2); --tone-subtle: color-mix(in srgb, var(--cat-2) 14%, transparent); }
+.ps-tile-3 { --tone: var(--cat-3); --tone-subtle: color-mix(in srgb, var(--cat-3) 14%, transparent); }
+.ps-tile-4 { --tone: var(--cat-4); --tone-subtle: color-mix(in srgb, var(--cat-4) 14%, transparent); }
+.ps-tile-5 { --tone: var(--cat-5); --tone-subtle: color-mix(in srgb, var(--cat-5) 14%, transparent); }
+.ps-tile-6 { --tone: var(--cat-6); --tone-subtle: color-mix(in srgb, var(--cat-6) 14%, transparent); }
+.ps-endpoints { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ps-endpoint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+.ps-endpoint.is-chosen { border-color: var(--accent); background: var(--accent-subtle); }
+.ps-endpoint input { accent-color: var(--accent); margin-top: 3px; flex: none; }
+.ps-endpoint-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ps-endpoint-url,
+.ps-address { font-size: 0.76rem; color: var(--text-secondary); overflow-wrap: anywhere; margin: 0; text-align: start; }
+.ps-guesses { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.ps-same { flex-direction: column; align-items: stretch; gap: var(--sp-2); }
+.ps-same p { margin: 0; }
+.ps-same-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; }
+.ps-resumed { justify-content: space-between; margin-bottom: var(--sp-3); }
+.ps-key-link { display: inline-block; margin-top: 6px; font-size: 0.82rem; }
+.ps-header-row { gap: 8px; margin-top: 6px; align-items: center; }
+.ps-found { margin: 0; font-weight: 600; }
+.ps-answer { flex-direction: column; align-items: stretch; gap: 6px; }
+.ps-answer p { margin: 0; }
+.ps-answer-text { margin: 0; padding-inline-start: var(--sp-3); border-inline-start: 2px solid var(--border); overflow-wrap: anywhere; }
+.ps-models { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; max-height: 220px; overflow-y: auto; margin-top: 6px; }
+.ps-check { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; min-width: 0; }
+.ps-check input { accent-color: var(--accent); flex: none; }
+.ps-check bdi { overflow-wrap: anywhere; min-width: 0; }
+.ps-back { margin-inline-end: auto; }
+.pc-tidy { border-top: 0; border-bottom: 1px solid var(--border); color: var(--warning); }
+/* A dialog that is one block of fields has the dialog's own padding. */
+.modal-overlay[data-dialog-guard] > .modal:not(.sched-modal):not(:has(> .modal-body)) { padding: var(--sp-6); overflow-y: auto; display: block; }
+@media (max-width: 640px) {
+  .ps-step > span:last-child { display: none; }
+  .ps-step.is-current > span:last-child { display: inline; }
+}

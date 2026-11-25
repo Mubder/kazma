@@ -206,14 +206,6 @@ var ProvidersManager = window.ProvidersManager = {
     },
 
     /**
-     * Get all preset keys for dropdown.
-     * @returns {Array<{key: string, name: string}>}
-     */
-    getPresetKeys() {
-        return this.catalog.map(row => ({ key: row.id, name: row.name, local: !!row.local, form: row.form || 'key' }));
-    },
-
-    /**
      * The API version segment the provider's base URL declares, e.g. "v4".
      *
      * Shown because guessing it is what broke Google, Z.AI and Perplexity:

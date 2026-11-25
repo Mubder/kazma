@@ -60,7 +60,10 @@ def create_csrf_middleware() -> Callable[[Request], Awaitable[Response]]:
             return await call_next(request)
 
         allowed = set(configured)
-        served_origin = normalize_origin(str(request.url), allow_path=True)
+        # The origin alone: the whole URL holds the DECODED path, and a space in
+        # it (a provider named "Qwen 1") made every same-origin write to that
+        # path read as cross-origin (2026-11-25).
+        served_origin = normalize_origin(str(request.base_url), allow_path=True)
         if served_origin:
             allowed.add(served_origin)
 

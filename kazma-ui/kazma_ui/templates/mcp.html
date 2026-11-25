@@ -75,7 +75,9 @@
     </div>
 
     <!-- Add Server Modal -->
-    <div class="modal-overlay" x-show="showAddModal" x-cloak @click.self="showAddModal = false" x-init="loadPresets()">
+    <div class="modal-overlay" x-show="showAddModal" x-cloak data-dialog-guard x-effect="showAddModal && KazmaDialogGuard.opened($el)"
+             @click.self="KazmaDialogGuard.close($el, () => showAddModal = false)"
+             @keydown.escape.window="showAddModal && KazmaDialogGuard.escape($event, $el, () => showAddModal = false)" x-init="loadPresets()">
         <div class="modal">
             <h2>{{ t('mcp.modal_title') }}</h2>
             {# Preset dropdown — one-click setup for known MCP servers.

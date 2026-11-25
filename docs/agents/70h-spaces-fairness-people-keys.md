@@ -452,7 +452,10 @@
     egress proxy -- behind it the proxy's key answered, a key that does not
     work was kept and the install paid -- and ledgered as theirs, `own_key`
     only when their key answered; rate limit bucket `own_keys`, 6 a
-    minute); DELETE forgets it. Settings -> My account -> "Use my own key"
+    minute) and answers what the model said; DELETE forgets it. The same
+    steps as the install's own setup (§61 stage 5): where the key is made
+    (`key_page`), whose a typed key looks like (`key_shapes`, matched in the
+    page), and the answer, beside each provider. Settings -> My account -> "Use my own key"
     (`#own-model-keys`, a member's page only), EN/AR.
   - Gates: `tests/test_member_own_keys.py` (her key in the header and never
     the install's, on the OpenAI-shaped and Anthropic classes, chat and
