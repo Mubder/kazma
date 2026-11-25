@@ -28,6 +28,20 @@ an install with one account behaves as before.
   names `OWNER_SPACE_ID` and says why. Enforcement is one stored switch
   (`identity.ENFORCED_KEY`) kept in memory (`scope.spaces_enforced`): asking
   for a space reads no settings.
+- **Work that knows one row's space says it** (`spaces/row_work.py`, S4-01
+  step 0a). Code no request binds -- a job's stages, a recovery, an ending, a
+  spool drain -- ran unbound, or in the space of whoever started it. Real work
+  for a row runs in `work_of(space, asker)` (`work_of_async` in a coroutine:
+  the whole scope, the asker while a member, else `acting_account`); only
+  statements that name the row's space run in `statements_of(space)`, which
+  changes no one's scope; the install's own (about every space, or none) run
+  in `install_statements(reason)`, declared in `INSTALL` of
+  `tests/test_row_work_gates.py`, both ways, and only where no request comes
+  with an id of its own; a loop for every space starts in `install_loops`. A
+  loop over rows of several spaces enters one per row. Never held across a
+  `yield`. With Spaces off they bind nothing. Nothing reads what was said yet:
+  the database door (`current_door`) is S4-01 step 1, and
+  `tests/_space_door.py` stands in for it.
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner
