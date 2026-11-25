@@ -394,6 +394,25 @@ def test_an_engine_without_the_filter_is_whole_until_someone_has_the_network(mac
     assert [s.action for s in steps] == ["engine:record", "engine:egress"] and not steps[-1].admin
 
 
+def test_rules_that_no_longer_hold_are_found_and_put_in_again(machine, monkeypatch):
+    """The stamp and the network are there, the rules flushed: the check said
+    "ok", and ``kazma setup engine`` -- the repair a refused run names -- put
+    nothing in (the drill of 2026-11-25). **Control:** in effect, the filter
+    is neither missing nor waiting."""
+    found = ces.check(machine)
+    assert "egress" not in found.missing + found.waiting
+    in_effect = machine.rules_answer
+    machine.rules_answer = (3, "EGRESS_NOT_IN_EFFECT DOCKER-USER->KAZMA-EGRESS")
+    _registry(monkeypatch, {})
+    found = ces.check(machine)
+    assert found.ok is True and found.waiting == ["egress"]
+    assert "engine:egress" in [s.action for s in ces.install_steps(found, with_waiting=True)]
+    _registry(monkeypatch, {"acct_reem": {"code_network": True}})
+    assert ces.check(machine).missing == ["egress"]
+    machine.rules_answer = in_effect
+    assert ces.check(machine).missing == []
+
+
 def test_an_identity_store_that_cannot_be_read_counts_as_nobody(machine, monkeypatch):
     from kazma_core.spaces.identity import IdentityUnavailable
 

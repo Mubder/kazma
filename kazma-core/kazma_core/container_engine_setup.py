@@ -325,7 +325,10 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
     waiting: list[str] = []
     if code == 0 and text.strip():
         version = text.strip().splitlines()[-1]
-        if not (egress_installed() and egress_network_ok(run)):
+        # The rules too, as before a run: with them flushed this said "ok" and
+        # `kazma setup engine`, the repair a refused run names, did nothing
+        # (the drill of 2026-11-25).
+        if not (egress_installed() and egress_network_ok(run) and egress_rules_in_effect(run)):
             # Only a member's network needs the filter: before one has it,
             # an engine without it is whole (nothing to repair, nothing red).
             (missing if _network_given() else waiting).append("egress")

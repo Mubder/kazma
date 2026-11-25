@@ -19,6 +19,13 @@
 #   are not in effect (ExecStartPost). Rules that cannot be put in cost the
 #   members' network, never Docker: SearXNG, Neo4j and the document worker
 #   start with it or without it;
+# * the hold: while Docker starts, every packet from the bridge is dropped
+#   (raw PREROUTING, which Docker never touches), and the guard lets them on
+#   only once the rules are in effect. Docker, starting, takes its jump to
+#   DOCKER-USER out and puts it back behind its own rules for about half a
+#   second, so a container it could not stop (a hung shim) reached private
+#   addresses then (the drill of 2026-11-25). Rules that do not hold leave
+#   the bridge held: a network that could not be taken away reaches nothing;
 # * `kazma-egress-rules [bridge] [chain] check`, which Kazma runs before every
 #   run of a member's code on the network: each jump the first rule the
 #   bridge's packets meet, and the chain exactly the one made here, or the
@@ -56,7 +63,7 @@ mv -f /etc/kazma/egress-host-addresses.new /etc/kazma/egress-host-addresses
 
 cat > /usr/local/sbin/kazma-egress-rules <<'RULES'
 #!/bin/bash
-# kazma-egress-rules [bridge] [chain] [apply|check|remove] -- see /etc/systemd/system/kazma-egress.service.
+# kazma-egress-rules [bridge] [chain] [apply|check|hold|release|remove] -- see /etc/systemd/system/kazma-egress.service.
 set -euo pipefail
 IF="${1:-kz-egress}"
 CHAIN="${2:-KAZMA-EGRESS}"
@@ -70,6 +77,44 @@ REFUSE_V6="-i $IF -j REJECT --reject-with icmp6-port-unreachable"
 REFUSED_V4="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12
 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24 192.168.0.0/16 198.18.0.0/15 198.51.100.0/24
 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4"
+
+HOLD="-i $IF -j DROP"
+
+# One at a time: two applies at once would build each other's chain.
+if [[ "$MODE" != check && -w /run ]] && command -v flock >/dev/null 2>&1; then
+  exec 9>/run/kazma-egress.lock
+  flock -w 30 9 || [[ "$MODE" == hold ]]
+fi
+
+held() {  # held TOOL: whether the bridge is held shut
+  # shellcheck disable=SC2086
+  "$1" -w -t raw -C PREROUTING $HOLD 2>/dev/null
+}
+
+tools() {
+  echo iptables
+  if ipv6; then
+    echo ip6tables
+  fi
+}
+
+hold() {
+  local tool
+  for tool in $(tools); do
+    # shellcheck disable=SC2086
+    held "$tool" || "$tool" -w -t raw -I PREROUTING 1 $HOLD
+  done
+}
+
+hold_off() {
+  local tool
+  for tool in $(tools); do
+    while held "$tool"; do
+      # shellcheck disable=SC2086
+      "$tool" -w -t raw -D PREROUTING $HOLD
+    done
+  done
+}
 
 jumps_off() {  # jumps_off CHAIN: every jump from DOCKER-USER to CHAIN out
   while iptables -w -C DOCKER-USER -i "$IF" -j "$1" 2>/dev/null; do
@@ -187,13 +232,20 @@ chain_rules() {  # the chain's rules, one a line, as iptables -S prints them
 
 if [[ "$MODE" == remove ]]; then
   hooks_off
+  hold_off
   drop_chain "$NEW"
   drop_chain "$CHAIN"
   echo "EGRESS_REMOVED $IF $CHAIN"
   exit 0
 fi
 
-if [[ "$MODE" == check ]]; then
+if [[ "$MODE" == hold ]]; then
+  hold
+  echo "EGRESS_HELD $IF"
+  exit 0
+fi
+
+if [[ "$MODE" == check || "$MODE" == release ]]; then
   # Each jump the first rule the bridge's packets meet -- a rule in front of
   # it would let them past -- and the chain exactly the one made here; else
   # exit 3 naming what is not and the rule in front (Kazma then refuses the
@@ -218,12 +270,22 @@ if [[ "$MODE" == check ]]; then
   fi
   want="$(echo "-N $CHAIN"; while IFS= read -r rule; do echo "-A $CHAIN $rule"; done < <(chain_rules))"
   [[ "$(iptables -w -S "$CHAIN" 2>/dev/null)" == "$want" ]] || missing+=("$CHAIN")
+  if [[ "$MODE" == check ]]; then
+    for tool in $(tools); do
+      if held "$tool"; then
+        missing+=("HELD:$tool")
+      fi
+    done
+  fi
   if (( ${#missing[@]} )); then
     echo "EGRESS_NOT_IN_EFFECT ${missing[*]}"
     for met in ${front[@]+"${front[@]}"}; do
       echo "EGRESS_IN_FRONT $met"
     done
     exit 3
+  fi
+  if [[ "$MODE" == release ]]; then
+    hold_off
   fi
   echo "EGRESS_IN_EFFECT $IF $CHAIN"
   exit 0
@@ -265,12 +327,12 @@ chmod 755 /usr/local/sbin/kazma-egress-rules
 
 cat > /usr/local/sbin/kazma-egress-guard <<'GUARD'
 #!/bin/bash
-# After Docker starts: rules not in effect take the members' network away --
-# nothing can run on it -- and leave Docker running. `kazma setup engine`
-# puts both back.
+# After Docker starts: rules in effect end the hold; rules not in effect keep
+# it, take the members' network away -- nothing can run on it -- and leave
+# Docker running. `kazma setup engine` puts all of it back.
 set -uo pipefail
 NET="${1:-kazma-egress}"
-if /usr/local/sbin/kazma-egress-rules kz-egress KAZMA-EGRESS check; then
+if /usr/local/sbin/kazma-egress-rules kz-egress KAZMA-EGRESS release; then
   exit 0
 fi
 said="$(timeout 30 docker network rm "$NET" 2>&1)"
@@ -316,10 +378,14 @@ cat > /etc/systemd/system/docker.service.d/kazma-egress.conf <<'DROPIN'
 After=kazma-egress.service
 
 [Service]
+ExecStartPre=-/usr/local/sbin/kazma-egress-rules kz-egress KAZMA-EGRESS hold
 ExecStartPre=-/usr/local/sbin/kazma-egress-rules
 ExecStartPost=-/usr/local/sbin/kazma-egress-guard
 DROPIN
 systemctl daemon-reload
 systemctl enable kazma-egress.service >/dev/null 2>&1
 /usr/local/sbin/kazma-egress-rules
+# A hold a failed start left ends here, when the rules hold; else setup's own
+# check says what does not.
+/usr/local/sbin/kazma-egress-rules kz-egress KAZMA-EGRESS release || true
 echo "EGRESS_READY"
