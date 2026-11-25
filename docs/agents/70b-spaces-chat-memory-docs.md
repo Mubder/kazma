@@ -191,9 +191,12 @@
   space of the install fails it, `no_space`). The recoveries at
   start (interrupted intakes, cut-off moves, stranded intakes) and the
   Knowledge reconcile enter each row's own space: one row's failure is said
-  (`_one_rows_failure`) and the rest go on, an outage is raised again as
-  before. Interrupted intakes whose people could not be read are tried again
-  by the intake sweep. The loops start with
+  (`_Pass`, once as a WARNING) and the rest go on, an outage is raised again as
+  before; three rows in a row that fail as a whole store does end the pass.
+  Interrupted intakes whose people could not be read, or whose space comes or
+  goes, are tried again by the intake sweep, never a job under a lease. What an
+  import is writing is read before the identity store (`importing_spaces`), or
+  its job is rejected as no space's. The loops start with
   no space (`install_loops`): a document tool starts them inside a turn, and
   they kept that person's space for good. The queue's fair claim, its leases
   and the intake queue are the install's. Off, nothing is bound and a failure

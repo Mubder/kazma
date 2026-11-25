@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import sqlite3
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from kazma_core.config_store import get_config_store
+from kazma_core.config_store import ConfigStoreUnavailableError, get_config_store
 from kazma_core.db import availability
 from kazma_core.documents import ingestion
 from kazma_core.documents.ingestion import DocumentIngestionService
@@ -175,6 +176,70 @@ def test_a_job_of_no_space_fails_and_is_not_retried(world: Any) -> None:
     assert call.space == call.kwargs["tenant_id"] == "Not A Space!" and call.scope is None
 
 
+def test_a_space_recorded_while_its_job_is_claimed_is_not_no_space(world: Any, monkeypatch: Any) -> None:
+    """The import is read before the people (``importing_spaces``): read the
+    other way round, a space recorded in between had neither, and a good
+    document was rejected for good."""
+    from kazma_core.spaces import space_move
+
+    _queued(world.svc, world.a, world.reem, "tides")
+    claimed = world.svc.jobs.claim_next(owner="w", lease_seconds=60)
+    real = identity.read_registry
+    read: list[str] = []
+
+    def journal() -> Any:
+        read.append("journal")  # emptied once the space is recorded
+        return frozenset() if "people" in read else frozenset({world.a})
+
+    def people_() -> Any:
+        read.append("people")
+        reg = real()
+        reg["spaces"].pop(world.a)  # recorded just after this was read
+        return reg
+
+    monkeypatch.setattr(space_move, "importing_spaces", journal)
+    monkeypatch.setattr(identity, "read_registry", people_)
+    with watched((DocumentJobRepository, "hand_back"), (DocumentJobRepository, "record_failure")) as calls:
+        asyncio.run(DocumentWorker(world.svc.jobs, {})._process_claimed(claimed, "w"))
+    assert [(c.name, c.kwargs.get("reason")) for c in calls] == [("hand_back", "space_arriving")]
+    assert read[0] == "journal"
+    job = world.svc.jobs.get(tenant_id=world.a, job_id=claimed.id)
+    assert (job.state, job.error_code, job.attempt) == (DocumentJobState.RETRY_WAIT, None, 0)
+
+
+def test_an_import_journal_that_cannot_be_read_spends_no_try(world: Any, monkeypatch: Any) -> None:
+    from kazma_core.spaces import space_move
+
+    _queued(world.svc, world.a, world.reem, "tides")
+    claimed = world.svc.jobs.claim_next(owner="w", lease_seconds=60)
+
+    def locked() -> Any:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(space_move, "importing_spaces", locked)
+    asyncio.run(DocumentWorker(world.svc.jobs, {})._process_claimed(claimed, "w"))
+    job = world.svc.jobs.get(tenant_id=world.a, job_id=claimed.id)
+    assert (job.state, job.error_code, job.attempt) == (DocumentJobState.RETRY_WAIT, None, 0)
+
+
+def test_a_job_given_back_again_is_said_once_and_waits_longer(world: Any, monkeypatch: Any,
+                                                              caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("DEBUG", logger="kazma_core.documents.worker")
+    _queued(world.svc, world.a, world.reem, "tides")
+    claimed = world.svc.jobs.claim_next(owner="w", lease_seconds=60)
+    identity.update_registry(lambda reg: reg["spaces"][world.a].update(erasing_at="now"))
+    worker = DocumentWorker(world.svc.jobs, {})
+
+    async def again() -> None:
+        for _ in range(6):
+            await worker._process_claimed(claimed, "w")
+
+    with watched((DocumentJobRepository, "hand_back")) as calls:
+        asyncio.run(again())
+    assert [c.kwargs["delay_seconds"] for c in calls] == [30, 60, 120, 240, 300, 300]
+    assert [r.levelname for r in caplog.records if "given back" in r.getMessage()] == ["WARNING"] + ["DEBUG"] * 5
+
+
 def test_a_job_given_back_is_said(world: Any, monkeypatch: Any, caplog: pytest.LogCaptureFixture) -> None:
     _queued(world.svc, world.a, world.reem, "tides")
     claimed = world.svc.jobs.claim_next(owner="w", lease_seconds=60)
@@ -298,6 +363,125 @@ def test_one_interrupted_job_that_cannot_be_recovered_stops_no_other(world: Any,
     with bind_scope(world.b, world.omar):  # started from B's turn
         assert world.svc.recover_interrupted_intake() == 1
     assert seen == [(world.a, Scope(world.a, world.reem)), (world.b, Scope(world.b, world.omar))]
+
+
+def test_a_stop_ends_the_pass_between_jobs(world: Any, monkeypatch: Any) -> None:
+    """A stop waited for every interrupted intake's inspection."""
+    seen = _interrupted(world, monkeypatch, RuntimeError("unused"))
+
+    def advance(job: Any, **_kw: Any) -> Any:
+        seen.append(job.tenant_id)
+        world.svc._intake_sweep_stop.set()  # stop_workers, from another thread
+        return SimpleNamespace(state=DocumentJobState.READY_TO_PARSE)
+
+    monkeypatch.setattr(world.svc, "_advance_intake", advance)
+    assert world.svc.recover_interrupted_intake() == 1 and seen == [world.a]
+
+
+def test_a_start_after_a_stop_recovers_again(world: Any, monkeypatch: Any) -> None:
+    ran: list[bool] = []
+    monkeypatch.setattr(world.svc, "recover_interrupted_intake",
+                        lambda **_kw: ran.append(world.svc._intake_sweep_stop.is_set()) or 0)
+    world.svc._intake_sweep_stop.set()
+
+    async def run() -> None:
+        await world.svc.start_workers()
+        await world.svc.stop_workers()
+
+    asyncio.run(run())
+    assert ran == [False], "the stop of before is over when the start's own pass runs"
+
+
+def test_the_sweep_leaves_a_job_a_worker_holds(world: Any, monkeypatch: Any) -> None:
+    """A worker validating a job under its lease: the sweep inspected it too."""
+    seen = _interrupted(world, monkeypatch, RuntimeError("unused"))
+    jobs = world.svc.jobs.interrupted_intake_jobs()
+    leased = dataclasses.replace(jobs[0], lease_owner="document-worker-x:0")
+    monkeypatch.setattr(world.svc.jobs, "interrupted_intake_jobs", lambda: [leased, jobs[1]])
+    monkeypatch.setattr(world.svc, "_advance_intake", lambda job, **_kw: seen.append(
+        (job.tenant_id, None)) or SimpleNamespace(state=DocumentJobState.READY_TO_PARSE))
+    assert world.svc.recover_interrupted_intake(unleased_only=True) == 1
+    assert [tenant for tenant, _scope in seen] == [world.b]
+    assert world.svc.recover_interrupted_intake() == 2, "the start's own pass is as before"
+
+
+def _many(world: Any, monkeypatch: pytest.MonkeyPatch, fails: BaseException, count: int = 12) -> list[Any]:
+    _interrupted(world, monkeypatch, fails)
+    jobs = world.svc.jobs.interrupted_intake_jobs()
+    rows = [jobs[0]] * count
+    monkeypatch.setattr(world.svc.jobs, "interrupted_intake_jobs", lambda: rows)
+    tried: list[Any] = []
+
+    def advance(job: Any, **_kw: Any) -> Any:
+        tried.append(job.id)
+        raise fails
+
+    monkeypatch.setattr(world.svc, "_advance_intake", advance)
+    return tried
+
+
+@pytest.mark.parametrize("fails", [sqlite3.OperationalError("database is locked"),
+                                   ConfigStoreUnavailableError(),
+                                   identity.IdentityUnavailable("away")], ids=lambda e: type(e).__name__)
+def test_a_store_that_answers_nothing_ends_the_pass(world: Any, monkeypatch: Any, fails: BaseException,
+                                                    caplog: pytest.LogCaptureFixture) -> None:
+    tried = _many(world, monkeypatch, fails)
+    assert world.svc.recover_interrupted_intake() == 0 and len(tried) == 3
+    assert world.svc._interrupted_left, "the sweep takes them up again"
+    said = [r for r in caplog.records if r.name.endswith("ingestion") and r.levelname == "WARNING"]
+    assert len(said) == 2 and "stopped after 3 in a row" in said[1].getMessage()
+    traced = said[0].exc_info is not None and said[0].exc_info[0] is not None
+    assert traced is not isinstance(fails, identity.IdentityUnavailable), "unreadable people need no traceback"
+
+
+def test_rows_that_fail_each_for_itself_are_all_tried(world: Any, monkeypatch: Any) -> None:
+    tried = _many(world, monkeypatch, scope.NoSpaceBound("refused"))
+    assert world.svc.recover_interrupted_intake() == 0 and len(tried) == 12
+
+
+def test_a_row_that_goes_on_starts_the_count_again() -> None:
+    from kazma_core.documents.ingestion import _Pass
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(scope, "_enforced", True)
+        rows = _Pass(set(), "rows")
+        locked = sqlite3.OperationalError("locked")
+        assert not rows.failed(locked, "a") and not rows.failed(locked, "b")
+        rows.went_on()
+        assert not rows.failed(locked, "c") and not rows.failed(locked, "d") and rows.failed(locked, "e")
+
+
+def test_one_rows_failure_is_said_once(world: Any, monkeypatch: Any, caplog: pytest.LogCaptureFixture) -> None:
+    """Every pass over several spaces' rows says what it left, the first time
+    as a WARNING with the traceback."""
+    caplog.set_level("DEBUG", logger="kazma_core.documents.ingestion")
+    _many(world, monkeypatch, KeyError("metadata"), count=1)
+    for _ in range(3):
+        world.svc.recover_interrupted_intake()
+    said = [r for r in caplog.records if "was not resumed" in r.getMessage()]
+    assert [r.levelname for r in said] == ["WARNING", "DEBUG", "DEBUG"] and said[0].exc_info[0] is KeyError
+
+
+@pytest.mark.parametrize("case", ["arriving", "erasing"])
+def test_an_interrupted_intake_of_a_space_that_comes_or_goes_is_tried_again(world: Any, monkeypatch: Any,
+                                                                           case: str) -> None:
+    from kazma_core.spaces import space_move
+
+    _interrupted(world, monkeypatch, RuntimeError("unused"))
+    if case == "arriving":
+        monkeypatch.setattr(space_move, "importing_spaces", lambda: frozenset({world.a}))
+        real = identity.read_registry
+
+        def without() -> Any:
+            reg = real()
+            reg["spaces"].pop(world.a)
+            return reg
+
+        monkeypatch.setattr(identity, "read_registry", without)
+    else:
+        identity.update_registry(lambda reg: reg["spaces"][world.a].update(erasing_at="now"))
+    world.svc.recover_interrupted_intake()
+    assert world.svc._interrupted_left
 
 
 def test_a_job_that_is_not_as_read_stops_no_other(world: Any, monkeypatch: Any) -> None:
@@ -551,6 +735,27 @@ def test_a_deleted_documents_pages_are_removed_in_its_own_space(world: Any) -> N
     assert len(report["pruned"]) == 1 and not report["failed"], report
     there = Scope(world.a, OWNER_ACCOUNT_ID)  # no person asked: the space's own account
     assert calls.scopes("unindex_document") == [there] == calls.scopes("list_indexed_libraries")
+
+
+def test_one_entry_that_cannot_be_removed_stops_no_other(world: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The reconcile's other direction: two documents the store does not
+    record, the first one's removal fails."""
+    svc = _restored(world)
+    adapter = svc.knowledge_adapter
+    entries = {(world.a, "docs", f"0000000{n}-0000-4000-8000-000000000000", "v") for n in (1, 2)}
+    monkeypatch.setattr(adapter.store, "document_index_entries", lambda: entries)
+    monkeypatch.setattr(svc.repository, "active_index_entries", lambda: [])
+    tried: list[str] = []
+
+    def unindex(**kw: Any) -> None:
+        tried.append(kw["document_id"])
+        if len(tried) == 1:
+            raise RuntimeError("this one could not be removed")
+
+    monkeypatch.setattr(adapter.index, "unindex_document", unindex)
+    report = svc.reconcile_index(prune=True)
+    assert len(tried) == 2 and len(report["pruned"]) == 1, report
+    assert [f["code"] for f in report["failed"]] == ["RuntimeError"]
 
 
 def test_an_entry_of_no_space_stops_no_other(world: Any, monkeypatch: pytest.MonkeyPatch) -> None:

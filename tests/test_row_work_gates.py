@@ -76,38 +76,54 @@ INSTALL: dict[str, str] = {
 
 #: A form that names a space: ``file::function`` -> where the space comes from.
 #: ``statements:`` names the row, ``Kazma's own work:`` may act for the space's
-#: own account, ``a person's act:`` is that person's or refused.
-ROWS: dict[str, str] = {
-    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._move_locked":
-        "a person's act: the space of theirs they move into, asked again under the lock",
-    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._put_back_in_the_index":
+#: own account, ``a person's act:`` is that person's or refused. And each use
+#: in it, as written: a second one, or another argument, is declared anew.
+ROWS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._put_back_in_the_index": (
         "Kazma's own work: the entry the documents store lists, as its owner",
-    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._recover_stranded_intakes":
+        ("statements_of(tenant)", "work_of(tenant, record.owner_id)",)),
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._recover_stranded_intakes": (
         "statements: the reservation's own tenant",
-    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._settle_one_move":
+        ("statements_of(row['tenant_id'])", "statements_of(row['tenant_id'])",)),
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._settle_one_move": (
         "Kazma's own work: the journal's two spaces, the copy's taking back in its own",
-    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._settle_unrecorded":
+        ("statements_of(target)", "work_of(target, actor)",)),
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._settle_unrecorded": (
         "Kazma's own work: the entry the library holds",
-    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._still_there":
+        ("statements_of(tenant)", "work_of(tenant)",)),
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._still_in_both": (
+        "a person's act: the space of theirs they move into, asked again under the lock",
+        ("resolve_act_of(target, actor)",)),
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService._still_there": (
         "statements: a move's journal, or its own two spaces",
-    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService.move_document":
+        ("statements_of(tenant)",)),
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService.move_document": (
         "statements: the audit row of each of the move's two spaces, whose rule was asked",
-    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService.recover_interrupted_intake":
+        ("statements_of(tenant)",)),
+    "kazma-core/kazma_core/documents/ingestion.py::DocumentIngestionService.recover_interrupted_intake": (
         "Kazma's own work: the job's own tenant and person",
-    "kazma-core/kazma_core/documents/telemetry.py::tenant_quota_snapshot":
+        ("work_of(snapshot.tenant_id, snapshot.actor_id)",)),
+    "kazma-core/kazma_core/documents/telemetry.py::tenant_quota_snapshot": (
         "statements: one space's own total, which the caller's route allows (a number, no row)",
-    "kazma-core/kazma_core/documents/worker.py::DocumentWorker._not_worked_on":
+        ("statements_of(tenant_id)",)),
+    "kazma-core/kazma_core/documents/worker.py::DocumentWorker._not_worked_on": (
         "statements: the claimed job's own tenant",
-    "kazma-core/kazma_core/documents/worker.py::DocumentWorker._process_claimed":
+        ("statements_of(job.tenant_id)",)),
+    "kazma-core/kazma_core/documents/worker.py::DocumentWorker._process_claimed": (
         "Kazma's own work: the claimed job's own tenant and person",
-    "kazma-core/kazma_core/runs/adapters/documents.py::_DocumentAdapter._read":
+        ("work_of_async(job.tenant_id, job.actor_id)", "statements_of(job.tenant_id)",)),
+    "kazma-core/kazma_core/runs/adapters/documents.py::_DocumentAdapter._read": (
         "statements: the listed job's own tenant, with nothing bound only",
-    "kazma-core/kazma_core/spaces/people.py::_after_leaving":
+        ("statements_of(job.tenant_id)",)),
+    "kazma-core/kazma_core/spaces/people.py::_after_leaving": (
         "Kazma's own work: the space whose membership change just took effect",
-    "kazma-core/kazma_core/spaces/space_limits.py::_documents_used":
+        ("resolve_work_of(space_id)", "statements_of(space_id)",)),
+    "kazma-core/kazma_core/spaces/space_limits.py::_documents_used": (
         "statements: a space the admin's page, or the space's own, counts (a number, no row)",
-    "kazma-ui/kazma_ui/health.py::_check_memory_recall":
+        ("statements_of(space_id)",)),
+    "kazma-ui/kazma_ui/health.py::_check_memory_recall": (
         "statements: the owner's space, the canary's",
+        ("statements_of(OWNER_SPACE_ID)",)),
 }
 
 #: Who asks for the account a space's own work acts for: ``file::function`` ->
@@ -119,6 +135,12 @@ ACTS_FOR_A_SPACE: dict[str, str] = {
     "kazma-core/kazma_core/spaces/identity.py::work_scope": "queued work that names nobody (a person who left is refused)",
     "kazma-core/kazma_core/spaces/row_work.py::resolve_work_of": "Kazma's own work for a row, declared in ROWS",
     "kazma-core/kazma_core/swarm/single_operator.py::_acts_for": "who may stop a task of a person who left",
+    "kazma-ui/kazma_ui/hitl_timeout.py::_close_turn_of_departed":
+        "ending the turn of a card whose asker left: nothing is resumed",
+    "kazma-ui/kazma_ui/hitl_timeout.py::_close_turn_unread":
+        "ending the turn of a card whose person is unread: nothing is resumed",
+    "kazma-core/kazma_core/skills/self_improvement.py::_learn_from_turn":
+        "the lesson a finished turn of nobody's teaches",
     "kazma-ui/kazma_ui/hitl_answerers.py::whose_turn": "whose card a thread that names nobody shows",
     "kazma-ui/kazma_ui/runs_chat_turn.py::_acting": "whose turn a thread that names nobody ran",
 }
@@ -143,6 +165,7 @@ class Use:
     function: str  # "plain", "coroutine", "generator", "context manager", "module"
     yields: bool
     line: int
+    written: str = ""
 
 
 def _name(node: ast.AST) -> str:
@@ -201,6 +224,8 @@ def uses_in(source: str, rel: str) -> list[Use]:
     every = FORMS | RESOLVERS
     tree = ast.parse(source)
     called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    exported = {id(c) for n in tree.body if isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "__all__" for t in n.targets) for c in ast.walk(n)}
 
     def visit(node: ast.AST, stack: list[str], function: ast.AST | None) -> None:
         taken: set[int] = set()
@@ -219,15 +244,18 @@ def uses_in(source: str, rel: str) -> list[Use]:
                     if isinstance(call, ast.Call) and _name(call) in FORMS | RESOLVERS:
                         taken.add(id(call))
                         found.append(Use(f"{rel}::{'.'.join(stack)}", _name(call), "with",
-                                         _kind(function), _yields(node), node.lineno))
+                                         _kind(function), _yields(node), node.lineno, ast.unparse(call)))
         here = f"{rel}::{'.'.join(stack)}"
         if isinstance(node, ast.Call) and _name(node) in every and id(node) not in seen:
             kept = _name(node) in RESOLVERS and _kept_and_entered(node, function)
             found.append(Use(here, _name(node), "kept" if kept else "call", _kind(function),
-                             function is not None and _yields(function), node.lineno))
+                             function is not None and _yields(function), node.lineno, ast.unparse(node)))
         if isinstance(node, ast.Name | ast.Attribute) and _name(node) in every and id(node) not in called \
                 and isinstance(node.ctx, ast.Load):
             found.append(Use(here, _name(node), "passed", _kind(function), False, node.lineno))
+        if isinstance(node, ast.Constant) and node.value in every and id(node) not in exported:
+            # getattr(row_work, "statements_of"): the form by its name.
+            found.append(Use(here, str(node.value), "passed", _kind(function), False, node.lineno))
         if isinstance(node, ast.ImportFrom):
             found.extend(Use(here, a.name, "passed", _kind(function), False, node.lineno)
                          for a in node.names if a.name in every and a.asname not in (None, a.name))
@@ -283,11 +311,11 @@ def test_the_installs_statements_are_the_declared_ones() -> None:
     assert all(len(reason.split()) >= 4 for reason in INSTALL.values())
 
 
-def _reason_problems(uses: list[Use], rows: dict[str, str]) -> list[str]:
+def _reason_problems(uses: list[Use], rows: dict[str, tuple[str, tuple[str, ...]]]) -> list[str]:
     """A form used for another reason than its function declares."""
     bad: list[str] = []
     for use in uses:
-        reason = rows.get(use.where, "")
+        reason, _written = rows.get(use.where, ("", ()))
         if use.form in FALLS_BACK and not reason.startswith("Kazma's own work:"):
             bad.append(f"{use.where}: {use.form} may act for the space's own account")
         if use.form == "resolve_act_of" and not reason.startswith("a person's act:"):
@@ -298,13 +326,30 @@ def _reason_problems(uses: list[Use], rows: dict[str, str]) -> list[str]:
     return bad
 
 
+def _written_problems(uses: list[Use], rows: dict[str, tuple[str, tuple[str, ...]]]) -> list[str]:
+    """Uses in a declared function that are not the ones it declares."""
+    now: dict[str, list[str]] = {}
+    for use in sorted(uses, key=lambda u: u.line):
+        now.setdefault(use.where, []).append(use.written.replace('"', "'"))
+    return [f"{where}: {sorted(now.get(where, []))}, declared {sorted(rows[where][1])}" for where in rows
+            if sorted(now.get(where, [])) != sorted(rows[where][1])]
+
+
+def test_a_second_use_in_a_declared_function_is_found() -> None:
+    uses = uses_in("def f(row, request):\n    with statements_of(row.t):\n        read()\n"
+                   "    with statements_of(request.query_params['space']):\n        read()\n", "x.py")
+    assert _written_problems(uses, {"x.py::f": ("statements: the row's own", ("statements_of(row.t)",))})
+    assert not _written_problems(uses[:1], {"x.py::f": ("statements: the row's own", ("statements_of(row.t)",))})
+
+
 def test_every_form_that_names_a_space_is_declared_with_where_it_comes_from() -> None:
     used = [u for u in _uses() if u.form in ROW_FORMS_DECLARED]
     where = {u.where for u in used}
     assert where - set(ROWS) == set(), "declare these in ROWS with where the space comes from"
     assert set(ROWS) - where == set(), "declared, and no longer there"
     kinds = ("statements:", "Kazma's own work:", "a person's act:")
-    assert all(r.startswith(kinds) and len(r.split()) >= 5 for r in ROWS.values())
+    assert all(r.startswith(kinds) and len(r.split()) >= 5 for r, _written in ROWS.values())
+    assert _written_problems(used, ROWS) == []
     assert _reason_problems(used, ROWS) == []
 
 
@@ -316,7 +361,7 @@ def test_every_form_that_names_a_space_is_declared_with_where_it_comes_from() ->
 ])
 def test_a_planted_persons_act_that_falls_back_is_found(form: str, reason: str) -> None:
     uses = uses_in(f"def move_page(a):\n    with {form}(a, 'omar')():\n        go()\n", "x.py")
-    assert _reason_problems(uses, {"x.py::move_page": reason})
+    assert _reason_problems(uses, {"x.py::move_page": (reason, ())})
 
 
 def test_a_planted_route_with_a_requests_id_is_seen() -> None:
@@ -333,8 +378,8 @@ def _callers_of(name: str) -> set[str]:
         for child in ast.iter_child_nodes(node):
             inner = [*stack, child.name] if isinstance(
                 child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) else stack
-            if isinstance(child, ast.Call) and _name(child) == name:
-                found.add(f"{rel}::{'.'.join(inner)}")
+            if isinstance(child, ast.Name | ast.Attribute) and _name(child) == name and isinstance(child.ctx, ast.Load):
+                found.add(f"{rel}::{'.'.join(inner)}")  # called, or handed on (asyncio.to_thread)
             visit(child, inner, rel)
 
     for rel in _product_files():
@@ -360,6 +405,7 @@ def test_who_acts_for_a_space_is_declared() -> None:
     ("from kazma_core.spaces.row_work import statements_of as of\n", "another name"),
     ("def f():\n    form = row_work.statements_of\n    with form('a'):\n        go()\n", "without being called"),
     ("def f():\n    run(functools.partial(work_of, 'a'))\n", "without being called"),
+    ("def f():\n    with getattr(rw, 'statements_of')('a'):\n        go()\n", "without being called"),
     ("def f():\n    install_statements('a ping')\n    ping()\n", "never entered"),
     ("def f():\n    g(statements_of(space))\n", "never entered"),
     ("@install_statements('x')\nasync def f():\n    await g()\n", "decorates a coroutine"),
@@ -474,3 +520,79 @@ def test_a_loop_over_every_spaces_rows_enters_one_per_row() -> None:
 ])
 def test_a_planted_loop_is_found(source: str, found: bool) -> None:
     assert loops_without_a_space(source, "x.py") == ({"x.py::f"} if found else set())
+
+
+# ── who binds a space itself ─────────────────────────────────────────────
+
+#: Files that bind a scope of their own (``bind_scope``, ``set_scope``) ->
+#: where its space comes from. A route binds none: the tenant middleware does,
+#: after it checked the membership.
+BINDERS: dict[str, str] = {
+    "kazma-cli/kazma_cli/history_import.py": "the owner's: the command is the owner's",
+    "kazma-core/kazma_core/backup/cloud_sync.py": "the owner's: the install's backups are the owner's",
+    "kazma-core/kazma_core/chat_files.py": "a chat move's two spaces, whose rule was asked",
+    "kazma-core/kazma_core/cron/scheduler.py": "the job's own space and creator (work_scope)",
+    "kazma-core/kazma_core/memory/task_queue.py": "the queued task's own tenant and person",
+    "kazma-core/kazma_core/observability/connector_health.py": "the checked account's own space",
+    "kazma-core/kazma_core/observability/daily_digest.py": "the owner's: the digest is the owner's",
+    "kazma-core/kazma_core/runs/runbooks.py": "the owner's: runbooks act for the owner",
+    "kazma-core/kazma_core/skills/self_improvement.py": "the finished turn's own space",
+    "kazma-core/kazma_core/spaces/machine.py": "a space of the owner's, after its own membership check",
+    "kazma-core/kazma_core/spaces/people.py": "the shared space just made",
+    "kazma-core/kazma_core/spaces/threads.py": "the thread's record",
+    "kazma-core/kazma_core/swarm/patterns.py": "the task's own space and person (work_scope)",
+    "kazma-core/kazma_core/web_acquire/canary.py": "the owner's: the canary's library",
+    "kazma-gateway/kazma_gateway/agent_handler/graph.py": "the linked account's space of the message's chat",
+    "kazma-gateway/kazma_gateway/agent_handler/hitl.py": "the paused thread's home, as its own asker",
+    "kazma-ui/kazma_ui/auth.py": "the request's principal, after the membership check",
+    "kazma-ui/kazma_ui/chat_delete.py": "the deleted chat's own scope",
+    "kazma-ui/kazma_ui/chat_move.py": "a chat move's two spaces, whose rule was asked",
+    "kazma-ui/kazma_ui/health.py": "the owner's: the recall canary's",
+    "kazma-ui/kazma_ui/hitl_answerers.py": "the card's own space and its answerer",
+    "kazma-ui/kazma_ui/hitl_timeout.py": "the timed-out card's own space",
+    "kazma-ui/kazma_ui/kb_api.py": "the resumed crawl's own space and asker (work_scope)",
+    "kazma-ui/kazma_ui/oauth_sign_in.py": "the sign-in attempt's own space and asker",
+    "kazma-ui/kazma_ui/runs_chat_turn.py": "the run's own thread",
+    "kazma-ui/kazma_ui/space_binding.py": "the space a request names, after the membership check",
+    "kazma-ui/kazma_ui/thread_rewind.py": "a chat move's target, whose rule was asked",
+}
+
+
+def binds_in(source: str) -> list[tuple[int, str]]:
+    """Every binding of a scope: its line, as written."""
+    return [(n.lineno, ast.unparse(n)) for n in ast.walk(ast.parse(source))
+            if isinstance(n, ast.Call) and _name(n) in ("bind_scope", "set_scope")]
+
+
+def _of_a_request(written: str) -> bool:
+    """Whether a binding's arguments come straight from a request."""
+    names = {n.id for n in ast.walk(ast.parse(written)) if isinstance(n, ast.Name)} | {
+        n.attr for n in ast.walk(ast.parse(written)) if isinstance(n, ast.Attribute)}
+    return bool(names & {"request", "body", "payload", "query_params", "path_params", "headers", "params"})
+
+
+def test_every_file_that_binds_a_space_is_declared_and_none_binds_a_requests() -> None:
+    found: set[str] = set()
+    bad: list[str] = []
+    for rel in _product_files():
+        if rel in (ROW_WORK, "kazma-core/kazma_core/spaces/scope.py"):
+            continue
+        text = (REPO / rel).read_text(encoding="utf-8", errors="replace")
+        if "bind_scope" in text or "set_scope" in text:
+            binds = binds_in(text)
+            found |= {rel} if binds else set()
+            bad += [f"{rel}:{line}: {written}" for line, written in binds if _of_a_request(written)]
+    assert bad == [], "a space a request names is the middleware's to bind, after it checked the membership"
+    assert found - set(BINDERS) == set(), "declare the file in BINDERS with where its spaces come from"
+    assert set(BINDERS) - found == set(), "declared, and binds nothing"
+
+
+@pytest.mark.parametrize("written", ["bind_scope(request.query_params['space'], who)", "bind_scope(body.space, who)",
+                                     "set_scope(request.headers['X-Kazma-Space'], who)"])
+def test_a_planted_route_that_binds_a_requests_space_is_found(written: str) -> None:
+    [(_, seen)] = binds_in(f"async def route(request):\n    with {written}:\n        pass\n")
+    assert _of_a_request(seen)
+
+
+def test_a_binding_of_a_records_space_is_not_a_requests() -> None:
+    assert not _of_a_request("bind_scope(entry['source'], entry['by'])")

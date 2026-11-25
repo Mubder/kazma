@@ -41,8 +41,9 @@ an install with one account behaves as before.
   in `install_statements(reason)`, declared in `INSTALL` of
   `tests/test_row_work_gates.py`, both ways, and only where no request comes
   with an id of its own; every use of the others is declared there too, with
-  where its space comes from (`ROWS`), and every caller of `acting_account`
-  (`ACTS_FOR_A_SPACE`); a loop for every space starts in `install_loops`. A
+  where its space comes from and as it is written (`ROWS`), every caller of
+  `acting_account` (`ACTS_FOR_A_SPACE`) and every file that binds a scope
+  itself (`BINDERS`; none from a request's own words); a loop for every space starts in `install_loops`. A
   loop over rows of several spaces enters one per row. Never held across a
   `yield`. With Spaces off they bind nothing. Nothing reads what was said yet:
   the database door (`Door.now`) is S4-01 step 1, and
