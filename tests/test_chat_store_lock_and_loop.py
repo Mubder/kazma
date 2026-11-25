@@ -93,6 +93,9 @@ def _uses(s: SessionManager) -> dict[str, Callable[[], Any]]:
         "another_chat_on": cold(lambda: s.another_chat_on("u-t", "x")),
         "unmark_if_held": cold(lambda: s.unmark_if_held("u-1", "u-t")),
         "add_usage": cold(lambda: s.add_usage("u-1", 1, 0.0)),
+        "space_erased": lambda: s.space_erased("sp-another"),
+        # Its threads are read from their own store; the chats' are let go.
+        "space_arrived": lambda: s.space_arrived("sp-another"),
         "rename": cold(lambda: s.rename("u-1", "r")),
         "set_archived": cold(lambda: s.set_archived("u-1", True)),
         "set_pinned": cold(lambda: s.set_pinned("u-1", True)),

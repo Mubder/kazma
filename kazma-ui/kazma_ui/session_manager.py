@@ -1063,7 +1063,7 @@ class SessionManager:
 
     def _let_go(self, space: str) -> None:
         """Drop the space's cached chats. The caller holds the lock."""
-        for key in [k for k, s in self._sessions.items() if (s.tenant_id or _space()) == space]:
+        for key in [k for k in self._sessions if k.startswith(f"{space}:")]:
             del self._sessions[key]
         self._list_refreshed_at.pop(space, None)
 
