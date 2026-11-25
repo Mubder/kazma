@@ -10,6 +10,16 @@
   in English, Gulf Arabic and Modern Standard Arabic. Facts already held twice
   are not merged by this.
 
+## Memory: lists and the Memory page find Arabic words (2026-11-25)
+
+- "List everything you remember about my allergy" in Arabic, and the Memory
+  page's searches (facts, memories, things and the map), now find an Arabic
+  word in any usual spelling, with or without its article, as they found an
+  English one: "قهوه" finds "القهوة", "12" finds "١٢". Kazma's list in a chat
+  found none of eight Arabic words before, in the very spelling they were told.
+- A plural or a possessive finds the word in the facts and things lists too
+  ("coffees", "car's").
+
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 
 - Once Spaces is on, a chat you started can move from your own space into a

@@ -964,7 +964,9 @@ Fact names (the old W7) are fixed here, where they can move a number.
 
 Step 1, built 2026-11-25: the facts the deep pass is shown are the ones the
 turn is about (`memory/held_facts.py`, §15 H). It compared lists of words in
-alphabetical order and gave every place to the user's newest facts. Next: one
+alphabetical order and gave every place to the user's newest facts. Built beside it the same day: memory's
+lists and the Memory page find an Arabic word in any spelling
+(`memory/word_search.py`, §15 G (3)). Next: one
 role for one person and lists by kind, facts found by an Arabic question as by
 an English one, what W4 left, and the benchmark written as Kazma writes.
 

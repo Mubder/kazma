@@ -212,6 +212,12 @@ drawing, the rest by extraction.
   (an underscore separates), the id matches even when the index holds no
   word of the query, and an exact id or name comes first. `kazma_ai_admin`
   became the one token `kazmaaiadmin` and found nothing.
+- **The page finds an Arabic word in any usual spelling**: the facts, the
+  memories and the Entities searches ask `memory/word_search.py` beside their
+  index (§15 G (3), "A list finds a word in any spelling"); an alias is read
+  out of its JSON (half its writers escape the Arabic). The map filters in
+  the browser with the same fold (`static/js/search_fold.js`, held to
+  `fold_for_search` character by character, `tests/test_search_fold_js.py`).
 - **Memory health reports the clutter** (`v2_health` -> `graph`: empty,
   isolated, work-item and same-word duplicate entities, with examples).
   Read-only; the operator merges or deletes with the existing controls.

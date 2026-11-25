@@ -265,7 +265,7 @@ def _chat_kept_out(thread: str, tenant_id: str) -> bool:
 
 def register_memory_tools(registry: Any) -> None:
     """Register the memory tools onto *registry*."""
-    from kazma_core.db.sql_patterns import like_literal
+    from kazma_core.memory import word_search
     # Helper closures used by the memory tools below. They carry no
     # @registry.register decorator, so they moved with their callers when
     # this module was split out of tool_builtins.py (audit O5).
@@ -294,14 +294,15 @@ def register_memory_tools(registry: Any) -> None:
             params: list[Any] = [tenant]
             if (q or "").strip():
                 # Word-boundary friendly: normalize _/- to spaces on BOTH
-                # sides so 'memory system' matches user_memory_system.
-                ql = f"%{like_literal(_qnorm(q))}%"
+                # sides so 'memory system' matches user_memory_system. Both
+                # folded, and by words (word_search, W6).
+                word_search.register(conn, word_search.Asked.of(_qnorm(q)))
                 sql += (
-                    " AND (LOWER(REPLACE(REPLACE(subject,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
-                    "OR LOWER(REPLACE(REPLACE(predicate,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
-                    "OR LOWER(REPLACE(REPLACE(object,'_',' '),'-',' ')) LIKE ? ESCAPE '!')"
+                    " AND (kazma_asked_phrase(REPLACE(REPLACE(subject,'_',' '),'-',' ')) "
+                    "OR kazma_asked_phrase(REPLACE(REPLACE(predicate,'_',' '),'-',' ')) "
+                    "OR kazma_asked_phrase(REPLACE(REPLACE(object,'_',' '),'-',' ')) "
+                    "OR kazma_asked_every(subject, predicate, object))"
                 )
-                params.extend([ql, ql, ql])
             sql += (
                 " ORDER BY (structural_importance * confidence) DESC LIMIT ?"
             )
@@ -345,13 +346,13 @@ def register_memory_tools(registry: Any) -> None:
             """
             params: list[Any] = [tenant]
             if (q or "").strip():
-                ql = f"%{like_literal(_qnorm(q))}%"
+                word_search.register(conn, word_search.Asked.of(_qnorm(q)))
                 sql += (
-                    " AND (LOWER(REPLACE(REPLACE(e.id,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
-                    "OR LOWER(REPLACE(REPLACE(e.name,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
-                    "OR LOWER(REPLACE(REPLACE(e.type,'_',' '),'-',' ')) LIKE ? ESCAPE '!')"
+                    " AND (kazma_asked_phrase(REPLACE(REPLACE(e.id,'_',' '),'-',' ')) "
+                    "OR kazma_asked_phrase(REPLACE(REPLACE(e.name,'_',' '),'-',' ')) "
+                    "OR kazma_asked_phrase(REPLACE(REPLACE(e.type,'_',' '),'-',' ')) "
+                    "OR kazma_asked_every(e.id, e.name, e.type, kazma_alias_names(e.aliases_json)))"
                 )
-                params.extend([ql, ql, ql])
             sql += " ORDER BY belief_count DESC, e.name ASC LIMIT ?"
             params.append(lim)
             rows = [dict(r) for r in conn.execute(sql, params).fetchall()]

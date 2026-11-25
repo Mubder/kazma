@@ -5071,7 +5071,8 @@
     var activePred = Object.keys(_v2gFilters.predicate);
     var search = '';
     var searchEl = document.getElementById('v2g-search');
-    if (searchEl) search = searchEl.value.trim().toLowerCase();
+    // Folded, both sides: an Arabic name in any usual spelling.
+    if (searchEl) search = window.kazmaSearchFold(searchEl.value);
 
     var nodes = _v2gRawNodes, links = _v2gRawLinks;
     // LOD: hard-cap node count for paint performance (P2-4)
@@ -5092,7 +5093,7 @@
       links = links.filter(function(l) {
         if (activePred.length && activePred.indexOf(l.type) < 0) return false;
         if (search) {
-          var hay = ((l.label || '') + ' ' + (l.source || '') + ' ' + (l.target || '') + ' ' + (l.object_text || '')).toLowerCase();
+          var hay = window.kazmaSearchFold((l.label || '') + ' ' + (l.source || '') + ' ' + (l.target || '') + ' ' + (l.object_text || ''));
           if (hay.indexOf(search) < 0) return false;
         }
         return true;
@@ -5108,7 +5109,7 @@
     links.forEach(function(l) { nodeIds.add(l.source); nodeIds.add(l.target); });
     if (search) {
       nodes.forEach(function(n) {
-        var nm = (n.name || n.label || n.id || '').toLowerCase();
+        var nm = window.kazmaSearchFold(n.name || n.label || n.id || '');
         if (nm.indexOf(search) >= 0) nodeIds.add(n.id);
       });
     }
@@ -5364,16 +5365,16 @@
   var _v2gShowEpisodes = false;
 
   function _v2gApplyPathFromQuery() {
-    var seeds = (_v2gLastQuerySeeds || []).map(function(s) { return String(s).toLowerCase(); });
+    var seeds = (_v2gLastQuerySeeds || []).map(function(s) { return window.kazmaSearchFold(s); });
     if (!seeds.length) {
       var q = ((document.getElementById('v2g-search') || {}).value || (document.getElementById('v2-probe-input') || {}).value || '').trim();
-      if (q) seeds = q.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
+      if (q) seeds = window.kazmaSearchFold(q).split(/\s+/).filter(function(w) { return w.length > 2; });
     }
     _v2gPathIds = {};
     var matched = 0;
     for (var i = 0; i < _v2gPts.length; i++) {
       var p = _v2gPts[i];
-      var hay = ((p.id || '') + ' ' + (p.fullLabel || '') + ' ' + (p.label || '')).toLowerCase();
+      var hay = window.kazmaSearchFold((p.id || '') + ' ' + (p.fullLabel || '') + ' ' + (p.label || ''));
       for (var s = 0; s < seeds.length; s++) {
         if (seeds[s] && hay.indexOf(seeds[s]) >= 0) {
           _v2gPathIds[p.id] = true;
