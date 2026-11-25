@@ -59,6 +59,7 @@ __all__ = [
     "has_rtl",
     "rtl_ratio",
     "is_rtl_dominant",
+    "spelling_pattern",
     "to_logical",
     "fold_for_search",
     "strip_bidi_controls",
@@ -391,6 +392,78 @@ def _fold_once(text: str) -> str:
     folded = _HARAKAT_RE.sub("", folded)
     folded = folded.translate(_SEARCH_TRANSLATE)
     return _WS_RE.sub(" ", folded).strip().casefold()
+
+
+# Where the characters that fold are: the Arabic blocks, their presentation
+# forms, and the marks a fold takes out (the bidi controls among them).
+_SPELLED_IN = ((0x600, 0x6FF), (0x750, 0x77F), (0x8A0, 0x8FF), (0x2000, 0x206F), (0xFB50, 0xFDFF), (0xFE70, 0xFEFF))
+# The joined letters a person or a PDF writes as one character. The typographic
+# ligatures of Presentation Forms-A ("ﱁ" for two letters) are not among
+# them: a font draws those from the letters, nobody types them.
+_JOINED = ("الله", "لا")
+
+
+@functools.lru_cache(maxsize=1)
+def _spellings() -> tuple[str, dict[str, str]]:
+    """What :func:`fold_for_search` reads as nothing, and as each letter
+    (and each of :data:`_JOINED`): asked of the fold itself, so this table
+    cannot disagree with it."""
+    removed: list[str] = []
+    of: dict[str, list[str]] = {}
+    for first, last in _SPELLED_IN:
+        for point in range(first, last + 1):
+            char = chr(point)
+            # Between two letters, as it stands in a word: alone, a space the
+            # fold trims would read as nothing.
+            inside = fold_for_search(f"ب{char}ب")[1:-1]
+            if not inside:
+                removed.append(char)
+            elif (len(inside) == 1 and inside != char) or inside in _JOINED:
+                of.setdefault(inside, []).append(char)
+    return "".join(removed), {letter: "".join(chars) for letter, chars in of.items()}
+
+
+@functools.lru_cache(maxsize=512)
+def spelling_pattern(term: str) -> str:
+    """A regular expression for the written forms of *term*: what
+    :func:`fold_for_search` folds to the same letters.
+
+    For a text too long to fold (a whole chat, in SQL or not): the pattern is
+    read where the text lies -- Python's ``re`` and Postgres' ``~`` both take
+    it -- and is linear. A hit is confirmed with the fold. "" for a term the
+    fold reads as nothing.
+    """
+    removed, of = _spellings()
+    marks = f"[{removed}]*"
+    folded = fold_for_search(term)
+    if not folded:
+        return ""
+    letters = [_written(c, of) for c in folded]
+    # A term may begin or end inside a joined lam-alef.
+    lam, alef = _JOINED[1]
+    if folded[0] == alef:
+        letters[0] = f"(?:{letters[0]}|[{of[_JOINED[1]]}])"
+    if folded[-1] == lam:
+        letters[-1] = f"(?:{letters[-1]}|[{of[_JOINED[1]]}])"
+    parts: list[str] = []
+    at = 0
+    while at < len(folded):
+        joined = next((j for j in _JOINED if folded.startswith(j, at)), "")
+        end = at + (len(joined) or 1)
+        one = marks.join(letters[at:end])
+        parts.append(f"(?:{one}|[{of[joined]}])" if joined else one)
+        at = end
+    return marks.join(parts)
+
+
+def _written(letter: str, of: dict[str, str]) -> str:
+    """One folded character, as a class of what folds to it."""
+    forms = {letter, *of.get(letter, "")}
+    forms |= {c for c in (letter.upper(), letter.lower()) if len(c) == 1}
+    inside = "".join(sorted(forms))
+    if len(forms) > 1:
+        return f"[{inside}]"
+    return letter if letter.isalnum() else "\\" + letter
 
 
 def to_arabic_numerals(text: str) -> str:

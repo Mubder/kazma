@@ -245,4 +245,19 @@ came up short, and archiving had erased 76 memories.
   SQLite `sessions`, overlaid with the save spool (`paths.chat_spool_db`, the
   web UI's rule too), tenant-filtered, scored in SQL over every session. The
   fallback used to open only the SQLite file -- on Postgres a July leftover.
+- **The past-chats search reads every spelling, and checks before it cuts**
+  (2026-11-25). The question was folded and the stored text was not: 14 of 21
+  Arabic spellings missed, "القهوة" as stored among them. A word that is not
+  plain English letters is looked for by `documents.arabic.spelling_pattern`,
+  built from `fold_for_search` itself (never a second table; a chat is not
+  folded to be searched: 9 MB/s against 650), in SQLite, Postgres, the spool
+  and the snippet, and confirmed with the fold. `search_sessions` ranks every
+  matching chat without its text, then asks `confirm` about each in rank
+  order, 15 texts at a time, until enough are confirmed: 15 rows cut first
+  hid the chat that answered behind 20 with "resize". A chat must hold
+  `at_least` of the terms to be ranked. `system` rows (the old `/compact`
+  wrote the prompt and "About me" as such) are not read, nor exported
+  (`export_session`). Gate: `tests/test_past_chats_search.py` (both
+  databases; the cut before the checks, and a class taken out of the fold,
+  as the controls).
 

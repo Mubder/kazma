@@ -502,6 +502,28 @@ def _save_fork_chat(session_id: str, title: str, messages: list[dict[str, Any]],
     ))
 
 
+def _fork_rows(thread_id: str, state: list[Any]) -> list[dict[str, Any]]:
+    """The fork's chat rows: the step's questions and answers, each question
+    naming who asked it in the source chat -- of the rows up to the step, the
+    later ones are not the fork's. They named nobody, so a fork in a shared
+    space could not be taken out (``others_wrote``) and its turns were the
+    opener's. Blocking: the chat store."""
+    from kazma_ui.reply_sink import carry_authors
+    from kazma_ui.session_manager import get_session_manager
+
+    rows = _projected_transcript(state)
+    _ok, session = _best_effort(f"reading who asked what in {thread_id} (its fork names nobody)",
+                                lambda: get_session_manager().get_by_thread_id(thread_id))
+    said = list(getattr(session, "messages", None) or [])
+    return carry_authors(said[:_transcript_cut(said, state)], rows, one_person=_one_person(said))
+
+
+def _one_person(rows: list[Any]) -> bool:
+    """Every question of the chat names the same person."""
+    return len({str(m.get("author") or "") for m in rows
+                if isinstance(m, dict) and m.get("role") == "user"}) == 1
+
+
 def _fork_title(thread_id: str, turn_index: int, lang: str) -> str:
     """"Fork of <the chat's title> (turn N)", in the page's language."""
     from kazma_ui.i18n import t
@@ -576,7 +598,7 @@ async def fork_thread(
         from kazma_ui.i18n import current_language
 
         lang = current_language()
-    messages = _projected_transcript(list(payload.get("messages") or []))
+    messages = await asyncio.to_thread(_fork_rows, thread_id, list(payload.get("messages") or []))
     title = await asyncio.to_thread(_fork_title, thread_id, record.turn_index, lang)
     chat_saved, _ = await asyncio.to_thread(
         _best_effort, f"saving the chat of fork {new_id} (it will not show in the chat list)",

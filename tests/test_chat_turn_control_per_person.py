@@ -8,7 +8,7 @@ Discord server channel, a Slack channel -- bound to the shared space Garden
 chat; Dana's turn is running:
 
 * each user row the gateway saves names the account that sent it
-  (``graph._carry_authors``): the row Dana's turn opens with is hers, so
+  (``reply_sink.carry_authors``): the row Dana's turn opens with is hers, so
   whose turn it is (``hitl_answerers.whose_turn``) reads Dana -- never the
   chat's opener;
 * Rami's ``/steer`` and ``/steer!``, his ``/abort`` and ``/stop`` and his
@@ -273,7 +273,8 @@ def test_whatsapp_dana_s_chat_is_hers_alone(world) -> None:
 
 
 def test_identical_messages_keep_their_own_authors() -> None:
-    from kazma_gateway.agent_handler.graph import _carry_authors, _merge_transcript
+    from kazma_gateway.agent_handler.graph import _merge_transcript
+    from kazma_ui.reply_sink import carry_authors
 
     existing = [{"role": "user", "content": "go", "author": "dana"},
                 {"role": "assistant", "content": "ok"},
@@ -282,9 +283,9 @@ def test_identical_messages_keep_their_own_authors() -> None:
     converted = [{"role": "user", "content": "go"}, {"role": "assistant", "content": "ok"},
                  {"role": "user", "content": "go"}, {"role": "assistant", "content": "ok again"},
                  {"role": "user", "content": "go"}]
-    out = _carry_authors(existing, _merge_transcript(existing, converted), "owner")
+    out = carry_authors(existing, _merge_transcript(existing, converted), "owner")
     assert [m.get("author") for m in out if m["role"] == "user"] == ["dana", "rami", "owner"]
-    out = _carry_authors(out, _merge_transcript(out, converted))
+    out = carry_authors(out, _merge_transcript(out, converted))
     assert [m.get("author") for m in out if m["role"] == "user"] == ["dana", "rami", "owner"], (
         "a later save keeps every row's author")
 
@@ -316,9 +317,9 @@ def test_negative_control_the_unrefused_press(world, monkeypatch) -> None:
 def test_negative_control_rows_without_their_authors(world, monkeypatch) -> None:
     """Planted: rows saved with no author. Whose turn it is falls back to the
     chat's opener, Rami: the check above fails on its own assertion."""
-    from kazma_gateway.agent_handler import graph as gw_graph
+    from kazma_ui import reply_sink
 
-    monkeypatch.setattr(gw_graph, "_carry_authors",
+    monkeypatch.setattr(reply_sink, "carry_authors",
                         lambda existing, out, author="": [{k: v for k, v in m.items() if k != "author"}
                                                           for m in out])
     with pytest.raises(AssertionError, match="the row Dana's turn opens with is hers"):

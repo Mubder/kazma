@@ -88,12 +88,29 @@ the later turns back from memory (`rewind_memory`, D2), from the transcript
 fork records a chat app's owner first, off the loop (`record_thread_owner`
 returns False and logs WARNING; a failure refuses the fork), writes the
 boundary state under the new id, and saves a projected chat row (questions
-and answers only) with a catalog title (`replay.fork_title`). Do NOT
+and answers only, each question naming its author: `_fork_rows`, below) with
+a catalog title (`replay.fork_title`). Do NOT
 overwrite `active_thread.{sender}` on a fork. Gates in
 `tests/test_time_travel_rewind.py`: only `thread_rewind` calls
 `apply_snapshot_to_thread`; every product function that calls
 `aupdate_state`/`adelete_thread` holds `thread_locks.thread_mutation` or is
 declared.
+
+**A chat's row keeps who asked** (2026-11-25). The checkpoint names no
+author, so rows made from it -- a fork's (`thread_rewind._fork_rows`, of the
+source's rows up to the step), the gateway's sync, the page's hydrate -- take
+them from the row they were in with the one helper,
+`reply_sink.carry_authors`. A question the row does not hold as written takes
+an author only when every question of the source chat is one person's. A
+fork named nobody: in a shared space it could not be taken out and its turns
+were the opener's. **`/compact` is of the state alone, on every install**: on
+the web it replaced the row with the model's own messages (the base prompt,
+"About me", recalled memory as `system` rows; authors, times and parts lost).
+Rows it wrote stay as they are. It still runs a whole model turn whose answer
+nobody sees (the trim is part of the supervisor's call). Gate:
+`tests/test_chat_authors_carried.py`: every place that sets a session's
+messages as a whole is declared with how it keeps authors (planted rewrites
+and the fork without the helper as the controls).
 
 **D2. A rewind rewinds memory** (Memory audit M09, 2026-10-13, decided with
 TT-03: memory is rewound, not kept). `/undo`, `/edit`, a restore

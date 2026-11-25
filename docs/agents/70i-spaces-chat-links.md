@@ -193,7 +193,7 @@
     in the handler; a refusal is said with the web's words
     (`hitl_answerers.turn_lines`) in the sender's language. Whose turn it is
     reads the chat store's rows, so every user row the gateway saves names
-    its sender (`graph._carry_authors`: the k-th newest row of the same text
+    its sender (`reply_sink.carry_authors`: the k-th newest row of the same text
     keeps its author, the message a turn opens with takes the bound asker;
     a web row's author survives a gateway save). `/undo`, `/edit` and
     `/replay <step>` are not asked yet. Gate:

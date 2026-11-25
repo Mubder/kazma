@@ -101,24 +101,33 @@ async def export_session(
         return f"Error: Unknown format '{format}'. Use 'json' or 'markdown'."
 
 
+def _without_system(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The conversation: the prompt, "About me", recalled memory and Kazma's
+    turn notes (``system`` messages) are not part of what was said, and the
+    export lands in the chat, which others may read (25 Nov 2026; only the
+    Markdown export left them out)."""
+    return [m for m in messages if str(m.get("role", "")).lower() != "system"]
+
+
 def _export_json(messages: list[dict[str, Any]]) -> str:
     """Export session as formatted JSON."""
-    export = {
+    shown = _without_system(messages)
+    export: dict[str, Any] = {
         "exported_at": datetime.now(UTC).isoformat(),
-        "message_count": len(messages),
-        "messages": messages,
+        "message_count": len(shown),
+        "messages": shown,
     }
+    if len(messages) > len(shown):
+        export["system_messages_left_out"] = len(messages) - len(shown)
     return json.dumps(export, ensure_ascii=False, indent=2)
 
 
 def _export_markdown(messages: list[dict[str, Any]]) -> str:
     """Export session as a readable Markdown document."""
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    # System messages (the prompt, turn notes) stay out of the readable
-    # export, and the export says so (audit 2026-10-26 AUD-072): it dropped
-    # them silently while its count included them. The JSON export keeps
-    # every message.
-    shown = [m for m in messages if str(m.get("role", "")).lower() != "system"]
+    # What is left out is said (audit 2026-10-26 AUD-072): it was dropped
+    # silently while the count included it.
+    shown = _without_system(messages)
     left_out = len(messages) - len(shown)
     lines: list[str] = [
         "# Session Export",
@@ -127,8 +136,7 @@ def _export_markdown(messages: list[dict[str, Any]]) -> str:
     ]
     if left_out:
         lines.append(
-            f"**System messages left out:** {left_out} "
-            "(the prompt and Kazma's notes; the JSON export includes them)"
+            f"**System messages left out:** {left_out} (the prompt and Kazma's notes)"
         )
     lines += ["", "---", ""]
 

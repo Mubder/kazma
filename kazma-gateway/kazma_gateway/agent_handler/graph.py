@@ -383,35 +383,6 @@ def _merge_transcript(existing: list, converted: list) -> list:
     return out
 
 
-def _carry_authors(existing: list, out: list, author: str = "") -> list:
-    """Each user row of *out* keeps the account that sent it (``author``,
-    Spaces S1-08; ``hitl_answerers.whose_turn`` reads it to know whose turn
-    it is): the checkpoint holds no author, so a row takes the author of the
-    row it was in *existing* -- the k-th newest row of the same text, so two
-    people's identical messages keep their own -- and the newest user row
-    takes *author*, the sender of the message the turn opens with (left out
-    of the matching: it is not in *existing* yet). Mutates and returns *out*.
-    No I/O."""
-    users = [i for i, m in enumerate(out) if isinstance(m, dict) and m.get("role") == "user"]
-    newest = users[-1] if author and users else None
-    before: dict[str, list[str]] = {}
-    for m in existing or []:
-        if isinstance(m, dict) and m.get("role") == "user":
-            before.setdefault(str(m.get("content") or ""), []).append(str(m.get("author") or ""))
-    seen: dict[str, int] = {}
-    for i in reversed(users):
-        if i == newest:
-            continue
-        key = str(out[i].get("content") or "")
-        seen[key] = seen.get(key, 0) + 1
-        authors = before.get(key, [])
-        if seen[key] <= len(authors) and authors[-seen[key]] and not out[i].get("author"):
-            out[i]["author"] = authors[-seen[key]]
-    if newest is not None:
-        out[newest]["author"] = author
-    return out
-
-
 def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[str, Any], messages: list,
                                   *, author: str = "") -> None:
     """Synchronize platform session to Web UI for seamless season takeover.
@@ -422,12 +393,13 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
 
     *author* is the account that sent the newest user message (at a turn's
     start: the bound asker); every user row keeps its author
-    (:func:`_carry_authors`), so whose turn it is reads the same as on the
+    (``reply_sink.carry_authors``), so whose turn it is reads the same as on the
     web (S3-06 follow-up: a group's member could steer or stop another
     member's turn).
     """
     try:
         from kazma_core.sessions.directory import canonical_web_session
+        from kazma_ui.reply_sink import carry_authors
         from kazma_ui.session_manager import get_session_manager
         store = get_session_manager()
         session = canonical_web_session(thread_id) or store.get_or_create(thread_id)
@@ -439,7 +411,7 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         # always ride over from the web row so a finished platform turn does
         # not land in the sidebar as text-only.
         if converted:
-            session.messages = _carry_authors(existing, _merge_transcript(existing, converted), author)
+            session.messages = carry_authors(existing, _merge_transcript(existing, converted), author)
 
         username = metadata.get("username") or metadata.get("display_name") or "user"
         plat = (platform or "chat").capitalize()

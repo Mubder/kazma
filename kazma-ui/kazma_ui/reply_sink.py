@@ -139,6 +139,52 @@ def authored(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def carry_authors(existing: list, out: list, author: str = "", *, one_person: bool = False) -> list:
+    """Each user row of *out* keeps the account that sent it (``author``,
+    Spaces S1-08; ``hitl_answerers.whose_turn`` reads it to know whose turn it
+    is, a chat's move whether others wrote in it): the checkpoint holds no
+    author, so a row made from it takes the author of the row it was in
+    *existing* -- the k-th newest row of the same text, so two people's
+    identical messages keep their own -- and the newest user row takes
+    *author*, the sender of the message the turn opens with (left out of the
+    matching: it is not in *existing* yet).
+
+    *one_person*: a question *existing* does not hold as written (the state
+    keeps an attachment's rewrite, a steer's note) is that person's too when
+    every question of *existing* names the same one; else it names nobody --
+    an author is recorded, never guessed. Mutates and returns *out*. No I/O."""
+    users = [i for i, m in enumerate(out) if isinstance(m, dict) and m.get("role") == "user"]
+    newest = users[-1] if author and users else None
+    before: dict[str, list[str]] = {}
+    for m in existing or []:
+        if isinstance(m, dict) and m.get("role") == "user":
+            before.setdefault(_as_said(m.get("content")), []).append(str(m.get("author") or ""))
+    everyone = {name for names in before.values() for name in names}
+    only = next(iter(everyone)) if one_person and len(everyone) == 1 else ""
+    seen: dict[str, int] = {}
+    for i in reversed(users):
+        if i == newest:
+            continue
+        key = _as_said(out[i].get("content"))
+        seen[key] = seen.get(key, 0) + 1
+        authors = before.get(key, [])
+        sent_by = authors[-seen[key]] if seen[key] <= len(authors) else only
+        if sent_by and not out[i].get("author"):
+            out[i]["author"] = sent_by
+    if newest is not None:
+        out[newest]["author"] = author
+    return out
+
+
+def _as_said(content: Any) -> str:
+    """A message's text as a row and the state both hold it (its parts' text
+    when it has parts)."""
+    if isinstance(content, list):
+        content = "".join(p if isinstance(p, str) else str(p.get("text") or "")
+                          for p in content if isinstance(p, (str, dict)))
+    return str(content or "").strip()
+
+
 #: A turn's lifecycle is a JOIN-SEMILATTICE, not a field: it only ever moves
 #: forward, and `closed` absorbs.
 #:
