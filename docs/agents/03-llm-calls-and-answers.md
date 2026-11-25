@@ -132,3 +132,22 @@ code before styles, links and images. Gate: `tests/js/test_markdown_render.js`.
 - Anthropic/Gemini/Azure/Bedrock have their own `chat()` implementations
   that handle system messages natively — do NOT hoist there.
 
+
+- **A model's thinking text is never part of its answer** (2026-11-25,
+  `kazma_core/reasoning_text.py`): a `<think>` block at the start of the
+  content, a stray `</think>` alone on its line or with the same text on both
+  sides (Qwen, once in 36 streamed replies), and a content list's reasoning
+  parts are taken out, whole (`split_reasoning`) and streamed (`ThinkFilter`),
+  by every client class; a reply that names the tag in prose or code is not
+  cut. A new client streams `shown = filter.feed(piece)`, never the
+  provider's piece. Gate: `tests/test_reasoning_is_never_the_answer.py` (a
+  recorded Qwen-shaped stream; the old stream as the control).
+- **A content filter's refusal is another vendor's to answer**
+  (`agent/content_refusal.py`, `llm_provider._is_content_refusal`): an
+  `LLMError` of kind `content_refused`, permanent, asked once (never again
+  with no tools). `_try_failover_models` and `resilient_chat` take it to the
+  first backup of ANOTHER vendor (the address's host), the chat's answer
+  begins with a line saying so in the message's language, and no alert is
+  raised: nothing is broken. With no such backup the turn says what refused it
+  and what to do. Every other 4xx still fails fast. Gate:
+  `tests/test_content_refusal_failover.py`.

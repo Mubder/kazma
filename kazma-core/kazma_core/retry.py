@@ -163,6 +163,15 @@ def friendly_llm_error(
             "proxy in front of it), or switch provider in Settings > Providers & Connectors."
         )
 
+    if getattr(exc, "kind", "") == "content_refused":
+        # The provider's filter, not Kazma's and not the key: what can be done.
+        where = f" ({model.strip()})" if model.strip() else ""
+        return (
+            f"⚠️ The model provider's content filter{where} refused this message, so it was "
+            "not answered. Put it another way, choose another model, or set a backup model "
+            "from another vendor (Settings > System): Kazma asks it when this happens."
+        )
+
     if getattr(exc, "kind", "") == "model_not_allowed":
         # Spaces S2-03: the model is not one the person may use; nothing was sent.
         where = f" ({model.strip()})" if model.strip() else ""

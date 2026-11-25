@@ -36,6 +36,7 @@ from kazma_core.llm_provider import (
     own_key_delta,
 )
 from kazma_core.llm_stream import StreamDelta
+from kazma_core.reasoning_text import ThinkFilter, split_reasoning
 
 logger = logging.getLogger(__name__)
 
@@ -333,7 +334,7 @@ class BedrockProvider(LLMProvider):
             cached_input_cost_per_1m=self.config.cached_input_cost_per_1m) if cost_known else 0.0
 
         return LLMResponse(
-            content="".join(text_parts),
+            content=split_reasoning("".join(text_parts))[0],
             tool_calls=tool_calls,
             finish_reason=finish,
             model=model_id,
@@ -397,6 +398,7 @@ class BedrockProvider(LLMProvider):
                 loop.call_soon_threadsafe(queue.put_nowait, None)
                 return
             text_parts: list[str] = []
+            thinking = ThinkFilter()
             tool_calls: list[ToolCall] = []
             usage_in = 0
             usage_out = 0
@@ -420,9 +422,11 @@ class BedrockProvider(LLMProvider):
                         chunk = str(delta.get("text") or "")
                         if chunk:
                             text_parts.append(chunk)
-                            loop.call_soon_threadsafe(
-                                queue.put_nowait, StreamDelta(content=chunk)
-                            )
+                            shown = thinking.feed(chunk)
+                            if shown:
+                                loop.call_soon_threadsafe(
+                                    queue.put_nowait, StreamDelta(content=shown)
+                                )
                     if "toolUse" in delta and current_tool is not None:
                         current_tool["input"] += str(
                             (delta.get("toolUse") or {}).get("input") or ""
@@ -450,6 +454,9 @@ class BedrockProvider(LLMProvider):
                 loop.call_soon_threadsafe(queue.put_nowait, exc)
                 loop.call_soon_threadsafe(queue.put_nowait, None)
                 return
+            shown = thinking.finish()
+            if shown:
+                loop.call_soon_threadsafe(queue.put_nowait, StreamDelta(content=shown))
             fake = {
                 "output": {
                     "message": {

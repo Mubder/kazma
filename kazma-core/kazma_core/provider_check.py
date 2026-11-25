@@ -308,6 +308,8 @@ def _check_error(exc: BaseException) -> tuple[str, str]:
     kind = str(getattr(exc, "kind", "") or "")
     if kind in ("unusable_answer", "stream_truncated"):
         return "unusable_answer", "The provider answered, but not with a model answer."
+    if kind == "content_refused":
+        return "content_refused", "The provider's content filter refused the message."
     if kind == "rate_limit_exhausted":
         return "rate_limited", "The provider is limiting how often it may be called (HTTP 429)."
     status = _extract_http_status_code(exc if isinstance(exc, Exception) else Exception(str(exc)))

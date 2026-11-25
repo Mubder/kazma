@@ -165,7 +165,7 @@ is so basic ... if I clicked outside the card the card gone").
   `field_<id>` in `i18n/catalog/provider_setup.py`.
 - **The rules are `kazma_core/provider_setup.py`**: `endpoint_address`,
   `field_problems` (asked by the check and the save; a value a row already
-  has is never judged), `identity_of` / `rows_at` (one row per provider and
+  has is never judged), `rows_at` (one row per provider and
   address), `add_key` and `tidy`. Both writers go through
   `ModelRegistry.update_provider_rows` (one `atomic_update` of the rows as
   stored). A merge keeps every key as an extra key, records the merged names

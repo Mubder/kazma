@@ -1066,10 +1066,7 @@ class ModelRegistry:
                 keep(list(GEMINI_MODELS))
                 return DiscoveryResult(True, list(GEMINI_MODELS), source="built_in")
             if own_preset and not own_preset.get("models_endpoint"):
-                # Bedrock has no address and no list: the models typed are its own.
-                typed = self._normalize_models(provider_entry.get("models", []))
-                return DiscoveryResult(True, typed, source="manual") if typed else failed(
-                    "no_models_endpoint", "This provider has no model list: type its models.")
+                return self._typed_models(provider_entry)  # Bedrock: no address, no list
             logger.warning("discover_models: no base_url for %r", clean_name)
             return failed("no_base_url", "The provider has no base URL.")
 
@@ -1081,9 +1078,7 @@ class ModelRegistry:
         if preset and not models_path:
             # Azure deployments and Bedrock model ids are the owner's own
             # list: there is no endpoint that lists them for a key.
-            own = self._normalize_models(provider_entry.get("models", []))
-            return DiscoveryResult(True, own, source="manual") if own else failed(
-                "no_models_endpoint", "This provider has no model list: type its models.")
+            return self._typed_models(provider_entry)
 
         # Build the full URL — base_url + models_path.
         # Most OpenAI-compatible APIs expect {base_url}/models where base_url
@@ -1180,6 +1175,16 @@ class ModelRegistry:
         except Exception as exc:  # no answer: network, TLS, a client that failed
             logger.error("discover_models failed for %r: %s", clean_name, exc)
             return failed("unreachable", f"The provider could not be reached ({type(exc).__name__}).")
+
+    def _typed_models(self, entry: dict[str, Any]) -> DiscoveryResult:
+        """The models typed for a provider that lists none (Azure's
+        deployments, Bedrock's ids)."""
+        own = self._normalize_models(entry.get("models", []))
+        if own:
+            return DiscoveryResult(True, own, source="manual")
+        return DiscoveryResult.failed(
+            "no_models_endpoint", "This provider has no model list: type its models.",
+            cached=list(self._discovered_models.get(str(entry.get("name") or ""), [])))
 
     async def _save_reported_details(self, provider_name: str) -> None:
         """Keep what the provider's list said about its models (providers

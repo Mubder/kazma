@@ -28,6 +28,7 @@ from typing import Any
 import httpx
 
 from kazma_core.llm_stream import StreamDelta
+from kazma_core.reasoning_text import ThinkFilter, split_reasoning, text_of_parts
 from kazma_core.token_usage import cache_write_tokens, token_counts
 from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
 
@@ -274,6 +275,35 @@ def cost_from_usage(
         + (counts.cached * cached_price)
         + (counts.completion * output_cost_per_1m)
     ) / 1_000_000
+
+
+#: What a provider's content filter says when it refuses a message, lower
+#: case: Qwen (``data_inspection_failed``), Azure and OpenAI, DeepSeek, Z.AI
+#: and Moonshot. Their own words and codes, never a guess from a 400 alone.
+_CONTENT_REFUSALS = (
+    "data_inspection_failed", "datainspectionfailed", "data may contain inappropriate content",
+    "responsibleaipolicyviolation", "content_policy_violation", "content exists risk",
+    '"content_filter"', "'content_filter'", "content management policy",
+    "potentially unsafe or sensitive content", "considered high risk",
+)
+
+
+def _is_content_refusal(status_code: int, detail: str) -> bool:
+    """True when a refused request was refused by the provider's content
+    filter (Qwen answered a harmless Arabic question so, and the turn ended in
+    an error: the real-use runs of 2026-11-22)."""
+    if status_code not in (400, 421, 422, 451):
+        return False
+    low = str(detail or "").lower()
+    return any(mark in low for mark in _CONTENT_REFUSALS)
+
+
+def _content_refused(endpoint: str, status_code: int, detail: str) -> LLMError:
+    where = f" (HTTP {status_code})" if status_code else ""
+    return LLMError(
+        f"The content filter of {endpoint} refused the message{where}: {str(detail or '')[:200]}",
+        transient=False, kind="content_refused",
+    )
 
 
 #: Waits after a 429 before the request is given up: each waits the
@@ -1419,6 +1449,14 @@ class LLMProvider:
                     kind="context_overflow",
                 ) from e
 
+            # ── The provider's content filter ───────────────────────────
+            # Permanent here -- it would refuse it again -- and answered by
+            # another vendor's backup where there is one (agent/content_refusal.py).
+            # Before the tool branches: a refusal that mentions a "function"
+            # was retried with no tools.
+            if _is_content_refusal(status_code, detail):
+                raise _content_refused(self._describe_endpoint(), status_code, detail) from e
+
             # ── A refused request field (providers stage 1) ─────────────
             # o-series / GPT-5 models (and an endpoint serving them) refuse
             # ``max_tokens`` and any temperature but the default. Ask again
@@ -1852,20 +1890,7 @@ class LLMProvider:
     @staticmethod
     def _delta_text(delta: Any) -> str:
         """Extract token text from an OpenAI-style ``delta`` object."""
-        if not isinstance(delta, dict):
-            return ""
-        content = delta.get("content")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: list[str] = []
-            for part in content:
-                if isinstance(part, str):
-                    parts.append(part)
-                elif isinstance(part, dict):
-                    parts.append(str(part.get("text") or part.get("content") or ""))
-            return "".join(parts)
-        return ""
+        return text_of_parts(delta.get("content")) if isinstance(delta, dict) else ""
 
     @staticmethod
     async def _iter_sse_json(resp: httpx.Response, unread: list[str] | None = None) -> Any:
@@ -2049,6 +2074,7 @@ class LLMProvider:
 
         async def _run_stream(body: dict[str, Any]) -> Any:
             content_parts: list[str] = []
+            thinking = ThinkFilter()
             tool_acc: dict[int, dict[str, str]] = {}
             finish_reason = ""
             usage: dict[str, Any] = {}
@@ -2077,6 +2103,8 @@ class LLMProvider:
                         msg = err if isinstance(err, str) else str(
                             (err or {}).get("message") or err
                         )
+                        if _is_content_refusal(400, str(err)):
+                            raise _content_refused(self._describe_endpoint(), 0, str(err))
                         raise LLMError(
                             f"LLM stream error: {msg[:300]}",
                             transient=_inband_stream_error_is_transient(err, msg),
@@ -2096,7 +2124,9 @@ class LLMProvider:
                     text = self._delta_text(delta)
                     if text:
                         content_parts.append(text)
-                        yield StreamDelta(content=text)
+                        shown = thinking.feed(text)
+                        if shown:
+                            yield StreamDelta(content=shown)
                     tcs = delta.get("tool_calls")
                     if isinstance(tcs, list) and tcs:
                         self._accumulate_tool_delta(tool_acc, tcs)
@@ -2136,6 +2166,9 @@ class LLMProvider:
                     kind="stream_truncated",
                 )
             duration_ms = (time.monotonic() - start) * 1000
+            shown = thinking.finish()
+            if shown:
+                yield StreamDelta(content=shown)
             assembled = self._response_from_stream_acc(
                 content="".join(content_parts),
                 tool_acc=tool_acc,
@@ -2207,6 +2240,9 @@ class LLMProvider:
                             "[LLMProvider] stream retry without stream_options failed: %s",
                             retry_exc,
                         )
+
+                if _is_content_refusal(status_code, detail):
+                    raise _content_refused(self._describe_endpoint(), status_code, detail) from e
 
                 # 4xx (except 429): fall back to blocking chat() which already
                 # classifies 404-function, context overflow, schema errors.
@@ -2316,7 +2352,9 @@ class LLMProvider:
         message = choice.get("message") or {}
         finish_reason = choice.get("finish_reason", "")
 
-        content = message.get("content", "") or ""
+        # Reasoning a provider sent inside the content is not the answer.
+        content, hidden = split_reasoning(text_of_parts(message.get("content")))
+        hidden_chars = len(hidden) or len(str(message.get("reasoning_content") or message.get("reasoning") or ""))
         tool_calls: list[ToolCall] = []
 
         for tc in message.get("tool_calls") or []:
@@ -2373,7 +2411,7 @@ class LLMProvider:
             cost_usd=round(cost, 6),
             cost_known=cost_known,
             duration_ms=round(duration_ms, 1),
-            reasoning_chars=len(str(message.get("reasoning_content") or "")),
+            reasoning_chars=hidden_chars,
         )
 
     async def _retry_refused_parameters(
@@ -2643,6 +2681,9 @@ class LLMError(Exception):
     * ``"unusable_answer"`` — the provider answered, with something that is
       no model answer (not JSON, an error, no choices); ``answer`` says what.
     * ``"stream_truncated"`` — the stream closed before the answer ended.
+    * ``"content_refused"`` — the provider's content filter refused the
+      message. Permanent on that provider; a backup of another vendor may
+      answer (``agent.content_refusal``).
     * ``"daily_limit"`` — not sent: the person the call is for reached their
       daily limit (Spaces S2-02, ``spaces.daily_limits``).
     * ``"model_not_allowed"`` — not sent: the model is not one the person the

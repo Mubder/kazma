@@ -28,19 +28,17 @@ from kazma_core.providers import PROVIDER_PRESETS
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "MAX_KEYS",
     "SetupRefused",
     "add_key",
     "endpoint_address",
     "field_problems",
-    "identity_of",
     "rows_at",
     "tidy",
     "tidy_report",
 ]
 
 #: The most extra keys one row may hold.
-MAX_KEYS = 20
+_MAX_KEYS = 20
 
 
 class SetupRefused(Exception):
@@ -140,7 +138,7 @@ def _address(url: str) -> str:
         return url.strip().rstrip("/").lower()
 
 
-def identity_of(entry: dict[str, Any]) -> tuple[str, ...] | None:
+def _identity_of(entry: dict[str, Any]) -> tuple[str, ...] | None:
     """What makes two rows the same provider: the wire format, the address
     and the fields its sign-in is made of; None for a row with neither (it
     repeats nothing)."""
@@ -171,14 +169,14 @@ def rows_at(registry: Any, entry: dict[str, Any], *, exclude: str = "") -> list[
     "keys"}`` -- never a key."""
     from kazma_core.provider_keys import keys_of
 
-    here = identity_of(entry)
+    here = _identity_of(entry)
     if here is None:
         return []
     active = str((registry.get_active_profile() or {}).get("provider") or "")
     out = []
     for row in registry.list_providers():
         name = str(row.get("name") or "")
-        if name == exclude or identity_of(row) != here:
+        if name == exclude or _identity_of(row) != here:
             continue
         keys = len(keys_of(str(row.get("api_key") or ""), row))
         if not keys and not row.get("enabled"):
@@ -197,10 +195,7 @@ def _changed(registry: Any, name: str) -> None:
     from kazma_core.runtime.model_switch import notify_credentials_changed
 
     registry.forget_client(name)
-    try:
-        notify_credentials_changed(name)
-    except Exception:  # noqa: BLE001 - the row is saved; a client rebuilds at its next call
-        logger.warning("[provider-setup] %r changed, and its running clients could not be told", name, exc_info=True)
+    notify_credentials_changed(name)
 
 
 def _new_key_id(rows: list[dict[str, Any]]) -> str:
@@ -223,8 +218,8 @@ def _with_key(row: dict[str, Any], key: str, label: str, held: set[str]) -> bool
         row["api_key"] = key
         return True
     extra = [dict(k) for k in (row.get("api_keys") or []) if isinstance(k, dict)]
-    if len(extra) >= MAX_KEYS:
-        raise SetupRefused("too_many_keys", f"A provider holds at most {MAX_KEYS} more keys.")
+    if len(extra) >= _MAX_KEYS:
+        raise SetupRefused("too_many_keys", f"A provider holds at most {_MAX_KEYS} more keys.")
     extra.append({"id": _new_key_id(extra), "label": label, "api_key": key})
     row["api_keys"] = extra
     return True
@@ -355,7 +350,7 @@ def _plan(registry: Any) -> dict[str, Any]:
     by_identity: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     for row in rows:
         name = str(row.get("name") or "")
-        here = identity_of(row)
+        here = _identity_of(row)
         set_up = bool(row.get("enabled")) or bool(keys_of(str(row.get("api_key") or ""), row))
         # A catalog row nobody set up repeats nothing unless another row does
         # its work under another name (live's "zai" beside "Z.AI").

@@ -14,7 +14,7 @@ from kazma_core.provider_setup import (
     add_key,
     endpoint_address,
     field_problems,
-    identity_of,
+    _identity_of,
     rows_at,
     tidy,
     tidy_report,
@@ -139,13 +139,13 @@ def test_rows_at_an_address_whatever_its_spelling(registry):
 
 def test_what_makes_two_rows_one_provider():
     azure = {"name": "a", "preset": "azure", "base_url": "https://r.openai.azure.com", "api_version": "2024-10-21"}
-    assert identity_of(azure) != identity_of({**azure, "api_version": "2025-01-01"})
+    assert _identity_of(azure) != _identity_of({**azure, "api_version": "2025-01-01"})
     bedrock = {"name": "b", "preset": "bedrock", "region": "us-east-1"}
-    assert identity_of(bedrock) == identity_of({**bedrock, "name": "c"})
-    assert identity_of(bedrock) != identity_of({**bedrock, "region": "eu-west-1"})
+    assert _identity_of(bedrock) == _identity_of({**bedrock, "name": "c"})
+    assert _identity_of(bedrock) != _identity_of({**bedrock, "region": "eu-west-1"})
     anthropic = {"name": "anthropic", "base_url": "https://api.anthropic.com/v1"}
-    assert identity_of(anthropic) != identity_of({"name": "x", "base_url": "https://api.anthropic.com/v1"})
-    assert identity_of({"name": "x"}) is None
+    assert _identity_of(anthropic) != _identity_of({"name": "x", "base_url": "https://api.anthropic.com/v1"})
+    assert _identity_of({"name": "x"}) is None
 
 
 def test_a_key_is_added_once_and_the_runtime_tries_it(registry):
@@ -293,3 +293,60 @@ def test_a_catalog_row_merged_away_stays_away(registry):
     assert "zai" not in {p["name"] for p in registry.list_providers()}
     row = registry.get_provider("zai")
     assert row["name"] == "Z.AI" and row["preset"] == "zai"
+
+
+# ── With the vault on, and on Postgres ──────────────────────────────────
+
+
+@pytest.fixture
+def vault_env(tmp_path, monkeypatch):
+    from kazma_core.security import vault as vault_mod
+
+    monkeypatch.setenv("KAZMA_VAULT_KEY", "unit-test-vault-key-32bytes-long!!")
+    vault_mod.reset_vault()
+    vault = vault_mod.SecretVault(db_path=str(tmp_path / "vault.db"))
+    monkeypatch.setattr(vault_mod, "_vault", vault)
+    monkeypatch.setattr(vault_mod, "_vault_init_attempted", True)
+    yield vault
+    vault_mod.reset_vault()
+
+
+def _merged(registry):
+    """Two rows merged, a key added: every key read back by a fresh registry,
+    and the rows as they are stored."""
+    from kazma_core.model_registry import ModelRegistry
+    from kazma_core.model_registry_store import load_providers_unresolved
+    from kazma_core.provider_keys import keys_of
+
+    _three_qwens(registry)
+    add_key(registry, "QwenCloud", KEY_C, "third")
+    tidy(registry, merge=["QwenCloud"], remove=["Qwen"])
+    row = registry.get_provider("Qwen 1")
+    assert [k for _l, k in keys_of(row["api_key"], row)] == [KEY_A, KEY_B, KEY_C]
+    # A row added later under the merged row's name takes nothing back.
+    _add(registry, "QwenCloud", "https://another.example/v1", "demo-key-dddddddd")
+    again = ModelRegistry(registry.config_store)
+    row = again.get_provider("Qwen 1")
+    assert [k for _l, k in keys_of(row["api_key"], row)] == [KEY_A, KEY_B, KEY_C]
+    assert again.get_provider("QwenCloud")["base_url"] == "https://another.example/v1"
+    return [r for r in load_providers_unresolved(registry.config_store) if r.get("name") == "Qwen 1"][0]
+
+
+def test_moved_keys_are_in_the_vault(registry, vault_env):
+    stored = _merged(registry)
+    held = [stored["api_key"], *(k["api_key"] for k in stored["api_keys"])]
+    assert len(held) == 3 and all(str(v).startswith("vault://") for v in held)
+    assert len(set(held)) == 3 and "demo-key" not in str(stored)
+
+
+@pytest.mark.postgres
+def test_on_postgres_too(registry):
+    from kazma_core.db.backend import is_postgres
+
+    if not is_postgres():
+        pytest.skip("a Postgres run")
+    from kazma_core.model_registry_store import REMOVED_PRESETS_KEY
+
+    for key in ("providers.list", REMOVED_PRESETS_KEY, "models.prices"):
+        registry.config_store.delete(key)
+    _merged(registry)

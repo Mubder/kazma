@@ -18,6 +18,12 @@
 - **Cached input has its own price** in Model prices. DeepSeek's cached tokens
   were billed at the full input price; Anthropic's made the rest of the prompt
   free; Bedrock's were not counted.
+- **A model's thinking text is never in its answer**, for any provider: a
+  `<think>` block, a stray `</think>` (Qwen showed one, with the answer
+  twice), or reasoning parts of a list.
+- **A message a provider's content filter refuses goes to a backup model of
+  another vendor**, and the answer says why. It used to end the turn in an
+  error.
 - A provider whose name has a space ("Qwen 1") can be changed from the page:
   every such change was refused as coming from another site.
 

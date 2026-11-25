@@ -35,6 +35,7 @@ from kazma_core.llm_provider import (
     retry_after_seconds,
 )
 from kazma_core.llm_stream import StreamDelta
+from kazma_core.reasoning_text import ThinkFilter, split_reasoning
 from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
@@ -516,6 +517,7 @@ class AnthropicProvider(LLMProvider):
         usage_out = 0
         cache_read = 0
         cache_written = 0
+        thinking = ThinkFilter()
         # Duplicated-prefix invariant (§29F): once any user-visible delta has
         # been emitted, a recovery attempt of the same call must not emit
         # content again — the authoritative text arrives via the final
@@ -579,8 +581,10 @@ class AnthropicProvider(LLMProvider):
                             piece = str(delta.get("text") or "")
                             if piece:
                                 text_parts.append(piece)
-                                _emitted_any = True
-                                yield StreamDelta(content=piece)
+                                shown = thinking.feed(piece)
+                                if shown:
+                                    _emitted_any = True
+                                    yield StreamDelta(content=shown)
                         elif dtype == "input_json_delta" and current_tool is not None:
                             current_tool["arguments"] += str(delta.get("partial_json") or "")
                     elif etype == "content_block_stop":
@@ -651,8 +655,11 @@ class AnthropicProvider(LLMProvider):
             "cache_creation_input_tokens": cache_written,
         }
         cost, cost_known = self._anthropic_cost(payload["model"], usage_blob)
+        shown = thinking.finish()
+        if shown:
+            yield StreamDelta(content=shown)
         assembled = LLMResponse(
-            content="".join(text_parts),
+            content=split_reasoning("".join(text_parts))[0],
             tool_calls=tool_calls,
             finish_reason=finish,
             model=payload["model"],
@@ -705,7 +712,7 @@ class AnthropicProvider(LLMProvider):
         cost, cost_known = self._anthropic_cost(model, usage_blob)
 
         return LLMResponse(
-            content="".join(text_parts),
+            content=split_reasoning("".join(text_parts))[0],
             tool_calls=tool_calls,
             finish_reason=finish,
             model=model,

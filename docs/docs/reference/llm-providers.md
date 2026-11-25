@@ -341,6 +341,16 @@ provider in use you are told once, and again when it answers. A key the
 provider refused gives way to its next key, if it has one. Providers with no
 model list (Azure, Bedrock, Vertex) are not checked this way.
 
+**A refusal by a provider's content filter** (Qwen's `data_inspection_failed`,
+Azure's and OpenAI's content policy, DeepSeek's "Content Exists Risk" and the
+like) is asked once and goes to the first backup model of another vendor; the
+answer begins with a line saying so. With no such backup, the reply says which
+filter refused it.
+
+**A model's thinking text is never shown as its answer**, whether the provider
+sends it in a field of its own, in `<think>` tags inside the text, or as parts
+of a list.
+
 **The backup model** (Settings → System → Non-stop → failover) must be one a
 provider can answer for: switched on, with a key or on your network, listing
 the model. Settings shows which provider would serve each backup, refuses to
