@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import importlib.util
 import secrets
 import sqlite3
 import tempfile
@@ -192,11 +193,9 @@ def psycopg_error() -> Exception:
     test job): skipped for it here, a test was skipped from inside the request
     it makes, and failed."""
     said = "server closed the connection unexpectedly"
-    try:
-        import psycopg
-    except ImportError:
+    if importlib.util.find_spec("psycopg") is None:
         return sqlite3.OperationalError(said)
-    return psycopg.OperationalError(said)
+    return pytest.importorskip("psycopg").OperationalError(said)
 
 
 def entries_of(monkeypatch) -> list[dict[str, Any]]:
