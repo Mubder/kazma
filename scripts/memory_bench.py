@@ -2859,6 +2859,33 @@ def _cmd_fact_languages_vectors() -> int:
     return 0
 
 
+def _cmd_held_pairs_vectors() -> int:
+    """Record bge-m3's vectors for ``benchmark_held.run_held_pairs`` (the
+    memory plan's W6, step 1) into the file its gate replays
+    (``tests/test_memory_held_facts_shown.py``)."""
+    from kazma_core.memory.benchmark import RecordingEmbedder
+    from kazma_core.memory.benchmark_held import HELD_PAIRS_VECTORS, run_held_pairs
+    from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
+
+    _limit_cpu_threads()
+    real = get_embedder()
+    if real is None:
+        print("no embedder is configured: install the rag extra (bge-m3)", file=sys.stderr)
+        return 2
+    model = get_embedding_model_name()
+    recorder = RecordingEmbedder(real)
+    a, b = _patched(recorder, model)
+    with a, b:
+        rows = run_held_pairs()
+    out = VECTORS.with_name(HELD_PAIRS_VECTORS)
+    n = recorder.save(out, model=model)
+    missed = [r for r in rows if not r["shown"] or not r["closed"]]
+    print(f"{out}: {n} vectors from {model}; {len(rows) - len(missed)} of {len(rows)} rows hold")
+    for r in missed:
+        print("  ", json.dumps(r))
+    return 0
+
+
 def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
     from kazma_core.memory.benchmark import ReplayEmbedder, run_benchmark
 
@@ -3640,6 +3667,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("writes")
     sub.add_parser("fact-languages-vectors",
                    help="record the vectors of the facts-across-languages gate (the real model)")
+    sub.add_parser("held-pairs-vectors",
+                   help="record the vectors of the held-facts pairs (the real model)")
     sub.add_parser("passage-vectors", help="record the vectors of every passage the benchmark's stores hold (W5)")
     rr = sub.add_parser("rerank-scores", help="record the cross-encoder's score of every pair the reranker reads (W3)")
     rr.add_argument("--reference", action="store_true", help="the quality reference model, not the shipping one")
@@ -3665,6 +3694,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_writes()
     if args.cmd == "fact-languages-vectors":
         return _cmd_fact_languages_vectors()
+    if args.cmd == "held-pairs-vectors":
+        return _cmd_held_pairs_vectors()
     if args.cmd == "passage-vectors":
         return _cmd_passage_vectors()
     if args.cmd == "rerank-scores":

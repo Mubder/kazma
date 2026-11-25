@@ -460,6 +460,12 @@ def _says_the_30th(text: str) -> bool:
     return says_day(text, "2026-05-30", "2026-05-31")
 
 
+def _names_subject(case: tuple[str, str]) -> bool:
+    from kazma_core.memory.held_facts import _Said
+
+    return _Said(case[0]).names(case[1])
+
+
 PAIRS: list[Pair] = [
     Pair("lesson_correction", (M + "skills/lesson_signal.py",),
          "No, I meant the config in the other folder.", "لا، قصدي الملف اللي في المجلد الثاني.",
@@ -715,6 +721,15 @@ PAIRS: list[Pair] = [
          "Where does Omar live?", "وين ساكن عمر؟", _asker_meant, False),
     Pair("member_named", (M + "memory/speakers.py",),
          "When is Omar's birthday?", "متى عيد ميلاد عمر؟", _members_named, ["omar"]),
+    # Whose facts the deep pass is shown (the memory plan's W6, step 1).
+    Pair("held_subject_named", (M + "memory/held_facts.py",),
+         ("My sister Noura is a surgeon now.", "noura"), ("أختي نورة صارت جراحة", "نورة"), _names_subject, True),
+    Pair("held_subject_not_named", (M + "memory/held_facts.py",),
+         ("What should I cook tonight?", "acme"), ("شنو أطبخ اليوم؟", "سارة"), _names_subject, False),
+    Pair("held_small_word_name", (M + "memory/held_facts.py",),
+         ("I told Will yesterday", "will"), ("كلمت علي أمس", "علي"), _names_subject, True),
+    Pair("held_small_word_no_name", (M + "memory/held_facts.py",),
+         ("I will call later", "will"), ("الكتاب على الطاولة", "علي"), _names_subject, False),
 ]
 
 
@@ -823,6 +838,9 @@ DECLARED: dict[str, str] = {
     M + "memory/benchmark.py": "the statements and questions of finding 10's gate, told and asked in "
                                "both languages (FACT_LANGUAGES): data the benchmark runs, nothing decided "
                                "by Arabic text; tests/test_memory_fact_languages.py",
+    M + "memory/benchmark_held.py": "the changes told in English, Gulf and MSA (HELD_PAIRS): data the "
+                                    "benchmark runs, nothing decided by Arabic text; "
+                                    "tests/test_memory_held_facts_shown.py",
     M + "agent/command_catalog.py": "each command's description in both languages (description / "
                                     "description_ar); tests/test_slash_help_and_menu.py",
     M + "safety/card_notes.py": "the approval cards' notes worded in both languages (NOTE_TEXT); "

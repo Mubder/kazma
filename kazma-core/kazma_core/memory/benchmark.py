@@ -1816,10 +1816,10 @@ def _tell(primary: Any, ops: Any, client: _ScriptedClient, reply: Callable[[list
         _apply_beliefs_to_v2,
         extract_and_apply_beliefs_sync,
         extract_beliefs_for_turn,
-        held_facts,
         said_on_iso,
     )
     from kazma_core.memory.entity_resolution import entity_vocabulary
+    from kazma_core.memory.held_facts import held_facts
     from kazma_core.memory.predicates import predicate_vocabulary
 
     extract_and_apply_beliefs_sync(primary, ops, user, session_id=session, turn=number, tenant_id=BENCH_TENANT,

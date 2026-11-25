@@ -313,7 +313,7 @@ def turn_message(
     the product and the benchmark's recordings alike.
 
     *held* is the facts Kazma holds about the turn's people and things
-    (:func:`held_facts`), shown numbered so the model can say which one a
+    (``memory.held_facts``), shown numbered so the model can say which one a
     new fact replaces (framework audit F4, second layer).
 
     The turn before, the facts held and the turn itself are data -- the
@@ -330,9 +330,9 @@ def turn_message(
     message is form 1's."""
     from datetime import date
 
+    from kazma_core.memory.held_facts import held_line
     from kazma_core.memory.limits import (
         DEEP_PASS_ANSWER,
-        DEEP_PASS_HELD_VALUE,
         DEEP_PASS_PREVIOUS_ANSWER,
         DEEP_PASS_PREVIOUS_QUESTION,
         DEEP_PASS_QUESTION,
@@ -347,9 +347,7 @@ def turn_message(
                         f"Assistant: {(answered or '')[:DEEP_PASS_PREVIOUS_ANSWER]}")
     if held:
         material.append("Facts Kazma holds now, numbered:\n"
-                        + "\n".join(f"{h['ref']}. {h['shown']} {h['predicate']} "
-                                     f"{' '.join(str(h['object']).split())[:DEEP_PASS_HELD_VALUE]}"
-                                     + (f" ({h['day']})" if h.get("day") else "") for h in held))
+                        + "\n".join(held_line(h) for h in held))
     material.append("This turn:\n"
                     f"User: {user_text[:DEEP_PASS_QUESTION]}\nAssistant: {(assistant_text or '')[:DEEP_PASS_ANSWER]}")
     blob = format_untrusted_block("\n\n".join(material), source="memory_turn")
@@ -504,59 +502,8 @@ def _carries_injection(text: str) -> bool:
     return filter_injection(text) is None or carries_fence_marker(text)
 
 
-#: A held fact's number in the deep pass's message (:func:`held_facts`).
+#: A held fact's number in the deep pass's message (``memory.held_facts``).
 _REF_RE = re.compile(r"f([0-9]{1,3})")
-
-
-def _held_day(meta: dict[str, Any]) -> str:
-    """An event's day as its held fact shows it."""
-    from kazma_core.memory.fact_days import event_day
-
-    day = event_day(meta)
-    return f"{'on' if meta.get('happened') else 'planned for'} {day}" if day else ""
-
-
-def held_facts(conn: Any, *, tenant_id: str, text: str, said_by: str | None = None) -> list[dict[str, Any]]:
-    """The current facts about a turn's people and things, numbered ``f1``,
-    ``f2``... for the deep pass's message (framework audit F4, second layer):
-    the speaker's own first (``user``; their entry in a shared space, shown
-    as ``user``), then each subject the turn names, newest first, at most
-    :data:`limits.DEEP_PASS_HELD_FACTS`. Another member's entry is never
-    shown. A forgotten fact holds no value and is left out. An event carries
-    its ``day`` ("on 2026-05-30"; the second review of W4: without it the
-    model could not tell one visit from another, nor a wrong day from one)."""
-    from kazma_core.memory.fact_days import metadata_of
-    from kazma_core.memory.limits import DEEP_PASS_HELD_FACTS
-    from kazma_core.memory.query_terms import content_terms
-    from kazma_core.memory.speakers import is_member_entry
-    from kazma_core.memory.speakers import room as speakers_room
-
-    people = speakers_room(tenant_id)
-    own = people.entry_for(said_by) if people.shared else "user"
-    current = "valid_until IS NULL AND invalidated_at IS NULL AND COALESCE(object, '') != ''"
-    words = content_terms(text or "")
-    named = []
-    for (subject,) in conn.execute(
-            f"SELECT DISTINCT subject FROM beliefs WHERE tenant_id = ? AND {current}",  # nosec B608 - fixed clause
-            (tenant_id,)).fetchall():
-        wanted = content_terms(str(subject or "").replace("_", " "))
-        if subject and subject not in (own, "user") and not is_member_entry(subject) and wanted and wanted <= words:
-            named.append(subject)
-    out: list[dict[str, Any]] = []
-    for subject in ([own] if own else []) + sorted(named):
-        rows = conn.execute(
-            "SELECT id, subject, predicate, predicate_type, object, extraction_method, metadata_json FROM beliefs "
-            f"WHERE tenant_id = ? AND subject = ? AND {current} "  # nosec B608 - fixed clause, values bound
-            "ORDER BY valid_from DESC, id LIMIT ?",
-            (tenant_id, subject, DEEP_PASS_HELD_FACTS - len(out))).fetchall()
-        for r in rows:
-            out.append({"ref": f"f{len(out) + 1}", "id": r[0], "subject": r[1],
-                        "shown": "user" if r[1] == own else r[1], "predicate": r[2],
-                        "predicate_type": r[3] or "set", "object": r[4], "method": r[5],
-                        "day": _held_day(metadata_of(r[6])) if (r[3] or "set") == "set" else ""})
-        if len(out) >= DEEP_PASS_HELD_FACTS:
-            break
-    return out
 
 
 def _take_replaces(clean: dict[str, Any], held: list[dict[str, Any]] | None, conn: Any,
@@ -1387,7 +1334,7 @@ def _apply_beliefs_to_v2(
 ) -> dict[str, Any]:
     """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
 
-    *held* is the numbered facts the deep pass was shown (:func:`held_facts`):
+    *held* is the numbered facts the deep pass was shown (``memory.held_facts``):
     a fact that says it ``replaces`` one about the same subject goes by its
     name and kind (:func:`_take_replaces`).
 
