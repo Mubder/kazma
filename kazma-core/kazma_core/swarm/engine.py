@@ -39,6 +39,8 @@ from kazma_core.swarm.reliability import (
 )
 from kazma_core.swarm.reliability_registry import ReliabilityRegistry
 from kazma_core.routing_engine import UnifiedRouter
+from kazma_core.spaces.row_work import install_statements, statements_of
+from kazma_core.swarm.single_operator import space_of_task
 from kazma_core.swarm.task import (
     TERMINAL_STATUSES,
     HandoffRecord,
@@ -138,6 +140,10 @@ _MAX_UNSAVED = 256
 #: The code of a new task the store would not record as running: not run,
 #: try again (the dispatch route answers 503 with Retry-After).
 STORE_UNAVAILABLE = "task_store_unavailable"
+
+#: The code of a new task the database refused for its space (Spaces
+#: enforced): not run, and trying again answers the same.
+SPACE_REFUSED = "space_refused"
 
 
 def _store_error_passes(exc: BaseException) -> bool:
@@ -610,7 +616,7 @@ class SwarmEngine:
         earlier = _hist_get_task(self._task_history, self._task_lock, task_id)
         if earlier is None or earlier.result is None:
             return None
-        if (earlier.result.metadata or {}).get("code") == STORE_UNAVAILABLE:
+        if (earlier.result.metadata or {}).get("code") in (STORE_UNAVAILABLE, SPACE_REFUSED):
             return None  # refused before it ran: dispatching it again runs it
         if earlier.status in TERMINAL_STATUSES or earlier.status == TaskStatus.PAUSED:
             return earlier.result
@@ -622,16 +628,23 @@ class SwarmEngine:
         Its refusal is the task's ending in this process only (the store
         holds nothing of it): the engine's record and the task's stream say
         it, so a page watching it hears why; the caller is told to try again
-        (``task_store_unavailable``, retryable). Dispatching it again runs it
-        (``_recorded_result`` does not answer from a refusal)."""
+        (``task_store_unavailable``, retryable), or, of a refusal that trying
+        again does not change, that it was refused (``space_refused``).
+        Dispatching it again runs it (``_recorded_result`` does not answer
+        from a refusal)."""
+        from kazma_core.db.pg_helpers import is_space_refusal
+
+        refused = is_space_refusal(exc)
         task.status = TaskStatus.FAILED
         task.completed_at = _utc_now_iso()
         result = TaskResult(
             task_id=task.id, status="failed",
-            error=(f"The task store could not record this task as running ({type(exc).__name__}), "
+            error=("The database refused this task for its space, so it was not run. Nothing ran, and "
+                   "trying again answers the same." if refused else
+                   f"The task store could not record this task as running ({type(exc).__name__}), "
                    "so it was not run. Nothing ran: try again shortly."),
-            metadata={"admission_unrecorded": True, "code": STORE_UNAVAILABLE, "retryable": True,
-                      "execution_outcome": "none_invoked"},
+            metadata={"admission_unrecorded": True, "code": SPACE_REFUSED if refused else STORE_UNAVAILABLE,
+                      "retryable": not refused, "execution_outcome": "none_invoked"},
         )
         task.result = result
         self._active_tasks.pop(task.id, None)
@@ -759,6 +772,12 @@ class SwarmEngine:
         store = self._task_store
 
         def _admit() -> bool:
+            # The task's own space (S4-01): a step resumed after a restart is
+            # admitted with nothing bound.
+            with statements_of(space_of_task(snapshot)):
+                return _admitted()
+
+        def _admitted() -> bool:
             waits = list(_WRITE_RETRY_WAITS)
             tried_again = False
             while True:
@@ -813,7 +832,8 @@ class SwarmEngine:
             return self._store_refused(task, exc)
         if admitted:
             return None
-        stored = await asyncio.to_thread(self._task_store.get_task, task.id)
+        with statements_of(space_of_task(task)):
+            stored = await asyncio.to_thread(self._task_store.get_task, task.id)
         logger.warning(
             "[SwarmEngine] task '%s' is already held at generation %s (%s): not run again",
             task.id, getattr(stored, "generation", "?"), getattr(stored, "status", "?"),
@@ -1240,8 +1260,15 @@ class SwarmEngine:
         """
         if self._task_store is None:
             return 0
+        from kazma_core.spaces.scope import spaces_enforced
+
+        # Every space's, at a start, with nothing bound: asked for in so many
+        # words once Spaces is enforced (the list was refused, and the boot
+        # held nothing), each task then written as its own space's.
+        every = {"tenant_id": "*"} if spaces_enforced() else None
         try:
-            rows = self._task_store.list_tasks(status="pending", page_size=max_tasks)
+            with install_statements("every space's pending tasks, listed at a start"):
+                rows = self._task_store.list_tasks(status="pending", page_size=max_tasks, metadata_filter=every)
             tasks = rows[0] if isinstance(rows, tuple) else rows
         except Exception:
             # Recovered tasks wait for the next start: say so (SW-E14).
@@ -2064,6 +2091,13 @@ class SwarmEngine:
         store = self._task_store
 
         def _write() -> None:
+            # The task's own space (S4-01): an ending is written by whoever
+            # ends it -- the watchdog, a shutdown, an auto-reject, another
+            # person's dispatch that reaps a stale task.
+            with statements_of(space_of_task(snapshot)):
+                _written()
+
+        def _written() -> None:
             # A lock or an absent database may pass: tried again, bounded
             # (Swarm tracker SQ04). A write that never lands is recorded for
             # the run's caller (_unsaved_ending): the work did not end as
@@ -2477,7 +2511,8 @@ class SwarmEngine:
         if self._task_store is None:
             return
         try:
-            written = await asyncio.to_thread(self._task_store.persist_task, task)
+            with statements_of(space_of_task(task)):
+                written = await asyncio.to_thread(self._task_store.persist_task, task)
         except Exception:
             # The step runs: the row is RUNNING (its admission), so a crash in
             # it is still held as unknown at the next start; only which step

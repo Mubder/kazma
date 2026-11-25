@@ -18,6 +18,8 @@ from typing import Any
 from kazma_core.runs import progress
 from kazma_core.runs.adapters._common import epoch, origin_from, short_title
 from kazma_core.runs.contract import ACTIVE_STATES, ActionResult, Run, RunState
+from kazma_core.spaces.row_work import install_statements
+from kazma_core.spaces.scope import current_scope, spaces_enforced
 
 __all__ = ["ADAPTER"]
 
@@ -58,16 +60,19 @@ class _SwarmAdapter:
     def _stored(store: Any, since: float) -> list[Any]:
         """RUNNING and PENDING rows, and the newest finished ones since *since*.
 
-        Once Spaces is enforced every space's (the store's ``"*"``, Kazma's
-        own work): each run carries its space and the registry keeps a
-        surface to its own (S1-21). With nothing bound the store refused the
-        list, and the supervisor read no swarm task at all."""
-        from kazma_core.spaces.scope import spaces_enforced
+        Once Spaces is enforced, every space's (the store's ``"*"``) with
+        nothing bound: the supervisor, Kazma's own work. Inside a space, that
+        space's own (S4-01, H6): the registry kept a surface to its own rows
+        of the newest forty of everyone's, so another space's hundred tasks
+        pushed them out."""
+        from contextlib import nullcontext
 
-        every = {"tenant_id": "*"} if spaces_enforced() else None
+        unbound = current_scope() is None
+        every = {"tenant_id": "*"} if spaces_enforced() and unbound else None
         found: list[Any] = []
         for status in ("running", "pending", "paused", *_FINISHED):
-            listed = store.list_tasks(status=status, page_size=_PER_STATUS, metadata_filter=every)
+            with install_statements("every space's swarm tasks, listed") if unbound else nullcontext():
+                listed = store.list_tasks(status=status, page_size=_PER_STATUS, metadata_filter=every)
             for task in listed:
                 if status in _FINISHED and (epoch(task.completed_at) or 0.0) < since:
                     continue

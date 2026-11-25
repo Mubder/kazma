@@ -1007,7 +1007,7 @@
       }
       addEventLine(taskId, '', t('swarm.task_completed'));
       // A background dispatch the task store could not record: nothing ran.
-      if (data.result && data.result.metadata && data.result.metadata.code === 'task_store_unavailable') {
+      if (data.result && data.result.metadata && (data.result.metadata.code === 'task_store_unavailable' || data.result.metadata.code === 'space_refused')) {
         showError(dispatchRefusalText(data.result.metadata, t('swarm.dispatch_failed')));
       }
       evtSource.close();
@@ -1146,6 +1146,9 @@
   function dispatchRefusalText(data, fallback) {
     if (data && data.code === 'swarm_at_capacity') {
       return t('swarm.at_capacity', {n: data.max_concurrent_tasks});
+    }
+    if (data && data.code === 'space_refused') {
+      return t('swarm.space_refused');
     }
     if (data && data.code === 'task_store_unavailable') {
       return t('swarm.task_store_unavailable');

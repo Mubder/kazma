@@ -1,4 +1,17 @@
 <!-- AGENTS.md, piece 70c-spaces-swarm-accounts. The index is in AGENTS.md; scripts/agents_md.py joins the pieces. -->
+- **A task's row is written as its own space's, whoever ends it (S4-01 step
+  0a, 2026-11-25).** The watchdog, a shutdown, an auto-reject armed at a start
+  and another person's dispatch that reaps a stale task wrote it unbound, or
+  bound to their own space. The engine's writes (`_persist`, the admission,
+  the step journal, a late outcome) and the recoveries at a start say
+  `statements_of(space_of_task(task))`; a start's listings, retention and the
+  tables are the install's, and a refused table raises. A task that names no
+  space is the owner's (`space_of_task`): in the owner's list and theirs to
+  read, cancel and answer. `"*"` is every space's whatever
+  `KAZMA_TENANT_FILTER` says; a runs list inside a space asks for its own. A
+  refusal is `space_refused` (403, not retryable), never `task_store_unavailable`.
+  Gates: `tests/test_swarm_rows_in_their_space.py`, and every caller of
+  `TaskStore.list_tasks` declared (`TASK_LISTS`, `tests/test_row_work_gates.py`).
 - **The swarm follows the space (S1-15, 2026-11-18).** Guards act only where
   Spaces is enforced; the older multi-user mode keeps its refusal
   (`swarm.single_operator.swarm_refusal`), and work bound to no space is

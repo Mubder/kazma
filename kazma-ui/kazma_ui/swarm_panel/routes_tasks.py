@@ -18,7 +18,7 @@ from kazma_gateway.telegram_format import (
     tg_heading,
     HEADING_RULE,
 )
-from kazma_core.swarm.engine import STORE_UNAVAILABLE
+from kazma_core.swarm.engine import SPACE_REFUSED, STORE_UNAVAILABLE
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.services import SWARM_CORE_MISSING, get_swarm_service
 
@@ -461,8 +461,15 @@ def register_tasks_routes(
 
     def _store_refusal(result: Any) -> JSONResponse:
         """The task store would not record the task as running: nothing ran,
-        and trying again shortly may work (HTTP 503 with Retry-After). The
+        and trying again shortly may work (HTTP 503 with Retry-After), or the
+        database refused it for its space, which it does again (403). The
         page words the code in its own language."""
+        if (result.metadata or {}).get("code") == SPACE_REFUSED:
+            return JSONResponse(
+                {"status": "error", "code": SPACE_REFUSED, "message": result.error,
+                 "task_id": result.task_id, "retryable": False},
+                status_code=403,
+            )
         return JSONResponse(
             {
                 "status": "error",
@@ -715,7 +722,7 @@ def register_tasks_routes(
                 int((task_result.metadata or {}).get("max_concurrent_tasks") or 0),
                 task_result.error,
             )
-        if task_result is not None and (task_result.metadata or {}).get("code") == STORE_UNAVAILABLE:
+        if task_result is not None and (task_result.metadata or {}).get("code") in (STORE_UNAVAILABLE, SPACE_REFUSED):
             return _store_refusal(task_result)
         results = [item.to_dict() for item in task_result.worker_results]
 

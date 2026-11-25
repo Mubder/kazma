@@ -86,6 +86,14 @@ def swarm_write_refusal() -> str | None:
     return None if bound_asker() == OWNER_ACCOUNT_ID else ADMIN_ONLY_REFUSAL
 
 
+def space_of_task(task: object) -> str:
+    """The space *task* (a ``SwarmTask`` or its dict) is of: its own, else the
+    owner's (a task of before Spaces names none, N19). No I/O."""
+    from kazma_core.spaces.scope import space_of_record
+
+    return space_of_record(_metadata(task).get("tenant_id"))
+
+
 def task_of_this_space(task: object) -> bool:
     """True when *task* (a ``SwarmTask`` or its dict) may be read or changed
     by this work: always while Spaces is not enforced; once it is, only a
@@ -96,7 +104,7 @@ def task_of_this_space(task: object) -> bool:
 
     if not spaces_enforced():
         return True
-    return str(_metadata(task).get("tenant_id") or "") == require_space_id()
+    return space_of_task(task) == require_space_id()
 
 
 def _metadata(task: object) -> dict:
@@ -144,8 +152,7 @@ def answered_by_caller(space: str, asker: str | None, tools: tuple[str, ...] = (
 
 def task_answered_by_caller(task: object) -> bool:
     """:func:`answered_by_caller` for *task* (a ``SwarmTask`` or its dict)."""
-    meta = _metadata(task)
-    return answered_by_caller(str(meta.get("tenant_id") or ""), meta.get("asker"))
+    return answered_by_caller(space_of_task(task), _metadata(task).get("asker"))
 
 
 def task_is_callers(task: object) -> bool:
@@ -164,8 +171,7 @@ def task_is_callers(task: object) -> bool:
     caller = bound_asker() or ""
     if not caller:
         return False
-    meta = _metadata(task)
-    return _acts_for(str(meta.get("tenant_id") or ""), meta.get("asker")) == caller
+    return _acts_for(space_of_task(task), _metadata(task).get("asker")) == caller
 
 
 def for_the_owner(space: str, asker: str | None) -> bool:

@@ -70,6 +70,18 @@ INSTALL: dict[str, str] = {
         "the supervisor's list of every space's jobs, with nothing bound only",
     "kazma-core/kazma_core/security/service_exposure.py::_role_answer":
         "the role that signed in, no row of any space",
+    "kazma-core/kazma_core/swarm/engine.py::SwarmEngine.redispatch_recovered_tasks":
+        "every space's legacy recovery rows, listed at a start; each is written as its own",
+    "kazma-core/kazma_core/swarm/task_store.py::TaskStore._init_db":
+        "the swarm's tables are made once, for every space",
+    "kazma-core/kazma_core/swarm/task_store.py::TaskStore.get_paused_tasks":
+        "lists every space's paused tasks at a start; each is restored as its own",
+    "kazma-core/kazma_core/swarm/task_store.py::TaskStore.prune_tasks":
+        "retention, by age alone, over every space's finished tasks",
+    "kazma-core/kazma_core/swarm/task_store.py::TaskStore.requeue_orphaned_running":
+        "lists every space's interrupted tasks at a start; each is written as its own",
+    "kazma-core/kazma_core/runs/adapters/swarm.py::_SwarmAdapter._stored":
+        "the supervisor's list of every space's tasks, with nothing bound only",
     "kazma-ui/kazma_ui/health.py::check_database":
         "a ping: whether the database answers, no row of any space",
 }
@@ -121,6 +133,27 @@ ROWS: dict[str, tuple[str, tuple[str, ...]]] = {
     "kazma-core/kazma_core/spaces/space_limits.py::_documents_used": (
         "statements: a space the admin's page, or the space's own, counts (a number, no row)",
         ("statements_of(space_id)",)),
+    "kazma-core/kazma_core/swarm/checkpoint_manager.py::CheckpointManager.handle_pipeline_checkpoint": (
+        "statements: the paused task's own space",
+        ("statements_of(space_of_task(task))",)),
+    "kazma-core/kazma_core/swarm/checkpoint_manager.py::CheckpointManager.restore_paused_tasks": (
+        "statements: each restored task's own space",
+        ("statements_of(space_of_task(task))",)),
+    "kazma-core/kazma_core/swarm/engine.py::SwarmEngine._admit_to_store": (
+        "statements: the admitted task's own space",
+        ("statements_of(space_of_task(task))",)),
+    "kazma-core/kazma_core/swarm/engine.py::SwarmEngine._admit_to_store._admit": (
+        "statements: the admitted task's own space",
+        ("statements_of(space_of_task(snapshot))",)),
+    "kazma-core/kazma_core/swarm/engine.py::SwarmEngine._journal_step": (
+        "statements: the resumed task's own space",
+        ("statements_of(space_of_task(task))",)),
+    "kazma-core/kazma_core/swarm/engine.py::SwarmEngine._persist._write": (
+        "statements: the written task's own space, whoever ends it",
+        ("statements_of(space_of_task(snapshot))",)),
+    "kazma-core/kazma_core/swarm/task_store.py::TaskStore.requeue_orphaned_running": (
+        "statements: each interrupted task's own space",
+        ("statements_of(space_of_task(task))",)),
     "kazma-ui/kazma_ui/health.py::_check_memory_recall": (
         "statements: the owner's space, the canary's",
         ("statements_of(OWNER_SPACE_ID)",)),
@@ -447,7 +480,7 @@ def test_an_undeclared_install_statement_is_seen() -> None:
 
 #: What answers rows of every space: the store method, or the function.
 LISTINGS = {"interrupted_intake_jobs", "recent_jobs", "unpublished", "fenced_recent", "active_index_entries",
-            "document_index_entries", "_moves_under_way"}
+            "document_index_entries", "_moves_under_way", "get_paused_tasks"}
 
 #: A loop over such rows that runs nothing for a row: ``file::function`` ->
 #: what it does instead.
@@ -596,3 +629,62 @@ def test_a_planted_route_that_binds_a_requests_space_is_found(written: str) -> N
 
 def test_a_binding_of_a_records_space_is_not_a_requests() -> None:
     assert not _of_a_request("bind_scope(entry['source'], entry['by'])")
+
+
+# ── who lists swarm tasks ────────────────────────────────────────────────
+
+#: Who lists the task store's tasks: ``file::function`` -> for whom. Once
+#: Spaces is enforced the store keeps a list to the bound space and refuses
+#: one with nothing bound; only a caller that asks for "*" lists every
+#: space's, and it is never reached with a space bound.
+TASK_LISTS: dict[str, str] = {
+    "kazma-core/kazma_core/runs/adapters/swarm.py::_SwarmAdapter._stored":
+        "every space's for the supervisor (nothing bound), else the bound space's",
+    "kazma-core/kazma_core/swarm/chat_tasks.py::_tasks_of": "the bound space's, of one chat",
+    "kazma-core/kazma_core/swarm/engine.py::SwarmEngine.redispatch_recovered_tasks":
+        "every space's, at a start",
+    "kazma-ui/kazma_ui/research_panel/routes.py::create_research_router.list_research":
+        "the request's space's",
+    "kazma-ui/kazma_ui/swarm_panel/routes_tasks.py::register_tasks_routes.swarm_tasks":
+        "the request's space's",
+    "kazma-ui/kazma_ui/swarm_panel/routes_tasks.py::register_tasks_routes.swarm_tasks_export":
+        "the request's space's",
+}
+
+
+def task_lists_in(source: str, rel: str) -> dict[str, bool]:
+    """Every function that lists a task store -> whether it asks for "*"."""
+    found: dict[str, bool] = {}
+
+    def visit(node: ast.AST, stack: list[str]) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = [*stack, child.name] if isinstance(
+                child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) else stack
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                own = _own(child)
+                if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "list_tasks"
+                       and "store" in ast.unparse(n.func.value) for n in own):
+                    found[f"{rel}::{'.'.join(inner)}"] = any(
+                        isinstance(n, ast.Constant) and n.value == "*" for n in own)
+            visit(child, inner)
+
+    visit(ast.parse(source), [])
+    return found
+
+
+def test_who_lists_swarm_tasks_is_declared() -> None:
+    found: dict[str, bool] = {}
+    for rel in _product_files():
+        text = (REPO / rel).read_text(encoding="utf-8", errors="replace")
+        if "list_tasks" in text:
+            found |= task_lists_in(text, rel)
+    assert set(found) - set(TASK_LISTS) == set(), "declare for whom it lists"
+    assert set(TASK_LISTS) - set(found) == set(), "declared, and no longer there"
+    asks = {where for where, every in found.items() if every}
+    assert asks == {where for where, whose in TASK_LISTS.items() if whose.startswith("every space's")}
+
+
+def test_a_planted_task_list_is_found() -> None:
+    source = ("class A:\n    def f(self):\n        return self._task_store.list_tasks(metadata_filter={'tenant_id': '*'})\n"
+              "def g(store):\n    return store.list_tasks()\ndef h(engine):\n    return engine.list_tasks()\n")
+    assert task_lists_in(source, "x.py") == {"x.py::A.f": True, "x.py::g": False}
