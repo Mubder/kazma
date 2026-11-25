@@ -271,7 +271,7 @@ def test_update_merges_a_runs_measurements(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(ci_shards.subprocess, "run", download)
-    assert ci_shards.update("123") == 0
+    assert ci_shards.update(123) == 0
     data = json.loads(table.read_text(encoding="utf-8"))
     assert data == {"unit": {"tests/test_a.py": 1.0, "tests/test_b.py": 2.5}, "e2e": {"tests/e2e/test_c.py": 30.0},
                     "measured": "CI run 123"}
@@ -288,3 +288,27 @@ def test_durations_are_read_from_a_real_report(tmp_path):
                     *ci_shards.JUNIT_OPTIONS], cwd=suite, check=True, capture_output=True, timeout=120)
     seconds = ci_shards.durations_of(report)
     assert list(seconds) == ["test_slow.py"] and 0.5 < seconds["test_slow.py"] < 20
+
+
+def test_only_a_run_number_is_passed_to_gh(monkeypatch):
+    asked: list[int] = []
+    monkeypatch.setattr(ci_shards, "update", lambda run_id: asked.append(run_id) or 0)
+    assert ci_shards.main(["update", "45712858239"]) == 0
+    for wrong in ("--repo=other/one", "latest", "1; rm"):
+        with pytest.raises(SystemExit):
+            ci_shards.main(["update", wrong])
+    assert asked == [45712858239]
+
+
+def test_a_path_outside_the_repository_and_the_temp_folders_is_refused(tmp_path, monkeypatch):
+    assert ci_shards.contained(tmp_path / "x.json") == (tmp_path / "x.json").resolve()
+    assert ci_shards.contained(REPO / ".pytest-tmp" / "x.json")
+    outside = Path(REPO.anchor) / "elsewhere" / "x.json"
+    for wrong in (outside, REPO / ".." / ".." / ".." / ".." / ".." / ".." / "x.json"):
+        with pytest.raises(SystemExit):
+            ci_shards.contained(wrong)
+    with pytest.raises(SystemExit):
+        ci_shards.write_durations(outside, "unit", {})
+    assert not outside.exists()
+    monkeypatch.setenv("RUNNER_TEMP", str(outside.parent))  # GitHub's own temp folder
+    assert ci_shards.contained(outside) == outside.resolve()

@@ -558,6 +558,14 @@ def snapshot_bundle(folder: Path) -> tuple[Path, str]:
     return bundle, ref
 
 
+def send_file(docker: list[str], name: str, source: Path, target: str) -> str:
+    """Copy *source* into the container as *target* (``docker cp`` reaches no
+    tmpfs); what went wrong, or nothing."""
+    with open(source, "rb") as data:
+        sent = subprocess.run([*docker, "exec", "-i", name, "sh", "-c", f"cat > {target}"], stdin=data, capture_output=True)
+    return sent.stderr.decode(errors="replace") or "the copy failed" if sent.returncode else ""
+
+
 def run_linux(part: Part, files: list[str], processes: int, whole: bool = False, near: Iterable[str] = ()) -> None:
     context = docker_context()
     if not context:
@@ -584,25 +592,25 @@ def run_linux(part: Part, files: list[str], processes: int, whole: bool = False,
             return
         with tempfile.TemporaryDirectory(prefix="kazma-prepush-") as folder:
             bundle, ref = snapshot_bundle(Path(folder))
-            for source, target in ((bundle, "/tmp/repo.bundle"),
-                                   (write_list("linux.txt", files), "/tmp/files.txt")):
-                with open(source, "rb") as data:
-                    sent = subprocess.run([*docker, "exec", "-i", name, "sh", "-c", f"cat > {target}"], stdin=data,
-                                          capture_output=True)
-                if sent.returncode:
-                    part.failures = sent.stderr.decode(errors="replace")
-                    return
+            problem = send_file(docker, name, bundle, "/work/repo.bundle")
+        if problem:
+            part.failures = problem
+            return
         prepare = ("set -e; cd /work; git config --global init.defaultBranch main; git init -q kazma; cd kazma; "
-                   f"git fetch -q /tmp/repo.bundle {ref}; "
-                   "git reset -q --hard FETCH_HEAD; "
+                   f"git fetch -q /work/repo.bundle {ref}; "
+                   "git reset -q --hard FETCH_HEAD; rm /work/repo.bundle; mkdir -p .pytest-tmp; "
                    "pip install -q --no-deps --no-build-isolation --root-user-action=ignore -e .; "
                    "! python -c 'import psycopg' 2>/dev/null")
         code, output = run_logged([*docker, "exec", name, "sh", "-c", prepare], part.log, timeout=600)
         if code:
             part.failures = "the container could not be prepared:\n" + "\n".join(output.splitlines()[-15:])
             return
+        problem = send_file(docker, name, write_list("linux.txt", files), "/work/kazma/.pytest-tmp/files.txt")
+        if problem:
+            part.failures = problem
+            return
         code, output = run_logged([*docker, "exec", "-w", "/work/kazma", name, "python", "scripts/fast_test.py",
-                                   *([] if whole else ["--files-from", "/tmp/files.txt"]), "--chunks", str(processes),
+                                   *([] if whole else ["--files-from", ".pytest-tmp/files.txt"]), "--chunks", str(processes),
                                    "--files-per-process", "40"], part.log, timeout=5000)
         part.failures = ""
         judge(part, code, output, near, lambda ids: run_logged(

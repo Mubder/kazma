@@ -123,6 +123,7 @@ def chunk_by_duration(files: list[Path], chunks: int) -> list[list[Path]]:
 
 def files_named_in(path: Path) -> list[Path]:
     """The test files *path* names, one repository path a line."""
+    path = ci_shards.contained(path)
     wanted = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     files = [REPO / name for name in dict.fromkeys(wanted)]
     missing = [str(f) for f in files if not f.is_file()]
@@ -784,6 +785,55 @@ def _safe_print(text: str) -> None:
         print(text.encode(enc, "replace").decode(enc, "replace"))
 
 
+def _shortened(text: str, limit: int) -> str:
+    """*text* in about *limit* characters, its END kept whole: a traceback's
+    last lines are the error (2026-11-25: 46 failures told only where the
+    test client began)."""
+    text = text.strip("\n")
+    if len(text) <= limit:
+        return text
+    head, tail = text[: limit // 4], text[-(limit - limit // 4):]
+    return f"{head.rsplit(chr(10), 1)[0]}\n  ... {len(text) - limit} characters left out ...\n{tail.split(chr(10), 1)[-1]}"
+
+
+#: pytest's own banners: a test may print lines of "=" itself.
+_NEXT_SECTION_RE = re.compile(
+    r"^=+ (?:short test summary info|warnings summary|FAILURES|ERRORS|PASSES|slowest[^=]*|threads left running"
+    r"|\d+ (?:passed|failed|error|errors|skipped)[^=]*) =+", re.M)
+
+
+def _section_digest(section: str, limit: int) -> str:
+    """One FAILURES or ERRORS section: each different error once, told to its
+    end, and how many more failed with the same one."""
+    parts = re.split(r"^(?=_{2,} .* _{2,}$)", section, flags=re.M)
+    blocks = [part for part in parts[1:] if part.strip()]
+    if not blocks:
+        return _shortened(section, limit)
+    groups: dict[str, list[tuple[str, str]]] = {}
+    for block in blocks:
+        # What a test printed follows its traceback and is not the error.
+        found = re.search(r"^-+ Captured ", block, flags=re.M)
+        traceback, printed = (block[: found.start()], block[found.start():]) if found else (block, "")
+        errors = re.findall(r"^E .*$", traceback, flags=re.M)
+        key = "\n".join(errors) or traceback.strip().splitlines()[-1]
+        groups.setdefault(key, []).append((traceback, printed))
+    shown = [parts[0].strip()]
+    each = max(700, limit // len(groups))
+    left = limit
+    for n, same in enumerate(groups.values()):
+        if left <= 0:
+            shown.append(f"... {len(groups) - n} more different errors")
+            break
+        text = _shortened(same[0][0], min(each, max(700, left)))
+        if same[0][1]:
+            text += "\n" + _shortened(same[0][1], 400)
+        if len(same) > 1:
+            text += f"\n... and {len(same) - 1} more with this error"
+        shown.append(text)
+        left -= len(text)
+    return "\n".join(shown)
+
+
 def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
     """Extract the FAILURES/ERRORS sections (tracebacks) from pytest -q output.
 
@@ -800,9 +850,9 @@ def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
         if m is None:
             continue
         rest = log[m.start():]
-        m2 = re.search(r"=+\s*(short test summary|slowest\d*\s*test)", rest)
+        m2 = _NEXT_SECTION_RE.search(rest, m.end() - m.start())
         section = rest[: m2.start()] if m2 else rest
-        sections.append(section[:limit])
+        sections.append(_section_digest(section, limit))
     # The root conftest's report of a non-daemon thread left running names the
     # test it first appeared after; the failing-test list keeps only its id
     # (2026-11-14: two leaked threads, and no way to tell from which test).
@@ -813,7 +863,7 @@ def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
         sections.append("threads left running:\n" + (rest[: m2.start()] if m2 else rest)[:limit])
     joined = "\n".join(sections).strip()
     if joined:
-        return joined[:limit]
+        return joined[: 2 * limit]  # each section is within about its limit
     # Retried-chunk logs sometimes omit the FAILURES banner (audit Part 5).
     # Still show a tail so CI is not id-only.
     if "FAILED" in log or "ERROR" in log:
