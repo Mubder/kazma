@@ -314,6 +314,26 @@ def begin_again(thread_id: str) -> None:
         _ended.pop(str(thread_id or ""), None)
 
 
+def end_space(space_id: str) -> None:
+    """The space was erased: the threads this process knows as its own run
+    nothing again. Memory only."""
+    with _spaces_lock:
+        its = [tid for tid, space in _spaces.items() if space == space_id]
+    for tid in its:
+        end_thread(tid, space_id)
+
+
+def space_begins_again(space_id: str) -> None:
+    """The space was brought in (from its bundle): its threads run. The marks
+    of threads ended in it go, and one of a thread it holds whose space was
+    not known; what was deleted in another space stays ended. Reads the
+    record store."""
+    _own, held = space_threads(space_id)
+    with _spaces_lock:
+        for tid in [t for t, where in _ended.items() if where == space_id or (not where and t in held)]:
+            del _ended[tid]
+
+
 def _refuse_ended(thread_id: str) -> None:
     if thread_ended(thread_id):
         raise ThreadEnded("this chat was deleted, so nothing runs on it")

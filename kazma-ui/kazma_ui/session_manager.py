@@ -272,6 +272,8 @@ class SessionManager:
         # ``_lock`` is held over a save (Postgres riding out an outage).
         self._deleted: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._deleted_lock = threading.Lock()
+        # The spaces erased in this process, with every chat they held.
+        self._erased: set[str] = set()
         self._pg = False
         self._conn: sqlite3.Connection | None = None
 
@@ -970,9 +972,11 @@ class SessionManager:
     def _is_deleted(self, tenant_id: str, session_id: str, thread_id: str = "") -> bool:
         """Whether the chat was deleted in this process: under its session id
         in its space, under a thread of that space (a row minted from the
-        thread alone is the same chat), or its thread ended."""
+        thread alone is the same chat), with its whole space, or its thread
+        ended."""
         return (
             (tenant_id, session_id) in self._deleted
+            or tenant_id in self._erased
             or threads.thread_ended(session_id, tenant_id)
             or bool(thread_id and threads.thread_ended(thread_id))
         )
@@ -1021,6 +1025,47 @@ class SessionManager:
             for key in [k for k in self._deleted if k[1] == thread_id]:
                 del self._deleted[key]
         threads.begin_again(thread_id)
+
+    def space_erased(self, space: str) -> None:
+        """*space* was erased (``spaces_api``): from here on nothing writes a
+        chat of it, and what was written while it was erased goes -- a copy
+        held since before brought an erased chat back. Raises when the store
+        cannot remove it."""
+        with self._lock:
+            with self._deleted_lock:
+                self._erased.add(space)
+            threads.end_space(space)
+            self._let_go(space)
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                get_pool().execute("DELETE FROM kazma_chat_sessions WHERE tenant_id = %s", (space,))
+            else:
+                assert self._conn is not None
+                with self._conn:
+                    self._conn.execute("DELETE FROM sessions WHERE tenant_id = ?", (space,))
+            for owner, session_id in self._spool.keys() if self._spool is not None else ():
+                if owner == space:
+                    self._spool_discard(owner, session_id)
+
+    def space_arrived(self, space: str) -> None:
+        """*space* was brought in from its bundle (``spaces_api``): what this
+        process remembers of it is of before -- chats deleted there, and
+        copies that hold what was said after the bundle was made. The store's
+        rows are the space. Raises when the thread records cannot be read."""
+        threads.space_begins_again(space)
+        with self._lock:
+            with self._deleted_lock:
+                self._erased.discard(space)
+                for key in [k for k in self._deleted if k[0] == space]:
+                    del self._deleted[key]
+            self._let_go(space)
+
+    def _let_go(self, space: str) -> None:
+        """Drop the space's cached chats. The caller holds the lock."""
+        for key in [k for k, s in self._sessions.items() if (s.tenant_id or _space()) == space]:
+            del self._sessions[key]
+        self._list_refreshed_at.pop(space, None)
 
     def put(self, session: ChatSession) -> None:
         """Insert or replace a session in the store. A chat deleted in this

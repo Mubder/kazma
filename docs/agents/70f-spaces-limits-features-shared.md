@@ -505,3 +505,15 @@
   that forgets its deletes as the control: the chat is back, and the reply is
   paged), `tests/test_chat_move_decisions.py` (the thread without its mark
   runs: the control).
+- **A space brought back in the same process is its bundle's (2026-11-25).**
+  Erasing a space and importing it (S4-06) are told to the chat store by the
+  two routes of `spaces_api`, the only callers. `space_erased`: nothing writes
+  a chat of the space from here on (one mark for the whole space: a copy held
+  by a late writer stored an erased chat again), its threads end, its cached
+  chats go, and so does a row or a spooled save written while it was erased.
+  `space_arrived`: the marks of chats deleted there go and its threads run
+  (`threads.space_begins_again`; what was deleted in another space stays
+  deleted), and no cached copy is served or saved (it held what was said after
+  the export). Gate: `tests/test_space_back_in_one_process.py` (the routes,
+  EN/AR; each call taken out as the controls; a caller that does not tell the
+  store, planted).
