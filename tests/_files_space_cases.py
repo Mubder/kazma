@@ -105,13 +105,13 @@ class World:
         (``workspace.remote_paths``, 2026-11-25; ``world`` stands there)."""
         drive = self.dir_b.drive or "C:"
         return [
-            f"file:///{drive}/{Matrix.SPACE_B}/files/{name}",
-            f"a?b/{drive}/{Matrix.SPACE_B}/files/{name}",
-            f"{drive}{Matrix.SPACE_B}/files/{name}",
             str(self.files("b") / name),
             str(self.owner_dir / name),
             f"../../{Matrix.SPACE_B}/files/{name}",
             f"..\\..\\{Matrix.SPACE_B}\\files\\{name}",
+            f"file:///{drive}/{Matrix.SPACE_B}/files/{name}",
+            f"a?b/{drive}/{Matrix.SPACE_B}/files/{name}",
+            f"{drive}{Matrix.SPACE_B}/files/{name}",
         ]
 
     # ── requests ─────────────────────────────────────────────────────────
