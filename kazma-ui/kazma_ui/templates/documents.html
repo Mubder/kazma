@@ -127,6 +127,65 @@
           {{ t('documents.delete_hint') }}
         </p>
       </div>
+
+      {# The files of this space's own folder (Spaces S2-12): a person shares
+         one of theirs with a shared space, or takes back one they shared.
+         Only a plain space has it (the server says, "available"). #}
+      <div class="card" id="space-files" style="padding:1rem;margin-top:1rem;" x-show="filesShown()" x-cloak>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;">
+          <strong>{{ t('documents.files.title') }}</strong>
+          <button class="btn btn-secondary btn-sm" @click="loadFiles()">{{ t('common.refresh') }}</button>
+        </div>
+        <p class="doc-meta" style="margin:0 0 .5rem;">{{ t('documents.files.intro') }}</p>
+        <div x-show="!filesLoaded && filesLoading" x-cloak role="status" style="color:var(--text-muted);font-size:.8rem;">{{ t('common.loading') }}</div>
+        <div x-show="filesError" x-cloak role="alert" class="notice tone-danger" style="font-size:.8rem;margin-bottom:.4rem;">{{ t('documents.files.failed') }}</div>
+        <div x-show="filesLoaded && !filesError && filesTotal === 0" x-cloak class="empty-state" style="font-size:.85rem;">
+          <span>{{ t('documents.files.empty') }}</span>
+        </div>
+        <template x-for="(f, n) in files" :key="'file:' + n + ':' + f.path">
+          <div class="doc-row" :data-space-file="f.path">
+            <div style="min-width:0;flex:1;">
+              <div class="doc-title"><bdi translate="no" dir="auto" x-text="f.path"></bdi></div>
+              <div class="doc-meta" x-text="fileMeta(f)"></div>
+              <div class="doc-meta" x-show="!f.movable" x-cloak>{{ t('documents.files.stays') }}</div>
+            </div>
+            <div class="doc-row-actions">
+              <template x-if="f.movable && fileShareTargets().length > 0">
+                <select class="form-input doc-move-select" :data-file-share="f.path" :disabled="acting"
+                        aria-label="{{ t('documents.share_with') }}"
+                        @change="moveFile(f, $event.target.value); $event.target.value = ''">
+                  <option value="">{{ t('documents.share_with') }}</option>
+                  <template x-for="s in fileShareTargets()" :key="f.path + ':' + s.id">
+                    <option :value="s.id" x-text="s.name" translate="no"></option>
+                  </template>
+                </select>
+              </template>
+              <button type="button" class="btn btn-sm btn-secondary" x-show="!!(f.mine && f.movable && fileTakeOutTarget())" x-cloak
+                      :data-file-take-out="f.path" :disabled="acting"
+                      @click="moveFile(f, fileTakeOutTarget().id)">{{ t('documents.take_out') }}</button>
+            </div>
+          </div>
+        </template>
+        <div x-show="filesCut" x-cloak class="doc-meta">{{ t('documents.files.cut') }}</div>
+        <div x-show="filesTotal > filesLimit" x-cloak style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;">
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="filesOffset === 0" data-files-previous
+                  @click="pageFiles(-1)">{{ t('documents.files.previous') }}</button>
+          <span class="doc-meta" x-text="filesPageText()"></span>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="filesOffset + filesLimit >= filesTotal" data-files-next
+                  @click="pageFiles(1)">{{ t('documents.files.next') }}</button>
+        </div>
+        <!-- The files taken out of this shared space by who shared them: the
+             line the space keeps. -->
+        <div id="files-taken-out" x-show="filesTakenOut.length > 0" x-cloak>
+          <h4 class="doc-meta">{{ t('documents.taken_out_title') }}</h4>
+          <template x-for="line in filesTakenOut" :key="'file-out-' + line.id">
+            <div class="doc-meta" :data-file-taken-out="line.path">
+              <bdi translate="no" dir="auto" x-text="line.path"></bdi>
+              <span x-text="takenOutText(line)"></span>
+            </div>
+          </template>
+        </div>
+      </div>
     </div>
 
     {# ── Right: detail ── #}

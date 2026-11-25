@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Spaces: moving one's own file between one's own space and a shared one (2026-11-25)
+
+- Once Spaces is on, the Documents page lists the files of your space's own
+  folder. A file of your own space can be shared with a plain shared space
+  you are in ("Share with…"), and a file you shared taken back out
+  ("Take out"); the shared space keeps a line of who took it out and when.
+- Only the person who shared a file takes it out, and only while nobody has
+  changed it. A name already taken in the other space is refused: nothing is
+  ever overwritten or deleted there. One file at a time, up to 20 MB.
+- The file is in exactly one space afterwards. A move cut off by a restart,
+  or that could not be finished, ends by itself: the file is moved, or back
+  where it was.
+- The owner's space (this computer's own files) and a space with a project
+  folder (a repository) are left out.
+
 ## Spaces: a space's export never follows a link out of its folder (2026-11-25)
 
 - Exporting a space, its bundle for another install and its size read the

@@ -255,6 +255,8 @@ ROUTE_SCOPE_RULES: tuple[tuple[Pattern, str], ...] = (
     ("/api/import/history", SPACE),
     ("/documents$", SPACE),
     ("/api/documents", SPACE),
+    # The files of a space's own folder, and moving one's own (S2-12).
+    ("/api/space-files", SPACE),
     ("/knowledge$", SPACE),
     ("/api/kb", SPACE),
     ("/scheduled$", SPACE),

@@ -78,6 +78,7 @@ DDL_SOURCES: dict[str, tuple[str, ...]] = {
     ),
     "hitl_gates.db": ("kazma-core/kazma_core/safety/hitl_gates.py",),
     "run_incidents.db": ("kazma-core/kazma_core/runs/incidents.py",),
+    "shared_files.db": ("kazma-core/kazma_core/spaces/shared_files.py",),
     "thread_scopes.db": (
         "kazma-core/kazma_core/spaces/threads.py",
         "kazma-core/kazma_core/spaces/chat_moves.py",

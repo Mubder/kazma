@@ -171,6 +171,9 @@ STORES: dict[str, Store] = {
         "which space each chat thread belongs to and which account opened it "
         "(kazma_core.spaces.threads); the lines a shared space keeps for chats taken out "
         "of it (kazma_core.spaces.chat_moves)", "bundle"),
+    "shared_files.db": Store(
+        "who shared each file into a shared space, and the lines it keeps for files taken out "
+        "(kazma_core.spaces.shared_files)", "bundle"),
     "activity.db": Store(
         "every change a person made in a space, under their account: the route, the ids in "
         "its path and the answer, never what was sent (kazma_core.spaces.activity)", "bundle"),
@@ -330,6 +333,9 @@ RETENTION: dict[str, str] = {
                         "no text). The chat delete removes it once nothing of the chat is left. "
                         "A shared space's lines for chats taken out of it: its newest 500 "
                         "(Spaces S2-12)",
+    "shared_files.db": "a shared file's maker while the file is there: taken out, or erased with its space, and "
+                       "once the file is gone by the maintenance sweep (file moves, after an hour); a space's "
+                       "lines for files taken out of it: its newest 500 (Spaces S2-12)",
     "activity.db": "90 days and at most 20,000 rows a space, pruned as rows are written "
                    "(kazma_core.spaces.activity._prune); a space's rows go with its erase",
     "chat_outbox.db": "the chat outbox retention sweep: settled rows (their text already emptied) "
@@ -745,6 +751,11 @@ SPACE_RULES: dict[str, SpaceRule] = {
         # A thread's record is ids only; the line a shared space keeps for a
         # chat taken out of it holds the title the chat had (S2-12).
         content={"chat_taken_out": ("title",)},
+        today="apart"),
+    "shared_files.db": SpaceRule(
+        "row",
+        # A file's path in the space's folder is its name: a person's words.
+        content={"shared_files": ("path",), "files_taken_out": ("path",)},
         today="apart"),
     "activity.db": SpaceRule(
         "row",

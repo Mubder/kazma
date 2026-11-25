@@ -1423,6 +1423,14 @@ def _settle_chat_moves() -> None:
     settle_unfinished()
 
 
+def _settle_file_moves() -> None:
+    # Spaces S2-12: a file move that did not end is ended (or the file put
+    # back), and the maker of a shared file that is gone is forgotten.
+    from kazma_core.spaces.file_moves import sweep
+
+    sweep()
+
+
 def _provider_health() -> None:
     # Providers stage 4: once an hour every switched-on chat provider is
     # asked for its model list (no tokens); unreachable twice is said, a
@@ -1505,6 +1513,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("settings snapshot", _settings_snapshot),
     ("erased space keys", _destroy_erased_space_keys),
     ("chat moves", _settle_chat_moves),
+    ("file moves", _settle_file_moves),
     ("forget convergence", _converge_forgets),
     ("memory vector repair", _repair_memory_vectors),
     ("memory vector codes", _fill_vector_codes),

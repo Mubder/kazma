@@ -10,6 +10,7 @@ A space's rows carry its id; its files live in one folder,
 ``images/``       generated images and browser screenshots
 ``documents/``    generated and converted documents
 ``exports/``      exports its people asked for
+``moving/``       a file being moved to or from another space, for a moment
 
 **The owner's space keeps the install's folders** (``<data dir>/attachments``
 and the rest, and the workspace the install has always had): a mapping, not a
@@ -49,6 +50,7 @@ __all__ = [
     "FOLDER_KINDS",
     "SpaceKindUnknown",
     "another_spaces_path",
+    "held_by_a_move",
     "in_sandboxed_space",
     "is_space_files_path",
     "own_files",
@@ -67,6 +69,11 @@ FOLDER_KINDS = ("attachments", "images", "documents", "exports")
 
 #: The space's own working folder inside its space folder.
 FILES = "files"
+
+#: Where a file being moved between spaces is held for a moment
+#: (``spaces.file_moves``): Kazma's own, beside the space's folders. It never
+#: travels: an export and a bundle leave it out, an import takes none.
+MOVING = "moving"
 
 
 class SpaceKindUnknown(RuntimeError):
@@ -208,20 +215,28 @@ def is_space_files_path(path: Path) -> bool:
     return len(parts) >= 2 and parts[1] == FILES
 
 
-def own_files(folder: Path, *, unreadable: list[Path] | None = None) -> Iterator[Path]:
+def own_files(folder: Path, *, unreadable: list[Path] | None = None, hidden: bool = True,
+              most_folders: int | None = None) -> Iterator[Path]:
     """Every file inside *folder* that is its own: never one a link or a
     junction leads to, so nothing of another place is counted, exported or
     moved as this one's (``workspace.real_paths.is_linked``). Every walk of a
     space's files asks it (``tests/test_space_file_walks.py``).
 
     Sorted by name, folder by folder. A folder that cannot be read raises, or
-    is added to *unreadable* when the caller counts them.
+    is added to *unreadable* when the caller counts them, as is the first one
+    past *most_folders*. Without *hidden*, no name that starts with a dot.
     """
     from kazma_core.workspace.real_paths import is_linked
 
     folders = [folder]
+    read = 0
     while folders:
         here = folders.pop()
+        read += 1
+        if most_folders is not None and read > most_folders:
+            if unreadable is not None:
+                unreadable.append(here)
+            return
         try:
             with os.scandir(here) as found:
                 entries = sorted(found, key=lambda entry: entry.name)
@@ -232,13 +247,21 @@ def own_files(folder: Path, *, unreadable: list[Path] | None = None) -> Iterator
             continue
         inner = []
         for entry in entries:
-            if is_linked(entry.path):
+            if is_linked(entry.path) or (not hidden and entry.name.startswith(".")):
                 continue
             if entry.is_dir(follow_symlinks=False):
                 inner.append(Path(entry.path))
             elif entry.is_file(follow_symlinks=False):
                 yield Path(entry.path)
         folders.extend(reversed(inner))
+
+
+def held_by_a_move(path: Path, folder: Path) -> bool:
+    """Whether *path*, inside the space's folder *folder*, is in the holding
+    folder of a file move (:data:`MOVING`): no file of the space's, as
+    Windows reads a name too (its case, and the dots and spaces at its end)."""
+    parts = path.relative_to(folder).parts
+    return bool(parts) and parts[0].rstrip(". ").casefold() == MOVING
 
 
 def space_of_folder(path: Path) -> str | None:

@@ -179,9 +179,10 @@ def make_row_stores() -> list[str]:
 
     SandboxBackend(space=OWNER_SPACE_ID)
     made.append("sandbox_emails.db")
-    from kazma_core.spaces import activity, threads
+    from kazma_core.spaces import activity, shared_files, threads
 
     threads.ensure_store()
     activity.ensure_store()
-    made += ["thread_scopes.db", "activity.db"]
+    shared_files.ensure_store()
+    made += ["thread_scopes.db", "activity.db", shared_files.STORE]
     return made

@@ -331,7 +331,7 @@
     which only the move writes: a delete refuses `MOVE_REASONS`). A move is
     the person's click on the Documents page (`POST
     /api/documents/{document_id}/move`), never the agent's. A chat moves by
-    the same rule (piece 6, below); a file is not moved.
+    the same rule (piece 6, below), and so does a file (piece 7).
   - Gates: `tests/test_document_moves.py` (a move that does not retire the
     source as the control), the taken-out read on SQLite and Postgres
     (`tests/test_document_listing_queries_are_joined.py`), the matrix case,
@@ -465,6 +465,52 @@
       `tests/e2e/test_chat_moves_browser.py` (by the sidebar, EN/AR, a second
       tab left open), `tests/js/test_moved_chat_browser_state.js`,
       `tests/js/test_telemetry_session_binding.js`.
+  - **Moving one's own file (piece 7, 2026-11-25).** The Documents page's
+    Files panel lists the bound space's own folder (`<space folder>/files`;
+    `GET /api/space-files`, `spaces.shared_files.list_files`: bounded and
+    paged, an unreadable folder is said, never "no files"), only in a plain
+    space. A person moves one file of theirs (`POST /api/space-files/move`,
+    `spaces.file_moves.move_file`: the route is its one caller) between their
+    sandboxed personal space and a plain shared space they are in; both
+    routes are the `documents` feature's. A shared folder records no maker,
+    so the move does (`shared_files.db`, made by the first file shared):
+    only they take it out, only while its SHA-256 is the same
+    (`changed_since`), leaving a line (who, when, the path it had). One
+    regular file, its path as the disk spells it (a path typed in another
+    case, an 8.3 name or a trailing dot is `not_found`; stored otherwise it
+    could never be taken out); a name another system cannot hold is listed
+    and stays (`bad_name`).
+    - **Copy aside, claim, compare, place, remove.** The copy goes to the
+      target's holding folder (`spaces/<id>/moving/<attempt>`, which no list,
+      tool, export or bundle sees and no import takes); the source is claimed
+      by a rename into its own; what was claimed is compared with the copy;
+      the rule is asked again; the copy is placed without replacing and
+      without making a folder. Placing is the only commit point, and
+      **nothing a person can see in the target is ever removed by a move**.
+      Hash-then-unlink lost a write in between, and a copy put in place
+      before the decision had to be deleted by its bytes: it deleted another
+      member's identical file.
+    - **One ending** (`_end`), for the move and for one a stop cut off: the
+      claimed bytes go only when the target, still a space, holds the very
+      bytes this move put there (`_was_placed`: the copy left its holding
+      folder or is the same file; bytes alone are not it); else they go back
+      to their name or beside it as "name (2)". Run at start, by the sweep
+      "file moves" and by the next move; a live move is left alone, and each
+      is ended on its own.
+    - **The record is a file beside what was claimed, never a store's row**:
+      the path in it is a person's words, it goes with its space's erase and
+      is of the files' moment in a backup. It is written before the target's
+      folders are made, and removed before the copy is.
+    - **An erase waits** for its space's moves after closing it
+      (`file_moves.quiet`); an export ends what is left first. Failures are
+      worded (`_worded`, `space_files_api.REFUSALS`); a lost answer is said
+      as what the list then shows. At most two moves at once, never waiting.
+    - Gates: `tests/test_file_moves.py`, `tests/test_file_move_crashes.py` (a
+      kill at every step both ways; no claim, settling by bytes alone, a
+      finish that does not look at the target, a rule asked once and a walk
+      that does not know the holding folder as the controls),
+      `tests/_file_move_space_cases.py`, `tests/js/test_space_files.js`,
+      `tests/e2e/test_file_moves_browser.py` (by the sidebar, EN/AR).
 - **A deleted chat stays deleted (2026-11-24).** On every install, in this
   process. Only a person's delete and a chat move mark one
   (`SessionManager.mark_deleted`: the space and the session id, at most

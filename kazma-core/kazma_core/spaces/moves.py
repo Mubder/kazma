@@ -16,8 +16,9 @@ document service). A move is always the person's own click on a page,
 never the agent's: a model steered by text it read must not carry a private
 thing into a shared space.
 
-A chat moves by the same rule (``spaces.chat_moves``, ``kazma_ui.chat_move``);
-a file in a shared folder records no maker, so files are not moved.
+A chat moves by the same rule (``spaces.chat_moves``, ``kazma_ui.chat_move``),
+and so does a file (``spaces.file_moves``: a shared folder records no maker,
+so the move records one).
 
 Blocking (the identity store, the document store): call it off the loop.
 """

@@ -513,9 +513,10 @@ def _folders(space: str) -> list[Path]:
 
 
 def _file_count(folders: list[Path]) -> int:
-    from kazma_core.spaces.files import own_files
+    from kazma_core.spaces.files import held_by_a_move, own_files
 
-    return sum(1 for folder in folders for _ in own_files(folder, unreadable=[]))
+    return sum(1 for folder in folders for path in own_files(folder, unreadable=[])
+               if not held_by_a_move(path, folder))
 
 
 # ── the checks ──────────────────────────────────────────────────────────
@@ -608,9 +609,12 @@ def export_space(space: str, target: Path, *, password: str | None = None) -> di
         finally:
             plain.unlink(missing_ok=True)
         return manifest
+    from kazma_core.spaces import file_moves
+
+    file_moves.quiet(space)  # a file being moved is where it belongs first
     ctx, found = _walk(space)
     from kazma_core.config_store import get_config_store
-    from kazma_core.spaces.files import own_files
+    from kazma_core.spaces.files import held_by_a_move, own_files
 
     store = get_config_store()
     manifest: dict[str, Any] = {"space": space, "made_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -638,6 +642,8 @@ def export_space(space: str, target: Path, *, password: str | None = None) -> di
             [{"name": name, "space": tenant or ""} for name, tenant in _vault_rows(space)], indent=1))
         for folder in _folders(space):
             for path in own_files(folder):
+                if held_by_a_move(path, folder):
+                    continue
                 zipped.write(path, f"files/{folder.name}/{path.relative_to(folder).as_posix()}")
                 manifest["files"] += 1
         zipped.writestr("manifest.json", json.dumps(manifest, indent=1))
@@ -763,6 +769,9 @@ def erase_space(space: str, *, by: str) -> dict[str, Any]:
 
     # Nobody new can start work in it: its members go first.
     people.close_space(space, by=by)
+    from kazma_core.spaces import file_moves
+
+    file_moves.quiet(space)  # no file moves in or out from here on
     before, first = _walk(space)
     from kazma_core.stores.knowledge_lifecycle import delete_library
 
