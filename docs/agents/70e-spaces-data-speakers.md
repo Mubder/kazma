@@ -40,6 +40,18 @@
     WinZip AES-256, at least 12 characters).
   - Pages: Settings -> This space -> This space's data; People lists the
     closed spaces with Erase.
+  - **A space's files are its own (2026-11-25).** Every walk of them (count,
+    export, erase, a bundle, the size, the universal backup, the migration
+    bundle, `scripts/backup_kazma.py`) is `workspace.real_paths.own_files`: a
+    link or a junction inside the folder leads to no file of the space's, so
+    nothing of another place is counted, exported, moved or backed up as its.
+    `rglob` with `is_file` followed a link to a file, and entered a junction
+    on Python 3.11; the backups asked `is_symlink`, which a junction passes.
+    A folder directly in the data folder may be a link (an install's own
+    layout). Gate: `tests/test_space_file_walks.py` reads the whole product:
+    in a module that names a space's folder or the data folder, every other
+    walk is in `REVIEWED` with its reason (planted walks and the old walk as
+    controls).
   - Gates: `tests/test_space_export_erase.py` (a word planted in every table
     of A and of B; A's export holds A's only; erasing A leaves no column or
     file holding A's word, B whole; yesterday's erase that misses a store, a

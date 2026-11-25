@@ -15,6 +15,18 @@ function documentsPage() {
     // their own documents between their own space and a shared one.
     takenOut: [],
     spacesHere: (window.kazmaSpace && window.kazmaSpace.spaces) || [],
+    // The files of this space's own folder (Spaces S2-12): a page of them,
+    // "none" only once the server answered; only a plain space has them.
+    files: [],
+    filesAvailable: false,
+    filesLoading: false,
+    filesLoaded: false,
+    filesError: false,
+    filesTotal: 0,
+    filesOffset: 0,
+    filesLimit: 50,
+    filesCut: false,
+    filesTakenOut: [],
     // The library and the audit history say "none" only after the server
     // answered: an empty list before that is "not loaded yet", and the page
     // said "No documents yet." for seconds over a library of five
@@ -68,8 +80,69 @@ function documentsPage() {
         this.spacesHere = Array.isArray(event.detail) ? event.detail : [];
       });
       await this.loadDocuments();
+      await this.loadFiles();
       await this.loadHealth();
       await this.loadOps();
+    },
+
+    /** A page of this space's own files (Spaces S2-12). */
+    async loadFiles() {
+      this.filesLoading = true;
+      let read = false;
+      try {
+        const query = `?offset=${this.filesOffset}&limit=${this.filesLimit}`;
+        const j = await window.kazmaGetJson("/api/space-files" + query);
+        if (!j || !j.ok) {
+          this.filesError = true;
+          return false;
+        }
+        this.filesError = false;
+        this.filesAvailable = !!j.available;
+        this.files = Array.isArray(j.files) ? j.files : [];
+        this.filesTotal = Number(j.total) || 0;
+        this.filesCut = !!j.cut;
+        this.filesTakenOut = Array.isArray(j.taken_out) ? j.taken_out : [];
+        read = true;
+        this.filesLoaded = true;
+      } finally {
+        this.filesLoading = false;
+      }
+      if (read && this.files.length === 0 && this.filesOffset > 0 && this.filesTotal > 0) {
+        // The last page emptied (its file moved): the one before it.
+        this.filesOffset = Math.max(0, Math.floor((this.filesTotal - 1) / this.filesLimit) * this.filesLimit);
+        return this.loadFiles();
+      }
+      return read;
+    },
+
+    /** The panel shows in a plain space, also when its first read failed. */
+    filesShown() {
+      const here = this._spaceHere();
+      return this.filesAvailable || (this.filesError && !!here && here.kind !== "host");
+    },
+
+    async pageFiles(step) {
+      const next = this.filesOffset + step * this.filesLimit;
+      if (next < 0 || next >= this.filesTotal) return;
+      this.filesOffset = next;
+      await this.loadFiles();
+    },
+
+    filesPageText() {
+      const start = this.filesTotal ? this.filesOffset + 1 : 0;
+      const end = Math.min(this.filesOffset + this.filesLimit, this.filesTotal);
+      const n = (v) => (window.KazmaFormat ? window.KazmaFormat.number(v) : String(v));
+      return kazmaT("documents.files.page", "{start}–{end} of {total}",
+        { start: n(start), end: n(end), total: n(this.filesTotal) });
+    },
+
+    fileMeta(f) {
+      const kb = Math.max(1, Math.round((Number(f.size) || 0) / 102.4) / 10);
+      const size = window.KazmaFormat
+        ? window.KazmaFormat.number(kb, { style: "unit", unit: "kilobyte", maximumFractionDigits: 1 })
+        : String(kb);
+      const when = window.KazmaFormat ? window.KazmaFormat.dateTime(f.modified) : String(f.modified || "");
+      return size + " · " + when;
     },
 
     // The shared .badge tones. Cancelled is neutral, as on every page:
@@ -721,6 +794,87 @@ function documentsPage() {
     takeOutTarget() {
       const here = this._spaceHere();
       return here && !here.personal ? (this.spacesHere || []).find((s) => s.personal) || null : null;
+    },
+
+    /** The plain shared spaces a file of the person's own space can go to:
+     * never one with a project folder (its folder is a repository). */
+    fileShareTargets() {
+      return this.shareTargets().filter((s) => s.kind !== "host");
+    },
+
+    /** In a plain shared space: the person's own space, where a file they
+     * shared can go back. */
+    fileTakeOutTarget() {
+      const here = this._spaceHere();
+      const own = here && here.kind !== "host" ? this.takeOutTarget() : null;
+      return own && own.kind !== "host" ? own : null;
+    },
+
+    /** What is known of a file whose move's answer did not arrive: the list
+     * is read again, and says whether the file is still here. */
+    async _afterLostAnswer(path) {
+      const read = await this.loadFiles();
+      if (read && this.files.some((f) => f.path === path)) {
+        return kazmaT("documents.files.lost_here", "The answer did not arrive. The file is still in this space; check again in a moment before you try again.");
+      }
+      if (read && !this.filesCut && this.filesTotal <= this.files.length) {
+        return kazmaT("documents.files.lost_gone", "The answer did not arrive. The file is no longer in this space: look for it in the other one.");
+      }
+      return kazmaT("documents.files.lost_unknown", "The answer did not arrive, and it is not known whether the file moved. Look in both spaces.");
+    },
+
+    /**
+     * Move the person's own file to another of their spaces (Spaces S2-12):
+     * into a plain shared space, or a file they shared back out. What it
+     * means is said first. The list is read again whatever came back.
+     */
+    async moveFile(f, toSpace) {
+      if (!f || !toSpace || this.acting) return;
+      const target = (this.spacesHere || []).find((s) => s.id === toSpace);
+      if (!target) return;
+      const here = this._spaceHere();
+      const takingOut = !!(here && !here.personal);
+      const name = (target.name || kazmaT("spaces.personal", "My space")).toString();
+      const proceed = await window.kazmaConfirm({
+        title: takingOut
+          ? kazmaT("documents.files.take_out_title", "Take this file out of {space}?", { space: (here && here.name) || "" })
+          : kazmaT("documents.files.share_title", "Share this file with {space}?", { space: name }),
+        message: takingOut
+          ? kazmaT("documents.files.take_out_confirm", "It goes back to your own space and leaves this one. The shared space keeps a line saying you took it out.")
+          : kazmaT("documents.files.share_confirm", "Everyone in that space will see it and can change it, and it leaves your own space. Only you can take it back out, and only while nobody has changed it."),
+        confirmText: takingOut ? kazmaT("documents.take_out", "Take out") : kazmaT("documents.share", "Share"),
+      });
+      if (!proceed || this.acting) return;
+      this.acting = true;
+      try {
+        let r = null;
+        let j = null;
+        try {
+          r = await fetch("/api/space-files/move", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ path: f.path, to_space: toSpace }),
+          });
+          j = await r.json();
+        } catch (e) {
+          j = null; // no answer, or one that is none: the list says what is known
+        }
+        if (!j || typeof j !== "object") {
+          this.toast(await this._afterLostAnswer(f.path), "warning");
+          return;
+        }
+        if (r.ok && j.ok) {
+          this.toast(takingOut ? kazmaT("documents.files.taken_out_done", "Taken out to your own space.")
+            : kazmaT("documents.files.shared_done", "Shared with {space}.", { space: name }), "success");
+        } else {
+          const code = r.status === 429 ? "busy" : j.code || "failed";
+          this.toast(kazmaT("documents.files.err." + code,
+            kazmaT("documents.files.err.failed", "The file could not be moved.")), "error");
+        }
+        await this.loadFiles();
+      } finally {
+        this.acting = false;
+      }
     },
 
     takenOutText(line) {

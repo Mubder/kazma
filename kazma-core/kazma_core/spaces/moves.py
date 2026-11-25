@@ -9,15 +9,16 @@ for the person who made it, and the shared space keeps a line saying it
 was taken out (the document's own record: ``DocumentIngestionService.
 taken_out_documents``).
 
-The one rule (:func:`move_rule`): Spaces enforced; the person is a member
-of both spaces; one of them is the person's own personal space and the
+The one rule (:func:`move_rule`): Spaces enforced; the person's account is
+enabled and a member of both spaces; one of them is the person's own personal space and the
 other a shared space; the document is the person's own (checked by the
 document service). A move is always the person's own click on a page,
 never the agent's: a model steered by text it read must not carry a private
 thing into a shared space.
 
-A chat moves by the same rule (``spaces.chat_moves``, ``kazma_ui.chat_move``);
-a file in a shared folder records no maker, so files are not moved.
+A chat moves by the same rule (``spaces.chat_moves``, ``kazma_ui.chat_move``),
+and so does a file (``spaces.file_moves``: a shared folder records no maker,
+so the move records one).
 
 Blocking (the identity store, the document store): call it off the loop.
 """
@@ -57,6 +58,11 @@ def move_rule(*, from_space: str, to_space: str, by: str) -> tuple[MoveRefused |
         return any(m.get("account") == by and m.get("space") == space for m in reg["memberships"])
 
     source, target = spaces.get(from_space) or {}, spaces.get(to_space) or {}
+    # A disabled account moves nothing: one disabled as its move went on is
+    # told apart when the rule is asked again.
+    account = reg["accounts"].get(by)
+    if isinstance(account, dict) and not account.get("enabled", True):
+        return MoveRefused("not_yours", 403, "That is not yours to move there."), False
     if from_space == to_space or not member(from_space) or not member(to_space):
         return MoveRefused("not_yours", 403, "That is not yours to move there."), False
     if source.get("erasing_at") or target.get("erasing_at"):

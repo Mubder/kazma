@@ -171,6 +171,9 @@ STORES: dict[str, Store] = {
         "which space each chat thread belongs to and which account opened it "
         "(kazma_core.spaces.threads); the lines a shared space keeps for chats taken out "
         "of it (kazma_core.spaces.chat_moves)", "bundle"),
+    "shared_files.db": Store(
+        "who shared each file into a shared space, and the lines it keeps for files taken out "
+        "(kazma_core.spaces.shared_files)", "bundle"),
     "activity.db": Store(
         "every change a person made in a space, under their account: the route, the ids in "
         "its path and the answer, never what was sent (kazma_core.spaces.activity)", "bundle"),
@@ -330,6 +333,9 @@ RETENTION: dict[str, str] = {
                         "no text). The chat delete removes it once nothing of the chat is left. "
                         "A shared space's lines for chats taken out of it: its newest 500 "
                         "(Spaces S2-12)",
+    "shared_files.db": "a shared file's maker while the file is there: taken out, or erased with its space, and "
+                       "once the file is gone by the maintenance sweep (file moves, after an hour); a space's "
+                       "lines for files taken out of it: its newest 500 (Spaces S2-12)",
     "activity.db": "90 days and at most 20,000 rows a space, pruned as rows are written "
                    "(kazma_core.spaces.activity._prune); a space's rows go with its erase",
     "chat_outbox.db": "the chat outbox retention sweep: settled rows (their text already emptied) "
@@ -439,7 +445,8 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     # One folder per space other than the owner's (Spaces S1-19,
     # kazma_core.spaces.files): its working folder, uploads, images,
     # generated documents and exports. The owner's space keeps the folders above.
-    "spaces": DataDirEntry("each space's own files, one folder per space", "bundle"),
+    "spaces": DataDirEntry(
+        "each space's own files, one folder per space; .moving, a file between two spaces", "bundle"),
     "document-store": DataDirEntry(
         "the document platform's content-addressed files", "documents",
         reason="carried with the document store export, beside documents.db"),
@@ -745,6 +752,11 @@ SPACE_RULES: dict[str, SpaceRule] = {
         # A thread's record is ids only; the line a shared space keeps for a
         # chat taken out of it holds the title the chat had (S2-12).
         content={"chat_taken_out": ("title",)},
+        today="apart"),
+    "shared_files.db": SpaceRule(
+        "row",
+        # A file's path in the space's folder is its name: a person's words.
+        content={"shared_files": ("path",), "files_taken_out": ("path",)},
         today="apart"),
     "activity.db": SpaceRule(
         "row",
@@ -1269,6 +1281,19 @@ def in_another_spaces_folder(path: str | Path) -> bool:
         return False
 
 
+def _in_kazmas_part_of_a_space(path: str | Path) -> bool:
+    """True when *path* is inside a space's folder and in none of the space's
+    own folders (``spaces.files.kazmas_own_in_a_space``): Kazma's own, refused
+    to that space's tools too. A space's file tools read and forged a file
+    move's record there (review of S2-12, piece 7)."""
+    try:
+        from kazma_core.spaces.files import kazmas_own_in_a_space
+
+        return kazmas_own_in_a_space(Path(path).expanduser().resolve())
+    except (ImportError, OSError, RuntimeError, ValueError):
+        return False
+
+
 def _in_a_spaces_files(resolved: Path) -> bool:
     """True when *resolved* is a space's working folder or inside one
     (``<data dir>/spaces/<id>/files``, Spaces S1-19)."""
@@ -1761,7 +1786,7 @@ def is_kazma_store(path: str | Path, *, write: bool = False) -> bool:
         return True
     if write and is_kazma_config_file(resolved):
         return True
-    if in_another_spaces_folder(resolved):
+    if in_another_spaces_folder(resolved) or _in_kazmas_part_of_a_space(resolved):
         return True
     name = _strip_sidecar(resolved.name)
     if name in _ALWAYS_PROTECTED:
@@ -1879,6 +1904,12 @@ def store_refusal(path_or_name: str | Path, *, door: str) -> str:
             f"{raw} is inside another space's folder; {door} may not open it. "
             "A space's files are its own people's: tell the user it is not "
             "reachable from here instead of looking for another way in."
+        )
+    if _in_kazmas_part_of_a_space(path_or_name):
+        return (
+            f"{raw} is Kazma's own, beside this space's files; {door} may not "
+            "open it. Nothing in it is meant for you to read; the space's files "
+            "are in its files folder."
         )
     if is_secret_file_name(raw) or is_kazma_secret_file(path_or_name):
         return (

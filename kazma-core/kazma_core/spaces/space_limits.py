@@ -239,11 +239,12 @@ _sizes_lock = threading.Lock()
 
 
 def _folder_bytes(folder: Path) -> int:
+    from kazma_core.spaces.files import own_files
+
     total = 0
-    for path in folder.rglob("*"):
+    for path in own_files(folder, unreadable=[]):
         try:
-            if path.is_file() and not path.is_symlink():
-                total += path.stat().st_size
+            total += path.stat().st_size
         except OSError:
             continue
     return total

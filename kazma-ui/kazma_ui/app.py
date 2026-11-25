@@ -1765,6 +1765,14 @@ class KazmaAppBuilder:
         except ImportError as e:
             logger.warning("[Spaces] Failed to mount the chat move API: %s", e)
             self._init_errors.append({"subsystem": "chat_move_api", "error": str(e)})
+        # ── The Files panel: a space's own files, and moving one's own (S2-12) ──
+        try:
+            from kazma_ui.space_files_api import create_space_files_router
+
+            self.app.include_router(create_space_files_router())
+        except ImportError as e:
+            logger.warning("[Spaces] Failed to mount the space files API: %s", e)
+            self._init_errors.append({"subsystem": "space_files_api", "error": str(e)})
         try:
             from kazma_ui.research_panel import create_research_router
 
@@ -2263,6 +2271,18 @@ class KazmaAppBuilder:
             except (ImportError, *store_errors()) as exc:
                 # The sweep settles them when the store answers.
                 logger.warning("[spaces] cut-off chat moves were not settled at start: %s", exc)
+
+            # ── File moves that did not end (Spaces S2-12) ─────────
+            # The file goes back, or its move ends, before anyone is served.
+            # Nothing is read or made where Spaces is not enforced; what cannot
+            # be ended now is said there and left to the sweep "file moves";
+            # nothing of it stops the rest of the start.
+            try:
+                from kazma_core.spaces.file_moves import settle_file_moves
+
+                await asyncio.to_thread(settle_file_moves)
+            except Exception:  # noqa: BLE001 -- the sweep tries again
+                logger.warning("[spaces] cut-off file moves were not settled at start", exc_info=True)
 
             # ── Turns a restart cut off (resilience plan C1) ───────
             # A safe one continues by itself; one whose tool effect is

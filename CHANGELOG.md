@@ -49,6 +49,34 @@
 - `scripts/scan_old_sessions.py` files each chat's facts in the chat's own
   space, under the person who asked (it put every space's under one).
 
+## Spaces: moving one's own file between one's own space and a shared one (2026-11-25)
+
+- Once Spaces is on, the Documents page lists the files of your space's own
+  folder. A file of your own space can be shared with a plain shared space
+  you are in ("Share with…"), and a file you shared taken back out
+  ("Take out"); the shared space keeps a line of who took it out and when.
+- Only the person who shared a file takes it out, and only while nobody has
+  changed it. A name already taken in the other space is refused: nothing is
+  ever overwritten or deleted there. One file at a time, up to 20 MB.
+- The file is in exactly one space afterwards. A move cut off by a restart,
+  or that could not be finished, ends by itself: the file is moved, or back
+  where it was.
+- The owner's space (this computer's own files) and a space with a project
+  folder (a repository) are left out.
+- A disabled account moves no file, chat or document, also when it is disabled
+  while one moves.
+- A space's file tools open the space's own folders and nothing Kazma keeps
+  beside them.
+
+## Spaces: a space's export never follows a link out of its folder (2026-11-25)
+
+- Exporting a space, its bundle for another install and its size read the
+  space's own files only. A link or a junction inside its folder to another
+  place is left alone; before, the file it led to went into the export.
+- So do the backups and the migration bundle of the whole install: a junction
+  inside the data folder was followed, and the files it led to were copied. A
+  folder directly in the data folder may still be on another disk.
+
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 
 - Once Spaces is on, a chat you started can move from your own space into a

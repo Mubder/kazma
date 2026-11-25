@@ -169,7 +169,9 @@ FEATURES: dict[str, Feature] = {f.id: f for f in (
     Feature(
         "documents", "space", True,
         pages=("/documents",),
-        routes=("/documents$", "/api/documents"),
+        # The Files panel of the Documents page (Spaces S2-12): a space's own
+        # files, and moving one's own between spaces.
+        routes=("/documents$", "/api/documents", "/api/space-files"),
         tools=frozenset({
             "convert_document", "document_cancel", "document_convert", "document_import",
             "document_index", "document_read", "document_redact", "document_search", "document_status",
@@ -449,6 +451,7 @@ NOT_A_TOOL_DOOR: dict[tuple[str | None, str], str] = {
     ("DELETE", "/api/documents/{document_id}$"): "deleting one's document; no tool deletes one",
     ("POST", "/api/documents/{document_id}/delete$"): "deleting one's document; no tool deletes one",
     ("POST", "/api/documents/{document_id}/move$"): "the person's own move between their spaces (S2-12)",
+    ("POST", "/api/space-files/move$"): "the person's own move between their spaces (S2-12); no tool moves a file",
     ("POST", "/api/documents/{document_id}/unindex$"): "taking a document out of a library; no tool does it",
     ("POST", "/api/documents/generate$"): "a work door: its handler asks the format's tool",
     (None, "/api/documents/ops"): "the admin's document maintenance",

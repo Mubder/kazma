@@ -513,7 +513,9 @@ def _folders(space: str) -> list[Path]:
 
 
 def _file_count(folders: list[Path]) -> int:
-    return sum(1 for folder in folders for p in folder.rglob("*") if p.is_file())
+    from kazma_core.spaces.files import own_files
+
+    return sum(1 for folder in folders for _path in own_files(folder, unreadable=[]))
 
 
 # ── the checks ──────────────────────────────────────────────────────────
@@ -606,8 +608,12 @@ def export_space(space: str, target: Path, *, password: str | None = None) -> di
         finally:
             plain.unlink(missing_ok=True)
         return manifest
+    from kazma_core.spaces import file_moves
+
+    file_moves.quiet(space)  # a file being moved is where it belongs first
     ctx, found = _walk(space)
     from kazma_core.config_store import get_config_store
+    from kazma_core.spaces.files import own_files
 
     store = get_config_store()
     manifest: dict[str, Any] = {"space": space, "made_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -634,10 +640,9 @@ def export_space(space: str, target: Path, *, password: str | None = None) -> di
         zipped.writestr("secrets.json", json.dumps(
             [{"name": name, "space": tenant or ""} for name, tenant in _vault_rows(space)], indent=1))
         for folder in _folders(space):
-            for path in sorted(folder.rglob("*")):
-                if path.is_file():
-                    zipped.write(path, f"files/{folder.name}/{path.relative_to(folder).as_posix()}")
-                    manifest["files"] += 1
+            for path in own_files(folder):
+                zipped.write(path, f"files/{folder.name}/{path.relative_to(folder).as_posix()}")
+                manifest["files"] += 1
         zipped.writestr("manifest.json", json.dumps(manifest, indent=1))
     partial.replace(target)
     logger.info("[spaces] space exported space=%s tables=%d files=%d", space,
@@ -760,10 +765,14 @@ def erase_space(space: str, *, by: str, chats_gone: Callable[[], None] = lambda:
 
         if get_vault() is None:  # refused before anything is changed
             raise SpaceDataRefused("vault_unavailable", 503, "The vault cannot be opened; nothing was erased.")
-    from kazma_core.spaces import people
+    from kazma_core.spaces import file_moves, people
+    from kazma_core.spaces.files import moving_dir
 
+    # A file whose move out of it was cut off goes where it belongs first.
+    file_moves.settle_file_moves(leaving=space)
     # Nobody new can start work in it: its members go first.
     people.close_space(space, by=by)
+    file_moves.quiet(space)  # no file moves in or out from here on
     before, first = _walk(space)
     from kazma_core.stores.knowledge_lifecycle import delete_library
 
@@ -780,9 +789,10 @@ def erase_space(space: str, *, by: str, chats_gone: Callable[[], None] = lambda:
         "libraries": len(ctx.ids["libraries"]),
         "files": 0,
     }
-    for folder in _folders(space):
-        erased["files"] += _file_count([folder])
-        shutil.rmtree(folder)
+    for folder in (*_folders(space), moving_dir(space)):
+        if folder.exists():
+            erased["files"] += _file_count([folder])
+            shutil.rmtree(folder)
     chats_gone()
     people.forget_space(space, by=by)
     logger.warning("[spaces] space erased space=%s by=%s rows=%d files=%d", space, by,

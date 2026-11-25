@@ -103,10 +103,10 @@ never in a shared space, for you either. Outside your own space, git signs
 in with the space's own GitHub account and never with this computer's SSH
 keys or saved passwords.
 
-## Moving a chat or a document
+## Moving a chat, a document or a file
 
 Private means in your personal space. Once Spaces is on, a chat you started,
-or a document of yours, can move from your own space into a shared space you
+a document of yours or a file of your space can move from your own space into a shared space you
 are in, and back out:
 
 - **A chat:** the chat list's menu offers "Share with…" in your own space and
@@ -143,11 +143,20 @@ are in, and back out:
   stays where it was and you can try again; if both the chat and its copy were
   written in, both are kept.
 - **A document:** the Documents page offers the same two moves.
+- **A file of your space's folder:** the Documents page's Files panel lists
+  them and offers the same two moves. Everyone in the shared space sees a file
+  you share and can change it. Only you take it out, and only while nobody has
+  changed it. A name already taken in the other space is refused: nothing is
+  ever overwritten. One file at a time, up to 20 MB. If something goes wrong
+  on the way, the file goes back to where it was, or beside it as "name (2)"
+  when that name was taken meanwhile. The owner's space and a space with a
+  project folder have no such panel: those folders are this computer's own
+  files and a repository.
 
 A chat someone else wrote in stays in the shared space: their words are the
 space's. Taking something out leaves the shared space a line saying who took
-it out and when, with its title. A move is always your own click: the agent
-never moves a chat or a document.
+it out and when, with its title or the file's path. A move is always your own
+click: the agent never moves a chat, a document or a file.
 
 ## What the admin can and cannot do
 

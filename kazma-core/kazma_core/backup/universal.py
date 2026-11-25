@@ -808,10 +808,15 @@ def selectable_databases(data_root: Path) -> list[Path]:
         parts = f.relative_to(data_root).parts
         return len(parts) > 1 and kept_out_of_backups(parts[0])
 
+    from kazma_core.workspace.real_paths import own_files
+
+    if not data_root.is_dir():
+        return []
     return [
         f
-        for f in sorted(data_root.rglob("*.db"))
-        if not any(p in _EXCLUDE_DIRS for p in f.parts)
+        for f in sorted(own_files(data_root, unreadable=[], linked_at_top=True))
+        if f.match("*.db")
+        and not any(p in _EXCLUDE_DIRS for p in f.parts)
         # A store the registry keeps out of backups, and says why: the Time
         # Travel steps (snapshots.db, TT-05).
         and not (f.parent == data_root and f.name in NOT_BACKED_UP)
@@ -881,8 +886,10 @@ def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | Non
     LibreOffice conversion runs leave ephemeral cache files (.bin under
     lo-profile/cache/) that can disappear between the directory walk and the
     copy. shutil.copytree aborts the ENTIRE directory on one missing file;
-    this walker skips individual failures so the real data (content-addressed
-    blobs) always lands. Returns the number of files successfully copied.
+    this one skips individual failures so the real data (content-addressed
+    blobs) always lands. Returns the number of files successfully copied. The
+    walk is ``real_paths.own_files``: no link and no junction is followed (a
+    junction passed ``is_symlink``, and its outside files were in the backup).
 
     Only a file that VANISHED (``FileNotFoundError``) is skipped quietly.
     Any other failure -- a locked blob (``PermissionError``), a read error --
@@ -895,33 +902,34 @@ def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | Non
     asset folder, copied consistently into ``dbs/``, and its sidecars
     (FA-267: it was copied a second time here, raw, with a live ``-wal``).
     """
+    from kazma_core.workspace.real_paths import own_files
+
     if failures is None:
         failures = []
     dest.mkdir(parents=True, exist_ok=True)
+    unread: list[Path] = []
+    folders: list[Path] = []
     count = 0
-    for item in sorted(src.iterdir()):
-        if _should_exclude(item.name):
-            continue
-        if skip and item.resolve() in skip:
-            continue
-        target = dest / item.name
+    for item in own_files(
+            src, unreadable=unread, folders_seen=folders,
+            keep=lambda p: not _should_exclude(p.name) and not (skip and p.resolve() in skip)):
+        target = dest / item.relative_to(src)
         try:
-            if item.is_symlink():
-                continue  # don't follow symlinks
-            if item.is_dir():
-                nested: list[dict[str, str]] = []
-                count += _robust_copytree(item, target, nested, skip)
-                failures.extend(
-                    {"path": f"{item.name}/{row['path']}", "error": row["error"]} for row in nested
-                )
-            elif item.is_file():
-                shutil.copy2(item, target)
-                count += 1
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, target)
+            count += 1
         except FileNotFoundError as exc:
             logger.debug("[universal-backup] skipped ephemeral file %s: %s", item.name, exc)
-        except Exception as exc:  # noqa: BLE001 -- recorded, never swallowed
+        except OSError as exc:  # recorded, never swallowed
             logger.warning("[universal-backup] could not copy %s: %s", item, exc)
-            failures.append({"path": item.name, "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+            failures.append({"path": item.relative_to(src).as_posix(),
+                             "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+    for folder in folders:  # an empty folder is a person's too
+        (dest / folder.relative_to(src)).mkdir(parents=True, exist_ok=True)
+    for folder in unread:
+        if os.path.lexists(folder):
+            logger.warning("[universal-backup] could not read the folder %s", folder)
+            failures.append({"path": folder.relative_to(src).as_posix(), "error": "the folder could not be read"})
     return count
 
 
@@ -1434,7 +1442,7 @@ def perform_universal_backup(
                     if old.is_dir() and old != dest and not (old / "manifest.json").is_file():
                         logger.info("[universal-backup] cleaning incomplete dir %s", old.name)
                         _rmtree_force(old)
-        except Exception:
+        except OSError:
             logger.debug("[universal-backup] incomplete cleanup failed", exc_info=True)
         _set_progress("databases", detail="Preparing backup…", started_ts=time.time())
 

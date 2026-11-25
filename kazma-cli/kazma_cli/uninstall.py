@@ -108,16 +108,14 @@ def _install_root() -> Path | None:
 
 
 def _size(path: Path) -> str:
+    from kazma_core.workspace.real_paths import own_files
+
     total = 0
-    try:
-        for p in path.rglob("*"):
-            try:
-                if p.is_file():
-                    total += p.stat().st_size
-            except OSError:
-                continue
-    except OSError:
-        return "?"
+    for p in own_files(path, unreadable=[]):  # nothing a link leads to is removed or counted
+        try:
+            total += p.stat().st_size
+        except OSError:
+            continue
     for unit in ("B", "KB", "MB", "GB"):
         if total < 1024 or unit == "GB":
             return f"{total:.0f} {unit}" if unit == "B" else f"{total:.1f} {unit}"

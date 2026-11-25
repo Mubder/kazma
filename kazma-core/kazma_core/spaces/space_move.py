@@ -264,6 +264,9 @@ MOVE_RULES: dict[tuple[str, str], MoveRule] = {
     ("thread_scopes.db", "thread_scopes"): _moves(),
     ("thread_scopes.db", "chat_taken_out"): _out("the old install's line of who took a chat out, and when: it names "
                                                  "its people"),
+    ("shared_files.db", "shared_files"): _out("who shared a file, on the old install: its files stay the space's"),
+    ("shared_files.db", "files_taken_out"): _out("the old install's line of who took a file out, and when: it names "
+                                                 "its people"),
     ("answer_quality.db", "answer_quality"): _out(_LEDGER),
     ("hitl_gates.db", "hitl_gates"): _out("the old install's approval cards; a card a moved chat was "
                                           "waiting on arrives expired"),
@@ -884,13 +887,14 @@ def _left_mark(path: Path) -> bool:
 def _moving_files(space: str) -> Iterator[tuple[str, Path, Path]]:
     """``(part, folder, file)`` of every file of the space that moves. A file
     of a person's under the mark's name refuses the move: no import takes
-    one, and it is never left out without a word."""
+    one, and it is never left out without a word. A link is no file of the
+    space's: what it leads to never travels."""
+    from kazma_core.spaces.files import own_files
+
     for part, where in _space_folders(space).items():
         if not where.is_dir():
             continue
-        for path in sorted(where.rglob("*")):
-            if not path.is_file():
-                continue
+        for path in own_files(where):
             inside = PurePosixPath(path.relative_to(where).as_posix())
             if _is_the_marks(inside):
                 if len(inside.parts) == 1 and _left_mark(path):
@@ -915,6 +919,9 @@ def export_bundle(space: str, target: Path, password: str, *, by: str) -> dict[s
     if len(password or "") < MIN_PASSWORD:
         raise SpaceMoveRefused("password_too_short", 400, f"The password is at least {MIN_PASSWORD} characters.")
     registry = _must_own(space, by)
+    from kazma_core.spaces import file_moves
+
+    file_moves.quiet(space)  # a file being moved is where it belongs first
     if sum(path.stat().st_size for _part, _where, path in _moving_files(space)) > MAX_BUNDLE_BYTES:
         raise SpaceMoveRefused("too_big", 413, "The space's files are bigger than a bundle another install takes.")
     keys, rows = _space_secrets(space, by)
