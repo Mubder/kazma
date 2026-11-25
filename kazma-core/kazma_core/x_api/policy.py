@@ -29,6 +29,27 @@ class PolicyDecision:
     hashtags: tuple[str, ...] = ()
 
 
+_PAUSED = "X publishing is paused after restore. Verify the account and explicitly resume in X Studio."
+
+
+def publishing_refusal(cfg: XConfig | None = None) -> str | None:
+    """Why nothing can be published to X now, whatever the text, or None.
+    No network. Asked before an approval card too (``safety.call_preflight``):
+    live 2026-11-25 the owner approved a post that was paused after a restore."""
+    cfg = cfg or get_x_config()
+    if cfg.restore_paused:
+        return _PAUSED
+    if cfg.kill_switch:
+        return "X posting is disabled (KAZMA_X_POST=0)."
+    if not cfg.enabled:
+        return ("X connector is off. Enable it in Settings → X after storing the "
+                "four OAuth 1.0a keys (Read + Write app). Do not paste keys in chat.")
+    if not cfg.credentials.complete():
+        return ("X credentials incomplete. Settings → X: API Key, API Key Secret, "
+                "Access Token, Access Token Secret. App-only Bearer tokens cannot post.")
+    return None
+
+
 def evaluate_post(
     text: str,
     *,
@@ -38,22 +59,9 @@ def evaluate_post(
 ) -> PolicyDecision:
     """Return allow/deny for a candidate tweet. No network."""
     cfg = cfg or get_x_config()
-    if cfg.restore_paused:
-        return PolicyDecision(False, "X publishing is paused after restore. Verify the account and explicitly resume in X Studio.")
-    if cfg.kill_switch:
-        return PolicyDecision(False, "X posting is disabled (KAZMA_X_POST=0).")
-    if not cfg.enabled:
-        return PolicyDecision(
-            False,
-            "X connector is off. Enable it in Settings → X after storing the "
-            "four OAuth 1.0a keys (Read + Write app). Do not paste keys in chat.",
-        )
-    if not cfg.credentials.complete():
-        return PolicyDecision(
-            False,
-            "X credentials incomplete. Settings → X: API Key, API Key Secret, "
-            "Access Token, Access Token Secret. App-only Bearer tokens cannot post.",
-        )
+    refused = publishing_refusal(cfg)
+    if refused is not None:
+        return PolicyDecision(False, refused)
     body = (text or "").strip()
     if not body:
         return PolicyDecision(False, "Tweet text is empty.")
@@ -147,10 +155,5 @@ def evaluate_post(
 
 def evaluate_delete(*, cfg: XConfig | None = None) -> PolicyDecision:
     cfg = cfg or get_x_config()
-    if cfg.restore_paused:
-        return PolicyDecision(False, "X publishing is paused after restore. Verify the account and explicitly resume in X Studio.")
-    if cfg.kill_switch:
-        return PolicyDecision(False, "X posting is disabled (KAZMA_X_POST=0).")
-    if not cfg.enabled or not cfg.credentials.complete():
-        return PolicyDecision(False, "X connector is not configured.")
-    return PolicyDecision(True, "Policy ok.")
+    refused = publishing_refusal(cfg)
+    return PolicyDecision(False, refused) if refused is not None else PolicyDecision(True, "Policy ok.")

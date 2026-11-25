@@ -77,6 +77,20 @@
   inside the data folder was followed, and the files it led to were copied. A
   folder directly in the data folder may still be on another disk.
 
+## A refused X post says why (2026-11-25)
+
+- A post, a delete or a booking X never got now tells you the reason. It said
+  "effects are unknown", even when Kazma had not contacted X at all.
+- While publishing to X is paused, switched off or not set up, Kazma says so
+  before asking you to approve a post that could not go out.
+
+## A file tool opens the file that was checked (Windows, 2026-11-25)
+
+- On Windows, a path that named a drive after its first part could be checked
+  as one file and opened as another, in the server's own folder. Such a path
+  is refused now, by its text, at every place that takes a path, and a path
+  that means a place only relative to a drive is never read as the workspace's.
+
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 
 - Once Spaces is on, a chat you started can move from your own space into a

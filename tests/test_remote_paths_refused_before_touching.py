@@ -262,3 +262,103 @@ def test_control_the_old_bodies_touch_the_network_path(touches, tmp_path):
     if os.path.isabs(absolute):
         os.path.realpath(absolute)
     assert len(touches) == 3, touches
+
+
+# ── 2026-11-25: a drive named after the first part (Windows) ───────────────
+# ``Path.resolve()`` of ``<workspace>\file:\C:\x`` answers the drive-relative
+# ``C:x``: the access check joined it to the workspace again and allowed it,
+# and the tool opened ``x`` in the server's current folder.
+
+INNER_DRIVE = ["file:///C:/x", "a?b/C:/x", "a|b/C:x", "a/C:/x", "a\\C:\\x", "./C:/x", "nul/d:/x", "a/../C:/x",
+               "C:/ok/D:/x", '  "a/C:/x"  ']
+NO_INNER_DRIVE = ["C:/work/a.txt", "C:\\work\\ab:c", "C:a.txt", "a.txt", "rel/ab:c", "https://host/x", "",
+                  "~/a.txt", "x:y"]
+
+
+@pytest.mark.parametrize("text", INNER_DRIVE)
+def test_a_drive_after_the_first_part_is_named(text):
+    from kazma_core.workspace.remote_paths import inner_drive_reason
+
+    assert inner_drive_reason(text)
+    assert bool(remote_path_reason(text)) is (os.name == "nt"), "every door asks it, on Windows"
+
+
+@pytest.mark.parametrize("text", NO_INNER_DRIVE)
+def test_a_path_with_one_drive_or_none_passes(text):
+    from kazma_core.workspace.remote_paths import inner_drive_reason
+
+    assert inner_drive_reason(text) is None
+
+
+@pytest.fixture
+def server_folder(tmp_path, monkeypatch) -> Path:
+    """The server's current folder, holding a file no tool may open."""
+    here = tmp_path / "server"
+    here.mkdir()
+    (here / "secret.txt").write_text("the server's own words\n", encoding="utf-8")
+    monkeypatch.chdir(here)
+    return here
+
+
+def _from_the_server_folder(here: Path) -> list[str]:
+    drive = here.drive or "C:"
+    return [f"file:///{drive}/secret.txt", f"a?b/{drive}/secret.txt", f"a/{drive}secret.txt", f"{drive}secret.txt"]
+
+
+async def test_no_file_tool_opens_the_servers_folder(server_folder, tmp_path):
+    from kazma_core.ide.workspace_scope import workspace_path_scope
+    from kazma_core.tools.file_apply_patch import file_apply_patch
+    from kazma_core.tools.file_read import clear_read_cache, file_read
+    from kazma_core.tools.file_write import file_write
+
+    clear_read_cache()
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    async with workspace_path_scope(workspace):
+        for text in _from_the_server_folder(server_folder):
+            for tool, args in ((file_read, (text,)), (file_write, (text, "overwritten")),
+                               (file_apply_patch, (text, "server's", "agent's"))):
+                try:
+                    shown = str(await tool(*args))
+                except RefusedBeforeEffect as refused:
+                    shown = "Error: " + str(refused)
+                assert "own words" not in shown, (text, shown)
+    assert (server_folder / "secret.txt").read_text(encoding="utf-8") == "the server's own words\n"
+    assert [p.name for p in server_folder.iterdir()] == ["secret.txt"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="a drive means something on Windows only")
+def test_a_drive_relative_path_is_refused_by_the_resolver_the_policy_and_the_ide(server_folder, tmp_path, monkeypatch):
+    from kazma_core.ide import service
+    from kazma_core.workspace import path_policy, remote_paths
+    from kazma_core.workspace.binding import resolve_tool_path
+    from kazma_core.workspace.real_paths import real_path
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    monkeypatch.setattr(service, "_resolve_workspace_root", lambda: workspace)
+    monkeypatch.setattr(path_policy, "resolve_active_root", lambda: workspace)
+    spelled = _from_the_server_folder(server_folder)
+    for text in spelled:
+        with pytest.raises(RefusedBeforeEffect):
+            resolve_tool_path(text, root=workspace)
+        assert not path_policy.check_path_access(text, "read").allowed, text
+        assert not path_policy.check_path_access(Path(text), "write").allowed, text
+        assert real_path(workspace / text).is_absolute()
+    for text in spelled[:3]:
+        with pytest.raises(ValueError, match="drive"):
+            service.IdeService().resolve(text)
+    # A resolve that still answers a drive-relative path is not believed.
+    monkeypatch.setattr(remote_paths, "inner_drive_reason", lambda _path: None)
+    with pytest.raises(RefusedBeforeEffect, match="can hold"):
+        resolve_tool_path(spelled[0], root=workspace)
+    answer = path_policy.check_path_access(spelled[0], "read")
+    assert not answer.allowed and "can hold" in answer.reason
+
+
+@pytest.mark.skipif(os.name != "nt", reason="a drive means something on Windows only")
+def test_control_windows_resolves_such_a_path_to_the_servers_folder(server_folder, tmp_path):
+    for text in _from_the_server_folder(server_folder)[:3]:
+        resolved = (tmp_path / "work" / text).resolve()
+        assert not resolved.is_absolute(), "no longer drive-relative: the rule may go"
+        assert resolved.read_text(encoding="utf-8") == "the server's own words\n"

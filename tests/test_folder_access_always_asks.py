@@ -26,6 +26,13 @@ from kazma_core.safety.task_grants import clear_task_grant, grant_task
 from kazma_core.safety.unasked import BY_TASK_GRANT, BY_YOLO
 from kazma_core.safety.yolo import disable_yolo, enable_yolo
 
+@pytest.fixture(autouse=True)
+def _x_can_publish(monkeypatch):
+    """An X account that can publish: what is measured here is the card and
+    who answers it. One that cannot gets none (tests/test_x_refused_says_why.py)."""
+    monkeypatch.setattr("kazma_core.x_api.policy.publishing_refusal", lambda cfg=None: None)
+
+
 TOOL = "request_path_access"
 TID = "thr-folder-access"
 HITL_ON = {"enabled": True}

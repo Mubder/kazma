@@ -5,7 +5,9 @@ policy or the host will refuse anyway wastes the approval and then fails the
 turn. Live 2026-10-18, twice on Telegram: an approved ``shell_exec`` the
 host-shell policy refused (``safety/shell_preflight``), then an approved
 ``browser_navigate`` this host cannot launch (strict browser network mode on
-Windows, ``web_acquire.browser_isolation.launch_refusal``).
+Windows, ``web_acquire.browser_isolation.launch_refusal``). And 2026-11-25:
+an approved ``x_post`` while publishing to X was paused
+(``x_api.policy.publishing_refusal``).
 
 ``call_refusal`` is the one question both gates ask before a card: the
 graph's (``graph_tool_worker._refuse_unrunnable_calls``) and the swarm bus's
@@ -35,7 +37,11 @@ BROWSER_TOOLS = frozenset({
     "computer_use",
 })
 
-__all__ = ["ALWAYS_ASK_TOOLS", "BROWSER_TOOLS", "PREFLIGHT_TOOLS", "call_refusal", "browser_refusal"]
+#: The tools that publish to X or delete from it, and the booking of a post.
+X_PUBLISH_TOOLS = frozenset({"x_post", "x_delete_post", "x_schedule_post"})
+
+__all__ = ["ALWAYS_ASK_TOOLS", "BROWSER_TOOLS", "PREFLIGHT_TOOLS", "X_PUBLISH_TOOLS", "call_refusal",
+           "browser_refusal"]
 
 
 async def browser_refusal() -> str | None:
@@ -68,6 +74,10 @@ async def call_refusal(name: str, arguments: Any, *, user_text: str | None = Non
         return await browser_refusal()
     if name in OUTBOUND_CHECKED:
         return await asyncio.to_thread(_outbound_refusal, name, args)
+    if name in X_PUBLISH_TOOLS:
+        from kazma_core.x_api.policy import publishing_refusal
+
+        return await asyncio.to_thread(publishing_refusal)
     return None
 
 
@@ -143,4 +153,6 @@ def _outbound_refusal(name: str, args: dict[str, Any]) -> str | None:
 ALWAYS_ASK_TOOLS = frozenset({*ALWAYS_HITL_TOOLS, "request_path_access"})
 
 #: Every tool ``call_refusal`` answers for.
-PREFLIGHT_TOOLS = frozenset({"shell_exec", *BROWSER_TOOLS, *INSTALL_PAID_TOOLS, *OUTBOUND_CHECKED})
+PREFLIGHT_TOOLS = frozenset({
+    "shell_exec", *BROWSER_TOOLS, *INSTALL_PAID_TOOLS, *OUTBOUND_CHECKED, *X_PUBLISH_TOOLS,
+})

@@ -154,7 +154,7 @@ async def publish_x_post(
     """
     refused = await _tool_switched_off("x_post")
     if refused is not None:
-        return False, refused
+        return False, {"posted": False, "outcome": "not_sent", **refused}
     from kazma_core.x_api.publication_service import publish
 
     return await publish(text=text, reply_to_id=reply_to_id, idempotency_key=idempotency_key, origin=origin, metadata=metadata)
@@ -168,7 +168,7 @@ async def delete_x_post(*, tweet_id: str) -> tuple[bool, dict[str, Any]]:
     """
     refused = await _tool_switched_off("x_delete_post")
     if refused is not None:
-        return False, refused
+        return False, {"deleted": False, "outcome": "not_sent", **refused}
     from kazma_core.x_api.publication_service import delete
 
     return await delete(tweet_id=tweet_id)

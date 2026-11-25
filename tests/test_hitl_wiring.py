@@ -21,6 +21,12 @@ from kazma_core.safety.hitl import (
 )
 from kazma_core.swarm.safety import SafetyMiddleware
 
+@pytest.fixture(autouse=True)
+def _x_can_publish(monkeypatch):
+    """An X account that can publish: what is measured here is the card and
+    who answers it. One that cannot gets none (tests/test_x_refused_says_why.py)."""
+    monkeypatch.setattr("kazma_core.x_api.policy.publishing_refusal", lambda cfg=None: None)
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # Phase 1b: MCP force_danger parity (C1 regression helpers)

@@ -31,6 +31,13 @@ from kazma_core.spaces import identity, people, scope
 from kazma_core.spaces import tools as host_tools
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, bind_scope
 
+@pytest.fixture(autouse=True)
+def _x_can_publish(monkeypatch):
+    """An X account that can publish: what is measured here is the card and
+    who answers it. One that cannot gets none (tests/test_x_refused_says_why.py)."""
+    monkeypatch.setattr("kazma_core.x_api.policy.publishing_refusal", lambda cfg=None: None)
+
+
 pytestmark = pytest.mark.real_features
 
 CODER, WRITER = "coder", "writer"

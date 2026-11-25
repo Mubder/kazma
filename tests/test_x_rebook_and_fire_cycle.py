@@ -97,11 +97,12 @@ def test_rebook_while_booked_at_another_time_is_a_conflict(x_env):
 
 
 def test_the_chat_tool_says_ok_only_when_scheduled(x_env, monkeypatch):
-    import asyncio
     import json
 
     from kazma_core.x_api import booking
     from kazma_skills.native.x_publisher import tools
+
+    from tests._tool_answer import answer_now
 
     service, store = x_env
     ok, first = service.schedule(text="Tool note", fire_at=time.time() + 3600, idempotency_key="proposal:p-4")
@@ -110,7 +111,7 @@ def test_the_chat_tool_says_ok_only_when_scheduled(x_env, monkeypatch):
         return service.schedule(text=kw["text"], fire_at=time.time() + 7200, idempotency_key=kw["idempotency_key"])
 
     monkeypatch.setattr(booking, "book_x_post", book)
-    out = json.loads(asyncio.run(tools.x_schedule_post("Tool note", "2h", proposal_id="p-4")))
+    out = json.loads(answer_now(tools.x_schedule_post, "Tool note", "2h", proposal_id="p-4"))
     assert out["ok"] is False and out["scheduled"] is False and out["state"] == "scheduled"
     assert out["code"] == "booking_conflict" and out["operation_id"] == first["operation_id"]
 

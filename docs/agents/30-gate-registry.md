@@ -232,7 +232,13 @@ metacharacter; the browser tools and `computer_use`:
 off the loop) is asked by the chat tool worker before the commitment gate
 (`_refuse_unrunnable_calls`, `outcome="policy"`, the turn goes on) and by the
 registry before the swarm bus. The cards had said "BLOCKED: host shell is
-disabled" and asked to approve a navigation Windows refuses. Gates:
+disabled" and asked to approve a navigation Windows refuses. The X tools that
+publish, delete or book (`X_PUBLISH_TOOLS`) ask `x_api.policy.publishing_refusal`
+there (live 2026-11-25: an approved `x_post` while publishing was paused after
+a restore), and one that certainly did not happen -- `not_sent`, `rejected`,
+`not_on_x`, a booking not made -- is raised as `RefusedBeforeEffect` with its
+reason; an unknown outcome stays a failure (`tests/test_x_refused_says_why.py`,
+which enumerates the X tools that ask). Gates:
 `tests/test_shell_refused_before_card.py`, `tests/test_browser_refused_before_card.py`
 (the live URL; the old browser tools give exactly the live `effect_uncertain`;
 a launchable or runnable call still gets its card). So does a call whose

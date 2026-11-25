@@ -100,12 +100,18 @@ class World:
         assert OWNER_MARK not in shown, shown[:600]
 
     def foreign(self, name: str) -> list[str]:
-        """B's file, the owner's file and a path that climbs out of A's folder."""
+        """B's file, the owner's file, a path that climbs out of A's folder, and
+        B's file as Windows reads it from the server's current folder
+        (``workspace.remote_paths``, 2026-11-25; ``world`` stands there)."""
+        drive = self.dir_b.drive or "C:"
         return [
             str(self.files("b") / name),
             str(self.owner_dir / name),
             f"../../{Matrix.SPACE_B}/files/{name}",
             f"..\\..\\{Matrix.SPACE_B}\\files\\{name}",
+            f"file:///{drive}/{Matrix.SPACE_B}/files/{name}",
+            f"a?b/{drive}/{Matrix.SPACE_B}/files/{name}",
+            f"{drive}{Matrix.SPACE_B}/files/{name}",
         ]
 
     # ── requests ─────────────────────────────────────────────────────────
@@ -154,6 +160,7 @@ def world(matrix: Matrix) -> Iterator[World]:
             _plant(made.files("b"), marks.b)
             _plant(owner_dir, OWNER_MARK)
             made.remember()
+            patch.chdir(made.dir_b.parent)
             yield made
         finally:
             for folder in (made.dir_a, made.dir_b, owner_dir):

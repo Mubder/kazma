@@ -469,7 +469,11 @@ def check_path_access(
     try:
         # A relative path means the workspace, the same as in every tool.
         resolved = resolve_tool_path(path, root=workspace)
-    except OSError as exc:
+    except Exception as exc:
+        from kazma_core.agent.tool_refusal import RefusedBeforeEffect
+
+        if not isinstance(exc, (OSError, RefusedBeforeEffect)):
+            raise
         return PathAccessResult(
             allowed=False,
             reason=f"invalid path: {exc}",
