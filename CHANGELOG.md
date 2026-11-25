@@ -9,6 +9,15 @@
   Kazma's data folder.
 - With Spaces on, the Activity page no longer shows such a request as failed.
 
+## Members' code network: shut while Docker starts (2026-11-25)
+
+- While Kazma's container engine starts, code given the network reaches
+  nothing until the rules that hold it to the public internet are found in
+  effect. For half a second of a start, a container Docker could not stop
+  could reach private addresses.
+- `kazma setup engine` finds rules that no longer hold and puts them in again;
+  it read them as fine before. Run it once where the network was set up.
+
 ## Spaces: background work runs in the space it is for (2026-11-25)
 
 - Once Spaces is on, a document is processed, recovered after a crash and put
