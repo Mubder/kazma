@@ -254,7 +254,7 @@ def create_history_import_router() -> APIRouter:
         token = secrets.token_urlsafe(16)
         path = (await asyncio.to_thread(_folder)) / f"upload-{token}"
         fh = await asyncio.to_thread(path.open, "wb")
-        size, buffer = 0, bytearray()
+        size, buffer, received = 0, bytearray(), False
         try:
             async for chunk in request.stream():
                 size += len(chunk)
@@ -266,13 +266,15 @@ def create_history_import_router() -> APIRouter:
                     buffer.clear()
             if buffer:
                 await asyncio.to_thread(fh.write, bytes(buffer))
+            received = True
         except ValueError:
-            await asyncio.to_thread(fh.close)
-            await asyncio.to_thread(path.unlink, True)
             return _refused("too_large", "the file is larger than Kazma takes", 413)
         finally:
-            if not fh.closed:
-                await asyncio.to_thread(fh.close)
+            await asyncio.to_thread(fh.close)
+            if not received:
+                # Too large, or the client went away while sending: no half
+                # of an export stays on disk.
+                await asyncio.to_thread(path.unlink, True)
 
         def read() -> dict[str, Any]:
             from kazma_core.memory import history_import

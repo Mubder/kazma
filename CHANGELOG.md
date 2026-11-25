@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## A page closed while sending is not a server error (2026-11-25)
+
+- A page that closes while it is still sending its request no longer logs an
+  unhandled exception with a traceback, and nothing is answered to it. A real
+  failure in the same request is reported as before.
+- A history export whose upload was cut off no longer leaves half a file in
+  Kazma's data folder.
+- With Spaces on, the Activity page no longer shows such a request as failed.
+
 ## Spaces: background work runs in the space it is for (2026-11-25)
 
 - Once Spaces is on, a document is processed, recovered after a crash and put
