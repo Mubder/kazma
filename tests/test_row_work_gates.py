@@ -32,6 +32,12 @@ ROW_WORK = "kazma-core/kazma_core/spaces/row_work.py"
 #: The install's own statements: ``file::function`` -> why no one space is the
 #: answer. A name is a function, and everything it calls is the install's.
 INSTALL: dict[str, str] = {
+    "kazma-core/kazma_core/checkpoint_retention.py::_prune_postgres_checkpoints":
+        "retention, by age alone, over every space's chats",
+    "kazma-ui/kazma_ui/hitl_timeout.py::_watchdog_loop":
+        "lists every space's waiting cards, with nothing bound; each is then timed out as its own",
+    "kazma-ui/kazma_ui/turn_resume.py::_find_cut_turns":
+        "lists every space's newest checkpoints at a start; each turn goes on as its own",
     "kazma-core/kazma_core/checkpoints_pg.py::open_postgres_checkpointer":
         "the checkpoint tables are made once, for every space",
     "kazma-core/kazma_core/db/pg_backup.py::verify_required_pg_tables":
@@ -154,6 +160,18 @@ ROWS: dict[str, tuple[str, tuple[str, ...]]] = {
     "kazma-core/kazma_core/swarm/task_store.py::TaskStore.requeue_orphaned_running": (
         "statements: each interrupted task's own space",
         ("statements_of(space_of_task(task))",)),
+    "kazma-ui/kazma_ui/history_import_api.py::_run": (
+        "a person's act: the space they brought their history into",
+        ("resolve_act_of(space, person)",)),
+    "kazma-ui/kazma_ui/session_manager.py::SessionManager._add_spooled_only": (
+        "statements: the spooled chat's own space",
+        ("statements_of(tenant_id)",)),
+    "kazma-ui/kazma_ui/session_manager.py::SessionManager._drain_spool": (
+        "statements: the spooled chat's own space",
+        ("statements_of(tenant_id)",)),
+    "kazma-ui/kazma_ui/session_manager.py::SessionManager.hand_over": (
+        "statements: the space a chat moves to, whose rule the move asked",
+        ("statements_of(to.tenant_id)", "statements_of(to.tenant_id)",)),
     "kazma-ui/kazma_ui/health.py::_check_memory_recall": (
         "statements: the owner's space, the canary's",
         ("statements_of(OWNER_SPACE_ID)",)),

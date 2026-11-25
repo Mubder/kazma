@@ -31,7 +31,9 @@ from datetime import UTC, datetime
 from typing import Any, Callable, Iterator
 
 from kazma_core.config_store import apply_sqlite_pragmas
+from kazma_core.db.pg_helpers import is_space_refusal
 from kazma_core.spaces import threads
+from kazma_core.spaces.row_work import statements_of
 from kazma_core.spaces.scope import OWNER_SPACE_ID, require_space_id
 
 logger = logging.getLogger(__name__)
@@ -438,8 +440,17 @@ class SessionManager:
             key = f"{tenant_id}:{session_id}"
             if key not in dest:
                 # Through the merging load: the session may have a primary
-                # row that fell outside this load's LIMIT.
-                loaded = self._load_one_from_db(tenant_id, session_id)
+                # row that fell outside this load's LIMIT. Read as its own
+                # space's (S4-01): the list's is another's, or nothing's.
+                try:
+                    with statements_of(tenant_id):
+                        loaded = self._load_one_from_db(tenant_id, session_id)
+                except Exception as exc:
+                    # Refused: without its stored row the spool's copy may be
+                    # an older chat. Left out of this load, never the rest.
+                    logger.warning("[SessionManager] spooled session %s:%s could not be read (%s)",
+                                   tenant_id, session_id, type(exc).__name__)
+                    continue
                 if loaded is not None:
                     dest[key] = loaded
 
@@ -529,10 +540,11 @@ class SessionManager:
             return
         for tenant_id, session_id in sorted(spool.keys()):
             try:
-                session = self._load_one_from_db(tenant_id, session_id)
-                if session is None:
-                    continue
-                self._upsert_db(session)
+                with statements_of(tenant_id):
+                    session = self._load_one_from_db(tenant_id, session_id)
+                    if session is None:
+                        continue
+                    self._upsert_db(session)
             except Exception as exc:
                 logger.warning(
                     "[SessionManager] spooled session %s:%s still refused (%s: %s); "
@@ -771,7 +783,9 @@ class SessionManager:
     def _load_one_from_primary(self, tenant_id: str, session_id: str, *,
                                strict: bool = False) -> ChatSession | None:
         """Load a single primary-store row (overlaid by ``_session_from_row``).
-        *strict*: a store that cannot be read raises; else it reads as none."""
+        *strict*: a store that cannot be read raises; else it reads as none --
+        but never a refusal (S4-01, H2): the chat is there, and read as none
+        it was made anew, empty."""
         try:
             if self._pg:
                 from kazma_core.db.pg_helpers import get_pool
@@ -799,8 +813,8 @@ class SessionManager:
                 (tenant_id, session_id),
             )
             row = cursor.fetchone()
-        except Exception:
-            if strict:
+        except Exception as exc:
+            if strict or is_space_refusal(exc):
                 raise
             logger.debug("[SessionManager] DB load failed for %s", session_id, exc_info=True)
             return None
@@ -1211,9 +1225,13 @@ class SessionManager:
             current = self.get(session_id)
             if current is None or current.messages != messages:
                 return False
+            # The copy's row is the space's it goes to (S4-01): the move is
+            # bound to the one it leaves. A row refused there was spooled, and
+            # the move went on with its only copy in the spool.
             try:
-                self._put(dataclasses.replace(to, title=current.title, archived=current.archived,
-                                              pinned=current.pinned, created_at=current.created_at))
+                with statements_of(to.tenant_id):
+                    self._put(dataclasses.replace(to, title=current.title, archived=current.archived,
+                                                  pinned=current.pinned, created_at=current.created_at))
             except ChatDeleted:  # its new space was erased
                 return False
             committed = False
@@ -1221,7 +1239,8 @@ class SessionManager:
                 committed = commit()
             finally:
                 if not committed:  # nobody has seen it
-                    self._delete_row(str(to.tenant_id), to.session_id)
+                    with statements_of(to.tenant_id):
+                        self._delete_row(str(to.tenant_id), to.session_id)
             if committed:
                 self.mark_deleted(session_id, current.thread_id or session_id)
             return committed
@@ -1331,60 +1350,6 @@ class SessionManager:
                     )
             # Otherwise the next load would bring the deleted chat back.
             self._spool_discard(tenant_id, session_id)
-
-    def _hydrate_from_checkpoints_db(self) -> None:
-        """Auto-discover platform gateway sessions (gw-*) from checkpoints (Postgres or SQLite)."""
-        try:
-            thread_ids: set[str] = set()
-            if self._pg:
-                from kazma_core.db.pg_helpers import get_pool
-                try:
-                    rows = get_pool().execute(
-                        "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE 'gw-%'"
-                    )
-                    for r in rows:
-                        tid = r.get("thread_id") if isinstance(r, dict) else (r[0] if r else None)
-                        if tid:
-                            thread_ids.add(str(tid))
-                except Exception as pg_exc:
-                    logger.debug("[SessionManager] Postgres checkpoint query skipped: %s", pg_exc)
-            else:
-                from kazma_core.paths import checkpoints_db
-                cp_path = checkpoints_db()
-                if os.path.exists(cp_path):
-                    conn = sqlite3.connect(cp_path)
-                    cursor = conn.execute(
-                        "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE 'gw-%'"
-                    )
-                    for (tid,) in cursor.fetchall():
-                        if tid:
-                            thread_ids.add(str(tid))
-                    conn.close()
-
-            for thread_id in thread_ids:
-                if any(s.session_id == thread_id for s in self._sessions.values()):
-                    continue
-                tid_low = thread_id.lower()
-                if "telegram" in tid_low:
-                    plat = "Telegram"
-                elif "discord" in tid_low:
-                    plat = "Discord"
-                elif "slack" in tid_low:
-                    plat = "Slack"
-                else:
-                    plat = "Gateway"
-
-                sess = ChatSession(
-                    session_id=thread_id,
-                    thread_id=thread_id,
-                    tenant_id=OWNER_SPACE_ID,
-                    title=f"{plat} · Session",
-                )
-                key = f"{OWNER_SPACE_ID}:{thread_id}"
-                self._sessions[key] = sess
-                self._write_durably(sess)
-        except Exception as exc:
-            logger.debug("[SessionManager] _hydrate_from_checkpoints_db skipped: %s", exc)
 
     def prune_empty_web_sessions(
         self,

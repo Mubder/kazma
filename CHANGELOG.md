@@ -11,6 +11,13 @@
 - Once Spaces is on and the database refuses Kazma, Kazma says so and does not
   go on with another, empty store: a start that is refused fails with the
   reason. With Spaces off, and in an outage, it does what it did before.
+- Once Spaces is on, a swarm task's ending is recorded in its own space whoever
+  ends it, Kazma's start holds tasks a crash cut off in every space, and the
+  owner's task list has the tasks of before Spaces. A task the database refuses
+  says so, instead of "try again shortly".
+- Once Spaces is on, a chat the database refuses to read is no longer opened as
+  a new, empty one, and a history you bring in is yours in your space, or is
+  not brought in if you left it meanwhile.
 - A document audit entry that could not be written is logged as a warning.
 - The check that Kazma does not sign in to Postgres as a superuser asks for the
   login itself.

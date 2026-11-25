@@ -165,42 +165,11 @@ async def _get_pending_approvals(
         logger.warning("[HITL] No DB connection available to enumerate threads")
         return []
 
-    # ── Filter by HITL state in metadata (if available) ────────────
-    # Try to get thread IDs with hitl_state == 'pending_approval' from DB
-    pending_thread_ids: list[str] = []
-    
-    # Check if connection supports direct metadata query
-    if conn is not None:
-        try:
-            # For SQLite (aiosqlite)
-            if hasattr(conn, 'execute'):
-                cursor = await conn.execute(
-                    "SELECT thread_id FROM checkpoints WHERE json_extract(metadata, '$.hitl_state') = ?",
-                    ("pending_approval",)
-                )
-                rows = await cursor.fetchall()
-                pending_thread_ids = [row[0] for row in rows if row[0]]
-            # For Postgres (psycopg)
-            elif hasattr(conn, 'connection'):
-                async with conn.connection() as pg_conn:
-                    async with pg_conn.cursor() as cur:
-                        await cur.execute(
-                            "SELECT thread_id FROM checkpoints WHERE metadata->>'hitl_state' = %s",
-                            ("pending_approval",)
-                        )
-                        rows = await cur.fetchall()
-                        pending_thread_ids = [row[0] for row in rows if row[0]]
-        except Exception as exc:
-            logger.debug("[HITL] Failed to query hitl_state from DB, falling back to graph scan: %s", exc)
-            # Fall back to scanning all threads
-            pending_thread_ids = thread_ids
-    
-    # If we couldn't query by state, use all thread IDs (backward compatibility)
-    if not pending_thread_ids:
-        pending_thread_ids = thread_ids
-
+    # Each thread's own state says whether it waits. (A query for
+    # ``metadata.hitl_state`` stood here: nothing writes it, so it matched no
+    # row, and on Postgres it raised on every row it might have read.)
     approvals: list[dict[str, Any]] = []
-    for thread_id in pending_thread_ids:
+    for thread_id in thread_ids:
         config: dict[str, Any] = {
             "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
         }

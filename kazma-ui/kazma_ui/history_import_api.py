@@ -26,6 +26,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from kazma_core.errors import validation_error
+from kazma_core.spaces.scope import bound_asker
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +69,9 @@ _JOBS_LOCK = threading.Lock()
 #: job, so the answer cannot change between the two: each space has its own
 #: job and its own lock, and two spaces could both see "none" and both start.
 _START_LOCK = threading.Lock()
-#: token -> (file, when, summary, the space that uploaded it).
-_UPLOADS: dict[str, tuple[Path, float, dict[str, Any], str]] = {}
+#: token -> (file, when, summary, the space that uploaded it, the person who
+#: did: ``""`` when no one is bound).
+_UPLOADS: dict[str, tuple[Path, float, dict[str, Any], str, str]] = {}
 _UPLOADS_LOCK = threading.Lock()
 
 
@@ -91,7 +93,7 @@ def _any_running() -> bool:
     return any(job.view()["state"] == "running" for job in jobs)
 
 
-def _claim(space: str, token: str, held: tuple[Path, float, dict[str, Any], str]) -> bool:
+def _claim(space: str, token: str, held: tuple[Path, float, dict[str, Any], str, str]) -> bool:
     """Start *space*'s import of *held*, unless an import runs anywhere.
     True when it was started. One lock for the check and the claim."""
     with _START_LOCK:
@@ -103,7 +105,7 @@ def _claim(space: str, token: str, held: tuple[Path, float, dict[str, Any], str]
             job.report, job.summary, job.error = None, held[2], ""
             job.stop.clear()
             job.thread = threading.Thread(
-                target=_run, args=(token, held[0], space, job), name="history-import", daemon=True)
+                target=_run, args=(token, held[0], space, job, held[4]), name="history-import", daemon=True)
             job.thread.start()
     return True
 
@@ -119,11 +121,11 @@ def _folder() -> Path:
 def _sweep(now: float) -> None:
     """Delete uploads older than an hour (never the one being imported)."""
     with _UPLOADS_LOCK:
-        for token, (path, at, _summary, _space_id) in list(_UPLOADS.items()):
+        for token, (path, at, _summary, _space_id, _person) in list(_UPLOADS.items()):
             if now - at > _KEEP_S:
                 path.unlink(missing_ok=True)
                 _UPLOADS.pop(token, None)
-    held = {str(p) for p, _a, _s, _sp in _UPLOADS.values()}
+    held = {str(p) for p, _a, _s, _sp, _who in _UPLOADS.values()}
     for leftover in _folder().glob("upload-*"):
         try:
             if str(leftover) not in held and now - leftover.stat().st_mtime > _KEEP_S:
@@ -145,22 +147,30 @@ def _refused(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse({"ok": False, "error": message, "code": code}, status_code=status)
 
 
-def _run(token: str, path: Path, space: str, job: _Job) -> None:
+def _run(token: str, path: Path, space: str, job: _Job, person: str = "") -> None:
+    """The import, in a thread of its own: in *space* as *person* (S4-01: a
+    bare thread holds no scope, so it ran with none, and its turns named
+    nobody), who brought the history. Refused when they left meanwhile: what
+    a person brings in is never anyone else's."""
     from kazma_core.memory import history_import
+    from kazma_core.spaces.identity import AskerLeft
+    from kazma_core.spaces.row_work import resolve_act_of
 
     try:
+        as_its_person = resolve_act_of(space, person)
         history = history_import.read_export(path)
 
         def progress(done: int, total: int) -> None:
             with job.lock:
                 job.done, job.total = done, total
 
-        report = history_import.import_history(
-            history, tenant_id=space, progress=progress, should_stop=job.stop.is_set)
+        with as_its_person():
+            report = history_import.import_history(
+                history, tenant_id=space, progress=progress, should_stop=job.stop.is_set)
         with job.lock:
             job.report = report.as_dict()
             job.state = "stopped" if report.stopped else "done"
-    except (history_import.ImportRefused, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+    except (AskerLeft, history_import.ImportRefused, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         logger.warning("[history_import] the import failed", exc_info=True)
         with job.lock:
             job.state, job.error = "failed", type(exc).__name__
@@ -219,7 +229,7 @@ def create_history_import_router() -> APIRouter:
             await asyncio.to_thread(path.unlink, True)
             return _refused("not_an_export", validation_error(exc), 422)
         with _UPLOADS_LOCK:
-            _UPLOADS[token] = (path, time.time(), summary, _space())
+            _UPLOADS[token] = (path, time.time(), summary, _space(), bound_asker() or "")
         return JSONResponse({"ok": True, "token": token, "summary": summary})
 
     @router.post("/start")

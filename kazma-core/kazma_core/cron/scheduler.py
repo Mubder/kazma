@@ -297,18 +297,6 @@ def _late_note(due: datetime | None, now: datetime, zone: tzinfo, zone_name: str
     return f"(due {local.strftime('%Y-%m-%d %H:%M')} {zone_name}, {span} late)"
 
 
-def _web_session_for_thread(thread_id: str) -> Any:
-    """The web chat session bound to *thread_id*, or None.
-
-    A chat-store read (a Postgres round trip when the session is not cached);
-    the target resolution runs it in a thread.
-    """
-    from kazma_ui.session_manager import get_session_manager
-
-    mgr = get_session_manager()
-    return mgr.get_by_thread_id(thread_id) if mgr else None
-
-
 def _valid_target(t: str) -> bool:
     return bool(t) and ":" in t and not t.endswith(":")
 
@@ -1339,8 +1327,7 @@ class CronScheduler:
         1. ``job.delivery_target`` when well-formed (``platform:id``).
         2. A sibling job's valid target on the same thread -- adopted AND
            persisted so the broken row self-heals (2026-08-27).
-        3. The session store for the thread (best effort; 5-minute TTL).
-        ``""`` when nothing works: the outbox records it undeliverable, with
+        ``""`` when neither works (a chat's own row holds no address): the outbox records it undeliverable, with
         an alert naming the job -- never a guessed address.
         """
         target_id = str(job.delivery_target or "").strip()
@@ -1359,15 +1346,6 @@ class CronScheduler:
             except Exception:  # noqa: BLE001
                 logger.warning("[CronScheduler] target repair persist failed", exc_info=True)
             return healed
-        try:
-            sess = await asyncio.to_thread(_web_session_for_thread, job.thread_id)
-            if sess is not None:
-                plat = str(getattr(sess, "platform", "") or job.platform or "")
-                chat = str(getattr(sess, "chat_id", "") or "")
-                if plat and chat and _valid_target(f"{plat}:{chat}"):
-                    return f"{plat}:{chat}"
-        except Exception:  # noqa: BLE001 — best effort
-            logger.debug("[CronScheduler] session lookup failed for %s", job.job_id, exc_info=True)
         return ""
 
     async def _record_missed(self, job: ScheduledJob, now: datetime) -> None:

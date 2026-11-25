@@ -183,6 +183,15 @@
   asker in its space on every surface, the refusal of chat and the agent
   lifted where Spaces is enforced, each space's files in its own folder once
   it is (the root keeps every tenant's copy in this release, for a revert).
+- **A chat's row is read and written as its own space's (S4-01 step 0a,
+  2026-11-25).** The spool's drain and the spooled chats of a list say each
+  row's space, a chat move's copy (and its undo) the space it goes to; a
+  start's listing of cut turns, the approval watchdog's and the checkpoint
+  retention are the install's (a page's listing keeps its own space); the
+  history import runs as the person who uploaded it, in their space, or is
+  refused when they left. A refused read of a chat raises: read as "no such
+  chat", it was made anew, empty. Gates: `tests/test_chat_rows_in_their_space.py`
+  (and no Postgres row is read by its place, inside a pool's block).
 - **A document's work runs in the document's space (S4-01 step 0a,
   2026-11-25).** The worker binds each job's scope before its first stage
   (`DocumentWorker._process_claimed`: heartbeat, stages and outcome; an
