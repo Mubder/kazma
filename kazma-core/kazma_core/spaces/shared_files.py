@@ -25,6 +25,7 @@ loop.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import sqlite3
@@ -50,6 +51,7 @@ __all__ = [
     "name_moves",
     "record_move",
     "undo_move",
+    "was_recorded",
 ]
 
 logger = logging.getLogger(__name__)
@@ -202,6 +204,20 @@ def undo_move(move: Mapping[str, Any]) -> None:
                  float(move["shared_at"]), move["shared_by_attempt"]))
 
 
+def was_recorded(move: Mapping[str, Any]) -> bool:
+    """Whether :func:`record_move` wrote this very move's rows: its file was
+    in its target."""
+    table = "files_taken_out" if move["taken_out"] else "shared_files"
+    with _reading() as conn:
+        return conn is not None and conn.execute(
+            f"SELECT 1 FROM {table} WHERE attempt = ?", (move["attempt"],)).fetchone() is not None
+
+
+def _line_id(attempt: str) -> str:
+    """A line's id on the page: its own, never the move's."""
+    return hashlib.sha256(f"taken out:{attempt}".encode()).hexdigest()[:32]
+
+
 def _taken_out_files(space: str, *, limit: int = 50) -> list[dict[str, str]]:
     """The files taken out of *space*, newest first: who, when and the path
     each had. Never a word of the file."""
@@ -209,7 +225,7 @@ def _taken_out_files(space: str, *, limit: int = 50) -> list[dict[str, str]]:
         rows = [] if conn is None else conn.execute(
             "SELECT attempt, path, taken_by, taken_at FROM files_taken_out WHERE space_id = ? "
             "ORDER BY taken_at DESC, rowid DESC LIMIT ?", (space, max(1, min(int(limit), 200)))).fetchall()
-    return [{"id": str(r[0]), "path": str(r[1]), "by": str(r[2]), "at": _iso(float(r[3]))} for r in rows]
+    return [{"id": _line_id(str(r[0])), "path": str(r[1]), "by": str(r[2]), "at": _iso(float(r[3]))} for r in rows]
 
 
 def forget_gone(spaces_being_moved: set[str]) -> int:

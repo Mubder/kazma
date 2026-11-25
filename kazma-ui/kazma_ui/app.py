@@ -2275,10 +2275,14 @@ class KazmaAppBuilder:
             # ── File moves that did not end (Spaces S2-12) ─────────
             # The file goes back, or its move ends, before anyone is served.
             # Nothing is read or made where Spaces is not enforced; what cannot
-            # be ended now is said there and left to the sweep "file moves".
-            from kazma_core.spaces.file_moves import settle_file_moves
+            # be ended now is said there and left to the sweep "file moves";
+            # nothing of it stops the rest of the start.
+            try:
+                from kazma_core.spaces.file_moves import settle_file_moves
 
-            await asyncio.to_thread(settle_file_moves)
+                await asyncio.to_thread(settle_file_moves)
+            except Exception:  # noqa: BLE001 -- the sweep tries again
+                logger.warning("[spaces] cut-off file moves were not settled at start", exc_info=True)
 
             # ── Turns a restart cut off (resilience plan C1) ───────
             # A safe one continues by itself; one whose tool effect is

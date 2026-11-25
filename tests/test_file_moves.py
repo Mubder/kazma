@@ -30,7 +30,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from kazma_core.spaces import file_moves, files, people, scope, shared_files, space_limits
-from kazma_core.spaces.files import FILES, MOVING, space_dir
+from kazma_core.spaces.files import FILES, moving_dir, space_dir
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID
 from kazma_ui import auth, space_binding
 from kazma_ui.space_files_api import REFUSALS, create_space_files_router
@@ -101,10 +101,10 @@ def test_only_the_person_who_shared_a_file_takes_it_out(world: Files) -> None:
     w = world
     w.share("trip.txt")
     # Omar, a member and an owner of the space: not his file.
-    assert w.refused("trip.txt", w.family, w.omars, by=w.omar) == "not_yours"
+    assert w.refused("trip.txt", w.family, w.omars, by=w.omar) == "not_the_sharer"
     # A file nobody shared (Kazma wrote it there): nobody's to take out.
     w.put(w.family, "report.txt", b"a report")
-    assert w.refused("report.txt", w.family, w.mine) == "not_yours"
+    assert w.refused("report.txt", w.family, w.mine) == "not_the_sharer"
     assert w.where() == ["family:trip.txt"] and w.where(b"a report") == ["family:report.txt"]
     assert w.held() == [] and w.lines() == []
 
@@ -183,12 +183,18 @@ def test_control_a_placing_that_replaces_takes_anothers_file(world: Files, monke
         _taken_at_the_last_moment(world, monkeypatch)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="Windows places by a rename that never replaces")
-def test_a_disk_with_no_hard_links_moves_and_never_replaces(world: Files, monkeypatch) -> None:
+def _no_links(monkeypatch) -> None:
     def no_links(*_a: Any, **_k: Any) -> None:
         raise PermissionError(errno.EPERM, "no hard links here")
 
     monkeypatch.setattr(file_moves.os, "link", no_links)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows places by a rename that never replaces")
+def test_a_disk_with_no_hard_links_moves_and_never_replaces(world: Files, monkeypatch) -> None:
+    if file_moves._rename_call() is None:
+        pytest.skip("this system has no rename that never replaces")
+    _no_links(monkeypatch)
     w = world
     w.share("trip.txt")
     w.move("trip.txt", w.family, w.mine)
@@ -454,7 +460,7 @@ def test_a_folder_that_cannot_be_read_is_said(world: Files, monkeypatch) -> None
             raise PermissionError("not yours")
         return real(path)
 
-    monkeypatch.setattr(files.os, "scandir", refuses)
+    monkeypatch.setattr(os, "scandir", refuses)
     part = shared_files.list_files(w.mine, by=w.reem)
     assert part["cut"] is True and [f["path"] for f in part["files"]] == ["a.txt"]
     closed.add(FILES)
@@ -641,10 +647,11 @@ def test_the_move_and_the_settling_run_off_the_loop(world: Files, client: TestCl
 
 def test_no_folder_of_a_move_is_a_space_folder_anything_reads(world: Files) -> None:
     w = world
-    held = space_dir(w.family) / MOVING / ("a" * 32)
+    held = moving_dir(w.family) / ("a" * 32)
     held.mkdir(parents=True)
     (held / "copy").write_bytes(b"held")
     assert files.is_space_files_path(held / "copy") is False
     assert "held" not in str(shared_files.list_files(w.family, by=w.reem))
-    with scope.bind_scope(w.mine, w.reem):
-        assert files.another_spaces_path((held / "copy").resolve()) is True
+    for space, person in ((w.mine, w.reem), (w.family, w.reem), (OWNER_SPACE_ID, OWNER_ACCOUNT_ID)):
+        with scope.bind_scope(space, person):
+            assert files.another_spaces_path((held / "copy").resolve()) is True

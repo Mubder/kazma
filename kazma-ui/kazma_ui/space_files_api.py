@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 REFUSALS: tuple[str, ...] = (
     "bad_name", "busy", "changed_meanwhile", "changed_since", "disk_full", "identity_unavailable", "in_use",
     "move_failed", "move_in_progress", "name_taken", "name_too_long", "not_a_file", "not_between_own_and_shared",
-    "not_found", "not_yours", "owners_space", "project_folder", "space_limit", "spaces_off", "too_large",
+    "not_found", "not_the_sharer", "not_yours", "owners_space", "project_folder", "space_limit", "spaces_off", "too_large",
     "unfinished",
 )
 

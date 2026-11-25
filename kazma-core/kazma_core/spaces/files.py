@@ -10,7 +10,11 @@ A space's rows carry its id; its files live in one folder,
 ``images/``       generated images and browser screenshots
 ``documents/``    generated and converted documents
 ``exports/``      exports its people asked for
-``moving/``       a file being moved to or from another space, for a moment
+
+These five are the space's: its file tools read and write them. Anything else
+in its folder is Kazma's own (an import's mark, ``.kazma-arriving``) and no
+tool opens it (:func:`kazmas_own_in_a_space`). A file being moved between two
+spaces is in neither folder for a moment (:func:`moving_dir`).
 
 **The owner's space keeps the install's folders** (``<data dir>/attachments``
 and the rest, and the workspace the install has always had): a mapping, not a
@@ -33,6 +37,7 @@ store (a settings read): blocking, so async code calls them in a thread.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from kazma_core.spaces.scope import (
@@ -49,9 +54,10 @@ __all__ = [
     "FOLDER_KINDS",
     "SpaceKindUnknown",
     "another_spaces_path",
-    "held_by_a_move",
     "in_sandboxed_space",
     "is_space_files_path",
+    "kazmas_own_in_a_space",
+    "moving_dir",
     "own_files",
     "sandboxed_files_root",
     "sandboxed_space",
@@ -69,10 +75,10 @@ FOLDER_KINDS = ("attachments", "images", "documents", "exports")
 #: The space's own working folder inside its space folder.
 FILES = "files"
 
-#: Where a file being moved between spaces is held for a moment
-#: (``spaces.file_moves``): Kazma's own, beside the space's folders. It never
-#: travels: an export and a bundle leave it out, an import takes none.
-MOVING = "moving"
+#: Where files being moved between spaces are held for a moment, beside the
+#: spaces' own folders: no space id, so no space's folder and every space's
+#: "another space's folder" (:func:`another_spaces_path`).
+_MOVING = ".moving"
 
 
 class SpaceKindUnknown(RuntimeError):
@@ -94,6 +100,14 @@ def space_dir(space_id: str) -> Path:
     if not valid_space_id(space_id):
         raise ValueError(f"not a space id: {space_id!r}")
     return _spaces_root() / space_id
+
+
+def moving_dir(space_id: str) -> Path:
+    """Where what a file move holds of *space_id* is kept for a moment
+    (``spaces.file_moves``; not created): ``<data dir>/spaces/.moving/<id>``,
+    Kazma's own, which no space's tool, list, count, export or bundle
+    reaches. It goes with the space's erase."""
+    return space_dir(space_id).parent / _MOVING / space_id
 
 
 def _bound_space() -> str | None:
@@ -214,12 +228,17 @@ def is_space_files_path(path: Path) -> bool:
     return len(parts) >= 2 and parts[1] == FILES
 
 
-def held_by_a_move(path: Path, folder: Path) -> bool:
-    """Whether *path*, inside the space's folder *folder*, is in the holding
-    folder of a file move (:data:`MOVING`): no file of the space's, as
-    Windows reads a name too (its case, and the dots and spaces at its end)."""
-    parts = path.relative_to(folder).parts
-    return bool(parts) and parts[0].rstrip(". ").casefold() == MOVING
+def kazmas_own_in_a_space(path: Path) -> bool:
+    """True when *path* (resolved) is inside a space's folder and in none of
+    the space's own (:data:`FILES`, :data:`FOLDER_KINDS`): Kazma's, whatever
+    it is, so one added later is refused to the space's tools the day it is
+    added."""
+    try:
+        parts = path.relative_to(_spaces_root().resolve()).parts
+    except (ValueError, OSError, RuntimeError):
+        return False
+    own = {FILES, *FOLDER_KINDS}
+    return len(parts) >= 2 and os.path.normcase(parts[1]) not in own
 
 
 def space_of_folder(path: Path) -> str | None:
@@ -232,7 +251,7 @@ def space_of_folder(path: Path) -> str | None:
     except (ValueError, OSError, RuntimeError):
         return None
     parts = relative.parts
-    return parts[0] if parts and parts[0] else None
+    return parts[0] if parts and valid_space_id(parts[0]) else None
 
 
 def another_spaces_path(path: Path) -> bool:

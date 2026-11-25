@@ -481,34 +481,57 @@
     could never be taken out); a name another system cannot hold is listed
     and stays (`bad_name`).
     - **Copy aside, claim, compare, place, remove.** The copy goes to the
-      target's holding folder (`spaces/<id>/moving/<attempt>`, which no list,
-      tool, export or bundle sees and no import takes); the source is claimed
-      by a rename into its own; what was claimed is compared with the copy;
-      the rule is asked again; the copy is placed without replacing and
-      without making a folder. Placing is the only commit point, and
-      **nothing a person can see in the target is ever removed by a move**.
-      Hash-then-unlink lost a write in between, and a copy put in place
-      before the decision had to be deleted by its bytes: it deleted another
-      member's identical file.
+      target's holding folder (`spaces/.moving/<space>/<attempt>`); the source
+      is claimed by a rename into its own; what was claimed is compared with
+      the copy, and what is not the checked file goes back by the same path;
+      the rule is asked again (the account still enabled, too); the copy is
+      placed without replacing and without making a folder. Placing is the
+      only commit point, and **nothing a person can see in the target is ever
+      removed by a move**. Hash-then-unlink lost a write in between, and a
+      copy put in place before the decision had to be deleted by its bytes: it
+      deleted another member's identical file. A disk with neither a rename
+      that never replaces (`renameat2`, `renamex_np`, Windows' own) nor hard
+      links is refused before the claim: an empty file that claims a name and
+      is replaced can be another program's words by then (the import's helper
+      is never used here).
+    - **The holding folder is no space's** (`spaces.files.moving_dir`), under
+      a name no space can have, so it is "another space's folder" to every
+      door, every space and the owner, and no list, count, export or bundle
+      meets it. Inside the space's folder the space's own file tools read it
+      and forged records in it. And whatever Kazma keeps in a space's folder
+      beside the space's own five is refused to that space's tools
+      (`files.kazmas_own_in_a_space`, asked by `is_kazma_store`). A record is
+      bounded, each field is checked, it is believed only of a move between
+      one's own space and a shared one, and no link is followed to it.
     - **One ending** (`_end`), for the move and for one a stop cut off: the
       claimed bytes go only when the target, still a space, holds the very
-      bytes this move put there (`_was_placed`: the copy left its holding
-      folder or is the same file; bytes alone are not it); else they go back
-      to their name or beside it as "name (2)". Run at start, by the sweep
-      "file moves" and by the next move; a live move is left alone, and each
-      is ended on its own.
+      file this move put there (`_was_placed`: by which file it is, kept in
+      the record; its bytes, or a copy that is gone, are no proof); else they
+      go back to their name or beside it as "name (2)". Run at start, by the
+      sweep "file moves" and by the next move; a live move is left alone, each
+      is ended on its own whatever it raises, and one that cannot be ended is
+      said once in ten minutes. The call at start is in its own try.
     - **The record is a file beside what was claimed, never a store's row**:
       the path in it is a person's words, it goes with its space's erase and
       is of the files' moment in a backup. It is written before the target's
-      folders are made, and removed before the copy is.
-    - **An erase waits** for its space's moves after closing it
-      (`file_moves.quiet`); an export ends what is left first. Failures are
+      folders are made and again with the ones really made (only those are
+      ever taken away), and removed before the copy is.
+    - **An erase ends** the moves that left its space, closes it, then
+      **waits** for those under way (`file_moves.quiet`); the target keeps
+      nothing of a file that did not move. An export ends what is left first.
+      A line of a file taken out has an id of its own, never its move's. Who
+      shared a file is asked as `not_the_sharer`; `not_yours` is the spaces'
+      rule. Failures are
       worded (`_worded`, `space_files_api.REFUSALS`); a lost answer is said
       as what the list then shows. At most two moves at once, never waiting.
     - Gates: `tests/test_file_moves.py`, `tests/test_file_move_crashes.py` (a
       kill at every step both ways; no claim, settling by bytes alone, a
-      finish that does not look at the target, a rule asked once and a walk
-      that does not know the holding folder as the controls),
+      finish that does not look at the target, a rule asked once and a holding
+      folder inside the space's as the controls),
+      `tests/test_file_move_review.py`
+      (the review of 2026-11-25, through the real tools and routes: every path
+      tool on the holding folder, forged and poison records, a stop inside the
+      placing),
       `tests/_file_move_space_cases.py`, `tests/js/test_space_files.js`,
       `tests/e2e/test_file_moves_browser.py` (by the sidebar, EN/AR).
 - **A deleted chat stays deleted (2026-11-24).** On every install, in this

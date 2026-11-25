@@ -889,14 +889,12 @@ def _moving_files(space: str) -> Iterator[tuple[str, Path, Path]]:
     of a person's under the mark's name refuses the move: no import takes
     one, and it is never left out without a word. A link is no file of the
     space's: what it leads to never travels."""
-    from kazma_core.spaces.files import held_by_a_move, own_files
+    from kazma_core.spaces.files import own_files
 
     for part, where in _space_folders(space).items():
         if not where.is_dir():
             continue
         for path in own_files(where):
-            if part == "space" and held_by_a_move(path, where):
-                continue
             inside = PurePosixPath(path.relative_to(where).as_posix())
             if _is_the_marks(inside):
                 if len(inside.parts) == 1 and _left_mark(path):
@@ -1406,8 +1404,6 @@ def _nothing_of_the_space_here(space: str) -> None:
 
 def _file_entries(bundle: _Bundle) -> list[tuple[str, PurePosixPath, str]]:
     """``(part, path inside the part's folder, entry name)``, each checked."""
-    from kazma_core.spaces.files import MOVING, held_by_a_move
-
     out = []
     for name in bundle.manifest["entries"]:
         if not name.startswith("files/"):
@@ -1421,10 +1417,6 @@ def _file_entries(bundle: _Bundle) -> list[tuple[str, PurePosixPath, str]]:
             # The mark is written there: a folder of its name failed the
             # import, a file was written over and lost.
             raise SpaceMoveRefused("reserved_name", 409, f"The bundle carries a file named {_ARRIVING}.")
-        if parts[1] == "space" and held_by_a_move(Path(*inside.parts), Path()):
-            # Kazma's own holding folder: a record planted there would be
-            # read as a file move that was cut off.
-            raise SpaceMoveRefused("reserved_name", 409, f"The bundle carries a folder named {MOVING}.")
         out.append((parts[1], inside, name))
     return out
 

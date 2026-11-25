@@ -21,14 +21,13 @@ import os
 import shutil
 import threading
 import zipfile
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 from kazma_core.paths import data_dir
 from kazma_core.spaces import file_moves, identity, people, shared_files, space_data, space_move
-from kazma_core.spaces.files import FILES, MOVING, space_dir
+from kazma_core.spaces.files import FILES, moving_dir, space_dir
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
 
 from tests._file_move_world import PLAN, Files, Killed, digest, files_world
@@ -325,7 +324,7 @@ def test_control_a_finish_that_does_not_look_at_the_target_loses_it(world: Files
     real = file_moves._target_has_it
     with pytest.raises(AssertionError, match="in neither space"):
         with monkeypatch.context() as patch:
-            def settle_blind() -> Any:
+            def settle_blind(**_k: Any) -> Any:
                 patch.setattr(file_moves, "_target_has_it", lambda move: True)
                 return real_settle()
 
@@ -373,14 +372,14 @@ def test_an_unfinished_move_is_said_and_ended_later(world: Files, monkeypatch) -
     w = world
     w.put(w.mine, REL)
     with monkeypatch.context() as patch:
-        real = file_moves._again
+        real = file_moves._unlink
 
-        def held_by_a_scanner(step: Callable[[], Any]) -> Any:
-            if getattr(step, "__name__", "") == "unlink":
+        def held_by_a_scanner(path: Path) -> None:
+            if path.name == "claimed":
                 raise PermissionError("held")
-            return real(step)
+            real(path)
 
-        patch.setattr(file_moves, "_again", held_by_a_scanner)
+        patch.setattr(file_moves, "_unlink", held_by_a_scanner)
         assert w.refused(REL, w.mine, w.family) == "unfinished"
         file_moves.settle_file_moves()  # still held: said, and tried again
     assert w.where() == [f"family:{REL}", "held"]
@@ -409,7 +408,7 @@ def test_one_move_that_cannot_be_ended_does_not_stop_the_others(world: Files, mo
     w.put(w.mine, "other.txt", b"other")
     with monkeypatch.context() as patch:
         _kill_at(patch, "_put_in_place", "before")
-        patch.setattr(file_moves, "settle_file_moves", lambda: [])
+        patch.setattr(file_moves, "settle_file_moves", lambda **_k: [])
         with pytest.raises(Killed):
             w.move("other.txt", w.mine, w.family)
     stuck = next(p for p in first if p.startswith(w.mine)).split("/")[-1]
@@ -433,11 +432,13 @@ def test_one_move_that_cannot_be_ended_does_not_stop_the_others(world: Files, mo
 
 def _taken_out_of_the_space(w: Files, monkeypatch, step: str) -> None:
     w.put(w.mine, REL)
-    real = getattr(file_moves, step)
+    real, gone = getattr(file_moves, step), []
 
     def meanwhile(*args: Any, **kwargs: Any) -> Any:
         done = real(*args, **kwargs)
-        people.remove_member(w.family, w.reem, by=OWNER_ACCOUNT_ID)
+        if not gone:
+            people.remove_member(w.family, w.reem, by=OWNER_ACCOUNT_ID)
+            gone.append(True)
         return done
 
     with monkeypatch.context() as patch:
@@ -608,37 +609,24 @@ def test_an_export_and_a_bundle_never_carry_a_held_file(world: Files, monkeypatc
     w = world
     _cut(w, monkeypatch, "share", "_put_in_place", "before")
     with monkeypatch.context() as patch:
-        patch.setattr(file_moves, "settle_file_moves", lambda: [])
+        patch.setattr(file_moves, "settle_file_moves", lambda **_k: [])
         counted = space_data.count_space(w.family)["files"]
         space_data.export_space(w.family, tmp_path / "held.zip")
         travelling = [p.name for _part, _where, p in space_move._moving_files(w.family)]
     assert counted == 0 and travelling == []
     with zipfile.ZipFile(tmp_path / "held.zip") as zipped:
-        assert not [n for n in zipped.namelist() if MOVING in n]
+        assert not [n for n in zipped.namelist() if "moving" in n]
     # The export itself ends what is left: her own space's holds the file again.
     space_data.export_space(w.mine, tmp_path / "mine.zip")
     with zipfile.ZipFile(tmp_path / "mine.zip") as zipped:
         assert [n for n in zipped.namelist() if n.endswith(REL)], "a file being moved is in no export"
 
 
-def test_control_a_walk_that_does_not_know_the_holding_folder_carries_it(world: Files, monkeypatch, tmp_path) -> None:
-    from kazma_core.spaces import files
-
-    monkeypatch.setattr(files, "held_by_a_move", lambda path, folder: False)
+def test_control_a_holding_folder_inside_the_spaces_folder_travels(world: Files, monkeypatch, tmp_path) -> None:
+    """Where it was before the review: every walk would have to know it."""
+    monkeypatch.setattr(file_moves, "moving_dir", lambda space: space_dir(space) / "moving")
     with pytest.raises(AssertionError):
         test_an_export_and_a_bundle_never_carry_a_held_file(world, monkeypatch, tmp_path)
-
-
-@pytest.mark.parametrize("name", ["moving/x/move.json", "MOVING/x", "moving. /x", "moving"])
-def test_an_import_takes_no_holding_folder(name) -> None:
-    class _Bundle:
-        manifest = {"entries": {f"files/space/{name}": 1}}
-
-    with pytest.raises(space_move.SpaceMoveRefused) as refused:
-        space_move._file_entries(_Bundle())
-    assert refused.value.code == "reserved_name"
-    _Bundle.manifest = {"entries": {f"files/space/files/{name}": 1, "files/documents/moving/x": 1}}
-    assert len(space_move._file_entries(_Bundle())) == 2
 
 
 # ── a backup, and a record nobody can read ────────────────────────────────
@@ -674,7 +662,7 @@ def test_a_restore_of_a_store_older_than_the_files_records_the_maker(world: File
 def test_a_claimed_file_whose_record_cannot_be_read_goes_back(world: Files, monkeypatch, record) -> None:
     w = world
     _cut(w, monkeypatch, "share", "_put_in_place", "before")
-    place = next((space_dir(w.mine) / MOVING).glob("*/move.json"))
+    place = next(moving_dir(w.mine).glob("*/move.json"))
     place.unlink()
     if record is not None:
         place.write_text(record, encoding="utf-8")
@@ -691,7 +679,7 @@ def test_a_claimed_file_whose_record_cannot_be_read_goes_back(world: Files, monk
 def test_a_record_that_names_another_place_is_not_followed(world: Files, monkeypatch, field, value) -> None:
     w = world
     _cut(w, monkeypatch, "share", "_put_in_place", "before")
-    place = next((space_dir(w.mine) / MOVING).glob("*/move.json"))
+    place = next(moving_dir(w.mine).glob("*/move.json"))
     place.write_text(json.dumps({**json.loads(place.read_text(encoding="utf-8")), field: value}), encoding="utf-8")
     file_moves.settle_file_moves()
     assert len(w.where()) == 1 and w.where()[0].startswith("own:moved file ")
@@ -701,7 +689,7 @@ def test_a_record_that_names_another_place_is_not_followed(world: Files, monkeyp
 def test_a_folder_that_is_no_moves_is_left_alone(world: Files) -> None:
     w = world
     w.put(w.mine, REL)
-    other = space_dir(w.mine) / MOVING / "not-an-attempt"
+    other = moving_dir(w.mine) / "not-an-attempt"
     other.mkdir(parents=True)
     (other / "copy").write_bytes(b"x")
     file_moves.settle_file_moves()

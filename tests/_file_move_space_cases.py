@@ -44,7 +44,8 @@ def space_files(matrix: Matrix) -> Iterator[SimpleNamespace]:
     middleware."""
     from kazma_ui.space_files_api import create_space_files_router
 
-    people = {"a": matrix.principal_a, "b": matrix.principal_b}
+    people = {"a": matrix.principal_a, "b": matrix.principal_b,
+              "a viewer": {**matrix.principal_a, "role": "viewer"}}
     marks = matrix.plant("file-move")
 
     def personal(reg: dict[str, Any]) -> None:
@@ -61,11 +62,11 @@ def space_files(matrix: Matrix) -> Iterator[SimpleNamespace]:
         _put(OWN_A, a_file)
         _put(Matrix.SPACE_B, b_file)
         app = FastAPI()
-        Matrix.role_checked(app)
+        refused = Matrix.role_checked(app)
         app.middleware("http")(auth.create_tenant_middleware())
         app.include_router(create_space_files_router())
         with TestClient(app) as client:
-            yield SimpleNamespace(client=client, marks=marks, a_file=a_file, b_file=b_file)
+            yield SimpleNamespace(client=client, marks=marks, a_file=a_file, b_file=b_file, refused=refused)
 
 
 def _as(who: str, space: str) -> dict[str, str]:
@@ -92,6 +93,12 @@ def files_list(matrix: Matrix) -> None:
 @case("POST /api/space-files/move", ITEM)
 def files_move(matrix: Matrix) -> None:
     with space_files(matrix) as w:
+        # A as a viewer has neither, as with the documents: the role rule's.
+        viewer = w.client.post("/api/space-files/move", headers=_as("a viewer", OWN_A),
+                               json={"path": w.a_file, "to_space": Matrix.SPACE_A})
+        assert viewer.status_code == 403 and w.refused == [("POST", "/api/space-files/move")], viewer.text
+        assert w.client.get("/api/space-files", headers=_as("a viewer", OWN_A)).status_code == 403
+        assert (space_dir(OWN_A) / FILES / w.a_file).exists()
         # B's file, named in A's own space: no file here.
         theirs = w.client.post("/api/space-files/move", headers=_as("a", OWN_A),
                                json={"path": w.b_file, "to_space": Matrix.SPACE_A})

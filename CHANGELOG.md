@@ -14,6 +14,10 @@
   where it was.
 - The owner's space (this computer's own files) and a space with a project
   folder (a repository) are left out.
+- A disabled account moves no file, chat or document, also when it is disabled
+  while one moves.
+- A space's file tools open the space's own folders and nothing Kazma keeps
+  beside them.
 
 ## Spaces: a space's export never follows a link out of its folder (2026-11-25)
 

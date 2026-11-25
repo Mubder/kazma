@@ -19,14 +19,23 @@ with the main session (23 and 25 November 2026):
 * The person's click on the Documents page, never the agent's.
 
 **How it moves: copy aside, claim, compare, place, remove.** The copy is
-written into the target's holding folder (``spaces/<target>/moving/<attempt>``,
-beside ``files``, which no list and no tool sees). The source is then claimed:
+written into the target's holding folder
+(``<data dir>/spaces/.moving/<target>/<attempt>``). The source is then claimed:
 renamed into its own space's holding folder, beside a record of the move. A
 write that came before the claim is seen in what was claimed, and one that
 comes after it makes a new file. What was claimed is compared with the copy.
 The rule is asked again. The copy is put in place without ever replacing
 anything: **that is the only commit point, and nothing a person can see in the
-target is ever removed by a move.**
+target is ever removed by a move.** A disk that can do neither a rename that
+never replaces nor a hard link is refused before the claim.
+
+**The holding folder is no space's** (``spaces.files.moving_dir``): it is
+beside the spaces' folders, under a name no space can have, so every door that
+refuses another space's folder refuses it, to every space and the owner's
+too, and nothing a space's folder is read for (a list, a tool, a count, an
+export, a bundle) meets it. It was inside each space's folder at first, and a
+space's own file tools read and forged what lay there. What lies there is
+still never believed further than its space (:func:`_believed`).
 
 **The one ending** (:func:`_end`), for the move itself and for one a stop or a
 failure cut off: the claimed bytes go only when the target, still a space,
@@ -38,12 +47,23 @@ list: a moment, or until the next start after a stop.
 
 **The record is the journal**, a file beside what was claimed
 (:data:`_RECORD`), never a store's row: the path in it is a person's words, so
-it is in their space's own folder, goes with that space, and is of the same
-moment as the files in any backup. A folder ``moving`` never travels (an
-export, a bundle for another install).
+it goes with its space's erase, and is of the same moment as the files in any
+backup.
 
-An erase waits for the moves of its space (:func:`quiet`), after it closed the
-space, so that none asked the rule before and places a file after.
+**What a move does not promise.** POSIX: a program that opened the file before
+the claim can still write through its handle. Written before the comparison it
+is ``changed_meanwhile``; after it, until the end, the sharer's space keeps
+that version beside the one that moved (``kept``); after the end the words go
+with the claimed file, as with any deleted one. Windows refuses to claim a
+file another program holds open. The bytes, the POSIX permission bits and the
+"came from the internet" mark of Windows travel; another stream, an extended
+attribute and Windows' read-only bit do not. One process settles at a time:
+the server holds the data folder alone (``runtime_ownership``), and nothing
+else calls this.
+
+An erase ends what its space's moves left, closes the space, then waits for
+the moves under way (:func:`quiet`), so that none asked the rule before and
+places a file after.
 
 Blocking (the file system, SQLite, the identity store): call it off the event
 loop.
@@ -51,24 +71,25 @@ loop.
 
 from __future__ import annotations
 
+import ctypes
 import errno
+import functools
 import hashlib
 import json
 import logging
 import os
-import sqlite3
 import stat
 import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from kazma_core.spaces import shared_files
-from kazma_core.spaces.files import FILES, MOVING, SpaceKindUnknown, space_dir
+from kazma_core.spaces.files import FILES, SpaceKindUnknown, moving_dir, space_dir
 from kazma_core.spaces.identity import IdentityError, IdentityUnavailable
 from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced, valid_space_id
 from kazma_core.workspace.real_paths import is_linked
@@ -89,13 +110,19 @@ logger = logging.getLogger(__name__)
 AT_ONCE = 2
 #: What a move keeps in its holding folders: the copy (the target's), and what
 #: was claimed with the record of the move (the source's).
-_COPY, _CLAIMED, _RECORD, _RECORD_PART = "copy", "claimed", "move.json", "move.part"
+_COPY, _COPY_PART, _CLAIMED = "copy", "copy.part", "claimed"
+_RECORD, _RECORD_PART = "move.json", "move.part"
 _CHUNK = 1024 * 1024
 #: A name given back beside its own: "name (2)" to "name (99)".
 _BESIDE = 100
-#: The failures a step may have that are no bug of the step: the move is ended
-#: and the answer is worded.
-_FAILURES = (OSError, sqlite3.Error, IdentityUnavailable, IdentityError, SpaceKindUnknown)
+#: A record is a few names: anything longer is none this code wrote.
+_RECORD_MAX = 1024 * 1024
+#: The longest name a disk holds: bytes (POSIX), UTF-16 units (Windows).
+_NAME_MAX = 255
+#: One settling waits this long for another, which does the same work.
+_SETTLING_WAIT_S = 30.0
+#: A move that cannot be ended is said once in this time, not at every try.
+_SAID_EVERY_S = 600.0
 
 
 class FileMoveRefused(ValueError):
@@ -106,6 +133,37 @@ class FileMoveRefused(ValueError):
         super().__init__(message)
         self.code = code
         self.status = status
+
+
+#: attempt -> when it was last said that it cannot be ended.
+_said: dict[str, float] = {}
+
+
+def _say(attempt: str, what: str, *, trouble: bool = True) -> None:
+    """Log *what* of the file move *attempt*, once in :data:`_SAID_EVERY_S`:
+    a settling runs at every move, and one that cannot be ended stays."""
+    now = time.monotonic()
+    if now - _said.get(attempt, -_SAID_EVERY_S) < _SAID_EVERY_S:
+        logger.debug("[spaces] file move %s %s", attempt, what, exc_info=trouble)
+        return
+    if len(_said) > 1000:
+        _said.clear()
+    _said[attempt] = now
+    logger.warning("[spaces] file move %s %s", attempt, what, exc_info=trouble)
+
+
+def _guarded(attempt: str, what: str, step: Callable[[], Any], *, each_time: bool = False) -> tuple[Any, Exception | None]:
+    """What *step* answers, or the exception it raised, said as *what*: one
+    move never stops another, an erase, an export or a start, whatever it
+    meets. *each_time*: said at every failure, a person is waiting for it."""
+    try:
+        return step(), None
+    except Exception as exc:  # noqa: BLE001 -- said here, worded or tried again by the caller
+        if each_time and not isinstance(exc, FileMoveRefused):
+            _said.pop(attempt, None)
+        if not isinstance(exc, FileMoveRefused):
+            _say(attempt, what)
+        return None, exc
 
 
 def _changed() -> FileMoveRefused:
@@ -341,6 +399,10 @@ class _Move:
     #: The folders this move made in the target, taken away again (while they
     #: are empty) if the file does not stay there.
     made: list[str] = field(default_factory=list)
+    #: Which file the copy is and which the source (:func:`_identity`): what
+    #: was put in place is known from another person's file of the same bytes.
+    copy_id: list[int] = field(default_factory=list)
+    source_id: list[int] = field(default_factory=list)
 
     def held(self) -> Path:
         return _holding(self.source, self.attempt) / _CLAIMED
@@ -356,33 +418,98 @@ class _Move:
 
 
 def _holding(space: str, attempt: str) -> Path:
-    return space_dir(space) / MOVING / attempt
+    return moving_dir(space) / attempt
+
+
+def _plain(folder: Path) -> bool:
+    """Whether *folder* is a folder and no link: the holding folder is never
+    looked for where a link leads."""
+    return not is_linked(folder) and folder.is_dir()
+
+
+def _make_holding(folder: Path) -> None:
+    """The holding *folder* of a move, made. Nothing is put where a link
+    leads, nor when its place is something else."""
+    for place in (folder.parent.parent, folder.parent, folder):
+        place.mkdir(parents=True, exist_ok=True)
+        if not _plain(place):
+            raise NotADirectoryError(errno.ENOTDIR, "the holding folder is something else", str(place))
 
 
 def _is_attempt(name: str) -> bool:
     return len(name) == 32 and all(c in "0123456789abcdef" for c in name)
 
 
-def _same_parts(path: str) -> bool:
-    return "/".join(_parts(path)) == path
+def _is_path(value: Any) -> bool:
+    try:
+        return isinstance(value, str) and "/".join(_parts(value)) == value
+    except FileMoveRefused:
+        return False
+
+
+def _identity(info: os.stat_result) -> list[int]:
+    """Which file this is on this disk, through a rename: its number and when
+    it was written (a number is given again to a later file). Not the disk's
+    own number, which a restart may change."""
+    return [int(info.st_ino), int(info.st_mtime_ns)]
+
+
+#: What each field of a record is.
+_FIELDS: dict[str, Callable[[Any], bool]] = {
+    "attempt": lambda v: isinstance(v, str) and _is_attempt(v),
+    "source": valid_space_id,
+    "target": valid_space_id,
+    "path": _is_path,
+    "target_path": _is_path,
+    "by": lambda v: isinstance(v, str) and 0 < len(v) <= 256,
+    "sha256": lambda v: isinstance(v, str) and len(v) == 64 and all(c in "0123456789abcdef" for c in v),
+    "size": lambda v: type(v) is int and v >= 0,
+    "taken_out": lambda v: isinstance(v, bool),
+    "shared_by_attempt": lambda v: isinstance(v, str) and (v == "" or _is_attempt(v)),
+    "shared_at": lambda v: type(v) in (int, float) and 0 <= v < 1e12,
+    "made": lambda v: isinstance(v, list) and all(_is_path(folder) for folder in v),
+    "copy_id": lambda v: isinstance(v, list) and all(type(n) is int for n in v),
+    "source_id": lambda v: isinstance(v, list) and all(type(n) is int for n in v),
+}
 
 
 def _read_record(space: str, attempt: str) -> _Move | None:
     """The move *attempt* of *space*, or None: there is no record, or it is
-    not one this code wrote."""
+    not one this code wrote. Raises when it cannot be read now, or who the
+    spaces' people are cannot be."""
     try:
-        raw = json.loads((_holding(space, attempt) / _RECORD).read_text(encoding="utf-8"))
-        move = _Move(**raw)
-        sound = (move.source == space and move.attempt == attempt and valid_space_id(move.target)
-                 and all(_same_parts(path) for path in (move.path, move.target_path, *move.made)))
+        with open(_holding(space, attempt) / _RECORD, "rb") as record:
+            text = record.read(_RECORD_MAX + 1)
     except FileNotFoundError:
         return None
-    except (ValueError, TypeError, AttributeError):
-        sound = False
-    if not sound:
-        logger.warning("[spaces] the record of file move %s cannot be read; its file is given back", attempt)
-        return None
-    return move
+    try:
+        raw = json.loads(text) if len(text) <= _RECORD_MAX else None
+    except (ValueError, RecursionError):
+        raw = None
+    if isinstance(raw, dict) and raw.keys() == _FIELDS.keys() and all(ok(raw[name]) for name, ok in _FIELDS.items()):
+        move = _Move(**raw)
+        if move.source == space and move.attempt == attempt and _believed(move):
+            return move
+    _say(attempt, "has a record that is none of Kazma's; its file is given back", trouble=False)
+    return None
+
+
+def _believed(move: _Move) -> bool:
+    """Whether the record is of a move there can be: from the person's own
+    space to a shared one, or back. Nothing is ever placed, removed or
+    recorded in a space it merely names. A space that is gone says nothing,
+    and nothing is done in it."""
+    from kazma_core.spaces.identity import read_registry
+
+    spaces = read_registry()["spaces"]
+    own, shared = (move.target, move.source) if move.taken_out else (move.source, move.target)
+    if own == shared or OWNER_SPACE_ID in (own, shared):
+        return False
+    own_space, shared_space = spaces.get(own), spaces.get(shared)
+    if not own_space and not shared_space:
+        return False
+    return ((not own_space or own_space.get("personal_of") == move.by)
+            and (not shared_space or not shared_space.get("personal_of")))
 
 
 def _sync_folder(folder: Path) -> None:
@@ -400,10 +527,13 @@ def _sync_folder(folder: Path) -> None:
 
 def _write_record(move: _Move) -> None:
     record = move.record()
-    record.parent.mkdir(parents=True, exist_ok=True)
+    _make_holding(record.parent)
+    text = json.dumps(asdict(move)).encode("utf-8")
+    if len(text) > _RECORD_MAX:
+        raise OSError(errno.ENAMETOOLONG, "the file's path is too long to record")
     partial = record.with_name(_RECORD_PART)
-    with open(partial, "x", encoding="utf-8") as out:
-        json.dump(asdict(move), out)
+    with open(partial, "wb") as out:
+        out.write(text)
         out.flush()
         os.fsync(out.fileno())
     os.replace(partial, record)
@@ -423,11 +553,28 @@ def _again(step: Callable[[], Any]) -> Any:
     return None
 
 
+def _unlink(path: Path) -> None:
+    """*path* goes: a read-only file too, which Windows does not delete."""
+
+    def gone() -> None:
+        try:
+            path.unlink(missing_ok=True)
+        except PermissionError:
+            if os.name != "nt" or os.lstat(path).st_mode & stat.S_IWRITE:
+                raise
+            os.chmod(path, stat.S_IWRITE)
+            path.unlink(missing_ok=True)
+
+    _again(gone)
+
+
 def _take_away(folder: Path) -> None:
     """A holding folder of one move, with what is in it (its own files, by
     name, never what was claimed: nothing else is removed)."""
-    for name in (_RECORD, _RECORD_PART, _COPY):
-        (folder / name).unlink(missing_ok=True)
+    if not _plain(folder):
+        return
+    for name in (_RECORD, _RECORD_PART, _COPY, _COPY_PART):
+        _unlink(folder / name)
     with suppress(OSError):  # not empty: something is held there
         folder.rmdir()
 
@@ -440,7 +587,7 @@ def _tidy_gone(space: str) -> None:
             return
     except (IdentityUnavailable, IdentityError):
         return
-    for folder in (space_dir(space) / MOVING, _files_root(space), space_dir(space)):
+    for folder in (moving_dir(space), _files_root(space), space_dir(space)):
         with suppress(OSError):  # not empty, or not there
             folder.rmdir()
 
@@ -463,15 +610,21 @@ def _digest(path: Path) -> str | None:
     return sha.hexdigest()
 
 
-def _copy_aside(source: Path, info: os.stat_result, copy: Path, max_bytes: int) -> tuple[str, int]:
+def _copy_aside(source: Path, info: os.stat_result, aside: Path, copy: Path, max_bytes: int) -> tuple[str, int]:
     """*source*'s bytes in the target's holding folder, on the disk: their
-    SHA-256 and how many. The very file that was checked, by its identity."""
-    copy.parent.mkdir(parents=True)
+    SHA-256 and how many. The very file that was checked, by its identity.
+    It is written in the source's holding folder (*aside*) and goes to the
+    target's as the file will go to its place (:func:`_place`): a disk that
+    cannot place without replacing, or that forgets which file it is in a
+    rename, is refused here, before anything is claimed."""
+    for folder in (aside, copy.parent):
+        _make_holding(folder)
+    partial = aside / _COPY_PART
     sha, size = hashlib.sha256(), 0
     with open(source, "rb") as handle:
         if not os.path.samestat(os.fstat(handle.fileno()), info):
             raise _changed()
-        with open(copy, "xb") as out:
+        with open(partial, "xb") as out:
             while chunk := handle.read(_CHUNK):
                 size += len(chunk)
                 if size > max_bytes:
@@ -480,83 +633,202 @@ def _copy_aside(source: Path, info: os.stat_result, copy: Path, max_bytes: int) 
                 out.write(chunk)
             out.flush()
             os.fsync(out.fileno())
+    if os.name == "nt":
+        _copy_web_mark(source, partial)
+    else:
+        os.chmod(partial, stat.S_IMODE(info.st_mode) & 0o777)
+    which = _identity(os.lstat(partial))
+    if not _place(partial, copy) or _identity(os.lstat(copy)) != which:
+        raise OSError(errno.EOPNOTSUPP, "this disk does not say which file is which after a rename")
     _sync_folder(copy.parent)
     return sha.hexdigest(), size
 
 
+def _copy_web_mark(source: Path, copy: Path) -> None:
+    """Windows' "came from the internet" mark: what it asks before it opens
+    a downloaded file."""
+    with suppress(OSError):  # no mark, or a disk that keeps none
+        with open(f"{source}:Zone.Identifier", "rb") as mark, open(f"{copy}:Zone.Identifier", "wb") as out:
+            out.write(mark.read(64 * 1024))
+
+
 def _claim(source: Path, info: os.stat_result, move: _Move) -> None:
     """The source leaves its folder for the holding folder, then is compared
-    with the copy: from here no write reaches it under its name."""
+    with the copy: from here no write reaches it under its name. What is not
+    the file that was checked goes back by the same path (a folder of it may
+    lead elsewhere since)."""
     held = move.held()
     _again(lambda: os.rename(source, held))
     _sync_folder(source.parent)
     _sync_folder(held.parent)
     now = os.lstat(held)
     if not os.path.samestat(now, info) or now.st_nlink != 1 or _digest(held) != move.sha256:
+        _put_at(held, source)
         raise _changed()
+
+
+@functools.lru_cache(maxsize=1)
+def _rename_call() -> Callable[[bytes, bytes], int] | None:
+    """The system's rename that never replaces: Linux ``renameat2`` with
+    RENAME_NOREPLACE, macOS ``renamex_np`` with RENAME_EXCL. None elsewhere."""
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+    except (OSError, TypeError):
+        return None
+    if hasattr(libc, "renameat2"):
+        return lambda old, new: int(libc.renameat2(-100, old, -100, new, ctypes.c_uint(1)))
+    if hasattr(libc, "renamex_np"):
+        return lambda old, new: int(libc.renamex_np(old, new, ctypes.c_uint(4)))
+    return None
+
+
+#: "Not on this disk", of a rename that never replaces and of a hard link.
+_NOT_HERE = frozenset({errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP, errno.EPERM, errno.EMLINK,
+                       getattr(errno, "ENOTSUP", errno.EOPNOTSUPP)})
+
+
+def _renamed_new(staged: Path, where: Path) -> bool | None:
+    """*staged* renamed to *where* in one step, never over a file: True, or
+    False when the name is taken. None: not on this system or this disk."""
+    call = _rename_call()
+    if call is None:
+        return None
+    if call(os.fsencode(staged), os.fsencode(where)) == 0:
+        return True
+    code = ctypes.get_errno()
+    if code == errno.EEXIST:
+        return False
+    if code in _NOT_HERE:
+        return None
+    raise OSError(code, os.strerror(code), str(staged), None, str(where))
+
+
+def _linked_new(staged: Path, where: Path) -> None:
+    """*staged* gets *where* as a second name, then loses its own. Cut off
+    between, it is one file with two names: an ending takes the first away
+    (:func:`_put_at`, :func:`_take_away`)."""
+    os.link(staged, where, follow_symlinks=False)
+    staged.unlink()
 
 
 def _place(staged: Path, where: Path) -> bool:
     """*staged* renamed to *where*, or False when that name is taken: nothing
-    is ever replaced, and no folder is made."""
-    from kazma_core.spaces.space_move import _claim_and_replace
-
+    is ever replaced, and no folder is made. ``OSError`` when the disk can do
+    neither a rename that never replaces nor a hard link: an empty file made
+    to claim the name, then replaced, could be another program's words by
+    then."""
     try:
         if os.name == "nt":
             _again(lambda: os.rename(staged, where))  # Windows never renames over a file
             return True
-        if not stat.S_ISREG(os.lstat(staged).st_mode):
+        done = _renamed_new(staged, where)
+        if done is not None:
+            return done
+        if stat.S_ISDIR(os.lstat(staged).st_mode):  # never a file of a move's: what was swapped for one
             if os.path.lexists(where):
                 return False
             os.rename(staged, where)
             return True
         try:
-            os.link(staged, where, follow_symlinks=False)
+            _linked_new(staged, where)
         except OSError as exc:
-            if exc.errno not in (errno.EPERM, errno.ENOSYS, errno.EOPNOTSUPP, errno.EMLINK):
+            if exc.errno not in _NOT_HERE or isinstance(exc, FileExistsError):
                 raise
-            _claim_and_replace(staged, where)  # a disk with no hard links
-            return True
+            raise OSError(errno.EOPNOTSUPP, "this disk cannot place a file without replacing one") from exc
     except FileExistsError:
         return False
-    with suppress(OSError):  # the file is in place: its other name goes with the holding folder
-        staged.unlink()
+    return True
+
+
+def _put_at(held: Path, where: Path) -> bool:
+    """*held* gets the name *where*, or False when another file has it. It
+    may have it already (:func:`_linked_new` cut off): its held name goes."""
+    try:
+        if os.path.samestat(os.lstat(where), os.lstat(held)):
+            held.unlink()
+            return True
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    return _place(held, where)
+
+
+def _no_link_on(root: Path, path: str) -> bool:
+    """Whether every folder of *path* inside *root* is a folder, none a link:
+    a file there is the space's own."""
+    here = root
+    if not _plain(here):
+        return False
+    for part in PurePosixPath(path).parts[:-1]:
+        here = here / part
+        if not _plain(here):
+            return False
     return True
 
 
 def _put_in_place(move: _Move) -> None:
     """The commit point: the copy gets its name in the target."""
-    where = move.placed_at()
-    here = _files_root(move.target)
-    for part in PurePosixPath(move.target_path).parts[:-1]:
-        here = here / part
-        if is_linked(here) or not here.is_dir():
-            raise _changed()
+    where, root = move.placed_at(), _files_root(move.target)
+    if not _no_link_on(root, move.target_path):
+        raise _changed()
     try:
         if not _place(move.copy(), where):
             raise _name_taken()
     except FileNotFoundError:
         raise _changed() from None  # its folder went meanwhile
+    if not _no_link_on(root, move.target_path):
+        # A folder of it became a link in that moment, and the copy is where
+        # it leads: it comes back the same way.
+        with suppress(OSError):
+            if _identity(os.lstat(where)) == move.copy_id:
+                _place(where, move.copy())
+        raise _changed()
     _sync_folder(where.parent)
 
 
 def _was_placed(move: _Move) -> bool:
-    """Whether the file at the move's place is the copy this move put there:
-    the copy left the holding folder, or is the same file. Another person's
-    file of the same bytes is not it."""
+    """Whether the file at the move's place is the copy this move put there,
+    by which file it is: another person's of the same bytes is not it, and a
+    copy that is gone proves nothing (a virus scanner takes one away). Files
+    that came back from a backup are other files on the disk, the held one
+    too: then the rows written when it was placed answer."""
+    if not _no_link_on(_files_root(move.target), move.target_path):
+        return False
     try:
         there = os.lstat(move.placed_at())
     except (FileNotFoundError, NotADirectoryError):
         return False
-    try:
-        return os.path.samestat(os.lstat(move.copy()), there)
-    except FileNotFoundError:
+    if _identity(there) == move.copy_id:
         return True
+    try:
+        restored = _identity(os.lstat(move.held())) != move.source_id
+    except FileNotFoundError:
+        restored = True
+    return restored and shared_files.was_recorded(asdict(move))
+
+
+def _units(name: str) -> int:
+    return len(os.fsencode(name)) if os.name != "nt" else len(name.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def _beside(name: str, count: int) -> str:
+    """*name*, or "name (2)" beside it: never longer than a disk holds."""
+    if count == 1:
+        return name
+    part = PurePosixPath(name)
+    stem, end = part.stem, f" ({count}){part.suffix}"
+    while len(stem) > 1 and _units(stem + end) > _NAME_MAX:
+        stem = stem[:-1]
+    return stem + end
+
+
+def _too_long(exc: OSError) -> bool:
+    return exc.errno == errno.ENAMETOOLONG or getattr(exc, "winerror", None) in (3, 111, 123, 206)
 
 
 def _give_back(space: str, held: Path, path: str) -> str:
     """What was claimed goes back to *path* of *space*, or beside it when
-    that name is taken now. Returns the path it got."""
+    that name is taken now; under a short name in the space's folder when the
+    one beside it would be too long. Returns the path it got."""
     root = _files_root(space)
     parts = PurePosixPath(path).parts
     try:
@@ -564,12 +836,19 @@ def _give_back(space: str, held: Path, path: str) -> str:
     except (FileMoveRefused, OSError):
         root.mkdir(parents=True, exist_ok=True)
         folder, names = root, ()  # one of its folders is something else now
-    name = PurePosixPath(parts[-1])
-    for count in range(1, _BESIDE):
-        given = str(name) if count == 1 else f"{name.stem} ({count}){name.suffix}"
-        if _place(held, folder / given):
-            _sync_folder(folder)
-            return "/".join((*names, given))
+    short = f"moved file {held.parent.name[:8]}"
+    for place, inside, name in ((folder, names, parts[-1]), (root, (), short)):
+        for count in range(1, _BESIDE):
+            given = _beside(name, count)
+            try:
+                put = _put_at(held, place / given)
+            except OSError as exc:
+                if name is short or not _too_long(exc):
+                    raise
+                break
+            if put:
+                _sync_folder(place)
+                return "/".join((*inside, given))
     raise OSError(errno.EEXIST, "no free name to give a file back under")
 
 
@@ -598,9 +877,20 @@ def _end(move: _Move) -> str:
     if not os.path.lexists(held):
         outcome = "moved" if here else "put_back"
     elif here and _digest(held) == move.sha256 and _is_open(move.target):
-        _again(held.unlink)
+        _unlink(held)
         outcome = "moved"
     elif not _is_open(move.source):
+        # Its space is being erased: what was claimed is left to that. The
+        # target keeps nothing of a file that did not move; the record stays
+        # with the claimed bytes, which a space opened again gets back.
+        _take_away(_holding(move.target, move.attempt))
+        if not here:
+            _remove_empty(_files_root(move.target), move.made)
+            _tidy_gone(move.target)
+        if os.name == "nt":
+            with suppress(OSError):  # a read-only file would stop the erase
+                os.chmod(held, stat.S_IWRITE)
+        _say(move.attempt, "was cut off and its space is being erased; its file goes with that space", trouble=False)
         return "left"
     else:
         if here and not _is_open(move.target):  # closed for its erase since
@@ -646,31 +936,26 @@ def move_file(path: str, *, from_space: str, to_space: str, by: str, max_bytes: 
 def _move(attempt: str, parts: tuple[str, ...], source: str, target: str, by: str, max_bytes: int) -> _Move:
     """The move itself, and its ending whatever happened."""
     recorded: list[_Move] = []
-    failed: Exception | None = None
-    try:
-        _carry(attempt, parts, source, target, by, max_bytes, recorded)
-    except FileMoveRefused as exc:
-        failed = exc
-    except _FAILURES as exc:
-        logger.warning("[spaces] a step of file move %s failed", attempt, exc_info=True)
-        failed = _worded(exc)
+    _none, failed = _guarded(attempt, "has a step that failed",
+                             lambda: _carry(attempt, parts, source, target, by, max_bytes, recorded), each_time=True)
+    if failed is not None and not isinstance(failed, FileMoveRefused):
+        failed = _worded(failed)
     if not recorded:
-        _forget_copy(target, attempt)
+        _forget_copy(source, target, attempt)
         raise failed or _changed()
     move = recorded[0]
-    try:
-        outcome = _end(move)
-    except _FAILURES:
-        logger.warning("[spaces] file move %s is not ended yet; the next settling ends it", attempt, exc_info=True)
+    outcome, unended = _guarded(attempt, "is not ended yet; the next settling ends it", lambda: _end(move), each_time=True)
+    if unended is not None:
         raise FileMoveRefused("unfinished", 503, "The move is not finished; Kazma ends it by itself.") from None
     if outcome != "moved":
         raise failed or _changed()
     return move
 
 
-def _forget_copy(target: str, attempt: str) -> None:
+def _forget_copy(source: str, target: str, attempt: str) -> None:
     try:
-        _take_away(_holding(target, attempt))
+        for space in (source, target):
+            _take_away(_holding(space, attempt))
         _tidy_gone(target)
     except OSError:
         logger.info("[spaces] the copy of file move %s stays until the next settling", attempt, exc_info=True)
@@ -689,22 +974,33 @@ def _carry(attempt: str, parts: tuple[str, ...], source: str, target: str, by: s
     path = "/".join(parts)
     maker = shared_files.maker_of(source, path) if taken_out else None
     if taken_out and (maker is None or maker["maker"] != by):
-        raise FileMoveRefused("not_yours", 403, "Only the person who shared a file takes it out.")
+        raise FileMoveRefused("not_the_sharer", 403, "Only the person who shared a file takes it out.")
     over = disk_refusal(target, int(info.st_size))
     if over:
         raise FileMoveRefused("space_limit", 507, over)
     if os.path.lexists(_files_root(target).joinpath(*parts)):
         raise _name_taken()
-    sha256, size = _copy_aside(where, info, _holding(target, attempt) / _COPY, max_bytes)
+    copy = _holding(target, attempt) / _COPY
+    sha256, size = _copy_aside(where, info, _holding(source, attempt), copy, max_bytes)
     if maker is not None and maker["sha256"] != sha256:
         raise FileMoveRefused("changed_since", 409, "This file changed after it was shared, so it stays in this space.")
     names, made = _planned(_files_root(target), parts[:-1])
     move = _Move(attempt=attempt, source=source, target=target, path=path, target_path="/".join((*names, parts[-1])),
                  by=by, sha256=sha256, size=size, taken_out=taken_out, made=made,
+                 copy_id=_identity(os.lstat(copy)), source_id=_identity(info),
                  shared_by_attempt=maker["attempt"] if maker else "", shared_at=maker["shared_at"] if maker else 0.0)
     recorded.append(move)
     _write_record(move)
-    if _make_folders(_files_root(target), names)[1] != names:
+    try:
+        _folder, spelled, made = _make_folders(_files_root(target), names)
+    except (FileMoveRefused, OSError):
+        recorded[0] = replace(move, made=[])  # it took away what it made
+        raise
+    # Only what this move made is ever taken away: a folder of the same name
+    # another member made in between is theirs.
+    move = recorded[0] = replace(move, made=made)
+    _write_record(move)
+    if spelled != names:
         raise _name_taken()
     _claim(where, info, move)
     if _rule(source, target, by) != taken_out or (maker is not None and shared_files.maker_of(source, path) != maker):
@@ -716,16 +1012,21 @@ def _carry(attempt: str, parts: tuple[str, ...], source: str, target: str, by: s
 
 
 def _attempts() -> list[tuple[str, str]]:
-    """``(space, attempt)`` of every holding folder on the disk."""
+    """``(space, attempt)`` of every holding folder on the disk, none of them
+    a link."""
+    root = moving_dir(OWNER_SPACE_ID).parent
+    if not os.path.lexists(root):
+        return []
+    if not _plain(root):
+        _say("(any)", f"cannot be looked for: {root} is not a folder of Kazma's", trouble=False)
+        return []
     found: list[tuple[str, str]] = []
-    try:
-        with os.scandir(space_dir(OWNER_SPACE_ID).parent) as spaces:
-            names = [entry.name for entry in spaces if valid_space_id(entry.name)]
-    except FileNotFoundError:
-        return found
+    with os.scandir(root) as spaces:
+        names = sorted(entry.name for entry in spaces if valid_space_id(entry.name) and _plain(Path(entry.path)))
     for name in names:
-        with suppress(FileNotFoundError, NotADirectoryError), os.scandir(space_dir(name) / MOVING) as held:
-            found.extend((name, entry.name) for entry in held if _is_attempt(entry.name))
+        with suppress(FileNotFoundError), os.scandir(moving_dir(name)) as held:
+            found.extend((name, entry.name) for entry in held
+                         if _is_attempt(entry.name) and _plain(Path(entry.path)))
     return found
 
 
@@ -738,15 +1039,34 @@ def _recover(space: str, attempt: str) -> str:
     return "put_back"
 
 
-def settle_file_moves() -> list[dict[str, str]]:
+def _settle_one(space: str, attempt: str) -> str:
+    """How the holding folder *attempt* of *space* was ended: an outcome of
+    :func:`_end`, or ``a copy`` (nothing but a copy, or nothing, is in it)."""
+    move = _read_record(space, attempt)
+    if move is not None:
+        return _end(move)
+    if not os.path.lexists(_holding(space, attempt) / _CLAIMED):
+        return "a copy"
+    if not _is_open(space):
+        _say(attempt, "is held for a space that is being erased or gone", trouble=False)
+        return "left"
+    return _recover(space, attempt)
+
+
+def settle_file_moves(*, leaving: str | None = None) -> list[dict[str, str]]:
     """End every file move a stop or a failure left (:func:`_end`), each on
     its own: one that cannot be ended now is said and tried again. Nothing on
     an install that does not enforce Spaces, and nothing is made. Run at
-    start, by the maintenance sweep and by the next move. Blocking."""
+    start, by the maintenance sweep and by the next move; with *leaving*, only
+    the moves out of that space (before it is closed for its erase, while a
+    file that did not move can still go back to it). Blocking."""
     if not spaces_enforced():
         return []
     settled: list[dict[str, str]] = []
-    with _settling:
+    if not _settling.acquire(timeout=_SETTLING_WAIT_S):
+        logger.warning("[spaces] the file moves cut off are being ended elsewhere; not waited for any longer")
+        return []
+    try:
         try:
             found = _attempts()
         except OSError:
@@ -754,24 +1074,22 @@ def settle_file_moves() -> list[dict[str, str]]:
             return []
         copies: list[tuple[str, str]] = []
         for space, attempt in found:
-            if _is_live(attempt):
+            if _is_live(attempt) or leaving not in (None, space):
                 continue
-            try:
-                move = _read_record(space, attempt)
-                if move is not None:
-                    outcome = _end(move)
-                elif os.path.lexists(_holding(space, attempt) / _CLAIMED):
-                    outcome = _recover(space, attempt) if _is_open(space) else "left"
-                else:
-                    copies.append((space, attempt))
-                    continue
-            except _FAILURES:
-                logger.warning("[spaces] file move %s could not be ended; it is tried again", attempt, exc_info=True)
+            outcome, failed = _guarded(attempt, "could not be ended; it is tried again",
+                                       functools.partial(_settle_one, space, attempt))
+            if failed is not None or outcome == "left":
+                continue  # said, or its space is being erased
+            if outcome == "a copy":
+                copies.append((space, attempt))
                 continue
-            if outcome != "left":
-                settled.append({"attempt": attempt, "outcome": outcome})
-                logger.warning("[spaces] a file move that was cut off was ended: %s", outcome)
-        _forget_orphans(copies)
+            _said.pop(attempt, None)
+            settled.append({"attempt": attempt, "outcome": outcome})
+            logger.warning("[spaces] a file move that was cut off was ended: %s", outcome)
+        if leaving is None:
+            _forget_orphans(copies)
+    finally:
+        _settling.release()
     return settled
 
 

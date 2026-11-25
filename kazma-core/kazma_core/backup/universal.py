@@ -920,7 +920,7 @@ def _robust_copytree(src: Path, dest: Path, failures: list[dict[str, str]] | Non
             count += 1
         except FileNotFoundError as exc:
             logger.debug("[universal-backup] skipped ephemeral file %s: %s", item.name, exc)
-        except Exception as exc:  # noqa: BLE001 -- recorded, never swallowed
+        except OSError as exc:  # recorded, never swallowed
             logger.warning("[universal-backup] could not copy %s: %s", item, exc)
             failures.append({"path": item.relative_to(src).as_posix(),
                              "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
@@ -1442,7 +1442,7 @@ def perform_universal_backup(
                     if old.is_dir() and old != dest and not (old / "manifest.json").is_file():
                         logger.info("[universal-backup] cleaning incomplete dir %s", old.name)
                         _rmtree_force(old)
-        except Exception:
+        except OSError:
             logger.debug("[universal-backup] incomplete cleanup failed", exc_info=True)
         _set_progress("databases", detail="Preparing backup…", started_ts=time.time())
 

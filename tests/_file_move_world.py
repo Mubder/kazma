@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.spaces import file_moves, identity, people, scope, shared_files
-from kazma_core.spaces.files import FILES, MOVING, space_dir
+from kazma_core.spaces.files import FILES, moving_dir, space_dir
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
 
 from tests._space_world import own_install
@@ -84,13 +84,13 @@ class Files:
             root = self.root(space)
             found += [f"{name}:{p.relative_to(root).as_posix()}" for p in root.rglob("*")
                       if p.is_file() and p.read_bytes() == data]
-            found += ["held" for p in (space_dir(space) / MOVING).glob("*/claimed") if p.read_bytes() == data]
+            found += ["held" for p in moving_dir(space).glob("*/claimed") if p.read_bytes() == data]
         return sorted(found)
 
     def held(self) -> list[str]:
         """What is left in any holding folder."""
-        root = space_dir(self.mine).parent
-        return sorted(p.relative_to(root).as_posix() for p in root.glob(f"*/{MOVING}/*"))
+        return sorted(f"{space}/{p.name}" for space in (self.mine, self.family, self.omars)
+                      for p in moving_dir(space).glob("*"))
 
     def maker(self, space: str, rel: str) -> tuple[str, str] | None:
         row = shared_files.maker_of(space, rel)
