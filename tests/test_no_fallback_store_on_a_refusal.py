@@ -46,35 +46,35 @@ def enforced(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.usefixtures("enforced")
 @pytest.mark.parametrize("refusal", _refusals(), ids=lambda e: type(e).__name__)
 def test_a_refusal_is_found_through_what_wraps_it(refusal: BaseException) -> None:
-    assert pg_helpers._is_space_refusal(refusal)
+    assert pg_helpers._space_refusal(refusal)
     try:
         try:
             raise refusal
         except Exception as inner:
             raise RuntimeError("the store could not open") from inner
     except RuntimeError as outer:
-        assert pg_helpers._is_space_refusal(outer)
+        assert pg_helpers._space_refusal(outer)
     try:
         try:
             raise refusal
         except Exception:
             raise ValueError("while handling it")
     except ValueError as outer:
-        assert pg_helpers._is_space_refusal(outer)
+        assert pg_helpers._space_refusal(outer)
 
 
 @pytest.mark.usefixtures("enforced")
 def test_an_outage_is_no_refusal() -> None:
-    assert not pg_helpers._is_space_refusal(None)
-    assert not pg_helpers._is_space_refusal(RuntimeError("Postgres pool unavailable"))
+    assert not pg_helpers._space_refusal(None)
+    assert not pg_helpers._space_refusal(RuntimeError("Postgres pool unavailable"))
     away = ConnectionError("refused by the network")
     away.__cause__ = away  # a cycle ends
-    assert not pg_helpers._is_space_refusal(away)
+    assert not pg_helpers._space_refusal(away)
 
 
 @pytest.mark.parametrize("refusal", _refusals(), ids=lambda e: type(e).__name__)
 def test_with_spaces_off_nothing_is_a_refusal(refusal: BaseException) -> None:
-    assert not pg_helpers._is_space_refusal(refusal)
+    assert not pg_helpers._space_refusal(refusal)
     assert pg_helpers.no_other_store_on_refusal(refusal, "a store") is None
 
 
@@ -194,6 +194,59 @@ def test_control_an_outage_still_falls_back(which: str, monkeypatch: pytest.Monk
 def test_off_every_failure_falls_back_as_before(which: str, refusal: BaseException,
                                                 monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     assert _open(which, monkeypatch, refusal, tmp_path)() == "sqlite"
+
+
+# ── the start itself, by the app's real lifespan ─────────────────────────
+
+
+def _start(monkeypatch: pytest.MonkeyPatch, exc: BaseException, *, enforced: bool) -> bool:
+    """Start the app with a chat state that cannot be opened: True when it
+    started. Raises what the start failed with."""
+    from fastapi.testclient import TestClient
+    from kazma_gateway.stores import checkpoint
+    from kazma_ui.app import create_app
+
+    async def cannot(*_a: Any, **_k: Any) -> Any:
+        # The start reads the stored switch first; this is that install's.
+        monkeypatch.setattr(scope, "_enforced", enforced)
+        raise exc
+
+    monkeypatch.setattr(checkpoint, "create_checkpointer", cannot)
+    with TestClient(create_app()) as client:
+        return client.get("/health/live").status_code == 200
+
+
+def test_a_start_whose_chat_state_is_refused_fails_with_the_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    said: list[str] = []
+    # The start sets up the process's own log handlers.
+    monkeypatch.setattr(pg_helpers.logger, "error", lambda text, *args: said.append(text % args))
+    with pytest.raises(NoSpaceBound, match="no space is bound"):
+        _start(monkeypatch, NoSpaceBound("no space is bound"), enforced=True)
+    assert len(said) == 1 and said[0].startswith(
+        "[Checkpoint]: Postgres refused this (NoSpaceBound: no space is bound)")
+
+
+@pytest.mark.parametrize(("exc", "enforced"), [(ConnectionError("away"), True), (NoSpaceBound("refused"), False)],
+                         ids=["an outage", "Spaces off"])
+def test_control_every_other_start_goes_on_as_before(monkeypatch: pytest.MonkeyPatch, exc: BaseException,
+                                                     enforced: bool) -> None:
+    assert _start(monkeypatch, exc, enforced=enforced)
+
+
+def test_the_log_names_the_refusal_not_what_wraps_it(monkeypatch: pytest.MonkeyPatch,
+                                                     caplog: pytest.LogCaptureFixture) -> None:
+    monkeypatch.setattr(scope, "_enforced", True)
+    caplog.set_level("ERROR", logger=pg_helpers.__name__)
+    try:
+        try:
+            raise _DeniedError("permission denied for schema public")
+        except _DeniedError as inner:
+            raise ConnectionError("Postgres did not answer") from inner
+    except ConnectionError as wrapped:
+        with pytest.raises(ConnectionError):
+            pg_helpers.no_other_store_on_refusal(wrapped, "[documents.jobs]")
+    assert "_DeniedError: permission denied for schema public" in caplog.text
+    assert "did not answer" not in caplog.text and "no space" not in caplog.text
 
 
 # ── every fallback, from the source ──────────────────────────────────────

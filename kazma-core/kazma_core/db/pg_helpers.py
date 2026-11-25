@@ -39,40 +39,40 @@ def store_errors() -> tuple[type[BaseException], ...]:
 _INSUFFICIENT_PRIVILEGE = "42501"
 
 
-def _is_space_refusal(exc: BaseException | None) -> bool:
-    """Whether *exc*, or what it was raised from, is a refusal and not an
-    outage: no space was bound to the work (``NoSpaceBound``), or Postgres
-    would not let this role do it. The store is there and said no, so nothing
-    may be read as missing or empty and no other store takes its place.
+def _space_refusal(exc: BaseException | None) -> BaseException | None:
+    """The refusal *exc* is, or was raised from; None for anything else: no
+    space was bound to the work (``NoSpaceBound``), or Postgres would not let
+    this role do it. The store is there and said no, so nothing may be read
+    as missing or empty and no other store takes its place. Never an outage.
 
-    Always False while Spaces is not enforced: an install without it reads its
+    Always None while Spaces is not enforced: an install without it reads its
     errors as before. ``store_errors()`` holds both kinds, so code that
     catches it to fall back asks here first (S4-01, H2)."""
     from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
 
     if not spaces_enforced():
-        return False
+        return None
     seen: set[int] = set()
     while exc is not None and id(exc) not in seen:
         seen.add(id(exc))
         if isinstance(exc, NoSpaceBound) or getattr(exc, "sqlstate", None) == _INSUFFICIENT_PRIVILEGE:
-            return True
+            return exc
         exc = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
-    return False
+    return None
 
 
 def no_other_store_on_refusal(exc: BaseException, what: str) -> None:
-    """Raise *exc* again when it is a refusal (:func:`_is_space_refusal`):
+    """Raise *exc* again when it is a refusal (:func:`_space_refusal`):
     the first thing a handler that would use another store does. *what* is
     the store, for the log. A fallback made then would last as long as the
     process: documents would list empty, uploads and chat state would be kept
     in two places."""
-    if not _is_space_refusal(exc):
+    refusal = _space_refusal(exc)
+    if refusal is None:
         return
-    from kazma_core.spaces.row_work import current_door
-
-    logger.error("%s: Postgres refused this (%s: %s), said for %s. No other store is used in its place.",
-                 what, type(exc).__name__, exc, current_door() or "no space")
+    # The refusal itself: what wraps it may read as an outage.
+    logger.error("%s: Postgres refused this (%s: %s). No other store is used in its place.",
+                 what, type(refusal).__name__, refusal)
     raise exc
 
 

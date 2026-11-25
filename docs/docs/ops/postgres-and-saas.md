@@ -187,6 +187,12 @@ a dump and the restore rehearsal as the new role.
    instead, its log names Postgres's reason (`[PostgresPool] Postgres
    refused the password for kazma_app ...`).
 
+Once Spaces is on, Kazma does not start while its role may not create or use
+its own tables; the log says `Postgres refused this` with Postgres's words.
+Run the script again, in Kazma's database, as the superuser: it gives the role
+the schema and every table in it (with a role of your own, `ALTER SCHEMA public
+OWNER TO <role>;` and ownership of its tables). Then start Kazma.
+
 To undo, put the old address back in `.env` (and the memory mirror) and
 reload; the superuser can still use every table. Leave the `kazma`
 superuser in place: it is how you administer the server.

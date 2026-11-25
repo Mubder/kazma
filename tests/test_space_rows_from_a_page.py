@@ -20,7 +20,7 @@ from kazma_core.config_store import get_config_store
 from kazma_core.documents import ingestion
 from kazma_core.documents.ingestion import set_ingestion_service
 from kazma_core.memory import forget
-from kazma_core.spaces import identity, people, scope, space_limits
+from kazma_core.spaces import identity, moves, people, scope, space_limits
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, OWNER_SPACE_ID, Scope, bind_scope
 
 from tests._documents_seed import seed_document, seeded_service
@@ -111,6 +111,31 @@ def test_a_copy_is_taken_back_where_it_is(world: Any) -> None:
     assert calls.scopes("_tombstone") == [Scope(world.mine, world.reem), Scope(world.family, world.reem)]
 
 
+@pytest.mark.parametrize("meanwhile", ["removed", "erasing"])
+def test_a_move_is_its_persons_or_refused(world: Any, monkeypatch: pytest.MonkeyPatch, meanwhile: str) -> None:
+    """Between the rule and the lock they were removed, or the target started
+    to be erased: the copy went in as the space's maker."""
+    doc = seed_document(world.svc, tenant_id=world.mine, owner=world.reem, marker="trip notes", title="Trip")
+    real = ingestion._move_lock.__enter__
+
+    def waited(self: Any) -> None:
+        real(self)
+        if meanwhile == "removed":
+            identity.remove_member(world.family, world.reem)
+        else:
+            identity.update_registry(lambda reg: reg["spaces"][world.family].update(erasing_at="now"))
+
+    monkeypatch.setattr(ingestion._move_lock, "__enter__", waited)
+    with watched((world.svc, "ingest_stream")) as calls, bind_scope(world.mine, world.reem):
+        with pytest.raises(ingestion.DocumentIngestionError) as refused:
+            moves.move_document(doc.document_id, from_space=world.mine, to_space=world.family, by=world.reem,
+                                workspace_id="w", service=world.svc)
+    assert refused.value.code == "not_movable" and not calls
+    assert not get_config_store().get(ingestion.MOVES_KEY), "nothing under way"
+    record = world.svc.repository.get_document(tenant_id=world.mine, document_id=doc.document_id)
+    assert record is not None and not record.deleted_at, "it is where it was"
+
+
 def test_off_a_move_binds_nothing(off: Any) -> None:
     calls = _move(off)
     assert {c.scope for c in calls} == {None}
@@ -153,6 +178,18 @@ def test_an_accounts_deletion_is_each_spaces_own(world: Any) -> None:
     calls = _leaving_calls(deleted)
     assert {s.space_id for s in calls.scopes("forget_entry")} == {world.family, world.team}
     assert {s.space_id for s in calls.scopes("take_back_access")} == {world.family, world.team}
+
+
+def test_leaving_a_space_that_is_being_erased_still_ends(world: Any) -> None:
+    """Nothing binds it; its own statements run, and the erase takes the rest."""
+    identity.update_registry(lambda reg: reg["spaces"][world.family].update(erasing_at="now"))
+
+    def left() -> None:
+        people._after_leaving(world.family, world.reem)
+
+    calls = _leaving_calls(left)
+    assert calls.of("forget_entry") == [world.family] == calls.of("take_back_access")
+    assert calls.scopes("forget_entry") == [None]
 
 
 def test_shares_are_really_taken_back(world: Any) -> None:

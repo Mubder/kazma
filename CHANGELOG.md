@@ -8,8 +8,9 @@
   longer stops the rest.
 - Moving a document writes its copy inside the space it moves to, and what goes
   with a member who leaves is taken back inside the space they left.
-- When the database refuses Kazma, Kazma says so and does not go on with
-  another, empty store. An outage is handled as before.
+- Once Spaces is on and the database refuses Kazma, Kazma says so and does not
+  go on with another, empty store: a start that is refused fails with the
+  reason. With Spaces off, and in an outage, it does what it did before.
 - A document audit entry that could not be written is logged as a warning.
 - The check that Kazma does not sign in to Postgres as a superuser asks for the
   login itself.

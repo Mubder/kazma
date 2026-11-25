@@ -13,9 +13,10 @@ import pytest
 from kazma_core.spaces import identity, row_work, scope
 from kazma_core.spaces.row_work import (
     Door,
-    current_door,
+    SpaceErasing,
     install_loops,
     install_statements,
+    resolve_act_of,
     resolve_work_of,
     statements_of,
     work_of,
@@ -27,7 +28,7 @@ from kazma_core.tenant_context import get_current_tenant_id
 
 def statement_space() -> str | None:
     """The space a statement is for now."""
-    door = current_door()
+    door = Door.now()
     return (door.space or None) if door is not None else None
 
 
@@ -54,11 +55,11 @@ def family() -> str:
 
 
 def test_nothing_said_is_no_door_and_a_scope_is_its_space() -> None:
-    assert current_door() is None and statement_space() is None
+    assert Door.now() is None and statement_space() is None
     with bind_scope("family", "layla"):
-        assert current_door() == Door(space="family") and statement_space() == "family"
+        assert Door.now() == Door(space="family") and statement_space() == "family"
     with install_work("a sweep"):
-        assert current_door() == Door(reason="a sweep") and statement_space() is None
+        assert Door.now() == Door(reason="a sweep") and statement_space() is None
 
 
 @pytest.mark.usefixtures("enforced")
@@ -88,10 +89,10 @@ def test_a_scope_bound_inside_wins_and_leaving_it_restores_what_was_said() -> No
             assert statement_space() == "family"
             with statements_of("default"):
                 assert statement_space() == "default"
-        assert current_door() == Door(reason="a sweep")
+        assert Door.now() == Door(reason="a sweep")
         with install_work("a deeper sweep"):
-            assert current_door() == Door(reason="a deeper sweep")
-    assert current_door() is None
+            assert Door.now() == Door(reason="a deeper sweep")
+    assert Door.now() is None
 
 
 def test_the_innermost_says_it() -> None:
@@ -99,7 +100,7 @@ def test_the_innermost_says_it() -> None:
         with statements_of("family"):
             assert statement_space() == "family"
             with install_statements("a ping"):
-                assert current_door() == Door(reason="a ping")
+                assert Door.now() == Door(reason="a ping")
             assert statement_space() == "family"
 
 
@@ -110,10 +111,10 @@ def test_install_statements_say_what_they_are_and_decorate_a_function() -> None:
 
     @install_statements("a listing of every space")
     def listing() -> Door | None:
-        return current_door()
+        return Door.now()
 
     assert listing() == listing() == Door(reason="a listing of every space"), "each call anew"
-    assert current_door() is None
+    assert Door.now() is None
 
 
 def test_what_was_said_follows_a_thread_and_a_task() -> None:
@@ -155,6 +156,29 @@ def test_work_for_a_row_from_another_spaces_turn_is_the_rows(family: str) -> Non
 
 
 @pytest.mark.usefixtures("enforced")
+def test_nothing_binds_a_space_of_no_install_or_one_being_erased(family: str) -> None:
+    with pytest.raises(NoSpaceBound) as unknown:
+        resolve_work_of("s00000000dead", "omar")
+    assert not isinstance(unknown.value, SpaceErasing)
+    identity.update_registry(lambda reg: reg["spaces"][family].update(erasing_at="now"))
+    with pytest.raises(SpaceErasing):
+        resolve_work_of(family, "omar")
+    with pytest.raises(identity.AskerLeft):
+        resolve_act_of(family, "omar")
+
+
+@pytest.mark.usefixtures("enforced")
+@pytest.mark.parametrize("who", ["", "operator", "nadia", "owner"])
+def test_an_act_is_its_persons_or_refused(family: str, who: str) -> None:
+    with resolve_act_of(family, "omar")():
+        assert current_scope() == Scope("family", "omar")
+    with pytest.raises(identity.AskerLeft):
+        resolve_act_of(family, who)
+    with pytest.raises(identity.AskerLeft):
+        resolve_act_of("Not A Space!", "omar")
+
+
+@pytest.mark.usefixtures("enforced")
 def test_a_row_of_no_space_is_refused_and_an_unreadable_store_is_said(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(NoSpaceBound):
         resolve_work_of("Not A Space!", "owner")
@@ -180,7 +204,7 @@ def test_off_work_binds_nothing_and_reads_nothing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(asyncio, "to_thread", threaded)
 
     async def run() -> None:
-        for enter in (resolve_work_of("acme", "x"), await work_of_async("acme", "x"),
+        for enter in (resolve_work_of("acme", "x"), resolve_act_of("acme", "x"), await work_of_async("acme", "x"),
                       lambda: install_loops("loops")):
             with enter():
                 assert current_scope() is None and get_current_tenant_id() is None
@@ -191,7 +215,7 @@ def test_off_work_binds_nothing_and_reads_nothing(monkeypatch: pytest.MonkeyPatc
 
 def test_loops_of_the_install_hold_no_persons_space(monkeypatch: pytest.MonkeyPatch) -> None:
     async def loop() -> tuple[Scope | None, Door | None]:
-        return current_scope(), current_door()
+        return current_scope(), Door.now()
 
     async def started() -> tuple[Scope | None, Door | None]:
         with bind_scope("family", "layla"):

@@ -10,8 +10,11 @@ argument names) was all they had. The second lock (S4-01) asks the database
 which space a statement is for, so each of them says it here, in one of three
 forms:
 
-* :func:`work_of` -- real work for a row: a document's stages, a recovery that
-  calls the product. It binds the whole scope, the person included.
+* :func:`work_of` -- real work Kazma does for a row: a document's stages, a
+  recovery that calls the product. It binds the whole scope: the person the
+  row names while they are in the space, else the space's own account.
+* :func:`resolve_act_of` -- a person's own act in another space of theirs (a
+  move into it). It binds that person or refuses, never anyone else.
 * :func:`statements_of` -- only statements that name the row's space. A
   variable the database door alone reads: who is acting does not change, and
   nothing is read to enter it.
@@ -21,7 +24,7 @@ forms:
 
 **Nothing decides by it yet**: the database door is step 1 (report mode),
 and the tests' stand-in for it is ``tests/_space_door.py``. A step that adds
-the door changes what asks :func:`current_door`, and no caller here.
+the door changes what asks :meth:`Door.now`, and no caller here.
 
 With Spaces off :func:`work_of` binds no scope and no tenant and reads
 nothing, so an install runs exactly as before.
@@ -42,6 +45,7 @@ import logging
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
+from typing import Any
 
 from kazma_core.spaces.scope import (
     NoSpaceBound,
@@ -57,9 +61,10 @@ from kazma_core.spaces.scope import (
 
 __all__ = [
     "Door",
-    "current_door",
+    "SpaceErasing",
     "install_loops",
     "install_statements",
+    "resolve_act_of",
     "resolve_work_of",
     "statements_of",
     "work_of",
@@ -80,6 +85,19 @@ class Door:
     space: str = ""
     reason: str = ""
 
+    @staticmethod
+    def now() -> Door | None:
+        """The door a statement goes through now: what was last said under
+        what is bound now, else the bound scope's space, else the install's
+        inside ``scope.install_work``; None when nothing says it. No I/O."""
+        scope, work = current_scope(), install_work_reason()
+        said = _said.get()
+        if said is not None and said.scope is scope and said.work == work:
+            return said.door
+        if scope is not None:
+            return Door(space=scope.space_id)
+        return Door(reason=work) if work else None
+
 
 @dataclass(frozen=True)
 class _Said:
@@ -91,19 +109,6 @@ class _Said:
 
 
 _said: contextvars.ContextVar[_Said | None] = contextvars.ContextVar("kazma_statements_of", default=None)
-
-
-def current_door() -> Door | None:
-    """The door a statement goes through now: what was last said under what
-    is bound now, else the bound scope's space, else the install's inside
-    ``scope.install_work``; None when nothing says it. No I/O."""
-    scope, work = current_scope(), install_work_reason()
-    said = _said.get()
-    if said is not None and said.scope is scope and said.work == work:
-        return said.door
-    if scope is not None:
-        return Door(space=scope.space_id)
-    return Door(reason=work) if work else None
 
 
 def _say(door: Door) -> contextvars.Token:
@@ -157,6 +162,51 @@ def install_loops(reason: str) -> AbstractContextManager[None]:
     return install_work(reason) if spaces_enforced() else install_statements(reason)
 
 
+class SpaceErasing(NoSpaceBound):
+    """A row's space is being erased: nothing binds it (S1-27). Its rows go
+    with it; work for one waits until they have."""
+
+
+def _open_space(space: str) -> dict[str, Any]:
+    """The registry, once *space* is one of the install's and not being
+    erased. Blocking (the settings store)."""
+    from kazma_core.spaces.identity import read_registry
+
+    registry = read_registry()
+    found = (registry.get("spaces") or {}).get(space) if valid_space_id(space) else None
+    if found is None:
+        raise NoSpaceBound(f"a row names {space!r}, which is no space of this install")
+    if found.get("erasing_at"):
+        raise SpaceErasing(f"the space {space!r} is being erased")
+    return registry
+
+
+def _is_in(registry: dict[str, Any], account: str, space: str) -> bool:
+    return bool(account) and any(m.get("account") == account and m.get("space") == space
+                                 for m in registry.get("memberships") or ())
+
+
+def resolve_act_of(space: object, person: object) -> Callable[[], AbstractContextManager[object]]:
+    """What a person's own act in *space* runs in, when the work bound now is
+    another's of their spaces (a move into it): call the answer and enter it.
+    Always as *person*. ``identity.AskerLeft`` when they are not in it, or it
+    is being erased: a rule asked before a wait may no longer hold, and an act
+    of theirs is never anyone else's. Blocking once Spaces is enforced; off,
+    it reads nothing and the work binds nothing."""
+    where = space_of_record(space)
+    if not spaces_enforced():
+        return functools.partial(statements_of, where)
+    from kazma_core.spaces.identity import AskerLeft
+
+    who = str(person or "").strip()
+    try:
+        if _is_in(_open_space(where), who, where):
+            return functools.partial(bind_scope, where, who)
+    except NoSpaceBound as exc:
+        raise AskerLeft(str(exc)) from exc
+    raise AskerLeft("the person is no longer in the space this would be done in")
+
+
 def resolve_work_of(space: object, asker: object = None) -> Callable[[], AbstractContextManager[object]]:
     """What real work for a row of *space* runs in: call the answer and enter
     it. *asker* is the account the row names, who is acting while still a
@@ -165,21 +215,20 @@ def resolve_work_of(space: object, asker: object = None) -> Callable[[], Abstrac
     Spaces ("operator"), a person who left. A row stays in its own space,
     never the owner's.
 
-    ``NoSpaceBound`` for a value that is no space id; ``IdentityUnavailable``
-    when the identity store cannot say. Not for work a person booked that
-    acts as them later (``identity.work_scope`` refuses that one when they
-    left). Blocking once Spaces is enforced (the settings store); off, it
+    ``NoSpaceBound`` for a row of no space of this install, ``SpaceErasing``
+    (one) while its space is being erased; ``IdentityUnavailable`` when the
+    identity store cannot say. Only for work of Kazma's own: never for what a
+    person does themself (:func:`resolve_act_of`), nor for work they booked
+    that acts as them later (``identity.work_scope``). Blocking once Spaces is enforced (the settings store); off, it
     reads nothing and the work binds nothing.
     """
     where = space_of_record(space)
     if not spaces_enforced():
         return functools.partial(statements_of, where)
-    if not valid_space_id(where):
-        raise NoSpaceBound(f"a row names {where!r}, which is no space of this install")
-    from kazma_core.spaces.identity import acting_account, is_member
+    from kazma_core.spaces.identity import acting_account
 
     who = str(asker or "").strip()
-    if not (who and is_member(who, where)):
+    if not _is_in(_open_space(where), who, where):
         who = acting_account(where)
     return functools.partial(bind_scope, where, who)
 

@@ -175,14 +175,14 @@ def _server_of(dsn: str) -> tuple[str, str] | None:
 def _database_of(dsn: str) -> tuple[str, str, str] | None:
     """(host, port, database) a DSN signs in to, or None when it cannot be
     read. A DSN that names no database means the one named as its user
-    (libpq's own rule, and ``PGDATABASE`` before it)."""
+    (libpq's own rule, and ``PGDATABASE`` before it; the user, ``PGUSER``)."""
     server = _server_of(dsn)
     if server is None:
         return None
     from psycopg.conninfo import conninfo_to_dict
 
     info = conninfo_to_dict(dsn)
-    name = info.get("dbname") or os.environ.get("PGDATABASE") or info.get("user") or ""
+    name = info.get("dbname") or os.environ.get("PGDATABASE") or info.get("user") or os.environ.get("PGUSER") or ""
     return *server, str(name)
 
 

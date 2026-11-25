@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from kazma_core.spaces.row_work import Door, current_door
+from kazma_core.spaces.row_work import Door
 from kazma_core.spaces.scope import current_scope
 
 
@@ -55,12 +55,12 @@ def _asking(calls: Calls, name: str, original: Any) -> Any:
     if inspect.iscoroutinefunction(original):
         @functools.wraps(original)
         async def asked(*args: Any, **kwargs: Any) -> Any:
-            calls.append(Call(name, current_door(), current_scope(), args, kwargs))
+            calls.append(Call(name, Door.now(), current_scope(), args, kwargs))
             return await original(*args, **kwargs)
     else:
         @functools.wraps(original)
         def asked(*args: Any, **kwargs: Any) -> Any:
-            calls.append(Call(name, current_door(), current_scope(), args, kwargs))
+            calls.append(Call(name, Door.now(), current_scope(), args, kwargs))
             return original(*args, **kwargs)
     return asked
 

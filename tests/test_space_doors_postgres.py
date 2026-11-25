@@ -87,13 +87,13 @@ def test_a_real_refusal_is_one_and_an_away_server_is_not(pool: Any, monkeypatch:
         raise AssertionError("Postgres allowed it")
 
     exc = refused()
-    assert not pg_helpers._is_space_refusal(exc), "Spaces off: as before"
+    assert not pg_helpers._space_refusal(exc), "Spaces off: as before"
     monkeypatch.setattr(scope, "_enforced", True)
-    assert pg_helpers._is_space_refusal(exc)
+    assert pg_helpers._space_refusal(exc)
     with pytest.raises(Exception) as away:
         with PostgresPool("postgresql://demo@127.0.0.1:1/none", min_size=0, max_size=1).connection(timeout=2):
             pass
-    assert not pg_helpers._is_space_refusal(away.value)
+    assert not pg_helpers._space_refusal(away.value)
 
 
 # ── documents ────────────────────────────────────────────────────────────
@@ -196,6 +196,10 @@ def test_counts_leaving_and_the_collection_say_whose_they_are(documents: Any) ->
                 assert space_limits._documents_used(w.b) == len("b notes")
             with watched_pool() as totals:
                 assert w.svc._storage_bytes()[0] >= len("a notes") + len("b notes")
+            with watched_pool() as depth:
+                assert w.svc.jobs.queue_stats().depth >= 0
+            with watched_pool() as own_depth:
+                w.svc.jobs.queue_stats(tenant_id="default")
             with watched_pool() as collection:
                 w.svc.gc.collect(dry_run=True)
             w.svc.grant_member_access(tenant_id=w.b, member=w.person_a, force=True)
@@ -206,7 +210,8 @@ def test_counts_leaving_and_the_collection_say_whose_they_are(documents: Any) ->
     finally:
         set_ingestion_service(None)
     assert set(_on(w, used)) == {w.b}
-    assert set(_on(w, totals)) == set(_on(w, collection)) == {"<install>"}
+    assert set(_on(w, totals)) == set(_on(w, collection)) == set(_on(w, depth)) == {"<install>"}
+    assert set(_on(w, own_depth)) == {"default"}, "a tenant's own depth is the bound space's"
     assert _on(w, leaving) and set(_on(w, leaving)) == {w.b}
     # Every space's jobs (the database may hold other tests' too), each title
     # read as its own space's.
@@ -216,10 +221,14 @@ def test_counts_leaving_and_the_collection_say_whose_they_are(documents: Any) ->
 def test_a_moves_copy_is_written_in_the_target(documents: Any) -> None:
     from kazma_core.config_store import get_config_store
     from kazma_core.documents.ingestion import MOVES_KEY
+    from kazma_core.spaces import people
 
     w = documents
+    people.add_member(w.b, w.person_a, by="owner")
     with watched_pool() as calls, bind_scope(w.a, w.person_a):
         w.svc.move_document(document_id=w.jobs["a"].document_id, from_tenant=w.a, to_tenant=w.b,
                             actor_id=w.person_a, workspace_id="w", taken_out=False)
     get_config_store().delete(MOVES_KEY)
     assert {w.a, w.b} <= set(_on(w, calls)) and "" not in _on(w, calls)
+    there = {c.scope.asker for c in calls if c.args[0] is w.pool and c.scope is not None and c.scope.space_id == w.b}
+    assert there == {w.person_a}, "as the person who moves it, never the space's maker"

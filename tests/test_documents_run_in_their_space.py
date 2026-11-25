@@ -24,7 +24,7 @@ from kazma_core.documents.knowledge import DocumentKnowledgeAdapter
 from kazma_core.documents.models import DocumentJobState
 from kazma_core.documents.worker import DocumentWorker, PermanentDocumentError
 from kazma_core.spaces import identity, people, scope
-from kazma_core.spaces.row_work import current_door
+from kazma_core.spaces.row_work import Door
 from kazma_core.spaces.scope import OWNER_ACCOUNT_ID, Scope, bind_scope, current_scope
 from kazma_core.stores.knowledge import KnowledgeStore
 from kazma_core.stores.knowledge_index import KnowledgeIndex
@@ -175,6 +175,48 @@ def test_a_job_of_no_space_fails_and_is_not_retried(world: Any) -> None:
     assert call.space == call.kwargs["tenant_id"] == "Not A Space!" and call.scope is None
 
 
+def test_a_job_given_back_is_said(world: Any, monkeypatch: Any, caplog: pytest.LogCaptureFixture) -> None:
+    _queued(world.svc, world.a, world.reem, "tides")
+    claimed = world.svc.jobs.claim_next(owner="w", lease_seconds=60)
+
+    def away(*_a: Any, **_k: Any) -> Any:
+        raise identity.IdentityUnavailable("the settings store is away")
+
+    monkeypatch.setattr(identity, "read_registry", away)
+    asyncio.run(DocumentWorker(world.svc.jobs, {})._process_claimed(claimed, "w"))
+    said = [r for r in caplog.records if "given back" in r.getMessage()]
+    assert [r.levelname for r in said] == ["WARNING"] and "identity_unavailable" in said[0].getMessage()
+
+
+@pytest.mark.parametrize(("case", "reason"), [("erasing", "space_erasing"), ("arriving", "space_arriving")])
+def test_a_job_of_a_space_that_goes_or_comes_waits(world: Any, monkeypatch: Any, case: str, reason: str) -> None:
+    """Nothing binds a space being erased (S1-27); one being brought in is
+    recorded last. Neither job is failed, and neither spends a try."""
+    from kazma_core.spaces import space_move
+
+    _queued(world.svc, world.a, world.reem, "tides")
+    claimed = world.svc.jobs.claim_next(owner="w", lease_seconds=60)
+    if case == "erasing":
+        identity.update_registry(lambda reg: reg["spaces"][world.a].update(erasing_at="2026-11-25T00:00:00Z"))
+    else:
+        monkeypatch.setattr(space_move, "importing_spaces", lambda: {world.a})
+        real = identity.read_registry
+
+        def without() -> Any:
+            reg = real()
+            reg["spaces"].pop(world.a, None)
+            return reg
+
+        monkeypatch.setattr(identity, "read_registry", without)
+    seen: list[Any] = []
+    with watched((DocumentJobRepository, "hand_back")) as calls:
+        asyncio.run(DocumentWorker(world.svc.jobs, {s: lambda *_a: seen.append(1) for s in DocumentJobState})
+                    ._process_claimed(claimed, "w"))
+    assert [c.kwargs["reason"] for c in calls] == [reason] and calls.of("hand_back") == [world.a]
+    job = world.svc.jobs.get(tenant_id=world.a, job_id=claimed.id)
+    assert not seen and (job.attempt, job.error_code) == (0, None)
+
+
 # ── the loops (row 30) ───────────────────────────────────────────────────
 
 
@@ -258,6 +300,26 @@ def test_one_interrupted_job_that_cannot_be_recovered_stops_no_other(world: Any,
     assert seen == [(world.a, Scope(world.a, world.reem)), (world.b, Scope(world.b, world.omar))]
 
 
+def test_a_job_that_is_not_as_read_stops_no_other(world: Any, monkeypatch: Any) -> None:
+    _interrupted(world, monkeypatch, KeyError("metadata"))
+    assert world.svc.recover_interrupted_intake() == 1
+    assert not world.svc._interrupted_left, "nothing the sweep can do better"
+
+
+def test_interrupted_intakes_whose_people_were_unread_are_tried_by_the_sweep(world: Any, monkeypatch: Any) -> None:
+    seen = _interrupted(world, monkeypatch, identity.IdentityUnavailable("one answer was lost"))
+    assert world.svc.recover_interrupted_intake() == 1 and world.svc._interrupted_left
+    from kazma_core import shutdown
+
+    async def soon(_seconds: float) -> bool:
+        return len(seen) > 2  # one pass of the sweep, then stop
+
+    monkeypatch.setattr(shutdown, "sleep_or_shutdown", soon)
+    asyncio.run(world.svc._sweep_stranded_intakes())
+    assert [tenant for tenant, _scope in seen] == [world.a, world.b, world.a, world.b]
+    assert not world.svc._interrupted_left
+
+
 def test_an_outage_while_recovering_is_not_one_jobs_failure(world: Any, monkeypatch: Any) -> None:
     _interrupted(world, monkeypatch, RuntimeError("the database is away"))
     monkeypatch.setattr(availability, "is_outage", lambda _exc: True)
@@ -306,6 +368,18 @@ def test_one_move_that_cannot_be_settled_stops_no_other(world: Any, monkeypatch:
         (world.a, world.a), (world.b, world.b)] * 2, "the source's half is the source's"
 
 
+def test_the_copy_a_cut_off_move_did_not_record_is_looked_up_in_the_target(world: Any, monkeypatch: Any) -> None:
+    """The journal's copy was never written: it is found by the move's key,
+    among the target's jobs (the case a lookup in another space misses, and
+    settles as "nothing copied" with the copy left behind)."""
+    _cut_off_moves(world, monkeypatch)
+    ingestion._settle_move("2" * 8)
+    ingestion._record_move("1" * 8, {"copy": ""})
+    with watched((DocumentJobRepository, "get_by_idempotency_key")) as calls, bind_scope(world.a, world.reem):
+        world.svc.settle_moves()
+    assert [(c.space, c.kwargs["tenant_id"]) for c in calls] == [(world.b, world.b)]
+
+
 def test_off_settling_binds_nothing_and_fails_as_before(off: Any, monkeypatch: Any) -> None:
     seen = _cut_off_moves(off, monkeypatch)
     with pytest.raises(RuntimeError, match="refused"):
@@ -327,7 +401,7 @@ def _stranded(world: Any, monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     seen: list[Any] = []
     for name in ("_rollback_intake", "_discard_tagged"):
         monkeypatch.setattr(world.svc, name, lambda row, name=name: seen.append(
-            (name, row["tenant_id"], getattr(current_door(), "space", None), current_scope())) or True)
+            (name, row["tenant_id"], getattr(Door.now(), "space", None), current_scope())) or True)
     return seen
 
 
@@ -342,6 +416,48 @@ def test_a_stranded_intake_is_rolled_back_in_its_own_space(world: Any, monkeypat
         assert world.svc._recover_stranded_intakes() == 2
     assert seen == [(name, tenant, tenant, bound) for name in ("_rollback_intake", "_discard_tagged")
                     for tenant in (world.a, world.b)], "its statements; nobody acts as anyone else"
+
+
+@pytest.mark.parametrize("what", ["claim", "_discard_tagged"])
+def test_one_stranded_row_that_fails_stops_no_other(world: Any, monkeypatch: Any, what: str) -> None:
+    """A claim that raised was not caught: Documents did not start."""
+    seen = _stranded(world, monkeypatch)
+    owner = world.svc.admissions if what == "claim" else world.svc
+    calls: list[Any] = []
+
+    def first_fails(row: Any, **_kw: Any) -> bool:
+        calls.append(row)
+        if len(calls) == 1:
+            raise RuntimeError("this row was refused")
+        return True
+
+    monkeypatch.setattr(owner, what, first_fails)
+    assert world.svc._recover_stranded_intakes() == (1 if what == "claim" else 2)
+    assert len(calls) == 2, "the second row is tried"
+    assert seen
+
+
+def test_an_outage_at_a_claim_is_raised_as_before(world: Any, monkeypatch: Any) -> None:
+    _stranded(world, monkeypatch)
+
+    def away(*_a: Any, **_k: Any) -> bool:
+        raise RuntimeError("the database is away")
+
+    monkeypatch.setattr(world.svc.admissions, "claim", away)
+    monkeypatch.setattr(availability, "is_outage", lambda _exc: True)
+    with pytest.raises(RuntimeError, match="away"):
+        world.svc._recover_stranded_intakes()
+
+
+def test_off_a_claim_that_fails_is_raised_as_before(off: Any, monkeypatch: Any) -> None:
+    _stranded(off, monkeypatch)
+
+    def refused(*_a: Any, **_k: Any) -> bool:
+        raise RuntimeError("this row was refused")
+
+    monkeypatch.setattr(off.svc.admissions, "claim", refused)
+    with pytest.raises(RuntimeError, match="refused"):
+        off.svc._recover_stranded_intakes()
 
 
 def test_off_a_stranded_intake_binds_nothing(off: Any, monkeypatch: Any) -> None:
@@ -390,6 +506,51 @@ def test_a_restored_index_is_brought_back_whoevers_turn_started_it(world: Any) -
         report = svc.reconcile_index()
     assert len(report["reindexed"]) == 1 and not report["failed"], report
     assert calls.scopes("index_document_ir") == [Scope(world.a, world.reem)], "as its owner, in its space"
+
+
+def _torn(world: Any, monkeypatch: pytest.MonkeyPatch) -> DocumentIngestionService:
+    """The restored index, and a second entry whose manifest is torn, first."""
+    svc = _restored(world)
+    real_entries = svc.repository.active_index_entries()
+    torn = seed_document(svc, tenant_id=world.b, owner=world.omar, marker="torn")
+    entry = (world.b, real_entries[0][1], str(torn.document_id), str(torn.version_id))
+    monkeypatch.setattr(svc.repository, "active_index_entries", lambda: [entry, *real_entries])
+    monkeypatch.setattr(svc.repository, "list_document_chunks", lambda **_kw: ["recorded"])
+    monkeypatch.setattr(svc.knowledge_adapter.store, "get_library_for_tenant", lambda *_a: {"id": "docs"})
+    manifest = next(p for p in (world.root / "documents").rglob("*") if p.is_file() and torn.version_id in str(p))
+    manifest.write_text("{torn", encoding="utf-8")
+    return svc
+
+
+def test_one_torn_manifest_stops_no_other(world: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    report = _torn(world, monkeypatch).reconcile_index()
+    assert len(report["failed"]) == 1 and report["failed"][0]["tenant_id"] == world.b, report
+    assert len(report["reindexed"]) == 1, report
+
+
+def test_off_a_torn_manifest_is_raised_as_before(off: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ValueError):
+        _torn(off, monkeypatch).reconcile_index()
+
+
+def test_a_deleted_documents_pages_are_removed_in_its_own_space(world: Any) -> None:
+    """The index's other direction: a tombstoned document still searchable (a
+    restored Knowledge store) is removed, whoever's turn the pass is in."""
+    svc = _restored(world)
+    with bind_scope(world.a, world.reem):
+        svc.reconcile_index()
+    [document] = {d for _t, _l, d, _v in svc.knowledge_adapter.store.document_index_entries()}
+    with svc.repository._lock:
+        svc.repository._conn.execute("UPDATE documents SET deleted_at = ? WHERE id = ?",
+                                     ("2026-11-25T00:00:00+00:00", document))
+        svc.repository._conn.execute("UPDATE document_chunks SET active = 0, index_status = 'tombstoned'")
+        svc.repository._conn.commit()
+    with watched((svc.knowledge_adapter.index, "unindex_document"),
+                 (svc.repository, "list_indexed_libraries")) as calls, bind_scope(world.b, world.omar):
+        report = svc.reconcile_index()
+    assert len(report["pruned"]) == 1 and not report["failed"], report
+    there = Scope(world.a, OWNER_ACCOUNT_ID)  # no person asked: the space's own account
+    assert calls.scopes("unindex_document") == [there] == calls.scopes("list_indexed_libraries")
 
 
 def test_an_entry_of_no_space_stops_no_other(world: Any, monkeypatch: pytest.MonkeyPatch) -> None:

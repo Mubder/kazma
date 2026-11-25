@@ -185,8 +185,13 @@ def test_another_database_of_the_server_is_not_kazmas(monkeypatch):
     for other in ("postgresql://kazma@localhost/mirror", "postgresql://mirror@localhost:5432"):
         assert not availability.is_kazma_database(other), other
         assert availability.is_kazma_database(other, or_its_server=True), other
-    # A DSN that names no database means the one named as its user.
+    # A DSN that names no database means the one named as its user, which
+    # libpq reads from PGUSER when the DSN names none either.
     assert availability.is_kazma_database("postgresql://kazma@localhost")
+    monkeypatch.setenv("PGUSER", "kazma")
+    assert availability.is_kazma_database("postgresql://localhost")
+    monkeypatch.setenv("PGUSER", "mirror")
+    assert not availability.is_kazma_database("postgresql://localhost")
 
 
 def test_the_mirror_reads_whose_outage_it_is_by_its_server(monkeypatch):

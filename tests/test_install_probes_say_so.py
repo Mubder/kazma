@@ -168,7 +168,7 @@ def test_the_checkpoint_tables_are_the_installs(monkeypatch: pytest.MonkeyPatch)
     pytest.importorskip("psycopg")
     pytest.importorskip("psycopg_pool")
     from kazma_core import checkpoints_pg
-    from kazma_core.spaces.row_work import current_door
+    from kazma_core.spaces.row_work import Door
 
     aio = pytest.importorskip("langgraph.checkpoint.postgres.aio")
     pool_module = pytest.importorskip("psycopg_pool")
@@ -188,7 +188,7 @@ def test_the_checkpoint_tables_are_the_installs(monkeypatch: pytest.MonkeyPatch)
         def __init__(self, **_kwargs: Any) -> None: ...
 
         async def setup(self) -> None:
-            doors.append(current_door())
+            doors.append(Door.now())
 
     monkeypatch.setattr(pool_module, "AsyncConnectionPool", _AsyncPool)
     monkeypatch.setattr(aio, "AsyncPostgresSaver", _Saver)
@@ -196,7 +196,7 @@ def test_the_checkpoint_tables_are_the_installs(monkeypatch: pytest.MonkeyPatch)
     async def opened_in_a_turn() -> Any:
         with bind_scope("family", "layla"):
             await checkpoints_pg.open_postgres_checkpointer("postgresql://demo@localhost/kazma")
-            return current_door()
+            return Door.now()
 
     after = asyncio.run(opened_in_a_turn())
     assert doors[0].reason and not doors[0].space, "setup is the install's"

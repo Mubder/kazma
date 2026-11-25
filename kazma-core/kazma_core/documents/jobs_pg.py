@@ -26,6 +26,7 @@ import math
 import os
 import random
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -882,7 +883,10 @@ class PostgresDocumentJobRepository:
         queueable = ",".join(f"'{s}'" for s in _QUEUEABLE_STATE_VALUES)
         terminal = ",".join(f"'{s}'" for s in _TERMINAL_STATE_VALUES)
         active = ",".join(f"'{s}'" for s in _ACTIVE_STATE_VALUES)
-        with self._pool.connection() as conn:
+        # The queue of the whole install, which an upload's admission counts
+        # whoever asks; a tenant's own is the bound space's.
+        with (install_statements("the depth of the one queue, for every space") if tenant is None
+              else nullcontext()), self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
