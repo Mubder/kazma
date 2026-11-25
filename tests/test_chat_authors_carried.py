@@ -186,7 +186,17 @@ def test_kazma_s_own_prompt_is_nobody_s(world):
              {"role": "assistant", "content": "working"}, {"role": "user", "content": AUTO_CONTINUE_PROMPT},
              {"role": "assistant", "content": "done"}]
     fork = _fork(w, i["family"], thread, state)
-    assert [r[1] for r in _rows(w, i["family"], fork) if r[0] == "user"] == [i["reem"], "", ""]
+    assert [r for r in _rows(w, i["family"], fork) if r[0] == "user"] == [("user", i["reem"], "the tent")]
+    w.moved("reem", i["family"], fork, i["mine"])  # her own fork is hers to take out
+
+
+def test_a_person_s_words_that_look_like_kazma_s_stay_in_the_fork(world):
+    from kazma_core.agent.plan_fence import AUTO_CONTINUE_PROMPT
+
+    w, i = world, world.ids
+    _session, thread = _chat(w, i["family"], ("reem", "the tent"), ("omar", AUTO_CONTINUE_PROMPT))
+    fork = _fork(w, i["family"], thread, _said("the tent", AUTO_CONTINUE_PROMPT))
+    assert len([r for r in _rows(w, i["family"], fork) if r[0] == "user"]) == 2
     assert "others_wrote" in w.move("reem", i["family"], fork, i["mine"]).text
 
 

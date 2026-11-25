@@ -236,9 +236,16 @@ def bell_items(language: str = "en") -> list[dict[str, Any]]:
 
 
 def _is_steer_row(row: dict[str, Any]) -> bool:
-    """A steer's row (``/steer``, ``/steer!``): a note to a running turn,
-    never the message that opened one."""
-    return bool(row.get("steer")) or str(row.get("content") or "").startswith(("/steer ", "/steer! "))
+    """A steer's row (``/steer``, ``/steer!``) or one of Kazma's own prompts
+    (a chat app's row is made from the state, which keeps both as ``user``
+    messages): never the message that opened a turn. A row that names its
+    author is a person's, whatever it says."""
+    from kazma_core.agent.plan_fence import is_graph_nudge
+
+    text = str(row.get("content") or "")
+    if bool(row.get("steer")) or text.startswith(("/steer ", "/steer! ")):
+        return True
+    return not row.get("author") and (is_graph_nudge(text) or text.startswith("[KAZMA STEER"))
 
 
 def _open_turn_id(rows: list[dict[str, Any]], thread_id: str) -> str:

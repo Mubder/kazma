@@ -384,15 +384,16 @@ def _merge_transcript(existing: list, converted: list) -> list:
 
 
 def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[str, Any], messages: list,
-                                  *, author: str = "") -> None:
+                                  *, author: str = "", at_pause: bool = False) -> None:
     """Synchronize platform session to Web UI for seamless season takeover.
 
     The web session_id **is** the gateway thread_id (``gw-telegram-…``), so
     opening that season in the chat sidebar continues the same LangGraph
     checkpointer used by Telegram/Discord/Slack.
 
-    *author* is the account that sent the newest user message (at a turn's
-    start: the bound asker); every user row keeps its author
+    *author* is the account that sent the message the turn opened with (the
+    bound asker: the newest one at its start, and at its pause the one it is
+    by then); every user row keeps its author
     (``reply_sink.carry_authors``), so whose turn it is reads the same as on the
     web (S3-06 follow-up: a group's member could steer or stop another
     member's turn).
@@ -411,7 +412,7 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         # always ride over from the web row so a finished platform turn does
         # not land in the sidebar as text-only.
         if converted:
-            session.messages = carry_authors(existing, _merge_transcript(existing, converted), author)
+            session.messages = carry_authors(existing, _merge_transcript(existing, converted), author, at_pause=at_pause)
 
         username = metadata.get("username") or metadata.get("display_name") or "user"
         plat = (platform or "chat").capitalize()
@@ -517,7 +518,12 @@ async def _persist_hitl_pause(
     approve with no session) lost the pre-approval notes. Does not put
     ``chat_id`` into graph state (AGENTS.md §2).
     """
-    await asyncio.to_thread(_sync_platform_session_to_web, thread_id, platform, metadata, messages)
+    from kazma_core.spaces.scope import bound_asker
+
+    # The turn stays its asker's: from a state it trimmed, "yes" of two people
+    # named nobody, and the paused turn passed to the chat's opener.
+    await asyncio.to_thread(_sync_platform_session_to_web, thread_id, platform, metadata, messages,
+                            author=bound_asker() or "", at_pause=True)
     try:
         from kazma_ui.turn_runtime import close_turn
 

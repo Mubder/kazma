@@ -28,6 +28,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -35,7 +36,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from kazma_core.config_store import get_config_store
 from kazma_core.spaces import chat_moves, scope, threads
-from kazma_ui import auth, session_manager, space_binding
+from kazma_core.spaces.identity import IdentityUnavailable
+from kazma_ui import auth, chat_move, session_manager, space_binding
 
 from tests import _tt_graph as tt
 from tests._chat_move_space_cases import NoCardGraph
@@ -1422,3 +1424,81 @@ def test_the_delete_route_and_a_move_remove_the_same_things(world) -> None:
     assert w.call("reem", "DELETE", f"/api/chat/sessions/{session}", space=i["mine"]).json() == {"status": "ok"}
     w.nothing_left(i["mine"], "reem", session, thread)
     assert '"code": "chat_deleted"' in _send(w, "reem", i["mine"], session, "more").text
+
+
+# ── The rule is asked again at the handover (25 Nov 2026) ─────────────────
+
+
+def _during_the_copy(monkeypatch, what):
+    """*what* happens while the chat's files are copied."""
+    real = chat_move._copy_files
+
+    def copied(rows, entry):
+        out = real(rows, entry)
+        what()
+        return out
+
+    monkeypatch.setattr(chat_move, "_copy_files", copied)
+
+
+def _stayed(w, frm, to, session, thread, entries):
+    """The chat is where it was, whole; no copy, no open move."""
+    i = w.ids
+    assert [m["role"] for m in w.row(i[frm], "reem", session).messages] == ["user", "assistant"]
+    assert threads.record_of(thread) is not None and not threads.thread_ended(thread)
+    assert w.row(i[to], "reem", entries[0]["new_session"]) is None
+    assert threads.record_of(entries[0]["new_thread"]) is None
+    assert chat_moves.moves_under_way() == {}
+
+
+@pytest.mark.parametrize(("frm", "to"), [("mine", "family"), ("family", "mine")], ids=["share", "take-out"])
+def test_one_removed_while_the_files_are_copied_moves_nothing(world, monkeypatch, frm, to) -> None:
+    from kazma_core.spaces import people
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    w, i = world, world.ids
+    session, thread = w.chat("reem", i[frm], mark="m")
+    entries = entries_of(monkeypatch)
+    _during_the_copy(monkeypatch, lambda: people.remove_member(i["family"], i["reem"], by=OWNER_ACCOUNT_ID))
+    answer = w.move("reem", i[frm], session, i[to])
+    assert answer.status_code == 403 and answer.json()["error"] == "not_yours", answer.text
+    _stayed(w, frm, to, session, thread, entries)
+
+
+@pytest.mark.parametrize(("frm", "to"), [("mine", "family"), ("family", "mine")], ids=["share", "take-out"])
+def test_an_identity_that_cannot_be_read_at_the_handover_moves_nothing(world, monkeypatch, frm, to) -> None:
+    from kazma_core.spaces import moves
+
+    w, i = world, world.ids
+    session, thread = w.chat("reem", i[frm], mark="m")
+    entries, down, up_again = entries_of(monkeypatch), [], []
+    real = moves.identity.read_registry
+
+    def read():
+        if down and not up_again:
+            raise IdentityUnavailable("the identity store cannot be read")
+        return real()
+
+    monkeypatch.setattr(moves, "identity", SimpleNamespace(read_registry=read))
+    _during_the_copy(monkeypatch, lambda: down.append(1))
+    answer = w.move("reem", i[frm], session, i[to])
+    assert answer.status_code == 503 and answer.json()["error"] == "identity_unavailable", answer.text
+    _stayed(w, frm, to, session, thread, entries)
+    up_again.append(1)
+    w.moved("reem", i[frm], session, i[to])  # and it moves when it can be read
+
+
+@pytest.mark.parametrize(("frm", "to"), [("mine", "family"), ("family", "mine")], ids=["share", "take-out"])
+def test_control_a_handover_that_asks_nothing_moves_it(world, monkeypatch, frm, to) -> None:
+    from kazma_core.spaces import people
+    from kazma_core.spaces.scope import OWNER_ACCOUNT_ID
+
+    w, i = world, world.ids
+    session, _thread = w.chat("reem", i[frm], mark="m")
+
+    def removed():
+        people.remove_member(i["family"], i["reem"], by=OWNER_ACCOUNT_ID)
+        monkeypatch.setattr(chat_moves, "move_refusal", lambda **_k: (None, frm == "family"))
+
+    _during_the_copy(monkeypatch, removed)
+    w.moved("reem", i[frm], session, i[to])  # the fault

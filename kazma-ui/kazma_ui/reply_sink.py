@@ -140,14 +140,17 @@ def authored(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def carry_authors(existing: list, out: list, author: str = "", *, one_person: bool = False,
-                  among: list | None = None) -> list:
+                  among: list | None = None, at_pause: bool = False) -> list:
     """Each user row of *out* keeps the account that sent it (``author``,
     Spaces S1-08; ``hitl_answerers.whose_turn`` reads it to know whose turn it
     is, a chat's move whether others wrote in it): the checkpoint holds no
     author, so a row made from it takes the author of the row it was in
     *existing*, and the newest user row takes *author*, the sender of the
     message the turn opens with (left out of the matching: it is not in
-    *existing* yet).
+    *existing* yet). *at_pause*: in the middle of *author*'s turn its opening
+    row is in *existing*, named, and the state may have been trimmed around it
+    or hold a steer or a prompt of Kazma's after it: the newest row of that
+    row's words is it.
 
     An author is recorded, never guessed; a row whose author is in doubt names
     nobody, and is then not the mover's own (``chat_moves.others_wrote``). A
@@ -167,6 +170,13 @@ def carry_authors(existing: list, out: list, author: str = "", *, one_person: bo
 
     users = [i for i, m in enumerate(out) if isinstance(m, dict) and m.get("role") == "user"]
     newest = users[-1] if author and users else None
+    if newest is not None and at_pause:
+        opened = next((m for m in reversed(existing or []) if isinstance(m, dict) and m.get("role") == "user"
+                       and m.get("author") == author and not m.get("steer")), None)
+        words = _as_said(opened.get("content")) if opened is not None else None
+        newest = next((i for i in reversed(users) if _as_said(out[i].get("content")) == words), None)
+        if newest is not None:
+            existing = [m for m in existing if m is not opened]
     matched = [i for i in users if i != newest and not is_graph_nudge(_as_said(out[i].get("content")))]
     before = _askers(existing)
     askers = before if among is None else _askers(among)

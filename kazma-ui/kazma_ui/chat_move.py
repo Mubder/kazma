@@ -393,7 +393,13 @@ def _hand_over(attempt: str, entry: dict[str, Any], messages: list[dict[str, Any
                rows: list[dict[str, Any]]) -> bool:
     """The copy's row in, the journal's ``copied``, the chat here marked
     deleted: one step (``SessionManager.hand_over``). False: the chat changed
-    since it was copied, or the move was settled meanwhile; nothing moved."""
+    since it was copied, or the move was settled meanwhile; nothing moved.
+    The spaces' rule is asked again: someone taken out of the shared space
+    while the files were copied moves nothing, nor does one whose identity
+    cannot be read."""
+    refused, _ = chat_moves.move_refusal(from_space=entry["source"], to_space=entry["target"], by=entry["by"])
+    if refused is not None:
+        raise refused
     from kazma_ui.session_manager import ChatSession, get_session_manager
 
     moved = ChatSession(session_id=entry["new_session"], thread_id=entry["new_thread"],
