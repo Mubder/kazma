@@ -32,6 +32,8 @@ store (a settings read): blocking, so async code calls them in a thread.
 from __future__ import annotations
 
 import logging
+import os
+from collections.abc import Iterator
 from pathlib import Path
 
 from kazma_core.spaces.scope import (
@@ -49,6 +51,7 @@ __all__ = [
     "another_spaces_path",
     "in_sandboxed_space",
     "is_space_files_path",
+    "own_files",
     "sandboxed_files_root",
     "sandboxed_space",
     "space_dir",
@@ -203,6 +206,39 @@ def is_space_files_path(path: Path) -> bool:
         return False
     parts = relative.parts
     return len(parts) >= 2 and parts[1] == FILES
+
+
+def own_files(folder: Path, *, unreadable: list[Path] | None = None) -> Iterator[Path]:
+    """Every file inside *folder* that is its own: never one a link or a
+    junction leads to, so nothing of another place is counted, exported or
+    moved as this one's (``workspace.real_paths.is_linked``). Every walk of a
+    space's files asks it (``tests/test_space_file_walks.py``).
+
+    Sorted by name, folder by folder. A folder that cannot be read raises, or
+    is added to *unreadable* when the caller counts them.
+    """
+    from kazma_core.workspace.real_paths import is_linked
+
+    folders = [folder]
+    while folders:
+        here = folders.pop()
+        try:
+            with os.scandir(here) as found:
+                entries = sorted(found, key=lambda entry: entry.name)
+        except OSError:
+            if unreadable is None:
+                raise
+            unreadable.append(here)
+            continue
+        inner = []
+        for entry in entries:
+            if is_linked(entry.path):
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                inner.append(Path(entry.path))
+            elif entry.is_file(follow_symlinks=False):
+                yield Path(entry.path)
+        folders.extend(reversed(inner))
 
 
 def space_of_folder(path: Path) -> str | None:

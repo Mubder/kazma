@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Spaces: a space's export never follows a link out of its folder (2026-11-25)
+
+- Exporting a space, its bundle for another install and its size read the
+  space's own files only. A link or a junction inside its folder to another
+  place is left alone; before, the file it led to went into the export.
+
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 
 - Once Spaces is on, a chat you started can move from your own space into a

@@ -884,13 +884,14 @@ def _left_mark(path: Path) -> bool:
 def _moving_files(space: str) -> Iterator[tuple[str, Path, Path]]:
     """``(part, folder, file)`` of every file of the space that moves. A file
     of a person's under the mark's name refuses the move: no import takes
-    one, and it is never left out without a word."""
+    one, and it is never left out without a word. A link is no file of the
+    space's: what it leads to never travels."""
+    from kazma_core.spaces.files import own_files
+
     for part, where in _space_folders(space).items():
         if not where.is_dir():
             continue
-        for path in sorted(where.rglob("*")):
-            if not path.is_file():
-                continue
+        for path in own_files(where):
             inside = PurePosixPath(path.relative_to(where).as_posix())
             if _is_the_marks(inside):
                 if len(inside.parts) == 1 and _left_mark(path):
