@@ -32,6 +32,7 @@ import time
 from typing import Any, Callable
 
 from kazma_core.shutdown import is_shutting_down
+from kazma_core.spaces.row_work import install_statements
 
 __all__ = ["register_chat_app_resumer", "start_hitl_timeout_watchdog", "stop_hitl_timeout_watchdog"]
 
@@ -496,7 +497,10 @@ async def _watchdog_loop(
             if registry_items is not None:
                 pending = registry_items
             else:
-                pending = await _get_pending_approvals(graph, checkpointer)
+                # Every space's, with nothing bound (a page's listing keeps its
+                # own space: S4-01, H6).
+                with install_statements("every space's waiting approvals, for their timeout"):
+                    pending = await _get_pending_approvals(graph, checkpointer)
             now = time.monotonic()
             current_ids = {str(p.get("thread_id")) for p in pending if p.get("thread_id")}
 

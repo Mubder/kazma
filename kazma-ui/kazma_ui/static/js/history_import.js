@@ -123,7 +123,11 @@
                 kept: (r && r.refused) || 0, failed: (r && r.failed) || 0,
               });
           } else if (data.state === 'failed') {
-            this.error = tr('memory.import.job_failed', 'The import stopped with an error ({why}).', { why: data.error || '' });
+            this.error = tr({
+              left_space: 'memory.import.why_left_space',
+              accounts_unavailable: 'memory.import.why_accounts_unavailable',
+              not_an_export: 'memory.import.why_not_an_export',
+            }[data.error] || 'memory.import.why_failed', 'The import stopped with an error.');
           }
         }
         if (this.running && document.getElementById('history-import')) {

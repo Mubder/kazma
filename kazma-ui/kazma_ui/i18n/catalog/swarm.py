@@ -212,6 +212,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لم تعد نقطة التحقق هذه بانتظار قرار.",
         "en": "This checkpoint is no longer waiting for a decision.",
     },
+    "swarm.approval_refused": {
+        "ar": "رفضت قاعدة البيانات هذه الموافقة في مساحتها، فلم يُستأنف شيء وبقيت نقطة الموافقة مفتوحة. إعادة المحاولة لن تغيّر ذلك.",
+        "en": "The database refused this approval for its space, so nothing was resumed and the checkpoint stays open. Trying again will not change that.",
+    },
     "swarm.approval_not_recorded": {
         "ar": "تعذّر حفظ الموافقة، فلم يُستأنف شيء. نقطة التحقق ما زالت بانتظار قرار: وافق مرة أخرى بعد قليل.",
         "en": "The approval could not be saved, so nothing resumed. The checkpoint is still waiting: approve again shortly.",
@@ -1069,6 +1073,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "swarm.task_store_unavailable": {
         "ar": "تعذّر تسجيل المهمة في سجل المهام، فلم تُشغَّل ولم يتغير شيء. أعد المحاولة بعد قليل.",
         "en": "The task could not be recorded in the task store, so it was not run and nothing changed. Try again shortly.",
+    },
+    "swarm.space_refused": {
+        "ar": "رفضت قاعدة البيانات هذه المهمة في مساحتها، فلم تُشغَّل ولم يتغير شيء. إعادة المحاولة لن تغيّر ذلك.",
+        "en": "The database refused this task for its space, so it was not run and nothing changed. Trying again will not change that.",
     },
     "swarm.engine_unavailable": {
         "ar": "لم يُحمَّل محرك السرب، فلم تُسجَّل المهمة ولم تُشغَّل. سجل الخادم يذكر السبب.",

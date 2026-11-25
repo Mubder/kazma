@@ -61,6 +61,11 @@ def _space_refusal(exc: BaseException | None) -> BaseException | None:
     return None
 
 
+def is_space_refusal(exc: BaseException | None) -> bool:
+    """Whether *exc* is a refusal, or was raised from one (:func:`_space_refusal`)."""
+    return _space_refusal(exc) is not None
+
+
 def no_other_store_on_refusal(exc: BaseException, what: str) -> None:
     """Raise *exc* again when it is a refusal (:func:`_space_refusal`):
     the first thing a handler that would use another store does. *what* is

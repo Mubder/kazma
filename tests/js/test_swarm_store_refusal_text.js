@@ -22,6 +22,8 @@ vm.runInContext(source.slice(start, end), context);
 
 assert.strictEqual(context.dispatchRefusalText({code: "task_store_unavailable", message: "English from the server"}, "x"),
                    "[swarm.task_store_unavailable]");
+assert.strictEqual(context.dispatchRefusalText({code: "space_refused", message: "English from the server"}, "x"),
+                   "[swarm.space_refused]");
 assert.strictEqual(context.dispatchRefusalText({code: "swarm_at_capacity", max_concurrent_tasks: 3}, "x"),
                    '[swarm.at_capacity {"n":3}]');
 // Control: an unknown code keeps the server's message.
@@ -33,11 +35,12 @@ const dEnd = source.indexOf("\n  }\n", dStart) + 4;
 vm.runInContext(source.slice(dStart, dEnd), context);
 assert.strictEqual(context.decisionErrorText({code: "temporal_unavailable", message: "English"}),
                    "[swarm.temporal_unavailable]");
+assert.strictEqual(context.decisionErrorText({code: "approval_refused", message: "English"}), "[swarm.approval_refused]");
 assert.strictEqual(context.decisionErrorText({code: "other", message: "server text"}), "server text");
 
 // The background dispatch's stream: its task_completed handler shows the refusal.
 const handler = source.slice(source.indexOf("evtSource.addEventListener('task_completed'"));
 const shown = handler.slice(0, handler.indexOf("evtSource.close();"));
-assert(/metadata\.code === 'task_store_unavailable'/.test(shown) && /showError\(dispatchRefusalText\(/.test(shown),
+assert(/metadata\.code === 'task_store_unavailable'/.test(shown) && /metadata\.code === 'space_refused'/.test(shown) && /showError\(dispatchRefusalText\(/.test(shown),
        "a background dispatch's refusal is not shown when its stream ends");
 console.log("swarm store refusal worded from the catalog, foreground and background");

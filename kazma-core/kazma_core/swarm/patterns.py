@@ -241,11 +241,11 @@ async def _run_self_improvement(
     if not spaces_enforced():
         await _learn_from_workers(task, worker_results, status, space=None)
         return
-    meta = task.metadata or {}
     from kazma_core.spaces.identity import IdentityUnavailable, work_scope
+    from kazma_core.swarm.single_operator import space_of_task
 
     try:
-        found = await asyncio.to_thread(work_scope, str(meta.get("tenant_id") or ""), meta.get("asker"))
+        found = await asyncio.to_thread(work_scope, space_of_task(task), (task.metadata or {}).get("asker"))
     except IdentityUnavailable:
         logger.warning("[SwarmPatterns] the task's space cannot be read; no lessons from task %s", task.id,
                        exc_info=True)

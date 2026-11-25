@@ -1035,7 +1035,7 @@ def _race_two_starts(monkeypatch, claim: Any) -> list[bool]:
     from kazma_ui import history_import_api
 
     monkeypatch.setattr(history_import_api, "_JOBS", {})
-    monkeypatch.setattr(history_import_api, "_run", lambda token, path, space, job: None)
+    monkeypatch.setattr(history_import_api, "_run", lambda token, path, space, job, person: None)
     gate = threading.Barrier(2)
     real = history_import_api._any_running
 
@@ -1049,7 +1049,7 @@ def _race_two_starts(monkeypatch, claim: Any) -> list[bool]:
 
     monkeypatch.setattr(history_import_api, "_any_running", slow)
     results: dict[str, bool] = {}
-    held = (Path("upload"), 0.0, {"turns": 1}, "")
+    held = (Path("upload"), 0.0, {"turns": 1}, "", "")
 
     def start(space: str) -> None:
         results[space] = claim(space, f"token-{space}", held)
