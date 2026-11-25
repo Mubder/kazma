@@ -543,3 +543,160 @@ def test_a_delete_that_leaves_something_keeps_its_thread_record(store, monkeypat
         assert threads.record_of("t-left") is not None
     assert asyncio.run(chat_delete.remove_chat_remains("s-left", "t-left", Takes())) is True
     assert threads.record_of("t-left") is None
+
+
+# ── one of two chats on one thread (the fifth review, M6) ─────────────────
+
+
+def _twins(s: SessionManager) -> tuple[str, str, str]:
+    """A chat app's chat kept under its name, and its archived twin
+    (``sessions.directory.prune_twin_sessions``): named, twin, thread."""
+    thread = f"gw-telegram-{uuid4().hex[:8]}"
+    named, _ = _chat(s, title="Work", thread=thread)
+    twin = s.get_or_create(thread, thread_id=thread)
+    twin.messages = [{"role": "user", "content": "question"}]
+    twin.title, twin.archived = "Telegram · user", True
+    s.put(twin)
+    return named, thread, thread
+
+
+def test_deleting_an_archived_twin_leaves_the_chat_it_was_the_twin_of(store, web) -> None:
+    """Its thread is the other chat's: that chat answered "this chat was
+    deleted", and its state went with the twin's."""
+    named, twin, thread = _twins(store)
+    assert web.client.delete(f"/api/chat/sessions/{twin}").json() == {"status": "ok"}
+    assert store.get(twin) is None and not threads.thread_ended(thread)
+    assert web.saved.deleted == [], "the thread's state is the other chat's"
+    assert '"code": "chat_deleted"' not in _send(web.client, named)
+    assert any(m["content"] == "more" for m in store.held(named).messages), "and its message is stored"
+    assert store.get_by_thread_id(thread).session_id == named
+
+
+def test_deleting_the_last_chat_of_a_thread_ends_it(store, web) -> None:
+    named, twin, thread = _twins(store)
+    for session_id in (twin, named):
+        web.client.delete(f"/api/chat/sessions/{session_id}")
+    assert threads.thread_ended(thread) and web.saved.deleted == [thread]
+
+
+@pytest.mark.postgres
+def test_a_twin_is_found_on_real_postgres(store) -> None:
+    from tests import _tt_graph as tt
+
+    if tt.postgres_dsn() is None:
+        pytest.skip("needs a real Postgres (KAZMA_DATABASE_URL + KAZMA_TEST_ALLOW_REAL_DB=1)")
+    assert store._pg
+    named, twin, thread = _twins(store)
+    store._sessions.clear()  # as the table says
+    assert store.another_chat_on(thread, twin) and store.another_chat_on(thread, named)
+    store.delete(twin)
+    assert not threads.thread_ended(thread) and not store.another_chat_on(thread, named)
+    store.delete(named)
+    assert threads.thread_ended(thread)
+
+
+def test_the_dashboards_delete_takes_every_chat_of_the_thread(store, dashboard_client, monkeypatch) -> None:
+    """One the list does not hold too, or the thread would be left recorded
+    nowhere with a chat on it."""
+    named, twin, thread = _twins(store)
+    monkeypatch.setattr(SessionManager, "list_all", lambda *_a, **_k: [])
+    assert dashboard_client.delete(f"/api/sessions/{thread}").json()["deleted"] is True
+    assert store.held(named) is None and store.held(twin) is None and threads.thread_ended(thread)
+
+
+def test_control_an_end_that_does_not_ask_ends_the_other_chat(store, web, monkeypatch) -> None:
+    monkeypatch.setattr(SessionManager, "another_chat_on", lambda *_a: False)
+    named, twin, thread = _twins(store)
+    web.client.delete(f"/api/chat/sessions/{twin}")
+    assert threads.thread_ended(thread) and '"code": "chat_deleted"' in _send(web.client, named)
+
+
+def test_a_delete_the_store_cannot_answer_is_not_one(store, monkeypatch) -> None:
+    """Whether the chat is there could not be read: nothing is removed, and
+    nothing is marked."""
+    session_id, thread_id = _chat(store)
+    store._sessions.clear()
+
+    def unreadable(*_a: Any, **_k: Any) -> Any:
+        raise sqlite3.OperationalError("disk I/O error")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(SessionManager, "_load_one_from_db", lambda *_a: None)  # as get reads it
+        patch.setattr(SessionManager, "_load_one_from_primary", unreadable)
+        with pytest.raises(sqlite3.OperationalError):
+            store.delete(session_id)
+    assert _stored(store, session_id) == 1 and not store.chat_deleted(session_id, thread_id)
+
+
+# ── a turn that does not run leaves no reply open (L3) ────────────────────
+
+
+@pytest.mark.parametrize("what", ["deleted", "restored"])
+def test_a_message_whose_turn_does_not_run_leaves_no_reply_open(store, web, monkeypatch, what) -> None:
+    """The run list showed an abandoned turn of a chat that is gone."""
+    import time
+
+    from kazma_ui.runs_chat_turn import _ChatTurnAdapter
+    from kazma_ui.thread_locks import bump_rewind_generation
+
+    session_id, thread_id = _chat(store)
+    real = reply_sink.open_reply_turn
+
+    def meanwhile(*args: Any, **kwargs: Any) -> str:
+        store.delete(session_id) if what == "deleted" else bump_rewind_generation(thread_id)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(reply_sink, "open_reply_turn", meanwhile)
+    assert "event: error" in _send(web.client, session_id)
+    assert thread_id not in reply_sink.open_turns_snapshot()
+    runs = asyncio.run(_ChatTurnAdapter().list_runs(time.time(), window_s=3600))
+    assert thread_id not in [run.native_id for run in runs]
+
+
+def test_nor_does_an_utterances(store, monkeypatch) -> None:
+    session_id, thread_id = _chat(store)
+    real = reply_sink.open_reply_turn
+
+    def meanwhile(*args: Any, **kwargs: Any) -> str:
+        store.delete(session_id)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(reply_sink, "open_reply_turn", meanwhile)
+    assert _speak(store.get(session_id), session_id, thread_id).error
+    assert thread_id not in reply_sink.open_turns_snapshot()
+
+
+# ── a thread that is no chat's (L5) ───────────────────────────────────────
+
+
+@pytest.fixture
+def dashboard_client(store, monkeypatch):
+    from fastapi.testclient import TestClient
+    from kazma_ui import dashboard
+
+    class Saved:
+        async def adelete_thread(self, _thread_id: str) -> None: ...
+
+    monkeypatch.setattr(dashboard, "_checkpoint_manager", Saved())
+    monkeypatch.setattr(dashboard, "require_admin", lambda _request: None)
+    app = FastAPI()
+    app.include_router(dashboard.router)
+    return TestClient(app)
+
+
+def test_deleting_a_thread_that_is_no_chats_ends_nothing(store, dashboard_client) -> None:
+    """A scheduled task's own thread: its next run is recorded again."""
+    threads.scope_for_turn("cron-job-1")
+    assert dashboard_client.delete("/api/sessions/cron-job-1").json()["deleted"] is True
+    assert threads.record_of("cron-job-1") is None
+    assert threads.scope_for_turn("cron-job-1") is not None
+    assert (scope.OWNER_SPACE_ID, "cron-job-1") not in store._deleted
+
+
+def test_a_chats_thread_deleted_there_ends(store, dashboard_client) -> None:
+    """A guard: by its thread."""
+    session_id, thread_id = _chat(store)
+    assert dashboard_client.delete(f"/api/sessions/{thread_id}").json()["deleted"] is True
+    assert store.held(session_id) is None and threads.thread_ended(thread_id)
+    with pytest.raises(threads.ThreadEnded):
+        threads.scope_for_turn(thread_id)

@@ -55,6 +55,7 @@ import asyncio
 import logging
 import time
 import uuid
+from datetime import UTC, datetime
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
@@ -1189,10 +1190,7 @@ def create_sse_chat_router(
                 await cancel_and_wait(_old, what=f"superseded turn of {thread_id[:12]}", timeout=15.0)
 
         # ── Persist UI projection (display only) ───────────────────
-        from datetime import UTC
-        from datetime import datetime as _dt
-
-        _ts = _dt.now(UTC).isoformat()
+        _ts = datetime.now(UTC).isoformat()
         _user_row = _reply_sink.authored({
             "role": "user", "content": display_text(user_message, _text_att) if _text_att else user_message,
             "ts": _ts,
@@ -1602,6 +1600,9 @@ def create_sse_chat_router(
                         )
                         register_turn(thread_id, _drive)
                 if _not_run is not None:
+                    # The reply opened for it is over: left open, the run
+                    # list showed an abandoned turn.
+                    await asyncio.to_thread(_reply_sink.close_reply_turn, thread_id, turn_id=_reply_turn)
                     yield _not_run
                     return
 
@@ -2597,7 +2598,10 @@ def create_sse_chat_router(
         try:
             if session_id:
                 _label = "/steer! " if mode == "hard" else "/steer "
-                _steer_row = _reply_sink.authored({"role": "user", "content": _label + text, "steer": True})
+                # With its time, as every row: what was said here is told by it
+                # in a chat moved from another space (S2-12).
+                _steer_row = _reply_sink.authored({"role": "user", "content": _label + text, "steer": True,
+                                                   "ts": datetime.now(UTC).isoformat()})
                 # AUD-052: read, append and write under the session's
                 # transaction (and off the loop: the read was on it).
                 await asyncio.to_thread(

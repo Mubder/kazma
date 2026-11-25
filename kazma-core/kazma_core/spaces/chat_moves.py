@@ -90,8 +90,9 @@ logger = logging.getLogger(__name__)
 #: ``kept_out``, ``title``, ``stage`` (``copying``, ``copied``,
 #: ``putting_back``), what was copied (``count``, ``last_ts``, ``checkpoint``) and the copy's own
 #: (``new_count``, ``new_last_ts``), each step of the finish done (``done``),
-#: ``at``. Ids, counts, times, the title the line will keep, never a word of
-#: the chat.
+#: how often a take-out kept the chat out of the shared space's memory
+#: (``keep_outs``), ``at``. Ids, counts, times, the title the line will keep,
+#: never a word of the chat.
 MOVES_KEY = "system.chats.moves"
 
 # ── What keys on the old ids ─────────────────────────────────────────────

@@ -1873,18 +1873,20 @@ def _take_back(space: str, *, mark: int, claiming: bool = False) -> None:
     since a row keyed by one is the chat's that was made here meanwhile. Its
     folders and its checkpoint file only when they carry the mark; the file
     last, since a process may hold it open (the journal keeps the rest of the
-    work for the next start)."""
+    work for the next start). No chat was deleted: its threads are released,
+    never ended, so the bundle can be brought in again and a chat made here
+    meanwhile runs."""
     from kazma_core.security.vault import get_vault
     from kazma_core.spaces import threads
 
     if claiming:
         for thread in threads.space_threads(space)[1]:
-            threads.forget_thread(thread)
+            threads.release_thread(thread)
     ctx, found = space_data._walk(space)
     space_data._erase_rows(found, ctx)
     space_data._erase_settings(space, ctx.ids["threads"])
     for thread in ctx.ids["threads"]:
-        threads.forget_thread(thread)  # its record went with the rows; its cached space too
+        threads.release_thread(thread)  # its record went with the rows; its cached space too
     if space_data._vault_rows(space) or space_data._vault_keys(space):
         vault = get_vault()
         if vault is None:

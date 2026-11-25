@@ -307,7 +307,10 @@
     chats' records are written first, alone, and what the checks asked is
     asked again after them (`_claim_threads`; the entry says `claiming` until
     then: a take-back of such an import removes the records alone, since a
-    row keyed by one is the chat's that was made here meanwhile); a
+    row keyed by one is the chat's that was made here meanwhile; released,
+    never ended -- `threads.release_thread`,
+    `tests/test_space_move_ends_no_chat.py` -- so that chat runs and the
+    bundle can be brought in again); a
     failure takes back what was written by the erase's own walk, by what is
     recorded here as the space's and **never by the ids the bundle names**
     (a chat or a job made here after the checks was erased by its id), and a file

@@ -9,7 +9,9 @@ thread's rewind generation (a turn prepared from its state does not start),
 ends the sockets and streams open on it, and removes what is left beside the
 row: the thread's checkpoints, its Time Travel steps and, last, its space
 record. What Kazma learned is memory and is kept (AGENTS.md section 15I).
-Safe to run twice.
+Safe to run twice. A thread another chat of the space is on (a chat app's
+archived twin, :meth:`SessionManager.another_chat_on`) stays that chat's: only
+the row deleted goes.
 """
 
 from __future__ import annotations
@@ -34,11 +36,18 @@ def _remove_row(session_id: str, thread_id: str, unchanged: Callable[[Any], bool
     chats = get_session_manager()
     if unchanged is None:
         chats.delete(session_id)
-        if thread_id:  # a second run no longer holds the row that named it
-            chats.mark_deleted(session_id, thread_id)
+        if thread_id and not chats.another_chat_on(thread_id, session_id):
+            chats.mark_deleted(session_id, thread_id)  # a second run no longer holds the row that named it
         return True
     chats.mark_deleted(session_id, thread_id)
     return chats.delete_if(session_id, unchanged)
+
+
+def _is_another_chats(thread_id: str, session_id: str) -> bool:
+    """Whether the thread is another chat's too. Blocking."""
+    from kazma_ui.session_manager import get_session_manager
+
+    return get_session_manager().another_chat_on(thread_id, session_id)
 
 
 def end_chat(session_id: str, thread_id: str, *, reason: str = "deleted") -> None:
@@ -71,6 +80,10 @@ async def delete_chat(
     with bind_scope(*scope) if scope else contextlib.nullcontext():
         if not await asyncio.to_thread(_remove_row, session_id, thread_id, unchanged):
             return None
+        if scope is None and await asyncio.to_thread(_is_another_chats, thread_id, session_id):
+            # A person's delete of one of two chats on one thread.
+            end_chat(session_id, "", reason=reason)
+            return await remove_chat_remains(session_id if session_id != thread_id else "", "", checkpoints)
         end_chat(session_id, thread_id, reason=reason)
         # The record goes last, so a thread recorded elsewhere, or nowhere,
         # has nothing left in the space the journal names.

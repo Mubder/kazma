@@ -396,8 +396,14 @@
       settle (`_decide`): the chat unchanged, its copy stands and the delete
       goes on; the chat changed and its copy not, the copy is taken away
       ("try again"), but only while it is exactly the copy; both changed,
-      both are kept and said (`kept_both`, a WARNING). Nothing is removed
-      whose words are nowhere else. `is_turn_running` is asked again before
+      both are kept and said (`kept_both`, a WARNING) -- and so is a chat that
+      changed whose copy was deleted, or that its shared space forgot or began
+      to forget (`keep_outs`). Nothing is removed
+      whose words are nowhere else. A chat kept in the shared space it was
+      leaving is remembered there again: the keep-out the move wrote is lifted
+      (`_lift_keep_out`), after the forget it began, and never a person's own.
+      A chat its person deleted meanwhile stays deleted (`_unmark` asks the
+      row). `is_turn_running` is asked again before
       the handover and right before the delete (voice takes no lock).
     - *The delete* (`_STEPS`, each on its own, recorded as it is done): first
       what memory must hold while the words are here (`_before_the_delete`:
@@ -431,8 +437,12 @@
       (`_move_chat`, shielded: a request that goes away cuts nothing off),
       journaled before it starts (ids, counts, times, the line's title). What
       a stop left is settled (`_settle_one`, the one path) at start, by the
-      maintenance sweep "chat moves" and by the next move of the chat. Never
-      in neither space.
+      maintenance sweep "chat moves" and by the next move of the chat, each
+      on its own: one whose state does not decode waits, the others do not
+      (`_SETTLE_FAILURES`). Never
+      in neither space. Gate: `tests/test_chat_move_fifth_review.py` (the real
+      app, at start before its chat apps listen; an unmark that does not ask
+      as the control).
     - *The page* opens the copy's new id where it lives
       (`kazmaSpace.openChat`) and keeps what this browser held by it (the
       chosen model; the old outbox and cursor go, `_moveBrowserState`); every
@@ -458,13 +468,18 @@
 - **A deleted chat stays deleted (2026-11-24).** On every install, in this
   process. Only a person's delete and a chat move mark one
   (`SessionManager.mark_deleted`: the space and the session id, at most
-  `DELETED_CHATS_KEPT`); a delete the database refused, and a pruned empty
-  chat, do not. `get` and the list hide one, `put` writes nothing,
+  `DELETED_CHATS_KEPT`); a delete the database refused or cannot answer, an
+  id that is no chat's, and a pruned empty chat, do not. `get` and the list hide one, `put` writes nothing,
   `get_or_create`, `_write_durably`, `update_from_dict`, `transact` and the
   rename, archive and pin raise `ChatDeleted` (their routes: 404
   `chat_deleted`, worded), and `_mutate_session` answers None, never storing
   the copy a request still holds. **Its thread never runs again**
-  (`spaces.threads.end_thread`, marked by `forget_thread` too):
+  (`spaces.threads.end_thread`, marked by `forget_thread` too, which only a
+  chat's delete calls; a record that goes for another reason -- an import
+  taken back, a thread that is no chat's deleted on the Dashboard -- is
+  `release_thread`d) unless another chat of the space is on it
+  (`SessionManager.another_chat_on`: a chat app's chat and its archived twin;
+  deleting one leaves the other, its thread and its state):
   `scope_for_turn` and `record_thread` raise `ThreadEnded`, and the delete
   bumps the thread's rewind generation and ends its sockets and streams
   (`chat_delete.end_chat`). The stream refuses it before the graph starts (an
@@ -475,8 +490,16 @@
   app's own chat, named by its sender, begins again with the message that
   comes in, `begin_again`). A closing turn's reply to it is an INFO, never
   "Reply NOT persisted" nor the ops alert (a chat deleted as its turn closed
-  paged one on live). A new writer of a chat row goes through these, never
-  around them. Gates: `tests/test_deleted_chat_stays_deleted.py` (a store
+  paged one on live); a turn not run closes the reply opened for it. **What is
+  asked of the store on the event loop waits for no save**: `chat_deleted` and
+  its siblings take `_deleted_lock`, never `_lock`, which a save holds (two
+  seconds of a slow database were two seconds of the loop); and **every use of
+  the store's one SQLite connection holds `_lock`** (`held` without it answered
+  "no row" for a chat that is there, for another chat too). A new writer of a
+  chat row goes through these, never
+  around them. Gates: `tests/test_chat_store_lock_and_loop.py` (every public
+  method, its connection watched; what an `async def` asks of the store
+  itself), `tests/test_deleted_chat_stays_deleted.py` (a store
   that forgets its deletes as the control: the chat is back, and the reply is
   paged), `tests/test_chat_move_decisions.py` (the thread without its mark
   runs: the control).

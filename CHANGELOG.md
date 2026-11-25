@@ -41,6 +41,8 @@
   answered late. The message you were sending goes to a new chat.
 - Deleting a chat as its answer finished no longer pages "a reply was
   produced but not saved".
+- Deleting one of two chats on one conversation (a chat app's chat and its
+  archived copy in the list) leaves the other as it is.
 
 ## Spaces: stronger sign-in, and no open switch once two people have accounts (2026-11-23)
 

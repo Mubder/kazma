@@ -67,6 +67,7 @@ __all__ = [
     "record_new_thread",
     "record_of",
     "record_thread",
+    "release_thread",
     "space_threads",
     "thread_refusal",
     "require_thread",
@@ -320,11 +321,22 @@ def _refuse_ended(thread_id: str) -> None:
 
 def forget_thread(thread_id: str) -> bool:
     """Remove a thread's record: its chat was deleted, and it never runs
-    again (:func:`end_thread`). True when one was removed."""
+    again (:func:`end_thread`). True when one was removed. Only a chat's
+    delete calls this; a record that goes for another reason is
+    :func:`release_thread`'s."""
+    if not thread_id:
+        return False
+    end_thread(str(thread_id))
+    return release_thread(thread_id)
+
+
+def release_thread(thread_id: str) -> bool:
+    """Remove a thread's record, and nothing else: no chat was deleted (an
+    import taken back, a thread that is no chat's). The id runs again as one
+    nobody recorded. True when one was removed."""
     tid = str(thread_id or "")
     if not tid:
         return False
-    end_thread(tid)
     with _connection() as conn:
         removed = conn.execute("DELETE FROM thread_scopes WHERE thread_id = ?", (tid,)).rowcount
     with _spaces_lock:

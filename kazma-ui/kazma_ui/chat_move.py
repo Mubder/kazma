@@ -96,6 +96,10 @@ _STEP_FAILURES: tuple[type[Exception], ...] = (*store_errors(), IdentityUnavaila
 #: that does not decode (either one means "not known").
 _STATE_FAILURES: tuple[type[Exception], ...] = (*store_errors(), LookupError, AttributeError)
 
+#: What settling one move can fail with: it keeps its entry, and the others
+#: are settled -- whatever one chat's state is.
+_SETTLE_FAILURES: tuple[type[Exception], ...] = (*_STEP_FAILURES, *_STATE_FAILURES)
+
 #: How long the maintenance sweep waits for the settling it started.
 _SETTLE_WAIT_S = 120.0
 
@@ -424,11 +428,14 @@ def _mark(entry: dict[str, Any]) -> None:
 
 
 def _unmark(entry: dict[str, Any]) -> None:
-    """The chat stays here after all."""
+    """The chat stays here after all -- but one whose person deleted it
+    meanwhile stays deleted. Raises when the store cannot say which."""
     from kazma_ui.session_manager import get_session_manager
 
     with bind_scope(entry["source"], entry["by"]):
-        get_session_manager().unmark_deleted(entry["session"], entry["thread"])
+        store = get_session_manager()
+        if store.held(entry["session"]) is not None:
+            store.unmark_deleted(entry["session"], entry["thread"])
 
 
 def _before_the_delete(entry: dict[str, Any]) -> None:
@@ -455,6 +462,10 @@ def _before_the_delete(entry: dict[str, Any]) -> None:
                             "messages": row.messages})
     kept_out, _turns = forget.forgotten_in_chat(source, keys)
     answers = []
+    if entry["taken_out"]:
+        # Said first: a chat that stays after all has its keep-out lifted
+        # (:func:`_lift_keep_out`), and a forget begun is never put back.
+        chat_moves.record_move(str(entry.get("attempt") or ""), {"keep_outs": int(entry.get("keep_outs") or 0) + 1})
     if entry["taken_out"] or kept_out:
         answers.append(forget.set_chat_remembered(entry["session"], False, tenant_id=source, keys=keys))
     if entry["taken_out"]:
@@ -462,6 +473,30 @@ def _before_the_delete(entry: dict[str, Any]) -> None:
     for out in answers:
         if not out.get("ok"):
             raise RuntimeError(f"a space did not take back a chat that left it: {out.get('error')}")
+
+
+def _lift_keep_out(entry: dict[str, Any]) -> None:
+    """The chat stays in the shared space it was being taken out of: the
+    keep-out the move wrote there is lifted, so the space remembers what is
+    said in it from now on. The forget it began is final and is done first
+    (what was said is forgotten; nothing said after is). A person's own "Don't
+    remember this chat" -- before the move, or since it began -- stays.
+    Raises when memory cannot answer: asked again. Blocking."""
+    if not entry.get("taken_out") or entry.get("kept_out") or not entry.get("keep_outs"):
+        return
+    from kazma_core.memory import forget, forget_journal
+
+    source, keys = entry["source"], [entry["session"], entry["thread"]]
+    asked = forget_journal.chat_entries("keep_out", tenant_id=source, keys=keys, since=float(entry["at"]))
+    if len(asked) > int(entry["keep_outs"]):
+        return  # someone asked for it too
+    if forget_journal.chat_entries("chat", tenant_id=source, keys=keys, since=float(entry["at"])):
+        forget.converge()
+        if forget_journal.chat_forget_pending(source, keys):
+            raise RuntimeError("a forget of a chat that stays is not done yet")
+    out = forget.set_chat_remembered(entry["session"], True, tenant_id=source, keys=keys)
+    if not out.get("ok"):
+        raise RuntimeError(f"a keep-out was not lifted: {out.get('error')}")
 
 
 def _drop_pointers(thread_id: str) -> int:
@@ -577,6 +612,7 @@ async def _finish(attempt: str, entry: dict[str, Any], checkpoints: Any) -> bool
     finished (its journal entry is gone). Raises :class:`_ChatChangedError`."""
     done = [str(s) for s in entry.get("done") or []]
     left: list[str] = []
+    entry = {**entry, "attempt": attempt}  # a step that notes something names it
     with bind_scope(entry["source"], entry["by"]):
         for name, step in _STEPS:
             if name in done or (name in _TAKEN_OUT_STEPS and not entry.get("taken_out")):
@@ -615,7 +651,7 @@ async def _row_is_here(entry: dict[str, Any]) -> bool:
 
 async def _old_checkpoint(entry: dict[str, Any], checkpoints: Any) -> str | None:
     """The id of the chat's checkpoint now, or None when there is no store
-    to ask."""
+    to ask. One that does not decode is not known: the move waits."""
     if checkpoints is None or not hasattr(checkpoints, "aget_tuple"):
         return None
     with bind_scope(entry["source"], entry["by"]):
@@ -646,23 +682,27 @@ async def _decide(entry: dict[str, Any], checkpoints: Any) -> str:
       the journal says ``copied``; one still being made is taken away.
     * The copy written in and the chat unchanged: the copy is the chat now.
     * The chat changed and the copy not: the copy is taken away -- unless the
-      shared space forgot the chat already: then both are kept.
+      shared space forgot the chat already, or began to: then both are kept.
     * Both changed: both are kept.
     * The chat gone: the copy stands; one still being made, which nobody saw,
       is taken away (its chat was deleted).
     * The copy gone: once it stood, a person deleted it, and the delete here
-      goes on; else what is left of it is taken away.
+      goes on -- unless the chat changed: then it is kept (the delete would
+      refuse it, and the chat was in neither space for good); else what is
+      left of it is taken away.
     """
     done = [str(s) for s in entry.get("done") or []]
     copied = entry.get("stage") == "copied"
     new = await asyncio.to_thread(_held_in, entry["target"], entry["by"], entry["new_session"])
     old = await _old_is(entry, checkpoints)
     if new is None:
-        return "finish" if copied and (done or old == "absent") else "put_back"
+        if not (copied and (done or old == "absent")):
+            return "put_back"
+        return "keep_both" if old == "changed" else "finish"
     written_in = not _still_the_copy(entry)(new)
     if old in ("absent", "same"):
         return "finish" if copied or written_in else "put_back"
-    forgotten = bool(entry.get("taken_out")) and "memory" in done
+    forgotten = bool(entry.get("taken_out")) and ("memory" in done or bool(entry.get("keep_outs")))
     return "keep_both" if written_in or forgotten else "put_back"
 
 
@@ -704,12 +744,17 @@ async def _put_back(attempt: str, entry: dict[str, Any], checkpoints: Any) -> bo
 
 
 async def _keep_both(attempt: str, entry: dict[str, Any]) -> None:
-    """Both chats hold words of their own: neither is removed."""
+    """The chat holds words of its own, and so may its copy: neither is
+    removed. The entry stays until the shared space's keep-out is lifted."""
     await asyncio.to_thread(_unmark, entry)
+    logger.warning("[spaces] a chat was written in while it was moved from %s to %s; it and its copy, both are "
+                   "kept (%s and %s)", entry["source"], entry["target"], entry["session"], entry["new_session"])
+    try:
+        await asyncio.to_thread(_lift_keep_out, entry)
+    except _STEP_FAILURES:
+        logger.warning("[spaces] a chat that stayed is still kept out of memory; it is tried again", exc_info=True)
+        return
     await asyncio.to_thread(chat_moves.settle_move, attempt)
-    logger.warning("[spaces] a chat and its copy were both written in while it was moved from %s to %s; "
-                   "both are kept (%s and %s)", entry["source"], entry["target"], entry["session"],
-                   entry["new_session"])
 
 
 #: What settling answers for a move that stands.
@@ -750,7 +795,7 @@ async def _settle_one(attempt: str, checkpoints: Any) -> str:
                 return "finished" if await _finish(attempt, entry, checkpoints) else "copied"
             except _ChatChangedError:
                 continue
-    except _STEP_FAILURES:
+    except _SETTLE_FAILURES:
         logger.warning("[spaces] a chat move that stopped was not settled; it is tried again", exc_info=True)
     return "waiting"
 
@@ -779,7 +824,7 @@ async def settle_chat_moves(checkpoints: Any = None) -> list[dict[str, str]]:
                 if attempt not in await asyncio.to_thread(chat_moves.moves_under_way):
                     continue
                 outcome = await _settle_one(attempt, checkpoints)
-        except _STEP_FAILURES:
+        except _SETTLE_FAILURES:
             logger.warning("[spaces] a chat move was not settled; it is tried again", exc_info=True)
         settled.append({"attempt": attempt, "outcome": outcome})
         logger.info("[spaces] a chat move that did not end: %s", outcome)

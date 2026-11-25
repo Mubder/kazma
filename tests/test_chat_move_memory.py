@@ -393,6 +393,19 @@ def test_a_turn_memory_missed_is_written_where_it_was_said(chat) -> None:
     assert any("Initech" in f for f in chat.facts(OWN)) and chat.held(TEAM) == 0
 
 
+@pytest.mark.parametrize(("age", "kept"), [(120.0, ["I work at Initech."]), (5.0, [])],
+                         ids=["missed", "still the live pipeline's"])
+def test_a_turn_missed_minutes_ago_is_not_left_for_a_pass_that_never_comes(chat, age, kept) -> None:
+    """The regular pass leaves ten minutes to the live pipeline; a chat that
+    leaves gives it one, since no pass would find the chat again."""
+    import time
+
+    chat.begin(OWN)
+    chat.row(OWN, "I work at Initech.", at=time.time() - age)
+    chat.move(OWN, TEAM)
+    assert chat.remembers(OWN) == kept and chat.held(TEAM) == 0
+
+
 def test_control_a_share_that_does_not_reconcile_loses_it(chat, monkeypatch) -> None:
     from kazma_core.memory import turn_reconcile
 

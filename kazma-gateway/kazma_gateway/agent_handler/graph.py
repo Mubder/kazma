@@ -154,6 +154,20 @@ def _begin_again(thread_id: str) -> None:
         store.begin_again(thread_id)
 
 
+def _clear_web_chat(thread_id: str) -> None:
+    """/reset: the web chat of the thread is emptied. Blocking (the chat
+    store: a list and a save)."""
+    from kazma_ui.session_manager import get_session_manager
+
+    store = get_session_manager()
+    for sess in store.list_all(include_archived=True):
+        if thread_id in (sess.thread_id, sess.session_id):
+            sess.messages = []
+            sess.title = ""
+            store.put(sess)
+            break
+
+
 def _forget_mouth(sender: str) -> None:
     """*sender*'s pointer to a chat that is gone. Blocking (settings)."""
     from kazma_core.config_store import get_config_store
@@ -1429,14 +1443,7 @@ def create_graph_handler(
 
                 # 4. Delete from Web UI SessionManager
                 try:
-                    from kazma_ui.session_manager import get_session_manager
-                    web_store = get_session_manager()
-                    for sess in web_store.list_all(include_archived=True):
-                        if sess.thread_id == thread_id or sess.session_id == thread_id:
-                            sess.messages = []
-                            sess.title = ""
-                            web_store.put(sess)
-                            break
+                    await asyncio.to_thread(_clear_web_chat, thread_id)
                 except Exception as exc:
                     logger.debug("[agent-handler] Web UI session clear failed on /reset: %s", exc)
 

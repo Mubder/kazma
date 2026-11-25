@@ -43,6 +43,8 @@ __all__ = [
     "Entry",
     "append",
     "apply_pending",
+    "chat_entries",
+    "chat_forget_pending",
     "entry_keys",
     "health",
     "keys_detail",
@@ -436,6 +438,24 @@ def health(memory_db: str | None = None) -> dict[str, Any]:
         for seq, _at, kind in waiting if seq in _FAILURES
     ]
     return out
+
+
+def chat_entries(kind: str, *, tenant_id: str, keys: list[str], since: float = 0.0) -> list[Entry]:
+    """The entries of *kind* of one chat (under any of *keys*) in one space,
+    since *since*. Blocking."""
+    return [e for e in _entries(kinds=(kind,), since=since) if e.tenant_id == tenant_id and e.session_key in keys]
+
+
+def chat_forget_pending(tenant_id: str, keys: list[str]) -> bool:
+    """Whether a forget of the chat, under any of *keys*, waits to be
+    finished. Blocking."""
+    from kazma_core.memory.forget import _open
+
+    conn = _open()
+    try:
+        return any(e.kind == "chat" and e.tenant_id == tenant_id and e.session_key in keys for e in pending(conn))
+    finally:
+        conn.close()
 
 
 def recent_chat_forgets(*, within_s: float = 86400.0) -> list[Entry]:

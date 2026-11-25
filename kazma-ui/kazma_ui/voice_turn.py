@@ -132,7 +132,7 @@ async def run_voice_user_turn(
         unregister_turn,
     )
     from kazma_ui.delivery import get_turn_broker
-    from kazma_ui.reply_sink import open_reply_turn
+    from kazma_ui.reply_sink import close_reply_turn, open_reply_turn
     from kazma_ui.sse_chat._streaming import (
         _drive_graph_to_journal,
         _sse_attach_stream,
@@ -320,6 +320,7 @@ async def run_voice_user_turn(
             )
             register_turn(thread_id, drive)
     if drive is None:
+        await asyncio.to_thread(close_reply_turn, thread_id, turn_id=reply_turn)  # no turn runs for it
         result.error = chat_gone_text()
         return result
 

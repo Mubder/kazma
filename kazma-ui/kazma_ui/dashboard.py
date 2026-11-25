@@ -518,6 +518,10 @@ def _delete_chats_of_thread(thread_id: str) -> list[str]:
     }
     for session_id in doomed:
         sm.delete(session_id)
+    # One the list does not hold (it reads the newest): its thread is this one.
+    while (left := sm.get_by_thread_id(thread_id)) is not None and left.session_id not in doomed:
+        doomed.add(left.session_id)
+        sm.delete(left.session_id)
     return sorted(doomed)
 
 
@@ -681,8 +685,11 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
         if not leftovers:
             # The thread's space record goes last, once nothing of the chat
             # is left: while a copy remains, the record keeps it in its space.
+            # A thread no chat had (a worker's run) ends with nothing: it is
+            # released, and its next run is recorded again.
+            gone = _threads.forget_thread if _threads.thread_ended(thread_id) else _threads.release_thread
             try:
-                await asyncio.to_thread(_threads.forget_thread, thread_id)
+                await asyncio.to_thread(gone, thread_id)
             except (sqlite3.Error, OSError):
                 logger.warning(
                     "[dashboard] the space record of thread %s was not removed", thread_id, exc_info=True

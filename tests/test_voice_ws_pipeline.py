@@ -37,6 +37,7 @@ import sys
 import time
 import types
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,11 @@ class FakeSessionStore:
 
     def chat_deleted(self, session_id: str = "", thread_id: str = "") -> bool:
         return False
+
+    @contextmanager
+    def transact(self, session_id: str):
+        yield self.session
+        self.puts += 1
 
 
 def _make_session(sid: str = "", thread_id: str = ""):

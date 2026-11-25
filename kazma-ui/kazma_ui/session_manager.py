@@ -267,8 +267,11 @@ class SessionManager:
         # The chats deleted in this process by the person's delete or a move
         # to another space -- never by a prune -- by (space, session id),
         # bounded: nothing written late re-creates one. Their threads end too
-        # (``kazma_core.spaces.threads.end_thread``).
+        # (``kazma_core.spaces.threads.end_thread``). Its own lock, never held
+        # over I/O: whether a chat was deleted is asked on the event loop, and
+        # ``_lock`` is held over a save (Postgres riding out an outage).
         self._deleted: OrderedDict[tuple[str, str], None] = OrderedDict()
+        self._deleted_lock = threading.Lock()
         self._pg = False
         self._conn: sqlite3.Connection | None = None
 
@@ -916,7 +919,7 @@ class SessionManager:
             for key, session in self._sessions.items():
                 if key.startswith(f"{tenant_id}:") and session.thread_id == thread_id:
                     if (tenant_id, session.session_id) in self._deleted:
-                        return None
+                        continue  # another chat may be on the thread
                     self._sessions.move_to_end(key)
                     return session
 
@@ -980,7 +983,7 @@ class SessionManager:
         deleted, or it is leaving for another space (a move's handover, or
         one settled after a restart). Its row may still be there."""
         tenant_id = _space()
-        with self._lock:
+        with self._deleted_lock:
             self._deleted[(tenant_id, session_id)] = None
             self._deleted.move_to_end((tenant_id, session_id))
             while len(self._deleted) > DELETED_CHATS_KEPT:
@@ -989,24 +992,24 @@ class SessionManager:
 
     def unmark_deleted(self, session_id: str, thread_id: str) -> None:
         """Take the mark away: the chat stays (a move that was put back)."""
-        with self._lock:
+        with self._deleted_lock:
             self._deleted.pop((_space(), session_id), None)
         threads.begin_again(thread_id)
 
     def chat_deleted(self, session_id: str = "", thread_id: str = "") -> bool:
         """Whether a chat was deleted in this process: *session_id* in the
         bound space, or *thread_id* in any (a thread is one chat's). Memory
-        only, no store is read."""
+        only: no store is read, and no save is waited for."""
         if thread_id and threads.thread_ended(thread_id):
             return True
-        with self._lock:
-            return bool(session_id) and self._is_deleted(_space(), session_id, thread_id)
+        return bool(session_id) and self._is_deleted(_space(), session_id, thread_id)
 
     def begin_again(self, thread_id: str) -> None:
         """A chat app's chat is named by its sender (``gw-<platform>-...``):
         the next message starts it again after it was deleted. Only the
-        gateway calls this, for a message that just came in."""
-        with self._lock:
+        gateway calls this, for a message that just came in. Memory only, as
+        :meth:`chat_deleted`."""
+        with self._deleted_lock:
             for key in [k for k in self._deleted if k[1] == thread_id]:
                 del self._deleted[key]
         threads.begin_again(thread_id)
@@ -1095,10 +1098,13 @@ class SessionManager:
         """The bound space's row of *session_id* as the store holds it now --
         never the cache, and whether or not the chat is marked deleted.
         Raises when the store cannot be read: "no row" is an answer a move
-        acts on."""
+        acts on. Under the store's lock, as every read of its one SQLite
+        connection: read beside another chat's read it answered "no row" for
+        one that is there, and so did theirs."""
         tenant_id = _space()
-        loaded = self._load_one_from_primary(tenant_id, session_id, strict=True)
-        return loaded if loaded is not None else self._spooled_only(tenant_id, session_id)
+        with self._lock:
+            loaded = self._load_one_from_primary(tenant_id, session_id, strict=True)
+            return loaded if loaded is not None else self._spooled_only(tenant_id, session_id)
 
     def hand_over(self, session_id: str, *, messages: list[dict[str, Any]], to: ChatSession,
                   commit: Callable[[], bool]) -> bool:
@@ -1158,11 +1164,47 @@ class SessionManager:
 
     def delete(self, session_id: str) -> None:
         """Remove a session: the person's delete. No-op if not found. Nothing
-        written late brings it back (:meth:`chat_deleted`)."""
+        written late brings it back (:meth:`chat_deleted`). Raises when the
+        store cannot say whether it is there."""
         with self._lock:
-            held = self.get(session_id)
+            held = self.get(session_id) or self.held(session_id)
             self._delete_row(_space(), session_id)
-            self.mark_deleted(session_id, (held.thread_id or session_id) if held is not None else "")
+            if held is not None:
+                thread_id = held.thread_id or session_id
+                # A thread another chat of the space is on runs on.
+                self.mark_deleted(session_id, "" if self.another_chat_on(thread_id, session_id) else thread_id)
+
+    def another_chat_on(self, thread_id: str, session_id: str) -> bool:
+        """Whether a chat of the bound space other than *session_id* is on the
+        thread: a chat app's auto-titled twin and the named chat it was kept
+        for (``sessions.directory.prune_twin_sessions`` archives the twin).
+        Deleting one leaves the other, and its thread, as they are. Raises
+        when the store cannot be read."""
+        tenant_id = _space()
+        if not thread_id:
+            return False
+
+        def another(sid: str, tid: str) -> bool:
+            return sid != session_id and (tid or sid) == thread_id and (tenant_id, sid) not in self._deleted
+
+        with self._lock:
+            if any(another(s.session_id, s.thread_id) for s in self._sessions.values()
+                   if (s.tenant_id or OWNER_SPACE_ID) == tenant_id):
+                return True
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                rows = [(r["session_id"], r["thread_id"]) for r in get_pool().execute(
+                    "SELECT session_id, thread_id FROM kazma_chat_sessions "
+                    "WHERE tenant_id = %s AND (thread_id = %s OR session_id = %s)",
+                    (tenant_id, thread_id, thread_id))]
+            else:
+                assert self._conn is not None
+                rows = self._conn.execute(
+                    "SELECT session_id, thread_id FROM sessions "
+                    "WHERE tenant_id = ? AND (thread_id = ? OR session_id = ?)",
+                    (tenant_id, thread_id, thread_id)).fetchall()
+            return any(another(str(sid), str(tid or "")) for sid, tid in rows)
 
     def delete_if(self, session_id: str, unchanged: Callable[[ChatSession], bool]) -> bool:
         """Remove the bound space's *session_id* -- marked deleted already, so
@@ -1355,6 +1397,7 @@ class SessionManager:
         # under it made every concurrent list wait for the others (FA-278).
         with self._lock:
             held = list(self._sessions.items())
+        with self._deleted_lock:
             deleted = set(self._deleted)
         sessions: list[ChatSession] = []
         seen_sids: set[str] = set()
@@ -1508,7 +1551,7 @@ class SessionManager:
             )
         else:
             assert self._conn is not None
-            with self._conn:
+            with self._lock, self._conn:
                 self._conn.execute(
                     "DELETE FROM sessions WHERE tenant_id = ?",
                     (tenant_id,),
