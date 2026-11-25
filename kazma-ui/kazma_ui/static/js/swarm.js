@@ -1096,6 +1096,7 @@
   function decisionErrorText(data) {
     if (data.code === 'swarm_at_capacity') return t('swarm.at_capacity', {n: data.max_concurrent_tasks});
     if (data.code === 'not_pending') return t('swarm.checkpoint_not_pending');
+    if (data.code === 'approval_refused') return t('swarm.approval_refused');
     if (data.code === 'approval_not_recorded') return t('swarm.approval_not_recorded');
     if (data.code === 'temporal_unavailable') return t('swarm.temporal_unavailable');
     if (data.code === 'not_yours') return t('swarm.not_yours');

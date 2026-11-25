@@ -20,6 +20,7 @@ from kazma_core.runs.adapters._common import epoch, origin_from, short_title
 from kazma_core.runs.contract import ACTIVE_STATES, ActionResult, Run, RunState
 from kazma_core.spaces.row_work import install_statements
 from kazma_core.spaces.scope import current_scope, spaces_enforced
+from kazma_core.swarm.single_operator import space_of_task
 
 __all__ = ["ADAPTER"]
 
@@ -111,7 +112,7 @@ class _SwarmAdapter:
             link="/swarm?task=" + task.id, detail=detail,
             origin=origin_from(meta.get("source_delivery_target"), meta.get("source_thread_id")),
             lineage="swarm_task:" + str(meta.get("retry_of") or task.id),
-            space=str(meta.get("tenant_id") or ""), asker=str(meta.get("asker") or ""),
+            space=space_of_task(task) if spaces_enforced() else str(meta.get("tenant_id") or ""), asker=str(meta.get("asker") or ""),
         )
 
     async def act(self, native_id: str, action: str, *, actor: str) -> ActionResult:

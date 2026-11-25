@@ -132,7 +132,7 @@ async def _get_pending_approvals(
 ) -> list[dict[str, Any]]:
     """Scan all checkpointed threads and return those in an interrupt state.
 
-    ONLY returns threads that are ACTIVELY pending approval (hitl_state == 'pending_approval').
+    ONLY returns threads whose own state waits on an approval now.
     This prevents stale checkpoints from showing up in the dashboard after approval/deny.
 
     Args:

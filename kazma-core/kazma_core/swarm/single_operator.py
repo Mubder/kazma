@@ -190,8 +190,7 @@ def for_the_owner(space: str, asker: str | None) -> bool:
 
 def _task_for_the_owner(task: object) -> bool:
     """:func:`for_the_owner` for *task* (a ``SwarmTask`` or its dict)."""
-    meta = _metadata(task)
-    return for_the_owner(str(meta.get("tenant_id") or ""), meta.get("asker"))
+    return for_the_owner(space_of_task(task), _metadata(task).get("asker"))
 
 
 #: How long a finished task's result waits for the identity store to say

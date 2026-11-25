@@ -992,6 +992,13 @@ def register_tasks_routes(
                 status_code=503,
                 headers={"Retry-After": "30"},
             )
+        if (result.metadata or {}).get("code") == SPACE_REFUSED:
+            # Refused for its space: approving again answers the same.
+            return JSONResponse(
+                {"status": "error", "code": "approval_refused", "task_id": task_id,
+                 "task_status": "paused", "message": result.error},
+                status_code=403,
+            )
         if (result.metadata or {}).get("admission_unrecorded"):
             # The task store did not take the approval: nothing resumed and
             # the checkpoint is pending again (Swarm tracker SQ04).

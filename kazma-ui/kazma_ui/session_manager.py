@@ -446,6 +446,8 @@ class SessionManager:
                     with statements_of(tenant_id):
                         loaded = self._load_one_from_db(tenant_id, session_id)
                 except Exception as exc:
+                    if not is_space_refusal(exc):
+                        raise
                     # Refused: without its stored row the spool's copy may be
                     # an older chat. Left out of this load, never the rest.
                     logger.warning("[SessionManager] spooled session %s:%s could not be read (%s)",
@@ -981,7 +983,9 @@ class SessionManager:
                     if not row:
                         return self._spooled_by_thread(tenant_id, thread_id)
                     loaded = self._session_from_row(*row)
-            except Exception:
+            except Exception as exc:
+                if is_space_refusal(exc):
+                    raise  # the chat is there, and refused: never "no such chat" (S4-01, H2)
                 logger.debug(
                     "[SessionManager] thread lookup failed for %s",
                     thread_id,

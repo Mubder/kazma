@@ -179,6 +179,8 @@ one; Swarm tracker SQ04). The rules those endings follow:
   admission slot freed, nothing ran). The dispatch route answers 503 with
   `Retry-After`, a background dispatch's stream ends with the same refusal, and
   the Swarm page says it in the page's language; sending it again runs it.
+  Once Spaces is on, a task the database refuses for its space answers 403
+  `space_refused` instead: sending it again answers the same.
   Until 2026-10-15 the task ran without its RUNNING row, so a crash in it left
   effects no recovery could see. **An approval whose row cannot be written
   resumes nothing**: the checkpoint is pending again, its auto-reject re-armed,
@@ -196,6 +198,7 @@ one; Swarm tracker SQ04). The rules those endings follow:
 
 | Fault | The caller is told | The store holds (after the next start) | Counted |
 |---|---|---|---|
+| The database refuses the RUNNING row for its space (Spaces on) | failed, `space_refused` (nothing ran; again answers the same) | nothing (no row) | `running_row` |
 | SQLite store locked through every attempt of the RUNNING row's write | failed, `task_store_unavailable` (nothing ran; try again) | nothing (no row) | `running_row` |
 | Locked at the RUNNING row's first attempt, free before the retries run out | success (the write tried again, the task run once) | completed | nothing |
 | Locked through a resumed pipeline's step journal | success (each step once) | completed | `step_journal` x2 |

@@ -29,6 +29,7 @@ from kazma_core.swarm.engine import STORE_UNAVAILABLE, SwarmEngine
 from kazma_core.swarm.task import TaskResult
 from kazma_core.swarm.task_store import TaskStore
 
+from tests._no_models import keep_models_out
 from tests._space_door import Calls, watched
 
 pytestmark = pytest.mark.postgres
@@ -277,6 +278,242 @@ def test_every_spaces_list_is_every_spaces_whatever_the_old_switch_says(
     monkeypatch.setenv("KAZMA_TENANT_FILTER", switch)
     kind, made = _before_and_after(store, b)
     assert _listed(store, kind, tenant_id="*") == {t.id for t in made.values()}
+
+
+# ── a task of before Spaces is the owner's, to the end (M1) ──────────────
+
+
+def _paused_before_spaces(store: Any, engine: SwarmEngine, tenant: str | None) -> tuple[SwarmTask, list[Any]]:
+    """A pipeline paused before Spaces (no tenant, or an empty one), offered
+    again at a start; what ran when it went on."""
+    metadata: dict[str, Any] = {"hitl_checkpoint": {"step": 1, "worker": "w", "output_preview": "draft"}}
+    task = _task(store, tenant, TaskStatus.PAUSED, type=TaskType.PIPELINE, metadata=metadata)
+    task.workers = ["w", "second"]
+    task.result = TaskResult(task_id=task.id, status="paused")
+    assert store.persist_task(task)
+    engine.add_worker(WorkerConfig(name="second", type="in_process"))
+    ran: list[Any] = []
+
+    async def work(prompt: str, context: Any = None) -> dict[str, Any]:
+        ran.append(scope.current_scope())
+        return {"worker": "second", "task_id": "", "status": "success", "output": "ok", "error": None}
+
+    engine.get_worker("second").dispatch = work
+    store.get_paused_tasks = lambda: [store.get_task(task.id)]
+    engine.restore_paused_tasks()
+    return task, ran
+
+
+def _quiet(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("KAZMA_SHARED_BREAKERS", "KAZMA_TEMPORAL", "KAZMA_GATE_REGISTRY", "KAZMA_SELF_IMPROVEMENT"):
+        monkeypatch.setenv(name, "0")
+    keep_models_out(monkeypatch)
+
+
+@pytest.mark.usefixtures("enforced")
+@pytest.mark.parametrize("tenant", [None, ""], ids=["no tenant", "an empty one"])
+def test_the_owner_approves_a_pipeline_paused_before_spaces(store: Any, tenant: str | None,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """Approve was offered and destroyed it: the workers read no space,
+    refused, and the task was failed with its checkpoint gone."""
+    from kazma_core.swarm.single_operator import task_answered_by_caller
+
+    _quiet(monkeypatch)
+    engine = _engine(store)
+    task, ran = _paused_before_spaces(store, engine, tenant)
+
+    async def run() -> Any:
+        with bind_scope("default", "owner"):
+            assert await asyncio.to_thread(task_answered_by_caller, store.get_task(task.id))
+            result = await engine.approve_checkpoint(task.id)
+        await engine._flush_writes(task.id)
+        return result
+
+    result = asyncio.run(run())
+    assert result is not None and result.status != "failed", result
+    assert ran == [Scope("default", "owner")], "the rest of it ran, in the owner's space"
+    stored = store.get_task(task.id)
+    assert stored.status == TaskStatus.COMPLETED and stored.metadata["tenant_id"] == "default"
+
+
+@pytest.mark.usefixtures("enforced")
+def test_the_owner_cancels_and_rejects_tasks_of_before_spaces(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from kazma_core.swarm.single_operator import task_is_callers
+
+    _quiet(monkeypatch)
+    engine = _engine(store)
+    running = _task(store, None)
+    task, ran = _paused_before_spaces(store, engine, None)
+    with bind_scope("default", "owner"):
+        assert task_is_callers(running) and task_is_callers(task)
+    with bind_scope("s0b0b0b0b0b0b", "omar"):
+        assert not task_is_callers(running), "nobody else's"
+
+    async def run() -> None:
+        with bind_scope("default", "owner"):
+            await engine.reject_checkpoint(task.id, reason="no")
+        await engine._flush_writes(task.id)
+
+    asyncio.run(run())
+    assert store.get_task(task.id).status == TaskStatus.FAILED and ran == []
+
+
+@pytest.mark.usefixtures("enforced")
+def test_who_answers_it_is_asked_of_the_owners_space(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from kazma_core.spaces import approvals
+    from kazma_core.swarm.single_operator import task_answered_by_caller
+
+    asked: list[Any] = []
+    monkeypatch.setattr(approvals, "answer_refusal", lambda space, person, _tools, *, caller: asked.append(
+        (space, person, caller)))
+    with bind_scope("default", "owner"):
+        assert task_answered_by_caller(_task(store, ""))
+    assert asked == [("default", "owner", "owner")]
+
+
+@pytest.mark.usefixtures("enforced")
+def test_its_result_reaches_the_owners_chat_app(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from kazma_core.spaces import chat_apps
+    from kazma_core.swarm import chat_delivery
+    from kazma_core.swarm.single_operator import wait_for_owner_answer
+
+    old, theirs = _task(store, ""), _task(store, "s0b0b0b0b0b0b", metadata={"asker": "omar"})
+    assert asyncio.run(wait_for_owner_answer(old, label="old")) is True
+    monkeypatch.setattr(chat_apps, "chat_is_the_askers", lambda space, *_a: space == "default")
+    assert chat_delivery._the_askers_chat(old, "telegram", "telegram:1")
+    assert not chat_delivery._the_askers_chat(theirs, "telegram", "telegram:1")
+
+
+@pytest.mark.usefixtures("enforced")
+def test_it_counts_as_the_owners_running_work(store: Any) -> None:
+    from kazma_core.runs.adapters.swarm import ADAPTER
+
+    engine = _engine(store)
+    old, new = _task(store, None), _task(store, "default")
+    engine._active_tasks = {old.id: old, new.id: new}
+    assert engine.running_in("default") == 2 and engine._running_ahead_of(new) == (1, 0)
+    assert ADAPTER._run(old, True, True).space == "default"
+
+
+@pytest.mark.usefixtures("enforced")
+def test_its_lessons_are_the_owners(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from kazma_core.swarm import patterns
+
+    seen: list[Any] = []
+
+    async def learn(*_a: Any, space: Any) -> None:
+        seen.append((space, scope.current_scope()))
+
+    monkeypatch.setattr(patterns, "_learn_from_workers", learn)
+    run = next(f for n, f in vars(patterns).items()
+               if asyncio.iscoroutinefunction(f) and "_learn_from_workers(" in _source(f) and n != "_learn_from_workers")
+    asyncio.run(run(_task(store, None), [], "completed"))
+    assert seen == [("default", Scope("default", "owner"))]
+
+
+def _source(function: Any) -> str:
+    import inspect
+
+    return inspect.getsource(function)
+
+
+# ── new work of no space is refused (M2) ─────────────────────────────────
+
+
+def _dispatched(store: Any, monkeypatch: pytest.MonkeyPatch, tenant: str | None) -> tuple[TaskResult, list[Any], Any]:
+    _quiet(monkeypatch)
+    engine = _engine(store)
+    ran: list[Any] = []
+
+    async def work(prompt: str, context: Any = None) -> dict[str, Any]:
+        ran.append(scope.current_scope())
+        return {"worker": "w", "task_id": "", "status": "success", "output": "ok", "error": None}
+
+    engine.get_worker("w").dispatch = work
+    task = _task(store, tenant, TaskStatus.PENDING)
+    result = asyncio.run(engine.dispatch(task))
+    return result, ran, (engine, task)
+
+
+@pytest.mark.usefixtures("enforced")
+@pytest.mark.parametrize("tenant", [None, ""], ids=["no tenant", "an empty one"])
+def test_new_work_of_no_space_is_refused_never_the_owners(store: Any, monkeypatch: pytest.MonkeyPatch,
+                                                          tenant: str | None) -> None:
+    result, ran, (engine, task) = _dispatched(store, monkeypatch, tenant)
+    assert (result.metadata["code"], result.metadata["retryable"]) == (SPACE_REFUSED, False)
+    assert ran == [] and engine.list_active_tasks() == [], "its slot is free"
+    assert store.get_task(task.id) is None, "nothing is recorded as anyone's"
+
+
+def test_off_work_of_no_tenant_runs_as_before(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, ran, (_engine_, task) = _dispatched(store, monkeypatch, None)
+    assert result.status == "success" and ran == [None]
+    assert store.get_task(task.id).metadata["tenant_id"] == "default"
+
+
+@pytest.mark.usefixtures("enforced")
+def test_a_refused_task_sent_again_is_tried_again(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_recorded_result`` answers no refusal: nothing ran."""
+    result, _ran, (engine, task) = _dispatched(store, monkeypatch, None)
+    assert result.metadata["code"] == SPACE_REFUSED
+    assert engine._recorded_result(task.id) is None
+
+
+# ── a refused approval (L4) ──────────────────────────────────────────────
+
+
+@pytest.mark.usefixtures("enforced")
+@pytest.mark.parametrize(("exc", "code"), [(NoSpaceBound("no space is bound"), SPACE_REFUSED),
+                                           (RuntimeError("Postgres pool unavailable"), None)],
+                         ids=["refused", "an outage"])
+def test_a_refused_approval_is_not_to_be_approved_again(store: Any, a: str, monkeypatch: pytest.MonkeyPatch,
+                                                        exc: BaseException, code: str | None) -> None:
+    monkeypatch.setattr(engine_module, "_WRITE_RETRY_WAITS", ())
+
+    def refuse(*_a: Any, **_k: Any) -> bool:
+        raise exc
+
+    monkeypatch.setattr(store, "admit", refuse)
+    result = asyncio.run(_engine(store)._admit_to_store(_task(store, a), must_record=True))
+    assert result.metadata.get("code") == code and result.metadata["checkpoint_open"]
+    assert ("approve again" in result.error) is (code is None)
+    if code:
+        assert "NoSpaceBound" not in result.error and "no space is bound" not in result.error
+
+
+def test_the_panel_answers_a_refused_approval_with_its_own_code(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    from fastapi import APIRouter, FastAPI
+    from fastapi.testclient import TestClient
+    from kazma_ui.swarm_panel import routes_tasks, task_actions
+
+    refused = TaskResult(task_id="t", status="failed", error="refused", metadata={
+        "admission_unrecorded": True, "checkpoint_open": True, "code": SPACE_REFUSED, "retryable": False})
+    store = TaskStore(str(tmp_path / "tasks.db"))
+    engine = _engine(store)
+
+    async def approve(*_a: Any, **_k: Any) -> TaskResult:
+        return refused
+
+    engine.approve_checkpoint = approve
+    engine.get_checkpoint_info = lambda _id: object()
+    from types import SimpleNamespace
+
+    svc = SimpleNamespace(resolve_engine=lambda m=None: engine, has_swarm_core=lambda: True)
+    monkeypatch.setattr(routes_tasks, "get_swarm_service", lambda: svc)
+    monkeypatch.setattr(task_actions, "task_refusal", lambda *_a, **_k: None)
+    if hasattr(routes_tasks, "task_refusal"):
+        monkeypatch.setattr(routes_tasks, "task_refusal", lambda *_a, **_k: None)
+    router = APIRouter()
+    routes_tasks.register_tasks_routes(router, templates=None)
+    app = FastAPI()
+    app.include_router(router)
+    try:
+        with TestClient(app) as client:
+            answer = client.post("/api/swarm/tasks/t/approve")
+        assert (answer.status_code, answer.json()["code"]) == (403, "approval_refused"), answer.text
+        assert "Retry-After" not in answer.headers
+    finally:
+        store.close()
 
 
 # ── the runs list (row 36) ───────────────────────────────────────────────

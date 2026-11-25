@@ -706,3 +706,58 @@ def test_a_planted_task_list_is_found() -> None:
     source = ("class A:\n    def f(self):\n        return self._task_store.list_tasks(metadata_filter={'tenant_id': '*'})\n"
               "def g(store):\n    return store.list_tasks()\ndef h(engine):\n    return engine.list_tasks()\n")
     assert task_lists_in(source, "x.py") == {"x.py::A.f": True, "x.py::g": False}
+
+
+# ── one way to read a task's space ───────────────────────────────────────
+
+#: The swarm's code, and what decides or delivers by a task.
+SWARM = ("kazma-core/kazma_core/swarm/", "kazma-ui/kazma_ui/swarm_panel/", "kazma-ui/kazma_ui/research_panel/",
+         "kazma-core/kazma_core/runs/adapters/swarm.py")
+
+#: Where a raw ``tenant_id`` is read, instead of ``space_of_task`` (a task of
+#: before Spaces names none, and is the owner's) -> why.
+RAW_TENANT: dict[str, str] = {
+    "kazma-core/kazma_core/runs/adapters/swarm.py::_SwarmAdapter._run":
+        "with Spaces off, the run's space as it always was",
+    "kazma-core/kazma_core/swarm/engine.py::SwarmEngine._dispatch":
+        "whether new work names a space at all: refused when it does not",
+    "kazma-core/kazma_core/swarm/single_operator.py::space_of_task": "the one way itself",
+    "kazma-core/kazma_core/swarm/task_store.py::TaskStore.list_tasks": "a list's filter, as it was asked",
+    "kazma-core/kazma_core/swarm/worker_dispatch.py::_whose":
+        "what a dispatch carries: none refuses, never the owner's (M2)",
+}
+
+
+def raw_tenants_in(source: str, rel: str) -> set[str]:
+    """Functions that read ``tenant_id`` out of a mapping (``.get`` or ``[]``)."""
+    found: set[str] = set()
+
+    def visit(node: ast.AST, stack: list[str]) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = [*stack, child.name] if isinstance(
+                child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) else stack
+            read = (isinstance(child, ast.Call) and _name(child) == "get" and child.args
+                    and isinstance(child.args[0], ast.Constant) and child.args[0].value == "tenant_id") or (
+                isinstance(child, ast.Subscript) and isinstance(child.ctx, ast.Load)
+                and isinstance(child.slice, ast.Constant) and child.slice.value == "tenant_id")
+            if read:
+                found.add(f"{rel}::{'.'.join(inner)}")
+            visit(child, inner)
+
+    visit(ast.parse(source), [])
+    return found
+
+
+def test_a_tasks_space_is_read_one_way() -> None:
+    found: set[str] = set()
+    for rel in _product_files():
+        if rel.startswith(SWARM):
+            found |= raw_tenants_in((REPO / rel).read_text(encoding="utf-8", errors="replace"), rel)
+    assert found - set(RAW_TENANT) == set(), "ask swarm.single_operator.space_of_task"
+    assert set(RAW_TENANT) - found == set(), "declared, and no longer there"
+
+
+def test_a_planted_raw_tenant_is_found() -> None:
+    source = "def f(t):\n    return (t.metadata or {}).get('tenant_id')\ndef g(m):\n    return m['tenant_id']\n"
+    assert raw_tenants_in(source, "x.py") == {"x.py::f", "x.py::g"}
+    assert raw_tenants_in("def f(t):\n    m['tenant_id'] = space_of_task(t)\n", "x.py") == set()

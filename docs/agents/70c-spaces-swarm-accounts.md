@@ -7,9 +7,13 @@
   `statements_of(space_of_task(task))`; a start's listings, retention and the
   tables are the install's, and a refused table raises. A task that names no
   space is the owner's (`space_of_task`): in the owner's list and theirs to
-  read, cancel and answer. `"*"` is every space's whatever
+  read, cancel, answer and approve (the resumed run is stamped with it), and
+  its result reaches the owner's chat app; that is for a row of before Spaces
+  alone: new work of no space is refused (`SwarmEngine._dispatch`). Nothing
+  reads a task's raw `tenant_id` (`RAW_TENANT`). `"*"` is every space's whatever
   `KAZMA_TENANT_FILTER` says; a runs list inside a space asks for its own. A
-  refusal is `space_refused` (403, not retryable), never `task_store_unavailable`.
+  refusal is `space_refused` (403, not retryable), never `task_store_unavailable`;
+  a refused approval `approval_refused`.
   Gates: `tests/test_swarm_rows_in_their_space.py`, and every caller of
   `TaskStore.list_tasks` declared (`TASK_LISTS`, `tests/test_row_work_gates.py`).
 - **The swarm follows the space (S1-15, 2026-11-18).** Guards act only where

@@ -1327,8 +1327,9 @@ class CronScheduler:
         1. ``job.delivery_target`` when well-formed (``platform:id``).
         2. A sibling job's valid target on the same thread -- adopted AND
            persisted so the broken row self-heals (2026-08-27).
-        ``""`` when neither works (a chat's own row holds no address): the outbox records it undeliverable, with
-        an alert naming the job -- never a guessed address.
+        ``""`` when neither works (a chat's own row holds no address): the
+        outbox records it undeliverable, with an alert naming the job -- never
+        a guessed address.
         """
         target_id = str(job.delivery_target or "").strip()
         if _valid_target(target_id):

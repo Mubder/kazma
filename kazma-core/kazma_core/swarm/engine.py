@@ -709,23 +709,21 @@ class SwarmEngine:
         """How many of *space_id*'s tasks run now (paused ones wait on a
         human and do not count, as for the install's cap)."""
         return sum(1 for t in list(self._active_tasks.values())
-                   if t.status != TaskStatus.PAUSED and (t.metadata or {}).get("tenant_id") == space_id)
+                   if t.status != TaskStatus.PAUSED and space_of_task(t) == space_id)
 
     def _running_ahead_of(self, task: SwarmTask) -> tuple[int, int]:
         """``(of its space, of its person)``: how many tasks of *task*'s
         space, and of the person who asked for it, were admitted before it
         and run now (paused ones do not count). On the loop: the in-flight
         table is the loop's."""
-        meta = task.metadata or {}
-        space, asker = meta.get("tenant_id"), str(meta.get("asker") or "")
+        space, asker = space_of_task(task), str((task.metadata or {}).get("asker") or "")
         ahead = mine = 0
         for other in list(self._active_tasks.values()):
             if other is task:
                 break
-            theirs = other.metadata or {}
-            if other.status != TaskStatus.PAUSED and theirs.get("tenant_id") == space:
+            if other.status != TaskStatus.PAUSED and space_of_task(other) == space:
                 ahead += 1
-                mine += bool(asker) and str(theirs.get("asker") or "") == asker
+                mine += bool(asker) and str((other.metadata or {}).get("asker") or "") == asker
         return ahead, mine
 
     @staticmethod
@@ -741,9 +739,8 @@ class SwarmEngine:
 
         if not spaces_enforced():
             return None
-        meta = task.metadata or {}
-        return running_refusal("swarm", str(meta.get("tenant_id") or ""), ahead[0],
-                               person=str(meta.get("asker") or ""), person_running=ahead[1])
+        return running_refusal("swarm", space_of_task(task), ahead[0],
+                               person=str((task.metadata or {}).get("asker") or ""), person_running=ahead[1])
 
     async def _admit_to_store(self, task: SwarmTask, *, must_record: bool = False) -> TaskResult | None:
         """Record *task* RUNNING at its new generation (SW-E03). None when
@@ -822,6 +819,16 @@ class SwarmEngine:
                 exc_info=True,
             )
             record_swarm_failure("running_row")
+            from kazma_core.db.pg_helpers import is_space_refusal
+
+            if must_record and is_space_refusal(exc):
+                return TaskResult(
+                    task_id=task.id, status="failed",
+                    error=("The database refused this approval for its space. Nothing was resumed, the "
+                           "checkpoint stays open, and approving again answers the same."),
+                    metadata={"admission_unrecorded": True, "checkpoint_open": True,
+                              "code": SPACE_REFUSED, "retryable": False},
+                )
             if must_record:
                 return TaskResult(
                     task_id=task.id, status="failed",
@@ -1013,6 +1020,13 @@ class SwarmEngine:
         except Exception:
             # An unstamped task is listed for every tenant (SW-E14: was silent).
             logger.warning("[SwarmEngine] could not stamp the tenant of task '%s'", task.id, exc_info=True)
+        from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
+
+        if spaces_enforced() and not str((task.metadata or {}).get("tenant_id") or "").strip():
+            # New work of no space is refused, never the owner's (S4-01, M2):
+            # only a row written before Spaces is read as theirs (N19).
+            return self._store_refused(task, NoSpaceBound(
+                f"swarm task {task.id}: no space is bound to what dispatched it"))
         self._active_tasks[task.id] = task  # track in-flight
 
         # A space's share of the slots (Spaces S2-08): one space's tasks never
@@ -1021,8 +1035,6 @@ class SwarmEngine:
         # The slot is held while the share is read (off the loop), and only
         # the space's tasks admitted ahead of this one count: two dispatches
         # at once never both pass, nor both fail, the share.
-        from kazma_core.spaces.scope import spaces_enforced
-
         held = None
         if spaces_enforced():
             ahead = self._running_ahead_of(task)
@@ -2421,6 +2433,13 @@ class SwarmEngine:
         task.generation = int(task.generation or 0) + 1
         task.run_id = _new_run_id()
         task.started_at = _utc_now_iso()  # the resumed run's own watchdog start
+        from kazma_core.spaces.scope import spaces_enforced
+
+        if spaces_enforced():
+            # A pipeline paused before Spaces names no space: it goes on as
+            # the owner's, whose it is (N19). Its workers run in the space the
+            # task carries, and with none they refuse and it ends failed.
+            task.metadata = {**(task.metadata or {}), "tenant_id": space_of_task(task)}
         self._active_tasks[task.id] = task
         try:
             held = await self._admit_to_store(task, must_record=True)

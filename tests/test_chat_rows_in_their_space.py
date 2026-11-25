@@ -143,6 +143,24 @@ def test_a_moved_chats_copy_is_written_in_the_space_it_goes_to(tmp_path: Path, c
     assert (made._load_one_from_primary(B, "copy") is not None) is committed
 
 
+@pytest.mark.usefixtures("enforced")
+def test_a_moves_commit_is_not_the_targets(tmp_path: Path) -> None:
+    """Only the copy's row is the target's: the journal's step and the chat
+    here are the move's own."""
+    made = _manager(tmp_path)
+    copy = ChatSession(session_id="copy", tenant_id=B, thread_id="t2", messages=_messages("the trip"))
+    doors: list[Any] = []
+
+    def commit() -> bool:
+        doors.append(Door.now())
+        return True
+
+    with bind_scope(A, "reem"):
+        made.put(ChatSession(session_id="chat", tenant_id=A, thread_id="t", messages=_messages("the trip")))
+        assert made.hand_over("chat", messages=_messages("the trip"), to=copy, commit=commit)
+    assert doors == [Door(space=A)]
+
+
 def test_off_a_hand_over_is_as_before(tmp_path: Path) -> None:
     made, _calls = _handed_over(tmp_path, committed=True)
     assert made._load_one_from_primary(B, "copy") is not None
@@ -173,6 +191,58 @@ def test_a_refused_chat_is_not_made_anew(tmp_path: Path, monkeypatch: pytest.Mon
     with bind_scope("default", "owner"), pytest.raises(NoSpaceBound):
         made.get_or_create("chat", durable=False)
     assert made._sessions == {}, "no empty chat in its place"
+
+
+@pytest.mark.usefixtures("enforced")
+def test_a_refused_chat_is_not_missing_by_its_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    made = _unreadable(tmp_path, NoSpaceBound("the database refused this"), monkeypatch)
+    with bind_scope("default", "owner"), pytest.raises(NoSpaceBound):
+        made.get_by_thread_id("t")
+
+
+@pytest.mark.parametrize("on", [True, False], ids=["an outage, enforced", "a refusal, Spaces off"])
+def test_every_other_thread_lookup_is_as_before(tmp_path: Path, monkeypatch: Any, on: bool) -> None:
+    made = _unreadable(tmp_path, sqlite3.OperationalError("away") if on else NoSpaceBound("refused"),
+                       monkeypatch)
+    monkeypatch.setattr(scope, "_enforced", on)
+    with bind_scope("default", "owner"):
+        assert made.get_by_thread_id("t") is None
+
+
+@pytest.mark.parametrize("on", [True, False], ids=["enforced", "Spaces off"])
+def test_a_spooled_chat_that_fails_otherwise_is_raised_as_before(tmp_path: Path, monkeypatch: Any, on: bool) -> None:
+    monkeypatch.setattr(SessionManager, "_drain_spool", lambda self: None)
+    _spooled(tmp_path)
+    made = _manager(tmp_path)
+    monkeypatch.setattr(scope, "_enforced", on)
+
+    def fails(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("a bug")
+
+    monkeypatch.setattr(made, "_load_one_from_db", fails)
+    with pytest.raises(RuntimeError, match="a bug"):
+        made._add_spooled_only({})
+
+
+@pytest.mark.parametrize("on", [True, False], ids=["enforced", "Spaces off"])
+def test_a_chat_apps_turn_that_is_refused_is_said_to_be_lost(monkeypatch: Any, on: bool,
+                                                             caplog: pytest.LogCaptureFixture) -> None:
+    """It was a DEBUG line. With Spaces off it still is."""
+    from kazma_core.observability import ops_alerts
+    from kazma_core.sessions import directory
+    from kazma_gateway.agent_handler import graph
+
+    def refused(_thread: str) -> Any:
+        raise NoSpaceBound("the database refused this")
+
+    sent: list[str] = []
+    monkeypatch.setattr(scope, "_enforced", on)
+    monkeypatch.setattr(directory, "canonical_web_session", refused)
+    monkeypatch.setattr(ops_alerts, "alert", lambda key, *_a, **_k: sent.append(key))
+    caplog.set_level("WARNING", logger="kazma_gateway.agent_handler.graph")
+    graph._sync_platform_session_to_web("gw-telegram-1", "telegram", {}, [])
+    assert sent == (["reply.persist_failed"] if on else [])
+    assert ("not saved to the transcript" in caplog.text) is on
 
 
 @pytest.mark.parametrize("on", [True, False], ids=["an outage, enforced", "a refusal, Spaces off"])
@@ -349,7 +419,94 @@ def test_a_history_of_someone_who_left_is_not_imported_as_anyone_else(person: An
                                                                       tmp_path: Path) -> None:
     identity.remove_member(person.space, person.id)
     seen, job = _imported(monkeypatch, tmp_path, person.space, person.id)
-    assert seen == [] and (job.state, job.error) == ("failed", "AskerLeft")
+    assert seen == [] and (job.state, job.error) == ("failed", "left_space")
+
+
+def test_a_person_who_leaves_while_it_runs_ends_it(person: Any, monkeypatch: Any, tmp_path: Path) -> None:
+    from kazma_core.memory import history_import
+    from kazma_ui import history_import_api
+
+    monkeypatch.setattr(history_import_api, "_ACCOUNTS_ASK_S", 0.0)
+    turns: list[bool] = []
+
+    def import_history(_history: Any, *, should_stop: Any, **_kw: Any) -> Any:
+        for n in range(5):
+            if n == 2:
+                identity.remove_member(person.space, person.id)
+            if should_stop():
+                return SimpleNamespace(stopped=True, as_dict=lambda: {})
+            turns.append(True)
+        return SimpleNamespace(stopped=False, as_dict=lambda: {})
+
+    monkeypatch.setattr(history_import, "read_export", lambda _path: object())
+    monkeypatch.setattr(history_import, "import_history", import_history)
+    path = tmp_path / "upload"
+    path.write_text("x")
+    job = history_import_api._Job()
+    history_import_api._run("token", path, person.space, job, person.id)
+    assert len(turns) == 2 and (job.state, job.error) == ("failed", "left_space")
+
+
+def test_an_import_waits_while_the_accounts_cannot_be_read(person: Any, monkeypatch: Any, tmp_path: Path) -> None:
+    """An outage failed it and deleted the uploaded file."""
+    from kazma_ui import history_import_api
+
+    monkeypatch.setattr(history_import_api, "_ACCOUNTS_ASK_S", 0.01)
+    real, asked = identity.read_registry, []
+
+    def away_twice() -> Any:
+        asked.append((tmp_path / "upload").exists())
+        if len(asked) <= 2:
+            raise identity.IdentityUnavailable("the settings store is away")
+        return real()
+
+    monkeypatch.setattr(identity, "read_registry", away_twice)
+    seen, job = _imported(monkeypatch, tmp_path, person.space, person.id)
+    assert asked[:2] == [True, True], "the file is kept meanwhile"
+    assert len(seen) == 1 and job.state == "done"
+
+
+def test_an_import_that_waited_in_vain_says_so_in_a_code(person: Any, monkeypatch: Any, tmp_path: Path) -> None:
+    from kazma_ui import history_import_api
+
+    monkeypatch.setattr(history_import_api, "_ACCOUNTS_ASK_S", 0.01)
+    monkeypatch.setattr(history_import_api, "_ACCOUNTS_WAIT_S", 0.05)
+
+    def away() -> Any:
+        raise identity.IdentityUnavailable("the settings store is away")
+
+    monkeypatch.setattr(identity, "read_registry", away)
+    _seen, job = _imported(monkeypatch, tmp_path, person.space, person.id)
+    assert (job.state, job.error) == ("failed", "accounts_unavailable")
+
+
+def test_every_code_of_a_failed_import_has_words_in_both_languages() -> None:
+    from kazma_ui import history_import_api
+    from kazma_ui.i18n.catalog.history_import import TRANSLATIONS
+
+    source = Path(history_import_api.__file__).read_text(encoding="utf-8")
+    why = next(n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.FunctionDef) and n.name == "_why")
+    codes = {n.value for r in ast.walk(why) if isinstance(r, ast.Return) for n in ast.walk(r)
+             if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    assert codes == {"left_space", "accounts_unavailable", "not_an_export", "failed"}
+    page = (REPO / "kazma-ui/kazma_ui/static/js/history_import.js").read_text(encoding="utf-8")
+    for code in codes:
+        words = TRANSLATIONS[f"memory.import.why_{code}"]
+        assert words["en"] and words["ar"] and f"memory.import.why_{code}" in page
+
+
+def test_a_started_import_is_its_uploaders(person: Any, monkeypatch: Any, tmp_path: Path) -> None:
+    """The upload's person reaches the thread, whoever's request starts it."""
+    from kazma_ui import history_import_api
+
+    ran: list[Any] = []
+    done = threading.Event()
+    monkeypatch.setattr(history_import_api, "_JOBS", {})
+    monkeypatch.setattr(history_import_api, "_run", lambda *args: (ran.append(args[2:]), done.set()))
+    with bind_scope(person.space, OWNER_ACCOUNT_ID):
+        assert history_import_api._claim(person.space, "token", (tmp_path, 0.0, {}, person.space, person.id))
+    assert done.wait(5)
+    assert ran[0][0] == person.space and ran[0][2] == person.id
 
 
 def test_off_an_import_binds_nothing(monkeypatch: Any, tmp_path: Path) -> None:
@@ -400,45 +557,150 @@ def test_a_jobs_address_reads_no_chat() -> None:
 
 # ── no row of a Postgres pool is read by its place (gate e) ──────────────
 
+_FETCH_ONE, _FETCH_MANY = {"fetchone", "execute_one"}, {"fetchall", "fetchmany"}
+
+
+def _last(call: ast.AST) -> str:
+    return call.func.attr if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) else ""
+
 
 def rows_by_place(source: str) -> set[int]:
-    """Lines that take a Postgres row by its place: inside a pool's
-    ``connection()`` block, outside an ``isinstance(row, dict)`` choice
-    (every Kazma pool answers dicts, and a plain cursor may stand in a test)."""
+    """Lines that take a Postgres row by its place: the shared pool's and the
+    checkpointer's rows are dicts, so it raises or reads the wrong thing.
+
+    What it reads: a row of a pool's ``connection()`` block, or of
+    ``pool.execute`` / ``execute_one`` (``get_pool()``, a name with ``pool``
+    in it): indexed by a number, or unpacked. Through ``await``, a name, a
+    walrus, a loop or a comprehension, and after the block too, in the same
+    function. Not a choice by ``isinstance`` or ``hasattr``, nor the rows of
+    SQLite (``_conn``, ``sqlite``). What it does not: a row handed to another
+    function, or kept on an object."""
     found: set[int] = set()
-    for block in ast.walk(ast.parse(source)):
-        if not (isinstance(block, ast.With | ast.AsyncWith)
-                and any(".connection(" in ast.unparse(item.context_expr) for item in block.items)):
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
-        inside = [n for stmt in block.body for n in ast.walk(stmt)]
-        chosen = {id(n) for c in inside if isinstance(c, ast.If | ast.IfExp) and "isinstance" in ast.unparse(c.test)
+        nodes = list(ast.walk(fn))
+        in_block = {id(n) for b in nodes if isinstance(b, ast.With | ast.AsyncWith)
+                    and any(".connection(" in ast.unparse(i.context_expr) for i in b.items)
+                    for stmt in b.body for n in ast.walk(stmt)}
+        chosen = {id(n) for c in nodes if isinstance(c, ast.If | ast.IfExp)
+                  and ("isinstance" in ast.unparse(c.test) or "hasattr" in ast.unparse(c.test))
                   for n in ast.walk(c)}
-        fetched = {t.id for n in inside if isinstance(n, ast.Assign) and "fetch" in ast.unparse(n.value)
-                   for t in n.targets if isinstance(t, ast.Name)}
-        rows = fetched | {n.target.id for n in inside
-                          if isinstance(n, ast.For | ast.comprehension) and isinstance(n.target, ast.Name)
-                          and ("fetch" in ast.unparse(n.iter)
-                               or fetched & {x.id for x in ast.walk(n.iter) if isinstance(x, ast.Name)})}
-        found |= {n.lineno for n in inside if isinstance(n, ast.Subscript) and id(n) not in chosen
-                  and isinstance(n.value, ast.Name) and n.value.id in rows
-                  and isinstance(n.slice, ast.Constant) and isinstance(n.slice.value, int)}
+        cursors = {i.optional_vars.id for b in nodes if isinstance(b, ast.With | ast.AsyncWith) for i in b.items
+                   if isinstance(i.optional_vars, ast.Name) and ".cursor(" in ast.unparse(i.context_expr)
+                   and (id(b) in in_block or any(".connection(" in ast.unparse(x.context_expr) for x in b.items))}
+        #: name -> its assignments: (line, "one" | "many" | "").
+        named: dict[str, dict[int, str]] = {}
+
+        def is_pg(call: ast.Call) -> bool:
+            owner = ast.unparse(call.func.value)
+            if "sqlite" in owner or "_conn" in owner:
+                return False
+            return id(call) in in_block or "pool" in owner.lower()
+
+        def kind(node: ast.AST) -> str:
+            if isinstance(node, ast.Await):
+                return kind(node.value)
+            if isinstance(node, ast.NamedExpr):
+                return kind(node.value)
+            if isinstance(node, ast.BoolOp):
+                return next((k for k in map(kind, node.values) if k), "")
+            if isinstance(node, ast.Name):
+                if node.id in cursors:
+                    return "many"
+                # The newest assignment before: a name may hold SQLite's row
+                # in one branch and Postgres's in the other.
+                before = [line for line in named.get(node.id, {}) if line <= node.lineno]
+                return named[node.id][max(before)] if before else ""
+            if isinstance(node, ast.Call) and _last(node) and is_pg(node):
+                if _last(node) in _FETCH_ONE:
+                    return "one"
+                if _last(node) in _FETCH_MANY or (_last(node) == "execute" and "pool" in ast.unparse(node.func.value)):
+                    return "many"
+            if isinstance(node, ast.Subscript) and kind(node.value) == "many" and not isinstance(node.slice, ast.Slice):
+                return "one"
+            return ""
+
+        for _ in range(3):  # names of names
+            for node in nodes:
+                pairs: list[tuple[ast.AST, str]] = []
+                if isinstance(node, ast.Assign):
+                    pairs = [(t, kind(node.value)) for t in node.targets]
+                elif isinstance(node, ast.NamedExpr):
+                    pairs = [(node.target, kind(node.value))]
+                elif isinstance(node, ast.For | ast.AsyncFor | ast.comprehension):
+                    pairs = [(node.target, "one" if kind(node.iter) == "many" else "")]
+                for target, what in pairs:
+                    if isinstance(target, ast.Name):
+                        named.setdefault(target.id, {})[node.lineno if hasattr(node, "lineno")
+                                                        else target.lineno] = what
+                    if isinstance(target, ast.Tuple | ast.List) and what == "one" and id(node) not in chosen:
+                        found.add(target.lineno)
+        for node in nodes:
+            if isinstance(node, ast.Subscript) and id(node) not in chosen and kind(node.value) == "one":
+                place = node.slice.operand if isinstance(node.slice, ast.UnaryOp) else node.slice
+                if isinstance(place, ast.Constant) and isinstance(place.value, int):
+                    found.add(node.lineno)
     return found
+
+
+#: Files whose Postgres connections answer tuples: the memory mirror and
+#: pgvector have connections of their own (``memory/backends.py``).
+TUPLES = ("kazma-core/kazma_core/memory/",)
+
+#: Places that read both backends' rows in one function: SQLite's by place.
+BOTH_BACKENDS: dict[str, str] = {}
 
 
 def test_no_postgres_row_is_read_by_its_place() -> None:
     files = subprocess.run(["git", "ls-files", "--", "kazma-*/*.py"], cwd=REPO, capture_output=True, text=True,
                            check=True).stdout.splitlines()
-    found: list[str] = []
+    found: set[str] = set()
     for rel in files:
         text = (REPO / rel).read_text(encoding="utf-8", errors="replace")
-        if ".connection(" in text:
-            found += [f"{rel}:{line}" for line in rows_by_place(text)]
-    assert found == [], "read it by its name: the pool's rows are dicts"
+        if not rel.startswith(TUPLES) and (".connection(" in text or "pool" in text):
+            found |= {f"{rel}:{line}" for line in rows_by_place(text)}
+    places = {f.rsplit(":", 1)[0] for f in found}
+    assert {f for f in found if f.rsplit(":", 1)[0] not in BOTH_BACKENDS} == set(), \
+        "read it by its name: the pool's rows are dicts"
+    assert set(BOTH_BACKENDS) - places == set(), "declared, and no longer there"
 
 
-def test_a_planted_row_by_place_is_found() -> None:
-    planted = ("async def f(conn):\n    async with conn.connection() as c:\n        rows = await c.fetchall()\n"
-               "        return [row[0] for row in rows]\n")
-    assert rows_by_place(planted) == {4}
-    assert rows_by_place(planted.replace("row[0] for", "row['thread_id'] for")) == set()
-    assert rows_by_place(planted.replace("row[0] for", "row['t'] if isinstance(row, dict) else row[0] for")) == set()
+def _planted(body: str) -> str:
+    return "async def f(self, conn):\n    async with conn.connection() as c, c.cursor() as cur:\n" + "".join(
+        f"        {line}\n" for line in body.split("\n"))
+
+
+@pytest.mark.parametrize("body", [
+    "rows = await cur.fetchall()\nreturn [row[0] for row in rows]",
+    "return (await cur.fetchone())[0]",
+    "return cur.fetchone()[0]",
+    "rows = cur.fetchall()\nfor a, b in rows:\n    use(a, b)",
+    "a, b = cur.fetchone()",
+    "for r in cur.fetchall():\n    use(r[-1])",
+    "for r in cur:\n    use(r[0])",
+    "if (row := cur.fetchone()):\n    use(row[0])",
+    "rows = cur.fetchall()\nreturn rows[0][0]",
+])
+def test_a_planted_row_by_place_is_found(body: str) -> None:
+    assert rows_by_place(_planted(body)), body
+
+
+@pytest.mark.parametrize("source", [
+    "def f(pool):\n    row = pool.execute_one(q)\n    return row[0]\n",
+    "def f():\n    for r in get_pool().execute(q):\n        use(r[0])\n",
+    "def f(c):\n    with c.connection() as conn:\n        rows = conn.execute(q).fetchall()\n    return rows[0][0]\n",
+])
+def test_a_planted_row_of_a_pool_or_after_the_block_is_found(source: str) -> None:
+    assert rows_by_place(source), source
+
+
+@pytest.mark.parametrize("body", [
+    "rows = cur.fetchall()\nreturn rows[0]['n']",
+    "row = cur.fetchone()\nreturn row['n']",
+    "rows = cur.fetchall()\nreturn [r['t'] if isinstance(r, dict) else r[0] for r in rows]",
+    "row = self._conn.execute(q).fetchone()\nreturn row[0]",
+    "name = path.split('.')[0]",
+])
+def test_a_right_read_is_not_a_finding(body: str) -> None:
+    assert rows_by_place(_planted(body)) == set(), body

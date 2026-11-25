@@ -35,6 +35,7 @@ const dEnd = source.indexOf("\n  }\n", dStart) + 4;
 vm.runInContext(source.slice(dStart, dEnd), context);
 assert.strictEqual(context.decisionErrorText({code: "temporal_unavailable", message: "English"}),
                    "[swarm.temporal_unavailable]");
+assert.strictEqual(context.decisionErrorText({code: "approval_refused", message: "English"}), "[swarm.approval_refused]");
 assert.strictEqual(context.decisionErrorText({code: "other", message: "server text"}), "server text");
 
 // The background dispatch's stream: its task_completed handler shows the refusal.

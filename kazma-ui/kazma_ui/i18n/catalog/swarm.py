@@ -212,6 +212,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لم تعد نقطة التحقق هذه بانتظار قرار.",
         "en": "This checkpoint is no longer waiting for a decision.",
     },
+    "swarm.approval_refused": {
+        "ar": "رفضت قاعدة البيانات هذه الموافقة في مساحتها، فلم يُستأنف شيء وبقيت نقطة الموافقة مفتوحة. إعادة المحاولة لن تغيّر ذلك.",
+        "en": "The database refused this approval for its space, so nothing was resumed and the checkpoint stays open. Trying again will not change that.",
+    },
     "swarm.approval_not_recorded": {
         "ar": "تعذّر حفظ الموافقة، فلم يُستأنف شيء. نقطة التحقق ما زالت بانتظار قرار: وافق مرة أخرى بعد قليل.",
         "en": "The approval could not be saved, so nothing resumed. The checkpoint is still waiting: approve again shortly.",
