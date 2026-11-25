@@ -182,8 +182,7 @@ def test_control_without_the_ownership_check_one_member_corrects_anothers_fact(d
     hers = _fact(db, "lives_in", "Kuwait City", subject=entry_id("sara"), tenant="team")
 
     def anyones(conn, belief_id, tenant_id, subject):
-        return conn.execute("SELECT id, subject, predicate, predicate_type, object FROM beliefs WHERE id = ?",
-                            (belief_id,)).fetchone()
+        return conn.execute("SELECT * FROM beliefs WHERE id = ?", (belief_id,)).fetchone()
 
     monkeypatch.setattr(about_you, "_own_current", anyones)
     with private_room(TEAM):

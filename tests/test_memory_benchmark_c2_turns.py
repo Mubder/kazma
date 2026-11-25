@@ -47,8 +47,13 @@ def _plain(facts: list[dict]) -> list[dict]:
     return [{k: v for k, v in f.items() if k not in ("since", "replaces", "ended")} for f in facts]
 
 
-def _turns() -> list[dict]:
+def _all_turns() -> list[dict]:
     return json.loads(benchmark.EXTRACTION_PATH.read_text(encoding="utf-8"))["turns"]
+
+
+def _turns() -> list[dict]:
+    """The turns of v3 (v4's event turns have tests of their own)."""
+    return [t for t in _all_turns() if int(t.get("new_in") or 0) <= 3]
 
 
 def _recording(answers: dict[str, list[dict]]) -> dict:
@@ -139,14 +144,14 @@ def _declared_over(recording: dict) -> dict:
 
 
 def test_a_drift_check_names_the_turns_added_after_its_recording_as_waiting(monkeypatch):
-    """The recording before C2 (dataset v1) never answered the turns v3
-    added: replayed as a drift check, they wait, named. Control: C2's own
-    recording (dataset v3) answered them, so a drift check over it, after a
-    later prompt change, leaves nothing out."""
+    """The recording before C2 (dataset v1) never answered the turns v3 and
+    v4 added: replayed as a drift check, they wait, named. Control: today's
+    own recording answered them, so a drift check over it, after a later
+    prompt change, leaves nothing out."""
     old = json.loads((FIXTURES / "extraction_llm_2026-10-15.json").read_text(encoding="utf-8"))
     report = benchmark.run_extraction_benchmark(llm_replies=old, pending=_declared_over(old))
     assert report["llm_replay"] == "previous"
-    assert report["llm_waiting"] == [t["id"] for t in _turns() if t.get("new_in")]
+    assert report["llm_waiting"] == [t["id"] for t in _all_turns() if t.get("new_in")]
     from kazma_core.memory import belief_extractor
 
     current = json.loads((FIXTURES / "extraction_llm.json").read_text(encoding="utf-8"))

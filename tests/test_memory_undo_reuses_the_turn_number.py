@@ -164,3 +164,39 @@ def test_asking_again_for_the_undone_turn_takes_nothing_of_the_new_one(db, undon
     assert forget.enforce_ledger(db)["memories"] == 1
     assert _held(db) == [kept]
     assert db.execute("SELECT tier FROM episodes WHERE id = ?", (old,)).fetchone()[0] == "forgotten"
+
+
+@pytest.mark.parametrize(("event", "first", "again"), [
+    ("the pottery exhibition", "The pottery exhibition was last Saturday.", "The pottery exhibition was on the 23rd."),
+    ("معرض الفخار", "معرض الفخار كان السبت اللي فات.", "معرض الفخار كان يوم ٢٣."),
+])
+def test_the_day_the_new_turn_gives_stays(db, event, first, again):
+    """The day half (``_ledgered_days``)."""
+    from kazma_core.memory.belief_extractor import _apply_beliefs_to_v2
+    from kazma_core.memory.fact_days import metadata_of
+
+    ops = sqlite3.connect(":memory:")
+    ensure_ops_schema(ops)
+
+    def told(day: str | None, text: str, turn: int) -> None:
+        fact = {"subject": "user", "predicate": "attended", "predicate_type": "set", "object": event,
+                "confidence": 0.9, **({"on": day} if day else {})}
+        _apply_beliefs_to_v2([fact], db, ops, session_id=CHAT, turn=turn, tenant_id="default", now=time.time(),
+                             private=True, user_text=text, stats={"source": "llm", "applied": 0, "rejected": 0,
+                                                                  "actions": [], "skipped_filler": False})
+        time.sleep(0.02)
+
+    def day() -> str:
+        return str(metadata_of(db.execute("SELECT metadata_json FROM beliefs WHERE predicate = 'attended' "
+                                          "AND valid_until IS NULL").fetchone()[0]).get("started") or "")
+
+    told(None, event, 1)
+    _turn(first)
+    told("2026-05-30", first, 2)
+    assert day() == "2026-05-30"
+    _undo(first)
+    assert day() == ""
+    _turn(again)
+    told("2026-05-23", again, 2)
+    forget.enforce_ledger(db)
+    assert day() == "2026-05-23"

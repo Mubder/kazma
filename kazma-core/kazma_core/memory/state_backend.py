@@ -814,7 +814,7 @@ class PostgresStateBackend:
                     f"""
                     SELECT id, subject, predicate, object, predicate_type,
                            confidence, structural_importance, source_trust_weight,
-                           valid_from
+                           valid_from, metadata_json
                     FROM kazma_beliefs
                     WHERE tenant_id = %s AND id IN ({placeholders})
                       AND valid_until IS NULL AND invalidated_at IS NULL

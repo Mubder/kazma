@@ -1,0 +1,253 @@
+{
+ "what": "The third review of W4 (dated event lines), 2026-11-25: the same cached replies of the two pilots written again through the apply step, and the blocks built again; no model call. before: 0bbecc655's stores and blocks (second_review.json's after); after: this commit's. Ids and counts only.",
+ "runs": {
+  "qwen_dev_200": {
+   "questions": "dev 200",
+   "extractor": "qwen3.8-flash",
+   "stores": {
+    "before": {
+     "current": 51747,
+     "dated_events": 3349,
+     "dated_events_current": 3060,
+     "day_before": 16,
+     "day_source": 229,
+     "events_on_single_value": 0,
+     "facts": 55192,
+     "lives_in_current": 135,
+     "name_is_current": 63,
+     "planned": 262,
+     "planned_current": 229,
+     "starts": 1477
+    },
+    "after": {
+     "current": 51805,
+     "dated_events": 3374,
+     "dated_events_current": 3084,
+     "day_before": 17,
+     "day_source": 231,
+     "events_on_single_value": 0,
+     "facts": 55249,
+     "lives_in_current": 135,
+     "name_is_current": 63,
+     "planned": 265,
+     "planned_current": 231,
+     "starts": 1479
+    }
+   },
+   "deep_passes": {
+    "before": {
+     "deep": 48110,
+     "deep_failed": 494,
+     "ended": 61,
+     "not_users_words": 73,
+     "pending_changes": 218,
+     "refs_lost": 2,
+     "replace_refused": 399,
+     "replaced_entries": 2315
+    },
+    "after": {
+     "deep": 48110,
+     "deep_failed": 494,
+     "ended": 61,
+     "not_users_words": 2,
+     "pending_changes": 218,
+     "refs_lost": 1,
+     "replace_refused": 399,
+     "replaced_entries": 2314
+    }
+   },
+   "current_dated_events": {
+    "events_kept_both": 3053,
+    "events_only_before": 6,
+    "events_only_after": 30
+   },
+   "blocks": {
+    "before": {
+     "tokens_p50": 1421.0,
+     "tokens_p95": 1496,
+     "facts_mean": 3.86,
+     "event_lines_mean": 0.81,
+     "questions_with_an_event_line": 70,
+     "planned_lines": 1,
+     "answer_text_held": 57,
+     "answer_text_of": 129
+    },
+    "after": {
+     "tokens_p50": 1426.0,
+     "tokens_p95": 1496,
+     "facts_mean": 3.86,
+     "event_lines_mean": 0.82,
+     "questions_with_an_event_line": 71,
+     "planned_lines": 3,
+     "answer_text_held": 57,
+     "answer_text_of": 129
+    },
+    "changed": 42,
+    "without_event_facts_changed": 38
+   },
+   "answer_text": {
+    "gained": [],
+    "lost": []
+   }
+  },
+  "deepseek_pilot_50": {
+   "questions": "pilot 50",
+   "extractor": "deepseek-flash",
+   "stores": {
+    "before": {
+     "current": 8727,
+     "dated_events": 869,
+     "dated_events_current": 795,
+     "day_before": 5,
+     "day_source": 48,
+     "events_on_single_value": 0,
+     "facts": 9314,
+     "lives_in_current": 30,
+     "name_is_current": 7,
+     "planned": 29,
+     "planned_current": 27,
+     "starts": 254
+    },
+    "after": {
+     "current": 8741,
+     "dated_events": 871,
+     "dated_events_current": 797,
+     "day_before": 5,
+     "day_source": 48,
+     "events_on_single_value": 0,
+     "facts": 9327,
+     "lives_in_current": 30,
+     "name_is_current": 7,
+     "planned": 30,
+     "planned_current": 28,
+     "starts": 255
+    }
+   },
+   "deep_passes": {
+    "before": {
+     "deep": 12089,
+     "deep_failed": 0,
+     "ended": 18,
+     "not_users_words": 13,
+     "pending_changes": 40,
+     "refs_lost": 0,
+     "replace_refused": 42,
+     "replaced_entries": 379
+    },
+    "after": {
+     "deep": 12089,
+     "deep_failed": 0,
+     "ended": 18,
+     "not_users_words": 0,
+     "pending_changes": 40,
+     "refs_lost": 0,
+     "replace_refused": 42,
+     "replaced_entries": 378
+    }
+   },
+   "current_dated_events": {
+    "events_kept_both": 795,
+    "events_only_before": 0,
+    "events_only_after": 2
+   },
+   "blocks": {
+    "before": {
+     "tokens_p50": 1459.0,
+     "tokens_p95": 1498,
+     "facts_mean": 3.52,
+     "event_lines_mean": 1.2,
+     "questions_with_an_event_line": 20,
+     "planned_lines": 0,
+     "answer_text_held": 12,
+     "answer_text_of": 37
+    },
+    "after": {
+     "tokens_p50": 1459.0,
+     "tokens_p95": 1498,
+     "facts_mean": 3.52,
+     "event_lines_mean": 1.18,
+     "questions_with_an_event_line": 20,
+     "planned_lines": 0,
+     "answer_text_held": 12,
+     "answer_text_of": 37
+    },
+    "changed": 10,
+    "without_event_facts_changed": 7
+   },
+   "answer_text": {
+    "gained": [],
+    "lost": []
+   }
+  }
+ },
+ "openings": {
+  "what": "events kept of an ordinary opening and an event told after it, the model's reply exact",
+  "review_45x3": {
+   "main": {
+    "en": 135,
+    "ar": 135
+   },
+   "0bbecc655": {
+    "en": 123,
+    "ar": 75
+   },
+   "this": {
+    "en": 135,
+    "ar": 135
+   }
+  },
+  "more_59x3": {
+   "0bbecc655": {
+    "en": 105,
+    "ar": 75
+   },
+   "this": {
+    "en": 177,
+    "ar": 177
+   }
+  },
+  "pasted_34x3_kept": {
+   "0bbecc655": {
+    "en": 0,
+    "ar": 12
+   },
+   "this": {
+    "en": 0,
+    "ar": 0
+   }
+  }
+ },
+ "left_out_of_the_replays": {
+  "dated": {
+   "told": {
+    "qwen": 3880,
+    "deepseek": 953
+   },
+   "before": {
+    "qwen": 34,
+    "deepseek": 2
+   },
+   "after": {
+    "qwen": 1,
+    "deepseek": 0
+   }
+  },
+  "undated_event_verbs": {
+   "told": {
+    "qwen": 3893,
+    "deepseek": 888
+   },
+   "before": {
+    "qwen": 18,
+    "deepseek": 7
+   },
+   "after": {
+    "qwen": 1,
+    "deepseek": 0
+   }
+  },
+  "what_is_left": "a title the user chose from a list, quoted, and a quoted text to proofread",
+  "first_form_dropped": "9 and 1, of which 7 and 1 were the user's own lists and stories (read; exempted)"
+ },
+ "plans_told_as_done": "a day to come kept under an event's verb: 3 new in the Qwen stores and 1 in DeepSeek's after the rule was held to a sentence that speaks of what is to come; before that 29 and 11, nearly all past events with the year left out"
+}

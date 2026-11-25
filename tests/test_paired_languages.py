@@ -408,6 +408,58 @@ def _lesson_signal(text: str) -> str | None:
 
 M = "kazma-core/kazma_core/"
 
+def _an_event_of_the_users(case: tuple[str, str]) -> bool:
+    from kazma_core.memory.event_text import stands_elsewhere
+
+    return not stands_elsewhere(case[1], case[0])
+
+
+def _denies(text: str) -> bool:
+    from kazma_core.memory.event_text import denies
+
+    return denies(text)
+
+
+def _corrects(text: str) -> bool:
+    from kazma_core.memory.event_text import corrects
+
+    return corrects(text)
+
+
+def _pasted(text: str) -> bool:
+    """Whether the message's last word stands in what is clearly pasted or
+    another person's."""
+    from kazma_core.memory.pasted_text import told_and_pasted
+
+    last = text.split()[-1]
+    return last in told_and_pasted(text)[1]
+
+
+def _to_come(case: tuple[str, str]) -> bool:
+    from kazma_core.memory.time_words import says_to_come
+
+    return says_to_come(case[0], case[1], "2026-05-31")
+
+
+def _events_lost(lang: int) -> int:
+    """Of the openings twinned in ``fixtures/memory_events/openings.json`` and
+    the events told after each, how many one language loses."""
+    import json
+
+    from kazma_core.memory.event_text import stands_elsewhere
+
+    cases = json.loads((ROOT / "tests/fixtures/memory_events/openings.json").read_text(encoding="utf-8"))
+    return sum(stands_elsewhere(told["value"][lang], opening[lang].format(told["said"][lang]), day=told["day"] or "",
+                                said_on="2026-05-31")
+               for opening in (*cases["openings"]["review"], *cases["openings"]["more"]) for told in cases["events"])
+
+
+def _says_the_30th(text: str) -> bool:
+    from kazma_core.memory.time_words import says_day
+
+    return says_day(text, "2026-05-30", "2026-05-31")
+
+
 PAIRS: list[Pair] = [
     Pair("lesson_correction", (M + "skills/lesson_signal.py",),
          "No, I meant the config in the other folder.", "لا، قصدي الملف اللي في المجلد الثاني.",
@@ -497,6 +549,56 @@ PAIRS: list[Pair] = [
          "Correct: my name is Ahmad.", "صحح: اسمي أحمد.", _facts, [("user", "name_is")]),
     Pair("own_words_reported_kept_out", (M + "memory/own_words.py",),
          "My sister said: I live in Lyon.", "قالت أختي: ساكنة في ليون.", _facts, []),
+    Pair("own_words_after_asking_kazmas_view", (M + "memory/own_words.py",),
+         "What do you think about my rugs? I live in Dubai.", "شنو رايك في سجادي؟ أنا ساكن في دبي.", _facts,
+         [("user", "lives_in")]),
+    Pair("own_words_after_do_you_think", (M + "memory/own_words.py",),
+         "Do you think so? I live in Dubai.", "تعتقد؟ أنا ساكن في دبي.", _facts, [("user", "lives_in")]),
+    Pair("own_words_after_asking_for_ideas", (M + "memory/own_words.py",),
+         "Do you have recipe ideas that feature cumin? I live in Dubai.",
+         "شنو يناسب هذا الجبن؟ أنا ساكن في دبي.", _facts, [("user", "lives_in")]),
+    Pair("own_words_i_want_to_tell_you", (M + "memory/own_words.py",),
+         "I want to tell you: I live in Dubai.", "بغيت أقولك: أنا ساكن في دبي.", _facts, [("user", "lives_in")]),
+    Pair("own_words_asked_about_a_text_kept_out", (M + "memory/own_words.py",),
+         "What do you think about this text?\nI live in Dubai.", "ما رأيك في هذا النص؟\nأنا ساكن في دبي.", _facts, []),
+    Pair("own_words_asked_what_someone_thinks_kept_out", (M + "memory/own_words.py",),
+         "Do you know what Ali thinks? I live in Dubai.", "شنو يعتقد علي؟ أنا ساكن في دبي.", _facts, []),
+    Pair("an_event_in_the_question_asked", (M + "memory/event_text.py", M + "memory/own_words.py"),
+         ("Do you think I should fertilize the plant I received in the mail?", "a plant in the mail"),
+         ("تعتقد لازم أسمد النبتة اللي وصلتني بالبريد؟", "نبتة بالبريد"), _an_event_of_the_users, True),
+    Pair("an_event_of_a_paste_kept_out", (M + "memory/event_text.py",),
+         ("Translate: I received a plant in the mail.", "a plant in the mail"),
+         ("ترجم: وصلتني نبتة بالبريد.", "نبتة بالبريد"), _an_event_of_the_users, False),
+    Pair("an_event_after_any_opening", (M + "memory/event_text.py", M + "memory/pasted_text.py"), 0, 1, _events_lost, 0),
+    Pair("pasted_after_an_instruction", (M + "memory/pasted_text.py",),
+         "Translate this: I sold my car", "ترجم هذا: بعت سيارتي", _pasted, True),
+    Pair("pasted_in_a_mail", (M + "memory/pasted_text.py",),
+         "From: Omar\nSubject: news\n\nI sold my car", "من: عمر\nالموضوع: أخبار\n\nبعت سيارتي", _pasted, True),
+    Pair("pasted_said_by_a_sister", (M + "memory/pasted_text.py",),
+         "My sister said: I sold my car", "أختي قالت: بعت سيارتي", _pasted, True),
+    Pair("not_pasted_after_please", (M + "memory/pasted_text.py",),
+         "Please, I sold my car", "لو سمحت، بعت سيارتي", _pasted, False),
+    Pair("not_pasted_under_a_heading", (M + "memory/pasted_text.py",),
+         "The story: I sold my car", "القصة: بعت سيارتي", _pasted, False),
+    Pair("not_pasted_when_imagined", (M + "memory/pasted_text.py",),
+         "Imagine, I sold my car", "تخيل، بعت سيارتي", _pasted, False),
+    Pair("a_correction_corrects", (M + "memory/event_text.py",), "Sorry, I meant Omar", "آسف أقصد عمر", _corrects, True),
+    Pair("a_no_before_a_noun", (M + "memory/event_text.py",),
+         "I saw the dentist on 2 May, no cavities", "زرت دكتور الأسنان يوم ٢ مايو، لا تسوس", _denies, False),
+    Pair("a_denial_beside_also", (M + "memory/event_text.py",),
+         "Not Paris, and I also went to Lyon", "مو باريس، ورحت ليون كمان", _denies, False),
+    Pair("a_day_to_come", (M + "memory/time_words.py",),
+         ("I'm going to the concert tomorrow", "2026-06-01"), ("رايح الحفلة بكرة", "2026-06-01"), _to_come, True),
+    Pair("a_day_nearer_behind", (M + "memory/time_words.py",),
+         ("I finished it on 10 December", "2026-12-10"), ("خلصته يوم 10 ديسمبر", "2026-12-10"), _to_come, False),
+    Pair("a_weekday_gone_by", (M + "memory/time_words.py",),
+         ("I sold it last Friday", "2026-06-05"), ("بعته الجمعة اللي فاتت", "2026-06-05"), _to_come, False),
+    Pair("a_correction_denies", (M + "memory/event_text.py",),
+         "Sorry, not Ali, I meant Omar", "عفوا، مو علي، أقصد عمر", _denies, True),
+    Pair("a_day_said_by_its_weekday", (M + "memory/time_words.py",),
+         "It was last Saturday", "كان السبت اللي فات", _says_the_30th, True),
+    Pair("a_day_of_another_date", (M + "memory/time_words.py",),
+         "the email I got last month", "الإيميل اللي وصلني الشهر اللي فات", _says_the_30th, False),
     Pair("speaker_someone_else", (M + "memory/clause_subject.py",),
          "My sister is a nurse and moved", "أختي ممرضة وانتقلت", _named_last, "other"),
     Pair("speaker_sentence_end", (M + "memory/clause_subject.py",),

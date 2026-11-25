@@ -104,9 +104,9 @@ def _words(text: str) -> list[str]:
 def _word_of(raw: str) -> str:
     """One word of a memory, read as :func:`_words` reads the question's."""
     from kazma_core.documents.arabic import fold_for_search
-    from kazma_core.memory.query_terms import _normalise
+    from kazma_core.memory.query_terms import normalised_word
 
-    return _normalise(fold_for_search(raw))
+    return normalised_word(fold_for_search(raw))
 
 
 def focused(text: str, limit: int, terms: set[str]) -> str:

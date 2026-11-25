@@ -30,18 +30,23 @@ is the reasoning setting below plus the tool count per turn (open).
   control, every `invoke_llm_chat` call in the chat turn's modules carrying
   the level), `tests/test_qwen_reasoning_off.py` (Qwen's switch on the wire,
   the classifier in English and Arabic, today's classifier as the control).
-- **Qwen caches Kazma's leading system prompt explicitly** (2026-11-23, the
-  memory plan's W4 pilot). Model Studio caches a prefix on its own when it
-  chooses (20 % of the input price); `llm_provider._with_qwen_cache_marker`,
-  applied in `_chat_payload` (the blocking and the streaming body) for a
-  Model Studio address (`_is_qwen_api`), sends a leading system message of
-  at least `_QWEN_CACHE_MIN_CHARS` characters as one text part with
-  `cache_control` (cached five minutes, renewed on each hit; Model Studio's
+- **Qwen caches a background call's instructions explicitly** (2026-11-23,
+  the memory plan's W4 pilot; its review, 2026-11-24). Model Studio caches a
+  prefix on its own when it chooses (20 % of the input price);
+  `llm_provider._with_qwen_cache_marker`, applied in `_chat_payload` (the
+  blocking and the streaming body) for a Model Studio address
+  (`_is_qwen_api`), marks only a call of the deep pass's shape -- one system
+  and one user message as the caller made it, no tools -- on a measured
+  model family (`_QWEN_CACHE_MODELS`), off with `KAZMA_PROMPT_CACHE=0`: its
+  system message of at least `_QWEN_CACHE_MIN_CHARS` characters is sent as
+  one text part with `cache_control` (cached five minutes, renewed on each hit; Model Studio's
   page gives a hit at typically 10 % of the input price and a first write
   at 125 %, qwen3.8-flash's own ratios by region). Measured through Kazma's
   own provider on qwen3.8-flash and qwen3.7-plus with the deep pass's
   prompt: 1,614 of about 1,850 prompt tokens served from the cache from the
-  second call on. Any other message and provider are sent as before. Gate:
+  second call on. `cost_from_usage` counts the write's 125 %
+  (`cache_creation_input_tokens`). Until the review every call of every Qwen
+  model was marked, a chat's changing system message included. Gate:
   `tests/test_qwen_context_cache.py` (a host that only looks like Model
   Studio's as the control).
 

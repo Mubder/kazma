@@ -189,7 +189,7 @@ def test_control_the_old_separator_rule_misses_the_spellings(monkeypatch):
     """Negative control: eef80e49c's rule (hyphens and spaces only)."""
     from kazma_core.memory import fact_names
 
-    monkeypatch.setattr(fact_names, "_normalised", lambda predicate: "_".join(predicate.replace("-", " ").split()))
+    monkeypatch.setattr(fact_names, "normalised_name", lambda predicate: "_".join(predicate.replace("-", " ").split()))
     missed = [n for n in ("home town", "lives.in", "livesIn", "currentLocation")
               if fact_names._canonical_for_user(n) == n]
     assert missed == ["lives.in", "livesIn", "currentLocation"]

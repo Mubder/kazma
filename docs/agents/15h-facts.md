@@ -93,12 +93,137 @@
   fact or list entry told again gains the day it lacks
   (`_add_named_start`, now from `_mutate_set` too). Recall shows it as
   "[on 30 May 2026]" (`_date_hits` `on`, `_dated_line`), never "[since
-  ...]". The prompt change is declared in the lock (`pending_recording`)
-  and waits for the pilot (`scripts/longmemeval_facts_pilot.py`: 50 dev
-  questions' histories written round by round through the product's own
-  deep-pass task) before any recording. Gate:
+  ...]". Measured by `scripts/longmemeval_facts_pilot.py` (LongMemEval
+  histories written round by round through the product's own deep-pass
+  task, one store a question; `--label` keeps another extractor's run
+  apart, `--prices` with `--stop-usd` ends one at its spend), then recorded
+  (2026-11-24). Gate:
   `tests/test_memory_event_lines.py` (EN/AR; the writer without the mark,
   which shows the day as a start, as the negative control).
+- **What an event is, whose day it carries, and when it happened** (the
+  review of W4, 2026-11-24; `memory/fact_days.py` is the one home of a
+  fact's day). An event is a list entry under its own name whatever the
+  reply labelled it (`belief_extractor._read_days`): never
+  `fact_names.users_names`, a first reading or a question ("I called my
+  mom" became the user's name, "moved_to Porto" their home); on a fact a
+  person holds one value of (`fact_names.names_one_value`) `on` is its
+  start. The same words on another day are another occasion
+  (`belief_mutation._entry_told_again`, an event's words compared by
+  `_same_value`; the nightly merges read the day too). `replaces` on the
+  SAME day is a correction whatever the words ("not Paris, Lyon"); with
+  another day it is the same event only when the words name one thing
+  (`fact_days.same_thing`: two shared words, or half of the longer's;
+  "bananas" was closed by "fresh vegetables", a phone by a phone case) and
+  the day told can have happened by the first telling
+  (`fact_days.could_have_happened_by`); with a day on one side only, a
+  switch of something that is no event, the same thing, or what the user
+  says it was not (`event_text.denies`) (`_same_event`). Then it corrects
+  the day, and one with no day or a vaguer one keeps the day it replaces
+  (`_keep_the_day`). A day names
+  who gave it when that is not the row's own turn (`day_source`: session,
+  turn, method; the day it took the place of stays under `day_before`), so
+  forgetting that turn or chat takes the day back
+  (`forget._forget_given_days`, the ledger pass too) and a day the model
+  read on a fact the user stated is tagged as Kazma's reading
+  (`fact_days.days_method`). An event is true on its day only
+  (`recall._held_in`, `memory_list`, `/memory/you`); a day after the turn is
+  `planned` ("[planned for 3 Jun 2026]", "[was planned for ...]"), never a
+  start thrown away; a month or a year reads "in". An event of the user
+  is theirs to tell (`event_text`, below). At most `_MAX_BELIEFS` facts a
+  reply. A new reader of a fact's day asks `fact_days`. Gate:
+  `tests/test_memory_event_lines_review.py` (EN/AR; each point fails on the
+  commit reviewed, with its control).
+- **Whose words an event and its day are, what its name is, and one line
+  for it** (the second review of W4, 2026-11-24).
+  - *Its words* (`memory/event_text.stands_elsewhere`, asked for every event
+    of the user's, dated or not; the rule of the third review, 2026-11-25): an
+    event is left out only when its words stand in text that is clearly pasted
+    or another person's and not in the rest (`memory/pasted_text.py`: a data
+    fence, a code fence, `>` lines, a forward or a mail with its header, a
+    chat, words after "X said:", a sentence quoted, an instruction's own text
+    to its line's end or the blank line under it). **In doubt it is the
+    user's** (the re-check of f68b21ae5: what it read as a chat or a mail took
+    48 to 57 of 249 events of openings nobody had shown it, Arabic more): a
+    paste let in is filed as Kazma's reading, a line of theirs dropped is
+    lost, so a signal is added only with its count on
+    `tests/fixtures/memory_events/own_words_openings.json` in English, Gulf
+    and MSA. Everything else stays as Kazma's reading: reported,
+    supposed, long, behind one label, or in the model's words. **Never
+    `own_words`**: it is for trust, takes out what it is unsure of, and as the
+    gate dropped 12 of 135 ordinary English openings and 60 Arabic ones ("لو
+    سمحت، بعت سيارتي" read as "if", "القصة:" as who spoke: Arabic has no
+    capitals to tell a heading from a name). A labelled line is a speaker's
+    when the label is a time's, a phone number, a handle, or the message shows
+    a conversation: "Me:" after another's line, A, B, A, a first word that
+    answers ("congrats", "مبروك"), a question to Kazma about that person.
+    Never a role or a name alone ("Doctor:", "بنتي:", "جدة:" is a city), one
+    named again, a "no" or a "?". A mail's header is "From:" with an address
+    or "Subject:" ("From: Kuwait / To: Dubai" is a journey); a letter ends at
+    the paragraph that asks Kazma about it; a line after a chat export is the
+    user's; a head with "my", "our", "I" ("My caption:", "لخص اللي سويته:")
+    hands over the user's own words, unless it is their person's ("my boss").
+    What the user points at is theirs ("Just bought these!"), dated or not.
+    Words are compared with what Arabic writes onto
+    them, on the message's side and the value's ("لدبي" holds "دبي",
+    "سيارتي" is "السيارة", "بـ٩٥" holds "٩٥").
+  - *Its day* (`event_text.days_elsewhere`, `time_words.says_day`: the day
+    itself written out, by its weekday or counted to, in either language; it
+    replaced "names a day at all"): a day a paste names and the rest of the
+    message does not is dropped. A day the user counted from the turn's own
+    ("today", "yesterday": `day_sure`) stands against a later turn's unless
+    that turn denies it; said without a denial, the other day is another
+    occasion. `event_text.corrects` ("sorry, I meant", "آسف أقصد") with
+    `replaces` is enough to put an event right; `denies` ("no", "not", "لا",
+    "مو") needs the old value named, is no "no" before a noun and nothing
+    beside "also" or "again" -- unless it denies the old value by name
+    (`puts_right`: "Not Paris, it was Lyon again") or begins the message;
+    "I also bought a lamp", "شريت لمبة برضه" close nothing.
+  - *Its name* (`event_text.is_event_name`, a verb list): a functional or
+    state label with a day holds unless the name is an event's verb ("I
+    weigh 78 kg today", "delivered yesterday"); such a name keeps a day to
+    come only as a plan the user told ("I'm going to the concert tomorrow",
+    read as attended: `time_words.says_to_come`), and no day past 2199 is
+    read (`_since_value`: a model's "9999" lost its reply's every fact);
+    "called"/"named" in a list is an event without a day too, unless
+    the message says what the user is called. A plan that came to pass is
+    filed as what happened, under its own name (`_came_to_pass`). `says_to_come` reads the
+    future and the past of "I" in each language ("سأحضر", "بعد غد", "كنت
+    رايح" is no plan).
+  - *The held list shows an event's day* ("(on 2026-05-30)", message form
+    5), with a prompt rule on its use.
+  - *One line for an event* (`recall._one_per_event`, `_by_event`,
+    `fact_days.event_key`): its occasions are one candidate in every lane,
+    the latest shown with "and N more", every one for a list or a period
+    question -- after everything found has been shown once (`recall._in_order`:
+    six visits to the dentist hid the eye doctor of a question naming both),
+    the ones the block has no room for counted; a list's siblings are those
+    holding a word of the question, then the newest, never in the order of
+    their ids. Five visits hid "my dentist is Dr Sara" from every search and
+    were the background the question was measured against. The
+    Postgres-primary path takes the same steps (`fetch_beliefs` reads the
+    metadata).
+  - *Forgetting a retelling opens the entry it closed* (`closed_by`,
+    `forget._reopen_replaced`), unless what took its place was replaced by a
+    turn that stands. One either archive moved out (the nightly sweep's, the
+    Memory page's) comes back as the kind it was, with no vector, naming no
+    predecessor that is not in `beliefs` (a foreign key made the forget
+    raise), and leaves the archive only when `beliefs` took it
+    (`_from_archive`); the ledger pass reads the archive too. A write compares `_FOLDED_ENTRIES` of a name's newest
+    entries folded, and all of them in their own spelling.
+  - *Own words after a question to Kazma* ("What do you think about my rugs?
+    I washed them"): a thinking verb whose subject is "you" reports nobody
+    (`own_words._asks_kazma_en`, `_asks_kazma_ar`), and a question asks
+    about the text after it only when it names or points at one
+    (`_asks_about_a_text_en`, `_asks_about_a_text_ar`).
+  Gate: `tests/test_memory_event_lines_second_review.py` (78 of its cases
+  fail on 174057e52; EN/AR pairs, controls),
+  `tests/test_memory_event_lines_third_review.py` (119 of its 233 fail on
+  0bbecc655; the twinned openings and pasted texts in
+  `tests/fixtures/memory_events/openings.json`: main keeps every opening's
+  event in each language and so must this),
+  `tests/test_memory_event_lines_recheck.py` (117 of its 182 fail on
+  f68b21ae5), the pairs in
+  `tests/test_paired_languages.py`.
 - The quick (heuristic) pass reads Arabic and mixed text too
   (`memory/arabic_facts.py`, 2026-10-14: the extraction benchmark measured
   0.00 Arabic recall). Token rules from the grammar, compared folded: a
@@ -318,7 +443,7 @@
   memory tools, the Memory page's link, a confirmed change and the V1
   backfill (its own inserts too), so a memory tool's `home_city` or
   `current_location` meets the user's home as one fact; a name is read in
-  snake case whatever its separators or case first (`_normalised`: "home
+  snake case whatever its separators or case first (`normalised_name`: "home
   town", "lives.in", "livesIn", "currentLocation"). Gate:
   `tests/test_user_fact_names_every_writer.py` (every function that calls
   `mutate_belief` or inserts into `beliefs` calls the map or is declared

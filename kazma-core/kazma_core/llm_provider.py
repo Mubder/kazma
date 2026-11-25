@@ -78,22 +78,34 @@ def _is_qwen_api(base_url: str) -> bool:
 #: 1,024 tokens for five minutes; a shorter one is not cached, so a system
 #: message under this many characters is not marked.
 _QWEN_CACHE_MIN_CHARS = 3000
+#: The model families the cache was measured on (a dated or longer name of one
+#: too); another model on Model Studio may refuse a system message that is a
+#: list of parts.
+_QWEN_CACHE_MODELS = ("qwen3.8-flash", "qwen3.7-plus")
 
 
-def _with_qwen_cache_marker(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _with_qwen_cache_marker(messages: list[dict[str, Any]], *, model: str,
+                            tools: Any = None) -> list[dict[str, Any]]:
     """*messages* with the leading system message marked for Model Studio's
     explicit context cache (``cache_control``, the memory plan's W4 pilot,
     2026-11-23). Measured on qwen3.8-flash with the deep pass's system prompt:
     the implicit cache served 1,024 of its 1,623 tokens, the marked one all
     1,377 of the system text from the second call on; a cache hit is billed at
-    about a tenth of an input token. The leading system message is the stable
-    one (``prompt_cache.pack_system_messages``): identity, personality,
-    environment, or a background task's instructions."""
-    if not messages:
+    about a tenth of an input token and the write at 125 % of one.
+
+    Only for a background call of the deep pass's shape -- one system and one
+    user message, no tools -- which repeats its instructions call after call:
+    a chat's system message changes within the five minutes, and each change
+    is a write (the review of W4, 2026-11-24). ``KAZMA_PROMPT_CACHE=0`` turns
+    it off with the rest of the prompt cache."""
+    from kazma_core.prompt_cache import prompt_cache_enabled
+
+    if (tools or [m.get("role") for m in messages] != ["system", "user"]
+            or not str(model or "").lower().startswith(_QWEN_CACHE_MODELS) or not prompt_cache_enabled()):
         return messages
     first = messages[0]
     content = first.get("content")
-    if first.get("role") != "system" or not isinstance(content, str) or len(content) < _QWEN_CACHE_MIN_CHARS:
+    if not isinstance(content, str) or len(content) < _QWEN_CACHE_MIN_CHARS:
         return messages
     marked = {**first, "content": [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]}
     return [marked, *messages[1:]]
@@ -234,11 +246,15 @@ def cost_from_usage(
     input_cost_per_1m: float,
     output_cost_per_1m: float,
     cache_read_multiplier: float = 0.1,
+    cache_write_multiplier: float = 1.25,
 ) -> float:
-    """USD from token usage. Cached prompt tokens bill at ``cache_read_multiplier``.
+    """USD from token usage. Cached prompt tokens bill at ``cache_read_multiplier``,
+    prompt tokens written to the cache (``cache_creation_input_tokens`` among
+    the prompt's details: Model Studio's explicit cache) at
+    ``cache_write_multiplier``.
 
     Anthropic cache reads are ~0.1× input; OpenAI cached_tokens are similar.
-    Unknown usage keys are treated as zero. Cached count is clamped to prompt.
+    Unknown usage keys are treated as zero. Both counts are clamped to prompt.
     """
     usage = usage or {}
     prompt = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
@@ -254,9 +270,12 @@ def cost_from_usage(
             or 0
         )
     cached = max(0, min(cached, prompt) if prompt else cached)
-    billable = max(prompt - cached, 0)
+    written = int(details.get("cache_creation_input_tokens") or 0) if isinstance(details, dict) else 0
+    written = max(0, min(written, prompt - cached))
+    billable = max(prompt - cached - written, 0)
     return (
         (billable * input_cost_per_1m / 1_000_000)
+        + (written * input_cost_per_1m * cache_write_multiplier / 1_000_000)
         + (cached * input_cost_per_1m * cache_read_multiplier / 1_000_000)
         + (completion * output_cost_per_1m / 1_000_000)
     )
@@ -1786,9 +1805,10 @@ class LLMProvider:
             payload["tool_choice"] = "auto"
         if response_format:
             payload["response_format"] = response_format
-        # Model Studio serves other vendors' models too: Qwen's only.
-        if _is_qwen_api(str(self.config.base_url or "")) and "qwen" in str(payload["model"]).lower():
-            payload["messages"] = _with_qwen_cache_marker(payload["messages"])
+        if _is_qwen_api(str(self.config.base_url or "")) and len(messages) == 2:
+            # The call as it was made: a chat's notes are merged into one above.
+            payload["messages"] = _with_qwen_cache_marker(payload["messages"], model=str(payload["model"]),
+                                                          tools=tools)
         _apply_param_fixes(
             payload, _param_fixes_for(str(self.config.base_url or ""), payload["model"]),
             openai_api=_is_openai_api(str(self.config.base_url or "")),

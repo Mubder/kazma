@@ -203,7 +203,7 @@ def _merge_duplicate_beliefs(
     # so we never build a giant groups dict for the full corpus at once.
     rows = conn.execute(
         """
-        SELECT id, subject, predicate, object, confidence, structural_importance
+        SELECT id, subject, predicate, object, confidence, structural_importance, metadata_json
         FROM beliefs
         WHERE tenant_id = ?
           AND valid_until IS NULL AND invalidated_at IS NULL
@@ -215,7 +215,11 @@ def _merge_duplicate_beliefs(
     p_count = max(1, int(partition_count or 1))
     p_index = max(0, int(partition_index or 0)) % p_count
 
-    groups: dict[tuple[str, str, str], list[Any]] = {}
+    # One event on two days is two entries ("visited the dentist" in May and
+    # in November): the day is part of what makes them the same.
+    from kazma_core.memory.fact_days import event_day, metadata_of
+
+    groups: dict[tuple[str, str, str, str], list[Any]] = {}
     scanned = 0
     for r in rows:
         sub = (r["subject"] or "").strip().lower()
@@ -226,6 +230,7 @@ def _merge_duplicate_beliefs(
             sub,
             (r["predicate"] or "").strip().lower(),
             (r["object"] or "").strip().lower(),
+            event_day(metadata_of(r["metadata_json"])),
         )
         groups.setdefault(key, []).append(r)
 

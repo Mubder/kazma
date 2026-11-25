@@ -27,7 +27,9 @@ import re
 from functools import lru_cache
 
 __all__ = ["ASKED_AS_MINE", "ASKED_WITH", "KINDS", "NOT_ASKED_BY_WORDS", "asked_as_mine", "asked_words",
-           "kinds_asked", "kinds_said_of_the_user", "plural_of_a_kind", "users_names", "users_predicate"]
+           "kinds_asked", "kinds_said_of_the_user", "names_one_value", "normalised_name", "plural_of_a_kind",
+           "users_names",
+           "users_predicate"]
 
 #: Kazma's name -> the names a model gives the same fact about a person.
 KINDS: dict[str, tuple[str, ...]] = {
@@ -41,6 +43,12 @@ KINDS: dict[str, tuple[str, ...]] = {
                  "current_employer", "employer_name"),
     "current_role": ("job_title", "occupation", "profession", "job_role", "position", "works_as", "job"),
 }
+
+#: The table's names that also tell something the user did: "called" my mom,
+#: "moved_to" Porto, "named" the cat. With the day it happened the fact is an
+#: event of its own, never the user's name or home (the review of W4,
+#: 2026-11-24: "I called my mom" became ``user name_is "my mom"``).
+_EVENT_NAMES = frozenset({"called", "named", "moved_to"})
 
 
 #: The words a person asks each of these facts with, English and Arabic
@@ -265,7 +273,7 @@ def _canonical_for_user(predicate: str) -> str:
     from kazma_core.memory.belief_mutation import _plural_of
     from kazma_core.memory.predicates import _predicate_key
 
-    named = _normalised(predicate)
+    named = normalised_name(predicate)
     key = _predicate_key(named)
     found = _aliases().get(key) if key else None
     if found is None:
@@ -278,7 +286,7 @@ def _canonical_for_user(predicate: str) -> str:
 _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 
-def _normalised(predicate: str) -> str:
+def normalised_name(predicate: str) -> str:
     """*predicate* in snake case whatever its separators: "lives-in",
     "lives in", "lives.in", "livesIn", "currentLocation" (the main
     session's check of the third review, fix 4)."""
@@ -319,13 +327,31 @@ def users_names(subject: object, predicate: str) -> tuple[object, str]:
     return _users_subject(subject), users_predicate(subject, predicate)
 
 
+def names_one_value(subject: object, predicate: str) -> bool:
+    """Whether *predicate* names a fact a person holds one value of: by
+    Kazma's own class (``belief_mutation``), or another name of one of the
+    user's such facts ("home_city") -- unless that name also tells something
+    the user did ("called", "moved_to": :data:`_EVENT_NAMES`). An event's day
+    on such a fact is when it began."""
+    from kazma_core.memory.belief_mutation import _classify_predicate
+    from kazma_core.memory.predicates import _predicate_key
+
+    if _classify_predicate(predicate, None) != "set":
+        return True
+    kazma = users_predicate(subject, predicate)
+    if kazma == predicate or _classify_predicate(kazma, None) == "set":
+        return False
+    found = _aliases().get(_predicate_key(normalised_name(predicate)))
+    return found is not None and found[1] not in _EVENT_NAMES
+
+
 def plural_of_a_kind(predicate: str) -> bool:
     """Whether *predicate* puts one of the table's names in the plural
     ("homes", "employers"): a list."""
     from kazma_core.memory.belief_mutation import _plural_of
     from kazma_core.memory.predicates import _predicate_key
 
-    named = _normalised(predicate)
+    named = normalised_name(predicate)
     key = _predicate_key(named)
     found = _aliases().get(key) if key else None
     return found is not None and _plural_of(named, found[1])

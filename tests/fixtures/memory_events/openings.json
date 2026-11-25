@@ -1,0 +1,1142 @@
+{
+ "what": "The third review of W4 (2026-11-25): English/Arabic twins, an event told after each opening. 'openings' (the review's 45, then more in Gulf Arabic and MSA) are the user telling and keep it; 'pasted' is clearly pasted or another person's and keeps nothing. 'kept': messages whose one event stays, with its day. Invented text.",
+ "events": [
+  {
+   "said": [
+    "I sold my car yesterday",
+    "بعت سيارتي أمس"
+   ],
+   "predicate": "sold",
+   "value": [
+    "my car",
+    "سيارتي"
+   ],
+   "day": "2026-05-30"
+  },
+  {
+   "said": [
+    "I visited the dentist on Friday",
+    "زرت دكتور الأسنان يوم الجمعة"
+   ],
+   "predicate": "visited",
+   "value": [
+    "the dentist",
+    "دكتور الأسنان"
+   ],
+   "day": "2026-05-29"
+  },
+  {
+   "said": [
+    "I bought a watch",
+    "شريت ساعة"
+   ],
+   "predicate": "bought",
+   "value": [
+    "a watch",
+    "ساعة"
+   ],
+   "day": null
+  }
+ ],
+ "openings": {
+  "review": [
+   [
+    "Please, {} what should I do?",
+    "لو سمحت، {} شنو أسوي؟"
+   ],
+   [
+    "Excuse me, {} what now?",
+    "لو سمحتي {} والحين؟"
+   ],
+   [
+    "If you can, help me: {}",
+    "إذا تقدر ساعدني: {}"
+   ],
+   [
+    "Background: {}",
+    "الخلفية: {}"
+   ],
+   [
+    "Latest news: {}",
+    "آخر الأخبار: {}"
+   ],
+   [
+    "It was a busy week: {}",
+    "كان أسبوع زحمة: {}"
+   ],
+   [
+    "Good news: {}",
+    "خبر حلو: {}"
+   ],
+   [
+    "Quick update: {}",
+    "تحديث سريع: {}"
+   ],
+   [
+    "Note: {}",
+    "ملاحظة: {}"
+   ],
+   [
+    "The story: {}",
+    "القصة: {}"
+   ],
+   [
+    "In short: {}",
+    "باختصار: {}"
+   ],
+   [
+    "The problem: {}",
+    "المشكلة: {}"
+   ],
+   [
+    "My day: {}",
+    "يومي: {}"
+   ],
+   [
+    "Yesterday: {}",
+    "أمس: {}"
+   ],
+   [
+    "Honestly: {}",
+    "بصراحة: {}"
+   ],
+   [
+    "By the way: {}",
+    "على فكرة: {}"
+   ],
+   [
+    "First: {}",
+    "أولاً: {}"
+   ],
+   [
+    "Context: {}",
+    "السياق: {}"
+   ],
+   [
+    "My situation: {}",
+    "وضعي: {}"
+   ],
+   [
+    "The truth: {}",
+    "الصراحة: {}"
+   ],
+   [
+    "Imagine! {}",
+    "تخيل! {}"
+   ],
+   [
+    "Imagine, {}",
+    "تخيل، {}"
+   ],
+   [
+    "Believe it or not, {}",
+    "صدق أو لا تصدق، {}"
+   ],
+   [
+    "If I remember right, {}",
+    "إذا ما أخطأت، {}"
+   ],
+   [
+    "God willing it helps: {}",
+    "إن شاء الله خير: {}"
+   ],
+   [
+    "Thank God, {}",
+    "الحمدلله {}"
+   ],
+   [
+    "My dear Kazma, {}",
+    "يا كازما يا عزيزي، {}"
+   ],
+   [
+    "Good morning, {}",
+    "صباح الخير، {}"
+   ],
+   [
+    "Peace be upon you, {}",
+    "السلام عليكم، {}"
+   ],
+   [
+    "By God {}",
+    "والله {}"
+   ],
+   [
+    "Even though I was tired, {}",
+    "مع إني كنت تعبان، {}"
+   ],
+   [
+    "Assuming you remember, {}",
+    "على فرض إنك تذكر، {}"
+   ],
+   [
+    "I forgot to tell you, {}",
+    "نسيت أقولك، {}"
+   ],
+   [
+    "I wanted to tell you that {}",
+    "بغيت أقولك إني {}"
+   ],
+   [
+    "I'm telling you, {}",
+    "أقولك {}"
+   ],
+   [
+    "As I told you, {}",
+    "مثل ما قلت لك، {}"
+   ],
+   [
+    "My friend knows: {}",
+    "صديقي يدري: {}"
+   ],
+   [
+    "The doctor was right, {}",
+    "الدكتور كان صادق، {}"
+   ],
+   [
+    "My wife was happy because {}",
+    "زوجتي كانت فرحانة لأني {}"
+   ],
+   [
+    "My wife said it's fine, {}",
+    "زوجتي قالت عادي، {}"
+   ],
+   [
+    "Let me tell you, {}",
+    "خل أقولك، {}"
+   ],
+   [
+    "Do you know what? {}",
+    "تدري شنو؟ {}"
+   ],
+   [
+    "Question: {}",
+    "سؤال: {}"
+   ],
+   [
+    "To be clear: {}",
+    "للتوضيح: {}"
+   ],
+   [
+    "From me: {}",
+    "مني: {}"
+   ]
+  ],
+  "more": [
+   [
+    "If you don't mind, {} what should I do?",
+    "لو تكرمت، {} ماذا أفعل؟"
+   ],
+   [
+    "If you please: {}",
+    "لو سمحتوا: {}"
+   ],
+   [
+    "Man, {}",
+    "يا خوي {}"
+   ],
+   [
+    "Brother, {}",
+    "يا أخي، {}"
+   ],
+   [
+    "You won't believe it: {}",
+    "ما راح تصدق: {}"
+   ],
+   [
+    "The thing is: {}",
+    "السالفة: {}"
+   ],
+   [
+    "Here's the thing: {}",
+    "هذي السالفة: {}"
+   ],
+   [
+    "Here's what happened: {}",
+    "هذا اللي صار: {}"
+   ],
+   [
+    "Here is my news: {}",
+    "هذي أخباري: {}"
+   ],
+   [
+    "What happened today: {}",
+    "اللي صار اليوم: {}"
+   ],
+   [
+    "Summary of my day: {}",
+    "ملخص يومي: {}"
+   ],
+   [
+    "To summarize: {}",
+    "للتلخيص: {}"
+   ],
+   [
+    "Important: {}",
+    "مهم: {}"
+   ],
+   [
+    "Reminder: {}",
+    "تذكير: {}"
+   ],
+   [
+    "Confession: {}",
+    "اعتراف: {}"
+   ],
+   [
+    "A question: {}",
+    "عندي سؤال: {}"
+   ],
+   [
+    "Good evening Kazma: {}",
+    "مساء الخير كازما: {}"
+   ],
+   [
+    "For your information: {}",
+    "لعلمك: {}"
+   ],
+   [
+    "For example: {}",
+    "مثلا: {}"
+   ],
+   [
+    "Suppose you want to know: {}",
+    "افترض إنك تبي تعرف: {}"
+   ],
+   [
+    "If you ask me, {}",
+    "إذا تسألني، {}"
+   ],
+   [
+    "If I'm not mistaken, {}",
+    "إذا لم أكن مخطئا، {}"
+   ],
+   [
+    "As far as I remember, {}",
+    "على ما أذكر، {}"
+   ],
+   [
+    "My mother is upset because {}",
+    "أمي زعلانة لأني {}"
+   ],
+   [
+    "Everyone says I'm crazy: {}",
+    "الكل يقول إني مجنون: {}"
+   ],
+   [
+    "Monday: {}",
+    "الاثنين: {}"
+   ],
+   [
+    "In the morning: {}",
+    "الصبح: {}"
+   ],
+   [
+    "Work: {}",
+    "الشغل: {}"
+   ],
+   [
+    "Two things: {}",
+    "شغلتين: {}"
+   ],
+   [
+    "The result: {}",
+    "النتيجة: {}"
+   ],
+   [
+    "The reason: {}",
+    "السبب: {}"
+   ],
+   [
+    "Tell me if this is wise: {}",
+    "قل لي إذا هذا تصرف صحيح: {}"
+   ],
+   [
+    "What do you think of this: {}",
+    "شرايك في هذا: {}"
+   ],
+   [
+    "Check this: {}",
+    "شوف هذا: {}"
+   ],
+   [
+    "Listen: {}",
+    "اسمع: {}"
+   ],
+   [
+    "Can you believe this? {}",
+    "تصدق هذا؟ {}"
+   ],
+   [
+    "Guess what! {}",
+    "احزر! {}"
+   ],
+   [
+    "Write this down: {}",
+    "سجل عندك: {}"
+   ],
+   [
+    "Remember: {}",
+    "تذكر: {}"
+   ],
+   [
+    "Make a note: {}",
+    "اكتب ملاحظة: {}"
+   ],
+   [
+    "Summarize my options. {}",
+    "لخص لي خياراتي. {}"
+   ],
+   [
+    "I told my boss: {}",
+    "قلت لمديري: {}"
+   ],
+   [
+    "I wrote to my sister: {}",
+    "كتبت لأختي: {}"
+   ],
+   [
+    "To whom it may concern, {}",
+    "إلى من يهمه الأمر، {}"
+   ],
+   [
+    "Hi,\n{}\nThanks,\nBader",
+    "هلا،\n{}\nشكرا،\nبدر"
+   ],
+   [
+    "Dear Kazma,\n{}\nRegards",
+    "عزيزي كازما،\n{}\nتحياتي"
+   ],
+   [
+    "Date: today\n{}",
+    "التاريخ: اليوم\n{}"
+   ],
+   [
+    "My week\n\n{}",
+    "أسبوعي\n\n{}"
+   ],
+   [
+    "Work: busy\nHome: {}",
+    "الشغل: زحمة\nالبيت: {}"
+   ],
+   [
+    "Monday: gym\nTuesday: {}",
+    "الاثنين: نادي\nالثلاثاء: {}"
+   ],
+   [
+    "Kuwait: rain\nMe: {}",
+    "الكويت: مطر\nأنا: {}"
+   ],
+   [
+    "12:30 PM\n{}",
+    "١٢:٣٠ م\n{}"
+   ],
+   [
+    "Thank you, you were right. {}",
+    "شكرا، كلامك صح. {}"
+   ],
+   [
+    "Actually I lied. {}",
+    "الصراحة كذبت عليك. {}"
+   ],
+   [
+    "The manager asked, {}",
+    "المدير سأل، {}"
+   ],
+   [
+    "According to my calendar, {}",
+    "حسب التقويم، {}"
+   ],
+   [
+    "Per my notes, {}",
+    "حسب ملاحظاتي، {}"
+   ],
+   [
+    "In my own words: {}",
+    "بكلامي: {}"
+   ],
+   [
+    "Draft of my life: {}",
+    "مسودة حياتي: {}"
+   ]
+  ]
+ },
+ "pasted": [
+  [
+   "Translate to Arabic: {}",
+   "ترجم للإنجليزي: {}"
+  ],
+  [
+   "Please translate this:\n{}",
+   "لو سمحت ترجم هذا:\n{}"
+  ],
+  [
+   "Can you translate this into Spanish? {}",
+   "ممكن تترجم هذا للإسباني؟ {}"
+  ],
+  [
+   "Fix the grammar: {}",
+   "صحح القواعد: {}"
+  ],
+  [
+   "Proofread this:\n\n{}",
+   "دقق هذا النص:\n\n{}"
+  ],
+  [
+   "Summarize this email:\n{}",
+   "لخص هذا الإيميل:\n{}"
+  ],
+  [
+   "Here is the email:\n{}",
+   "هذا الإيميل:\n{}"
+  ],
+  [
+   "Reply to this:\n{}",
+   "رد على هذا:\n{}"
+  ],
+  [
+   "Reply to this message: {}",
+   "رد على هذه الرسالة: {}"
+  ],
+  [
+   "Can you reply to this?\n\nHi Ali,\n{}\n\nBest,\nOmar",
+   "ممكن ترد على هذا؟\n\nهلا علي،\n{}\n\nتحياتي،\nعمر"
+  ],
+  [
+   "> {}\nWhat should I answer?",
+   "> {}\nشنو أرد؟"
+  ],
+  [
+   "```\n{}\n```",
+   "```\n{}\n```"
+  ],
+  [
+   "---------- Forwarded message ---------\nFrom: Omar\nSubject: news\n\n{}",
+   "---------- رسالة محولة ---------\nمن: عمر\nالموضوع: أخبار\n\n{}"
+  ],
+  [
+   "From: Omar <omar@x.y>\nSubject: Hi\n\n{}\n\nBest,\nOmar\n\nWhat does he want?",
+   "من: عمر <omar@x.y>\nالموضوع: هلا\n\n{}\n\nتحياتي،\nعمر\n\nشنو يبي؟"
+  ],
+  [
+   "On Tue, 18 Nov 2026 at 12:01, Dana <dana@x.y> wrote:\n{}",
+   "في الثلاثاء، 18 نوفمبر 2026 في 12:01، كتبت دانة <dana@x.y>:\n{}"
+  ],
+  [
+   "Dana wrote:\n{}",
+   "دانة كتبت:\n{}"
+  ],
+  [
+   "My sister said: {}",
+   "أختي قالت: {}"
+  ],
+  [
+   "My sister: {}\nWhat do I say?",
+   "أختي: {}\nشنو أقول؟"
+  ],
+  [
+   "[30/05/2026, 10:11] Omar: {}",
+   "[30/05/2026, 10:11] عمر: {}"
+  ],
+  [
+   "Omar: {}\nMe: nice!",
+   "عمر: {}\nأنا: مبروك"
+  ],
+  [
+   "Omar: {}\nSara: congrats!",
+   "عمر: {}\nسارة: مبروك"
+  ],
+  [
+   "Omar: {}\nSara: really?\nOmar: so happy",
+   "عمر: {}\nسارة: صج؟\nعمر: وايد فرحان"
+  ],
+  [
+   "Omar: {}\nWhat should I tell Omar?",
+   "عمر: {}\nشنو أقول حق عمر؟"
+  ],
+  [
+   "Omar, [30.05.26 12:01]\n{}",
+   "عمر، [30.05.26 12:01]\n{}"
+  ],
+  [
+   "What does \"{}\" mean?",
+   "شنو معنى «{}»؟"
+  ],
+  [
+   "She wrote me \"{}\"",
+   "كتبت لي \"{}\""
+  ],
+  [
+   "Message from Dana: {}",
+   "رسالة دانة: {}"
+  ],
+  [
+   "Pretend you are a rich man who says {}",
+   "تقمص دور رجل غني يقول {}"
+  ],
+  [
+   "[Attached: a.txt]\n<kazma:data source=\"document\" untrusted=\"true\">\n{}\n</kazma:data>",
+   "[Attached: a.txt]\n<kazma:data source=\"document\" untrusted=\"true\">\n{}\n</kazma:data>"
+  ],
+  [
+   "{}, says the mayor. Is it true?",
+   "{}، قال المدير. صج؟"
+  ],
+  [
+   "My boss wrote: {}",
+   "مديري كتب: {}"
+  ],
+  [
+   "Is this sentence correct: {}",
+   "هل هذي الجملة صحيحة: {}"
+  ],
+  [
+   "Write an email to my boss saying: {}",
+   "اكتب إيميل لمديري: {}"
+  ],
+  [
+   "[12:01, 30/05/2026] dana_92: {}",
+   "[12:01, 30/05/2026] dana_92: {}"
+  ]
+ ],
+ "kept": [
+  {
+   "case": "EN undated yes",
+   "said": "Yes, I finished it",
+   "predicate": "finished",
+   "value": "the marathon",
+   "day": null
+  },
+  {
+   "case": "AR undated yes",
+   "said": "ايه خلصته",
+   "predicate": "finished",
+   "value": "الماراثون",
+   "day": null
+  },
+  {
+   "case": "EN dated yes",
+   "said": "Yes, I finished it yesterday",
+   "predicate": "finished",
+   "value": "the marathon",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR dated yes",
+   "said": "ايه خلصته أمس",
+   "predicate": "finished",
+   "value": "الماراثون",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN pronoun after paste",
+   "said": "Here's the product page:\n> Sony WH-1000XM5 headphones, wireless noise cancelling\nI bought these yesterday, are they good?",
+   "predicate": "bought",
+   "value": "Sony WH-1000XM5 headphones",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR pronoun after paste",
+   "said": "هذا المنتج:\n> سماعات سوني WH-1000XM5 لاسلكية\nشريتها أمس، زينة؟",
+   "predicate": "bought",
+   "value": "سماعات سوني WH-1000XM5",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN before paste",
+   "said": "I bought the Sony headphones yesterday. Can you check this email from the shop?\n> Your Sony headphones order shipped",
+   "predicate": "bought",
+   "value": "Sony headphones",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR before paste",
+   "said": "شريت سماعات سوني أمس. ممكن تشوف هذا الإيميل من المحل؟\n> طلبك سماعات سوني انشحن",
+   "predicate": "bought",
+   "value": "سماعات سوني",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN after colon paste",
+   "said": "Translate this to Arabic: Dear Sir, thanks.\nBy the way, I met Omar on Friday",
+   "predicate": "met",
+   "value": "Omar",
+   "day": "2026-05-29"
+  },
+  {
+   "case": "AR after colon paste",
+   "said": "ترجم هذا للإنجليزي: عزيزي، شكرا.\nبالمناسبة، قابلت عمر يوم الجمعة",
+   "predicate": "met",
+   "value": "عمر",
+   "day": "2026-05-29"
+  },
+  {
+   "case": "EN several",
+   "said": "Last week was busy: on Monday I sold my car, Tuesday I visited my aunt in Jahra, and yesterday I adopted a cat.",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR several",
+   "said": "كان أسبوع زحمة: الاثنين بعت سيارتي، الثلاثاء زرت خالتي بالجهرا، وأمس تبنيت قطوة.",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN told by boss",
+   "said": "My manager told me I got the promotion yesterday",
+   "predicate": "received",
+   "value": "a promotion",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR told by boss",
+   "said": "مديري قال لي إني ترقيت أمس",
+   "predicate": "received",
+   "value": "ترقية",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN doctor said",
+   "said": "The doctor said I broke my wrist on Friday",
+   "predicate": "broke",
+   "value": "my wrist",
+   "day": "2026-05-29"
+  },
+  {
+   "case": "AR doctor said",
+   "said": "الدكتور قال إني كسرت معصمي يوم الجمعة",
+   "predicate": "broke",
+   "value": "معصمي",
+   "day": "2026-05-29"
+  },
+  {
+   "case": "EN quoted title",
+   "said": "I read \"The Alchemist\" last week and finished it on Friday",
+   "predicate": "finished",
+   "value": "The Alchemist",
+   "day": "2026-05-29"
+  },
+  {
+   "case": "AR quoted title",
+   "said": "قريت «الخيميائي» الأسبوع الماضي وخلصته الجمعة",
+   "predicate": "finished",
+   "value": "الخيميائي",
+   "day": "2026-05-29"
+  },
+  {
+   "case": "EN quoted title dquote only",
+   "said": "Yesterday I watched \"Oppenheimer\" with my brother",
+   "predicate": "watched",
+   "value": "Oppenheimer",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR quoted title only",
+   "said": "أمس شفت فيلم \"أوبنهايمر\" مع أخوي",
+   "predicate": "watched",
+   "value": "أوبنهايمر",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN quoted undated",
+   "said": "I watched \"Oppenheimer\" with my brother",
+   "predicate": "watched",
+   "value": "Oppenheimer",
+   "day": null
+  },
+  {
+   "case": "AR quoted undated",
+   "said": "شفت \"أوبنهايمر\" مع أخوي",
+   "predicate": "watched",
+   "value": "أوبنهايمر",
+   "day": null
+  },
+  {
+   "case": "EN denial",
+   "said": "I didn't go to Paris, I went to Lyon yesterday",
+   "predicate": "travelled_to",
+   "value": "Lyon",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR denial",
+   "said": "ما رحت باريس، رحت ليون أمس",
+   "predicate": "travelled_to",
+   "value": "ليون",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN never thought",
+   "said": "I never said I sold the house, I said I rented it out last month",
+   "predicate": "rented out",
+   "value": "the house",
+   "day": "2026-04"
+  },
+  {
+   "case": "EN AIdigits",
+   "said": "I bought 3 chairs for 45 KD on 12 May",
+   "predicate": "bought",
+   "value": "3 chairs for 45 KD",
+   "day": "2026-05-12"
+  },
+  {
+   "case": "AR AIdigits",
+   "said": "شريت ٣ كراسي بـ٤٥ دينار يوم ١٢ مايو",
+   "predicate": "bought",
+   "value": "٣ كراسي بـ ٤٥ دينار",
+   "day": "2026-05-12"
+  },
+  {
+   "case": "AR AI digits -> west",
+   "said": "شريت ٣ كراسي بـ٤٥ دينار يوم ١٢ مايو",
+   "predicate": "bought",
+   "value": "3 كراسي بـ 45 دينار",
+   "day": "2026-05-12"
+  },
+  {
+   "case": "AR only number",
+   "said": "دفعت ٤٥ دينار أمس",
+   "predicate": "paid",
+   "value": "45 دينار",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR translated object",
+   "said": "رحت دبي أمس",
+   "predicate": "travelled_to",
+   "value": "Dubai",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR translated undated",
+   "said": "رحت دبي وشريت ساعة",
+   "predicate": "bought",
+   "value": "a watch",
+   "day": null
+  },
+  {
+   "case": "AR gulf",
+   "said": "أمس طلعت كشتة مع الربع بالوفرة",
+   "predicate": "went_on",
+   "value": "كشتة مع الربع بالوفرة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR gulf2",
+   "said": "توني مخلص دوام، وقبل شوي غديت عند امي",
+   "predicate": "ate",
+   "value": "غداء عند أمي",
+   "day": "2026-05-31"
+  },
+  {
+   "case": "AR gulf3 dishdasha",
+   "said": "فصلت دشداشة يديدة قبل يومين",
+   "predicate": "ordered",
+   "value": "دشداشة جديدة",
+   "day": "2026-05-29"
+  },
+  {
+   "case": "AR gulf4 baa",
+   "said": "بعت الموتر حق اخوي ويا ولد عمي",
+   "predicate": "sold",
+   "value": "سيارة أخي",
+   "day": null
+  },
+  {
+   "case": "EN nominal",
+   "said": "I got married last Saturday",
+   "predicate": "married",
+   "value": "got married",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN gave birth",
+   "said": "My daughter was born yesterday!",
+   "predicate": "welcomed",
+   "value": "birth of my daughter",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "AR birth",
+   "said": "انولدت بنتي أمس",
+   "predicate": "received",
+   "value": "ولادة ابنتي",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN let's",
+   "said": "Let me tell you about my day: I ran 10 km this morning",
+   "predicate": "ran",
+   "value": "10 km",
+   "day": "2026-05-31"
+  },
+  {
+   "case": "EN btw colon",
+   "said": "Update: I passed my driving test today",
+   "predicate": "passed",
+   "value": "driving test",
+   "day": "2026-05-31"
+  },
+  {
+   "case": "AR update colon",
+   "said": "تحديث: نجحت في اختبار السواقة اليوم",
+   "predicate": "passed",
+   "value": "اختبار السواقة",
+   "day": "2026-05-31"
+  },
+  {
+   "case": "EN list bullets",
+   "said": "What I did this week:\n- sold my bike on Monday\n- met Dana on Tuesday",
+   "predicate": "sold",
+   "value": "my bike",
+   "day": "2026-05-25"
+  },
+  {
+   "case": "AR list bullets",
+   "said": "اللي سويته هالأسبوع:\n- بعت دراجتي الاثنين\n- قابلت دانة الثلاثاء",
+   "predicate": "sold",
+   "value": "دراجتي",
+   "day": "2026-05-25"
+  },
+  {
+   "case": "EN remember:",
+   "said": "Remember this: I paid the rent on 28 May",
+   "predicate": "paid",
+   "value": "the rent",
+   "day": "2026-05-28"
+  },
+  {
+   "case": "AR remember:",
+   "said": "تذكر هذا: دفعت الإيجار يوم ٢٨ مايو",
+   "predicate": "paid",
+   "value": "الإيجار",
+   "day": "2026-05-28"
+  },
+  {
+   "case": "EN wife told",
+   "said": "My wife told me yesterday that we won the tender",
+   "predicate": "won",
+   "value": "the tender",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN summary",
+   "said": "To summarize: I quit my job on Thursday",
+   "predicate": "quit",
+   "value": "my job",
+   "day": "2026-05-28"
+  },
+  {
+   "case": "EN question",
+   "said": "Did you know I climbed Kilimanjaro last year?",
+   "predicate": "climbed",
+   "value": "Kilimanjaro",
+   "day": "2025"
+  },
+  {
+   "case": "AR question",
+   "said": "تدري إني تسلقت كليمنجارو السنة الماضية؟",
+   "predicate": "climbed",
+   "value": "كليمنجارو",
+   "day": "2025"
+  },
+  {
+   "case": "EN if",
+   "said": "If I remember right, I visited Rome in 2019",
+   "predicate": "visited",
+   "value": "Rome",
+   "day": "2019"
+  },
+  {
+   "case": "AR if",
+   "said": "إذا ما خانتني الذاكرة زرت روما في ٢٠١٩",
+   "predicate": "visited",
+   "value": "روما",
+   "day": "2019"
+  },
+  {
+   "case": "EN code",
+   "said": "I installed Docker yesterday:\n```\ndocker run hello\n```",
+   "predicate": "installed",
+   "value": "Docker",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN email about me",
+   "said": "I emailed my landlord this: \"I paid the rent on 28 May\"",
+   "predicate": "paid",
+   "value": "the rent",
+   "day": "2026-05-28"
+  },
+  {
+   "case": "EN pasted own note",
+   "said": "my notes from today:\n- met Sara about the loan\n- paid the plumber",
+   "predicate": "met",
+   "value": "Sara about the loan",
+   "day": "2026-05-31"
+  },
+  {
+   "case": "AR own note",
+   "said": "ملاحظاتي اليوم:\n- قابلت سارة عن القرض\n- دفعت للسباك",
+   "predicate": "met",
+   "value": "سارة عن القرض",
+   "day": "2026-05-31"
+  },
+  {
+   "case": "EN Sentences then colon quote",
+   "said": "I sent this to my boss: thanks. Also I bought a bike yesterday.",
+   "predicate": "bought",
+   "value": "a bike",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "EN what do you say",
+   "said": "What do you say about my new sofa? I bought it yesterday at IKEA",
+   "predicate": "bought",
+   "value": "sofa at IKEA",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after EN 0",
+   "said": "Here's what Omar wrote me:\n> I bought a Rolex on Friday\n\nYesterday I adopted a cat.",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after AR 1",
+   "said": "هذا اللي كتبه لي عمر:\n> شريت رولكس يوم الجمعة\n\nأمس تبنيت قطوة.",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after EN 2",
+   "said": "Omar wrote me:\n> I bought a Rolex on Friday\n\nAnyway, yesterday I adopted a cat.",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after AR 3",
+   "said": "عمر كتب لي:\n> شريت رولكس يوم الجمعة\n\nالمهم أمس تبنيت قطوة.",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after EN 4",
+   "said": "> I bought a Rolex on Friday\n\nOmar sent me that. Yesterday I adopted a cat.",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after AR 5",
+   "said": "> شريت رولكس يوم الجمعة\n\nعمر طرش لي هذا. أمس تبنيت قطوة.",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after EN 6",
+   "said": "Fix the grammar of this email:\n> I buyed a Rolex\n\nYesterday I adopted a cat.",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after AR 7",
+   "said": "صحح هذا الإيميل:\n> شريت رولكس\n\nأمس تبنيت قطوة.",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after EN 8",
+   "said": "Yesterday I adopted a cat. Reply to this:\n> Your order shipped",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after AR 9",
+   "said": "أمس تبنيت قطوة. رد على هذا:\n> طلبك انشحن",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after EN 10",
+   "said": "Yesterday I adopted a cat. Translate this: hello",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after AR 11",
+   "said": "أمس تبنيت قطوة. ترجم هذا: هلا",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after EN 12",
+   "said": "Yesterday I adopted a cat, can you check this message: hello",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after AR 13",
+   "said": "أمس تبنيت قطوة، ممكن تشوف هالرسالة: هلا",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after EN 14",
+   "said": "Yesterday I adopted a cat.\nOmar: congrats!\nMe: thanks",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after AR 15",
+   "said": "أمس تبنيت قطوة.\nعمر: مبروك\nأنا: الله يبارك فيك",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after EN 16",
+   "said": "Omar said congrats because yesterday I adopted a cat",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after AR 17",
+   "said": "عمر قال مبروك لأني أمس تبنيت قطوة",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after EN 18",
+   "said": "What did Omar mean by \"nice\"? I had told him that yesterday I adopted a cat",
+   "predicate": "adopted",
+   "value": "a cat",
+   "day": "2026-05-30"
+  },
+  {
+   "case": "after AR 19",
+   "said": "شنو يقصد عمر بـ«حلو»؟ كنت قايل له إني أمس تبنيت قطوة",
+   "predicate": "adopted",
+   "value": "قطوة",
+   "day": "2026-05-30"
+  }
+ ]
+}

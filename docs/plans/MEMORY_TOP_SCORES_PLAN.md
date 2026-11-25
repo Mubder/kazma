@@ -636,8 +636,324 @@ against today, 20 gains and 5 losses in both runs; multi-session 0.40 to
 0.57 / 0.59. The block's median 1,336 to 1,424 tokens (p95 1,490 to 1,496).
 Reviewed before the merge: an event told again that already has its day left
 a write transaction open on a default-mode connection (fixed), and the cache
-marker now goes to Qwen's own models only. The extraction recording stays
-declared pending: it is taken on the model the last one was made on.
+marker now goes to Qwen's own models only. The extraction recording stayed
+declared pending until it could be taken on the model the last one was made
+on (below).
+
+**The recording** (24 Nov): deepseek-flash, the 40 turns of extraction
+dataset v3, 5 askings each, 200 calls (360,945 prompt tokens, 325,968 of them
+from DeepSeek's cache, 31,270 completion, about $0.03); locked with
+`--new-recording`, which ends the declared change. Before (20 Nov, the prompt
+without events) and after, the spread two standard errors:
+
+| | English | Arabic | mixed |
+|---|---|---|---|
+| found | 1.000 -> 0.990 (0.021) | 0.971 -> 0.971 (0.057) | 1.000 -> 1.000 |
+| named as the list names it | 0.863 -> 0.819 (0.025) | 0.941 -> 0.912 (0.083) | 0.720 -> 0.740 (0.049) |
+| right | 1.000 -> 0.990 (0.020) | 1.000 -> 0.972 (0.057) | 0.926 -> 1.000 |
+| quiet | 1.000 -> 1.000 | 1.000 -> 1.000 | 1.000 -> 1.000 |
+| a fact's start | 0.90 -> 0.80 (0.245) | 1.00 -> 1.00 | |
+| replaced / ended | 1.00 / 1.00, unchanged | 1.00 / 1.00, unchanged | |
+
+Every fall but one is inside the spread of five askings: one English asking
+kept "3 May" for "the 3rd of May" (found and right), one Arabic asking wrote
+Noura's name in Latin letters (both of its facts count as unwanted), two
+askings of "last month" said on 31 May gave May (one did before). The
+English name is past it: 77 of 94 found facts under a listed name against 82
+of 95, mostly `loves` for "likes", `occupation_is` for "occupation" and
+`prefers_drink` for "morning_drink", twice each; the facts are the same. The
+write scenarios all pass as before. What it does not say: none of the 40 turns
+tells an event (no reply before or after gives `"on"`), so this set measures
+what the prompt change did to the rest of extraction, not the event lines;
+those are measured by the pilots. Event turns are dataset v4 (below).
+
+**The pilot on deepseek-flash** (24 Nov, the model live runs on): the same 50
+questions, 12,322 rounds, prompt, reader and judges, with stores and replies
+of its own (`longmemeval_facts_pilot.py --label deepseek-flash --stop-usd`).
+The Qwen pilot's blocks rebuilt at this commit are the same, 50 of 50, so its
+answers stand and only the new blocks were asked.
+
+| | today | Qwen: facts / with event lines | DeepSeek: facts / with event lines |
+|---|---|---|---|
+| answered, main run (second judge) | 0.60 (0.60) | 0.60 (0.60) / 0.70 (0.70) | 0.64 (0.64) / 0.72 (0.74) |
+| answered, noise run (second judge) | 0.60 (0.62) | 0.60 (0.58) / 0.72 (0.70) | 0.66 (0.66) / 0.74 (0.76) |
+| multi-session (16), main / noise, with event lines | 0.375 / 0.375 | 0.562 / 0.562 | 0.625 / 0.688 |
+| temporal reasoning (16), main / noise, with event lines | 0.562 / 0.562 | 0.625 / 0.688 | 0.688 / 0.625 |
+| answers that flip between the two runs | 0 | 0 / 1 | 1 / 3 |
+| block tokens p50 / p95 | 1,429 / 1,494 | 1,456 / 1,496; 1,455 / 1,496 | 1,458 / 1,500; 1,459 / 1,498 |
+| facts written (dated events) | 0 | 13,900 (838) | 9,319 (853) |
+| deep passes that failed four tries | | 144 | 0 |
+| tokens: prompt (cached), completion (reasoning) | | 33.3M (19.8M), 15.7M (14.5M) | 32.3M (19.1M), 3.2M (2.6M) |
+| cost | | about $9.70 | $3.95 off-peak (twice that at peak) |
+
+On live's model the event lines gain in both runs: against today +8 / -2 and
++8 / -1 (7 gains and 1 loss in both), against the same facts without the dated
+events +5 / -1 in each (4 gains in both, no loss in both). Facts without the
+events gain here too (+3 / -1, +3 / -0; on Qwen +2 / -2), so on this model
+part of the gain is the facts'. Between the two extractors +3 / -2 in each run
+on 50 questions: no difference to claim. DeepSeek writes a third fewer facts
+and the same number of dated events with a fifth of the completion tokens.
+The loss in both runs is the one Qwen's had: an unanswerable question answered
+from a fact. Each extractor wrote its stores once, so what extraction itself
+varies by is not in these numbers; the noise run repeats the answers only.
+Answers asked: 300 calls a run, 189K prompt and 73K completion tokens each.
+Evidence: `docs/audits/evidence/memory_event_lines/pilot_deepseek.json`.
+
+**The independent review, fixed** (24 Nov; code only, the prompt and the
+message are the same, so the recording and every cached reply stand). What it
+found at 81b7a2529 and what holds now (`memory/fact_days.py`,
+`tests/test_memory_event_lines_review.py`: each point fails on that commit):
+an event is a list entry under its own name ("I called my mom" became the
+user's name, "moved_to Porto" their home, and an event labelled single-valued
+closed the last one); one told again without its day keeps it, and another
+event is not closed by it ("bananas" by "fresh vegetables"); the same words on
+another day are another occasion, the latest shown first, and with `replaces`
+a correction -- when what was told then can have happened on that day; a day
+names the turn that gave it, so forgetting that turn takes the day back, and
+on a fact the user stated it reads as Kazma's; an event is true on its day
+("what did I buy last month?"); a day to come is planned, not a start lost; a
+month reads "in"; an event stands in the user's own words; Qwen's cache marks
+only a background call of the measured models, and its write is priced.
+
+The cached replies of both pilots through the fixed apply step, round by
+round, no model call (a reply's `replaces` resolved by what the fact it named
+was; 6 and 2 named one no longer held):
+
+| | Qwen replies, dev 200 | DeepSeek replies, pilot 50 |
+|---|---|---|
+| dated events current | 2,976 -> 3,049 | 782 -> 790 |
+| planned (they had no day) | 0 -> 251 | 0 -> 38 |
+| events on a single-valued fact | 21 -> 0 | 11 -> 0 |
+| events that were lost to an undated retelling | 95 have their day | 15 have their day |
+| another occasion, or a corrected day | 33 | 11 |
+| closed by another event before | 10 | 0 |
+| events not kept: not in the user's own words | 67 of 3,888 told | 12 of 959 told |
+| blocks that change | 45 of 200, 31 of them only "on" -> "in" | 11 of 50, 8 of them only that |
+| block tokens p50 / p95 | 1,424 / 1,496 -> 1,425 / 1,496 | 1,459 / 1,498 -> the same |
+| questions showing an event line | 69 -> 72 | 19 -> 20 |
+| the answer's words in the block | 57 of 129 -> the same | 12 of 37 -> the same |
+| answered, main run (second judge) | 0.755 (0.74) -> 0.760 (0.745), +1 / -0 | 0.72 (0.74) -> the same, 0 / 0 |
+| answered, noise run (second judge) | 0.765 (0.75) -> the same, 0 / 0 | 0.74 (0.76) -> 0.72 (0.74), +0 / -1 |
+| the changed blocks right, main / noise | 34 -> 35 / 35 -> 35 of 45 | 8 -> 8 / 8 -> 7 of 11 |
+
+Only the changed blocks were asked (a block that is the same has the same
+answer): 67 answers a run, judged twice. Nothing is lost in both runs; without
+the event facts one of 9 changed dev answers is lost in the noise run; the one
+DeepSeek answer lost in the noise run is right in the main one (it is one of
+the four that flip between the runs), and the one Qwen gain is in the main run
+only. Beside the block with no facts the fixed blocks stay where they were:
+0.69 -> 0.76 (main) and 0.69 -> 0.765 (noise) on dev, 0.60 -> 0.72 and 0.60 ->
+0.72 on the pilot. Read one by one, none of the 14 and 3 blocks that change by
+more than the word loses what its question asks; "Which book did I finish a
+week ago?" and "What did I do 5 days ago?" now show only that day's. Spend on
+Qwen, both runs: 134 answers and 268 judgements, 191,108 prompt tokens for the
+reader (48,000 cached) and 82,421 out, 62,850 and 268 for the judges. What fell: the 67 and 12
+events. The first rule (half of the event's words in the turn's own words)
+left out 103 and 21, and reading them showed days told of something memory
+holds, by "it" ("I got it in 2018"), so the held fact's words count when the
+day is the user's own (the second review replaced this rule, below); 48 and 4 of the rest stand
+in the message where `own_words` leaves them out (finding 19). A start of a
+lasting fact ("since 2019") is not carried over to the entry that replaces
+it: the new one may be another thing. Evidence:
+`docs/audits/evidence/memory_event_lines/review_fixes.json`. The Qwen spend
+above counted no cache writes; there were 30 (49,560 tokens, under a cent).
+
+**Event turns, dataset v4** (24 Nov). Fifteen shapes, each in English and in
+Arabic: two events of one day with a place and a price, a call with a day, a
+move, the same farm on two days, a retelling without its day, a wrong day
+corrected, an appointment to come, two kinds of pasted first-person text,
+three turns with no event, a habit, someone else's trip, a month, and an event
+with no day. Each is scored by the model's reply and by what the store holds
+after the product's own write path took it -- the quick pass, the reply
+parsed and applied with the facts held, after the chat before it
+(`memory/benchmark_events.py`): the event stored, its days exactly right, what
+must stand standing, nothing stored that is not the user's. With one part of
+the write path put back as it was before the review and the same replies, the
+reply's scores do not move and the stored ones fall (seven controls,
+`tests/test_memory_benchmark_event_turns.py`). Recorded on deepseek-flash, 5
+askings of the 30 turns (150 calls: 273,265 prompt tokens, 246,400 of them
+from DeepSeek's cache, 44,923 completion; the balance went from $5.72 to $5.66,
+live's own calls in it); the 200 replies to the other 40 turns are the ones
+locked before, and their scores are unchanged.
+
+| | English | Arabic |
+|---|---|---|
+| the event in the reply / its day | 1.000 / 1.000 | 0.980 (0.040) / 0.971 (0.057) |
+| right | 0.928 (0.056) | 0.867 (0.008) |
+| quiet (nothing to keep, nothing kept) | 0.800 (0.163) | 0.667 |
+| stored / its days exactly right | 1.000 / 1.000 | 1.000 / 0.975 (0.050) |
+| safe / everything about the turn right | 1.000 / 1.000 | 0.980 (0.040) / 0.973 (0.033) |
+
+The gap between "right" and "safe" is the pasted text: the model reads it as
+the user's in most askings, and Kazma's own-words rule keeps all but one out
+(finding 20). The one Arabic event missed is one empty reply of five to "I
+went to the farm again yesterday". A move told with no held home named
+("moved_to Porto", an event) is kept as an event; the quick pass asks about
+the home.
+
+**The second review, fixed** (24 Nov, at 174057e52;
+`tests/test_memory_event_lines_second_review.py`: 78 of its 95 cases fail on
+that commit, English and Arabic). What holds now:
+
+* *One line for an event.* Its occasions are one candidate in every lane of
+  recall, on both paths: five visits to the dentist hid "my dentist is Dr
+  Sara" from every search and were the background the question was measured
+  against. The latest is shown with "and N more", all of them for a list or a
+  period question.
+* *Whose words.* The first rule asked that half of an event's words stand in
+  the user's own words, compared exactly: 30 of 30 English travel sentences
+  kept their event and 12 of 30 Arabic. Now an event is somebody else's when
+  its words stand in what `own_words` removed and not in what it kept,
+  compared with what Arabic writes onto them ("لدبي"), for an event with a
+  day and one without (finding 20). A day a paste names and the user does not
+  is dropped, the event kept.
+* *Its day and its name.* A day the user counted from the turn's own
+  ("yesterday") stands against a later turn's unless that turn denies it. A
+  single-valued label with a day holds unless the name is an event's verb ("I
+  weigh 78 kg today"); a plan that came to pass is filed as what happened.
+* *What a retelling closes.* `replaces` on the same day is a correction
+  whatever the words; on another day, only of the same thing (a phone is not
+  closed by its case). Forgetting the retelling opens what it closed; an
+  ending the user confirms retires its bare entity, as a forget does.
+* *Own words after a question to Kazma* (finding 19), in both languages.
+* *The held list shows an event's day* (message form 5), with a prompt rule.
+
+The same cached replies again, against the first review's stores:
+
+| | Qwen replies, dev 200 | DeepSeek replies, pilot 50 |
+|---|---|---|
+| dated events current | 3,049 -> 3,060 | 790 -> 795 |
+| planned | 251 -> 229 | 38 -> 27 |
+| dated events not the user's words | 67 -> 34, and 4 new | 12 -> 2 |
+| undated events the same check leaves out (finding 20's verbs) | 66 -> 18 | 21 -> 7 |
+| a pasted day dropped, the event kept | 25 | 1 |
+| blocks that change (without event facts) | 9 (3) of 200 | 1 (0) of 50 |
+| block tokens p50 / p95 | 1,425 / 1,496 -> 1,421 / 1,496 | 1,459 / 1,498 -> the same |
+| the answer's words in the block | 57 of 129 -> the same | 12 of 37 -> the same |
+| answered, main / noise (second judge) | 0.760 (0.745) / 0.765 (0.75), +0 / -0 in both | 0.72 (0.74) / 0.72 (0.74), +0 / -0 in both |
+
+The 13 changed blocks were asked twice (78 calls, 48,474 prompt tokens, none
+cached, and 13,675 out, on Qwen). The replies are to message form 4: the
+pilots were not extracted again on form 5. DeepSeek's cost $3.95 on the
+shorter prompt and form 5 adds about 4 % to what is not cached, so it would
+pass the $4 set for it: **declared pending**. The 34 and 2 left out are pasted
+lists and texts to rewrite, "Here's the info:" hand-overs read as label lines,
+quotes, "according to", replies the user asks to be written in their name, and
+text past `own_words`' 2,000 characters. Evidence:
+`docs/audits/evidence/memory_event_lines/second_review.json`.
+
+**The recording again, message form 5** (24 Nov): dataset v4 with one shape
+more (a held event spoken of by its day, nothing new to keep; 72 turns), 5 askings,
+deepseek-flash: 360 calls, 673,745 prompt tokens, 597,504 of them from
+DeepSeek's cache, 81,537 completion; the balance went from $5.66 to $5.60.
+
+| | English | Arabic |
+|---|---|---|
+| the event in the reply / its day | 1.000 / 1.000 | 0.980 -> 1.000 / 0.971 -> 1.000 |
+| right | 0.928 -> 0.894 | 0.867 -> 0.894 |
+| quiet | 0.800 -> 0.667 | 0.667 |
+| stored / its days exactly right | 1.000 / 1.000 | 1.000 / 0.975 -> 1.000 |
+| safe / everything about the turn right | 1.000 / 1.000 | 0.980 -> 1.000 / 0.973 -> 1.000 |
+
+What is stored is right on every asking of every event turn in both languages;
+the replies' own "right" and "quiet" are the pasted text, read as the user's
+in every asking and kept out by Kazma. On the 40 turns before: found 0.990 ->
+1.000 and right 0.990 -> 1.000 in English, 0.971 -> 0.986 and 0.972 -> 0.986 in
+Arabic, named 0.819 -> 0.853 and 0.912 -> 0.971; a start 0.80 -> 0.70 in
+English (one asking of ten), replaced 1.00 -> 0.90 and ended 1.00 -> 0.80 in
+Arabic (one asking each), mixed right 1.000 -> 0.962, each inside the spread
+of five askings.
+
+**The third review, fixed** (25 Nov, of 0bbecc655;
+`tests/test_memory_event_lines_third_review.py`: 119 of its 233 cases failed on
+that commit, English and Arabic; no model call, the prompt and the recording
+unchanged). What holds now:
+
+* *An event is left out only when its words stand in text that is clearly
+  pasted or another person's* (`memory/pasted_text.py`), dated or not.
+  `own_words`, which is for trust, was the gate and lost ordinary statements:
+  of the review's 45 openings with three events each, 123 English and 75
+  Arabic events of 135 were kept; now 135 and 135, as on main, and 177 and 177
+  of 59 openings more in Gulf Arabic and MSA. Of 34 pasted shapes with the
+  same events (a mail, a chat, a quote, a text to translate), none is kept in
+  either language (12 Arabic were). What is in neither text stays, as Kazma's
+  reading: an event told only by the assistant's reply is now the prompt's to
+  keep out, as on main.
+* *A period or a list shows everything once first* (`recall._in_order`): six
+  visits to the dentist hid the eye doctor of a question naming both. The
+  occasions with no room are counted ("and 2 more"). Finding 21 with it.
+* *A value's own clitics* ("بـ٩٥"), *a correction that names no old value*
+  ("sorry, I meant Omar", "آسف أقصد عمر"), *a plan told as done* ("I'm going
+  to the concert tomorrow", read as attended: planned), *a model's "9999"*
+  (it lost its reply's every fact).
+* *Smaller:* what Arabic says a day by ("قبل ثلاث أيام", "الربوع", "خميس
+  الماضي", "أول البارح", "شهر ٥", "الصبح"); a "no" before a noun and a denial
+  beside "also" move no day; "I also bought a lamp" closes nothing; forgetting
+  a retelling brings back the entry it closed from the archive; "missed",
+  "acquired", "rented" and other names the pilots gave are events.
+
+The same cached replies again, against the second review's stores:
+
+| | Qwen replies, dev 200 | DeepSeek replies, pilot 50 |
+|---|---|---|
+| dated events current | 3,060 -> 3,084 | 795 -> 797 |
+| planned | 229 -> 231 | 27 -> 28 |
+| dated events left out | 34 -> 1 of 3,880 | 2 -> 0 of 953 |
+| undated ones left out | 18 -> 1 of 3,893 | 7 -> 0 of 888 |
+| blocks that change (without event facts) | 42 (38) of 200 | 10 (7) of 50 |
+| block tokens p50 / p95 | 1,421 / 1,496 -> 1,426 / 1,496 | 1,459 / 1,498 -> the same |
+| the answer's words in the block | 57 of 129 -> the same, none lost | 12 of 37 -> the same, none lost |
+
+The two events left out are quotations. The first form of the rule left out 9
+and 1, and reading them showed 7 and 1 of the user's own (a list's fields read
+as a chat's speakers, "write my story: ..."); the first form of the plan rule
+made 29 and 11 new plans, nearly all past events whose year was left out
+("which I finished on March 20th", told on the 15th), so it asks the sentence
+to speak of what is to come. The blocks change by the order of a list's
+siblings; the changed ones were not asked again (no model call). Left: two
+undated events with a wrong `replaces` and no "also" (17 such closings of
+different words in the replays, read one by one: 15 or more were the same
+thing told more exactly, so a stricter rule would leave those twice); a bare
+mail with no header; one word shared between what the user asks and what is
+pasted; two unmarked-paste turns and a prompt line for the next recording.
+Evidence: `docs/audits/evidence/memory_event_lines/third_review.json`.
+
+**The re-check of those fixes, fixed** (25 Nov, of f68b21ae5: 0 H, 4 M, 7 L;
+`tests/test_memory_event_lines_recheck.py`, English, Gulf and MSA: 117 of its
+182 cases failed on that commit; no model call). A forget finishes on its
+first call whatever either archive holds (it raised a foreign-key error when
+the fact it opened again named an archived predecessor). "Too" and "again"
+undo no correction that names the old value. The user's own line is kept
+before anything else:
+
+| events kept (main keeps all) | EN | Gulf | MSA |
+|---|---|---|---|
+| the reviewer's 83 openings x 3: f68b21ae5 | 201 | 192 | 198 |
+| ... now, of 249 | 249 | 249 | 249 |
+| 78 written before the fix x 3: f68b21ae5 | 204 | 198 | 192 |
+| ... now, of 234 | 234 | 234 | 234 |
+| 40 written after its first form x 3: that form | 105 | 114 | 114 |
+| ... now, of 120 | 114 | 117 | 117 |
+| 12 beside a paste x 3: f68b21ae5 | 30 | 30 | 30 |
+| ... now, of 36 | 36 | 36 | 36 |
+| the reviewer's pastes let in, of 132: f68b21ae5 | 63 | 81 | - |
+| ... now (accepted: filed as Kazma's reading) | 69 | 90 | - |
+
+The third row is what to expect of shapes nobody has tried. The cached
+replies replayed, against f68b21ae5: the answer's words are in 57 of 129 and
+12 of 37 blocks, as before, none lost; current dated events 3,084 and 797,
+planned 231 and 28, tokens, all unchanged; one event fewer is left out (2 ->
+1); 10 and 2 blocks change, mostly by order. Five facts differ in the stores,
+read one by one: a trip told again closes its first telling ("a bit too small"
+had read as "too"); a sentence of a text to proofread is let in; a start read
+from the user's own resume, and one from a post they drafted, stay; and a
+retelling closes another of three occasions that tie.
+Left of the re-check: L-d (pastes let in: "My brother sent me this:", a label
+alone, "Customer review:", a text above "Translate the above"), L-f (a list of
+a kind in Arabic finds nothing: the same on main), L-g (the parts of a message
+are quadratic in lines under the 6,000-character cap), and of M3 what is
+honestly unclear (a doctor's letter, an order, an offer quoted in the second
+person). Evidence: `docs/audits/evidence/memory_event_lines/recheck.json`.
 
 ### W6. Ingestion the product's way (M)
 
@@ -1201,3 +1517,32 @@ alone as the negative controls.
     Arabic questions (q1004, h042), each answered by one memory. Left as it
     is; measured before anything is built, on the parallel set's count
     questions asked in both languages.
+19. **`own_words` dropped what the user says after "What do you think about
+    ...?" and "Do you think I ...", in English only. Fixed 24 Nov.** "What do
+    you think about my bathroom rugs? I washed them last Sunday." was read as
+    someone's words ("think" as a reporting verb, the rest as what they
+    reported), and Arabic kept both. A thinking verb whose subject is "you"
+    reports nobody (`_asks_kazma_en`, `_asks_kazma_ar`); a question asks about
+    the text after it only when it names or points at one ("What do you think
+    of this email: ...", "ما رأيك في هذا النص؟ ..."). "Let's add ...", "TV
+    shows, I've ...", "recipe ideas that feature ...? I recently ..." and
+    "بغيت أقولك:" too. The pastes' security cases hold unchanged
+    (`tests/test_memory_own_words.py`); pairs in
+    `tests/test_paired_languages.py`.
+20. **An event told with no day was not held to the user's own words. Fixed
+    24 Nov.** Found by the event turns: asked about pasted text ("صحح النص:
+    رحت روما ..."), deepseek-flash gave it as the user's, and a reply that left
+    the day out was stored. Measured before finding 19's fix, the check would
+    have taken 66 of 2,421 (Qwen) and 21 of 549 (DeepSeek) undated events, most
+    of them the user's own; with finding 19 fixed and the second review's rule
+    it takes 18 and 7. Evidence:
+    `docs/audits/evidence/memory_event_lines/undated_events.json`,
+    `second_review.json`.
+21. **A list question's sibling facts are read in the order of their ids.**
+    Found reading the changed blocks (24 Nov): `_with_list_siblings` takes the
+    newest `limit` of a name and hydrates them in id order, so when the block cuts
+    them the ones shown are random ("how many fish ...?" shows other
+    `interested_in` facts after a rewrite of the same store). **Fixed 25 Nov**
+    with the third review's M2: a sibling that holds a word of the question
+    first, then the newest (an event by its day), in both languages
+    (`recall._list_siblings`).

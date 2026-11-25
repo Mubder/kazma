@@ -299,7 +299,7 @@ def _without_the_local_steps(monkeypatch) -> None:
     monkeypatch.setattr(recall_mod, "_primary_episodes_as_local",
                         lambda ranked, rows, local, tenant_id, limit: ranked[:limit])
     monkeypatch.setattr(recall_mod, "_primary_beliefs_as_local",
-                        lambda ranked, rows, local, tenant_id, limit: ranked)
+                        lambda query, ranked, rows, local, tenant_id, limit: ranked)
 
 
 def _bench(conn, refs, covers, dataset) -> dict:

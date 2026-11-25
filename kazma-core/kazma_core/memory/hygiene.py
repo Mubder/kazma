@@ -246,33 +246,20 @@ def invalidate_belief(
         # single, batch, and the UI unlink all funnel through this function).
         # Only on a real flip (n > 0); idempotent re-invalidates are no-ops.
         if n > 0:
-            try:
-                from kazma_core.memory.entity_counts import recompute_entity_counts
-
-                sub = _col("subject", 1)
-                obj = _col("object", 3)
-                tid = _col("tenant_id", 4)
-                recompute_entity_counts(
-                    conn,
-                    [str(sub or ""), str(obj or "")],
-                    tenant_id=space_of_record(tid),
-                )
-                conn.commit()
-            except Exception:
-                logger.debug("[hygiene] entity count recompute skipped", exc_info=True)
-            # An entity this was the last fact of, holding nothing else, goes
-            # with it (entity_retire: plain shells only).
+            from kazma_core.memory.entity_counts import entity_ids_named, recompute_entity_counts
             from kazma_core.memory.entity_retire import retire_empty_entities
 
+            owner = space_of_record(_col("tenant_id", 4))
             try:
-                if retire_empty_entities(
-                    conn,
-                    [str(_col("subject", 1) or ""), str(_col("object", 3) or "")],
-                    tenant_id=space_of_record(_col("tenant_id", 4)),
-                ):
+                named = entity_ids_named(conn, [_col("subject", 1), _col("object", 3)], tenant_id=owner)
+                recompute_entity_counts(conn, named, tenant_id=owner)
+                conn.commit()
+                # An entity this was the last fact of, holding nothing else,
+                # goes with it (entity_retire: plain shells only).
+                if retire_empty_entities(conn, named, tenant_id=owner):
                     conn.commit()
             except sqlite3.Error:
-                logger.warning("[hygiene] empty-entity cleanup failed", exc_info=True)
+                logger.warning("[hygiene] entity counts and empty-entity cleanup failed", exc_info=True)
 
             # Mirror tombstone (M-04): push death flags to shared state so a
             # role=primary cutover can never resurrect this fact.

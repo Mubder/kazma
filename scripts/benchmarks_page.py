@@ -146,11 +146,47 @@ def _rests_on(extraction: dict, kind: str, lang: str) -> str:
         raise ValueError(f"the lock does not say what {kind}.{lang} rests on: "
                          "python scripts/memory_bench.py lock")
     turns = int(row["turns"])
-    if kind != "llm":
+    if kind == "heuristic":
         return _count(turns, "turn")
     askings = int(row["askings"])
     each = askings // turns if turns else 0
     return f"{_count(askings, 'asking')} ({_count(turns, 'turn')}, {each} each)"
+
+
+def _events(extraction: dict) -> list[str]:
+    """The event turns (extraction dataset v4): the model's reply, and what is
+    stored after Kazma wrote it."""
+    ex = extraction.get("scores") or {}
+    langs = [(k, label) for k, label in (("en", "English"), ("ar", "Arabic")) if f"events.{k}.whole" in ex]
+    if not langs:
+        return []
+    lines = [
+        "#### Events and their days {#memory-events}",
+        "",
+        "Turns that tell of something the user did, each shape in English and in Arabic: two events of one day, the "
+        "same place on two days, something told again without its day, a wrong day corrected, an appointment to "
+        "come, a call that must not become a name, a move that must be asked about, pasted words that are not the "
+        "user's, someone else's trip, and turns with no event. The model's recorded reply is read (**Found**, **Day "
+        "given**: the event in the reply, and its day; **Right** and **Quiet** as above), then written by Kazma's "
+        "own code after the chat before it, and the store is read. **Stored**: the event is kept. **Day stored**: its "
+        "days are exactly right, with no second entry. **Safe**: nothing that must stand was changed and nothing "
+        "that must not be stored was. **Whole**: everything about the turn is right.",
+        "",
+        "| Language | Found | Day given | Right | Quiet | Stored | Day stored | Safe | Whole | Rests on |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for lang, label in langs:
+        cells = [_pct(ex.get(f"events.{lang}.{k}"))
+                 for k in ("found", "on", "right", "quiet", "stored", "day", "safe", "whole")]
+        lines.append(f"| {label} | {' | '.join(cells)} | {_rests_on(extraction, 'events', lang)} |")
+    lines += ["", "**Right** and **Quiet** are the model's alone: asked to fix or explain pasted words, it often reads "
+              "them as the user's. Kazma keeps what is not in the user's own words out, which **Safe** measures."]
+    spread = extraction.get("events_spread") or {}
+    if spread:
+        most = max(v for row in spread.values() for v in row.values())
+        lines += [f"Asked again, a score in this table moves by at most {most * 100:.1f} points (two standard errors "
+                  "over the askings)."]
+    return [*lines, ""]
 
 
 def _edges(data: dict) -> list[str]:
@@ -310,6 +346,7 @@ def _memory(data: dict) -> list[str]:
                     "still keeps what it kept; they do not measure the new prompt, which is measured when it is "
                     "recorded.")
         lines.append("")
+        lines += _events(extraction)
     pg = data.get("pgvector") or {}
     floors = pg.get("floors") or {}
     if floors:

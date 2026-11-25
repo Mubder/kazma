@@ -17,7 +17,8 @@ Every turn's first asking comes before any turn's second. The file is
 written after every reply, and a file already at ``--out`` that answered the
 same prompt, message form and dataset is continued: what it holds is never
 asked again, so a run cut short or stopped at its limit goes on where it
-stopped. It writes nothing but ``--out``; name a checkout's fixture there,
+stopped, and a recording of an earlier dataset version is asked the turns
+added since. It writes nothing but ``--out``; name a checkout's fixture there,
 then score and lock in that checkout (``python scripts/memory_bench.py
 extraction``, then ``lock --new-recording "why"``: a new recording replaces
 the model pass's scores only on purpose, and only with

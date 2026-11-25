@@ -266,7 +266,7 @@ _PASTED_THINGS_AR = frozenset({"الايميل", "الايميلات", "الرس
                                "التغريده", "المنشور", "الخطاب", "الرد", "التعليق", "المسج", "البوست"})
 #: Every Arabic verb these rules know: none of them names who spoke a line.
 _AR_VERBS = (_TEXT_VERBS_AR | _EDIT_VERBS_AR | _WRITE_VERBS_AR | _REPORTING_AR | _HYPOTHETICAL_AR
-             | {"تذكر", "احفظ", "سجل"})
+             | {"تذكر", "احفظ", "سجل", "اقول", "اقولك", "اقوللك", "بقولك", "اخبرك", "بخبرك", "ابلغك", "اعلمك"})
 
 #: An aside that ends the text an instruction works on, at the start of a
 #: line or a sentence after it: "Translate: thanks.\nBy the way, my name is
@@ -525,7 +525,80 @@ def _remembers_pasted_text_en(words: list[str]) -> bool:
     return False
 
 
-def _head_kind_en(head: str, *, colon: bool) -> str | None:
+#: What may follow "this", "these" or "it" in a question about a pasted text
+#: ("Is this correct?", "Does it sound right?").
+_OF_A_TEXT_EN = frozenset({"correct", "right", "wrong", "ok", "okay", "good", "fine", "true", "spam", "clear", "mean",
+                           "means", "sound", "sounds", "look", "looks", "read", "reads", "say", "says", "make",
+                           "makes", "need", "needs", "better", "please", "for", "to", "and", "or", "in", "is", "are",
+                           "one", "two", "three", "more", "pasted", "attached"})
+#: What "that" stands after when it names a text ("about that?"), not when it
+#: joins a clause to a noun ("recipe ideas that feature cumin").
+_BEFORE_THAT_EN = frozenset({"is", "does", "do", "check", "about", "of", "with", "see", "explain", "for", "to", "on",
+                             "fix", "correct", "read", "review", "edit", "if", "in", "at", "all", "did", "was"})
+
+
+def _asks_about_a_text_en(words: list[str]) -> bool:
+    """Whether the words of a question ask about the text after it ("Is this
+    correct?", "What do you think about this message?"): they name a text, or
+    point at one. "that" joining a clause and "these" before another noun
+    point at none: "Do you have recipe ideas that feature cumin? I recently
+    made a stew ..." is the user's, and the stew was dropped as a pasted
+    text."""
+    asks_for_one = words[:3] == ["do", "you", "have"]  # "Do you have any advice on this? I've been ..."
+    for k, word in enumerate(words):
+        if k == 0 or word not in _TEXT_OBJECTS_EN or (asks_for_one and word in ("this", "that", "these", "it")):
+            continue
+        after = words[k + 1] if k + 1 < len(words) else ""
+        if word == "that":
+            if not after or (words[k - 1] in _BEFORE_THAT_EN and (after in _OF_A_TEXT_EN or after in _TEXT_OBJECTS_EN)):
+                return True
+        elif word in ("this", "these", "it"):
+            if not after or after in _OF_A_TEXT_EN or after in _TEXT_OBJECTS_EN:
+                return True
+        else:
+            return True
+    return False
+
+
+def _asks_about_a_text_ar(words: list[str]) -> bool:
+    """As :func:`_asks_about_a_text_en`: "هل هذي الجملة صحيحة؟" does, "شنو
+    يناسب هذا الجبن؟" does not."""
+    for k, word in enumerate(words):
+        if word not in _TEXT_OBJECTS_AR:
+            continue
+        after = words[k + 1] if k + 1 < len(words) else ""
+        if word not in ("هذا", "هذي", "هذه", "هاذا"):
+            return True
+        if not after or after in _TEXT_OBJECTS_AR or not after.startswith("ال"):
+            return True
+    return False
+
+
+_MIND_VERBS_EN = frozenset({"think", "believe", "assume", "say", "suspect", "reckon"})
+
+
+def _asks_kazma_en(folded: list[str], k: int) -> bool:
+    """Whether the verb at *k* of a question asks Kazma's mind: "What do you
+    think about ...?", "Do you think I should ...?" report nobody's words.
+    Never what "you said" or "told me"."""
+    return k > 0 and folded[k - 1] in ("you", "u", "ya") and folded[k] in _MIND_VERBS_EN
+
+
+#: "You think", "you say": the verb is written alike for "she" ("أختي
+#: تعتقد"), so only a question that begins with it, or with a question word
+#: before it, asks Kazma.
+#: "Your view" of a text: "ما رأيك في هذا النص؟".
+_YOUR_VIEW_AR = frozenset({"رايك", "رايكم", "رايچ"})
+_YOU_THINK_AR = frozenset({"تعتقد", "تعتقدين", "تظن", "تظنين", "تقول", "تقولين"})
+
+
+def _asks_kazma_ar(folded: list[str], k: int) -> bool:
+    return folded[k] in _YOU_THINK_AR and all(
+        w in _QUESTION_WORDS_AR or w in _POLITE_AR or w in _LEAD_INS_AR or w in ("انت", "انتي", "طيب", "يعني")
+        for w in folded[:k])
+
+
+def _head_kind_en(head: str, *, colon: bool, question: bool = False) -> str | None:
     said = _words(head)  # "Kazma said:": the name is the speaker here, not a courtesy
     head = _strip_polite_en(head.lower().replace("’", "'").strip())
     for verb in (*_TEXT_VERBS_EN, *_HYPOTHETICAL_EN):
@@ -558,7 +631,8 @@ def _head_kind_en(head: str, *, colon: bool) -> str | None:
     # "Tell me if this is spam:", "What does this mean:" -- a question about
     # the text that follows. Read after the courtesy words, so "Can you
     # remember this:" is never one.
-    if words and words[0] in _ASKS_ABOUT_EN and any(w in _TEXT_OBJECTS_EN for w in words[1:]):
+    if words and words[0] in _ASKS_ABOUT_EN and (_asks_about_a_text_en(words) if question else any(
+            w in _TEXT_OBJECTS_EN for w in words[1:])):
         return _INSTRUCTION
     # "Message from Dana:" -- a text named by who sent it.
     if said[0] in _MESSAGE_THINGS_EN and "from" in said[1:3]:
@@ -569,8 +643,11 @@ def _head_kind_en(head: str, *, colon: bool) -> str | None:
     # "she said:", "my boss wrote:", "they told me:", "You said:" -- someone
     # else's words. A colon only (with none, "My sister said I should" is a
     # sentence ``_reported_cut`` reads), and never the user's own ("As I
-    # said:").
-    if (len(said) <= _REPORTED_HEAD_WORDS and any(w in _REPORTING_EN for w in said[1:])
+    # said:") or a question to Kazma ("What do you think about my rugs? I
+    # washed them last Sunday.").
+    if (len(said) <= _REPORTED_HEAD_WORDS
+            and any(w in _REPORTING_EN and not (question and _asks_kazma_en(said, k))
+                    for k, w in enumerate(said) if k)
             and not any(w.split("'")[0] in {"i", "we"} for w in said)):
         return _REPORTED
     return None
@@ -618,7 +695,7 @@ def _remembers_pasted_text_ar(words: list[str]) -> bool:
     return any(w in _PASTED_THINGS_AR for w in words[1:5])
 
 
-def _head_kind_ar(head: str, *, colon: bool) -> str | None:
+def _head_kind_ar(head: str, *, colon: bool, question: bool = False) -> str | None:
     words = _ar_words(head)
     if not words:
         return None
@@ -643,19 +720,21 @@ def _head_kind_ar(head: str, *, colon: bool) -> str | None:
     # "هل هذي الجملة صحيحة:" -- a question about the text that follows.
     if words[0] in _HANDS_OVER_AR and not _speaks_in_first_person(head):
         return _INSTRUCTION
-    if words[0] in _ASKS_ABOUT_AR and any(w in _TEXT_OBJECTS_AR for w in words):
+    if (words[0] in _ASKS_ABOUT_AR or _YOUR_VIEW_AR & set(words[:3])) and (_asks_about_a_text_ar(words) if question else any(
+            w in _TEXT_OBJECTS_AR for w in words)):
         return _INSTRUCTION
     told_me = any(w in _YOU_TOLD_ME_AR or (w == "قلت" and nxt == "لي")
                   for w, nxt in zip(words, [*words[1:], ""]))
-    if told_me or (any(w in _REPORTING_AR for w in words) and not any(w in _I_AR for w in words)):
+    reports = any(w in _REPORTING_AR and not (question and _asks_kazma_ar(words, k)) for k, w in enumerate(words))
+    if told_me or (reports and not any(w in _I_AR for w in words)):
         return _REPORTED
     return None
 
 
-def _head_kind(head: str, *, colon: bool) -> str | None:
+def _head_kind(head: str, *, colon: bool, question: bool = False) -> str | None:
     """Either language's rules: a head may mix them ("translate للعربي:",
-    "ترجم to English:")."""
-    return _head_kind_en(head, colon=colon) or _head_kind_ar(head, colon=colon)
+    "ترجم to English:"). *question*: the head ends in a question mark."""
+    return _head_kind_en(head, colon=colon, question=question) or _head_kind_ar(head, colon=colon, question=question)
 
 
 def _starts_with_text_verb(head: str) -> bool:
@@ -762,7 +841,7 @@ def _cut_open(body: str) -> tuple[str, bool]:
             end, kind = start, _INSTRUCTION
         else:
             stop = min(stops)
-            kind = _head_kind(window[:stop], colon=window[stop] != "\n")
+            kind = _head_kind(window[:stop], colon=window[stop] != "\n", question=window[stop] in "?؟")
             if kind is None:
                 continue
             end = start + stop + 1
@@ -1134,7 +1213,11 @@ def _reports_on_the_user_at(folded: list[str], k: int) -> bool:
     return word in _FIRST_PERSON_EN or word in _FIRST_PERSON_AR or word in _THAT_I_AR
 
 
-def _reported_cut(sentence: str) -> str:
+#: Reporting verbs that are nouns too: before a comma they report nothing.
+_ALSO_NOUNS = frozenset({"shows", "lists", "states"})
+
+
+def _reported_cut(sentence: str, *, questions: bool = False) -> str:
     """*sentence* without what it reports someone else saying, with no colon
     to mark it: the words after a reporting verb that a first-person word
     follows ("He said, I live in Lyon.", "أختي تقول أنا ساكنة في دبي", "Ali
@@ -1155,10 +1238,15 @@ def _reported_cut(sentence: str) -> str:
     comma = max(sentence.rfind(","), sentence.rfind("،"))
     if comma > 0 and _named_after_comma(tokens, folded, comma):
         return " " + end
+    asked = questions and sentence.rstrip().endswith(("?", "؟"))
     for k in range(len(folded)):
         last = _reports_at(folded, k)
         if last is None:
             continue
+        if asked and (_asks_kazma_en(folded, k) or _asks_kazma_ar(folded, k)):
+            continue  # "Do you think I should fertilize the plant I received?": theirs to ask
+        if folded[k] in _ALSO_NOUNS and "," in sentence[tokens[k][0] + len(tokens[k][1]):][:1]:
+            continue  # "Speaking of TV shows, I've been watching ..."
         if k > 0 and folded[k - 1] in _NEGATIONS:
             return sentence[:tokens[k][0]] + end  # "I never said I live in Oslo"
         if any(w in _SUBJECT_I for w in folded[:k]):
@@ -1189,8 +1277,9 @@ def _asks(sentence: str) -> bool:
 _NEGATIONS = frozenset({"never", "not", "didn't", "didnt", "don't", "dont", "doesn't", "doesnt", "won't",
                         "wouldn't", "can't", "cant", "cannot", "ما", "لم", "مو", "ابد", "ابدا"})
 #: Where a hypothetical starts: "If I live in Oslo, ...", "لو كنت ساكن ...".
-_SUPPOSING = frozenset({"if", "suppose", "supposing", "assuming", "imagine", "hypothetically", "lets", "let's",
+_SUPPOSING = frozenset({"if", "suppose", "supposing", "assuming", "imagine", "hypothetically",
                         "اذا", "لو", "فرضا", "افترض", "تخيل"})
+_LETS_SUPPOSE = frozenset({"say", "suppose", "assume", "imagine", "pretend", "just"})
 #: Asking how to say something: "Is it correct to say I live in Oslo".
 _ASKS_TO_SAY_EN = ("is it correct to say", "is it right to say", "is it ok to say", "is it okay to say",
                    "is it wrong to say", "is it proper to say", "can i say", "could i say", "should i say",
@@ -1206,6 +1295,8 @@ def _supposes_or_asks_to_say(sentence: str) -> bool:
     lowered = [w.lower().replace("’", "'") for w in _WORD_RE.findall(sentence)]
     lowered = [w for w in lowered if w not in _LEAD_INS_EN] or [""]
     folded = [_fold(w) for w in _WORD_RE.findall(sentence) if _fold(w) not in _LEAD_INS_AR] or [""]
+    if lowered[0] in ("let's", "lets") and lowered[1:2] and lowered[1] in _LETS_SUPPOSE:
+        return True  # "Let's say I live in Oslo", never "Let's add The Daily Grind"
     if lowered[0] in _SUPPOSING or folded[0] in _SUPPOSING or lowered[:2] in (["what", "if"], ["even", "if"]):
         return True
     said = " ".join(lowered)
@@ -1233,7 +1324,7 @@ def _without_reported_or_asked(body: str, *, questions: bool = False) -> str:
             out.append("\n" if sentence.endswith("\n") else " ")
             after_report = False
             continue
-        out.append(_reported_cut(sentence))
+        out.append(_reported_cut(sentence, questions=questions))
         after_report = sentence.endswith("\n") and _ends_reporting(sentence)
     return "".join(out)
 
