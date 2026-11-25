@@ -26,8 +26,11 @@ import math
 import os
 import random
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
+from kazma_core.spaces.row_work import install_statements
 
 from .jobs import (
     _ACTIVE_STATE_VALUES,
@@ -190,6 +193,7 @@ class PostgresDocumentJobRepository:
         if ensure_schema:
             self._ensure_schema()
 
+    @install_statements("the document job tables, made for every space")
     def _ensure_schema(self) -> None:
         from kazma_core.db.pg_schema import ensure_schema
 
@@ -360,6 +364,7 @@ class PostgresDocumentJobRepository:
             conn.commit()
         return _row_to_record(row) if row is not None else None
 
+    @install_statements("every space's interrupted intakes, listed")
     def interrupted_intake_jobs(
         self, *, tenant_id: str | None = None
     ) -> list[DocumentJobRecord]:
@@ -386,6 +391,7 @@ class PostgresDocumentJobRepository:
 
     # ── Claim (multi-replica) ────────────────────────────────────────────
 
+    @install_statements("the fair claim, across every space's jobs")
     def claim_next(
         self,
         *,
@@ -649,6 +655,7 @@ class PostgresDocumentJobRepository:
                 raise
         return _row_to_record(updated)
 
+    @install_statements("a stopping worker's leases, whoever's jobs they hold")
     def release_leases(self, owners: list[str]) -> int:
         """Give back the jobs *owners* hold, for a graceful stop, on the
         attempt they had (FA-264; the SQLite store's rule)."""
@@ -723,6 +730,7 @@ class PostgresDocumentJobRepository:
                     conn.rollback()
         return row is not None
 
+    @install_statements("expired leases, whoever's jobs they hold")
     def recover_expired_leases(self, *, tenant_id: str | None = None) -> int:
         tenant = _required(tenant_id, "tenant_id") if tenant_id is not None else None
         now = self._clock()
@@ -875,7 +883,10 @@ class PostgresDocumentJobRepository:
         queueable = ",".join(f"'{s}'" for s in _QUEUEABLE_STATE_VALUES)
         terminal = ",".join(f"'{s}'" for s in _TERMINAL_STATE_VALUES)
         active = ",".join(f"'{s}'" for s in _ACTIVE_STATE_VALUES)
-        with self._pool.connection() as conn:
+        # The queue of the whole install, which an upload's admission counts
+        # whoever asks; a tenant's own is the bound space's.
+        with (install_statements("the depth of the one queue, for every space") if tenant is None
+              else nullcontext()), self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -1143,9 +1154,9 @@ def resolve_job_repository(
     """
     if document_jobs_backend() != "postgres":
         return sqlite_repo
-    try:
-        from kazma_core.db.pg_helpers import get_pool
+    from kazma_core.db.pg_helpers import get_pool, no_other_store_on_refusal
 
+    try:
         pool = get_pool()
         repo = PostgresDocumentJobRepository(
             pool, retry_base_seconds=retry_base_seconds, retry_max_seconds=retry_max_seconds
@@ -1153,6 +1164,7 @@ def resolve_job_repository(
         logger.info("[documents.jobs] using Postgres multi-replica job repository")
         return repo
     except Exception as exc:  # noqa: BLE001
+        no_other_store_on_refusal(exc, "[documents.jobs]")
         logger.warning(
             "[documents.jobs] Postgres job repo unavailable (%s); "
             "falling back to single-node SQLite queue",

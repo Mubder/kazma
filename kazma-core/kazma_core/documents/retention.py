@@ -49,6 +49,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from kazma_core.spaces.row_work import install_statements
+
 from . import live_scratch
 from .config import DocumentConfig, get_document_config
 from .policy import DocumentPolicy, policy_operation
@@ -143,6 +145,7 @@ class DocumentGarbageCollector:
     # ── Public entry ─────────────────────────────────────────────────────
 
     @policy_operation
+    @install_statements("the garbage collection, over every space's catalog")
     def collect(self, *, dry_run: bool = False) -> GcReport:
         """Run one bounded mark/sweep pass and return a truthful report."""
         cfg = self._policy.current

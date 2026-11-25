@@ -183,7 +183,7 @@ class PostgresStateBackend:
         from kazma_core.db import availability
 
         if self._ours is None:
-            self._ours = availability.is_kazma_database(self._dsn)
+            self._ours = availability.is_kazma_database(self._dsn, or_its_server=True)
         ours = self._ours
         began = availability.now()
         conn = None

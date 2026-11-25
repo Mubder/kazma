@@ -43,6 +43,7 @@ from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
+from kazma_core.spaces.row_work import statements_of
 from kazma_core.spaces.scope import OWNER_SPACE_ID, spaces_enforced
 
 __all__ = [
@@ -400,7 +401,10 @@ def _documents_used(space_id: str) -> int | None:
     service = peek_ingestion_service()
     if service is None:
         return None
-    return int(service.repository.tenant_referenced_blob_bytes(tenant_id=space_id))
+    # Asked by the admin's page about every space (S4-01): read as the page's
+    # own space, every other one would show 0.
+    with statements_of(space_id):
+        return int(service.repository.tenant_referenced_blob_bytes(tenant_id=space_id))
 
 
 def _knowledge_used(space_id: str) -> int:

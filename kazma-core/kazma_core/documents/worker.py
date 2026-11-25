@@ -14,6 +14,8 @@ from typing import Protocol
 
 from . import telemetry
 from kazma_core.db.pg_helpers import store_errors
+from kazma_core.spaces.row_work import SpaceErasing, statements_of, work_of_async
+from kazma_core.spaces.scope import NoSpaceBound
 
 from .cancellation import call_with_cancel
 from .errors import DocumentParseError, infrastructure_errors, storage_full
@@ -92,6 +94,9 @@ class _SpaceArriving(Exception):
 
 #: How long a job of an arriving space waits before it is claimed again.
 _ARRIVING_WAIT_S = 30.0
+#: How long a job waits when whose it is could not be read, or its space is
+#: being erased.
+_IDENTITY_WAIT_S = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,6 +368,41 @@ class DocumentWorker:
             pass
 
     async def _process_claimed(self, job: DocumentJobRecord, owner: str) -> None:
+        """Run *job*'s stages, its heartbeat and its outcome in its own space
+        (S4-01): the person who asked, else the space's own account. They ran
+        with no space bound, or the one of whoever started the workers."""
+        from kazma_core.spaces.identity import IdentityUnavailable
+        from kazma_core.spaces.space_move import importing_spaces
+
+        try:
+            its_space = await work_of_async(job.tenant_id, job.actor_id)
+        except IdentityUnavailable:
+            # Whose job it is cannot be read.
+            await self._not_worked_on(job, owner, "identity_unavailable", _IDENTITY_WAIT_S)
+        except SpaceErasing:
+            await self._not_worked_on(job, owner, "space_erasing", _IDENTITY_WAIT_S)
+        except NoSpaceBound:
+            if job.tenant_id in await asyncio.to_thread(importing_spaces):
+                # Recorded last, when the import has brought its rows in.
+                await self._not_worked_on(job, owner, "space_arriving", _ARRIVING_WAIT_S)
+                return
+            with statements_of(job.tenant_id):
+                await self._persist_failure(job, owner, PermanentDocumentError(
+                    "no_space", "This document belongs to no space of this install, so it is not processed."))
+        else:
+            with its_space():
+                await self._process_stages(job, owner)
+
+    async def _not_worked_on(self, job: DocumentJobRecord, owner: str, reason: str, wait: float) -> None:
+        """Give *job* back on the attempt it had, and say why."""
+        logger.warning("Document job given back job=%s reason=%s; tried again in %.0fs", job.id, reason, wait)
+        with statements_of(job.tenant_id):
+            await asyncio.to_thread(
+                self._repository.hand_back, tenant_id=job.tenant_id, job_id=job.id, owner=owner,
+                delay_seconds=wait, reason=reason,
+            )
+
+    async def _process_stages(self, job: DocumentJobRecord, owner: str) -> None:
         from kazma_core.spaces.features import work_refusal
         from kazma_core.spaces.identity import asker_left
         from kazma_core.spaces.scope import spaces_enforced

@@ -1072,6 +1072,9 @@ class KazmaAgent:
                     )
                     logger.info("KazmaAgent checkpointer: AsyncPostgresSaver")
             except Exception as exc:
+                from kazma_core.db.pg_helpers import no_other_store_on_refusal
+
+                no_other_store_on_refusal(exc, "KazmaAgent checkpointer")
                 logger.warning(
                     "Postgres checkpointer unavailable (%s) — SQLite fallback",
                     exc,

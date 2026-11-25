@@ -649,37 +649,39 @@ async def create_checkpoint_manager(
         ``langgraph-checkpoint-postgres`` + ``psycopg``).
       * SQLite otherwise (``path``).
 
+    A refusal (Spaces enforced) raises: the start fails with the reason, never
+    on an empty SQLite state.
+
     Returns:
         Initialized CheckpointManager ready for graph.compile(checkpointer=...).
     """
     # ── Postgres checkpointer (multi-replica) ──────────────────────
-    try:
-        from kazma_core.db.backend import get_database_url, is_postgres
+    from kazma_core.db.pg_helpers import no_other_store_on_refusal, use_postgres
 
-        if is_postgres():
-            try:
-                from kazma_core.checkpoints_pg import open_postgres_checkpointer
+    if use_postgres():
+        try:
+            from kazma_core.checkpoints_pg import open_postgres_checkpointer
+            from kazma_core.db.backend import get_database_url
 
-                saver = await open_postgres_checkpointer(get_database_url() or "", max_size=10)
-                manager = CheckpointManager(saver)  # type: ignore[arg-type]
-                logger.info(
-                    "[Checkpoint] CheckpointManager using AsyncPostgresSaver (multi-replica)"
-                )
-                return manager
-            except ImportError as exc:
-                logger.warning(
-                    "[Checkpoint] Postgres URL set but langgraph-checkpoint-postgres "
-                    "unavailable (%s) — falling back to SQLite. "
-                    "pip install -e '.[postgres]'",
-                    exc,
-                )
-            except Exception as exc:
-                logger.exception(
-                    "[Checkpoint] AsyncPostgresSaver failed (%s) — SQLite fallback",
-                    exc,
-                )
-    except Exception:
-        pass
+            saver = await open_postgres_checkpointer(get_database_url() or "", max_size=10)
+            manager = CheckpointManager(saver)  # type: ignore[arg-type]
+            logger.info(
+                "[Checkpoint] CheckpointManager using AsyncPostgresSaver (multi-replica)"
+            )
+            return manager
+        except ImportError as exc:
+            logger.warning(
+                "[Checkpoint] Postgres URL set but langgraph-checkpoint-postgres "
+                "unavailable (%s) — falling back to SQLite. "
+                "pip install -e '.[postgres]'",
+                exc,
+            )
+        except Exception as exc:
+            no_other_store_on_refusal(exc, "[Checkpoint]")
+            logger.exception(
+                "[Checkpoint] AsyncPostgresSaver failed (%s) — SQLite fallback",
+                exc,
+            )
 
     # ── SQLite checkpointer (default) ──────────────────────────────
     # Resolve the default here, not in the signature. It was the literal

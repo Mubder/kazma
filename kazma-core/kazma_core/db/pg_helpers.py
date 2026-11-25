@@ -35,6 +35,47 @@ def store_errors() -> tuple[type[BaseException], ...]:
     return tuple(errs)
 
 
+#: "The database refused this" (a policy, a table this role may not touch).
+_INSUFFICIENT_PRIVILEGE = "42501"
+
+
+def _space_refusal(exc: BaseException | None) -> BaseException | None:
+    """The refusal *exc* is, or was raised from; None for anything else: no
+    space was bound to the work (``NoSpaceBound``), or Postgres would not let
+    this role do it. The store is there and said no, so nothing may be read
+    as missing or empty and no other store takes its place. Never an outage.
+
+    Always None while Spaces is not enforced: an install without it reads its
+    errors as before. ``store_errors()`` holds both kinds, so code that
+    catches it to fall back asks here first (S4-01, H2)."""
+    from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
+
+    if not spaces_enforced():
+        return None
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, NoSpaceBound) or getattr(exc, "sqlstate", None) == _INSUFFICIENT_PRIVILEGE:
+            return exc
+        exc = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
+    return None
+
+
+def no_other_store_on_refusal(exc: BaseException, what: str) -> None:
+    """Raise *exc* again when it is a refusal (:func:`_space_refusal`):
+    the first thing a handler that would use another store does. *what* is
+    the store, for the log. A fallback made then would last as long as the
+    process: documents would list empty, uploads and chat state would be kept
+    in two places."""
+    refusal = _space_refusal(exc)
+    if refusal is None:
+        return
+    # The refusal itself: what wraps it may read as an outage.
+    logger.error("%s: Postgres refused this (%s: %s). No other store is used in its place.",
+                 what, type(refusal).__name__, refusal)
+    raise exc
+
+
 def get_pool() -> Any:
     from kazma_core.db.postgres_pool import get_postgres_pool
 

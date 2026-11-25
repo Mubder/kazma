@@ -147,7 +147,7 @@ def test_control_the_document_stage_without_its_call_is_found() -> None:
     path = "kazma-core/kazma_core/documents/worker.py"
     source = (REPO / path).read_text(encoding="utf-8").replace(
         'await asyncio.to_thread(work_refusal, "documents", current.actor_id)', "None")
-    assert admission_findings({"documents": (f"{path}::DocumentWorker._process_claimed",)}, {path: source})
+    assert admission_findings({"documents": (f"{path}::DocumentWorker._process_stages",)}, {path: source})
 
 
 # ── the intent engine (finding 1) ───────────────────────────────────────

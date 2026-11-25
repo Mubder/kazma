@@ -38,6 +38,8 @@ import subprocess
 from collections.abc import Iterable
 from typing import Any
 
+from kazma_core.spaces.row_work import install_statements
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["exposure_problems", "report_exposure", "searxng_secret_problems"]
@@ -161,13 +163,15 @@ def _superuser_problem(answer: dict[str, Any] | None) -> str | None:
     return None
 
 
+@install_statements("the role Kazma signs in to Postgres as")
 def _role_answer() -> dict[str, Any] | None:
     from kazma_core.db.postgres_pool import get_postgres_pool
 
     pool = get_postgres_pool()
     if pool is None:
         return None
-    return pool.execute_one("SELECT rolname, rolsuper FROM pg_roles WHERE rolname = current_user")
+    # The role that signed in: a connection may be acting as a smaller one.
+    return pool.execute_one("SELECT rolname, rolsuper FROM pg_roles WHERE rolname = session_user")
 
 
 def exposure_problems() -> tuple[list[str], list[str]]:

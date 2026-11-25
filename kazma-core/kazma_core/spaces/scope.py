@@ -50,6 +50,7 @@ __all__ = [
     "bound_asker",
     "current_scope",
     "install_work",
+    "install_work_reason",
     "made_space_id",
     "new_space_id",
     "require_scope",
@@ -256,6 +257,12 @@ def current_scope() -> Scope | None:
     """The bound scope, or None. Never falls back; for code that must tell
     "bound" from "not bound"."""
     return _scope.get()
+
+
+def install_work_reason() -> str:
+    """What the install work this runs in is (:func:`install_work`), else
+    ``""``. No I/O."""
+    return _install_work.get() or ""
 
 
 def space_of_state(state: object) -> str:

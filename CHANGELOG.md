@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Spaces: background work runs in the space it is for (2026-11-25)
+
+- Once Spaces is on, a document is processed, recovered after a crash and put
+  back in the Knowledge index inside its own space, whoever's chat started
+  Kazma's document workers. One document that cannot be recovered at start no
+  longer stops the rest.
+- Moving a document writes its copy inside the space it moves to, and what goes
+  with a member who leaves is taken back inside the space they left.
+- Once Spaces is on and the database refuses Kazma, Kazma says so and does not
+  go on with another, empty store: a start that is refused fails with the
+  reason. With Spaces off, and in an outage, it does what it did before.
+- A document audit entry that could not be written is logged as a warning.
+- The check that Kazma does not sign in to Postgres as a superuser asks for the
+  login itself.
+
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 
 - Once Spaces is on, a chat you started can move from your own space into a

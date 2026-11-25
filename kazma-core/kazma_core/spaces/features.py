@@ -321,7 +321,7 @@ ADMISSIONS: dict[str, tuple[str, ...]] = {
         "kazma-core/kazma_core/x_api/booking.py::book_x_post",
         "kazma-core/kazma_core/x_api/ownership.py::x_work_scope",
     ),
-    "documents": ("kazma-core/kazma_core/documents/worker.py::DocumentWorker._process_claimed",),
+    "documents": ("kazma-core/kazma_core/documents/worker.py::DocumentWorker._process_stages",),
     "knowledge": (
         "kazma-core/kazma_core/stores/knowledge_ingest.py::_knowledge_off_now",  # before every page
         "kazma-ui/kazma_ui/kb_api.py::_in_the_crawls_space",

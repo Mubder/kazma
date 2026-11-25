@@ -32,13 +32,25 @@ problem was its database. Each layer now holds on its own:
   database, and the probes always answer** (2026-11, FA-259: a 2-minute
   outage still got Kazma killed, a 12-minute one kept it down 15 minutes).
   See §54.
+- **A refusal is not an outage, and no other store answers for it** (S4-01
+  step 0a, H2). `NoSpaceBound` is a `RuntimeError` and a policy's refusal a
+  `psycopg.Error`: both are inside `store_errors()`. A handler that would open
+  SQLite instead of Postgres first calls `pg_helpers.no_other_store_on_refusal`
+  (Spaces enforced: logged and raised again, so documents, jobs, the gateway's
+  and the agent's checkpointer never run on a second store, and the start
+  fails with the reason; off: nothing changes). Gate:
+  `tests/test_no_fallback_store_on_a_refusal.py`. `is_kazma_database` compares
+  the database too (M8); whose outage a mirror's failure is stays the
+  server's (`or_its_server`). Pings and schema statements are
+  `install_statements` (§70 (1)), `tests/test_install_probes_say_so.py`; the
+  role question reads `session_user`.
 - **One answer to "is the database away"** (`kazma_core/db/availability.py`,
   resilience plan A3, 2026-11). Live 2026-11-03/04 Docker took the database
   away for eleven hours: every background loop retried on its own clock and
   logged a WARNING each pass (the pool alone 1,900 lines an hour), the memory
   queue dead-lettered work that had done nothing wrong, and 33 of 34 guard
   restarts were a boot that waited its 13 minutes and exited. Now a failure
-  of Kazma's own database (`is_kazma_database`; `is_outage`: SQLSTATE class
+  of Kazma's own database server (`is_kazma_database`, `or_its_server`; `is_outage`: SQLSTATE class
   08/28, 57P01-03, 53300, 3D000, a pool timeout, `PostgresUnreachable`,
   through the cause chain -- never a query error, never SQLite) is reported
   with `note_failure`; ONE prober thread then signs in every `PROBE_EVERY_S`

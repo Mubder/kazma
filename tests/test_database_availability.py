@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import functools
 import importlib.util
 import json
 import logging
@@ -159,16 +160,55 @@ def test_a_cause_cycle_ends():
     assert not availability.is_outage(a)
 
 
-def test_kazma_database_is_matched_by_server(monkeypatch):
+@pytest.mark.parametrize("asked", [{}, {"or_its_server": True}], ids=["database", "server"])
+def test_kazma_database_is_matched_by_server(monkeypatch, asked):
     pytest.importorskip("psycopg")
     monkeypatch.setattr("kazma_core.db.backend.get_database_url",
                         lambda: "postgresql://kazma:pw@127.0.0.1:5432/kazma")
-    assert availability.is_kazma_database("postgres://other@localhost/kazma")
-    assert not availability.is_kazma_database("postgresql://kazma@localhost:6543/kazma")
-    assert not availability.is_kazma_database("postgresql://kazma@db.example.com/kazma")
-    assert not availability.is_kazma_database(None)
+    is_kazma = functools.partial(availability.is_kazma_database, **asked)
+    assert is_kazma("postgres://other@localhost/kazma")
+    assert not is_kazma("postgresql://kazma@localhost:6543/kazma")
+    assert not is_kazma("postgresql://kazma@db.example.com/kazma")
+    assert not is_kazma(None)
     monkeypatch.setattr("kazma_core.db.backend.get_database_url", lambda: None)
-    assert not availability.is_kazma_database("postgresql://kazma@localhost/kazma")
+    assert not is_kazma("postgresql://kazma@localhost/kazma")
+
+
+def test_another_database_of_the_server_is_not_kazmas(monkeypatch):
+    """S4-01, M8: a mirror in another database of the same server was read as
+    Kazma's own. It shares the server's outages (or_its_server, unchanged)
+    and none of its tables."""
+    pytest.importorskip("psycopg")
+    monkeypatch.delenv("PGDATABASE", raising=False)
+    monkeypatch.setattr("kazma_core.db.backend.get_database_url",
+                        lambda: "postgres://kazma:pw@127.0.0.1:5432/kazma")
+    for other in ("postgresql://kazma@localhost/mirror", "postgresql://mirror@localhost:5432"):
+        assert not availability.is_kazma_database(other), other
+        assert availability.is_kazma_database(other, or_its_server=True), other
+    # A DSN that names no database means the one named as its user, which
+    # libpq reads from PGUSER when the DSN names none either.
+    assert availability.is_kazma_database("postgresql://kazma@localhost")
+    monkeypatch.setenv("PGUSER", "kazma")
+    assert availability.is_kazma_database("postgresql://localhost")
+    monkeypatch.setenv("PGUSER", "mirror")
+    assert not availability.is_kazma_database("postgresql://localhost")
+
+
+def test_the_mirror_reads_whose_outage_it_is_by_its_server(monkeypatch):
+    """With the mirror in another database of Kazma's server, its failure is
+    still the one process-wide outage, as it always was."""
+    pytest.importorskip("psycopg")
+    from kazma_core.memory import state_backend
+
+    monkeypatch.setattr("kazma_core.db.backend.get_database_url",
+                        lambda: "postgresql://kazma:pw@127.0.0.1:5432/kazma")
+    mirror = state_backend.PostgresStateBackend("postgresql://kazma@localhost/mirror")
+    monkeypatch.setattr(mirror, "_open_connection", lambda: (_ for _ in ()).throw(_outage()))
+    noted = []
+    monkeypatch.setattr(availability, "note_failure", lambda source, exc: noted.append(source))
+    with pytest.raises(Exception, match="boom"):
+        mirror._connect()
+    assert noted == ["memory mirror"]
 
 
 # ── the state machine ─────────────────────────────────────────────────────

@@ -31,6 +31,8 @@ import re
 from contextlib import contextmanager
 from typing import Any, Iterator
 
+from kazma_core.spaces.row_work import statements_of
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -317,7 +319,8 @@ def tenant_quota_snapshot(
     """
     used = 0
     try:
-        used = int(repository.tenant_referenced_blob_bytes(tenant_id=tenant_id))
+        with statements_of(tenant_id):
+            used = int(repository.tenant_referenced_blob_bytes(tenant_id=tenant_id))
     except Exception:  # noqa: BLE001 - telemetry must never raise
         logger.debug("[documents.telemetry] tenant quota read failed", exc_info=True)
     quota = max(1, int(quota_bytes))
