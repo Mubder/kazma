@@ -63,30 +63,51 @@
   every place. `memory/held_facts.py` gives each way of choosing a share of
   the `limits.DEEP_PASS_HELD_FACTS` places (`_SHARES`; what is left over goes
   to them in order): another subject the turn **names** (sets of words, at
-  most `_A_SUBJECT` facts each, taken in turn), the speaker's facts whose
-  **value the user's words say**, the ones Kazma keeps **one value** of, the
-  **nearest in meaning** by the vectors already stored for the turn
-  (`worker_bootstrap._stored_vector`, the current model's only) and the facts
-  -- nothing is embedded for it --, two of a subject named in **another
+  most `_A_SUBJECT` facts each, taken in turn, who is named most and earliest
+  first; after them who the turn before named, for a pronoun), the speaker's
+  facts whose **value the user's words say**, the ones Kazma keeps **one
+  value** of (home, employer, name, role, then favourites; never a next reset,
+  always the newest), the **nearest in meaning** by the vectors already stored
+  for the turn (`worker_bootstrap._stored_vector`, the current model's only)
+  and the facts -- nothing is embedded for it; `_NEAR_READ` of them are read,
+  because 60 were one speaker's own --, two of a subject named in **another
   alphabet** (no word of "عمر نقل" can name `omar`), and the **newest**. Only
-  what the model reads of the turn names anyone. The hub link
-  (`ego_anchor.ANCHOR_PREDICATE`) is nobody's statement and is not shown.
+  what the model reads of the turn names anyone. An Arabic subject is matched
+  by whole words: what is written before a name comes off; the article and
+  whose-it-is endings only when the subject is no person (`_a_person`, by the
+  facts held), and never a taa marbuta or a bare taa ("كريمة" is not "كريم",
+  "الهند" not Hind); "عبد الله" and "بو فهد" are the one word they are also
+  written as. The hub link Kazma writes (`ego_anchor.ANCHOR_PREDICATE`,
+  `system_tool`) is nobody's statement and is not shown; one the user told is.
   Values are cut at `DEEP_PASS_HELD_VALUE` and the lines together at
-  `DEEP_PASS_HELD_TOKENS`, what comes first kept. Measured on the pilots'
-  cached replies, round by round, old code and new (no model asked):
-  DeepSeek's 12,083 rounds showed 57 of the 518 subjects they named, and now
-  all; Qwen's 48,586 showed 168 of 2,510, and now 2,290 of 2,303. Of the facts
-  the recorded replies replaced, every one DeepSeek's did is still shown (3
-  were hub links) and 3,670 of Qwen's 3,686 (10 were hub links; three of the
-  other six were wrong replacements). The stores are the same, fact for fact.
-  The list is 467 tokens at the median against 437 (Qwen 506 against 449), 915
-  at the most; 5 ms a turn there, 0.3 s at 10,000 facts, in the worker's thread.
+  `DEEP_PASS_HELD_CHARS` **characters**, so Arabic is shown as many facts as
+  English (a bound in tokens kept 13 to English's 20), the newest
+  `_NEWEST_KEPT` first: 18 of the longest lines, 976 tokens in English and
+  1,516 in Arabic (`estimate_text_tokens`), the most the list can cost.
+- **What that was measured to do, and not.** The pilots' cached replies
+  (English), round by round, no model asked: of the subjects a turn's words
+  name, DeepSeek's 12,083 rounds show 464 of 464, Qwen's 48,586 show 2,298 of
+  2,303. (The old code showed 57 of 518 and 168 of 2,510, read from the whole
+  turn and not the part the model is given: the two counts are not one
+  measure.) Of the facts the recorded replies replaced, 629 of DeepSeek's 632
+  are still shown (3 were hub links) and 3,674 of Qwen's 3,686. A replay
+  cannot say more: it hands back a fact the list left out, so its stores are
+  the same by construction, and the MODEL's answer to the new list is
+  measured only by asking it. The list is 465 tokens at the median (Qwen
+  503), 915 at the most; 5 ms a turn there, and at 10,000 facts 0.2 s in
+  English and 0.7 in Arabic (30,000: 0.8 and 2.2), in the worker's thread.
+  **Not claimed:** a fact held under a name in the other alphabet is shown,
+  and a reply that writes the name as the user did ("عمر"), which the prompt
+  asks for, is about another subject: `_take_replaces` refuses, and both stay
+  current. Kazma has no match between a name's two alphabets; it is planned
+  with the plan's step 2.
   Gates: `tests/test_memory_held_facts_shown.py` (eight changes told in
   English, Gulf and MSA, to stores of none and forty newer facts and with the
-  fact held in the other language; the old choice and each way taken away as
+  fact held in the other language; a friend's home among 300 nearer facts and
+  a member's habit among another's; the old choice and each way taken away as
   negative controls), and the class: no order comparison with a list anywhere
-  in the packages (`tests/test_word_lists_compared.py`, read from source, the
-  live one planted as its control). Vectors:
+  in the packages (`tests/test_word_lists_compared.py`, read from source; the
+  live one and the spellings of it a review planted are its controls). Vectors:
   `scripts/memory_bench.py held-pairs-vectors`.
 - **The deep pass reads the turn inside a data fence** (2026-11-20, the
   framework audit's F10, part C2). `turn_message` (form 4) puts the turn

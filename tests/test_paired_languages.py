@@ -463,7 +463,13 @@ def _says_the_30th(text: str) -> bool:
 def _names_subject(case: tuple[str, str]) -> bool:
     from kazma_core.memory.held_facts import _Said
 
-    return _Said(case[0]).names(case[1])
+    return _Said(case[0]).names(case[1]) is not None
+
+
+def _names_person(case: tuple[str, str]) -> bool:
+    from kazma_core.memory.held_facts import _Said
+
+    return _Said(case[0]).names(case[1], person=True) is not None
 
 
 PAIRS: list[Pair] = [
@@ -730,6 +736,29 @@ PAIRS: list[Pair] = [
          ("I told Will yesterday", "will"), ("كلمت علي أمس", "علي"), _names_subject, True),
     Pair("held_small_word_no_name", (M + "memory/held_facts.py",),
          ("I will call later", "will"), ("الكتاب على الطاولة", "علي"), _names_subject, False),
+    # One name is not another, and a thing is said with its article (the review of step 1).
+    Pair("held_name_not_another", (M + "memory/held_facts.py",),
+         ("I maxed out the card", "max"), ("كلمت كريمة", "كريم"), _names_person, False),
+    Pair("held_name_not_another_shorter", (M + "memory/held_facts.py",),
+         ("Max called", "maxine"), ("كلمت خالد", "خالدة"), _names_person, False),
+    Pair("held_name_not_a_verb", (M + "memory/held_facts.py",),
+         ("The car willed itself on", "will"), ("سارت السيارة", "سارة"), _names_person, False),
+    Pair("held_name_not_a_place", (M + "memory/held_facts.py",),
+         ("I flew to Indiana", "india"), ("سافرت الهند", "هند"), _names_person, False),
+    Pair("held_name_not_a_plant", (M + "memory/held_facts.py",),
+         ("I bought roses", "rosalynn"), ("شريت وردة", "ورد"), _names_person, False),
+    Pair("held_two_word_name", (M + "memory/held_facts.py",),
+         ("I met Abu Dhabi Bank", "abu_dhabi_bank"), ("كلمت عبدالله", "عبد_الله"), _names_person, True),
+    Pair("held_two_word_name_joined", (M + "memory/held_facts.py",),
+         ("Mary Ann called", "mary_ann"), ("أبو فهد وصل", "بو_فهد"), _names_person, True),
+    Pair("held_thing_of_mine", (M + "memory/held_facts.py",),
+         ("My car broke down", "car"), ("سيارتي خربت", "سيارة"), _names_subject, True),
+    Pair("held_thing_with_the_article", (M + "memory/held_facts.py",),
+         ("The car broke down", "car"), ("السيارة خربت", "سيارة"), _names_subject, True),
+    Pair("held_one_digit", (M + "memory/held_facts.py",),
+         ("Room 7 is booked now.", "room_7"), ("غرفة 7 محجوزة", "غرفة_7"), _names_subject, True),
+    Pair("held_another_digit", (M + "memory/held_facts.py",),
+         ("Room 7 is booked now.", "room_1"), ("غرفة 7 محجوزة", "غرفة_1"), _names_subject, False),
 ]
 
 

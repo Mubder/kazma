@@ -305,9 +305,11 @@ it, and a text past it keeps its start with a warning in the log.
 - **Model inputs stay bounded.** The deep pass reads the first 1,500
   characters of a message and 800 of the answer; a weekly summary reads 400
   and 600 of each turn. With a turn the deep pass is shown up to 30 facts
-  Kazma holds (1,000 tokens at most) so that a new one can replace an old one:
-  the facts of the people and things the turn names, yours that it speaks of
-  by word or by meaning, your home, work and name, and the ones you told last.
+  Kazma holds (4,000 characters at most, as many in Arabic as in English) so
+  that a new one can replace an old one: the facts of the people and things
+  the turn names (and the turn before, for "she" and "it"), yours that it
+  speaks of by word or by meaning, your home, employer, name and role, and the
+  ones you told last.
 
 ### Post-turn
 

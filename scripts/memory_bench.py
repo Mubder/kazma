@@ -2864,7 +2864,7 @@ def _cmd_held_pairs_vectors() -> int:
     memory plan's W6, step 1) into the file its gate replays
     (``tests/test_memory_held_facts_shown.py``)."""
     from kazma_core.memory.benchmark import RecordingEmbedder
-    from kazma_core.memory.benchmark_held import HELD_PAIRS_VECTORS, run_held_pairs
+    from kazma_core.memory.benchmark_held import HELD_PAIRS_VECTORS, run_held_crowds, run_held_pairs
     from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
 
     _limit_cpu_threads()
@@ -2877,11 +2877,12 @@ def _cmd_held_pairs_vectors() -> int:
     a, b = _patched(recorder, model)
     with a, b:
         rows = run_held_pairs()
+        crowds = run_held_crowds()
     out = VECTORS.with_name(HELD_PAIRS_VECTORS)
     n = recorder.save(out, model=model)
     missed = [r for r in rows if not r["shown"] or not r["closed"]]
     print(f"{out}: {n} vectors from {model}; {len(rows) - len(missed)} of {len(rows)} rows hold")
-    for r in missed:
+    for r in [*missed, *(c for c in crowds if not c["shown"])]:
         print("  ", json.dumps(r))
     return 0
 

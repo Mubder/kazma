@@ -12,7 +12,13 @@ replaces the old fact when it was shown, as a model that reads the list
 would, and is filed under another name, as models name facts.
 
 The Arabic turns are told twice: to a store that holds the old fact in
-Arabic, and (``crossed``) to one that holds it in English. Vectors are
+Arabic, and (``crossed``) to one that holds it in English. A reply to a
+crossed turn may name the subject as the list shows it (``omar``) or, as the
+prompt asks, in the script the user wrote ("عمر"): both are run (``subject``).
+
+:func:`run_held_crowds` asks whether a fact is still shown when many others
+are nearer in meaning: a friend's home among the user's facts about cities,
+and a member's own fact among another member's of the same kind. Vectors are
 recorded (``scripts/memory_bench.py held-pairs-vectors``); no model is asked.
 """
 
@@ -21,7 +27,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-__all__ = ["HELD_PAIRS", "HELD_PAIRS_VECTORS", "run_held_pairs"]
+__all__ = ["HELD_PAIRS", "HELD_PAIRS_VECTORS", "run_held_crowds", "run_held_pairs"]
 
 HELD_PAIRS_VECTORS = "held_pairs_vectors.npz"
 
@@ -127,7 +133,7 @@ def _turn(said: str, answer: str, at: float) -> dict[str, Any]:
             "embedding_model_version": get_embedding_model_name()}
 
 
-def _one(pair: dict[str, Any], dialect: str, held_in: str, newer: int) -> dict[str, Any]:
+def _one(pair: dict[str, Any], dialect: str, held_in: str, newer: int, named: str = "as held") -> dict[str, Any]:
     from kazma_core.memory.belief_extractor import _apply_beliefs_to_v2
     from kazma_core.memory.benchmark import BASE_TIME, BENCH_TENANT, _private_stores
     from kazma_core.memory.worker_bootstrap import _turn_context
@@ -144,7 +150,7 @@ def _one(pair: dict[str, Any], dialect: str, held_in: str, newer: int) -> dict[s
         at = BASE_TIME + 86400.0
         held = _turn_context(primary, _turn(said, _ANSWER[lang], at))["held"]
         ref = next((h["ref"] for h in held if h["id"] == old), None)
-        new = {"subject": subject, "predicate": name if told is None else told[0], "predicate_type": kind,
+        new = {"subject": subject if named == "as held" else pair["held"][lang][0], "predicate": name if told is None else told[0], "predicate_type": kind,
                "object": value if told is None else told[1], "confidence": 0.9,
                **({"ended": True} if told is None else {}), **({"replaces": ref} if ref else {})}
         # An ending of a fact the model was not shown names no value it knows.
@@ -154,16 +160,75 @@ def _one(pair: dict[str, Any], dialect: str, held_in: str, newer: int) -> dict[s
         current = primary.execute("SELECT valid_until IS NULL AND invalidated_at IS NULL FROM beliefs "
                                   "WHERE id = ? AND tenant_id = ?", (old, BENCH_TENANT)).fetchone()[0]
     about = {"user", subject}
-    return {"pair": pair["id"], "dialect": dialect, "held_in": held_in, "newer": newer, "shown": ref is not None,
+    return {"pair": pair["id"], "dialect": dialect, "held_in": held_in, "newer": newer, "subject": named,
+            "shown": ref is not None,
             "closed": not current, "places": len(held),
             "unrelated": sorted({h["subject"] for h in held} - about)}
 
 
 def run_held_pairs() -> list[dict[str, Any]]:
-    """Every pair, dialect, store language and number of newer facts: whether
-    the old fact was ``shown``, whether it was ``closed``, and the subjects
-    the turn is not about that were shown (``unrelated``)."""
-    return [_one(pair, dialect, held_in, newer)
+    """Every pair, dialect, store language, number of newer facts and way the
+    reply names the subject: whether the old fact was ``shown``, whether it
+    was ``closed``, and the subjects the turn is not about that were shown
+    (``unrelated``)."""
+    return [_one(pair, dialect, held_in, newer, named)
             for pair in HELD_PAIRS for dialect in ("en", "gulf", "msa")
             for held_in in (("en",) if dialect == "en" else ("ar", "en"))
-            for newer in (0, 40)]
+            for newer in (0, 40)
+            for named in (("as held", "as said") if dialect != "en" and held_in == "en" else ("as held",))]
+
+
+# ── Many facts nearer in meaning ─────────────────────────────────────────
+
+_CITIES = ("Athens Austin Baghdad Baku Bali Bangkok Beirut Berlin Bogota Boston Bristol Brussels Cairo Cebu Chicago "
+           "Colombo Dakar Dallas Delhi Denver Doha Dubai Dublin Geneva Hanoi Havana Helsinki Istanbul Jaipur Jakarta "
+           "Jeddah Karachi Kyoto Lagos Lima Lisbon London Lyon Madrid Malaga Manila Medina Miami Milan Mumbai Munich "
+           "Nairobi Naples Oslo Paris Prague Quito Riyadh Rome Salalah Seoul Sofia Tokyo Tunis Zurich").split()
+_ABOUT_CITIES = ("visited", "wants_to_visit", "flew_to", "lived_in_once", "has_family_in")
+
+#: A member's own habit, and another member's of the same kind.
+_CROWD = {"en": ("swims every friday", "swims in pool {n} with the club"),
+          "ar": ("يسبح كل جمعة", "يسبح في المسبح رقم {n} مع النادي")}
+
+
+def run_held_crowds() -> list[dict[str, Any]]:
+    """Whether the old fact is ``shown`` when ``others`` nearer facts are held:
+    ``friend`` (a home held in English, the turn in each dialect, the user's
+    facts about cities) and ``member`` (a shared space: the speaker's own
+    habit, forty newer facts of theirs, and another member's habits)."""
+    from kazma_core.memory.benchmark import BASE_TIME, BENCH_TENANT, _private_stores
+    from kazma_core.memory.speakers import Member, Room, entry_id, private_room
+    from kazma_core.memory.worker_bootstrap import _turn_context
+
+    pairs = {p["id"]: p for p in HELD_PAIRS}
+    rows: list[dict[str, Any]] = []
+
+    def asked(conn: sqlite3.Connection, old: str, case: str, dialect: str, others: int, said_by: str | None) -> None:
+        lang = "en" if dialect == "en" else "ar"
+        said = pairs["friend" if case == "friend" else "habit"]["said"][dialect]
+        turn = {**_turn(said, _ANSWER[lang], BASE_TIME + 86400.0), "said_by": said_by}
+        rows.append({"case": case, "dialect": dialect, "others": others,
+                     "shown": any(h["id"] == old for h in _turn_context(conn, turn)["held"])})
+
+    cities = [(what, city) for what in _ABOUT_CITIES for city in _CITIES]
+    for others in (0, 60, 120, 300):
+        with _private_stores("kazma-held-crowds") as (conn, _ops):
+            old = _hold(conn, *pairs["friend"]["held"]["en"], BASE_TIME)
+            for n, (what, city) in enumerate(cities[:others]):
+                _hold(conn, "user", what, "set", city, BASE_TIME + 60 + n)
+            for dialect in ("en", "gulf", "msa"):
+                asked(conn, old, "friend", dialect, others, None)
+    people = Room(space=BENCH_TENANT, shared=True, members={
+        a: Member(account=a, name=a.capitalize()) for a in ("sara", "omar")})
+    for dialect in ("en", "gulf", "msa"):
+        lang = "en" if dialect == "en" else "ar"
+        for others in (0, 80):
+            with private_room(people), _private_stores("kazma-held-crowds") as (conn, _ops):
+                own, theirs = _CROWD[lang]
+                old = _hold(conn, entry_id("sara"), "habit", "set", own, BASE_TIME)
+                for n, (what, its) in enumerate(_NEWER[lang]):
+                    _hold(conn, entry_id("sara"), what, "set", its, BASE_TIME + 60 + n)
+                for n in range(others):
+                    _hold(conn, entry_id("omar"), "habit", "set", theirs.format(n=n + 1), BASE_TIME + 3600 + n)
+                asked(conn, old, "member", dialect, others, "sara")
+    return rows

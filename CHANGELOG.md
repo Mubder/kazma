@@ -4,11 +4,13 @@
 
 - When you say that something changed or ended ("my sister Noura is a surgeon
   now", "بطلت السباحة"), Kazma now looks at the fact it holds about that person
-  or thing, however long ago you told it, and replaces it. It used to look at
-  your thirty newest facts, and at people picked by the alphabet, so an older
-  fact and the new one could both stay current and both be recalled. The same
-  in English, Gulf Arabic and Modern Standard Arabic. Facts already held twice
-  are not merged by this.
+  or thing, however long ago you told it, so that the new one can replace it.
+  It used to look at your thirty newest facts, and at people picked by the
+  alphabet, so an older fact and the new one could both stay current and both
+  be recalled. The same in English, Gulf Arabic and Modern Standard Arabic,
+  for a name held in the alphabet you write it in; one held as "omar" is not
+  yet replaced by what you say of "عمر". Facts already held twice are not
+  merged by this.
 
 ## Memory: lists and the Memory page find Arabic words (2026-11-25)
 
