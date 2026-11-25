@@ -42,8 +42,11 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import shutil
 import sqlite3
+import stat
+import sys
 import time
 import zipfile
 from collections.abc import Callable, Iterator
@@ -753,6 +756,23 @@ def _erase_secrets(space: str) -> int:
     return vault.erase_space(space)
 
 
+def _remove_folder(folder: Path) -> None:
+    """*folder* goes, with everything in it. Windows deletes no read-only file
+    (git's own objects are): the mark is taken off and the delete asked again.
+    It stopped the erase there, with the space closed, at every try."""
+
+    def _writable_and_again(func: Any, target: str, _exc: Any) -> None:
+        os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+        func(target)
+
+    if os.name != "nt":
+        shutil.rmtree(folder)
+    elif sys.version_info >= (3, 12):
+        shutil.rmtree(folder, onexc=_writable_and_again)
+    else:
+        shutil.rmtree(folder, onerror=_writable_and_again)
+
+
 def erase_space(space: str, *, by: str) -> dict[str, Any]:
     """Erase the space: its libraries (vectors and fetched pages too), every
     store's rows, its settings, its secrets and its files; then it leaves the
@@ -797,7 +817,7 @@ def erase_space(space: str, *, by: str) -> dict[str, Any]:
     for folder in (*_folders(space), moving_dir(space)):
         if folder.exists():
             erased["files"] += _file_count([folder])
-            shutil.rmtree(folder)
+            _remove_folder(folder)
     people.forget_space(space, by=by)
     logger.warning("[spaces] space erased space=%s by=%s rows=%d files=%d", space, by,
                    erased["rows"], erased["files"])

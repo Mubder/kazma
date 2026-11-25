@@ -31,6 +31,8 @@
   backup's manifest and in the log, and the backup alert says it once.
 - Exporting or deleting a space while a file of it is being moved says so and
   asks to try again, instead of leaving the file out.
+- Deleting a space ends when a file in it is read-only (Windows). It stopped
+  there, with the space closed.
 
 ## Spaces: moving one's own chat between one's own space and a shared one (2026-11-24)
 

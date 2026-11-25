@@ -19,7 +19,9 @@ space, and erases a person's space only once the person is deleted.
 from __future__ import annotations
 
 import io
+import os
 import sqlite3
+import stat
 import zipfile
 from contextlib import closing
 from pathlib import Path
@@ -131,6 +133,20 @@ def test_an_append_only_table_is_erased_and_keeps_its_guard(world) -> None:
     with closing(sqlite3.connect(str(_documents_db()))) as conn:
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             conn.execute("DELETE FROM document_job_events")
+
+
+def test_a_read_only_file_does_not_stop_an_erase(world) -> None:
+    """Windows deletes no read-only file (git's objects are): the erase raised
+    there, and again at every try, with the space closed."""
+    from kazma_core.spaces.files import FILES, moving_dir, space_dir
+
+    for folder in (space_dir(A) / FILES / "repo" / "objects", moving_dir(A) / ("a" * 32)):
+        folder.mkdir(parents=True)
+        (folder / "x").write_bytes(b"x")
+        os.chmod(folder / "x", stat.S_IREAD)
+    erased = space_data.erase_space(A, by=OWNER_ACCOUNT_ID)
+    assert erased["files"] >= 2 and not space_dir(A).exists() and not moving_dir(A).exists()
+    assert A not in identity.read_registry()["spaces"], "it is closed and never erased"
 
 
 def test_control_without_lifting_the_guard_the_erase_fails(world, monkeypatch) -> None:
