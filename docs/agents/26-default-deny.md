@@ -60,10 +60,11 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   the error is `ClientDisconnect` alone: a group with another member, one
   raised over a real failure, and `CancelledError` go on as before. A request
   cut off mid-body is answered nothing, and the activity and memory trails
-  note it as 499. A `try` that reads a body and catches everything re-raises
-  `ClientDisconnect` first (the document upload logged it as a failed
-  upload); a body written to disk as it arrives is removed when it stops (the
-  history import kept half an export). Gate: `tests/test_client_gone.py`.
+  note its failure as 499 (what a route did all the same stays done). A `try`
+  that reads a body and catches everything re-raises `ClientDisconnect` first
+  (the document upload logged it as a failed upload); a body written to disk
+  as it arrives is removed when it stops (the history import kept half an
+  export). Gate: `tests/test_client_gone.py`.
 - **Every credential but the shared secret carries a role** (API tokens: the
   role chosen at creation, operator by default), enforced in every mode, and
   `admin_decision` gives the same answer. A token handed to another agent

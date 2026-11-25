@@ -34,9 +34,8 @@ kazma spaces migrate --check
 
 It changes nothing and lists each one as holding or missing, with what
 closes it. While one is missing, adding a second person is refused and the
-refusal names it. Today some of Kazma's own code still falls back to the
-owner's space when no space is named, so the list is never empty. The plan, with every step and
-its state, is `docs/plans/SPACES_PLAN.md`.
+refusal names it. The plan, with every step and its state, is
+`docs/plans/SPACES_PLAN.md`.
 
 This page describes what Spaces does once it is on.
 

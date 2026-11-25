@@ -59,7 +59,7 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | GET | `/api/research/sessions/{id}` | Session | Session status / log / report path |
 | GET | `/api/research/sessions/{id}/stream` | Session | SSE progress (`snapshot` / `progress` / `done`) |
 | GET | `/api/research/eval` | Session | Structural rubric for `?path=research/reports/…` or `?session_id=` |
-| POST | `/api/memory/v2/eval/golden` | Session | Run golden memory recall cases (pass rate) |
+| POST | `/api/memory/v2/eval/golden` | Session | Run the quick recall check's cases (pass rate) |
 | GET | `/research` | Session | Research panel page (start form + live progress) |
 
 ## Memory / RAG
@@ -100,7 +100,7 @@ on error (never a bare 500); non-numeric params yield a FastAPI 422.
 | GET | `/api/memory/v2/graph/export` | Session | On-demand JSON or GraphML (`?format=json\|graphml`). |
 | POST | `/api/memory/v2/probe` | Session | Recall dry-run (explain chips). |
 | POST | `/api/memory/v2/federated-search` | Session | Memory + KB labeled search. |
-| POST | `/api/memory/v2/eval/golden` | Session | Golden recall suite. |
+| POST | `/api/memory/v2/eval/golden` | Session | The quick recall check. |
 
 Page: `GET /memory` (HTML admin). Guide: [Memory & RAG](../guide/memory-and-rag) · [Memory best path](../guide/memory-best-path).
 

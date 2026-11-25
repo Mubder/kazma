@@ -411,6 +411,16 @@ def test_the_recorders_note_a_client_that_left_not_a_failure(monkeypatch):
     rows.clear()
     asyncio.run(settle(make(_reads)))  # raised through
     assert rows == [("act", CLIENT_GONE_STATUS)]
+    rows.clear()
+
+    async def does_it_all_the_same(request: Request) -> Any:
+        for _ in range(2):  # the half, then the disconnect: the route goes on
+            await request.receive()
+        assert body_cut_off(request.scope)
+        return {"ok": True}
+
+    asyncio.run(settle(make(does_it_all_the_same)))  # done, and noted as done
+    assert sorted(rows) == [("act", 200), ("mem", 200)]
 
 
 def test_body_cut_off_without_the_layer_is_false():
