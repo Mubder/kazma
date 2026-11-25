@@ -47,14 +47,26 @@ from tests._bash import find_bash
 pytestmark = pytest.mark.skipif(find_bash() is None, reason="bash is not on this machine")
 
 _FAKE = r'''
-import json, sys
+import json, os, sys, time
 from pathlib import Path
 
 sys.stdout.reconfigure(newline=chr(10))
+
+
+def told_to_wait(act):
+    # Windows refuses a file another copy is opening or replacing at that moment.
+    for _ in range(100):
+        try:
+            return act()
+        except PermissionError:
+            time.sleep(0.02)
+    return act()
+
+
 family, state_file, args = sys.argv[1], Path(sys.argv[2]), [a for a in sys.argv[3:] if a != "-w"]
 if family == "v6" and state_file.with_name("no-ip6tables").exists():
     sys.exit(3)  # IPv6 off in the kernel: ip6tables can do nothing
-state = json.loads(state_file.read_text()) if state_file.exists() else {}
+state = json.loads(told_to_wait(state_file.read_text)) if state_file.exists() else {}
 tables = state.setdefault(family, {"INPUT": [], "FORWARD": [], "OUTPUT": []})
 op, chain, rest = args[0], args[1], args[2:]
 code = 0
@@ -111,7 +123,12 @@ with log.open("a") as ops:
         jumps = [[r[r.index("-j") + 1], len(tables.get(r[r.index("-j") + 1], []))]
                  for r in tables["DOCKER-USER"] if "-j" in r]
         ops.write(json.dumps(["jumps", jumps]) + "\n")
-state_file.write_text(json.dumps(state))
+if op not in ("-S", "-C"):
+    # Copies run beside one another (a pipeline lists while its reader changes):
+    # one that only reads writes nothing, and the rules are never half written.
+    whole = state_file.with_name(f"state.{os.getpid()}")
+    whole.write_text(json.dumps(state))
+    told_to_wait(lambda: os.replace(whole, state_file))
 sys.exit(code)
 '''
 
