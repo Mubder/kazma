@@ -251,7 +251,7 @@
 - **W4's left list, by harm** (2026-11-26, the memory plan's W6, step 4).
   The final check of W4 (9ea531ce1) left seven small ones. Three are built;
   `tests/test_memory_w4_left_list.py` holds them in EN, Gulf and MSA.
-  - *L1, a denial that adds* (`event_text.adds_rather_than_denies`): "Not only
+  - *L1, a denial that adds* (`event_text._adds_rather_than_denies`): "Not only
     Ali, I met Omar", "ليس فقط علي", "مو بس علي", "No, I didn't see Ali alone,
     I met Omar too", "لم ألتق بعلي وحده" closed Ali when the model named him
     replaced and no day was given.
