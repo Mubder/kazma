@@ -56,6 +56,23 @@
 - The settings are counted as Kazma's own: they stay outside any space's
   lock.
 
+## Memory: Arabic questions about what you told find it as English ones do (2026-11-26)
+
+- Asking in Arabic about the thing itself finds what you told Kazma, as English
+  does: "أي طبيب أراجع؟", "أي تويوتا أسوق؟", "شنو اسم قطوتي؟", "شنو حالتي
+  الاجتماعية؟", "عدد كل الأماكن اللي زرتها", "أقدر آكل جلوتين؟". Of 132 such
+  questions a way, Gulf Arabic missed 16, Modern Standard Arabic 9 and English
+  3; now 3, 2 and 1. The rest are a store holding one fact, and a detail the
+  fact does not keep ("at the gym").
+- Places you visited, your pets ("What is my cat called?" as "شنو اسم قطوتي؟")
+  and whether you are married are asked in Arabic and English alike now.
+  "Can I eat gluten?" asks what you may not eat; "Can I eat here?", "What can I
+  eat for dinner?", "أقدر آكل الحين؟" and "Can I take Panadol with coffee?" ask
+  nothing of you, and "my drive" is no car.
+- Every question of Kazma's own benchmark, its small-store run and the
+  shared-space set shows what it did. One question of the Spaces study ("What
+  kind of pet do I have at home?") shows one unrelated memory fewer.
+
 ## A page closed while sending is not a server error (2026-11-25)
 
 - A page that closes while it is still sending its request no longer logs an

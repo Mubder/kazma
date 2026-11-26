@@ -294,6 +294,55 @@ four injected were noise.
   set and the small store do not move (a first version showed the home for
   the small store's abstain question q805, "What is my home Wi-Fi network
   called?": hence the rule that the word is the thing asked).
+- **A fact told as a turn, asked three ways** (2026-11-26, W6 step 3).
+  `benchmark_kinds.run_fact_languages_kinds` is `run_fact_languages`' table
+  grown by 22 kinds a model names. Each fact is TOLD as a turn and filed as the
+  product files it: the quick pass, then a scripted deep-pass reply through
+  `_apply_beliefs_to_v2`, so `users_names` and `name_to_file` are in it. It is
+  told in English and in Arabic, in stores of 1, 5 and 30, and asked in English,
+  Gulf and MSA in the first person and with the thing asked ("Which bike did I
+  buy?", "شنو الدراجة اللي شريتها؟"). Each kind also has a question in another
+  sense ("What can I buy here?", "شنو أشتري هدية؟"). Vectors are recorded apart
+  (`fact_languages_kinds_vectors.npz`, `scripts/memory_bench.py
+  fact-languages-kinds-vectors`).
+  - Lost before, of 132 a way and form (first person / with the thing): EN 0/3,
+    Gulf 2/16, MSA 0/9; as first built 0/1, 0/3, 0/2. With no table (meaning
+    alone): 13/4, 67/35, 53/21.
+  - **After the review of step 3** (23 rows a way now: a pet held by its name
+    alone; other-sense rows asked in the stores of five and thirty, and rows
+    that hold the added words bare): lost of 138 a way, step 3 as built EN 1/2,
+    Gulf 0/3, MSA 0/2; now 0/1, 0/2, 0/1.
+  - What is left: a store of one fact (no background) and "at the gym", which
+    the fact does not hold.
+  - Shown in another sense, by way and store (5 / 30; of 68, 64, 62): step 3 as
+    built EN 36/48, Gulf 21/42, MSA 22/39; now 32/44, 17/38, 20/37; meaning
+    alone 31/43, 16/34, 18/35. The table still adds 1 to 4 a way and store
+    (its words for the kinds asked before this step); the review's fixes took
+    off what this step had added.
+  - Added only where a question was measured lost:
+    - a doctor's nobody's nouns ("طبيب", "دكتور", as English has "doctor"), and
+      "أراجع" only beside them ("أي طبيب أراجع؟"; "متى أراجع البنك؟" asks none);
+    - "أسوق" (drive), "زرت"/"زرتها" (visited, a list kind now), "قطوتي"/"قطتي",
+      "my cat", "my dog" (pets), "متزوج" (married), and "أهتم" only after "أي"
+      ("بأي فن أهتم؟"; "كيف أهتم بصحتي؟" asks none);
+    - not "drive", "visit", "حيواني" or a bare "أهتم"/"أراجع": each has another
+      common sense (the review, L1); "my X" is read from the nouns a kind is asked
+      alone by, never its verbs ("my drive" is no car, M1);
+    - "حالتي الاجتماعية" and "my marital status" as phrases (`ASKED_AS_MINE`);
+    - "Can I eat ...?" / "أقدر آكل ...؟" at a question's head with a food after
+      it (diet). "Can I eat here?", "أقدر آكل الحين؟", "What can I eat for
+      dinner?" ask none, and "أتناول" is out ("أتناول البنادول", M2);
+    - "عدد" as asking (L-f, "عدد كل الأماكن اللي زرتها"), and "places" / "الأماكن"
+      as words that only ask.
+  - Kazma's benchmark (183), the small store (164) and the speakers set (105):
+    no question moved (hit, rank, precision, fact hit, what was shown;
+    cdbcfb65e against this step, and against its review's fixes). The Spaces R3
+    study's q103 (pets) shows one memory fewer (re-recorded).
+  - Gates: `tests/test_memory_fact_kinds.py`. The step's numbers are held there,
+    and the table before step 3, and as step 3 first built it, are the negative
+    controls. Every kind the tables ask has a told row, questions in all three
+    ways and both forms, and a question in another sense; one helper is both the
+    gate's check and its control's (a planted kind).
 - **Every kind of fact, asked in either language** (2026-11-25, W6 step 2).
   `ASKED_WITH` knew seven kinds, by Kazma's own names alone; the deep pass names
   a fact freely ("intends_to", "has_occupation"), in English, so an English
