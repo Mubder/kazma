@@ -9,6 +9,12 @@ from typing import Any
 os.environ["GIT_TERMINAL_PROMPT"] = "0"
 os.environ["GIT_ASKPASS"] = "echo"
 
+# Before anything imports psycopg: a client library Windows refuses gives way
+# to the installed PostgreSQL's own (live 2026-11-26; kazma_core.libpq_reach).
+from kazma_core.libpq_reach import reach_libpq  # noqa: E402
+
+reach_libpq()
+
 _EXPORT_GROUPS = {
     "audit_logger": ("AuditEntry", "AuditLogger"),
     "authorization_flow": ("ApprovalResult", "AuthorizationFlow", "AuthorizationRequest", "DenialResult"),

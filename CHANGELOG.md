@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Kazma reaches its database when Windows refuses psycopg's library (2026-11-26)
+
+- **Postgres's own client library stands in**: from 11:30 UTC Windows'
+  Application Control refused the client library psycopg bundles. The next
+  reload could not load any, and Kazma started read-only with the database
+  running. When Windows refuses the bundled library, Kazma now gives
+  psycopg the signed `libpq.dll` of the installed PostgreSQL instead, and
+  says so once in the log. Where the bundled library is allowed, nothing
+  changes.
+
 ## A docker program Windows refuses is passed over (2026-11-26)
 
 - **Kazma uses the next docker CLI when Windows refuses its own**: from
