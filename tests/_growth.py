@@ -7,10 +7,12 @@ on a busy machine: a shared CI runner, or this PC while other suites run.
 
 How it is measured:
 
-* the small and the large input are timed in turns, five of each, and the
+* the small and the large input are timed in turns, three of each, and the
   fastest of each is kept. A burst of load slows the calls made during it;
-  timed in turns, a burst covers at most half of the small input's calls,
-  so the fastest small time stays clean. Timed in a block (three small,
+  timed in turns, a burst as long as three calls covers at most two of
+  either input's, so the fastest of each stays clean. (Five of each, the
+  first form, took the regex controls past pytest's 300 s on a slow CI
+  runner, 2026-11-26: the large inputs of quadratic patterns are the cost.) Timed in a block (three small,
   then three large) one burst could cover every small call, and a
   quadratic pattern read as linear (CI, 2026-11-26: the old ``dd``
   pattern, sixteen times slower on four times the input);
@@ -25,7 +27,7 @@ from collections.abc import Callable
 from typing import Any
 
 #: How many times each input is timed in one comparison.
-TURNS = 5
+TURNS = 3
 
 
 def timed(fn: Callable[..., Any], *args: Any) -> float:

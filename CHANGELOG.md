@@ -27,7 +27,7 @@
 - **The regex tests time both inputs in turns**: the tests that prove an old
   pattern slows down faster than its input (and a new one does not) now ask
   one shared measure, `tests/_growth.py`. It times the small and the large
-  input in turns, five of each, so a burst of load on a CI runner can no
+  input in turns, three of each, so a burst of load on a CI runner can no
   longer cover every small call. CI read the old `dd` pattern, sixteen times
   slower on four times the input, as linear. A gate keeps every such helper
   on the one measure.
