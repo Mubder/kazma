@@ -168,8 +168,8 @@ Zed — `~/.config/zed/settings.json` (Windows: `%APPDATA%\Zed\settings.json`):
   "agent_servers": {
     "Kazma": {
       "type": "custom",
-      "command": "kazma",
-      "args": ["acp"]
+      "command": "C:\\kazma\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "kazma_cli", "acp"]
     }
   }
 }
@@ -198,10 +198,12 @@ the same gate the chat window uses — that is the difference from
 ```json
 {
   "mcpServers": {
-    "kazma": { "command": "kazma", "args": ["mcp"] }
+    "kazma": { "command": "C:\\kazma\\.venv\\Scripts\\python.exe", "args": ["-m", "kazma_cli", "mcp"] }
   }
 }
 ```
+
+`command` is the install's Python (`.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere) running `-m kazma_cli`, never the `kazma` launcher: on Windows the launcher is made on the PC and nothing signs it ([Windows Smart App Control](windows-smart-app-control)). `kazma mcp --help` prints the line with this install's own path.
 
 | Env var | Meaning |
 |---|---|

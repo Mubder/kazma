@@ -584,7 +584,6 @@ if ($installExit -eq 0) { Log-Header "5. Setup Complete" }
 elseif ($installExit -eq 3) { Log-Header "5. Restart Windows, then run .\setup.cmd again to finish" }
 else { Log-Header "5. Setup Stopped Short (run .\setup.cmd again to finish)" }
 Write-Host ""
-$ScriptsDir = Split-Path $VenvPython
 Log-Info "First visit:    the chat page asks for a provider key (or edit .env)"
 # The port the install kept (KAZMA_PORT in .env); 9090 when none is set.
 $KazmaPort = "9090"
@@ -592,8 +591,10 @@ $PortLine = Select-String -Path ".env" -Pattern '^\s*KAZMA_PORT\s*=\s*(\d+)' -Er
 if ($PortLine) { $KazmaPort = $PortLine.Matches[0].Groups[1].Value }
 Log-Info "Kazma:          runs as a service when that part is installed (http://127.0.0.1:$KazmaPort)"
 Log-Info "Port:           $VenvPython -m kazma_cli setup port <N> changes it"
-Log-Info "Without it:     & '$(Join-Path $ScriptsDir 'kazma.exe')' serve"
-Log-Info "Run TUI:        & '$(Join-Path $ScriptsDir 'kazma-tui.exe')'"
+# Python itself, never the venv's console-script launchers: pip makes those on
+# this PC and nothing signs them (Windows' file check, docs/plans/WINDOWS_TRUST_PLAN.md).
+Log-Info "Without it:     $VenvPython -m kazma_cli serve"
+Log-Info "Run TUI:        $VenvPython -m kazma_tui"
 Log-Info "Run tests:      $VenvPython scripts\fast_test.py"
 Log-Info "Parts:          $VenvPython -m kazma_cli setup install --list"
 Log-Info "Everything:     .\setup.cmd -Mode full"

@@ -20,7 +20,15 @@ from __future__ import annotations
 
 import os
 
-__all__ = ["checks_files", "smart_app_control"]
+__all__ = ["REFUSAL_CODES", "checks_files", "smart_app_control"]
+
+#: Windows' answers that refuse a program or a library by policy: access
+#: denied (5), blocked by group policy (1260, Software Restriction), and an
+#: Application Control policy (4551: App Control for Business, Smart App
+#: Control; the one live met on 2026-11-26). The one definition: the docker
+#: CLI lookup, the libpq fallback, the guard and prepush read it, and
+#: ``tests/test_windows_trust.py`` finds any second copy (AGENTS section 71).
+REFUSAL_CODES = frozenset({5, 1260, 4551})
 
 _POLICY_KEY = r"SYSTEM\CurrentControlSet\Control\CI\Policy"
 _POLICY_VALUE = "VerifiedAndReputablePolicyState"

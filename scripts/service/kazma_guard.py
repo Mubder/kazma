@@ -679,11 +679,6 @@ _RELOAD_PREFLIGHT_MARK = "KAZMA_RELOAD_PREFLIGHT "
 #: it the update waits and the running server is kept: an unproven start is
 #: not swapped for a working server.
 RELOAD_PREFLIGHT_TIMEOUT_S = float(os.environ.get("KAZMA_GUARD_PREFLIGHT_TIMEOUT_S", "180"))
-#: Windows' answers that refuse a program or library by policy: access
-#: denied, blocked by group policy, and an Application Control policy (App
-#: Control for Business, Smart App Control). The same set as
-#: ``kazma_core.docker_cli`` and ``kazma_core.libpq_reach``.
-_WINDOWS_POLICY_CODES = frozenset({5, 1260, 4551})
 #: How Windows' refusal reads inside an import error ("DLL load failed while
 #: importing pq: An Application Control policy has blocked this file.").
 _WINDOWS_POLICY_WORDS = ("application control policy", "group policy")
@@ -701,7 +696,7 @@ _PREFLIGHT_PARTS = {
 def preflight_refused_by_windows(result: dict) -> bool:
     """True when a failed preflight met Windows' file check (a policy
     refusal), not an error in the code."""
-    if result.get("winerror") in _WINDOWS_POLICY_CODES and result.get("step") in {"python", "docker"}:
+    if result.get("winerror") in _windows_refusal_codes() and result.get("step") in {"python", "docker"}:
         return True
     text = str(result.get("detail") or "").lower()
     return any(word in text for word in _WINDOWS_POLICY_WORDS)
@@ -3393,6 +3388,32 @@ def _docker_cli() -> str | None:
         return None
 
 
+def _windows_refusal_codes() -> frozenset[int]:
+    """Windows' answers that refuse a file by policy: ``REFUSAL_CODES`` of
+    ``kazma_core/windows_policy.py`` (the one definition), which the docker
+    CLI module loads by path for the guard."""
+    try:
+        return _docker_cli_module().refusal_codes()
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return frozenset()
+
+
+def _docker_cli_refusal(cli: str) -> str | None:
+    """Why Windows does not let *cli* start now (asked fresh), or None."""
+    try:
+        return _docker_cli_module().refused_by_os(cli, fresh=True)
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return None
+
+
+def _refused_docker_clis() -> list[str]:
+    """The docker CLIs here that Windows does not allow to start."""
+    try:
+        return list(_docker_cli_module().refused_clis())
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return []
+
+
 #: Kazma's engine's Docker context (``docker_cli.KAZMA_CONTEXT``) and its WSL distro.
 _KAZMA_CONTEXT = "kazma-engine"
 _KAZMA_DISTRO = "kazma-engine"
@@ -3709,12 +3730,32 @@ class Dependencies:
         if self.cli is None:
             self.cli = _docker_cli()
         if self.cli is None:
+            refused = _refused_docker_clis()
+            if refused:
+                self._cli_waits(refused)
+                return
             if not self._cli_said:
                 self._cli_said = True
                 self.log("warn", "deps.no_docker_cli", wanted=self.containers)
             self._set("no_docker_cli", "the docker CLI was not found")
             return
-        if self._engine_answers():
+        answered = self._engine_answers()
+        if answered is None:
+            # The CLI itself did not start. Windows' file check refusing it
+            # (live 2026-11-26, 10:56 UTC) is not an engine that is down: the
+            # guard ran the KazmaEngine task and restarted Docker in it again
+            # and again while the engine answered. Take the next CLI Windows
+            # allows, or wait calmly; the engine is never touched for it.
+            why = _docker_cli_refusal(self.cli)
+            if why is not None:
+                refused_cli, self.cli = self.cli, _docker_cli()
+                if self.cli is None or self.cli == refused_cli:
+                    self.cli = None
+                    self._cli_waits([refused_cli], why)
+                    return
+                self.log("info", "deps.cli_replaced", refused=refused_cli, cli=self.cli, detail=why)
+                answered = self._engine_answers()
+        if answered:
             self._engine_is_up(now)
             if self.containers:
                 self._check_containers(now)
@@ -3723,9 +3764,36 @@ class Dependencies:
             self._engine_is_down(now)
         self._write()
 
-    def _engine_answers(self) -> bool:
+    def _engine_answers(self) -> bool | None:
+        """True when the engine answers, False when it does not, None when
+        the docker CLI itself could not be started."""
         got = _run_command([self.cli or "docker", "version", "--format", "{{.Server.Version}}"], 15)
-        return bool(got and got[0] == 0 and got[1].strip())
+        if got is None:
+            return None
+        return bool(got[0] == 0 and got[1].strip())
+
+    def _cli_waits(self, refused: list[str], why: str = "") -> None:
+        """Windows' file check does not let a docker CLI start here, and no
+        other one is installed: what needs Docker waits for a signed CLI (an
+        update, or Docker Desktop's). Never "the engine is down": nothing is
+        started or restarted for it, and one calm card names the feature."""
+        self._down_since = None
+        self.engine_up = None
+        state_changed = self.state != "cli_refused"
+        self._set("cli_refused", "Windows' file check did not allow the docker command-line tool on "
+                                 "this PC, and no other one is installed; running code and containers "
+                                 "waits for a signed one (the engine is not restarted for it)")
+        if not state_changed:
+            return
+        self.log("info", "deps.cli_refused", clis=refused[:4], detail=why[:300], wanted=self.containers,
+                 note="Windows' file check, not an engine outage: nothing is restarted")
+        self.guard._page(
+            "warn", "Kazma could not keep a feature working on this PC",
+            "Running code and containers waits: Windows checked the docker command-line tool and did "
+            "not allow it on this PC, and no signed one is installed here. An update brings a signed "
+            "version; everything else keeps working, and nothing is wrong with the PC."
+            + (f"\nDetail: {why[:200]}" if why else ""),
+            kind="deps.docker_cli_waits", fingerprint="deps:cli_refused", force=True)
 
     def _set(self, state: str, detail: str) -> None:
         changed = state != self.state
@@ -5379,7 +5447,7 @@ class Guard:
         problem): Kazma waits for Docker, and the watch sees the engine down."""
         deps = getattr(self, "deps", None)
         return bool("docker" in waits and deps is not None and deps.owns_engine_alerts()
-                    and deps.engine_up is False)
+                    and (deps.engine_up is False or deps.state == "cli_refused"))
 
     def _note_waiting(self, waits: tuple[str, ...], detail: str) -> None:
         """Kazma is up and waits for a dependency outside it (``waits_for``:

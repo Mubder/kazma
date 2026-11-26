@@ -466,7 +466,7 @@ def shutdown_service_refusal(run: Runner = subprocess.run) -> int | None:
     refused its program (``WIN32_EXIT_CODE`` of ``sc.exe query``), else None:
     running, not installed, or stopped for another reason. Read only: nothing
     is started (:mod:`kazma_core.windows_trust`)."""
-    from kazma_core.libpq_reach import REFUSALS
+    from kazma_core.windows_policy import REFUSAL_CODES
 
     code, text = _out(run, ["sc.exe", "query", SHUTDOWN_SERVICE])
     if code != 0:
@@ -479,7 +479,7 @@ def shutdown_service_refusal(run: Runner = subprocess.run) -> int | None:
             state = words[-1]
         elif key.strip() == "WIN32_EXIT_CODE" and words and words[0].isdigit():
             exit_code = int(words[0])
-    return exit_code if state == "STOPPED" and exit_code in REFUSALS else None
+    return exit_code if state == "STOPPED" and exit_code in REFUSAL_CODES else None
 
 
 def _service_command_line(run: Runner) -> str | None:

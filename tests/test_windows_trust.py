@@ -361,6 +361,20 @@ def _log_strings(path: Path, functions: set[str] | None = None) -> list[str]:
     return out
 
 
+def _strings_in(path: Path, function: str) -> list[str]:
+    """The string literals of *function* in *path*, joined per call (a card)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    out = []
+    for fn in ast.walk(tree):
+        if isinstance(fn, ast.FunctionDef) and fn.name == function:
+            for call in ast.walk(fn):
+                if isinstance(call, ast.Call):
+                    out.append("".join(c.value for a in call.args for c in ast.walk(a)
+                                       if isinstance(c, ast.Constant) and isinstance(c.value, str)))
+    assert out, f"{function} not found in {path.name}"
+    return out
+
+
 def _what_kazma_says() -> list[str]:
     said = [text for pair in windows_trust.WORDS.values() for text in pair.values()]
     said += [name for part in windows_trust.PARTS for name in (*part.name, *part.feature)]
@@ -373,6 +387,7 @@ def _what_kazma_says() -> list[str]:
     said += _log_strings(core / "libpq_reach.py", {"reach_libpq"})
     said += _log_strings(core / "docker_cli.py", {"_usable"})
     said += _log_strings(core / "windows_trust.py")
+    said += _strings_in(REPO / "scripts" / "service" / "kazma_guard.py", "_cli_waits")
     for page in _docs_pages():
         said.append(page.read_text(encoding="utf-8"))
     # The operator's detail quotes Windows itself ("has blocked this file").
@@ -399,3 +414,117 @@ def test_control_a_planted_sentence_is_found_in_either_language():
     assert _offending(["To use it, turn off Smart App Control."]) != []
     assert _offending(["عطّل التحكم الذكي في التطبيقات لاستخدامه."]) != []
     assert _offending(["Kazma uses the signed alternative."]) == []
+
+
+# ── one definition of Windows' refusal codes (the audit's F6/F7) ─────────
+
+def _product_sources(*patterns: str) -> dict[str, str]:
+    listed = subprocess.run(["git", "ls-files", *patterns], cwd=REPO, capture_output=True, text=True,
+                            check=True).stdout.split()
+    return {name: (REPO / name).read_text(encoding="utf-8", errors="replace") for name in listed
+            if "/tests/" not in f"/{name}" and (REPO / name).is_file()}
+
+
+def _copies_of_refusal_codes(sources: dict[str, str]) -> list[str]:
+    """Where a product file spells Windows' refusal codes itself (1260, 4551)
+    instead of reading ``windows_policy.REFUSAL_CODES``."""
+    hits = []
+    for name, text in sources.items():
+        if name.endswith("kazma_core/windows_policy.py"):
+            continue
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.Constant) and type(node.value) is int and node.value in (1260, 4551):
+                hits.append(f"{name}:{node.lineno}")
+    return hits
+
+
+def test_windows_refusal_codes_have_one_definition():
+    sources = _product_sources("*.py")
+    assert len(sources) > 500, "the sources were not read"
+    assert _copies_of_refusal_codes(sources) == []
+    assert windows_policy.REFUSAL_CODES == frozenset({5, 1260, 4551})
+    assert libpq_reach.REFUSALS is windows_policy.REFUSAL_CODES
+    assert docker_cli.refusal_codes() == windows_policy.REFUSAL_CODES
+
+
+def test_control_a_second_copy_is_found():
+    assert _copies_of_refusal_codes({"scripts/x.py": "R = frozenset({5, 1260, 4551})\n"}) == [
+        "scripts/x.py:1", "scripts/x.py:1"]
+    assert _copies_of_refusal_codes({"kazma-core/kazma_core/windows_policy.py": "R = {4551}\n"}) == []
+
+
+def test_prepush_finds_docker_the_way_kazma_does(monkeypatch):
+    """prepush kept a copy of the lookup (no winerror check, no
+    KAZMA_DOCKER_BIN): it now loads docker_cli.py by path, as the guard does."""
+    spec = importlib.util.spec_from_file_location("_trust_prepush", REPO / "scripts" / "prepush.py")
+    prepush = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = prepush
+    spec.loader.exec_module(prepush)
+    assert not hasattr(prepush, "_docker_candidates")
+    module = prepush._docker_cli_module()
+    assert Path(module.__file__).resolve() == (REPO / "kazma-core" / "kazma_core" / "docker_cli.py").resolve()
+    monkeypatch.setattr(module, "find_docker_cli", lambda: r"C:\signed\docker.exe")
+    monkeypatch.setattr(prepush, "_DOCKER", [])
+    assert prepush.docker_exe() == r"C:\signed\docker.exe"
+    monkeypatch.setattr(module, "find_docker_cli", lambda: None)
+    monkeypatch.setattr(prepush, "_DOCKER", [])
+    assert prepush.docker_exe() == "docker"
+
+
+# ── Kazma never starts its own launchers (the audit's F8-F10) ────────────
+
+def _launcher_names() -> list[str]:
+    import tomllib
+
+    scripts = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"]["scripts"]
+    return sorted(f"{name}.exe" for name in scripts)
+
+
+def _docstrings(tree: ast.AST) -> set[int]:
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                ids.add(id(first.value))
+    return ids
+
+
+def _launcher_uses(sources: dict[str, str], names: list[str]) -> list[str]:
+    """Where Kazma's code or scripts would start a console-script launcher
+    (made on the user's PC, never signed) instead of ``python -m``: a string
+    a program runs, or a script line that is not a comment."""
+    hits = []
+    for name, text in sources.items():
+        if name.endswith(".py"):
+            tree = ast.parse(text)
+            skip = _docstrings(tree)
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skip
+                        and any(exe in node.value.lower() for exe in names)):
+                    hits.append(f"{name}:{node.lineno}")
+        else:
+            for number, line in enumerate(text.splitlines(), 1):
+                code = line.split("#", 1)[0] if name.endswith((".ps1", ".sh")) else line
+                if not line.lstrip().startswith((";", "//", "REM", "rem", "::")) and \
+                        any(exe in code.lower() for exe in names):
+                    hits.append(f"{name}:{number}")
+    return hits
+
+
+def test_kazma_never_starts_its_own_launchers():
+    names = _launcher_names()
+    assert "kazma.exe" in names and len(names) >= 3
+    sources = _product_sources("kazma-*/*.py", "kazma-*/**/*.py", "scripts/*.py", "scripts/**/*.py",
+                               "*.ps1", "*.cmd", "scripts/**/*.iss", "scripts/**/*.ps1")
+    assert any(n.endswith(".ps1") for n in sources) and any(n.endswith(".iss") for n in sources)
+    assert _launcher_uses(sources, names) == []
+
+
+def test_control_a_launcher_started_by_name_is_found():
+    names = _launcher_names()
+    planted = {
+        "kazma-cli/kazma_cli/x.py": 'import subprocess\nsubprocess.run(["kazma.exe", "serve"])\n',
+        "setup.ps1": "& (Join-Path $ScriptsDir 'kazma-tui.exe')\n# kazma.exe in a comment is fine\n",
+    }
+    assert _launcher_uses(planted, names) == ["kazma-cli/kazma_cli/x.py:2", "setup.ps1:1"]

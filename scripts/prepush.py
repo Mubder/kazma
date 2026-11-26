@@ -491,37 +491,38 @@ def run_browser(part: Part, files: list[str], processes: int) -> None:
 
 # ── Linux, Python 3.11, no psycopg ───────────────────────────────────────
 
-def _docker_candidates() -> list[str]:
-    """PATH's docker, then Docker Desktop's and Kazma's own engine's install folders."""
-    out = [shutil.which("docker") or ""]
-    if os.name == "nt":
-        roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432")] + [r"C:\Program Files"]
-        out += [str(Path(r) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe") for r in roots if r]
-        local = os.environ.get("LOCALAPPDATA")
-        if local:
-            out.append(str(Path(local) / "Kazma" / "engine" / "bin" / "docker.exe"))
-    return [c for c in dict.fromkeys(out) if c]
-
-
 _DOCKER: list[str] = []
+_DOCKER_CLI = None
+
+
+def _docker_cli_module():
+    """``kazma_core/docker_cli.py``, loaded by path as the guard loads it:
+    this script never imports Kazma, and keeps no copy of its own of how a
+    docker CLI is found or what Windows' refusal looks like (the audit's
+    F6/F7, 2026-11-26)."""
+    global _DOCKER_CLI
+    if _DOCKER_CLI is None:
+        import importlib.util
+
+        path = REPO / "kazma-core" / "kazma_core" / "docker_cli.py"
+        spec = importlib.util.spec_from_file_location("prepush_docker_cli", path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load {path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        _DOCKER_CLI = module
+    return _DOCKER_CLI
 
 
 def docker_exe() -> str:
-    """The first docker CLI that starts (2026-11-26: Windows' Application
-    Control began refusing the copy Kazma's engine put first on PATH, and the
-    Linux part found no Docker). As ``kazma_core.docker_cli`` does, a CLI the
-    system refuses is passed over; this script does not import Kazma."""
+    """The docker CLI Kazma would pick (``KAZMA_DOCKER_BIN``, Kazma's engine,
+    PATH, Docker's install folders; one Windows refuses is passed over,
+    2026-11-26), else ``docker``."""
     if not _DOCKER:
-        for candidate in _docker_candidates():
-            try:
-                subprocess.run([candidate, "--version"], capture_output=True, timeout=15, check=False)
-            except subprocess.TimeoutExpired:
-                pass
-            except OSError:
-                continue
-            _DOCKER.append(candidate)
-            break
-        else:
+        try:
+            _DOCKER.append(_docker_cli_module().find_docker_cli() or "docker")
+        except (OSError, ImportError, SyntaxError, AttributeError):
             _DOCKER.append("docker")
     return _DOCKER[0]
 

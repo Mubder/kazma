@@ -118,15 +118,12 @@ def _installed_tool(tool: str) -> str | None:
     off the container, PATH had no pg_dump and ``KAZMA_DB_CONTAINER`` still
     named the old container: every backup would have dumped that container's
     stale database while it ran, and failed once it was stopped."""
-    from kazma_core.postgres_service import read_record
+    from kazma_core.postgres_service import installed_bin_dir
 
-    try:
-        bin_dir = str((read_record().get("postgres") or {}).get("bin_dir") or "")
-    except AttributeError:  # a record whose "postgres" is not an object
+    folder = installed_bin_dir()
+    if folder is None:
         return None
-    if not bin_dir:
-        return None
-    path = Path(bin_dir) / (f"{tool}.exe" if os.name == "nt" else tool)
+    path = folder / (f"{tool}.exe" if os.name == "nt" else tool)
     return str(path) if path.is_file() else None
 
 

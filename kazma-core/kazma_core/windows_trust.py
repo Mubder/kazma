@@ -213,7 +213,9 @@ def _database_client() -> PartState:
     folder = libpq_reach.added_folder()
     if libpq_reach.preferred() and folder is not None:
         return PartState("database_client", PREFERRED, tuple(f.name for f in files), str(folder / "libpq.dll"))
-    refused = [(f, code) for f in files if (code := libpq_reach.load_error(f)) in libpq_reach.REFUSALS]
+    from kazma_core.windows_policy import REFUSAL_CODES
+
+    refused = [(f, code) for f in files if (code := libpq_reach.load_error(f)) in REFUSAL_CODES]
     if not refused:
         return PartState("database_client", ALLOWED, tuple(f.name for f in files))
     names = tuple(f.name for f, _ in refused)

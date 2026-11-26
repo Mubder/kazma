@@ -98,10 +98,34 @@ def test_control_an_allowed_bundled_library_changes_nothing(windows, monkeypatch
 
 
 def test_a_libpq_already_on_path_is_left_to_psycopg(windows, monkeypatch):
-    monkeypatch.setattr(libpq_reach, "_refused", lambda path: True)
+    monkeypatch.setattr(libpq_reach, "_refused", lambda path: path.suffix == ".pyd")
     monkeypatch.setenv("PATH", str(windows[0]))
     assert libpq_reach.reach_libpq() is None
     assert os.environ["PATH"] == str(windows[0])
+
+
+def test_a_libpq_on_path_windows_refuses_too_is_passed_over(windows, monkeypatch):
+    """The audit's F3: the PATH copy was taken on trust; one Windows refuses
+    is passed over for an installed PostgreSQL's that it allows. The test
+    above (an allowed PATH copy, left to psycopg) is the control."""
+    monkeypatch.setattr(libpq_reach, "_refused", lambda path: path.suffix == ".pyd" or path.parent == windows[0])
+    monkeypatch.setenv("PATH", str(windows[0]))
+    assert libpq_reach.reach_libpq() == windows[1]
+    assert os.environ["PATH"].split(os.pathsep) == [str(windows[0]), str(windows[1])]
+
+
+def test_the_postgres_kazma_set_up_comes_first(windows, monkeypatch, tmp_path):
+    """The audit's F2: the PostgreSQL ``kazma setup postgres`` recorded is
+    looked for first, wherever it was installed; Program Files' after it."""
+    from kazma_core import postgres_service
+
+    recorded = tmp_path / "D-drive" / "pgsql" / "bin"
+    recorded.mkdir(parents=True)
+    (recorded / "libpq.dll").write_bytes(b"")
+    monkeypatch.setattr(postgres_service, "installed_bin_dir", lambda record=None: recorded)
+    assert libpq_reach._postgres_bins() == [recorded, windows[1], windows[0]]
+    monkeypatch.setattr(postgres_service, "installed_bin_dir", lambda record=None: None)
+    assert libpq_reach._postgres_bins() == [windows[1], windows[0]]  # control: none recorded
 
 
 def test_no_postgres_installed_is_said(windows, monkeypatch, tmp_path, caplog):

@@ -49,6 +49,7 @@ __all__ = [
     "Step",
     "detect_platform",
     "empty_database_steps",
+    "installed_bin_dir",
     "read_record",
     "service_name",
     "service_state",
@@ -529,6 +530,23 @@ def read_record(path: Path | None = None) -> dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def installed_bin_dir(record: dict[str, Any] | None = None) -> Path | None:
+    """The ``bin`` folder of the PostgreSQL ``kazma setup postgres`` installed
+    (its record's ``bin_dir``), when it is there. The one answer for where
+    that PostgreSQL's programs and its client library are: the backup's
+    ``pg_dump`` (``pg_bridge``) and psycopg's signed ``libpq.dll``
+    (``libpq_reach``, AGENTS section 71) both read it."""
+    try:
+        postgres = (record if record is not None else read_record()).get("postgres") or {}
+        bin_dir = str(postgres.get("bin_dir") or "")
+    except AttributeError:  # a record whose "postgres" is not an object
+        return None
+    if not bin_dir:
+        return None
+    folder = Path(bin_dir)
+    return folder if folder.is_dir() else None
 
 
 @dataclass

@@ -59,6 +59,29 @@ separate process: can the new version load what it needs on this PC? When the
 answer is no, the running version stays, the update waits, and you get one
 message saying so. Nothing is lost. The next update or reload checks again.
 
+## What Windows checked on a real PC
+
+On 26 November 2026, Smart App Control was on on the PC Kazma is built on.
+Most of Kazma's files, including ones that carry no signature yet, ran
+normally: Windows already knew them well. Windows did not allow two:
+psycopg's database client library (its Python 3.14 build) and the Docker
+command-line tool Kazma's container engine had installed. Kazma now uses the
+signed alternatives for both, as the table above says. A different PC, or a
+newer version of a file, can be judged differently, so the plan below is
+signatures rather than reputation.
+
+## For company IT: App Control for Business
+
+A company may manage its PCs with **App Control for Business** instead of Smart App Control. Unlike
+Smart App Control, a company policy can name what it allows. If your IT team
+manages the policy, they may choose to allow Kazma's signed files (by its
+publisher certificate, once releases are signed) or the folder Kazma is
+installed in. This is an option for the administrators who own that policy;
+nobody using Kazma needs to do anything, and Kazma works the same way under
+either: it uses signed alternatives, keeps the running version, or names the
+feature that waits. `kazma doctor` lists each of Kazma's native parts and
+what Windows decided, which is what an administrator needs to write a rule.
+
 ## What comes next
 
 1. **Signed releases.** Kazma's own files signed with a code-signing

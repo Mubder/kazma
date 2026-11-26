@@ -377,6 +377,10 @@ CATALOG: tuple[_Entry, ...] = (
     _guard("deps.engine_down", "warn", "Docker does not answer", "Docker لا يستجيب",
            closed_by="deps.engine_up", condition="docker_away"),
     _guard("deps.engine_up", "success", "Docker is back", "عاد Docker"),
+    # The docker CLI Windows' file check does not allow, and no other installed: a feature
+    # waits (kazma_core.windows_trust's words); never an engine outage (AGENTS section 71).
+    _guard("deps.docker_cli_waits", "warn", "Kazma could not keep a feature working on this PC",
+           "لم يتمكن كاظمه من إبقاء ميزة تعمل على هذا الجهاز", page=_SYSTEM),
     _guard("deps.container_start_failed", "warn", "A container Kazma needs will not start",
            "حاوية يحتاجها كاظمه لا تبدأ", closed_by="deps.container_recovered"),
     _guard("deps.container_recovered", "success", "A container Kazma needs runs again",

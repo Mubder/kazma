@@ -78,6 +78,36 @@ exceptions; a user cannot be asked to turn a protection off.
   planted as a `psycopg` in its folder; the clean folder as the control),
   `tests/test_guard_integration.py::test_a_reload_whose_new_code_cannot_start_keeps_the_server_running`
   (the real guard: kept, then switched once the plant is gone).
+- **The outside audit (2026-11-26)**: `KAZMA_DOCKER_BIN` naming a file
+  Windows refuses is said as that, at INFO under its own key, never "does
+  not exist" (F1); `libpq_reach` looks first in the PostgreSQL `kazma setup
+  postgres` recorded (`postgres_service.installed_bin_dir`, the one reader,
+  which `pg_bridge` uses too) and passes over a `libpq.dll` on PATH Windows
+  refuses (F2, F3); the refusal codes are `windows_policy.REFUSAL_CODES`
+  only -- `docker_cli` (`refusal_codes()`), `libpq_reach`, the guard and
+  prepush read it, prepush loads `docker_cli.py` by path instead of its copy
+  (F6, F7; gate `test_windows_refusal_codes_have_one_definition`, a planted
+  copy as control); a CLI that started is asked again after
+  `STARTED_RECHECK_S` (900 s): the policy can arrive while Kazma runs.
+- **A refused docker CLI is not a stopped engine** (F12): the guard's
+  `Dependencies` asks `refused_by_os(cli, fresh=True)` when `docker version`
+  could not even start its CLI; it takes the next CLI Windows allows
+  (`deps.cli_replaced`) or waits (`cli_refused`, `refused_clis()` when none
+  is found): no KazmaEngine task, no `systemctl restart docker`, never
+  `deps.engine_down`; one card `deps.docker_cli_waits` names the feature, and
+  `_deps_speaks_for` keeps the readiness wait from paging it twice. Gate:
+  `tests/test_guard_dependencies.py` (a planted refusal; the engine really
+  down as the control; a refused CLI replaced by an allowed one).
+- **Kazma never starts its own launchers** (F8-F10): `kazma.exe`,
+  `kazma-web.exe`, `kazma-tui.exe` are made on the user's PC by pip and
+  nothing signs them. The guard, the KazmaAgent task, `kazma update`, the
+  installer's shortcuts and setup already ran `python -m`; setup's hints and
+  the MCP/ACP client configs (`mcp.server._client_config`, the docs) now do
+  too. Gate: `test_kazma_never_starts_its_own_launchers` (names from
+  pyproject's `[project.scripts]`; .py strings outside docstrings, .ps1/.cmd/
+  .iss lines outside comments; a planted start as control). The engine's
+  shutdown helper, built by `csc.exe` on the PC, is planned as a signed
+  release asset (`docs/plans/WINDOWS_TRUST_PLAN.md`).
 - **User page**: `docs/docs/guide/windows-smart-app-control.md` and its
   Arabic text `windows-smart-app-control-ar.md` (the site's
   `ar/windows-smart-app-control`). The plan it states: signed releases (a

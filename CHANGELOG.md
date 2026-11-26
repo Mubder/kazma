@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Windows' file check: the outside audit's findings (2026-11-26)
+
+- A docker program Windows does not allow is never taken for a Docker engine
+  that is down: the guard uses the next program Windows allows, or waits and
+  says once which feature waits; it no longer restarts Kazma's engine for it.
+  A program that started is checked again after 15 minutes, so a policy that
+  arrives while Kazma runs is noticed.
+- `KAZMA_DOCKER_BIN` naming a program Windows refused is said as that, not as
+  a missing file. The PostgreSQL Kazma's setup installed is looked for first
+  wherever it lives, and a `libpq.dll` on PATH that Windows refuses is passed
+  over.
+- One list of Windows' refusal codes, read everywhere, including by the
+  pre-push check, which now finds docker the way Kazma does.
+- Kazma's setup hints and the MCP and ACP client configs run Kazma with
+  Python (`python -m kazma_cli`), never its unsigned launchers.
+- The Smart App Control page has a section for company IT (App Control for
+  Business) and says what Windows checked on a real PC.
+
 ## Kazma works with Windows' file check (Smart App Control) (2026-11-26)
 
 - **An update never replaces a working Kazma with one that cannot start**:

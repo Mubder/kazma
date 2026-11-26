@@ -74,10 +74,11 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   blocked this file", WinError 4551; it was chosen because the file was
   there, every docker call failed, the guard restarted an engine that
   answered and code execution waited). A CLI Windows refuses by policy
-  (`docker_cli._REFUSALS`) is passed over for the next, said once at
-  WARNING and tried again every 5 minutes; a file that is no program is
-  not a refusal (gate: `tests/test_docker_cli_discovery.py`, the old choice
-  as the control). The guard keeps its copy of the module until the
+  (`windows_policy.REFUSAL_CODES`, §71) is passed over for the next, said
+  once at INFO and tried again every 5 minutes (one that started, after 15);
+  while Smart App Control is on, Docker Desktop's signed CLI comes first; a
+  file that is no program is not a refusal (gate:
+  `tests/test_docker_cli_discovery.py`, the old choice as the control). The guard keeps its copy of the module until the
   `KazmaAgent` task restarts. The check took Docker
   Desktop's CLI for Kazma's, so the owner's PC never got its own, and
   uninstalling Docker Desktop would have cut Kazma off from its engine; the

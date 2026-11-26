@@ -81,7 +81,9 @@ __all__ = [
     "kazma_engine_dir",
     "kazma_engine_disk_dir",
     "normalize_engine",
+    "refusal_codes",
     "refused_by_os",
+    "refused_clis",
     "wsl_distro_location",
 ]
 
@@ -105,10 +107,10 @@ REFUSED_RECHECK_S = 300.0
 _START_TIMEOUT_S = 15.0
 #: (path, mtime_ns, size) -> (why it was refused or None, when it was tried)
 _started: dict[tuple[str, int, int], tuple[str | None, float]] = {}
-#: Windows' answers that refuse a program by policy: access denied, blocked
-#: by group policy (Software Restriction), and an Application Control policy
-#: (App Control for Business, Smart App Control), the one live met.
-_REFUSALS = frozenset({5, 1260, 4551})
+#: A CLI that started is asked again after this long: Windows' policy can
+#: arrive while Kazma runs (live 2026-11-26, 10:56 UTC), and a start
+#: remembered for the life of the file kept a refused CLI chosen.
+STARTED_RECHECK_S = 900.0
 
 
 def _candidates() -> list[Path]:
@@ -133,12 +135,12 @@ def _candidates() -> list[Path]:
     return out
 
 
-def _say_once(key: str, message: str, *args: object) -> None:
+def _say_once(key: str, message: str, *args: object, level: int = logging.WARNING) -> None:
     with _reported_lock:
         if key in _reported:
             return
         _reported.add(key)
-    logger.warning(message, *args)
+    logger.log(level, message, *args)
 
 
 def _on_windows() -> bool:
@@ -162,16 +164,18 @@ def _start(candidate: Path) -> None:
     )
 
 
-def _refused_by_os(path: str | Path) -> str | None:
+def _refused_by_os(path: str | Path, *, fresh: bool = False) -> str | None:
     """Why Windows refuses to start the CLI at ``path``, or None.
 
-    Only a refusal by the system's policy counts (:data:`_REFUSALS`): a file
-    that cannot be read, or is no program, is left to fail as it did before.
-    Elsewhere than Windows the answer is None without a start.
+    Only a refusal by the system's policy counts
+    (``windows_policy.REFUSAL_CODES``): a file that cannot be read, or is no
+    program, is left to fail as it did before. Elsewhere than Windows the
+    answer is None without a start.
 
-    The answer is kept per file version: a CLI that started is not tried
-    again until the file changes; a refusal is tried again after
-    :data:`REFUSED_RECHECK_S`."""
+    The answer is kept per file version: a CLI that started is asked again
+    after :data:`STARTED_RECHECK_S`, a refusal after
+    :data:`REFUSED_RECHECK_S`; *fresh* asks now (a docker call that could not
+    start its CLI)."""
     if not _on_windows():
         return None
     candidate = Path(path)
@@ -183,7 +187,8 @@ def _refused_by_os(path: str | Path) -> str | None:
     now = time.monotonic()
     with _reported_lock:
         held = _started.get(key)
-    if held is not None and (held[0] is None or now - held[1] < REFUSED_RECHECK_S):
+    keep = STARTED_RECHECK_S if held is not None and held[0] is None else REFUSED_RECHECK_S
+    if held is not None and not fresh and now - held[1] < keep:
         return held[0]
     why: str | None = None
     try:
@@ -192,17 +197,19 @@ def _refused_by_os(path: str | Path) -> str | None:
         why = None  # it started
     except OSError as exc:
         code = getattr(exc, "winerror", None)
-        why = f"WinError {code}: {exc.strerror}" if code in _REFUSALS else None
+        why = f"WinError {code}: {exc.strerror}" if code in refusal_codes() else None
     with _reported_lock:
         _started[key] = (why, now)
     return why
 
 
-def refused_by_os(path: str | Path) -> str | None:
+def refused_by_os(path: str | Path, *, fresh: bool = False) -> str | None:
     """Why Windows' file check does not allow the program at ``path`` to start
-    (``WinError 4551: ...``), or None when it starts. Started once per file
-    version (:func:`_refused_by_os`); read by :mod:`kazma_core.windows_trust`."""
-    return _refused_by_os(path)
+    (``WinError 4551: ...``), or None when it starts. Kept per file version
+    (:func:`_refused_by_os`); *fresh* starts it now. Read by
+    :mod:`kazma_core.windows_trust` and by the guard, which asks fresh when a
+    docker call could not start its CLI."""
+    return _refused_by_os(path, fresh=fresh)
 
 
 def _usable(path: str | Path) -> bool:
@@ -230,13 +237,13 @@ def _usable(path: str | Path) -> bool:
 _policy = None
 
 
-def _checks_files() -> bool:
-    """Smart App Control checks every program on this PC
-    (``kazma_core.windows_policy``). The guard loads this file by path and
-    never imports Kazma, so the policy file is loaded the same way there."""
+def _windows_policy():
+    """``kazma_core.windows_policy``: imported in a Kazma process, loaded by
+    path where this file was (the guard, prepush, the reload preflight),
+    which never import Kazma. None when it cannot be read."""
     global _policy
-    try:
-        if _policy is None:
+    if _policy is None:
+        try:
             if __name__ == "kazma_core.docker_cli":
                 from kazma_core import windows_policy as module
             else:
@@ -245,13 +252,31 @@ def _checks_files() -> bool:
                 spec = importlib.util.spec_from_file_location(
                     f"{__name__}_windows_policy", Path(__file__).with_name("windows_policy.py"))
                 if spec is None or spec.loader is None:
-                    return False
+                    return None
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[spec.name] = module
                 spec.loader.exec_module(module)
-            _policy = module
-        return bool(_policy.checks_files())
-    except (ImportError, OSError, AttributeError):
+        except (ImportError, OSError, SyntaxError):
+            return None
+        _policy = module
+    return _policy
+
+
+def refusal_codes() -> frozenset[int]:
+    """Windows' answers that refuse a program by policy
+    (``windows_policy.REFUSAL_CODES``, the one definition), for this file's
+    callers that load it by path: the guard, prepush."""
+    policy = _windows_policy()
+    return frozenset(getattr(policy, "REFUSAL_CODES", ()) or ())
+
+
+def _checks_files() -> bool:
+    """Smart App Control checks every program on this PC
+    (``kazma_core.windows_policy``)."""
+    policy = _windows_policy()
+    try:
+        return bool(policy is not None and policy.checks_files())
+    except (OSError, AttributeError):
         return False
 
 
@@ -272,6 +297,23 @@ def _signed_cli(own: Path) -> str | None:
     return None
 
 
+def refused_clis() -> list[str]:
+    """The docker CLIs on this machine that Windows' file check does not allow
+    to start (answers kept per file version, :func:`_refused_by_os`). With
+    :func:`find_docker_cli` None it tells "Windows did not allow the CLI"
+    from "no CLI is installed"; the guard reads it so a refused CLI is never
+    taken for a stopped engine."""
+    explicit = (os.environ.get(_ENV) or "").strip().strip('"')
+    found = [Path(explicit)] if explicit else []
+    if _on_windows():
+        found.append(kazma_engine_dir() / "bin" / "docker.exe")
+    on_path = shutil.which("docker")
+    if on_path:
+        found.append(Path(on_path))
+    found += _candidates()
+    return [str(p) for p in dict.fromkeys(found) if p.is_file() and _refused_by_os(p)]
+
+
 def find_docker_cli() -> str | None:
     """Absolute path of a usable docker CLI, or ``None``. In a Kazma process
     the first call also pins the chosen container engine (see the module
@@ -281,13 +323,23 @@ def find_docker_cli() -> str | None:
     _apply_stored_choice_once()
     explicit = (os.environ.get(_ENV) or "").strip().strip('"')
     if explicit:
-        if Path(explicit).is_file() and _usable(explicit):
+        if not Path(explicit).is_file():
+            _say_once(
+                f"env:{explicit}",
+                "[docker] %s=%s does not exist -- falling back to PATH and the "
+                "standard install locations", _ENV, explicit,
+            )
+        elif _usable(explicit):
             return explicit
-        _say_once(
-            f"env:{explicit}",
-            "[docker] %s=%s does not exist -- falling back to PATH and the "
-            "standard install locations", _ENV, explicit,
-        )
+        else:
+            # It exists: Windows did not let it start. Said as that, calmly,
+            # never as a missing file (the audit's F1, 2026-11-26).
+            _say_once(
+                f"env-refused:{explicit}",
+                "[docker] %s=%s: Windows checked it and did not allow it to start on this PC; "
+                "Kazma uses the next docker CLI (PATH, then Docker's install folders)", _ENV, explicit,
+                level=logging.INFO,
+            )
     if _on_windows():
         own = kazma_engine_dir() / "bin" / "docker.exe"
         if own.is_file() and _checks_files():

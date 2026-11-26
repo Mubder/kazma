@@ -412,6 +412,45 @@ def test_control_without_smart_app_control_kazmas_own_cli_comes_first(engine_and
     assert docker_cli.find_docker_cli() == str(engine_and_desktop)
 
 
+def test_a_named_cli_windows_refuses_is_said_as_that_never_as_missing(fake_docker, tmp_path, monkeypatch, caplog):
+    """The audit's F1: ``KAZMA_DOCKER_BIN`` naming a file Windows refused was
+    said as a file that "does not exist"."""
+    named = tmp_path / "named" / "docker.exe"
+    named.parent.mkdir()
+    named.write_bytes(b"")
+    monkeypatch.setenv("KAZMA_DOCKER_BIN", str(named))
+    monkeypatch.setattr(docker_cli, "_on_windows", lambda: True)
+    monkeypatch.setattr(docker_cli, "_started", {})
+    monkeypatch.setattr(docker_cli, "_start", _refusing(named))
+    caplog.set_level(logging.INFO, logger=docker_cli.__name__)
+    assert docker_cli.find_docker_cli() == str(fake_docker)
+    said = [r for r in caplog.records if r.getMessage().startswith("[docker] KAZMA_DOCKER_BIN=")]
+    assert len(said) == 1 and said[0].levelno == logging.INFO
+    assert "did not allow it to start" in said[0].getMessage()
+    assert not any("does not exist" in r.getMessage() for r in caplog.records)
+
+
+def test_control_a_named_cli_that_is_missing_is_said_missing(fake_docker, tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("KAZMA_DOCKER_BIN", str(tmp_path / "nowhere" / "docker.exe"))
+    caplog.set_level(logging.INFO, logger=docker_cli.__name__)
+    assert docker_cli.find_docker_cli() == str(fake_docker)
+    assert any("does not exist" in r.getMessage() for r in caplog.records)
+    assert not any("did not allow" in r.getMessage() for r in caplog.records)
+
+
+def test_a_cli_refused_after_it_was_chosen_is_passed_over_at_the_next_check(blocked_docker, fake_docker, monkeypatch):
+    """Windows' policy can arrive while Kazma runs (live 2026-11-26, 10:56 UTC):
+    a start is remembered for STARTED_RECHECK_S, then asked again."""
+    monkeypatch.setattr(docker_cli, "_start", _refusing(Path("nothing-is-refused")))
+    assert docker_cli.find_docker_cli() == str(blocked_docker)
+    monkeypatch.setattr(docker_cli, "_start", _refusing(blocked_docker))
+    assert docker_cli.find_docker_cli() == str(blocked_docker), "control: inside the window, the start is kept"
+    later = docker_cli.time.monotonic() + docker_cli.STARTED_RECHECK_S + 1
+    monkeypatch.setattr(docker_cli.time, "monotonic", lambda: later)
+    assert docker_cli.find_docker_cli() == str(fake_docker)
+    assert docker_cli.refused_clis() == [str(blocked_docker)]
+
+
 def test_a_cli_allowed_again_comes_back_by_itself(blocked_docker, fake_docker, monkeypatch):
     monkeypatch.setattr(docker_cli, "_start", _refusing(blocked_docker))
     assert docker_cli.find_docker_cli() == str(fake_docker)

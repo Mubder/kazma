@@ -36,15 +36,15 @@ import logging
 import os
 from pathlib import Path
 
+from kazma_core.windows_policy import REFUSAL_CODES
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["REFUSALS", "added_folder", "bundled_files", "load_error", "postgres_libpq_folders", "preferred",
            "reach_libpq"]
 
-#: Windows' answers that refuse a library by policy: access denied, blocked
-#: by group policy, and an Application Control policy (the one live met).
-REFUSALS = frozenset({5, 1260, 4551})
-_REFUSALS = REFUSALS
+#: Windows' answers that refuse a library by policy (the one definition).
+REFUSALS = REFUSAL_CODES
 
 #: The folder this process added to PATH, once it did.
 _added: Path | None = None
@@ -86,8 +86,22 @@ def _refused(path: Path) -> bool:
     return load_error(path) in REFUSALS
 
 
+def _recorded_bin() -> list[Path]:
+    """The ``bin`` of the PostgreSQL ``kazma setup postgres`` installed, when
+    it holds ``libpq.dll`` (``postgres_service.installed_bin_dir``): first,
+    wherever it was installed (the audit's F2, 2026-11-26)."""
+    try:
+        from kazma_core.postgres_service import installed_bin_dir
+
+        folder = installed_bin_dir()
+    except (ImportError, OSError, ValueError):
+        return []
+    return [folder] if folder is not None and (folder / "libpq.dll").is_file() else []
+
+
 def _postgres_bins() -> list[Path]:
-    """Installed PostgreSQL ``bin`` folders that hold ``libpq.dll``, the newest major first."""
+    """Installed PostgreSQL ``bin`` folders that hold ``libpq.dll``: the one
+    Kazma's setup recorded first, then Program Files', the newest major first."""
     roots = {os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432")} | {r"C:\Program Files"}
     found = {lib.parent for root in roots if root for lib in Path(root, "PostgreSQL").glob("*/bin/libpq.dll")}
 
@@ -95,7 +109,7 @@ def _postgres_bins() -> list[Path]:
         head = folder.parent.name.split(".")[0]
         return int(head) if head.isdigit() else 0
 
-    return sorted(found, key=major, reverse=True)
+    return list(dict.fromkeys([*_recorded_bin(), *sorted(found, key=major, reverse=True)]))
 
 
 def postgres_libpq_folders() -> list[Path]:
@@ -171,12 +185,16 @@ def reach_libpq() -> Path | None:
         if not refused:
             return None
         path = os.environ.get("PATH", "")
-        if any(Path(d, "libpq.dll").is_file() for d in path.split(os.pathsep) if d):
+        # A libpq.dll already on PATH is psycopg's to find -- unless Windows
+        # refuses it too: then it is passed over (the audit's F3, 2026-11-26).
+        on_path = [Path(d, "libpq.dll") for d in path.split(os.pathsep) if d and Path(d, "libpq.dll").is_file()]
+        allowed = next((lib for lib in on_path if not _refused(lib)), None)
+        if allowed is not None:
             logger.info("[postgres] Windows' file check did not allow psycopg's bundled client "
-                        "library on this PC; psycopg uses the libpq.dll already on PATH (%s)",
-                        ", ".join(p.name for p in refused))
+                        "library on this PC; psycopg uses the libpq.dll already on PATH (%s). Detail: %s",
+                        allowed, ", ".join(p.name for p in refused))
             return None
-        bins = _postgres_bins()
+        bins = [b for b in _postgres_bins() if b / "libpq.dll" not in on_path]
     except (OSError, ImportError, ValueError) as exc:
         logger.warning("[postgres] could not check psycopg's client library: %s", type(exc).__name__)
         return None
