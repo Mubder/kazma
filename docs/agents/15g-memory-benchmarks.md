@@ -358,6 +358,37 @@
   cut memory read whole, three tool rounds and no fourth with five as the
   control, the question's clock in recall with the real clock as the
   control, a refused call never judged).
+- **Dataset v9: the facts under the names the product holds** (2026-11-26,
+  the memory plan's W6, the framework audit's F-C (5)). v8 seeded the user's
+  role as `job_title` and name as `name`, names no writer of the product keeps
+  (`users_names`, `name_to_file` file them as `current_role` and `name_is`), so
+  the benchmark measured a store no user has and hid a miss. From v9
+  (`benchmark.NAMED_AS_THE_PRODUCT_FROM`) `_seed` files each fact as the
+  extraction pass does. No memory changes, so the fingerprint and the sealed
+  set's `ids_hold_since` hold, and v5 to v8 replay exactly (they seed as
+  before). Three facts move (f01, f04, f34); `memory_bench.py vectors`
+  embedded three texts.
+  - **The miss it showed:** q601 "what is it that I do for a living?" was lost
+    under the product's names. The role phrase asked only "do I do for a
+    living". It now takes "I do for a living", and MSA "لكسب عيشي/رزقي"
+    (`fact_names.ASKED_AS_MINE`). With that, v9 against v8 loses no question
+    of the benchmark (183), the small store (164) or the scale run (183).
+  - **What moves:** h022 ("شنو فصيلة دمي؟") and h024 ("What's my brother's
+    name?") still find their answer, second where it was first: the renamed
+    name fact ("user name_is Sami") stands nearer them by meaning. q006
+    precision is a little lower, q1008 (small store) ranks higher. Locked
+    again with `--rebaseline`: overall precision 0.4872 to 0.4868, second set
+    MRR 0.7574 to 0.7347 (mixed 0.9048 to 0.7619, its two questions h022 and
+    h024 of seven), small-store precision 0.6752 to 0.6771, scale second-set
+    MRR 0.7305 to 0.7078, the speakers' scores up (the steps before, first
+    measured here).
+  - **The edge list is empty.** q601, the audit's witness at 0.0004, is found
+    by its words now, far from the cut, and no hit flips inside the rounding.
+    The edge gate's controls plant a flip on the hit nearest the cut
+    (`tests/test_memory_benchmark_edges.py`).
+  - Gate: `tests/test_memory_benchmark_v9.py` (the product's names from v9,
+    v8 seeding as before as the control; every user fact of the dataset held
+    under the name a product writer gives it; q601's phrase in EN, Gulf, MSA).
 - **The product measures and the real-use suite** (2026-11-22, the memory
   plan's W0 and section 2.1: every memory change is gated on these before
   an outside score counts). `scripts/memory_product_measures.py`, on the

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Memory: "What is it that I do for a living?" finds your job (2026-11-26)
+
+- Asking "What is it that I do for a living?" or "ما الذي أعمله لكسب عيشي؟"
+  now finds your job, as "What do I do for a living?" and "شنو شغلتي؟" did.
+- Kazma's memory benchmark now keeps its facts under the names Kazma itself
+  keeps them by (dataset version 9). This showed the miss above.
+
 ## Memory: "not only", "No, Omar" and a voice note (2026-11-26)
 
 - "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "ليس فقط علي" and "I

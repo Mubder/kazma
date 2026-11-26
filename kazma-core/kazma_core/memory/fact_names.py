@@ -365,11 +365,17 @@ ASKED_AS_MINE: dict[str, dict[str, object]] = {
     "current_role": {
         # "living" alone is a room, a cost; only with what the user does.
         "words": ("living",),
-        "en": re.compile(r"\b(?:do|am) (?:i|we) (?:do(?:ing)?|doing) for (?:a |my )?(?:living|work|job)\b"
+        # "What do I do for a living?", and "What is it that I do for a living?"
+        # (dataset v9's q601: the phrase asked "do I do" only).
+        "en": re.compile(r"\b(?:(?:do|am) )?(?:i|we) (?:do(?:ing)?|doing) for (?:a |my )?(?:living|work|job)\b"
                          r"|\bwhat do (?:i|we) work as\b|\bmy line of work\b"),
         "ar": ("شغلتي", "شغلتنا", "مهنتي", "وظيفتي"),
         "ar_after": ("شنو", "وش", "ايش", "شو", "ما", "ماهي", "هي", "هو"),
         "ar_not_before": ("المفضله", "السابقه", "القديمه", "الاولي"),
+        # "for a living", in MSA: "ما الذي أعمله لكسب عيشي؟", "لكسب رزقي".
+        # Only "for earning" ("لكسب"): "كيف أكسب رزقي من الإنترنت؟" asks how, as
+        # "How do I make a living online?" does.
+        "ar_said": re.compile(r"(?:^|\s)لكسب (?:عيشي|رزقي|قوتي|لقمه عيشي)(?=\s|$|[؟?.,])"),
         "as": "job",
     },
     # "Can I eat gluten?", "أقدر آكل جلوتين؟": whether the user may eat a
