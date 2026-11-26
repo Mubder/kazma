@@ -33,6 +33,19 @@ Docker Desktop, when someone opens it, may set that back to itself. The first
 server, the CLI and scripts all use one engine. A context the operator set
 in the environment wins. The guard loads this file by path and takes the
 choice from the server's record, so it stays standard-library only.
+
+A CLI the operating system refuses to start is passed over (live
+2026-11-26, from 10:56 UTC): Windows began refusing Kazma's own engine's
+``docker.exe`` ("An Application Control policy has blocked this file").
+The file was there, so it was chosen; every docker call then failed, the
+guard read the engine as down although it answered, restarted Docker in it
+again and again, and the server's code execution waited for an engine that
+was up. A candidate is now started once (``docker --version``) before it is
+chosen. One that is refused is said once at WARNING, and the next CLI is
+used (PATH, then Docker's own install folders). A refusal is tried again
+after :data:`REFUSED_RECHECK_S`, so a CLI that is allowed again comes back
+by itself; a CLI that started is remembered for as long as the file does
+not change.
 """
 
 from __future__ import annotations
@@ -42,8 +55,10 @@ import json
 import logging
 import os
 import shutil
+import subprocess  # nosec B404 - runs only the docker CLI's own --version, never shell
 import sys
 import threading
+import time
 from pathlib import Path, PureWindowsPath
 
 logger = logging.getLogger(__name__)
@@ -79,6 +94,18 @@ _ENV = "KAZMA_DOCKER_BIN"
 _reported: set[str] = set()
 _reported_lock = threading.Lock()
 
+#: How long a CLI the operating system refused stays passed over before it
+#: is tried again (an operator who allows it again needs no restart).
+REFUSED_RECHECK_S = 300.0
+#: A start that takes longer than this still started: slow is not refused.
+_START_TIMEOUT_S = 15.0
+#: (path, mtime_ns, size) -> (why it was refused or None, when it was tried)
+_started: dict[tuple[str, int, int], tuple[str | None, float]] = {}
+#: Windows' answers that refuse a program by policy: access denied, blocked
+#: by group policy (Software Restriction), and an Application Control policy
+#: (App Control for Business, Smart App Control), the one live met.
+_REFUSALS = frozenset({5, 1260, 4551})
+
 
 def _candidates() -> list[Path]:
     """Where Docker installs its CLI, per OS. Order is preference."""
@@ -110,6 +137,78 @@ def _say_once(key: str, message: str, *args: object) -> None:
     logger.warning(message, *args)
 
 
+def _on_windows() -> bool:
+    return os.name == "nt"
+
+
+#: Bound here, not looked up at the call: a test that stands in for
+#: ``subprocess.run`` to watch the docker calls Kazma makes must not see this
+#: start among them.
+_RUN = subprocess.run
+
+
+def _start(candidate: Path) -> None:
+    """Start ``candidate --version`` once; an OSError says Windows refused it."""
+    _RUN(  # nosec B603 - a fixed argument list, no shell
+        [str(candidate), "--version"],
+        capture_output=True,
+        timeout=_START_TIMEOUT_S,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
+def _refused_by_os(path: str | Path) -> str | None:
+    """Why Windows refuses to start the CLI at ``path``, or None.
+
+    Only a refusal by the system's policy counts (:data:`_REFUSALS`): a file
+    that cannot be read, or is no program, is left to fail as it did before.
+    Elsewhere than Windows the answer is None without a start.
+
+    The answer is kept per file version: a CLI that started is not tried
+    again until the file changes; a refusal is tried again after
+    :data:`REFUSED_RECHECK_S`."""
+    if not _on_windows():
+        return None
+    candidate = Path(path)
+    try:
+        stat = candidate.stat()
+    except OSError:
+        return None
+    key = (str(candidate), stat.st_mtime_ns, stat.st_size)
+    now = time.monotonic()
+    with _reported_lock:
+        held = _started.get(key)
+    if held is not None and (held[0] is None or now - held[1] < REFUSED_RECHECK_S):
+        return held[0]
+    why: str | None = None
+    try:
+        _start(candidate)
+    except subprocess.TimeoutExpired:
+        why = None  # it started
+    except OSError as exc:
+        code = getattr(exc, "winerror", None)
+        why = f"WinError {code}: {exc.strerror}" if code in _REFUSALS else None
+    with _reported_lock:
+        _started[key] = (why, now)
+    return why
+
+
+def _usable(path: str | Path) -> bool:
+    """True when ``path`` starts; a refusal is said once per CLI and reason."""
+    why = _refused_by_os(path)
+    if why is None:
+        return True
+    _say_once(
+        f"refused:{path}:{why}",
+        "[docker] the operating system refuses to start %s (%s) -- passing it over "
+        "for the next docker CLI. Allow it again (on Windows: Smart App Control or "
+        "the Application Control policy) to use it; Kazma tries it again every %d s.",
+        path, why, int(REFUSED_RECHECK_S),
+    )
+    return False
+
+
 def find_docker_cli() -> str | None:
     """Absolute path of a usable docker CLI, or ``None``. In a Kazma process
     the first call also pins the chosen container engine (see the module
@@ -117,7 +216,7 @@ def find_docker_cli() -> str | None:
     _apply_stored_choice_once()
     explicit = (os.environ.get(_ENV) or "").strip().strip('"')
     if explicit:
-        if Path(explicit).is_file():
+        if Path(explicit).is_file() and _usable(explicit):
             return explicit
         _say_once(
             f"env:{explicit}",
@@ -126,13 +225,13 @@ def find_docker_cli() -> str | None:
         )
     if os.name == "nt":
         own = kazma_engine_dir() / "bin" / "docker.exe"
-        if own.is_file():
+        if own.is_file() and _usable(own):
             return str(own)
     on_path = shutil.which("docker")
-    if on_path:
+    if on_path and _usable(on_path):
         return on_path
     for candidate in _candidates():
-        if candidate.is_file():
+        if candidate.is_file() and _usable(candidate):
             if candidate.parent.parent.name == "engine" and candidate.parent.parent.parent.name == "Kazma":
                 return str(candidate)  # Kazma's own engine's CLI lives there by design
             _say_once(

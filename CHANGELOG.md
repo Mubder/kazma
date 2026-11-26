@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## A docker program Windows refuses is passed over (2026-11-26)
+
+- **Kazma uses the next docker CLI when Windows refuses its own**: from
+  10:56 UTC Windows refused to start the `docker.exe` Kazma's engine
+  installed ("An Application Control policy has blocked this file"). Kazma
+  chose it because the file was there, so every docker call failed: code
+  execution waited for an engine that was running, and the guard restarted
+  Docker in it again and again. Each docker CLI is now started once before
+  it is chosen. One Windows refuses by policy is said once in the log and
+  passed over for Docker's own CLI, and tried again every five minutes, so
+  allowing it again needs no restart.
+
 ## A busy test machine cannot hide a slow pattern (2026-11-26)
 
 - **The regex tests time both inputs in turns**: the tests that prove an old
