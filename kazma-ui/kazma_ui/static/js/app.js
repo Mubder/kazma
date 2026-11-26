@@ -5,6 +5,7 @@
 // globals, so the ESM migration is behavior-preserving.
 // ═══════════════════════════════════════════════════════════════════
 
+import { installDialogGuard } from './modules/dialog_guard.js';
 import { registerStores } from './modules/stores.js';
 import {
     applyAccentColor,
@@ -38,6 +39,7 @@ window.showModal = showModal;
 window.closeModal = closeModal;
 
 // ── Boot ──
+installDialogGuard();  // a dialog typed into asks before a click outside closes it
 registerStores();   // registers Alpine stores on alpine:init
 initSoftNav();      // progressive-enhancement client-side nav
 startBuildWatch();  // "Kazma was updated -- Refresh" when the server's build moves on

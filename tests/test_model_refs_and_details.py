@@ -128,7 +128,8 @@ def test_your_override_wins_then_the_provider_then_the_catalog(store):
     known = details_for("openai", "gpt-5-mini", store=store)
     assert (known.context_window, known.vision, known.input_per_1m) == (400000, False, 0.25)
     assert known.sources == {"context_window": "provider", "max_output": "provider", "vision": "provider",
-                             "tools": "catalog", "input_per_1m": "catalog", "output_per_1m": "catalog"}
+                             "tools": "catalog", "input_per_1m": "catalog", "output_per_1m": "catalog",
+                             "cached_input_per_1m": "catalog"}
     store.set("models.details", {"openai:gpt-5-mini": {"context_window": 200000, "vision": True}}, category="models")
     known = details_for("openai", "gpt-5-mini", store=store)
     assert (known.context_window, known.vision) == (200000, True)

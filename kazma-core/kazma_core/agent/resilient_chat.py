@@ -22,6 +22,7 @@ import logging
 import time
 from typing import Any
 
+from kazma_core.agent.content_refusal import is_content_refused, other_vendor
 from kazma_core.observability.llm_ledger import answered_with_own_key, provider_of
 
 __all__ = ["reset_failover_cache", "resilient_chat"]
@@ -158,6 +159,26 @@ def _kwargs_for(client: Any, chat_kwargs: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in chat_kwargs.items() if key != "reasoning"}
 
 
+def _failed(exc: BaseException, model: str, until: float, refused: BaseException | None) -> None:
+    """A backup failed: it rests until *until*, unless its own content filter
+    refused the message (it is not down). *refused*: the refusal it was asked
+    over, which then says a backup was tried."""
+    if refused is not None:
+        refused.backup_tried = True  # type: ignore[attr-defined]
+    if not is_content_refused(exc):
+        _cooldowns[model] = until
+
+
+def _backups(ns: Any, frozen: Any) -> tuple[tuple[str, ...], float]:
+    """The backup models of a call and how long a failed one rests: the ones
+    frozen for it, else the settings'."""
+    if frozen is not None:
+        return tuple(name for name, _ in frozen.clients), frozen.cooldown_seconds
+    if not ns:
+        return (), 0
+    return (tuple(ns.failover.chain) if ns.failover.enabled else ()), ns.failover.cooldown_seconds
+
+
 async def resilient_chat(
     client: Any,
     *,
@@ -240,6 +261,8 @@ async def resilient_chat(
             last_exc = exc
         except LLMError as exc:
             last_exc = exc
+            if is_content_refused(exc):
+                break  # another vendor's backup may answer, this one never will
             if not getattr(exc, "transient", False):
                 raise  # permanent — fail fast, no retry, no failover
         except _ChaosInjectionError as exc:
@@ -261,14 +284,14 @@ async def resilient_chat(
             await asyncio.sleep(wait)
 
     # ── Failover chain (opt-in via agent.nonstop.failover) ────────────
+    refused = last_exc is not None and is_content_refused(last_exc)
     try:
         from kazma_core.agent.nonstop import get_nonstop_config
 
         ns = await asyncio.to_thread(get_nonstop_config) if frozen_failover is None else None
     except Exception:
         ns = None
-    chain = tuple(name for name, _ in frozen_failover.clients) if frozen_failover is not None else tuple(ns.failover.chain) if ns and ns.failover.enabled else ()
-    cooldown_seconds = frozen_failover.cooldown_seconds if frozen_failover is not None else ns.failover.cooldown_seconds if ns else 0
+    chain, cooldown_seconds = _backups(ns, frozen_failover)
     if chain:
         try:
             from kazma_core.model_registry import get_model_registry
@@ -291,9 +314,12 @@ async def resilient_chat(
                     if fb_client is None:
                         fb_client = registry.get_client(fb_model)
                         _clients[fb_model] = fb_client
+                    if refused and not other_vendor(client, fb_client):
+                        continue  # the same filter would refuse it again
                     logger.warning(
-                        "[%s] primary model failed transiently — failover to '%s'",
+                        "[%s] primary model %s — failover to '%s'",
                         label or "resilient-chat",
+                        "was refused by its provider's content filter" if refused else "failed transiently",
                         fb_model,
                     )
                     response = await fb_client.chat(
@@ -316,6 +342,8 @@ async def resilient_chat(
                         priced=bool(getattr(response, "cost_known", True)),
                         own_key=answered_with_own_key(response),
                     )
+                    if refused:
+                        return response  # nothing is broken: the log says it
                     from kazma_core.observability.model_fallback import report_failover
 
                     report_failover(
@@ -324,7 +352,7 @@ async def resilient_chat(
                     )
                     return response
                 except Exception as fb_exc:
-                    _cooldowns[fb_model] = now + cooldown_seconds
+                    _failed(fb_exc, fb_model, now + cooldown_seconds, last_exc if refused else None)
                     logger.warning(
                         "[%s] failover model '%s' failed: %s (cooldown %.0fs)",
                         label or "resilient-chat",

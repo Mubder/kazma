@@ -16,7 +16,9 @@ among the id's (``_`` and every other non-letter separate them), so
 ``lives_in``. Kazma's own
 ids for the person (``user``, a member's entry) and itself are never a
 mention: "forget everything that mentions user" is not "forget every fact
-about the user".
+about the user". A person's id is found by their name in either alphabet
+("خالد" finds ``khaled``); a text by the letters it is written in: "علي" is a
+name and "on".
 
 :func:`register` puts the three tests on a SQLite connection as functions, so
 a statement can ask them over every row of a table.
@@ -24,6 +26,7 @@ a statement can ask them over every row of a table.
 
 from __future__ import annotations
 
+import functools
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -53,6 +56,19 @@ def _slug(text: str) -> str:
         return slug(text)
     except ValueError:  # a text with no letter or digit has no id
         return ""
+
+
+@functools.lru_cache(maxsize=32768)
+def _holds_the_name(name: str, value: str) -> bool:
+    """Whether some words of the id *value*, side by side, are *name* in the
+    other alphabet (a name of two words may be three there: "عبدالله")."""
+    from kazma_core.memory.name_alphabets import same_name
+
+    if name.isascii() == value.isascii():
+        return False
+    have, most = [w for w in _ID_WORD_BREAK.split(value) if w], len(name.split()) + 2
+    return any(same_name(name, " ".join(have[i:j])) for i in range(len(have))
+               for j in range(i + 1, min(len(have), i + most) + 1))
 
 
 @dataclass(frozen=True)
@@ -88,7 +104,17 @@ class Needle:
         wrote about."""
         from kazma_core.memory.entity_protection import is_core_entity
 
-        return value is not None and not is_core_entity(str(value)) and self.in_id(value)
+        if value is None or is_core_entity(str(value)):
+            return False
+        return self.in_id(value) or self._names(str(value))
+
+    def _names(self, value: str) -> bool:
+        """Whether the id *value* holds the name the user wrote, as the other
+        alphabet writes it: "خالد" and the subject ``khaled_alotaibi``, "Khaled"
+        and ``خالد`` (``name_alphabets``). Facts told of خالد are filed under
+        ``khaled`` where that is who was meant (``belief_extractor._who_is_meant``),
+        and are his under either name when he is forgotten."""
+        return bool(self.words) and _holds_the_name(" ".join(self.words), value)
 
 
 def register(conn: sqlite3.Connection, needle: Needle) -> None:

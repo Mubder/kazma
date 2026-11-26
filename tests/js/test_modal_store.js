@@ -77,6 +77,25 @@ function dialog(title, label, checkbox) {
   ok("a closed dialog is cleared", store.title === "" && store.actions.length === 0 && store.checkbox === "");
 }
 
+// A click outside or Escape closes a question, never one typed into; its
+// own buttons close it whatever was typed.
+{
+  const { store } = makeStore(literal);
+  const prompt = { title: "Rename", body: "", input: "Name", inputValue: "Old", actions: [] };
+  store.show(prompt);
+  store.inputValue = "New name";
+  store.dismiss();
+  ok("a prompt typed into stays open", store.open === true && store.inputValue === "New name");
+  store.close();
+  ok("its own button closes it", store.open === false);
+  store.show(prompt);
+  store.dismiss();
+  ok("a prompt left as it was closes", store.open === false);
+  store.show(dialog("Delete chat A?", "Delete", "Also forget"));
+  store.dismiss();
+  ok("a question with no input closes", store.open === false);
+}
+
 // Negative control: without the guard the second dialog is wiped.
 {
   const { store, runTimers } = makeStore(literal.replace(GUARD, ""));

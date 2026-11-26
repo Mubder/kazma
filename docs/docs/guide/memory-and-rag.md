@@ -156,7 +156,8 @@ related or not.
    time; older turns of the chat that no longer fit are.
 9. **Counting and listing.** A question that asks for every memory of a
    kind ("how many long runs did I do?", "list all my subscriptions", "كم
-   مرة") gets up to 12 facts and 12 conversations, shown shorter, and a rule
+   مرة", "عطني كل خططي") gets up to 12 facts and 12 conversations (a list whose
+   entries were kept under several names, "plans to" and "intends to", as one), shown shorter, and a rule
    telling the model these are only the best matches. The `memory_list`
    tool (a read tool: no approval) lists every memory that holds some words
    or comes from a period, newest first, 30 a page, each with its id: the

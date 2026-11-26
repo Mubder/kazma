@@ -17,8 +17,6 @@ serve. Blocking (settings and the vault): callers run them off the loop.
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urlsplit
-
 __all__ = ["backup_status", "parse_chain", "suggest_backups", "unusable_backups"]
 
 
@@ -32,10 +30,11 @@ def parse_chain(value: Any) -> list[str]:
 
 
 def _vendor(entry: dict[str, Any]) -> str:
-    """A provider's vendor: its address's host (one vendor's outage takes
-    every model it serves down at once), else its name."""
-    host = urlsplit(str(entry.get("base_url") or "")).hostname or ""
-    return host.lower() or str(entry.get("name") or "").lower()
+    """A provider's vendor, in whatever region (one vendor's outage, or its
+    content filter, is every region's): ``provider_endpoints.vendor_of``."""
+    from kazma_core.provider_endpoints import vendor_of
+
+    return vendor_of(str(entry.get("preset") or ""), str(entry.get("name") or ""), str(entry.get("base_url") or ""))
 
 
 def _usable(registry: Any, entry: dict[str, Any]) -> bool:
@@ -81,13 +80,15 @@ def unusable_backups(registry: Any, chain: list[str]) -> list[dict[str, Any]]:
 _FAILED_HEALTH = frozenset({"down", "chat_failing"})
 
 
-def suggest_backups(registry: Any, limit: int = 4) -> list[dict[str, str]]:
+def suggest_backups(registry: Any, limit: int = 4, *, beside: str = "") -> list[dict[str, str]]:
     """A model of each usable provider of another vendor than the one in
-    use, whose last check did not fail: ``{"provider", "display_name",
-    "model"}``, the provider's own chosen models first."""
+    use -- or than *beside*, a provider about to be the default -- whose last
+    check did not fail: ``{"provider", "display_name", "model"}``, the
+    provider's own chosen models first."""
     from kazma_core.providers import default_model_for
 
-    own = _active_vendor(registry)
+    chosen = next((r for r in registry.list_providers() or [] if str(r.get("name") or "") == beside), None) if beside else None
+    own = _vendor(chosen) if chosen else _active_vendor(registry)
     seen: set[str] = set()
     out: list[dict[str, str]] = []
     for entry in registry.list_providers() or []:

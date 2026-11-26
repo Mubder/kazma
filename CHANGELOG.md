@@ -36,6 +36,42 @@
 - The settings are counted as Kazma's own: they stay outside any space's
   lock.
 
+## Adding a provider, step by step (2026-11-25)
+
+- **Add provider is a guided setup**: the provider (searchable, grouped, or by
+  pasting its key), its own regions and endpoints with a custom address last,
+  the key with a link to where it is made, one test message with the answer
+  and the price, then the models to show, the default and a backup from
+  another vendor. Azure, Bedrock, Vertex AI and the rest ask for the fields
+  they need, checked before anything is sent or saved.
+- **Nothing typed is lost**: a click outside or Escape asks first, here and in
+  the connector, profile, MCP, scheduled, workspace and problem-report
+  dialogs, and a half-done setup is resumed. Keys are never written to the
+  browser's storage.
+- **One row per provider and address**: a second setup adds the key to the row
+  that is there, and rows that repeat each other, or are off with no key, can
+  be tidied without losing a stored key; a row that lives on a key from the
+  environment is left as it is.
+- **A key goes to its own provider and address alone**: saving a provider at
+  another address without its key is refused (an empty key kept the stored one
+  and sent it there), its extra keys and headers are dropped with the move, and
+  a refused request never answers a key back.
+- **Cached input has its own price** in Model prices. DeepSeek's cached tokens
+  were billed at the full input price; Anthropic's made the rest of the prompt
+  free; Bedrock's were not counted.
+- **A model's thinking text is kept out of its answer** when it is certainly
+  thinking: a `<think>` block, a stray `</think>` (Qwen showed one, with the
+  answer twice), or reasoning parts of a list. An answer that names a tag
+  mid-sentence or in code is left whole; one that writes it alone on a line,
+  as thinking does, is cut there.
+- **A message a provider's content filter refuses goes to a backup model of
+  another vendor** (Qwen, also behind OpenRouter, OpenAI, Azure, DeepSeek,
+  Anthropic, Bedrock), and the answer says why. It used to end the turn in an
+  error. The closing summary of a turn with no answer text is still asked of
+  its own model only.
+- A provider whose name has a space ("Qwen 1") can be changed from the page:
+  every such change was refused as coming from another site.
+
 ## A page closed while sending is not a server error (2026-11-25)
 
 - A page that closes while it is still sending its request no longer logs an
@@ -161,6 +197,37 @@
   as one file and opened as another, in the server's own folder. Such a path
   is refused now, by its text, at every place that takes a path, and a path
   that means a place only relative to a drive is never read as the workspace's.
+
+## Memory: an Arabic question finds a fact as an English one does (2026-11-25)
+
+- Asking in Arabic for your plans, goals, interests, what you bought, received,
+  attended or finished, whom you met, your age, birthday, doctor, diet, work,
+  study or children finds it as asking in English does, whichever language it
+  was told in ("شنو خططي؟", "ماذا اشتريت؟", "منو دكتوري؟"). Of the 138 questions
+  the table was written from, Gulf Arabic missed 59 and Modern Standard Arabic
+  55, English 11; none now. Questions written apart from it still miss some
+  ("وين دوامي؟"): the independent review's 54 lost Gulf 6 of 36 and MSA 1.
+- "List all my plans" shows them all, whatever words they were kept under
+  ("plans to", "intends to", "planning"); so do goals, interests, purchases,
+  what you attended and habits. "List the books I plan to read" shows the books
+  first, and the other plans only where they name a book. "عطني كل خططي", "قائمة" and "لستة" ask for a list,
+  and "ومتى؟" goes on from what was said, as "list" and "And when?" did.
+- Your own job and age are kept under one name whatever words a reply uses for
+  them, so a new one takes the old one's place. A club role, a child's age, a
+  part in a play, a weekend job and a list of jobs stay beside them. Another
+  person's new job takes the old one's place where the reply says it replaces
+  it; a second job of theirs stays beside the first. In what Kazma reads from a
+  turn, a fact you forgot, denied ("Not me") or that ended is known whatever the
+  next reply calls it, a "role" included. The memory tools, the Memory page's
+  link, "About me", a confirmed change and the history import write as they did.
+- A change about a person kept in one alphabet and spoken of in the other
+  ("عمر" and Omar) replaces the fact it changes, for names written out as one
+  person's in both; a name that could be two people's ("Hassan", "Samer" and
+  "سمر") is left alone, and a member's own name is the member's. "Forget
+  everything that mentions خالد" forgets what is kept under Khaled too.
+- In memory's lists, "سيارتي" lists "سيارة" as "my car" lists the car, a name
+  ("سامي") lists no "سام", and a word typed with a separate accent, or with
+  Arabic digits beside Latin letters ("iphone١٥"), finds itself.
 
 ## Memory: a change replaces the fact it changes (2026-11-25)
 

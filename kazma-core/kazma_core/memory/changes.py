@@ -323,8 +323,14 @@ def user_said_not_me(conn: sqlite3.Connection, *, tenant_id: str, subject: str, 
                      value: str) -> bool:
     """Whether the user said "Not me" to *value* of this fact: the deep pass
     never files it again (``belief_extractor._apply_beliefs_to_v2``); the
-    user's own words still can."""
-    return _recorded(conn, tenant_id, READING, subject, predicate, value, ("dismissed",))
+    user's own words still can. Under whatever name the model gives it now
+    (``fact_names.same_statement``)."""
+    from kazma_core.memory.belief_mutation import _same_value
+    from kazma_core.memory.fact_names import same_statement
+
+    return any(same_statement(str(name), predicate) and _same_value(found, value) for name, found in conn.execute(
+        "SELECT predicate, new_value FROM memory_changes WHERE tenant_id = ? AND subject = ? AND kind = ? "
+        "AND state = 'dismissed'", (tenant_id, subject, READING)).fetchall())
 
 
 def _recorded(conn: sqlite3.Connection, tenant: str, kind: str, subject: str, predicate: str, value: str,

@@ -73,8 +73,17 @@ def _local_endpoint(url: str) -> bool:
         return False
 
 
+def _exact_row(registry: Any, provider: str) -> dict[str, Any] | None:
+    """The provider row of that very name, or the one it was merged into
+    (``aliases``, kazma_core.provider_setup.tidy) -- never a fuzzy match."""
+    wanted = str(provider or "").casefold()
+    rows = registry.list_providers()
+    exact = next((p for p in rows if str(p.get("name") or "").casefold() == wanted), None)
+    return exact or next((p for p in rows if wanted in (str(a).casefold() for a in p.get("aliases") or [])), None)
+
+
 def _require_local(registry: Any, provider: str, *, client: Any = None) -> None:
-    entry = next((p for p in registry.list_providers() if str(p.get("name") or "").casefold() == provider.casefold()), None)
+    entry = _exact_row(registry, provider)
     if provider.casefold() in ("google", "anthropic", "azure", "bedrock") or entry is None:
         raise XModelUnavailableError("X local-only mode requires a configured local OpenAI-compatible endpoint.")
     resolver = getattr(registry, "resolve_provider_credentials", None)
@@ -115,9 +124,7 @@ def validate_provider(selection: dict[str, Any]) -> None:
             registry = get_model_registry()
             _require_local(registry, str(registry.get_active_profile().get("provider") or ""))
         return
-    entries = get_model_registry().list_providers()
-    entry = next((p for p in entries if str(p.get("name") or "").lower()
-                  == selection["provider"].lower()), None)
+    entry = _exact_row(get_model_registry(), selection["provider"])
     if entry is None or not entry.get("enabled", True):
         raise XModelUnavailableError("The selected X provider is missing or disabled. Review Settings → X.")
     if selection.get("local_only"):

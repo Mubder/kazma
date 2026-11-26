@@ -391,19 +391,20 @@
      "lang": "ar",
      "category": "self",
      "by": "omar",
-     "injected": 3,
-     "misattributed": 2,
+     "injected": 4,
+     "misattributed": 3,
      "first_person": true,
      "shown": [
+      "user car تسلا موديل ٣",
       "User: سيارتي نيسان باترول. / Assistant: تمام، سيارتك نيسان باترول.",
       "User: سيارتي تويوتا كامري بيضاء. / Assistant: تمام، سيارتك تويوتا كامري بيضاء.",
       "User: سيارتي مازدا ٣. / Assistant: تمام، سيارتك مازدا ٣."
      ],
      "hit": true,
-     "rr": 1.0,
-     "precision": 0.3333333333333333,
+     "rr": 0.5,
+     "precision": 0.25,
      "fact_hit": false,
-     "wrong_first": false
+     "wrong_first": true
     },
     {
      "id": "q22",
@@ -708,22 +709,22 @@
     "n": 35,
     "hit_rate": 0.8571,
     "fact_hit_rate": 0.5806,
-    "mrr": 0.6237,
-    "precision": 0.453,
-    "misattributed_items": 80,
+    "mrr": 0.6081,
+    "precision": 0.4504,
+    "misattributed_items": 81,
     "questions_with_misattribution": 33,
-    "wrong_first_fact": 14
+    "wrong_first_fact": 15
    },
    "by_lang": {
     "ar": {
      "n": 10,
      "hit_rate": 0.8,
      "fact_hit_rate": 0.4444,
-     "mrr": 0.6481,
-     "precision": 0.4093,
-     "misattributed_items": 21,
+     "mrr": 0.5926,
+     "precision": 0.4,
+     "misattributed_items": 22,
      "questions_with_misattribution": 10,
-     "wrong_first_fact": 3
+     "wrong_first_fact": 4
     },
     "en": {
      "n": 17,
@@ -761,11 +762,11 @@
      "n": 23,
      "hit_rate": 1.0,
      "fact_hit_rate": 0.5217,
-     "mrr": 0.6214,
-     "precision": 0.4172,
-     "misattributed_items": 54,
+     "mrr": 0.5997,
+     "precision": 0.4136,
+     "misattributed_items": 55,
      "questions_with_misattribution": 22,
-     "wrong_first_fact": 12
+     "wrong_first_fact": 13
     },
     "self_none": {
      "n": 3,

@@ -472,6 +472,13 @@ def _list_finds(case: tuple[str, str]) -> bool:
     return Asked.of(case[1], whole=True).any(case[0])
 
 
+def _same_person(case: tuple[str, str]) -> bool:
+    """One name in two alphabets (W6, step 2), whichever is held."""
+    from kazma_core.memory.name_alphabets import same_name
+
+    return same_name(*case)
+
+
 def _names_person(case: tuple[str, str]) -> bool:
     from kazma_core.memory.held_facts import _Said
 
@@ -501,6 +508,14 @@ PAIRS: list[Pair] = [
          "And where does she work?", "ووين تشتغل؟", _follow_up, True),
     Pair("not_follow_up", (M + "memory/question_shape.py",),
          "Where does my sister work?", "وين تشتغل أختي؟", _follow_up, False),
+    Pair("follow_up_when", (M + "memory/question_shape.py",),
+         "And when?", "ومتى؟", _follow_up, True),
+    Pair("asks_for_all_of_mine", (M + "memory/question_shape.py",),
+         "Give me all my plans", "عطني كل خططي", _asks_for_all, True),
+    Pair("asks_for_a_list", (M + "memory/question_shape.py",),
+         "List the plans", "عطني قائمة الخطط", _asks_for_all, True),
+    Pair("not_asks_for_all", (M + "memory/question_shape.py",),
+         "I run daily", "أركض كل يوم", _asks_for_all, False),
     Pair("asks_for_all", (M + "memory/question_shape.py",),
          "How many times did I go to the gym?", "كم مرة رحت النادي؟", _asks_for_all, True),
     Pair("about_me_line", (M + "memory/profile_suggestions.py",),
@@ -551,6 +566,17 @@ PAIRS: list[Pair] = [
          ("lives_in",)),
     Pair("not_said_of_the_user", (M + "memory/fact_names.py",),
          "What is my home Wi-Fi network called?", "شنو اسم شبكة الواي فاي في بيتي؟", _said_of_the_user, ()),
+    # A kind of fact is asked in either language, whatever the model named it (W6, step 2).
+    Pair("asked_my_plans", (M + "memory/fact_names.py",),
+         "What are my plans?", "شنو خططي؟", _said_of_the_user, ("plans",)),
+    Pair("asked_what_i_bought", (M + "memory/fact_names.py",),
+         "What did I buy?", "شنو شريت؟", _said_of_the_user, ("bought",)),
+    Pair("asked_what_i_do", (M + "memory/fact_names.py",),
+         "What do I do for a living?", "شنو شغلتي؟", _said_of_the_user, ("current_role",)),
+    Pair("asked_nothing_of_what_i_bought", (M + "memory/fact_names.py",),
+         "What can I buy here?", "شنو أشتري هدية؟", _said_of_the_user, ()),
+    Pair("asked_a_cars_number", (M + "memory/fact_names.py",),
+         "What is my car's plate number?", "وش رقم سيارتي؟", _said_of_the_user, ()),
     Pair("fact_lives_in", (M + "memory/belief_extractor.py", M + "memory/arabic_facts.py"),
          "I live in Dubai.", "أنا ساكن في دبي.", _facts, [("user", "lives_in")]),
     Pair("fact_name", (M + "memory/belief_extractor.py", M + "memory/arabic_facts.py"),
@@ -749,6 +775,15 @@ PAIRS: list[Pair] = [
          ("my car is blue", "cars"), ("سيارتي زرقاء", "السيارة"), _list_finds, True),
     Pair("list_word_inside_another", (M + "memory/word_search.py",),
          ("a new carpet", "car"), ("مقهوة جديدة", "قهوة"), _list_finds, False),
+    # A person held in one alphabet and spoken of in the other (W6, step 2).
+    Pair("held_name_other_alphabet", (M + "memory/held_facts.py", M + "memory/name_alphabets.py"),
+         ("Omar moved to Doha", "عمر"), ("عمر نقل الدوحة", "omar"), _names_person, True),
+    Pair("held_name_other_alphabet_another", (M + "memory/held_facts.py", M + "memory/name_alphabets.py"),
+         ("Amr moved to Doha", "عمر"), ("عمار نقل الدوحة", "omar"), _names_person, False),
+    Pair("one_person_two_alphabets", (M + "memory/name_alphabets.py",),
+         ("noura", "نورة"), ("نورة", "noura"), _same_person, True),
+    Pair("two_people_two_alphabets", (M + "memory/name_alphabets.py",),
+         ("noor", "نورة"), ("نور", "noura"), _same_person, False),
     # One name is not another, and a thing is said with its article (the reviews of step 1).
     Pair("held_name_not_another", (M + "memory/held_facts.py",),
          ("I maxed out the card", "max"), ("كلمت كريمة", "كريم"), _names_person, False),
@@ -888,6 +923,8 @@ DECLARED: dict[str, str] = {
     M + "memory/benchmark.py": "the statements and questions of finding 10's gate, told and asked in "
                                "both languages (FACT_LANGUAGES): data the benchmark runs, nothing decided "
                                "by Arabic text; tests/test_memory_fact_languages.py",
+    M + "memory/benchmark_kinds.py": "the facts and questions in English, Gulf and MSA (FACT_KINDS, LISTS): data the "
+                                     "benchmark runs, nothing decided by Arabic text; tests/test_memory_fact_kinds.py",
     M + "memory/benchmark_held.py": "the changes told in English, Gulf and MSA (HELD_PAIRS): data the "
                                     "benchmark runs, nothing decided by Arabic text; "
                                     "tests/test_memory_held_facts_shown.py",
@@ -961,6 +998,13 @@ DECLARED: dict[str, str] = {
     M + "cron/scheduler.py": "a job's refusal when its person lacks the Scheduled feature, an (English, "
                              "Arabic) pair chosen by the job's language; nothing is decided by Arabic "
                              "text; tests/test_feature_grants.py",
+    M + "agent/content_refusal.py": "the line an answer from another vendor begins with, two fixed "
+                                    "strings that language_lock.in_their_language chooses between; "
+                                    "nothing is decided by Arabic text; "
+                                    "tests/test_content_refusal_failover.py",
+    M + "reasoning_text.py": "the marks a sentence ends with before a closing tag: the Arabic question "
+                             "mark beside the Latin ones, one rule for both languages; "
+                             "tests/test_reasoning_is_never_the_answer.py (both)",
     M + "agent/turn_budget.py": "the honest end of a turn refused before it started (its space's or "
                                 "person's share of turns in use, S4-04), two fixed strings that "
                                 "language_lock.in_their_language chooses between; nothing is decided "

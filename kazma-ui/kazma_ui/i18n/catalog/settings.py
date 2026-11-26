@@ -2340,6 +2340,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الإدخال: دولار لكل مليون رمز",
         "en": "Input: US$ per million tokens",
     },
+    "settings.model_prices_cached": {
+        "ar": "الإدخال المخزَّن مؤقتًا: دولار لكل مليون رمز",
+        "en": "Cached input: US$ per million tokens",
+    },
+    "settings.model_prices_cached_ph": {
+        "ar": "اختياري",
+        "en": "Optional",
+    },
     "settings.model_prices_output": {
         "ar": "الإخراج: دولار لكل مليون رمز",
         "en": "Output: US$ per million tokens",
@@ -2361,8 +2369,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Prices not saved: ",
     },
     "settings.model_prices_incomplete": {
-        "ar": "لكل نموذج اسم وسعران.",
-        "en": "Each model needs a name and both prices.",
+        "ar": "لكل نموذج اسم وسعر إدخال وسعر إخراج.",
+        "en": "Each model needs a name, an input price and an output price.",
     },
     "settings.model_prices_empty": {
         "ar": "لم تُحدَّد أسعار.",

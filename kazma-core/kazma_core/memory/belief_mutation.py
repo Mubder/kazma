@@ -773,6 +773,34 @@ def mutate_belief(
         _unbind_write_context(tokens)
 
 
+def file_under(conn: sqlite3.Connection, belief_id: str, name: str, *, tenant_id: str) -> bool:
+    """File a current fact of the user's anew under *name*, Kazma's name for
+    what it says (``fact_names.name_to_file``): a role held as "has_occupation"
+    from before the table. The value, its source and its history stay; the
+    change reaches the mirror and the graph as any does (their outboxes). What
+    is then written replaces it, or is refused, as under any one name."""
+    from kazma_core.memory.hygiene import beliefs_write
+
+    with _mutation_lock:
+        began = not conn.in_transaction
+        row = conn.execute("SELECT subject, predicate FROM beliefs WHERE id = ? AND tenant_id = ?",
+                           (belief_id, tenant_id)).fetchone()
+        done = beliefs_write(conn, "UPDATE beliefs SET predicate = ? WHERE id = ? AND tenant_id = ? "
+                                   "AND valid_until IS NULL AND invalidated_at IS NULL", (name, belief_id, tenant_id))
+        if row is not None and getattr(done, "rowcount", 0):
+            # An open question or reading of that fact follows it, so the
+            # write's answer finds it (``changes.answer_pending``).
+            try:
+                conn.execute("UPDATE memory_changes SET predicate = ? WHERE tenant_id = ? AND subject = ? "
+                             "AND predicate = ? AND state = 'open'", (name, tenant_id, row[0], row[1]))
+            except sqlite3.OperationalError as exc:
+                if "no such table" not in str(exc):
+                    raise
+        if began and conn.in_transaction:
+            conn.commit()
+    return bool(getattr(done, "rowcount", 0))
+
+
 def end_belief(
     primary_conn: sqlite3.Connection,
     belief_id: str,

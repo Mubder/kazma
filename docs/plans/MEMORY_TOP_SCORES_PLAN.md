@@ -966,13 +966,16 @@ Step 1, built 2026-11-25: the facts the deep pass is shown are the ones the
 turn is about (`memory/held_facts.py`, §15 H). It compared lists of words in
 alphabetical order and gave every place to the user's newest facts. Built beside it the same day: memory's
 lists and the Memory page find an Arabic word in any spelling
-(`memory/word_search.py`, §15 G (3)). Found by step 1's review and planned
-with step 2: a person held under a name in one alphabet and spoken of in the
-other ("عمر" and `omar`) is shown, and not replaced when the reply writes the
-name as the user did; it needs a match between a name's two alphabets that
-never joins two people. Next: one
-role for one person and lists by kind, facts found by an Arabic question as by
-an English one, what W4 left, and the benchmark written as Kazma writes.
+(`memory/word_search.py`, §15 G (3)). 
+Step 2, built 2026-11-25 (§15 H, §15 G (1)): a person's role or employer is one
+current value whatever the model names it (`fact_names.name_in_use`,
+`ONE_VALUE_NAMES`); a list is read by its kind (`LISTS`); every kind of fact is
+found by an Arabic question as by an English one (138 questions a way: Gulf lost
+59, MSA 55, English 11; now none); and a person held in one alphabet and spoken
+of in the other is the same person where the reply says so and the name is one
+person's in both (`memory/name_alphabets.py`). Decision 16's forty names were
+measured down to about ten kinds. Next: what W4 left, and the benchmark written
+as Kazma writes.
 
 ### W8. Scale and speed (M)
 

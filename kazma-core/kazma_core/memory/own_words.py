@@ -204,7 +204,7 @@ _HANDS_OVER_EN = ("here is", "here's", "heres", "here are", "below is", "below a
 _QUESTION_WORDS_EN = frozenset({"how", "what", "why", "which", "who", "whom", "whose", "where", "when",
                                 "should", "shall", "can", "could", "would", "will", "do", "does", "did",
                                 "is", "are", "am", "was", "were", "have", "has"})
-_QUESTION_WORDS_AR = frozenset({"هل", "كيف", "وش", "شنو", "شو", "ايش", "ليش", "متى", "وين", "شلون", "كم",
+_QUESTION_WORDS_AR = frozenset({"هل", "كيف", "وش", "شنو", "شو", "ايش", "ليش", "متي", "وين", "شلون", "كم",
                                 "مين", "ماذا", "لماذا", "اين"})
 
 #: Arabic, folded: the verbs (with their "to me"/"it" forms), polite words
@@ -236,7 +236,7 @@ _I_AR = frozenset({"انا", "احنا", "نحن", "قلت", "قلنا"})
 #: Arabic heads that hand over or ask about a text ("هذا المقال:", "وش
 #: معنى هذا:", "هل هذي الجملة صحيحة:").
 _HANDS_OVER_AR = frozenset({"هذا", "هذي", "هذه", "هاذا", "هاذي", "التالي"})
-_ASKS_ABOUT_AR = frozenset({"هل", "وش", "شنو", "شو", "ايش", "شوف", "شيك", "تاكد", "اشرح", "معنى"})
+_ASKS_ABOUT_AR = frozenset({"هل", "وش", "شنو", "شو", "ايش", "شوف", "شيك", "تاكد", "اشرح", "معنى", "معني"})
 #: "قلت لي" / "قلتلي": "you told me" (the "قلت" of "I said" takes no "لي").
 _YOU_TOLD_ME_AR = frozenset({"قلتلي", "كتبتلي"})
 _SAID_AR = frozenset({"قال", "قالت", "قالوا", "قالو", "يقول", "تقول", "يقولون", "كتب", "كتبت",
@@ -366,10 +366,10 @@ _OWN_LABELS = frozenset({
     "hi", "hello", "thanks", "anyway", "story", "home", "work", "hobby", "hobbies", "interests",
     "profession", "occupation", "employer", "birthday", "nationality", "language", "languages", "pronouns",
     "school", "university", "degree", "skills", "username", "website", "timezone", "warning", "heads",
-    "انا", "اسمي", "ملاحظه", "تصحيح", "تحديث", "تذكير", "تذكر", "مهم", "للعلم", "سؤال", "جواب", "نعم", "لا",
+    "انا", "اسمي", "ملاحظه", "تصحيح", "تحديث", "تذكير", "تذكر", "مهم", "للعلم", "سؤال", "سوال", "جواب", "نعم", "لا",
     "الاسم", "العمر", "المدينه", "العمل", "الوظيفه", "الهاتف", "العنوان", "خبر", "اخبار", "معلومه",
     "معلومات", "فكره", "المهم", "سالفه", "قصه", "نبذه", "عني", "اليوم", "امس", "البارحه", "بكره", "الحين",
-    "حاليا", "اخيرا", "بالمناسبه", "ترى", "يعني", "بس", "صراحه", "توضيح", "للتوضيح", "تنبيه", "مثال",
+    "حاليا", "اخيرا", "بالمناسبه", "ترى", "تري", "يعني", "بس", "صراحه", "توضيح", "للتوضيح", "تنبيه", "مثال",
 })
 #: Lead-in words before a question's first word ("Hey Kazma, how do I ...").
 _LEAD_INS_EN = frozenset({"hey", "hi", "hello", "ok", "okay", "so", "and", "but", "also", "kazma", "please",

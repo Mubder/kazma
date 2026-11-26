@@ -21,7 +21,8 @@ __all__ = ["verify_same_origin"]
 
 def _allowed_origins(request: Request) -> set[str]:
     allowed = set(configured_browser_origins())
-    served = normalize_origin(str(request.url), allow_path=True)
+    # Never the whole URL: its path is decoded, and a space in it is no origin.
+    served = normalize_origin(str(request.base_url), allow_path=True)
     if served:
         allowed.add(served)
     host = request.headers.get("host") or ""

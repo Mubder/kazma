@@ -496,7 +496,8 @@ class SettingsRouterBuilder:
             return {
                 "key": OWNER_PRICES_KEY,
                 "prices": [
-                    {"model": name, "input": p.input_per_1m, "output": p.output_per_1m}
+                    {"model": name, "input": p.input_per_1m, "output": p.output_per_1m,
+                     "cached_input": p.cached_input_per_1m}
                     for name, p in sorted(prices.items())
                 ],
                 "unpriced": None if unpriced is None else _still_to_price(unpriced, prices),
@@ -1436,10 +1437,12 @@ class SettingsRouterBuilder:
             return {"status": "ok"}
 
         @router.get("/api/settings/failover-backup")
-        def api_failover_backup() -> dict[str, Any]:
+        def api_failover_backup(beside: str = "") -> dict[str, Any]:
             """The backup models: each with the provider that would serve it
-            and whether it can be called, and a model of each other usable
-            provider to use instead (kazma_core.failover_backup)."""
+            and whether it can be called, and a model of each usable provider
+            of another vendor to use instead -- another than the one in use,
+            or than *beside*, the provider a setup is about to make the
+            default (kazma_core.failover_backup)."""
             from kazma_core.agent.nonstop import get_nonstop_config
             from kazma_core.failover_backup import backup_status, parse_chain, suggest_backups
             from kazma_core.model_registry import get_model_registry
@@ -1449,7 +1452,7 @@ class SettingsRouterBuilder:
             return {
                 "enabled": bool(get_nonstop_config().failover.enabled),
                 "chain": backup_status(registry, chain),
-                "suggestions": suggest_backups(registry),
+                "suggestions": suggest_backups(registry, beside=beside),
             }
 
         @router.get("/api/settings/voice")

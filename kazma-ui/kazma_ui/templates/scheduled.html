@@ -318,7 +318,9 @@
   </div>
 
   {# ── Create / edit: cron task ── #}
-  <div class="modal-overlay" x-show="showCronModal" x-cloak @click.self="showCronModal = false">
+  <div class="modal-overlay" x-show="showCronModal" x-cloak data-dialog-guard x-effect="showCronModal && KazmaDialogGuard.opened($el)"
+             @click.self="KazmaDialogGuard.close($el, () => showCronModal = false)"
+             @keydown.escape.window="showCronModal && KazmaDialogGuard.escape($event, $el, () => showCronModal = false)">
     <div class="modal sched-modal" role="dialog" aria-modal="true">
       <h3 x-text="cronForm.job_id ? t('scheduled.edit_task') : t('scheduled.new_task')"></h3>
       <div class="form-group" x-show="!cronForm.job_id">
@@ -354,7 +356,9 @@
   </div>
 
   {# ── Create / edit: X post ── #}
-  <div class="modal-overlay" x-show="showXModal" x-cloak @click.self="showXModal = false">
+  <div class="modal-overlay" x-show="showXModal" x-cloak data-dialog-guard x-effect="showXModal && KazmaDialogGuard.opened($el)"
+             @click.self="KazmaDialogGuard.close($el, () => showXModal = false)"
+             @keydown.escape.window="showXModal && KazmaDialogGuard.escape($event, $el, () => showXModal = false)">
     <div class="modal sched-modal" role="dialog" aria-modal="true">
       <h3 x-text="xForm.id ? t('scheduled.edit_x') : t('scheduled.new_x')"></h3>
       <template x-if="!xForm.id">

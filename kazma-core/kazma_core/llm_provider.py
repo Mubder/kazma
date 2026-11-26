@@ -28,6 +28,8 @@ from typing import Any
 import httpx
 
 from kazma_core.llm_stream import StreamDelta
+from kazma_core.reasoning_text import ThinkFilter, split_reasoning, text_of_parts
+from kazma_core.token_usage import cache_write_tokens, token_counts
 from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
 
 __all__ = [
@@ -240,44 +242,123 @@ def _apply_param_fixes(payload: dict[str, Any], fixes: frozenset[str] | set[str]
         payload.pop("temperature", None)
 
 
+def _numbers(usage: Any) -> Any:
+    """*usage* with a count written as text ("100") as its number, one level
+    down too: some proxies answer so, and a call billed at $0 is not free."""
+    if not isinstance(usage, dict):
+        return usage
+    return {k: (int(v) if isinstance(v, str) and v.strip().isdecimal() else
+                _numbers(v) if isinstance(v, dict) else v) for k, v in usage.items()}
+
+
 def cost_from_usage(
     usage: dict[str, Any] | None,
     *,
     input_cost_per_1m: float,
     output_cost_per_1m: float,
+    cached_input_cost_per_1m: float | None = None,
     cache_read_multiplier: float = 0.1,
     cache_write_multiplier: float = 1.25,
 ) -> float:
-    """USD from token usage. Cached prompt tokens bill at ``cache_read_multiplier``,
-    prompt tokens written to the cache (``cache_creation_input_tokens`` among
-    the prompt's details: Model Studio's explicit cache) at
-    ``cache_write_multiplier``.
+    """USD from token usage, whatever the provider's shape (the one reading,
+    :func:`kazma_core.token_usage.token_counts`).
 
-    Anthropic cache reads are ~0.1× input; OpenAI cached_tokens are similar.
-    Unknown usage keys are treated as zero. Both counts are clamped to prompt.
+    Prompt tokens served from the cache bill at *cached_input_cost_per_1m*
+    (the owner's cached price, or the model's known one), else at
+    ``cache_read_multiplier`` of the input price; prompt tokens written to the
+    cache at ``cache_write_multiplier``. DeepSeek's ``prompt_cache_hit_tokens``
+    were billed at the full input price, and Anthropic's cached tokens, which
+    its ``input_tokens`` leaves out, were taken out of the uncached ones: a
+    long cached prompt cost almost nothing on the page (2026-11-25).
     """
-    usage = usage or {}
-    prompt = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-    completion = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
-    details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
-    cached = 0
-    if isinstance(details, dict):
-        cached = int(details.get("cached_tokens") or details.get("cache_read_input_tokens") or 0)
-    if not cached:
-        cached = int(
-            usage.get("cache_read_input_tokens")
-            or usage.get("cached_tokens")
-            or 0
-        )
-    cached = max(0, min(cached, prompt) if prompt else cached)
-    written = int(details.get("cache_creation_input_tokens") or 0) if isinstance(details, dict) else 0
-    written = max(0, min(written, prompt - cached))
-    billable = max(prompt - cached - written, 0)
+    usage = _numbers(usage)
+    counts = token_counts(usage)
+    cached_price = (
+        input_cost_per_1m * cache_read_multiplier
+        if cached_input_cost_per_1m is None else cached_input_cost_per_1m
+    )
+    written = min(cache_write_tokens(usage), counts.prompt - counts.cached)
+    billable = counts.prompt - counts.cached - written
     return (
-        (billable * input_cost_per_1m / 1_000_000)
-        + (written * input_cost_per_1m * cache_write_multiplier / 1_000_000)
-        + (cached * input_cost_per_1m * cache_read_multiplier / 1_000_000)
-        + (completion * output_cost_per_1m / 1_000_000)
+        (billable * input_cost_per_1m)
+        + (written * input_cost_per_1m * cache_write_multiplier)
+        + (counts.cached * cached_price)
+        + (counts.completion * output_cost_per_1m)
+    ) / 1_000_000
+
+
+#: The codes a provider's content filter refuses with, exactly, lower case:
+#: Qwen, Azure and OpenAI, Moonshot.
+_REFUSAL_CODES = frozenset({
+    "data_inspection_failed", "datainspectionfailed", "content_filter", "responsibleaipolicyviolation",
+    "content_policy_violation",
+})
+
+#: What a filter's message says where its code says nothing: Qwen's native
+#: answer, DeepSeek, Anthropic and Bedrock, Z.AI.
+_REFUSAL_PHRASES = (
+    "algo.datainspectionfailed", "data may contain inappropriate content", "content exists risk",
+    "blocked by content filtering policy", "unsafe or sensitive content",
+)
+
+#: The finish reasons that say a filter kept the whole answer back.
+_REFUSAL_FINISHES = frozenset({"content_filter", "refusal", "content_filtered", "guardrail_intervened"})
+
+
+def _is_content_refusal(status_code: int, detail: Any, *, _depth: int = 0) -> bool:
+    """True when a refused request was refused by the provider's content
+    filter (Qwen answered a harmless Arabic question so, and the turn ended in
+    an error: the real-use runs of 2026-11-22). Read from the error's own
+    code, type and message, never from the whole body: a refused parameter
+    named ``content_filter``, or a body that echoes the person's words, is no
+    refusal of theirs."""
+    if status_code not in (0, 400, 421, 451):
+        return False
+    body: Any = detail
+    if isinstance(detail, str):
+        try:
+            body = json.loads(detail)
+        except ValueError:
+            body = {"message": detail}
+    if not isinstance(body, dict):
+        return False
+    error = body.get("error") if isinstance(body.get("error"), dict) else body
+    inner = error.get("innererror") if isinstance(error.get("innererror"), dict) else {}
+    named = {str(part.get(key) or "").strip().lower() for part in (body, error, inner) for key in ("code", "type")}
+    if named & _REFUSAL_CODES:
+        return True
+    said = error.get("message") or (body["error"] if isinstance(body.get("error"), str) else "")
+    if any(phrase in str(said or "")[:300].lower() for phrase in _REFUSAL_PHRASES):
+        return True
+    # A router that passes the upstream's own error on (OpenRouter's
+    # ``metadata.raw``: Qwen's data_inspection_failed behind it, the review of
+    # d3ae5b2c8, N7) is read the same way, one level down.
+    raw = error.get("metadata", {}).get("raw") if isinstance(error.get("metadata"), dict) else None
+    return bool(_depth < 1 and raw and isinstance(raw, (str, dict))
+                and _is_content_refusal(status_code, raw, _depth=_depth + 1))
+
+
+def content_refusal(endpoint: str, status_code: int, detail: Any) -> LLMError | None:
+    """The error of a message *endpoint*'s content filter refused (0: said in
+    the stream), or None when it is another failure. Every client asks it
+    before it reads a refused request any other way."""
+    if not _is_content_refusal(status_code, detail):
+        return None
+    where = f" (HTTP {status_code})" if status_code else ""
+    return LLMError(
+        f"The content filter of {endpoint} refused the message{where}: {str(detail or '')[:200]}",
+        transient=False, kind="content_refused",
+    )
+
+
+def refused_by_finish(endpoint: str, finish: str, content: str, tool_calls: Any) -> LLMError | None:
+    """The same for an answer a filter kept back whole: a finish reason that
+    says so, and nothing in the answer."""
+    if str(finish or "").lower() not in _REFUSAL_FINISHES or str(content or "").strip() or tool_calls:
+        return None
+    return LLMError(
+        f"The content filter of {endpoint} kept the answer back ({finish}).",
+        transient=False, kind="content_refused",
     )
 
 
@@ -342,6 +423,9 @@ class LLMConfig:
     # It was gpt-4o-mini's $0.15 / $0.60, applied to every model.
     input_cost_per_1m: float | None = None
     output_cost_per_1m: float | None = None
+    # The price of input served from the provider's cache; None: a tenth of
+    # the input price (``cost_from_usage``).
+    cached_input_cost_per_1m: float | None = None
     # LiteLLM router support
     router: str | None = None
     fallback_model: str | None = None
@@ -395,6 +479,7 @@ class LLMConfig:
             timeout=d.get("timeout", cls.timeout),
             input_cost_per_1m=d.get("input_cost_per_1m", cls.input_cost_per_1m),
             output_cost_per_1m=d.get("output_cost_per_1m", cls.output_cost_per_1m),
+            cached_input_cost_per_1m=d.get("cached_input_cost_per_1m", cls.cached_input_cost_per_1m),
             router=d.get("router", cls.router),
             fallback_model=d.get("fallback_model", cls.fallback_model),
             api_version=str(d.get("api_version", cls.api_version) or ""),
@@ -1420,6 +1505,15 @@ class LLMProvider:
                     kind="context_overflow",
                 ) from e
 
+            # ── The provider's content filter ───────────────────────────
+            # Permanent here -- it would refuse it again -- and answered by
+            # another vendor's backup where there is one (agent/content_refusal.py).
+            # Before the tool branches: a refusal that mentions a "function"
+            # was retried with no tools.
+            refused = content_refusal(self._describe_endpoint(), status_code, detail)
+            if refused is not None:
+                raise refused from e
+
             # ── A refused request field (providers stage 1) ─────────────
             # o-series / GPT-5 models (and an endpoint serving them) refuse
             # ``max_tokens`` and any temperature but the default. Ask again
@@ -1853,20 +1947,7 @@ class LLMProvider:
     @staticmethod
     def _delta_text(delta: Any) -> str:
         """Extract token text from an OpenAI-style ``delta`` object."""
-        if not isinstance(delta, dict):
-            return ""
-        content = delta.get("content")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: list[str] = []
-            for part in content:
-                if isinstance(part, str):
-                    parts.append(part)
-                elif isinstance(part, dict):
-                    parts.append(str(part.get("text") or part.get("content") or ""))
-            return "".join(parts)
-        return ""
+        return text_of_parts(delta.get("content")) if isinstance(delta, dict) else ""
 
     @staticmethod
     async def _iter_sse_json(resp: httpx.Response, unread: list[str] | None = None) -> Any:
@@ -2050,6 +2131,7 @@ class LLMProvider:
 
         async def _run_stream(body: dict[str, Any]) -> Any:
             content_parts: list[str] = []
+            thinking = ThinkFilter()
             tool_acc: dict[int, dict[str, str]] = {}
             finish_reason = ""
             usage: dict[str, Any] = {}
@@ -2078,6 +2160,10 @@ class LLMProvider:
                         msg = err if isinstance(err, str) else str(
                             (err or {}).get("message") or err
                         )
+                        refused = content_refusal(
+                            self._describe_endpoint(), 0, err if isinstance(err, dict) else {"message": msg})
+                        if refused is not None:
+                            raise refused
                         raise LLMError(
                             f"LLM stream error: {msg[:300]}",
                             transient=_inband_stream_error_is_transient(err, msg),
@@ -2097,7 +2183,9 @@ class LLMProvider:
                     text = self._delta_text(delta)
                     if text:
                         content_parts.append(text)
-                        yield StreamDelta(content=text)
+                        shown = thinking.feed(text)
+                        if shown:
+                            yield StreamDelta(content=shown)
                     tcs = delta.get("tool_calls")
                     if isinstance(tcs, list) and tcs:
                         self._accumulate_tool_delta(tool_acc, tcs)
@@ -2137,6 +2225,11 @@ class LLMProvider:
                     kind="stream_truncated",
                 )
             duration_ms = (time.monotonic() - start) * 1000
+            shown = thinking.finish(cut=finish_reason == "length")
+            if shown:
+                yield StreamDelta(content=shown)
+            if thinking.retracted:
+                yield StreamDelta(retract=thinking.retracted)
             assembled = self._response_from_stream_acc(
                 content="".join(content_parts),
                 tool_acc=tool_acc,
@@ -2208,6 +2301,10 @@ class LLMProvider:
                             "[LLMProvider] stream retry without stream_options failed: %s",
                             retry_exc,
                         )
+
+                refused = content_refusal(self._describe_endpoint(), status_code, detail)
+                if refused is not None:
+                    raise refused from e
 
                 # 4xx (except 429): fall back to blocking chat() which already
                 # classifies 404-function, context overflow, schema errors.
@@ -2317,7 +2414,9 @@ class LLMProvider:
         message = choice.get("message") or {}
         finish_reason = choice.get("finish_reason", "")
 
-        content = message.get("content", "") or ""
+        # Reasoning a provider sent inside the content is not the answer.
+        content, hidden = split_reasoning(text_of_parts(message.get("content")), cut=finish_reason == "length")
+        hidden_chars = len(hidden) or len(str(message.get("reasoning_content") or message.get("reasoning") or ""))
         tool_calls: list[ToolCall] = []
 
         for tc in message.get("tool_calls") or []:
@@ -2355,18 +2454,15 @@ class LLMProvider:
             )
 
         usage = data.get("usage", {}) or {}
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        cached = 0
-        details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
-        if isinstance(details, dict):
-            cached = int(details.get("cached_tokens") or details.get("cache_read_input_tokens") or 0)
-        if not cached:
-            cached = int(usage.get("cache_read_input_tokens") or 0)
-        if cached:
+        refused = refused_by_finish(self._describe_endpoint(), finish_reason, content, tool_calls)
+        if refused is not None:
+            raise refused
+        counts = token_counts(usage)
+        if counts.cached:
             logger.info(
                 "[LLMProvider] prompt cache hit cached_tokens=%s / prompt=%s",
-                cached,
-                prompt_tokens,
+                counts.cached,
+                counts.prompt,
             )
 
         cost, cost_known = self._call_cost(usage)
@@ -2380,7 +2476,7 @@ class LLMProvider:
             cost_usd=round(cost, 6),
             cost_known=cost_known,
             duration_ms=round(duration_ms, 1),
-            reasoning_chars=len(str(message.get("reasoning_content") or "")),
+            reasoning_chars=hidden_chars,
         )
 
     async def _retry_refused_parameters(
@@ -2421,9 +2517,11 @@ class LLMProvider:
             data = self._json_answer(resp)
             return self._parse_response(data, (time.monotonic() - start) * 1000)
 
-    @staticmethod
-    def _raise_refused(status_code: int, detail: str) -> LLMResponse:
-        raise LLMError(
+    def _raise_refused(self, status_code: int, detail: str) -> LLMResponse:
+        # A request asked again without a refused field may be refused by the
+        # content filter this time (found by the widened gate, the review of
+        # d3ae5b2c8, N5).
+        raise content_refusal(self._describe_endpoint(), status_code, detail) or LLMError(
             f"LLM call failed (HTTP {status_code}): {str(detail or '')[:300]}",
             transient=_http_status_is_transient(status_code),
         )
@@ -2439,7 +2537,9 @@ class LLMProvider:
         inp, outp = self.config.input_cost_per_1m, self.config.output_cost_per_1m
         if inp is None or outp is None:
             return 0.0, False
-        return cost_from_usage(usage, input_cost_per_1m=inp, output_cost_per_1m=outp), True
+        return cost_from_usage(
+            usage, input_cost_per_1m=inp, output_cost_per_1m=outp,
+            cached_input_cost_per_1m=self.config.cached_input_cost_per_1m), True
 
     async def _retry_direct_after_gateway_fail(
         self, payload: dict[str, Any], exc: BaseException
@@ -2648,6 +2748,9 @@ class LLMError(Exception):
     * ``"unusable_answer"`` — the provider answered, with something that is
       no model answer (not JSON, an error, no choices); ``answer`` says what.
     * ``"stream_truncated"`` — the stream closed before the answer ended.
+    * ``"content_refused"`` — the provider's content filter refused the
+      message. Permanent on that provider; a backup of another vendor may
+      answer (``agent.content_refusal``).
     * ``"daily_limit"`` — not sent: the person the call is for reached their
       daily limit (Spaces S2-02, ``spaces.daily_limits``).
     * ``"model_not_allowed"`` — not sent: the model is not one the person the
@@ -2664,6 +2767,8 @@ class LLMError(Exception):
         super().__init__(*args)
         self.transient = bool(transient)
         self.kind = str(kind or "")
+        #: For ``content_refused``: a backup of another vendor was asked too.
+        self.backup_tried = False
         #: For ``unusable_answer``: what the provider sent instead (FA-211).
         self.answer = str(answer or "")
         #: For ``rate_limit_exhausted``: the requests the provider refused and
