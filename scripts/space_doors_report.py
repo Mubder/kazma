@@ -8,7 +8,8 @@ reads one, from this install or from a file named, and sets it beside the
 lists in ``tests/_space_door_lists.py``:
 
 * **findings**: checkouts through no door, by where they came from; each is
-  ``known`` (``KNOWN_OPEN``, with the step that gives it one) or **new**;
+  ``known`` (``KNOWN_OPEN``: through a listed entry, from one of its listed
+  first callers, with the step that gives it one) or **new**;
 * **install**: the install's door, by reason and caller;
 * **spaces**: a space's door, by caller (the bound scope, or a row's own);
 * **not seen**: functions of ``CHECKOUTS`` no checkout came from (not proven
@@ -20,6 +21,11 @@ Reads only. Usage (repo root, the dev checkout's Python)::
     python scripts/space_doors_report.py                      # this install's report
     python scripts/space_doors_report.py --file <path>        # another install's, read only
     python scripts/space_doors_report.py --strict             # exit 1 on a new finding
+    python scripts/space_doors_report.py --since 2026-12-01T10:00  # only what was seen since (a deploy)
+
+The report adds up across restarts and deploys and never forgets: once a step
+gives a caller its door, its old finding stays in the file. ``--since`` (UTC)
+keeps the entries seen since then; their counts are still their totals.
 
 Exit code: 0; 1 with ``--strict`` when a finding is new, or the report cannot
 be read.
@@ -37,29 +43,44 @@ REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-#: Pools whose callers the source gate lists (the checkpointer's are
-#: LangGraph's and whoever called the saver).
+#: Pools whose callers the source gate lists. The checkpointer's are mostly
+#: LangGraph's and whoever called the saver: its own Kazma callers (the
+#: gateway's listings, the approvals') are counted when they are first.
 _LISTED_POOLS = ("shared", "memory mirror", "pgvector")
 
 
-def _lists() -> tuple[set[str], dict[str, tuple[str, str]]]:
+def _lists() -> tuple[set[str], dict[str, tuple[str, str, tuple[str, ...]]]]:
     from tests._space_door_lists import CHECKOUTS, KNOWN_OPEN
 
     declared = {f"{rel}::{function}" for rel, functions in CHECKOUTS.items() for function in functions}
     return declared, dict(KNOWN_OPEN)
 
 
-def _known(callers: list[str], known: dict[str, tuple[str, str]]) -> tuple[str, str] | None:
+def _known(callers: list[str], known: dict[str, tuple[str, str, tuple[str, ...]]]) -> tuple[str, str] | None:
+    """The (why, step) of the entry a finding passes through, when its first
+    caller is one the entry lists; else None: new."""
     for caller in callers:
-        if caller in known:
-            return known[caller]
+        if caller in known and callers and callers[0] in known[caller][2]:
+            return known[caller][0], known[caller][1]
     return None
 
 
-def summarise(report: dict[str, Any]) -> dict[str, Any]:
-    """The report set beside the lists: what :func:`main` prints."""
+def _utc(when: str) -> str:
+    """*when* (ISO, UTC when it names no zone) as the report writes times."""
+    from datetime import UTC, datetime
+
+    at = datetime.fromisoformat(when)
+    return (at if at.tzinfo else at.replace(tzinfo=UTC)).astimezone(UTC).isoformat(timespec="seconds")
+
+
+def summarise(report: dict[str, Any], *, since: str | None = None) -> dict[str, Any]:
+    """The report set beside the lists: what :func:`main` prints. *since*:
+    only the entries last seen then or later."""
     declared, known = _lists()
     entries = [e for e in report.get("entries", []) if isinstance(e, dict)]
+    if since:
+        cut = _utc(since)
+        entries = [e for e in entries if str(e.get("last") or "") >= cut]
     findings = []
     for entry in entries:
         if entry.get("door") != "none":
@@ -67,9 +88,11 @@ def summarise(report: dict[str, Any]) -> dict[str, Any]:
         said = _known(entry.get("callers") or [], known)
         findings.append({**entry, "known": said is not None, "why": said[0] if said else "",
                          "step": said[1] if said else ""})
-    seen = {(e.get("callers") or [""])[0] for e in entries if e.get("pool") in _LISTED_POOLS}
+    seen = {(e.get("callers") or [""])[0] for e in entries if e.get("pool") in _LISTED_POOLS or (
+        e.get("pool") == "checkpoints" and str((e.get("callers") or [""])[0]).startswith("kazma-"))}
     return {
-        "since": report.get("since"), "updated": report.get("updated"),
+        "since": _utc(since) if since else report.get("since"), "updated": report.get("updated"),
+        "cut": bool(since),
         "checkouts": report.get("checkouts", 0), "dropped": report.get("dropped", 0),
         "failures": report.get("failures", 0),
         "findings": findings,
@@ -87,7 +110,10 @@ def _line(entry: dict[str, Any]) -> str:
 
 def render(summary: dict[str, Any]) -> str:
     out = [f"Door report: {summary['checkouts']} checkouts from {summary['since']} to {summary['updated']}"
-           f" (dropped {summary['dropped']}, failures {summary['failures']})", ""]
+           f" (dropped {summary['dropped']}, failures {summary['failures']})"]
+    if summary.get("cut"):
+        out.append(f"Only what was seen since {summary['since']}; each count is its total since first seen.")
+    out.append("")
     out.append(f"Findings, through no door: {len(summary['findings'])} ({len(summary['new'])} new)")
     for finding in summary["findings"]:
         mark = f"known, {finding['step']}" if finding["known"] else "NEW"
@@ -113,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--file", help="a report to read (default: this install's)")
     parser.add_argument("--strict", action="store_true", help="exit 1 when a finding is new")
     parser.add_argument("--json", action="store_true", help="the summary as JSON (ASCII)")
+    parser.add_argument("--since", help="only entries seen since this time (ISO, UTC when it names no zone)")
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -135,7 +162,11 @@ def main(argv: list[str] | None = None) -> int:
     if not report:
         print(f"no door report at {path} yet")
         return 0
-    summary = summarise(report)
+    try:
+        summary = summarise(report, since=args.since)
+    except ValueError as exc:
+        print(f"--since: {exc}", file=sys.stderr)
+        return 1
     print(json.dumps(summary, indent=1) if args.json else render(summary))
     return 1 if args.strict and summary["new"] else 0
 

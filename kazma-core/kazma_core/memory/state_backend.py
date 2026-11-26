@@ -187,8 +187,10 @@ class PostgresStateBackend:
         from kazma_core.db import availability, space_doors
 
         if self._ours is None:
-            self._ours = availability.is_kazma_database(self._dsn, or_its_server=True)
+            ours = availability.is_kazma_database(self._dsn, or_its_server=True)
+            # This first: a thread that finds _ours set finds this set too.
             self._kazmas_database = availability.is_kazma_database(self._dsn)
+            self._ours = ours
         ours = self._ours
         if self._kazmas_database:
             # Kazma's own database: which door it goes through is counted

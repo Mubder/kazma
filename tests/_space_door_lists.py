@@ -171,18 +171,22 @@ CHECKOUTS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-#: Kazma's own work known to reach the database through no door today, by a
-#: function on its way there (the report matches any of a finding's callers)
-#: -> (why, the step of S4-01 that gives it one). Each was seen in report
-#: mode (an app start and stop, the Postgres suites, the maintenance passes,
-#: 2026-11-26) or read by the review ("V"). The report calls every other
-#: finding new. An entry leaves when its step lands; one is added only with
-#: the step that ends it.
-KNOWN_OPEN: dict[str, tuple[str, str]] = {
+#: Kazma's own work known to reach the database through no door today, by
+#: the function it is entered at -> (why, the step of S4-01 that gives it
+#: one, the functions that check the connection out on its way). A finding
+#: is known only when it passes through the entry AND its first caller is
+#: one of those: a new store function reached from inside a known sweep is
+#: new (review L5). Each was seen in report mode (an app start and stop, the
+#: Postgres suites, the maintenance passes, 2026-11-26) or read by the review
+#: ("V"). An entry leaves when its step lands; one is added only with the
+#: step that ends it.
+KNOWN_OPEN: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "kazma-ui/kazma_ui/session_manager.py::SessionManager._load_all_from_primary": (
         "every space's chats, read whole when the chat store starts, nothing bound (section 5: the install's)",
-        "step 3, chats"),
+        "step 3, chats",
+        ("kazma-ui/kazma_ui/session_manager.py::SessionManager._load_all_from_primary",)),
     "kazma-core/kazma_core/swarm/metrics.py::MetricsCollector._flush_metric": (
         "the workers' metrics table has no space column: the install's, outside the policies (L9)",
-        "step 2, the rules"),
+        "step 2, the rules",
+        ("kazma-core/kazma_core/swarm/task_store.py::TaskStore.record_worker_metric",)),
 }

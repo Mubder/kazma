@@ -36,8 +36,10 @@ made to be left on:
 
 * nothing changes: no statement is sent and nothing is refused; a failure
   inside the counter is counted and said once, never raised into a checkout;
-* cheap: a few microseconds a checkout, no I/O, one short lock
-  (``tests/test_space_doors.py`` measures it);
+* cheap: no I/O, one short lock; measured 2026-11-26, about 5 us a
+  checkout of the shared pool and about 20 us (p95 22) in LangGraph's
+  checkpoint calls, whose stack holds no frame of Kazma's and is walked
+  whole (``tests/test_space_doors.py`` bounds it);
 * bounded: at most :data:`MAX_ENTRIES` distinct entries a process, the rest
   counted as ``dropped`` (one WARNING);
 * quiet: one INFO line for each caller with no door that the report does
@@ -132,10 +134,6 @@ _PLUMBING_PREFIXES = tuple(f"{name}." for name in _PLUMBING)
 
 _PLUMB, _KAZMA, _FOREIGN = 0, 1, 2
 
-#: What the counter itself may fail with (a frame or a name it cannot read):
-#: counted and said once, never raised into a checkout.
-_COUNTER_FAILURES = (AttributeError, KeyError, IndexError, TypeError, ValueError, RuntimeError, OSError)
-
 _ENV = "KAZMA_SPACE_DOOR_REPORT"
 
 
@@ -159,7 +157,10 @@ _flush_lock = threading.Lock()
 _entries: dict[_Key, _Entry] = {}
 #: Checkouts through no door that the report holds, or this process said.
 _said: set[_Key] = set()
-_codes: dict[Any, tuple[int, str]] = {}
+#: ``id(code)`` -> (the code object, its kind, its name). By identity: code
+#: objects compare by value (two functions of the same name, bytecode and
+#: first line in two files are equal), and hashing one walks it whole.
+_codes: dict[int, tuple[Any, int, str]] = {}
 _on = _switched_on()
 _dropped = 0
 _dropped_flushed = 0
@@ -182,7 +183,7 @@ def checkout(pool: str) -> None:
         return
     try:
         _record(pool)
-    except _COUNTER_FAILURES:  # the counter never stops a statement
+    except Exception:  # noqa: BLE001 - whatever fails here is counted and said once, never raised into a checkout
         _count_failure()
 
 
@@ -259,9 +260,9 @@ def _callers(depth: int) -> tuple[str, ...]:
 
 def _kind(frame: Any) -> tuple[int, str]:
     code = frame.f_code
-    known = _codes.get(code)
-    if known is not None:
-        return known
+    hit = _codes.get(id(code))
+    if hit is not None and hit[0] is code:
+        return hit[1], hit[2]
     module = str(frame.f_globals.get("__name__") or "")
     qualname = str(getattr(code, "co_qualname", code.co_name)).replace("<locals>.", "")
     top = module.partition(".")[0]
@@ -272,7 +273,8 @@ def _kind(frame: Any) -> tuple[int, str]:
     else:
         known = (_FOREIGN, f"{module or '?'}::{qualname}")
     if len(_codes) < _MAX_CODES:
-        _codes[code] = known
+        # The code object is kept: its id is never another's while it is.
+        _codes[id(code)] = (code, *known)
     return known
 
 
@@ -331,9 +333,24 @@ def read_report(path: Path | str | None = None) -> dict[str, Any]:
     except FileNotFoundError:
         return {}
     data = json.loads(text)
-    if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+    if not isinstance(data, dict) or not isinstance(data.get("entries"), list) or not all(
+            _is_item(item) for item in data["entries"]) or not all(
+            _is_count(data.get(k, 0)) for k in ("checkouts", "dropped", "failures")):
         raise ValueError(f"{target} is not a door report")
     return data
+
+
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_item(item: Any) -> bool:
+    """One entry as :func:`flush` writes it: anything else stopped every
+    later flush (a sweep WARNING each 15 minutes, nothing kept)."""
+    return (isinstance(item, dict)
+            and all(isinstance(item.get(k), str) for k in ("pool", "door", "how", "reason", "first", "last"))
+            and isinstance(item.get("callers"), list) and all(isinstance(c, str) for c in item["callers"])
+            and _is_count(item.get("count")))
 
 
 def _kept(target: Path) -> dict[str, Any]:
