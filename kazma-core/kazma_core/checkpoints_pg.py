@@ -94,11 +94,18 @@ def _reported_pool_class() -> type:
                     self._kazma_space_lock = asyncio.Lock()
                 async with self._kazma_space_lock:
                     if self._kazma_space_half is None:
+                        from psycopg.rows import dict_row  # type: ignore
+
+                        from kazma_core.db.postgres_pool import pool_connection_kwargs
+
+                        space_conninfo = row_security.space_conninfo(self.conninfo)
                         half = AsyncConnectionPool(
-                            conninfo=row_security.space_conninfo(self.conninfo),
+                            conninfo=space_conninfo,
                             min_size=0,
                             max_size=self.max_size,
-                            kwargs=dict(self.kwargs),
+                            kwargs=pool_connection_kwargs(
+                                space_conninfo, autocommit=True, prepare_threshold=0, row_factory=dict_row,
+                            ),
                             configure=row_security.check_space_role_async,
                             reset=row_security.end_space_async,
                             check=AsyncConnectionPool.check_connection,

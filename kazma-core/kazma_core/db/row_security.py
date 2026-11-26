@@ -1404,8 +1404,12 @@ async def begin_space_async(conn: Any, space: str, *, role: bool) -> None:
     if not valid_space_id(space):
         raise _NotASpace(f"not a space id: {space!r}")
     literal = pq.Escaping(conn.pgconn).escape_literal(space.encode()).decode()
-    cur = await conn.execute(f"BEGIN; SELECT set_config('{SPACE_SETTING}', {literal}, true), current_user::text",
-                             prepare=False)
+    try:
+        cur = await conn.execute(f"BEGIN; SELECT set_config('{SPACE_SETTING}', {literal}, true), "
+                                 "current_user::text", prepare=False)
+    except BaseException:
+        await rollback_space_async(conn)  # a BEGIN whose setting failed ends here, never left open
+        raise
     who = ""
     while True:
         result = cur.pgresult
@@ -1425,12 +1429,21 @@ async def end_space_transaction_async(conn: Any, ok: bool) -> None:
     well (a failure is the caller's: its write did not happen), else
     ``ROLLBACK``; a rollback that cannot be sent closes the connection,
     which the pool discards and the server rolls back."""
+    if ok:
+        await conn.execute("COMMIT", prepare=False)
+        return
+    await rollback_space_async(conn)
+
+
+async def rollback_space_async(conn: Any) -> None:
+    """``ROLLBACK`` on a checkpointer connection, bounded; one that cannot be
+    sent closes the connection, which the pool discards and the server rolls
+    back."""
     import asyncio
 
     import psycopg
 
-    if ok:
-        await conn.execute("COMMIT", prepare=False)
+    if conn.closed:
         return
     try:
         await asyncio.wait_for(conn.execute("ROLLBACK", prepare=False), timeout=5.0)
