@@ -51,6 +51,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     # 2
     _S + "where": _w("Where is your account?", "أين حسابك؟"),
     _S + "optional": _w("Optional", "اختياري"),
+    _S + "choose": _w("Choose one", "اختر واحدًا"),
+    _S + "other_value": _w("Another (type it)", "غير ذلك (اكتبه)"),
     _S + "problem_missing": _w("This is needed.", "هذا مطلوب."),
     _S + "problem_malformed": _w("This does not look right. Check it against the provider's page.",
                                  "هذا لا يبدو صحيحًا. قارنه بصفحة المزوّد."),

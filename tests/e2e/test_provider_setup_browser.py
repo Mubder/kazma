@@ -78,6 +78,19 @@ def provider():
     yield f"http://127.0.0.1:{server.server_port}/v1", _Provider
     server.shutdown()
 
+def _try_model(page, name: str) -> None:
+    """Picks *name* from the models found, or types it ("Another"): the list
+    is a select, never a datalist (tests/test_no_hidden_lists.py)."""
+    page.wait_for_function(
+        "[...document.querySelectorAll('#setup-model-pick, #setup-model')].some(e => e.offsetParent)", timeout=30000)
+    pick = page.locator("#setup-model-pick")
+    if pick.is_visible() and pick.locator(f"option[value='v:{name}']").count():
+        pick.select_option(f"v:{name}")
+        return
+    if pick.is_visible():
+        pick.select_option("other")
+    page.locator("#setup-model").fill(name)
+
 
 def _shot(page, name: str) -> None:
     folder = os.environ.get("KAZMA_SETUP_SHOTS")
@@ -167,7 +180,7 @@ def test_a_provider_is_set_up_step_by_step(kazma, provider, lang) -> None:  # no
             page.locator("#setup-test").wait_for(state="visible", timeout=30000)
             assert [a for a, _k in server.asked] == ["GET /v1/models"], "a message was sent unasked"
             assert page.locator("#setup-next").is_disabled()
-            page.locator("#setup-model").fill("model-a")
+            _try_model(page, "model-a")
             page.locator("#setup-test").click()
             page.locator("#setup-answer").wait_for(state="visible", timeout=30000)
             assert page.locator(".ps-answer-text").inner_text() == "OK, I am here."
@@ -288,7 +301,7 @@ def test_one_row_per_provider_and_the_list_is_tidied(kazma, provider, lang) -> N
             page.locator(".ps-use-row").first.click()
             page.locator("#setup-next").click()
             page.locator("#setup-test").wait_for(state="visible", timeout=30000)
-            page.locator("#setup-model").fill("model-a")
+            _try_model(page, "model-a")
             page.locator("#setup-test").click()
             page.locator("#setup-answer").wait_for(state="visible", timeout=30000)
             page.locator("#setup-next").click()

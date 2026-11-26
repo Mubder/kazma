@@ -64,13 +64,16 @@ def person_text(messages: Any) -> str:
 
 def already_told(messages: Any) -> bool:
     """True when this turn's answer so far already says who refused it (a turn
-    that goes on by itself asks the model again)."""
+    that goes on by itself asks the model again). Judged by how an answer
+    opens -- the line is put at its head (:func:`refusal_line`) -- never by
+    the words anywhere in it: an answer that quotes them was told nothing
+    (``tests/test_messages_judged_by_how_they_open.py``)."""
     from kazma_core.agent.plan_fence import running_turn
+    from kazma_core.reasoning_text import text_of_parts
 
     return any(
-        line in str(m.get("content") or "")
+        text_of_parts(m.get("content")).lstrip().startswith((_TOLD_EN, _TOLD_AR))
         for m in running_turn(messages) if isinstance(m, dict) and m.get("role") == "assistant"
-        for line in (_TOLD_EN, _TOLD_AR)
     )
 
 

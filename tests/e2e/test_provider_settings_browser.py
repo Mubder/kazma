@@ -30,6 +30,19 @@ pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 
 MODEL = "fake-model"
 
+def _try_model(page, name: str) -> None:
+    """Picks *name* from the models found, or types it ("Another"): the list
+    is a select, never a datalist (tests/test_no_hidden_lists.py)."""
+    page.wait_for_function(
+        "[...document.querySelectorAll('#setup-model-pick, #setup-model')].some(e => e.offsetParent)", timeout=30000)
+    pick = page.locator("#setup-model-pick")
+    if pick.is_visible() and pick.locator(f"option[value='v:{name}']").count():
+        pick.select_option(f"v:{name}")
+        return
+    if pick.is_visible():
+        pick.select_option("other")
+    page.locator("#setup-model").fill(name)
+
 
 def _free_port() -> int:
     with socket.socket() as s:
@@ -163,8 +176,7 @@ def test_provider_settings_in_a_browser(kazma) -> None:
                 pg.locator("#setup-next").click()
                 pg.locator("#setup-name").fill(name)
                 pg.locator("#setup-next").click()
-                pg.locator("#setup-model").wait_for(state="visible", timeout=30000)
-                pg.locator("#setup-model").fill(MODEL)
+                _try_model(pg, MODEL)
                 assert pg.locator("#setup-next").is_disabled()
                 pg.locator("#setup-test").click()
 
@@ -226,7 +238,7 @@ def test_stage_two_to_four_in_a_browser(kazma) -> None:
             pg.locator(".ps-endpoint", has_text="https://api.cerebras.ai/v1").wait_for(state="visible", timeout=15000)
             pg.locator("#setup-back").click()
             pg.locator(".ps-tile[data-provider='bedrock']").click()
-            pg.locator("#setup-field-region").wait_for(state="visible", timeout=5000)
+            pg.locator("#setup-pick-region").wait_for(state="visible", timeout=5000)
             assert not pg.locator("#setup-custom-url").is_visible()
             pg.locator("#provider-setup").evaluate("e => e.click()")
             pg.locator(".modal-checkbox input").check()

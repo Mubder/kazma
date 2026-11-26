@@ -37,7 +37,7 @@
                 name: "", displayName: "", models: "", model: "", kind: "chat", urlAsTyped: false, headerRows: [],
                 baseUrl: "", problems: [], same: [], addTo: "", separate: false, keyHost: "", cleared: "",
                 busy: "", found: null, findError: "", test: null, saved: "", savedLabel: "", error: "",
-                shown: {}, shownQuery: "", makeDefault: "", backup: "", backups: [],
+                shown: {}, shownQuery: "", makeDefault: "", backup: "", backups: [], typed: {},
             };
         },
 
@@ -172,6 +172,7 @@
         return {
             setup: Logic.empty(),
             setupData: { groups: [], fields: {}, regions: {}, key_shapes: [] },
+            setupListLoaded: false,
             _setupTicket: 0,
 
             // ── open, close, resume ─────────────────────────────────
@@ -181,6 +182,14 @@
                     const data = await this._fetch('/api/providers/setup');
                     if (data && Array.isArray(data.groups)) this.setupData = data;
                 }
+                // The list the first step shows: the setup's groups and the
+                // server's catalog (the page reads it at load; read again if
+                // that read failed). Before both are in, nothing says "none".
+                if (!(ProvidersManager.catalog || []).length) {
+                    const catalog = await this._fetch('/api/providers/catalog');
+                    if (Array.isArray(catalog)) ProvidersManager.setCatalog(catalog);
+                }
+                this.setupListLoaded = this.setupData.groups.length > 0 && (ProvidersManager.catalog || []).length > 0;
                 if (!this.setup.preset || this.setup.saved) {
                     let draft = null;
                     try { draft = JSON.parse(root.localStorage.getItem(DRAFT_KEY) || 'null'); } catch (e) { draft = null; }
@@ -334,6 +343,29 @@
 
             setupFieldExample(id) {
                 return ((this.setupData.fields || {})[id] || {}).example || '';
+            },
+
+            /** The choices a box offers, shown as a list (never a datalist):
+             *  a field's own options, or the models found ("model"). */
+            setupOptions(f) {
+                if (f === 'model') return (this.setup.found || []).map(m => m.id).filter(Boolean);
+                return this.setupFieldOptions(f);
+            },
+
+            /** Whether *f* is typed in its box: it has no choices, "Another"
+             *  was picked, or it holds a value that is none of them. */
+            setupTyping(f, value) {
+                const options = this.setupOptions(f);
+                return !options.length || !!(this.setup.typed || {})[f] || (!!value && options.indexOf(value) === -1);
+            },
+
+            /** The value a pick in *f*'s list stands for ("v:" + a choice,
+             *  "other", or "" for none). */
+            setupPick(f, raw) {
+                const other = raw === 'other';
+                this.setup.typed = Object.assign({}, this.setup.typed || {}, { [f]: other });
+                if (other) return '';
+                return String(raw || '').startsWith('v:') ? String(raw).slice(2) : '';
             },
 
             setupFieldOptions(id) {

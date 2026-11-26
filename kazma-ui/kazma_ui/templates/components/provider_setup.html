@@ -5,7 +5,7 @@
      x-effect="keepSetupDraft()"
      @click.self="closeProviderSetup()"
      @keydown.escape.window="setup.open && !KazmaDialogGuard.escapeIsTaken() && closeProviderSetup()">
-    <div class="modal modal-lg ps-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-setup-title" @keydown.tab.window="setup.open && KazmaDialogGuard.keepFocus($event, $el)">
+    <div class="modal modal-lg ps-dialog" role="dialog" :aria-modal="setup.open ? 'true' : null" aria-labelledby="provider-setup-title" @keydown.tab.window="setup.open && KazmaDialogGuard.keepFocus($event, $el)">
         <div class="modal-header">
             <h2 id="provider-setup-title">{{ t('settings.add_provider') }}</h2>
             <button type="button" class="modal-close" @click="closeProviderSetup()" aria-label="{{ t('common.close') }}"><span class="ki" x-html="KazmaIcons.get('x')" aria-hidden="true"></span></button>
@@ -54,7 +54,8 @@
                         </div>
                     </section>
                 </template>
-                <div class="empty-state" x-show="!setupGroups().length" x-cloak>{{ t('settings.setup.none_found') }}</div>
+                <div class="empty-state" x-show="setupListLoaded && !setupGroups().length" x-cloak>{{ t('settings.setup.none_found') }}</div>
+                <p class="notice tone-warning" id="setup-list-failed" x-show="!setupListLoaded" x-cloak>{{ t('load_failed') }}</p>
             </div>
 
             <!-- 2: where it is -->
@@ -88,26 +89,40 @@
                 </div>
                 <template x-for="f in setupEndpointFields()" :key="f">
                     <div class="form-group">
-                        <label class="form-label" :for="'setup-field-' + f" x-text="setupFieldLabel(f)"></label>
+                        <label class="form-label" :for="(setupTyping(f, setup.values[f]) ? 'setup-field-' : 'setup-pick-') + f" x-text="setupFieldLabel(f)"></label>
+                        <select class="form-select" :id="'setup-pick-' + f" x-show="setupOptions(f).length" x-cloak :aria-label="setupFieldLabel(f)"
+                                @change="setup.values[f] = setupPick(f, $event.target.value); setupChanged()">
+                            <option value="" :selected="!setup.values[f] && !setupTyping(f, setup.values[f])">{{ t('settings.setup.choose') }}</option>
+                            <template x-for="o in setupOptions(f)" :key="o">
+                                <option translate="no" :value="'v:' + o" :selected="!setupTyping(f, setup.values[f]) && setup.values[f] === o" x-text="o"></option>
+                            </template>
+                            <option value="other" :selected="setupTyping(f, setup.values[f])">{{ t('settings.setup.other_value') }}</option>
+                        </select>
                         <input type="text" class="form-input" :id="'setup-field-' + f" dir="ltr" translate="no" autocomplete="off" spellcheck="false"
-                               :list="setupFieldOptions(f).length ? 'setup-options-' + f : null"
+                               x-show="setupTyping(f, setup.values[f])" :aria-label="setupFieldLabel(f)"
                                :value="setup.values[f] || ''" @input="setup.values[f] = $event.target.value; setupChanged()"
                                :placeholder="setupFieldExample(f)">
-                        <datalist :id="'setup-options-' + f"><template x-for="o in setupFieldOptions(f)" :key="o"><option :value="o"></option></template></datalist>
                         <p class="text-error" x-show="setupProblem(f)" x-cloak x-text="setupProblem(f)"></p>
                     </div>
                 </template>
                 <template x-for="f in setupFormFields()" :key="f.id">
                     <div class="form-group">
-                        <label class="form-label" :for="'setup-field-' + f.id">
+                        <label class="form-label" :for="(setupTyping(f.id, setup[f.model]) ? 'setup-field-' : 'setup-pick-') + f.id">
                             <span x-text="setupFieldLabel(f.id)"></span>
                             <span class="setting-desc" x-show="!f.required" x-cloak>{{ t('settings.setup.optional') }}</span>
                         </label>
+                        <select class="form-select" :id="'setup-pick-' + f.id" x-show="setupOptions(f.id).length" x-cloak :aria-label="setupFieldLabel(f.id)"
+                                @change="setup[f.model] = setupPick(f.id, $event.target.value); setupChanged()">
+                            <option value="" :selected="!setup[f.model] && !setupTyping(f.id, setup[f.model])">{{ t('settings.setup.choose') }}</option>
+                            <template x-for="o in setupOptions(f.id)" :key="o">
+                                <option translate="no" :value="'v:' + o" :selected="!setupTyping(f.id, setup[f.model]) && setup[f.model] === o" x-text="o"></option>
+                            </template>
+                            <option value="other" :selected="setupTyping(f.id, setup[f.model])">{{ t('settings.setup.other_value') }}</option>
+                        </select>
                         <input type="text" class="form-input" :id="'setup-field-' + f.id" dir="ltr" translate="no" autocomplete="off" spellcheck="false"
-                               :list="setupFieldOptions(f.id).length ? 'setup-options-' + f.id : null"
+                               x-show="setupTyping(f.id, setup[f.model])" :aria-label="setupFieldLabel(f.id)"
                                :value="setup[f.model] || ''" @input="setup[f.model] = $event.target.value; setupChanged()"
                                :placeholder="setupFieldExample(f.id)">
-                        <datalist :id="'setup-options-' + f.id"><template x-for="o in setupFieldOptions(f.id)" :key="o"><option :value="o"></option></template></datalist>
                         <p class="text-error" x-show="setupProblem(f.id)" x-cloak x-text="setupProblem(f.id)"></p>
                     </div>
                 </template>
@@ -220,10 +235,20 @@
                 <p class="ps-found" x-show="(setup.found || []).length" x-cloak x-text="setupFoundLabel()"></p>
                 <p class="notice tone-warning" x-show="setup.findError" x-cloak x-text="setup.findError"></p>
                 <div class="form-group">
-                    <label class="form-label" for="setup-model">{{ t('settings.setup.try_with') }}</label>
-                    <input type="text" class="form-input" id="setup-model" dir="ltr" translate="no" list="setup-model-list" autocomplete="off" spellcheck="false"
+                    <label class="form-label" :for="setupTyping('model', setup.model) ? 'setup-model' : 'setup-model-pick'">{{ t('settings.setup.try_with') }}</label>
+                    {#- The models found are shown, never hidden in a <datalist>
+                        (tests/test_no_hidden_lists.py); "Another" types one. -#}
+                    <select class="form-select" id="setup-model-pick" x-show="setupOptions('model').length" x-cloak aria-label="{{ t('settings.setup.try_with') }}"
+                            @change="setup.model = setupPick('model', $event.target.value); setup.test = null">
+                        <option value="" :selected="!setup.model && !setupTyping('model', setup.model)">{{ t('settings.setup.choose') }}</option>
+                        <template x-for="m in setupOptions('model')" :key="m">
+                            <option translate="no" :value="'v:' + m" :selected="!setupTyping('model', setup.model) && setup.model === m" x-text="m"></option>
+                        </template>
+                        <option value="other" :selected="setupTyping('model', setup.model)">{{ t('settings.setup.other_value') }}</option>
+                    </select>
+                    <input type="text" class="form-input" id="setup-model" dir="ltr" translate="no" autocomplete="off" spellcheck="false"
+                           x-show="setupTyping('model', setup.model)" aria-label="{{ t('settings.setup.try_with') }}"
                            x-model="setup.model" @input="setup.test = null">
-                    <datalist id="setup-model-list"><template x-for="m in (setup.found || [])" :key="m.id"><option :value="m.id"></option></template></datalist>
                     <p class="setting-desc" x-show="setup.model && !setup.test" x-cloak x-text="setupPriceLabel(setupListedPrice())"></p>
                 </div>
                 <button type="button" class="btn btn-secondary" id="setup-test" @click="sendSetupTest()" :disabled="!!setup.busy"
@@ -287,7 +312,7 @@
    as shown (kazma_core.provider_setup.tidy). #}
 <div x-show="tidy.open" x-cloak class="modal-overlay" id="provider-tidy"
      @click.self="tidy.open = false" @keydown.escape.window="if (!KazmaDialogGuard.escapeIsTaken()) tidy.open = false">
-    <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="provider-tidy-title" @keydown.tab.window="tidy.open && KazmaDialogGuard.keepFocus($event, $el)">
+    <div class="modal modal-lg" role="dialog" :aria-modal="tidy.open ? 'true' : null" aria-labelledby="provider-tidy-title" @keydown.tab.window="tidy.open && KazmaDialogGuard.keepFocus($event, $el)">
         <div class="modal-header">
             <h2 id="provider-tidy-title">{{ t('settings.setup.tidy_title') }}</h2>
             <button type="button" class="modal-close" @click="tidy.open = false" aria-label="{{ t('common.close') }}"><span class="ki" x-html="KazmaIcons.get('x')" aria-hidden="true"></span></button>

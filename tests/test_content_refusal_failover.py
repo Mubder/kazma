@@ -154,6 +154,10 @@ def test_the_line_follows_the_persons_own_last_message():
     assert person_text(nudged) == "ما هذا؟" and already_told(nudged)
     assert not already_told([*nudged, {"role": "user", "content": "وهذا؟"}])  # another turn
     assert not already_told([asked])
+    # Judged by how the answer opens: one that quotes the line was told nothing
+    # (tests/test_messages_judged_by_how_they_open.py).
+    quoted = {"role": "assistant", "content": "It said: " + refusal_line("ما هذا؟", "a", "b")}
+    assert not already_told([asked, quoted])
 
 
 def test_the_failure_says_what_was_done_in_the_messages_language():
