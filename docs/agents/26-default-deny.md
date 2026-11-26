@@ -213,7 +213,10 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   plus a correlation id, with the real exception logged under that id.
 - 4xx **validation** paths use `validation_error(exc)` instead: the message
   is the caller's answer, and replacing it with a code makes the API
-  unusable. Redaction applies either way.
+  unusable. Redaction applies either way. A typed refusal of Kazma's own
+  (`PeopleRefused`, `SpaceMoveRefused`...) keeps its sentence in a `message`
+  field, and a route answers it with `refusal_message(exc)`: the field,
+  redacted, never the exception's text (2026-11-26, section 66).
 - **No answer carries an exception's own text** (2026-11-14). A page that
   shows the error gets `described_error(sentence, exc)`: Kazma's sentence
   with the code and the reference ("Could not resolve the clone URL from

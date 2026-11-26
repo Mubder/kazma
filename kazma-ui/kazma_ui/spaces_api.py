@@ -50,7 +50,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
-from kazma_core.errors import validation_error
+from kazma_core.errors import refusal_message
 from kazma_core.security.sealed_zip import MIN_PASSWORD
 from kazma_core.spaces import people, space_data, space_move
 from kazma_core.spaces.identity import IdentityUnavailable, read_registry
@@ -121,11 +121,11 @@ def _guarded(request: Request, space_id: str, action: str, run: Any) -> Any:
             return refused
         return run()
     except space_data.SpaceDataRefused as exc:
-        return _answer(exc.code, exc.status, validation_error(exc))
+        return _answer(exc.code, exc.status, refusal_message(exc))
     except space_move.SpaceMoveRefused as exc:
-        return _answer(exc.code, exc.status, validation_error(exc))
+        return _answer(exc.code, exc.status, refusal_message(exc))
     except PeopleRefused as exc:
-        return _answer(exc.code, exc.status, validation_error(exc))
+        return _answer(exc.code, exc.status, refusal_message(exc))
     except IdentityUnavailable:
         return JSONResponse({"ok": False, "error": "identity_unavailable"}, status_code=503,
                             headers={"Retry-After": "5"})
@@ -260,11 +260,11 @@ def create_spaces_router() -> APIRouter:
             try:
                 taken = space_move.import_bundle(source, password, owner=owner, by=by)
             except space_move.SpaceMoveRefused as exc:
-                return _answer(exc.code, exc.status, validation_error(exc))
+                return _answer(exc.code, exc.status, refusal_message(exc))
             except space_data.SpaceDataRefused as exc:
-                return _answer(exc.code, exc.status, validation_error(exc))
+                return _answer(exc.code, exc.status, refusal_message(exc))
             except PeopleRefused as exc:
-                return _answer(exc.code, exc.status, validation_error(exc))
+                return _answer(exc.code, exc.status, refusal_message(exc))
             except IdentityUnavailable:
                 return JSONResponse({"ok": False, "error": "identity_unavailable"}, status_code=503,
                                     headers={"Retry-After": "5"})

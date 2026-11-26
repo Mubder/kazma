@@ -147,3 +147,39 @@ def test_control_a_big_endian_counter_writes_a_zip_no_tool_opens(tmp_path, tools
         opened = _extract(tool, sealed, out, PASSWORD)
         got = {name: (out / name).read_bytes() for name in entries if (out / name).is_file()}
         assert not opened or got != entries, tool
+
+
+def _sealed_bodies(archive: Path) -> list[bytes]:
+    """Each entry's encrypted data (between its salt and verifier and its
+    MAC), read from its local header."""
+    raw = archive.read_bytes()
+    bodies = []
+    with zipfile.ZipFile(archive) as zipped:
+        for info in zipped.infolist():
+            at = info.header_offset
+            name_len, extra_len = int.from_bytes(raw[at + 26:at + 28], "little"), int.from_bytes(raw[at + 28:at + 30], "little")
+            start = at + 30 + name_len + extra_len + 16 + 2  # the salt (AES-256) and the verifier
+            bodies.append(raw[start:start + info.compress_size - 16 - 2 - 10])
+    return bodies
+
+
+def test_no_two_entries_share_a_keystream(tmp_path, monkeypatch) -> None:
+    """The ECB in ``_Counter`` makes WinZip's counter-mode keystream: AES of
+    unique counters under one entry's key (CodeQL py/weak-cryptographic-algorithm,
+    judged correct 2026-11-26). It is safe only while no two entries share a
+    key: each takes a fresh salt. Two entries of the same bytes seal apart.
+
+    Negative control: with one salt for every entry, the same bytes seal to
+    the same body -- the reuse this test is there to see."""
+    plain = tmp_path / "twins.zip"
+    with zipfile.ZipFile(plain, "w") as zipped:
+        zipped.writestr("one.txt", b"the same words " * 500)
+        zipped.writestr("two.txt", b"the same words " * 500)
+    sealed_zip.seal(plain, tmp_path / "sealed.zip", PASSWORD)
+    first, second = _sealed_bodies(tmp_path / "sealed.zip")
+    assert first and len(first) == len(second) and first != second
+
+    monkeypatch.setattr(sealed_zip.os, "urandom", lambda n: b"\x07" * n)
+    sealed_zip.seal(plain, tmp_path / "one-salt.zip", PASSWORD)
+    first, second = _sealed_bodies(tmp_path / "one-salt.zip")
+    assert first == second, "the control: one salt for both entries reuses the keystream"

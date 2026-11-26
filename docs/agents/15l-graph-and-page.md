@@ -124,9 +124,11 @@ drawing, the rest by extraction.
   **Restore takes only a backup of the memory database**: the list showed the
   operations database's copies (`memory_ops_<ts>.db`) beside the memory
   ones with the same Restore button, and restoring one replaced every memory
-  with the task queue. The list and the route take only
-  `backup.is_memory_backup_name` (`memory_state_<ts>.db`, the stem of
-  `primary_memory_db`), and `restore_memory_backup` refuses a file without
+  with the task queue. The list takes only `backup.is_memory_backup_name`
+  (`memory_state_<ts>.db`, the stem of `primary_memory_db`, the stamp ASCII
+  digits), the route only `backup.memory_backup_path` (the same name, made
+  again from its timestamp: no text the request sent is in the path,
+  section 66), and `restore_memory_backup` refuses a file without
   the memory database's own tables (`NotAMemoryBackup`, read `immutable=1`)
   before anything is copied (400 `not_a_memory_backup`). **Back up now**
   answers `failed` / `nothing_backed_up` when nothing was copied, and its

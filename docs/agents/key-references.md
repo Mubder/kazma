@@ -21,6 +21,7 @@
 - `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` — Binding industrial audit (waves 0–8 shipped). Do **not** follow dump `AUDIT_DEEP_2026-09-01.md` Part 6 order.
 - `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` — Deep-structure audit (22 findings, change-impact map, CI recovery, Telegram desync §20)
 - `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Historical production audit (2026-07-21)
+- `docs/audits/CODEQL_TRIAGE_2026-11-26.md` — Every code-scanning alert open on 2026-11-26 (135): fixed, false positive with its reason, or the owner's; the list the owner dismisses from (section 66)
 - `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report (historical, 2026-08-11; not a current qualification — the current state is the hardening tracker above)
 - `docs/audits/AUDIT_{KNOWLEDGE,SWARM,MEMORY,SCHEDULED,TIME_TRAVEL}_2026-10-13.md` and their trackers `docs/plans/{KNOWLEDGE,SWARM,MEMORY,SCHEDULED,TIME_TRAVEL}_INDUSTRIAL_HARDENING_GOAL.md` — the 2026-10-13 audits of those areas (findings, AGENTS.md claims the code does not match, staged path) and the open remediation, one tracker per area, modelled on Documents
 - `docs/plans/HITL_GATE_REGISTRY_PLAN.md` — Gate registry (P6)
