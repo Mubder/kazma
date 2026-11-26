@@ -28,7 +28,7 @@ holds what the database needs for it, and nothing uses it at run time yet:
   the registry knows; on a connection as the space role each policy table is
   under row security, raises with nothing set, and shows nothing of a space
   that does not exist.
-* :func:`_space_conninfo` -- the one function that builds the space
+* :func:`space_conninfo` -- the one function that builds the space
   connection's address (decision 5; review M10: the address's own options and
   ``PGOPTIONS`` kept, the role last).
 
@@ -47,6 +47,7 @@ as today. Grants are lost on a restore; :func:`apply` puts them back.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import re
@@ -199,7 +200,7 @@ def _role_option() -> str:
     return f"-c role={SPACE_ROLE}"
 
 
-def _space_conninfo(url: str, environ: Mapping[str, str] | None = None) -> str:
+def space_conninfo(url: str, environ: Mapping[str, str] | None = None) -> str:
     """The space connection's address: *url* with the role as a start option.
 
     The address's own ``options`` and ``PGOPTIONS`` (a ``search_path``, a
@@ -231,7 +232,7 @@ def _space_connect(url: str) -> Any:
     """A connection as the space role, for :func:`prove` only."""
     import psycopg
 
-    return psycopg.connect(_space_conninfo(url), autocommit=False, connect_timeout=10)
+    return psycopg.connect(space_conninfo(url), autocommit=False, connect_timeout=10)
 
 
 def _one(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
@@ -973,3 +974,188 @@ def prove(url: str, known: Iterable[str], *, vector_table: str | None = None) ->
     except psycopg.OperationalError as exc:
         proof.failed.append(f"Kazma's login could not sign in as {SPACE_ROLE} ({type(exc).__name__})")
     return proof
+
+
+# ── the space half of a pool (S4-01 step 3; armed in tests only) ────────
+#
+# Once armed, a checkout of Kazma's own database asks whose statements these
+# are: a space's go to a pool that signs in as the space role, with the
+# space set for the transaction; the install's to the owner's pool as today;
+# nothing said is refused before anything is sent (design 3 and 6). Nothing
+# arms it yet but tests: arming at start is step 6. Not armed, a pool takes
+# today's path and sends nothing more.
+
+_armed = False
+
+
+def armed() -> bool:
+    """True once the second lock is armed in this process."""
+    return _armed
+
+
+def _arm(value: bool = True) -> None:
+    """Arm (or disarm) the second lock in this process: tests now, the
+    server's start in step 6, after :func:`apply` and :func:`prove`."""
+    global _armed
+    _armed = value
+
+
+def _refusal_base() -> type:
+    from kazma_core.spaces.scope import NoSpaceBound
+
+    return NoSpaceBound
+
+
+class _SecondTransaction(_refusal_base()):  # type: ignore[misc]
+    """A statement after the checkout's own transaction ended: it has no
+    space, and the policy would answer it with nothing found when no row is
+    reached (review M4). A refusal (``NoSpaceBound``): no other store answers
+    for it (H2)."""
+
+
+class _NestedInstallCheckout(_refusal_base()):  # type: ignore[misc]
+    """An install checkout while this context holds a space one: a space
+    transaction holding a lock the install's statement waits for would wait
+    for good, and Postgres sees no deadlock (review M13). A refusal, like
+    ``NoSpaceBound``."""
+
+
+#: The space a checkout of this context holds, while it holds one.
+_holding: contextvars.ContextVar[str] = contextvars.ContextVar("kazma_space_checkout", default="")
+#: Why an install checkout inside a space one is declared safe, when it is.
+_nested_said: contextvars.ContextVar[str] = contextvars.ContextVar("kazma_nested_install", default="")
+
+
+def checkout_space() -> str:
+    """Whose statements a checkout of Kazma's own database is for, once armed:
+    a space's id, or ``""`` for the install's (said by
+    ``row_work.install_statements`` or ``scope.install_work``).
+
+    Nothing said raises ``NoSpaceBound`` before any statement is sent (design
+    6.1): no fallback to the owner's space. An install checkout while this
+    context holds a space one raises :class:`_NestedInstallCheckout` unless
+    :func:`_install_inside_a_space` declares it (review M13). No I/O."""
+    from kazma_core.spaces.row_work import Door
+    from kazma_core.spaces.scope import NoSpaceBound
+
+    door = Door.now()
+    if door is None:
+        raise NoSpaceBound("a statement to Kazma's database said no space and no install door: refused before "
+                           "it was sent (Spaces S4-01)")
+    if door.space:
+        return door.space
+    held = _holding.get()
+    if held and not _nested_said.get():
+        raise _NestedInstallCheckout(f"an install checkout while this context holds a checkout of space {held}")
+    return ""
+
+
+@contextmanager
+def _install_inside_a_space(reason: str) -> Iterator[None]:
+    """Declare an install checkout made while a space one is held safe:
+    *reason* says why no lock of the space transaction is waited for."""
+    if not reason.strip():
+        raise ValueError("_install_inside_a_space needs its reason")
+    token = _nested_said.set(reason.strip())
+    try:
+        yield
+    finally:
+        _nested_said.reset(token)
+
+
+@contextmanager
+def holding(space: str) -> Iterator[None]:
+    """This context holds a checkout of *space* for the block (M13)."""
+    token = _holding.set(space)
+    try:
+        yield
+    finally:
+        _holding.reset(token)
+
+
+_space_class: type | None = None
+
+
+def space_connection_class() -> type:
+    """The space half's connection: after its checkout's transaction ends
+    (a commit or a rollback), the next statement is refused, never run with
+    no space (review M4). Reset when the pool takes it back."""
+    global _space_class
+    if _space_class is None:
+        import psycopg
+
+        class SpaceConnection(psycopg.Connection):  # type: ignore[type-arg,misc]
+            _kazma_out = False
+            _kazma_spent = False
+
+            def commit(self) -> None:
+                super().commit()
+                self._kazma_spent = True
+
+            def rollback(self) -> None:
+                super().rollback()
+                self._kazma_spent = True
+
+            def cursor(self, *args: Any, **kwargs: Any) -> Any:
+                if self._kazma_out and self._kazma_spent:
+                    raise _SecondTransaction("a second transaction in one checkout has no space: check out again")
+                return super().cursor(*args, **kwargs)
+
+        _space_class = SpaceConnection
+    return _space_class
+
+
+def begin_space(conn: Any, space: str) -> None:
+    """Open the checkout's transaction in *space*: ``BEGIN`` and the setting
+    in one message, so psycopg finds the connection in a transaction and
+    sends no ``BEGIN`` of its own (design 3). Blocking libpq: the sync pool's
+    caller only, never on the loop (review H4). Its result is read: a dead
+    backend or a refused setting raises psycopg's error, so the pool discards
+    the connection and §44 sees an outage (review M3)."""
+    import psycopg
+    from psycopg import pq
+
+    from kazma_core.spaces.scope import valid_space_id
+
+    if not valid_space_id(space):
+        raise ValueError(f"not a space id: {space!r}")
+    literal = pq.Escaping(conn.pgconn).escape_literal(space.encode())
+    result = conn.pgconn.exec_(b"BEGIN; SELECT set_config('" + SPACE_SETTING.encode() + b"', " + literal
+                               + b", true)")
+    if result.status != pq.ExecStatus.TUPLES_OK:
+        said = (result.error_message or b"").decode(errors="replace").strip()
+        raise psycopg.OperationalError(f"the checkout could not set its space ({said or 'no answer'})")
+    conn._kazma_out, conn._kazma_spent = True, False
+
+
+def end_space(conn: Any) -> None:
+    """The pool took the connection back: it belongs to no checkout."""
+    conn._kazma_out = False
+
+
+def check_space_role(conn: Any) -> None:
+    """Every new connection of the space half must be the space role: a
+    pooler that drops start options would hand out the owner, who sees every
+    row (review M10). Asked of each connection, not once at arming."""
+    import psycopg
+
+    with conn.cursor() as cur:
+        who = _one(cur, "SELECT current_user::text")
+    conn.rollback()
+    if who != SPACE_ROLE:
+        raise psycopg.OperationalError(f"the space pool signed in as {who}, not {SPACE_ROLE}")
+
+
+_half_said_at = 0.0
+
+
+def say_space_half_failed(reason: str) -> None:
+    """The space half cannot sign in while the owner can: its own problem,
+    never the outage of §44 (review M1). Said at most once a minute."""
+    global _half_said_at
+    now = time.monotonic()
+    if now - _half_said_at < 60.0:
+        return
+    _half_said_at = now
+    logger.warning("[row_security] the space role cannot sign in while Kazma's login can (%s): a space's "
+                   "statements are refused until it can (deploy/postgres/kazma_app_role.sql)", reason)

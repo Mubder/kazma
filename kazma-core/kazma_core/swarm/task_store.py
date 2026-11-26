@@ -882,6 +882,7 @@ class TaskStore:
     # Worker metrics
     # ------------------------------------------------------------------
 
+    @install_statements("the workers' metrics: one table of the install's, no space's (S4-01)")
     def record_worker_metric(
         self,
         *,
@@ -979,6 +980,7 @@ class TaskStore:
                 params,
             )
 
+    @install_statements("the workers' metrics: one table of the install's, no space's (S4-01)")
     def get_worker_metrics(self, worker: str) -> list[dict[str, Any]]:
         """Return daily metrics for a given worker, newest first."""
         with self._lock:
@@ -1003,6 +1005,7 @@ class TaskStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    @install_statements("the workers' metrics: one table of the install's, no space's (S4-01)")
     def get_all_worker_metrics(self) -> list[dict[str, Any]]:
         """Return aggregated metrics for all workers."""
         with self._lock:
