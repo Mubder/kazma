@@ -473,7 +473,35 @@ def notes() -> list[str]:
     except (sqlite3.Error, OSError, KeyError, ValueError) as exc:  # a note, never a refusal
         out.append(f"Memory outside every space could not be counted ({type(exc).__name__}).")
     out.extend(_listed_senders_note())
+    out.extend(_second_lock_note())
     return out
+
+
+def _second_lock_note() -> list[str]:
+    """Postgres's second lock (S4-01): not a precondition -- an install that
+    cannot have it runs with the first lock and says so (decision 3) -- so a
+    note that names what it needs. Read-only."""
+    from kazma_core.db.backend import get_database_url, is_postgres
+
+    url = get_database_url() or ""
+    if not url or not is_postgres():
+        return []
+    try:
+        import psycopg
+
+        from kazma_core.db import row_security
+    except ImportError:
+        return []
+    try:
+        found = row_security.check(url)
+    except (psycopg.Error, OSError) as exc:
+        return [f"Spaces' second lock on Postgres could not be read ({type(exc).__name__})."]
+    head = ("Spaces' second lock on Postgres (each space's rows held apart by the database, S4-01) is not "
+            "armed: the first lock holds alone.")
+    role = [f for f in found if f.subject == row_security.SPACE_ROLE]
+    if role:
+        return [f"{head} It needs the role {row_security.SPACE_ROLE} ({role[0].problem}): {role[0].fix}."]
+    return [head]
 
 
 def _listed_senders_note() -> list[str]:

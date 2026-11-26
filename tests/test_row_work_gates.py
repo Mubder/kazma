@@ -19,6 +19,7 @@ This gate reads ``spaces.row_work``'s forms from the product's source:
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -448,6 +449,102 @@ def test_every_form_that_names_a_space_is_declared_with_where_it_comes_from() ->
     assert all(r.startswith(kinds) and len(r.split()) >= 5 for r, _written in ROWS.values())
     assert _written_problems(used, ROWS) == []
     assert _reason_problems(used, ROWS) == []
+
+
+# ── a delete that trusts "nothing there" asks whose door it is (0b M1) ──
+
+_DELETE = re.compile(r"\bDELETE\s+FROM\b", re.I)
+_EXISTS = re.compile(r"\bSELECT\s+1\s+FROM\b", re.I)
+
+
+def _texts(node: ast.AST) -> str:
+    """Every string a function holds, f-strings' fixed parts included."""
+    return " ".join(n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str))
+
+
+def _functions(tree: ast.Module) -> dict[str, ast.AST]:
+    found: dict[str, ast.AST] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            found[node.name] = node
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    found[f"{node.name}.{item.name}"] = item
+    return found
+
+
+def trusting_deletes(source: str, roots: set[str]) -> dict[str, bool]:
+    """The functions *roots* run in this file (each, and the functions of its
+    class or module it calls) that send a ``DELETE`` and then ask whether a
+    row of that id is left: their name -> whether they ask ``door_hides``
+    first. Once the lock is armed, a door of another space sees neither the
+    row nor its absence, so its "nothing there" is no "gone" (0b review M1)."""
+    functions = _functions(ast.parse(source))
+    reached: set[str] = set()
+    for root in roots:
+        node = functions.get(root)
+        if node is None:
+            continue
+        reached.add(root)
+        cls = root.rpartition(".")[0]
+        for call in (n for n in ast.walk(node) if isinstance(n, ast.Call)):
+            fn = call.func
+            if isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name) and fn.value.id == "self" and cls:
+                reached.add(f"{cls}.{fn.attr}")
+            elif isinstance(fn, ast.Name):
+                reached.add(fn.id)
+    out: dict[str, bool] = {}
+    for name in sorted(reached & set(functions)):
+        text = _texts(functions[name])
+        if _DELETE.search(text) and _EXISTS.search(text):
+            out[name] = any(isinstance(n, ast.Call) and _name(n.func) == "door_hides"
+                            for n in ast.walk(functions[name]))
+    return out
+
+
+def _rows_by_file() -> dict[str, set[str]]:
+    by_file: dict[str, set[str]] = {}
+    for key in ROWS:
+        rel, _, where = key.partition("::")
+        by_file.setdefault(rel, set()).add(where)
+    return by_file
+
+
+def test_a_delete_that_trusts_nothing_there_asks_whose_door_it_is() -> None:
+    found = {f"{rel}::{name}": asks for rel, roots in _rows_by_file().items()
+             for name, asks in trusting_deletes((REPO / rel).read_text(encoding="utf-8"), roots).items()}
+    assert {"kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend._delete_fact",
+            "kazma-core/kazma_core/memory/backends.py::PgvectorBackend._delete_vector"} <= set(found), found
+    assert [name for name, asks in found.items() if not asks] == [], (
+        "a delete in a declared row's space that trusts an existence SELECT asks row_work.door_hides first")
+
+
+_PLANTED_DELETE = """
+class Store:
+    def remove(self, row_id, tenant_id):
+        with row_statements(tenant_id):
+            return self._gone(row_id, tenant_id)
+
+    def _gone(self, row_id, space):
+        cur.execute(f"DELETE FROM {self.table} WHERE id = %s RETURNING id", (row_id,))
+        if not cur.fetchall():
+            {ask}cur.execute("SELECT 1 FROM t WHERE id = %s", (row_id,))
+            return cur.fetchone() is None
+        return True
+"""
+
+
+@pytest.mark.parametrize(("ask", "asks"), [("", False), ("door_hides(space)\n            ", True)])
+def test_a_planted_delete_that_trusts_nothing_there_is_found(ask: str, asks: bool) -> None:
+    assert trusting_deletes(_PLANTED_DELETE.replace("{ask}", ask), {"Store.remove"}) == {"Store._gone": asks}
+
+
+def test_the_real_deletes_without_their_question_are_found() -> None:
+    """The negative control on the product's own source."""
+    rel = "kazma-core/kazma_core/memory/backends.py"
+    source = (REPO / rel).read_text(encoding="utf-8").replace("door_hides(", "door_kept_quiet(")
+    assert trusting_deletes(source, _rows_by_file()[rel])["PgvectorBackend._delete_vector"] is False
 
 
 @pytest.mark.parametrize(("form", "reason"), [

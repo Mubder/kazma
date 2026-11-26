@@ -84,6 +84,44 @@ an install with one account behaves as before.
   controls; behaviour `tests/test_space_doors.py`, real pools
   `tests/test_space_doors_postgres.py`). `KAZMA_SPACE_DOOR_REPORT=0` turns
   the counter off.
+- **Every Kazma table on Postgres has a second-lock rule** (S4-01 step 2,
+  `db/row_security.py`, 2026-11-26; nothing arms it yet). `RULES` gives each
+  table of `pg_backup.KAZMA_PG_TABLES` -- and pgvector's under its configured
+  name (M9) -- one rule: a space's (policy `kazma_space_rows`, `TO PUBLIC`,
+  enabled never forced, a row's space `COALESCE(NULLIF(x, ''), 'default')`
+  for every table, M6), the intake mutex's narrow grant, or the install's (no
+  grant, no policy). The rights of the role `kazma_space` are per table
+  (M12: audit and job events SELECT, INSERT; reservations SELECT; blobs no
+  DELETE). The policy compares with `kazma_space_id()`
+  (`KAZMA_PG_FUNCTIONS`: raises 42501 when no space or `''` is set; every
+  restore makes it). **A new Postgres table needs its rule**, in `RULES` and
+  in the rights block of `deploy/postgres/kazma_app_role.sql`, which is
+  generated from it (`row_security._role_sql_rights()`); the role, its
+  membership (`kazma_app` holds it with INHERIT FALSE, SET TRUE; it is a
+  member of nothing) and those rights live in that file (M11), granted on a
+  space's table only where its policy is on. `apply(url)` puts what is
+  missing in place as the tables' owner only (a login that owns nothing would
+  blind the install), one table per transaction, 300 ms lock wait, a few
+  tries, one budget (M15), and adds the checkpoints' `space_id` column only
+  with no space set (its default is the transaction's space). `check(url)`
+  compares the catalog with the rules both ways (role, membership, function,
+  row security, policies, rights incl. PUBLIC's, schema CREATE, default
+  privileges, views, SECURITY DEFINER functions); `space_rows` lists rows
+  whose space the registry does not know (M6) and `prove` adds a connection
+  as the role (`_space_conninfo`: the address's own options kept, the role
+  last, M10). A table made later gets its rule as it is made
+  (`ensure_schema` -> `apply_made_tables`; the checkpointer after `setup()`),
+  only once `apply` succeeded in this process (`in_place`) and only in a
+  database that holds the rules: with Spaces off nothing more is sent.
+  `kazma doctor` and `kazma spaces migrate --check` show it (not a
+  precondition, decision 3); `scripts/row_security.py` checks, lists, proves
+  and applies by hand. Gates: `tests/test_row_security_rules.py` (rules both
+  ways, every schema maker's `CREATE TABLE`, the role file's rights, the
+  function, the address, nothing more sent; controls planted), real Postgres
+  `tests/test_pg_row_security.py` (the role file and its repairs, apply
+  once, each planted difference, a space's own rows only, no space raises,
+  M6, the refusals, a dump's lock left, tables made later, dump, restore,
+  the upgrade's copy, the rehearsal, the remove file).
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner

@@ -132,7 +132,7 @@ come from `kazma_core.paths` (§37, §38).
 | You add | Declare it in |
 |---|---|
 | a tool | `TOOL_TIERS` + effect profile (§7, §20), `TOOL_WRITES` (§37), `spaces/features.py` and `spaces/tools.py` (§70), a typed schema (§35) |
-| a store, table or data-dir file | `store_registry.py`: `STORES` / `DATA_DIR_ENTRIES`, `SPACE_RULES`, `RETENTION` (§37, §56, §70); memory tables also `memory_stores.py` (§15 I); a Postgres table in `KAZMA_PG_TABLES` (§21) |
+| a store, table or data-dir file | `store_registry.py`: `STORES` / `DATA_DIR_ENTRIES`, `SPACE_RULES`, `RETENTION` (§37, §56, §70); memory tables also `memory_stores.py` (§15 I); a Postgres table in `KAZMA_PG_TABLES` (§21) and `row_security.RULES` (§70) |
 | a route | its role and `ui/route_scopes.py` (§70), a caller or a reason (UI 3), a body limit (§26), the space matrix case (§70) |
 | a setting | a reader, `settings_restore.py`, `settings_scope.py`, a validation rule (§47, §54, §56, §70) |
 | an environment variable | the reference pages and index (§38) |

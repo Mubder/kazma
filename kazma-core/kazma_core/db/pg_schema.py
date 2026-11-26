@@ -27,6 +27,11 @@ take the exclusive lock on every start. Other statements (an
 
 ``tests/test_pg_schema_setup.py`` holds every Postgres ``ADD COLUMN`` in
 product code to this module and runs the stores on a real Postgres.
+
+A table made here gets its second-lock rule in the same transaction
+(``db/row_security.apply_made_tables``, Spaces S4-01 review H3) -- only once
+the rules are in place in this process and in a database that holds them;
+until then nothing more is sent.
 """
 
 from __future__ import annotations
@@ -78,16 +83,19 @@ def _first(row: Any) -> Any:
     return row[0]
 
 
-def ensure_schema(cur: Any, statements: str | Iterable[str]) -> list[str]:
+def ensure_schema(cur: Any, statements: str | Iterable[str], *, vector_table: str | None = None) -> list[str]:
     """Bring a store's schema up to date inside the caller's transaction.
 
     Returns the statements it sent (empty when the schema was current). The
     caller commits; the advisory lock is released with its transaction.
+    *vector_table* names pgvector's table when the caller makes it (its rule
+    is keyed by the configured name).
     """
 
     items = split_statements(statements) if isinstance(statements, str) else [s.strip() for s in statements]
     cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (SCHEMA_LOCK_KEY,))
     sent: list[str] = []
+    made: list[str] = []
     for statement in items:
         if not statement:
             continue
@@ -97,6 +105,7 @@ def ensure_schema(cur: Any, statements: str | Iterable[str]) -> list[str]:
         if table:
             if _exists(cur, table.group(1)):
                 continue
+            made.append(table.group(1))
         elif index:
             if _exists(cur, index.group(1)):
                 continue
@@ -110,4 +119,8 @@ def ensure_schema(cur: Any, statements: str | Iterable[str]) -> list[str]:
             )
         cur.execute(statement)
         sent.append(statement)
+    if made:
+        from kazma_core.db.row_security import apply_made_tables
+
+        apply_made_tables(cur, made, vector_table=vector_table)
     return sent

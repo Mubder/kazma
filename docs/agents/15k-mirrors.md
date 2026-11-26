@@ -20,12 +20,14 @@ an answer ("User prefers dark mode").
   row of that id left. Not gone -- False, and a WARNING once per id, DEBUG
   after -- is a row of that id kept under another space, or a door of
   another space (`row_work.door_hides`: once armed its "nothing there" says
-  nothing). Then pgvector's forget journal keeps the vector queued; the
-  mirror's own callers (`macro_sleep`, graph-clear) do not retry, and the
-  outbox the `beliefs_mirror_ad` trigger fills, which deletes by id in the
-  sync's install door, finishes it (H5: "deleted" was answered whatever the
-  statement did, pgvector dropped its tenant, and a forgotten fact could stay
-  for good). Callers that know the fact's space pass it
+  nothing). Then pgvector's forget journal keeps the vector queued. The
+  mirror's own callers (`macro_sleep`, graph-clear) do not retry; the outbox
+  does, in the sync's install door: `macro_sleep` deletes the fact locally,
+  so the `beliefs_mirror_ad` trigger queues a delete by id; graph-clear
+  invalidates it, so `beliefs_mirror_au` queues the row and the outbox pushes
+  it as a dead copy, which the mirror's reads skip (H5: "deleted" was
+  answered whatever the statement did, pgvector dropped its tenant, and a
+  forgotten fact could stay for good). Callers that know the fact's space pass it
   (`unmirror_belief_to_state(id, tenant)`). The schema is made on a
   connection of its own, as the install's (`_ensure()`, `_ensure_table()`):
   on the caller's, its commits put the caller's statement in a second

@@ -110,11 +110,12 @@ def _required_pg_tables() -> list[str]:
     mirror = mirrors_to_postgres()
     return [t for t in KAZMA_PG_TABLES if mirror or t not in _MEMORY_MIRROR_TABLES]
 
-#: Functions the triggers on Kazma's tables call. ``pg_dump -t`` dumps a
-#: table's triggers but never the functions they call, so every restore
-#: creates these in the target first (``migration.pg_bridge.restore_database``)
-#: -- otherwise a restore into a fresh database (the weekly rehearsal, a drill,
-#: a new machine) cannot recreate the trigger. ``tests/test_document_audit_pg.py``
+#: Functions the triggers and policies on Kazma's tables call. ``pg_dump -t``
+#: dumps a table's triggers and policies but never the functions they call, so
+#: every restore creates these in the target first
+#: (``migration.pg_bridge.restore_database``) -- otherwise a restore into a
+#: fresh database (the weekly rehearsal, a drill, a new machine) cannot
+#: recreate the trigger or the policy. ``tests/test_document_audit_pg.py``
 #: holds every trigger function product code creates to this mapping.
 KAZMA_PG_FUNCTIONS: dict[str, str] = {
     # documents/audit.py: audit rows are immutable, and deleted only by the
@@ -133,6 +134,26 @@ BEGIN
     RETURN OLD;
 END
 $guard$
+""",
+    # db/row_security.py (Spaces S4-01): the space a transaction is in, for
+    # every policy. Raises when none is set, or '' (what a transaction that
+    # set it leaves behind), so a statement that forgot its space fails
+    # instead of finding nothing (decision 2). Made on every restore, so a
+    # dump by table -- which carries policies, never functions -- restores
+    # whole; with Spaces off nothing calls it (review L7).
+    "kazma_space_id": """
+CREATE OR REPLACE FUNCTION kazma_space_id() RETURNS text
+LANGUAGE plpgsql STABLE PARALLEL SAFE AS $space$
+DECLARE
+    space text := current_setting('kazma.space', true);
+BEGIN
+    IF space IS NULL OR space = '' THEN
+        RAISE EXCEPTION 'no space is set for this transaction (Kazma S4-01)'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN space;
+END
+$space$
 """,
 }
 

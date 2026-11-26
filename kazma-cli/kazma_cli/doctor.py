@@ -384,6 +384,45 @@ def _database_service_rows() -> list[tuple[str, str]]:
     return out
 
 
+def _second_lock_rows() -> list[tuple[str, str]]:
+    """Spaces' second lock on Postgres (S4-01): whether its role exists and
+    every Kazma table holds its rule, read from the catalog. Shown, never
+    counted, until the lock is armed: nothing uses it yet. Read-only."""
+    from kazma_core.db.backend import get_database_url, is_postgres
+
+    url = get_database_url() or ""
+    if not url or not is_postgres():
+        return []
+    from kazma_core.db import row_security
+    from kazma_core.spaces import identity
+
+    try:
+        on = identity.enforcement_enabled()
+    except identity.IdentityUnavailable:
+        on = None
+    state = {True: "Spaces is on", False: "Spaces is off", None: "the Spaces switch could not be read"}[on]
+    out = [_line(INFO, "the second lock is not armed", f"{state}; it is armed only once it is built whole")]
+    try:
+        import psycopg
+    except ImportError:
+        return [*out, _line(INFO, "its rules could not be read", "no Postgres driver")]
+    try:
+        with read_only_diagnostic("kazma doctor: the second lock"):
+            found = row_security.check(url)
+    except (psycopg.Error, OSError) as exc:
+        return [*out, _line(INFO, "its rules could not be read", type(exc).__name__)]
+    if not any(f.subject == row_security.SPACE_ROLE for f in found):
+        out.append(_line(INFO, f"the role {row_security.SPACE_ROLE} is in place"))
+    blocking = [f for f in found if f.blocking]
+    if not blocking:
+        out.append(_line(INFO, "every Kazma table holds its rule"))
+    for f in blocking[:8]:
+        out.append(_line(INFO, f"{f.subject}: {f.problem}", f"fix: {f.fix}" if f.fix else ""))
+    if len(blocking) > 8:
+        out.append(_line(INFO, f"and {len(blocking) - 8} more", "python scripts/row_security.py check"))
+    return out
+
+
 def _cloud_profile_rows() -> list[tuple[str, str]]:
     """The cloud profile (Spaces S4-08): every check a public install must
     pass at boot. With the profile on, a missing piece that refuses the boot
@@ -423,6 +462,12 @@ def run(argv: list[str] | None = None) -> int:
         for _status, rendered in db_rows:
             print(rendered)
         rows = rows + db_rows
+    lock_rows = _second_lock_rows()
+    if lock_rows:
+        print("\nSpaces' second lock (Postgres)\n")
+        for _status, rendered in lock_rows:
+            print(rendered)
+        rows = rows + lock_rows
     cloud_rows = _cloud_profile_rows()
     print("\nThe cloud profile\n")
     for _status, rendered in cloud_rows:

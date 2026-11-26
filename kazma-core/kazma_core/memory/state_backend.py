@@ -31,27 +31,6 @@ from kazma_core.spaces.scope import space_named_or_bound, space_of_record, space
 
 # Liveness-probe cache TTL for the shared-state backend's `available`.
 _READY_PROBE_TTL = 60.0
-
-#: What a delete found (S4-01 H5, 0b review M1).
-_GONE = "gone"
-_KEPT = "kept under another space"
-_UNSEEN = "asked from another space's door, which cannot see it once the lock is armed"
-
-#: Ids a "not gone" was said for in this process: once each (0b review L1).
-_KEPT_SAID: set[str] = set()
-
-
-def _say_kept(row_id: str, outcome: str) -> None:
-    """WARNING the first time an id is not gone, DEBUG after: the outbox
-    retries it every pass."""
-    first = row_id not in _KEPT_SAID
-    if first:
-        if len(_KEPT_SAID) >= 10_000:
-            _KEPT_SAID.clear()
-        _KEPT_SAID.add(row_id)
-    logger.log(logging.WARNING if first else logging.DEBUG,
-               "[state_backend] fact %s is not known to be gone from the Postgres mirror (%s); it stays queued",
-               row_id, outcome)
 from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
@@ -80,6 +59,29 @@ __all__ = [
     "reconcile_state_beliefs",
     "mirror_drift_summary",
 ]
+
+#: What a delete found (S4-01 H5, 0b review M1).
+_GONE = "gone"
+_KEPT = "kept under another space"
+_UNSEEN = "asked from another space's door, which cannot see it once the lock is armed"
+
+#: The (id, why) a "not gone" was said for in this process: once each (0b
+#: review L1); a new reason for the same id is said again (delta review L-d).
+_KEPT_SAID: set[tuple[str, str]] = set()
+
+
+def _say_kept(row_id: str, outcome: str) -> None:
+    """WARNING the first time an id is not gone for this reason, DEBUG after:
+    the outbox retries it every pass."""
+    key = (row_id, outcome)
+    first = key not in _KEPT_SAID
+    if first:
+        if len(_KEPT_SAID) >= 10_000:
+            _KEPT_SAID.clear()
+        _KEPT_SAID.add(key)
+    logger.log(logging.WARNING if first else logging.DEBUG,
+               "[state_backend] fact %s is not known to be gone from the Postgres mirror (%s); it stays queued",
+               row_id, outcome)
 
 # Singleton cache for the shared-state mirror backend (see get_state_backend).
 _state_backend_cache: dict[tuple, Any] = {}
