@@ -20,7 +20,8 @@ forms:
   nothing is read to enter it.
 * :func:`row_statements` -- a row Kazma keeps for itself (a mirror's copy, a
   vector) is written in its own space where Kazma does the work itself, and
-  in the bound space where a request or a turn does.
+  in the bound (or declared) space where a request or a turn does; a row of
+  another space there is said as ``cross``.
 * :func:`install_statements` -- the install's own statements: about every
   space, or about none. Each use is declared, with its reason, in
   ``tests/test_row_work_gates.py``.
@@ -67,6 +68,7 @@ from kazma_core.spaces.scope import (
 __all__ = [
     "Door",
     "SpaceErasing",
+    "door_hides",
     "install_loops",
     "install_statements",
     "resolve_act_of",
@@ -87,9 +89,11 @@ class Door:
     ``space`` is the space it is for; ``""`` with a ``reason`` is the
     install's, and then the reason says why. ``how`` says what made it the
     door: ``scope`` (the bound scope), ``row`` (:func:`statements_of`),
-    ``statements`` (:func:`install_statements`) or ``work``
-    (``scope.install_work``). Two doors to the same space are equal however
-    they were said.
+    ``statements`` (:func:`install_statements`), ``work``
+    (``scope.install_work``), or ``cross``: a space's door kept for a row of
+    another space (:func:`row_statements`; once armed the row is hidden from
+    it, so the report counts it as a finding). Two doors to the same space
+    are equal however they were said.
     """
 
     space: str = ""
@@ -151,18 +155,37 @@ def row_statements(space: object) -> Iterator[None]:
     *space*'s where Kazma does the work itself -- nothing is bound, or the
     install's door is said around it (a sweep, the forget convergence).
 
-    Where a scope is bound and nothing else is said (a request, a turn) the
-    bound space stays the door: a person's own rows are written in their
-    space, and a write into another space is said where it starts
-    (:func:`statements_of`, declared), never made by the store that writes it
-    (H6). For the database alone, like :func:`statements_of`.
+    Where a space's door is said already -- the bound scope (a request, a
+    turn) or a declared :func:`statements_of` -- that door stays: a person's
+    own rows are written in their space, and a write into another space is
+    said where it starts (declared), never made by the store that writes it
+    (H6, review L3). A space's door that is not the row's is said as
+    ``cross`` (the same space, so nothing moves): once the lock is armed the
+    row is hidden from it, and step 1's report counts it as a finding of its
+    own (0b review M1). For the database alone, like :func:`statements_of`.
     """
     door = Door.now()
-    if door is not None and door.how == "scope":
+    if door is None or not door.space:
+        with statements_of(space):
+            yield
+        return
+    if door.space == space_of_record(space) or door.how == "cross":
         yield
         return
-    with statements_of(space):
+    token = _say(Door(space=door.space, how="cross"))
+    try:
         yield
+    finally:
+        _said.reset(token)
+
+
+def door_hides(space: object) -> bool:
+    """Whether the statements now go through a space's door that is not
+    *space*'s own (``cross``: a request bound to another space). Once the lock
+    is armed such a door cannot see the row, so its "nothing there" says
+    nothing about the row (0b review M1). No I/O."""
+    door = Door.now()
+    return door is not None and bool(door.space) and door.space != space_of_record(space)
 
 
 @contextmanager

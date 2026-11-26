@@ -105,11 +105,11 @@ class _Mirror:
                                                      ("subject", "predicate", "object")), terms)]
         return rows[: max(1, min(int(limit), 50))]
 
-    def fetch_episodes(self, ids, *, tenant_id="default"):
+    def fetch_episodes(self, ids, *, tenant_id="default", strict=False):
         wanted = {str(i) for i in ids[:50]}
         return [r for r in self._episode_rows(tenant_id) if str(r["id"]) in wanted]
 
-    def fetch_beliefs(self, ids, *, tenant_id="default"):
+    def fetch_beliefs(self, ids, *, tenant_id="default", strict=False):
         wanted = {str(i) for i in ids[:50]}
         return [r for r in self._belief_rows(tenant_id) if str(r["id"]) in wanted]
 

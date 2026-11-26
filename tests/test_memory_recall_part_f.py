@@ -318,10 +318,10 @@ class _FailingMirror:
     def search_beliefs(self, query, *, tenant_id="default", limit=10, strict=False):
         raise ConnectionError("the mirror is away")
 
-    def fetch_episodes(self, ids, *, tenant_id="default"):
+    def fetch_episodes(self, ids, *, tenant_id="default", strict=False):
         return []
 
-    def fetch_beliefs(self, ids, *, tenant_id="default"):
+    def fetch_beliefs(self, ids, *, tenant_id="default", strict=False):
         return []
 
 

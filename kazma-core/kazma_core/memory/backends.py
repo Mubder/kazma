@@ -21,8 +21,8 @@ import time
 from contextlib import nullcontext
 from typing import Any, Protocol, runtime_checkable
 
-from kazma_core.spaces.row_work import install_statements, row_statements
-from kazma_core.spaces.scope import space_named_or_bound, space_of_record
+from kazma_core.spaces.row_work import door_hides, install_statements, row_statements
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record, spaces_enforced
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,26 @@ _REMOTE_VECTOR_LOCK = threading.Lock()
 #: removed underneath (the 2026-08-14 shared-database incident) is recreated.
 _PGVECTOR_TABLES_READY: set[tuple[str, str]] = set()
 _PGVECTOR_INDEX_WARNED: set[tuple[str, str]] = set()
+
+#: What a vector delete found (S4-01 H5, 0b review M1).
+_VECTOR_GONE = "gone"
+_VECTOR_KEPT = "kept under another space"
+_VECTOR_UNSEEN = "asked from another space's door, which cannot see it once the lock is armed"
+#: Ids a "not gone" was said for in this process: once each (0b review L1).
+_VECTOR_KEPT_SAID: set[str] = set()
+
+
+def _say_vector_kept(item_id: str, outcome: str) -> None:
+    """WARNING the first time an id is not gone, DEBUG after: the forget
+    journal retries it every pass."""
+    first = item_id not in _VECTOR_KEPT_SAID
+    if first:
+        if len(_VECTOR_KEPT_SAID) >= 10_000:
+            _VECTOR_KEPT_SAID.clear()
+        _VECTOR_KEPT_SAID.add(item_id)
+    logger.log(logging.WARNING if first else logging.DEBUG,
+               "[pgvector] the vector of %s is not known to be gone (%s); the forget journal retries it",
+               item_id, outcome)
 
 #: Read-only: the extension, whether the table exists or may be created,
 #: and the existing table's vector size (``atttypmod`` is the dimension for
@@ -1015,14 +1035,17 @@ class PgvectorBackend:
 
     def delete(self, item_id: str, *, tenant_id: str | None = None) -> bool:
         """Delete the vector of *item_id*, of *tenant_id* (its row's own space:
-        named in the statement and its door). True when it is gone: deleted
-        now, or none of that id is left; a vector of that id kept under
-        another space is not gone (False and a WARNING: the forget journal
-        retries it). S4-01 H5: the tenant was dropped and "erased" answered
-        whatever the statement found."""
+        its door, and once Spaces is enforced named in the statement, an
+        empty space the owner's; with Spaces off by id, as before: 0b review
+        L1). True when it is gone: deleted now, or none of that id is left.
+        Not gone -- False and a WARNING once per id, so the forget journal
+        retries it -- when a vector of that id is kept under another space,
+        or the door is a request's of another space, whose "nothing there"
+        says nothing once the lock is armed (0b review M1). S4-01 H5: the
+        tenant was dropped and "erased" answered whatever the statement found."""
         if not item_id or not self._dsn:
             return False
-        space = space_of_record(tenant_id) if tenant_id else ""
+        named = space_of_record(tenant_id) if tenant_id else ""
         state = self.probe()
         if state in _NO_VECTOR_TABLE_STATES:
             # No table can hold the vector, so it is gone: no statement is sent
@@ -1038,35 +1061,37 @@ class PgvectorBackend:
                 # extension is installed but nothing has written. A table
                 # of another size exists: the row is deleted from it as is.
                 self._ensure_table()
-            with row_statements(space) if space else nullcontext():
-                kept = self._delete_vector(str(item_id), space)
+            with row_statements(named) if named else nullcontext():
+                outcome = self._delete_vector(str(item_id), named if spaces_enforced() else "")
         except Exception:
             self._table_failed()
             logger.debug("[pgvector] delete failed", exc_info=True)
             return False
-        if kept:
-            logger.warning("[pgvector] the vector of %s is kept under another space than its own; it was "
-                           "not deleted and the forget journal retries it", item_id)
-            return False
-        return True
+        if outcome == _VECTOR_GONE:
+            return True
+        _say_vector_kept(str(item_id), outcome)
+        return False
 
-    def _delete_vector(self, item_id: str, space: str) -> bool:
-        """Delete it; whether a vector of that id is still there."""
+    def _delete_vector(self, item_id: str, space: str) -> str:
+        """Delete it: :data:`_VECTOR_GONE`, or why it is not known to be gone."""
         conn = self._connect()
         try:
             cur = conn.cursor()
             if space:
-                cur.execute(f"DELETE FROM {self._table} WHERE id = %s AND tenant_id = %s RETURNING id",
-                            (item_id, space))
+                cur.execute(f"DELETE FROM {self._table} WHERE id = %s AND COALESCE(NULLIF(tenant_id, ''), "
+                            "'default') = %s RETURNING id", (item_id, space))
             else:
                 cur.execute(f"DELETE FROM {self._table} WHERE id = %s RETURNING id", (item_id,))
-            kept = False
+            outcome = _VECTOR_GONE
             if not cur.fetchall():
-                cur.execute(f"SELECT 1 FROM {self._table} WHERE id = %s", (item_id,))
-                kept = cur.fetchone() is not None
+                if space and door_hides(space):
+                    outcome = _VECTOR_UNSEEN
+                else:
+                    cur.execute(f"SELECT 1 FROM {self._table} WHERE id = %s", (item_id,))
+                    outcome = _VECTOR_KEPT if cur.fetchone() is not None else _VECTOR_GONE
             conn.commit()
             cur.close()
-            return kept
+            return outcome
         finally:
             conn.close()
 

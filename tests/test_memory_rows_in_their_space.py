@@ -65,7 +65,7 @@ class _Cursor:
     def execute(self, sql: str, params: Any = ()) -> None:
         text = " ".join(sql.split())
         self.conn.statements.append((text, tuple(params or ())))
-        self._rows = self.conn.server.answer(text, tuple(params or ()))
+        self._rows = self.conn.server.answer(text, tuple(params or ()), self.conn.door)
 
     def executemany(self, sql: str, seq: Any) -> None:
         for params in seq:
@@ -103,27 +103,45 @@ class _Conn:
 
 
 class _Server:
-    """Rows by id -> tenant, for one table."""
+    """Rows by id -> tenant, for one table. ``hide``: what the armed lock
+    does -- a space's door sees its own space's rows only."""
 
     def __init__(self, table: str) -> None:
         self.table = table
         self.rows: dict[str, str] = {}
         self.conns: list[_Conn] = []
+        self.hide = False
 
     def connect(self) -> _Conn:
         return _Conn(self)
 
-    def answer(self, sql: str, params: tuple) -> list[tuple]:
-        if sql.startswith(f"DELETE FROM {self.table} WHERE id = %s AND tenant_id = %s"):
+    def _seen(self, row_id: str, door: Door | None) -> bool:
+        if row_id not in self.rows:
+            return False
+        return not (self.hide and door is not None and door.space
+                    and scope.space_of_record(self.rows[row_id]) != door.space)
+
+    def answer(self, sql: str, params: tuple, door: Door | None = None) -> list[tuple]:
+        if sql.startswith(f"DELETE FROM {self.table} WHERE id = %s AND COALESCE(NULLIF(tenant_id, ''), "
+                          "'default') = %s"):
             row_id, tenant = params
-            if self.rows.get(row_id) == tenant:
+            if self._seen(row_id, door) and scope.space_of_record(self.rows[row_id]) == tenant:
+                del self.rows[row_id]
+                return [(row_id,)]
+            return []
+        if sql.startswith(f"DELETE FROM {self.table} WHERE id = %s AND tenant_id = %s"):  # 0b before its review
+            row_id, tenant = params
+            if self._seen(row_id, door) and self.rows[row_id] == tenant:
                 del self.rows[row_id]
                 return [(row_id,)]
             return []
         if sql.startswith(f"DELETE FROM {self.table} WHERE id = %s"):
-            return [(params[0],)] if self.rows.pop(params[0], None) is not None else []
+            if not self._seen(params[0], door):
+                return []
+            del self.rows[params[0]]
+            return [(params[0],)]
         if sql.startswith(f"SELECT 1 FROM {self.table} WHERE id = %s"):
-            return [(1,)] if params[0] in self.rows else []
+            return [(1,)] if self._seen(params[0], door) else []
         if "_STATE_" in sql or "pg_extension" in sql:
             return [(True, True, True, None, True)]
         return []
@@ -180,24 +198,37 @@ def test_a_requests_own_pushes_stay_in_its_space(mirror: Any) -> None:
     with bind_scope("family", "layla"):
         mirror.mirror_belief(_fact("b1", "family"))
         mirror.mirror_belief(_fact("b2", "default"))  # not this request's to move: refused once armed
-    assert [(c.door.space, c.door.how) for c in _writes(mirror.server)] == [("family", "scope"), ("family", "scope")]
+    # The second keeps the request's door, said as another space's row's (0b review M1).
+    assert [(c.door.space, c.door.how) for c in _writes(mirror.server)] == [("family", "scope"), ("family", "cross")]
 
 
-def test_a_fact_kept_under_another_space_is_not_gone(mirror: Any, caplog: pytest.LogCaptureFixture) -> None:
+@pytest.fixture
+def enforced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Spaces enforced in this process (no lock armed: the stand-in hides
+    nothing unless asked)."""
+    monkeypatch.setattr(scope, "_enforced", True)
+    monkeypatch.setattr("kazma_core.memory.state_backend._KEPT_SAID", set(), raising=False)
+    monkeypatch.setattr("kazma_core.memory.backends._VECTOR_KEPT_SAID", set(), raising=False)
+
+
+_NAMED = "DELETE FROM {} WHERE id = %s AND COALESCE(NULLIF(tenant_id, ''), 'default') = %s RETURNING id"
+
+
+def test_a_fact_kept_under_another_space_is_not_gone(mirror: Any, enforced: None,
+                                                    caplog: pytest.LogCaptureFixture) -> None:
     """H5: the delete answered True whatever it found, and the outbox took the
     fact off its queue -- a forgotten fact stayed in the mirror for good."""
     mirror.server.rows["b1"] = "default"
     with caplog.at_level(logging.WARNING, logger="kazma_core.memory.state_backend"):
         assert mirror.delete_belief("b1", tenant_id="family") is False
     assert mirror.server.rows == {"b1": "default"}, "another space's fact is not touched"
-    assert any("still in the Postgres mirror" in r.getMessage() for r in caplog.records)
+    assert any("kept under another space" in r.getMessage() for r in caplog.records)
     [delete] = _writes(mirror.server)
-    assert delete.statements[0] == ("DELETE FROM kazma_beliefs WHERE id = %s AND tenant_id = %s RETURNING id",
-                                    ("b1", "family"))
+    assert delete.statements[0] == (_NAMED.format("kazma_beliefs"), ("b1", "family"))
     assert (delete.door.space, delete.door.how) == ("family", "row")
 
 
-def test_a_fact_deleted_or_never_there_is_gone(mirror: Any) -> None:
+def test_a_fact_deleted_or_never_there_is_gone(mirror: Any, enforced: None) -> None:
     mirror.server.rows["b1"] = "family"
     assert mirror.delete_belief("b1", tenant_id="family") is True and mirror.server.rows == {}
     assert mirror.delete_belief("b2", tenant_id="family") is True, "never mirrored: nothing to keep"
@@ -309,7 +340,8 @@ def test_a_vector_is_written_in_its_rows_space(vectors: Any) -> None:
     assert [(c.door.space, c.door.how) for c in _writes(vectors.server)] == [("family", "row"), ("default", "scope")]
 
 
-def test_a_vector_kept_under_another_space_is_not_erased(vectors: Any, caplog: pytest.LogCaptureFixture) -> None:
+def test_a_vector_kept_under_another_space_is_not_erased(vectors: Any, enforced: None,
+                                                         caplog: pytest.LogCaptureFixture) -> None:
     """Review 13, H5: the delete dropped its tenant and the forget journal
     recorded the vector as erased."""
     vectors.server.rows["e1"] = "default"
@@ -317,15 +349,15 @@ def test_a_vector_kept_under_another_space_is_not_erased(vectors: Any, caplog: p
         assert vectors.delete("e1", tenant_id="family") is False
     assert vectors.server.rows == {"e1": "default"}
     [delete] = _writes(vectors.server)
-    assert delete.statements[0] == (
-        "DELETE FROM kazma_memory_vectors WHERE id = %s AND tenant_id = %s RETURNING id", ("e1", "family"))
+    assert delete.statements[0] == (_NAMED.format("kazma_memory_vectors"), ("e1", "family"))
     assert (delete.door.space, delete.door.how) == ("family", "row")
     assert any("kept under another space" in r.getMessage() for r in caplog.records)
     vectors.server.rows["e2"] = "family"
     assert vectors.delete("e2", tenant_id="family") is True and "e2" not in vectors.server.rows
 
 
-def test_the_forget_journal_keeps_a_vector_the_index_still_holds(vectors: Any, monkeypatch: pytest.MonkeyPatch,
+def test_the_forget_journal_keeps_a_vector_the_index_still_holds(vectors: Any, enforced: None,
+                                                                 monkeypatch: pytest.MonkeyPatch,
                                                                  tmp_path: Any) -> None:
     from kazma_core.memory import forget_journal
 
@@ -361,24 +393,46 @@ def test_the_vector_probe_is_a_ping_of_the_install(monkeypatch: pytest.MonkeyPat
 # ── the install's own passes ─────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(("sweep", "inner"), [
-    ("_recover_erased_memories", "kazma_core.memory.rehydrate.run_rehydrate_pass"),
-    ("_reconcile_memory_turns", "kazma_core.memory.turn_reconcile.run_turn_reconcile_pass"),
-    ("_fill_cut_memory_text", "kazma_core.memory.text_fill.run_text_fill_pass"),
-])
-def test_memorys_sweeps_over_every_space_say_so(monkeypatch: pytest.MonkeyPatch, sweep: str, inner: str) -> None:
+#: Each pass over every space's chats, and what it reads first.
+_PASSES = [
+    ("kazma_core.memory.rehydrate", "run_rehydrate_pass", "kazma_core.paths.primary_memory_db"),
+    ("kazma_core.memory.turn_reconcile", "run_turn_reconcile_pass", "kazma_core.memory.turn_reconcile._open_primary"),
+    ("kazma_core.memory.text_fill", "run_text_fill_pass", "kazma_core.paths.primary_memory_db"),
+]
+
+
+def _first_read_records(monkeypatch: pytest.MonkeyPatch, target: str,
+                        seen: list[Door | None] | None = None) -> list[Door | None]:
+    seen = [] if seen is None else seen
+
+    def records(*a: Any, **k: Any) -> None:
+        seen.append(Door.now())
+        return None
+
+    monkeypatch.setattr(target, records)
+    return seen
+
+
+@pytest.mark.parametrize(("module", "name", "first_read"), _PASSES)
+def test_memorys_passes_over_every_space_are_the_installs(monkeypatch: pytest.MonkeyPatch, module: str,
+                                                          name: str, first_read: str) -> None:
     """Review 19: with nothing bound, every read of the chats and checkpoints
     went through no door; an empty answer read as "every conversation was
-    read" (H5)."""
+    read" (H5). 0b review M2: the pass itself says it, so a request that
+    runs it (the memory restore) is the install's too."""
+    import importlib
+
+    run = getattr(importlib.import_module(module), name)
+    seen = _first_read_records(monkeypatch, first_read)
+    run()
+    with bind_scope("family", "layla"):
+        run()
+    assert len(seen) == 2 and all(d is not None and d.space == "" and d.reason for d in seen), seen
+
+
+@pytest.mark.parametrize("sweep", ["_recover_erased_memories", "_reconcile_memory_turns", "_fill_cut_memory_text"])
+def test_memorys_sweeps_run_the_passes(monkeypatch: pytest.MonkeyPatch, sweep: str) -> None:
     from kazma_core.memory import sweep_cursors, worker_bootstrap
-
-    seen: list[Door | None] = []
-
-    def records(*a: Any, **k: Any) -> dict[str, Any]:
-        seen.append(Door.now())
-        return {}
-
-    monkeypatch.setattr(inner, records)
 
     class _Cursor:
         skip = False
@@ -392,8 +446,31 @@ def test_memorys_sweeps_over_every_space_say_so(monkeypatch: pytest.MonkeyPatch,
             return None
 
     monkeypatch.setattr(sweep_cursors, "idle_skip", lambda name: _Skip())
+    seen = _first_read_records(monkeypatch, "kazma_core.paths.primary_memory_db")
+    _first_read_records(monkeypatch, "kazma_core.memory.turn_reconcile._open_primary", seen)
     getattr(worker_bootstrap, sweep)()
     assert len(seen) == 1 and seen[0] is not None and seen[0].space == "" and seen[0].reason
+
+
+def test_the_memory_restore_reads_every_spaces_chats_as_the_install(monkeypatch: pytest.MonkeyPatch,
+                                                                    tmp_path: Any) -> None:
+    """0b review M2: ``POST /api/system/memory/restore`` runs turn reconcile in
+    the admin's request. In its space's door, once armed, the reconcile reads
+    that space's chats only and moves the one cursor past every other
+    space's: their turns never reach memory (§15 F)."""
+    from kazma_core.memory import backup, forget
+
+    monkeypatch.setattr(backup, "_is_memory_backup", lambda path: True)
+    monkeypatch.setattr("kazma_core.db.sqlite_snapshot.snapshot_copy", lambda src, dest: None)
+    monkeypatch.setattr(backup, "_bring_schema_up_to_date", lambda path: None)
+    monkeypatch.setattr("kazma_core.memory.graph_sync.mark_full_due", lambda why: None)
+    monkeypatch.setattr(forget, "converge", lambda: {})
+    monkeypatch.setattr("kazma_core.paths.primary_memory_db", lambda: str(tmp_path / "memory.db"))
+    seen = _first_read_records(monkeypatch, "kazma_core.memory.turn_reconcile._open_primary")
+    with bind_scope("family", "layla"):
+        backup.restore_memory_backup(tmp_path / "backup.db")
+    assert len(seen) == 1 and seen[0] is not None and seen[0].space == "", seen
+    assert "every space's chats" in seen[0].reason
 
 
 def test_the_forget_convergence_is_the_installs_and_each_row_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -438,6 +515,145 @@ def test_the_mirrors_comparison_is_the_installs(monkeypatch: pytest.MonkeyPatch)
 # ── on a real Postgres ───────────────────────────────────────────────────
 
 
+# ── the 0b review ────────────────────────────────────────────────────────
+
+
+def test_a_space_door_for_another_spaces_row_is_said_cross() -> None:
+    """M1, L3: a request bound to one space -- or a declared single-row
+    door -- reaching another space's row keeps its door (nothing moves, H6)
+    and says so as ``cross``, which step 1's report counts as a finding."""
+    with bind_scope("family", "layla"), row_statements("default"):
+        assert (Door.now(), Door.now().how) == (Door(space="family"), "cross")
+    with bind_scope("default", "owner"), statements_of("family"), row_statements("default"):
+        assert (Door.now(), Door.now().how) == (Door(space="family"), "cross"), "L3: not moved to default"
+    # The controls: its own space's row, and Kazma's own work.
+    with bind_scope("family", "layla"), row_statements("family"):
+        assert Door.now().how == "scope"
+    with install_statements("a sweep"), row_statements("default"):
+        assert (Door.now(), Door.now().how) == (Door(space="default"), "row")
+
+
+def test_the_report_counts_a_cross_door_as_a_finding(monkeypatch: pytest.MonkeyPatch,
+                                                     caplog: pytest.LogCaptureFixture) -> None:
+    import importlib.util
+    from pathlib import Path as _Path
+
+    from kazma_core.db import space_doors
+
+    monkeypatch.setattr(space_doors, "_on", True)
+    monkeypatch.setattr(space_doors, "_entries", {})
+    monkeypatch.setattr(space_doors, "_said", set())
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="kazma_core.db.space_doors"):
+        with bind_scope("family", "layla"), row_statements("default"):
+            space_doors.checkout("memory mirror")
+        with bind_scope("family", "layla"), row_statements("family"):
+            space_doors.checkout("memory mirror")
+    kinds = sorted(e["door"] for e in space_doors.entries())
+    assert kinds == ["cross", "space"], kinds
+    assert any("another space's door" in r.getMessage() for r in caplog.records)
+    script = _Path(__file__).resolve().parent.parent / "scripts" / "space_doors_report.py"
+    spec = importlib.util.spec_from_file_location("space_doors_report_0b", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    summary = module.summarise({"entries": space_doors.entries()})
+    assert [f["door"] for f in summary["findings"]] == ["cross"] and summary["new"]
+
+
+def test_a_delete_from_another_spaces_door_is_never_gone(mirror: Any, vectors: Any, enforced: None,
+                                                         caplog: pytest.LogCaptureFixture) -> None:
+    """M1: once armed, the door of a request bound to another space sees
+    neither the row nor its absence; its "nothing there" was answered as
+    gone, and pgvector's forget recorded the vector as erased."""
+    for server in (mirror.server, vectors.server):
+        server.hide = True
+    mirror.server.rows["b1"] = "default"
+    vectors.server.rows["e1"] = "default"
+    with caplog.at_level(logging.WARNING), bind_scope("family", "layla"):
+        assert mirror.delete_belief("b1", tenant_id="default") is False
+        assert vectors.delete("e1", tenant_id="default") is False
+    assert mirror.server.rows == {"b1": "default"} and vectors.server.rows == {"e1": "default"}
+    assert sum("another space's door" in r.getMessage() for r in caplog.records) == 2
+    # The control: the row's own space's door deletes it, and says gone.
+    with bind_scope("default", "owner"):
+        assert mirror.delete_belief("b1", tenant_id="default") is True
+        assert vectors.delete("e1", tenant_id="default") is True
+    assert mirror.server.rows == {} and vectors.server.rows == {}
+
+
+def test_the_forget_queues_a_vector_a_door_of_another_space_cannot_see(vectors: Any, enforced: None,
+                                                                        monkeypatch: pytest.MonkeyPatch,
+                                                                        tmp_path: Any) -> None:
+    """M1 through the forget path: the vector stays queued (§15 I)."""
+    from kazma_core.memory import forget, forget_journal
+
+    monkeypatch.setattr(forget_journal, "_connect", lambda: _journal(tmp_path))
+    monkeypatch.setattr("kazma_core.memory.backends.get_remote_vector_backend", lambda: vectors)
+    vectors.server.hide = True
+    vectors.server.rows["e1"] = "default"
+    with bind_scope("family", "layla"):
+        assert forget._delete_remote_vector(sqlite3.connect(":memory:"), "e1", "default") is False
+    pending = _journal(tmp_path).execute("SELECT item_id, tenant_id FROM forget_remote_pending").fetchall()
+    assert pending == [("e1", "default")]
+
+
+def test_spaces_off_deletes_by_id_as_before(mirror: Any, vectors: Any) -> None:
+    """L1: with Spaces off a copy held under another tenant string ('' from
+    before S1-02, a vector moved by an older upsert) was no longer deleted
+    and stayed pending for good; it is by id, as before 0b."""
+    mirror.server.rows["b1"] = "family"
+    vectors.server.rows.update({"e1": "", "e2": "telegram:42"})
+    assert mirror.delete_belief("b1", tenant_id="default") is True and mirror.server.rows == {}
+    assert vectors.delete("e1", tenant_id="default") is True
+    assert vectors.delete("e2", tenant_id="default") is True and vectors.server.rows == {}
+    [statement] = {s for c in _writes(vectors.server) for s, _p in c.statements if s.startswith("DELETE")}
+    assert statement == "DELETE FROM kazma_memory_vectors WHERE id = %s RETURNING id"
+
+
+def test_an_empty_tenant_is_the_owners_and_kept_is_said_once(vectors: Any, enforced: None,
+                                                            caplog: pytest.LogCaptureFixture) -> None:
+    """L1 once enforced: '' is the owner's (decision M6); a vector kept under
+    another space is said once, not every pass."""
+    vectors.server.rows.update({"e1": "", "e2": "family"})
+    assert vectors.delete("e1", tenant_id="default") is True and "e1" not in vectors.server.rows
+    with caplog.at_level(logging.WARNING, logger="kazma_core.memory.backends"):
+        assert vectors.delete("e2", tenant_id="default") is False
+        assert vectors.delete("e2", tenant_id="default") is False
+    assert sum("e2" in r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING) == 1
+
+
+@pytest.mark.parametrize("wrapper", ["search_state_episodes", "search_state_beliefs"])
+def test_a_refused_search_is_never_no_matches_through_the_wrappers(monkeypatch: pytest.MonkeyPatch,
+                                                                   wrapper: str) -> None:
+    """L2: the module's wrappers answered [] for a refusal when not strict."""
+    from kazma_core.memory import state_backend
+
+    class _RefusedError(Exception):
+        pass
+
+    class _Backend:
+        def search_episodes(self, *a: Any, **k: Any) -> list:
+            raise _RefusedError("refused")
+
+        search_beliefs = search_episodes
+
+    monkeypatch.setattr(state_backend, "get_state_backend", lambda: _Backend())
+    monkeypatch.setattr(state_backend, "is_space_refusal", lambda exc: isinstance(exc, _RefusedError))
+    with pytest.raises(_RefusedError):
+        getattr(state_backend, wrapper)("x", tenant_id="default")
+    # The control: another failure is still "no matches" when not strict.
+    monkeypatch.setattr(state_backend, "is_space_refusal", lambda exc: False)
+    assert getattr(state_backend, wrapper)("x", tenant_id="default") == []
+
+
+def test_every_fetch_takes_strict() -> None:
+    """L4: once recall passes strict=True, a backend without it raises TypeError."""
+    from kazma_core.memory.state_backend import _NullStateBackend
+
+    assert _NullStateBackend().fetch_episodes(["e1"], strict=True) == []
+    assert _NullStateBackend().fetch_beliefs(["b1"], strict=True) == []
+
+
 @pytest.fixture
 def real_mirror(monkeypatch: pytest.MonkeyPatch) -> Any:
     import os
@@ -460,7 +676,7 @@ def real_mirror(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 @pytest.mark.postgres
-def test_a_mirrored_fact_is_gone_only_from_its_own_space_on_postgres(real_mirror: Any) -> None:
+def test_a_mirrored_fact_is_gone_only_from_its_own_space_on_postgres(real_mirror: Any, enforced: None) -> None:
     from kazma_core.db import space_doors
 
     fact = f"s401-{uuid.uuid4().hex[:12]}"
@@ -474,3 +690,13 @@ def test_a_mirrored_fact_is_gone_only_from_its_own_space_on_postgres(real_mirror
     assert ("install", "statements", "the memory mirror's tables, made once for every space") in doors, \
         "the tables on their own connection, as the install's"
     assert ("space", "row", "") in doors, "the writes in the fact's own space"
+
+
+@pytest.mark.postgres
+def test_spaces_off_a_mirrored_fact_is_deleted_by_id_on_postgres(real_mirror: Any) -> None:
+    """0b review L1, on Postgres: with Spaces off the delete is by id, as
+    before 0b, whatever tenant string the copy was written under."""
+    fact = f"s401-{uuid.uuid4().hex[:12]}"
+    assert real_mirror.mirror_belief(_fact(fact, "telegram:42")) is True
+    assert real_mirror.delete_belief(fact, tenant_id="default") is True
+    assert real_mirror.fetch_beliefs([fact], tenant_id="telegram:42") == []

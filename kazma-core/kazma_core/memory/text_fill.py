@@ -49,6 +49,7 @@ from typing import Any
 
 from kazma_core.memory.chat_history import STORE_ERRORS
 from kazma_core.memory.limits import LEGACY_BRIDGE_CUT, LEGACY_SUMMARY_CUT, LEGACY_TEXT_CUT
+from kazma_core.spaces.row_work import install_statements
 from kazma_core.spaces.scope import OWNER_SPACE_ID
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,7 @@ def _write_vector(conn: sqlite3.Connection, row: Any, question: str, answer: str
                        meta={"session_id": row["session_id"], "tier": row["tier"]}, still_held=_still_held)
 
 
+@install_statements("the text fill reads every space's chats that still hold a turn whole")
 def run_text_fill_pass(*, time_budget_s: float = 60.0) -> dict[str, int]:
     """One pass over the primary memory database (the 15-minute maintenance
     cadence). Returns what it did to each row it looked at."""

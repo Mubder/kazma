@@ -119,14 +119,14 @@ class _Store:
                 hits.sort(key=lambda r: r["created_at"], reverse=True)
                 return [{k: v for k, v in r.items() if k != "vec"} for r in hits[:limit]]
 
-            def fetch_episodes(self, ids, *, tenant_id="default"):
+            def fetch_episodes(self, ids, *, tenant_id="default", strict=False):
                 return [{k: v for k, v in store.rows[i].items() if k != "vec"}
                         for i in ids if i in store.rows]
 
             def search_beliefs(self, query, *, tenant_id="default", limit=10, strict=False):
                 return []
 
-            def fetch_beliefs(self, ids, *, tenant_id="default"):
+            def fetch_beliefs(self, ids, *, tenant_id="default", strict=False):
                 return []
 
         return _Mirror()
