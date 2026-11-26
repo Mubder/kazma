@@ -352,6 +352,18 @@ memories where it showed 5. It still finds the answer, at the same rank. So
 precision rises: overall 0.6392 to 0.6413, paraphrase 0.5899 to 0.6086. No
 other number moves.
 
+**Re-run on 2026-11-26, dataset v9.** The benchmark's lock is now dataset v9's
+(facts named as the product holds them), and "what is it that I do for a
+living?" (q601) now names the user's role. In the `control` arrangement
+(dataset v5, one `user`) q601 shows the role and fewer unrelated memories:
+noise precision 0.6111 to 0.6667, overall 0.6443 to 0.6467. Its
+`equal_to_locked` turns false: it is compared with the frozen
+`docs/audits/evidence/spaces_r3/locked_v5_scores.json` (unchanged), and
+the product's new q601 phrase names the role even under v5's old
+`job_title`, so q601 moves (under v8 seeding the phrase alone moves its
+margin 0.0004 to 1.0 and its precision 0.167 to 0.286; step 4's review,
+L2). No hit or rank of any arrangement moves.
+
 By kind of question, chosen design (today in brackets): about the asker,
 fact hit 0.957 (0.522) and mrr 0.971 (0.621); the asker never said, 3 of 3
 show nothing as the asker's (0 of 3); another member by name, hit 1.000

@@ -703,6 +703,10 @@ def _distractor_summaries(sessions: list[dict[str, Any]]) -> list[dict[str, Any]
 
 #: The version that replaced the pool.
 POOL_VERSION = 8
+#: The dataset's version. v9 (the memory plan's W6, 2026-11-26) changes no
+#: memory: from it on, the benchmark files a fact under the name the product
+#: holds it by (``benchmark.NAMED_AS_THE_PRODUCT_FROM``).
+DATASET_VERSION = 9
 #: The generated turns (``scripts/memory_pool_generate.py``).
 POOL_TURNS = REPO / "tests" / "fixtures" / "memory_bench" / "pool_turns.json"
 #: Sessions of unrelated chat, as v7 had; the scale run's store holds
@@ -1214,7 +1218,7 @@ def build() -> dict[str, Any]:
     keys = [_pool_key(t["user"]) for t in pool_turns]
     if len(set(keys)) != len(keys) or set(keys) & others:
         raise ValueError("a turn of the pool is said twice")
-    data = {"version": POOL_VERSION, "seed": SEED, "sessions": sessions, "facts": facts,
+    data = {"version": DATASET_VERSION, "seed": SEED, "sessions": sessions, "facts": facts,
             "summaries": summaries, "rollups": rollups, "questions": questions, "second": second,
             "scale": {"factor": SCALE_FACTOR, "new_in": POOL_VERSION, "sessions": scale_sessions,
                       "summaries": _pool_summaries(scale_sessions, "zw")}}

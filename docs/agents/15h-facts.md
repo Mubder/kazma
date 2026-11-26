@@ -248,6 +248,56 @@
   reply. A new reader of a fact's day asks `fact_days`. Gate:
   `tests/test_memory_event_lines_review.py` (EN/AR; each point fails on the
   commit reviewed, with its control).
+- **W4's left list, by harm** (2026-11-26, the memory plan's W6, step 4).
+  The final check of W4 (9ea531ce1) left seven small ones. Three are built;
+  `tests/test_memory_w4_left_list.py` holds them in EN, Gulf and MSA.
+  - *L1, a denial that adds*: "Not only Ali, I met Omar", "مو بس علي", "I
+    didn't see Ali alone" close Ali when the model names him replaced and no
+    day is given. **Left, with why:** six review rounds of "adds" rules
+    ("not only", "alone", "only ... too", then by sentence) each turned some
+    real correction into an addition, worse than before ("Not Ali just
+    Omar", "No, Thursday, I'm not just guessing"). They were taken out of
+    step 4: `denies`, `_denies_value` and `puts_right` are as before step 4.
+    The cases, the four case sets as the bar and the design lessons wait in
+    the notes folder (`memory-w6/adds-rules-later.md`) for a step of their
+    own. Kept: "Wrong" said of nothing ("Nothing is wrong", "ما في شي غلط",
+    "لا يوجد خطأ") puts nothing right (`_NOTHING_WRONG`), never a bare "لا"
+    ("لا غلط، عمر" corrects); "خطأ" corrects only as a sentence-start answer
+    ("لا خطأ، كان عمر"; "وكان خطأ اني ما عزمت علي" is something else).
+  - *L3, a bare "No, Omar"* (`event_text.no_then`): a whole message that is
+    "no" and a value ("No, Omar", "Nope Omar!", "No - Omar", "لا، عمر", "لا
+    يا كازما، عمر", "كلا، عمر") puts right the fact the reply says it
+    replaces; read only beside a reply's `replaces` (`_same_event`; with
+    none both stay). Every word said is the value's, a filler ("it was",
+    "just", "the", "with", "في", "يوم", "الصحيح") or nothing: "No, not Omar",
+    "No, Omar too", "No, and Omar", "لا، وعمر", "لا، عمر بعد" close nothing
+    (`_and_then`; "وليد" is itself), and "لا يا عمر" speaks to Omar. "No
+    Omar" and "لا عمر" are not read ("no sugar", "لا تسوس"). The marks after
+    "no" and after a vocative are read once (`\W*+`, `\W++`): "No," + "-" *
+    6000 + "x.y" took 28 s, "لا يا كازما" + the same 43 s; now linear. The
+    regex sweep reads a head behind `^\W*(...|...)` and through optional
+    literal-led groups (`sample_head`), and runs each input again with a tail
+    that fails late ("a.a"); it found the plan approval's and WhatsApp's
+    heading patterns quadratic too, rewritten to the same matches.
+  - *L4, a voice note* (`own_words._MEDIUM_AR`): "رسالة صوتية:" was read as
+    someone else's message and lost the user's event in MSA (keep 117 of 120;
+    now 120, as English and Gulf). A text noun before a medium ("صوتية",
+    "نصية") is the user's own label unless a word after it says whose ("رسالة
+    صوتية من عمر:"); from the user or to their own it stays theirs ("رسالة
+    صوتية مني:", "لأمي:", the review's L3). Gate: every text noun before every
+    medium word.
+  - *Left, with why:*
+    - L2: label lines and "My brother:" follow "in doubt the user's", and a
+      paste let in is filed as Kazma's reading.
+    - L5 and L-d (more pastes let in): the price of M2, and the other side
+      loses the user's own lines.
+    - L6: archive rows from before W4 carry no type; it is one-off and decays.
+    - L7 and the "unclear" ones (what only the pasted part states): the turn
+      itself is remembered.
+    - L-g: bounded, off the loop.
+  - *The undo of a forgotten day* needs nothing built: forgetting is final
+    (§15 I), and forgetting the turn that gave a day takes it back
+    (`test_memory_event_lines_review.py::test_forgetting_the_turn_that_gave_the_day_takes_it_back`).
 - **Whose words an event and its day are, what its name is, and one line
   for it** (the second review of W4, 2026-11-24).
   - *Its words* (`memory/event_text.stands_elsewhere`, asked for every event

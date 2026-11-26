@@ -3,9 +3,11 @@
 The recorded vectors keep one byte a number, so the model's real vector is
 anywhere within half a rounding step of the recorded one, and another
 machine's model differs from it by about that much. Question q601 ("what is
-it that I do for a living?") clears recall's floor by 0.0004: its hit holds
-on this recording only, and the audit saw it flip in 7 of 30 draws inside
-the rounding.
+it that I do for a living?") cleared recall's floor by 0.0004 up to dataset
+v8: its hit held on that recording only, and the audit saw it flip in 7 of
+30 draws inside the rounding. Dataset v9 (the facts named as the product holds
+them, the memory plan's W6) measured it again: the question now names the
+user's role, and no hit flips inside the rounding, so the list is empty.
 
 ``scripts/memory_bench.py lock`` replays the benchmark with the vectors moved
 inside their rounding (``EDGE_DRAWS`` seeded draws) and refuses when a hit
@@ -15,8 +17,8 @@ flips, unless the question is on the edge list with its margin named
 * CI asks the draws again for the questions near the cut, so a change that
   brings one to the edge without moving a score is seen; the list names
   exactly the questions that flip, each with its margin as measured;
-* the negative control: today's dataset without q601 on the list stops the
-  lock, naming q601 and its margin;
+* the negative control: a flip planted on the hit nearest the cut, not on the
+  list, stops the lock, naming the question and its margin;
 * the list's rules: a question that no longer flips leaves it, one that does
   not flip cannot be named, a new dataset starts the list again.
 """
@@ -117,22 +119,37 @@ def test_the_edge_list_is_what_the_draws_find(report, near_edge):
     assert not problems, "\n  ".join(["The edge list is not what the draws find:", *problems])
 
 
-def test_q601_stands_on_the_edge(report, near_edge):
-    """The audit's witness, kept until R6's dataset version measures it again."""
+def test_q601_has_left_the_edge(report, near_edge):
+    """The audit's witness, measured again by dataset v9: found by its words,
+    far from the cut, and no draw flips it."""
     r = _results(report)["q601"]
-    assert r["hit"] and 0 < r["margin"] < 0.001
-    assert "q601" in near_edge["flips"]
+    assert r["hit"] and r["margin"] > 10 * benchmark.EDGE_WATCH
+    assert "q601" not in near_edge["flips"]
+
+
+def _witness(report) -> tuple[str, float]:
+    """The hit nearest the cut: where a flip is planted for the controls."""
+    qid, r = min(((q, r) for q, r in _results(report).items() if r["hit"] and r["margin"] is not None
+                  and r["category"] != "list"), key=lambda item: item[1]["margin"])
+    return qid, r["margin"]
+
+
+def _planted(near_edge: dict, qid: str) -> dict:
+    return {**near_edge, "flips": {**near_edge["flips"], qid: 1}}
 
 
 def test_the_list_check_sees_an_unnamed_flip_and_a_wrong_margin(report, near_edge):
-    """Negative control for the CI check: a lock without q601, and one that
-    names another margin, are each refused."""
+    """Negative control for the CI check: a planted flip the lock does not
+    name, and a list that names another margin, are each refused."""
     locked = _locked_edges()
     results = _results(report)
-    without = {**locked, "hits": [h for h in locked["hits"] if h["id"] != "q601"]}
-    assert any(p.startswith("q601 flips") for p in _list_problems(without, near_edge, results))
-    moved = {**locked, "hits": [{**h, "margin": round(h["margin"] + 0.01, 4)} for h in locked["hits"]]}
-    assert any("names margin" in p for p in _list_problems(moved, near_edge, results))
+    qid, margin = _witness(report)
+    check = _planted(near_edge, qid)
+    assert any(p.startswith(f"{qid} flips") for p in _list_problems(locked, check, results))
+    named = {**locked, "hits": [{"id": qid, "hit": True, "margin": round(margin, 4), "why": "planted"}]}
+    assert _list_problems(named, check, results) == []
+    moved = {**named, "hits": [{**h, "margin": round(h["margin"] + 0.01, 4)} for h in named["hits"]]}
+    assert any("names margin" in p for p in _list_problems(moved, check, results))
     stale = {**locked, "hits": [*locked["hits"], {"id": "q001", "hit": True, "margin": 0.5, "why": "x"}]}
     assert any(p.startswith("q001 is on the edge list") for p in _list_problems(stale, near_edge, results))
 
@@ -168,33 +185,36 @@ def lock_copy(tmp_path, monkeypatch, report, near_edge):
     real_run = benchmark.run_benchmark
     monkeypatch.setattr(benchmark, "run_benchmark",
                         lambda dataset=None, **kw: report if dataset is None else real_run(dataset, **kw))
-    monkeypatch.setattr(benchmark, "edge_check", lambda *_a, **_kw: near_edge)
+    monkeypatch.setattr(benchmark, "edge_check", lambda *_a, **_kw: _planted(near_edge, _witness(report)[0]))
     return script, path
 
 
-def test_a_hit_at_the_edge_stops_the_lock(lock_copy, capsys):
-    """Negative control: today's dataset, q601 not on the list, is refused,
-    with the question and its margin named; nothing is written."""
+def test_a_hit_at_the_edge_stops_the_lock(lock_copy, report, capsys):
+    """Negative control: a flip planted on the hit nearest the cut, not on
+    the list, is refused, with the question and its margin named; nothing is
+    written."""
     script, path = lock_copy
+    qid, margin = _witness(report)
     data = json.loads(path.read_text(encoding="utf-8"))
     data["edges"] = {**data["edges"], "hits": []}
     path.write_text(json.dumps(data), encoding="utf-8")
     before = path.read_text(encoding="utf-8")
     assert script._cmd_lock(rebaseline=False) == 1
     err = capsys.readouterr().err
-    assert "q601" in err and "0.0004" in err and "lock --edge q601" in err
+    assert qid in err and f"{margin:.4f}".rstrip("0") in err and f"lock --edge {qid}" in err
     assert "never move a threshold" in err
     assert path.read_text(encoding="utf-8") == before
 
 
-def test_naming_it_is_the_exit_and_it_is_recorded(lock_copy):
+def test_naming_it_is_the_exit_and_it_is_recorded(lock_copy, report):
     script, path = lock_copy
+    qid, margin = _witness(report)
     data = json.loads(path.read_text(encoding="utf-8"))
     data["edges"] = {**data["edges"], "hits": []}
     path.write_text(json.dumps(data), encoding="utf-8")
-    assert script._cmd_lock(rebaseline=False, edges=[("q601", "the audit's witness")]) == 0
-    hit = {h["id"]: h for h in json.loads(path.read_text(encoding="utf-8"))["edges"]["hits"]}["q601"]
-    assert hit["margin"] == pytest.approx(0.0004, abs=SLACK)
+    assert script._cmd_lock(rebaseline=False, edges=[(qid, "the audit's witness")]) == 0
+    hit = {h["id"]: h for h in json.loads(path.read_text(encoding="utf-8"))["edges"]["hits"]}[qid]
+    assert hit["margin"] == pytest.approx(margin, abs=SLACK)
     assert hit["why"] == "the audit's witness" and hit["flipped"] >= 1 and hit["since"]
 
 
