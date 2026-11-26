@@ -326,186 +326,17 @@ _CLAUSE = re.compile(r"[^.,،;؛!?؟\n]+")
 _DENIES_IT_REACH = 4
 
 
-#: A denial that adds instead: "not only Ali", "not just", "I didn't see Ali
-#: alone", "ليس فقط علي", "مو علي بس", "ما قابلت علي بروحه" (W4's left list,
-#: L1), folded. "Only" right after a negation ("not only", "مو بس"), never
-#: after a bare "no" ("No, just Omar", "لا بس عمر" put right); or an "only"
-#: or "alone" word right after the denied value's own words, within the
-#: denial's reach ("Ali alone", "علي بس", "بعلي وحده"). Said of someone else
-#: ("Not Ali, I met Omar alone", "مو علي قابلت عمر بروحه") or of the user
-#: ("I was home alone") it adds nothing: the denial stands (step 4's review,
-#: H1 and M4).
-_ONLY = frozenset({"only", "just", "merely", "simply", "فقط", "بس"})
-_ALONE = frozenset({"alone", "بروحي", "لحالي", "لوحدي", "وحدي", "بمفردي", "بروحه", "لحاله", "لوحده", "وحده", "بروحها",
-                    "لحالها", "لوحدها", "وحدها"})
-_BARE_NO = frozenset({"no", "nope", "لا", "ما"})
-#: An answer, not a negation of what follows: "No I went to the gym alone",
-#: "لا رحت النادي بروحي" deny the day, not the gym.
-_ANSWER_NO = frozenset({"no", "nope", "لا"})
-#: "But" going on after "not Ali only".
-_BUT = frozenset({"but", "بل", "لكن", "ولكن", "وانما", "انما"})
-#: Words that put right and never say "not only": "Actually just Omar".
-_NEVER_ADDING = frozenset({"actually", "correct", "instead", "rather", "بل", "الصحيح"})
-
-
-def _value_end(words: list[str], at: int, wanted: list[str]) -> int | None:
-    """Where the denied value's words end, when they begin within the
-    denial's reach after *at*; None when they are not there. A value runs at
-    most its own words and two more: a held value of denial words ("مو",
-    "Not Me") repeated stretched over the whole run for every denial
-    (quadratic, step 4's fourth review)."""
-    start = next((i for i in range(at + 1, min(len(words), at + 1 + _DENIES_IT_REACH))
-                  if words_said(wanted, words[i])), None)
-    if start is None:
-        return None
-    end, last = start, min(len(words) - 1, start + len(wanted) + 2)
-    while end < last and words_said(wanted, words[end + 1]):
-        end += 1
-    return end
-
-
-# What makes a denial add rather than deny is read in a few narrow shapes,
-# each clearly an addition; every other message keeps the denial, as it was
-# before step 4 (the memory plan's W6, step 4's fourth review: five rounds on
-# reading "too" more widely each turned some correction into an addition).
-#
-#   "not only Ali", "مو بس علي"                  a denial, then "only"
-#   "I didn't see Ali alone,", "بعلي وحده،"       "alone" ending the clause, after the value
-#   "not Ali only but Omar", "مو علي بس بل عمر"   "only" after the value, then "but"
-#   "Not Ali only Omar too", "مو علي بس عمر بعد"  "only", the new value alone, "too" ending the clause
-#   "not Ali only, Omar too", "مو علي بس، وكمان عمر"
-#                                                "only" ending the clause, and the next clause
-#                                                begins with "but"/"also" or ends with "too"
-
-#: "Too" where a clause ends ("Omar too", "عمر بعد", "عمر كمان"); "as well"
-#: is read as two words there. Never "again", "another", "مرة ثانية". Folded.
-_TOO_END = frozenset({"too", "also", "ايضا", "كمان", "كذلك", "برضه", "برضو", "بردو", "بعد"})
-#: Words that open a clause that adds: "but Omar", "also Omar", "وكمان عمر".
-_ADDING_OPENERS = _BUT | {"also", "plus", "كمان", "وكمان", "ايضا", "وايضا", "كذلك", "وكذلك"}
-
-
-def _ends_with_too(words: list[str]) -> int:
-    """How many words of "too" end *words* after at least one other ("Omar
-    too", "Omar as well": 1 and 2); 0 when none."""
-    if len(words) >= 3 and words[-2:] == ["as", "well"]:
-        return 2
-    return 1 if len(words) >= 2 and words[-1] in _TOO_END else 0
-
-
-def _only_new_value_then_too(rest: list[str]) -> bool:
-    """*rest* is the new value alone, then "too" ending the clause: "Omar
-    too", "عمر بعد", "Omar Khan as well"; never "Omar and his brother too",
-    "عمر واخوه بعد", "Omar who was too tired"."""
-    too = _ends_with_too(rest)
-    value = rest[:-too] if too else []
-    return (1 <= len(value) <= 2 and value[0] not in ("and", "who", "but", "as")
-            and not any(w in ("and", "who", "but", "as", "plus") or (len(w) > 2 and w[0] == "و")
-                        for w in value[1:]))
-
-
-def _next_clause_adds(words: list[str]) -> bool:
-    """The clause after "not Ali only," goes on adding: it begins with "but"
-    or "also" ("but Omar", "وكمان عمر", "بل بعمر"), or ends with "too"
-    ("Omar too", "عمر واخوه بعد")."""
-    return bool(words) and (words[0] in _ADDING_OPENERS or bool(_ends_with_too(words)))
-
-
-def _adds_rather(words: list[str], at: int, wanted: list[str] | None = None,
-                 following: list[str] | None = None) -> bool:
-    """Whether the denial at *at* in a clause's *words* says "not only" or
-    "not alone" of the value whose words are *wanted*, in one of the narrow
-    shapes above; *following* is the next clause's words."""
-    after = words[at + 1:]
-    if not after or words[at] in _NEVER_ADDING:
-        return False
-    if words[at] not in _BARE_NO and after[0] in _ONLY:
-        return True
-    if not wanted or words[at] in _ANSWER_NO:
-        return False
-    end = _value_end(words, at, wanted)
-    if end is None or end + 1 >= len(words) or words[end + 1] not in _ONLY | _ALONE:
-        return False
-    rest = words[end + 2:]
-    if words[end + 1] in _ALONE:
-        return not rest
-    if not rest:
-        return _next_clause_adds(list(following or ()))
-    return rest[0] in _BUT or _only_new_value_then_too(rest)
-
-
-def _adds_rather_than_denies(user_text: str, value: str = "") -> bool:
-    """Whether the message's denial adds to what it names rather than denying
-    it: "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "No, I didn't see
-    Ali alone, I met Omar too" (of *value* "Ali")."""
-    return bool(_adding_clauses(_own_folded(user_text), value))
-
-
-def _adding_clauses(folded: str, value: str) -> list[int]:
-    """Where in *folded* each clause whose denial adds begins (the narrow
-    shapes above)."""
-    arabic = _folded_words(_DENIALS_AR_RAW)
-    wanted = value_words(value) if value else None
-    spans = [(m.start(), re.findall(r"[\w']+", m.group())) for m in _CLAUSE.finditer(folded)]
-    out = []
-    for n, (start, words) in enumerate(spans):
-        following = spans[n + 1][1] if n + 1 < len(spans) else []
-        if any((word in _DENIALS_EN or word in arabic or word in _BARE_NO) and _adds_rather(words, at, wanted, following)
-               for at, word in enumerate(words)):
-            out.append(start)
-    return out
-
-
-#: A sentence: up to a stop, a question or exclamation mark, or a new line.
-_SENTENCE = re.compile(r"[^.!?؟\n]+")
-
-
-def _outside_adding_sentences(folded: str, value: str) -> str | None:
-    """*folded* without the sentences whose denial adds and that speak of
-    *value* (with a bare "No." just before one: "No. Not only Ali, Omar
-    too."); None when no sentence adds. A "No" or a denial in any other
-    sentence still denies: "No, Thursday. I'm not just guessing" (step 4's
-    fifth review)."""
-    starts = _adding_clauses(folded, value)
-    if not starts:
-        return None
-    wanted = value_words(value)
-    sentences = list(_SENTENCE.finditer(folded))
-    # A sentence that adds and speaks of the value, or the message's only one
-    # ("مو بس أمس، الخميس بعد", of the gym's day).
-    from bisect import bisect_left
-
-    def holds_adding(m: re.Match[str]) -> bool:
-        i = bisect_left(starts, m.start())
-        return i < len(starts) and starts[i] < m.end()
-
-    adding = {n for n, m in enumerate(sentences)
-              if holds_adding(m) and (len(sentences) == 1 or (wanted and _share(wanted, m.group()) >= EVENT_WORDS))}
-    if not adding:
-        return None
-    for n in sorted(adding):
-        if n > 0 and set(re.findall(r"[\w']+", sentences[n - 1].group())) <= _ANSWER_NO | {"كلا"}:
-            adding.add(n - 1)
-    return ". ".join(m.group() for n, m in enumerate(sentences) if n not in adding)
-
-
-def _clause_words(folded: str) -> list[list[str]]:
-    """Each clause's words, in order: one pass over the message."""
-    return [re.findall(r"[\w']+", clause) for clause in _CLAUSE.findall(folded)]
-
-
 def _denies_value(folded: str, value: str) -> bool:
     """Whether *folded* denies *value* by name: a denial and, within a few
     words of its clause, a word of it ("not Paris", "مو علي"). "I visited the
-    dentist, no cavities" denies no dentist, and "not only Ali" no Ali."""
+    dentist, no cavities" denies no dentist."""
     wanted = value_words(value)
     arabic = _folded_words(_DENIALS_AR_RAW)
     denials = (_DENIALS_EN - {"actually", "correct", "rather", "never"}) | (arabic - _folded_words(("بل", "الصحيح")))
-    clauses = _clause_words(folded) if wanted else []
-    for n, words in enumerate(clauses):
-        following = clauses[n + 1] if n + 1 < len(clauses) else []
+    for clause in _CLAUSE.findall(folded) if wanted else ():
+        words = re.findall(r"[\w']+", clause)
         for at, word in enumerate(words):
-            if word not in denials and not (word[:1] in "وف" and word[1:] in denials) or _adds_rather(
-                    words, at, wanted, following):
+            if word not in denials and not (word[:1] in "وف" and word[1:] in denials):
                 continue
             after = " ".join(words[at + 1:at + 1 + _DENIES_IT_REACH])
             if after and _share(wanted, after) >= EVENT_WORDS:
@@ -563,7 +394,8 @@ def _and_then(word: str, wanted: list[str]) -> bool:
 #: "لا، في دبي", "لا، بل عمر" say beside the value (step 4's delta review, N3:
 #: articles and prepositions).
 _NO_THEN_FILLERS = frozenset({"its", "it's", "it", "was", "كان", "كانت", "هو", "هي", "actually", "بل", "the", "a", "an",
-                              "my", "at", "in", "to", "with", "on", "في", "مع", "عند", "الى", "الي", "يوم", "الصحيح"}) | _ONLY
+                              "my", "at", "in", "to", "with", "on", "في", "مع", "عند", "الى", "الي", "يوم", "الصحيح",
+                              "only", "just", "merely", "simply", "فقط", "بس"})
 
 
 def says_once_more(user_text: str) -> bool:
@@ -579,19 +411,8 @@ def denies(user_text: str, value: str = "") -> bool:
     also visited the dentist on 2 May, no cavities" is another visit -- unless
     the message begins with the no, or it denies *value* by name."""
     folded = _own_folded(user_text)
-    if corrects(user_text):
+    if corrects(user_text) or _NO_FIRST.search(folded) or (value and _denies_value(folded, value)):
         return True
-    rest = _outside_adding_sentences(folded, value) if value else None
-    if rest is not None:
-        # A sentence that adds ("Not only Ali, Omar too") denies only by name;
-        # every other sentence is read as before (step 4's fifth review).
-        if _denies_value(folded, value):
-            return True
-        folded = rest
-        if not folded.strip():
-            return False
-    if _NO_FIRST.search(folded) or (value and _denies_value(folded, value)):
-        return True
-    if _ONCE_MORE.search(folded):
+    if says_once_more(user_text):
         return False
     return bool(_NO.search(folded)) or _says_one_of(folded, _DENIALS_EN, _folded_words(_DENIALS_AR_RAW))

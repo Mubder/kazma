@@ -19,16 +19,10 @@
 - Kazma's memory benchmark now keeps its facts under the names Kazma itself
   keeps them by (dataset version 9). This showed the miss above.
 
-## Memory: "not only", "No, Omar" and a voice note (2026-11-26)
+## Memory: "Nothing is wrong", "No, Omar" and a voice note (2026-11-26)
 
-- "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "مو علي بس، قابلت عمر
-  بعد", "Not Ali only Omar too" and "I didn't see Ali alone, Omar was there" no
-  longer take the meeting with Ali away;
-  "Nothing is wrong, I met Omar" takes nothing away either.
-- "Alone" said of someone else or of you still puts right: "Not Ali I met Omar
-  alone", "مو علي قابلت عمر بروحه", "No I went to the gym alone on Thursday".
-  So do "Not Ali just Omar", "مو علي بس عمر" and "لا غلط، عمر", whatever else the
-  message goes on to say ("..., I saw him again today").
+- "Nothing is wrong, I met Omar" and "ما في شي غلط" no longer take the meeting
+  with Ali away; "لا غلط، عمر" still puts it right.
 - A reply of just "No, Omar", "Nope Omar!" or "لا، عمر" now puts right what
   Kazma had just said was Ali; "No, Omar too", "لا، عمر بعد" and "لا، وعمر" add
   Omar.
