@@ -401,26 +401,23 @@ def _second_lock_rows() -> list[tuple[str, str]]:
     except identity.IdentityUnavailable:
         on = None
     state = {True: "Spaces is on", False: "Spaces is off", None: "the Spaces switch could not be read"}[on]
-    out = [_line(INFO, "the second lock is not armed", f"{state}; it is armed only once it is built whole")]
+    title = "the second lock is not armed"
     try:
         import psycopg
     except ImportError:
-        return [*out, _line(INFO, "its rules could not be read", "no Postgres driver")]
+        return [_line(INFO, title, f"{state}; its rules could not be read (no Postgres driver)")]
     try:
         with read_only_diagnostic("kazma doctor: the second lock"):
             found = row_security.check(url)
     except (psycopg.Error, OSError) as exc:
-        return [*out, _line(INFO, "its rules could not be read", type(exc).__name__)]
-    if not any(f.subject == row_security.SPACE_ROLE for f in found):
-        out.append(_line(INFO, f"the role {row_security.SPACE_ROLE} is in place"))
+        return [_line(INFO, title, f"{state}; its rules could not be read ({type(exc).__name__})")]
+    # One line while nothing is armed (step 2 review L6): what it would need.
+    role = next((f.problem for f in found if f.subject == row_security.SPACE_ROLE and f.blocking), "")
     blocking = [f for f in found if f.blocking]
-    if not blocking:
-        out.append(_line(INFO, "every Kazma table holds its rule"))
-    for f in blocking[:8]:
-        out.append(_line(INFO, f"{f.subject}: {f.problem}", f"fix: {f.fix}" if f.fix else ""))
-    if len(blocking) > 8:
-        out.append(_line(INFO, f"and {len(blocking) - 8} more", "python scripts/row_security.py check"))
-    return out
+    rules = (f"{len(blocking)} difference(s) from its rules: python scripts/row_security.py check"
+             if blocking else "every Kazma table holds its rule")
+    who = f"the role {row_security.SPACE_ROLE}: {role}" if role else f"the role {row_security.SPACE_ROLE} is in place"
+    return [_line(INFO, title, f"{state}; {who}; {rules}")]
 
 
 def _cloud_profile_rows() -> list[tuple[str, str]]:

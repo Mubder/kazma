@@ -292,6 +292,17 @@ def _tool(bin_dir: str, name: str) -> list[str]:
     return [str(Path(bin_dir) / (f"{name}.exe" if os.name == "nt" else name))]
 
 
+def _close_functions(dest_url: str, say: Callable[[str], None]) -> None:
+    """PUBLIC may run none of Kazma's functions on the copy (restored without
+    privileges, they have PUBLIC's default: step 2 review L3)."""
+    from kazma_core.db.pg_backup import revoke_public_execute
+
+    problem = revoke_public_execute(dest_url)
+    if problem:
+        say(f"   PUBLIC may still run Kazma's functions on the new server ({problem}): "
+            "python scripts/row_security.py apply takes it away.")
+
+
 def copy_database(source_url: str, dest_url: str, *, bin_dir: str, say: Callable[[str], None] = print,
                   run=subprocess.run, empty_target: Callable[[], bool] | None = None,
                   tools: Callable[[str], list[str]] | None = None) -> bool:
@@ -363,6 +374,7 @@ def copy_database(source_url: str, dest_url: str, *, bin_dir: str, say: Callable
             said = ((done.stderr or "").strip().splitlines() or [""])[-1][:300]
             say(f"The restore failed (exit {done.returncode}): {said}")
             return False
+    _close_functions(dest_url, say)
 
     try:
         dest_counts, dest_sequences = _snapshot(dest_url)

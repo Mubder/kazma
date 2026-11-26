@@ -25,6 +25,12 @@ schema setup and owned by ``kazma_app`` as setup makes it:
 * dumps, the restore, the upgrade's and the move's whole copy and the restore
   rehearsal work with the rules, name no role, and ``apply`` gives the rights
   back after them;
+* the step 2 review: rows and the proof read a database the rules never
+  reached (M1); a superuser, and a PostgreSQL 16 creator holding the role
+  without SET, are granted it as it must be, and a login that may not grant
+  it is said, not raised (M2, L5); a function of another role is refused
+  (L5); PUBLIC may run none of Kazma's functions, after a restore or the
+  upgrade's whole copy too (L3);
 * ``kazma_space_role_remove.sql`` takes it all out, and the owner reads on.
 
 Needs a throwaway server and a superuser DSN (``KAZMA_DATABASE_URL`` +
@@ -107,9 +113,10 @@ def rs(db: dict[str, str], monkeypatch: pytest.MonkeyPatch) -> Any:
     from kazma_core.db import row_security
 
     monkeypatch.setattr(row_security, "_configured_vector_table", lambda: None)
+    monkeypatch.setattr(row_security, "_in_place", False)  # what a fresh process has; given back after
     done = row_security.apply(db["app"])
-    assert done.complete, (done.refused, done.left)
-    monkeypatch.setattr(row_security, "_in_place", False)
+    assert done.complete, (done.refused, done.left, done.unresolved)
+    row_security._mark_in_place(False)
     return row_security
 
 
@@ -338,8 +345,9 @@ def test_the_migrate_check_and_doctor_name_the_second_lock(rs: Any, db: dict[str
     monkeypatch.setattr(identity, "enforcement_enabled", lambda: False)
     note = " ".join(preconditions._second_lock_note())
     assert "is not armed" in note and "needs the role" not in note, note
-    rows = " ".join(line for _status, line in doctor._second_lock_rows())
-    assert "every Kazma table holds its rule" in rows and "Spaces is off" in rows, rows
+    rows = doctor._second_lock_rows()
+    assert len(rows) == 1, "one line while nothing is armed (step 2 review L6)"
+    assert "every Kazma table holds its rule" in rows[0][1] and "Spaces is off" in rows[0][1], rows
     assert {status for status, _line in doctor._second_lock_rows()} == {doctor.INFO}, "shown, never counted"
     _sql(db["su"], "ALTER ROLE kazma_space RENAME TO kazma_space_away")
     try:
@@ -461,6 +469,11 @@ def _tools() -> str:
     return str(Path(found).parent)
 
 
+#: Whether PUBLIC may run each of Kazma's functions.
+_PUBLIC_RUNS = ("SELECT has_function_privilege('public', 'public.kazma_space_id()', 'EXECUTE'), "
+                "has_function_privilege('public', 'public.kazma_document_audit_guard()', 'EXECUTE')")
+
+
 def _counts(dsn: str, tables: list[str]) -> dict[str, int]:
     return {t: _sql(dsn, f"SELECT count(*) FROM {t}")[0][0] for t in tables}  # noqa: S608
 
@@ -479,6 +492,7 @@ def test_a_dump_by_table_restores_with_its_policies(rs: Any, db: dict[str, str],
     assert "TO kazma_space" not in listing and "GRANT " not in listing, "the dump names no role"
     target = _with(db["base"], user="kazma_app", password=db["password"], db=_new_database(db))
     restore_database(dump, target, strict=True)  # the function is made first
+    assert _sql(target, _PUBLIC_RUNS) == [(False, False)], "a restore makes functions PUBLIC may not run (L3)"
     present = [t for t in KAZMA_PG_TABLES if _sql(app, "SELECT to_regclass(%s) IS NOT NULL", (t,))[0][0]]
     assert _counts(target, present) == _counts(app, present)
     assert _sql(target, "SELECT count(*) FROM pg_policy WHERE polname = 'kazma_space_rows'") == \
@@ -507,6 +521,8 @@ def test_the_upgrades_and_the_moves_whole_copy_keeps_the_rules(rs: Any, db: dict
     target = _with(db["base"], user="kazma_app", password=db["password"], db=_new_database(db))
     said: list[str] = []
     assert copy_database(db["app"], target, bin_dir=bin_dir, say=said.append), said
+    # Restored without privileges, they had PUBLIC's default (step 2 review L3).
+    assert _sql(target, _PUBLIC_RUNS) == [(False, False)], said
     assert rs.apply(target, vector_table="").complete
     assert rs.check(target, vector_table="") == []
     assert rs.prove(target, KNOWN, vector_table="").holds
@@ -525,6 +541,164 @@ def test_the_restore_rehearsal_passes_with_the_rules(rs: Any, db: dict[str, str]
     res = DrillResult(backup_dir=str(tmp_path))
     rehearse_pg_restore(dump, db["app"], res)
     assert res.ok, res.checks
+
+
+# ── the step 2 review ────────────────────────────────────────────────────
+
+
+def test_rows_and_the_proof_read_a_database_the_rules_never_reached(db: dict[str, Any],
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """M1: before any apply the checkpoints have no space column, and the
+    check the owner was to run on live raised UndefinedColumn."""
+    from kazma_core.db import row_security
+
+    monkeypatch.setattr(row_security, "_configured_vector_table", lambda: None)
+    monkeypatch.setattr(row_security, "_in_place", False)
+    fresh = _with(db["base"], user="kazma_app", password=db["password"], db=_new_database(db))
+    _every_store_set_up(fresh)
+    assert _sql(fresh, "SELECT count(*) FROM pg_attribute WHERE attrelid = 'checkpoints'::regclass "
+                       "AND attname = 'space_id'") == [(0,)], "a database the rules never reached"
+    _sql(fresh, "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, checkpoint, metadata) "
+                "VALUES ('th', '', 'k1', '{}', '{}')")
+    _sql(fresh, "INSERT INTO kazma_chat_sessions (tenant_id, session_id) VALUES ('ghost', 'g1')")
+    strays = {(s.table, s.space) for s in row_security.space_rows(fresh, KNOWN, vector_table="")}
+    assert strays == {("kazma_chat_sessions", "ghost")}, "the checkpoint, with no space column yet, is the owner's"
+    proof = row_security.prove(fresh, KNOWN, vector_table="")
+    assert not proof.holds and proof.failed, "said, not raised"
+
+
+def _drop_login(base: str, login: str) -> None:
+    """A test's own login, and every membership it holds or granted."""
+    _sql(base, "DO $$ DECLARE r record; BEGIN "
+               "FOR r IN SELECT b.rolname AS role, g.rolname AS grantor FROM pg_auth_members m "
+               "JOIN pg_roles b ON b.oid = m.roleid JOIN pg_roles g ON g.oid = m.grantor "
+               f"WHERE m.member = '{login}'::regrole ORDER BY m.grantor = '{login}'::regrole DESC LOOP "
+               f"EXECUTE format('REVOKE %I FROM {login} GRANTED BY %I CASCADE', r.role, r.grantor); "
+               "END LOOP; END $$")
+    _sql(base, f"DROP ROLE IF EXISTS {login}")
+
+
+def _creator(db: dict[str, Any]) -> tuple[str, str, str]:
+    """A login that may make roles (not a superuser), owning a new database
+    every store has set up: ``(login, address, database)``."""
+    login, password = f"kazma_c_{uuid.uuid4().hex[:8]}", secrets.token_urlsafe(16)
+    _sql(db["base"], f"CREATE ROLE {login} LOGIN CREATEROLE PASSWORD '{password}'")
+    name = f"kazma_rls_{uuid.uuid4().hex[:10]}"
+    _sql(db["base"], f'CREATE DATABASE "{name}" OWNER {login}')
+    dsn = _with(db["base"], user=login, password=password, db=name)
+    _every_store_set_up(dsn)
+    return login, dsn, name
+
+
+def _membership(base: str, login: str) -> list[tuple[Any, ...]]:
+    return _sql(base, "SELECT inherit_option, set_option FROM pg_auth_members "
+                      "WHERE roleid = 'kazma_space'::regrole AND member = %s::regrole ORDER BY 2", (login,))
+
+
+def _pg16(db: dict[str, Any]) -> None:
+    if int(_sql(db["base"], "SHOW server_version_num")[0][0]) < 160000:
+        pytest.skip("membership with SET and INHERIT options is PostgreSQL 16's")
+
+
+def test_a_superuser_that_owns_the_tables_holds_the_role_as_it_must(db: dict[str, Any],
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """M2: the compose install signs in as the superuser. ``pg_has_role``
+    says yes for a superuser, so apply granted nothing and its own check and
+    proof failed for good."""
+    from kazma_core.db import row_security
+
+    monkeypatch.setattr(row_security, "_configured_vector_table", lambda: None)
+    monkeypatch.setattr(row_security, "_in_place", False)
+    name = f"kazma_rls_{uuid.uuid4().hex[:10]}"
+    _sql(db["base"], f'CREATE DATABASE "{name}"')
+    db["extra"].append(name)
+    su = _with(db["base"], db=name)
+    _every_store_set_up(su)
+    login = _sql(su, "SELECT session_user::text")[0][0]
+    try:
+        done = row_security.apply(su, vector_table="")
+        assert done.complete, done
+        assert not [f for f in row_security.check(su, vector_table="") if f.subject == "kazma_space"]
+        assert row_security.prove(su, KNOWN, vector_table="").holds
+    finally:
+        _sql(db["base"], f'REVOKE kazma_space FROM "{login}"')  # the role is the server's: as it was found
+
+
+def test_a_creator_that_holds_the_role_without_set_is_granted_it(db: dict[str, Any],
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """M2: on PostgreSQL 16 a CREATEROLE login holds the role it made with
+    ADMIN and neither INHERIT nor SET. ``pg_has_role`` says member, so apply
+    granted nothing and could never be complete."""
+    from kazma_core.db import row_security
+
+    _pg16(db)
+    monkeypatch.setattr(row_security, "_configured_vector_table", lambda: None)
+    monkeypatch.setattr(row_security, "_in_place", False)
+    login, dsn, name = _creator(db)
+    try:
+        _sql(db["base"], f"GRANT kazma_space TO {login} WITH ADMIN OPTION, INHERIT FALSE, SET FALSE")
+        assert _sql(db["base"], "SELECT pg_has_role(%s, 'kazma_space', 'MEMBER')", (login,)) == [(True,)]
+        done = row_security.apply(dsn, vector_table="")
+        assert done.complete, done
+        assert (False, True) in _membership(db["base"], login), "granted explicitly: INHERIT FALSE, SET TRUE"
+        assert not [f for f in row_security.check(dsn, vector_table="") if f.subject == "kazma_space"]
+        assert row_security.prove(dsn, KNOWN, vector_table="").holds
+    finally:
+        _sql(db["base"], f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        _drop_login(db["base"], login)
+
+
+def test_a_login_that_may_not_grant_the_role_is_said_not_raised(db: dict[str, Any],
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """M2, L5: a CREATEROLE login with no ADMIN on the role the superuser
+    made may not grant it on PostgreSQL 16: apply says the role is not in
+    place and is not complete, and raises nothing."""
+    from kazma_core.db import row_security
+
+    _pg16(db)
+    monkeypatch.setattr(row_security, "_configured_vector_table", lambda: None)
+    monkeypatch.setattr(row_security, "_in_place", False)
+    login, dsn, name = _creator(db)
+    try:
+        done = row_security.apply(dsn, vector_table="")
+        assert not done.complete and not done.refused, done
+        assert any("not a member" in problem for problem in done.unresolved), done.unresolved
+        assert not row_security.prove(dsn, KNOWN, vector_table="").holds
+    finally:
+        _sql(db["base"], f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        _drop_login(db["base"], login)
+
+
+def test_a_function_of_another_role_is_refused_not_raised(db: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    """L5: CREATE OR REPLACE of a function another role owns raised."""
+    from kazma_core.db import row_security
+
+    monkeypatch.setattr(row_security, "_configured_vector_table", lambda: None)
+    monkeypatch.setattr(row_security, "_in_place", False)
+    name = _new_database(db)
+    fresh = _with(db["base"], user="kazma_app", password=db["password"], db=name)
+    _every_store_set_up(fresh)
+    _sql(_with(db["base"], db=name), "CREATE FUNCTION public.kazma_space_id() RETURNS text LANGUAGE sql STABLE "
+                                     "AS $$ SELECT 'x' $$")  # the superuser's, and not Kazma's
+    done = row_security.apply(fresh, vector_table="")
+    assert "belongs to another role" in done.refused and not done.complete
+
+
+def test_public_may_not_run_the_function_and_the_space_role_may(rs: Any, db: dict[str, Any]) -> None:
+    """L3: a reader the owner set up to run no function in Kazma's database
+    was refused after the next restore made one PUBLIC could run."""
+    app = db["app"]
+    fn = "public.kazma_space_id()"
+    assert _sql(app, _PUBLIC_RUNS) == [(False, False)]
+    assert _sql(app, "SELECT has_function_privilege('kazma_space', %s, 'EXECUTE')", (fn,)) == [(True,)]
+    # The control: PUBLIC given them back is said, and apply takes it away again.
+    _sql(app, "GRANT EXECUTE ON FUNCTION public.kazma_space_id(), public.kazma_document_audit_guard() TO PUBLIC")
+    assert {f.subject for f in rs.check(app, vector_table="") if "PUBLIC may run" in f.problem} == \
+        {fn, "public.kazma_document_audit_guard()"}
+    done = rs.apply(app, vector_table="")
+    assert done.complete and f"PUBLIC may no longer run {fn}" in done.changed, done
+    assert _sql(app, _PUBLIC_RUNS) == [(False, False)]
+    assert _sql(app, "SELECT has_function_privilege('kazma_space', %s, 'EXECUTE')", (fn,)) == [(True,)]
 
 
 # ── the way out (last: it drops the role) ───────────────────────────────

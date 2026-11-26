@@ -12,6 +12,9 @@ or the install's. These gates need no database:
 * ``deploy/postgres/kazma_app_role.sql`` grants exactly the rules' rights
   (review M11: the role, its membership and its grants live in that file);
 * the policy function raises when no space is set, and is made on restores;
+* PUBLIC may run no function of Kazma's: each one's DDL takes it away, and
+  every copy restored without privileges takes it away after (step 2 review
+  L3: a constrained SQL-tool reader refuses a database where it may run one);
 * the space connection's address keeps the address's own options (M10);
 * with the rules not in place, the two places that make tables send nothing
   more than before (Spaces off unchanged).
@@ -63,11 +66,22 @@ def _unruled(source: str) -> set[str]:
 # ── every table has a rule ──────────────────────────────────────────────
 
 
+def _unmatched(rules: dict[str, Any], tables: list[str]) -> tuple[list[str], list[str]]:
+    """Tables with no rule, and rules with no table."""
+    return sorted(set(tables) - set(rules)), sorted(set(rules) - set(tables))
+
+
 def test_every_kazma_table_has_a_rule_both_ways() -> None:
-    assert set(row_security.RULES) == set(KAZMA_PG_TABLES), (
+    no_rule, no_table = _unmatched(row_security.RULES, KAZMA_PG_TABLES)
+    assert (no_rule, no_table) == ([], []), (
         "db/row_security.RULES and pg_backup.KAZMA_PG_TABLES name the same tables: "
-        f"no rule {sorted(set(KAZMA_PG_TABLES) - set(row_security.RULES))}, "
-        f"no table {sorted(set(row_security.RULES) - set(KAZMA_PG_TABLES))}")
+        f"no rule {no_rule}, no table {no_table}")
+
+
+def test_the_gate_sees_a_table_with_no_rule_and_a_rule_with_no_table() -> None:
+    # Negative control (step 2 review L7): one of each, planted.
+    rules = {**row_security.RULES, "kazma_gone": row_security.RULES["documents"]}
+    assert _unmatched(rules, [*KAZMA_PG_TABLES, "kazma_new"]) == (["kazma_new"], ["kazma_gone"])
 
 
 def test_every_table_a_schema_maker_creates_has_a_rule() -> None:
@@ -92,6 +106,9 @@ def test_pgvector_is_ruled_under_its_configured_name() -> None:
 
     cfg = {"vector": {"provider": "pgvector", "url": "postgresql://x/y", "collection": "my-vectors!"}}
     assert pgvector_table(cfg) == "myvectors"
+    # Step 2 review L1: Postgres folds the unquoted name it is made with.
+    capitals = {"vector": {"provider": "pgvector", "url": "postgresql://x/y", "collection": "Kazma_Vectors"}}
+    assert pgvector_table(capitals) == "kazma_vectors"
     assert row_security.rules("myvectors")["myvectors"].kind == "space"
     assert pgvector_table({"vector": {"provider": "sqlite_vec", "collection": "x"}}) is None
     assert "myvectors" not in row_security.rules(None)
@@ -121,7 +138,7 @@ def test_rights_are_the_reviews() -> None:
 
 def test_policies_are_to_public_and_call_the_raising_function() -> None:
     sql = row_security._policy_sql("kazma_chat_sessions", row_security.RULES["kazma_chat_sessions"])
-    assert "TO PUBLIC" in sql and "FOR ALL" in sql and "(SELECT kazma_space_id())" in sql
+    assert "TO PUBLIC" in sql and "FOR ALL" in sql and "(SELECT public.kazma_space_id())" in sql
     assert f"TO {row_security.SPACE_ROLE}" not in sql, "a policy that names the role makes dumps unrestorable elsewhere"
     assert sql.count("COALESCE(NULLIF(tenant_id, ''), 'default')") == 2  # USING and WITH CHECK
 
@@ -131,6 +148,9 @@ def test_a_stored_policy_reads_as_the_rule() -> None:
     stored = ("(COALESCE(NULLIF((metadata ->> 'tenant_id'::text), ''::text), 'default'::text) = "
               "( SELECT kazma_space_id() AS kazma_space_id))")  # PostgreSQL 18 prints it so
     assert row_security._same_expression(stored, rule)
+    # As a reader whose search path lacks public prints it (step 2 review L2).
+    assert row_security._same_expression(stored.replace("SELECT kazma_space_id()", "SELECT public.kazma_space_id()"),
+                                         rule)
     # Controls: another column, a widened match, nothing.
     assert not row_security._same_expression(stored.replace("tenant_id", "owner_id"), rule)
     assert not row_security._same_expression(stored[:-1] + " OR true)", rule)
@@ -140,6 +160,8 @@ def test_a_stored_policy_reads_as_the_rule() -> None:
 def test_the_policy_function_raises_with_no_space_and_is_restored() -> None:
     ddl = KAZMA_PG_FUNCTIONS["kazma_space_id"]
     assert "STABLE PARALLEL SAFE" in ddl and "SECURITY DEFINER" not in ddl
+    assert "FUNCTION public.kazma_space_id()" in ddl, "schema-qualified (step 2 review L2)"
+    assert "REVOKE EXECUTE ON FUNCTION public.kazma_space_id() FROM PUBLIC" in ddl, "step 2 review L3"
     assert "insufficient_privilege" in ddl and "space = ''" in ddl and "IS NULL" in ddl
     assert "current_setting('kazma.space', true)" in ddl
     assert row_security._body(ddl).startswith("DECLARE")
@@ -280,3 +302,83 @@ def test_the_checkpointer_sends_nothing_more_with_spaces_off(monkeypatch: pytest
     monkeypatch.setattr(row_security, "after_checkpointer_setup", lambda url: called.append(url) or [])
     asyncio.run(checkpoints_pg._rules_after_setup("postgresql://u@h/d"))
     assert called == ["postgresql://u@h/d"]
+
+
+# ── the script takes no address on its command line (step 2 review L4) ──
+
+
+def _script() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("row_security_script", ROOT / "scripts" / "row_security.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_script_reads_its_address_from_a_named_variable(monkeypatch: pytest.MonkeyPatch,
+                                                           capsys: pytest.CaptureFixture[str]) -> None:
+    script = _script()
+    monkeypatch.setenv("KAZMA_SCRATCH_URL", "sqlite:///nothing")
+    assert script.main(["check", "--url-from", "KAZMA_SCRATCH_URL"]) == 1
+    assert "not Postgres" in capsys.readouterr().err
+    # The control: an address on the command line is no option any more.
+    with pytest.raises(SystemExit):
+        script.main(["check", "--url", "postgresql://kazma:secret@db/kazma"])
+
+
+# ── PUBLIC may run no function of Kazma's (step 2 review L3) ────────────
+
+#: Product files that restore with ``--no-privileges`` and need not take
+#: PUBLIC's EXECUTE away after, and why.
+RESTORES_KEEPING_FUNCTIONS: dict[str, str] = {
+    "kazma-core/kazma_core/migration/pg_bridge.py": (
+        "restore_database makes Kazma's functions first from KAZMA_PG_FUNCTIONS, each of which takes PUBLIC's "
+        "EXECUTE away; a dump by table carries no function"),
+    "scripts/restore_rehearsal.py": "a scratch database, dropped when the rehearsal ends",
+}
+
+
+def _open_to_public(functions: dict[str, str]) -> list[str]:
+    """Functions whose DDL does not take PUBLIC's EXECUTE away."""
+    return sorted(name for name, ddl in functions.items()
+                  if not re.search(rf"REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+(public\.)?{name}\(\)\s+FROM\s+PUBLIC\b",
+                                   ddl))
+
+
+def test_no_function_of_kazmas_may_be_run_by_public() -> None:
+    assert _open_to_public(KAZMA_PG_FUNCTIONS) == [], (
+        "CREATE FUNCTION gives PUBLIC EXECUTE: end the DDL with REVOKE EXECUTE ON FUNCTION <it> FROM PUBLIC")
+    # Negative control: a function made as CREATE FUNCTION leaves it.
+    planted = {**KAZMA_PG_FUNCTIONS,
+               "kazma_new": "CREATE FUNCTION public.kazma_new() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$"}
+    assert _open_to_public(planted) == ["kazma_new"]
+
+
+def _restores_without_privileges() -> dict[str, str]:
+    listed = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", "kazma-*/kazma_*/*.py",
+         "scripts/*.py"], cwd=ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    texts = {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in sorted(set(listed))}
+    return {rel: text for rel, text in texts.items() if "pg_restore" in text and "--no-privileges" in text}
+
+
+def _not_closing(sources: dict[str, str]) -> list[str]:
+    return sorted(rel for rel, text in sources.items()
+                  if "revoke_public_execute" not in text and rel not in RESTORES_KEEPING_FUNCTIONS)
+
+
+def test_every_copy_restored_without_privileges_takes_publics_execute_away() -> None:
+    sources = _restores_without_privileges()
+    assert _not_closing(sources) == [], (
+        "a restore with --no-privileges makes Kazma's functions with PUBLIC's EXECUTE: call "
+        "pg_backup.revoke_public_execute after it, or say why not in RESTORES_KEEPING_FUNCTIONS")
+    assert {"kazma-core/kazma_core/postgres_upgrade.py", "kazma-core/kazma_core/backup/pg_move.py",
+            "kazma-core/kazma_core/postgres_compose_upgrade.py"} <= set(sources), "the gate reads the copies"
+    stale = sorted(set(RESTORES_KEEPING_FUNCTIONS) - set(sources))
+    assert not stale, f"no longer restores without privileges: take out of RESTORES_KEEPING_FUNCTIONS {stale}"
+    # Negative control: a planted restore that leaves them.
+    planted = {"kazma-core/kazma_core/planted.py": 'run(["pg_restore", "--no-owner", "--no-privileges", dump])'}
+    assert _not_closing(planted) == ["kazma-core/kazma_core/planted.py"]

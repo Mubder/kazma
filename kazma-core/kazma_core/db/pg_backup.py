@@ -54,6 +54,8 @@ __all__ = [
     "latest_pg_backup",
     "recheck_new_tables",
     "report_missing_tables",
+    "revoke_public_execute",
+    "revoke_public_execute_sql",
     "verify_required_pg_tables",
 ]
 
@@ -116,7 +118,13 @@ def _required_pg_tables() -> list[str]:
 #: (``migration.pg_bridge.restore_database``) -- otherwise a restore into a
 #: fresh database (the weekly rehearsal, a drill, a new machine) cannot
 #: recreate the trigger or the policy. ``tests/test_document_audit_pg.py``
-#: holds every trigger function product code creates to this mapping.
+#: holds every trigger function product code creates to this mapping. Each
+#: one takes PUBLIC's EXECUTE away as it is made (Spaces S4-01 step 2 review
+#: L3): ``CREATE FUNCTION`` gives it to PUBLIC by default, and a constrained
+#: SQL-tool reader (``database_client.remote_reads``) refuses a database where
+#: it may run any function. A trigger fires without it; the policies' function
+#: is the space role's (``row_security.apply``). A whole copy restored without
+#: privileges gives it back: :func:`revoke_public_execute` after it.
 KAZMA_PG_FUNCTIONS: dict[str, str] = {
     # documents/audit.py: audit rows are immutable, and deleted only by the
     # retention prune, which sets kazma.document_audit_prune for its own
@@ -133,16 +141,18 @@ BEGIN
     END IF;
     RETURN OLD;
 END
-$guard$
+$guard$;
+REVOKE EXECUTE ON FUNCTION kazma_document_audit_guard() FROM PUBLIC
 """,
     # db/row_security.py (Spaces S4-01): the space a transaction is in, for
     # every policy. Raises when none is set, or '' (what a transaction that
     # set it leaves behind), so a statement that forgot its space fails
     # instead of finding nothing (decision 2). Made on every restore, so a
     # dump by table -- which carries policies, never functions -- restores
-    # whole; with Spaces off nothing calls it (review L7).
+    # whole; with Spaces off nothing calls it (review L7). PUBLIC may not
+    # run it (step 2 review L3); the space role may (row_security.apply).
     "kazma_space_id": """
-CREATE OR REPLACE FUNCTION kazma_space_id() RETURNS text
+CREATE OR REPLACE FUNCTION public.kazma_space_id() RETURNS text
 LANGUAGE plpgsql STABLE PARALLEL SAFE AS $space$
 DECLARE
     space text := current_setting('kazma.space', true);
@@ -153,9 +163,44 @@ BEGIN
     END IF;
     RETURN space;
 END
-$space$
+$space$;
+REVOKE EXECUTE ON FUNCTION public.kazma_space_id() FROM PUBLIC
 """,
 }
+
+def revoke_public_execute_sql() -> str:
+    """One statement that takes PUBLIC's EXECUTE away from each function of
+    :data:`KAZMA_PG_FUNCTIONS` there is, as their owner. A copy restored with
+    ``--no-privileges`` makes them with PUBLIC's default (step 2 review L3)."""
+    # Nested: SQL does not promise AND stops early, and the privilege check
+    # raises on a function that is not there.
+    checks = "\n".join(
+        f"    IF to_regprocedure('public.{name}()') IS NOT NULL THEN\n"
+        f"        IF has_function_privilege('public', 'public.{name}()', 'EXECUTE') THEN\n"
+        f"            REVOKE EXECUTE ON FUNCTION public.{name}() FROM PUBLIC;\n"
+        "        END IF;\n"
+        "    END IF;"
+        for name in KAZMA_PG_FUNCTIONS)
+    return f"DO $kazma$\nBEGIN\n{checks}\nEND\n$kazma$"
+
+
+def revoke_public_execute(url: str) -> str:
+    """:func:`revoke_public_execute_sql` on the database at *url*, after a
+    whole copy into it. ``""`` when done, else what kept it (the caller says
+    it; ``python scripts/row_security.py apply`` takes it away later)."""
+    try:
+        import psycopg
+    except ImportError:
+        return "no Postgres driver"
+    try:
+        with psycopg.connect(url, connect_timeout=10, autocommit=True) as conn:
+            conn.execute(revoke_public_execute_sql())
+    except psycopg.Error as exc:
+        logger.warning("[pg_backup] PUBLIC may still run Kazma's functions after the copy: %s",
+                       type(exc).__name__)
+        return type(exc).__name__
+    return ""
+
 
 # How many raw .dump files stay on local disk. These are staging, not the
 # archive: restic snapshots each dump and keeps the real history under
