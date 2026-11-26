@@ -1025,17 +1025,23 @@ def register_memory_tools(registry: Any) -> None:
                         "id": h.id, "content": content, "score": h.score,
                         "kind": kind, "source": h.source, "metadata": h.metadata,
                     })
+            # The mirror unread for the top-up is its own sentence: this
+            # install's memories were searched in full (recall-strict M1).
+            mirror = f"{MIRROR_UNREAD[:1].upper()}{MIRROR_UNREAD[1:]}." if result.mirror_unread else ""
             if result.degraded:
                 # Not "nothing remembered": a search that could not look by
                 # meaning says so (Memory audit M16).
-                # The mirror unread for the top-up is no search by words alone.
-                tail = "" if result.degraded == MIRROR_UNREAD else "; keyword matches only"
-                note = f"Memory search was incomplete ({result.degraded}){tail}."
+                note = f"Memory search was incomplete ({result.degraded}); keyword matches only. {mirror}".rstrip()
                 if out:
                     return note + "\n" + json.dumps(out, ensure_ascii=False, indent=2), False
                 return note + " " + _RECALL_DEGRADED, True
             if out:
-                return json.dumps(out, ensure_ascii=False, indent=2), False
+                body = json.dumps(out, ensure_ascii=False, indent=2)
+                return (f"{mirror}\n{body}" if mirror else body), False
+            if mirror:
+                # The search ran in full here and found nothing: no failure
+                # (recall-strict review L3).
+                return f"No relevant memories found among this install's memories. {mirror}", True
             return "No relevant memories found.", True
         except Exception as exc:
             logger.warning("[memory_search] V2 recall failed: %s", exc)

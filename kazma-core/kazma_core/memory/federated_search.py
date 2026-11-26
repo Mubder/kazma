@@ -127,6 +127,9 @@ def federated_search(
     # side said nothing (an exception at DEBUG, `result.degraded` dropped)
     # and the response was still ok (audit 2026-10-26 AUD-057).
     memory_degraded: str | None = None
+    # Other installs' memories unread (the mirror away): its own line, never
+    # "keyword matches only" (recall-strict review M1).
+    mirror_unread = False
     knowledge_error: str | None = None
 
     if include_memory:
@@ -141,6 +144,7 @@ def federated_search(
                 explain=True,
             )
             memory_degraded = result.degraded
+            mirror_unread = bool(result.mirror_unread)
             for h in result.beliefs:
                 hits.append(
                     {
@@ -231,6 +235,7 @@ def federated_search(
         },
         # The page shows each as a banner instead of "no hits" (AUD-057).
         "degraded": memory_degraded,
+        "mirror_unread": mirror_unread,
         "knowledge_error": knowledge_error,
     }
 

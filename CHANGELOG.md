@@ -10,6 +10,11 @@
   this install's memories and says the others were not read; when the
   database refuses (Spaces), the search fails and says so. Neither reads as
   "nothing more found".
+- Saying it is kept to the searches someone asks for: the memory tool and
+  the Memory page say, calmly and in both languages, that memories from
+  other Kazma installs could not be read just now. It is never called
+  "keyword matches only", the note to the model on each turn leaves it out,
+  and it pages nobody: the database's own alert already says the outage.
 
 ## Spaces: the database's own lock between spaces, its rules in place (2026-11-26)
 
