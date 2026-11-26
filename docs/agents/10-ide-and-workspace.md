@@ -90,7 +90,13 @@ workspace. Three new modules; understanding their interaction is essential.
   `read_file` / `search_code` and the TUI's file preview ask the same
   predicate. A save, a patch or a delete resolves with `write=True`, so
   Kazma's configuration (readable by every door) is refused before the
-  tool and its card run. Gate: `tests/test_ide_reads_refuse_kazma_files.py` (a census of
+  tool and its card run. The IDE's read-only git (`/api/ide/git`, the chat
+  command `/ide git`; it runs with no card) reads the repository's versions
+  only (`ide/git_policy.validate_read_paths`): `--no-index` is not a read
+  option, `diff` runs only when the workspace is a repository
+  (`is_a_repository`: outside one git compares its operands as files), and
+  every operand, inside the workspace, is asked `is_kazma_store` too. The
+  census counts a process an IDE module starts as a read. Gate: `tests/test_ide_reads_refuse_kazma_files.py` (a census of
   every file read in `kazma_core/ide/` and every module that drives
   `get_ide_service()`, each declared with a probe that plants Kazma's
   secret files in the workspace; every IdeService method that takes a path

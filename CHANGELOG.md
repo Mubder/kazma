@@ -24,6 +24,9 @@
   its MCP server and the terminal app's preview now refuse Kazma's stores
   and secret files wherever they are. An alert reported this earlier (#53)
   and was dismissed; the owner reopens it.
+- **The IDE's read-only git reads the repository's versions only**: no
+  `--no-index`, `git diff` only in a repository, and none of Kazma's own
+  files as an operand.
 - **Smaller ones**: a memory backup to restore is found by its timestamp
   (a name with Unicode digits passed before); X's sign-in refusal comes
   back to Settings as a word the page has, in English and Arabic, and an

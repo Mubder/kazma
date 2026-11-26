@@ -108,7 +108,10 @@ DECLARED_OPEN: dict[tuple[str, ...], str] = {
     ("/ide", "delete"): "IdeService deletes through LocalToolRegistry.execute: file_delete asks the bus (§10B)",
     ("/ide", "run"): "IdeService runs shell_exec through LocalToolRegistry.execute, which asks the bus (§10B)",
     ("/ide", "runfile"): "IdeService runs it through LocalToolRegistry.execute, which asks the bus (§10B)",
-    ("/ide", "git"): "IdeService runs git through LocalToolRegistry.execute, which asks the bus (§10B)",
+    ("/ide", "git"): ("a read runs git directly, with no card: git_policy allows read verbs and flags only, "
+                      "a repository's versions, operands inside the workspace and none of Kazma's files "
+                      "(tests/test_ide_reads_refuse_kazma_files.py); anything else is shell_exec through "
+                      "LocalToolRegistry.execute, which asks the bus (§10B)"),
     ("/ide", "skill"): "sends a coding task to the swarm; its workers' tools ask the approval bus (§7B, §10C)",
     ("/ide", "swarm"): "sends a task to the swarm; its workers' tools ask the approval bus (§7B, §10C)",
     ("/documents", "convert"): "writes a new artifact the operator owns (§19 B4b); the document is unchanged",

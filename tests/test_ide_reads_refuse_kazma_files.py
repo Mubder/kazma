@@ -62,6 +62,16 @@ IDE_READS: dict[str, str] = {
         "is_kazma_store on each file before it is read",
     "kazma-tui/kazma_tui/files.py::FilesPanel._read_preview_text":
         "is_kazma_store before the preview opens the file",
+    "kazma-core/kazma_core/ide/service.py::IdeService._git_read._run":
+        "git_policy.validate_read_paths: no --no-index, diff only in a repository, "
+        "every operand inside the workspace and asked is_kazma_store",
+}
+
+#: Processes the IDE's modules start whose command is Kazma's own literal:
+#: no caller names a path or an argument, so there is nothing to probe.
+FIXED_PROCESSES: dict[str, str] = {
+    "kazma-core/kazma_core/ide/env_context.py::_git":
+        "git config --get remote.origin.url and git branch --show-current, literals",
 }
 
 #: IdeService methods that take a path and are not a door of their own.
@@ -112,13 +122,23 @@ def _mode_of(call: ast.Call, position: int) -> ast.expr | None:
     return call.args[position] if len(call.args) > position else None
 
 
+_PROCESS_STARTS = frozenset({
+    ("subprocess", "run"), ("subprocess", "Popen"), ("subprocess", "check_output"),
+    ("subprocess", "check_call"), ("subprocess", "call"), ("subprocess", "getoutput"),
+    ("subprocess", "getstatusoutput"), ("asyncio", "create_subprocess_exec"),
+    ("asyncio", "create_subprocess_shell"),
+})
+
+
 def ide_read_sites(sources: dict[str, str]) -> set[str]:
     """``<file>::<qualname>`` of every file read in the IDE's modules.
 
     The IDE's modules are ``kazma_core/ide/`` and every module that calls
     ``get_ide_service()``. A read is ``.read_text`` or ``.read_bytes``
     (called or handed to a thread), ``.open(...)`` and ``open(...)`` unless
-    their literal mode only writes.
+    their literal mode only writes, and a process the module starts
+    (``subprocess.run`` and its kin, ``asyncio.create_subprocess_*``): what
+    the process prints is read too.
     """
     found: set[str] = set()
     for rel, text in sources.items():
@@ -151,6 +171,9 @@ def ide_read_sites(sources: dict[str, str]) -> set[str]:
                 elif isinstance(func, ast.Attribute) and func.attr == "open":
                     if _write_only(_mode_of(node, 0)):
                         writes.add(id(func))
+                elif (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                      and (func.value.id, func.attr) in _PROCESS_STARTS):
+                    found.add(f"{rel}::{'.'.join(stack)}")
                 self.generic_visit(node)
 
             def visit_Attribute(self, node: ast.Attribute) -> None:
@@ -166,8 +189,9 @@ def ide_read_sites(sources: dict[str, str]) -> set[str]:
 
 def test_every_ide_read_is_declared_with_its_check() -> None:
     found = ide_read_sites(_product_sources())
-    unknown = sorted(found - set(IDE_READS))
-    stale = sorted(set(IDE_READS) - found)
+    declared = set(IDE_READS) | set(FIXED_PROCESSES)
+    unknown = sorted(found - declared)
+    stale = sorted(declared - found)
     assert not unknown, (
         "A file read in the IDE's modules is not declared in IDE_READS. "
         "Make it ask store_registry.is_kazma_store (or read a path "
@@ -194,12 +218,15 @@ def test_control_the_census_finds_an_undeclared_read() -> None:
             "async def show(p):\n"
             "    get_ide_service()\n"
             "    return await asyncio.to_thread(p.read_bytes)\n"
+            "def peek_with_git(p):\n"
+            "    return subprocess.run(['git', 'show', p], capture_output=True).stdout\n"
         ),
         "kazma-ui/kazma_ui/not_the_ide.py": "def other(p):\n    return open(p).read()\n",
     }
     assert ide_read_sites(planted) == {
         "kazma-core/kazma_core/ide/planted.py::Peek.look",
         "kazma-ui/kazma_ui/planted_front.py::show",
+        "kazma-ui/kazma_ui/planted_front.py::peek_with_git",
     }
 
 
@@ -362,6 +389,40 @@ def _probe_tui_preview(root: Path, calls: list) -> str:
     return json.dumps(out)
 
 
+def _commit_everything(root: Path) -> None:
+    """Make the workspace a repository whose first commit holds every file,
+    Kazma's own included (a project that committed them, or a copy of the
+    install folder's tree)."""
+    import shutil
+
+    git = shutil.which("git")
+    assert git, "the git probe needs git"
+
+    def run(*args: str) -> None:
+        subprocess.run([git, "-c", "core.fsmonitor=false", "-c", "core.autocrlf=false", *args],
+                       cwd=root, capture_output=True, text=True, check=True)
+
+    run("init", "-q")
+    run("config", "user.name", "Kazma Test")
+    run("config", "user.email", "test@example.invalid")
+    run("add", "-f", "--", ".")
+    run("commit", "-q", "-m", "everything")
+
+
+def _probe_git(root: Path, calls: list) -> str:
+    """Read-only git over Kazma's files: by name in a revision, as pathspecs,
+    and with the old file-to-file and folder-to-folder comparison."""
+    from kazma_core.ide.service import get_ide_service
+
+    _commit_everything(root)
+    svc = get_ide_service()
+    commands = [f"show HEAD:{rel}" for rel in KAZMA_FILES]
+    commands += [f"log -p -- {rel}" for rel in KAZMA_FILES]
+    commands += [f"blame {rel}" for rel in KAZMA_FILES]
+    commands += ["diff --no-index kazma-data src", "diff --no-index .env src/app.py"]
+    return json.dumps([asyncio.run(svc.git(c)) for c in commands])
+
+
 PROBES: dict[str, Callable[[Path, list], str]] = {
     "kazma-core/kazma_core/ide/service.py::IdeService._read_file_sync": _probe_read_file,
     "kazma-core/kazma_core/ide/service.py::IdeService.run_file": _probe_run_file,
@@ -370,6 +431,7 @@ PROBES: dict[str, Callable[[Path, list], str]] = {
     "kazma-gateway/kazma_gateway/mcp_server.py::_tool_read_file": _probe_mcp_read,
     "kazma-gateway/kazma_gateway/mcp_server.py::_tool_search_code": _probe_mcp_search,
     "kazma-tui/kazma_tui/files.py::FilesPanel._read_preview_text": _probe_tui_preview,
+    "kazma-core/kazma_core/ide/service.py::IdeService._git_read._run": _probe_git,
 }
 
 
@@ -508,3 +570,68 @@ def test_the_ide_saves_no_kazma_configuration_and_still_opens_it(
     assert svc.resolve("kazma.yaml") == (install / "kazma.yaml").resolve()
     with pytest.raises(ValueError):
         svc.resolve("kazma.yaml", write=True)
+
+
+# ── Read-only git compares the repository's versions, nothing else ──────
+
+
+def test_read_only_git_compares_no_two_paths_of_the_disk(install: Path) -> None:
+    """``diff --no-index`` is no read, and outside a repository ``diff``
+    would compare its operands as files: both are refused before git runs,
+    for folders and files alike."""
+    from kazma_core.ide.service import get_ide_service
+
+    svc = get_ide_service()
+    outside_a_repository = ["diff kazma-data src", "diff . src", "diff --stat kazma-data src",
+                            "diff --no-index kazma-data src", "diff --no-index .env src/app.py"]
+    answers = [asyncio.run(svc.git(c)) for c in outside_a_repository]
+    assert all(a["ok"] is False for a in answers), answers
+    assert SECRET not in json.dumps(answers)
+    _commit_everything(install)
+    for command in ("diff --no-index kazma-data src", "diff --no-index . src"):
+        answer = asyncio.run(svc.git(command))
+        assert answer["ok"] is False and SECRET not in json.dumps(answer), (command, answer)
+    # Ordinary reads still work in a repository.
+    (install / "src" / "app.py").write_text("def greet_all(items):\n    return list(items)\n",
+                                             encoding="utf-8")
+    changed = asyncio.run(svc.git("diff -- src/app.py"))
+    assert changed["ok"] is True and "list(items)" in changed["output"], changed
+    assert asyncio.run(svc.git("status --short"))["ok"] is True
+
+
+def test_control_the_old_policy_compares_folders_of_the_disk(
+    install: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control: with ``--no-index`` allowed again, or the repository
+    rule gone, the same reads print the secret file."""
+    from kazma_core.ide import git_policy
+    from kazma_core.ide.service import get_ide_service
+
+    svc = get_ide_service()
+    with monkeypatch.context() as patch:
+        patch.setitem(git_policy._FLAGS, "diff", git_policy._FLAGS["diff"] | {"--no-index"})
+        patch.setattr(git_policy, "is_a_repository", lambda _root: True)
+        old = asyncio.run(svc.git("diff --no-index kazma-data src"))
+    assert SECRET in json.dumps(old), old
+    with monkeypatch.context() as patch:
+        patch.setattr(git_policy, "is_a_repository", lambda _root: True)
+        implied = asyncio.run(svc.git("diff kazma-data src"))
+    assert SECRET in json.dumps(implied), implied
+
+
+def test_a_folder_named_git_is_no_repository(tmp_path: Path) -> None:
+    """Git looks for HEAD, objects and refs; an empty ``.git`` folder makes
+    no repository, and diff would compare paths again."""
+    from kazma_core.ide.git_policy import is_a_repository
+
+    assert not is_a_repository(tmp_path)
+    (tmp_path / ".git").mkdir()
+    assert not is_a_repository(tmp_path)
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (tmp_path / ".git" / "objects").mkdir()
+    (tmp_path / ".git" / "refs").mkdir()
+    assert is_a_repository(tmp_path)
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    (linked / ".git").write_text("gitdir: ../.git/worktrees/linked\n", encoding="utf-8")
+    assert is_a_repository(linked)

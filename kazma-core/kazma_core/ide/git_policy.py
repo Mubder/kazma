@@ -19,7 +19,9 @@ _DIFF_FLAGS = frozenset({
 })
 _FLAGS: dict[str, frozenset[str]] = {
     "status": frozenset({"-s", "--short", "-b", "--branch", "-sb", "-bs", "--porcelain", "-z", "--ignored"}),
-    "diff": _DIFF_FLAGS | {"--cached", "--staged", "--no-index"},
+    # A read compares the repository's versions: never --no-index, which
+    # makes diff compare two files or folders of the disk (2026-11-27).
+    "diff": _DIFF_FLAGS | {"--cached", "--staged"},
     "show": _DIFF_FLAGS | {"--oneline", "--pretty", "--format"},
     "log": _DIFF_FLAGS | {"--oneline", "--all", "--graph", "--decorate", "--no-decorate", "--reverse", "--first-parent", "--no-merges", "--merges", "--date-order", "--topo-order"},
     "rev-parse": frozenset({"--abbrev-ref", "--show-toplevel", "--show-prefix", "--verify", "--quiet", "--short", "--is-inside-work-tree", "--is-bare-repository", "--symbolic", "--symbolic-full-name"}),
@@ -122,9 +124,29 @@ def read_operands(parts: list[str]) -> list[str]:
     return operands
 
 
+def is_a_repository(root: Path) -> bool:
+    """True when *root* holds a repository git itself finds there: a ``.git``
+    file (a linked work tree), or a ``.git`` folder with ``HEAD``, ``objects``
+    and ``refs``. Reads run with ``GIT_CEILING_DIRECTORIES`` at the root's
+    parent, so no folder above the root is asked."""
+    dot = root / ".git"
+    if dot.is_file():
+        return True
+    return dot.is_dir() and (dot / "HEAD").is_file() and (dot / "objects").is_dir() and (dot / "refs").is_dir()
+
+
 def validate_read_paths(parts: list[str], root: Path) -> None:
-    """Check path-shaped operands even when Git also accepts revision syntax."""
-    for operand in read_operands(parts):
+    """Check path-shaped operands even when Git also accepts revision syntax.
+
+    Every operand is confined to the workspace and asked
+    ``store_registry.is_kazma_store``: a read runs with no approval card, and
+    Kazma's own stores and secret files are opened by no door. ``diff`` runs
+    only in a repository: outside one git compares its operands as files.
+    """
+    operands = read_operands(parts)
+    if parts[0] == "diff" and not is_a_repository(root):
+        raise ValueError("git diff compares a repository's versions, and this workspace is not a git repository")
+    for operand in operands:
         if operand.startswith(":(") or operand.startswith(":/"):
             raise ValueError("Git pathspec magic is unsupported in workspace reads")
         path = operand
@@ -141,6 +163,9 @@ def validate_read_paths(parts: list[str], root: Path) -> None:
             candidate.resolve().relative_to(root.resolve())
         except (ValueError, OSError) as exc:
             raise ValueError(f"Git operand escapes the workspace: {operand}") from exc
+        from kazma_core.store_registry import is_kazma_store, store_refusal
         from kazma_core.workspace.path_policy import control_plane_store_targeted
+        if is_kazma_store(candidate, write=False):
+            raise ValueError(store_refusal(candidate, door="the IDE's git"))
         if control_plane_store_targeted(path, cwd=str(root)):
             raise ValueError("Git reads may not open Kazma control-plane stores")
