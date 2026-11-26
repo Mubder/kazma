@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Memory: "not only", "No, Omar" and a voice note (2026-11-26)
+
+- "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "ليس فقط علي" and "I
+  didn't see Ali alone" no longer take the meeting with Ali away; "Nothing is
+  wrong, I met Omar" takes nothing away either.
+- A reply of just "No, Omar" or "لا، عمر" now puts right what Kazma had just
+  said was Ali.
+- A message that starts "رسالة صوتية:" keeps what you did, as "Voice note:" and
+  "فويس:" did.
+
 ## Memory: Arabic questions about what you told find it as English ones do (2026-11-26)
 
 - Asking in Arabic about the thing itself finds what you told Kazma, as English

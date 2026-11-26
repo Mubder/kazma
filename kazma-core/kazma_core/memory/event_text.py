@@ -32,8 +32,8 @@ import re
 from collections.abc import Iterable
 from functools import lru_cache
 
-__all__ = ["corrects", "denies", "days_elsewhere", "is_event_name", "mentions_value", "own_text", "puts_right",
-           "says_once_more", "stands_elsewhere", "value_words", "words_said"]
+__all__ = ["corrects", "denies", "days_elsewhere", "is_event_name", "mentions_value", "no_then",
+           "own_text", "puts_right", "says_once_more", "stands_elsewhere", "value_words", "words_said"]
 
 #: The share of an event's content words one text holds, at least, for the
 #: event to stand in it; measured on the two pilots' replies (2026-11-24).
@@ -299,11 +299,18 @@ def _own_folded(user_text: str) -> str:
     return fold_for_search(own_text(user_text).replace("’", "'")).lower().strip()
 
 
+#: "Nothing is wrong", "ما في شي غلط": a word of putting right, said of nothing
+#: (W4's left list, L1; the memory plan's W6, step 4).
+_NOTHING_WRONG = re.compile(r"\b(?:nothing|no ?one|nobody|none|no ?thing)(?:'s| is| was)? (?:wrong|a mistake)\b"
+                            r"|(?<!\w)(?:ما ?(?:في|فيه|فيها)|مافي|مافيه|لا ?يوجد|ليس هناك|لا) (?:شي |شيء |اي )?(?:غلط|خطا)(?!\w)")
+
+
 def corrects(user_text: str) -> bool:
     """Whether the user says they put something right: "sorry, I meant Omar",
     "آسف أقصد عمر", "No, it was Omar". Enough by itself with the fact it
-    replaces named; a denial (:func:`denies`) is not."""
-    folded = _own_folded(user_text)
+    replaces named; a denial (:func:`denies`) is not. "Nothing is wrong" puts
+    nothing right."""
+    folded = _NOTHING_WRONG.sub(" ", _own_folded(user_text))
     return (_says_one_of(folded, _CORRECTING_EN, _folded_words(_CORRECTING_AR_RAW))
             or bool(_CORRECTING_PHRASES.search(folded) or _NO_IT_WAS.search(folded)))
 
@@ -313,17 +320,48 @@ _CLAUSE = re.compile(r"[^.,،;؛!?؟\n]+")
 _DENIES_IT_REACH = 4
 
 
+#: A denial that adds instead: "not only Ali", "not just", "I didn't go alone",
+#: "ليس فقط علي", "مو بس علي", "ما رحت بروحي" (W4's left list, L1), folded.
+#: "Only" right after a negation ("not only", "مو بس"); never after a bare "no"
+#: ("No, just Omar", "لا بس عمر" put right). "Alone" anywhere after a denial.
+_ONLY = frozenset({"only", "just", "merely", "simply", "فقط", "بس"})
+_ALONE = frozenset({"alone", "بروحي", "لحالي", "لوحدي", "وحدي", "بمفردي", "بروحه", "لحاله", "لوحده", "وحده", "بروحها",
+                    "لحالها", "لوحدها", "وحدها"})
+_BARE_NO = frozenset({"no", "nope", "لا", "ما"})
+
+
+def _adds_rather(words: list[str], at: int) -> bool:
+    """Whether the denial at *at* in a clause's *words* says "not only" or
+    "not alone"."""
+    after = words[at + 1:]
+    return (words[at] not in _BARE_NO and bool(after) and after[0] in _ONLY) or any(w in _ALONE for w in after)
+
+
+def _adds_rather_than_denies(user_text: str) -> bool:
+    """Whether the message's denial adds to what it names rather than denying
+    it: "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "No, I didn't see
+    Ali alone, I met Omar too"."""
+    folded = _own_folded(user_text)
+    arabic = _folded_words(_DENIALS_AR_RAW)
+    for clause in _CLAUSE.findall(folded):
+        words = re.findall(r"[\w']+", clause)
+        for at, word in enumerate(words):
+            if (word in _DENIALS_EN or word in arabic or word in _BARE_NO) and _adds_rather(words, at):
+                return True
+    return False
+
+
 def _denies_value(folded: str, value: str) -> bool:
     """Whether *folded* denies *value* by name: a denial and, within a few
     words of its clause, a word of it ("not Paris", "مو علي"). "I visited the
-    dentist, no cavities" denies no dentist."""
+    dentist, no cavities" denies no dentist, and "not only Ali" no Ali."""
     wanted = value_words(value)
     arabic = _folded_words(_DENIALS_AR_RAW)
     denials = (_DENIALS_EN - {"actually", "correct", "rather", "never"}) | (arabic - _folded_words(("بل", "الصحيح")))
     for clause in _CLAUSE.findall(folded) if wanted else ():
         words = re.findall(r"[\w']+", clause)
         for at, word in enumerate(words):
-            if word not in denials and not (word[:1] in "وف" and word[1:] in denials):
+            if word not in denials and not (word[:1] in "وف" and word[1:] in denials) or _adds_rather(words, at):
                 continue
             after = " ".join(words[at + 1:at + 1 + _DENIES_IT_REACH])
             if after and _share(wanted, after) >= EVENT_WORDS:
@@ -336,6 +374,26 @@ def puts_right(user_text: str, value: str) -> bool:
     (:func:`corrects`) or denies it by name ("Not Paris, it was Lyon again":
     "again" and "too" take nothing back of that)."""
     return corrects(user_text) or _denies_value(_own_folded(user_text), value)
+
+
+#: A whole message that is "no" and a value: "No, Omar", "Nope, Omar", "No!
+#: Omar, I told you", "لا، عمر", "لأ، عمر", "لا يا كازما، عمر" (W4's left list,
+#: L3). Folded.
+_NO_THEN = re.compile(r"^\W*(?:no|nope|nah|لا|لاء|كلا)(?:[ \t]*[,،.!]+|[ \t]+(?=يا ))\W*(?:يا [^\W\d_]+\W+)?"
+                      r"(?P<value>[^.,،!?؟\n]{1,60}?)"
+                      r"(?:\W+(?:i (?:told|said) (?:you|it|that)|i said|قلت ?لك|قلتلك|قلت لكم|قلت))?\W*$")
+
+
+def no_then(user_text: str, value: str) -> bool:
+    """Whether the user's whole message is "no" and *value*, nothing else: the
+    value the reply says replaces a held one ("No, Omar" after "I met Ali").
+    Bare, it says no more than that, so it is read only beside a reply that
+    names the fact replaced (``belief_extractor._same_event``)."""
+    found = _NO_THEN.match(_own_folded(user_text))
+    if not found:
+        return False
+    said, wanted = value_words(found["value"]), value_words(value)
+    return bool(said) and bool(wanted) and set(said) <= set(wanted) | {"its", "it", "was", "كان", "كانت", "هو", "هي"}
 
 
 def says_once_more(user_text: str) -> bool:
@@ -351,7 +409,11 @@ def denies(user_text: str, value: str = "") -> bool:
     also visited the dentist on 2 May, no cavities" is another visit -- unless
     the message begins with the no, or it denies *value* by name."""
     folded = _own_folded(user_text)
-    if corrects(user_text) or _NO_FIRST.search(folded) or (value and _denies_value(folded, value)):
+    if corrects(user_text):
+        return True
+    if _adds_rather_than_denies(user_text):
+        return bool(value) and _denies_value(folded, value)
+    if _NO_FIRST.search(folded) or (value and _denies_value(folded, value)):
         return True
     if says_once_more(user_text):
         return False

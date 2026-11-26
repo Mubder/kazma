@@ -258,6 +258,8 @@ _EXAMPLE_HEADS_AR = ("مثلا", "مثال", "على سبيل المثال", "ك
 _TEXT_STEMS_AR = frozenset({"رسالت", "ايميل", "كلام", "تعليق", "منشور", "تغريدت", "نبذت", "سيرت", "جواب",
                             "مسج", "بايو", "رد", "مقال", "خطاب", "بوست", "بروفايل"})
 _THIRD_SUFFIXES_AR = ("ها", "هم", "هن", "ه")
+#: What a message is sent as, not whose: "رسالة صوتية", "رسالة نصية" (folded).
+_MEDIUM_AR = frozenset({"صوتيه", "صوتي", "نصيه", "مسجله", "قصيره"})
 _TEXT_NOUNS_AR = frozenset({"رساله", "ايميل", "كلام", "تعليق", "منشور", "تغريده", "نبذه", "سيره", "جواب",
                             "مسج", "بايو", "مقال", "خطاب", "بوست", "بروفايل"})
 #: Remembering a pasted text ("احفظ هذا الإيميل:", "تذكر هالرسالة:").
@@ -683,6 +685,10 @@ def _names_someones_text_ar(words: list[str]) -> bool:
     first = words[0]
     if any(first.endswith(s) and first[:-len(s)] in _TEXT_STEMS_AR for s in _THIRD_SUFFIXES_AR):
         return True
+    if first in _TEXT_NOUNS_AR and len(words) >= 2 and words[1] in _MEDIUM_AR:
+        # "رسالة صوتية:" is the user's voice note, as "Voice note:" is; "رسالة
+        # صوتية من عمر:" Omar's (W4's left list, L4): a word after it says whose.
+        return len(words) >= 3
     return (first in _TEXT_NOUNS_AR and len(words) >= 2 and words[1] not in _OWN_LABELS
             and not _speaks_in_first_person(words[1]))
 

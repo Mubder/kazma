@@ -622,7 +622,15 @@ def _same_event(entry: dict[str, Any], clean: dict[str, Any], user_text: str = "
     * when one of them has no day: a switch ("from vim to emacs yesterday"),
       or the same thing, or what the user puts right ("sorry, I meant Omar",
       "آسف أقصد عمر") or says it was not ("مو علي، عمر")."""
-    from kazma_core.memory.event_text import denies, is_event_name, mentions_value, own_text, puts_right, says_once_more
+    from kazma_core.memory.event_text import (
+        denies,
+        is_event_name,
+        mentions_value,
+        no_then,
+        own_text,
+        puts_right,
+        says_once_more,
+    )
     from kazma_core.memory.fact_days import compatible, could_have_happened_by, event_day, same_thing
     from kazma_core.memory.time_words import says_day
 
@@ -635,7 +643,8 @@ def _same_event(entry: dict[str, Any], clean: dict[str, Any], user_text: str = "
     if not held or not told:
         if not event:
             return True
-        return same or puts_right(user_text, old) or (denies(user_text, old) and mentions_value(old, user_text))
+        return (same or puts_right(user_text, old) or (denies(user_text, old) and mentions_value(old, user_text))
+                or no_then(user_text, str(clean["object"])))
     if not same or compatible(held, told):
         return same
     if meta.get("planned"):

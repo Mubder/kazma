@@ -248,6 +248,43 @@
   reply. A new reader of a fact's day asks `fact_days`. Gate:
   `tests/test_memory_event_lines_review.py` (EN/AR; each point fails on the
   commit reviewed, with its control).
+- **W4's left list, by harm** (2026-11-26, the memory plan's W6, step 4).
+  The final check of W4 (9ea531ce1) left seven small ones. Three are built;
+  `tests/test_memory_w4_left_list.py` holds them in EN, Gulf and MSA.
+  - *L1, a denial that adds* (`event_text.adds_rather_than_denies`): "Not only
+    Ali, I met Omar", "ليس فقط علي", "مو بس علي", "No, I didn't see Ali alone,
+    I met Omar too", "لم ألتق بعلي وحده" closed Ali when the model named him
+    replaced and no day was given.
+    - "Only" right after a negation, or "alone" anywhere after a denial, now
+      adds rather than denies. A bare "no" before "just" still puts right
+      ("No, just Omar").
+    - "Wrong" said of nothing ("Nothing is wrong", "ما في شي غلط", "لا يوجد
+      خطأ") puts nothing right (`_NOTHING_WRONG`).
+    - Gate: every denial of the source's tables before every "only" and
+      "alone" word, with the rule taken away as the control.
+  - *L3, a bare "No, Omar"* (`event_text.no_then`): a whole message that is
+    "no" and a value ("No, Omar", "Nope, Omar", "No! Omar, I told you", "لا،
+    عمر", "لا يا كازما، عمر", "كلا، عمر") puts right the fact the reply says
+    it replaces. Bare, it says no more than that, so it is read only beside a
+    reply's `replaces` (`belief_extractor._same_event`). With none, both stay
+    (the control).
+  - *L4, a voice note* (`own_words._MEDIUM_AR`): "رسالة صوتية:" was read as
+    someone else's message and lost the user's event in MSA (keep 117 of 120;
+    now 120, as English and Gulf). A text noun before a medium ("صوتية",
+    "نصية") is the user's own label unless a word after it says whose ("رسالة
+    صوتية من عمر:"). Gate: every text noun before every medium word.
+  - *Left, with why:*
+    - L2: label lines and "My brother:" follow "in doubt the user's", and a
+      paste let in is filed as Kazma's reading.
+    - L5 and L-d (more pastes let in): the price of M2, and the other side
+      loses the user's own lines.
+    - L6: archive rows from before W4 carry no type; it is one-off and decays.
+    - L7 and the "unclear" ones (what only the pasted part states): the turn
+      itself is remembered.
+    - L-g: bounded, off the loop.
+  - *The undo of a forgotten day* needs nothing built: forgetting is final
+    (§15 I), and forgetting the turn that gave a day takes it back
+    (`test_memory_event_lines_review.py::test_forgetting_the_turn_that_gave_the_day_takes_it_back`).
 - **Whose words an event and its day are, what its name is, and one line
   for it** (the second review of W4, 2026-11-24).
   - *Its words* (`memory/event_text.stands_elsewhere`, asked for every event
