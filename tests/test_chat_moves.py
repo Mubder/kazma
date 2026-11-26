@@ -280,8 +280,11 @@ def test_a_move_on_real_postgres_stores_the_copys_row(world) -> None:
     assert session_manager.get_session_manager()._pg
     session, _thread = w.chat("reem", i["mine"], mark="pg")
     shared = w.moved("reem", i["mine"], session, i["family"])
-    rows = get_pool().execute("SELECT tenant_id, session_id FROM kazma_chat_sessions "
-                              "WHERE session_id IN (%s, %s)", (session, shared))
+    from kazma_core.spaces.row_work import install_statements
+
+    with install_statements("the test's own check, over both spaces' rows"):  # armed: every space's
+        rows = get_pool().execute("SELECT tenant_id, session_id FROM kazma_chat_sessions "
+                                  "WHERE session_id IN (%s, %s)", (session, shared))
     assert [(r["tenant_id"], r["session_id"]) for r in rows] == [(i["family"], shared)]
     w.restart()
     assert len(w.row(i["family"], "reem", shared).messages) == 2
