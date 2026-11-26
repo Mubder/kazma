@@ -335,3 +335,76 @@ def test_the_boot_sweep_enqueues_the_dump_when_it_is_stale():
     block = skip.split("while True:", 1)[0]
     assert "await asyncio.to_thread(_pg_dump_is_stale)" in block
     assert '"native_pg_backup"' in block
+
+
+# ── a CLI the operating system refuses to start (live 2026-11-26) ─────────
+
+
+def _refusing(blocked: Path, *, winerror: int = 4551, calls: list | None = None):
+    """A stand-in for starting a CLI: Windows refuses ``blocked``, every other CLI starts."""
+
+    def start(candidate):
+        if calls is not None:
+            calls.append(str(candidate))
+        if str(candidate) == str(blocked):
+            exc = OSError(22, "An Application Control policy has blocked this file")
+            exc.winerror = winerror
+            raise exc
+
+    return start
+
+
+@pytest.fixture
+def blocked_docker(fake_docker, tmp_path, monkeypatch):
+    """Kazma's own CLI first, refused by an Application Control policy; Docker's own after it."""
+    blocked = tmp_path / "Kazma" / "engine" / "bin" / "docker.exe"
+    blocked.parent.mkdir(parents=True)
+    blocked.write_bytes(b"")
+    monkeypatch.setattr(docker_cli, "_candidates", lambda: [blocked, fake_docker])
+    monkeypatch.setattr(docker_cli, "_on_windows", lambda: True)
+    monkeypatch.setattr(docker_cli, "_started", {})
+    return blocked
+
+
+def test_a_cli_the_os_refuses_is_passed_over_and_said_once(blocked_docker, fake_docker, monkeypatch, caplog):
+    calls: list = []
+    monkeypatch.setattr(docker_cli, "_start", _refusing(blocked_docker, calls=calls))
+    caplog.set_level(logging.WARNING, logger=docker_cli.__name__)
+    assert docker_cli.find_docker_cli() == str(fake_docker)
+    assert docker_cli.find_docker_cli() == str(fake_docker)
+    refused = [r.getMessage() for r in caplog.records if "refuses to start" in r.getMessage()]
+    assert len(refused) == 1 and str(blocked_docker) in refused[0] and "4551" in refused[0]
+    assert calls.count(str(blocked_docker)) == 1  # the refusal is kept, not asked on every call
+    assert calls.count(str(fake_docker)) == 1  # a CLI that started is remembered
+
+
+def test_a_cli_allowed_again_comes_back_by_itself(blocked_docker, fake_docker, monkeypatch):
+    monkeypatch.setattr(docker_cli, "_start", _refusing(blocked_docker))
+    assert docker_cli.find_docker_cli() == str(fake_docker)
+    later = docker_cli.time.monotonic() + docker_cli.REFUSED_RECHECK_S + 1
+    monkeypatch.setattr(docker_cli.time, "monotonic", lambda: later)
+    monkeypatch.setattr(docker_cli, "_start", _refusing(Path("nothing-is-refused")))
+    assert docker_cli.find_docker_cli() == str(blocked_docker)
+
+
+def test_control_without_the_start_check_the_refused_cli_is_chosen(blocked_docker, monkeypatch):
+    """What live did: the file was there, so it was chosen, and every docker call failed."""
+    monkeypatch.setattr(docker_cli, "_start", _refusing(blocked_docker))
+    monkeypatch.setattr(docker_cli, "_usable", lambda path: True)
+    assert docker_cli.find_docker_cli() == str(blocked_docker)
+
+
+def test_control_a_file_that_is_no_program_is_not_a_refusal(blocked_docker, monkeypatch):
+    monkeypatch.setattr(docker_cli, "_start", _refusing(blocked_docker, winerror=193))
+    assert docker_cli.find_docker_cli() == str(blocked_docker)
+
+
+def test_elsewhere_than_windows_nothing_is_started(fake_docker, monkeypatch):
+    monkeypatch.setattr(docker_cli, "_on_windows", lambda: False)
+    monkeypatch.setattr(docker_cli, "_started", {})
+
+    def no_start(candidate):
+        raise AssertionError("a docker CLI was started")
+
+    monkeypatch.setattr(docker_cli, "_start", no_start)
+    assert docker_cli.find_docker_cli() == str(fake_docker)

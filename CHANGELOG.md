@@ -16,6 +16,32 @@
   "keyword matches only", the note to the model on each turn leaves it out,
   and it pages nobody: the database's own alert already says the outage.
 
+## Kazma reaches its database when Windows refuses psycopg's library (2026-11-26)
+
+- **Postgres's own client library stands in**: from 11:30 UTC Windows'
+  Application Control refused the client library psycopg bundles. The next
+  reload could not load any, and Kazma started read-only with the database
+  running. When Windows refuses the bundled library, Kazma now gives
+  psycopg the signed `libpq.dll` of the installed PostgreSQL instead, and
+  says so once in the log. Where the bundled library is allowed, nothing
+  changes.
+
+## A docker program Windows refuses is passed over (2026-11-26)
+
+- **Kazma uses the next docker CLI when Windows refuses its own**: from
+  10:56 UTC Windows refused to start the `docker.exe` Kazma's engine
+  installed ("An Application Control policy has blocked this file"). Kazma
+  chose it because the file was there, so every docker call failed: code
+  execution waited for an engine that was running, and the guard restarted
+  Docker in it again and again. Each docker CLI is now started once before
+  it is chosen. One Windows refuses by policy is said once in the log and
+  passed over for Docker's own CLI, and tried again every five minutes, so
+  allowing it again needs no restart.
+- **The pre-push check does the same**: `scripts/prepush.py` takes the first
+  docker CLI that starts for its Linux part, and runs bandit as
+  `python -m bandit`, since the same policy refused uv's freshly made
+  `bandit.exe` now and then.
+
 ## Spaces: the database's own lock between spaces, its rules in place (2026-11-26)
 
 - Every table Kazma keeps on Postgres now has a rule for Spaces' second lock:
@@ -50,7 +76,7 @@
 - **The regex tests time both inputs in turns**: the tests that prove an old
   pattern slows down faster than its input (and a new one does not) now ask
   one shared measure, `tests/_growth.py`. It times the small and the large
-  input in turns, five of each, so a burst of load on a CI runner can no
+  input in turns, three of each, so a burst of load on a CI runner can no
   longer cover every small call. CI read the old `dd` pattern, sixteen times
   slower on four times the input, as linear. A gate keeps every such helper
   on the one measure.
