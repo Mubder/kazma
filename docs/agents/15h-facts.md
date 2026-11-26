@@ -262,11 +262,16 @@
       puts right ("No, just Omar"), and actually / correct / instead / rather
       / بل / الصحيح never add (`_NEVER_ADDING`). An "only" word after the
       value adds only when what follows goes on with "but" (`_BUT`) or says
-      "too" (`_ONCE_MORE`), in its clause or after it ("not Ali only but
-      Omar", "It wasn't Ali only, Omar too", "مو علي بس، قابلت عمر بعد");
-      before another word it is that word's, and the denial stands ("Not Ali
-      just Omar", "مو علي بس عمر", "مو علي بس، عمر", "I didn't see Ali just
-      now, it was Omar": step 4's delta review, N1, each a put-right test).
+      "too" (`_goes_on_adding`: too, also, as well, plus, أيضا, كمان, كذلك,
+      برضه, and "بعد" ending its words; never "again", "another", "مرة
+      ثانية"). A word after "only" in its clause: that clause alone is read
+      ("not Ali only but Omar", "Not Ali only Omar too", "مو علي بس عمر بعد");
+      "only" ending its clause: the next clause alone ("It wasn't Ali only,
+      Omar too", "مو علي بس، قابلت عمر بعد"). Else the denial stands ("Not
+      Ali just Omar", "مو علي بس، عمر", "I didn't see Ali just now, it was
+      Omar", and "Not Ali just Omar, I saw him again today", "مو علي بس عمر،
+      وكمان رحنا السوق": step 4's delta review N1 and third review B, D, each
+      a test). Each clause's words are read once (`_clause_words`): linear.
     - **Step 4's review (H1, M4):** step 4 read "alone" anywhere after a
       denial, and an unpunctuated message lost its denial: "No I didn't meet
       Ali I was home alone", "مو علي قابلت عمر بروحه", "لم ألتق بعلي بل
@@ -303,7 +308,13 @@
     took 28 s, the delta review's N2): linear. The regex sweep reads a head
     behind `^\W*(...|...)`, and runs each input again with a tail that fails
     late ("a.a"): the snowman it ended with completes a pattern ending
-    `\W*$` at once, which hid this one.
+    `\W*$` at once, which hid this one. The vocative reads its marks once too
+    (`\W++`: "لا يا كازما" + "-" * 5980 + "x.y" took 43 s, the third review's
+    A), and the sweep builds a head through a pattern's optional literal-led
+    groups ("no,يا a ", `sample_head`); it then found the plan approval's
+    "\s*[.!]?\s*$" and WhatsApp's heading quadratic, both rewritten to the
+    same matches. "No, on Thursday" / "لا، يوم الخميس" and "No, actually
+    Omar" / "لا، الصحيح عمر" read alike (E).
   - *L4, a voice note* (`own_words._MEDIUM_AR`): "رسالة صوتية:" was read as
     someone else's message and lost the user's event in MSA (keep 117 of 120;
     now 120, as English and Gulf). A text noun before a medium ("صوتية",

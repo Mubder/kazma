@@ -45,7 +45,9 @@ _APPROVE_RE = re.compile(
     r"proceed|continue|go\s*ahead|do\s+it|approved|agreed|"
     r"approve(?:\s+the\s+plan)?|execute(?:\s+the\s+plan)?|"
     r"يلا|نفّذ|نفذ|نفّذ الخطة|نفذ الخطة|موافق|كمّل|كمل|اكمل|أكمل|تابع|"
-    r"سوّها|سوها|سويها|اعتمد(?:\s+الخطة)?)\s*[.!]?\s*$"
+    # The spaces around the mark read once ("\s*[.!]?\s*$" read a run twice:
+    # quadratic on "/plan go" + tabs, step 4's third review).
+    r"سوّها|سوها|سويها|اعتمد(?:\s+الخطة)?)\s*+(?:[.!]\s*+)?$"
 )
 
 PLAN_MODE_NOTE = (

@@ -90,6 +90,8 @@ ADDS = [
     (GULF, "مو بس علي قابلت عمر بعد"), (GULF, "مو علي بس، قابلت عمر بعد"), (GULF, "ما قابلت علي بروحه، عمر كان معاه"),
     (GULF, "مو علي لحاله، عمر بعد"),
     (MSA, "ليس فقط علي بل عمر أيضا"), (MSA, "ليس علي فقط، عمر أيضا"), (MSA, "لم ألتق بعلي فقط، بل بعمر أيضا"),
+    # "بعد" ending the clause after the new value, as "Omar too" (the third review, D).
+    (EN, "Not Ali only Omar too"), (GULF, "مو علي بس عمر بعد"), (GULF, "مو علي بس، عمر بعد"),
 ]
 
 
@@ -122,6 +124,12 @@ PUT_RIGHT = [
     (GULF, "مو علي بس عمر"), (GULF, "لا مو علي بس عمر"), (GULF, "مب علي بس عمر"), (GULF, "لا ما قابلت علي بس عمر"),
     (GULF, "مو علي بس عمر اللي قابلته"), (GULF, "مو علي بس، عمر"),
     (MSA, "ليس علي فقط عمر"), (MSA, "لم ألتق بعلي فقط بعمر"),
+    # "Again" or a "too" of a later clause adds nothing to "Not Ali just Omar"
+    # (step 4's third review, B: each kept Ali at de794c799).
+    (EN, "Not Ali just Omar. I also went to the gym"), (EN, "Not Ali just Omar, and then we went to the gym again"),
+    (EN, "Not Ali just Omar, I saw him again today"), (EN, "Not Ali just Omar again"),
+    (GULF, "مو علي بس عمر، وكمان رحنا السوق"), (GULF, "مو علي بس عمر، وبعدين رحنا المطعم مره ثانيه"),
+    (MSA, "ليس علي فقط عمر، ثم ذهبنا إلى المطعم مرة أخرى"),
 ]
 
 
@@ -174,7 +182,10 @@ def test_control_a_bare_no_whose_reply_names_nothing_changes_nothing(conn, who, 
     ("لا، وعمر", "عمر", False), ("لا، فعمر", "عمر", False), ("لا، وليد", "وليد", True),
     ("No, the gym", "the gym", True), ("No, my dentist", "my dentist", True), ("No, at the gym", "the gym", True),
     ("No, with Omar", "Omar", True), ("No, in Dubai", "Dubai", True), ("لا، في دبي", "دبي", True),
-    ("لا، مع عمر", "عمر", True), ("كلا، في دبي", "دبي", True)])
+    ("لا، مع عمر", "عمر", True), ("كلا، في دبي", "دبي", True),
+    # The fillers' twins (the third review, E).
+    ("No, on Thursday", "Thursday", True), ("لا، يوم الخميس", "الخميس", True), ("No, actually Omar", "Omar", True),
+    ("لا، الصحيح عمر", "عمر", True)])
 def test_no_then_is_the_whole_message(text, value, whole):
     assert event_text.no_then(text, value) is whole
 
@@ -249,9 +260,10 @@ def test_every_only_or_alone_word_adds_right_after_the_denied_value_and_nowhere_
         # Before another word "only" is that word's: "Not Ali just Omar", "مو
         # علي بس عمر", "مو علي بس، عمر" put right (step 4's delta review, N1).
         for word in event_text._ONLY:
-            for text in (f"{denial} Ali {word} Omar", f"{denial} Ali {word}, Omar", f"{denial} Ali {word}"):
-                assert not event_text._adds_rather(text.replace(",", "").lower().split(), 0, ["ali"],
-                                                   "omar" if "," in text else ""), (text,)
+            # As the product reads it, the comma included (the third review, F).
+            for text in (f"{denial} Ali {word} Omar", f"{denial} Ali {word}, Omar", f"{denial} Ali {word}",
+                         f"{denial} Ali {word} Omar, I saw him again"):
+                assert not event_text._adds_rather_than_denies(text, "Ali"), (text,)
     for no in event_text._ANSWER_NO:
         for word in event_text._ALONE:
             assert not event_text._adds_rather_than_denies(f"{no} went gym {word}", "gym"), (no, word)

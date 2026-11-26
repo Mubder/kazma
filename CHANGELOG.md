@@ -26,7 +26,8 @@
   "Nothing is wrong, I met Omar" takes nothing away either.
 - "Alone" said of someone else or of you still puts right: "Not Ali I met Omar
   alone", "مو علي قابلت عمر بروحه", "No I went to the gym alone on Thursday".
-  So do "Not Ali just Omar", "مو علي بس عمر" and "لا غلط، عمر".
+  So do "Not Ali just Omar", "مو علي بس عمر" and "لا غلط، عمر", whatever else the
+  message goes on to say ("..., I saw him again today").
 - A reply of just "No, Omar", "Nope Omar!" or "لا، عمر" now puts right what
   Kazma had just said was Ali; "No, Omar too", "لا، عمر بعد" and "لا، وعمر" add
   Omar.
