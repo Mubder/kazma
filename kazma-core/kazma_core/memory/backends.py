@@ -60,18 +60,20 @@ _PGVECTOR_INDEX_WARNED: set[tuple[str, str]] = set()
 _VECTOR_GONE = "gone"
 _VECTOR_KEPT = "kept under another space"
 _VECTOR_UNSEEN = "asked from another space's door, which cannot see it once the lock is armed"
-#: Ids a "not gone" was said for in this process: once each (0b review L1).
-_VECTOR_KEPT_SAID: set[str] = set()
+#: The (id, why) a "not gone" was said for in this process: once each (0b
+#: review L1); a new reason for the same id is said again (delta review L-d).
+_VECTOR_KEPT_SAID: set[tuple[str, str]] = set()
 
 
 def _say_vector_kept(item_id: str, outcome: str) -> None:
-    """WARNING the first time an id is not gone, DEBUG after: the forget
-    journal retries it every pass."""
-    first = item_id not in _VECTOR_KEPT_SAID
+    """WARNING the first time an id is not gone for this reason, DEBUG after:
+    the forget journal retries it every pass."""
+    key = (item_id, outcome)
+    first = key not in _VECTOR_KEPT_SAID
     if first:
         if len(_VECTOR_KEPT_SAID) >= 10_000:
             _VECTOR_KEPT_SAID.clear()
-        _VECTOR_KEPT_SAID.add(item_id)
+        _VECTOR_KEPT_SAID.add(key)
     logger.log(logging.WARNING if first else logging.DEBUG,
                "[pgvector] the vector of %s is not known to be gone (%s); the forget journal retries it",
                item_id, outcome)

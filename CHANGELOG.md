@@ -37,7 +37,8 @@
   does so in the space the memory belongs to, and calls it gone only when it
   is: a copy kept under another space is said in the log once and never
   recorded as deleted. A vector is tried again by the forget journal; a
-  fact's copy is removed by the mirror's queue of deletions. With Spaces off
+  fact's copy is removed, or kept marked as no longer true, by the mirror's
+  queue of changes. With Spaces off
   the copy is removed by its id, as before. The vector index had dropped
   which space a vector belonged to when deleting it.
 - Memory's work over every space's chats (recovery, catching up on chats,

@@ -622,6 +622,23 @@ def test_an_empty_tenant_is_the_owners_and_kept_is_said_once(vectors: Any, enfor
     assert sum("e2" in r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING) == 1
 
 
+def test_a_new_reason_for_the_same_id_is_said_again(vectors: Any, enforced: None,
+                                                   caplog: pytest.LogCaptureFixture) -> None:
+    """Delta review L-d: keyed by id alone, a later reason was said at DEBUG only."""
+    vectors.server.hide = True
+    vectors.server.rows["e1"] = "default"
+    with caplog.at_level(logging.WARNING, logger="kazma_core.memory.backends"):
+        with bind_scope("family", "layla"):
+            assert vectors.delete("e1", tenant_id="default") is False  # a door that cannot see it
+        # Not armed here: the row's own door sees the copy kept under another
+        # space (armed, it would not: delta review L-b, the arming step's proof).
+        vectors.server.hide = False
+        assert vectors.delete("e1", tenant_id="family") is False  # kept under another space
+        assert vectors.delete("e1", tenant_id="family") is False  # the same again: DEBUG
+    said = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING and "e1" in r.getMessage()]
+    assert len(said) == 2 and "another space's door" in said[0] and "kept under another space" in said[1], said
+
+
 @pytest.mark.parametrize("wrapper", ["search_state_episodes", "search_state_beliefs"])
 def test_a_refused_search_is_never_no_matches_through_the_wrappers(monkeypatch: pytest.MonkeyPatch,
                                                                    wrapper: str) -> None:
