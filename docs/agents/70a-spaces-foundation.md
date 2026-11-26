@@ -108,7 +108,7 @@ an install with one account behaves as before.
   row security, policies, rights incl. PUBLIC's, schema CREATE, default
   privileges, views, SECURITY DEFINER functions); `space_rows` lists rows
   whose space the registry does not know (M6) and `prove` adds a connection
-  as the role (`_space_conninfo`: the address's own options kept, the role
+  as the role (`space_conninfo`: the address's own options kept, the role
   last, M10). A table made later gets its rule as it is made
   (`ensure_schema` -> `apply_made_tables`; the checkpointer after `setup()`),
   only once `apply` succeeded in this process (`in_place`) and only in a
@@ -139,6 +139,34 @@ an install with one account behaves as before.
   it is idle. `scripts/row_security.py` takes another address only from an
   environment variable it is named (`--url-from`), never its command line
   (§26 D); `kazma doctor` gives it one line while nothing is armed.
+- **Once armed, the shared pool has a space half** (S4-01 step 3,
+  `db/postgres_pool.py`, `db/row_security.py`; nothing arms it yet but tests:
+  `row_security.armed()`, step 6 arms at start). `PostgresPool.connection`
+  asks `row_security.checkout_space()`: nothing said is `NoSpaceBound` before
+  anything is sent; the install's door is the owner's pool as today; a
+  space's goes to a second pool on the same address that signs in as
+  `kazma_space` (`space_conninfo`; every new connection checked to be that
+  role, M10), as large as the install's (M2), and opens the transaction with
+  `BEGIN; SELECT set_config('kazma.space', ...)` in one message, its result
+  read (M3). After that transaction ends the checkout refuses a second one
+  (M4); an install checkout inside a space one is refused unless declared
+  (`_install_inside_a_space`, M13); a space half that cannot sign in while
+  the owner can is its own problem, said, not §44's outage (M1). Those
+  refusals are `NoSpaceBound`s: no other store answers for them (H2). Not
+  armed, the pool takes today's path and opens no space half. The workers'
+  metrics table, which has no space, is the install's
+  (`TaskStore.record_worker_metric` and its two readers); so is the chat
+  store's whole read into its one cache (`_load_all_from_primary`):
+  `KNOWN_OPEN` is empty. The memory mirror and pgvector on Kazma's own
+  database take the shared door once armed (`PostgresPool.held_connection`,
+  a checkout held until `close()`, tuple rows); elsewhere they stay outside
+  the lock. Gates: `tests/test_pg_space_pool.py` (the doors, real Postgres,
+  each with its control) and `tests/test_pg_armed_flows.py` (documents,
+  swarm, chats and the mirror armed and enforced, seeded as requests bind:
+  each space reads its own; not armed as the control).
+  `KAZMA_TEST_SECOND_LOCK=armed` runs any Postgres suite armed
+  (`tests/_second_lock_armed.py`); a test there that reaches the database
+  with nothing bound fails, and binding every test is step 5's.
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner

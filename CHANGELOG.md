@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## Spaces: the database's own lock between spaces, wired and tried (2026-11-26)
+
+- Kazma's connection to its own Postgres can now hold each space to its own
+  rows: once the second lock is armed, a space's statements run as a role
+  that sees that space's rows only, Kazma's own as before, and a statement
+  that says neither is refused before it is sent. Nothing arms it yet: with
+  Spaces on or off, Kazma works exactly as before.
+- Tried armed: documents (upload, processing, recovery, moving, leaving a
+  space, clean-up), the swarm's tasks, chats and the memory copies each read
+  and write their own space only.
+- A document upload refused by the database says so, instead of "capacity
+  unavailable; retry shortly".
+
+## Memory search says when the Postgres copy could not be read (2026-11-26)
+
+- Where Postgres holds memory, a memory found by meaning that could then not
+  be read is a failed memory search, said as one, never left out of the
+  answer in silence.
+- Where this install's own memories answer and the Postgres copy only adds
+  memories other installs wrote: when that copy is away, the answer keeps
+  this install's memories and says the others were not read; when the
+  database refuses (Spaces), the search fails and says so. Neither reads as
+  "nothing more found".
+- Saying it is kept to the searches someone asks for: the memory tool and
+  the Memory page say, calmly and in both languages, that memories from
+  other Kazma installs could not be read just now. It is never called
+  "keyword matches only", the note to the model on each turn leaves it out,
+  and it pages nobody: the outage is said where it happens (and by the
+  database's own alert when the copy is in Kazma's own database).
+- A Postgres copy that is down when Kazma starts no longer slows every
+  memory search by seconds: Kazma asks it again once a minute, not on each
+  search.
 ## Kazma reaches its database when Windows refuses psycopg's library (2026-11-26)
 
 - **Postgres's own client library stands in**: from 11:30 UTC Windows'
@@ -25,22 +57,6 @@
   docker CLI that starts for its Linux part, and runs bandit as
   `python -m bandit`, since the same policy refused uv's freshly made
   `bandit.exe` now and then.
-
-## Memory search says when the Postgres copy could not be read (2026-11-26)
-
-- Where Postgres holds memory, a memory found by meaning that could then not
-  be read is a failed memory search, said as one, never left out of the
-  answer in silence.
-- Where this install's own memories answer and the Postgres copy only adds
-  memories other installs wrote: when that copy is away, the answer keeps
-  this install's memories and says the others were not read; when the
-  database refuses (Spaces), the search fails and says so. Neither reads as
-  "nothing more found".
-- Saying it is kept to the searches someone asks for: the memory tool and
-  the Memory page say, calmly and in both languages, that memories from
-  other Kazma installs could not be read just now. It is never called
-  "keyword matches only", the note to the model on each turn leaves it out,
-  and it pages nobody: the database's own alert already says the outage.
 
 ## Spaces: the database's own lock between spaces, its rules in place (2026-11-26)
 

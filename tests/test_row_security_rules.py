@@ -202,14 +202,14 @@ def test_the_space_address_keeps_the_addresss_own_options() -> None:
     conninfo_to_dict = pytest.importorskip("psycopg.conninfo").conninfo_to_dict
 
     url = "postgresql://kazma_app:pw@127.0.0.1:5432/kazma?options=-c%20search_path%3Dkazma"
-    options = conninfo_to_dict(row_security._space_conninfo(url, environ={}))["options"]
+    options = conninfo_to_dict(row_security.space_conninfo(url, environ={}))["options"]
     assert options == "-c search_path=kazma -c role=kazma_space"
     plain = "postgresql://kazma_app:pw@127.0.0.1:5432/kazma"
-    assert conninfo_to_dict(row_security._space_conninfo(plain, environ={"PGOPTIONS": "-c statement_timeout=5s"}))[
+    assert conninfo_to_dict(row_security.space_conninfo(plain, environ={"PGOPTIONS": "-c statement_timeout=5s"}))[
         "options"] == "-c statement_timeout=5s -c role=kazma_space"
     # The role comes last, so an address that names another role is overruled.
     other = "postgresql://u@h/d?options=-c%20role%3Dkazma_app"
-    assert conninfo_to_dict(row_security._space_conninfo(other, environ={}))["options"].endswith(
+    assert conninfo_to_dict(row_security.space_conninfo(other, environ={}))["options"].endswith(
         "-c role=kazma_space")
 
 

@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from kazma_core.db import availability as _availability
-from kazma_core.db import space_doors
+from kazma_core.db import row_security, space_doors
 from kazma_core.db.backend import get_database_url, is_postgres, require_postgres_driver
 from kazma_core.spaces.row_work import install_statements
 
@@ -144,6 +144,13 @@ class PostgresPool:
         except ValueError:
             checkout_s = 5.0
         checkout_s = max(1.0, min(checkout_s, 30.0))
+        self._dsn = dsn
+        self._max_size = max_size
+        self._checkout_s = checkout_s
+        # The space half (Spaces S4-01 step 3): opened on the first space
+        # checkout once the second lock is armed; never while it is not.
+        self._space_pool: Any = None
+        self._space_lock = threading.Lock()
         self._pool = ConnectionPool(
             conninfo=dsn,
             min_size=min_size,
@@ -174,6 +181,14 @@ class PostgresPool:
         # Which door the statements go through, counted (Spaces S4-01 step
         # 1, report mode): nothing is sent and nothing is refused.
         space_doors.checkout("shared")
+        if row_security.armed():
+            # The second lock (S4-01): whose statements these are decides the
+            # pool -- a space's, the install's, or none (refused, unsent).
+            space = row_security.checkout_space()
+            if space:
+                with self._space_checkout(space, timeout) as conn:
+                    yield conn
+                return
         start = _availability.now()
         try:
             with self._pool.connection(timeout=timeout) as conn:
@@ -182,6 +197,63 @@ class PostgresPool:
             _availability.note_failure("pool", exc)
             raise
         _availability.note_success("pool", since=start)
+
+    def held_connection(self) -> Any:
+        """A checkout of this pool's door, held open until its ``close()``:
+        for the stores that open and close a connection themselves (the
+        memory mirror, pgvector) on Kazma's own database once the second lock
+        is armed, so their statements take the door of their space, the
+        install's, or none (S4-01 step 3). Its rows are tuples while held, as
+        those stores' own connections give them."""
+        return _HeldConnection(self.connection())
+
+    def _space_half(self) -> Any:
+        """The pool that signs in as the space role (the address's own
+        options kept, the role last: ``row_security.space_conninfo``), as
+        large as the install's (review M2)."""
+        with self._space_lock:
+            if self._space_pool is None:
+                from psycopg_pool import ConnectionPool  # type: ignore
+
+                self._space_pool = ConnectionPool(
+                    conninfo=row_security.space_conninfo(self._dsn),
+                    min_size=0,
+                    max_size=self._max_size,
+                    timeout=self._checkout_s,
+                    kwargs=pool_connection_kwargs(self._dsn, row_factory=self._dict_row, autocommit=False),
+                    connection_class=row_security.space_connection_class(),
+                    configure=row_security.check_space_role,
+                    reset=row_security.end_space,
+                    check=ConnectionPool.check_connection,
+                    open=True,
+                )
+                close_at_exit(self._space_pool)
+            return self._space_pool
+
+    @contextmanager
+    def _space_checkout(self, space: str, timeout: float | None) -> Generator[Any, None, None]:
+        start = _availability.now()
+        try:
+            with self._space_half().connection(timeout=timeout) as conn:
+                row_security.begin_space(conn, space)
+                with row_security.holding(space):
+                    yield conn
+        except self._driver_errors as exc:
+            self._space_failed(exc)
+            raise
+        _availability.note_success("pool", since=start)
+
+    def _space_failed(self, exc: BaseException) -> None:
+        """A space checkout failed. An outage when the owner cannot sign in
+        either (§44); else the space role's own problem, said as one, never
+        an outage (review M1). One direct sign-in each, after the pool gave up."""
+        if not _availability.is_outage(exc):
+            return
+        if refusal_reason(self._dsn) is not None:
+            _availability.note_failure("pool", exc)
+            return
+        row_security.say_space_half_failed(refusal_reason(row_security.space_conninfo(self._dsn))
+                                           or type(exc).__name__)
 
     def execute(self, sql: str, params: tuple | list | dict | None = None) -> list[dict]:
         """Run *sql* and commit; return its rows.
@@ -214,10 +286,48 @@ class PostgresPool:
         return rows[0] if rows else None
 
     def close(self) -> None:
+        for pool in (self._pool, self._space_pool):
+            if pool is None:
+                continue
+            try:
+                pool.close()
+            except (*self._driver_errors, OSError, RuntimeError) as exc:
+                logger.debug("[PostgresPool] close failed: %s", type(exc).__name__)
+
+
+class _HeldConnection:
+    """:meth:`PostgresPool.connection` entered now and left at ``close()``.
+
+    A transaction a failed statement left open is rolled back first; the
+    door's own block then commits whatever is left and gives the connection
+    back. Closed where it was opened (the door's context is this thread's)."""
+
+    def __init__(self, door: Any) -> None:
+        from psycopg.rows import tuple_row
+
+        self._door = door
+        self._conn = door.__enter__()
+        self._rows = self._conn.row_factory
+        self._conn.row_factory = tuple_row
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+    def close(self) -> None:
+        door, self._door = self._door, None
+        if door is None:
+            return
+        import psycopg
+        from psycopg.pq import TransactionStatus
+
         try:
-            self._pool.close()
-        except (*self._driver_errors, OSError, RuntimeError) as exc:
-            logger.debug("[PostgresPool] close failed: %s", type(exc).__name__)
+            if not self._conn.closed and self._conn.info.transaction_status == TransactionStatus.INERROR:
+                self._conn.rollback()
+        except (psycopg.Error, OSError) as exc:  # the door's block below discards a broken connection
+            logger.debug("[PostgresPool] rollback before giving back a held connection failed: %s",
+                         type(exc).__name__)
+        self._conn.row_factory = self._rows
+        door.__exit__(None, None, None)
 
 
 class PostgresUnreachable(RuntimeError):

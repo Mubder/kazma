@@ -11,6 +11,8 @@ from __future__ import annotations
 #: connection (path 5 of the design), outside the doors in every step.
 MADE: dict[str, str] = {
     "kazma-core/kazma_core/db/postgres_pool.py::PostgresPool.__init__": "door: PostgresPool.connection",
+    "kazma-core/kazma_core/db/postgres_pool.py::PostgresPool._space_half":
+        "door: PostgresPool.connection",
     "kazma-core/kazma_core/checkpoints_pg.py::open_postgres_checkpointer":
         "door: _reported_pool_class.ReportedCheckpointPool.connection",
     "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend._get_pool":
@@ -86,7 +88,7 @@ CHECKOUTS: dict[str, tuple[str, ...]] = {
         "verify_required_pg_tables",
     ),
     "kazma-core/kazma_core/db/postgres_pool.py": (
-        "_ensure_core_schema",
+        "PostgresPool._space_checkout", "PostgresPool.held_connection", "_ensure_core_schema",
     ),
     "kazma-core/kazma_core/documents/admission.py": (
         "IntakeAdmissionStore._transaction",
@@ -188,12 +190,4 @@ CHECKOUTS: dict[str, tuple[str, ...]] = {
 #: ("V"). An entry leaves when its step lands; one is added only with the
 #: step that ends it.
 KNOWN_OPEN: dict[str, tuple[str, str, tuple[str, ...]]] = {
-    "kazma-ui/kazma_ui/session_manager.py::SessionManager._load_all_from_primary": (
-        "every space's chats, read whole when the chat store starts, nothing bound (section 5: the install's)",
-        "step 3, chats",
-        ("kazma-ui/kazma_ui/session_manager.py::SessionManager._load_all_from_primary",)),
-    "kazma-core/kazma_core/swarm/metrics.py::MetricsCollector._flush_metric": (
-        "the workers' metrics table has no space column: the install's, outside the policies (L9)",
-        "step 2, the rules",
-        ("kazma-core/kazma_core/swarm/task_store.py::TaskStore.record_worker_metric",)),
 }

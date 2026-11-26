@@ -33,7 +33,7 @@ from typing import Any, Callable, Iterator
 from kazma_core.config_store import apply_sqlite_pragmas
 from kazma_core.db.pg_helpers import is_space_refusal
 from kazma_core.spaces import threads
-from kazma_core.spaces.row_work import statements_of
+from kazma_core.spaces.row_work import install_statements, statements_of
 from kazma_core.spaces.scope import OWNER_SPACE_ID, require_space_id
 
 logger = logging.getLogger(__name__)
@@ -590,6 +590,8 @@ class SessionManager:
             # A session whose every save was refused has no primary row at all.
             self._add_spooled_only(dest)
 
+    @install_statements("every space's chats, read whole into the one cache this process keeps, keyed by "
+                        "space (design section 5)")
     def _load_all_from_primary(
         self, *, limit: int | None, dest: dict[str, ChatSession]
     ) -> None:

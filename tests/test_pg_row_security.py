@@ -130,7 +130,7 @@ def _new_database(db: dict[str, Any], *, owner: str = "kazma_app") -> str:
 def _space(db: dict[str, str]) -> Any:
     from kazma_core.db import row_security
 
-    return psycopg.connect(row_security._space_conninfo(db["app"]), autocommit=False)
+    return psycopg.connect(row_security.space_conninfo(db["app"]), autocommit=False)
 
 
 def _in(conn: Any, space: str | None, statement: str, params: tuple[Any, ...] = ()) -> Any:

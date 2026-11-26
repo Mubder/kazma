@@ -1047,14 +1047,15 @@
       }
       // Beside the hits or "No hits.", never instead of them: this install's
       // own search was whole.
-      const mirror = data.mirror_unread ? _mirrorUnreadBanner() : '';
+      const mirror = data.mirror_unread ? _mirrorUnreadBanner(!data.degraded) : '';
       if (!lines.length) {
         const hints = (data.hints || []).map(function(hh) {
           return '<div translate="no" class="mem-warn" style="margin-top:4px;">• ' + _esc(hh) + '</div>';
         }).join('');
         out.innerHTML = mirror + '<span class="mem-muted">' + _esc(_mt('memory.console.no_hits', 'No hits.')) + '</span>' + hints;
       } else {
-        out.innerHTML = mirror + lines.join('') +
+        // After the degraded banner, as the federated search shows it.
+        out.innerHTML = (data.degraded ? lines.shift() : '') + mirror + lines.join('') +
           '<div class="mem-muted" style="margin-top:6px;font-size:0.68rem;">' + _esc(_mt('memory.console.channels_hint', 'Channels: fts5 · dense · belief_ppr · session_boost (enable Explain recall in Settings → Memory)')) + '</div>' +
           '<button type="button" class="btn btn-sm btn-secondary" id="v2-probe-path-btn" style="margin-top:8px;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>' +
           '<button type="button" class="btn btn-sm btn-outline" id="v2-eval-golden-btn" style="margin-top:8px;margin-inline-start:6px;">' + _esc(_mt('memory.console.run_golden_eval', 'Quick recall check')) + '</button>';
@@ -1289,12 +1290,14 @@
     // A failed search is a failure (danger); keyword-only is a warning.
     return '<div class="notice tone-' + (failed ? 'danger' : 'warning') + '" style="display:block;margin-bottom:6px;font-size:0.72rem;">' + _esc(text) + '</div>';
   }
-  // Other installs' memories unread (the Postgres mirror away): this
-  // install's own were all searched, so a calm note, never "keyword matches
-  // only" (recall-strict review M1).
-  function _mirrorUnreadBanner() {
+  // Other installs' memories unread (the Postgres mirror away): a calm
+  // note, never "keyword matches only" (recall-strict review M1). "All
+  // searched" only when meaning search did not fall short too (delta Low 1).
+  function _mirrorUnreadBanner(whole) {
+    let text = _mt('memory.console.mirror_unread', 'Memories from other Kazma installs could not be read just now.');
+    if (whole) text += ' ' + _mt('memory.console.mirror_unread_whole', "This install's own memories were all searched.");
     return '<div class="notice tone-info" style="display:block;margin-bottom:6px;font-size:0.72rem;">' +
-      _esc(_mt('memory.console.mirror_unread', "Memories from other Kazma installs could not be read just now; this install's own were all searched.")) + '</div>';
+      _esc(text) + '</div>';
   }
   function _knowledgeFailedBanner() {
     return '<div class="notice tone-danger" style="display:block;margin-bottom:6px;font-size:0.72rem;">' +
@@ -1353,7 +1356,7 @@
       const banners = [];
       if (data.degraded) banners.push(_memoryDegradedBanner(data.degraded));
       if (data.knowledge_error) banners.push(_knowledgeFailedBanner());
-      const mirror = data.mirror_unread ? _mirrorUnreadBanner() : '';
+      const mirror = data.mirror_unread ? _mirrorUnreadBanner(!data.degraded) : '';
       if (lines.length) {
         out.innerHTML = banners.join('') + mirror + lines.join('') +
           '<button type="button" class="btn btn-sm btn-secondary" id="v2-fed-path-btn" style="margin-top:8px;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>';
