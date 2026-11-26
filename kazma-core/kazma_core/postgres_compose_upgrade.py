@@ -309,6 +309,7 @@ def _move_in(dep: _Deployment, dump: Path, before, journal: dict[str, Any], run,
     if done.returncode != 0:
         said = (done.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-1:] or [""]
         raise _StepFailedError(f"the restore failed (exit {done.returncode}): {said[0][:300]}")
+    _close_functions(dep, run, say)
     after = _snapshot(d, dep.name, dep.user, dep.database)
     differ = sorted(t for t in before[0] if before[0][t] != after[0].get(t))
     differ += sorted(f"sequence {s}" for s in before[1] if before[1][s] != after[1].get(s))
@@ -318,6 +319,19 @@ def _move_in(dep: _Deployment, dump: Path, before, journal: dict[str, Any], run,
         f"Postgres {dep.new_major}")
     d.compose("up", "-d", "--no-deps", "--force-recreate", "db")
     _wait_ready(d, dep.name, dep.user, dep.database)
+
+
+def _close_functions(dep: _Deployment, run, say) -> None:
+    """PUBLIC may run none of Kazma's functions on the copy (restored without
+    privileges, they have PUBLIC's default: Spaces S4-01 step 2 review L3)."""
+    from kazma_core.db.pg_backup import revoke_public_execute_sql
+
+    done = run([dep.d.docker, "exec", dep.name, "psql", "-U", dep.user, "-d", dep.database, "-v",
+                "ON_ERROR_STOP=1", "-At", "-c", revoke_public_execute_sql()],
+               stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=False)
+    if done.returncode != 0:
+        say(f"   PUBLIC may still run Kazma's functions (exit {done.returncode}): "
+            "python scripts/row_security.py apply takes it away.")
 
 
 def _after_failure(dep: _Deployment, journal: dict[str, Any], say) -> None:

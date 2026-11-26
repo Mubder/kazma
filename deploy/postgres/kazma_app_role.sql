@@ -106,7 +106,7 @@ $$;
 DO $$
 DECLARE
     r record;
-    wrong boolean;
+    held boolean;
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'kazma_space') THEN
         CREATE ROLE kazma_space NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
@@ -126,15 +126,21 @@ BEGIN
     -- kazma_app holds it: it may switch to it, and inherits none of its rights
     -- (before PostgreSQL 16 a membership has no such options).
     IF current_setting('server_version_num')::int >= 160000 THEN
+        -- Every grant that inherits or cannot switch is taken back, whoever
+        -- made it (a REVOKE alone takes back only the current role's).
+        FOR r IN EXECUTE 'SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.grantor '
+                         'WHERE m.roleid = ''kazma_space''::regrole AND m.member = ''kazma_app''::regrole '
+                         'AND (m.inherit_option OR NOT m.set_option)'
+        LOOP
+            EXECUTE format('REVOKE kazma_space FROM kazma_app GRANTED BY %I CASCADE', r.rolname);
+        END LOOP;
         EXECUTE 'SELECT EXISTS (SELECT 1 FROM pg_auth_members WHERE roleid = ''kazma_space''::regrole '
-                'AND member = ''kazma_app''::regrole AND (inherit_option OR NOT set_option))' INTO wrong;
-        IF wrong THEN
-            EXECUTE 'REVOKE kazma_space FROM kazma_app';
-        END IF;
-        IF NOT pg_has_role('kazma_app', 'kazma_space', 'MEMBER') THEN
+                'AND member = ''kazma_app''::regrole AND set_option)' INTO held;
+        IF NOT held THEN
             EXECUTE 'GRANT kazma_space TO kazma_app WITH INHERIT FALSE, SET TRUE';
         END IF;
-    ELSIF NOT pg_has_role('kazma_app', 'kazma_space', 'MEMBER') THEN
+    ELSIF NOT EXISTS (SELECT 1 FROM pg_auth_members
+                      WHERE roleid = 'kazma_space'::regrole AND member = 'kazma_app'::regrole) THEN
         EXECUTE 'GRANT kazma_space TO kazma_app';
     END IF;
 
@@ -199,6 +205,13 @@ BEGIN
     LOOP
         EXECUTE format('GRANT USAGE ON SEQUENCE %s TO kazma_space', r.seq);
     END LOOP;
+
+    -- The function the policies call, once Kazma's rules made it: the space
+    -- role may run it, PUBLIC may not.
+    IF to_regprocedure('public.kazma_space_id()') IS NOT NULL THEN
+        EXECUTE 'REVOKE EXECUTE ON FUNCTION public.kazma_space_id() FROM PUBLIC';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.kazma_space_id() TO kazma_space';
+    END IF;
 END
 $$;
 
