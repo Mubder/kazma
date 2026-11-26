@@ -194,6 +194,7 @@ def test_docker_desktop_first_and_no_docker_is_a_failure_not_a_skip(monkeypatch,
             return subprocess.CompletedProcess(cmd, 0 if ok else 1, "linux\n" if ok else "", "")
         return run
 
+    monkeypatch.setattr(prepush, "docker_exe", lambda: "docker")
     monkeypatch.setattr(prepush.subprocess, "run", docker({"desktop-linux", "kazma-engine"}))
     assert prepush.docker_context() == "desktop-linux" and asked == ["desktop-linux"]
     monkeypatch.setattr(prepush.subprocess, "run", docker({"kazma-engine"}))
@@ -435,3 +436,34 @@ def test_control_a_rerun_that_says_nothing_changes_nothing():
     part = prepush.Part("linux")
     prepush.judge(part, 0, "[fast-test] TOTALS in 1s: 3 passed\n", [], None)
     assert part.ok and part.failures == ""
+
+
+# ── a program Windows refuses (2026-11-26) ───────────────────────────────
+
+
+def test_a_docker_cli_the_system_refuses_is_passed_over(monkeypatch):
+    started: list[str] = []
+
+    def run(cmd, **kw):
+        started.append(cmd[0])
+        if cmd[0] == "refused-docker":
+            raise OSError(22, "An Application Control policy has blocked this file")
+        return subprocess.CompletedProcess(cmd, 0, "Docker version 29", "")
+
+    monkeypatch.setattr(prepush, "_docker_candidates", lambda: ["refused-docker", "desktop-docker"])
+    monkeypatch.setattr(prepush, "_DOCKER", [])
+    monkeypatch.setattr(prepush.subprocess, "run", run)
+    assert prepush.docker_exe() == "desktop-docker"
+    assert prepush.docker_exe() == "desktop-docker" and started == ["refused-docker", "desktop-docker"]
+
+
+def test_control_the_first_docker_that_starts_is_kept(monkeypatch):
+    monkeypatch.setattr(prepush, "_docker_candidates", lambda: ["path-docker", "desktop-docker"])
+    monkeypatch.setattr(prepush, "_DOCKER", [])
+    monkeypatch.setattr(prepush.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
+    assert prepush.docker_exe() == "path-docker"
+
+
+def test_bandit_runs_as_a_module_and_other_tools_as_named():
+    assert prepush.locked_tool("scan", ["bandit", "-r", "x"])[-5:] == ["python", "-m", "bandit", "-r", "x"]
+    assert prepush.locked_tool("lint", ["ruff", "check"])[-2:] == ["ruff", "check"]

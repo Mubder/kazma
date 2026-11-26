@@ -491,12 +491,47 @@ def run_browser(part: Part, files: list[str], processes: int) -> None:
 
 # ── Linux, Python 3.11, no psycopg ───────────────────────────────────────
 
+def _docker_candidates() -> list[str]:
+    """PATH's docker, then Docker Desktop's and Kazma's own engine's install folders."""
+    out = [shutil.which("docker") or ""]
+    if os.name == "nt":
+        roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432")] + [r"C:\Program Files"]
+        out += [str(Path(r) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe") for r in roots if r]
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            out.append(str(Path(local) / "Kazma" / "engine" / "bin" / "docker.exe"))
+    return [c for c in dict.fromkeys(out) if c]
+
+
+_DOCKER: list[str] = []
+
+
+def docker_exe() -> str:
+    """The first docker CLI that starts (2026-11-26: Windows' Application
+    Control began refusing the copy Kazma's engine put first on PATH, and the
+    Linux part found no Docker). As ``kazma_core.docker_cli`` does, a CLI the
+    system refuses is passed over; this script does not import Kazma."""
+    if not _DOCKER:
+        for candidate in _docker_candidates():
+            try:
+                subprocess.run([candidate, "--version"], capture_output=True, timeout=15, check=False)
+            except subprocess.TimeoutExpired:
+                pass
+            except OSError:
+                continue
+            _DOCKER.append(candidate)
+            break
+        else:
+            _DOCKER.append("docker")
+    return _DOCKER[0]
+
+
 def docker_context() -> str:
     """The first Docker that answers: Docker Desktop, else Kazma's own engine
     (the live install's Neo4j and SearXNG run there). Never started here."""
     for context in CONTEXTS:
         with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-            done = subprocess.run(["docker", "--context", context, "info", "--format", "{{.OSType}}"],
+            done = subprocess.run([docker_exe(), "--context", context, "info", "--format", "{{.OSType}}"],
                                   capture_output=True, text=True, timeout=15)
             if done.returncode == 0 and done.stdout.strip() == "linux":
                 return context
@@ -522,7 +557,7 @@ def ensure_image(context: str, log: Path) -> str:
     dockerfile = (REPO / "deploy" / "prepush" / "Dockerfile").read_text(encoding="utf-8").replace("\r\n", "\n")
     requirements = locked_requirements()
     tag = image_tag(dockerfile, requirements)
-    docker = ["docker", "--context", context]
+    docker = [docker_exe(), "--context", context]
     if subprocess.run([*docker, "image", "inspect", tag], capture_output=True).returncode == 0:
         return tag
     print(f"[prepush] linux: building {tag} (once per uv.lock)", flush=True)
@@ -576,7 +611,7 @@ def run_linux(part: Part, files: list[str], processes: int, whole: bool = False,
     except (RuntimeError, OSError) as exc:
         part.failures = str(exc)
         return
-    docker = ["docker", "--context", context]
+    docker = [docker_exe(), "--context", context]
     name = f"kazma-prepush-{os.getpid()}"
     memory = f"{int(processes * LINUX_GB + LINUX_FILES_GB + 1)}g"
     part.failures = "the container could not be prepared"
@@ -639,9 +674,17 @@ def ci_commands(job: str, program: str, ci_text: str | None = None) -> list[list
     return found
 
 
+#: Tools run as ``python -m <tool>`` instead of the console script uv makes:
+#: Windows' Application Control refuses a freshly made ``bandit.exe`` now and
+#: then ("os error 4551", 2026-11-26), while the interpreter it runs under starts.
+_AS_MODULE = frozenset({"bandit"})
+
+
 def locked_tool(group: str, words: list[str]) -> list[str]:
     """*words* run from a locked dependency group, in an environment of its
     own: the checkout's virtualenv is not touched."""
+    if words and words[0] in _AS_MODULE:
+        words = ["python", "-m", *words]
     return ["uv", "run", "--isolated", "--frozen", "--only-group", group, "--python", sys.executable, *words]
 
 

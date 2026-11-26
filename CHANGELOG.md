@@ -11,6 +11,10 @@
   it is chosen. One Windows refuses by policy is said once in the log and
   passed over for Docker's own CLI, and tried again every five minutes, so
   allowing it again needs no restart.
+- **The pre-push check does the same**: `scripts/prepush.py` takes the first
+  docker CLI that starts for its Linux part, and runs bandit as
+  `python -m bandit`, since the same policy refused uv's freshly made
+  `bandit.exe` now and then.
 
 ## Spaces: the database's own lock between spaces, its rules in place (2026-11-26)
 
