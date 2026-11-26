@@ -88,7 +88,9 @@ workspace. Three new modules; understanding their interaction is essential.
   it was dismissed because `resolve` "contains" it. `resolve` now refuses
   Kazma's stores and secret files wherever they are; the IDE MCP server's
   `read_file` / `search_code` and the TUI's file preview ask the same
-  predicate. Gate: `tests/test_ide_reads_refuse_kazma_files.py` (a census of
+  predicate. A save, a patch or a delete resolves with `write=True`, so
+  Kazma's configuration (readable by every door) is refused before the
+  tool and its card run. Gate: `tests/test_ide_reads_refuse_kazma_files.py` (a census of
   every file read in `kazma_core/ide/` and every module that drives
   `get_ide_service()`, each declared with a probe that plants Kazma's
   secret files in the workspace; every IdeService method that takes a path

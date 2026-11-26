@@ -475,3 +475,36 @@ def test_the_users_own_files_still_open(install: Path, tool_calls: list) -> None
     assert "greet_all" in labels
     assert "greet_all" in _tool_read_file(install, {"path": "src/app.py"})
     assert asyncio.run(svc.list_path("src"))["ok"] is True
+
+
+# ── Kazma's configuration: the IDE opens it and never changes it ────────
+
+#: The IdeService methods that change a file: they resolve with ``write``.
+_SAVES = ("write_file", "apply_patch", "apply_patch_set", "delete_file")
+
+
+def test_the_ide_saves_no_kazma_configuration_and_still_opens_it(
+    install: Path, tool_calls: list,
+) -> None:
+    """Configuration is readable by every door and writable by none
+    (``is_kazma_store(path, write=True)``): a save, a patch or a delete of
+    ``kazma.yaml`` is refused before its tool (and its approval card) runs."""
+    from kazma_core.ide.lsp import handle_lsp
+    from kazma_core.ide.service import get_ide_service
+    from kazma_gateway.mcp_server import _tool_write_file
+
+    (install / "kazma.yaml").write_text("agent:\n  name: kazma\n", encoding="utf-8")
+    svc = get_ide_service()
+    for method in _SAVES:
+        answer = asyncio.run(_PATH_CALLS[method](svc, "kazma.yaml"))
+        assert answer["ok"] is False, method
+    with pytest.raises(PermissionError):
+        _tool_write_file(install, {"path": "kazma.yaml", "content": "x"})
+    assert tool_calls == []
+    assert svc._read_file_sync("kazma.yaml")["ok"] is True
+    assert handle_lsp("documentSymbol", path="kazma.yaml")["ok"] is True
+    # The control: asked as a read, the resolver lets configuration through;
+    # only the save's write mode refuses it.
+    assert svc.resolve("kazma.yaml") == (install / "kazma.yaml").resolve()
+    with pytest.raises(ValueError):
+        svc.resolve("kazma.yaml", write=True)

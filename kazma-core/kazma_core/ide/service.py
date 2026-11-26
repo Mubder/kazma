@@ -85,13 +85,14 @@ def _lang_for_path(path: Path) -> str:
     }.get(ext, "plaintext")
 
 
-def _kazma_file_refusal(target: Path) -> str | None:
+def _kazma_file_refusal(target: Path, *, write: bool) -> str | None:
     """Why the IDE will not open *target*, when it is one of Kazma's own
-    stores or secret files (``store_registry.is_kazma_store``, the one
+    stores or secret files, or (with *write*) its configuration, which every
+    door reads and none changes (``store_registry.is_kazma_store``, the one
     predicate every door asks); None for any other path."""
     from kazma_core.store_registry import is_kazma_store, store_refusal
 
-    if not is_kazma_store(target):
+    if not is_kazma_store(target, write=write):
         return None
     return store_refusal(target, door="the IDE")
 
@@ -134,21 +135,23 @@ class IdeService:
         self._root = _resolve_workspace_root()
         return self._root
 
-    async def _aresolve(self, rel_path: str) -> Path:
+    async def _aresolve(self, rel_path: str, *, write: bool = False) -> Path:
         """:meth:`resolve` in a thread.
 
         Resolving reads the workspace store (the root is re-resolved on every
         call) and the filesystem (``realpath``): every async method resolves
         through this, never on the event loop (2026-10-01).
         """
-        return await asyncio.to_thread(self.resolve, rel_path)
+        return await asyncio.to_thread(self.resolve, rel_path, write=write)
 
-    def resolve(self, rel_path: str) -> Path:
+    def resolve(self, rel_path: str, *, write: bool = False) -> Path:
         """Resolve a (possibly relative) path against the workspace root.
 
         Raises ``ValueError`` if the result escapes the workspace (path
         traversal protection), or names one of Kazma's own stores or secret
-        files, wherever it is. Absolute paths inside the root are allowed.
+        files, wherever it is; with *write* (a save, a patch, a delete) also
+        Kazma's configuration, which the IDE opens but never changes.
+        Absolute paths inside the root are allowed.
         Uses ``os.path.realpath`` (fully symlink/junction aware) so the
         check is robust on Windows where ``%LOCALAPPDATA%\\Temp`` is often a
         junction.
@@ -229,7 +232,7 @@ class IdeService:
         # diagnostics, run, save, delete) resolves through here. On an install
         # whose workspace is the install folder, code completion offered the
         # words of .env (2026-11-26; gate tests/test_ide_reads_refuse_kazma_files.py).
-        refusal = _kazma_file_refusal(target)
+        refusal = _kazma_file_refusal(target, write=write)
         if refusal:
             raise ValueError(refusal)
         # Return the original (non-realpath) resolved path for display.
@@ -357,7 +360,7 @@ class IdeService:
         success/error message.
         """
         try:
-            target = await self._aresolve(rel_path)
+            target = await self._aresolve(rel_path, write=True)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "path": rel_path}
         res = await self._call_tool("file_write", {"path": str(target), "content": content})
@@ -379,7 +382,7 @@ class IdeService:
         Prefer this over :meth:`write_file` for edits to existing files.
         """
         try:
-            target = await self._aresolve(rel_path)
+            target = await self._aresolve(rel_path, write=True)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "path": rel_path}
         res = await self._call_tool(
@@ -401,7 +404,7 @@ class IdeService:
         for item in patches or []:
             rel = str(item.get("path") or "")
             try:
-                target = await self._aresolve(rel)
+                target = await self._aresolve(rel, write=True)
             except ValueError as exc:
                 return {"ok": False, "error": str(exc), "path": rel}
             row = dict(item)
@@ -428,7 +431,7 @@ class IdeService:
         recursively. The path is traversal-checked via :meth:`resolve`.
         """
         try:
-            target = await self._aresolve(rel_path)
+            target = await self._aresolve(rel_path, write=True)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "path": rel_path}
         if not await asyncio.to_thread(target.exists):

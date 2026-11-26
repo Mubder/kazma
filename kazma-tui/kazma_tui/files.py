@@ -131,7 +131,7 @@ class FilesPanel(VerticalScroll):
         """
         from kazma_core.store_registry import is_kazma_store, store_refusal
 
-        if is_kazma_store(path):
+        if is_kazma_store(path, write=False):
             raise PermissionError(store_refusal(path, door="the preview"))
         with path.open("r") as f:
             content = f.read(limit + 1)
