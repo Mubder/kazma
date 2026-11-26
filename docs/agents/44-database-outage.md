@@ -44,6 +44,12 @@ problem was its database. Each layer now holds on its own:
   server's (`or_its_server`). Pings and schema statements are
   `install_statements` (§70 (1)), `tests/test_install_probes_say_so.py`; the
   role question reads `session_user`.
+- **A checkout counts its door before anything else, and nothing more**
+  (S4-01 step 1, §70 (1)): `PostgresPool.connection` and the checkpointer's
+  pool call `space_doors.checkout`, which reads nothing, sends nothing and
+  never raises, so an outage, a pool timeout and a refusal take the path they
+  took before. A connection made anywhere else is declared an own sign-in
+  (`tests/test_space_doors_gates.py`).
 - **One answer to "is the database away"** (`kazma_core/db/availability.py`,
   resilience plan A3, 2026-11). Live 2026-11-03/04 Docker took the database
   away for eleven hours: every background loop retried on its own clock and

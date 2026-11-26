@@ -1843,6 +1843,16 @@ class KazmaAppBuilder:
         from kazma_core.http_tls import prewarm as _prewarm_tls
 
         await asyncio.to_thread(_prewarm_tls)
+        # The database doors' report (Spaces S4-01 step 1, report mode): the
+        # callers with no door it already holds are not said again. One small
+        # file read; a failure leaves the counter on and is said.
+        from kazma_core.db import space_doors as _space_doors
+
+        try:
+            await asyncio.to_thread(_space_doors.start)
+        except (OSError, ValueError, RuntimeError, TypeError, KeyError):  # the report never stops a start
+            logger.warning("[space-doors] the door report could not start; checkouts are still counted",
+                           exc_info=True)
         # An ops alert raised in a worker thread is delivered on this loop,
         # where the chat-app senders' HTTP clients live (2026-10-02).
         from kazma_core.observability.ops_alerts import bind_server_loop
@@ -3029,6 +3039,15 @@ class KazmaAppBuilder:
             logger.debug("[app] SessionManager close: %s", e)
 
         self._mark_stop("the chat sessions")
+        # 7) The database doors' report (Spaces S4-01 step 1): what was
+        # counted since the last 15-minute flush is added to it.
+        try:
+            from kazma_core.db import space_doors
+
+            await asyncio.to_thread(space_doors.flush)
+        except (OSError, ValueError, RuntimeError, TypeError, KeyError):  # a stop goes on
+            logger.warning("[space-doors] the door report could not be kept at the stop", exc_info=True)
+        self._mark_stop("the database doors' report")
         # (VectorMemory close removed with the V1 stack.)
 
         from kazma_core.observability.ops_alerts import bind_server_loop

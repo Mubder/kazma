@@ -87,7 +87,9 @@ scheduler needs a case there.
   watch (§39), the document worker broker (§19 E1), guard dependencies
   (§39), malware signatures
   (§19 E), dependency advisories (§57), model failover drill (§38), provider
-  health (§60), erased space keys (§70, S4-07), chat moves and file moves (§70, S2-12), forget convergence (§15I), memory vector repair, memory recovery,
+  health (§60), erased space keys (§70, S4-07), chat moves and file moves (§70, S2-12), the space door
+  report (§70 (1), S4-01 step 1: the database doors' counts added to `space_doors.json`), forget
+  convergence (§15I), memory vector repair, memory recovery,
   retired knowledge promotions and memory turn reconcile (§15F), memory
   text fill (§15F), memory mirror sync (§15K), memory graph sync (§15K2), weekly topic summaries (§15J), entity count repair
   (§15L) and knowledge vector repair (§24F, last), run by ONE isolated

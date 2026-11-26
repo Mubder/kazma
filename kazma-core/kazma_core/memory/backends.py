@@ -678,8 +678,19 @@ class PgvectorBackend:
         self._table = "".join(c for c in (collection or "kazma_memory_vectors") if c.isalnum() or c == "_") or "kazma_memory_vectors"
         self._dim = int(dimension or 1024)
         self._timeout = max(0.5, float(timeout_s))
+        self._kazmas_database: bool | None = None
 
     def _connect(self) -> Any:
+        if self._kazmas_database is None:
+            from kazma_core.db.availability import is_kazma_database
+
+            self._kazmas_database = is_kazma_database(self._dsn)
+        if self._kazmas_database:
+            # Kazma's own database: which door it goes through is counted
+            # (Spaces S4-01 step 1, report mode; nothing is refused).
+            from kazma_core.db import space_doors
+
+            space_doors.checkout("pgvector")
         try:
             import psycopg
 

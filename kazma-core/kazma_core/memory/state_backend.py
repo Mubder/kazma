@@ -171,6 +171,7 @@ class PostgresStateBackend:
         self._pool_lock = threading.Lock()
         self._closed = False
         self._ours: bool | None = None
+        self._kazmas_database = False
 
     def _connect(self) -> Any:
         """A connection for one operation; its ``close()`` gives it back.
@@ -180,11 +181,18 @@ class PostgresStateBackend:
         thousands a pass at scale). Without psycopg's pool package, a new
         connection, as before.
         """
-        from kazma_core.db import availability
+        from kazma_core.db import availability, space_doors
 
         if self._ours is None:
-            self._ours = availability.is_kazma_database(self._dsn, or_its_server=True)
+            ours = availability.is_kazma_database(self._dsn, or_its_server=True)
+            # This first: a thread that finds _ours set finds this set too.
+            self._kazmas_database = availability.is_kazma_database(self._dsn)
+            self._ours = ours
         ours = self._ours
+        if self._kazmas_database:
+            # Kazma's own database: which door it goes through is counted
+            # (Spaces S4-01 step 1, report mode; nothing is refused).
+            space_doors.checkout("memory mirror")
         began = availability.now()
         conn = None
         try:
@@ -995,7 +1003,7 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
         try:
             data = json.loads(raw)
             return data if isinstance(data, dict) else {}
-        except Exception:
+        except (ValueError, RecursionError):  # not JSON, or nested past the parser's depth
             return {}
     return {}
 

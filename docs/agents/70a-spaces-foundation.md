@@ -45,9 +45,38 @@ an install with one account behaves as before.
   `acting_account` (`ACTS_FOR_A_SPACE`) and every file that binds a scope
   itself (`BINDERS`; none from a request's own words); a loop for every space starts in `install_loops`. A
   loop over rows of several spaces enters one per row. Never held across a
-  `yield`. With Spaces off they bind nothing. Nothing reads what was said yet:
-  the database door (`Door.now`) is S4-01 step 1, and
-  `tests/_space_door.py` stands in for it.
+  `yield`. With Spaces off they bind nothing. Report mode (below) asks
+  `Door.now` at every checkout; nothing decides by it yet, and
+  `tests/_space_door.py` asks at a store's own methods.
+- **Every checkout of Kazma's own Postgres is counted by its door** (S4-01
+  step 1, report mode, `db/space_doors.py`, 2026-11-26). The shared pool's
+  `connection` (and so `execute`), the checkpointer's pool
+  (`checkpoints_pg.ReportedCheckpointPool`) and the memory mirror's and
+  pgvector's connections, when their address is Kazma's own database, call
+  `space_doors.checkout(pool)` first: it asks `Door.now` and counts the
+  checkout by door (`space`: `scope` or `row`; `install`: `statements` or
+  `work`, with the reason; `none`: a tenant only, or nothing), pool and
+  caller (the nearest function of Kazma's own, six for `none`; no space id,
+  no row). Nothing is sent and nothing refused, Spaces on or off; a failure
+  in the counter is counted and said once. One INFO per caller with no door
+  that the report does not hold yet. The report is `space_doors.json` in the
+  data folder, added to by the maintenance runner (`space door report`) and
+  at a stop; `scripts/space_doors_report.py` prints it against the lists
+  below (the file never forgets: `--since` the deploy that fixed a caller).
+  The settings table is the install's (`ConfigStore._pg_access`,
+  decision 4). **A new connection or pool is a door that counts, or one of
+  the install's own sign-ins, declared with why** (`MADE`; read through the
+  file's own imports, every spelling psycopg allows); a helper that
+  only passes a statement on goes in `space_doors.DOOR_FUNCTIONS`, so the
+  report names who wanted it; every function that checks a connection out is
+  in `CHECKOUTS`; a caller known to go through no door is in `KNOWN_OPEN`,
+  with the step that gives it one and the functions that check out on its
+  way (a new one inside it is new), and leaves when that step lands
+  (`tests/_space_door_lists.py`; gate `tests/test_space_doors_gates.py`, both
+  ways, planted connections, checkouts and a door that stops counting as
+  controls; behaviour `tests/test_space_doors.py`, real pools
+  `tests/test_space_doors_postgres.py`). `KAZMA_SPACE_DOOR_REPORT=0` turns
+  the counter off.
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner

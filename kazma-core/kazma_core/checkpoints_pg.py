@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from kazma_core.spaces.row_work import install_statements
@@ -26,6 +28,36 @@ __all__ = ["close_postgres_checkpointer", "open_postgres_checkpointer"]
 def _conninfo(dsn: str) -> str:
     # libpq takes "postgresql://"; some operators write the short scheme.
     return "postgresql://" + dsn[len("postgres://"):] if dsn.startswith("postgres://") else dsn
+
+
+#: The counted pool class, by the psycopg pool class it is made from.
+_REPORTED: dict[type, type] = {}
+
+
+def _reported_pool_class() -> type:
+    """psycopg's ``AsyncConnectionPool`` whose every checkout is counted by
+    the door it goes through (``db.space_doors``, Spaces S4-01 step 1: report
+    mode, nothing refused). LangGraph's saver and the code that takes
+    ``saver.conn`` itself (the gateway's thread listing, the approvals'
+    listing, retention) all check out through ``connection()``. Made on
+    first use, once for each pool class (psycopg_pool is an extra)."""
+    from psycopg_pool import AsyncConnectionPool  # type: ignore
+
+    from kazma_core.db import space_doors
+
+    made = _REPORTED.get(AsyncConnectionPool)
+    if made is not None:
+        return made
+
+    class ReportedCheckpointPool(AsyncConnectionPool):  # type: ignore[misc,type-arg,valid-type]
+        @asynccontextmanager
+        async def connection(self, timeout: float | None = None) -> AsyncIterator[Any]:
+            space_doors.checkout("checkpoints")
+            async with super().connection(timeout=timeout) as conn:
+                yield conn
+
+    _REPORTED[AsyncConnectionPool] = ReportedCheckpointPool
+    return ReportedCheckpointPool
 
 
 async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
@@ -49,7 +81,7 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
     from kazma_core.db.postgres_pool import pool_connection_kwargs
 
     conninfo = _conninfo(dsn)
-    pool = AsyncConnectionPool(
+    pool = _reported_pool_class()(
         conninfo=conninfo,
         min_size=1,
         max_size=max_size,

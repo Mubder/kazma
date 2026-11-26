@@ -16,7 +16,9 @@ from contextlib import contextmanager
 from typing import Any
 
 from kazma_core.db import availability as _availability
+from kazma_core.db import space_doors
 from kazma_core.db.backend import get_database_url, is_postgres, require_postgres_driver
+from kazma_core.spaces.row_work import install_statements
 
 __all__ = ["PostgresPool", "close_at_exit", "get_postgres_pool", "pool_connection_kwargs",
            "reset_postgres_pool"]
@@ -169,6 +171,9 @@ class PostgresPool:
         # marks the database away (once, for every caller), an answer after
         # that marks it back. Never refused here: psycopg's own timeout
         # bounds a checkout while the database is away.
+        # Which door the statements go through, counted (Spaces S4-01 step
+        # 1, report mode): nothing is sent and nothing is refused.
+        space_doors.checkout("shared")
         start = _availability.now()
         try:
             with self._pool.connection(timeout=timeout) as conn:
@@ -456,6 +461,7 @@ def os_env(key: str, default: str) -> str:
     return (os.environ.get(key) or default).strip() or default
 
 
+@install_statements("the shared tables are made once, for every space")
 def _ensure_core_schema(pool: PostgresPool) -> None:
     """Idempotent schema for multi-replica shared tables."""
     from kazma_core.db.pg_schema import ensure_schema, split_statements

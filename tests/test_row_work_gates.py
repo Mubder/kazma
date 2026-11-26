@@ -40,6 +40,11 @@ INSTALL: dict[str, str] = {
         "lists every space's newest checkpoints at a start; each turn goes on as its own",
     "kazma-core/kazma_core/checkpoints_pg.py::open_postgres_checkpointer":
         "the checkpoint tables are made once, for every space",
+    "kazma-core/kazma_core/config_store.py::ConfigStore._pg_access":
+        "the settings table: one key space and one cache for the install, outside every space's lock "
+        "(S4-01 decision 4)",
+    "kazma-core/kazma_core/db/postgres_pool.py::_ensure_core_schema":
+        "the shared tables are made once, for every space",
     "kazma-core/kazma_core/db/pg_backup.py::verify_required_pg_tables":
         "which tables the database has, no row of any space",
     "kazma-core/kazma_core/documents/audit.py::DocumentAuditStore._ensure_pg_guard":
