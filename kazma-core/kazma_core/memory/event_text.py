@@ -246,12 +246,15 @@ def mentions_value(value: str, user_text: str) -> bool:
 _CORRECTING_EN = frozenset("sorry wrong mistake mistaken mistyped typo correction correcting meant oops misspoke "
                            "apologies".split())
 _CORRECTING_AR_RAW = ("غلط", "أقصد", "قصدي", "آسف", "آسفة", "عفوا", "عفواً", "تصحيح", "صححها", "أخطأت", "غلطت",
-                      "معليش", "السموحة", "متأسف", "متأسفة", "أعني", "معذرة", "أعتذر", "خطأ", "خربطت", "لخبطت", "تلخبطت",
+                      "معليش", "السموحة", "متأسف", "متأسفة", "أعني", "معذرة", "أعتذر", "خربطت", "لخبطت", "تلخبطت",
                       "التبس", "عدلها", "سامحني")
 #: ... said in more than a word; "No, it was ..." as a message begins.
 _CORRECTING_PHRASES = re.compile(
     r"\b(?:my bad|i apologi[sz]e|scratch that|forgive me|let me rephrase|change (?:it|that) to|mixed (?:it|that|them|him|her) up"
     r"|confused (?:it|that|them|him|her) with)\b|\bi said\b[^.!?\n]{1,60}\bbut (?:it|that) (?:was|is)\b"
+    # "خطأ" as an answer only: "لا خطأ، كان عمر"; "وكان خطأ اني ما عزمت علي"
+    # says something else was a mistake (step 4's fifth review).
+    r"|^(?:لا|كلا)[ ،,]+خطا(?!\w)"
     r"|^سوري(?!\w)|(?<!\w)(?:بالغلط قلت|خلطت بين\w{0,4})(?!\w)")
 _NO_IT_WAS = re.compile(
     r"^(?:(?:oh|well|ah|hmm|wait|actually|اوه|اه|لحظه|والله)[ ,،.]+)?(?:(?:no|nope|لا)[ ,،.!]+){1,3}"
@@ -434,17 +437,55 @@ def _adds_rather_than_denies(user_text: str, value: str = "") -> bool:
     """Whether the message's denial adds to what it names rather than denying
     it: "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "No, I didn't see
     Ali alone, I met Omar too" (of *value* "Ali")."""
-    folded = _own_folded(user_text)
+    return bool(_adding_clauses(_own_folded(user_text), value))
+
+
+def _adding_clauses(folded: str, value: str) -> list[int]:
+    """Where in *folded* each clause whose denial adds begins (the narrow
+    shapes above)."""
     arabic = _folded_words(_DENIALS_AR_RAW)
     wanted = value_words(value) if value else None
-    clauses = _clause_words(folded)
-    for n, words in enumerate(clauses):
-        following = clauses[n + 1] if n + 1 < len(clauses) else []
-        for at, word in enumerate(words):
-            if (word in _DENIALS_EN or word in arabic or word in _BARE_NO) and _adds_rather(
-                    words, at, wanted, following):
-                return True
-    return False
+    spans = [(m.start(), re.findall(r"[\w']+", m.group())) for m in _CLAUSE.finditer(folded)]
+    out = []
+    for n, (start, words) in enumerate(spans):
+        following = spans[n + 1][1] if n + 1 < len(spans) else []
+        if any((word in _DENIALS_EN or word in arabic or word in _BARE_NO) and _adds_rather(words, at, wanted, following)
+               for at, word in enumerate(words)):
+            out.append(start)
+    return out
+
+
+#: A sentence: up to a stop, a question or exclamation mark, or a new line.
+_SENTENCE = re.compile(r"[^.!?؟\n]+")
+
+
+def _outside_adding_sentences(folded: str, value: str) -> str | None:
+    """*folded* without the sentences whose denial adds and that speak of
+    *value* (with a bare "No." just before one: "No. Not only Ali, Omar
+    too."); None when no sentence adds. A "No" or a denial in any other
+    sentence still denies: "No, Thursday. I'm not just guessing" (step 4's
+    fifth review)."""
+    starts = _adding_clauses(folded, value)
+    if not starts:
+        return None
+    wanted = value_words(value)
+    sentences = list(_SENTENCE.finditer(folded))
+    # A sentence that adds and speaks of the value, or the message's only one
+    # ("مو بس أمس، الخميس بعد", of the gym's day).
+    from bisect import bisect_left
+
+    def holds_adding(m: re.Match[str]) -> bool:
+        i = bisect_left(starts, m.start())
+        return i < len(starts) and starts[i] < m.end()
+
+    adding = {n for n, m in enumerate(sentences)
+              if holds_adding(m) and (len(sentences) == 1 or (wanted and _share(wanted, m.group()) >= EVENT_WORDS))}
+    if not adding:
+        return None
+    for n in sorted(adding):
+        if n > 0 and set(re.findall(r"[\w']+", sentences[n - 1].group())) <= _ANSWER_NO | {"كلا"}:
+            adding.add(n - 1)
+    return ". ".join(m.group() for n, m in enumerate(sentences) if n not in adding)
 
 
 def _clause_words(folded: str) -> list[list[str]]:
@@ -540,10 +581,17 @@ def denies(user_text: str, value: str = "") -> bool:
     folded = _own_folded(user_text)
     if corrects(user_text):
         return True
-    if _adds_rather_than_denies(user_text, value):
-        return bool(value) and _denies_value(folded, value)
+    rest = _outside_adding_sentences(folded, value) if value else None
+    if rest is not None:
+        # A sentence that adds ("Not only Ali, Omar too") denies only by name;
+        # every other sentence is read as before (step 4's fifth review).
+        if _denies_value(folded, value):
+            return True
+        folded = rest
+        if not folded.strip():
+            return False
     if _NO_FIRST.search(folded) or (value and _denies_value(folded, value)):
         return True
-    if says_once_more(user_text):
+    if _ONCE_MORE.search(folded):
         return False
     return bool(_NO.search(folded)) or _says_one_of(folded, _DENIALS_EN, _folded_words(_DENIALS_AR_RAW))

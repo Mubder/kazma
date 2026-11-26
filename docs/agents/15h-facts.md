@@ -251,78 +251,52 @@
 - **W4's left list, by harm** (2026-11-26, the memory plan's W6, step 4).
   The final check of W4 (9ea531ce1) left seven small ones. Three are built;
   `tests/test_memory_w4_left_list.py` holds them in EN, Gulf and MSA.
-  - *L1, a denial that adds* (`event_text._adds_rather_than_denies`): "Not only
-    Ali, I met Omar", "ليس فقط علي", "مو بس علي", "No, I didn't see Ali alone,
-    I met Omar too", "لم ألتق بعلي وحده" closed Ali when the model named him
-    replaced and no day was given.
-    - **A denial denies, as before step 4, except in a few narrow shapes
-      that clearly add** (step 4's fourth review: five rounds that read "too"
-      more widely each turned some correction into an addition; base's
-      denial is the default, and in doubt the denial stands):
-      - a denial, then "only": "not only Ali", "مو بس علي", "ليس فقط علي";
-      - "alone" ending its clause right after the denied value: "I didn't
-        see Ali alone,", "ما قابلت علي بروحه،", "لم ألتق بعلي وحده،";
-      - "only" right after the value, then "but": "not Ali only but Omar",
-        "مو علي بس بل عمر";
-      - "only", the new value alone (a word or two, no "and"/"و" between),
-        then "too" ending the clause (`_TOO_END`: too, also, as well, أيضا,
-        كمان, كذلك, برضه, بعد): "Not Ali only Omar too", "مو علي بس عمر بعد";
-      - "only" ending its clause, and the next clause opens with "but" or
-        "also" (`_ADDING_OPENERS`) or ends with "too": "It wasn't Ali only,
-        Omar too", "مو علي بس، وكمان عمر", "لم ألتق بعلي فقط، بل بعمر".
-      Every other shape denies: "Not Ali just Omar", "مو علي بس، عمر", "Not
-      Ali just Omar, I saw him again today", "Not Ali just Omar who was too
-      tired", "Not Ali only Omar plus his wife", "مو علي بس عمر واخوه بعد".
-      "Again", "another" and "مرة ثانية" never add. A bare "no" before "just"
-      puts right ("No, just Omar"); actually / correct / instead / rather /
-      بل / الصحيح never add (`_NEVER_ADDING`). Each clause's words are read
-      once (`_clause_words`), and a value runs at most its own words and two
-      more (`_value_end`: a held "مو" or "Not Me" repeated took 0.9 s).
-      Measured against base on the reviewers' cases (`cases.py`, `cases2.py`):
-      no case worse than base.
-    - **Step 4's review (H1, M4):** step 4 read "alone" anywhere after a
-      denial, and an unpunctuated message lost its denial: "No I didn't meet
-      Ali I was home alone", "مو علي قابلت عمر بروحه", "لم ألتق بعلي بل
-      التقيت بعمر وحده" kept Ali, and "No I went to the gym alone on
-      Thursday" kept the wrong day as `day_sure` (11 of 13 measured). "Alone"
-      said of someone else, or of the user, adds nothing now; an answer's
-      "no" / "لا" never attaches it ("لا رحت النادي بروحي"), and "وحده
-      ثانيه" is another one (it does not end its clause). Arabic's usual order
-      adds where one of the shapes above holds ("مو علي بس، قابلت عمر بعد").
-    - "Wrong" said of nothing ("Nothing is wrong", "ما في شي غلط", "لا يوجد
-      خطأ") puts nothing right (`_NOTHING_WRONG`). Never a bare "لا": "لا
-      غلط، عمر" is the commonest Gulf correction (the review's H2); "خطأ" puts
-      right as "غلط" does ("لا خطأ، كان عمر").
-    - Gate: every denial of the source's tables before every "only" word; every
-      "only" and "alone" word right after the denied value adds and after
-      another word does not, for every denial; the answer words, the
-      never-adding words and "وحده ثانيه"; with step 4's rule and with no rule
-      as the controls, and each of the review's cases a test in EN, Gulf, MSA.
+  - *L1, a denial that adds* (`event_text._adds_rather`): "Not only Ali, I
+    met Omar", "مو بس علي", "No, I didn't see Ali alone, I met Omar too" closed
+    Ali when the model named him replaced and no day was given. After five
+    review rounds (each wider "too" turned a correction into an addition) a
+    denial denies, as before step 4, except in five narrow shapes:
+    - a denial, then "only": "not only Ali", "مو بس علي", "ليس فقط علي";
+    - "alone" ending its clause right after the denied value ("I didn't see
+      Ali alone,", "ما قابلت علي بروحه،");
+    - "only" right after the value, then "but": "not Ali only but Omar";
+    - "only", the new value alone (no "and"/"و" between), then "too" ending
+      the clause (`_TOO_END`): "Not Ali only Omar too", "مو علي بس عمر بعد";
+    - "only" ending its clause, and the next clause opens with but/also
+      (`_ADDING_OPENERS`) or ends with "too": "It wasn't Ali only, Omar too".
+    Every other shape denies ("Not Ali just Omar", "مو علي بس، عمر", "Not Ali
+    just Omar, I saw him again", "No I went to the gym alone on Thursday",
+    "مو علي قابلت عمر بروحه"); "again" and "مرة ثانية" never add, an
+    answer's "no"/"لا" never attaches "alone", and actually / instead / بل /
+    الصحيح never add (`_NEVER_ADDING`). **By sentence** (`denies`,
+    `_outside_adding_sentences`): a sentence that adds sets aside only its
+    own denial (when it names the held value, or is the only sentence; a bare
+    "No." right before it goes with it); a "No" or denial in any other
+    sentence still denies ("No, Thursday. I'm not just guessing", "لا،
+    الخميس. مو بس النادي، رحت المسبح بعد"). Clause words are read once and a
+    value runs at most its words and two more (`_value_end`): linear.
+    "Wrong" said of nothing ("Nothing is wrong", "ما في شي غلط", "لا يوجد
+    خطأ") puts nothing right (`_NOTHING_WRONG`), never a bare "لا" ("لا غلط،
+    عمر" corrects); "خطأ" corrects as an answer only ("لا خطأ، كان عمر").
+    Measured against base on the reviewers' `cases.py`, `cases2.py`,
+    `cases3.py`: no case worse. Gates: each shape and its near misses from
+    the product's own sets; every adding shape after each kind of denial
+    still denies; the reviews' cases as rows in EN, Gulf, MSA.
   - *L3, a bare "No, Omar"* (`event_text.no_then`): a whole message that is
-    "no" and a value ("No, Omar", "Nope, Omar", "No! Omar, I told you", "لا،
-    عمر", "لا يا كازما، عمر", "كلا، عمر") puts right the fact the reply says
-    it replaces. Bare, it says no more than that, so it is read only beside a
-    reply's `replaces` (`belief_extractor._same_event`). With none, both stay
-    (the control). Every word said is the value's, or "it was", "just",
-    "actually", "بل": "No, not Omar", "No, Omar too", "No, and Omar", "لا، عمر
-    بعد", "لا، مو عمر" deny or add and close nothing, and "لا يا عمر" speaks
-    to Omar (the review's M1). "No - Omar" and "Nope Omar!" are read; "No
-    Omar" and "لا عمر" are not ("no" and "لا" come before nouns: "no sugar",
-    "لا تسوس"). Articles and prepositions are no new words ("No, the gym",
-    "No, with Omar", "لا، في دبي"), and "and" on the value's front adds in
-    Arabic as in English ("لا، وعمر", "لا، فعمر"; a name that begins with the
-    letter, "وليد", is itself: `_and_then`, the delta review's N3). One mark,
-    then the rest read once (`\W*+`, possessive: "No," + "-" * 6000 + "x.y"
-    took 28 s, the delta review's N2): linear. The regex sweep reads a head
-    behind `^\W*(...|...)`, and runs each input again with a tail that fails
-    late ("a.a"): the snowman it ended with completes a pattern ending
-    `\W*$` at once, which hid this one. The vocative reads its marks once too
-    (`\W++`: "لا يا كازما" + "-" * 5980 + "x.y" took 43 s, the third review's
-    A), and the sweep builds a head through a pattern's optional literal-led
-    groups ("no,يا a ", `sample_head`); it then found the plan approval's
-    "\s*[.!]?\s*$" and WhatsApp's heading quadratic, both rewritten to the
-    same matches. "No, on Thursday" / "لا، يوم الخميس" and "No, actually
-    Omar" / "لا، الصحيح عمر" read alike (E).
+    "no" and a value ("No, Omar", "Nope Omar!", "No - Omar", "لا، عمر", "لا
+    يا كازما، عمر", "كلا، عمر") puts right the fact the reply says it
+    replaces; read only beside a reply's `replaces` (`_same_event`; with
+    none both stay). Every word said is the value's, a filler ("it was",
+    "just", "the", "with", "في", "يوم", "الصحيح") or nothing: "No, not Omar",
+    "No, Omar too", "No, and Omar", "لا، وعمر", "لا، عمر بعد" close nothing
+    (`_and_then`; "وليد" is itself), and "لا يا عمر" speaks to Omar. "No
+    Omar" and "لا عمر" are not read ("no sugar", "لا تسوس"). The marks after
+    "no" and after a vocative are read once (`\W*+`, `\W++`): "No," + "-" *
+    6000 + "x.y" took 28 s, "لا يا كازما" + the same 43 s; now linear. The
+    regex sweep reads a head behind `^\W*(...|...)` and through optional
+    literal-led groups (`sample_head`), and runs each input again with a tail
+    that fails late ("a.a"); it found the plan approval's and WhatsApp's
+    heading patterns quadratic too, rewritten to the same matches.
   - *L4, a voice note* (`own_words._MEDIUM_AR`): "رسالة صوتية:" was read as
     someone else's message and lost the user's event in MSA (keep 117 of 120;
     now 120, as English and Gulf). A text noun before a medium ("صوتية",

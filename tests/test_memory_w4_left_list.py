@@ -90,6 +90,10 @@ ADDS = [
     (GULF, "مو بس علي قابلت عمر بعد"), (GULF, "مو علي بس، قابلت عمر بعد"), (GULF, "ما قابلت علي بروحه، عمر كان معاه"),
     (GULF, "مو علي لحاله، عمر بعد"),
     (MSA, "ليس فقط علي بل عمر أيضا"), (MSA, "ليس علي فقط، عمر أيضا"), (MSA, "لم ألتق بعلي فقط، بل بعمر أيضا"),
+    # A "No." before the sentence that adds goes with it (step 4's fifth review).
+    (EN, "No. Not only Ali, Omar too."), (GULF, "لا. مو بس علي، عمر بعد"),
+    # "خطأ" said of something else puts nothing right (the fifth review, Low).
+    (GULF, "قابلت عمر بعد، وكان خطأ اني ما عزمت علي"),
     # "بعد" ending the clause after the new value, as "Omar too" (the third review, D).
     (EN, "Not Ali only Omar too"), (GULF, "مو علي بس عمر بعد"), (GULF, "مو علي بس، عمر بعد"),
 ]
@@ -137,6 +141,13 @@ PUT_RIGHT = [
     (EN, "Not Ali just Omar but Sara too"), (EN, "I didn't meet Ali just Omar and his brother too"),
     (GULF, "مو علي بس عمر وجاب ولده بعد"), (GULF, "مو علي بس عمر واخوه بعد"), (GULF, "مو علي بس عمر وكان متأخر كمان"),
     (MSA, "لم ألتق بعلي فقط بعمر وكان متعبا أيضا"), (MSA, "ليس علي فقط عمر وأخوه كذلك"),
+    # "Not only" in another sentence leaves this one's "No" a denial (step 4's
+    # fifth review: each kept Ali from step 4's first commit; base denied).
+    (EN, "No. I met Omar, Ali was at work. It wasn't just a coffee either"),
+    (GULF, "لا، قابلت عمر، علي كان بالدوام. مو بس قهوة، تغدينا سوا"),
+    (MSA, "لا، التقيت بعمر، وكان علي في العمل. اللقاء ليس فقط للقهوة"),
+    (EN, "Ali? No. Just Omar. Ali was not only busy, he was abroad."),
+    (GULF, "علي؟ لا. بس عمر. علي مو بس مشغول، كان مسافر"), (MSA, "علي؟ لا. عمر فقط. علي ليس فقط مشغولا، بل مسافر"),
 ]
 
 
@@ -148,6 +159,14 @@ DAY_PUT_RIGHT = [
     ("I went to the gym yesterday", "gym", "No I went to the gym alone on Thursday"),
     ("رحت النادي أمس", "النادي", "لا رحت النادي بروحي يوم الخميس"),
     ("ذهبت إلى النادي أمس", "النادي", "بل ذهبت إلى النادي وحدي يوم الخميس"),
+    # "Not only" in another sentence (step 4's fifth review: each kept the old day).
+    ("I went to the gym yesterday", "gym", "No, Thursday. I'm not just guessing, I checked"),
+    ("I went to the gym yesterday", "gym", "Thursday, not yesterday. Not just the gym, I went to the pool too"),
+    ("I went to the gym yesterday", "gym", "No, on Thursday. It isn't only the gym I go to, I swim too"),
+    ("رحت النادي أمس", "النادي", "لا، الخميس. مو بس النادي، رحت المسبح بعد"),
+    ("رحت النادي أمس", "النادي", "لا، الخميس مو أمس. مو بس تمرين خفيف، تمرنت ساعتين"),
+    ("ذهبت إلى النادي أمس", "النادي", "لا، يوم الخميس وليس أمس. ليس فقط النادي، بل المسبح أيضا"),
+    ("ذهبت إلى النادي أمس", "النادي", "لا، يوم الخميس. الأمر ليس فقط تخمينا، فقد تأكدت"),
 ]
 
 
@@ -285,6 +304,23 @@ def test_a_denial_adds_only_in_its_narrow_shapes():
         assert not adds(f"{word} just Omar", "Ali"), word
     # "وحده ثانيه": another one, not alone.
     assert not adds("مو علي وحده ثانيه اسمها عمر", "علي")
+
+
+def test_a_sentence_that_adds_never_silences_another_sentences_denial():
+    """Step 4's fifth review, the class: an adding shape ("Not only X, Y
+    too") cancels only the denial of its own sentence. Every shape, said of
+    something else after each kind of denial ("No, Omar.", "Not Ali.", "لا،
+    عمر.", "مو علي."), leaves that denial standing. Controls: the shape alone
+    adds; a bare "No." right before it goes with it."""
+    shapes = ["Not only the coffee, lunch too", "It wasn't just a coffee, lunch too",
+              "مو بس قهوة، غدا بعد", "ليس فقط القهوة، بل الغداء أيضا", "Not the coffee alone, lunch too"]
+    for opener in ("No, Omar.", "Not Ali, Omar.", "لا، عمر.", "مو علي، عمر.", "لا، التقيت بعمر."):
+        for shape in shapes:
+            assert event_text.denies(f"{opener} {shape}", "Ali" if opener.isascii() else "علي"), (opener, shape)
+    for shape in ("Not only Ali, Omar too", "مو بس علي، عمر بعد", "ليس فقط علي، بل عمر أيضا"):
+        value = "Ali" if shape.isascii() else "علي"
+        assert not event_text.denies(shape, value), shape
+        assert not event_text.denies(f"{'No' if shape.isascii() else 'لا'}. {shape}", value), shape
 
 
 def test_control_the_rule_before_the_review_turns_denials_into_additions(monkeypatch):
