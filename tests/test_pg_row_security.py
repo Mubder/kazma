@@ -51,14 +51,14 @@ from tests.test_pg_app_role import SCRIPT, _every_store_set_up, _with
 
 pytestmark = pytest.mark.postgres
 
+psycopg = pytest.importorskip("psycopg")
+
 ROOT = Path(__file__).resolve().parents[1]
 REMOVE = ROOT / "deploy" / "postgres" / "kazma_space_role_remove.sql"
 KNOWN = {"default", "sa", "sb"}
 
 
 def _sql(dsn: str, statement: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
-    import psycopg
-
     with psycopg.connect(dsn, autocommit=True) as conn:
         cur = conn.execute(statement, params or None)
         return list(cur.fetchall()) if cur.description else []
@@ -68,7 +68,6 @@ def _sql(dsn: str, statement: str, params: tuple[Any, ...] = ()) -> list[tuple[A
 def db() -> Iterator[dict[str, str]]:
     """A private database seeded as setup leaves it: every store's tables,
     owned by ``kazma_app``, the role file run by the superuser."""
-    psycopg = pytest.importorskip("psycopg")
     base = os.environ.get("KAZMA_DATABASE_URL", "")
     if not base or os.environ.get("KAZMA_TEST_ALLOW_REAL_DB") != "1":
         pytest.skip("needs a throwaway Postgres (KAZMA_DATABASE_URL + KAZMA_TEST_ALLOW_REAL_DB=1)")
@@ -122,7 +121,6 @@ def _new_database(db: dict[str, Any], *, owner: str = "kazma_app") -> str:
 
 
 def _space(db: dict[str, str]) -> Any:
-    import psycopg
     from kazma_core.db import row_security
 
     return psycopg.connect(row_security._space_conninfo(db["app"]), autocommit=False)
@@ -151,8 +149,6 @@ def _seed(db: dict[str, str]) -> None:
               "('t1', 'x', 'p', 'done', 'now', '{\"tenant_id\": \"sa\"}'), "
               "('t2', 'x', 'p', 'done', 'now', '{\"tenant_id\": \"sb\"}'), ('t3', 'x', 'p', 'done', 'now', '{}')")
     _sql(app, "INSERT INTO kazma_episodes (id, tenant_id) VALUES ('e1', 'sa'), ('e2', 'sb')")
-    import psycopg
-
     with psycopg.connect(app) as conn:
         for space, thread in (("sa", "th-a"), ("sb", "th-b"), (None, "th-owner")):
             with conn.transaction():
@@ -242,8 +238,6 @@ def test_check_finds_each_planted_difference(rs: Any, db: dict[str, str]) -> Non
 
 
 def test_a_space_reads_and_changes_its_own_rows_only(rs: Any, db: dict[str, str]) -> None:
-    import psycopg
-
     _seed(db)
     with _space(db) as conn:
         assert _in(conn, "sa", "SELECT current_user")[0][0] == "kazma_space"
@@ -275,8 +269,6 @@ def test_a_thread_is_stamped_with_its_transactions_space(rs: Any, db: dict[str, 
 
 
 def test_no_space_set_raises(rs: Any, db: dict[str, str]) -> None:
-    import psycopg
-
     _seed(db)
     with _space(db) as conn:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
@@ -291,8 +283,6 @@ def test_no_space_set_raises(rs: Any, db: dict[str, str]) -> None:
 
 
 def test_the_install_tables_are_refused_and_rights_are_narrow(rs: Any, db: dict[str, str]) -> None:
-    import psycopg
-
     with _space(db) as conn:
         for table in ("kazma_settings", "kazma_platform_users", "kazma_web_sessions", "checkpoint_migrations"):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
@@ -376,8 +366,6 @@ def test_apply_refuses_a_login_that_does_not_own_the_tables(rs: Any, db: dict[st
 
 
 def test_a_table_a_dump_holds_is_left_not_waited_for(rs: Any, db: dict[str, str]) -> None:
-    import psycopg
-
     app = db["app"]
     _sql(app, "DROP POLICY kazma_space_rows ON documents; ALTER TABLE documents DISABLE ROW LEVEL SECURITY")
     holder = psycopg.connect(app)
@@ -396,8 +384,6 @@ def test_a_table_a_dump_holds_is_left_not_waited_for(rs: Any, db: dict[str, str]
 
 
 def test_a_column_is_never_added_with_a_space_set(rs: Any, db: dict[str, str]) -> None:
-    import psycopg
-
     app = db["app"]
     _sql(app, "DROP POLICY kazma_space_rows ON checkpoint_writes; ALTER TABLE checkpoint_writes DROP COLUMN space_id")
     with psycopg.connect(app) as conn, conn.transaction(), conn.cursor() as cur:
@@ -545,8 +531,6 @@ def test_the_restore_rehearsal_passes_with_the_rules(rs: Any, db: dict[str, str]
 
 
 def test_zz_the_remove_file_takes_the_lock_out(rs: Any, db: dict[str, str]) -> None:
-    import psycopg
-
     with psycopg.connect(db["base"], autocommit=True) as admin:
         for other in db["extra"]:  # the role's rights in other databases go with them
             admin.execute(f'DROP DATABASE IF EXISTS "{other}" WITH (FORCE)')

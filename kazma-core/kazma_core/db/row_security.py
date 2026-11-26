@@ -726,7 +726,7 @@ def _strays(cur: Any, table: str, rule: Rule, known: set[str]) -> list[StrayRows
     from kazma_core.spaces.scope import valid_space_id
 
     # A name from the rules, quoted; the expression is the rule's own text.
-    sql = f"SELECT {rule.expression} AS space, count(*) FROM {_quoted(table)} GROUP BY 1"  # noqa: S608  # nosec B608
+    sql = f"SELECT {rule.expression} AS space, count(*) FROM {_quoted(table)} GROUP BY 1"  # noqa: S608  # nosec B608 - a rule's table, quoted
     out: list[StrayRows] = []
     for space, count in _rows(cur, sql):
         space = str(space)
@@ -801,7 +801,7 @@ def _space_checks(conn: Any, owner_counts: dict[str, int], all_rules: dict[str, 
         rule = all_rules[table]
         q = _quoted(table)
         if rule.kind != _SPACE:
-            denied = _raises_unset(conn, f"SELECT 1 FROM {q} LIMIT 0")  # noqa: S608  # nosec B608
+            denied = _raises_unset(conn, f"SELECT 1 FROM {q} LIMIT 0")  # noqa: S608  # nosec B608 - a rule's table, quoted
             if denied == bool(rule.rights):
                 failed.append(f"{table}: the space role {'may not' if rule.rights else 'may'} read it")
             continue
@@ -810,12 +810,12 @@ def _space_checks(conn: Any, owner_counts: dict[str, int], all_rules: dict[str, 
         conn.rollback()
         if not active:
             failed.append(f"{table}: row security is not active for the space role")
-        if count and not _raises_unset(conn, f"SELECT 1 FROM {q} LIMIT 1"):  # noqa: S608  # nosec B608
+        if count and not _raises_unset(conn, f"SELECT 1 FROM {q} LIMIT 1"):  # noqa: S608  # nosec B608 - a rule's table, quoted
             failed.append(f"{table}: a statement with no space set did not raise")
         try:
             with conn.transaction(), conn.cursor() as cur:
                 cur.execute("SELECT set_config(%s, %s, true)", (SPACE_SETTING, _NO_SPACE))
-                seen = _one(cur, f"SELECT count(*) FROM {q}")  # noqa: S608  # nosec B608
+                seen = _one(cur, f"SELECT count(*) FROM {q}")  # noqa: S608  # nosec B608 - a rule's table, quoted
         except psycopg.Error as exc:
             failed.append(f"{table}: could not be read in a space ({type(exc).__name__})")
             conn.rollback()
@@ -844,7 +844,7 @@ def prove(url: str, known: Iterable[str], *, vector_table: str | None = None) ->
         proof.failed.append("the space role is missing or wrong: nothing could be read as it")
         return proof
     with _owner_connect(url, autocommit=True) as conn, conn.cursor() as cur:
-        counts = {t: int(_one(cur, f"SELECT count(*) FROM {_quoted(t)}"))  # noqa: S608  # nosec B608
+        counts = {t: int(_one(cur, f"SELECT count(*) FROM {_quoted(t)}"))  # noqa: S608  # nosec B608 - a rule's table, quoted
                   for t in _present(cur, all_rules)}
     try:
         with _space_connect(url) as conn:

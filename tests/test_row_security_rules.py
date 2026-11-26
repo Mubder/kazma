@@ -177,7 +177,7 @@ def test_the_rights_gate_sees_a_changed_right() -> None:
 
 
 def test_the_space_address_keeps_the_addresss_own_options() -> None:
-    from psycopg.conninfo import conninfo_to_dict
+    conninfo_to_dict = pytest.importorskip("psycopg.conninfo").conninfo_to_dict
 
     url = "postgresql://kazma_app:pw@127.0.0.1:5432/kazma?options=-c%20search_path%3Dkazma"
     options = conninfo_to_dict(row_security._space_conninfo(url, environ={}))["options"]
@@ -193,7 +193,8 @@ def test_the_space_address_keeps_the_addresss_own_options() -> None:
 
 def test_a_bare_role_option_would_drop_the_addresss_own() -> None:
     # Negative control: what M10 measured -- options= replaces the address's.
-    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+    conninfo = pytest.importorskip("psycopg.conninfo")
+    conninfo_to_dict, make_conninfo = conninfo.conninfo_to_dict, conninfo.make_conninfo
 
     url = "postgresql://u@h/d?options=-c%20search_path%3Dkazma"
     assert conninfo_to_dict(make_conninfo(url, options="-c role=kazma_space"))["options"] == "-c role=kazma_space"
@@ -273,6 +274,7 @@ def test_the_checkpointer_sends_nothing_more_with_spaces_off(monkeypatch: pytest
     monkeypatch.setattr(row_security, "_in_place", False)
     monkeypatch.setattr(row_security, "after_checkpointer_setup", _never)
     asyncio.run(checkpoints_pg._rules_after_setup("postgresql://u@h/d"))
+    pytest.importorskip("psycopg")  # the rules in place: Postgres is there
     called: list[str] = []
     monkeypatch.setattr(row_security, "_in_place", True)
     monkeypatch.setattr(row_security, "after_checkpointer_setup", lambda url: called.append(url) or [])
