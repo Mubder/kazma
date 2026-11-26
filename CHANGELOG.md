@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## A busy test machine cannot hide a slow pattern (2026-11-26)
+
+- **The regex tests time both inputs in turns**: the tests that prove an old
+  pattern slows down faster than its input (and a new one does not) now ask
+  one shared measure, `tests/_growth.py`. It times the small and the large
+  input in turns, five of each, so a burst of load on a CI runner can no
+  longer cover every small call. CI read the old `dd` pattern, sixteen times
+  slower on four times the input, as linear. A gate keeps every such helper
+  on the one measure.
+
 ## Adding a provider, step by step (2026-11-25)
 
 - **Add provider is a guided setup**: the provider (searchable, grouped, or by
