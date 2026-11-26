@@ -294,6 +294,66 @@ four injected were noise.
   set and the small store do not move (a first version showed the home for
   the small store's abstain question q805, "What is my home Wi-Fi network
   called?": hence the rule that the word is the thing asked).
+- **Every kind of fact, asked in either language** (2026-11-25, W6 step 2).
+  `ASKED_WITH` knew seven kinds, by Kazma's own names alone; the deep pass names
+  a fact freely ("intends_to", "has_occupation"), in English, so an English
+  question shares a word with it and an Arabic one none. `fact_names.fact_kind`
+  reads a kind from a name's words (`LISTS`, `_FEW`, a role's and an employer's
+  other names) and `asked_words` gives the kind's words; new kinds have Arabic
+  words that say whose it is ("خططي", "شريت"), never nobody's ("خطة المبنى",
+  "كم هدف سجل؟"). A question of nothing but one kind, said of the user ("شنو
+  شريت؟", "Who is my doctor?"), keeps the asker's facts of it whatever their
+  evidence (`_kinds_it_is_all_of`, through `recall._named_facts`); beside another
+  word the question is of that one (`ASKED_ALONE`: "وش رقم سيارتي؟" asks no car).
+  "Do for a living" and what one may not eat are phrases (`ASKED_AS_MINE`).
+  Only kinds a question was measured to miss are in the table. Measured
+  (`memory/benchmark_kinds.py`: 23 kinds told in each language, stores of 1, 5
+  and 35, 138 questions a way): lost English 11, Gulf 59, MSA 55; now 0, 0, 0,
+  and the questions that use a kind's word otherwise show what they did (5, 2, 3
+  of 12, by meaning). Twenty kinds asked once in other words, not tuned on:
+  lost 8, 11, 6 of 40 before and 6, 10, 5 after; with the few words that run
+  showed missing, 6, 5, 5. Kazma's benchmark: every one of its 183 questions as
+  it was. The fact's vector is unchanged. Gate:
+  `tests/test_memory_fact_kinds.py` (the table before and the words alone as
+  negative controls, `scripts/memory_bench.py fact-kinds-vectors`).
+- **A list is read by its kind** (2026-11-25, W6 step 2). "List all my plans"
+  showed the entries of ONE name: 66 of 76 in English, 52 in Gulf, 59 in MSA (four lists told in each language, each
+  asked two ways); now all.
+  `recall._list_siblings` reads every name of the kind (`fact_names.LISTS`:
+  plans, goals, interests, bought, attended, habits), each entry under the name
+  it was told by; nothing is renamed or merged. Only where the names say ONE
+  list: "uses_service" and "uses_tool", "owns" and "has_item", "went_to" were
+  read as one and put eight tools into a question about delivery services. On
+  the pilots' stores (no model asked) 1 of 50 blocks and 8 of 200 change, and no
+  word of an answer is lost. **The name found comes first** (the review of step
+  2): the kind's other names come after its own entries, and only when the
+  question is of nothing but the kind or they hold a word of it
+  (`recall._asks_the_kind`, `fact_names.words_beside_the_kind`): "List all the
+  books I plan to read" showed 4 of 8 books among the other plans, "How many
+  concerts did I attend?" 7 wrong of 12. Measured (`benchmark_kinds.NARROW`,
+  4 lists in each language, 36 questions, real bge-m3): own entries of 68 a way
+  5f9bd053c 68/67/67, b80d43c15 60/59/58, now 68/67/67; the kind's other names
+  shown 9/5/5, 55/44/44, now 12/6/6 (after the own ones; "how many" as before).
+  Gate: `test_a_list_of_some_of_a_kind_shows_its_own_first`.
+- **A pattern that reads folded text is written folded** (2026-11-25): the list
+  pattern held "قائمة" and "لستة" and the follow-up's "متى", spellings the fold
+  takes away, so "عطني قائمة الخطط" was no list and "ومتى؟" no follow-up while their
+  English twins were; "إلى مارس" read no time (`time_words`' "الى"). Gate:
+  `tests/test_arabic_patterns_folded.py`: every Arabic word of a regular
+  expression -- compiled or not, joined, from a table, an f-string, a class's
+  attribute -- and of a comparison with folded text, in every module that folds;
+  a word the fold changes stands beside its folded spelling or is declared with
+  why (a pattern asked of the text as written). A table named beside a folded
+  word (`x in _ORG_HEADS`, `.get`, `__contains__`), an alias of `re` and
+  `functools.partial` are read too; the delta check found six more live ones that
+  way ("مؤسسة" and "هيئة" filed no employer; "متى أسكن في دبي؟" filed a home;
+  `own_words`' "ترى", "سؤال", "معنى"; `pasted_text`'s "نهائي", "الرئيس"),
+  each now written beside its folded spelling. 25 planted ways of writing one
+  and the live ones are the control. Not read: a pattern built in another
+  module, `content_terms` and `str.translate` tables.
+- **A list's question word in an entry's name** (the delta check, N5):
+  `recall._named_by` reads the fact's name's words beside its value, so "List all
+  the trips I am planning" puts `planning_trip` entries before other plans.
 - **One fact, one predicate name (W6, `memory/predicates.py`).** The
   extractor names predicates freely; under two names a single-valued fact is
   never superseded (live 2026-09-27: "daily_tweet_cap" 16 and

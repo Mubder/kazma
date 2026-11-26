@@ -62,7 +62,13 @@
     looked for the folded word in the unfolded text with `LIKE`: 8 of 8
     English words found, 0-1 of 8 Arabic ones in their own spelling. "My X" is
     one Arabic word and is taken off both what was typed and what was told
-    ("سيارتي" and "سيارة"); a dual, a broken plural and "our" are other words.
+    ("سيارتي" and "سيارة"), except off a name (`name_alphabets.is_a_name`: "سامي"
+    lists no "سام") and the few words whose ending is their own
+    (`speakers._AR_NOT_MINE`: "عادي"). It was taken off only where no row held
+    the word itself, and the user's own turns hold it: "سيارتي" lost the car
+    (the review of step 2); a dual, a broken plural and "our" are other words.
+    A typed letter and its mark are composed before marks are dropped ("café"),
+    and a digit inside a Latin word is looked for in any script ("iphone١٥").
     Only a word that may be the one asked for is folded, and only for an
     Arabic word or a number: folding each turn whole took 24 s for "gpt5" in
     20,000 facts and 50,000 turns (0.3 s now; the share of letters folded is

@@ -701,14 +701,15 @@ def _named_facts(query: str, rows: dict[str, Any]) -> frozenset[str]:
     user ("What is my city?", "وين بيتي؟": ``fact_names.kinds_said_of_the_user``):
     the asker's own, of the kind it names. Recall keeps them whatever their
     meaning score (``_rank_by_evidence``'s ``named``)."""
-    from kazma_core.memory.fact_names import kinds_said_of_the_user
+    from kazma_core.memory.fact_names import fact_kind, kinds_said_of_the_user
 
     entry = _ASKER_ENTRY.get()
-    kinds = kinds_said_of_the_user(query) if entry else ()
+    ask = _ASK.get()
+    kinds = kinds_said_of_the_user(query, ask.words if ask is not None else frozenset()) if entry else ()
     if not kinds:
         return frozenset()
     return frozenset(bid for bid, row in rows.items()
-                     if str(_field(row, "predicate") or "") in kinds
+                     if fact_kind(str(_field(row, "predicate") or "")) in kinds
                      and str(_field(row, "subject") or "") == entry)
 
 
@@ -1920,11 +1921,19 @@ def _in_order(query: str, ranked: list[RecallHit], rows: dict[str, Any], conn: s
 
 
 def _named_by(query: str) -> Any:
-    """Whether a fact's value holds a word of the question's."""
+    """Whether a fact's value, or what its name says beside its first word,
+    holds a word of the question's: "trip" is in ``planning_trip`` (the delta
+    check of the review of step 2). The first word is what every entry of the
+    list says ("visited"): read, it named every occasion of a habit."""
     from kazma_core.memory.query_terms import content_terms
 
     asked = set(_without_time_words(content_terms(query)))
-    return lambda row: bool(asked & set(_without_time_words(content_terms(str(_field(row, "object") or "")))))
+
+    def named(row: Any) -> bool:
+        beside = str(_field(row, "predicate") or "").split("_")[1:]
+        return bool(asked & set(_without_time_words(content_terms(f"{_field(row, 'object') or ''} {' '.join(beside)}"))))
+
+    return named
 
 
 def _with_the_rest(hits: list[RecallHit], rows: dict[str, Any], limit: int) -> list[RecallHit]:
@@ -1947,14 +1956,22 @@ def _with_the_rest(hits: list[RecallHit], rows: dict[str, Any], limit: int) -> l
 #: the facts of the same subject under the same name ("user noted ...") --
 #: come with them (part F). Read for this many of the best.
 _LIST_SIBLINGS_OF = 3
+#: The most names one kind of list is read under (the most in the pilots' 250
+#: stores: 60).
+_LIST_NAMES = 200
 
 
 def _list_siblings(conn: sqlite3.Connection, tenant_id: str, query: str, ranked: list[RecallHit],
                    others: list[RecallHit], rows: dict[str, Any],
                    limit: int) -> tuple[list[RecallHit], list[RecallHit]]:
-    """The current facts sharing a subject and a name with one of *ranked*'s
-    best (:data:`_LIST_SIBLINGS_OF`), kind by kind, and the other occasions of
-    those that are events. "List every note I asked you to keep" finds one
+    """The current facts sharing a subject and a name -- or a kind of list: a
+    model names one list in many ways (``fact_names.LISTS``: "plans_to",
+    "planning", "intends_to") -- with one of *ranked*'s best
+    (:data:`_LIST_SIBLINGS_OF`), kind by kind, and the other occasions of
+    those that are events. The entries of the name found come first; another
+    name's come after them, and only when the question is of nothing but the
+    kind or they hold a word of it (:func:`_asks_the_kind`): "List all the books
+    I plan to read" showed other plans in their place. "List every note I asked you to keep" finds one
     note by meaning; the notes are the facts ``user noted ...``. A sibling
     stands on its kind's evidence, never on its own words: those holding a
     word of the question come first, then the newest (an event by its day).
@@ -1966,23 +1983,27 @@ def _list_siblings(conn: sqlite3.Connection, tenant_id: str, query: str, ranked:
     taken = {_event_of(rows.get(h.id)) for h in ranked} - {None}
     keep = _BELIEF_KEEP.get()
     asked = _named_by(query)
+    whole_kind, of_the_question = _asks_the_kind(query)
     for best in ranked[:_LIST_SIBLINGS_OF]:
         row = rows.get(best.id)
         sub, pred = _field(row, "subject"), _field(row, "predicate")
         if not sub or not pred or _field(row, "valid_until") is not None:
             continue
         try:
-            found = conn.execute(
+            found = [str(r[0]) for r in conn.execute(
                 "SELECT id FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? "
                 f"AND {BELIEF_ACTIVE_SQL} AND COALESCE(object, '') != '' "  # nosec B608 - fixed clause, values bound
                 "ORDER BY valid_from DESC LIMIT ?",
                 (tenant_id, sub, pred, _OCCASIONS_READ),
-            ).fetchall()
+            ).fetchall()]
+            kin = _of_the_same_list(conn, tenant_id, sub, pred)
         except sqlite3.Error:
             logger.debug("[recall] a fact's siblings could not be read", exc_info=True)
             continue
-        fresh = _hydrate_beliefs(conn, [str(r[0]) for r in found if str(r[0]) not in seen], tenant_id)
-        for sib in sorted(fresh, key=lambda r: (asked(r), _told_or_happened(r), str(r["id"])), reverse=True):
+        fresh = _hydrate_beliefs(conn, [bid for bid in (*found, *kin) if bid not in seen], tenant_id)
+        fresh = [r for r in fresh if _field(r, "predicate") == pred or whole_kind(pred) or of_the_question(r)]
+        for sib in sorted(fresh, key=lambda r: (_field(r, "predicate") == pred, asked(r), _told_or_happened(r),
+                                                str(r["id"])), reverse=True):
             sid, key = str(sib["id"]), _event_of(sib)
             if keep is not None and not keep(str(_field(sib, "subject") or "")):
                 continue
@@ -1997,6 +2018,47 @@ def _list_siblings(conn: sqlite3.Connection, tenant_id: str, query: str, ranked:
             taken.add(key)
             out.append(hit)
     return out, more
+
+
+def _asks_the_kind(query: str) -> tuple[Any, Any]:
+    """``(whether the question asks for every entry of a name's kind, whether an
+    entry holds what it asks of the kind)``: "List all my plans" is of plans
+    under whatever name, "List all the books I plan to read" of the books."""
+    from kazma_core.memory.fact_names import list_kind, words_beside_the_kind
+    from kazma_core.memory.query_terms import content_terms
+
+    ask = _ASK.get()
+    times = ask.words if ask is not None else frozenset()
+
+    def whole(predicate: str) -> bool:
+        kind = list_kind(predicate)
+        return kind is not None and not words_beside_the_kind(query, kind, times)
+
+    def holds(row: Any) -> bool:
+        kind = list_kind(str(_field(row, "predicate") or ""))
+        wanted = words_beside_the_kind(query, kind, times) if kind else frozenset()
+        return bool(wanted & set(_without_time_words(content_terms(str(_field(row, "object") or "")))))
+
+    return whole, holds
+
+
+def _of_the_same_list(conn: sqlite3.Connection, tenant_id: str, subject: str, predicate: str) -> list[str]:
+    """*subject*'s current facts under another name of the same kind of list
+    (``fact_names.list_kind``), the newest first, of at most
+    :data:`_LIST_NAMES` names."""
+    from kazma_core.memory.fact_names import list_kind
+
+    kind = list_kind(predicate)
+    if kind is None:
+        return []
+    names = [str(r[0]) for r in conn.execute(
+        f"SELECT predicate, MAX(valid_from) FROM beliefs WHERE tenant_id = ? AND subject = ? AND {BELIEF_ACTIVE_SQL} "  # nosec B608 - fixed clause, values bound
+        "GROUP BY predicate ORDER BY 2 DESC", (tenant_id, subject)).fetchall()]
+    names = [n for n in names if n != predicate and list_kind(n) == kind][:_LIST_NAMES]
+    return [str(r[0]) for r in conn.execute(
+        f"SELECT id FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate IN ({','.join('?' for _ in names)}) "  # nosec B608 - '?' placeholders only
+        f"AND {BELIEF_ACTIVE_SQL} AND COALESCE(object, '') != '' ORDER BY valid_from DESC LIMIT ?",
+        (tenant_id, subject, *names, _OCCASIONS_READ)).fetchall()] if names else []
 
 
 def _told_or_happened(row: Any) -> float:
@@ -3608,12 +3670,15 @@ def _belief_search_words(query: str) -> list[str]:
     English name, and an Arabic question's own found no fact (the memory
     plan's finding 10). The kinds come first: the words are cut at
     :data:`_QUESTION_MAX_TERMS`."""
-    from kazma_core.memory.fact_names import asked_as_mine, kinds_asked
+    from kazma_core.memory.fact_names import asked_as_mine, indexed_words, kinds_asked, kinds_said_of_the_user
     from kazma_core.memory.query_terms import content_terms
 
     # "my city", "وين بيتي" ask where the user lives; "the home page" and
     # "بيت الشعر" ask nothing of the user (``fact_names.asked_as_mine``).
-    kinds = list(kinds_asked(asked_as_mine(query, _without_time_words(content_terms(query)))))
+    ask = _ASK.get()
+    said = kinds_said_of_the_user(query, ask.words if ask is not None else frozenset())
+    kinds = list(dict.fromkeys((*kinds_asked(asked_as_mine(query, _without_time_words(content_terms(query)))),
+                                *indexed_words(said))))
     return [*kinds, *(w for w in _search_words(query) if w not in kinds)]
 
 

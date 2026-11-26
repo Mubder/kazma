@@ -445,6 +445,8 @@ _DECLARED_CALLERS = {
         "the benchmark scores a recall that failed as a miss, on every question",
     "kazma-core/kazma_core/memory/benchmark.py::run_speaker_benchmark":
         "the speakers benchmark scores a recall that failed as a miss",
+    "kazma-core/kazma_core/memory/benchmark_kinds.py::_ask":
+        "the benchmark's rows say a degraded recall, and its gate refuses one",
     "kazma-core/kazma_core/memory/eval_golden.py::run_golden_eval":
         "a recall that failed fails its case: nothing it expects is found",
 }

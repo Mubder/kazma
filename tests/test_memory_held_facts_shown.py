@@ -63,13 +63,19 @@ def test_the_fact_a_turn_changes_is_shown_and_closed_in_each_dialect(monkeypatch
     assert max(r["places"] for r in rows) == DEEP_PASS_HELD_FACTS
 
 
-def test_a_reply_in_the_users_script_does_not_yet_close_a_name_held_in_the_other(monkeypatch):
-    """Not claimed (the review of step 1): the fact held as ``omar`` is shown
-    to "عمر نقل الدوحة", and a reply that says "عمر", as the prompt asks, is
-    about another subject, so the old home stays. Kazma has no match between
-    a name's two alphabets; when one is built, these close."""
+def test_a_reply_in_the_users_script_closes_a_persons_fact_held_in_the_other(monkeypatch):
+    """The fact held as ``omar`` is shown to "عمر نقل الدوحة", and a reply that
+    says "عمر", as the prompt asks, replaces it (W6, step 2:
+    ``name_alphabets``). A project's name is nobody's in two alphabets: the
+    reply's fact is written as it came."""
     said = [r for r in _run(monkeypatch) if r["subject"] == "as said"]
     assert len(said) == 32 and all(r["shown"] for r in said)
+    assert {(r["pair"], r["dialect"]) for r in said if not r["closed"]} == {("project", "gulf"), ("project", "msa")}
+
+
+def test_control_without_the_match_the_job_and_the_home_stay(monkeypatch):
+    monkeypatch.setattr("kazma_core.memory.name_alphabets.same_name", lambda one, other: False)
+    said = [r for r in _run(monkeypatch) if r["subject"] == "as said"]
     assert {(r["pair"], r["dialect"]) for r in said if not r["closed"]} == {
         (pair, dialect) for pair in ("job", "friend", "project") for dialect in ("gulf", "msa")}
 
@@ -89,7 +95,14 @@ def test_a_fact_is_shown_among_many_nearer_ones_in_each_dialect(monkeypatch):
     assert len(rows) == 18 and [r for r in rows if not r["shown"]] == []
 
 
+def _no_names_across_alphabets(monkeypatch) -> None:
+    """A friend held as ``omar`` is found near in meaning alone, as a thing is
+    whose name Kazma does not know in both alphabets."""
+    monkeypatch.setattr(held_facts._Said, "_in_the_other_alphabet", lambda self, subject: None)
+
+
 def test_control_sixty_facts_read_lose_it(monkeypatch):
+    _no_names_across_alphabets(monkeypatch)
     monkeypatch.setattr(held_facts, "_NEAR_READ", 60)
     lost = {(r["case"], r["dialect"], r["others"]) for r in _crowds(monkeypatch) if not r["shown"]}
     # The English ones hold a word of the turn ("swims", "Omar"); the Arabic
@@ -133,7 +146,9 @@ def test_control_each_way_of_choosing_is_needed_in_each_dialect(monkeypatch, way
 
 
 def test_control_a_name_in_the_other_alphabet_is_found_only_near(monkeypatch):
-    """"عمر نقل الدوحة" and ``omar``: no word of the turn names him."""
+    """"عمر نقل الدوحة" and ``omar``, were the name not known in both: no word
+    of the turn names him."""
+    _no_names_across_alphabets(monkeypatch)
     monkeypatch.setattr(held_facts, "_OTHER_ALPHABET", 0)
     rows = [r for r in _run(monkeypatch) if r["subject"] == "as held"]
     assert {(pair, dialect) for pair, dialect, *_ in _lost(rows)} == {("friend", "gulf"), ("friend", "msa")}

@@ -99,11 +99,6 @@
   measured only by asking it. The list is 465 tokens at the median (Qwen
   503), 915 at the most; 5 ms a turn there, and at 10,000 facts 0.2 s in
   English and 0.7 in Arabic (30,000: 0.8 and 2.2), in the worker's thread.
-  **Not claimed:** a fact held under a name in the other alphabet is shown,
-  and a reply that writes the name as the user did ("عمر"), which the prompt
-  asks for, is about another subject: `_take_replaces` refuses, and both stay
-  current. Kazma has no match between a name's two alphabets; it is planned
-  with the plan's step 2.
   Gates: `tests/test_memory_held_facts_shown.py` (eight changes told in
   English, Gulf and MSA, to stores of none and forty newer facts and with the
   fact held in the other language; a friend's home among 300 nearer facts and
@@ -112,6 +107,70 @@
   in the packages (`tests/test_word_lists_compared.py`, read from source; the
   live one and the spellings of it a review planted are its controls). Vectors:
   `scripts/memory_bench.py held-pairs-vectors`.
+- **A person held in one alphabet and spoken of in the other** (2026-11-25, W6
+  step 2, `memory/name_alphabets.py`). The prompt keeps a name in the script the
+  user wrote, so "عمر نقل" came as a fact of "عمر" and the home held of `omar`
+  stayed. **Never two people:** by its letters "حسن" is as near to "hassan" as
+  "حسان" is, so the match is no transliteration: it is the pairs written out in
+  `_NAMES`, an Arabic name and the Latin spellings that are its own. The first
+  version made the spellings by rule and joined Eli with علي, Samer with سمر,
+  Eiman with أيمن, Majid with ماجد (the review of step 2, 2026-11-26): a
+  spelling people use for two names is in no pair. A name not in the list
+  matches nothing, and an English word that is a spelling ("Sultan", "Hind")
+  names someone in a text only where it is written as a name. Every word of a
+  subject must match. It is read in three places: `belief_extractor._who_is_meant`,
+  where the REPLY says the fact replaces (or ends) one held of them, no other
+  subject held may be meant (`may_be`, `same_spelling`: "نوره" is somebody when
+  "نورة" is said) and the name is no member's (N30: a member's own name is the
+  member's, whoever else is held); `held_facts._Said`, which shows a person's
+  facts (places only); and Forget (`mention_match`): "forget everything that
+  mentions خالد" takes what is kept under `khaled`, by subject and entity, never a
+  text's other alphabet ("علي" is "on" too). Not covered: a project or a place, a
+  name beyond the list, a family name on one side only, someone already held
+  under both names. Gate: `tests/test_memory_name_alphabets.py` (no spelling of
+  the list is two names'; 200 rivals, none read as another name, with a planted
+  one as the control; English words read from Kazma's own documents; the whole
+  write with near names; members; forgetting both ways).
+- **One role for one person** (2026-11-25, W6 step 2; narrowed by the review of
+  step 2, 2026-11-26). Near doubles are rare: of 154 pairs of facts in two names
+  that look alike in DeepSeek's 50 stores, read one by one, about 20 are one
+  statement. So nothing here joins by meaning, and a list is never merged.
+  `fact_names.name_to_file`, asked ONCE by the pass (`_apply_beliefs_to_v2`,
+  deep and quick) **before** anything compares the fact with what was
+  forgotten (N33), denied ("Not me") or asked about, never inside
+  `mutate_belief`: named after those checks, a forgotten member's job came back
+  and a denied role was filed again (M1). The user's (and a member's) role and
+  age go under Kazma's name (`ONE_VALUE_NAMES`: has_occupation, has_profession,
+  has_job_title, current_occupation, current_profession; has_age, current_age),
+  and a value held under one of those from before is filed anew under it
+  (`belief_mutation.file_under`, with the open changes of the old name) so the
+  trust gate and the card see one fact. **Another person's job is filed as it
+  came**: it joins the held one only where the reply says it `replaces` it
+  (`_take_replaces`). By the name alone, "clinical consultant to Zain" closed
+  Noura's "dentist" and "كاتبة روايات" Sara's "محامية" (the delta check, N1),
+  and the pilots' 250 stores hold nobody with two such names. **Only names that
+  say it of the user's work in any sentence**: "role" is a part, a captain, a
+  father of three; "has_job" and "current_job" a weekend one or a chore; each
+  stays beside. A value that says it is beside ("part-time", "chess club",
+  "متطوعة", "النادي": `_BESIDE`), or an age lower than the one held (a child's),
+  is filed as it came. The rows of the kind are read by their names' words
+  (`_KIND_WORDS`), not every fact of the user's. Where a list of the kind is
+  held, Kazma's name included, nothing is joined. What was forgotten, denied or
+  ended is compared by
+  `fact_names.same_statement` (the same words, or the same kind), so it is
+  known whatever the next reply calls it (M3: an ended "job_title surgeon"
+  ended nothing filed under "occupation"); "role", "role_is" and "has_role" are
+  compared as a role and never joined or asked by (`_SAID_ALIKE`). Only in the
+  pass: the memory tools, the Memory page's link, `about_you`, `changes.confirm`
+  and the backfill ask neither the name nor "Not me", as on 5f9bd053c. A store that holds both of the user's names stays doubled (the weekly
+  rebuild does not join them). Gates: `tests/test_memory_one_name_for_a_person.py`
+  (EN/AR: today's table as the control; what stands beside a job; forgotten,
+  denied and ended under every pair of the tables' names; the pass's order read
+  from its source with five planted moves as the control; every statement in
+  `memory/` that reads facts by one name -- in SQL however it is written, or in
+  Python, a comparison of tuples, sets, ``match`` and comparing calls included --
+  declared with why, 27 planted ways as the control; a row's name read by its
+  place, ``row[2]``, is not seen).
 - **The deep pass reads the turn inside a data fence** (2026-11-20, the
   framework audit's F10, part C2). `turn_message` (form 4) puts the turn
   before, the facts held and the turn itself inside one
@@ -491,8 +550,8 @@
   facts go by Kazma's names before the write
   (`memory/fact_names.py`, `_canonical_for_user`: "home_city", "located_in",
   "resides_in" -> "lives_in"; employer, role, name, preferred name; subject
-  `user` only; a plural is a list -- the first layer of F4's table, which
-  grows to forty names after the owner's review). **One helper, every
+  `user` only; a plural is a list -- the first layer of F4's table, whose
+  second part is W6's, below). **One helper, every
   writer** (the main session's check of the third review, fixes 1 and 4):
   `fact_names.users_names` ("User" is the user, and the user's facts go by
   Kazma's names) is called before `mutate_belief` by the deep pass, the

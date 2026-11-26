@@ -2887,6 +2887,36 @@ def _cmd_held_pairs_vectors() -> int:
     return 0
 
 
+def _cmd_fact_kinds_vectors() -> int:
+    """Record bge-m3's vectors for ``benchmark_kinds`` (the memory plan's W6,
+    step 2) into the file its gate replays (``tests/test_memory_fact_kinds.py``)."""
+    from kazma_core.memory.benchmark import RecordingEmbedder
+    from kazma_core.memory.benchmark_kinds import FACT_KINDS_VECTORS, run_fact_kinds, run_lists, run_narrow_lists
+    from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
+
+    _limit_cpu_threads()
+    real = get_embedder()
+    if real is None:
+        print("no embedder is configured: install the rag extra (bge-m3)", file=sys.stderr)
+        return 2
+    model = get_embedding_model_name()
+    recorder = RecordingEmbedder(real)
+    a, b = _patched(recorder, model)
+    deadline = mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0)
+    with a, b, deadline:
+        rows, lists, narrow = run_fact_kinds(), run_lists(), run_narrow_lists()
+    out = VECTORS.with_name(FACT_KINDS_VECTORS)
+    n = recorder.save(out, model=model)
+    missed = [r for r in rows if ("want" in r and not r["found"]) or r.get("never") in r["shown"]]
+    short = [r for r in lists if r["shown"] < r["of"] or r["apart"]]
+    print(f"{out}: {n} vectors from {model}; {len(rows) - len(missed)} of {len(rows)} rows hold, "
+          f"{len(lists) - len(short)} of {len(lists)} lists; narrow lists: "
+          f"{sum(r['own'] for r in narrow)} of {sum(r['of'] for r in narrow)} entries, {sum(r['other'] for r in narrow)} others")
+    for r in [*missed, *short, *narrow]:
+        print("  ", json.dumps(r))
+    return 0
+
+
 def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
     from kazma_core.memory.benchmark import ReplayEmbedder, run_benchmark
 
@@ -3668,6 +3698,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("writes")
     sub.add_parser("fact-languages-vectors",
                    help="record the vectors of the facts-across-languages gate (the real model)")
+    sub.add_parser("fact-kinds-vectors",
+                   help="record bge-m3's vectors for the kinds of facts asked in both languages (W6, step 2)")
     sub.add_parser("held-pairs-vectors",
                    help="record the vectors of the held-facts pairs (the real model)")
     sub.add_parser("passage-vectors", help="record the vectors of every passage the benchmark's stores hold (W5)")
@@ -3697,6 +3729,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_fact_languages_vectors()
     if args.cmd == "held-pairs-vectors":
         return _cmd_held_pairs_vectors()
+    if args.cmd == "fact-kinds-vectors":
+        return _cmd_fact_kinds_vectors()
     if args.cmd == "passage-vectors":
         return _cmd_passage_vectors()
     if args.cmd == "rerank-scores":

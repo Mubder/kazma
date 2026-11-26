@@ -76,7 +76,7 @@ _ASKING_STARTS = {
     "should", "shall", "can", "could", "would", "do", "does", "did", "how", "what", "why", "which", "who",
     "whom", "whose", "summarize", "summarise", "translate", "explain", "rewrite", "proofread", "review",
     "draft", "compose",
-    "هل", "كيف", "وش", "شنو", "ليش", "متى", "وين", "شلون", "لخص", "ترجم", "اشرح", "صحح", "راجع",
+    "هل", "كيف", "وش", "شنو", "ليش", "متى", "متي", "وين", "شلون", "لخص", "ترجم", "اشرح", "صحح", "راجع",
 }
 
 # Arabic, written folded (``documents.arabic.fold_for_search``).

@@ -100,7 +100,8 @@ def _every_word(columns: tuple[str, ...], asked: word_search.Asked) -> tuple[str
     held = " || ' ' || ".join(f"COALESCE({c},'')" for c in columns)
     plain = [t for t in asked.terms if t.isascii() and any(ch.isalpha() for ch in t)]
     clause = "".join(f"LOWER({held}) LIKE ? AND " for _ in plain) + word_search.holds("every", *columns)
-    return clause, [f"%{t}%" for t in plain]
+    # A digit may stand in another script in the text ("iphone١٥", "٣G").
+    return clause, ["%" + "".join("_" if ch.isdigit() else ch for ch in t) + "%" for t in plain]
 
 
 def _day(ts: Any, zone: Any) -> str:
@@ -140,7 +141,6 @@ def list_memories(
     if when.strip() and period is None:
         # A time the reader cannot place is never read as "any time".
         return MemoryListing(about=about, when=when, offset=offset)
-    asked = word_search.Asked.of(about, words=8)
     only = narrowed_to(tenant_id)
     people = speakers.room(tenant_id)
     own = conn is None
@@ -150,9 +150,10 @@ def list_memories(
         conn = sqlite3.connect(primary_memory_db(), timeout=15)
     conn.row_factory = sqlite3.Row
     try:
+        tiers = ",".join("?" for _ in RECALLABLE_TIERS)
+        asked = word_search.Asked.of(about, words=8)
         word_search.register(conn, asked)
         facts = _facts(conn, only, asked, period, zone)
-        tiers = ",".join("?" for _ in RECALLABLE_TIERS)
         where, params = [f"tier IN ({tiers})", "(? IS NULL OR tenant_id = ?)"], [*RECALLABLE_TIERS, only, only]
         if period is not None:
             where.append("created_at >= ? AND created_at < ?")

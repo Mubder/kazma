@@ -14,7 +14,9 @@ spelling).
 Here both sides are folded with ``documents.arabic.fold_for_search`` and
 compared word by word, as recall reads a question (``query_terms``): a word's
 article, one-letter prefix, possessive or light plural is no difference, nor
-is the Arabic "my" at its end ("سيارتي", "سيارة"). An Arabic dual ("سيارتين"),
+is the Arabic "my" at its end ("سيارتي", "سيارة"). A name's last letter is its
+own ("سامي" is nobody's "سام"), and so is that of the few words that end so and
+say nobody's ("عادي", "ثاني"). An Arabic dual ("سيارتين"),
 a broken plural and "our" at a typed word's end ("سيارتنا") are other words.
 Only a word that may be the one asked for is folded (a text of 50,000 turns
 took 24 seconds folded whole, for "gpt5").
@@ -115,10 +117,12 @@ def _look(term: str, forms: Sequence[str]) -> re.Pattern[str]:
     """What an unfolded text that holds *term*, or one of its *forms*, holds
     somewhere: the letters they all begin with, in any spelling. Every text is
     looked at; only a word around a find is folded."""
-    if not _folds(term):
-        return re.compile(re.escape(term), re.IGNORECASE)
-    begin = os.path.commonprefix([f[:-1] if f.endswith((_TAA, _MY)) and len(f) > 2 else f for f in forms]) or term[:1]
     spellings = _spellings()
+    if not _folds(term):
+        # A Latin word as it is written, its digits in any script ("iphone١٥").
+        return re.compile("".join(f"[{spellings[ch]}]" if ch.isdigit() and ch in spellings else re.escape(ch)
+                                  for ch in term), re.IGNORECASE)
+    begin = os.path.commonprefix([f[:-1] if f.endswith((_TAA, _MY)) and len(f) > 2 else f for f in forms]) or term[:1]
     return re.compile(_DROPPED.join(f"[{spellings[ch]}]" if ch in spellings else re.escape(ch) for ch in begin),
                       re.IGNORECASE)
 
@@ -132,9 +136,14 @@ _WHOSE = "(?:هما|كما|نا|كم|هم|ها|ي|ك|ه)"
 def _forms(written: str, term: str) -> list[str]:
     """The folded *term*, and, when it was *written* with the ending "my", the
     word without it: "سيارتي" is "سياره", "بيتي" is "بيت", "مستشفاي" is
-    "مستشفى". "منى" and "مستشفى" end in no "my"."""
+    "مستشفى". "منى" and "مستشفى" end in no "my", and neither does a name
+    ("سامي") or a word whose ending is its own ("عادي")."""
+    from kazma_core.memory.name_alphabets import is_a_name
     from kazma_core.memory.query_terms import content_terms
+    from kazma_core.memory.speakers import _AR_NOT_MINE
 
+    if is_a_name(term) or term in _AR_NOT_MINE:
+        return [term]
     if term.isascii() or len(term) < 3 or not written.endswith((_MY, "ی")) or not term.endswith(_MY):
         return [term]
     bare = term[:-1]
@@ -210,7 +219,7 @@ class Asked:
         together: list[tuple[int, ...]] = []
         for piece in (query or "").split():
             here: list[int] = []
-            for written in _TOKEN.findall("".join(ch for ch in piece if unicodedata.category(ch) != "Mn" and ch != "ـ")):
+            for written in _TOKEN.findall(_unmarked(piece)):
                 for term in content_terms(written):
                     term = term[:_WORD_CHARS]
                     if term not in terms:
@@ -269,6 +278,14 @@ class Asked:
     def as_written(self, value: object) -> bool:
         """The whole query is in *value*, both folded."""
         return bool(self.phrase) and value is not None and self.phrase in fold(_text(value))
+
+
+def _unmarked(piece: str) -> str:
+    """*piece* without its marks and stretches -- composed first: a letter and
+    the mark that makes another letter of it ("café" typed as "e" and an
+    accent, an alef and its hamza) is that letter, never the letter without it."""
+    return "".join(ch for ch in unicodedata.normalize("NFKC", piece)
+                   if unicodedata.category(ch) != "Mn" and ch != "ـ")
 
 
 def _folded(chunk: str) -> str:

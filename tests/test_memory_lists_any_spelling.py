@@ -270,6 +270,58 @@ def test_a_word_is_found_as_a_word(stored, query, held):
     assert Asked.of(query, whole=True).any(stored) is held
 
 
+@pytest.mark.parametrize("stored, query, held", [
+    # A letter typed as a letter and its mark (the last check of step 1).
+    ("the café by the sea", "café", True), ("my résumé", "résumé", True),
+    ("the cafe by the sea", "café", False), ("قرأت كتاب", "قرأت", True),
+    # A digit in another script, inside a Latin word.
+    ("٣G router", "٣G", True), ("bought an iphone١٥", "iphone١٥", True), ("bought an iPhone15", "iphone١٥", True),
+    ("GPT٥ is out", "gpt5", True), ("gpt6 is out", "gpt5", False), ("٣G", "4g", False),
+])
+def test_a_word_is_found_as_it_was_typed(stored, query, held):
+    from kazma_core.memory.word_search import Asked
+
+    assert Asked.of(query).every(stored) is held
+
+
+#: What is held, what is typed, the rows listed: a final ي that may be "my".
+#: "سيارتي" lists "سيارة" where "سيارتي" is written too (the review of step 2:
+#: the user's own turns hold it, and the fact was no longer listed); a name's
+#: last letter is its own, and so is that of a word that says nobody's.
+MY = [
+    (("سامي اتصل", "سام زارنا"), "سامي", {0}), (("عادي جدا", "عاد من السفر"), "عادي", {0}),
+    (("رامي في البيت", "رام الله مدينة"), "رامي", {0}), (("هادي وصل", "هاد الشي"), "هادي", {0}),
+    (("سيارة تويوتا بيضاء", "بيت كبير"), "سيارتي", {0}), (("سيارتي تعطلت", "بيت كبير"), "سيارتي", {0}),
+    (("سيارة تويوتا بيضاء", "سيارتي تعطلت أمس"), "سيارتي", {0, 1}),
+    (("حساسية من الفول", "حساسيتي زادت"), "حساسيتي", {0, 1}), (("قهوة عربية بالهيل", "قهوتي بردت"), "قهوتي", {0, 1}),
+    (("رحلة إلى صلالة", "رحلتي تأجلت"), "رحلتي", {0, 1}),
+]
+
+
+@pytest.mark.parametrize("held, typed, listed", MY)
+@pytest.mark.parametrize("place", PLACES)
+def test_my_is_taken_off_unless_the_word_is_a_name(lists, place, held, typed, listed):
+    lists.told(held)
+    assert lists(place, typed) == {_id(n) for n in listed}
+
+
+@pytest.mark.parametrize(("english", "arabic"), [("my car", "سيارتي"), ("my allergy", "حساسيتي"), ("my coffee", "قهوتي")])
+def test_my_x_finds_x_in_both_languages(english, arabic):
+    from kazma_core.memory.word_search import Asked
+
+    thing = {"my car": "car", "my allergy": "allergy", "my coffee": "coffee"}[english]
+    held = {"car": "سيارة", "allergy": "حساسية", "coffee": "قهوة"}[thing]
+    assert Asked.of(english).every(f"a {thing} I like") and Asked.of(arabic).every(f"{held} أحبها")
+
+
+def test_control_a_name_read_as_my_lists_another(lists, monkeypatch):
+    from kazma_core.memory import name_alphabets
+
+    monkeypatch.setattr(name_alphabets, "is_a_name", lambda word: False)
+    lists.told(MY[0][0])
+    assert lists("page: facts", "سامي") == {_id(0), _id(1)}
+
+
 def test_a_list_that_wants_every_word_takes_a_words_start():
     from kazma_core.memory.word_search import Asked
 

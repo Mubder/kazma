@@ -486,9 +486,9 @@ def _sanitize_belief(b: dict[str, Any]) -> dict[str, Any] | None:
     on = _since_value(b.get("on"))
     if on:
         clean["on"] = on
-    replaces = _REF_RE.fullmatch(str(b.get("replaces") or "").strip().lower())
+    replaces = _ref_of(b)
     if replaces:
-        clean["replaces"] = f"f{int(replaces[1])}"
+        clean["replaces"] = replaces
     if b.get("ended") is True:
         clean["ended"] = True
     return clean
@@ -509,8 +509,8 @@ _REF_RE = re.compile(r"f([0-9]{1,3})")
 def _take_replaces(clean: dict[str, Any], held: list[dict[str, Any]] | None, conn: Any,
                    tenant_id: str, user_text: str = "") -> dict[str, Any] | None:
     """The held fact *clean* replaces (its ``replaces`` number), when it is
-    about the same subject and still current: *clean* then goes by that
-    fact's name and kind, so the trust gate decides as for any change of it
+    about the same subject (:func:`_who_is_meant`) and still current: *clean*
+    then goes by that fact's name and kind, so the trust gate decides as for any change of it
     (a fact the user stated yields only to the user's own words). Anything
     else is ignored: the fact is written as it came."""
     ref = clean.pop("replaces", None)
@@ -537,6 +537,61 @@ def _take_replaces(clean: dict[str, Any], held: list[dict[str, Any]] | None, con
         clean["predicate"] = entry["predicate"]
     clean["predicate_type"] = "set" if clean.get("event") else entry["predicate_type"]
     return entry
+
+
+def _who_is_meant(raw_beliefs: list[dict[str, Any]], held: list[dict[str, Any]] | None, conn: Any,
+                  tenant_id: str, people: Any) -> dict[str, str]:
+    """The names a reply gives to subjects that are held under another
+    spelling: the id of the name as the reply writes it -> the subject held
+    (the memory plan's W6, step 2). Only where the reply says itself that a
+    fact of it replaces one of theirs, and the name is the same one: in another
+    case ("Noura", ``noura``), or in the other alphabet ("عمر", ``omar``). The
+    reply's other facts of that name are the same person's.
+
+    Never two people: the name must be one Kazma knows to be one person's in
+    both alphabets (``name_alphabets``), no other subject held may be the one
+    meant (``omar`` beside ``umar``), and nobody may be held under the name as
+    it was said (a ``عمر`` with facts of his own is himself), however it is
+    spelled. A member's name is that member's, whoever else is held under it
+    (N30: ``people`` says whose, ``speakers.Room.filed``). Else the fact is
+    written as it came, and both stay."""
+    from kazma_core.memory.entity_resolution import slug
+    from kazma_core.memory.name_alphabets import may_be, same_name, same_spelling
+    from kazma_core.memory.speakers import is_member_entry
+
+    shown = {h["ref"]: h["subject"] for h in held or ()}
+    out: dict[str, str] = {}
+    subjects: set[str] | None = None
+    for b in raw_beliefs:
+        fact = b if isinstance(b, dict) else {}
+        said, theirs = str(fact.get("subject") or "").strip(), shown.get(_ref_of(fact))
+        if not said or not theirs or said == theirs or "user" in (said.casefold(), theirs) or is_member_entry(theirs):
+            continue
+        if people.member_named(said) is not None:
+            continue
+        if slug(said) == theirs:
+            out[slug(said)] = theirs
+        elif same_name(said, theirs):
+            if subjects is None:
+                subjects = {str(r[0]) for r in conn.execute(
+                    "SELECT DISTINCT subject FROM beliefs WHERE tenant_id = ? AND valid_until IS NULL "
+                    "AND invalidated_at IS NULL", (tenant_id,)).fetchall()}
+            if not any(may_be(said, other) or same_spelling(said, other) for other in subjects - {theirs}):
+                out[slug(said)] = theirs
+    return out
+
+
+def _held_as(said: str, meant: dict[str, str]) -> str:
+    """*said* as the subject it is held under (:func:`_who_is_meant`)."""
+    from kazma_core.memory.entity_resolution import slug
+
+    return meant.get(slug(said), said) if meant else said
+
+
+def _ref_of(belief: dict[str, Any]) -> str | None:
+    """The held fact a reply's belief says it replaces, as it is numbered."""
+    ref = _REF_RE.fullmatch(str(belief.get("replaces") or "").strip().lower())
+    return f"f{int(ref[1])}" if ref else None
 
 
 def _holds_one_value(entry: dict[str, Any]) -> bool:
@@ -567,8 +622,7 @@ def _same_event(entry: dict[str, Any], clean: dict[str, Any], user_text: str = "
     * when one of them has no day: a switch ("from vim to emacs yesterday"),
       or the same thing, or what the user puts right ("sorry, I meant Omar",
       "آسف أقصد عمر") or says it was not ("مو علي، عمر")."""
-    from kazma_core.memory.event_text import (denies, is_event_name, mentions_value, own_text, puts_right,
-                                              says_once_more)
+    from kazma_core.memory.event_text import denies, is_event_name, mentions_value, own_text, puts_right, says_once_more
     from kazma_core.memory.fact_days import compatible, could_have_happened_by, event_day, same_thing
     from kazma_core.memory.time_words import says_day
 
@@ -701,14 +755,16 @@ def _apply_ending(clean: dict[str, Any], replaced: dict[str, Any] | None, method
 
 def _current_fact(conn: Any, clean: dict[str, Any], tenant_id: str) -> str | None:
     """The current fact of *clean*'s subject that holds its value under the
-    same name (the same words: ``predicates._predicate_key``), if any."""
-    from kazma_core.memory.predicates import _predicate_key
+    same name, or another name for the same (``fact_names.same_statement``: a
+    surgeon told as "job_title" is filed as "occupation"), if any."""
+    from kazma_core.memory.entity_resolution import slug
+    from kazma_core.memory.fact_names import same_statement
 
     for fact_id, predicate, value in conn.execute(
-            "SELECT id, predicate, object FROM beliefs WHERE tenant_id = ? AND subject = ? AND valid_until IS NULL "
+            "SELECT id, predicate, object FROM beliefs WHERE tenant_id = ? AND subject IN (?, ?) AND valid_until IS NULL "
             "AND invalidated_at IS NULL AND COALESCE(object, '') != '' ORDER BY valid_from DESC",
-            (tenant_id, clean["subject"])).fetchall():
-        if _predicate_key(predicate) == _predicate_key(clean["predicate"]) and _same_value_text(value, clean["object"]):
+            (tenant_id, clean["subject"], slug(clean["subject"]))).fetchall():
+        if same_statement(predicate, clean["predicate"]) and _same_value_text(value, clean["object"]):
             return str(fact_id)
     return None
 
@@ -1150,6 +1206,15 @@ def _default_method(stats: dict[str, Any] | None) -> str:
     return USER_STATED if (stats or {}).get("source") == "heuristic" else LLM_INFERRED
 
 
+def _forgotten_of_them(clean: dict[str, Any], not_again: set[tuple[str, ...]]) -> bool:
+    """Whether *clean* is a fact a member forgot about themself (N33), under
+    whatever name this reply gives it."""
+    from kazma_core.memory.fact_names import same_statement
+
+    return any(subject == clean["subject"] and value == str(clean["object"]).casefold()
+               and same_statement(name, clean["predicate"]) for subject, name, value in not_again)
+
+
 def _user_said_not_me(primary_conn, clean: dict[str, Any], *, tenant_id: str) -> bool:
     from kazma_core.memory import changes
 
@@ -1243,8 +1308,7 @@ def _tells_an_undated_event(clean: dict[str, Any], named: str, user_text: str) -
 
 
 def _filed(clean: dict[str, Any], named: str, method: str, *, people: Any, said_by: str | None, user_text: str,
-           now: float | None, held: list[dict[str, Any]] | None, not_again: set[tuple[str, ...]] | None,
-           stats: dict[str, Any]) -> str | None:
+           now: float | None, held: list[dict[str, Any]] | None, stats: dict[str, Any]) -> str | None:
     """*clean* as it is filed: with its day, under *named* (Kazma's name for
     it) unless it is an event, in the user's spelling and -- in a shared
     space -- under the member it is about. The source it is filed with, or
@@ -1285,8 +1349,6 @@ def _filed(clean: dict[str, Any], named: str, method: str, *, people: Any, said_
             # A member's facts go by the names the user's do (fact_names).
             clean["predicate"] = users_predicate("user", clean["predicate"])
         method = people.label(method, filed, said_by)
-        if not_again and (filed, clean["predicate"], str(clean["object"]).casefold()) in not_again:
-            return None
     told = event or (clean["predicate_type"] == "set" and is_event_name(clean["predicate"]))
     if (told and user_text and not clean.get("ended")
             and (clean["subject"] == "user" or is_member_entry(clean["subject"]))
@@ -1368,9 +1430,9 @@ def _apply_beliefs_to_v2(
     Mutates ``stats`` in place and returns it.
     """
     tenant_id = space_named_or_bound(tenant_id)
-    from kazma_core.memory.belief_mutation import mutate_belief
-    from kazma_core.memory.entity_resolution import resolve_entity
-    from kazma_core.memory.fact_names import users_names
+    from kazma_core.memory.belief_mutation import file_under, mutate_belief
+    from kazma_core.memory.entity_resolution import resolve_entity, slug
+    from kazma_core.memory.fact_names import name_to_file, users_names
     from kazma_core.memory.provenance import LLM_INFERRED, USER_SOURCES
     from kazma_core.memory.speakers import is_member_entry
     from kazma_core.memory.speakers import room as speakers_room
@@ -1395,11 +1457,14 @@ def _apply_beliefs_to_v2(
     # (Memory audit M18 -- 93 names, seconds of CPU a turn on live).
     candidate_vecs = None
 
+    meant = _who_is_meant(raw_beliefs, held, primary_conn, tenant_id, people)
+
     for b in raw_beliefs:
         clean = _sanitize_belief(b)
         if clean is None:
             stats["rejected"] += 1
             continue
+        clean["subject"] = _held_as(clean["subject"], meant)
         # Commitment Layer §6.2 — conservative auto-store: throttle low-
         # confidence INFERRED beliefs so post-turn extraction doesn't pollute
         # the belief graph with noise (incl. dates the assistant invented in
@@ -1414,13 +1479,21 @@ def _apply_beliefs_to_v2(
         # beside the user's "lives_in" (``fact_names``, F4).
         clean["subject"], named = users_names(clean.get("subject"), clean["predicate"])
         _method = _filed(clean, named, _method, people=people, said_by=said_by, user_text=user_text, now=now,
-                         held=held, not_again=not_again, stats=stats)
+                         held=held, stats=stats)
         if _method is None:
             stats["rejected"] += 1
             continue
         replaced = _take_replaces(clean, held, primary_conn, tenant_id, user_text or "")
         if replaced and not clean.get("ended"):
             _keep_the_day(replaced, clean, _method, user_text or "")
+        # The fact's name is settled here, once: every check below asks by it.
+        filing = name_to_file(
+            primary_conn, tenant_id=tenant_id, subject=slug(clean["subject"]), predicate=clean["predicate"],
+            predicate_type=clean["predicate_type"], value=clean["object"])
+        clean["predicate"] = filing.name
+        if not_again and _forgotten_of_them(clean, not_again):
+            stats["rejected"] += 1
+            continue
         if _said_not_me_before(primary_conn, clean, _method, tenant_id, stats):
             continue
         if _held_back_by_auto_store(clean, _method, cfg, stats):
@@ -1488,6 +1561,8 @@ def _apply_beliefs_to_v2(
                     clean["object"] = merged_onto
         except Exception:
             logger.debug("[belief_extract] entity resolution skipped", exc_info=True)
+        if filing.refile:
+            file_under(primary_conn, filing.refile, filing.name, tenant_id=tenant_id)
         action = mutate_belief(
             primary_conn,
             clean["subject"],
