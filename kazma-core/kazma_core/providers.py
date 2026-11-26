@@ -26,6 +26,10 @@ Each entry says:
 * ``local`` -- a server on this computer or network (no key, no cost);
 * ``default_model`` -- the model to try when nothing else names one;
 * ``url_hint`` -- what to change in the address, when it has a placeholder.
+
+Where a provider has several addresses, what its keys look like and where a
+key is made are :mod:`kazma_core.provider_endpoints`; :func:`catalog` serves
+both.
 """
 
 from __future__ import annotations
@@ -156,9 +160,10 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
 def catalog() -> list[dict[str, Any]]:
     """Every preset as the pages read it (``GET /api/providers/catalog``):
     ``custom`` last, as the dialog's "any other" choice."""
-    rows = [{"id": pid, **meta} for pid, meta in PROVIDER_PRESETS.items() if pid != "custom"]
-    rows.append({"id": "custom", **PROVIDER_PRESETS["custom"]})
-    return rows
+    from kazma_core.provider_endpoints import setup_data
+
+    order = [pid for pid in PROVIDER_PRESETS if pid != "custom"] + ["custom"]
+    return [{"id": pid, **PROVIDER_PRESETS[pid], **setup_data(pid, PROVIDER_PRESETS[pid])} for pid in order]
 
 
 def is_local_preset(provider: str) -> bool:

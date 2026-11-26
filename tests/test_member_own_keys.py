@@ -516,7 +516,8 @@ def test_a_key_is_kept_only_once_it_answered(world, app, as_reem) -> None:
     own_keys._forget(world.reem)
     assert own_keys._read_key(world.reem, "deepseek") == REEMS["deepseek"], "nothing was kept"
     kept = app.put("/api/account/model-keys/deepseek", json={"key": "reem-new-key"}, headers=as_reem)
-    assert kept.status_code == 200 and kept.json() == {"ok": True, "provider": "deepseek", "own": True}
+    assert kept.status_code == 200 and {k: kept.json()[k] for k in ("ok", "provider", "own")} == {
+        "ok": True, "provider": "deepseek", "own": True}
     assert "reem-new-key" not in kept.text
     assert app.checked[-1] == {"key": "reem-new-key", "headers": {}, "model": "deepseek-chat"}
     assert own_keys._read_key(world.reem, "deepseek") == "reem-new-key"

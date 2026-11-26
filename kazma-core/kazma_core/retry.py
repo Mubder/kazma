@@ -108,7 +108,7 @@ def _extract_http_status_code(exc: Exception) -> int | None:
 
 
 def friendly_llm_error(
-    exc: Exception, *, model: str = "", base_url: str = ""
+    exc: Exception, *, model: str = "", base_url: str = "", user_text: str | None = None
 ) -> str:
     """Map LLM call failures to user-friendly messages after retries exhausted.
 
@@ -162,6 +162,12 @@ def friendly_llm_error(
             "again in a minute; if it keeps happening, check the provider (or a "
             "proxy in front of it), or switch provider in Settings > Providers & Connectors."
         )
+
+    if getattr(exc, "kind", "") == "content_refused":
+        # The provider's filter, not Kazma's and not the key: what can be done.
+        from kazma_core.agent.content_refusal import refusal_failed_text
+
+        return refusal_failed_text(user_text, model.strip(), backup_tried=bool(getattr(exc, "backup_tried", False)))
 
     if getattr(exc, "kind", "") == "model_not_allowed":
         # Spaces S2-03: the model is not one the person may use; nothing was sent.

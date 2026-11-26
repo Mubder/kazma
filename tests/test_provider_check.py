@@ -124,6 +124,9 @@ class _Registry:
         row = self.rows.get(name)
         return dict(row) if row else None
 
+    def list_providers(self):
+        return [dict(r) for r in self.rows.values()]
+
     def resolve_provider_credentials(self, name):
         row = self.rows.get(name) or {}
         return row.get("base_url", ""), row.get("api_key", "")

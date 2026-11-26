@@ -79,6 +79,7 @@ export function registerStores() {
                 this.actions = opts.actions || [];
                 this.input = opts.input !== undefined ? opts.input : null;
                 this.inputValue = opts.inputValue !== undefined ? opts.inputValue : '';
+                this._inputGiven = this.inputValue;
                 this.inputType = opts.inputType || 'text';
                 this.checkbox = opts.checkbox || '';
                 this.checkboxValue = false;
@@ -100,6 +101,13 @@ export function registerStores() {
                         }
                     }
                 }, 50);
+            },
+
+            /** A click outside or Escape: closes, unless something was typed
+             *  that would be lost (its Cancel and x close it). */
+            dismiss() {
+                if (this.input && this.inputValue !== this._inputGiven) return;
+                this.close();
             },
 
             close() {

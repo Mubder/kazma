@@ -961,6 +961,13 @@ DECLARED: dict[str, str] = {
     M + "cron/scheduler.py": "a job's refusal when its person lacks the Scheduled feature, an (English, "
                              "Arabic) pair chosen by the job's language; nothing is decided by Arabic "
                              "text; tests/test_feature_grants.py",
+    M + "agent/content_refusal.py": "the line an answer from another vendor begins with, two fixed "
+                                    "strings that language_lock.in_their_language chooses between; "
+                                    "nothing is decided by Arabic text; "
+                                    "tests/test_content_refusal_failover.py",
+    M + "reasoning_text.py": "the marks a sentence ends with before a closing tag: the Arabic question "
+                             "mark beside the Latin ones, one rule for both languages; "
+                             "tests/test_reasoning_is_never_the_answer.py (both)",
     M + "agent/turn_budget.py": "the honest end of a turn refused before it started (its space's or "
                                 "person's share of turns in use, S4-04), two fixed strings that "
                                 "language_lock.in_their_language chooses between; nothing is decided "

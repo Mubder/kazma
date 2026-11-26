@@ -5,9 +5,10 @@
 
 {# Global modal (controlled via Alpine store) #}
 <template x-if="$store.modal.open" x-transition>
+    {# A question with something typed in it stays open on a click outside or Escape #}
     <div class="modal-overlay"
-         @click.self="$store.modal.close()"
-         @keydown.escape.window="$store.modal.close()">
+         @click.self="$store.modal.dismiss()"
+         @keydown.escape.window="$store.modal.dismiss()">
         <div class="modal"
              :class="{
                  'modal-sm': $store.modal.size === 'sm',
@@ -56,7 +57,6 @@
                        :type="$store.modal.inputType"
                        :placeholder="$store.modal.input"
                        @keydown.enter="$store.modal.actions[$store.modal.actions.length - 1] && $store.modal.actions[$store.modal.actions.length - 1].handler ? ($store.modal.actions[$store.modal.actions.length - 1].handler(), $store.modal.close()) : null"
-                       @keydown.escape="$store.modal.close()"
                        dir="auto"
                        style="width:100%;font-size:0.9rem;">
             </div>

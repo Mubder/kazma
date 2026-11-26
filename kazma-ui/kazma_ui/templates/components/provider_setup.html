@@ -1,0 +1,324 @@
+{# The guided provider setup (settings_provider_setup.js): the provider, its
+   address, the key, one test message, then what to use it for. Included by
+   settings.html inside the settings component. #}
+<div x-show="setup.open" x-cloak class="modal-overlay" id="provider-setup"
+     x-effect="keepSetupDraft()"
+     @click.self="closeProviderSetup()"
+     @keydown.escape.window="setup.open && !KazmaDialogGuard.escapeIsTaken() && closeProviderSetup()">
+    <div class="modal modal-lg ps-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-setup-title" @keydown.tab.window="setup.open && KazmaDialogGuard.keepFocus($event, $el)">
+        <div class="modal-header">
+            <h2 id="provider-setup-title">{{ t('settings.add_provider') }}</h2>
+            <button type="button" class="modal-close" @click="closeProviderSetup()" aria-label="{{ t('common.close') }}"><span class="ki" x-html="KazmaIcons.get('x')" aria-hidden="true"></span></button>
+        </div>
+        <ol class="ps-steps" aria-label="{{ t('settings.setup.steps') }}">
+            <template x-for="st in setupSteps()" :key="st.id">
+                <li class="ps-step" :class="'is-' + st.state" :aria-current="st.state === 'current' ? 'step' : false">
+                    <span class="ps-step-n" aria-hidden="true" x-text="st.n"></span>
+                    <span x-text="st.label"></span>
+                </li>
+            </template>
+        </ol>
+
+        <div class="modal-body">
+            <div class="notice ps-resumed" x-show="setup.resumed && setup.step < 5" x-cloak>
+                <span>{{ t('settings.setup.resumed') }}</span>
+                <button type="button" class="btn btn-ghost btn-sm" id="setup-start-over" @click="startSetupOver()">{{ t('settings.setup.start_over') }}</button>
+            </div>
+
+            <!-- 1: the provider -->
+            <div x-show="setup.step === 1" class="ps-part">
+                <label class="form-label" for="setup-search">{{ t('settings.setup.search_label') }}</label>
+                <input type="text" class="form-input" id="setup-search" x-model="setup.query" autocomplete="off" spellcheck="false"
+                       translate="no" placeholder="{{ t('settings.setup.search_ph') }}"
+                       @keydown.enter.prevent="setupGuess(setup.query).length === 1 && chooseSetupProvider(setupGuess(setup.query)[0])">
+                <div class="notice tone-info" id="setup-guess" x-show="setupGuess(setup.query).length" x-cloak>
+                    <span>{{ t('settings.setup.looks_like') }}</span>
+                    <span class="ps-guesses">
+                        <template x-for="id in setupGuess(setup.query)" :key="id">
+                            <button type="button" class="btn btn-secondary btn-sm" translate="no" @click="chooseSetupProvider(id)" x-text="setupName(id)"></button>
+                        </template>
+                    </span>
+                </div>
+                <template x-for="group in setupGroups()" :key="group.id">
+                    <section class="ps-group">
+                        <h3 class="ps-group-title" x-text="setupGroupLabel(group.id)"></h3>
+                        <div class="ps-tiles">
+                            <template x-for="row in group.rows" :key="row.id">
+                                <button type="button" class="ps-tile" :data-provider="row.id"
+                                        :aria-pressed="setup.preset === row.id ? 'true' : 'false'"
+                                        @click="chooseSetupProvider(row.id)">
+                                    <span class="icon-tile icon-tile-sm" :class="setupTone(row)" aria-hidden="true" translate="no" x-text="setupMonogram(row)"></span>
+                                    <span class="ps-tile-name" translate="no" x-text="setupName(row.id)"></span>
+                                </button>
+                            </template>
+                        </div>
+                    </section>
+                </template>
+                <div class="empty-state" x-show="!setupGroups().length" x-cloak>{{ t('settings.setup.none_found') }}</div>
+            </div>
+
+            <!-- 2: where it is -->
+            <div x-show="setup.step === 2" class="ps-part" x-cloak>
+                <h3 class="ps-title"><bdi translate="no" x-text="setupName(setup.preset)"></bdi></h3>
+                <div class="form-group" x-show="setupPreset().form === 'google'" x-cloak>
+                    <label class="form-label" for="setup-google-mode">{{ t('settings.hub.google_mode') }}</label>
+                    <select id="setup-google-mode" class="form-select" x-model="setup.googleMode" @change="setupChanged()">
+                        <option value="ai_studio">{{ t('settings.hub.google_ai_studio') }}</option>
+                        <option value="vertex_ai" translate="no">Google Cloud / Vertex AI (ADC / gcloud)</option>
+                    </select>
+                </div>
+                <fieldset class="ps-endpoints" x-show="setupEndpoints().length" x-cloak>
+                    <legend class="form-label">{{ t('settings.setup.where') }}</legend>
+                    <template x-for="e in setupEndpoints()" :key="e.id">
+                        <label class="ps-endpoint" :class="{ 'is-chosen': setup.endpoint === e.id }">
+                            <input type="radio" name="setup-endpoint" :value="e.id" :checked="setup.endpoint === e.id"
+                                   @change="setup.endpoint = e.id; setupChanged()">
+                            <span class="ps-endpoint-text">
+                                <span x-text="e.label"></span>
+                                <bdi class="ps-endpoint-url" dir="ltr" translate="no" x-show="e.shown" x-text="e.shown"></bdi>
+                            </span>
+                        </label>
+                    </template>
+                </fieldset>
+                <div class="form-group" x-show="setup.endpoint === 'custom' && setupEndpoints().length" x-cloak>
+                    <label class="form-label" for="setup-custom-url">{{ t('settings.base_url') }}</label>
+                    <input type="text" class="form-input" id="setup-custom-url" dir="ltr" translate="no" autocomplete="off" spellcheck="false"
+                           x-model="setup.customUrl" @input="setupChanged()" placeholder="https://api.example.com/v1">
+                    <p class="text-error" x-show="setupProblem('base_url')" x-cloak x-text="setupProblem('base_url')"></p>
+                </div>
+                <template x-for="f in setupEndpointFields()" :key="f">
+                    <div class="form-group">
+                        <label class="form-label" :for="'setup-field-' + f" x-text="setupFieldLabel(f)"></label>
+                        <input type="text" class="form-input" :id="'setup-field-' + f" dir="ltr" translate="no" autocomplete="off" spellcheck="false"
+                               :list="setupFieldOptions(f).length ? 'setup-options-' + f : null"
+                               :value="setup.values[f] || ''" @input="setup.values[f] = $event.target.value; setupChanged()"
+                               :placeholder="setupFieldExample(f)">
+                        <datalist :id="'setup-options-' + f"><template x-for="o in setupFieldOptions(f)" :key="o"><option :value="o"></option></template></datalist>
+                        <p class="text-error" x-show="setupProblem(f)" x-cloak x-text="setupProblem(f)"></p>
+                    </div>
+                </template>
+                <template x-for="f in setupFormFields()" :key="f.id">
+                    <div class="form-group">
+                        <label class="form-label" :for="'setup-field-' + f.id">
+                            <span x-text="setupFieldLabel(f.id)"></span>
+                            <span class="setting-desc" x-show="!f.required" x-cloak>{{ t('settings.setup.optional') }}</span>
+                        </label>
+                        <input type="text" class="form-input" :id="'setup-field-' + f.id" dir="ltr" translate="no" autocomplete="off" spellcheck="false"
+                               :list="setupFieldOptions(f.id).length ? 'setup-options-' + f.id : null"
+                               :value="setup[f.model] || ''" @input="setup[f.model] = $event.target.value; setupChanged()"
+                               :placeholder="setupFieldExample(f.id)">
+                        <datalist :id="'setup-options-' + f.id"><template x-for="o in setupFieldOptions(f.id)" :key="o"><option :value="o"></option></template></datalist>
+                        <p class="text-error" x-show="setupProblem(f.id)" x-cloak x-text="setupProblem(f.id)"></p>
+                    </div>
+                </template>
+                <p class="setting-desc" x-show="setupIsVertex()" x-cloak>{{ t('settings.hub.adc_hint') | safe }}</p>
+
+                <!-- This provider is here already -->
+                <div class="notice tone-warning ps-same" id="setup-same" x-show="setup.same.length" x-cloak>
+                    <p>{{ t('settings.setup.same_title') }}</p>
+                    <template x-for="row in setup.same" :key="row.name">
+                        <div class="ps-same-row">
+                            <bdi translate="no" x-text="row.display_name"></bdi>
+                            <button type="button" class="btn btn-primary btn-sm ps-use-row" x-show="setupRowTakesKey(row)" @click="useSetupRow(row)"
+                                    x-text="row.has_key ? t('settings.setup.same_add_key') : t('settings.setup.same_set_key')"></button>
+                            <button type="button" class="btn btn-secondary btn-sm ps-show-row" x-show="!setupRowTakesKey(row)" x-cloak @click="showSetupRow(row)">{{ t('settings.setup.same_show') }}</button>
+                            <p class="setting-desc" x-show="row.env_key" x-cloak>{{ t('settings.setup.same_env_key') }}</p>
+                        </div>
+                    </template>
+                    <button type="button" class="btn btn-ghost btn-sm" id="setup-separate" @click="makeSetupSeparate()">{{ t('settings.setup.same_separate') }}</button>
+                </div>
+            </div>
+
+            <!-- 3: the key -->
+            <div x-show="setup.step === 3" class="ps-part" x-cloak>
+                <h3 class="ps-title"><bdi translate="no" x-text="setupName(setup.preset)"></bdi></h3>
+                <p class="ps-address" x-show="setup.baseUrl" x-cloak><bdi dir="ltr" translate="no" x-text="setup.baseUrl"></bdi></p>
+                <p class="notice tone-info" x-show="setup.addTo" x-cloak x-text="t('settings.setup.adding_to', { name: setup.addTo })"></p>
+                <div x-show="setupPreset().form === 'bedrock'" x-cloak>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="setup-aws-key-id">{{ t('settings.hub.aws_access_key_id') }}</label>
+                            <input type="text" class="form-input" id="setup-aws-key-id" dir="ltr" translate="no" autocomplete="off" spellcheck="false" x-model="setup.awsKeyId" @input="setupKeyChanged()">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="setup-aws-secret">{{ t('settings.hub.aws_secret_access_key') }}</label>
+                            <input type="password" class="form-input" id="setup-aws-secret" dir="ltr" autocomplete="off" spellcheck="false" x-model="setup.awsSecret" @input="setupKeyChanged()">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="setup-aws-token">{{ t('settings.hub.aws_session_token') }}</label>
+                        <input type="password" class="form-input" id="setup-aws-token" dir="ltr" autocomplete="off" spellcheck="false" x-model="setup.awsToken" @input="setupKeyChanged()">
+                    </div>
+                    <p class="setting-desc">{{ t('settings.hub.bedrock_hint') }}</p>
+                </div>
+                <div class="form-group" x-show="setupPreset().form !== 'bedrock' && !setupIsVertex()" x-cloak>
+                    <label class="form-label" for="setup-key" x-text="setupNeedsKey() ? t('settings.api_key') : t('settings.hub.api_key_optional')"></label>
+                    <div class="input-with-toggle">
+                        <input id="setup-key" :type="setup.showKey ? 'text' : 'password'" class="form-input" dir="ltr" autocomplete="off" spellcheck="false"
+                               x-model="setup.apiKey" @input="setupKeyChanged()" placeholder="{{ t('settings.setup.key_ph') }}"
+                               @keydown.enter.prevent="setupNext()">
+                        <button class="btn btn-icon" type="button" @click="setup.showKey = !setup.showKey"
+                                :title="setup.showKey ? t('settings.hub.hide') : t('settings.hub.show')"
+                                :aria-label="setup.showKey ? t('settings.hub.hide') : t('settings.hub.show')"
+                                x-html="setup.showKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
+                    </div>
+                    <a class="ps-key-link" id="setup-key-link" x-show="setupKeyHost()" x-cloak :href="setupKeyPage()" target="_blank" rel="noopener noreferrer">
+                        <span>{{ t('settings.setup.get_key') }}</span> <bdi dir="ltr" translate="no" x-text="setupKeyHost()"></bdi>
+                    </a>
+                    <div class="notice tone-warning" id="setup-mismatch" x-show="setupKeyMismatch().length" x-cloak>
+                        <span>{{ t('settings.setup.looks_like') }}</span>
+                        <span class="ps-guesses">
+                            <template x-for="id in setupKeyMismatch()" :key="id">
+                                <button type="button" class="btn btn-secondary btn-sm" translate="no" @click="chooseSetupProvider(id, true)" x-text="setupName(id)"></button>
+                            </template>
+                        </span>
+                    </div>
+                    <p class="notice tone-info" id="setup-cleared" x-show="setup.cleared" x-cloak x-text="t('settings.setup.cleared', { host: setup.cleared })"></p>
+                    <p class="setting-desc">{{ t('settings.setup.key_stays') }}</p>
+                </div>
+                <div class="form-group" x-show="['azure', 'bedrock'].includes(setupPreset().form)" x-cloak>
+                    <label class="form-label" for="setup-models" x-text="setupPreset().form === 'azure' ? t('settings.hub.azure_deployments') : t('settings.setup.models_typed')"></label>
+                    <input type="text" class="form-input" id="setup-models" dir="ltr" translate="no" x-model="setup.models" @input="setupKeyChanged()" autocomplete="off">
+                </div>
+                <div class="form-row" x-show="!setup.addTo" x-cloak>
+                    <div class="form-group">
+                        <label class="form-label" for="setup-name">{{ t('settings.name_id') }}</label>
+                        <input type="text" class="form-input" id="setup-name" translate="no" x-model="setup.name" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="setup-display-name">{{ t('settings.display_name') }}</label>
+                        <input type="text" class="form-input" id="setup-display-name" translate="no" x-model="setup.displayName" autocomplete="off">
+                    </div>
+                </div>
+                <details class="provider-advanced" x-show="!setup.addTo" x-cloak>
+                    <summary>{{ t('settings.hub.advanced') }}</summary>
+                    <div class="form-group" x-show="!['google', 'bedrock', 'azure'].includes(setupPreset().form)" x-cloak>
+                        <label class="ps-check"><input type="checkbox" id="setup-as-typed" x-model="setup.urlAsTyped" @change="setupKeyChanged()"> <span>{{ t('settings.hub.url_as_typed') }}</span></label>
+                        <div class="setting-desc">{{ t('settings.hub.url_as_typed_hint') }}</div>
+                    </div>
+                    <div class="form-group" role="group" aria-labelledby="setup-headers-label" x-show="setupPreset().form !== 'bedrock'" x-cloak>
+                        <div class="form-label" id="setup-headers-label">{{ t('settings.hub.headers') }}</div>
+                        <div class="setting-desc">{{ t('settings.hub.headers_hint') }}</div>
+                        <template x-for="(row, i) in setup.headerRows" :key="i">
+                            <div class="form-row ps-header-row">
+                                <input type="text" class="form-input" dir="ltr" translate="no" x-model="row.name" @input="setupKeyChanged()" :aria-label="t('settings.hub.header_name')" :placeholder="t('settings.hub.header_name')" autocomplete="off">
+                                <input type="password" class="form-input" dir="ltr" x-model="row.value" @input="setupKeyChanged()" :aria-label="t('settings.hub.header_value')" :placeholder="t('settings.hub.header_value')" autocomplete="off">
+                                <button class="btn btn-icon" type="button" @click="removeSetupHeader(i)" :title="t('settings.hub.remove')" :aria-label="t('settings.hub.remove')" x-html="KazmaIcons.get('x')"></button>
+                            </div>
+                        </template>
+                        <button class="btn btn-secondary btn-sm" type="button" id="setup-add-header" @click="addSetupHeader()">{{ t('settings.hub.add_header') }}</button>
+                    </div>
+                    <div class="form-group">
+                        <label class="ps-check"><input type="checkbox" id="setup-speech" :checked="setup.kind === 'speech'" @change="setup.kind = $event.target.checked ? 'speech' : 'chat'; setupKeyChanged()"> <span>{{ t('settings.hub.kind_speech') }}</span></label>
+                        <div class="setting-desc">{{ t('settings.hub.kind_speech_hint') }}</div>
+                    </div>
+                </details>
+            </div>
+
+            <!-- 4: one message -->
+            <div x-show="setup.step === 4" class="ps-part" x-cloak>
+                <p class="ps-found" x-show="(setup.found || []).length" x-cloak x-text="setupFoundLabel()"></p>
+                <p class="notice tone-warning" x-show="setup.findError" x-cloak x-text="setup.findError"></p>
+                <div class="form-group">
+                    <label class="form-label" for="setup-model">{{ t('settings.setup.try_with') }}</label>
+                    <input type="text" class="form-input" id="setup-model" dir="ltr" translate="no" list="setup-model-list" autocomplete="off" spellcheck="false"
+                           x-model="setup.model" @input="setup.test = null">
+                    <datalist id="setup-model-list"><template x-for="m in (setup.found || [])" :key="m.id"><option :value="m.id"></option></template></datalist>
+                    <p class="setting-desc" x-show="setup.model && !setup.test" x-cloak x-text="setupPriceLabel(setupListedPrice())"></p>
+                </div>
+                <button type="button" class="btn btn-secondary" id="setup-test" @click="sendSetupTest()" :disabled="!!setup.busy"
+                        x-text="setup.busy === 'test' ? t('settings.testing') : t('settings.setup.send_test')"></button>
+                <p class="setting-desc">{{ t('settings.setup.test_note') }}</p>
+                <div class="notice tone-success ps-answer" id="setup-answer" x-show="setup.test && setup.test.ok" x-cloak>
+                    <p x-text="setupAnsweredLabel()"></p>
+                    <blockquote class="ps-answer-text" x-show="setup.test && setup.test.answer" x-cloak translate="no" dir="auto" x-text="setup.test ? setup.test.answer : ''"></blockquote>
+                    <p id="setup-thinking" x-show="setup.test && setup.test.thinking" x-cloak>{{ t('settings.setup.thinking') }}</p>
+                    <p class="setting-desc" x-text="setupPriceLabel(setup.test ? setup.test.price : null)"></p>
+                </div>
+                <div class="notice tone-danger" id="setup-test-failed" x-show="setup.test && !setup.test.ok && !setup.test.speech" x-cloak>
+                    <span x-text="setupTestWords()"></span>
+                    <button type="button" class="btn btn-ghost btn-sm" id="setup-save-anyway" @click="saveSetupAnyway()" :disabled="!!setup.busy">{{ t('settings.save_untested') }}</button>
+                </div>
+                <p class="notice tone-info" x-show="setup.test && setup.test.speech" x-cloak x-text="setupTestWords()"></p>
+            </div>
+
+            <!-- 5: what to use it for -->
+            <div x-show="setup.step === 5" class="ps-part" x-cloak>
+                <p class="notice tone-success" id="setup-saved" x-text="setup.savedLabel"></p>
+                <p class="setting-desc" x-show="setup.busy === 'after'" x-cloak>{{ t('settings.setup.reading_models') }}</p>
+                <div class="form-group" role="group" aria-labelledby="setup-shown-label" x-show="setupShownList().length" x-cloak>
+                    <div class="form-label" id="setup-shown-label">{{ t('settings.setup.shown_label') }}</div>
+                    <input type="text" class="form-input" id="setup-shown-search" x-show="setupShownList().length > 12" x-cloak x-model="setup.shownQuery"
+                           aria-label="{{ t('settings.hub.search_models') }}" placeholder="{{ t('settings.hub.search_models') }}" autocomplete="off">
+                    <div class="ps-models">
+                        <template x-for="m in setupShownFiltered()" :key="m">
+                            <label class="ps-check"><input type="checkbox" :checked="!!setup.shown[m]" @change="setup.shown[m] = $event.target.checked"> <bdi dir="ltr" translate="no" x-text="m"></bdi></label>
+                        </template>
+                    </div>
+                </div>
+                <div class="form-group" x-show="setupShownList().length" x-cloak>
+                    <label class="form-label" for="setup-default">{{ t('settings.setup.default_label') }}</label>
+                    <select id="setup-default" class="form-select" x-model="setup.makeDefault" @change="loadSetupBackups()">
+                        <option value="">{{ t('settings.setup.default_keep') }}</option>
+                        <template x-for="m in setupChosenModels().slice(0, 200)" :key="m"><option :value="m" translate="no" x-text="m"></option></template>
+                    </select>
+                </div>
+                <div class="form-group" x-show="setup.backups.length" x-cloak>
+                    <label class="form-label" for="setup-backup">{{ t('settings.setup.backup_label') }}</label>
+                    <select id="setup-backup" class="form-select" x-model="setup.backup">
+                        <option value="">{{ t('settings.setup.backup_keep') }}</option>
+                        <template x-for="b in setup.backups" :key="b.model"><option :value="b.model" translate="no" x-text="b.model"></option></template>
+                    </select>
+                    <p class="setting-desc">{{ t('settings.setup.backup_hint') }}</p>
+                </div>
+            </div>
+
+            <p class="text-error" id="setup-error" role="alert" x-show="setup.error" x-cloak x-text="setupErrorWords()"></p>
+        </div>
+
+        <div class="modal-footer">
+            <button type="button" class="btn btn-ghost ps-back" id="setup-back" x-show="setup.step > 1 && setup.step < 5" x-cloak @click="setupBack()">{{ t('settings.setup.back') }}</button>
+            <button type="button" class="btn btn-primary" id="setup-next" @click="setupNext()" :disabled="!canSetupNext()" x-text="setupNextLabel()"></button>
+        </div>
+    </div>
+</div>
+
+{# Rows that repeat each other, and rows nothing uses: merged and removed only
+   as shown (kazma_core.provider_setup.tidy). #}
+<div x-show="tidy.open" x-cloak class="modal-overlay" id="provider-tidy"
+     @click.self="tidy.open = false" @keydown.escape.window="if (!KazmaDialogGuard.escapeIsTaken()) tidy.open = false">
+    <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="provider-tidy-title" @keydown.tab.window="tidy.open && KazmaDialogGuard.keepFocus($event, $el)">
+        <div class="modal-header">
+            <h2 id="provider-tidy-title">{{ t('settings.setup.tidy_title') }}</h2>
+            <button type="button" class="modal-close" @click="tidy.open = false" aria-label="{{ t('common.close') }}"><span class="ki" x-html="KazmaIcons.get('x')" aria-hidden="true"></span></button>
+        </div>
+        <div class="modal-body">
+            <template x-for="g in tidy.merges" :key="g.keep">
+                <section class="ps-group">
+                    <h3 class="ps-group-title"><bdi translate="no" x-text="g.display_name"></bdi></h3>
+                    <p class="ps-address" x-show="g.base_url" x-cloak><bdi dir="ltr" translate="no" x-text="g.base_url"></bdi></p>
+                    <template x-for="m in g.merge" :key="m.name">
+                        <label class="ps-check tidy-merge"><input type="checkbox" :checked="!!tidy.picked[m.name]" @change="tidy.picked[m.name] = $event.target.checked">
+                            <span>{{ t('settings.setup.tidy_merge') }}</span> <bdi translate="no" x-text="m.display_name"></bdi>
+                            <span class="setting-desc" x-text="tidyKeys(m)"></span>
+                            <span class="setting-desc" x-show="!m.enabled && m.keys" x-cloak>{{ t('settings.setup.tidy_off_with_key') }}</span></label>
+                    </template>
+                    <p class="setting-desc" x-show="g.merge.length" x-cloak x-text="tidyMergeNote(g)"></p>
+                    <template x-for="m in g.kept" :key="m.name">
+                        <p class="setting-desc"><bdi translate="no" x-text="m.display_name"></bdi> <span x-text="tidyWhy(m.why)"></span></p>
+                    </template>
+                </section>
+            </template>
+            <section class="ps-group" x-show="tidy.unused.length" x-cloak>
+                <h3 class="ps-group-title">{{ t('settings.setup.tidy_unused') }}</h3>
+                <template x-for="u in tidy.unused" :key="u.name">
+                    <label class="ps-check tidy-unused"><input type="checkbox" :checked="!!tidy.picked[u.name]" @change="tidy.picked[u.name] = $event.target.checked">
+                        <bdi translate="no" x-text="u.display_name"></bdi> <bdi class="setting-desc" dir="ltr" translate="no" x-text="u.base_url"></bdi></label>
+                </template>
+            </section>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-primary" id="tidy-run" @click="runProviderTidy()" :disabled="tidy.busy || tidyPickedCount() === 0">{{ t('settings.setup.tidy_do') }}</button>
+        </div>
+    </div>
+</div>

@@ -104,7 +104,13 @@ def create_own_keys_router() -> APIRouter:
         except (IdentityUnavailable, OwnKeyUnreadable):
             logger.warning("[own-keys] a person's own keys could not be read", exc_info=True)
             return _unreadable()
-        return JSONResponse({"ok": True, "providers": providers})
+        from kazma_core.provider_endpoints import KEY_SHAPES
+        from kazma_core.providers import PROVIDER_PRESETS
+
+        # What each provider's keys look like, matched in the page.
+        shapes = [{"pattern": pattern, "providers": [{"id": i, "name": PROVIDER_PRESETS[i]["name"]} for i in ids]}
+                  for pattern, ids in KEY_SHAPES]
+        return JSONResponse({"ok": True, "providers": providers, "key_shapes": shapes})
 
     @router.put("/{provider}", dependencies=[Depends(rate_limit("own_keys", 6))])
     async def keep_model_key(request: Request, provider: str) -> JSONResponse:
@@ -133,7 +139,8 @@ def create_own_keys_router() -> APIRouter:
         except (IdentityUnavailable, OwnKeyUnreadable):
             logger.warning("[own-keys] a person's own key could not be kept", exc_info=True)
             return _unreadable()
-        return JSONResponse({"ok": True, "provider": provider, "own": True})
+        return JSONResponse({"ok": True, "provider": provider, "own": True,
+                             "answer": str(checked.get("answer") or "")[:200], "ms": checked.get("ms")})
 
     @router.delete("/{provider}")
     def forget_model_key(request: Request, provider: str) -> JSONResponse:

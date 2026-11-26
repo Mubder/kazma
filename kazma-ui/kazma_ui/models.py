@@ -181,6 +181,8 @@ class ProviderUpdateRequest(BaseModel):
     """Request to add or update an LLM provider in the unified hub."""
 
     name: str
+    #: A new provider: a name a provider that is set up has is refused (409).
+    create: bool = False
     display_name: str = ""
     base_url: str = ""
     api_key: str = ""
@@ -244,6 +246,14 @@ class ProviderTestResponse(BaseModel):
     error_code: str | None = None
     #: The models the check listed when none was given to try.
     models: list[str] | None = None
+    #: What the model said (a success only), and what it costs: the price per
+    #: million tokens Kazma knows ({input, output, cached_input, source}), and
+    #: this message's cost when it is known.
+    answer: str | None = None
+    #: It answered, and was still thinking when the check's own limit came.
+    thinking: bool | None = None
+    price: dict[str, Any] | None = None
+    cost_usd: float | None = None
 
 
 class ConnectorTestResponse(BaseModel):

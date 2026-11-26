@@ -47,7 +47,8 @@ OVERRIDES_KEY = "models.details"
 #: When the catalog's prices were read from the vendors' own pages.
 CATALOG_AS_OF = "2026-11"
 
-_FIELDS = ("context_window", "max_output", "vision", "tools", "input_per_1m", "output_per_1m")
+_FIELDS = ("context_window", "max_output", "vision", "tools", "input_per_1m", "output_per_1m",
+           "cached_input_per_1m")
 
 
 @dataclass
@@ -62,6 +63,7 @@ class ModelDetails:
     tools: bool | None = None
     input_per_1m: float | None = None
     output_per_1m: float | None = None
+    cached_input_per_1m: float | None = None
     sources: dict[str, str] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -84,31 +86,33 @@ def reported_key(provider: str) -> str:
 # ── The catalog ─────────────────────────────────────────────────────────
 #
 # Exact model ids, by the preset whose own API serves them at that price.
-# Prices: US dollars per million tokens, standard (uncached, under any long
-# context tier) input / output, from the vendor's pricing page as of
-# CATALOG_AS_OF. A model served elsewhere (OpenRouter, a router) takes that
+# Prices: US dollars per million tokens, standard (under any long context
+# tier) input / output, and cached input where the vendor lists one, from the
+# vendor's pricing page as of CATALOG_AS_OF. A model served elsewhere (OpenRouter, a router) takes that
 # provider's price, never this one.
 
-def _m(vision: bool, tools: bool = True, price: tuple[float, float] | None = None) -> dict[str, Any]:
+def _m(vision: bool, tools: bool = True, price: tuple[float, ...] | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {"vision": vision, "tools": tools}
     if price is not None:
-        out["input_per_1m"], out["output_per_1m"] = price
+        out["input_per_1m"], out["output_per_1m"] = price[:2]
+        if len(price) > 2:
+            out["cached_input_per_1m"] = price[2]
     return out
 
 
 CATALOG: dict[str, dict[str, dict[str, Any]]] = {
     "openai": {
-        "gpt-5": _m(True, price=(1.25, 10.0)),
-        "gpt-5-mini": _m(True, price=(0.25, 2.0)),
-        "gpt-5-nano": _m(True, price=(0.05, 0.40)),
-        "gpt-4.1": _m(True, price=(2.0, 8.0)),
-        "gpt-4.1-mini": _m(True, price=(0.40, 1.60)),
-        "gpt-4.1-nano": _m(True, price=(0.10, 0.40)),
-        "gpt-4o": _m(True, price=(2.50, 10.0)),
-        "gpt-4o-mini": _m(True, price=(0.15, 0.60)),
-        "o3": _m(True, price=(2.0, 8.0)),
-        "o4-mini": _m(True, price=(1.10, 4.40)),
-        "o3-mini": _m(False, price=(1.10, 4.40)),
+        "gpt-5": _m(True, price=(1.25, 10.0, 0.125)),
+        "gpt-5-mini": _m(True, price=(0.25, 2.0, 0.025)),
+        "gpt-5-nano": _m(True, price=(0.05, 0.40, 0.005)),
+        "gpt-4.1": _m(True, price=(2.0, 8.0, 0.50)),
+        "gpt-4.1-mini": _m(True, price=(0.40, 1.60, 0.10)),
+        "gpt-4.1-nano": _m(True, price=(0.10, 0.40, 0.025)),
+        "gpt-4o": _m(True, price=(2.50, 10.0, 1.25)),
+        "gpt-4o-mini": _m(True, price=(0.15, 0.60, 0.075)),
+        "o3": _m(True, price=(2.0, 8.0, 0.50)),
+        "o4-mini": _m(True, price=(1.10, 4.40, 0.275)),
+        "o3-mini": _m(False, price=(1.10, 4.40, 0.55)),
     },
     "anthropic": {
         "claude-opus-4-1": _m(True, price=(15.0, 75.0)),
@@ -200,6 +204,9 @@ def from_listing(item: Any) -> dict[str, Any]:
     inp, outp = _price_per_token(pricing.get("prompt")), _price_per_token(pricing.get("completion"))
     if inp is not None and outp is not None:
         out["input_per_1m"], out["output_per_1m"] = inp, outp
+        cached = _price_per_token(pricing.get("input_cache_read"))
+        if cached is not None:
+            out["cached_input_per_1m"] = cached
     return out
 
 
