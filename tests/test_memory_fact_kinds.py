@@ -217,3 +217,101 @@ def test_a_list_entrys_name_holds_a_word_of_the_question(question, name, value):
     if name.isascii():
         assert recall._named_by(question)(row)
     assert not recall._named_by(question)({"predicate": "plans_to", "object": "paint the kitchen"})
+
+
+# ── told as a turn, asked three ways (W6 step 3) ─────────────────────────
+
+TOLD_FIXTURE = Path(__file__).parent / "fixtures" / "memory_bench" / benchmark_kinds.TOLD_VECTORS
+#: Measured on cdbcfb65e (before step 3), lost of 132 a way and form; shown in
+#: another sense, of 44 a way (by meaning alone: 30, 25, 26).
+TOLD_BEFORE = {("en", "mine"): 0, ("en", "thing"): 3, ("gulf", "mine"): 2, ("gulf", "thing"): 16, ("msa", "mine"): 0,
+               ("msa", "thing"): 9}
+TOLD_NOW = {("en", "mine"): 0, ("en", "thing"): 1, ("gulf", "mine"): 0, ("gulf", "thing"): 3, ("msa", "mine"): 0,
+            ("msa", "thing"): 2}
+OTHER_SENSE_TOLD = {"en": 31, "gulf": 29, "msa": 28}
+
+
+def _told(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    replay = benchmark.ReplayEmbedder(TOLD_FIXTURE)
+    monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: replay)
+    monkeypatch.setattr("kazma_core.memory.embedder.get_embedding_model_name", lambda: replay.model)
+    monkeypatch.setattr(recall, "_recall_deadline_s", lambda: 600.0)
+    return benchmark_kinds.run_fact_languages_kinds()
+
+
+def _told_lost(rows: list[dict]) -> dict[tuple[str, str], int]:
+    return {(way, form): sum(1 for r in rows if r["asked"] == way and r["form"] == form and not r["found"])
+            for way in WAYS for form in ("mine", "thing")}
+
+
+def test_a_fact_told_as_a_turn_is_found_three_ways(monkeypatch):
+    """Told in either language through the quick pass and the deep pass, in
+    stores of 1, 5 and 30; asked in English, Gulf and MSA, in the first person
+    and with the thing asked. What is still lost: the store of one fact (no
+    background) and "at the gym", which the fact does not hold."""
+    rows = _told(monkeypatch)
+    assert not [r for r in rows if r["degraded"]]
+    assert Counter((r["told"], r["size"], r["asked"]) for r in rows if r["form"] == "mine") == {
+        (told, size, way): (len(benchmark_kinds.TOLD) if size == 30 else len(benchmark_kinds.TOLD))
+        for told in ("en", "ar") for size in benchmark_kinds.TOLD_SIZES for way in WAYS}
+    assert _told_lost(rows) == TOLD_NOW
+    shown = {way: sum(1 for r in rows if r["form"] == "other" and r["asked"] == way and r["shown"]) for way in WAYS}
+    assert all(shown[way] <= OTHER_SENSE_TOLD[way] for way in WAYS), shown
+
+
+def test_control_the_table_before_step_3_loses_arabic_questions_of_the_thing(monkeypatch):
+    for kind in ("car", "visited", "pets", "married"):
+        monkeypatch.delitem(fact_names.ASKED_WITH, kind)
+    monkeypatch.setitem(fact_names.ASKED_WITH, "doctor", ("doctor", "physician", "دكتوري", "دكتورتي", "طبيبي", "طبيبتي"))
+    monkeypatch.delitem(fact_names.ASKED_AS_MINE, "married")
+    for cached in (fact_names.asked_words, fact_names._asked_sets, fact_names._alone_sets, fact_names._all_mine,
+                   fact_names._mine_sets, fact_names._arabic_neighbours):
+        cached.cache_clear()
+    try:
+        lost = _told_lost(_told(monkeypatch))
+    finally:
+        monkeypatch.undo()
+        for cached in (fact_names.asked_words, fact_names._asked_sets, fact_names._alone_sets, fact_names._all_mine,
+                       fact_names._mine_sets, fact_names._arabic_neighbours):
+            cached.cache_clear()
+    assert lost["gulf", "thing"] > 3 * TOLD_NOW["gulf", "thing"] and lost["msa", "thing"] > TOLD_NOW["msa", "thing"], lost
+
+
+def test_every_kind_asked_is_told_and_asked_three_ways():
+    """The class: each kind the tables ask has a told row, questions in all three
+    ways in both forms, and a question in another sense in all three. The five
+    the quick pass writes are ``benchmark.run_fact_languages``'."""
+    quick = {"lives_in", "works_at", "name_is", "preferred_name", "allergic_to", "favorite_"}
+    asked = (set(fact_names.ASKED_WITH) | set(fact_names.ASKED_ALONE) | set(fact_names._FEW) | set(fact_names.LISTS)) - quick
+    told = {k["kind"] for k in benchmark_kinds.TOLD}
+    assert asked <= told, asked - told
+    for kind in benchmark_kinds.TOLD:
+        assert set(kind["asked"]) == set(kind["other"]) == set(WAYS) and set(kind["told"]) == {"en", "ar"}, kind["kind"]
+        assert all(len(q) == 2 for q in kind["asked"].values()), kind["kind"]
+
+
+def test_control_a_kind_with_no_told_row_is_found(monkeypatch):
+    monkeypatch.setitem(fact_names.ASKED_WITH, "planted", ("planted", "مزروع"))
+    quick = {"lives_in", "works_at", "name_is", "preferred_name", "allergic_to", "favorite_"}
+    asked = set(fact_names.ASKED_WITH) - quick
+    assert "planted" in asked - {k["kind"] for k in benchmark_kinds.TOLD}
+
+
+@pytest.mark.parametrize(("kind", "english", "gulf", "msa"), [
+    ("diet", "Can I eat gluten?", "أقدر آكل جلوتين؟", "هل أستطيع أكل الجلوتين؟"),
+    ("married", "What is my marital status?", "شنو حالتي الاجتماعية؟", "ما حالتي الاجتماعية؟"),
+    ("visited", "Which places have I visited?", "عدد كل الأماكن اللي زرتها", "ما الأماكن التي زرتها؟"),
+    ("pets", "What are my pets?", "شنو اسم قطوتي؟", "ما اسم قطتي؟")])
+def test_a_question_of_the_kind_asks_it_in_three_ways(kind, english, gulf, msa):
+    for question in (english, gulf, msa):
+        assert kind in fact_names.kinds_said_of_the_user(question), question
+
+
+@pytest.mark.parametrize(("english", "gulf", "msa"), [
+    ("What can I eat for dinner?", "شنو آكل على العشا؟", "ماذا آكل على العشاء؟"),
+    ("Which places do tourists visit?", "وين يروحون السياح؟", "ما الأماكن التي يزورها السياح؟"),
+    ("How is my health?", "شلون حالتي الصحية؟", "ما حالتي الصحية؟"),
+    ("How many cars are there?", "كم عدد السيارات؟", "ما عدد السيارات؟")])
+def test_the_same_words_in_another_sense_ask_no_kind(english, gulf, msa):
+    for question in (english, gulf, msa):
+        assert fact_names.kinds_said_of_the_user(question) == (), question

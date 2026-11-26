@@ -684,7 +684,7 @@ def test_every_kind_that_is_asked_is_some_names_kind():
     names = ["has_goal", "plans_to", "interested_in", "bought", "received", "met", "attended", "finished", "has_routine",
              "dietary_restriction", "doctor", "age_is", "birthday_is", "enrolled_in", "drives", "has_daughter",
              "has_son", "favorite_color", "lives_in", "works_at", "current_role", "name_is", "preferred_name",
-             "allergic_to"]
+             "allergic_to", "visited", "has_pet", "marital_status"]
     kinds = {fact_names.fact_kind(n) for n in names}
     assert kinds == set(fact_names.ASKED_WITH) | set(fact_names.ASKED_ALONE)
     assert set(fact_names.LISTS) <= kinds and set(fact_names._FEW) <= kinds

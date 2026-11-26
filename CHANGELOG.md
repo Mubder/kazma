@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Memory: Arabic questions about what you told find it as English ones do (2026-11-26)
+
+- Asking in Arabic about the thing itself finds what you told Kazma, as English
+  does: "أي طبيب أراجع؟", "أي تويوتا أسوق؟", "شنو اسم قطوتي؟", "شنو حالتي
+  الاجتماعية؟", "عدد كل الأماكن اللي زرتها", "أقدر آكل جلوتين؟". Of 132 such
+  questions a way, Gulf Arabic missed 16, Modern Standard Arabic 9 and English
+  3; now 3, 2 and 1. The rest are a store holding one fact, and a detail the
+  fact does not keep ("at the gym").
+- Places you visited, your pets and whether you are married are asked in Arabic
+  and English alike now, and "Can I eat gluten?" asks what you may not eat,
+  while "What can I eat for dinner?" still asks nothing of you.
+- Nothing else that recall shows moved: every question of Kazma's own
+  benchmark, its small-store run and the shared-space set shows what it did.
+
 ## A page closed while sending is not a server error (2026-11-25)
 
 - A page that closes while it is still sending its request no longer logs an
