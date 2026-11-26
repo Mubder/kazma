@@ -748,7 +748,11 @@ def test_once_armed_kazmas_database_is_reached_through_the_shared_door(
         backend._ours = backend._kazmas_database = ours
         monkeypatch.setattr(backend, "_open_connection", lambda: own)
     else:
+        import sys
+        from types import SimpleNamespace
+
         backend = PgvectorBackend(dsn=dsn)
         backend._kazmas_database = ours
-        monkeypatch.setattr("psycopg.connect", lambda *a, **k: own)
+        # Its own connection, with or without the driver installed (CI's main job has none).
+        monkeypatch.setitem(sys.modules, "psycopg", SimpleNamespace(connect=lambda *a, **k: own))
     assert (backend._connect() is held) is through_the_door
