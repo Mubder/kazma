@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## A page closed while sending is not a server error (2026-11-25)
+
+- A page that closes while it is still sending its request no longer logs an
+  unhandled exception with a traceback, and nothing is answered to it. A real
+  failure in the same request is reported as before.
+- A history export whose upload was cut off no longer leaves half a file in
+  Kazma's data folder.
+- With Spaces on, the Activity page no longer shows such a request as failed.
+
+## Members' code network: shut while Docker starts (2026-11-25)
+
+- While Kazma's container engine starts, code given the network reaches
+  nothing until the rules that hold it to the public internet are found in
+  effect. For half a second of a start, a container Docker could not stop
+  could reach private addresses.
+- `kazma setup engine` finds rules that no longer hold and puts them in again;
+  it read them as fine before. Run it once where the network was set up.
+
 ## Spaces: background work runs in the space it is for (2026-11-25)
 
 - Once Spaces is on, a document is processed, recovered after a crash and put
@@ -11,6 +29,13 @@
 - Once Spaces is on and the database refuses Kazma, Kazma says so and does not
   go on with another, empty store: a start that is refused fails with the
   reason. With Spaces off, and in an outage, it does what it did before.
+- Once Spaces is on, a swarm task's ending is recorded in its own space whoever
+  ends it, Kazma's start holds tasks a crash cut off in every space, and the
+  owner's task list has the tasks of before Spaces. A task the database refuses
+  says so, instead of "try again shortly".
+- Once Spaces is on, a chat the database refuses to read is no longer opened as
+  a new, empty one, and a history you bring in is yours in your space, or is
+  not brought in if you left it meanwhile.
 - A document audit entry that could not be written is logged as a warning.
 - The check that Kazma does not sign in to Postgres as a superuser asks for the
   login itself.

@@ -32,6 +32,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from kazma_core.spaces.row_work import install_statements
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["continue_turn", "cut_turns", "forget_cut_turn", "register_chat_app_continuer", "resume_cut_turns"]
@@ -122,18 +124,19 @@ async def _find_cut_turns(checkpointer: Any, graph: Any, now: float | None = Non
     # inside the listing waits on the listing for good.
     recent: list[tuple[str, float]] = []
     seen: set[str] = set()
-    async for tup in checkpointer.alist(None, limit=_SCAN_LIMIT):
-        cfg = (getattr(tup, "config", None) or {}).get("configurable") or {}
-        thread_id, ns = str(cfg.get("thread_id") or ""), str(cfg.get("checkpoint_ns") or "")
-        if not thread_id or ns or thread_id in seen:
-            continue
-        seen.add(thread_id)
-        at = checkpoint_time(cfg.get("checkpoint_id"))
-        if at is None:
-            continue
-        if now - at > RESUME_WINDOW_S:
-            break                         # newest first: everything after is older
-        recent.append((thread_id, at))
+    with install_statements("every space's newest checkpoints, listed at a start"):
+        async for tup in checkpointer.alist(None, limit=_SCAN_LIMIT):
+            cfg = (getattr(tup, "config", None) or {}).get("configurable") or {}
+            thread_id, ns = str(cfg.get("thread_id") or ""), str(cfg.get("checkpoint_ns") or "")
+            if not thread_id or ns or thread_id in seen:
+                continue
+            seen.add(thread_id)
+            at = checkpoint_time(cfg.get("checkpoint_id"))
+            if at is None:
+                continue
+            if now - at > RESUME_WINDOW_S:
+                break                     # newest first: everything after is older
+            recent.append((thread_id, at))
     found: list[CutTurn] = []
     for thread_id, at in recent:
         snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}})

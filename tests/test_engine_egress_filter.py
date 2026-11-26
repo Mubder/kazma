@@ -47,16 +47,34 @@ from tests._bash import find_bash
 pytestmark = pytest.mark.skipif(find_bash() is None, reason="bash is not on this machine")
 
 _FAKE = r'''
-import json, sys
+import json, os, sys, time
 from pathlib import Path
 
 sys.stdout.reconfigure(newline=chr(10))
+
+
+def told_to_wait(act):
+    # Windows refuses a file another copy is opening or replacing at that moment.
+    for _ in range(100):
+        try:
+            return act()
+        except PermissionError:
+            time.sleep(0.02)
+    return act()
+
+
 family, state_file, args = sys.argv[1], Path(sys.argv[2]), [a for a in sys.argv[3:] if a != "-w"]
 if family == "v6" and state_file.with_name("no-ip6tables").exists():
     sys.exit(3)  # IPv6 off in the kernel: ip6tables can do nothing
-state = json.loads(state_file.read_text()) if state_file.exists() else {}
+state = json.loads(told_to_wait(state_file.read_text)) if state_file.exists() else {}
 tables = state.setdefault(family, {"INPUT": [], "FORWARD": [], "OUTPUT": []})
+raw = args[:2] == ["-t", "raw"]
+if raw:
+    args = args[2:]
+    tables.setdefault("raw:PREROUTING", [])
 op, chain, rest = args[0], args[1], args[2:]
+if raw:
+    chain = "raw:" + chain
 code = 0
 if op == "-N":
     if chain in tables:
@@ -111,7 +129,12 @@ with log.open("a") as ops:
         jumps = [[r[r.index("-j") + 1], len(tables.get(r[r.index("-j") + 1], []))]
                  for r in tables["DOCKER-USER"] if "-j" in r]
         ops.write(json.dumps(["jumps", jumps]) + "\n")
-state_file.write_text(json.dumps(state))
+if op not in ("-S", "-C"):
+    # Copies run beside one another (a pipeline lists while its reader changes):
+    # one that only reads writes nothing, and the rules are never half written.
+    whole = state_file.with_name(f"state.{os.getpid()}")
+    whole.write_text(json.dumps(state))
+    told_to_wait(lambda: os.replace(whole, state_file))
 sys.exit(code)
 '''
 
@@ -269,7 +292,10 @@ def test_the_installer_keeps_only_addresses_and_starts_before_docker() -> None:
     drop_in = text[text.index("<<'DROPIN'"):text.index("\nDROPIN\n")]
     assert "Requires=" not in drop_in and "After=kazma-egress.service" in drop_in
     starts = [line for line in drop_in.splitlines() if line.startswith("Exec")]
-    assert starts == ["ExecStartPre=-/usr/local/sbin/kazma-egress-rules",
+    # Held before anything else: Docker, starting, takes its jump out (the
+    # drill of 2026-11-25).
+    assert starts == ["ExecStartPre=-/usr/local/sbin/kazma-egress-rules kz-egress KAZMA-EGRESS hold",
+                      "ExecStartPre=-/usr/local/sbin/kazma-egress-rules",
                       "ExecStartPost=-/usr/local/sbin/kazma-egress-guard"]
     assert text.index("DROPIN") < text.index("systemctl daemon-reload")
     assert "{1,3}" in text.split("for addr in")[1].split("done")[0]  # only an IPv4 address is kept
@@ -414,6 +440,56 @@ def test_a_kernel_with_no_ipv6_is_filtered_without_it(stand_in) -> None:
     _as_docker_starts(run, rules)
     assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
     assert "EGRESS_REMOVED" in run("kz-egress", "KAZMA-EGRESS", "remove")
+
+
+# ── the hold while Docker starts (the drill of 2026-11-25) ──────────────────
+
+HOLD = ["-i", "kz-egress", "-j", "DROP"]
+
+
+def _held(state: dict) -> list[int]:
+    return [state[family].get("raw:PREROUTING", []).count(HOLD) for family in ("v4", "v6")]
+
+
+def test_the_bridge_is_held_while_docker_starts_and_until_the_rules_hold(stand_in) -> None:
+    """Docker, starting, takes its jump to DOCKER-USER out and puts it back
+    behind its own rules: a container it could not stop reached private
+    addresses for that half second (measured on the VM). Held, the bridge's
+    packets are dropped before any rule of Docker's, the check says so, and
+    only rules in effect let them on again. **Control:** the start's rules
+    alone (as before) leave nothing holding the bridge."""
+    run, rules = stand_in
+    run(hosts=[HOST])
+    assert _held(rules()) == [0, 0]  # control: the rules alone hold nothing
+    good = _as_docker_starts(run, rules)
+    assert "EGRESS_HELD kz-egress" in run("kz-egress", "KAZMA-EGRESS", "hold", hosts=[HOST])
+    run("kz-egress", "KAZMA-EGRESS", "hold", hosts=[HOST])
+    run(hosts=[HOST])  # ExecStartPre's second: the rules put in again keep the hold
+    assert _held(rules()) == [1, 1]
+    said = run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST], expect_code=3)
+    assert said == "EGRESS_NOT_IN_EFFECT HELD:iptables HELD:ip6tables\n"
+    # Docker's own rules in front (the interval): the hold is kept.
+    state = rules()
+    state["v4"]["FORWARD"].insert(0, ["-j", "DOCKER-FORWARD"])
+    run.save(state)
+    said = run("kz-egress", "KAZMA-EGRESS", "release", hosts=[HOST], expect_code=3)
+    assert "FORWARD->DOCKER-USER" in said and "HELD" not in said and _held(rules()) == [1, 1]
+    state["v4"]["FORWARD"] = good["v4"]["FORWARD"]
+    run.save(state)
+    assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "release", hosts=[HOST])
+    assert _held(rules()) == [0, 0]
+    assert "EGRESS_IN_EFFECT" in run("kz-egress", "KAZMA-EGRESS", "check", hosts=[HOST])
+    run("kz-egress", "KAZMA-EGRESS", "hold", hosts=[HOST])
+    run("kz-egress", "KAZMA-EGRESS", "remove", hosts=[HOST])
+    assert _held(rules()) == [0, 0]
+
+
+def test_the_guard_ends_the_hold_only_through_release() -> None:
+    guard = _guard_script()
+    assert "kazma-egress-rules kz-egress KAZMA-EGRESS release" in guard and "check" not in guard
+    # Setup's own run ends a hold a failed start left.
+    tail = ces._asset("egress-filter.sh").split("systemctl enable kazma-egress.service")[1]
+    assert "kazma-egress-rules kz-egress KAZMA-EGRESS release || true" in tail
 
 
 def _guard_script() -> str:

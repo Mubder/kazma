@@ -26,6 +26,8 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from kazma_ui.client_gone import CLIENT_GONE_STATUS, body_cut_off
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["ActivityRecorder", "create_activity_router"]
@@ -94,6 +96,10 @@ class ActivityRecorder:
             account, space = _who(scope), str(scope.get("kazma_space") or "")
             if done is not None and account and space:
                 status = held.get("status", 500)
+                if status >= 400 and body_cut_off(scope):
+                    # A client that left before sending all of its request is no
+                    # failure of the server's. What was done stays done.
+                    status = CLIENT_GONE_STATUS
                 if answered:
                     await asyncio.to_thread(_write, space, account, done[0], done[1], status)
                 else:

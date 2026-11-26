@@ -67,11 +67,11 @@ def caller_may_act_on(task: Any, *, answering: bool) -> bool:
     Spaces is not enforced. Raises ``IdentityUnavailable``. Blocking (the
     identity store)."""
     from kazma_core.spaces.shared_work import may_change
-    from kazma_core.swarm.single_operator import task_answered_by_caller, task_is_callers
+    from kazma_core.swarm.single_operator import space_of_task, task_answered_by_caller, task_is_callers
 
     meta = (task.get("metadata") if isinstance(task, dict) else getattr(task, "metadata", None)) or {}
     if isinstance(meta, dict) and meta.get("kind") == RESEARCH_KIND:
-        return may_change(str(meta.get("tenant_id") or ""), meta.get("asker"))
+        return may_change(space_of_task(task), meta.get("asker"))
     return task_answered_by_caller(task) if answering else task_is_callers(task)
 
 

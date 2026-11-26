@@ -54,6 +54,8 @@ both READMEs). Each check Kazma can meet is now met and held by a gate:
   `.github/actions/coverage-upload` combines and uploads with GitHub's OIDC token
   (`use_oidc`; no Codecov token is stored). They measure and never gate: CI's jobs are the
   gates, and tests that check a child's exact environment see coverage's variable there.
+  It runs once a day and by hand, not on every push (2026-11-26: its six jobs held the runners
+  CI's required checks waited for; `tests/test_ci_shards.py`).
 - **Not met, on purpose or not yet**: Code-Review, CI-Tests and
   Branch-Protection count pull requests and their reviews (the owner pushes
   to `main`); Signed-Releases rises as `release.yml` signs new releases;

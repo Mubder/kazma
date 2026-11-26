@@ -267,8 +267,6 @@ NO_OTHER_STORE = {
     "kazma-ui/kazma_ui/health.py::check_database [get_postgres_pool]": "a probe: it says the failure",
     "kazma-ui/kazma_ui/app.py::KazmaAppBuilder._on_startup [get_postgres_pool]":
         "a boot check: it says the failure",
-    "kazma-ui/kazma_ui/session_manager.py::SessionManager._hydrate_from_checkpoints_db [get_pool]":
-        "no caller: piece 5 of S4-01 step 0a deletes it",
 }
 
 

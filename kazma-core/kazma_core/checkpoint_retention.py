@@ -52,6 +52,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from kazma_core.spaces.row_work import install_statements
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -267,6 +269,7 @@ _PG_DELETE_BLOBS = """
 """
 
 
+@install_statements("the checkpoints' retention, by age alone, over every space's chats")
 def _prune_postgres_checkpoints(
     *,
     days: int,

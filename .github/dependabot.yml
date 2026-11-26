@@ -41,6 +41,12 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+    # One pull request a week for every action, not one each: each runs all
+    # of CI (36 jobs), and five at once held the runners main's required
+    # checks waited for (2026-11-25).
+    groups:
+      actions:
+        patterns: ["*"]
 
   # Container base images (2026-11, supply chain): every Dockerfile pins its
   # FROM by digest (tests/test_setup_downloads_verified.py), so a new image
@@ -59,12 +65,33 @@ updates:
     labels:
       - "dependencies"
       - "docker"
+    groups:
+      images:
+        patterns: ["*"]
     ignore:
       # Python 3.15 has no onnxruntime build (the OCR engines, Chroma's
       # embedding stack) and Chroma does not resolve on it (2026-11-13): the
       # images stay on the newest Python every package has wheels for.
       - dependency-name: "python"
         versions: [">= 3.15"]
+
+  # The checks before a push (scripts/prepush.py): CI's own Python, 3.11.
+  - package-ecosystem: "docker"
+    directory: "/deploy/prepush"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"
+    groups:
+      images:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "python"
+        versions: [">= 3.12"]
 
   # The images Kazma's compose files run (2026-11-13): SearXNG and Neo4j are
   # pinned by version and digest (tests/test_container_services.py), so a new
@@ -81,6 +108,9 @@ updates:
     labels:
       - "dependencies"
       - "docker"
+    groups:
+      services:
+        patterns: ["*"]
     ignore:
       # An odd nginx minor is its development ("mainline") line; Kazma's HA
       # proxy runs the stable one (even minor).

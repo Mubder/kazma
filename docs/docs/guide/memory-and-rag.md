@@ -1130,12 +1130,13 @@ the plan's next runs. Asked through Kazma's own chat turn, which calls
 measurement.
 
 **The block's bounds, measured** (`scripts/recall_block_bounds.py`, the
-same reader and judge; not yet built into the product):
+same reader and judge; built into the product since, as the last row: see
+"Showing" above):
 
 | How each recalled conversation is shown | Answered | Block (characters, median) |
 |---|---|---|
-| Today: 200 of the question, 300 of the reply | 0.48 | 3,926 |
-| Twice today's bounds | 0.58 | 4,392 |
+| Before: 200 of the question, 300 of the reply | 0.48 | 3,926 |
+| Twice those bounds | 0.58 | 4,392 |
 | Each as wide as the block's budget allows | 0.59 | 4,979 |
 | Every one whole, no budget | 0.59 | 5,221 |
 | The best one at up to 1,500 characters around the question's words, the others at 500 | 0.74 | 5,344 |
@@ -1147,7 +1148,7 @@ the others short (500 characters, 250 when the 1,500-token budget needs it;
 no line is ever left out). Questions that count across conversations
 ("how many") gain most when their list lines are handled the same way.
 On the benchmark's own store nothing changes: its conversations are all
-shorter than today's bounds.
+shorter than the bounds before.
 
 **In English and in Arabic**: 40 of the sample's questions and the 84
 conversations holding their answers, in one memory, in English and

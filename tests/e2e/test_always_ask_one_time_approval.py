@@ -36,6 +36,14 @@ from tests.e2e._unified_turn_harness import (  # noqa: E402
     unified_turn_server,
 )
 
+
+@pytest.fixture(autouse=True)
+def _x_can_publish(monkeypatch):
+    """An X account that can publish: what is measured here is the card. One
+    that cannot gets none (tests/test_x_refused_says_why.py)."""
+    monkeypatch.setattr("kazma_core.x_api.policy.publishing_refusal", lambda cfg=None: None)
+
+
 DRAFT = "Kazma one-time approval check"
 NOT_POSTED = "Not posted: this draft was written in this same turn"
 

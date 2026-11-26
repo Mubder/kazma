@@ -19,7 +19,9 @@ from time import perf_counter
 from typing import Any
 
 from kazma_core.swarm.checkpoint import HITLCheckpoint, HITLCheckpointHandler
+from kazma_core.spaces.row_work import statements_of
 from kazma_core.swarm.patterns import PatternExecution
+from kazma_core.swarm.single_operator import space_of_task
 from kazma_core.swarm.task import SwarmTask, TaskResult, TaskStatus
 
 __all__ = ["CheckpointManager"]
@@ -219,7 +221,9 @@ class CheckpointManager:
             try:
                 # A refused write (roadmap theme 1): the row is finished, or a
                 # newer run owns it; the pause is not on record for a restart.
-                if not self._task_store.persist_task(task):
+                with statements_of(space_of_task(task)):
+                    stored = self._task_store.persist_task(task)
+                if not stored:
                     logger.warning(
                         "[CheckpointManager] the store refused the paused state of '%s' "
                         "(its row is finished or a newer run owns it); a restart will not "
@@ -399,12 +403,13 @@ class CheckpointManager:
                     worker_results=worker_results,
                     blackboard_data=blackboard_data,
                 )
-                _gate_register_pipeline(
-                    task.id,
-                    checkpoint_meta.get("step", 0),
-                    checkpoint_meta.get("worker", ""),
-                    checkpoint_meta.get("output_preview", ""),
-                )
+                with statements_of(space_of_task(task)):
+                    _gate_register_pipeline(
+                        task.id,
+                        checkpoint_meta.get("step", 0),
+                        checkpoint_meta.get("worker", ""),
+                        checkpoint_meta.get("output_preview", ""),
+                    )
                 # Re-arm the auto-reject timeout. Previously this was only
                 # armed on first pause (handle_pipeline_checkpoint); after a
                 # restart the paused task would hang forever (never auto-

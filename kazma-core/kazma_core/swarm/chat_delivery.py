@@ -170,10 +170,11 @@ def _the_askers_chat(task: Any, platform: str, target: str) -> bool:
     the result in its space. Blocking."""
     from kazma_core.spaces.chat_apps import chat_is_the_askers
     from kazma_core.spaces.identity import IdentityUnavailable
+    from kazma_core.swarm.single_operator import space_of_task
 
     meta = dict(getattr(task, "metadata", None) or {})
     try:
-        return chat_is_the_askers(str(meta.get("tenant_id") or ""), str(meta.get("asker") or ""),
+        return chat_is_the_askers(space_of_task(task), str(meta.get("asker") or ""),
                                   platform, target, str(meta.get("source_thread_id") or ""))
     except (IdentityUnavailable, sqlite3.Error, OSError) as exc:
         logger.warning("[swarm] task %s: whose chat %s is cannot be read (%s); its result stays in "

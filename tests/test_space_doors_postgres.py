@@ -232,3 +232,61 @@ def test_a_moves_copy_is_written_in_the_target(documents: Any) -> None:
     assert {w.a, w.b} <= set(_on(w, calls)) and "" not in _on(w, calls)
     there = {c.scope.asker for c in calls if c.args[0] is w.pool and c.scope is not None and c.scope.space_id == w.b}
     assert there == {w.person_a}, "as the person who moves it, never the space's maker"
+
+
+# ── the swarm and the chats ──────────────────────────────────────────────
+
+
+@pytest.mark.usefixtures("enforced")
+def test_a_starts_swarm_recovery_lists_as_the_install_and_writes_as_each_space(pool: Any, tmp_path: Any) -> None:
+    import uuid
+
+    from kazma_core.swarm import SwarmTask, TaskStatus
+    from kazma_core.swarm.task_store import TaskStore
+
+    a, b = (f"s{uuid.uuid4().hex[:12]}" for _ in range(2))
+    with watched_pool() as made, bind_scope(b, "omar"):  # a tool's own store
+        store = TaskStore(str(tmp_path / "none.db"))
+    assert {c.space for c in made if c.args[0] is pool} == {"<install>"}
+    tasks = [SwarmTask(prompt="p", id=f"task-{uuid.uuid4().hex[:12]}", status=TaskStatus.RUNNING,
+                       metadata={"tenant_id": space}) for space in (a, b)]
+    for task in tasks:
+        assert store.persist_task(task)
+    try:
+        with watched_pool() as calls:
+            store.requeue_orphaned_running()
+            store.get_paused_tasks()
+            store.prune_tasks(retention_days=3650)
+        said = [c.space for c in calls if c.args[0] is pool]
+        assert {a, b} <= set(said) and said[0] == "<install>" and "" not in said
+    finally:
+        for task in tasks:
+            store.delete_task(task.id)
+
+
+@pytest.mark.usefixtures("enforced")
+def test_retention_and_a_moved_chats_copy_say_whose_they_are(pool: Any, tmp_path: Any,
+                                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    import uuid
+
+    from kazma_core import checkpoint_retention
+    from kazma_ui import session_manager as sm
+
+    with watched_pool() as calls, bind_scope("family", "layla"):
+        checkpoint_retention._prune_postgres_checkpoints(days=3650, pool=pool, thread_ids=[])
+    assert [c.space for c in calls if c.args[0] is pool] == ["<install>"]
+
+    a, b = (f"s{uuid.uuid4().hex[:12]}" for _ in range(2))
+    made = sm.SessionManager(db_path=str(tmp_path / "chats.db"))
+    assert made._pg
+    messages = [{"role": "user", "content": "the trip", "ts": "2026-11-25T00:00:00+00:00"}]
+    copy = sm.ChatSession(session_id=f"copy-{b}", tenant_id=b, thread_id=f"t-{b}", messages=messages)
+    try:
+        with bind_scope(a, "reem"):
+            made.put(sm.ChatSession(session_id=f"chat-{a}", tenant_id=a, thread_id=f"t-{a}", messages=messages))
+            with watched_pool() as calls:
+                assert made.hand_over(f"chat-{a}", messages=messages, to=copy, commit=lambda: False) is False
+        said = [c.space for c in calls if c.args[0] is pool]
+        assert said.count(b) >= 2 and set(said) <= {a, b}, "the copy's row, in and out again"
+    finally:
+        pool.execute("DELETE FROM kazma_chat_sessions WHERE tenant_id IN (%s, %s)", (a, b))

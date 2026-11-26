@@ -63,7 +63,8 @@
   503 when any check fails; TTL-cached 30s (aggressive polling is free).
   Poll it in ops dashboards — it exists to catch SILENT no-ops (the
   recall-NameError class), which structural checks cannot see.
-- CI (`ci.yml`) GATES on the full suite: `python scripts/fast_test.py --chunks
+- CI (`ci.yml`) GATES on the full suite, in six matrix shards since 2026-11-25
+  (testing-2): `python scripts/fast_test.py --shard K/6 --chunks
   4` (crash-tolerant chunked serial pytest over ALL
   testpaths — the package suites were previously orphaned by `pytest tests/`),
   `-m "not slow"`, per-chunk `--timeout=120`. Compile-check (py_compile over
@@ -77,10 +78,10 @@
   pure-wheel deps (pillow/pymupdf/sqlite-vec/pypdfium2/numpy — without numpy
   the belief-graph PPR silently runs its degraded uniform-seed path) that the
   `.[test]`-only install left `importorskip`ing/degrading. Playwright is a
-  separate CI job: smoke (`tests/e2e/test_smoke.py`, polls `/health/live`)
-  plus a named GATE step for HITL view-model incidents 2 and 3
-  (`tests/e2e/test_hitl_view_model.py`). Remaining `tests/e2e` files run in
-  the same job. Incidents 1 and 4 are claimed by
+  separate CI job, four shards of one list in `ci.yml` (`tests/e2e/test_smoke.py`,
+  which polls `/health/live`, HITL view-model incidents 2 and 3 in
+  `tests/e2e/test_hitl_view_model.py`, and every other `tests/e2e` file but the
+  unified turn job's). Incidents 1 and 4 are claimed by
   `tests/e2e/test_unified_turn_browser.py` in the `unified-turn-lifecycle`
   job (§31E). Torch-bearing `rag` extra is still too heavy for CI.
 

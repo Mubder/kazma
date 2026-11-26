@@ -62,6 +62,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.routing import APIRoute
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import ClientDisconnect
 from kazma_core.diagnostic_scope import read_only_diagnostic
 from kazma_core.documents.errors import DocumentPolicyError
 from kazma_core.errors import safe_error, validation_error
@@ -327,6 +328,8 @@ def create_documents_router() -> APIRouter:
 
             payload = await asyncio.to_thread(_run)
             return {"ok": True, **payload}
+        except ClientDisconnect:
+            raise  # the client went away mid-upload: not a failed upload of the server's (client_gone)
         except Exception as exc:  # noqa: BLE001
             if isinstance(exc, DocumentPolicyError):
                 return _policy_error(exc)
