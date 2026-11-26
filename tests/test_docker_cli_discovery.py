@@ -42,6 +42,7 @@ def fake_docker(tmp_path, monkeypatch):
     monkeypatch.setattr(docker_cli.shutil, "which", lambda name: None)
     monkeypatch.setattr(docker_cli, "_candidates", lambda: [tmp_path / "missing.exe", exe])
     monkeypatch.setattr(docker_cli, "_reported", set())
+    monkeypatch.setattr(docker_cli, "_checks_files", lambda: False)  # this PC's setting is not the test's
     return exe
 
 
@@ -369,13 +370,46 @@ def blocked_docker(fake_docker, tmp_path, monkeypatch):
 def test_a_cli_the_os_refuses_is_passed_over_and_said_once(blocked_docker, fake_docker, monkeypatch, caplog):
     calls: list = []
     monkeypatch.setattr(docker_cli, "_start", _refusing(blocked_docker, calls=calls))
-    caplog.set_level(logging.WARNING, logger=docker_cli.__name__)
+    caplog.set_level(logging.INFO, logger=docker_cli.__name__)
     assert docker_cli.find_docker_cli() == str(fake_docker)
     assert docker_cli.find_docker_cli() == str(fake_docker)
-    refused = [r.getMessage() for r in caplog.records if "refuses to start" in r.getMessage()]
-    assert len(refused) == 1 and str(blocked_docker) in refused[0] and "4551" in refused[0]
+    # Said once, calmly, at INFO (the owner's rule, 2026-11-26): what Windows
+    # checked and that Kazma uses the next CLI; the operator's detail kept.
+    refused = [r for r in caplog.records if "did not allow it to start" in r.getMessage()]
+    assert len(refused) == 1 and refused[0].levelno == logging.INFO
+    assert str(blocked_docker) in refused[0].getMessage() and "4551" in refused[0].getMessage()
     assert calls.count(str(blocked_docker)) == 1  # the refusal is kept, not asked on every call
     assert calls.count(str(fake_docker)) == 1  # a CLI that started is remembered
+
+
+@pytest.fixture
+def engine_and_desktop(fake_docker, tmp_path, monkeypatch):
+    """Kazma's engine's CLI (unsigned, from Docker's static zip) and Docker
+    Desktop's (signed by Docker Inc), both able to start."""
+    own = tmp_path / "local" / "Kazma" / "engine" / "bin" / "docker.exe"
+    own.parent.mkdir(parents=True)
+    own.write_bytes(b"")
+    monkeypatch.setattr(docker_cli, "_on_windows", lambda: True)
+    monkeypatch.setattr(docker_cli, "_started", {})
+    monkeypatch.setattr(docker_cli, "_candidates", lambda: [own, fake_docker])
+    return own
+
+
+def test_while_smart_app_control_checks_files_the_signed_cli_is_used_and_the_other_never_started(
+        engine_and_desktop, fake_docker, monkeypatch, caplog):
+    calls: list = []
+    monkeypatch.setattr(docker_cli, "_start", _refusing(Path("nothing-is-refused"), calls=calls))
+    monkeypatch.setattr(docker_cli, "_checks_files", lambda: True)
+    caplog.set_level(logging.INFO, logger=docker_cli.__name__)
+    assert docker_cli.find_docker_cli() == str(fake_docker)
+    assert str(engine_and_desktop) not in calls, "an unsigned file Windows would judge was started"
+    said = [r for r in caplog.records if "signed CLI" in r.getMessage()]
+    assert len(said) == 1 and said[0].levelno == logging.INFO
+
+
+def test_control_without_smart_app_control_kazmas_own_cli_comes_first(engine_and_desktop, monkeypatch):
+    monkeypatch.setattr(docker_cli, "_start", _refusing(Path("nothing-is-refused")))
+    assert docker_cli.find_docker_cli() == str(engine_and_desktop)
 
 
 def test_a_cli_allowed_again_comes_back_by_itself(blocked_docker, fake_docker, monkeypatch):

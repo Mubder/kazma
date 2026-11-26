@@ -258,6 +258,21 @@ class Machine:
     log_path: Path | None = None
     record_path: Path | None = None
     env_path: Path | None = None
+    #: Windows' file check (``kazma_core.windows_trust.check``).
+    file_check: Callable[[], object] | None = None
+
+
+def _say_file_check(platform, machine: Machine, say) -> None:
+    """Windows' file check, as notes (``kazma_core.windows_trust``): Smart
+    App Control checking files, and each native part Windows did not allow
+    with what Kazma uses instead or which feature waits. Nothing when there
+    is nothing to say; never a step, never a reason to stop."""
+    if platform.os != "windows":
+        return
+    from kazma_core.windows_trust import check, notes
+
+    for text in notes((machine.file_check or check)()):
+        say(f"Note: {text}")
 
 
 # -- what is there ------------------------------------------------------------------------------
@@ -1202,6 +1217,7 @@ def install(options, machine: Machine | None = None) -> int:
     recorded = pgs.read_record(machine.record_path).get("install") or {}
     log.write(f"--- kazma setup install ({' '.join(sys.argv[1:]) or 'no arguments'})")
     say(_header(platform), "brand")
+    _say_file_check(platform, machine, say)
     try:
         mode, parts, without = _select_parts(options, recorded, machine, say, platform.os)
     except (KeyError, ValueError) as exc:

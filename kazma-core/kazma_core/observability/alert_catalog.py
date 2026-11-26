@@ -324,6 +324,10 @@ CATALOG: tuple[_Entry, ...] = (
          "تنبيه أمني لإحدى الاعتماديات يخص هذا التثبيت"),
     _ops("security.service_exposed", "warn", "A service of Kazma's is reachable beyond this machine",
          "إحدى خدمات كاظمه متاحة خارج هذا الجهاز"),
+    # Windows' file check (kazma_core.windows_trust): only when no signed alternative kept a
+    # feature working; a fallback that worked is an INFO line, never an alert.
+    _ops("windows.feature_waits", "warn", "Kazma could not keep a feature working on this PC",
+         "لم يتمكن كاظمه من إبقاء ميزة تعمل على هذا الجهاز", page=_SYSTEM),
     _ops("guard.gone", "critical", "Kazma is running without its guard", "يعمل كاظمه دون حارسه",
          condition="guard_gone", owner=False),
     _ops("resilience.firing_ledger", "warn", "The weekly report of what fired", "التقرير الأسبوعي لما عمل"),
@@ -340,6 +344,8 @@ CATALOG: tuple[_Entry, ...] = (
     _guard("guard.crash_loop", "critical", "Kazma is crash-looping", "كاظمه يتعطل مرارًا"),
     _guard("guard.operator_reload", "info", "Kazma is restarting for an operator reload",
            "يُعاد تشغيل كاظمه بطلب المشغّل"),
+    _guard("guard.reload_waits", "info", "An update waits; Kazma keeps running",
+           "تحديث ينتظر، وكاظمه يواصل العمل"),
     _guard("guard.port_still_held", "error", "A restart did not take effect", "لم تنجح إعادة التشغيل"),
     _guard("guard.refused_to_start", "error", "Kazma's guard did not start", "لم يبدأ حارس كاظمه"),
     _guard("guard.internal_error", "error", "Kazma's guard hit an error in its own code",

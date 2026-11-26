@@ -346,6 +346,7 @@ Paths are short: `core/` is `kazma-core/kazma_core/`, `gw/`
 - `70h-spaces-fairness-people-keys.md` **§70 (8)** S4-04, 05, 08, S2-09, 10, 04: fairness, members' code, activity, own keys, cloud profile: `core/spaces/fairness.py`, `core/spaces/member_code.py`, `core/spaces/own_keys.py`, `core/security/cloud_profile.py`
 - `70i-spaces-chat-links.md` **§70 (9)** Stage 3: linked chat-app accounts and its review: `core/spaces/chat_links.py`, `core/spaces/chat_apps.py`
 - `70j-spaces-sign-in.md` **§70 (10)** S4-03, S4-02: open switches refused, second factor, invitations: `core/security/second_factor.py`, `core/spaces/invitations.py`
+- `71-windows-file-check.md` **§71** Windows' file check (Smart App Control): calm words, the probe, signed parts first, the one alert, the reload preflight: `core/windows_trust.py`, `core/windows_policy.py`, `core/libpq_reach.py`
 - `ui-1-words-and-direction.md` **UI (1)** Dialogs, catalog words in EN and AR, text direction, TUI names: `ui/templates/`, `ui/static/js/`, `ui/i18n/`, `tui/`
 - `ui-2-look-and-components.md` **UI (2)** Toasts, logo, colours, shell, shared components, x-cloak, bindings: `ui/static/css/`
 - `ui-3-pages-and-controls.md` **UI (3)** Page loading, soft navigation, deep links, bell, controls and routes, dates and counts, empty states, polling: `ui/templates/`, `ui/static/js/modules/nav.js`

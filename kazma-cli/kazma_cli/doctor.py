@@ -445,6 +445,20 @@ def _cloud_profile_rows() -> list[tuple[str, str]]:
     return out
 
 
+#: How each line of Windows' file check is marked: Smart App Control and a
+#: signed alternative in use are information, never a finding; only a
+#: feature with no signed alternative is a warning, and it names the feature.
+_WINDOWS_MARKS = {"state": INFO, "allowed": OK, "alternative": INFO, "preferred": INFO, "waits": WARN}
+
+
+def _windows_rows() -> list[tuple[str, str]]:
+    """Windows' file check (``kazma_core.windows_trust``): the setting and each
+    native part of Kazma's. Empty elsewhere than Windows."""
+    from kazma_core.windows_trust import check, lines
+
+    return [_line(_WINDOWS_MARKS[status], text) for status, text in lines(check())]
+
+
 def run(argv: list[str] | None = None) -> int:
     """Print the report. Exit 1 if anything is broken, 0 otherwise."""
     rows = collect()
@@ -456,6 +470,12 @@ def run(argv: list[str] | None = None) -> int:
     for _status, rendered in system_rows:
         print(rendered)
     rows = rows + system_rows
+    windows_rows = _windows_rows()
+    if windows_rows:
+        print("\nWindows' file check\n")
+        for _status, rendered in windows_rows:
+            print(rendered)
+        rows = rows + windows_rows
     db_rows = _database_service_rows()
     if db_rows:
         print("\nThe database service\n")

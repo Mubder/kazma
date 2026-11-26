@@ -51,6 +51,8 @@
     {"source": "docs/docs/guide/swarm-orchestration.md", "site": "swarm-orchestration"},
 
     {"source": "docs/docs/guide/security-and-safety.md", "site": "security-and-safety"},
+    {"source": "docs/docs/guide/windows-smart-app-control.md", "site": "windows-smart-app-control"},
+    {"source": "docs/docs/guide/windows-smart-app-control-ar.md", "site": null, "why": "the Arabic text of windows-smart-app-control, written with the English page so the owner's wording rule (Kazma works with Windows' protection, never asks to change it) holds in both languages; the website sync takes it as the site's ar/windows-smart-app-control page"},
     {"source": "docs/docs/guide/commitment-layer.md", "site": "commitment-layer"},
     {"source": "docs/docs/guide/task-ledger.md", "site": "task-ledger"},
     {"source": "docs/docs/ops/chaos-testing.md", "site": "chaos-testing"},

@@ -91,7 +91,7 @@ prints the same list):
 |---|---|---|---|
 | Meaning search (bge-m3) | yes | yes | memory recall and the Knowledge Library match words only |
 | Document reading and writing (PyMuPDF, PDFium, WeasyPrint) | yes | yes | PDFs are read by the simpler built-in readers (weaker on Arabic and tables) |
-| Kazma's test suite (pytest, ruff) | yes | yes | Kazma's tests cannot run here |
+| Kazma's test suite (pytest) | yes | yes | Kazma's tests cannot run here |
 | Code structure (tree-sitter) | yes | yes | the code index reads code by pattern only |
 | Database drivers (MySQL, MongoDB, Postgres) | yes | yes | the database tools reach SQLite files only |
 | Push notifications (Web Push) | yes | yes | no push notification when a task finishes (the chat still says it) |

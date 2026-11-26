@@ -280,9 +280,13 @@ GUARD_ACK_S = 20.0
 #   data_folder_move -- leaves a part ``kazma setup data-folder`` is moving
 #                 alone (its journal in the setup record): the database
 #                 service is not started or paged, the engine not started.
+#   reload_preflight -- a reload first checks, in a child process, that the
+#                 code on disk can load its native parts; when it cannot,
+#                 the running server is kept (state ``reload_action``
+#                 ``kept_running`` and ``reload_preflight``).
 GUARD_FEATURES = ("pause_held", "document_broker", "dependencies", "boot_wait",
                   "database_hold", "disk_watch", "outside_watch", "database_service", "power_watch",
-                  "pager_test", "data_folder_move")
+                  "pager_test", "data_folder_move", "reload_preflight")
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -524,10 +528,17 @@ def _write_json_atomic(path: Path, data: dict) -> None:
             time.sleep(0.05)
 
 
-def request_reload() -> float:
-    """Ask the running guard to boot new code. Returns the request's time."""
+def request_reload(*, check: bool = True) -> float:
+    """Ask the running guard to boot new code. Returns the request's time.
+
+    ``check=False`` (``--reload --skip-check``) tells the guard to switch
+    without its preflight (:func:`run_reload_preflight`): the operator's way
+    past a check they know to be wrong."""
     ts = time.time()
-    _write_json_atomic(_reload_path(), {"ts": ts, "pid": os.getpid()})
+    body: dict = {"ts": ts, "pid": os.getpid()}
+    if not check:
+        body["check"] = False
+    _write_json_atomic(_reload_path(), body)
     return ts
 
 
@@ -585,6 +596,198 @@ def consume_reload_request() -> bool:
         return True
     except Exception:
         return False
+
+
+# -- reload preflight: the new code starts here before the old one stops ---
+#
+# Live 2026-11-26 11:30 UTC: Windows' Application Control (Smart App
+# Control) had begun refusing unsigned DLLs half an hour earlier. The running
+# server had loaded psycopg's client library before that, so it kept
+# working; the reload stopped it, and the new process could not load the
+# library: Kazma started read-only for thirty minutes with its database
+# answering the whole time. A reload now asks first, in a child process
+# with the server's interpreter and folder, whether the code on disk can
+# load its native parts; when it cannot, the running server is kept, the
+# reason logged and the owner told, calmly: the update waits, Kazma keeps
+# running. The child, never the guard, imports Kazma (the guard stays
+# standard-library only, AGENTS §39).
+
+#: Run by :func:`run_reload_preflight` in a child process, in the install
+#: folder, with the interpreter that runs the server. It loads ``.env`` the
+#: way the server does (not under pytest: no test reads a real one), imports
+#: what a start imports first -- ``kazma_core`` (which puts the installed
+#: PostgreSQL's own client library within reach when Windows refuses the
+#: bundled one, ``kazma_core.libpq_reach``), psycopg and the client library
+#: it picked (when installed: an install on SQLite has none, and CI's Linux
+#: job neither), the app -- and starts the docker CLI ``find_docker_cli`` picks.
+#: ``docker_cli.py`` is loaded by path, as the guard loads it: the stored
+#: engine choice is then not applied, so no settings store is opened.
+_RELOAD_PREFLIGHT = r"""
+import importlib.util, json, os, subprocess, sys
+out = {"ok": True, "steps": {}}
+def finish(step=None, exc=None):
+    if step is not None:
+        text = " ".join(str(exc).split())[:300]
+        out.update(ok=False, step=step,
+                   detail=(type(exc).__name__ + ": " + text) if text else type(exc).__name__,
+                   winerror=getattr(exc, "winerror", None))
+    print("KAZMA_RELOAD_PREFLIGHT " + json.dumps(out), flush=True)
+    sys.exit(0)
+try:
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        from kazma_core.env_files import load_env_files
+        load_env_files()
+    import kazma_core
+    out["steps"]["kazma_core"] = "ok"
+except BaseException as exc:
+    finish("kazma_core", exc)
+try:
+    if importlib.util.find_spec("psycopg") is None:
+        out["steps"]["psycopg"] = "not installed"  # an install on SQLite: nothing to load
+    else:
+        import psycopg
+        out["steps"]["psycopg"] = str(psycopg.pq.__impl__)
+except BaseException as exc:
+    finish("psycopg", exc)
+try:
+    import kazma_ui.app
+    out["steps"]["app"] = "ok"
+except BaseException as exc:
+    finish("app", exc)
+try:
+    spec = importlib.util.find_spec("kazma_core.docker_cli")
+    loader = importlib.util.spec_from_file_location("kazma_preflight_docker_cli", spec.origin)
+    docker_cli = importlib.util.module_from_spec(loader)
+    sys.modules[loader.name] = docker_cli
+    loader.loader.exec_module(docker_cli)
+    cli = docker_cli.find_docker_cli()
+except BaseException as exc:
+    finish("docker", exc)
+if cli:
+    try:
+        subprocess.run([cli, "--version"], capture_output=True, timeout=15, check=False,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        pass
+    except OSError as exc:
+        finish("docker", exc)
+out["steps"]["docker"] = "started" if cli else "none found"
+finish()
+"""
+_RELOAD_PREFLIGHT_MARK = "KAZMA_RELOAD_PREFLIGHT "
+#: How long a preflight may take (a cold disk makes the imports slow). Past
+#: it the update waits and the running server is kept: an unproven start is
+#: not swapped for a working server.
+RELOAD_PREFLIGHT_TIMEOUT_S = float(os.environ.get("KAZMA_GUARD_PREFLIGHT_TIMEOUT_S", "180"))
+#: Windows' answers that refuse a program or library by policy: access
+#: denied, blocked by group policy, and an Application Control policy (App
+#: Control for Business, Smart App Control). The same set as
+#: ``kazma_core.docker_cli`` and ``kazma_core.libpq_reach``.
+_WINDOWS_POLICY_CODES = frozenset({5, 1260, 4551})
+#: How Windows' refusal reads inside an import error ("DLL load failed while
+#: importing pq: An Application Control policy has blocked this file.").
+_WINDOWS_POLICY_WORDS = ("application control policy", "group policy")
+#: The part each step loads, as the owner reads it.
+_PREFLIGHT_PARTS = {
+    "python": "the Python that runs Kazma",
+    "kazma_core": "Kazma's core",
+    "psycopg": "the database client library",
+    "app": "the web app",
+    "docker": "the Docker command-line tool",
+    "timeout": "the new version",
+}
+
+
+def preflight_refused_by_windows(result: dict) -> bool:
+    """True when a failed preflight met Windows' file check (a policy
+    refusal), not an error in the code."""
+    if result.get("winerror") in _WINDOWS_POLICY_CODES and result.get("step") in {"python", "docker"}:
+        return True
+    text = str(result.get("detail") or "").lower()
+    return any(word in text for word in _WINDOWS_POLICY_WORDS)
+
+
+def run_reload_preflight(python: str, cwd: Path, *, timeout_s: float | None = None,
+                         tick: Callable[[], None] | None = None) -> dict:
+    """Can the code on disk start here? Runs :data:`_RELOAD_PREFLIGHT`.
+
+    Returns ``{"ok": bool, "steps": {...}, "seconds": float}`` and, when not
+    ok, ``step`` (``python``, ``kazma_core``, ``psycopg``, ``app``,
+    ``docker`` or ``timeout``), ``detail`` (the error's type and words, for
+    the operator) and ``winerror``. *tick* is called about once a second
+    while the child runs, so the guard keeps its heartbeat. Never raises.
+    """
+    limit = RELOAD_PREFLIGHT_TIMEOUT_S if timeout_s is None else timeout_s
+    started = time.monotonic()
+
+    def result(ok: bool, **fields: object) -> dict:
+        return {"ok": ok, "steps": {}, **fields,
+                "seconds": round(time.monotonic() - started, 1)}
+
+    extra: dict = {}
+    if os.name == "nt":
+        extra["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        proc = subprocess.Popen(  # nosec B603 - the server's own interpreter, fixed code
+            [python, "-c", _RELOAD_PREFLIGHT], cwd=str(cwd),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", **extra,
+        )
+    except OSError as exc:
+        return result(False, step="python", winerror=getattr(exc, "winerror", None),
+                      detail=f"{type(exc).__name__}: {exc}"[:300])
+    deadline = started + limit
+    while True:
+        try:
+            stdout, stderr = proc.communicate(timeout=1.0)
+            break
+        except subprocess.TimeoutExpired:
+            if tick is not None:
+                try:
+                    tick()
+                except Exception:  # noqa: BLE001 -- the heartbeat must not end the check
+                    pass
+            if time.monotonic() >= deadline:
+                proc.kill()
+                try:
+                    proc.communicate(timeout=10.0)
+                except Exception:  # noqa: BLE001 -- killed; its output no longer matters
+                    pass
+                return result(False, step="timeout",
+                              detail=f"the check did not finish in {int(limit)} s")
+    for line in reversed((stdout or "").splitlines()):
+        if line.startswith(_RELOAD_PREFLIGHT_MARK):
+            try:
+                data = json.loads(line[len(_RELOAD_PREFLIGHT_MARK):])
+            except ValueError:
+                break
+            if isinstance(data, dict):
+                data["ok"] = data.get("ok") is True
+                data.setdefault("steps", {})
+                data["seconds"] = round(time.monotonic() - started, 1)
+                return data
+            break
+    tail = [ln for ln in (stderr or "").strip().splitlines() if ln.strip()]
+    return result(False, step="python",
+                  detail=f"exit {proc.returncode}: {tail[-1][:240] if tail else 'no output'}")
+
+
+def preflight_words(result: dict) -> tuple[str, str]:
+    """The owner's card for a failed preflight: (title, detail). Calm: the
+    update waits and Kazma keeps running; a Windows file check is Windows
+    doing its job, never a fault of the PC (the owner's rule, 2026-11-26)."""
+    part = _PREFLIGHT_PARTS.get(str(result.get("step") or ""), "a part of the new version")
+    if preflight_refused_by_windows(result):
+        what = (f"Windows checked {part} of the new version and did not allow it to load "
+                "on this PC. Nothing is wrong with the PC: Windows only lets files it "
+                "trusts run, and a later update brings a signed version.")
+    elif result.get("step") == "timeout":
+        what = "The check of the new version did not finish in time."
+    else:
+        what = f"{part[0].upper()}{part[1:]} of the new version did not load."
+    detail = (f"{what} Kazma keeps running the version it had, and nothing is lost; "
+              "the next reload checks again.\nDetail: " + str(result.get("detail") or "")[:300])
+    return "An update waits; Kazma keeps running", detail
 
 
 # A forgotten pause is an outage nobody is looking for -- the exact failure
@@ -5711,12 +5914,72 @@ class Guard:
             self.log("info", "reload.already_satisfied", age_s=age_s,
                      note="requested before the running server was started")
             return False
-        _update_state(reload_ack=requested_at, reload_action="restarting")
         assert self.proc is not None
+        if req.get("check", True) is not False:
+            # The new code must be able to start HERE before the running
+            # server stops (live 2026-11-26: Windows refused the new process
+            # a library the old one had loaded; Kazma started read-only).
+            _update_state(reload_ack=requested_at, reload_action="checking")
+            checked = self._reload_preflight()
+            if not checked.get("ok"):
+                self._keep_running(requested_at, checked)
+                return False
+        else:
+            self.log("info", "guard.reload_preflight_skipped", note="--reload --skip-check")
+        _update_state(reload_ack=requested_at, reload_action="restarting", reload_preflight=None)
         self.log("info", "guard.reload_requested", pid=self.proc.pid, age_s=age_s)
         self._stopped_for_reload = True
         self._last_stop_graceful = stop_child(self.proc, self.log, grace_s=GRACEFUL_STOP_S)
+        self._reload_waits_paged = set()  # the update went through: a later wait is new
         return True
+
+    def _reload_preflight(self) -> dict:
+        """Run :func:`run_reload_preflight` with the server's interpreter in
+        its folder, keeping the heartbeat and the watches going meanwhile."""
+        python = getattr(self, "server_python", None) or sys.executable
+        cwd = Path(getattr(self, "cwd", None) or REPO_ROOT)
+        self.log("info", "guard.reload_preflight", python=python)
+
+        def tick() -> None:
+            self._beat()
+            self._broker_tick()
+
+        checked = run_reload_preflight(python, cwd, tick=tick)
+        if checked.get("ok"):
+            self.log("info", "guard.reload_preflight_ok", seconds=checked.get("seconds"),
+                     **{f"step_{k}": v for k, v in (checked.get("steps") or {}).items()})
+        return checked
+
+    def _keep_running(self, requested_at: float, checked: dict) -> None:
+        """The new code cannot start here: keep the running server, say why
+        in guard.log, the state file (``--reload`` and ``--status`` read it)
+        and one page per reason until an update goes through."""
+        by_windows = preflight_refused_by_windows(checked)
+        record = {
+            "at": time.time(),
+            "step": checked.get("step"),
+            "detail": str(checked.get("detail") or "")[:300],
+            "windows_check": by_windows,
+        }
+        _update_state(reload_ack=requested_at, reload_action="kept_running",
+                      reload_preflight=record)
+        self.log("warn", "guard.reload_preflight_failed", step=record["step"],
+                 detail=record["detail"], windows_check=by_windows,
+                 seconds=checked.get("seconds"),
+                 note="the update waits; the running server is kept")
+        paged = getattr(self, "_reload_waits_paged", None)
+        if paged is None:
+            paged = self._reload_waits_paged = set()
+        reason = f"{record['step']}\n{record['detail']}"
+        if reason in paged:
+            return
+        paged.add(reason)
+        title, detail = preflight_words(checked)
+        try:
+            self._page("info", title, detail, kind="guard.reload_waits",
+                       fingerprint=f"reload_waits:{reason}", force=True)
+        except Exception:  # noqa: BLE001 -- the kept server matters, the card is best effort
+            self.log("debug", "guard.reload_waits.notify_failed")
 
     def _fresh_reload_request(self) -> bool:
         """After a child exit: was it stopped for a reload by an older --reload?
@@ -6423,10 +6686,29 @@ def _cmd_status() -> int:
         print(line)
     for line in _outside_status_lines(state):
         print(line)
+    for line in _update_status_lines(state):
+        print(line)
     if not ok and not (result.answered and result.needs_setup):
         # REMAINING 3.1: wherever Kazma is unwell, the way to tell someone.
         print(REPORT_HINT)
     return 0
+
+
+def _update_status_lines(state: dict) -> list[str]:
+    """What --status says when the last reload was kept back by its
+    preflight: the update waits, Kazma keeps running (and why, for the
+    operator)."""
+    rec = state.get("reload_preflight")
+    if state.get("reload_action") != "kept_running" or not isinstance(rec, dict):
+        return []
+    when = rec.get("at")
+    at = (datetime.fromtimestamp(float(when), UTC).strftime("%Y-%m-%d %H:%M UTC")
+          if isinstance(when, (int, float)) else "?")
+    part = _PREFLIGHT_PARTS.get(str(rec.get("step") or ""), "a part of the new version")
+    lines = [f"update      : waits since {at}; Kazma keeps running the version it had ({part})"]
+    if rec.get("detail"):
+        lines.append(f"  detail    : {str(rec.get('detail'))[:200]}")
+    return lines
 
 
 #: What --status says when Kazma is not healthy (setup waiting for its owner
@@ -6839,6 +7121,47 @@ def _wait_for_reload_ack(requested_at: float, timeout_s: float) -> bool:
         time.sleep(0.5)
 
 
+#: ``--reload``'s answer when the guard kept the running server because the
+#: new code could not start here (its preflight): nothing failed, the update
+#: waits.
+RELOAD_WAITS_EXIT = 4
+
+
+def _wait_for_preflight(requested_at: float, log: GuardLog) -> dict | None:
+    """After the guard took the request: wait while it checks the new code.
+
+    Returns the guard's preflight record when it kept the running server
+    (``reload_action`` ``kept_running``), else None: it is restarting Kazma,
+    or it is a guard from before the preflight, which restarts at once."""
+    deadline = time.monotonic() + RELOAD_PREFLIGHT_TIMEOUT_S + 30.0
+    said = False
+    while True:
+        state = _read_state()
+        ack = state.get("reload_ack")
+        ours = isinstance(ack, (int, float)) and abs(float(ack) - requested_at) < 1e-6
+        action = state.get("reload_action") if ours else None
+        if action == "kept_running":
+            record = state.get("reload_preflight")
+            return record if isinstance(record, dict) else {}
+        if action != "checking" or time.monotonic() >= deadline:
+            return None
+        if not said:
+            said = True
+            print("The guard is checking that the new code can start on this PC…")
+            log("info", "reload.preflight_wait")
+        time.sleep(0.5)
+
+
+def _say_update_waits(record: dict, log: GuardLog) -> int:
+    """``--reload``'s words when the guard kept the running server."""
+    title, detail = preflight_words(record)
+    print(f"{title}.")
+    for line in detail.splitlines():
+        print(f"  {line}")
+    log("info", "reload.waits", step=record.get("step"), detail=str(record.get("detail") or "")[:300])
+    return RELOAD_WAITS_EXIT
+
+
 def _old_server_serving(health_url: str, requested_at: float) -> bool:
     """A server that booted before the request is still answering."""
     boot = server_started_at(health_url, 5.0)
@@ -6927,7 +7250,8 @@ def _wait_for_new_boot(health_url: str, requested_at: float, before: str | None,
     return 2
 
 
-def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0) -> int:
+def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0,
+                check: bool = True) -> int:
     """Operator deploy: have the supervisor boot the code on disk.
 
     The RUNNING GUARD does the stop. It owns the child and runs with the
@@ -6943,7 +7267,10 @@ def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0) -> in
          clears the old server with its own rights);
       4. waits for a guard to take the request -- and only if none does
          (a guard from before this change), stops the server from here;
-      5. waits until a server that booted AFTER the request answers ready.
+      5. while the guard checks that the new code can start on this PC
+         (its preflight), waits; when it kept the running server, says why
+         and returns RELOAD_WAITS_EXIT;
+      6. waits until a server that booted AFTER the request answers ready.
 
     A request no guard will act on is never left behind.
     """
@@ -6957,8 +7284,8 @@ def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0) -> in
     if clear_pause():
         print("Cleared leftover pause so the supervisor can respawn.")
         log("info", "reload.cleared_pause")
-    requested_at = request_reload()
-    log("info", "reload.requested")
+    requested_at = request_reload() if check else request_reload(check=False)
+    log("info", "reload.requested", check=check)
 
     ack_wait = GUARD_ACK_S
     if _guard_alive():
@@ -6999,6 +7326,9 @@ def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0) -> in
             log("error", "reload.not_applied",
                 note="old server still serving; request withdrawn")
             return 1
+    kept = _wait_for_preflight(requested_at, log)
+    if kept is not None:
+        return _say_update_waits(kept, log)
     return _wait_for_new_boot(health, requested_at, before, log)
 
 
@@ -7080,6 +7410,9 @@ def main() -> int:
                     help="show whether supervision is active or paused")
     ap.add_argument("--reload", action="store_true",
                     help="have the supervisor boot new code (the guard stops the server)")
+    ap.add_argument("--skip-check", action="store_true",
+                    help="with --reload: switch without first checking that the new "
+                         "code can start on this PC")
     ap.add_argument("--when-idle", action="store_true",
                     help="with --reload or --pause --stop: first wait until no "
                          "chat turn is running")
@@ -7105,7 +7438,8 @@ def main() -> int:
     if args.install:
         return _cmd_install()
     if args.reload:
-        return _cmd_reload(when_idle=args.when_idle, idle_timeout_s=args.idle_timeout)
+        return _cmd_reload(when_idle=args.when_idle, idle_timeout_s=args.idle_timeout,
+                           check=not args.skip_check)
     if args.pause:
         return _cmd_pause(
             args.reason, args.ttl, stop_now=args.stop,

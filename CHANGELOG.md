@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## Kazma works with Windows' file check (Smart App Control) (2026-11-26)
+
+- **An update never replaces a working Kazma with one that cannot start**:
+  before the guard stops the running server for a reload, it checks in a
+  separate process that the new code can load what it needs on this PC
+  (the database client library, the app, the docker command-line tool).
+  When it cannot, the running server stays, the update waits, and the owner
+  gets one calm message saying so; `kazma_guard.py --reload` answers 4.
+  On 26 November a reload left Kazma read-only for thirty minutes this way.
+  The running guard takes this on the next restart of the KazmaAgent task.
+- **Kazma says what Windows checked, calmly**: `kazma doctor` has a
+  "Windows' file check" section (whether Smart App Control checks files, and
+  each of Kazma's native parts: allowed, replaced by its signed alternative,
+  or the feature that waits); `kazma setup system` and `kazma setup install`
+  add a note when there is something to say; the security report shows it as
+  information, never a finding. The two fallbacks (PostgreSQL's signed client
+  library, Docker Desktop's signed CLI) now say so at INFO. One alert,
+  "Kazma could not keep a feature working on this PC", only when a feature
+  has no signed alternative, naming it. Nothing Kazma says asks anyone to
+  change Windows' protection, in English or Arabic (a test reads every
+  phrase).
+- **Signed parts first while Smart App Control checks files**: Kazma then
+  uses PostgreSQL's signed client library and Docker Desktop's signed CLI
+  from the start, and never tries the unsigned copies (psycopg's bundled
+  library, the engine's own CLI). With it off, nothing changes.
+- **Fewer unsigned files in Express**: the test suite part installs pytest
+  and its plugins (the `test` extra), not the developer tools (`dev`: mypy,
+  locust, pre-commit), which nothing in a running Kazma or its tests uses.
+  Measured on Windows: 699 unsigned native files in an Express install's
+  packages before, 359 after.
+- **New page**: [Kazma and Windows Smart App Control](docs/docs/guide/windows-smart-app-control.md),
+  with its Arabic text, and the plan: signed releases, then a release bundle
+  where every file Kazma ships is signed.
+
 ## Kazma reaches its database when Windows refuses psycopg's library (2026-11-26)
 
 - **Postgres's own client library stands in**: from 11:30 UTC Windows'

@@ -12,7 +12,13 @@ the parts in Express everywhere). **Full** is the whole table (`full_ids`), neve
 kept by hand, so a part added joins Full the day it is added. **Custom** is a
 checklist from Express (`toggle`: on brings what a part needs, off takes what
 needs it). Every extra in pyproject.toml belongs to a part or is declared in
-`EXTRA_ALIASES` with why.
+`EXTRA_ALIASES` with why. **A part installs what it promises, nothing for
+working on Kazma** (2026-11-26, §71): the tests part takes the `test` extra
+(pytest and its plugins), not `dev`, whose mypy, locust and pre-commit no
+test and no running Kazma imports -- measured, 340 of the 699 unsigned native
+files an Express install on Windows carried. `dev` is a checkout's (setup.ps1,
+setup.sh); `kazma update` keys it on `mypy` only (`_EXTRA_MARKERS`), so an
+install with pytest alone does not gain it.
 
 `kazma setup install` (`kazma_cli/install.py`) checks every part -- the ones
 not chosen too (`_check_every_part`: one already here is "Here, not chosen",

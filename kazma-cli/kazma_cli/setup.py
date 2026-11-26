@@ -491,6 +491,12 @@ def _setup_system(options, *, run=subprocess.run, which=None, ask=input, platfor
          + f", package manager: {platform.manager or 'none known'}")
     states: list[DepState] = check_all(platform, run=run, which=which, **(finders or {}))
     problems = _print_states(states)
+    if platform.os == "windows":
+        # Windows' file check, as notes: never a problem setup counts or fixes.
+        from kazma_core import windows_trust
+
+        for text in windows_trust.notes(windows_trust.check()):
+            _say(f"  note {text}")
     if options.check:
         record_system(states)
         if problems:

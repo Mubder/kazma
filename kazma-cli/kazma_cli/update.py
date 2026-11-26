@@ -95,7 +95,9 @@ _EXTRA_MARKERS: dict[str, tuple[str, ...]] = {
     "tui": ("textual", "bidi"),
     "observability": ("prometheus_client",),
     "web": ("playwright",),
-    "dev": ("pytest", "ruff", "mypy"),
+    # mypy only: pytest is the test extra's (Express's tests part), and an
+    # install with it alone must not gain dev's tools at its next update.
+    "dev": ("mypy",),
     "test": ("fakeredis",),
     "push": ("pywebpush",),
     "postgres": ("psycopg",),

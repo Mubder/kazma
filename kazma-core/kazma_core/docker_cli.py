@@ -41,8 +41,11 @@ The file was there, so it was chosen; every docker call then failed, the
 guard read the engine as down although it answered, restarted Docker in it
 again and again, and the server's code execution waited for an engine that
 was up. A candidate is now started once (``docker --version``) before it is
-chosen. One that is refused is said once at WARNING, and the next CLI is
-used (PATH, then Docker's own install folders). A refusal is tried again
+chosen. One that is refused is said once at INFO, calmly -- what Windows
+checked, what Kazma used instead -- and the next CLI is used (PATH, then
+Docker's own install folders, where Docker Desktop's signed CLI lives). When
+no CLI is left, :mod:`kazma_core.windows_trust` says which feature waits
+(its one alert). A refusal is tried again
 after :data:`REFUSED_RECHECK_S`, so a CLI that is allowed again comes back
 by itself; a CLI that started is remembered for as long as the file does
 not change.
@@ -78,6 +81,7 @@ __all__ = [
     "kazma_engine_dir",
     "kazma_engine_disk_dir",
     "normalize_engine",
+    "refused_by_os",
     "wsl_distro_location",
 ]
 
@@ -194,25 +198,86 @@ def _refused_by_os(path: str | Path) -> str | None:
     return why
 
 
+def refused_by_os(path: str | Path) -> str | None:
+    """Why Windows' file check does not allow the program at ``path`` to start
+    (``WinError 4551: ...``), or None when it starts. Started once per file
+    version (:func:`_refused_by_os`); read by :mod:`kazma_core.windows_trust`."""
+    return _refused_by_os(path)
+
+
 def _usable(path: str | Path) -> bool:
-    """True when ``path`` starts; a refusal is said once per CLI and reason."""
+    """True when ``path`` starts; a refusal is said once per CLI and reason.
+
+    Calm (the owner's rule, 2026-11-26): Windows checking a program is
+    Windows doing its job. Kazma uses the next CLI, says so at INFO with the
+    operator's detail, and never asks anyone to change the protection."""
     why = _refused_by_os(path)
     if why is None:
         return True
-    _say_once(
-        f"refused:{path}:{why}",
-        "[docker] the operating system refuses to start %s (%s) -- passing it over "
-        "for the next docker CLI. Allow it again (on Windows: Smart App Control or "
-        "the Application Control policy) to use it; Kazma tries it again every %d s.",
-        path, why, int(REFUSED_RECHECK_S),
-    )
+    with _reported_lock:
+        first = f"refused:{path}:{why}" not in _reported
+        _reported.add(f"refused:{path}:{why}")
+    if first:
+        logger.info(
+            "[docker] Windows checked %s and did not allow it to start on this PC; Kazma uses "
+            "the next docker CLI (a signed one, when one is installed). Detail: %s; tried again "
+            "every %d s.", path, why, int(REFUSED_RECHECK_S),
+        )
     return False
+
+
+#: ``kazma_core.windows_policy``, loaded once (by path outside a Kazma process).
+_policy = None
+
+
+def _checks_files() -> bool:
+    """Smart App Control checks every program on this PC
+    (``kazma_core.windows_policy``). The guard loads this file by path and
+    never imports Kazma, so the policy file is loaded the same way there."""
+    global _policy
+    try:
+        if _policy is None:
+            if __name__ == "kazma_core.docker_cli":
+                from kazma_core import windows_policy as module
+            else:
+                import importlib.util
+
+                spec = importlib.util.spec_from_file_location(
+                    f"{__name__}_windows_policy", Path(__file__).with_name("windows_policy.py"))
+                if spec is None or spec.loader is None:
+                    return False
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[spec.name] = module
+                spec.loader.exec_module(module)
+            _policy = module
+        return bool(_policy.checks_files())
+    except (ImportError, OSError, AttributeError):
+        return False
+
+
+def _signed_cli(own: Path) -> str | None:
+    """While Smart App Control checks every program: Docker Desktop's own CLI
+    (signed by Docker Inc; the static-zip CLI Kazma's engine installs carries
+    no signature, measured 2026-11-26), which reaches Kazma's engine through
+    the same context. Said once at INFO; None when Docker Desktop's is not here."""
+    for candidate in _candidates():
+        if candidate != own and candidate.is_file() and _usable(candidate):
+            with _reported_lock:
+                first = f"signed:{candidate}" not in _reported
+                _reported.add(f"signed:{candidate}")
+            if first:
+                logger.info("[docker] Windows checks each program on this PC (Smart App Control), so "
+                            "Kazma uses Docker's signed CLI (%s) with its own engine", candidate)
+            return str(candidate)
+    return None
 
 
 def find_docker_cli() -> str | None:
     """Absolute path of a usable docker CLI, or ``None``. In a Kazma process
     the first call also pins the chosen container engine (see the module
-    docstring), so the CLI it returns talks to that engine."""
+    docstring), so the CLI it returns talks to that engine. While Smart App
+    Control checks every program, Docker's signed CLI comes before Kazma's
+    engine's unsigned one, which is then never started (:func:`_signed_cli`)."""
     _apply_stored_choice_once()
     explicit = (os.environ.get(_ENV) or "").strip().strip('"')
     if explicit:
@@ -223,8 +288,12 @@ def find_docker_cli() -> str | None:
             "[docker] %s=%s does not exist -- falling back to PATH and the "
             "standard install locations", _ENV, explicit,
         )
-    if os.name == "nt":
+    if _on_windows():
         own = kazma_engine_dir() / "bin" / "docker.exe"
+        if own.is_file() and _checks_files():
+            signed = _signed_cli(own)
+            if signed:
+                return signed
         if own.is_file() and _usable(own):
             return str(own)
     on_path = shutil.which("docker")
