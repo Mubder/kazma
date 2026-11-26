@@ -784,8 +784,8 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
 
         if not await asyncio.to_thread(engine.egress_network_ok):
             raise RuntimeError(
-                f"the filtered network ({EGRESS_NETWORK}) is not set up on Kazma's engine: "
-                "run `kazma setup engine`")
+                f"the filtered network ({EGRESS_NETWORK}) is not set up on Kazma's engine, or the engine "
+                "does not answer (it may be starting): try again, then run `kazma setup engine`")
         # The rules themselves, now: a stamp and a network say the filter was
         # put in, not that its rules still hold (never a run on a bridge they
         # no longer filter).

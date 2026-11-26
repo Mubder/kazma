@@ -432,7 +432,34 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
             len(session.messages),
         )
     except Exception as exc:
+        if _not_saved_to_the_web(thread_id, exc):
+            return
         logger.debug("[agent-handler] Failed to sync session to Web UI: %s", exc)
+
+
+def _not_saved_to_the_web(thread_id: str, exc: BaseException) -> bool:
+    """Say a refused save of a chat app's turn (Spaces enforced): True when
+    it was one. The chat's row was read as none before, and made anew; read
+    as refused, the save is lost, so it is said as every lost save is."""
+    from kazma_core.db.pg_helpers import is_space_refusal
+
+    if not is_space_refusal(exc):
+        return False
+    logger.warning("[agent-handler] thread=%s: the chat's row is refused, so this turn is not saved to the "
+                   "transcript (%s)", thread_id[:12], type(exc).__name__)
+    from kazma_core.observability.ops_alerts import alert
+
+    try:
+        alert(
+            "reply.persist_failed",
+            "A reply was produced but NOT saved to the transcript.",
+            f"thread={thread_id[:12]}: the database refused the chat's row for its space. The reply is in the "
+            "chat app and in the checkpoint; the transcript does not have it.",
+            severity="error",
+        )
+    except (RuntimeError, OSError, ValueError):
+        logger.warning("[agent-handler] thread=%s: the alert was not sent", thread_id[:12], exc_info=True)
+    return True
 
 
 

@@ -36,6 +36,8 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, MutableMapping
 from typing import Any
 
+from kazma_ui.client_gone import CLIENT_GONE_STATUS, body_cut_off
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["MemoryActionRecorder", "action_counts"]
@@ -231,6 +233,8 @@ class MemoryActionRecorder:
         template = getattr(route, "path", None) or str(scope.get("path", ""))
         ids = [str(v) for v in (scope.get("path_params") or {}).values()]
         status = int(held.get("status") or (held.get("start") or {}).get("status") or 500)
+        if status >= 400 and body_cut_off(scope):
+            status = CLIENT_GONE_STATUS  # the client left before sending all of it; what was done stays done
         await asyncio.to_thread(_record, f"{scope['method']} {template}", ids, status,
                                 list(scope.get("headers") or []), str(scope.get("kazma_space") or ""),
                                 str(scope.get("kazma_asker") or ""))

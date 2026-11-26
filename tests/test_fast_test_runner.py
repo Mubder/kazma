@@ -984,3 +984,46 @@ def test_a_crashed_process_is_recovered_and_costs_the_others_nothing(tmp_path, m
     crashed = sorted(when for name, when in starts if name == "test_b0_crashes")
     third = [when for name, when in starts if name == "test_c0"]
     assert crashed[0] < third[0] < crashed[1], "the process after the crash ran in the first pass"
+
+
+# ── A failure is told to its end (2026-11-26) ────────────────────────────
+# CI's first sharded run printed 46 failures of one kind as the first lines of
+# one traceback: the test client's frames, and never the error.
+
+def _block(name: str, error: str, frames: int = 60) -> str:
+    return (f"_____ {name} _____\n" + "".join(f"lib/frame_{i}.py:{i}: in call\n    return await app(scope)\n" for i in range(frames))
+            + f"E   {error}\n----- Captured stdout call -----\n" + "noise of the test\n" * 400)
+
+
+def _pytest_log(blocks: list[str]) -> str:
+    return ("....\n=================== FAILURES ===================\n" + "".join(blocks)
+            + "=============================== warnings summary ===============================\nsome warning\n"
+            + "=========================== short test summary info ===========================\nFAILED tests/test_x.py::test_y\n")
+
+
+def test_a_failure_is_told_to_its_end() -> None:
+    runner = _runner()
+    log = _pytest_log([_block("test_swarm_page", "sqlite3.OperationalError: unable to open database file")])
+    digest = runner._failure_digest(log, limit=3000)
+    assert "sqlite3.OperationalError: unable to open database file" in digest
+    assert "_____ test_swarm_page _____" in digest and "characters left out" in digest
+    assert "some warning" not in digest and len(digest) < 4500
+    # Control: the first 3,000 characters of the section, as it was, held no error.
+    assert "OperationalError" not in log[log.index("FAILURES"):][:3000]
+
+
+def test_one_error_many_times_is_told_once_and_a_second_error_beside_it() -> None:
+    runner = _runner()
+    log = _pytest_log([_block(f"test_{i}", "unable to open database file") for i in range(45)]
+                      + [_block("test_other", "assert 1 == 2")])
+    digest = runner._failure_digest(log, limit=3000)
+    assert "... and 44 more with this error" in digest and "assert 1 == 2" in digest
+    many = runner._failure_digest(_pytest_log([_block(f"test_{i}", f"error number {i}") for i in range(30)]), limit=3000)
+    assert "error number 0" in many and "more different errors" in many and len(many) < 8000
+
+
+def test_what_a_test_printed_does_not_end_the_section() -> None:
+    runner = _runner()
+    printed = _block("test_a", "first error").replace("noise of the test\n", "======= a banner of the test's own =======\n", 1)
+    digest = runner._failure_digest(_pytest_log([printed, _block("test_b", "second error")]), limit=3000)
+    assert "first error" in digest and "second error" in digest

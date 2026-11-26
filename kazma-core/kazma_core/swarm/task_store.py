@@ -26,6 +26,8 @@ from kazma_core.swarm.task import (
 
 from kazma_core.config_store import apply_sqlite_pragmas
 from kazma_core.db.sqlite_columns import add_missing_columns
+from kazma_core.spaces.row_work import install_statements, statements_of
+from kazma_core.swarm.single_operator import space_of_task
 
 __all__ = [
     "DEFAULT_TASK_RETENTION_DAYS",
@@ -292,11 +294,16 @@ class TaskStore:
             try:
                 from kazma_core.db.pg_schema import ensure_schema
 
-                with pool.connection() as conn:
+                # The first swarm tool of a turn makes a store too.
+                with install_statements("the swarm's tables, made for every space"), pool.connection() as conn:
                     with conn.cursor() as cur:
                         ensure_schema(cur, ddl_extra)
                     conn.commit()
-            except Exception:
+            except Exception as exc:
+                from kazma_core.db.pg_helpers import no_other_store_on_refusal
+
+                # A refusal is no outage the next start mends (S4-01, H2).
+                no_other_store_on_refusal(exc, "[TaskStore]")
                 # A column missing here fails every task write that names it.
                 logger.warning(
                     "[TaskStore] Postgres schema update failed; swarm task writes "
@@ -575,13 +582,22 @@ class TaskStore:
         # Multi-tenant hard filter: inject tenant_id unless caller opts out
         # via metadata_filter={"tenant_id": "*"} or KAZMA_TENANT_FILTER=0.
         metadata_filter = dict(metadata_filter or {})
-        from kazma_core.spaces.scope import require_space_id, spaces_enforced
+        # Kazma's own work asks for every space's with "*": the word, never a
+        # value to look for (with KAZMA_TENANT_FILTER=0 it matched nothing).
+        every = metadata_filter.get("tenant_id") == "*"
+        if every:
+            metadata_filter.pop("tenant_id")
+        from kazma_core.spaces.scope import OWNER_SPACE_ID, require_space_id, spaces_enforced
 
-        if spaces_enforced() and metadata_filter.get("tenant_id") != "*":
+        # The owner's list, as ``scope.space_of_record`` reads a task's space:
+        # a task of before Spaces names none, or an empty one.
+        owners = False
+        if spaces_enforced() and not every:
             # Spaces S1-15: a space's list is its own, whatever the older
             # switches say; with no space bound it is refused (NoSpaceBound),
-            # never every space's. Kazma's own work asks with "*".
+            # never every space's.
             metadata_filter["tenant_id"] = require_space_id()
+            owners = metadata_filter["tenant_id"] == OWNER_SPACE_ID
         try:
             import os as _os_tf
 
@@ -591,13 +607,13 @@ class TaskStore:
             if filter_on:
                 from kazma_core.tenant_isolation import multi_user_or_production, require_tenant_id
 
-                if multi_user_or_production() and metadata_filter.get("tenant_id") != "*":
+                if not every and multi_user_or_production():
                     metadata_filter.setdefault("tenant_id", require_tenant_id())
-                if metadata_filter.get("tenant_id") == "*":
-                    metadata_filter.pop("tenant_id", None)
         except Exception:
             # Without the tenant filter the list is every tenant's (SW-E14).
             logger.warning("[TaskStore] could not apply the tenant filter to the task list", exc_info=True)
+        if owners:
+            metadata_filter.pop("tenant_id", None)
         if not metadata_filter:
             metadata_filter = None
 
@@ -617,6 +633,9 @@ class TaskStore:
                 if metadata_filter:
                     conditions.append("metadata @> %s::jsonb")
                     params.append(_pg_json(metadata_filter))
+                if owners:
+                    conditions.append("COALESCE(NULLIF(metadata->>'tenant_id', ''), %s) = %s")
+                    params += [OWNER_SPACE_ID, OWNER_SPACE_ID]
                 if query:
                     conditions.append("prompt ILIKE %s ESCAPE '\\'")
                     params.append(f"%{_like_escape(query)}%")
@@ -657,6 +676,9 @@ class TaskStore:
                     conditions.append("json_extract(metadata, ?) = ?")
                     params.append(f"$.{mkey}")
                     params.append(mval)
+            if owners:
+                conditions.append("COALESCE(NULLIF(json_extract(metadata, '$.tenant_id'), ''), ?) = ?")
+                params += [OWNER_SPACE_ID, OWNER_SPACE_ID]
             if query:
                 conditions.append("prompt LIKE ? ESCAPE '\\'")
                 params.append(f"%{_like_escape(query)}%")
@@ -685,6 +707,7 @@ class TaskStore:
             return tasks, total
         return tasks
 
+    @install_statements("finished tasks past their keep, of every space")
     def prune_tasks(self, retention_days: int = 30) -> int:
         """Prune finished swarm tasks older than retention_days (audit M3).
 
@@ -758,6 +781,7 @@ class TaskStore:
             cur = conn.execute("DELETE FROM swarm_tasks WHERE id = ?", (task_id,))
             return (cur.rowcount or 0) > 0
 
+    @install_statements("every space's paused tasks, put back at a start")
     def get_paused_tasks(self) -> list[SwarmTask]:
         """Return all tasks with status='paused' (for HITL restore on restart)."""
         with self._lock:
@@ -787,7 +811,7 @@ class TaskStore:
         """
         requeued: list[str] = []
         failed: list[str] = []
-        with self._lock:
+        with install_statements("every space's running tasks, listed at a start"), self._lock:
             if self._pg:
                 rows = _pg_execute(
                     "SELECT * FROM kazma_swarm_tasks WHERE status = %s",
@@ -826,7 +850,8 @@ class TaskStore:
                 metadata=dict(metadata),
             )
             try:
-                written = self.persist_task(task)
+                with statements_of(space_of_task(task)):
+                    written = self.persist_task(task)
             except Exception as exc:  # noqa: BLE001 — recovery must not abort boot
                 logger.warning(
                     "[TaskStore] Failed to requeue orphaned task %s: %s", task.id, exc

@@ -20,10 +20,27 @@ CI = REPO / ".github" / "workflows" / "ci.yml"
 RUNBOOK = REPO / "docs" / "docs" / "ops" / "branch-protection.md"
 
 
+def behind_an_aggregate(jobs: dict) -> set[str]:
+    """Jobs another job reports for: it needs them, runs whatever they ended
+    as, and reads every result (``tests/test_ci_shards.py`` runs that gate).
+    Protection requires the aggregate; a shard's own name changes with the
+    number of shards."""
+    behind: set[str] = set()
+    for job in jobs.values():
+        always = str(job.get("if") or "").strip("${} ") == "always()"
+        reads = any("needs.*.result" in str((step.get("env") or {}).get("RESULTS")) for step in job.get("steps") or [])
+        if always and reads:
+            behind |= set(job.get("needs") or [])
+    return behind
+
+
 def ci_check_names(ci_text: str) -> set[str]:
     jobs = (yaml.safe_load(ci_text) or {}).get("jobs") or {}
     names: set[str] = set()
+    hidden = behind_an_aggregate(jobs)
     for key, job in jobs.items():
+        if key in hidden:
+            continue
         template = str(job.get("name") or key)
         matrix = (job.get("strategy") or {}).get("matrix") or {}
         axes = {axis: values for axis, values in matrix.items() if axis not in ("include", "exclude")}
@@ -56,3 +73,15 @@ def test_the_comparison_sees_a_missing_job():
 def test_matrix_checks_use_actual_reported_names():
     ci = 'jobs:\n  a:\n    name: Check (${{ matrix.os }}, ${{ matrix.python }})\n    strategy:\n      matrix:\n        os: [linux, windows]\n        python: ["3.11", "3.12"]\n'
     assert ci_check_names(ci) == {f"Check ({os}, {python})" for os in ("linux", "windows") for python in ("3.11", "3.12")}
+
+
+def test_only_a_job_whose_result_an_aggregate_reads_is_left_out():
+    """Control: a job that is merely needed is still a check to require."""
+    aggregate = (
+        "  all:@    name: All@    needs: [a]@    if: always()@    steps:@"
+        "      - run: x@        env:@          RESULTS: ${{ join(needs.*.result, ' ') }}@"
+    ).replace("@", "\n")
+    base = "jobs:\n  a:\n    name: Alpha\n"
+    assert ci_check_names(base + aggregate) == {"All"}
+    assert ci_check_names(base + aggregate.replace("    if: always()\n", "")) == {"All", "Alpha"}
+    assert ci_check_names(base + aggregate.replace("needs.*.result", "needs.b.result")) == {"All", "Alpha"}

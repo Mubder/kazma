@@ -53,8 +53,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "memory.import.not_read": {"en": "The file could not be read: {why}", "ar": "تعذّرت قراءة الملف: {why}"},
     "memory.import.not_started": {"en": "The import did not start: {why}", "ar": "لم يبدأ الاستيراد: {why}"},
     "memory.import.failed": {"en": "Kazma did not answer. Try again.", "ar": "لم يُجب Kazma. حاول مرة أخرى."},
-    "memory.import.job_failed": {
-        "en": "The import stopped with an error ({why}).",
-        "ar": "توقف الاستيراد بسبب خطأ ({why}).",
+    "memory.import.why_left_space": {
+        "en": "The import ended: the person who brought this history is no longer in this space.",
+        "ar": "انتهى الاستيراد: من أحضر هذا السجل لم يعد في هذه المساحة.",
+    },
+    "memory.import.why_accounts_unavailable": {
+        "en": "The import did not start: Kazma could not read the accounts for half an hour. Choose the file again later.",
+        "ar": "لم يبدأ الاستيراد: تعذّرت على Kazma قراءة الحسابات نصف ساعة. اختر الملف مرة أخرى لاحقًا.",
+    },
+    "memory.import.why_not_an_export": {
+        "en": "The import ended: this file is not an export Kazma can read.",
+        "ar": "انتهى الاستيراد: هذا الملف ليس تصديرًا يستطيع Kazma قراءته.",
+    },
+    "memory.import.why_failed": {
+        "en": "The import stopped with an error; the server log names it. Import it again to go on: what is there is skipped.",
+        "ar": "توقف الاستيراد بسبب خطأ يذكره سجل الخادم. استورده مرة أخرى لتكمل: ما هو موجود يُتخطى.",
     },
 }

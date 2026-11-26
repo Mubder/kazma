@@ -122,7 +122,16 @@
     starts and lets it start whatever that answers, and once it runs
     `kazma-egress-guard` removes the network when the check fails and says
     what `docker network rm` answered: removed, not there, still there, or
-    Docker could not say (`kazma setup engine` puts both back). A kernel with
+    Docker could not say (`kazma setup engine` puts both back).
+    **The bridge is held shut while Docker starts** (the drill of 2026-11-25,
+    `docs/audits/EGRESS_RESTART_DRILL_2026-11-25.md`): Docker takes its jump
+    to `DOCKER-USER` out and puts it back behind its own rules for half a
+    second, and a container it could not kill (a hung shim) got through. The
+    drop-in's first `ExecStartPre` is `kazma-egress-rules ... hold` (a DROP in
+    raw `PREROUTING`, both families); only `release` -- the check, the hold
+    aside -- ends it, from the guard or setup. A held bridge is not in effect
+    (`HELD:`). `container_engine_setup.check` asks the rules too: flushed, it
+    said "ok" and `kazma setup engine` repaired nothing. A kernel with
     no IPv6 (`/proc/net/if_inet6` absent) carries none: nothing is put in for
     it. Not refused, and said on People's confirm (EN/AR) and in the
     guide: the network's own public address (hairpin NAT to the router's

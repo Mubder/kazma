@@ -12,6 +12,15 @@ on:
 permissions:
   contents: read
 
+# A pull request's newer commit cancels the run of its older one; a push to
+# main is never cancelled (its group is its own commit). On 2026-11-25 the
+# shards of main's run ended at 12 minutes and its two required checks waited
+# 19 more for a runner, behind ten Dependabot pull requests' runs of 36 jobs
+# each (run 45723281289). tests/test_ci_shards.py holds the rule.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   PYTHON_VERSION: "3.11"
 
@@ -119,9 +128,20 @@ jobs:
           "$RUNNER_TEMP/wheel-venv/bin/python" -c "import kazma_core, kazma_gateway, kazma_ui, kazma_cli, kazma_tui, kazma_skills; print('wheel imports ok')"
           "$RUNNER_TEMP/wheel-venv/bin/kazma" --help
 
+  # The full suite in shards (2026-11-25): on one 4-core runner it took 52 to
+  # 82 minutes, and a small change paid it on every push. Which file runs in
+  # which shard is scripts/ci_shards.py's answer (a committed table of
+  # durations, and the path's hash for a file the table does not hold), so
+  # every file runs in exactly one; tests/test_ci_shards.py holds that. Branch
+  # protection requires `Tests`, the job after this one.
   tests:
-    name: Tests
+    name: Tests, shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -210,8 +230,8 @@ jobs:
         # runner: every chunk of every run in November 2026 ran out of time
         # and was re-run whole as pieces, and the job took 60-75 minutes.
         # A hung test is pytest-timeout's (--timeout=120), not this budget's.
-        # --files-per-process: a chunk runs its ~470 files as consecutive
-        # pytest processes of at most this many, one after another, so four
+        # --files-per-process: a chunk runs its files (~470 of them before the
+        # shards, ~80 since) as consecutive pytest processes of at most this many, one after another, so four
         # processes run at any moment as before. One process per chunk grew
         # for the whole run -- 3.8, 3.6, 3.5 and 2.8 GB at 40 minutes, 14.6 of
         # 16 GB in use (2026-11-23); 5.1, 4.3 and 4.1 GB at 52 minutes on an
@@ -238,7 +258,7 @@ jobs:
           ) &
           monitor=$!
           status=0
-          python scripts/fast_test.py --chunks 4 --files-per-process 60 || status=$?
+          python scripts/fast_test.py --shard ${{ matrix.shard }}/${{ strategy.job-total }} --chunks 4 --files-per-process 60 --durations-json "$RUNNER_TEMP/test-durations.json" || status=$?
           kill "$monitor" 2>/dev/null || true
           exit "$status"
         env:
@@ -255,6 +275,34 @@ jobs:
           free -m || true
           echo "open files: $(ulimit -n)"
           sudo dmesg -T 2>/dev/null | tail -40 || true
+      - name: Upload what each file took
+        # `python scripts/ci_shards.py update <run id>` makes the next table
+        # of shards from these.
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: test-durations-unit-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-durations.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  readme-metrics:
+    # A step of the Tests job until it became shards; `Tests` needs it.
+    name: README metrics
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install deps
+        # The Tests shards' set: the collected test count depends on it.
+        uses: ./.github/actions/install-locked
+        with:
+          extras: test
+          groups: ci-light
       - name: README metrics gate
         # README carries "Metrics auto-verified from METRICS.md" above a
         # table nothing verified — on 2026-09-16 it advertised 7,346 tests /
@@ -266,6 +314,26 @@ jobs:
         # refreshed with `generate_metrics.py --write` before a push, and the
         # website gets a fresh copy daily from sync-metrics.yml.
         run: python scripts/generate_metrics.py --check-readme
+
+  tests-passed:
+    # The check branch protection requires, by the name it always had. It
+    # runs whatever happened before it, and passes only when every shard and
+    # the README gate succeeded: failed, cancelled or skipped is not success.
+    name: Tests
+    needs: [tests, readme-metrics]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every shard passed (GATE)
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          [ -n "$RESULTS" ] || exit 1
+          for result in $RESULTS; do
+            [ "$result" = "success" ] || { echo "::error::a shard ended '$result'"; exit 1; }
+          done
 
   document-worker-container:
     name: Document worker container profile (real Docker)
@@ -739,9 +807,18 @@ jobs:
         env:
           KAZMA_DB_BACKEND: sqlite
 
+  # The browser files in shards (2026-11-25; one after another they took 34
+  # minutes). The list below is every file of tests/e2e but the unified turn
+  # job's; scripts/ci_shards.py picks this shard's files from it. Branch
+  # protection requires `Playwright smoke`, the job after this one.
   playwright-smoke:
-    name: Playwright smoke
+    name: Playwright, shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
@@ -753,125 +830,97 @@ jobs:
           extras: test web
       - name: Install Playwright's Chromium
         run: python -m playwright install chromium --with-deps
-      - name: Health + composer smoke
-        run: python -m pytest tests/e2e/test_smoke.py -q --timeout=180
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: HITL view-model (incidents 2 and 3 — GATE)
-        # HITL_VIEW_MODEL F. fast_test.py excludes tests/e2e. This step is
-        # the merge gate for refresh-mid-pause and refresh-after-settle.
-        # Incidents 1 and 4 stay unclaimed (F0: create_app() supervisor
-        # does not pause). No || true. importorskip only when Playwright
-        # is absent, same as smoke.
-        run: python -m pytest tests/e2e/test_hitl_view_model.py -q --timeout=180
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Every page loads clean (2026-09-26)
-        # Each page the navigation links to, in its own tab: no uncaught
-        # error, every Alpine directive compiles, every bundled CodeMirror
-        # mode registered. Four pages threw on every load until then (IDE,
-        # workspace, knowledge, settings) and no test opened them.
-        run: python -m pytest tests/e2e/test_pages_load_clean.py -q --timeout=600
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Only a card is the card colour; the header has its line (2026-11-17)
-        # Every page and Settings tab, desktop and phone, both themes: no
-        # column or band in the card colour that is not a card (the chat
-        # session list was), the header set off by a line, and on a phone
-        # both drawers above the chat composer.
-        run: python -m pytest tests/e2e/test_chrome_is_the_page.py -q --timeout=600
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: X Studio bilingual composer and review
-        # X composer/review acceptance has its own isolated app fixture.
-        # It must run here because the chunked unit suite excludes e2e.
-        # Keep failures blocking, as with the other browser checks.
-        run: python -m pytest tests/e2e/test_x_studio_browser.py -q --timeout=300
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Every page reads in Arabic (2026-09-28)
-        # Each nav page and Settings tab, and a chat turn paused at its
-        # approval card and finished, with the Arabic cookie: no English
-        # interface text outside translate="no". The Memory page was
-        # almost entirely English, and the approval card's buttons were
-        # English on every platform language.
-        run: python -m pytest tests/e2e/test_pages_read_in_arabic.py -q --timeout=900
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Text follows its own language, in either UI (2026-10-02)
-        # Real turns in the Arabic and the English UI, live and reloaded:
-        # every paragraph, quote, list item and tool output starts at its
-        # own language's edge, and the two UIs lay each paragraph out the
-        # same. The Arabic UI right-aligned English replies and tool output,
-        # and a mostly English reply ran its Arabic paragraphs left to right.
-        run: python -m pytest tests/e2e/test_text_follows_its_language.py -q --timeout=900
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Research completion reaches the bell and its saved result (2026-10-12)
-        # A finished research session becomes a durable bell alert in both
-        # UIs; its link opens the SAVED result (still there after a reload,
-        # not a toast), and Settings reads the monitor's settings. It ran in
-        # no job from the day it was written (found 2026-10-13).
-        run: python -m pytest tests/e2e/test_acquisition_alerts.py -q --timeout=600
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Swarm page through a proxy that cuts long answers (2026-10-14)
-        # Swarm audit SW-S08/SW-S09: approve answers 202, the page reads every
-        # answer and follows the task on a resumable stream, in English and
-        # Arabic, through a proxy that cuts a request held open (the
-        # Cloudflare Tunnel shape the live page sits behind).
-        run: python -m pytest tests/e2e/test_swarm_through_a_cutting_proxy.py -q --timeout=600
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Scheduled page reads every status in Arabic (2026-10-14)
-        # Scheduled audit SCH-S04/SCH-S08: every cron and X status the page
-        # projects, a booked and a held X post, and the clarify card of a
-        # real paused cancel turn, rendered in Arabic.
-        run: python -m pytest tests/e2e/test_scheduled_reads_in_arabic.py -q --timeout=600
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: The night's pages in a browser (2026-11-14)
-        # WhatsApp's Settings card, the problem report, Kazma as an installable
-        # app (Chrome's own installability check), Bring your history and the
-        # automations gallery: each reached by the sidebar, English and Arabic.
-        run: >-
-          python -m pytest -q --timeout=600
-          tests/e2e/test_whatsapp_settings_browser.py
-          tests/e2e/test_problem_report_browser.py
-          tests/e2e/test_web_app_install_browser.py
-          tests/e2e/test_history_import_browser.py
-          tests/e2e/test_automation_gallery_browser.py
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Time travel page restores and reads in Arabic (2026-10-14)
-        # Time Travel audit TT-Q1: reached by the sidebar, a restore that
-        # rewinds the chat, the restored chat, Arabic with no English, and
-        # the error state.
-        run: python -m pytest tests/e2e/test_time_travel_page.py -q --timeout=600
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Swarm approval panel answers a chat card's request (2026-10-14)
-        # Swarm audit SW-S03: the card's link opens the whole call on the
-        # Swarm page, reached by soft navigation, in English and Arabic, and
-        # its Approve decides the shared request as the web.
-        run: python -m pytest tests/e2e/test_swarm_approval_panel.py -q --timeout=600
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Knowledge page words a refused and a partial crawl (2026-10-14)
-        # Knowledge audit KB-S05/KB-S15: a refused crawl in the page's
-        # language through the real route; a crawl with failed pages never
-        # titled "Done". English and Arabic, arriving by the sidebar.
-        run: python -m pytest tests/e2e/test_knowledge_outcomes_browser.py -q --timeout=600
-        env:
-          KAZMA_DB_BACKEND: sqlite
-      - name: Remaining e2e suites
+      - name: This shard's browser files (GATE)
         # scripts/fast_test.py excludes everything under tests/e2e, and this
-        # job only ever ran test_smoke.py — so test_delivery_v2_e2e.py,
+        # job once ran only test_smoke.py -- so test_delivery_v2_e2e.py,
         # test_e2e_playwright.py and test_memory_playwright.py ran in NO job
         # at all (audit 2026-09-16 F-7). Same orphaning the pyproject comment
-        # already records for kazma-core/tests.
+        # already records for kazma-core/tests. A new file goes at the end of
+        # this list; tests/test_ci_shards.py and the F-7 gate hold it.
         run: |
-          python -m pytest -q --timeout=300 \
+          files=(
+            # Health + composer smoke
+            tests/e2e/test_smoke.py
+            # HITL view-model (incidents 2 and 3 — GATE)
+            #   HITL_VIEW_MODEL F. fast_test.py excludes tests/e2e. This step is
+            #   the merge gate for refresh-mid-pause and refresh-after-settle.
+            #   Incidents 1 and 4 stay unclaimed (F0: create_app() supervisor
+            #   does not pause). No || true. importorskip only when Playwright
+            #   is absent, same as smoke.
+            tests/e2e/test_hitl_view_model.py
+            # Every page loads clean (2026-09-26)
+            #   Each page the navigation links to, in its own tab: no uncaught
+            #   error, every Alpine directive compiles, every bundled CodeMirror
+            #   mode registered. Four pages threw on every load until then (IDE,
+            #   workspace, knowledge, settings) and no test opened them.
+            tests/e2e/test_pages_load_clean.py
+            # Only a card is the card colour; the header has its line (2026-11-17)
+            #   Every page and Settings tab, desktop and phone, both themes: no
+            #   column or band in the card colour that is not a card (the chat
+            #   session list was), the header set off by a line, and on a phone
+            #   both drawers above the chat composer.
+            tests/e2e/test_chrome_is_the_page.py
+            # X Studio bilingual composer and review
+            #   X composer/review acceptance has its own isolated app fixture.
+            #   It must run here because the chunked unit suite excludes e2e.
+            #   Keep failures blocking, as with the other browser checks.
+            tests/e2e/test_x_studio_browser.py
+            # Every page reads in Arabic (2026-09-28)
+            #   Each nav page and Settings tab, and a chat turn paused at its
+            #   approval card and finished, with the Arabic cookie: no English
+            #   interface text outside translate="no". The Memory page was
+            #   almost entirely English, and the approval card's buttons were
+            #   English on every platform language.
+            tests/e2e/test_pages_read_in_arabic.py
+            # Text follows its own language, in either UI (2026-10-02)
+            #   Real turns in the Arabic and the English UI, live and reloaded:
+            #   every paragraph, quote, list item and tool output starts at its
+            #   own language's edge, and the two UIs lay each paragraph out the
+            #   same. The Arabic UI right-aligned English replies and tool output,
+            #   and a mostly English reply ran its Arabic paragraphs left to right.
+            tests/e2e/test_text_follows_its_language.py
+            # Research completion reaches the bell and its saved result (2026-10-12)
+            #   A finished research session becomes a durable bell alert in both
+            #   UIs; its link opens the SAVED result (still there after a reload,
+            #   not a toast), and Settings reads the monitor's settings. It ran in
+            #   no job from the day it was written (found 2026-10-13).
+            tests/e2e/test_acquisition_alerts.py
+            # Swarm page through a proxy that cuts long answers (2026-10-14)
+            #   Swarm audit SW-S08/SW-S09: approve answers 202, the page reads every
+            #   answer and follows the task on a resumable stream, in English and
+            #   Arabic, through a proxy that cuts a request held open (the
+            #   Cloudflare Tunnel shape the live page sits behind).
+            tests/e2e/test_swarm_through_a_cutting_proxy.py
+            # Scheduled page reads every status in Arabic (2026-10-14)
+            #   Scheduled audit SCH-S04/SCH-S08: every cron and X status the page
+            #   projects, a booked and a held X post, and the clarify card of a
+            #   real paused cancel turn, rendered in Arabic.
+            tests/e2e/test_scheduled_reads_in_arabic.py
+            # The night's pages in a browser (2026-11-14)
+            #   WhatsApp's Settings card, the problem report, Kazma as an installable
+            #   app (Chrome's own installability check), Bring your history and the
+            #   automations gallery: each reached by the sidebar, English and Arabic.
+            tests/e2e/test_whatsapp_settings_browser.py
+            tests/e2e/test_problem_report_browser.py
+            tests/e2e/test_web_app_install_browser.py
+            tests/e2e/test_history_import_browser.py
+            tests/e2e/test_automation_gallery_browser.py
+            # Time travel page restores and reads in Arabic (2026-10-14)
+            #   Time Travel audit TT-Q1: reached by the sidebar, a restore that
+            #   rewinds the chat, the restored chat, Arabic with no English, and
+            #   the error state.
+            tests/e2e/test_time_travel_page.py
+            # Swarm approval panel answers a chat card's request (2026-10-14)
+            #   Swarm audit SW-S03: the card's link opens the whole call on the
+            #   Swarm page, reached by soft navigation, in English and Arabic, and
+            #   its Approve decides the shared request as the web.
+            tests/e2e/test_swarm_approval_panel.py
+            # Knowledge page words a refused and a partial crawl (2026-10-14)
+            #   Knowledge audit KB-S05/KB-S15: a refused crawl in the page's
+            #   language through the real route; a crawl with failed pages never
+            #   titled "Done". English and Arabic, arriving by the sidebar.
+            tests/e2e/test_knowledge_outcomes_browser.py
+            # The other browser files
             tests/e2e/test_delivery_v2_e2e.py \
             tests/e2e/test_e2e_playwright.py \
             tests/e2e/test_memory_playwright.py \
@@ -945,8 +994,38 @@ jobs:
             tests/e2e/test_chat_moves_browser.py \
             tests/e2e/test_file_moves_browser.py \
             tests/e2e/test_approval_card_reaches_the_asker.py
+          )
+          python scripts/ci_shards.py e2e --shard ${{ matrix.shard }}/${{ strategy.job-total }} \
+            --durations-json "$RUNNER_TEMP/test-durations.json" "${files[@]}"
         env:
           KAZMA_DB_BACKEND: sqlite
+          PYTHONUNBUFFERED: "1"
+      - name: Upload what each file took
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: test-durations-e2e-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-durations.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  playwright-smoke-passed:
+    # The check branch protection requires, by the name it always had.
+    name: Playwright smoke
+    needs: [playwright-smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every shard passed (GATE)
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          [ -n "$RESULTS" ] || exit 1
+          for result in $RESULTS; do
+            [ "$result" = "success" ] || { echo "::error::a shard ended '$result'"; exit 1; }
+          done
 
   fresh-install:
     # A clean machine, installed the way a person installs Kazma (REMAINING
