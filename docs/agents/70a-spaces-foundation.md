@@ -190,6 +190,32 @@ an install with one account behaves as before.
   `KAZMA_TEST_SECOND_LOCK=armed` runs any Postgres suite armed
   (`tests/_second_lock_armed.py`); a test there that reaches the database
   with nothing bound fails, and binding every test is step 5's.
+- **The checkpointer's door** (S4-01 step 4, `checkpoints_pg.py`,
+  `db/row_security.py`, the gateway's `stores/checkpoint.py`; nothing arms
+  it). The checkpointer's pool asks `row_security.checkpoint_door()` at each
+  checkout. Spaces off and not armed: today's path, nothing more sent.
+  Spaces enforced: a space's checkout opens its transaction in the space
+  (`BEGIN` and `set_config` in one message, `await conn.execute(...,
+  prepare=False)`: never `pgconn.exec_` on the loop, review H4, a gate) and
+  ends it with `COMMIT` or `ROLLBACK`, so the rows it writes are stamped
+  with the space, armed or not (M7); the install's door and nothing said take
+  today's path until armed. Armed, a space's checkout goes to the space half
+  (an async pool signed in as `kazma_space`, opened on the loop at its first
+  use, every connection role-checked and given back reset, as the shared
+  pool's), nothing said is refused. `CheckpointManager` runs each saver call
+  in the thread's own space (`_door`: its record, or the bound space for a
+  call that names no thread); its listing takes each step in the door and
+  hands the row on outside it (M5: a door held across a `yield` stays in the
+  consumer). `aprune` keeping the latest is refused in a space's checkout
+  (L1). `apply` ends with the backfill (design 7.3, at every pass): every
+  checkpoint row gets its thread's space from `thread_scopes.db`, NULL for
+  the owner's, a wrong stamp back; a record store that cannot be read keeps
+  `apply` from being complete. Gates: `tests/test_pg_checkpoint_spaces.py`
+  (real Postgres, the saver called directly: wire, stamp, a space's own
+  threads, refused, backfill, prune; each with its control) and
+  `tests/test_checkpoint_doors.py` (the door's answers, the manager, M5 and
+  its control, the H4 gate). A moved thread's checkpoints are restamped by
+  the next backfill; at the move itself is step 5's.
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner

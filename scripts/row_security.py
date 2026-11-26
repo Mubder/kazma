@@ -16,8 +16,10 @@ preparing the arming) looks at a database and puts the rules in place:
   shows nothing of a space that does not exist. Reads only (every statement
   on the space connection is rolled back).
 * ``apply`` -- what is missing, as the tables' owner: the role when the login
-  may make it, the function, row security, policies, rights. Asks first
-  (``--yes`` does not). A table another session holds is left and said.
+  may make it, the function, row security, policies, rights; then every
+  checkpoint row gets its thread's space (the backfill, from this install's
+  thread records). Asks first (``--yes`` does not). A table another session
+  holds is left and said.
 
 The address is this install's (``KAZMA_DATABASE_URL``, read from its
 ``.env`` as the server reads it), or the one held by the environment variable

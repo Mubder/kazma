@@ -88,10 +88,12 @@ def test_every_postgres_checkpointer_comes_from_the_one_opener():
             if path == home:
                 continue
             for line in _constructions(path.read_text(encoding="utf-8", errors="replace"),
-                                       {"AsyncPostgresSaver", "PostgresSaver", "AsyncConnectionPool"}):
+                                       {"AsyncPostgresSaver", "PostgresSaver", "AsyncConnectionPool",
+                                        "KazmaPostgresSaver", "_saver_class"}):
                 found.append(f"{path.relative_to(REPO).as_posix()}:{line}")
     assert found == [], "open it with kazma_core.checkpoints_pg.open_postgres_checkpointer: " + ", ".join(found)
-    assert _constructions(home.read_text(encoding="utf-8"), {"AsyncPostgresSaver"}), "the home lost it"
+    # The home builds Kazma's saver (LangGraph's, aprune refused in a space: S4-01 step 4).
+    assert _constructions(home.read_text(encoding="utf-8"), {"_saver_class"}), "the home lost it"
     # Negative control: a second builder is seen.
     assert _constructions("pool = AsyncConnectionPool(conninfo=dsn)\n", {"AsyncConnectionPool"}) == [1]
 

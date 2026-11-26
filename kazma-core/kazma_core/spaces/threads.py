@@ -69,6 +69,7 @@ __all__ = [
     "record_thread",
     "release_thread",
     "space_threads",
+    "thread_spaces",
     "thread_refusal",
     "require_thread",
     "scope_for_turn",
@@ -395,6 +396,15 @@ def space_threads(space_id: str) -> tuple[bool, list[str]]:
             "SELECT thread_id FROM thread_scopes WHERE space_id = ?", (space_id,)
         ).fetchall()
         return True, [str(r[0]) for r in rows]
+
+
+def thread_spaces() -> dict[str, str]:
+    """Every recorded thread and its space, in one read of the record store:
+    the checkpoints' backfill (Spaces S4-01 step 4) gives each thread's rows
+    its space. A thread with no record is from before Spaces: the owner's."""
+    with _connection() as conn:
+        rows = conn.execute("SELECT thread_id, space_id FROM thread_scopes").fetchall()
+    return {str(r[0]): str(r[1] or "") for r in rows}
 
 
 def thread_home(thread_id: str) -> str:
