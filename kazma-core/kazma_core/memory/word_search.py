@@ -14,8 +14,9 @@ spelling).
 Here both sides are folded with ``documents.arabic.fold_for_search`` and
 compared word by word, as recall reads a question (``query_terms``): a word's
 article, one-letter prefix, possessive or light plural is no difference, nor
-is the Arabic "my" at its end ("سيارتي", "سيارة"; a list takes it off a typed
-word only when the word itself is nowhere in it, :func:`asked_in`). An Arabic dual ("سيارتين"),
+is the Arabic "my" at its end ("سيارتي", "سيارة"). A name's last letter is its
+own ("سامي" is nobody's "سام"), and so is that of the few words that end so and
+say nobody's ("عادي", "ثاني"). An Arabic dual ("سيارتين"),
 a broken plural and "our" at a typed word's end ("سيارتنا") are other words.
 Only a word that may be the one asked for is folded (a text of 50,000 turns
 took 24 seconds folded whole, for "gpt5").
@@ -45,7 +46,7 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-__all__ = ["Asked", "asked_in", "fold", "holds", "register"]
+__all__ = ["Asked", "fold", "holds", "register"]
 
 #: The most words of a query that are looked for, as the memories panel asks
 #: its index; a list that wants every word asks fewer (``of``'s *words*).
@@ -135,9 +136,14 @@ _WHOSE = "(?:هما|كما|نا|كم|هم|ها|ي|ك|ه)"
 def _forms(written: str, term: str) -> list[str]:
     """The folded *term*, and, when it was *written* with the ending "my", the
     word without it: "سيارتي" is "سياره", "بيتي" is "بيت", "مستشفاي" is
-    "مستشفى". "منى" and "مستشفى" end in no "my"."""
+    "مستشفى". "منى" and "مستشفى" end in no "my", and neither does a name
+    ("سامي") or a word whose ending is its own ("عادي")."""
+    from kazma_core.memory.name_alphabets import is_a_name
     from kazma_core.memory.query_terms import content_terms
+    from kazma_core.memory.speakers import _AR_NOT_MINE
 
+    if is_a_name(term) or term in _AR_NOT_MINE:
+        return [term]
     if term.isascii() or len(term) < 3 or not written.endswith((_MY, "ی")) or not term.endswith(_MY):
         return [term]
     bare = term[:-1]
@@ -188,7 +194,6 @@ class _Word:
     look: re.Pattern[str]
     pattern: re.Pattern[str]
     folds: bool
-    mine: bool = False
 
 
 @dataclass(frozen=True)
@@ -203,12 +208,10 @@ class Asked:
     together: tuple[tuple[int, ...], ...]
 
     @classmethod
-    def of(cls, query: str, *, whole: bool = False, words: int = _WORDS_MAX,
-           kept: frozenset[str] = frozenset()) -> Asked:
+    def of(cls, query: str, *, whole: bool = False, words: int = _WORDS_MAX) -> Asked:
         """*whole*: a word is found as a whole word (a list that answers
         with any of the words), else from its start (a list that wants all).
-        *words*: the most words that are looked for. *kept*: the folded words
-        whose ending is their own, no "my"."""
+        *words*: the most words that are looked for."""
         from kazma_core.memory.query_terms import _TOKEN, content_terms
 
         terms: list[str] = []
@@ -222,22 +225,15 @@ class Asked:
                     if term not in terms:
                         if len(terms) >= words:
                             continue
-                        forms = [term] if term in kept else _forms(written, term)
+                        forms = _forms(written, term)
                         terms.append(term)
-                        read.append(_Word(_look(term, forms), _word_pattern(term, forms, whole=whole), _folds(term),
-                                          len(forms) > 1))
+                        read.append(_Word(_look(term, forms), _word_pattern(term, forms, whole=whole), _folds(term)))
                     here.append(terms.index(term))
             if "_" in piece and len(here) > 1:
                 together.append(tuple(here))
             else:
                 together += [(n,) for n in here]
         return cls(fold(query), tuple(terms), tuple(read), tuple(dict.fromkeys(together)))
-
-    @property
-    def perhaps_mine(self) -> tuple[str, ...]:
-        """The words an ending was taken off as "my", which may be their own
-        ("سيارتي", and "سامي")."""
-        return tuple(term for term, word in zip(self.terms, self.words, strict=True) if word.mine)
 
     @property
     def needs_folding(self) -> bool:
@@ -314,33 +310,6 @@ def holds(test: str, *columns: str) -> str:
     column SQLite cannot hand over as text would fail the whole statement).
     The columns are the caller's own SQL, never what was typed."""
     return f"kazma_asked_{test}({', '.join(f'CAST({c} AS BLOB)' for c in columns)})"
-
-
-#: Where a list looks: its rows' ``FROM ... WHERE ...``, the values that binds,
-#: and the columns that are searched.
-Place = tuple[str, Sequence[object], tuple[str, ...]]
-
-
-def asked_in(conn: sqlite3.Connection, query: str, places: Sequence[Place], *, whole: bool = False,
-             words: int = _WORDS_MAX) -> Asked:
-    """*query* as the lists *places* are asked it, its functions on *conn*
-    (:func:`register`). A final ي is taken off a typed word as "my" only when
-    no row of them holds the word itself: "سامي" does not list "سام", nor
-    "عادي" who "عاد", where a Sami or something ordinary is told of; "سيارتي"
-    still lists "سيارة" where nobody wrote "سيارتي"."""
-    asked = Asked.of(query, whole=whole, words=words)
-    register(conn, asked)
-    kept = set()
-    for term in asked.perhaps_mine:
-        alone = Asked.of(term, whole=whole, kept=frozenset({term}))
-        conn.create_function("kazma_asked_alone", -1, lambda *v, one=alone: int(one.every(*v)), deterministic=True)
-        if any(conn.execute(f"SELECT 1 {rows} AND {holds('alone', *columns)} LIMIT 1", tuple(values)).fetchone()  # nosec B608 - the callers' own SQL, values bound
-               for rows, values, columns in places):
-            kept.add(term)
-    if kept:
-        asked = Asked.of(query, whole=whole, words=words, kept=frozenset(kept))
-        register(conn, asked)
-    return asked
 
 
 def register(conn: sqlite3.Connection, asked: Asked) -> None:

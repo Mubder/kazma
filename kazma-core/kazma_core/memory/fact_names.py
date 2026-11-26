@@ -25,10 +25,12 @@ doubles are rare: of 154 pairs of facts in two names that look alike in the
 pilots' stores, read one by one, about 20 were one statement, so nothing here
 joins facts by meaning, and a list is never merged:
 
-* a person's role or employer goes under the name they ALREADY have a single
-  value of it under, and the user's role and age under Kazma's when they have
-  none (:func:`name_in_use`, asked with the store at hand: a list of four
-  occupations stays four);
+* a person's occupation or employer goes under the name they ALREADY have a
+  single value of it under, and the user's role and age under Kazma's
+  (:func:`name_to_file`, asked with the store at hand: a list of four
+  occupations stays four). Only under names that say it of the person's work
+  in any sentence: a "role" is a part in a play, a "job" a weekend one, a
+  "workplace" a town (the review of step 2, 2026-11-26);
 * a list is read by its kind (:data:`LISTS`): "plans_to", "planning" and
   "intends_to" are one list of plans when all are asked for, each under its
   own name.
@@ -38,12 +40,15 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import unicodedata
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
 __all__ = ["ASKED_ALONE", "ASKED_AS_MINE", "ASKED_WITH", "KINDS", "LISTS", "NOT_ASKED_BY_WORDS", "ONE_VALUE_NAMES",
            "asked_as_mine", "asked_words", "fact_kind", "indexed_words", "kinds_asked", "kinds_said_of_the_user", "list_kind",
-           "name_in_use", "names_one_value", "normalised_name", "plural_of_a_kind", "users_names", "users_predicate"]
+           "Filing", "name_to_file", "names_one_value", "normalised_name", "plural_of_a_kind", "same_statement", "users_names",
+           "users_predicate"]
 
 #: Kazma's name -> the names a model gives the same fact about a person.
 KINDS: dict[str, tuple[str, ...]] = {
@@ -58,22 +63,38 @@ KINDS: dict[str, tuple[str, ...]] = {
     "current_role": ("job_title", "occupation", "profession", "job_role", "position", "works_as", "job"),
 }
 
-#: Names read as Kazma's only where the fact is one value (a functional or
-#: state label) and no list is held under them (:func:`name_in_use`): "has_occupation career coach, influencer, teacher, business
-#: owner" is a list of true jobs, "has_role Éponine" a part in a play. ``age_is``
-#: is not in :data:`KINDS`: a first reading of one of those is put on the
-#: Memory page. ``has_role`` is in neither: it says a part as often as a job.
+#: Names of the user's read as Kazma's only where the fact is one value (a
+#: functional or state label) and no list of it is held (:func:`name_to_file`):
+#: "has_occupation career coach, influencer, teacher, business owner" is a list
+#: of true jobs. ``age_is`` is not in :data:`KINDS`: a first reading of one of
+#: those is put on the Memory page. In neither: "role" ("captain of the team",
+#: "father of three") and "has_job" ("a weekend barista"), which say as often
+#: what stands beside a person's work.
 ONE_VALUE_NAMES: dict[str, tuple[str, ...]] = {
-    "current_role": ("role", "has_occupation", "has_profession", "has_job", "has_job_title", "current_job",
-                     "current_occupation", "current_profession", "employed_as"),
+    "current_role": ("has_occupation", "has_profession", "has_job_title", "current_occupation", "current_profession"),
     "age_is": ("has_age", "current_age"),
 }
 
-#: The names another person's role and employer go by. Never a place, and
-#: never a name a thing has too ("position" of a shelf, "company" of a phone).
-_ANOTHERS: dict[str, tuple[str, ...]] = {
-    "current_role": ("current_role", "job_title", "occupation", "profession", "job_role", "works_as", "job",
-                     *ONE_VALUE_NAMES["current_role"]),
+#: The names another person's occupation and employer are read as one under.
+#: None that a sentence can say beside it: "works as a lifeguard at weekends",
+#: "works at the airport", "works for Khaled" (the boss), "employed by an
+#: agency", "workplace Ahmadi" -- and no name a thing has.
+_ONE_OF_ANOTHERS: dict[str, tuple[str, ...]] = {
+    "current_role": ("job_title", "occupation", "profession", *ONE_VALUE_NAMES["current_role"]),
+    "works_at": ("employer", "current_employer", "employer_name", "has_employer"),
+}
+
+#: A value that says itself it stands beside the person's work, English and
+#: Arabic (folded): it joins nothing.
+_BESIDE = re.compile(r"\b(?:part[- ]?time|side|second|weekends?|evenings?|freelance|volunteer\w*|also|unpaid|former(?:ly)?|"
+                     r"ex|retired|aspiring|future|substitute|temporary|acting)\b"
+                     r"|(?:^|\s)(?:ال|ب|بال|في ال|و)?(?:جزيي|جزييا|متطوعه?|تطوع|ثاني|ثانيه|اضافي|اضافيه|ويكند|ويكيند|سابق|سابقا|سابقه|"
+                     r"متقاعده?|موقت|موقته|موقتا|ايضا|بعد الدوام|نهايه الاسبوع)(?=\s|$)", re.IGNORECASE)
+
+#: The names a question of a person's role or employer asks, whoever's it is.
+_ASKED_NAMES: dict[str, tuple[str, ...]] = {
+    "current_role": ("current_role", "job_title", "occupation", "profession", "job_role", "works_as", "job", "has_job",
+                     "current_job", "employed_as", *ONE_VALUE_NAMES["current_role"]),
     "works_at": ("works_at", "employer", "works_for", "employed_at", "employed_by", "workplace",
                  "current_employer", "employer_name"),
 }
@@ -171,6 +192,18 @@ def _holding(*words: str, unless: str = "") -> Any:
     return lambda name: bool(held.intersection(name)) and not out.intersection(name)
 
 
+def _of(words: str, beside: str = "") -> Any:
+    """A name that holds one of *words* and nothing but them and *beside*:
+    "college_major", never "college_friend"."""
+    held = frozenset(words.split())
+    allowed = held | frozenset(beside.split()) | {"is"}
+    return lambda name: bool(held.intersection(name)) and allowed.issuperset(name)
+
+
+def _either(*rules: Any) -> Any:
+    return lambda name: any(fits(name) for fits in rules)
+
+
 def _named(*names: str) -> Any:
     """One of *names*, whole."""
     every = {tuple(n.split("_")) for n in names}
@@ -186,24 +219,26 @@ def _named(*names: str) -> Any:
 #: into "which food delivery services have I used?" (read on the pilots' blocks).
 LISTS: dict[str, Any] = {
     "plans": _one_of("plan", "plans", "planned", "planning", "intends", "intend", "intending", "intention", "intentions",
-                     unless="type price name cost tier provider renews expires status"),
+                     unless="type price name cost tier provider renews expires status by"),
     "goals": _holding("goal", "goals", "aim", "aims", "aspires", "aspiration", "ambition", "ambitions", "objective",
-                      "objectives", unless="scored keeper team"),
+                      "objectives", unless="scored keeper team c lens"),
     "interests": _one_of("interested", "interest", "interests", "hobby", "hobbies", unless="rate rates"),
-    "bought": _one_of("bought", "purchased"),
-    "attended": _one_of("attended", "participated"),
+    "bought": _one_of("bought", "purchased", unless="by"),
+    "attended": _one_of("attended", "participated", unless="by"),
     "habits": _one_of("habit", "habits", "routine", "routines"),
 }
 
 #: The other kinds whose words :data:`ASKED_WITH` or :data:`ASKED_ALONE` holds:
 #: one value, or a list under its own name.
 _FEW: dict[str, Any] = {
-    "received": _one_of("received"), "met": _one_of("met"), "finished": _one_of("finished", "completed"),
-    "diet": _holding("diet", "dietary", "vegetarian", "vegan", unless="considering"),
+    "received": _one_of("received", unless="by"), "met": _one_of("met", unless="by"),
+    "finished": _one_of("finished", "completed", unless="by"),
+    "diet": _of("diet dietary vegetarian vegan", "restriction restrictions preference preferences requirement requirements follows on type"),
     "doctor": _named("doctor", "doctor_is", "doctor_name", "physician", "primary_care_doctor", "family_doctor"),
     "age_is": _named("age", "age_is"),
-    "birthday": _holding("birthday", "birthdate", unless="party gift"),
-    "study": _one_of("studies", "studying", "enrolled", "university", "college", "major", "majors"),
+    "birthday": _of("birthday birthdate", "date day on"),
+    "study": _either(_one_of("studies", "studying", "enrolled", unless="by"),
+                     _of("university college major majors", "name in at degree field subject attends school")),
     "car": _named("drives", "car", "car_is", "car_model", "vehicle", "owns_car", "drives_car"),
     "daughters": _named("daughter", "daughters", "daughter_is", "daughter_name"),
     "sons": _named("son", "sons", "son_is", "son_name"),
@@ -242,9 +277,9 @@ def fact_kind(predicate: str) -> str | None:
     if name.startswith("favorite_") and len(name) > len("favorite_"):
         return "favorite_"
     named = normalised_name(name)
-    anothers = _anothers().get(_predicate_key(named))
-    if anothers:
-        return anothers
+    role_or_employer = _asked_names().get(_predicate_key(named))
+    if role_or_employer:
+        return role_or_employer
     if named in _HOME_NAMES:
         return "lives_in"
     found = list_kind(name)
@@ -399,7 +434,8 @@ _ALL_MINE_EN: dict[str, str] = {
 #: Words that only ask, or say nothing of the thing: "منو قابلت؟", "شنو ناوي
 #: أسوي؟" (an English "do" is no content word), "the people I met".
 _ONLY_ASKING = ("أسوي نسوي أفعل نفعل منو مين منهو ماهي ماهو الذي التي هناك اسم عيد يوم عطني أعطني اذكر عدد الأشياء أشياء الناس "
-                "name called list things people stuff day")
+                "قايمة قائمة عنها عنهم عنه قلت قلتها أخبرتك ذكرت ذكرتها خطط أهداف اهتمامات هوايات عادات شكثر جميع "
+                "name called list things people stuff day tell told mentioned everything many")
 
 
 @lru_cache(maxsize=1)
@@ -430,13 +466,41 @@ def _kinds_it_is_all_of(question: str, time_words: frozenset[str]) -> tuple[str,
     from kazma_core.memory.query_terms import content_terms
 
     arabic, english = _all_mine()
-    terms = set(content_terms(question)) - time_words - set(content_terms(_ONLY_ASKING))
+    terms = set(content_terms(question)) - time_words - _only_asking()
     lowered = _plain_english(question)
     out = [kind for kind, pattern in english.items()
            if (said := pattern.search(lowered)) and terms <= set(content_terms(said.group())) | _alone_sets()[kind]]
     if _ASKS_AR.search(fold_for_search(question or "")):
-        out += [kind for kind in sorted({arabic[t] for t in terms if t in arabic}) if terms <= _alone_sets()[kind]]
+        mine = {t for t in terms if t in arabic} - _said_of_nobody(question)
+        out += [kind for kind in sorted({arabic[t] for t in mine}) if terms <= _alone_sets()[kind]]
     return tuple(dict.fromkeys(out))
+
+
+def _said_of_nobody(question: str) -> set[str]:
+    """The first-person words of *question* that are no "my" as it is written:
+    with the article ("الميلادي", a calendar), called to ("يا عمري", my dear),
+    or a verb ("أبني", I build; "ابني", my son)."""
+    from kazma_core.memory.query_terms import content_terms
+
+    words = _WORD_RE.findall(unicodedata.normalize("NFC", question or ""))
+    return {t for before, word in zip(["", *words], words, strict=False)
+            if word.startswith(("ال", "أبن")) or before == "يا" for t in content_terms(word)}
+
+
+def words_beside_the_kind(question: str, kind: str, time_words: frozenset[str] = frozenset()) -> frozenset[str]:
+    """The content words of *question* that say something besides list kind
+    *kind*: none for "List all my plans" and "كل خططي", "book" and "read" for
+    "List all the books I plan to read"."""
+    from kazma_core.memory.query_terms import content_terms
+
+    return frozenset(content_terms(question)) - time_words - _only_asking() - _alone_sets()[kind]
+
+
+@lru_cache(maxsize=1)
+def _only_asking() -> frozenset[str]:
+    from kazma_core.memory.query_terms import content_terms
+
+    return frozenset(content_terms(_ONLY_ASKING))
 
 
 def _plain_english(question: str) -> str:
@@ -557,67 +621,121 @@ def _one_value_aliases() -> dict[frozenset[str], tuple[str, str]]:
 
 
 @lru_cache(maxsize=1)
-def _anothers() -> dict[frozenset[str], str]:
+def _asked_names() -> dict[frozenset[str], str]:
     from kazma_core.memory.predicates import _predicate_key
 
-    return {_predicate_key(name): kazma for kazma, names in _ANOTHERS.items() for name in names}
+    return {_predicate_key(name): kazma for kazma, names in _ASKED_NAMES.items() for name in names}
+
+
+@lru_cache(maxsize=1)
+def _one_of_anothers() -> dict[frozenset[str], str]:
+    from kazma_core.memory.predicates import _predicate_key
+
+    return {_predicate_key(name): kazma for kazma, names in _ONE_OF_ANOTHERS.items() for name in names}
 
 
 #: The labels of a fact that holds one value.
 _ONE_VALUE = ("functional", "state")
 
 
-def name_in_use(conn: sqlite3.Connection, *, tenant_id: str, subject: str, predicate: str, predicate_type: str,
-                value: str, extraction_method: str) -> str:
-    """The name a person's role or employer is written under: the one
-    *subject* ALREADY has a current value of that kind under ("Noura occupation
-    dentist", then "Noura job_title surgeon" -> ``occupation``); for the user,
-    with none held, Kazma's ("has_occupation" -> ``current_role``); else
-    *predicate*. One value of each kind, whatever the model names it: under two
-    names both stayed current. Most of the user's names are Kazma's before this
-    (:func:`users_names`): here are the role's and the age's that a list may
-    stand under too (:data:`ONE_VALUE_NAMES`).
-
-    Nothing is lost by it: both must be single values, and a name a list is
-    held under stays a list's. Of another person, the value must be one this
-    source may overrule (a refused write would drop the new one; under its own
-    name it is kept) and say no less of the same ("neuroscientist", held
-    "neuroscientist specializing in ..."). The user's is refused and put to
-    them, as any change of a fact they stated."""
+def _one_kind(subject: object, predicate: str) -> str | None:
+    """The kind of single value *predicate* names of *subject* -- the user's or
+    a member's by :data:`ONE_VALUE_NAMES`, another's by :data:`_ONE_OF_ANOTHERS` --
+    or None."""
     from kazma_core.memory.predicates import _predicate_key
+    from kazma_core.memory.speakers import is_member_entry
+
+    key = _predicate_key(normalised_name(predicate))
+    if _is_the_user(subject) or is_member_entry(subject):
+        return _one_value_aliases().get(key, (None, ""))[0]
+    return _one_of_anothers().get(key)
+
+
+def same_statement(one: str, other: str) -> bool:
+    """Whether two names of facts say one thing of a value: the same words, or
+    the same kind ("has_occupation" and "current_role"; :func:`fact_kind`).
+    What a reply says again is compared by this with what was forgotten, denied
+    or ended, whatever it calls it. A favourite's kind is its own words."""
+    from kazma_core.memory.predicates import _predicate_key
+
+    first, second = normalised_name(one), normalised_name(other)
+    if first == second or (_predicate_key(first) and _predicate_key(first) == _predicate_key(second)):
+        return True
+    kind = fact_kind(first)
+    return kind is not None and kind != "favorite_" and kind == fact_kind(second)
+
+
+@dataclass(frozen=True)
+class Filing:
+    """The name a fact is filed under, and the held fact that is filed anew
+    under it first (``belief_mutation.file_under``), if any."""
+
+    name: str
+    refile: str | None = None
+
+
+def name_to_file(conn: sqlite3.Connection, *, tenant_id: str, subject: str, predicate: str, predicate_type: str,
+                 value: str, extraction_method: str, said_by: str | None = None, shared: bool = False) -> Filing:
+    """The name a person's occupation, employer or age is filed under: for the
+    user (and a member) Kazma's, whatever the model named it ("has_occupation"
+    -> ``current_role``), and the value held under another of its names from
+    before the table is filed anew under Kazma's; of another person, the name
+    *subject* ALREADY has a current value of that kind under ("Noura occupation
+    dentist", then "Noura job_title surgeon" -> ``occupation``); else
+    *predicate*. One value of each kind: under two names both stayed current.
+
+    Asked ONCE, by the deep pass and the quick pass, before anything compares
+    the fact with what was forgotten, denied or asked about
+    (``belief_extractor._apply_beliefs_to_v2``); never by the mutation, which
+    would name the fact after those checks: a fact a member had forgotten came
+    back that way (the review of step 2). Reads only, and no lock is held.
+
+    Nothing is lost by it: both must be single values, and where a list of the
+    kind is held nothing is joined. Of another person, the value must be one
+    this source may overrule (a refused write would drop the new one; under its
+    own name it is kept), say no less of the same ("neuroscientist", held
+    "neuroscientist specializing in ...") and not say that it stands beside it
+    (:data:`_BESIDE`); in a shared space both must be one account's words: two
+    members' "my sister" are two people. The user's is refused and put to
+    them, as any change of a fact they stated."""
+    from kazma_core.documents.arabic import fold_for_search
     from kazma_core.memory.provenance import may_overrule
     from kazma_core.memory.query_terms import content_terms
     from kazma_core.memory.speakers import is_member_entry
     from kazma_core.spaces.scope import space_named_or_bound
 
-    theirs = _is_the_user(subject) or is_member_entry(subject)
-
-    def kind_of(name: str) -> str | None:
-        key = _predicate_key(normalised_name(name))
-        if theirs:
-            return _one_value_aliases().get(key, (None, ""))[0]
-        return _anothers().get(key)
-
-    kind = kind_of(predicate)
+    kind = _one_kind(subject, predicate)
     if kind is None or predicate_type not in _ONE_VALUE:
-        return predicate
-    held: dict[str, tuple[str, str]] = {}
-    for name, its, method, ptype in conn.execute(
-            "SELECT predicate, object, extraction_method, predicate_type FROM beliefs WHERE tenant_id = ? "
+        return Filing(predicate)
+    theirs = _is_the_user(subject) or is_member_entry(subject)
+    held: dict[str, tuple[str, str, str, str]] = {}
+    listed = set()
+    for name, its, method, ptype, belief_id, author in conn.execute(
+            "SELECT predicate, object, extraction_method, predicate_type, id, CASE WHEN json_valid(metadata_json) "
+            "THEN json_extract(metadata_json, '$.said_by') END FROM beliefs WHERE tenant_id = ? "
             "AND subject = ? AND valid_until IS NULL AND invalidated_at IS NULL AND COALESCE(object, '') != '' "
             "ORDER BY valid_from DESC, id", (space_named_or_bound(tenant_id), subject)).fetchall():
-        if name == predicate:
-            return predicate  # one more of it, whatever it is: a list stays a list
-        if ptype in _ONE_VALUE and kind_of(name) == kind:
-            held.setdefault(str(name), (str(its), str(method or "")))
-    if not held:
-        return kind if theirs else predicate
-    name, (its, method) = next(iter(held.items()))
+        name = str(name)
+        if _one_kind(subject, name) != kind:
+            continue
+        if ptype not in _ONE_VALUE or name in held:
+            listed.add(name)
+        held.setdefault(name, (str(its), str(method or ""), str(belief_id), str(author or "")))
+    if listed:
+        return Filing(predicate)  # a list of the kind stays one, and what is told beside it stands
     if theirs:
-        return name
+        others = [row[2] for name, row in held.items() if name != kind]
+        return Filing(kind, others[0] if len(others) == 1 and kind not in held else None)
+    if predicate in held or not held or (shared and not said_by):
+        return Filing(predicate)
+    name, (its, method, _id, author) = next(iter(held.items()))
+    if shared and author != said_by:
+        return Filing(predicate)
     new = set(content_terms(str(value).replace("_", " ")))
     says_less = bool(new) and new < set(content_terms(its.replace("_", " ")))
-    return name if may_overrule(method, extraction_method) and not says_less else predicate
+    beside = any(_BESIDE.search(fold_for_search(str(v).replace("_", " "))) for v in (value, its))
+    stands = beside or says_less or not may_overrule(method, extraction_method)
+    return Filing(predicate if stands else name)
 
 
 def _canonical_for_user(predicate: str) -> str:

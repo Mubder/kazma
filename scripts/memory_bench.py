@@ -2891,7 +2891,7 @@ def _cmd_fact_kinds_vectors() -> int:
     """Record bge-m3's vectors for ``benchmark_kinds`` (the memory plan's W6,
     step 2) into the file its gate replays (``tests/test_memory_fact_kinds.py``)."""
     from kazma_core.memory.benchmark import RecordingEmbedder
-    from kazma_core.memory.benchmark_kinds import FACT_KINDS_VECTORS, run_fact_kinds, run_lists
+    from kazma_core.memory.benchmark_kinds import FACT_KINDS_VECTORS, run_fact_kinds, run_lists, run_narrow_lists
     from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
 
     _limit_cpu_threads()
@@ -2904,14 +2904,15 @@ def _cmd_fact_kinds_vectors() -> int:
     a, b = _patched(recorder, model)
     deadline = mock.patch("kazma_core.memory.recall._recall_deadline_s", lambda: 600.0)
     with a, b, deadline:
-        rows, lists = run_fact_kinds(), run_lists()
+        rows, lists, narrow = run_fact_kinds(), run_lists(), run_narrow_lists()
     out = VECTORS.with_name(FACT_KINDS_VECTORS)
     n = recorder.save(out, model=model)
     missed = [r for r in rows if ("want" in r and not r["found"]) or r.get("never") in r["shown"]]
     short = [r for r in lists if r["shown"] < r["of"] or r["apart"]]
     print(f"{out}: {n} vectors from {model}; {len(rows) - len(missed)} of {len(rows)} rows hold, "
-          f"{len(lists) - len(short)} of {len(lists)} lists")
-    for r in [*missed, *short]:
+          f"{len(lists) - len(short)} of {len(lists)} lists; narrow lists: "
+          f"{sum(r['own'] for r in narrow)} of {sum(r['of'] for r in narrow)} entries, {sum(r['other'] for r in narrow)} others")
+    for r in [*missed, *short, *narrow]:
         print("  ", json.dumps(r))
     return 0
 

@@ -151,19 +151,15 @@ def list_memories(
     conn.row_factory = sqlite3.Row
     try:
         tiers = ",".join("?" for _ in RECALLABLE_TIERS)
-        texts = ("user_text", "assistant_text", "summary_text")
-        asked = word_search.asked_in(conn, about, [
-            ("FROM beliefs WHERE (? IS NULL OR tenant_id = ?) AND valid_until IS NULL AND invalidated_at IS NULL",
-             (only, only), _FACT_WORDS),
-            (f"FROM episodes WHERE tier IN ({tiers}) AND (? IS NULL OR tenant_id = ?)",
-             (*RECALLABLE_TIERS, only, only), texts)], words=8)
+        asked = word_search.Asked.of(about, words=8)
+        word_search.register(conn, asked)
         facts = _facts(conn, only, asked, period, zone)
         where, params = [f"tier IN ({tiers})", "(? IS NULL OR tenant_id = ?)"], [*RECALLABLE_TIERS, only, only]
         if period is not None:
             where.append("created_at >= ? AND created_at < ?")
             params.extend(period)
         if asked.terms:
-            clause, likes = _every_word(texts, asked)
+            clause, likes = _every_word(("user_text", "assistant_text", "summary_text"), asked)
             where.append(clause)
             params.extend(likes)
         turns = conn.execute(
@@ -214,10 +210,6 @@ def _event_of(row: sqlite3.Row) -> dict[str, Any]:
 _META = "CASE WHEN json_valid(metadata_json) THEN metadata_json END"
 
 
-#: A fact's words.
-_FACT_WORDS = ("subject", "predicate", "object")
-
-
 def _facts(conn: sqlite3.Connection, only: str | None, asked: word_search.Asked,
            period: tuple[float, float] | None, zone: Any) -> list[sqlite3.Row]:
     """The facts holding every word asked for: the current ones, and with a period
@@ -241,7 +233,7 @@ def _facts(conn: sqlite3.Connection, only: str | None, asked: word_search.Asked,
         where.append("(invalidated_at IS NULL OR id IN (SELECT supersedes_id FROM beliefs "
                      "WHERE supersedes_id IS NOT NULL))")
     if asked.terms:
-        clause, likes = _every_word(_FACT_WORDS, asked)
+        clause, likes = _every_word(("subject", "predicate", "object"), asked)
         where.append(clause)
         params.extend(likes)
     rows = conn.execute(

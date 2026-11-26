@@ -223,7 +223,7 @@ def _ar_month_pattern() -> re.Pattern[str]:
     if not _AR_MONTH_CACHE:
         _AR_MONTH_CACHE.update(_ar_months())
     names = "|".join(sorted(_AR_MONTH_CACHE, key=len, reverse=True))
-    return re.compile(rf"(?:^|\s)(?:في|ب|خلال|من|لين|الى|شهر)\s+(?:شهر\s+)?({names})(?:\s+(\d{{4}}))?"
+    return re.compile(rf"(?:^|\s)(?:في|ب|خلال|من|لين|الي|شهر)\s+(?:شهر\s+)?({names})(?:\s+(\d{{4}}))?"
                       rf"(?=\s|$|[؟?.,،])")
 
 

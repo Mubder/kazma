@@ -301,9 +301,7 @@ def register_memory_tools(registry: Any) -> None:
                 # Word-boundary friendly: normalize _/- to spaces on BOTH
                 # sides so 'memory system' matches user_memory_system. Both
                 # folded, and by words (word_search, W6).
-                word_search.asked_in(conn, _qnorm(q), [
-                    ("FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL AND tenant_id=?", (tenant,),
-                     ("subject", "predicate", "object"))])
+                word_search.register(conn, word_search.Asked.of(_qnorm(q)))
                 sql += (
                     " AND (" + "".join(f"{word_search.holds('phrase', _spoken(c))} OR "
                                        for c in ("subject", "predicate", "object"))
@@ -352,9 +350,7 @@ def register_memory_tools(registry: Any) -> None:
             """
             params: list[Any] = [tenant]
             if (q or "").strip():
-                word_search.asked_in(conn, _qnorm(q), [
-                    ("FROM entities e WHERE e.tenant_id = ?", (tenant,),
-                     ("e.id", "e.name", "e.type", word_search.ALIAS_NAMES))])
+                word_search.register(conn, word_search.Asked.of(_qnorm(q)))
                 sql += (
                     " AND (" + "".join(f"{word_search.holds('phrase', _spoken(c))} OR "
                                        for c in ("e.id", "e.name", "e.type"))

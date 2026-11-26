@@ -325,13 +325,26 @@ four injected were noise.
   list: "uses_service" and "uses_tool", "owns" and "has_item", "went_to" were
   read as one and put eight tools into a question about delivery services. On
   the pilots' stores (no model asked) 1 of 50 blocks and 8 of 200 change, and no
-  word of an answer is lost.
+  word of an answer is lost. **The name found comes first** (the review of step
+  2): the kind's other names come after its own entries, and only when the
+  question is of nothing but the kind or they hold a word of it
+  (`recall._asks_the_kind`, `fact_names.words_beside_the_kind`): "List all the
+  books I plan to read" showed 4 of 8 books among the other plans, "How many
+  concerts did I attend?" 7 wrong of 12. Measured (`benchmark_kinds.NARROW`,
+  4 lists in each language, 36 questions, real bge-m3): own entries of 68 a way
+  5f9bd053c 68/67/67, b80d43c15 60/59/58, now 68/67/67; the kind's other names
+  shown 9/5/5, 55/44/44, now 12/6/6 (after the own ones; "how many" as before).
+  Gate: `test_a_list_of_some_of_a_kind_shows_its_own_first`.
 - **A pattern that reads folded text is written folded** (2026-11-25): the list
   pattern held "قائمة" and "لستة" and the follow-up's "متى", spellings the fold
   takes away, so "عطني قائمة الخطط" was no list and "ومتى؟" no follow-up while their
-  English twins were. Gate: `tests/test_arabic_patterns_folded.py` (every
-  compiled pattern of the packages asked of text its function folded; the live
-  four as the control).
+  English twins were; "إلى مارس" read no time (`time_words`' "الى"). Gate:
+  `tests/test_arabic_patterns_folded.py`: every Arabic word of a regular
+  expression -- compiled or not, joined, from a table, an f-string, a class's
+  attribute -- and of a comparison with folded text, in every module that folds;
+  a word the fold changes stands beside its folded spelling or is declared with
+  why (a pattern asked of the text as written). Eighteen planted ways of
+  writing one and the five live ones are the control.
 - **One fact, one predicate name (W6, `memory/predicates.py`).** The
   extractor names predicates freely; under two names a single-valued fact is
   never superseded (live 2026-09-27: "daily_tweet_cap" 16 and

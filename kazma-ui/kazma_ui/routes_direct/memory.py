@@ -560,8 +560,7 @@ def register_memory_routes(self: Any) -> None:
             where = base_where
             params: list = [*tparams]
             if query:
-                word_search.asked_in(conn, query, [(base_where, tuple(tparams), ("subject", "predicate", "object"))],
-                                     whole=True)
+                word_search.register(conn, word_search.Asked.of(query, whole=True))
                 either = [word_search.holds("any", "subject", "predicate", "object")]
                 if fts_ids:
                     either.append(f"id IN ({','.join('?' for _ in fts_ids)})")
@@ -931,12 +930,12 @@ def register_memory_routes(self: Any) -> None:
                     return {"ok": True, "episodes": [], "total": 0, "offset": 0, "limit": limit, "q": q}
                 indexed = "rowid IN (SELECT rowid FROM episodes_fts WHERE episodes_fts MATCH ?)"
                 params.append(match_q)
-                if word_search.Asked.of(q.strip()[:500]).needs_folding:
+                asked = word_search.Asked.of(q.strip()[:500])
+                if asked.needs_folding:
                     # The index keeps an Arabic word and its digits as they
                     # were written (``word_search``).
-                    texts = ("user_text", "assistant_text", "summary_text")
-                    word_search.asked_in(conn, q.strip()[:500], [(where, tuple(params[:-1]), texts)])
-                    worded = word_search.holds("every", *texts)
+                    word_search.register(conn, asked)
+                    worded = word_search.holds("every", "user_text", "assistant_text", "summary_text")
                     indexed = f"({indexed} OR {worded})"
                 where += f" AND {indexed}"
             # The matches once (a folded search reads every turn's text), then

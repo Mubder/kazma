@@ -1960,7 +1960,10 @@ def _list_siblings(conn: sqlite3.Connection, tenant_id: str, query: str, ranked:
     model names one list in many ways (``fact_names.LISTS``: "plans_to",
     "planning", "intends_to") -- with one of *ranked*'s best
     (:data:`_LIST_SIBLINGS_OF`), kind by kind, and the other occasions of
-    those that are events. "List every note I asked you to keep" finds one
+    those that are events. The entries of the name found come first; another
+    name's come after them, and only when the question is of nothing but the
+    kind or they hold a word of it (:func:`_asks_the_kind`): "List all the books
+    I plan to read" showed other plans in their place. "List every note I asked you to keep" finds one
     note by meaning; the notes are the facts ``user noted ...``. A sibling
     stands on its kind's evidence, never on its own words: those holding a
     word of the question come first, then the newest (an event by its day).
@@ -1972,25 +1975,27 @@ def _list_siblings(conn: sqlite3.Connection, tenant_id: str, query: str, ranked:
     taken = {_event_of(rows.get(h.id)) for h in ranked} - {None}
     keep = _BELIEF_KEEP.get()
     asked = _named_by(query)
+    whole_kind, of_the_question = _asks_the_kind(query)
     for best in ranked[:_LIST_SIBLINGS_OF]:
         row = rows.get(best.id)
         sub, pred = _field(row, "subject"), _field(row, "predicate")
         if not sub or not pred or _field(row, "valid_until") is not None:
             continue
         try:
-            names = _names_of_the_list(conn, tenant_id, sub, pred)
-            found = conn.execute(
-                "SELECT id FROM beliefs WHERE tenant_id = ? AND subject = ? "
-                f"AND predicate IN ({','.join('?' for _ in names)}) "
-                f"AND {BELIEF_ACTIVE_SQL} AND COALESCE(object, '') != '' "  # nosec B608 - '?' placeholders only
+            found = [str(r[0]) for r in conn.execute(
+                "SELECT id FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate = ? "
+                f"AND {BELIEF_ACTIVE_SQL} AND COALESCE(object, '') != '' "  # nosec B608 - fixed clause, values bound
                 "ORDER BY valid_from DESC LIMIT ?",
-                (tenant_id, sub, *names, _OCCASIONS_READ),
-            ).fetchall()
+                (tenant_id, sub, pred, _OCCASIONS_READ),
+            ).fetchall()]
+            kin = _of_the_same_list(conn, tenant_id, sub, pred)
         except sqlite3.Error:
             logger.debug("[recall] a fact's siblings could not be read", exc_info=True)
             continue
-        fresh = _hydrate_beliefs(conn, [str(r[0]) for r in found if str(r[0]) not in seen], tenant_id)
-        for sib in sorted(fresh, key=lambda r: (asked(r), _told_or_happened(r), str(r["id"])), reverse=True):
+        fresh = _hydrate_beliefs(conn, [bid for bid in (*found, *kin) if bid not in seen], tenant_id)
+        fresh = [r for r in fresh if _field(r, "predicate") == pred or whole_kind(pred) or of_the_question(r)]
+        for sib in sorted(fresh, key=lambda r: (_field(r, "predicate") == pred, asked(r), _told_or_happened(r),
+                                                str(r["id"])), reverse=True):
             sid, key = str(sib["id"]), _event_of(sib)
             if keep is not None and not keep(str(_field(sib, "subject") or "")):
                 continue
@@ -2007,19 +2012,45 @@ def _list_siblings(conn: sqlite3.Connection, tenant_id: str, query: str, ranked:
     return out, more
 
 
-def _names_of_the_list(conn: sqlite3.Connection, tenant_id: str, subject: str, predicate: str) -> list[str]:
-    """*predicate* and the other names *subject* has current facts under that
-    name the same kind of list (``fact_names.list_kind``), at most
-    :data:`_LIST_NAMES`."""
+def _asks_the_kind(query: str) -> tuple[Any, Any]:
+    """``(whether the question asks for every entry of a name's kind, whether an
+    entry holds what it asks of the kind)``: "List all my plans" is of plans
+    under whatever name, "List all the books I plan to read" of the books."""
+    from kazma_core.memory.fact_names import list_kind, words_beside_the_kind
+    from kazma_core.memory.query_terms import content_terms
+
+    ask = _ASK.get()
+    times = ask.words if ask is not None else frozenset()
+
+    def whole(predicate: str) -> bool:
+        kind = list_kind(predicate)
+        return kind is not None and not words_beside_the_kind(query, kind, times)
+
+    def holds(row: Any) -> bool:
+        kind = list_kind(str(_field(row, "predicate") or ""))
+        wanted = words_beside_the_kind(query, kind, times) if kind else frozenset()
+        return bool(wanted & set(_without_time_words(content_terms(str(_field(row, "object") or "")))))
+
+    return whole, holds
+
+
+def _of_the_same_list(conn: sqlite3.Connection, tenant_id: str, subject: str, predicate: str) -> list[str]:
+    """*subject*'s current facts under another name of the same kind of list
+    (``fact_names.list_kind``), the newest first, of at most
+    :data:`_LIST_NAMES` names."""
     from kazma_core.memory.fact_names import list_kind
 
     kind = list_kind(predicate)
     if kind is None:
-        return [predicate]
-    others = conn.execute(
+        return []
+    names = [str(r[0]) for r in conn.execute(
         f"SELECT predicate, MAX(valid_from) FROM beliefs WHERE tenant_id = ? AND subject = ? AND {BELIEF_ACTIVE_SQL} "  # nosec B608 - fixed clause, values bound
-        "GROUP BY predicate ORDER BY 2 DESC", (tenant_id, subject)).fetchall()
-    return [predicate, *(str(r[0]) for r in others if r[0] != predicate and list_kind(str(r[0])) == kind)][:_LIST_NAMES]
+        "GROUP BY predicate ORDER BY 2 DESC", (tenant_id, subject)).fetchall()]
+    names = [n for n in names if n != predicate and list_kind(n) == kind][:_LIST_NAMES]
+    return [str(r[0]) for r in conn.execute(
+        f"SELECT id FROM beliefs WHERE tenant_id = ? AND subject = ? AND predicate IN ({','.join('?' for _ in names)}) "  # nosec B608 - '?' placeholders only
+        f"AND {BELIEF_ACTIVE_SQL} AND COALESCE(object, '') != '' ORDER BY valid_from DESC LIMIT ?",
+        (tenant_id, subject, *names, _OCCASIONS_READ)).fetchall()] if names else []
 
 
 def _told_or_happened(row: Any) -> float:

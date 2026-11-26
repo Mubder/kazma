@@ -101,11 +101,35 @@ def test_a_whole_list_is_shown_whatever_names_its_entries_have(monkeypatch):
 def test_control_a_list_read_by_one_name_is_short(monkeypatch, gone, way):
     _replayed(monkeypatch)
     if gone == "kind":
-        monkeypatch.setattr(recall, "_names_of_the_list", lambda conn, tenant, subject, predicate: [predicate])
+        monkeypatch.setattr(recall, "_of_the_same_list", lambda conn, tenant, subject, predicate: [])
     else:  # "كل خططي" read as no list
         monkeypatch.setattr(question_shape, "asks_for_all", lambda question: "كل" not in question)
     short = [r for r in benchmark_kinds.run_lists() if r["asked"] == way and r["shown"] < r["of"]]
     assert short
+
+
+#: A question of SOME of a kind, measured on 5f9bd053c (own entries of 68 each
+#: way; others of the kind shown: English 9, Gulf 5, MSA 5) and on b80d43c15
+#: (60, 59, 58; others 55, 44, 44).
+NARROW_BEFORE = {"en": (68, 9), "gulf": (67, 5), "msa": (67, 5)}
+
+
+def test_a_list_of_some_of_a_kind_shows_its_own_first(monkeypatch):
+    """The review of step 2's M4: "List all the books I plan to read" showed 4 of 8."""
+    _replayed(monkeypatch)
+    rows = benchmark_kinds.run_narrow_lists()
+    for way, (own, _others) in NARROW_BEFORE.items():
+        mine = [r for r in rows if r["asked"] == way]
+        assert sum(r["own"] for r in mine) >= own, way
+    how_many = [r for r in rows if r["question"].startswith(("How many", "كم"))]
+    assert all(r["other"] == 0 for r in how_many if r["name"] == "attended_concert"), how_many
+
+
+def test_control_the_kinds_other_names_first_lose_its_own(monkeypatch):
+    _replayed(monkeypatch)
+    monkeypatch.setattr(recall, "_asks_the_kind", lambda query: (lambda name: True, lambda row: True))
+    rows = benchmark_kinds.run_narrow_lists()
+    assert sum(r["other"] for r in rows) > 2 * sum(o for _own, o in NARROW_BEFORE.values())
 
 
 # ── what a question's words ask ──────────────────────────────────────────

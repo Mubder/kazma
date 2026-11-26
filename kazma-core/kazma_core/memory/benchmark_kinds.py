@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["FACT_KINDS", "FACT_KINDS_VECTORS", "run_fact_kinds", "run_lists"]
+__all__ = ["FACT_KINDS", "FACT_KINDS_VECTORS", "run_fact_kinds", "run_lists", "run_narrow_lists"]
 
 FACT_KINDS_VECTORS = "fact_kinds_vectors.npz"
 
@@ -188,9 +188,41 @@ LISTS: tuple[dict[str, Any], ...] = (
     {"kind": "bought", "entries": (("bought", "a blue bicycle", "دراجة زرقاء"), ("purchased", "a lamp", "ليت"),
                                    ("bought_item", "a tent", "خيمة")),
      "not": (("wants_to_buy", "a kayak", "قارب كاياك"),),
-     "asked": {"en": ("List everything I bought.", "List the things I bought for the house."),
-               "gulf": ("عطني كل الأشياء اللي شريتها", "عطني قائمة اللي شريته للبيت"),
-               "msa": ("اذكر لي كل الأشياء التي اشتريتها", "اذكر لي كل ما اشتريته للبيت")}},
+     "asked": {"en": ("List everything I bought.", "List the things I bought."),
+               "gulf": ("عطني كل الأشياء اللي شريتها", "عطني قائمة اللي شريته"),
+               "msa": ("اذكر لي كل الأشياء التي اشتريتها", "اذكر لي كل ما اشتريته")}},
+)
+
+#: A question of SOME of a kind, told under one name, in a store with more of
+#: the kind under others: the entries of that name are the answer, the others
+#: are not (the review of step 2: 8 of 8 books became 4, 5 right concerts 12).
+NARROW: tuple[dict[str, Any], ...] = (
+    {"name": "plans_to_read", "entries": (("Dune", "رواية كثبان"), ("The Odyssey", "الأوديسة"), ("a book on bees", "كتاب عن النحل"),
+                                          ("Emma", "رواية إيما"), ("The Trial", "رواية المحاكمة"), ("a history of Kuwait", "تاريخ الكويت"),
+                                          ("poems by Mutanabbi", "ديوان المتنبي"), ("Animal Farm", "مزرعة الحيوان")),
+     "others": (("plans_to", "set", "paint the kitchen", "أصبغ المطبخ"), ("planning_to", "set", "learn Spanish", "أتعلم الإسباني"),
+                ("intends_to", "set", "run a marathon", "أركض ماراثون"), ("has_plan", "set", "a garden party", "حفلة في الحديقة"),
+                ("plans_to_buy", "set", "a tent", "خيمة"), ("plans_to_visit", "set", "Japan", "اليابان")),
+     "asked": {"en": ("List all the books I plan to read.", "What are all the books I'm planning to read?"),
+               "gulf": ("عطني كل الكتب اللي ناوي أقراها", "شنو كل الكتب اللي أخطط أقراها؟"),
+               "msa": ("اذكر لي كل الكتب التي أنوي قراءتها", "ما هي كل الكتب التي أخطط لقراءتها؟")}},
+    {"name": "planning_trip", "entries": (("to Oman in spring", "إلى عمان في الربيع"), ("to Istanbul", "إلى إسطنبول"),
+                                          ("to the chalet", "إلى الشاليه"), ("to Cairo with Dana", "إلى القاهرة مع دانة"), ("to Georgia", "إلى جورجيا")),
+     "others": (("plans_to", "set", "paint the kitchen", "أصبغ المطبخ"), ("planning_to", "set", "learn Spanish", "أتعلم الإسباني"),
+                ("intends_to", "set", "sleep early", "أنام بدري"), ("has_plan", "set", "a garden party", "حفلة في الحديقة")),
+     "asked": {"en": ("List all the trips I am planning.",), "gulf": ("عطني كل السفرات اللي أخطط لها",),
+               "msa": ("اذكر لي كل الرحلات التي أخطط لها",)}},
+    {"name": "attended_concert", "entries": (("Fairouz in Beirut", "فيروز في بيروت"), ("a jazz night", "ليلة جاز"), ("Coldplay", "كولدبلاي"),
+                                             ("an oud recital", "أمسية عود"), ("the Opera House gala", "حفل دار الأوبرا")),
+     "others": (("attended", "set", "a pottery workshop", "ورشة فخار"), ("attended_meeting", "set", "the school board", "مجلس المدرسة"),
+                ("participated_in", "set", "a beach clean-up", "تنظيف الشاطئ"), ("attended_wedding", "set", "of a neighbour", "عرس الجيران")),
+     "asked": {"en": ("How many concerts did I attend?", "List every concert I attended."),
+               "gulf": ("كم حفلة غنائية حضرت؟", "عطني كل الحفلات الغنائية اللي حضرتها"),
+               "msa": ("كم حفلة غنائية حضرت؟", "اذكر لي كل الحفلات الغنائية التي حضرتها")}},
+    {"name": "career_goal", "entries": (("lead a team", "أقود فريق"), ("a pay rise", "زيادة راتب"), ("move to product", "أنتقل لإدارة المنتجات")),
+     "others": (("has_goal", "set", "run a marathon", "أركض ماراثون"), ("goal", "set", "save 2,000 dinars", "أوفر ٢٠٠٠ دينار"),
+                ("current_goal", "set", "read more", "أقرأ أكثر"), ("fitness_goal", "set", "lose five kilos", "أنقص خمسة كيلو")),
+     "asked": {"en": ("How many career goals do I have?",), "gulf": ("كم هدف مهني عندي؟",), "msa": ("كم هدفاً مهنياً لدي؟",)}},
 )
 
 
@@ -216,4 +248,29 @@ def run_lists() -> list[dict[str, Any]]:
                     rows.append({"kind": one["kind"], "told": told, "asked": way, "question": question, "of": len(entries),
                                  "shown": sum(1 for p in shown if p >= first), "degraded": result.degraded,
                                  "apart": [apart[p - len(others)][0] for p in shown if len(others) <= p < first]})
+    return rows
+
+
+def run_narrow_lists() -> list[dict[str, Any]]:
+    """Every (:data:`NARROW` list, language told, way asked): how many of the
+    name's own entries are shown, of how many, and how many of the kind's other
+    names are."""
+    from kazma_core.memory.benchmark import _private_stores
+
+    rows: list[dict[str, Any]] = []
+    for told in ("en", "ar"):
+        at = 0 if told == "en" else 1
+        for one in NARROW:
+            entries = [(one["name"], "set", e[at]) for e in one["entries"]]
+            beside = [(name, kind, en if told == "en" else ar) for name, kind, en, ar in (*one["others"], *_OTHERS[:8])]
+            with _private_stores("kazma-narrow-lists") as (conn, _ops):
+                # Told before the kind's other entries: the newest are the others.
+                place = _hold(conn, [*entries, *beside])
+                for way, question in ((way, q) for way, asked in one["asked"].items() for q in asked):
+                    result = _ask(conn, question)
+                    shown = [place[h.id] for h in result.beliefs if h.id in place]
+                    n = len(entries)
+                    rows.append({"name": one["name"], "told": told, "asked": way, "question": question, "of": n,
+                                 "own": sum(1 for p in shown if p < n), "degraded": result.degraded,
+                                 "other": sum(1 for p in shown if n <= p < n + len(one["others"]))})
     return rows

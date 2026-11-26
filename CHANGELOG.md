@@ -106,22 +106,29 @@
 - Asking in Arabic for your plans, goals, interests, what you bought, received,
   attended or finished, whom you met, your age, birthday, doctor, diet, work,
   study or children finds it as asking in English does, whichever language it
-  was told in ("شنو خططي؟", "ماذا اشتريت؟", "منو دكتوري؟"). Of 138 such questions
-  Gulf Arabic missed 59 and Modern Standard Arabic 55; English missed 11. None
-  is missed now.
+  was told in ("شنو خططي؟", "ماذا اشتريت؟", "منو دكتوري؟"). Of the 138 questions
+  the table was written from, Gulf Arabic missed 59 and Modern Standard Arabic
+  55, English 11; none now. Questions written apart from it still miss some
+  ("وين دوامي؟"): the independent review's 54 lost Gulf 6 of 36 and MSA 1.
 - "List all my plans" shows them all, whatever words they were kept under
   ("plans to", "intends to", "planning"); so do goals, interests, purchases,
-  what you attended and habits. "عطني كل خططي", "قائمة" and "لستة" ask for a list,
+  what you attended and habits. "List the books I plan to read" shows the books
+  first, and the other plans only where they name a book. "عطني كل خططي", "قائمة" and "لستة" ask for a list,
   and "ومتى؟" goes on from what was said, as "list" and "And when?" did.
-- A person's new job or employer takes the place of the old one whatever words
-  each was told in, and your own one job or age does too. Several jobs told as
-  a list stay a list, and what you said yourself is not changed by a reading.
+- A person's new occupation or employer takes the place of the old one when it
+  is told as an occupation, profession or job title (an employer as one), and
+  your own job and age do too. A part in a play, a captain, a weekend job, the
+  boss, a workplace's town, a list of jobs, two members' sisters and what you
+  said yourself all stay as they are. Forgotten, denied ("Not me") or ended, a
+  fact is known whatever the next reply calls it.
 - A change about a person kept in one alphabet and spoken of in the other
-  ("عمر" and Omar) replaces the fact it changes, for names that are one
-  person's in both; a name that could be two people's ("Hassan") is left alone.
-- In memory's lists, "سامي" no longer lists "سام" where a Sami is held, and a
-  word typed with a separate accent, or with Arabic digits beside Latin letters
-  ("iphone١٥"), finds itself.
+  ("عمر" and Omar) replaces the fact it changes, for names written out as one
+  person's in both; a name that could be two people's ("Hassan", "Samer" and
+  "سمر") is left alone, and a member's own name is the member's. "Forget
+  everything that mentions خالد" forgets what is kept under Khaled too.
+- In memory's lists, "سيارتي" lists "سيارة" as "my car" lists the car, a name
+  ("سامي") lists no "سام", and a word typed with a separate accent, or with
+  Arabic digits beside Latin letters ("iphone١٥"), finds itself.
 
 ## Memory: a change replaces the fact it changes (2026-11-25)
 

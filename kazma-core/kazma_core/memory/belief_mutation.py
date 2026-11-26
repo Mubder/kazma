@@ -617,7 +617,6 @@ def mutate_belief(
             # type (memory/predicates.py) -- so the same value is a no-op, a
             # new value supersedes and a set appends, instead of a second
             # name holding a second, conflicting value.
-            from kazma_core.memory.fact_names import name_in_use
             from kazma_core.memory.predicates import canonical_predicate
 
             try:
@@ -625,10 +624,6 @@ def mutate_belief(
                     primary_conn, tenant_id=tenant_id, subject=sub,
                     predicate=pred, predicate_type=ptype,
                 )
-                # ... and a person's role or employer under the name they
-                # already have one under, whatever words name it.
-                pred = name_in_use(primary_conn, tenant_id=tenant_id, subject=sub, predicate=pred,
-                                   predicate_type=ptype, value=obj, extraction_method=extraction_method)
             except sqlite3.Error:
                 logger.debug("[belief_mutate] predicate names unreadable; keeping %r", pred)
             ptype = _established_kind(primary_conn, tenant_id=tenant_id, subject=sub,
@@ -776,6 +771,23 @@ def mutate_belief(
         return _after_failure(exc, result)
     finally:
         _unbind_write_context(tokens)
+
+
+def file_under(conn: sqlite3.Connection, belief_id: str, name: str, *, tenant_id: str) -> bool:
+    """File a current fact of the user's anew under *name*, Kazma's name for
+    what it says (``fact_names.name_to_file``): a role held as "has_occupation"
+    from before the table. The value, its source and its history stay; the
+    change reaches the mirror and the graph as any does (their outboxes). What
+    is then written replaces it, or is refused, as under any one name."""
+    from kazma_core.memory.hygiene import beliefs_write
+
+    with _mutation_lock:
+        began = not conn.in_transaction
+        done = beliefs_write(conn, "UPDATE beliefs SET predicate = ? WHERE id = ? AND tenant_id = ? "
+                                   "AND valid_until IS NULL AND invalidated_at IS NULL", (name, belief_id, tenant_id))
+        if began and conn.in_transaction:
+            conn.commit()
+    return bool(getattr(done, "rowcount", 0))
 
 
 def end_belief(
