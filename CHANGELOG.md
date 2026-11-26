@@ -3,13 +3,16 @@
 ## Memory's copies in Postgres keep to their spaces (2026-11-26)
 
 - When Kazma removes a forgotten fact or memory from its Postgres copies, it
-  removes it from the space the memory belongs to, and calls it gone only
-  when it is: a copy kept under another space is said in the log and tried
-  again, never recorded as deleted. The vector index had dropped which space
-  a vector belonged to when deleting it.
-- Memory's work in the background (recovery, catching up on chats, filling
-  in cut text, the mirror's sync, finishing forgets) says that it reads
-  every space, and writes each memory in its own space.
+  does so in the space the memory belongs to, and calls it gone only when it
+  is: a copy kept under another space is said in the log once and never
+  recorded as deleted. A vector is tried again by the forget journal; a
+  fact's copy is removed by the mirror's queue of deletions. With Spaces off
+  the copy is removed by its id, as before. The vector index had dropped
+  which space a vector belonged to when deleting it.
+- Memory's work over every space's chats (recovery, catching up on chats,
+  filling in cut text, the mirror's sync, finishing forgets) says that it
+  reads every space -- also when a memory restore runs it -- and writes each
+  memory in its own space.
 - The tables of the memory mirror and of the vector index are made on a
   connection of their own, so the first write after a start is never in a
   separate transaction.

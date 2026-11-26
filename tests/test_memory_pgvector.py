@@ -174,10 +174,10 @@ def test_postgres_primary_fuses_pgvector_dense(monkeypatch) -> None:
                 }
             ]
 
-        def fetch_episodes(self, ids, *, tenant_id="default"):
+        def fetch_episodes(self, ids, *, tenant_id="default", strict=False):
             return [{"id": "e-dense", "summary_text": "moved to Lyon last year", "tier": "episodic"}]
 
-        def fetch_beliefs(self, ids, *, tenant_id="default"):
+        def fetch_beliefs(self, ids, *, tenant_id="default", strict=False):
             return [
                 {
                     "id": "b-dense",

@@ -26,11 +26,32 @@ from collections.abc import Iterable
 from contextlib import nullcontext
 
 from kazma_core.db.pg_helpers import is_space_refusal
-from kazma_core.spaces.row_work import install_statements, row_statements
-from kazma_core.spaces.scope import space_named_or_bound, space_of_record
+from kazma_core.spaces.row_work import door_hides, install_statements, row_statements
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record, spaces_enforced
 
 # Liveness-probe cache TTL for the shared-state backend's `available`.
 _READY_PROBE_TTL = 60.0
+
+#: What a delete found (S4-01 H5, 0b review M1).
+_GONE = "gone"
+_KEPT = "kept under another space"
+_UNSEEN = "asked from another space's door, which cannot see it once the lock is armed"
+
+#: Ids a "not gone" was said for in this process: once each (0b review L1).
+_KEPT_SAID: set[str] = set()
+
+
+def _say_kept(row_id: str, outcome: str) -> None:
+    """WARNING the first time an id is not gone, DEBUG after: the outbox
+    retries it every pass."""
+    first = row_id not in _KEPT_SAID
+    if first:
+        if len(_KEPT_SAID) >= 10_000:
+            _KEPT_SAID.clear()
+        _KEPT_SAID.add(row_id)
+    logger.log(logging.WARNING if first else logging.DEBUG,
+               "[state_backend] fact %s is not known to be gone from the Postgres mirror (%s); it stays queued",
+               row_id, outcome)
 from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
@@ -145,12 +166,12 @@ class _NullStateBackend:
         return []
 
     def fetch_episodes(
-        self, ids: list[str], *, tenant_id: str | None = None
+        self, ids: list[str], *, tenant_id: str | None = None, strict: bool = False
     ) -> list[dict[str, Any]]:
         return []
 
     def fetch_beliefs(
-        self, ids: list[str], *, tenant_id: str | None = None
+        self, ids: list[str], *, tenant_id: str | None = None, strict: bool = False
     ) -> list[dict[str, Any]]:
         return []
 
@@ -498,46 +519,51 @@ class PostgresStateBackend:
     def delete_belief(self, row_id: str, *, tenant_id: str | None = None) -> bool:
         """Hard-delete a mirrored fact (it left the local store).
 
-        With *tenant_id*, the fact's own space, the statement names it and
-        runs in it (``row_statements``). True when the fact is gone: deleted
-        now, or no fact of that id is left. A fact of that id the mirror keeps
-        under another space is not gone: False and a WARNING, so the outbox
-        keeps it (S4-01 H5: "deleted" was answered whatever the statement
-        did, and a forgotten fact could stay in the mirror for good).
+        With *tenant_id*, the fact's own space, the statements run in it
+        (``row_statements``), and once Spaces is enforced the delete names it
+        (an empty space is the owner's, decision M6); with Spaces off it is by
+        id, as before (0b review L1). True when the fact is gone: deleted now,
+        or no fact of that id is left. Not gone -- False and a WARNING once
+        per id, so the outbox keeps it (S4-01 H5) -- when a fact of that id is
+        kept under another space, or when the door is a request's of another
+        space, whose "nothing there" says nothing once the lock is armed (0b
+        review M1).
         """
         if not self._dsn or not row_id:
             return False
-        space = space_of_record(tenant_id) if tenant_id else ""
+        named = space_of_record(tenant_id) if tenant_id else ""
         try:
             self._ensure()
-            with row_statements(space) if space else nullcontext():
-                kept = self._delete_fact(str(row_id), space)
+            with row_statements(named) if named else nullcontext():
+                outcome = self._delete_fact(str(row_id), named if spaces_enforced() else "")
         except Exception:
             logger.debug("[state_backend] postgres belief delete failed", exc_info=True)
             return False
-        if kept:
-            logger.warning("[state_backend] fact %s is still in the Postgres mirror, under another space "
-                           "than its own; it was not deleted and stays queued", row_id)
-            return False
-        return True
+        if outcome == _GONE:
+            return True
+        _say_kept(str(row_id), outcome)
+        return False
 
-    def _delete_fact(self, row_id: str, space: str) -> bool:
-        """Delete it; whether a fact of that id is still there."""
+    def _delete_fact(self, row_id: str, space: str) -> str:
+        """Delete it: :data:`_GONE`, or why it is not known to be gone."""
         conn = self._connect()
         try:
             cur = conn.cursor()
             if space:
-                cur.execute("DELETE FROM kazma_beliefs WHERE id = %s AND tenant_id = %s RETURNING id",
-                            (row_id, space))
+                cur.execute("DELETE FROM kazma_beliefs WHERE id = %s AND COALESCE(NULLIF(tenant_id, ''), "
+                            "'default') = %s RETURNING id", (row_id, space))
             else:
                 cur.execute("DELETE FROM kazma_beliefs WHERE id = %s RETURNING id", (row_id,))
-            kept = False
+            outcome = _GONE
             if not cur.fetchall():
-                cur.execute("SELECT 1 FROM kazma_beliefs WHERE id = %s", (row_id,))
-                kept = cur.fetchone() is not None
+                if space and door_hides(space):
+                    outcome = _UNSEEN
+                else:
+                    cur.execute("SELECT 1 FROM kazma_beliefs WHERE id = %s", (row_id,))
+                    outcome = _KEPT if cur.fetchone() is not None else _GONE
             conn.commit()
             cur.close()
-            return kept
+            return outcome
         finally:
             conn.close()
 
@@ -1995,8 +2021,9 @@ def search_state_episodes(
                 query, tenant_id=tenant_id, limit=limit, strict=strict, **period
             )
         )
-    except Exception:
-        if strict:
+    except Exception as exc:
+        # A refusal of the second lock is never "no matches" (0b review L2).
+        if strict or is_space_refusal(exc):
             raise
         return []
 
@@ -2021,7 +2048,8 @@ def search_state_beliefs(
         return list(
             get_state_backend().search_beliefs(query, tenant_id=tenant_id, limit=limit, strict=strict)
         )
-    except Exception:
-        if strict:
+    except Exception as exc:
+        # A refusal of the second lock is never "no matches" (0b review L2).
+        if strict or is_space_refusal(exc):
             raise
         return []

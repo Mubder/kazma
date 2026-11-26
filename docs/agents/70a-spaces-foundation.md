@@ -40,8 +40,11 @@ an install with one account behaves as before.
   changes no one's scope; a row Kazma keeps for itself (a memory's mirror
   copy, its vector) is written in `row_statements(space)`: the row's own space
   where Kazma does the work (nothing bound, or the install's door said), the
-  bound space where a request or a turn does -- a store never moves a
-  request into another space (S4-01 0b); the install's own (about every space, or none) run
+  bound (or declared) space where a request or a turn does -- a store never
+  moves a request into another space (S4-01 0b); a row of another space
+  there keeps that door, said as `cross`, which step 1's report counts as a
+  finding and `door_hides` tells a delete not to trust (0b review M1, L3);
+  the install's own (about every space, or none) run
   in `install_statements(reason)`, declared in `INSTALL` of
   `tests/test_row_work_gates.py`, both ways, and only where no request comes
   with an id of its own; every use of the others is declared there too, with

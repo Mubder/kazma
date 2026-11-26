@@ -56,6 +56,7 @@ from typing import Any
 
 from kazma_core.memory.chat_history import STORE_ERRORS, epoch_of
 from kazma_core.memory.limits import turn_key
+from kazma_core.spaces.row_work import install_statements
 
 logger = logging.getLogger(__name__)
 
@@ -407,6 +408,7 @@ def _write_state(conn: sqlite3.Connection | None, state: dict[str, Any]) -> None
             conn.close()
 
 
+@install_statements("memory's turn reconcile reads every space's chats changed since its cursor")
 def run_turn_reconcile_pass(*, time_budget_s: float = 60.0) -> dict[str, Any]:
     """One reconcile pass (15-minute cadence). The cursors are kept in the
     memory database (:func:`read_state`); the report under :data:`STATE_KEY`.

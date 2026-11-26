@@ -93,11 +93,12 @@ INSTALL: dict[str, str] = {
         "the vector table is made once, for every space",
     "kazma-core/kazma_core/memory/forget.py::converge":
         "every space's pending forgets; each row it removes in its own space",
-    "kazma-core/kazma_core/memory/worker_bootstrap.py::_recover_erased_memories":
+    "kazma-core/kazma_core/memory/rehydrate.py::run_rehydrate_pass":
         "lists every space's chats and checkpoints for erased turns; each restored row is its own",
-    "kazma-core/kazma_core/memory/worker_bootstrap.py::_reconcile_memory_turns":
-        "lists every space's chats changed since its cursor; each turn is written as its own",
-    "kazma-core/kazma_core/memory/worker_bootstrap.py::_fill_cut_memory_text":
+    "kazma-core/kazma_core/memory/turn_reconcile.py::run_turn_reconcile_pass":
+        "lists every space's chats changed since its one cursor (the sweep, the memory restore); "
+        "each turn is written as its own",
+    "kazma-core/kazma_core/memory/text_fill.py::run_text_fill_pass":
         "reads every space's chats that still hold a cut turn whole; each row is its own",
     "kazma-core/kazma_core/runs/adapters/documents.py::_DocumentAdapter._read":
         "the supervisor's list of every space's jobs, with nothing bound only",
@@ -210,13 +211,13 @@ ROWS: dict[str, tuple[str, tuple[str, ...]]] = {
         ("row_statements(space_of_record(row.get('tenant_id')))",)),
     "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.delete_belief": (
         "statements: the removed fact's own tenant, which its caller names",
-        ("row_statements(space)",)),
+        ("row_statements(named)",)),
     "kazma-core/kazma_core/memory/backends.py::PgvectorBackend.upsert": (
         "statements: the vector's own row's tenant, where Kazma writes it itself",
         ("row_statements(tenant_id)",)),
     "kazma-core/kazma_core/memory/backends.py::PgvectorBackend.delete": (
         "statements: the forgotten row's own tenant, which the forget names",
-        ("row_statements(space)",)),
+        ("row_statements(named)",)),
 }
 
 #: Who asks for the account a space's own work acts for: ``file::function`` ->
