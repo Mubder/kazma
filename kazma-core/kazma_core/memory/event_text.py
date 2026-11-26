@@ -339,8 +339,6 @@ _BARE_NO = frozenset({"no", "nope", "لا", "ما"})
 #: An answer, not a negation of what follows: "No I went to the gym alone",
 #: "لا رحت النادي بروحي" deny the day, not the gym.
 _ANSWER_NO = frozenset({"no", "nope", "لا"})
-#: "وحده ثانيه": another one (a woman), not "alone".
-_ANOTHER = frozenset({"ثانيه", "ثاني", "ثانيين", "غير", "ثانيات"})
 #: "But" going on after "not Ali only".
 _BUT = frozenset({"but", "بل", "لكن", "ولكن", "وانما", "انما"})
 #: Words that put right and never say "not only": "Actually just Omar".
@@ -349,36 +347,71 @@ _NEVER_ADDING = frozenset({"actually", "correct", "instead", "rather", "بل", "
 
 def _value_end(words: list[str], at: int, wanted: list[str]) -> int | None:
     """Where the denied value's words end, when they begin within the
-    denial's reach after *at*; None when they are not there."""
+    denial's reach after *at*; None when they are not there. A value runs at
+    most its own words and two more: a held value of denial words ("مو",
+    "Not Me") repeated stretched over the whole run for every denial
+    (quadratic, step 4's fourth review)."""
     start = next((i for i in range(at + 1, min(len(words), at + 1 + _DENIES_IT_REACH))
                   if words_said(wanted, words[i])), None)
     if start is None:
         return None
-    end = start
-    while end + 1 < len(words) and words_said(wanted, words[end + 1]):
+    end, last = start, min(len(words) - 1, start + len(wanted) + 2)
+    while end < last and words_said(wanted, words[end + 1]):
         end += 1
     return end
 
 
-#: "Too" said after "not Ali only" (never "again", "another", "مرة ثانية": the
-#: same thing again is no addition, step 4's third review B). Folded.
-_TOO = frozenset({"too", "also", "plus", "ايضا", "كمان", "كذلك", "برضه", "برضو", "بردو"})
+# What makes a denial add rather than deny is read in a few narrow shapes,
+# each clearly an addition; every other message keeps the denial, as it was
+# before step 4 (the memory plan's W6, step 4's fourth review: five rounds on
+# reading "too" more widely each turned some correction into an addition).
+#
+#   "not only Ali", "مو بس علي"                  a denial, then "only"
+#   "I didn't see Ali alone,", "بعلي وحده،"       "alone" ending the clause, after the value
+#   "not Ali only but Omar", "مو علي بس بل عمر"   "only" after the value, then "but"
+#   "Not Ali only Omar too", "مو علي بس عمر بعد"  "only", the new value alone, "too" ending the clause
+#   "not Ali only, Omar too", "مو علي بس، وكمان عمر"
+#                                                "only" ending the clause, and the next clause
+#                                                begins with "but"/"also" or ends with "too"
+
+#: "Too" where a clause ends ("Omar too", "عمر بعد", "عمر كمان"); "as well"
+#: is read as two words there. Never "again", "another", "مرة ثانية". Folded.
+_TOO_END = frozenset({"too", "also", "ايضا", "كمان", "كذلك", "برضه", "برضو", "بردو", "بعد"})
+#: Words that open a clause that adds: "but Omar", "also Omar", "وكمان عمر".
+_ADDING_OPENERS = _BUT | {"also", "plus", "كمان", "وكمان", "ايضا", "وايضا", "كذلك", "وكذلك"}
 
 
-def _goes_on_adding(words: list[str]) -> bool:
-    """Whether *words* go on with "but" or say "too": "but Omar", "Omar too",
-    "وكمان عمر", "قابلت عمر بعد" ("بعد" ending them, after a word)."""
-    if not words:
-        return False
-    return (words[0] in _BUT or any(w in _TOO or (w[:1] == "و" and w[1:] in _TOO) for w in words)
-            or " as well" in " " + " ".join(words) or (len(words) > 1 and words[-1] == "بعد"))
+def _ends_with_too(words: list[str]) -> int:
+    """How many words of "too" end *words* after at least one other ("Omar
+    too", "Omar as well": 1 and 2); 0 when none."""
+    if len(words) >= 3 and words[-2:] == ["as", "well"]:
+        return 2
+    return 1 if len(words) >= 2 and words[-1] in _TOO_END else 0
+
+
+def _only_new_value_then_too(rest: list[str]) -> bool:
+    """*rest* is the new value alone, then "too" ending the clause: "Omar
+    too", "عمر بعد", "Omar Khan as well"; never "Omar and his brother too",
+    "عمر واخوه بعد", "Omar who was too tired"."""
+    too = _ends_with_too(rest)
+    value = rest[:-too] if too else []
+    return (1 <= len(value) <= 2 and value[0] not in ("and", "who", "but", "as")
+            and not any(w in ("and", "who", "but", "as", "plus") or (len(w) > 2 and w[0] == "و")
+                        for w in value[1:]))
+
+
+def _next_clause_adds(words: list[str]) -> bool:
+    """The clause after "not Ali only," goes on adding: it begins with "but"
+    or "also" ("but Omar", "وكمان عمر", "بل بعمر"), or ends with "too"
+    ("Omar too", "عمر واخوه بعد")."""
+    return bool(words) and (words[0] in _ADDING_OPENERS or bool(_ends_with_too(words)))
 
 
 def _adds_rather(words: list[str], at: int, wanted: list[str] | None = None,
                  following: list[str] | None = None) -> bool:
     """Whether the denial at *at* in a clause's *words* says "not only" or
-    "not alone" of the value whose words are *wanted*; *following* is the
-    next clause's words."""
+    "not alone" of the value whose words are *wanted*, in one of the narrow
+    shapes above; *following* is the next clause's words."""
     after = words[at + 1:]
     if not after or words[at] in _NEVER_ADDING:
         return False
@@ -391,14 +424,10 @@ def _adds_rather(words: list[str], at: int, wanted: list[str] | None = None,
         return False
     rest = words[end + 2:]
     if words[end + 1] in _ALONE:
-        return not (rest and rest[0] in _ANOTHER)
-    # "Only" after the value adds where what follows goes on with "but" or
-    # says "too": in its own clause when a word follows it ("not Ali only but
-    # Omar", "مو علي بس عمر بعد"), else in the next clause alone ("It wasn't
-    # Ali only, Omar too", "مو علي بس، قابلت عمر بعد"). Otherwise it is the
-    # next word's ("Not Ali just Omar", "مو علي بس، عمر", "Not Ali just Omar,
-    # I saw him again today"): the denial stands (step 4's reviews, N1 and B).
-    return _goes_on_adding(rest if rest else list(following or ()))
+        return not rest
+    if not rest:
+        return _next_clause_adds(list(following or ()))
+    return rest[0] in _BUT or _only_new_value_then_too(rest)
 
 
 def _adds_rather_than_denies(user_text: str, value: str = "") -> bool:

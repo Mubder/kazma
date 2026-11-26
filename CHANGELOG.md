@@ -21,8 +21,9 @@
 
 ## Memory: "not only", "No, Omar" and a voice note (2026-11-26)
 
-- "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "مو علي بس", "ليس علي
-  فقط" and "I didn't see Ali alone" no longer take the meeting with Ali away;
+- "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "مو علي بس، قابلت عمر
+  بعد", "Not Ali only Omar too" and "I didn't see Ali alone, Omar was there" no
+  longer take the meeting with Ali away;
   "Nothing is wrong, I met Omar" takes nothing away either.
 - "Alone" said of someone else or of you still puts right: "Not Ali I met Omar
   alone", "مو علي قابلت عمر بروحه", "No I went to the gym alone on Thursday".
