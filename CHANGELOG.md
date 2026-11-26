@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Memory's copies in Postgres keep to their spaces (2026-11-26)
+
+- When Kazma removes a forgotten fact or memory from its Postgres copies, it
+  removes it from the space the memory belongs to, and calls it gone only
+  when it is: a copy kept under another space is said in the log and tried
+  again, never recorded as deleted. The vector index had dropped which space
+  a vector belonged to when deleting it.
+- Memory's work in the background (recovery, catching up on chats, filling
+  in cut text, the mirror's sync, finishing forgets) says that it reads
+  every space, and writes each memory in its own space.
+- The tables of the memory mirror and of the vector index are made on a
+  connection of their own, so the first write after a start is never in a
+  separate transaction.
+- With Spaces on, a memory read that the database refuses is an error, never
+  "no memories found". With Spaces off nothing changes.
+
 ## Spaces: whose each database statement is, counted (2026-11-26)
 
 - Kazma now counts, for each statement it sends to its own Postgres, whose

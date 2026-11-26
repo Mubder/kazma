@@ -5,6 +5,27 @@ working-turn promotion never told it), 17 facts that never reached it, and 53
 rows only the mirror held -- test data written before the database shield and
 memories removed here since -- which recall's top-up could bring back into
 an answer ("User prefers dark mode").
+- **Memory's copies in Postgres say whose rows they are** (S4-01 step 0b,
+  2026-11-26, §70 (2)). A mirror write, a mirror delete and a vector write or
+  delete run in their row's own space where Kazma does the work itself (a
+  sweep, the forget convergence; `row_work.row_statements`), and in the bound
+  space where a request or a turn does; the mirror's pushes are grouped by
+  space, one transaction each. **A delete names its tenant and says whether
+  the row is gone** (`delete_belief(id, tenant_id=)`, pgvector's `delete`):
+  deleted now, or no row of that id left; one kept under another space is
+  not gone -- False and a WARNING, so the outbox or the forget journal keeps
+  it (H5: "deleted" was answered whatever the statement did, pgvector dropped
+  its tenant, and a forgotten fact could stay in the mirror for good). Callers
+  that know the fact's space pass it (`unmirror_belief_to_state(id, tenant)`).
+  The schema is made on a connection of its own, as the install's
+  (`_ensure()`, `_ensure_table()`): on the caller's, its commits put the
+  caller's statement in a second transaction. The probes, the sync, the
+  comparison, the drift summary, the forget convergence and the sweeps that
+  read every space's chats (recovery, turn reconcile, text fill) are the
+  install's (`install_statements`). `fetch_*` take `strict` like `search_*`,
+  and a space refusal raises from all four whatever *strict* says (never
+  "nothing found"). Gate: `tests/test_memory_rows_in_their_space.py` (each
+  fails on the code before; a real Postgres keeps another space's fact).
 - **Every tier or text change reaches the mirror.** `remirror_episodes` is the
   one call after a local change (macro_sleep's moves, the working-turn
   promotion, forget, retire). Every `UPDATE episodes SET tier/text` in product

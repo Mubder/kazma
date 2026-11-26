@@ -432,7 +432,7 @@ def test_pgvector_scores_exactly_the_named_rows(monkeypatch):
     dsn = "postgresql://localhost/kazma-relevance"
     be = PgvectorBackend(dsn=dsn, dimension=3)
     monkeypatch.setattr(be, "_connect", lambda: _Conn())
-    monkeypatch.setattr(be, "_ensure_table", lambda conn: None)
+    monkeypatch.setattr(be, "_ensure_table", lambda: None)
     monkeypatch.setitem(backends._REMOTE_VECTOR_STATE, ("pgvector", dsn),
                         (time.monotonic(), "installed"))
     assert be.similarities([0.1, 0.2, 0.3], ["e1", "e2", "e1"], tenant_id="t",

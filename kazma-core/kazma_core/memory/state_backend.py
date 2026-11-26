@@ -23,7 +23,10 @@ import sys
 import threading
 import time
 from collections.abc import Iterable
+from contextlib import nullcontext
 
+from kazma_core.db.pg_helpers import is_space_refusal
+from kazma_core.spaces.row_work import install_statements, row_statements
 from kazma_core.spaces.scope import space_named_or_bound, space_of_record
 
 # Liveness-probe cache TTL for the shared-state backend's `available`.
@@ -109,8 +112,8 @@ class _NullStateBackend:
     def count_beliefs(self, *, tenant_id: str | None = None) -> int:
         return 0
 
-    def delete_belief(self, row_id: str) -> bool:
-        del row_id
+    def delete_belief(self, row_id: str, *, tenant_id: str | None = None) -> bool:
+        del row_id, tenant_id
         return False
 
     def mirror_belief_snapshot(self) -> dict[str, bool]:
@@ -266,13 +269,16 @@ class PostgresStateBackend:
             self._ready_at = time.monotonic()
             return False
         try:
-            conn = self._connect()
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT 1")
-                cur.close()
-            finally:
-                conn.close()
+            # A ping: whether the mirror answers, no row of any space (S4-01
+            # review 10: unbound, it turned the mirror off for every space).
+            with install_statements("a ping: whether the memory mirror answers"):
+                conn = self._connect()
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SELECT 1")
+                    cur.close()
+                finally:
+                    conn.close()
             self._ready = True
             self._ready_at = time.monotonic()
             return True
@@ -281,12 +287,28 @@ class PostgresStateBackend:
             self._ready_at = time.monotonic()
             return False
 
-    def _ensure(self, conn: Any) -> None:
+    def _ensure(self) -> None:
+        """The mirror's tables, made once a process on a connection of their
+        own (S4-01 review 22): made on the caller's connection and committed
+        there, the caller's statement ran in a second transaction, which the
+        lock reads as no space's. Raises what Postgres raises."""
         if self._ensured:
             return
         from kazma_core.db.pg_schema import ensure_schema
 
-        cur = conn.cursor()
+        with install_statements("the memory mirror's tables, made once for every space"):
+            conn = self._connect()
+            try:
+                cur = conn.cursor()
+                self._make_tables(ensure_schema, cur)
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
+        self._ensured = True
+
+    @staticmethod
+    def _make_tables(ensure_schema: Any, cur: Any) -> None:
         ensure_schema(cur, [
             """
             CREATE TABLE IF NOT EXISTS kazma_episodes (
@@ -323,9 +345,6 @@ class PostgresStateBackend:
             "CREATE INDEX IF NOT EXISTS idx_kazma_ep_tenant ON kazma_episodes(tenant_id)",
             "CREATE INDEX IF NOT EXISTS idx_kazma_bel_tenant ON kazma_beliefs(tenant_id)",
         ])
-        conn.commit()
-        cur.close()
-        self._ensured = True
 
     def _existing_meta(self, conn: Any, table: str, row_id: str) -> dict[str, Any] | None:
         cur = conn.cursor()
@@ -364,24 +383,35 @@ class PostgresStateBackend:
         rows = [r for r in rows if r.get("id")]
         if not self._dsn or not rows:
             return []
-        try:
-            conn = self._connect()
+        # Each space's rows in one transaction of that space (S4-01 0b): a
+        # sweep pushes several spaces' rows at once.
+        by_space: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            by_space.setdefault(space_of_record(r.get("tenant_id")), []).append(r)
+        written: list[str] = []
+        for space, group in by_space.items():
             try:
-                self._ensure(conn)
-                allowed = self._writable(conn, "kazma_episodes", [str(r["id"]) for r in rows])
-                rows = [r for r in rows if str(r["id"]) in allowed]
-                if not rows:
-                    return []
-                cur = conn.cursor()
-                cur.executemany(_EPISODE_UPSERT, [_episode_params(r) for r in rows])
-                conn.commit()
-                cur.close()
-                return [str(r["id"]) for r in rows]
-            finally:
-                conn.close()
-        except Exception:
-            logger.debug("[state_backend] postgres episode mirror failed", exc_info=True)
-            return []
+                self._ensure()
+                with row_statements(space):
+                    written.extend(self._write_episodes(group))
+            except Exception:
+                logger.debug("[state_backend] postgres episode mirror failed", exc_info=True)
+        return written
+
+    def _write_episodes(self, rows: list[dict[str, Any]]) -> list[str]:
+        conn = self._connect()
+        try:
+            allowed = self._writable(conn, "kazma_episodes", [str(r["id"]) for r in rows])
+            rows = [r for r in rows if str(r["id"]) in allowed]
+            if not rows:
+                return []
+            cur = conn.cursor()
+            cur.executemany(_EPISODE_UPSERT, [_episode_params(r) for r in rows])
+            conn.commit()
+            cur.close()
+            return [str(r["id"]) for r in rows]
+        finally:
+            conn.close()
 
     def _writable(self, conn: Any, table: str, ids: list[str]) -> set[str]:
         """Which of *ids* this region may write (:func:`should_apply_remote_write`
@@ -406,50 +436,54 @@ class PostgresStateBackend:
         if not self._dsn or not row.get("id"):
             return False
         try:
-            conn = self._connect()
-            try:
-                self._ensure(conn)
-                if not self._may_write(conn, "kazma_beliefs", str(row.get("id"))):
-                    return False
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    INSERT INTO kazma_beliefs (
-                      id, tenant_id, subject, predicate, predicate_type, object,
-                      confidence, structural_importance, source_trust_weight,
-                      valid_from, valid_until, invalidated_at, metadata_json
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT (id) DO UPDATE SET
-                      object = EXCLUDED.object,
-                      confidence = EXCLUDED.confidence,
-                      valid_until = EXCLUDED.valid_until,
-                      invalidated_at = EXCLUDED.invalidated_at,
-                      metadata_json = EXCLUDED.metadata_json
-                    """,
-                    (
-                        row.get("id"),
-                        space_of_record(row.get("tenant_id")),
-                        _pg_text(row.get("subject")),
-                        _pg_text(row.get("predicate")),
-                        row.get("predicate_type") or "functional",
-                        _pg_text(row.get("object")),
-                        float(row.get("confidence") or 0.5),
-                        int(row.get("structural_importance") or 1),
-                        float(row.get("source_trust_weight") or 1.0),
-                        row.get("valid_from"),
-                        row.get("valid_until"),
-                        row.get("invalidated_at"),
-                        _stamp_region_meta(row),
-                    ),
-                )
-                conn.commit()
-                cur.close()
-                return True
-            finally:
-                conn.close()
+            self._ensure()
+            with row_statements(space_of_record(row.get("tenant_id"))):
+                return self._write_belief(row)
         except Exception:
             logger.debug("[state_backend] postgres belief mirror failed", exc_info=True)
             return False
+
+    def _write_belief(self, row: dict[str, Any]) -> bool:
+        conn = self._connect()
+        try:
+            if not self._may_write(conn, "kazma_beliefs", str(row.get("id"))):
+                return False
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO kazma_beliefs (
+                  id, tenant_id, subject, predicate, predicate_type, object,
+                  confidence, structural_importance, source_trust_weight,
+                  valid_from, valid_until, invalidated_at, metadata_json
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (id) DO UPDATE SET
+                  object = EXCLUDED.object,
+                  confidence = EXCLUDED.confidence,
+                  valid_until = EXCLUDED.valid_until,
+                  invalidated_at = EXCLUDED.invalidated_at,
+                  metadata_json = EXCLUDED.metadata_json
+                """,
+                (
+                    row.get("id"),
+                    space_of_record(row.get("tenant_id")),
+                    _pg_text(row.get("subject")),
+                    _pg_text(row.get("predicate")),
+                    row.get("predicate_type") or "functional",
+                    _pg_text(row.get("object")),
+                    float(row.get("confidence") or 0.5),
+                    int(row.get("structural_importance") or 1),
+                    float(row.get("source_trust_weight") or 1.0),
+                    row.get("valid_from"),
+                    row.get("valid_until"),
+                    row.get("invalidated_at"),
+                    _stamp_region_meta(row),
+                ),
+            )
+            conn.commit()
+            cur.close()
+            return True
+        finally:
+            conn.close()
 
     def count_episodes(self, *, tenant_id: str | None = None) -> int:
         tenant_id = space_named_or_bound(tenant_id)
@@ -459,33 +493,60 @@ class PostgresStateBackend:
         tenant_id = space_named_or_bound(tenant_id)
         return self._count("kazma_beliefs", tenant_id)
 
-    def delete_belief(self, row_id: str) -> bool:
-        """Hard-delete a mirrored belief (row left the SQLite SoT entirely)."""
+    def delete_belief(self, row_id: str, *, tenant_id: str | None = None) -> bool:
+        """Hard-delete a mirrored fact (it left the local store).
+
+        With *tenant_id*, the fact's own space, the statement names it and
+        runs in it (``row_statements``). True when the fact is gone: deleted
+        now, or no fact of that id is left. A fact of that id the mirror keeps
+        under another space is not gone: False and a WARNING, so the outbox
+        keeps it (S4-01 H5: "deleted" was answered whatever the statement
+        did, and a forgotten fact could stay in the mirror for good).
+        """
         if not self._dsn or not row_id:
             return False
+        space = space_of_record(tenant_id) if tenant_id else ""
         try:
-            conn = self._connect()
-            try:
-                self._ensure(conn)
-                cur = conn.cursor()
-                cur.execute("DELETE FROM kazma_beliefs WHERE id = %s", (row_id,))
-                conn.commit()
-                cur.close()
-                return True
-            finally:
-                conn.close()
+            self._ensure()
+            with row_statements(space) if space else nullcontext():
+                kept = self._delete_fact(str(row_id), space)
         except Exception:
             logger.debug("[state_backend] postgres belief delete failed", exc_info=True)
             return False
+        if kept:
+            logger.warning("[state_backend] fact %s is still in the Postgres mirror, under another space "
+                           "than its own; it was not deleted and stays queued", row_id)
+            return False
+        return True
+
+    def _delete_fact(self, row_id: str, space: str) -> bool:
+        """Delete it; whether a fact of that id is still there."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            if space:
+                cur.execute("DELETE FROM kazma_beliefs WHERE id = %s AND tenant_id = %s RETURNING id",
+                            (row_id, space))
+            else:
+                cur.execute("DELETE FROM kazma_beliefs WHERE id = %s RETURNING id", (row_id,))
+            kept = False
+            if not cur.fetchall():
+                cur.execute("SELECT 1 FROM kazma_beliefs WHERE id = %s", (row_id,))
+                kept = cur.fetchone() is not None
+            conn.commit()
+            cur.close()
+            return kept
+        finally:
+            conn.close()
 
     def mirror_belief_snapshot(self) -> dict[str, bool]:
         """id → live-flag scan of the mirror (reconcile/drift inputs)."""
         if not self._dsn:
             return {}
         try:
+            self._ensure()
             conn = self._connect()
             try:
-                self._ensure(conn)
                 cur = conn.cursor()
                 cur.execute(
                     "SELECT id, invalidated_at IS NULL AND valid_until IS NULL "
@@ -503,9 +564,9 @@ class PostgresStateBackend:
     def _digest(self, sql: str) -> dict[str, tuple[Any, str]]:
         if not self._dsn:
             return {}
+        self._ensure()
         conn = self._connect()
         try:
-            self._ensure(conn)
             cur = conn.cursor()
             cur.execute(sql)
             out = {str(r[0]): (r[1], str(r[2])) for r in cur.fetchall()}
@@ -542,9 +603,9 @@ class PostgresStateBackend:
         shared database). Raises like :meth:`episode_digest`."""
         if table not in ("kazma_episodes", "kazma_beliefs") or not self._dsn or not ids:
             return set()
+        self._ensure()
         conn = self._connect()
         try:
-            self._ensure(conn)
             cur = conn.cursor()
             cur.execute(f"SELECT id FROM {table} WHERE id = ANY(%s)", (list(ids),))
             out = {str(r[0]) for r in cur.fetchall()}
@@ -561,9 +622,9 @@ class PostgresStateBackend:
         would fail the whole query. Raises like :meth:`episode_digest`."""
         if table not in ("kazma_episodes", "kazma_beliefs") or not self._dsn:
             return {}
+        self._ensure()
         conn = self._connect()
         try:
-            self._ensure(conn)
             cur = conn.cursor()
             sql = (
                 "SELECT id, substring(metadata_json from "
@@ -602,9 +663,9 @@ class PostgresStateBackend:
         if not terms or not self._dsn:
             return []
         try:
+            self._ensure()
             conn = self._connect()
             try:
-                self._ensure(conn)
                 cur = conn.cursor()
                 clauses = " OR ".join(
                     [
@@ -660,8 +721,8 @@ class PostgresStateBackend:
                 return rows[: max(1, min(int(limit), 50))]
             finally:
                 conn.close()
-        except Exception:
-            if strict:
+        except Exception as exc:
+            if strict or is_space_refusal(exc):
                 raise
             logger.debug("[state_backend] postgres episode search failed", exc_info=True)
             return []
@@ -678,9 +739,9 @@ class PostgresStateBackend:
             return []
         from kazma_core.memory.vector_engine import RECALLABLE_TIERS
 
+        self._ensure()
         conn = self._connect()
         try:
-            self._ensure(conn)
             cur = conn.cursor()
             tiers = ",".join("%s" for _ in RECALLABLE_TIERS)
             cur.execute(
@@ -713,9 +774,9 @@ class PostgresStateBackend:
         if not terms or not self._dsn:
             return []
         try:
+            self._ensure()
             conn = self._connect()
             try:
-                self._ensure(conn)
                 cur = conn.cursor()
                 clauses = " OR ".join(
                     [
@@ -762,23 +823,26 @@ class PostgresStateBackend:
                 return rows[: max(1, min(int(limit), 50))]
             finally:
                 conn.close()
-        except Exception:
-            if strict:
+        except Exception as exc:
+            if strict or is_space_refusal(exc):
                 raise
             logger.debug("[state_backend] postgres belief search failed", exc_info=True)
             return []
 
     def fetch_episodes(
-        self, ids: list[str], *, tenant_id: str | None = None
+        self, ids: list[str], *, tenant_id: str | None = None, strict: bool = False
     ) -> list[dict[str, Any]]:
+        """The tenant's recallable turns of *ids*. *strict*: a failure raises,
+        never ``[]`` (recall's primary path); a space refusal always raises
+        (S4-01 review 40: it read as "nothing found")."""
         tenant_id = space_named_or_bound(tenant_id)
         wanted = [str(i) for i in ids if i][:50]
         if not wanted or not self._dsn:
             return []
         try:
+            self._ensure()
             conn = self._connect()
             try:
-                self._ensure(conn)
                 cur = conn.cursor()
                 from kazma_core.memory.vector_engine import RECALLABLE_TIERS
 
@@ -799,21 +863,25 @@ class PostgresStateBackend:
                 return rows
             finally:
                 conn.close()
-        except Exception:
+        except Exception as exc:
+            if strict or is_space_refusal(exc):
+                raise
             logger.debug("[state_backend] postgres episode fetch failed", exc_info=True)
             return []
 
     def fetch_beliefs(
-        self, ids: list[str], *, tenant_id: str | None = None
+        self, ids: list[str], *, tenant_id: str | None = None, strict: bool = False
     ) -> list[dict[str, Any]]:
+        """The tenant's live facts of *ids*; *strict* and a refusal as
+        :meth:`fetch_episodes`."""
         tenant_id = space_named_or_bound(tenant_id)
         wanted = [str(i) for i in ids if i][:50]
         if not wanted or not self._dsn:
             return []
         try:
+            self._ensure()
             conn = self._connect()
             try:
-                self._ensure(conn)
                 cur = conn.cursor()
                 placeholders = ",".join(["%s"] * len(wanted))
                 cur.execute(
@@ -833,7 +901,9 @@ class PostgresStateBackend:
                 return rows
             finally:
                 conn.close()
-        except Exception:
+        except Exception as exc:
+            if strict or is_space_refusal(exc):
+                raise
             logger.debug("[state_backend] postgres belief fetch failed", exc_info=True)
             return []
 
@@ -841,9 +911,9 @@ class PostgresStateBackend:
         if not self.available:
             return 0
         try:
+            self._ensure()
             conn = self._connect()
             try:
-                self._ensure(conn)
                 cur = conn.cursor()
                 cur.execute(
                     f"SELECT COUNT(*) FROM {table} WHERE tenant_id = %s",
@@ -1164,10 +1234,15 @@ def mirror_belief_to_state(row: dict[str, Any]) -> bool:
         return False
 
 
-def unmirror_belief_to_state(row_id: str) -> bool:
-    """Hard-delete a mirrored belief whose SQLite row no longer exists."""
+def unmirror_belief_to_state(row_id: str, tenant_id: str | None = None) -> bool:
+    """Hard-delete a mirrored fact whose local row no longer exists; with
+    *tenant_id* (the fact's own space) in that space. True when it is gone
+    (``PostgresStateBackend.delete_belief``)."""
     try:
-        return bool(get_state_backend().delete_belief(row_id))
+        backend = get_state_backend()
+        if tenant_id:
+            return bool(backend.delete_belief(row_id, tenant_id=tenant_id))
+        return bool(backend.delete_belief(row_id))
     except Exception:
         return False
 
@@ -1499,6 +1574,7 @@ def _drain_outbox(conn: sqlite3.Connection, budget: int, backend: Any = None) ->
     return out
 
 
+@install_statements("the mirror compared with the local store, every space's rows; each push in its row's space")
 def sync_state_mirror(
     conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT, full: bool | None = None,
 ) -> dict[str, Any]:
@@ -1701,6 +1777,7 @@ def last_mirror_sync() -> dict[str, Any]:
     return dict(_last_sync)
 
 
+@install_statements("the mirror's facts compared with the local store's, of every space")
 def reconcile_state_beliefs(conn: Any, *, dry_run: bool = False) -> dict[str, int]:
     """One-shot heal: make the mirror match the SQLite SoT exactly.
 
@@ -1767,6 +1844,7 @@ def reconcile_state_beliefs(conn: Any, *, dry_run: bool = False) -> dict[str, in
     return stats
 
 
+@install_statements("how far the mirror is from the local store, over every space")
 def mirror_drift_summary(conn: Any, *, sample: int = 5) -> dict[str, Any]:
     """Cheap nightly assertion input: count mirror rows that disagree with
     the SQLite SoT (missing locally / dead-locally-but-live-in-mirror)."""

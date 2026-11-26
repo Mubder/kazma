@@ -18,6 +18,9 @@ forms:
 * :func:`statements_of` -- only statements that name the row's space. A
   variable the database door alone reads: who is acting does not change, and
   nothing is read to enter it.
+* :func:`row_statements` -- a row Kazma keeps for itself (a mirror's copy, a
+  vector) is written in its own space where Kazma does the work itself, and
+  in the bound space where a request or a turn does.
 * :func:`install_statements` -- the install's own statements: about every
   space, or about none. Each use is declared, with its reason, in
   ``tests/test_row_work_gates.py``.
@@ -68,6 +71,7 @@ __all__ = [
     "install_statements",
     "resolve_act_of",
     "resolve_work_of",
+    "row_statements",
     "statements_of",
     "work_of",
     "work_of_async",
@@ -138,6 +142,27 @@ def statements_of(space: object) -> Iterator[None]:
         yield
     finally:
         _said.reset(token)
+
+
+@contextmanager
+def row_statements(space: object) -> Iterator[None]:
+    """The block's statements write or remove a row Kazma keeps for itself (a
+    memory's copy in the Postgres mirror, its vector) of *space*: they are
+    *space*'s where Kazma does the work itself -- nothing is bound, or the
+    install's door is said around it (a sweep, the forget convergence).
+
+    Where a scope is bound and nothing else is said (a request, a turn) the
+    bound space stays the door: a person's own rows are written in their
+    space, and a write into another space is said where it starts
+    (:func:`statements_of`, declared), never made by the store that writes it
+    (H6). For the database alone, like :func:`statements_of`.
+    """
+    door = Door.now()
+    if door is not None and door.how == "scope":
+        yield
+        return
+    with statements_of(space):
+        yield
 
 
 @contextmanager

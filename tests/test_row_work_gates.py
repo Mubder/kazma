@@ -77,6 +77,28 @@ INSTALL: dict[str, str] = {
         "what any space refers to decides what may go",
     "kazma-core/kazma_core/memory/health.py::build_memory_health":
         "a ping only: the probes round it read the owner's memory as before",
+    "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.available":
+        "a ping: whether the memory mirror answers, no row of any space",
+    "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend._ensure":
+        "the mirror's tables are made once, for every space",
+    "kazma-core/kazma_core/memory/state_backend.py::sync_state_mirror":
+        "the whole mirror compared with the local store; each push in its row's own space",
+    "kazma-core/kazma_core/memory/state_backend.py::reconcile_state_beliefs":
+        "the mirror's facts of every space compared with the local store's",
+    "kazma-core/kazma_core/memory/state_backend.py::mirror_drift_summary":
+        "how far the whole mirror is from the local store, for memory health",
+    "kazma-core/kazma_core/memory/backends.py::PgvectorBackend.probe":
+        "a ping: the catalog says whether this Postgres can hold vectors",
+    "kazma-core/kazma_core/memory/backends.py::PgvectorBackend._ensure_table":
+        "the vector table is made once, for every space",
+    "kazma-core/kazma_core/memory/forget.py::converge":
+        "every space's pending forgets; each row it removes in its own space",
+    "kazma-core/kazma_core/memory/worker_bootstrap.py::_recover_erased_memories":
+        "lists every space's chats and checkpoints for erased turns; each restored row is its own",
+    "kazma-core/kazma_core/memory/worker_bootstrap.py::_reconcile_memory_turns":
+        "lists every space's chats changed since its cursor; each turn is written as its own",
+    "kazma-core/kazma_core/memory/worker_bootstrap.py::_fill_cut_memory_text":
+        "reads every space's chats that still hold a cut turn whole; each row is its own",
     "kazma-core/kazma_core/runs/adapters/documents.py::_DocumentAdapter._read":
         "the supervisor's list of every space's jobs, with nothing bound only",
     "kazma-core/kazma_core/security/service_exposure.py::_role_answer":
@@ -180,6 +202,21 @@ ROWS: dict[str, tuple[str, tuple[str, ...]]] = {
     "kazma-ui/kazma_ui/health.py::_check_memory_recall": (
         "statements: the owner's space, the canary's",
         ("statements_of(OWNER_SPACE_ID)",)),
+    "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.mirror_episode_rows": (
+        "statements: each pushed memory's own tenant, where Kazma pushes it itself",
+        ("row_statements(space)",)),
+    "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.mirror_belief": (
+        "statements: the pushed fact's own tenant, where Kazma pushes it itself",
+        ("row_statements(space_of_record(row.get('tenant_id')))",)),
+    "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.delete_belief": (
+        "statements: the removed fact's own tenant, which its caller names",
+        ("row_statements(space)",)),
+    "kazma-core/kazma_core/memory/backends.py::PgvectorBackend.upsert": (
+        "statements: the vector's own row's tenant, where Kazma writes it itself",
+        ("row_statements(tenant_id)",)),
+    "kazma-core/kazma_core/memory/backends.py::PgvectorBackend.delete": (
+        "statements: the forgotten row's own tenant, which the forget names",
+        ("row_statements(space)",)),
 }
 
 #: Who asks for the account a space's own work acts for: ``file::function`` ->
@@ -203,12 +240,15 @@ ACTS_FOR_A_SPACE: dict[str, str] = {
 
 #: The forms, by the name they are called by.
 INSTALL_FORMS = {"install_statements", "install_loops"}
+#: A row Kazma keeps for itself: its own space where Kazma does the work, the
+#: bound one where a request does (``row_work.row_statements``).
+OWN_ROW_FORMS = {"row_statements"}
 #: What answers something to enter: a call inside the ``with``, or kept for one.
 RESOLVERS = {"resolve_work_of", "resolve_act_of", "work_of_async"}
 #: The forms that may act for a space's own account.
 FALLS_BACK = {"work_of", "resolve_work_of", "work_of_async"}
-ROW_FORMS_DECLARED = FALLS_BACK | {"statements_of", "resolve_act_of"}
-FORMS = INSTALL_FORMS | {"statements_of", "work_of"}
+ROW_FORMS_DECLARED = FALLS_BACK | OWN_ROW_FORMS | {"statements_of", "resolve_act_of"}
+FORMS = INSTALL_FORMS | OWN_ROW_FORMS | {"statements_of", "work_of"}
 
 
 @dataclass(frozen=True)

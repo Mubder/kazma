@@ -26,6 +26,7 @@ from collections.abc import Callable
 from typing import Any
 
 from kazma_core.memory.task_queue import failed_because
+from kazma_core.spaces.row_work import install_statements
 from kazma_core.spaces.scope import space_of_record
 
 logger = logging.getLogger(__name__)
@@ -1248,6 +1249,7 @@ def _compact_knowledge_store() -> None:
         store.compact()
 
 
+@install_statements("memory recovery reads every space's chats and checkpoints for erased turns")
 def _recover_erased_memories() -> None:
     # Memories the pre-2026-09-26 archive rule erased, restored from the
     # sources that still hold them, verified (item D). Rows get one verdict
@@ -1287,6 +1289,7 @@ def _retire_knowledge_promotions() -> None:
         cursor.idle = not (retire_knowledge_promotions() or {}).get("retired")
 
 
+@install_statements("memory's turn reconcile reads every space's chats changed since its cursor")
 def _reconcile_memory_turns() -> None:
     # Every conversation turn in the chat store gets its episode (item H):
     # the web chat wrote none from 2026-08-08 to 2026-09-26, and a turn the
@@ -1297,6 +1300,7 @@ def _reconcile_memory_turns() -> None:
     run_turn_reconcile_pass()
 
 
+@install_statements("the text fill reads every space's chats that still hold a turn whole")
 def _fill_cut_memory_text() -> None:
     # Memories written before 2026-11-19 kept 4,000 characters of a long
     # question or answer; this brings the rest back from the chat that still

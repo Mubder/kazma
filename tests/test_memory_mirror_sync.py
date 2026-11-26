@@ -443,7 +443,7 @@ def test_the_region_of_a_mirrored_row_is_read_from_postgres():
             f"e_region_{tag}_c": 'not json "region": at all {'}
     pg = backend._connect()
     try:
-        backend._ensure(pg)
+        backend._ensure()
         cur = pg.cursor()
         for rid, meta in rows.items():
             cur.execute("INSERT INTO kazma_episodes (id, tenant_id, session_id, turn_number, user_text, "

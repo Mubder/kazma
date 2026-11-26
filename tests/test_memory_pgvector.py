@@ -288,7 +288,7 @@ def test_pgvector_search_filters_kind(monkeypatch) -> None:
     dsn = "postgresql://localhost/kazma"
     be = PgvectorBackend(dsn=dsn, dimension=3)
     monkeypatch.setattr(be, "_connect", lambda: _Conn())
-    monkeypatch.setattr(be, "_ensure_table", lambda conn: None)
+    monkeypatch.setattr(be, "_ensure_table", lambda: None)
     # search asks the extension probe first (tests/test_vector_store_probe.py)
     monkeypatch.setitem(
         backends._REMOTE_VECTOR_STATE, ("pgvector", dsn), (time.monotonic(), "installed")

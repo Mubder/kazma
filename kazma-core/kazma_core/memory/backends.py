@@ -18,9 +18,11 @@ import importlib
 import logging
 import threading
 import time
+from contextlib import nullcontext
 from typing import Any, Protocol, runtime_checkable
 
-from kazma_core.spaces.scope import space_named_or_bound
+from kazma_core.spaces.row_work import install_statements, row_statements
+from kazma_core.spaces.scope import space_named_or_bound, space_of_record
 
 logger = logging.getLogger(__name__)
 
@@ -723,14 +725,17 @@ class PgvectorBackend:
             return hit[1]
         state, note = "unreachable", ""
         try:
-            conn = self._connect()
-            try:
-                cur = conn.cursor()
-                cur.execute(_PGVECTOR_STATE_SQL, (self._table, self._table))
-                installed, installable, may_create, table_dim, table_exists = cur.fetchone()
-                cur.close()
-            finally:
-                conn.close()
+            # The catalog, no row of any space (S4-01 review 41: unbound, it
+            # read as "unreachable" for every space).
+            with install_statements("a ping: whether this Postgres can hold vectors"):
+                conn = self._connect()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(_PGVECTOR_STATE_SQL, (self._table, self._table))
+                    installed, installable, may_create, table_dim, table_exists = cur.fetchone()
+                    cur.close()
+                finally:
+                    conn.close()
             if not installed and not installable:
                 state = "missing"
             elif table_exists and table_dim not in (None, -1) and int(table_dim) != self._dim:
@@ -765,8 +770,11 @@ class PgvectorBackend:
         """Forget that the table is ready: the next call re-creates what is gone."""
         _PGVECTOR_TABLES_READY.discard((self._dsn, self._table))
 
-    def _ensure_table(self, conn: Any) -> None:
-        """Extension, table and index — checked once per process per table.
+    def _ensure_table(self) -> None:
+        """Extension, table and index — checked once per process per table,
+        on a connection of their own (S4-01 review 23: on the caller's, up to
+        three commits came before the caller's statement, which then ran in a
+        transaction of its own, no space's).
 
         Each statement commits or rolls back on its own. In one transaction a
         refused ``CREATE EXTENSION`` (the role may not) or ``CREATE INDEX``
@@ -776,6 +784,14 @@ class PgvectorBackend:
         key = (self._dsn, self._table)
         if key in _PGVECTOR_TABLES_READY:
             return
+        with install_statements("the vector table, made once for every space"):
+            conn = self._connect()
+            try:
+                self._make_table(conn, key)
+            finally:
+                conn.close()
+
+    def _make_table(self, conn: Any, key: tuple[str, str]) -> None:
         from kazma_core.db.pg_schema import ensure_schema
 
         errors = _pg_driver_errors()
@@ -842,9 +858,9 @@ class PgvectorBackend:
         if not query_vec or not self._dsn or not self.available:
             return []
         try:
+            self._ensure_table()
             conn = self._connect()
             try:
-                self._ensure_table(conn)
                 cur = conn.cursor()
                 emb = "[" + ",".join(str(float(x)) for x in query_vec) + "]"
                 kind_sql = ""
@@ -910,9 +926,9 @@ class PgvectorBackend:
         if not query_vec or not wanted or not self._dsn or not self.available:
             return {}
         try:
+            self._ensure_table()
             conn = self._connect()
             try:
-                self._ensure_table(conn)
                 cur = conn.cursor()
                 emb = "[" + ",".join(str(float(x)) for x in query_vec) + "]"
                 kind_sql = ""
@@ -952,46 +968,59 @@ class PgvectorBackend:
         if not item_id or not vec or not self._dsn or not self.available:
             return False
         try:
-            from kazma_core.db.pg_helpers import json_dumps as _pg_json
-
-            conn = self._connect()
-            try:
-                self._ensure_table(conn)
-                cur = conn.cursor()
-                emb = "[" + ",".join(str(float(x)) for x in vec) + "]"
-                tier = (meta or {}).get("tier") or "episodic"
-                cur.execute(
-                    f"""
-                    INSERT INTO {self._table} (id, tenant_id, tier, embedding, meta)
-                    VALUES (%s, %s, %s, %s::vector, %s::jsonb)
-                    ON CONFLICT (id) DO UPDATE SET
-                      tenant_id = EXCLUDED.tenant_id,
-                      tier = EXCLUDED.tier,
-                      embedding = EXCLUDED.embedding,
-                      meta = EXCLUDED.meta
-                    """,
-                    (
-                        item_id,
-                        tenant_id,
-                        tier,
-                        emb,
-                        _pg_json(meta or {}),  # NUL-free (pg_helpers.strip_nul)
-                    ),
-                )
-                conn.commit()
-                cur.close()
-                return True
-            finally:
-                conn.close()
+            self._ensure_table()
+            # The vector of a row of *tenant_id*, in that space where Kazma
+            # writes it itself (S4-01 review 20: the turns' vectors, the text
+            # fill and the repair wrote them with nothing bound).
+            with row_statements(tenant_id):
+                return self._write_vector(item_id, vec, tenant_id, meta)
         except Exception:
             self._table_failed()
             logger.debug("[pgvector] upsert failed", exc_info=True)
             return False
 
+    def _write_vector(self, item_id: str, vec: list[float], tenant_id: str, meta: dict[str, Any] | None) -> bool:
+        from kazma_core.db.pg_helpers import json_dumps as _pg_json
+
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            emb = "[" + ",".join(str(float(x)) for x in vec) + "]"
+            tier = (meta or {}).get("tier") or "episodic"
+            cur.execute(
+                f"""
+                INSERT INTO {self._table} (id, tenant_id, tier, embedding, meta)
+                VALUES (%s, %s, %s, %s::vector, %s::jsonb)
+                ON CONFLICT (id) DO UPDATE SET
+                  tenant_id = EXCLUDED.tenant_id,
+                  tier = EXCLUDED.tier,
+                  embedding = EXCLUDED.embedding,
+                  meta = EXCLUDED.meta
+                """,
+                (
+                    item_id,
+                    tenant_id,
+                    tier,
+                    emb,
+                    _pg_json(meta or {}),  # NUL-free (pg_helpers.strip_nul)
+                ),
+            )
+            conn.commit()
+            cur.close()
+            return True
+        finally:
+            conn.close()
+
     def delete(self, item_id: str, *, tenant_id: str | None = None) -> bool:
-        del tenant_id
+        """Delete the vector of *item_id*, of *tenant_id* (its row's own space:
+        named in the statement and its door). True when it is gone: deleted
+        now, or none of that id is left; a vector of that id kept under
+        another space is not gone (False and a WARNING: the forget journal
+        retries it). S4-01 H5: the tenant was dropped and "erased" answered
+        whatever the statement found."""
         if not item_id or not self._dsn:
             return False
+        space = space_of_record(tenant_id) if tenant_id else ""
         state = self.probe()
         if state in _NO_VECTOR_TABLE_STATES:
             # No table can hold the vector, so it is gone: no statement is sent
@@ -1002,24 +1031,42 @@ class PgvectorBackend:
         if state not in _USABLE_REMOTE_STATES and state != "dimension_mismatch":
             return False  # unreachable: the forget journal retries it
         try:
-            conn = self._connect()
-            try:
-                if state != "dimension_mismatch":
-                    # The table may not exist yet on a server where the
-                    # extension is installed but nothing has written. A table
-                    # of another size exists: the row is deleted from it as is.
-                    self._ensure_table(conn)
-                cur = conn.cursor()
-                cur.execute(f"DELETE FROM {self._table} WHERE id = %s", (item_id,))
-                conn.commit()
-                cur.close()
-                return True
-            finally:
-                conn.close()
+            if state != "dimension_mismatch":
+                # The table may not exist yet on a server where the
+                # extension is installed but nothing has written. A table
+                # of another size exists: the row is deleted from it as is.
+                self._ensure_table()
+            with row_statements(space) if space else nullcontext():
+                kept = self._delete_vector(str(item_id), space)
         except Exception:
             self._table_failed()
             logger.debug("[pgvector] delete failed", exc_info=True)
             return False
+        if kept:
+            logger.warning("[pgvector] the vector of %s is kept under another space than its own; it was "
+                           "not deleted and the forget journal retries it", item_id)
+            return False
+        return True
+
+    def _delete_vector(self, item_id: str, space: str) -> bool:
+        """Delete it; whether a vector of that id is still there."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            if space:
+                cur.execute(f"DELETE FROM {self._table} WHERE id = %s AND tenant_id = %s RETURNING id",
+                            (item_id, space))
+            else:
+                cur.execute(f"DELETE FROM {self._table} WHERE id = %s RETURNING id", (item_id,))
+            kept = False
+            if not cur.fetchall():
+                cur.execute(f"SELECT 1 FROM {self._table} WHERE id = %s", (item_id,))
+                kept = cur.fetchone() is not None
+            conn.commit()
+            cur.close()
+            return kept
+        finally:
+            conn.close()
 
 
 class HybridVectorBackend:

@@ -233,7 +233,7 @@ def register_memory_routes(self: Any) -> None:
                 from kazma_core.memory.state_backend import unmirror_belief_to_state
 
                 for bid in cleared_ids:
-                    unmirror_belief_to_state(str(bid))
+                    unmirror_belief_to_state(str(bid), tid)
             except Exception:
                 logger.debug("[memory] graph-clear mirror tombstone skipped", exc_info=True)
             # M-15: Neo4j dual-write edges must die with the SQLite invalidate.

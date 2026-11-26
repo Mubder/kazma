@@ -125,8 +125,8 @@ CHECKOUTS: dict[str, tuple[str, ...]] = {
         "DocumentGarbageCollector._sweep_idle_catalog",
     ),
     "kazma-core/kazma_core/memory/backends.py": (
-        "PgvectorBackend.delete", "PgvectorBackend.probe", "PgvectorBackend.search", "PgvectorBackend.similarities",
-        "PgvectorBackend.upsert",
+        "PgvectorBackend._delete_vector", "PgvectorBackend._ensure_table", "PgvectorBackend._write_vector",
+        "PgvectorBackend.probe", "PgvectorBackend.search", "PgvectorBackend.similarities",
     ),
     "kazma-core/kazma_core/memory/chat_history.py": (
         "_id_rows", "_search_postgres", "_texts_of", "checkpoint_message_versions", "conversations_for",
@@ -136,11 +136,11 @@ CHECKOUTS: dict[str, tuple[str, ...]] = {
         "build_memory_health",
     ),
     "kazma-core/kazma_core/memory/state_backend.py": (
-        "PostgresStateBackend._count", "PostgresStateBackend._digest", "PostgresStateBackend.available",
-        "PostgresStateBackend.delete_belief", "PostgresStateBackend.episodes_between",
+        "PostgresStateBackend._count", "PostgresStateBackend._delete_fact", "PostgresStateBackend._digest",
+        "PostgresStateBackend._ensure", "PostgresStateBackend._write_belief", "PostgresStateBackend._write_episodes",
+        "PostgresStateBackend.available", "PostgresStateBackend.episodes_between",
         "PostgresStateBackend.fetch_beliefs", "PostgresStateBackend.fetch_episodes",
-        "PostgresStateBackend.mirror_belief", "PostgresStateBackend.mirror_belief_snapshot",
-        "PostgresStateBackend.mirror_episode_rows", "PostgresStateBackend.present_ids",
+        "PostgresStateBackend.mirror_belief_snapshot", "PostgresStateBackend.present_ids",
         "PostgresStateBackend.row_regions", "PostgresStateBackend.search_beliefs",
         "PostgresStateBackend.search_episodes",
     ),
@@ -185,16 +185,4 @@ KNOWN_OPEN: dict[str, tuple[str, str]] = {
     "kazma-core/kazma_core/swarm/metrics.py::MetricsCollector._flush_metric": (
         "the workers' metrics table has no space column: the install's, outside the policies (L9)",
         "step 2, the rules"),
-    "kazma-core/kazma_core/memory/backends.py::probe_vector_backend": (
-        "the vector store's probe at a start, nothing bound: a probe is the install's (M14)",
-        "step 3, the mirror and pgvector"),
-    "kazma-core/kazma_core/memory/worker_bootstrap.py::_reconcile_memory_turns": (
-        "memory's turn reconcile reads every space's changed chats with nothing bound (review 19)",
-        "0b, memory's half"),
-    "kazma-core/kazma_core/memory/worker_bootstrap.py::_recover_erased_memories": (
-        "memory recovery reads every space's checkpoints with nothing bound (review 19, V)",
-        "0b, memory's half"),
-    "kazma-core/kazma_core/memory/worker_bootstrap.py::_sync_memory_mirror": (
-        "the mirror's sync compares and pushes every space's rows with nothing bound (review 28, V)",
-        "0b, memory's half"),
 }

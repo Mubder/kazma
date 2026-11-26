@@ -103,7 +103,7 @@ def _remote_episode(backend, tenant: str, eid: str, question: str, *, tier: str 
                     created: float) -> None:
     conn = backend._connect()
     try:
-        backend._ensure(conn)
+        backend._ensure()
         conn.cursor().execute(
             "INSERT INTO kazma_episodes (id, tenant_id, session_id, turn_number, user_text, assistant_text, "
             "summary_text, tier, structural_importance, created_at, metadata_json) "
@@ -249,7 +249,7 @@ def test_a_fact_holding_every_word_beats_more_important_ones_holding_one(pg):
     backend, tenant = pg
     conn = backend._connect()
     try:
-        backend._ensure(conn)
+        backend._ensure()
         cur = conn.cursor()
         sql = ("INSERT INTO kazma_beliefs (id, tenant_id, subject, predicate, object, predicate_type, confidence, "
                "structural_importance, source_trust_weight, valid_from, metadata_json) "
