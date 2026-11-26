@@ -144,6 +144,13 @@ class RecallResult:
 #: remembered (audit 2026-10-26 AUD-026, §26 G, Memory audit M11).
 RECALL_FAILED = "recall_failed:"
 
+#: ``RecallResult.degraded`` when the Postgres mirror could not be read for
+#: the top-up of a thin local result (an outage, or no answer to its ping):
+#: this install's own memories are whole, other installs' were not asked
+#: (§44: said, never read as "nothing more found"). A refusal is no outage:
+#: that recall fails (Spaces S4-01).
+MIRROR_UNREAD = "the Postgres mirror could not be read: memories other installs wrote are not in this answer"
+
 
 def _failed_recall(code: str) -> RecallResult:
     """An empty result that says recall failed, never "nothing found"."""
@@ -321,8 +328,8 @@ def recall(
         _BELIEF_KEEP.reset(keeps)
         _ENTRY_NAMES.reset(names)
         _QUERY_MEMO.reset(token)
-    if memo["degraded"] and result.degraded is None:
-        result.degraded = memo["degraded"]
+    if memo["degraded"] and not result.failed:
+        result.degraded = memo["degraded"] if result.degraded is None else f"{memo['degraded']}; {result.degraded}"
     if "rerank_read" in memo:
         result.rerank = "partial" if memo.get("rerank_unread") else "whole"
     result.listing = listing
@@ -930,6 +937,7 @@ def _recall(
         )
         # Multi-replica assist: merge sparse hits from Postgres state mirror
         # when local results are thin (does not replace SQLite FTS/dense).
+        mirror_unread = False
         if not local_only and (len(episodes) < limit or len(beliefs) < limit):
             try:
                 episodes, beliefs = _merge_remote_state_hits(
@@ -941,11 +949,19 @@ def _recall(
                     explain=bool(do_explain),
                     local_conn=conn,
                 )
-            except Exception:
+            except Exception as exc:
+                from kazma_core.db.pg_helpers import is_space_refusal
+
+                if is_space_refusal(exc):
+                    raise  # refused, not away: this recall fails and says so (S4-01 0b delta L-a)
+                # Away (§44: the mirror's connect said the outage once): this
+                # install's memories stand, and the answer says what it lacks.
                 logger.debug("[recall] remote state merge skipped", exc_info=True)
+                mirror_unread = True
         result = RecallResult(
             beliefs=beliefs, episodes=episodes,
             summaries=_recall_summaries(conn, query, tenant_id),
+            degraded=MIRROR_UNREAD if mirror_unread else None,
         )
         # Phase A: bump access so macro_sleep promotion/retention is real.
         if not result.empty:
@@ -1266,7 +1282,7 @@ def _pg_primary_episodes(
     if need and callable(fetch):
         # The mirror answers 50 ids a call.
         for start in range(0, len(need), 50):
-            for row in fetch(need[start:start + 50], tenant_id=tenant_id) or []:
+            for row in fetch(need[start:start + 50], tenant_id=tenant_id, strict=True) or []:
                 if row.get("id"):
                     rows[str(row["id"])] = row
     # What this install forgot stays forgotten, whatever the shared store
@@ -1424,7 +1440,7 @@ def _pg_primary_beliefs(
         need = [bid for bid in ids if bid not in rows]
         if need and callable(fetch):
             for start in range(0, len(need), 50):
-                for row in fetch(need[start:start + 50], tenant_id=tenant_id) or []:
+                for row in fetch(need[start:start + 50], tenant_id=tenant_id, strict=True) or []:
                     if row.get("id"):
                         rows[str(row["id"])] = row
         return {bid: rows[bid] for bid in ids if bid in rows}
@@ -1636,8 +1652,11 @@ def _merge_remote_state_hits(
     )
 
     be = get_state_backend()
-    if not getattr(be, "available", False) or getattr(be, "name", "") == "null":
+    if getattr(be, "name", "") == "null":
         return episodes, beliefs
+    if not getattr(be, "available", False):
+        # A mirror that does not answer its ping is not "no more memories".
+        raise ConnectionError("the memory mirror did not answer")
 
     terms = _without_time_words(content_terms(query))
 
@@ -1664,7 +1683,8 @@ def _merge_remote_state_hits(
 
     seen_ep = {h.id for h in episodes}
     if len(episodes) < limit:
-        remote = search_state_episodes(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 2)
+        remote = search_state_episodes(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 2,
+                                       strict=True)
         held = _held_locally("episodes", [str(r.get("id") or "") for r in remote])
         for i, row in enumerate(remote):
             eid = str(row.get("id") or "")
@@ -1703,7 +1723,8 @@ def _merge_remote_state_hits(
 
     seen_b = {h.id for h in beliefs}
     if len(beliefs) < limit:
-        remote_b = search_state_beliefs(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 2)
+        remote_b = search_state_beliefs(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 2,
+                                        strict=True)
         held_b = _held_locally("beliefs", [str(r.get("id") or "") for r in remote_b])
         for i, row in enumerate(remote_b):
             bid = str(row.get("id") or "")

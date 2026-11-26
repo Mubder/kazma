@@ -998,6 +998,7 @@ def register_memory_tools(registry: Any) -> None:
         # Returns its results even when empty: an empty result is a real
         # "no memories match", not a signal to consult a legacy store.
         try:
+            from kazma_core.memory.recall import MIRROR_UNREAD
             from kazma_core.memory.recall import recall as v2_recall
             from kazma_core.safety.hitl import get_current_tenant_id
 
@@ -1027,7 +1028,9 @@ def register_memory_tools(registry: Any) -> None:
             if result.degraded:
                 # Not "nothing remembered": a search that could not look by
                 # meaning says so (Memory audit M16).
-                note = f"Memory search was incomplete ({result.degraded}); keyword matches only."
+                # The mirror unread for the top-up is no search by words alone.
+                tail = "" if result.degraded == MIRROR_UNREAD else "; keyword matches only"
+                note = f"Memory search was incomplete ({result.degraded}){tail}."
                 if out:
                     return note + "\n" + json.dumps(out, ensure_ascii=False, indent=2), False
                 return note + " " + _RECALL_DEGRADED, True

@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Memory search says when the Postgres copy could not be read (2026-11-26)
+
+- Where Postgres holds memory, a memory found by meaning that could then not
+  be read is a failed memory search, said as one, never left out of the
+  answer in silence.
+- Where this install's own memories answer and the Postgres copy only adds
+  memories other installs wrote: when that copy is away, the answer keeps
+  this install's memories and says the others were not read; when the
+  database refuses (Spaces), the search fails and says so. Neither reads as
+  "nothing more found".
+
 ## Spaces: the database's own lock between spaces, its rules in place (2026-11-26)
 
 - Every table Kazma keeps on Postgres now has a rule for Spaces' second lock:
