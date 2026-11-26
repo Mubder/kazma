@@ -9,6 +9,9 @@ from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "common.send": {"en": "Send", "ar": "إرسال"},
+    # A refusal of Kazma's own that carries no sentence (errors.refusal_message:
+    # never expected, every class a route answers keeps one).
+    "common.request_refused": {"en": "The request was refused.", "ar": "رُفض الطلب."},
     # The header's space switcher (space_scope.js, Spaces S1-06).
     "spaces.switcher": {"en": "Space", "ar": "المساحة"},
     "spaces.personal": {"en": "My space", "ar": "مساحتي"},

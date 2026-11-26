@@ -17,10 +17,13 @@ dismissed on GitHub: that is the owner's.
 | Verdict | Alerts | What happens on GitHub |
 |---|---|---|
 | Fixed in the code | 11 | closes at the next analysis of `main` |
-| False positive, its source removed | 88 | closes at the next analysis of `main` (see below) |
+| False positive, its source removed | 90 | closes at the next analysis of `main` (see below) |
 | False positive, hardened | 1 | closes at the next analysis of `main` |
-| False positive | 33 | stays open: the owner dismisses it, with the reason in the table |
+| False positive | 31 | stays open: the owner dismisses it, with the reason in the table |
 | Owner's decision | 2 | Scorecard: repository settings, not code |
+
+One alert outside the 135 was dismissed earlier and is real: #53, fixed
+here (below). The owner reopens it.
 
 **No log line among the 101 logging alerts prints a secret.** Each one
 prints an account id, a space id, a key's id, a count, a role, a model's or
@@ -63,9 +66,13 @@ The fix is at the source. The fallback returns the vault's answer without
 naming it. A secret is still named where it is read: by its key
 (`cfg.get("x.api_key")` is a source to CodeQL by its literal key) or by the
 variable that holds it. `tests/test_codeql_triage_2026_11_26.py` reads every
-function on `ConfigStore.get`'s value path with CodeQL's own name heuristics
-and fails if one binds a value to a secret's name. The old line is its
-control. These 88 close at the next analysis. If one does not (another
+function a setting's value comes back through with CodeQL's own name
+heuristics: from `ConfigStore.get`, `get_all`, `get_category` and
+`snapshot`, through the raw reads (`_sqlite_get_raw`, `_pg_get_raw`) and
+into the vault (`retrieve_scoped`, `SecretVault.retrieve`, `_open_row`,
+the decryption). It fails if one binds a value to a secret's name. The old
+line is one control; the same binding planted in the vault's row
+decryption is the other. These 88 close at the next analysis. If one does not (another
 source CodeQL did not list), the table's reason is the dismissal.
 
 The other 13 come from sources that are names, not values. The table says
@@ -75,7 +82,8 @@ which for each:
   keys);
 - an API token's role (`_api_token_entry()`);
 - the manifest key `"secrets"`, a count;
-- a test's variable named `secret`;
+- a test's variable named `secret` (#515, #516; renamed, so these two close
+  as well);
 - the Postgres app password, which reaches only a refusal sentence
   `_word_refusal` already words or masks.
 
@@ -89,9 +97,11 @@ There are no traversal gaps.
 
 - **Admin-only folder choices (12).** The backup folder's Test and Browse,
   and the workspace's select and create. `/api/settings` is admin only, and
-  the workspace writes are in `_ADMIN_WRITE_PREFIXES`. Choosing a folder of
-  this computer is the feature. Device and network paths are refused on
-  their text before anything resolves them.
+  the workspace writes are in `_ADMIN_WRITE_PREFIXES`. The admin choosing a
+  folder is the feature. Device paths are refused on their text before
+  anything resolves them. The backup folder may be a network share, by
+  design (a copy on another machine survives this one); the workspace
+  refuses a network path on its text.
 - **The path policy itself (6).** `is_kazma_store`, `in_another_spaces_folder`,
   `path_under_root`, `check_path_access` and `tool_path_or_reason` resolve
   the path they are asked about to decide about it: the sink is the
@@ -111,8 +121,8 @@ whose workspace is the install folder that includes `.env`. Any signed-in
 operator could call the request (an API token, a Spaces member); a tool
 argument or a chat message could not.
 
-**Real, fixed** by the commit that adds
-`tests/test_ide_reads_refuse_kazma_files.py`. `resolve` now refuses Kazma's
+**Real, fixed** by `1ce495e51`
+(`tests/test_ide_reads_refuse_kazma_files.py`). `resolve` now refuses Kazma's
 stores and secret files inside the workspace too (`is_kazma_store`). The
 same predicate now guards the IDE MCP server's `read_file` and
 `search_code` and the TUI's file preview. The test is a census of every
@@ -188,9 +198,9 @@ moving to pull requests. This triage changes no repository setting.
 
 ## What the owner does
 
-1. After the fixes reach `main`, the next CodeQL analysis closes 100 alerts
-   (88 + 11 + 1).
-2. Dismiss the 33 marked "False positive" with the reason in the table
+1. After the fixes reach `main`, the next CodeQL analysis closes 102 alerts
+   (90 + 11 + 1).
+2. Dismiss the 31 marked "False positive" with the reason in the table
    (GitHub: "False positive").
 3. Decide #481 and #506.
 4. Reopen #53 (dismissed earlier; real, fixed: see above).
@@ -297,16 +307,16 @@ moving to pull requests. This triage changes no repository setting.
 | 617 | clear-text logging | `ui/app.py:372` | FP, source removed | the same sentence on stderr |
 | 596 | clear-text logging | `ui/auth.py:1527` | False positive | an API token's role (`viewer`, `operator`, `admin`); sources: `_api_token_entry()` and `_api_token_role()`, which CodeQL reads as tokens by their names |
 | 511 | clear-text logging | `ui/auth.py:1534` | False positive | the same role |
-| 516 | clear-text logging | `ui/session_manager.py:821` | False positive | a chat session id (not the web sign-in cookie, section 66); the only source is a test's variable named `secret` (`tests/test_attached_text_fenced.py:110`) |
-| 515 | clear-text logging | `ui/session_spool.py:123` | False positive | a chat session id; the same test source |
+| 516 | clear-text logging | `ui/session_manager.py:821` | FP, source removed | a chat session id (not the web sign-in cookie, section 66); its only source was a test's variable named `secret` (`tests/test_attached_text_fenced.py:110`), now `name_in_file` |
+| 515 | clear-text logging | `ui/session_spool.py:123` | FP, source removed | a chat session id; the same test variable, renamed |
 | 590 | clear-text logging | `scripts/scan_old_sessions.py:388` | FP, source removed | a provider's name (a maintenance script) |
-| 539 | path injection | `core/backup/folder_copy.py:250` | False positive | Settings -> Backup folder, Test: admin only (`platform_rbac`, `/api/settings`). Any folder of this computer is the feature; `path_problem` refuses device paths, relative paths and the data folder, before anything opens it |
-| 540 | path injection | `core/backup/folder_copy.py:252` | False positive | the same test (the folder's drive) |
-| 541 | path injection | `core/backup/folder_copy.py:255` | False positive | the same test (making the chosen folder) |
-| 542 | path injection | `core/backup/folder_copy.py:261` | False positive | the same test (its probe file, `.kazma-write-test-<random>`) |
-| 543 | path injection | `core/backup/folder_copy.py:262` | False positive | the same test (reading the probe back) |
-| 544 | path injection | `core/backup/folder_copy.py:268` | False positive | the same test (removing the probe) |
-| 545 | path injection | `core/backup/folder_copy.py:274` | False positive | the same test (the free room) |
+| 539 | path injection | `core/backup/folder_copy.py:250` | False positive | Settings -> Backup folder, Test: admin only (`platform_rbac`, `/api/settings`); a share is allowed by design. The admin chooses the folder, a network share included (`\\server\share`); `path_problem` refuses device paths, relative paths and the data folder on the text, before anything opens it |
+| 540 | path injection | `core/backup/folder_copy.py:252` | False positive | Backup folder Test, the folder's drive: admin only; a share is allowed by design |
+| 541 | path injection | `core/backup/folder_copy.py:255` | False positive | Backup folder Test, making the chosen folder: admin only; a share is allowed by design |
+| 542 | path injection | `core/backup/folder_copy.py:261` | False positive | Backup folder Test, its probe file, `.kazma-write-test-<random>`: admin only; a share is allowed by design |
+| 543 | path injection | `core/backup/folder_copy.py:262` | False positive | Backup folder Test, reading the probe back: admin only; a share is allowed by design |
+| 544 | path injection | `core/backup/folder_copy.py:268` | False positive | Backup folder Test, removing the probe: admin only; a share is allowed by design |
+| 545 | path injection | `core/backup/folder_copy.py:274` | False positive | Backup folder Test, the free room: admin only; a share is allowed by design |
 | 546 | path injection | `core/backup/folder_copy.py:307` | False positive | Settings -> Backup folder, Browse: admin only; a network path is refused before it is listed, the rest is the folder picker |
 | 547 | path injection | `core/backup/folder_copy.py:311` | False positive | the same browse (listing the folder) |
 | 654 | path injection | `core/db/sqlite_snapshot.py:36` | Fixed | memory restore: the copy is now made from `memory_backup_path`, the name rebuilt from its timestamp (it was validated before: admin only, no separators, `relative_to` the backups folder) |
@@ -317,8 +327,8 @@ moving to pull requests. This triage changes no repository setting.
 | 657 | path injection | `core/store_registry.py:1788` | False positive | `in_another_spaces_folder`, the same predicate's space rule |
 | 531 | path injection | `core/stores/workspaces.py:308` | False positive | Workspace select / create: admin only (`platform_rbac._ADMIN_WRITE_PREFIXES`), a network path refused on its text, `root_policy.validate_root`; the folder chosen becomes the workspace by design |
 | 651 | path injection | `core/workspace/binding.py:238` | False positive | `binding.tool_path_or_reason`, where every tool path is resolved before the policy decides; network and drive-relative paths refused on the text first. Sources: the IDE's LSP request and the checkpoint restore, which writes only a file the checkpoint holds and `check_path_access` allows |
-| 574 | path injection | `core/workspace/folder_identity.py:41` | False positive | the backup folder test's same-disk check (`_identity`): admin only, the folder the admin chose |
-| 575 | path injection | `core/workspace/folder_identity.py:58` | False positive | the same check |
+| 574 | path injection | `core/workspace/folder_identity.py:41` | False positive | the backup folder test's same-disk check (`_identity`): admin only; a share is allowed by design |
+| 575 | path injection | `core/workspace/folder_identity.py:58` | False positive | the backup folder test's same-disk check: admin only; a share is allowed by design |
 | 653 | path injection | `core/workspace/path_grants.py:55` | False positive | `path_grants.path_under_root`: the containment check itself |
 | 652 | path injection | `core/workspace/path_policy.py:437` | False positive | `path_policy._space_disk_refusal` / `check_path_access`: the path policy itself |
 | 603 | stack-trace exposure | `ui/chat_links_api.py:163` | Fixed | chat links: `LinkRefused` answered through `errors.refusal_message` (its `message` field) |

@@ -224,9 +224,21 @@ def validation_error(exc: BaseException, *, max_chars: int = _MAX_VERBOSE_CHARS)
     return text[:max_chars]
 
 
-#: What a refusal with no sentence of its own answers (never expected: every
-#: class a route answers this way carries one, see :func:`refusal_message`).
-_REFUSED = "The request was refused."
+#: The catalog key a refusal with no sentence of its own answers (never
+#: expected: every class a route answers this way carries one, see
+#: :func:`refusal_message`); worded in English and Arabic.
+REFUSED_KEY = "common.request_refused"
+
+
+def _refused_sentence() -> str:
+    """:data:`REFUSED_KEY` in the reader's language. A route asks this from a
+    request, where the UI's catalog is loaded; anywhere else the key itself
+    is the answer, a code a page can word."""
+    try:
+        from kazma_ui.i18n import current_language, t
+    except ImportError:
+        return REFUSED_KEY
+    return t(REFUSED_KEY, current_language())
 
 
 def refusal_message(exc: BaseException, *, max_chars: int = _MAX_VERBOSE_CHARS) -> str:
@@ -241,15 +253,16 @@ def refusal_message(exc: BaseException, *, max_chars: int = _MAX_VERBOSE_CHARS) 
     A route that answers a typed refusal (``PeopleRefused``, ``LinkRefused``,
     ``SpaceMoveRefused``...) uses this; ``tests/test_codeql_triage_2026_11_26.py``
     holds every class a route passes here to carrying the field. One without
-    it answers :data:`_REFUSED`, said at WARNING.
+    it answers the catalog's :data:`REFUSED_KEY` in the reader's language,
+    said at WARNING.
     """
     message = getattr(exc, "message", None)
     if not isinstance(message, str):
         logger.warning("[errors] %s carries no message field: the page was told only that it was refused",
                        type(exc).__name__)
-        return _REFUSED
+        return _refused_sentence()
     text = _REDACT.sub("<redacted>", message).strip()
-    return text[:max_chars] if text else _REFUSED
+    return text[:max_chars] if text else _refused_sentence()
 
 
 def error_payload(exc: BaseException, **extra: Any) -> dict[str, Any]:

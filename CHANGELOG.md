@@ -26,8 +26,11 @@
   and was dismissed; the owner reopens it.
 - **Smaller ones**: a memory backup to restore is found by its timestamp
   (a name with Unicode digits passed before); X's sign-in refusal comes
-  back to Settings as a word the page has, in English and Arabic; a sealed
-  zip's entries are tested never to share a keystream.
+  back to Settings as a word the page has, in English and Arabic, and an
+  outage at X says X could not be reached; a sealed zip's entries are
+  tested never to share a keystream. Documents, a document's move and a
+  Knowledge URL answer their refusal's sentence too, and a refusal with no
+  sentence is answered in the reader's language.
 
 ## Kazma reaches its database when Windows refuses psycopg's library (2026-11-26)
 

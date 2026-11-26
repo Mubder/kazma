@@ -635,20 +635,31 @@ def x_disconnect() -> JSONResponse:
 #: characters only, never a space or a control character.
 _X_TOKEN_TEXT = re.compile(r"[A-Za-z0-9%._~+/=:-]{8,2048}")
 
-#: X's OAuth 2.0 refusals Settings -> X words (``settings.xapi.err.*``, EN and
-#: AR). The callback sends one of these back to the page, or "refused" for
-#: any other: Kazma's own word, never the text the request carried.
-_X_SIGN_IN_ERRORS = ("access_denied", "invalid_scope", "invalid_request")
+#: X's OAuth 2.0 refusal codes (RFC 6749 4.1.2.1) and the word Settings -> X
+#: shows for each (``settings.xapi.err.<word>``, EN and AR). X's outage codes
+#: say X could not answer, not that the client is wrong: they are
+#: ``unreachable``. The callback sends one of these words back to the page,
+#: or "refused" for any other code: Kazma's own word, never the text the
+#: request carried.
+_X_SIGN_IN_ERRORS: dict[str, str] = {
+    "access_denied": "access_denied",
+    "invalid_scope": "invalid_scope",
+    "invalid_request": "invalid_request",
+    "server_error": "unreachable",
+    "temporarily_unavailable": "unreachable",
+}
+
+#: Every word the callback can send the page (each worded in the catalog).
+_X_SIGN_IN_WORDS = (*dict.fromkeys(_X_SIGN_IN_ERRORS.values()), "refused", "missing_code")
 
 
 def _sign_in_error_word(error: str | None) -> str:
     """The word the page is sent for X's refusal *error*: ``missing_code``
-    when X named none, the matching word of :data:`_X_SIGN_IN_ERRORS`, else
-    ``refused``. The word returned is always one of Kazma's constants."""
+    when X named none, the word :data:`_X_SIGN_IN_ERRORS` gives X's code,
+    else ``refused``. The word returned is always one of Kazma's constants."""
     if not error:
         return "missing_code"
-    given = error.strip().lower()
-    return next((word for word in _X_SIGN_IN_ERRORS if word == given), "refused")
+    return _X_SIGN_IN_ERRORS.get(error.strip().lower(), "refused")
 
 
 class _XApiAccessBody(BaseModel):

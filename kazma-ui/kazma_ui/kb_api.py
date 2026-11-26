@@ -62,7 +62,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from kazma_core.background import spawn_background
-from kazma_core.errors import safe_error, validation_error
+from kazma_core.errors import refusal_message, safe_error, validation_error
 from kazma_core.playwright_loop import finish_owned
 from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
@@ -399,7 +399,7 @@ def create_kb_router() -> APIRouter:
         except KnowledgeStorageFull as exc:  # the library ceiling (KB-Q01)
             return _capacity_refusal(lib_id, exc)
         except KnowledgeUrlRefused as exc:
-            return _fail("url_refused", validation_error(exc), 422)
+            return _fail("url_refused", refusal_message(exc), 422)
         except ValueError as exc:
             return _fail("invalid_request", validation_error(exc), 422)
         except Exception as exc:
@@ -457,7 +457,7 @@ def create_kb_router() -> APIRouter:
                 return _not_found()
             return {"ok": True, "library": lib}
         except KnowledgeUrlRefused as exc:
-            return _fail("url_refused", validation_error(exc), 422)
+            return _fail("url_refused", refusal_message(exc), 422)
         except ValueError as exc:
             return _fail("invalid_request", validation_error(exc), 422)
         except Exception as exc:

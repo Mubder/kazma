@@ -65,7 +65,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import ClientDisconnect
 from kazma_core.diagnostic_scope import read_only_diagnostic
 from kazma_core.documents.errors import DocumentPolicyError
-from kazma_core.errors import safe_error, validation_error
+from kazma_core.errors import refusal_message, safe_error
 
 from kazma_ui.error_envelope import http_envelope, validation_envelope
 from kazma_ui.rate_limit import rate_limit
@@ -136,7 +136,7 @@ async def _resolve_scope(request: Request) -> tuple[str, str, str]:
         return await asyncio.to_thread(_scope_and_workspace)
     except DocumentsRefused as exc:
         raise HTTPException(
-            status_code=403, detail={"error": validation_error(exc), "code": "documents_refused"},
+            status_code=403, detail={"error": refusal_message(exc), "code": "documents_refused"},
         ) from exc
 
 
@@ -576,7 +576,7 @@ def create_documents_router() -> APIRouter:
             )
             return {"ok": True, **moved}
         except MoveRefused as exc:
-            return _coded_error(exc.code, validation_error(exc), default=exc.status)
+            return _coded_error(exc.code, refusal_message(exc), default=exc.status)
         except IdentityUnavailable:
             return _coded_error("identity_unavailable", "Accounts cannot be read right now. Try again.",
                                 default=503)
