@@ -61,8 +61,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Meaning search was unavailable: keyword matches only.",
     },
     "memory.console.mirror_unread": {
-        "ar": "تعذّرت قراءة ذكريات نسخ Kazma الأخرى الآن، وقد بُحث في ذكريات هذه النسخة كلها.",
-        "en": "Memories from other Kazma installs could not be read just now; this install's own were all searched.",
+        "ar": "تعذّرت الآن قراءة ذكريات تثبيتات Kazma الأخرى.",
+        "en": "Memories from other Kazma installs could not be read just now.",
+    },
+    "memory.console.mirror_unread_whole": {
+        "ar": "وقد بُحث في ذكريات هذا التثبيت كلها.",
+        "en": "This install's own memories were all searched.",
     },
     "memory.console.memory_search_failed": {
         "ar": "تعذّر البحث في الذاكرة: هذه ليست نتيجة فارغة.",

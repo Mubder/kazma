@@ -45,10 +45,13 @@ an answer ("User prefers dark mode").
   answer and says so in its own field, `RecallResult.mirror_unread`, never
   `degraded` (0b delta review L-a, §44; recall-strict review M1, L1). A top-up
   works on copies, so one that fails half way keeps none of its rows (L2).
-  The explicit searches say it (the memory tool, the Memory page's probe and
-  search, EN and AR, beside the hits or "no hits"); the per-turn note and
-  the quality page do not: this install's memories were searched in full,
-  and the outage is said where it is. Gate: every reader of `degraded` and
+  The memory tool and the Memory page's probe and search say it (EN and AR,
+  beside the hits or "no hits"; "searched in full" only when meaning search
+  did not fall short too); the per-turn note and the quality page do not:
+  this install's memories were searched, and the outage is said where it
+  is. The TUI's memory panel and `GET /api/memory/graph/search` read
+  `search_with_status`, whose two values carry `degraded` only: they do not
+  say it yet. Gate: every reader of `degraded` and
   of `mirror_unread` is declared, no writer puts the mirror into `degraded`,
   and every Memory page banner site shows it, each with a planted control
   (`tests/test_recall_mirror_reads.py`). Once the second lock is armed

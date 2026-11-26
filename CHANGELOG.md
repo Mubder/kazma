@@ -27,7 +27,8 @@
   the Memory page say, calmly and in both languages, that memories from
   other Kazma installs could not be read just now. It is never called
   "keyword matches only", the note to the model on each turn leaves it out,
-  and it pages nobody: the database's own alert already says the outage.
+  and it pages nobody: the outage is said where it happens (and by the
+  database's own alert when the copy is in Kazma's own database).
 
 ## Kazma reaches its database when Windows refuses psycopg's library (2026-11-26)
 

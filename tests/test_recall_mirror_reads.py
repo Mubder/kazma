@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from kazma_core.memory.recall import MIRROR_UNREAD, recall
+from kazma_core.memory.recall import MIRROR_UNREAD, MIRROR_UNREAD_LOCAL_WHOLE, recall
 from kazma_core.memory.schema_v2 import ensure_primary_schema
 
 DIM = 8
@@ -308,6 +308,8 @@ def test_the_memory_tool_says_what_an_unread_mirror_lacks(local: sqlite3.Connect
     out = _memory_search(QUESTION)
     assert ("keyword matches only" in out) is words_only, out
     assert (MIRROR_UNREAD[1:] in out) is mirror_unread and "e_local" in out, out
+    # "Searched in full" only when it was (delta review Low 1).
+    assert (MIRROR_UNREAD_LOCAL_WHOLE in out) is (mirror_unread and degraded is None), out
 
 
 @pytest.mark.parametrize("mirror_unread", [True, False])
@@ -435,12 +437,28 @@ def _uses(sources: dict[str, str]) -> tuple[dict[str, set[str]], list[str]]:
                         mirror_writes.append(where())
                 self.generic_visit(node)
 
+            def _write(self, target: ast.AST, value: ast.AST | None) -> None:
+                # .degraded, ["degraded"], or a name that holds one
+                # (memory_degraded: the delta review's Low 2).
+                named = (isinstance(target, ast.Attribute) and target.attr == "degraded") or (
+                    isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant)
+                    and target.slice.value == "degraded") or (
+                    isinstance(target, ast.Name) and target.id.endswith("degraded"))
+                if named and value is not None and names_mirror(value):
+                    mirror_writes.append(where())
+
             def visit_Assign(self, node: ast.Assign) -> None:
                 for target in node.targets:
-                    named = (isinstance(target, ast.Attribute) and target.attr == "degraded") or (
-                        isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant)
-                        and target.slice.value == "degraded")
-                    if named and names_mirror(node.value):
+                    self._write(target, node.value)
+                self.generic_visit(node)
+
+            def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+                self._write(node.target, node.value)
+                self.generic_visit(node)
+
+            def visit_Dict(self, node: ast.Dict) -> None:
+                for key, value in zip(node.keys, node.values, strict=True):
+                    if isinstance(key, ast.Constant) and key.value == "degraded" and names_mirror(value):
                         mirror_writes.append(where())
                 self.generic_visit(node)
 
@@ -469,6 +487,21 @@ def test_the_gate_sees_a_new_reader_and_a_mirror_written_into_degraded() -> None
     readers, mirror_writes = _uses(planted)
     assert readers["degraded"] == {"kazma-core/kazma_core/planted.py::show"}
     assert mirror_writes == ["kazma-core/kazma_core/planted.py::mark", "kazma-core/kazma_core/planted.py::mark"]
+    # The shapes federated search would use (delta review Low 2): a name
+    # ending in degraded, and the answer's "degraded" key.
+    shapes = {"kazma-core/kazma_core/planted.py": (
+        "def page(result):\n"
+        "    memory_degraded: str | None = result.degraded or (MIRROR_UNREAD if result.mirror_unread else None)\n"
+        "    memory_degraded = result.degraded or (MIRROR_UNREAD if result.mirror_unread else None)\n"
+        "    return {\"degraded\": result.degraded or (MIRROR_UNREAD if result.mirror_unread else None)}\n")}
+    assert _uses(shapes)[1] == ["kazma-core/kazma_core/planted.py::page"] * 3
+    # Their controls: the same shapes that keep the mirror out.
+    clean = {"kazma-core/kazma_core/planted.py": (
+        "def page(result):\n"
+        "    memory_degraded = result.degraded\n"
+        "    mirror_unread = bool(result.mirror_unread)\n"
+        "    return {\"degraded\": memory_degraded, \"mirror_unread\": mirror_unread}\n")}
+    assert _uses(clean)[1] == []
 
 
 _PAGE = ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "memory_console.js"
@@ -478,7 +511,7 @@ def _banner_sites(js: str) -> tuple[int, int]:
     """Where the page shows a memory search's degraded banner, and where it
     shows the mirror's note."""
     return (len(re.findall(r"_memoryDegradedBanner\(data\.degraded\)", js)),
-            len(re.findall(r"data\.mirror_unread \? _mirrorUnreadBanner\(\)", js)))
+            len(re.findall(r"data\.mirror_unread \? _mirrorUnreadBanner\(!data\.degraded\)", js)))
 
 
 def test_every_memory_banner_on_the_page_says_the_mirror_too() -> None:

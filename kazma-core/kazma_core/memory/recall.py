@@ -153,11 +153,15 @@ class RecallResult:
 RECALL_FAILED = "recall_failed:"
 
 #: What an explicit search (the memory tool) says when
-#: ``RecallResult.mirror_unread``: this install's own memories are whole,
-#: other installs' were not asked (§44: said, never read as "nothing more
-#: found"). A refusal is no outage: that recall fails (Spaces S4-01).
+#: ``RecallResult.mirror_unread``: other installs' memories were not asked
+#: (§44: said, never read as "nothing more found"). A refusal is no outage:
+#: that recall fails (Spaces S4-01).
 MIRROR_UNREAD = ("memories other Kazma installs wrote could not be read just now (the Postgres mirror "
-                 "did not answer); this install's own memories were searched in full")
+                 "did not answer)")
+#: Said after :data:`MIRROR_UNREAD` only when meaning search did not fall
+#: short (``degraded`` is None): then this install's search was whole
+#: (recall-strict delta review Low 1).
+MIRROR_UNREAD_LOCAL_WHOLE = "this install's own memories were searched in full"
 
 
 def _failed_recall(code: str) -> RecallResult:
