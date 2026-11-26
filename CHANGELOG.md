@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## The regex sweep holds on a slow runner, and the DOCX font pattern reads each tag once (2026-11-27)
+
+- **A Word file's font table is read in linear time**: the pattern that takes
+  out a font's old embeds read to the end of the text from every
+  `<w:embed…` when no `>` followed, so a crafted file's time grew with the
+  square of its size. It now stops at the next tag, and removes exactly what
+  it did from well-formed XML.
+- **The regex sweep's verdicts no longer depend on the machine**: the secret
+  scanner's pattern is linear (every repeat bounded) but heavy, and its
+  inputs ran out the sweep's clock on CI's slower runners; it is declared
+  with the measurement. A planted slow pattern that runs out the clock now
+  counts as caught.
+
 ## Spaces: the database's own lock between spaces, wired and tried (2026-11-26)
 
 - Kazma's connection to its own Postgres can now hold each space to its own
