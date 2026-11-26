@@ -552,14 +552,32 @@ def _chosen_context(engine: object) -> str | None:
 #: :func:`apply_engine_choice` last saw it.
 _engine_choice = ""
 
+#: Set by :func:`apply_engine_choice` for the processes Kazma starts when
+#: Kazma's own engine is the choice and the Windows CLI has no
+#: ``kazma-engine`` context to carry it in ``DOCKER_CONTEXT``: a copy of this
+#: file that never applies the choice itself (the guard's document broker,
+#: loaded by path) then reaches the engine through wsl.exe as its parent
+#: does. A variable of its own, not ``KAZMA_DOCKER_ROUTE=wsl``, which would
+#: also send calls meant for Docker Desktop to Kazma's distro (review M-a,
+#: 2026-11-27). Kazma sets and clears it; it is not an operator setting.
+ENGINE_BY_CHOICE_ENV = "KAZMA_DOCKER_ENGINE_BY_CHOICE"
+
+
+def _choice_in_force() -> str:
+    """This process's own applied choice, else the one its parent exported."""
+    if _choice_applied:
+        return _engine_choice
+    return normalize_engine(os.environ.get(ENGINE_BY_CHOICE_ENV))
+
 
 def _kazma_by_choice() -> bool:
     """Kazma's own engine is the stored choice and its distro is registered,
     with no engine of the operator's own in the way: it is reached through
     wsl.exe whether or not the Windows CLI's ``kazma-engine`` context exists
     (only the Windows docker.exe creates that, and Windows may refuse it:
-    review M4, 2026-11-26)."""
-    if _engine_choice != "kazma" or not _on_windows() or os.environ.get("DOCKER_HOST"):
+    review M4, 2026-11-26). A process that has not applied the choice takes
+    its parent's (:data:`ENGINE_BY_CHOICE_ENV`, review M-a)."""
+    if _choice_in_force() != "kazma" or not _on_windows() or os.environ.get("DOCKER_HOST"):
         return False
     pinned = (os.environ.get("DOCKER_CONTEXT") or "").strip()
     if pinned and pinned != KAZMA_CONTEXT:
@@ -569,6 +587,8 @@ def _kazma_by_choice() -> bool:
 
 #: The DOCKER_CONTEXT this module set; one the operator set is never changed.
 _applied: str | None = None
+#: Whether the last applied choice is Kazma's engine reached through wsl.exe.
+_applied_by_wsl = False
 _apply_lock = threading.Lock()
 #: Whether this process has applied the stored choice (see find_docker_cli).
 _choice_applied = False
@@ -579,24 +599,32 @@ def apply_engine_choice(engine: object) -> str | None:
     docker call it starts (children inherit it, the document broker's
     included). Returns the context in force (None: the CLI's current one).
     The operator's own ``DOCKER_CONTEXT`` or ``DOCKER_HOST`` is left alone."""
-    global _applied, _choice_applied, _engine_choice
+    global _applied, _applied_by_wsl, _choice_applied, _engine_choice
     with _apply_lock:
         _choice_applied = True
         _engine_choice = normalize_engine(engine)
         current = os.environ.get("DOCKER_CONTEXT")
         if os.environ.get("DOCKER_HOST") or (current and current != _applied):
+            os.environ.pop(ENGINE_BY_CHOICE_ENV, None)  # the operator's engine, for children too
             return current or None
         wanted = _chosen_context(engine)
         if wanted:
             os.environ["DOCKER_CONTEXT"] = wanted
         else:
             os.environ.pop("DOCKER_CONTEXT", None)
-        if wanted != _applied:
+        by_wsl = wanted is None and _kazma_by_choice()
+        if by_wsl:
+            os.environ[ENGINE_BY_CHOICE_ENV] = "kazma"
+        else:
+            os.environ.pop(ENGINE_BY_CHOICE_ENV, None)
+        if (wanted, by_wsl) != (_applied, _applied_by_wsl):
             logger.info("[docker] Kazma's container engine: %s",
+                        "Kazma's own, through Microsoft's wsl.exe (no Windows docker context needed)"
+                        if by_wsl else
                         {KAZMA_CONTEXT: "Kazma's own (the kazma-engine context)",
                          DESKTOP_CONTEXT: "Docker Desktop"}.get(wanted or "",
                                                                 "the docker CLI's current context"))
-        _applied = wanted
+        _applied, _applied_by_wsl = wanted, by_wsl
         return wanted
 
 
@@ -737,21 +765,59 @@ def _cross(arg: str, before: str | None) -> str | None:
     return arg
 
 
+#: Options of ``docker run``/``create``/``exec`` that take no value. Any other
+#: option is read as taking one: a wrong guess then keeps translating (the
+#: older behaviour), never stops before a mount that needs it.
+_NO_VALUE_FLAGS = frozenset({"--rm", "-i", "-t", "-d", "--interactive", "--tty", "--detach", "--init",
+                             "--privileged", "--read-only", "-P", "--publish-all", "--no-healthcheck",
+                             "--oom-kill-disable", "-q", "--quiet", "--disable-content-trust", "--sig-proxy"})
+
+
+def _program_start(args: Sequence[str]) -> int | None:
+    """Where the container program's own arguments begin in a ``run``,
+    ``create`` or ``exec`` call: at the image or the container, past
+    docker's options. None for any other call."""
+    i = 0
+    if args[:1] == ["container"]:
+        i = 1
+    if i >= len(args) or args[i] not in ("run", "create", "exec"):
+        return None
+    i += 1
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            return i + 1
+        if not arg.startswith("-"):
+            return i
+        flags = arg[1:] if not arg.startswith("--") else ""
+        if (arg in _NO_VALUE_FLAGS or (arg.startswith("--") and "=" in arg)
+                or (len(flags) > 1 and all(f"-{c}" in _NO_VALUE_FLAGS for c in flags))):
+            i += 1
+        else:
+            i += 2
+    return None
+
+
 def _cross_args(args: Sequence[str]) -> list[str] | None:
     """*args* with docker's own paths as the distro reads them, or None when
     one names a place the distro cannot reach (the Windows CLI then).
 
     Only the values of docker's own path options, a build's context and a
     cp's host side are translated; the container program's own arguments
-    are left as the caller wrote them (review L6, 2026-11-26)."""
+    (from the image or container of a run, create or exec on) are left as
+    the caller wrote them (review L6, 2026-11-26; L-1, 2026-11-27)."""
     path_options = frozenset({"-v", "--volume", "--mount", "--env-file", "-f", "--file", "--iidfile",
                               "--cidfile", "--label-file", "--project-directory", "--config"})
     words = [a for a in args if not a.startswith("-")]
     command = words[0] if words else ""
     positional_paths = command in ("build", "cp") or (command in ("buildx", "image") and "build" in words[:2])
+    program = _program_start(list(args))
     out: list[str] = []
     before: str | None = None
-    for arg in args:
+    for index, arg in enumerate(args):
+        if program is not None and index >= program:
+            out.extend(args[index:])
+            break
         name = arg.split("=", 1)[0] if arg.startswith("--") else ""
         if (before in path_options or name in path_options
                 or (positional_paths and not arg.startswith("-") and before not in ("-t", "--tag"))):

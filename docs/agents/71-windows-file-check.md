@@ -136,17 +136,25 @@ exceptions; a user cannot be asked to turn a protection off.
   shutdown helper, built by `csc.exe` on the PC, is planned as a signed
   release asset (`docs/plans/WINDOWS_TRUST_PLAN.md`).
 - **A new Windows install runs on a signed interpreter** (2026-11-26):
-  `setup.ps1` `Find-SignedPython` takes a python.org Python 3.12, 3.13,
-  3.14 or 3.11 (>= 3.11.5) whose `python.exe` reads Valid, signed by the
-  Python Software Foundation (the `py` launcher, then the per-user and
-  Program Files folders), installs `Python.Python.3.12` with winget when
-  none is there, and passes it to `uv sync --python` for a new `.venv` only;
-  an environment that is there keeps its interpreter. Measured: python.org
-  3.14 has no unsigned interpreter file outside Tcl/Tk (never loaded); uv's
-  3.12 build 41 of 49. Gate: `tests/test_setup_signed_python.py` (the
-  function run in PowerShell: a python.org interpreter chosen, uv's build
-  passed over as the control). Every file and its route:
-  `docs/plans/WINDOWS_TRUST_INVENTORY.md`.
+  `setup.ps1` `Find-SignedPython` takes the newest python.org Python
+  (>= 3.11.5, < 3.15) whose `python.exe` reads Valid, signed by the Python
+  Software Foundation, wherever it was found (the `py` launcher, its probes
+  with `PYTHON_MANAGER_AUTOMATIC_INSTALL=false` so a probe never installs;
+  the per-user and Program Files folders): 3.14, then 3.13; 3.12 and 3.11
+  only when nothing newer is there, as python.org ships no patched Windows
+  build of them any more (review M-b, L-7, 2026-11-27). With none,
+  `Install-SignedPython` installs the pinned `Python.Python.3.14`
+  (`$PythonWingetVersion`) with winget only with the owner's yes: `-Yes`
+  installs, a person at the terminal is asked once, with nobody to ask
+  nothing is installed and setup says so; a failure says winget's exit code
+  and last line (M-c). The interpreter goes to `uv sync --python` for a new
+  `.venv` only; an environment that is there keeps its interpreter.
+  Measured: python.org 3.14 has no unsigned interpreter file outside Tcl/Tk
+  (never loaded); uv's 3.12 build 41 of 49. Gate:
+  `tests/test_setup_signed_python.py` (the functions run in PowerShell: a
+  python.org interpreter chosen, uv's build passed over; the newest wins,
+  3.12 only alone; each winget rule with stand-ins). Every file and its
+  route: `docs/plans/WINDOWS_TRUST_INVENTORY.md`.
 - **The review's fixes (2026-11-26)**: a docker call is recognised by
   `docker_cli.is_docker_exec` (the word after the route's own prefix), never
   by `"docker"` in argv[0] -- on the wsl.exe route argv[0] is `wsl.exe`, and
@@ -164,7 +172,9 @@ exceptions; a user cannot be asked to turn a protection off.
   timed-out code-exec container has a name and is killed by it (L1);
   `WSL_UTF8=1` on the route (L2); the guard asks the wsl.exe route first, so
   a wsl timeout is an engine that does not answer, never a refused CLI (L3);
-  `KAZMA_DOCKER_ROUTE` reaches the broker (L4); an explicit non-Kazma context
+  `KAZMA_DOCKER_ROUTE` reaches the broker (L4; a gate compares every
+  variable `docker_cli.py` reads with `_BROKER_ENV_KEEP`, L-9); an explicit
+  non-Kazma context
   always takes the CLI (L5); only docker's own path options are translated
   (`_cross_args`, L6); the preflight's detail is masked by value in the
   child (URL passwords and tokens) and again in the guard (the token table,
@@ -174,6 +184,21 @@ exceptions; a user cannot be asked to turn a protection off.
   (`run(["kazma", ...])`, `which("kazma-tui")`, a script line `kazma serve`;
   L10). `kazma update` (L8) and `--when-idle`'s window (L11) are in the VM
   test notes.
+- **The delta review (2026-11-27)**: a process that loads `docker_cli.py` by
+  path and never applies the choice (the guard's document broker) takes its
+  parent's from `KAZMA_DOCKER_ENGINE_BY_CHOICE` (set by
+  `apply_engine_choice` when Kazma's engine is chosen and reached through
+  wsl.exe with no Windows context, cleared otherwise; kept for the broker),
+  never from `KAZMA_DOCKER_ROUTE=wsl`, which would send Docker Desktop's
+  calls to Kazma's distro (M-a). The docker tool and compose read
+  `not_needed` on that route, with their own EN/AR words, and are not
+  started to be judged (L-2, L-4). Docker's own path options only, up to
+  the image or the container of a run, create or exec (`_program_start`,
+  L-1); readiness's probe runs with the route's entries (L-3); the page of a
+  deploy that waits says what a start without the check would do (L-5); the
+  installer answer depends on Smart App Control (L-6); the launcher gate
+  finds `args=`, shell strings, `cmd /c`, `.cmd` `call`/`start` and `.ps1`
+  blocks (L-8).
 - **User page**: `docs/docs/guide/windows-smart-app-control.md` and its
   Arabic text `windows-smart-app-control-ar.md` (the site's
   `ar/windows-smart-app-control`). The plan it states: signed releases (a

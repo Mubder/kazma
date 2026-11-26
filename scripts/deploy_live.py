@@ -446,9 +446,14 @@ def deploy(live: Path, *, dev: Path = DEV, revert: bool = True, skip_turn: bool 
         step = str(waits.get("step") or "a part of the new version")
         say(f"   the update waits: Windows' file check did not allow a file the new version needs ({step});"
             " Kazma keeps running the version it had. Not reverted.")
+        # The live tree now holds the new version: anything that starts Kazma
+        # without the guard's check (a crash restart, `kazma update`, a
+        # reboot) starts it, so the page says so (review L-5, 2026-11-27).
         page(live, "A deploy waits for Windows' file check",
              f"{after[:12]} is pulled; Kazma keeps running the version it had. Windows' file check did not allow"
-             f" a file the new version needs ({step}). Nothing is wrong with the code or the PC; not reverted.")
+             f" a file the new version needs ({step}). Nothing is wrong with the code or the PC; not reverted."
+             " Until a signed update is in, a start that skips the guard's check (a crash restart,"
+             " `kazma update`, a reboot) would start the new version, which cannot load that file here.")
         return RELOAD_WAITS_EXIT
     if code != 0:
         return fail(live, dev, shipped, after, f"the reload did not happen: {essential(out)}", revert,

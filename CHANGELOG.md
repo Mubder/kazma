@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Windows setup asks before it installs Python, and takes the newest (2026-11-27)
+
+- A new Windows install takes the newest python.org Python on the PC: 3.14,
+  then 3.13. 3.12 and 3.11 are used only when nothing newer is there, as
+  python.org no longer ships patched Windows builds of them.
+- When there is none, setup installs Python 3.14.10 from python.org with
+  winget only with your yes: `-Yes` installs it, a terminal asks once, and
+  without either nothing is installed and setup says so. A failed install
+  says winget's exit code and its last line. Looking for a Python never
+  installs one.
+- Kazma's document jobs reach Kazma's own engine through `wsl.exe` on a PC
+  without the Windows docker program's context, as Kazma itself does.
+  `kazma doctor` says the Windows docker tool is not needed there, without
+  starting it.
+- The installer question in the Smart App Control page now depends on
+  whether Smart App Control is on (English and Arabic).
+
 ## Windows' file check: the review's fixes (2026-11-26)
 
 - Backups of a Postgres that runs in a container on Kazma's engine work on

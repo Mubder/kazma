@@ -34,8 +34,9 @@ plan is signatures, in this order.
 - Docker through `wsl.exe` for Kazma's own engine: no Windows `docker.exe`
   needed (`docker_cli.docker_command`).
 - A new Windows install runs on a signed python.org Python (`setup.ps1`
-  `Find-SignedPython`, winget's `Python.Python.3.12` when none): uv's own
-  builds are unsigned.
+  `Find-SignedPython`, the newest there, 3.14 first; winget's pinned
+  `Python.Python.3.14` with the owner's yes when none): uv's own builds are
+  unsigned.
 
 ## Next
 

@@ -491,26 +491,50 @@ def _docstrings(tree: ast.AST) -> set[int]:
     return ids
 
 
-#: Calls that start a program from their first argument (an argv, or the
-#: program itself), and ``which``, which would find a launcher to start.
+#: Calls that start a program from their first argument (an argv, a command
+#: line, or the program itself), and ``which``, which would find a launcher.
 _STARTS = frozenset({"run", "Popen", "call", "check_call", "check_output", "create_subprocess_exec",
-                     "execv", "execvp", "execvpe", "spawnv", "spawnvp", "startfile", "which"})
+                     "create_subprocess_shell", "system", "popen", "execv", "execvp", "execvpe", "spawnv",
+                     "spawnvp", "startfile", "which"})
+#: Programs that run the command they are given (``cmd /c kazma``).
+_SHELLS = frozenset({"cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe"})
+
+
+def _const(node: ast.AST | None) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _names_a_launcher(words: list[str | None], bare: set[str]) -> bool:
+    """An argv (each word a literal or None) whose program is a launcher,
+    directly or through a shell (``["cmd", "/c", "kazma", ...]``)."""
+    first = (words[0] or "").strip("'\"").lower().removesuffix(".exe") if words else ""
+    if first in bare:
+        return True
+    if first in {s.removesuffix(".exe") for s in _SHELLS}:
+        rest = [w for w in words[1:] if w is not None and not w.startswith(("/", "-"))]
+        return bool(rest) and rest[0].split()[0].strip("'\"").lower().removesuffix(".exe") in bare
+    return False
 
 
 def _bare_launcher(node: ast.AST, bare: set[str]) -> bool:
     """A call that starts a launcher by its bare name: ``run(["kazma",
-    "serve"])``, ``create_subprocess_exec("kazma-web")``,
-    ``which("kazma-tui")`` -- Windows runs ``kazma.exe`` for "kazma" too
-    (review L10, 2026-11-26)."""
-    if not (isinstance(node, ast.Call) and node.args):
+    "serve"])``, ``Popen(args=[...])``, ``os.system("kazma serve")``,
+    ``run("kazma serve", shell=True)``, ``create_subprocess_shell(...)``,
+    ``run(["cmd", "/c", "kazma", ...])``, ``which("kazma-tui")`` -- Windows
+    runs ``kazma.exe`` for "kazma" too (review L10, 2026-11-26; L-8,
+    2026-11-27)."""
+    if not isinstance(node, ast.Call):
         return False
     func = node.func
     if (func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")) not in _STARTS:
         return False
-    first = node.args[0]
-    if isinstance(first, (ast.List, ast.Tuple)) and first.elts:
-        first = first.elts[0]
-    return isinstance(first, ast.Constant) and isinstance(first.value, str) and first.value.lower() in bare
+    first = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == "args"), None)
+    if first is None:
+        return False
+    if isinstance(first, (ast.List, ast.Tuple)):
+        return _names_a_launcher([_const(e) for e in first.elts], bare)
+    text = _const(first)
+    return text is not None and _names_a_launcher(text.split(), bare)
 
 
 def _launcher_uses(sources: dict[str, str], names: list[str]) -> list[str]:
@@ -519,8 +543,11 @@ def _launcher_uses(sources: dict[str, str], names: list[str]) -> list[str]:
     a program runs, an argv that starts with a launcher's bare name, or a
     script line that is not a comment and runs one."""
     bare = {exe.removesuffix(".exe") for exe in names}
-    runs = re.compile(r"""^\s*(?:&\s*)?['"]?(?:""" + "|".join(sorted(map(re.escape, bare), key=len, reverse=True))
-                      + r""")(?:\.exe)?['"]?(?:\s|$)""")
+    # At a line's start, after `&`, `call`, `start ""`, or inside a block or
+    # after a separator (`{ kazma serve }`, `x; kazma`): never inside quotes.
+    runs = re.compile(r"""(?:^|[{;|(])\s*(?:&\s*)?(?:(?:call|start)\s+(?:""\s+)?)?['"]?(?:"""
+                      + "|".join(sorted(map(re.escape, bare), key=len, reverse=True))
+                      + r""")(?:\.exe)?['"]?(?:\s|$|})""")
     hits = []
     for name, text in sources.items():
         if name.endswith(".py"):
@@ -533,8 +560,10 @@ def _launcher_uses(sources: dict[str, str], names: list[str]) -> list[str]:
         else:
             for number, line in enumerate(text.splitlines(), 1):
                 code = line.split("#", 1)[0] if name.endswith((".ps1", ".sh")) else line
+                # A quoted text with a space in it is words, not a program name.
+                spoken = re.sub(r"""'[^'\s]*\s[^']*'|"[^"\s]*\s[^"]*\"""", "''", code)
                 if not line.lstrip().startswith((";", "//", "REM", "rem", "::")) and \
-                        (any(exe in code.lower() for exe in names) or runs.match(code)):
+                        (any(exe in code.lower() for exe in names) or runs.search(spoken)):
                     hits.append(f"{name}:{number}")
     return sorted(set(hits), key=lambda hit: (hit.rsplit(":", 1)[0], int(hit.rsplit(":", 1)[1])))
 
@@ -555,6 +584,29 @@ def test_control_a_launcher_started_by_name_is_found():
         "setup.ps1": "& (Join-Path $ScriptsDir 'kazma-tui.exe')\n# kazma.exe in a comment is fine\n",
     }
     assert _launcher_uses(planted, names) == ["kazma-cli/kazma_cli/x.py:2", "setup.ps1:1"]
+
+
+def test_control_every_way_to_start_a_launcher_is_found():
+    """Review L-8 (2026-11-27): the gate found 2 of 11 planted starts."""
+    names = _launcher_names()
+    planted = {
+        "kazma-cli/kazma_cli/v.py": (
+            "import asyncio, os, subprocess\n"
+            "subprocess.Popen(args=['kazma', 'serve'])\n"          # 2
+            "os.system('kazma serve')\n"                            # 3
+            "subprocess.run('kazma serve', shell=True)\n"           # 4
+            "asyncio.create_subprocess_shell('kazma-web --x')\n"    # 5
+            "subprocess.run(['cmd', '/c', 'kazma', 'serve'])\n"     # 6
+            "subprocess.run(['cmd.exe', '/c', 'kazma-tui.exe'])\n"  # 7
+            "os.popen('kazma update')\n"                            # 8
+        ),
+        "scripts/v.cmd": 'call kazma serve\nstart "" kazma-web\nstart kazma-tui\necho kazma serve\n',
+        "scripts/v.ps1": "Invoke-Command { kazma serve }\n$x = 1; kazma update\nWrite-Host 'x { kazma serve }'\n",
+    }
+    found = _launcher_uses(planted, names)
+    assert found == [*(f"kazma-cli/kazma_cli/v.py:{n}" for n in range(2, 9)),
+                     "scripts/v.cmd:1", "scripts/v.cmd:2", "scripts/v.cmd:3",
+                     "scripts/v.ps1:1", "scripts/v.ps1:2"], found
 
 
 def test_control_a_launcher_started_by_its_bare_name_is_found():
@@ -579,14 +631,23 @@ def test_control_a_launcher_started_by_its_bare_name_is_found():
 # ── the wsl.exe route: Kazma's engine needs no Windows docker tools (review M2) ──
 
 
+def _never_started(path):
+    raise AssertionError(f"{path} was started to be judged (review L-4)")
+
+
 def test_a_refused_engine_cli_is_no_wait_when_the_engine_is_reached_through_wsl(engine_cli, monkeypatch):
     monkeypatch.setattr(windows_trust, "_through_wsl", lambda: True)
-    monkeypatch.setattr(docker_cli, "refused_by_os", lambda p: "WinError 4551: refused")
+    monkeypatch.setattr(docker_cli, "refused_by_os", _never_started)
     monkeypatch.setattr(docker_cli, "find_docker_cli", lambda: None)
     state = windows_trust._docker_cli()
-    assert state.status == windows_trust.ALTERNATIVE and state.alternative == windows_trust.WSL_ROUTE
+    assert state.status == windows_trust.NOT_NEEDED
     report = _report(state)
-    assert windows_trust.notes(report)[-1].endswith("Everything works.")
+    assert windows_trust.report_at_boot is not None and not report.waiting()
+    (status, english), = [line for line in windows_trust.lines(report) if line[0] != "state"]
+    (_, arabic), = [line for line in windows_trust.lines(report, "ar") if line[0] != "state"]
+    assert english.endswith("Everything works.") and "wsl.exe" in english
+    assert arabic.endswith("كل شيء يعمل.") and "wsl.exe" in arabic, "the Arabic line is whole (review L-2)"
+    assert "Microsoft's" not in arabic
 
 
 def test_control_without_the_wsl_route_the_same_refusal_waits(engine_cli, monkeypatch):
@@ -602,8 +663,17 @@ def test_a_refused_compose_plugin_is_no_wait_through_wsl(tmp_path, monkeypatch):
     plugin = tmp_path / "docker-compose.exe"
     plugin.write_bytes(b"")
     monkeypatch.setattr(container_engine_setup, "compose_plugin", lambda: plugin)
-    monkeypatch.setattr(docker_cli, "refused_by_os", lambda p: "WinError 4551: refused")
+    monkeypatch.setattr(docker_cli, "refused_by_os", _never_started)
     monkeypatch.setattr(windows_trust, "_through_wsl", lambda: True)
-    assert windows_trust._compose().status == windows_trust.ALTERNATIVE
+    assert windows_trust._compose().status == windows_trust.NOT_NEEDED
+    monkeypatch.setattr(docker_cli, "refused_by_os", lambda p: "WinError 4551: refused")
     monkeypatch.setattr(windows_trust, "_through_wsl", lambda: False)
     assert windows_trust._compose().status == windows_trust.WAITS  # control
+
+
+def test_doctor_marks_every_status():
+    from kazma_cli.doctor import _WINDOWS_MARKS
+
+    statuses = {windows_trust.ALLOWED, windows_trust.ALTERNATIVE, windows_trust.PREFERRED,
+                windows_trust.NOT_NEEDED, windows_trust.WAITS, "state"}
+    assert statuses <= set(_WINDOWS_MARKS)

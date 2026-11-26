@@ -279,8 +279,11 @@ def fresh_process(tmp_path, monkeypatch):
     config.mkdir()
     (config / "config.json").write_text(json.dumps({"currentContext": "desktop-linux"}), encoding="utf-8")
     monkeypatch.setenv("DOCKER_CONFIG", str(config))
-    for name in ("DOCKER_CONTEXT", "DOCKER_HOST", "KAZMA_DOCKER_BIN", docker_cli.ROUTE_ENV):
-        monkeypatch.delenv(name, raising=False)
+    for name in ("DOCKER_CONTEXT", "DOCKER_HOST", "KAZMA_DOCKER_BIN", docker_cli.ROUTE_ENV,
+                 docker_cli.ENGINE_BY_CHOICE_ENV):
+        # Registered first, so what apply_engine_choice writes is undone too.
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
     monkeypatch.setattr(docker_cli, "_choice_applied", False)
     monkeypatch.setattr(docker_cli, "_engine_choice", "")
     monkeypatch.setattr(docker_cli, "_applied", None)
@@ -312,6 +315,70 @@ def test_kazmas_engine_needs_no_windows_context(fresh_process):
     assert docker_cli.engine_host_path(r"G:\w", windows=True) == "/g/w"
 
 
+def _by_path_copy(name: str):
+    """docker_cli.py loaded by path, as the guard and its document broker load it."""
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location(name, REPO / "kazma-core" / "kazma_core" / "docker_cli.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _no_windows_cli(monkeypatch, module) -> None:
+    """A Windows PC with Kazma's engine registered and no docker.exe it may run."""
+    monkeypatch.setattr(module, "_on_windows", lambda: True)
+    monkeypatch.setattr(module, "_wsl_exe", lambda: WSL)
+    monkeypatch.setattr(module, "wsl_distro_location", lambda name: (Path(r"C:\engine"), "ext4.vhdx"))
+    monkeypatch.setattr(module, "_context_exists", lambda name: False)
+    monkeypatch.setattr(module, "find_docker_cli", lambda: None)
+
+
+def _broker_child(monkeypatch, *, exported: bool):
+    """The guard applies the choice (a by-path copy), then its broker -- a
+    second by-path copy that never applies it -- runs in the environment
+    the guard gives it (``_BROKER_ENV_KEEP``)."""
+    from tests.test_guard_document_broker import guard as guard_module
+
+    guard_copy = _by_path_copy("_route_guard_docker_cli")
+    _no_windows_cli(monkeypatch, guard_copy)
+    assert guard_copy.apply_engine_choice("kazma") is None
+    assert guard_copy.docker_command(["version"]).route == "wsl"
+    child_env = {k: v for k, v in docker_cli.os.environ.items() if k.upper() in guard_module._BROKER_ENV_KEEP}
+    if not exported:
+        child_env.pop(docker_cli.ENGINE_BY_CHOICE_ENV, None)
+    for name in list(docker_cli.os.environ):
+        if name not in child_env:
+            monkeypatch.delenv(name)
+    broker_copy = _by_path_copy("_route_broker_docker_cli")
+    _no_windows_cli(monkeypatch, broker_copy)
+    return broker_copy.docker_command(["version"])
+
+
+def test_a_by_path_copy_in_the_brokers_environment_reaches_kazmas_engine(fresh_process):
+    """Review M-a (2026-11-27): the guard's broker loads its own copy and
+    never applies the choice; with no Windows context it got no route (or
+    Docker Desktop's engine). The guard exports the choice for it."""
+    routed = _broker_child(fresh_process, exported=True)
+    assert routed is not None and routed.route == "wsl"
+
+
+def test_control_without_the_export_the_brokers_copy_misses_the_engine(fresh_process):
+    routed = _broker_child(fresh_process, exported=False)
+    assert routed is None or routed.route != "wsl"
+
+
+def test_the_export_is_cleared_when_the_choice_is_desktop(fresh_process):
+    copy = _by_path_copy("_route_choice_docker_cli")
+    _no_windows_cli(fresh_process, copy)
+    copy.apply_engine_choice("kazma")
+    assert docker_cli.os.environ.get(docker_cli.ENGINE_BY_CHOICE_ENV) == "kazma"
+    copy.apply_engine_choice("desktop")
+    assert docker_cli.ENGINE_BY_CHOICE_ENV not in docker_cli.os.environ
+
+
 def test_control_without_the_distro_the_cli_and_its_context(fresh_process):
     fresh_process.setattr(docker_cli, "_context_exists", lambda name: False)
     fresh_process.setattr(docker_cli, "wsl_distro_location", lambda name: None)
@@ -330,6 +397,20 @@ def test_another_engine_named_is_never_sent_to_kazmas_distro(kazma_engine, monke
     monkeypatch.setenv(docker_cli.ROUTE_ENV, "wsl")
     assert docker_cli.docker_command(["rm", "-f", "x"], context=docker_cli.DESKTOP_CONTEXT).route == "cli"
     assert docker_cli.docker_command(["ps"]).route == "wsl", "control: unnamed, wsl is honoured"
+
+
+def test_a_programs_own_path_options_are_its_own(kazma_engine):
+    """Review L-1 (2026-11-27): past the image or the container, -f, -v and
+    --config are the program's, not docker's."""
+    dump = docker_cli.docker_command(["exec", "-i", "-e", "PGPASSWORD", "kazma-db", "pg_dump", "-f", r"C:\out.dump"])
+    assert dump.argv[-2:] == ["-f", r"C:\out.dump"]
+    run = docker_cli.docker_command(["run", "--rm", "-it", "--name", "j", "-v", r"G:\w:/w", "--cap-drop=ALL",
+                                     "alpine", "tool", "-v", r"C:\x", "--config", r"C:\c"]).argv[7:]
+    assert run == ["run", "--rm", "-it", "--name", "j", "-v", "/g/w:/w", "--cap-drop=ALL",
+                   "alpine", "tool", "-v", r"C:\x", "--config", r"C:\c"]
+    # The control: docker's own options before the image are still translated.
+    assert docker_cli.docker_command(["create", "--mount", r"type=bind,src=G:\w,dst=/w", "img"]).argv[-2] \
+        == "type=bind,src=/g/w,dst=/w"
 
 
 def test_only_dockers_own_paths_are_translated(kazma_engine):

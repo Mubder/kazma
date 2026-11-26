@@ -123,6 +123,26 @@ def test_with_docker_answering_it_is_ready(docker):
     assert code == 200 and "waits_for" not in body
 
 
+def test_the_probe_runs_with_the_routes_entries_and_no_secret(docker, monkeypatch):
+    """Review L-3 (2026-11-27): the probe ran with the plain child
+    environment, so the wsl.exe route's WSL_UTF8 was lost and its messages
+    were logged as UTF-16 (a NUL after every character)."""
+    from kazma_core.tools import code_exec
+
+    monkeypatch.setenv("KAZMA_VAULT_KEY", "not-for-a-child")
+    monkeypatch.setattr(code_exec, "_docker_command", lambda args, env=None: DockerCommand(
+        ["wsl.exe", "-d", "kazma-engine", "--exec", "docker", *args], {**(env or {}), "WSL_UTF8": "1"}, "wsl"))
+    seen: list[dict] = []
+
+    def run(argv, **kw):
+        seen.append(kw["env"])
+        return subprocess.CompletedProcess(argv, 0, stdout="29.0.1\n", stderr="")
+
+    monkeypatch.setattr(health.subprocess, "run", run)
+    assert health._check_code_execution()["status"] == "ok"
+    assert seen and seen[0]["WSL_UTF8"] == "1" and "KAZMA_VAULT_KEY" not in seen[0]
+
+
 def test_the_outage_is_said_once_and_its_end_once(docker, caplog):
     caplog.set_level(logging.DEBUG, logger=health.logger.name)
     docker.extend(["down", "down", "slow", "down", "up", "down"])

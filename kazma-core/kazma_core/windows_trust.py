@@ -68,6 +68,9 @@ ALTERNATIVE = "alternative"
 #: While Smart App Control checks every file, the signed copy was chosen up
 #: front and the unsigned one never tried (``libpq_reach``, ``docker_cli``).
 PREFERRED = "preferred"
+#: Kazma's own engine is reached through wsl.exe, so the Windows tool is not
+#: used at all; it is not started to be judged (review L-4, 2026-11-27).
+NOT_NEEDED = "not_needed"
 WAITS = "waits"
 ABSENT = "absent"
 
@@ -103,6 +106,12 @@ WORDS: dict[str, dict[str, str]] = {
     PREFERRED: {
         "en": "{part}: while Windows checks each file, Kazma uses the signed one ({alt}). Everything works.",
         "ar": "{part}: بينما يفحص Windows كل ملف، يستخدم كاظمه النسخة الموقَّعة ({alt}). كل شيء يعمل.",
+    },
+    NOT_NEEDED: {
+        "en": "{part}: not needed here: Kazma reaches its own engine through Microsoft's wsl.exe and "
+              "the engine's own Docker. Everything works.",
+        "ar": "{part}: لا حاجة إليه هنا: يصل كاظمه إلى محركه عبر wsl.exe من Microsoft "
+              "وDocker الخاص بالمحرك. كل شيء يعمل.",
     },
     WAITS: {
         "en": "{part}: Windows checked it and did not allow it on this PC, and no signed alternative "
@@ -229,13 +238,10 @@ def _database_client() -> PartState:
     return PartState("database_client", WAITS, names, detail=detail)
 
 
-#: What reaches Kazma's own engine when its Windows tools are not needed.
-WSL_ROUTE = "Microsoft's wsl.exe and the engine's own Docker"
-
-
 def _through_wsl() -> bool:
     """Kazma's engine is reached through wsl.exe (``docker_cli.docker_command``):
-    its Windows docker.exe and compose plugin are then not needed (review M2)."""
+    its Windows docker.exe and compose plugin are then not needed (review M2),
+    and not started to be judged (L-4)."""
     from kazma_core import docker_cli
 
     routed = docker_cli.docker_command(["version"])
@@ -249,9 +255,7 @@ def _docker_cli() -> PartState:
     if not own.is_file():
         return PartState("docker_cli", ABSENT)
     if _through_wsl():
-        why = docker_cli.refused_by_os(own)
-        return (PartState("docker_cli", ALLOWED, (own.name,)) if why is None
-                else PartState("docker_cli", ALTERNATIVE, (own.name,), WSL_ROUTE, why))
+        return PartState("docker_cli", NOT_NEEDED, (own.name,))
     if _checks_files():
         chosen = docker_cli.find_docker_cli()
         if chosen and Path(chosen) != own:
@@ -278,11 +282,11 @@ def _compose() -> PartState:
     plugin = compose_plugin()
     if not plugin.is_file():
         return PartState("compose", ABSENT)
+    if _through_wsl():  # compose runs inside the engine's distro
+        return PartState("compose", NOT_NEEDED, (plugin.name,))
     why = docker_cli.refused_by_os(plugin)
     if why is None:
         return PartState("compose", ALLOWED, (plugin.name,))
-    if _through_wsl():  # compose runs inside the engine's distro
-        return PartState("compose", ALTERNATIVE, (plugin.name,), WSL_ROUTE, why)
     return PartState("compose", WAITS, (plugin.name,), detail=why)
 
 

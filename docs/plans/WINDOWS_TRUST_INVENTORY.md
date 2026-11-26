@@ -22,7 +22,7 @@ Kazma's own code-signing certificate:
 
 | File(s) | Signed? | Route | Status |
 |---|---|---|---|
-| Interpreter, python.org (`python.exe`, `pythonw.exe` venv launchers, `python3.dll`, `python3XX.dll`, stdlib `.pyd`/`.dll`, `vcruntime140*.dll`) | Valid (PSF; vcruntime: Microsoft catalog) | signed | closed: setup makes a new venv from a python.org Python (installs one with winget when none) |
+| Interpreter, python.org (`python.exe`, `pythonw.exe` venv launchers, `python3.dll`, `python3XX.dll`, stdlib `.pyd`/`.dll`, `vcruntime140*.dll`) | Valid (PSF; vcruntime: Microsoft catalog) | signed | closed: setup makes a new venv from the newest python.org Python there (3.14 first; installs the pinned 3.14 with winget, with the owner's yes, when none) |
 | Interpreter, Tcl/Tk (`tcl90.dll`, `tcl9tk90.dll`, `libtommath.dll`, `zlib1.dll`) | NotSigned | not started (only `_tkinter` loads them; Kazma never imports tkinter) | closed |
 | Interpreter, uv-managed CPython (python-build-standalone: 41 of 43 files) | NotSigned | dropped (setup no longer lets uv download one on Windows) | closed for new installs; the dev venv still uses one |
 | Kazma's console-script launchers (`kazma.exe`, `kazma-web.exe`, `kazma-tui.exe`) and every other venv `Scripts\*.exe` launcher (98 unsigned) | NotSigned (made on the PC) | not started: Kazma runs `python -m ...` everywhere (gate) | closed |
@@ -62,10 +62,15 @@ Kazma's own code-signing certificate:
   not (3.12.16: 42 of 49 unsigned). Live already runs on python.org 3.14.
 - **The Python version.** The package side does not change with the version:
   cp312 and cp314 venvs carry 661 files from version-specific wheels, 646
-  unsigned, in both. What differs is reputation: on 26 Nov cp314's psycopg was
-  refused while cp312's loaded. Recommendation for Windows installs: **3.12**
-  (the most widely installed wheels); 3.13 could not be measured offline.
-  Live stays on 3.14 unless the owner moves it.
+  unsigned, in both. Reputation differed once: on 26 Nov cp314's psycopg was
+  refused while cp312's loaded (one event). Recommendation for Windows
+  installs: **3.14**, then 3.13 (the delta review, 27 Nov): python.org ships
+  no patched Windows build of 3.12 after 3.12.10 or of 3.11 after 3.11.9
+  (later fixes are source-only), so they miss the June 2025 tarfile fixes
+  (CVE-2025-4517 and its siblings) that Kazma's `filter="data"` extraction
+  relies on; they are taken only when nothing newer is there. Setup installs
+  the pinned `Python.Python.3.14` 3.14.10 with winget, with the owner's yes.
+  Live runs on 3.14.
 - **psycopg's wrapper** (a throwaway PostgreSQL 18 container on the engine,
   two rounds, the compiled wrapper first): `SELECT 1` 0.47-0.50 ms against
   0.53-0.54 ms pure Python on PostgreSQL's signed libpq; a parameterised read

@@ -326,6 +326,7 @@ def test_an_update_windows_held_back_is_kept_and_paged_not_reverted(repos, stub,
     (title, detail), = recorded["pages"]
     assert title == "A deploy waits for Windows' file check" and "not reverted" in detail
     assert "psycopg" in detail
+    assert "a reboot" in detail, "what a start without the check would do is said (review L-5)"
 
 
 def test_control_an_update_whose_own_code_failed_is_reverted(repos, stub, recorded, monkeypatch):

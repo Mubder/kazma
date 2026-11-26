@@ -629,7 +629,7 @@ def masked(text):
     try:  # URL passwords and token-shaped values, when Kazma's core loads
         from kazma_core.security.url_credentials import mask_urls_in_text
         return mask_urls_in_text(text)
-    except BaseException:
+    except Exception:
         return text  # the guard masks tokens again with the same table
 def finish(step=None, exc=None):
     if step is not None:
@@ -2523,7 +2523,8 @@ _BROKER_ENV_KEEP = (
     "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP",
     "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES",
     "PROGRAMW6432", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_CERT_PATH",
-    "DOCKER_TLS_VERIFY", "KAZMA_DOCKER_BIN", "KAZMA_DOCKER_ROUTE", "LANG", "LC_ALL", "TZ",
+    "DOCKER_TLS_VERIFY", "KAZMA_DOCKER_BIN", "KAZMA_DOCKER_ROUTE", "KAZMA_DOCKER_ENGINE_BY_CHOICE",
+    "LANG", "LC_ALL", "TZ",
 )
 _BROKER_REQUEST_MAGIC = b"KZDB-REQ/1\n"
 

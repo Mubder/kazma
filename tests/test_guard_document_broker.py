@@ -17,6 +17,7 @@ operation. ``test_document_broker_guard_docker.py`` runs the real broker.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -299,6 +300,49 @@ def test_changed_code_restarts_the_broker_at_the_next_spawn(monkeypatch, tmp_pat
     assert len(h.procs) == 2 and "--image" in h.procs[1].cmd
     assert h.procs[1].cmd[h.procs[1].cmd.index("--image") + 1] == "kazma-document-worker:other"
     assert "broker.code_changed" in h.events()
+
+
+def _env_names_read(source: str) -> set[str]:
+    """The environment names a module reads: ``os.environ.get(X)``,
+    ``os.getenv(X)``, ``os.environ[X]``, X a literal or a module constant."""
+    tree = ast.parse(source)
+    consts = {target.id: node.value.value for node in tree.body if isinstance(node, ast.Assign)
+              and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+              for target in node.targets if isinstance(target, ast.Name)}
+
+    def value(expr: ast.AST) -> str | None:
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+            return expr.value
+        return consts.get(expr.id) if isinstance(expr, ast.Name) else None
+
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args and ast.unparse(node.func) in ("os.environ.get", "os.getenv"):
+            name = value(node.args[0])
+        elif (isinstance(node, ast.Subscript) and ast.unparse(node.value) == "os.environ"
+              and isinstance(node.ctx, ast.Load)):
+            name = value(node.slice)
+        else:
+            continue
+        if name:
+            names.add(name.upper())
+    return names
+
+
+def test_the_broker_keeps_every_variable_its_docker_module_reads():
+    """Review L-9 (2026-11-27): the broker runs ``docker_cli.py`` (by path)
+    in the environment ``_BROKER_ENV_KEEP`` lets through; a variable it reads
+    and the guard drops (KAZMA_DOCKER_ROUTE before L4, the engine choice's
+    export before M-a) silently changes the broker's route."""
+    source = (ROOT / "kazma-core" / "kazma_core" / "docker_cli.py").read_text(encoding="utf-8")
+    read = _env_names_read(source)
+    assert {"DOCKER_CONTEXT", "KAZMA_DOCKER_ROUTE", "KAZMA_DOCKER_ENGINE_BY_CHOICE"} <= read
+    assert sorted(read - set(guard._BROKER_ENV_KEEP)) == []
+
+
+def test_control_a_planted_variable_the_broker_drops_is_found():
+    planted = 'import os\n_X = "KAZMA_PLANTED_NAME"\nos.environ.get(_X)\nos.environ["OTHER_PLANTED"]\n'
+    assert _env_names_read(planted) - set(guard._BROKER_ENV_KEEP) == {"KAZMA_PLANTED_NAME", "OTHER_PLANTED"}
 
 
 def test_a_broker_tick_that_fails_never_reaches_the_guard(monkeypatch, tmp_path):

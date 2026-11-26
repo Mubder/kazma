@@ -448,7 +448,8 @@ def _cloud_profile_rows() -> list[tuple[str, str]]:
 #: How each line of Windows' file check is marked: Smart App Control and a
 #: signed alternative in use are information, never a finding; only a
 #: feature with no signed alternative is a warning, and it names the feature.
-_WINDOWS_MARKS = {"state": INFO, "allowed": OK, "alternative": INFO, "preferred": INFO, "waits": WARN}
+_WINDOWS_MARKS = {"state": INFO, "allowed": OK, "alternative": INFO, "preferred": INFO, "not_needed": OK,
+                  "waits": WARN}
 
 
 def _windows_rows() -> list[tuple[str, str]]:

@@ -103,9 +103,16 @@ recognise them.
 **Is something wrong with my PC?** No. A message about Windows' file check
 means Windows checked a file and Kazma adapted.
 
-**Windows shows a notice when I run Kazma's installer.** Windows shows this
+**Windows shows a notice when I run Kazma's installer.** Windows shows one
 for installers that aren't signed yet, and signed releases are on the way.
-Choose **More info**, then **Run anyway**.
+What it offers depends on Smart App Control (Windows Security → App & browser
+control):
+
+- **Off, or learning (evaluation)**: choose **More info**, then **Run
+  anyway**.
+- **On**: Windows doesn't run an installer that isn't signed, and it offers
+  no way to run one anyway. Keep Smart App Control as it is; the signed
+  installer is on the way.
 
 **My company manages the PC with App Control for Business.** Kazma reads it the
 same way and behaves the same way. Your IT team can see each part Kazma uses

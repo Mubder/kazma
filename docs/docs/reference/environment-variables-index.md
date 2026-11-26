@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**296** variables are read by the product code; **296** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**297** variables are read by the product code; **297** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -72,6 +72,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_DIVISION` | (none) | `kazma_core.division_runtime` | yes |
 | `KAZMA_DIVISION_USER` | (none) | `kazma_core.division_runtime` | yes |
 | `KAZMA_DOCKER_BIN` | `""` | `kazma_core.docker_cli`, `kazma_core.documents.worker_broker` | yes |
+| `KAZMA_DOCKER_ENGINE_BY_CHOICE` | (none) | `kazma_core.docker_cli` | yes |
 | `KAZMA_DOCKER_ROUTE` | (none) | `kazma_core.docker_cli` | yes |
 | `KAZMA_DOCLING` | `"1"` | `kazma_core.documents.extract_salvage`, `kazma_core.documents.service` | yes |
 | `KAZMA_DOCUMENTS_JOBS_BACKEND` | (none) | `kazma_core.documents.jobs_pg` | yes |
