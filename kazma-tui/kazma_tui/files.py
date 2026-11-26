@@ -124,8 +124,15 @@ class FilesPanel(VerticalScroll):
     def _read_preview_text(path: Path, limit: int) -> tuple[str, bool]:
         """Read up to `limit` chars of a file. Runs in a worker thread.
 
-        Returns (content, truncated).
+        Returns (content, truncated). Kazma's own stores and secret files are
+        not previewed (``store_registry.is_kazma_store``, the predicate every
+        door asks): the workspace can be the install folder, and its ``.env``
+        on screen is the vault key (2026-11-26).
         """
+        from kazma_core.store_registry import is_kazma_store, store_refusal
+
+        if is_kazma_store(path):
+            raise PermissionError(store_refusal(path, door="the preview"))
         with path.open("r") as f:
             content = f.read(limit + 1)
         truncated = len(content) > limit

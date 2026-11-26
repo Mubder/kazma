@@ -5,7 +5,7 @@
 | Alerts | 135 open on `Mubder/kazma` on 2026-11-26 (created 2026-11-16 to 2026-11-25): 133 CodeQL, 2 OpenSSF Scorecard |
 | Analysis read | CodeQL 2.27.6, Python analysis `2256312367` of `main` at `049545f78`, with its code flows (SARIF) |
 | Rules | AGENTS.md sections 66 (code scanning), 26 D and F (masking, `safe_error`), 32, 67, 69 |
-| Tests | `tests/test_codeql_triage_2026_11_26.py`, `tests/test_route_errors_carry_no_exception_text.py`, `tests/test_sealed_zip.py` |
+| Tests | `tests/test_codeql_triage_2026_11_26.py`, `tests/test_route_errors_carry_no_exception_text.py`, `tests/test_sealed_zip.py`, `tests/test_ide_reads_refuse_kazma_files.py` |
 
 Every alert was read against the code, and against the path CodeQL gives
 for it: the source it started from and each step to the line it names. The
@@ -94,11 +94,31 @@ There are no traversal gaps.
   their text before anything resolves them.
 - **The path policy itself (6).** `is_kazma_store`, `in_another_spaces_folder`,
   `path_under_root`, `check_path_access` and `tool_path_or_reason` resolve
-  the path they are asked about: that resolution is the check. The flows
-  come from the IDE's LSP request (`IdeService.resolve` is the containment
-  check) and the checkpoint restore, which writes only a file its checkpoint
-  holds and `check_path_access` allows for writing.
+  the path they are asked about to decide about it: the sink is the
+  decision, and none of them opens the file. The flows come from the IDE's
+  LSP request and the checkpoint restore. What the LSP request then read is
+  a separate alert, #53, below.
 - **The memory restore (3).** Fixed (above).
+
+### An earlier dismissal that was wrong: #53
+
+#53 (path injection, `core/ide/lsp.py:151`, the read in `_buffer`) is not
+among the 135: it was dismissed before this triage, on the reasoning that
+`IdeService.resolve` contains the path. Containment is not the store rule.
+`resolve` asked the path policy only about a path *outside* the workspace,
+so the LSP request read Kazma's own files inside it, and on an install
+whose workspace is the install folder that includes `.env`. Any signed-in
+operator could call the request (an API token, a Spaces member); a tool
+argument or a chat message could not.
+
+**Real, fixed** by the commit that adds
+`tests/test_ide_reads_refuse_kazma_files.py`. `resolve` now refuses Kazma's
+stores and secret files inside the workspace too (`is_kazma_store`). The
+same predicate now guards the IDE MCP server's `read_file` and
+`search_code` and the TUI's file preview. The test is a census of every
+file read in the IDE's modules, each with a probe that plants Kazma's
+secret files in the workspace, and its control blinds the predicate. The
+owner reopens #53 on GitHub; the next analysis closes it.
 
 ### Stack-trace exposure (7)
 
@@ -173,6 +193,7 @@ moving to pull requests. This triage changes no repository setting.
 2. Dismiss the 33 marked "False positive" with the reason in the table
    (GitHub: "False positive").
 3. Decide #481 and #506.
+4. Reopen #53 (dismissed earlier; real, fixed: see above).
 
 ## Every alert
 

@@ -17,6 +17,13 @@
   keeps, redacted, never the exception's text. The People page answered it
   raw. The check that every answer carries no exception text missed it; it
   now knows every exception class Kazma defines.
+- **The IDE opens none of Kazma's own files, inside the workspace too**:
+  the IDE checked a path inside the workspace for containment only, so its
+  code completion, hover and symbols read Kazma's secret files there. On an
+  install whose workspace is the install folder that is `.env`. The IDE,
+  its MCP server and the terminal app's preview now refuse Kazma's stores
+  and secret files wherever they are. An alert reported this earlier (#53)
+  and was dismissed; the owner reopens it.
 - **Smaller ones**: a memory backup to restore is found by its timestamp
   (a name with Unicode digits passed before); X's sign-in refusal comes
   back to Settings as a word the page has, in English and Arabic; a sealed

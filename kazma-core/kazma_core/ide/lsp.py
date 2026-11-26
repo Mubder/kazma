@@ -8,7 +8,8 @@ façade over the existing code index + in-process parsers:
     and the unsaved buffer
   * diagnostics via ``ast.parse`` (Python) / ``json.loads`` (JSON)
 
-All paths go through ``IdeService.resolve`` (workspace + path grants). Read-only.
+All paths go through ``IdeService.resolve`` (workspace + path grants; Kazma's
+own stores and secret files refused, inside the workspace too). Read-only.
 Kill-switch: ``KAZMA_IDE_LSP=0``.
 """
 

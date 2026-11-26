@@ -223,6 +223,13 @@ def _resolve(root: Path, p: str) -> Path:
         target.relative_to(root_resolved)
     except ValueError:
         raise PermissionError(f"Path {p} escapes project root")
+    # Inside the project too: Kazma's own stores and secret files are opened
+    # by no door (store_registry.is_kazma_store); the project can be the
+    # install folder (2026-11-26, tests/test_ide_reads_refuse_kazma_files.py).
+    from kazma_core.store_registry import is_kazma_store, store_refusal
+
+    if is_kazma_store(target):
+        raise PermissionError(store_refusal(target, door="the IDE server"))
     return target
 
 
@@ -247,6 +254,8 @@ def _tool_search_code(root: Path, args: dict[str, Any]) -> str:
     # files that resolve inside it (a link inside the project can point out).
     if glob and (os.path.isabs(glob) or ".." in Path(glob).parts or glob.startswith(("/", "\\"))):
         return "Error: glob must stay inside the project root (no '..' or absolute paths)"
+    from kazma_core.store_registry import is_kazma_store
+
     root_resolved = root.resolve()
     search_files = root.rglob(glob) if glob else root.rglob("*")
     for fpath in search_files:
@@ -255,6 +264,9 @@ def _tool_search_code(root: Path, args: dict[str, Any]) -> str:
         try:
             fpath.resolve().relative_to(root_resolved)
         except (OSError, ValueError):
+            continue
+        # Kazma's own stores and secret files are searched by no door.
+        if is_kazma_store(fpath):
             continue
         # Skip binary / large files
         if fpath.stat().st_size > 1_000_000:

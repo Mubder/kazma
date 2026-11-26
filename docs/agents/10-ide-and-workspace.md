@@ -79,6 +79,21 @@ workspace. Three new modules; understanding their interaction is essential.
   remain future work.
 - Path-traversal protection: `IdeService.resolve()` does a string-level
   `normpath` `..` check + containment backstop (symlink/junction-aware).
+- **Containment is not the store rule: every IDE read asks
+  `is_kazma_store` too, inside the workspace** (2026-11-26, the review of
+  that day's code-scanning triage). `resolve` asked the path policy only for
+  a path outside the workspace, and the LSP request read a path inside it
+  whole: on live the workspace is the install folder, and code completion
+  offered the words of `.env`. Code scanning had reported that read (#53);
+  it was dismissed because `resolve` "contains" it. `resolve` now refuses
+  Kazma's stores and secret files wherever they are; the IDE MCP server's
+  `read_file` / `search_code` and the TUI's file preview ask the same
+  predicate. Gate: `tests/test_ide_reads_refuse_kazma_files.py` (a census of
+  every file read in `kazma_core/ide/` and every module that drives
+  `get_ide_service()`, each declared with a probe that plants Kazma's
+  secret files in the workspace; every IdeService method that takes a path
+  refuses one before a tool runs; the control blinds the predicate and
+  every probe finds the secret).
 - **A relative path an agent tool is given means the active workspace**
   (`binding.resolve_tool_path`), the directory `shell_exec` runs in — never
   the server process's CWD. Every file tool, `check_path_access` and the

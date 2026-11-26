@@ -85,6 +85,17 @@ def _lang_for_path(path: Path) -> str:
     }.get(ext, "plaintext")
 
 
+def _kazma_file_refusal(target: Path) -> str | None:
+    """Why the IDE will not open *target*, when it is one of Kazma's own
+    stores or secret files (``store_registry.is_kazma_store``, the one
+    predicate every door asks); None for any other path."""
+    from kazma_core.store_registry import is_kazma_store, store_refusal
+
+    if not is_kazma_store(target):
+        return None
+    return store_refusal(target, door="the IDE")
+
+
 def _is_readonly_git(subcommand: str) -> bool:
     """True for git verbs that do not mutate the repo or remotes."""
     from kazma_core.ide.git_policy import read_operands, split_git_command
@@ -136,7 +147,8 @@ class IdeService:
         """Resolve a (possibly relative) path against the workspace root.
 
         Raises ``ValueError`` if the result escapes the workspace (path
-        traversal protection). Absolute paths inside the root are allowed.
+        traversal protection), or names one of Kazma's own stores or secret
+        files, wherever it is. Absolute paths inside the root are allowed.
         Uses ``os.path.realpath`` (fully symlink/junction aware) so the
         check is robust on Windows where ``%LOCALAPPDATA%\\Temp`` is often a
         junction.
@@ -211,6 +223,15 @@ class IdeService:
                 "Use request_path_access to request a grant, or add an Extra "
                 "folder in Settings → Workspace."
             )
+        # Inside the workspace too, Kazma's own stores and secret files are
+        # refused: the branch above asks check_path_access only for a path
+        # outside it, and every IDE door (open, completion, hover, symbols,
+        # diagnostics, run, save, delete) resolves through here. On an install
+        # whose workspace is the install folder, code completion offered the
+        # words of .env (2026-11-26; gate tests/test_ide_reads_refuse_kazma_files.py).
+        refusal = _kazma_file_refusal(target)
+        if refusal:
+            raise ValueError(refusal)
         # Return the original (non-realpath) resolved path for display.
         return target
 
