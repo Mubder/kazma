@@ -383,10 +383,10 @@ def _no_thread_guard(monkeypatch) -> None:
     and writes the thread they name."""
     from kazma_gateway.stores.checkpoint import CheckpointManager
 
-    async def _open(self: Any, thread_id: Any, *, write: bool = False) -> Any:
-        return self._saver
+    async def _opened(self: Any, thread_id: Any, *, write: bool = False) -> Any:
+        return self._saver, None
 
-    monkeypatch.setattr(CheckpointManager, "_open", _open)
+    monkeypatch.setattr(CheckpointManager, "_opened", _opened)
     monkeypatch.setattr(CheckpointManager, "_filters_by_thread", lambda self: False)
 
 

@@ -531,6 +531,8 @@ class Applied:
     #: What still keeps the lock from holding after the pass (the role, its
     #: membership, the function): said, never "complete" (step 2 review M2).
     unresolved: list[str] = field(default_factory=list)
+    #: Checkpoint rows given their thread's space by the backfill (step 4).
+    backfilled: int = 0
 
     @property
     def complete(self) -> bool:
@@ -743,6 +745,9 @@ def apply(url: str, *, tables: Iterable[str] | None = None, vector_table: str | 
         for table in present:
             if not _take(conn, table, all_rules[table], result, lock_timeout_ms, tries, deadline):
                 result.left.append(table)
+        stamped = [t for t in present if all_rules[t].column == SPACE_COLUMN and t not in result.left]
+        if stamped:
+            _backfill(conn, stamped, result, lock_timeout_ms, tries, deadline)
     _mark_in_place()
     if result.left:
         logger.warning("[row_security] %d table(s) could not be taken in time and keep no rule until the next "
@@ -770,6 +775,74 @@ def _take(conn: Any, table: str, rule: Rule, result: Applied, lock_timeout_ms: i
                 raise
             time.sleep(min(0.2 * (attempt + 1), max(0.0, deadline - time.monotonic())))
     return False
+
+
+# ── the checkpoints' backfill (S4-01 step 4, design 7.3) ────────────────
+
+#: Threads per statement of the backfill.
+_BACKFILL_BATCH = 500
+
+
+def _backfill(conn: Any, tables: list[str], result: Applied, lock_timeout_ms: int, tries: int,
+              deadline: float) -> None:
+    """Every checkpoint row gets its thread's space: the record store's
+    (``thread_scopes.db``) for a thread of another space, NULL for the
+    owner's -- a thread with no record is from before Spaces (N19), and a
+    wrong stamp (a thread moved to the owner) goes back. At every pass, not
+    once: an older build run after a revert writes NULL for another space's
+    thread. In batches, one transaction each under the schema lock, waiting
+    at most *lock_timeout_ms*; a table not taken in time is in ``left``. A
+    record store that cannot be read is said in ``unresolved``: the lock is
+    not to be armed on a half backfill."""
+    import sqlite3
+
+    import psycopg
+
+    from kazma_core.spaces import threads
+    from kazma_core.spaces.scope import OWNER_SPACE_ID
+
+    try:
+        homes = threads.thread_spaces()
+    except (sqlite3.Error, OSError) as exc:
+        result.unresolved.append(f"checkpoints: the threads' spaces could not be read ({type(exc).__name__})")
+        logger.warning("[row_security] the checkpoints' backfill could not read the thread records: %s",
+                       type(exc).__name__)
+        return
+    by_space: dict[str, list[str]] = {}
+    for thread_id, space in homes.items():
+        if space and space != OWNER_SPACE_ID:
+            by_space.setdefault(space, []).append(thread_id)
+    others = [t for ids in by_space.values() for t in ids]
+    for table in tables:
+        statements: list[tuple[str, tuple[Any, ...]]] = []
+        for space, ids in sorted(by_space.items()):
+            for i in range(0, len(ids), _BACKFILL_BATCH):
+                statements.append((f"UPDATE public.{table} SET {SPACE_COLUMN} = %s "  # nosec B608 - a rule's table
+                                   f"WHERE thread_id = ANY(%s) AND {SPACE_COLUMN} IS DISTINCT FROM %s",
+                                   (space, ids[i:i + _BACKFILL_BATCH], space)))
+        statements.append((f"UPDATE public.{table} SET {SPACE_COLUMN} = NULL "  # nosec B608 - a rule's table
+                           f"WHERE {SPACE_COLUMN} IS NOT NULL AND {SPACE_COLUMN} <> %s AND NOT (thread_id = ANY(%s))",
+                           (OWNER_SPACE_ID, others)))
+        for statement, params in statements:
+            done = False
+            for attempt in range(max(1, tries)):
+                if time.monotonic() >= deadline:
+                    break
+                try:
+                    with _table_transaction(conn, lock_timeout_ms) as cur:
+                        cur.execute(statement, params)
+                        result.backfilled += max(0, cur.rowcount)
+                    done = True
+                    break
+                except psycopg.Error as exc:
+                    if not _lock_wait(exc):
+                        raise
+                    time.sleep(min(0.2 * (attempt + 1), max(0.0, deadline - time.monotonic())))
+            if not done:
+                result.left.append(f"{table} (its rows' spaces)")
+                break
+    if result.backfilled:
+        result.changed.append(f"checkpoints: {result.backfilled} row(s) given their thread's space")
 
 
 # ── tables made later (review H3) ───────────────────────────────────────
@@ -1207,6 +1280,11 @@ def begin_space(conn: Any, space: str) -> None:
     conn._kazma_out, conn._kazma_spent = True, False
 
 
+#: What a space connection's session is given back as, before the next
+#: checkout (step 3 review M1, delta review N1): both halves send it.
+_RESET_SESSION = "CLOSE ALL; UNLISTEN *; SELECT pg_advisory_unlock_all(); RESET ALL; RESET ROLE; DISCARD TEMP"
+
+
 def end_space(conn: Any) -> None:
     """The pool took the connection back: it belongs to no checkout, and
     what a checkout set for the session is taken back before the next one
@@ -1222,8 +1300,7 @@ def end_space(conn: Any) -> None:
     from psycopg import pq
 
     conn._kazma_out = False
-    result = conn.pgconn.exec_(b"CLOSE ALL; UNLISTEN *; SELECT pg_advisory_unlock_all(); RESET ALL; RESET ROLE; "
-                               b"DISCARD TEMP")
+    result = conn.pgconn.exec_(_RESET_SESSION.encode())
     if result.status != pq.ExecStatus.COMMAND_OK:
         said = (result.error_message or b"").decode(errors="replace").strip()
         raise psycopg.OperationalError(f"a space connection could not be reset ({said or 'no answer'})")
@@ -1275,3 +1352,124 @@ def say_space_half_failed(signin_refused: str | None, failure: str) -> None:
         return
     _half_said[kind] = now
     logger.warning("[row_security] %s", text)
+
+
+# ── the checkpointer's door (S4-01 step 4) ──────────────────────────────
+#
+# The checkpointer's pool is psycopg's async pool, on the loop, autocommit
+# (LangGraph's ``setup()`` makes indexes concurrently). Its checkout asks the
+# same question as the shared pool's: whose statements these are. Its
+# opening message goes with ``await conn.execute(..., prepare=False)``:
+# ``pgconn.exec_`` blocks the loop for the server's whole answer (review H4),
+# and the pool prepares every statement at once, which two commands cannot be.
+
+
+def checkpoint_door() -> str | None:
+    """Whose statements a checkpointer checkout is for. None: today's path
+    -- Spaces not enforced and the lock not armed, or, not armed, the
+    install's door or nothing said. Armed, :func:`checkout_space`'s answer:
+    ``""`` the install's, a space's id, nothing said refused. Enforced and not
+    armed, a space's id too: its transaction is opened in the space on the
+    owner's connection, so what it writes is stamped with it (review M7:
+    armed or not). No I/O."""
+    if armed():
+        return checkout_space()
+    from kazma_core.spaces.row_work import Door
+    from kazma_core.spaces.scope import spaces_enforced, valid_space_id
+
+    if not spaces_enforced():
+        return None
+    door = Door.now()
+    if door is None or not door.space or not valid_space_id(door.space):
+        return None
+    return door.space
+
+
+class _KeepLatestRefused(_refusal_base()):  # type: ignore[misc]
+    """``aprune`` keeping the latest checkpoints, in a space's checkout
+    (Spaces enforced, armed or not): it sets its transaction's isolation
+    inside the checkout's own ``BEGIN`` and fails with 25001 (review L1).
+    Kazma never calls it; the ``delete`` strategy works."""
+
+
+async def begin_space_async(conn: Any, space: str, *, role: bool) -> None:
+    """``BEGIN`` and the space in one message on a checkpointer connection,
+    awaited and not prepared (review H4). With *role* (the space half), the
+    same message reads ``current_user``: anything but the space role is
+    closed and refused (step 3 review M1)."""
+    from psycopg import pq
+
+    from kazma_core.spaces.scope import valid_space_id
+
+    if not valid_space_id(space):
+        raise _NotASpace(f"not a space id: {space!r}")
+    literal = pq.Escaping(conn.pgconn).escape_literal(space.encode()).decode()
+    import asyncio
+
+    import psycopg
+
+    try:
+        cur = await conn.execute(f"BEGIN; SELECT set_config('{SPACE_SETTING}', {literal}, true), "
+                                 "current_user::text", prepare=False)
+    except (psycopg.Error, OSError, asyncio.CancelledError):
+        await _rollback_space_async(conn)  # a BEGIN whose setting failed ends here, never left open
+        raise
+    who = ""
+    while True:
+        result = cur.pgresult
+        if result is not None and result.status == pq.ExecStatus.TUPLES_OK:
+            who = (result.get_value(0, 1) or b"").decode(errors="replace")
+            break
+        if not cur.nextset():
+            break
+    if role and who != SPACE_ROLE:
+        await conn.close()  # the pool discards a closed connection
+        raise _NotTheSpaceRole(f"a space checkout's connection was {who or 'no role'}, not {SPACE_ROLE}: "
+                               "closed and refused")
+
+
+async def end_space_transaction_async(conn: Any, ok: bool) -> None:
+    """The checkout's transaction ends: ``COMMIT`` when its block ended
+    well (a failure is the caller's: its write did not happen), else
+    ``ROLLBACK``; a rollback that cannot be sent closes the connection,
+    which the pool discards and the server rolls back."""
+    if ok:
+        await conn.execute("COMMIT", prepare=False)
+        return
+    await _rollback_space_async(conn)
+
+
+async def _rollback_space_async(conn: Any) -> None:
+    """``ROLLBACK`` on a checkpointer connection, bounded; one that cannot be
+    sent closes the connection, which the pool discards and the server rolls
+    back."""
+    import asyncio
+
+    import psycopg
+
+    if conn.closed:
+        return
+    try:
+        await asyncio.wait_for(conn.execute("ROLLBACK", prepare=False), timeout=5.0)
+    except (psycopg.Error, OSError, TimeoutError) as exc:
+        logger.debug("[row_security] a checkpointer rollback failed (%s): the connection is closed",
+                     type(exc).__name__)
+        await conn.close()
+
+
+async def check_space_role_async(conn: Any) -> None:
+    """:func:`check_space_role` for the checkpointer's space half."""
+    import psycopg
+
+    global _role_refused
+    cur = await conn.execute("SELECT current_user::text", prepare=False)
+    who = (cur.pgresult.get_value(0, 0) or b"").decode(errors="replace") if cur.pgresult is not None else ""
+    if who != SPACE_ROLE:
+        _role_refused = (time.monotonic(), who)
+        raise psycopg.OperationalError(f"the space pool signed in as {who or 'no role'}, not {SPACE_ROLE}")
+
+
+async def end_space_async(conn: Any) -> None:
+    """:func:`end_space` for the checkpointer's space half: the session given
+    back before the next checkout. Raising discards the connection."""
+    await conn.execute(_RESET_SESSION, prepare=False)

@@ -12,10 +12,11 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 import aiosqlite
@@ -23,6 +24,7 @@ from langchain_core.runnables import RunnableConfig
 from kazma_core.checkpoint_serde import kazma_checkpoint_serde
 from kazma_core.config_store import apply_sqlite_pragmas_async
 from kazma_core.spaces import threads as _threads
+from kazma_core.spaces.row_work import statements_of
 from kazma_core.spaces.scope import OWNER_SPACE_ID, current_scope, spaces_enforced
 from kazma_core.tenant_context import get_current_tenant_id
 from langgraph.checkpoint.base import (
@@ -138,7 +140,27 @@ class CheckpointManager(BaseCheckpointSaver):
         return await asyncio.to_thread(_threads.thread_home, thread_id)
 
     async def _open(self, thread_id: str | None, *, write: bool = False) -> Any | None:
-        """The saver *thread_id* is read or written in; None for a read this
+        """The saver of :meth:`_opened`, without its space."""
+        return (await self._opened(thread_id, write=write))[0]
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _door(space: str | None) -> Iterator[None]:
+        """The database door of a saver call: the space its statements are in
+        (``row_work.statements_of``), or none while Spaces is not enforced."""
+        if not space:
+            yield
+            return
+        with statements_of(space):
+            yield
+
+    async def _opened(self, thread_id: str | None, *, write: bool = False) -> tuple[Any | None, str | None]:
+        """The saver *thread_id* is read or written in, and the space its
+        statements are in (Spaces S4-01 step 4): the thread's own, whoever
+        asks, so the rows a write makes are stamped with it and, once the
+        second lock is armed, a read sees that space's rows only; the bound
+        space (or the owner's) for a call that names no thread; None while
+        Spaces is not enforced, as before. The saver is None for a read this
         work may not make (the thread is another space's: it reads as a
         thread with no checkpoints). A refused write raises.
 
@@ -150,12 +172,13 @@ class CheckpointManager(BaseCheckpointSaver):
         two spaces apart; on SQLite each space also has its own file.
         """
         if not spaces_enforced():
-            return await self._get_saver()
+            return await self._get_saver(), None
         asked = self._asked_space()
         if not thread_id:
             # A listing or a clear names no thread: the bound space's saver,
-            # and the owner's for install work that bound nothing.
-            return await self._saver_of(asked or OWNER_SPACE_ID)
+            # and the owner's for install work that bound nothing (its door
+            # is the one it said, or none).
+            return await self._saver_of(asked or OWNER_SPACE_ID), asked
         home = await self._home(str(thread_id))
         if asked is not None and asked != home:
             if write:
@@ -164,8 +187,8 @@ class CheckpointManager(BaseCheckpointSaver):
                 )
             logger.warning("[Checkpoint] a read of thread %s was refused: it is another space's",
                            str(thread_id)[:12])
-            return None
-        return await self._saver_of(home)
+            return None, None
+        return await self._saver_of(home), home
 
     async def _saver_of(self, tenant_id: str) -> AsyncSqliteSaver:
         """The saver of one space: the shared table on Postgres (once Spaces
@@ -253,8 +276,9 @@ class CheckpointManager(BaseCheckpointSaver):
         lock = self._get_lock(thread_id)
 
         async with lock:
-            saver = await self._open(self._thread_of(config), write=True)
-            return await saver.aput(config, checkpoint, metadata, new_versions)
+            saver, space = await self._opened(self._thread_of(config), write=True)
+            with self._door(space):
+                return await saver.aput(config, checkpoint, metadata, new_versions)
 
     async def aput_writes(
         self,
@@ -268,8 +292,9 @@ class CheckpointManager(BaseCheckpointSaver):
         lock = self._get_lock(thread_id)
 
         async with lock:
-            saver = await self._open(self._thread_of(config), write=True)
-            await saver.aput_writes(config, writes, task_id, task_path)
+            saver, space = await self._opened(self._thread_of(config), write=True)
+            with self._door(space):
+                await saver.aput_writes(config, writes, task_id, task_path)
 
     @staticmethod
     def _thread_of(config: Any) -> str | None:
@@ -279,13 +304,19 @@ class CheckpointManager(BaseCheckpointSaver):
 
     async def aget(self, config: dict[str, Any]) -> Any:
         """Retrieve a checkpoint (read-only, no lock needed)."""
-        saver = await self._open(self._thread_of(config))
-        return await saver.aget(config) if saver is not None else None
+        saver, space = await self._opened(self._thread_of(config))
+        if saver is None:
+            return None
+        with self._door(space):
+            return await saver.aget(config)
 
     async def aget_tuple(self, config: dict[str, Any]) -> Any:
         """Retrieve a checkpoint tuple."""
-        saver = await self._open(self._thread_of(config))
-        return await saver.aget_tuple(config) if saver is not None else None
+        saver, space = await self._opened(self._thread_of(config))
+        if saver is None:
+            return None
+        with self._door(space):
+            return await saver.aget_tuple(config)
 
     async def alist(
         self,
@@ -301,21 +332,22 @@ class CheckpointManager(BaseCheckpointSaver):
         (``kazma_ui.turn_resume``) failed on every boot of the live server
         (2026-11-06), which hands it this manager, not the saver."""
         named = self._thread_of(config)
-        saver = await self._open(named)
+        saver, space = await self._opened(named)
         if saver is None:
             return
         # A listing over every thread of a shared table shows a bound space
         # its own threads only. The space's threads are asked once.
         only = self._asked_space() if (named is None and self._filters_by_thread()) else None
         if only is None:
-            async for item in saver.alist(config, filter=filter, before=before, limit=limit):
+            rows = saver.alist(config, filter=filter, before=before, limit=limit)
+            async for item in self._each_in(rows, space):
                 yield item
             return
         mine = await self._threads_of(only)
         shown = 0
         # The saver's own limit counts every space's rows: it is applied here,
         # to the rows this space is shown.
-        async for item in saver.alist(config, filter=filter, before=before):
+        async for item in self._each_in(saver.alist(config, filter=filter, before=before), space):
             listed = self._thread_of(getattr(item, "config", None))
             if listed is None or not mine(listed):
                 continue
@@ -323,6 +355,27 @@ class CheckpointManager(BaseCheckpointSaver):
             shown += 1
             if limit is not None and shown >= limit:
                 return
+
+    @classmethod
+    async def _each_in(cls, rows: Any, space: str | None) -> Any:
+        """*rows* (the saver's listing), each step taken in *space*'s door
+        and the door given back before the row is handed on: a door held
+        across a ``yield`` would stay in force in the consumer between rows
+        and after a ``break`` (S4-01 review M5). The listing's checkout is
+        made, in its space, at its first step."""
+        it = rows.__aiter__()
+        try:
+            while True:
+                with cls._door(space):
+                    try:
+                        item = await it.__anext__()
+                    except StopAsyncIteration:
+                        return
+                yield item
+        finally:
+            aclose = getattr(it, "aclose", None)
+            if aclose is not None:
+                await aclose()
 
     @staticmethod
     async def _threads_of(space_id: str) -> Any:
@@ -341,9 +394,10 @@ class CheckpointManager(BaseCheckpointSaver):
         """Delete all checkpoints for a thread."""
         lock = self._get_lock(thread_id)
         async with lock:
-            saver = await self._open(str(thread_id) if thread_id else None, write=True)
+            saver, space = await self._opened(str(thread_id) if thread_id else None, write=True)
             if hasattr(saver, "adelete_thread"):
-                await saver.adelete_thread(thread_id)
+                with self._door(space):
+                    await saver.adelete_thread(thread_id)
 
     @staticmethod
     async def _thread_ids(saver: Any) -> list[str]:

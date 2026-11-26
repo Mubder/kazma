@@ -13,6 +13,15 @@
   with the measurement. A planted slow pattern that runs out the clock now
   counts as caught.
 
+## Spaces: a chat's saved state is marked with its own space (2026-11-26)
+
+- With Spaces on, each chat's saved state in Postgres is now marked with the
+  space the chat belongs to, whoever is asking, so the database's own lock
+  will show a space only its own chats' state once it is switched on.
+  Nothing switches the lock on yet, and with Spaces off nothing changes.
+- Putting the lock's rules in place also gives the state saved by older
+  versions its chat's space.
+
 ## Spaces: the database's own lock between spaces, wired and tried (2026-11-26)
 
 - Kazma's connection to its own Postgres can now hold each space to its own

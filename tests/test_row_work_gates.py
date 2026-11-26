@@ -177,6 +177,10 @@ ROWS: dict[str, tuple[str, tuple[str, ...]]] = {
     "kazma-core/kazma_core/spaces/space_limits.py::_documents_used": (
         "statements: a space the admin's page, or the space's own, counts (a number, no row)",
         ("statements_of(space_id)",)),
+    "kazma-gateway/kazma_gateway/stores/checkpoint.py::CheckpointManager._door": (
+        "statements: the thread's own space, whoever asks (its record), or the bound space for a call that "
+        "names no thread (Spaces S4-01 step 4)",
+        ("statements_of(space)",)),
     "kazma-core/kazma_core/swarm/checkpoint_manager.py::CheckpointManager.handle_pipeline_checkpoint": (
         "statements: the paused task's own space",
         ("statements_of(space_of_task(task))",)),

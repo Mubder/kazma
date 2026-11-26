@@ -55,6 +55,8 @@ MADE: dict[str, str] = {
         "own sign-in: the second lock's rules are read and put in place as the tables' owner (S4-01 step 2)",
     "kazma-core/kazma_core/db/row_security.py::_space_connect":
         "own sign-in: the proof signs in as the space role to see that the lock holds; it writes nothing",
+    "kazma-core/kazma_core/checkpoints_pg.py::_reported_pool_class.ReportedCheckpointPool._space_half":
+        "door: _reported_pool_class.ReportedCheckpointPool.connection",
     "kazma-core/kazma_core/postgres_upgrade.py::server_major":
         "own sign-in: the upgrade asks the server for its version, no row of any table",
     "kazma-core/kazma_core/postgres_upgrade.py::_snapshot":
