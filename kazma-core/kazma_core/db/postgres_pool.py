@@ -10,6 +10,7 @@ import atexit
 import logging
 import re
 import threading
+import time
 import weakref
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -151,6 +152,9 @@ class PostgresPool:
         # checkout once the second lock is armed; never while it is not.
         self._space_pool: Any = None
         self._space_lock = threading.Lock()
+        # When a failed space checkout was last judged, and the verdict:
+        # (when, the owner cannot sign in either, why the space role cannot).
+        self._space_verdict: tuple[float, bool, str | None] | None = None
         self._pool = ConnectionPool(
             conninfo=dsn,
             min_size=min_size,
@@ -245,15 +249,22 @@ class PostgresPool:
 
     def _space_failed(self, exc: BaseException) -> None:
         """A space checkout failed. An outage when the owner cannot sign in
-        either (§44); else the space role's own problem, said as one, never
-        an outage (review M1). One direct sign-in each, after the pool gave up."""
+        either (§44); else the space half's own problem, said in words that
+        tell a refused sign-in from a full pool (review M1, step 3 review
+        L3). The verdict -- one direct sign-in each -- holds for a minute, so
+        failing checkouts do not each sign in twice."""
         if not _availability.is_outage(exc):
             return
-        if refusal_reason(self._dsn) is not None:
+        now = time.monotonic()
+        verdict = self._space_verdict
+        if verdict is None or now - verdict[0] >= 60.0:
+            owner_refused = refusal_reason(self._dsn) is not None
+            space_refused = None if owner_refused else refusal_reason(row_security.space_conninfo(self._dsn))
+            verdict = self._space_verdict = (now, owner_refused, space_refused)
+        if verdict[1]:
             _availability.note_failure("pool", exc)
             return
-        row_security.say_space_half_failed(refusal_reason(row_security.space_conninfo(self._dsn))
-                                           or type(exc).__name__)
+        row_security.say_space_half_failed(verdict[2], type(exc).__name__)
 
     def execute(self, sql: str, params: tuple | list | dict | None = None) -> list[dict]:
         """Run *sql* and commit; return its rows.
@@ -298,9 +309,11 @@ class PostgresPool:
 class _HeldConnection:
     """:meth:`PostgresPool.connection` entered now and left at ``close()``.
 
-    A transaction a failed statement left open is rolled back first; the
-    door's own block then commits whatever is left and gives the connection
-    back. Closed where it was opened (the door's context is this thread's)."""
+    A transaction left open -- failed, or never committed by the store --
+    is rolled back first, as the stores' own connections do (step 3 review
+    L2: an INSERT before a Python error was committed); the door's block
+    then gives the connection back. Closed where it was opened (the door's
+    context is this thread's)."""
 
     def __init__(self, door: Any) -> None:
         from psycopg.rows import tuple_row
@@ -321,7 +334,8 @@ class _HeldConnection:
         from psycopg.pq import TransactionStatus
 
         try:
-            if not self._conn.closed and self._conn.info.transaction_status == TransactionStatus.INERROR:
+            if not self._conn.closed and self._conn.info.transaction_status in (
+                    TransactionStatus.INERROR, TransactionStatus.INTRANS):
                 self._conn.rollback()
         except (psycopg.Error, OSError) as exc:  # the door's block below discards a broken connection
             logger.debug("[PostgresPool] rollback before giving back a held connection failed: %s",

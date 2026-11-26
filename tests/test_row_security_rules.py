@@ -24,6 +24,7 @@ Each gate has a negative control. Real Postgres: ``tests/test_pg_row_security.py
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 from pathlib import Path
@@ -411,3 +412,70 @@ def test_every_copy_restored_without_privileges_takes_publics_execute_away() -> 
     # Negative control: a planted restore that leaves them.
     planted = {"kazma-core/kazma_core/planted.py": 'run(["pg_restore", "--no-owner", "--no-privileges", dump])'}
     assert _not_closing(planted) == ["kazma-core/kazma_core/planted.py"]
+
+
+# ── who may declare a checkout inside a space one (step 3 delta review N2) ──
+
+#: Every product function that declares an install checkout inside a space
+#: one, and why none of the space transaction's locks is waited for.
+INSTALL_INSIDE_A_SPACE: dict[str, str] = {
+    "kazma-core/kazma_core/config_store.py::ConfigStore._pg_access":
+        "the settings table: the space role has no right on it and holds none of its locks",
+}
+#: The same for a space checkout inside another: none.
+SPACE_INSIDE_A_SPACE: dict[str, str] = {}
+
+_DECLARES = ("install_inside_a_space", "space_inside_a_space")
+
+
+def _declarers(sources: dict[str, str]) -> dict[str, set[str]]:
+    """Each declaration's callers, ``path::function``."""
+    found: dict[str, set[str]] = {name: set() for name in _DECLARES}
+    for rel, text in sources.items():
+        stack: list[str] = []
+
+        class _Visit(ast.NodeVisitor):
+            def _scope(self, node: Any) -> None:
+                stack.append(node.name)
+                self.generic_visit(node)
+                stack.pop()
+
+            visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = _scope  # noqa: N815 - ast's names
+
+            def visit_Call(self, node: ast.Call) -> None:
+                func = node.func
+                name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+                if name in found:
+                    found[name].add(f"{rel}::{'.'.join(stack) or '<module>'}")  # noqa: B023 - read while visiting
+                self.generic_visit(node)
+
+        _Visit().visit(ast.parse(text))
+    return found
+
+
+def _product_declaring() -> dict[str, str]:
+    listed = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "--",
+                             "kazma-*/kazma_*/*.py"], cwd=ROOT, capture_output=True, text=True, check=True)
+    texts = {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in sorted(set(listed.stdout.split()))}
+    return {rel: text for rel, text in texts.items() if "inside_a_space" in text}
+
+
+def test_only_the_declared_functions_declare_a_checkout_inside_a_space() -> None:
+    found = _declarers(_product_declaring())
+    for name, declared in (("install_inside_a_space", INSTALL_INSIDE_A_SPACE),
+                           ("space_inside_a_space", SPACE_INSIDE_A_SPACE)):
+        assert found[name] == set(declared), (
+            f"{name} lets a checkout wait inside a space transaction: declare each caller and why no lock "
+            f"of the space's is waited for; undeclared {sorted(found[name] - set(declared))}, "
+            f"stale {sorted(set(declared) - found[name])}")
+
+
+def test_the_gate_sees_a_planted_declaration() -> None:
+    # Negative control: a store that declares its own.
+    planted = {"kazma-core/kazma_core/planted.py": (
+        "from kazma_core.db import row_security\n"
+        "class Store:\n"
+        "    def read(self):\n"
+        "        with row_security.install_inside_a_space('mine'):\n"
+        "            return 1\n")}
+    assert _declarers(planted)["install_inside_a_space"] == {"kazma-core/kazma_core/planted.py::Store.read"}

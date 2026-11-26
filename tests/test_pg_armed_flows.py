@@ -286,3 +286,29 @@ def test_the_mirror_on_kazmas_database_takes_the_shared_door(armed: Any, monkeyp
     finally:
         _install("DELETE FROM kazma_beliefs WHERE id = ANY(%s)", (list(facts.values()),))
         mirror.close()
+
+
+# ── the step 3 review ────────────────────────────────────────────────────
+
+
+def test_a_settings_read_inside_a_spaces_checkout_answers(armed: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """M2: a cold settings read inside a space checkout was refused as a
+    nested install checkout, and the mirror, which reads its conflict policy
+    inside its held connection, fell back to last_write_wins while the
+    setting said fail_closed."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.memory.state_backend import state_conflict_policy
+
+    store = get_config_store()
+    if not store._use_postgres():
+        pytest.skip("the settings are on Postgres only with KAZMA_DB_BACKEND=postgres")
+    key = "memory.backends.state.conflict_policy"
+    store.set(key, "fail_closed")
+    space = f"s{uuid.uuid4().hex[:12]}"
+    try:
+        store._clear_cache()  # cold: as 15 s after a write elsewhere
+        with bind_scope(space, "owner"), armed.connection():  # a space checkout held, as the mirror holds one
+            assert state_conflict_policy() == "fail_closed"
+            assert store.get(key) == "fail_closed"
+    finally:
+        store.delete(key)
