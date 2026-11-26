@@ -155,7 +155,9 @@ _SIGN_OFF = re.compile(
     r"[ \t]*(?:(?:best|kind|warm|many)(?: (?:regards|wishes|thanks))?|regards|cheers|sincerely|yours(?: \w+)?|"
     r"yours sincerely|yours truly|thanks(?: again)?|thank you|love|respectfully|"
     r"(?:مع |اطيب |خالص |مع خالص |مع اطيب |وتقبلوا )?(?:تحياتي|التحيات|التحيه|تحيه|تحياتنا)|شكرا(?: لك| لكم)?|"
-    r"اخوك|اخوكم|المخلص|مع الشكر|ودمتم)(?:[ \t]\w+)?[ \t]*[,،.!]?[ \t]*")
+    # The mark and its spaces read once ("[ \t]*[,،.!]?[ \t]*" read a run of
+    # spaces twice: quadratic, step 4's review).
+    r"اخوك|اخوكم|المخلص|مع الشكر|ودمتم)(?:[ \t]\w+)?[ \t]*(?:[,،.!][ \t]*)?")
 _LETTER_OPENS = re.compile(
     r"[ \t]*(?:hi|hello|hey|dear|good (?:morning|afternoon|evening)|هلا|اهلا|مرحبا|عزيزي|عزيزتي|السلام عليكم|"
     r"حضره|الاخ|الاخت|الساده|سعاده)\b[^\n.!?؟]{0,60}[,،:!]?[ \t]*", re.IGNORECASE)

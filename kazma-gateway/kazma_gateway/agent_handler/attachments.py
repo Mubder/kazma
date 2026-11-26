@@ -55,11 +55,40 @@ from kazma_core.paths import data_dir as _data_dir
 ATTACHMENT_DIR = _data_dir() / "attachments"
 
 # Model-emitted paths in chat text that we may auto-attach (telegram send).
-# Untrusted: the regex is not a permission check. Containment is.
-_AUTO_ATTACH_RE = re.compile(
-    r"(?:kazma-data/documents/|reports/|data/)[^\s\"'\(\)\[\]`]+\.(?:pdf|docx|html)",
-    re.IGNORECASE,
-)
+# Untrusted: the reading is not a permission check. Containment is.
+# What ``(?:kazma-data/documents/|reports/|data/)[^\s"'()\[\]`]+\.(?:pdf|docx|html)``
+# found with ``findall``, read a token at a time: that one pattern tried every
+# start inside a long token and read it to the end, quadratic on a reply of
+# "data/data/data/..." (step 4's review, the regex sweep's head shape).
+_PATH_TOKEN = re.compile(r"[^\s\"'()\[\]`]+")
+#: The folders a reply's path begins with: words a reply says, never a path
+#: opened here (containment is ``resolve_auto_attach_path``'s).
+_AUTO_ATTACH_PREFIX = re.compile(r"(?:kazma-data/documents/|reports/|data/)", re.IGNORECASE)
+_AUTO_ATTACH_EXT = re.compile(r"\.(?:pdf|docx|html)", re.IGNORECASE)
+
+
+def _auto_attach_matches(text: str) -> list[str]:
+    """The paths a model's reply names, as the one pattern's ``findall``
+    gave them: in a token, from the leftmost known folder's prefix that
+    leaves a character before the token's last ".pdf", ".docx" or ".html",
+    to that extension (the greedy middle took the last; one a token)."""
+    out: list[str] = []
+    for token in _PATH_TOKEN.finditer(text):
+        word = token.group()
+        last = None
+        for last in _AUTO_ATTACH_EXT.finditer(word):
+            pass
+        if last is None:
+            continue
+        pos = 0
+        while (found := _AUTO_ATTACH_PREFIX.search(word, pos)) is not None and found.start() < last.start():
+            # "data/" inside "kazma-data/documents/" ends sooner: a later
+            # prefix may fit where an earlier one did not.
+            if found.end() < last.start():
+                out.append(word[found.start():last.end()])
+                break
+            pos = found.start() + 1
+    return out
 
 
 def auto_attach_roots() -> tuple[Path, Path]:
@@ -109,7 +138,7 @@ def find_auto_attach_paths(
     """Extract contained auto-attach files mentioned in *text*."""
     found: list[Path] = []
     seen: set[str] = set()
-    for match in _AUTO_ATTACH_RE.findall(text or ""):
+    for match in _auto_attach_matches(text or ""):
         fpath = resolve_auto_attach_path(match, roots=roots)
         if fpath is None:
             continue

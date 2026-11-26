@@ -14,18 +14,23 @@
 
 - Asking "What is it that I do for a living?" or "ما الذي أعمله لكسب عيشي؟"
   now finds your job, as "What do I do for a living?" and "شنو شغلتي؟" did.
+  Asking for advice ("What should I do for a living?", "ماذا يجب أن أفعل لكسب
+  رزقي؟") does not.
 - Kazma's memory benchmark now keeps its facts under the names Kazma itself
   keeps them by (dataset version 9). This showed the miss above.
 
 ## Memory: "not only", "No, Omar" and a voice note (2026-11-26)
 
-- "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "ليس فقط علي" and "I
-  didn't see Ali alone" no longer take the meeting with Ali away; "Nothing is
-  wrong, I met Omar" takes nothing away either.
-- A reply of just "No, Omar" or "لا، عمر" now puts right what Kazma had just
-  said was Ali.
-- A message that starts "رسالة صوتية:" keeps what you did, as "Voice note:" and
-  "فويس:" did.
+- "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "مو علي بس", "ليس علي
+  فقط" and "I didn't see Ali alone" no longer take the meeting with Ali away;
+  "Nothing is wrong, I met Omar" takes nothing away either.
+- "Alone" said of someone else or of you still puts right: "Not Ali I met Omar
+  alone", "مو علي قابلت عمر بروحه", "No I went to the gym alone on Thursday".
+  So does "لا غلط، عمر".
+- A reply of just "No, Omar", "Nope Omar!" or "لا، عمر" now puts right what
+  Kazma had just said was Ali; "No, Omar too" and "لا، عمر بعد" add Omar.
+- A message that starts "رسالة صوتية:" or "رسالة صوتية مني:" keeps what you did,
+  as "Voice note:" and "فويس:" did.
 
 ## Memory: Arabic questions about what you told find it as English ones do (2026-11-26)
 
