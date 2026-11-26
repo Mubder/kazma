@@ -397,6 +397,13 @@ TOLD: tuple[dict[str, Any], ...] = (
      "asked": {"en": ("Do I have any pets?", "What is my cat called?"), "gulf": ("عندي حيوانات أليفة؟", "شنو اسم قطوتي؟"),
                "msa": ("هل لدي حيوانات أليفة؟", "ما اسم قطتي؟")},
      "other": {"en": "Which pets live the longest?", "gulf": "أي حيوان أليف يعيش أكثر؟", "msa": "ما الحيوانات الأليفة الأطول عمراً؟"}},
+    # A pet held by its name alone ("has_cat Milo"): "What is my cat called?"
+    # shares no word with it (the review of step 3, L3).
+    {"kind": "pets", "name": "has_cat", "type": "set",
+     "told": {"en": ("My cat is called Simba.", "Simba"), "ar": ("قطوتي اسمها سمبا.", "سمبا")},
+     "asked": {"en": ("What is my cat called?", "What's my cat's name?"), "gulf": ("شنو اسم قطوتي؟", "منو قطوتي؟"),
+               "msa": ("ما اسم قطتي؟", "ما هو اسم قطتي؟")},
+     "other": {"en": "Are cats clever?", "gulf": "القطاوة ذكية؟", "msa": "هل القطط ذكية؟"}},
     {"kind": "languages", "name": "speaks_language", "type": "set",
      "told": {"en": ("I speak Italian.", "Italian"), "ar": ("أتكلم إيطالي.", "إيطالي")},
      "asked": {"en": ("What languages do I speak?", "Do I speak Italian?"), "gulf": ("شنو اللغات اللي أتكلمها؟", "أتكلم إيطالي؟"),
@@ -411,6 +418,29 @@ TOLD: tuple[dict[str, Any], ...] = (
 
 #: Store sizes: a fact alone, among four others, and among all.
 TOLD_SIZES = (1, 5, 30)
+
+#: Questions in another sense that hold a word the tables give the kind, as a
+#: word of its own (the review of step 3, M3): the precision rows must be able
+#: to see what is added. Asked in the stores of five and of thirty. By the
+#: told row's name.
+TOLD_OTHER_BARE: dict[str, dict[str, tuple[str, ...]]] = {
+    "doctor": {"en": ("Which doctor is best for teeth?",), "gulf": ("أي دكتور أسنان أفضل؟", "شنو لازم أراجع قبل الامتحان؟"),
+               "msa": ("أي طبيب أسنان أفضل في المدينة؟", "متى أراجع البنك؟")},
+    "has_pet": {"en": ("What's my pet peeve?",), "gulf": ("البروتين الحيواني زين؟",), "msa": ("هل البروتين الحيواني صحي؟",)},
+    "is_interested_in": {"en": ("How do I take care of my health?",), "gulf": ("شلون أهتم بصحتي؟",), "msa": ("كيف أهتم بصحتي؟",)},
+    "drives": {"en": ("What's in my drive?", "Where did I save the file on Google Drive?", "How is my driving?"),
+            "gulf": ("وين السوق؟",), "msa": ("أين السوق؟",)},
+    "visited": {"en": ("What should I visit in Paris?",), "gulf": ("شنو أزور بباريس؟",), "msa": ("ماذا أزور في باريس؟",)},
+    "marital_status": {"en": ("Is the actor married?",), "gulf": ("الممثل متزوج؟",), "msa": ("هل الممثل متزوج؟",)},
+    "dietary_restriction": {"en": ("Can I eat here?", "Can we eat outside?", "Can I take Panadol with coffee?"),
+             "gulf": ("أقدر آكل الحين؟", "يصير آكل بالليل؟"), "msa": ("هل أستطيع أن أتناول البنادول مع القهوة؟",)},
+}
+
+
+def _other_sense(kind: dict[str, Any]) -> list[tuple[str, str]]:
+    """The kind's questions in another sense, (way, question)."""
+    bare = TOLD_OTHER_BARE.get(kind["name"], {})
+    return [(way, q) for way in ("en", "gulf", "msa") for q in (kind["other"][way], *bare.get(way, ()))]
 
 
 def _tell(primary: Any, ops: Any, facts: list[tuple[str, str, str, str]]) -> None:
@@ -453,8 +483,8 @@ def run_fact_languages_kinds(kinds: tuple[dict[str, Any], ...] = TOLD) -> list[d
                                 rows.append({"told": told, "size": size, "asked": way, "form": form, "kind": kind["kind"],
                                              "question": question, "found": any(value in h.content for h in result.beliefs),
                                              "degraded": result.degraded})
-                        if at is None:
-                            for way, question in kind["other"].items():
+                        if size > 1:
+                            for way, question in _other_sense(kind):
                                 result = _ask(conn, question)
                                 rows.append({"told": told, "size": size, "asked": way, "form": "other", "kind": kind["kind"],
                                              "question": question, "shown": any(value in h.content for h in result.beliefs),
