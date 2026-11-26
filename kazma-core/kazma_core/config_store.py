@@ -50,6 +50,7 @@ from kazma_core.security.url_credentials import (
     url_has_credentials,
     url_password_is_masked,
 )
+from kazma_core.spaces.row_work import install_statements
 
 __all__ = ["CONFIG_STORE_MIGRATIONS", "ChangeListener", "ConfigStore", "ConfigStoreProtocol", "MigrationRunner", "SettingsSnapshot", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
 
@@ -1265,7 +1266,11 @@ class ConfigStore(_ChangeNotices):
                 raise ConfigStoreUnavailableError()
             probing = True
         try:
-            yield
+            # The settings table is the install's, outside every space's lock
+            # (Spaces S4-01, decision 4): one key space and one cache for the
+            # install. Every settings statement runs in this block.
+            with install_statements("the settings table, one key space for the install (S4-01 decision 4)"):
+                yield
         except ConfigStoreUnavailableError:
             self._mark_pg_down(None)
             raise

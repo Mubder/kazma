@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Spaces: whose each database statement is, counted (2026-11-26)
+
+- Kazma now counts, for each statement it sends to its own Postgres, whose
+  statement it is: a space's, Kazma's own (with the reason it gives), or
+  nobody's. Nothing is refused and Kazma does nothing differently: this is
+  the record that must show every part of Kazma saying whose its statements
+  are before the database's own lock between spaces is ever turned on.
+- The count is kept in `space_doors.json` in Kazma's data folder, added to
+  every 15 minutes and when Kazma stops, by part of Kazma and with how many
+  times. `python scripts/space_doors_report.py` prints it. A part found
+  saying nothing is logged once, at INFO.
+- `KAZMA_SPACE_DOOR_REPORT=0` turns the counting off. It costs a few
+  microseconds a statement.
+- The settings are counted as Kazma's own: they stay outside any space's
+  lock.
+
 ## A page closed while sending is not a server error (2026-11-25)
 
 - A page that closes while it is still sending its request no longer logs an

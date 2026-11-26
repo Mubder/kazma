@@ -22,9 +22,11 @@ forms:
   space, or about none. Each use is declared, with its reason, in
   ``tests/test_row_work_gates.py``.
 
-**Nothing decides by it yet**: the database door is step 1 (report mode),
-and the tests' stand-in for it is ``tests/_space_door.py``. A step that adds
-the door changes what asks :meth:`Door.now`, and no caller here.
+**Nothing decides by it yet.** Step 1 (report mode) asks :meth:`Door.now` at
+every checkout of Kazma's own database and records the answer
+(``db.space_doors``), with nothing refused; the tests' stand-in that asks at
+a store's own methods is ``tests/_space_door.py``. A step that arms the lock
+changes what the answer decides, and no caller here.
 
 With Spaces off :func:`work_of` binds no scope and no tenant and reads
 nothing, so an install runs exactly as before.
@@ -44,7 +46,7 @@ import functools
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from kazma_core.spaces.scope import (
@@ -79,24 +81,32 @@ class Door:
     """Through which door a database statement goes.
 
     ``space`` is the space it is for; ``""`` with a ``reason`` is the
-    install's, and then the reason says why.
+    install's, and then the reason says why. ``how`` says what made it the
+    door: ``scope`` (the bound scope), ``row`` (:func:`statements_of`),
+    ``statements`` (:func:`install_statements`) or ``work``
+    (``scope.install_work``). Two doors to the same space are equal however
+    they were said.
     """
 
     space: str = ""
     reason: str = ""
+    how: str = field(default="", compare=False)
 
     @staticmethod
     def now() -> Door | None:
         """The door a statement goes through now: what was last said under
         what is bound now, else the bound scope's space, else the install's
-        inside ``scope.install_work``; None when nothing says it. No I/O."""
+        inside ``scope.install_work``; None when nothing says it. No I/O.
+
+        The database's door asks it at every checkout (``db.space_doors``:
+        report mode, S4-01 step 1)."""
         scope, work = current_scope(), install_work_reason()
         said = _said.get()
         if said is not None and said.scope is scope and said.work == work:
             return said.door
         if scope is not None:
-            return Door(space=scope.space_id)
-        return Door(reason=work) if work else None
+            return Door(space=scope.space_id, how="scope")
+        return Door(reason=work, how="work") if work else None
 
 
 @dataclass(frozen=True)
@@ -123,7 +133,7 @@ def statements_of(space: object) -> Iterator[None]:
     For the database alone. The bound scope, the asker and the tenant stay as
     they are, and nothing is read.
     """
-    token = _say(Door(space=space_of_record(space)))
+    token = _say(Door(space=space_of_record(space), how="row"))
     try:
         yield
     finally:
@@ -143,7 +153,7 @@ def install_statements(reason: str) -> Iterator[None]:
     """
     if not (reason or "").strip():
         raise ValueError("install statements must say what they are")
-    token = _say(Door(reason=reason.strip()))
+    token = _say(Door(reason=reason.strip(), how="statements"))
     try:
         yield
     finally:

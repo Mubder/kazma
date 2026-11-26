@@ -1,10 +1,11 @@
-"""A stand-in for the database door of Spaces S4-01 (its step 1).
+"""A stand-in for the database door of Spaces S4-01, for a test's own calls.
 
 The second lock will ask, at each checkout, which space a statement is for:
-the bound scope's, what ``spaces.row_work`` said, or the install's. Nothing
-asks today, so a caller that says nothing (or says another space) looks right.
+the bound scope's, what ``spaces.row_work`` said, or the install's. Step 1's
+counter (``kazma_core.db.space_doors``) asks at every checkout and only
+counts; a test asks here to see each call with its arguments.
 :func:`watched` asks at the store's own methods, on either backend, and
-:func:`watched_pool` at the Postgres pool's checkout, as step 1 will.
+:func:`watched_pool` at the Postgres pool's checkout, as the counter does.
 """
 
 from __future__ import annotations

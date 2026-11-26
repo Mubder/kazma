@@ -152,7 +152,7 @@ def test_the_maintenance_cadence_carries_the_retention_sweep():
         "dependency advisories",
         "model failover drill",
         "provider health",
-        "settings snapshot", "erased space keys", "chat moves", "file moves",
+        "settings snapshot", "erased space keys", "chat moves", "file moves", "space door report",
         "forget convergence", "memory vector repair", "memory vector codes", "memory recovery",
         "retired knowledge promotions",
         "memory turn reconcile", "memory text fill",
