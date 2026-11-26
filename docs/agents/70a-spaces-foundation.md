@@ -128,7 +128,12 @@ an install with one account behaves as before.
   explicitly and is not `complete` while a role, function or schema finding
   remains (`Applied.unresolved`); a grant or function it may not touch is
   said, never raised. The policies call `public.kazma_space_id()`, which
-  PUBLIC may not run (a reader set up to run no function stays one). `rows`
+  PUBLIC may not run (a reader set up to run no function stays one), nor
+  any function of `KAZMA_PG_FUNCTIONS`: each DDL revokes it, `apply` does,
+  and every whole restore (the upgrade's and the move's copies, the compose
+  upgrade, the migration bundle's import) calls
+  `pg_backup.revoke_public_execute` after, which fails when PUBLIC still may
+  (delta review N1, N4). `rows`
   and `prove` read a database the rules never reached (a missing rule column
   is the owner's rows) and count every space's table in full: on live, when
   it is idle. `scripts/row_security.py` takes another address only from an
