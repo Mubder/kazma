@@ -1921,13 +1921,19 @@ def _in_order(query: str, ranked: list[RecallHit], rows: dict[str, Any], conn: s
 
 
 def _named_by(query: str) -> Any:
-    """Whether a fact's value, or its name, holds a word of the question's:
-    "trip" is in ``planning_trip`` (the delta check of the review of step 2)."""
+    """Whether a fact's value, or what its name says beside its first word,
+    holds a word of the question's: "trip" is in ``planning_trip`` (the delta
+    check of the review of step 2). The first word is what every entry of the
+    list says ("visited"): read, it named every occasion of a habit."""
     from kazma_core.memory.query_terms import content_terms
 
     asked = set(_without_time_words(content_terms(query)))
-    return lambda row: bool(asked & set(_without_time_words(content_terms(
-        f"{_field(row, 'object') or ''} {str(_field(row, 'predicate') or '').replace('_', ' ')}"))))
+
+    def named(row: Any) -> bool:
+        beside = str(_field(row, "predicate") or "").split("_")[1:]
+        return bool(asked & set(_without_time_words(content_terms(f"{_field(row, 'object') or ''} {' '.join(beside)}"))))
+
+    return named
 
 
 def _with_the_rest(hits: list[RecallHit], rows: dict[str, Any], limit: int) -> list[RecallHit]:

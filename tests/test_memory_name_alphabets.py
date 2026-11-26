@@ -170,7 +170,7 @@ def test_a_spelling_that_is_an_english_word_is_declared():
 
 
 @pytest.mark.parametrize(("text", "named"), [
-    ("I met Sultan and Omar.", ["سلطان", "عمر"]), ("The sultan of Oman met omar.", ["عمر"]), ("Sultan Ahmed street", ["احمد"]),
+    ("I met Sultan and Omar.", ["سلطان", "عمر"]), ("The sultan of Oman met omar.", ["عمر"]), ("the Sultan Ahmed mosque", ["احمد"]),
     ("he said it was sad, nor did we", []), ("it is nada", []), ("ask Iman about it", ["ايمان"]), ("the iman he has", [])])
 def test_an_english_word_names_someone_only_where_it_is_written_as_a_name(text, named):
     assert sorted(name_alphabets.arabic_names_in(text)) == sorted(named)
