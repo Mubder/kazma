@@ -122,6 +122,43 @@
 - With Spaces on, a memory read that the database refuses is an error, never
   "no memories found". With Spaces off nothing changes.
 
+## Memory: "What is it that I do for a living?" finds your job (2026-11-26)
+
+- Asking "What is it that I do for a living?" or "ما الذي أعمله لكسب عيشي؟"
+  now finds your job, as "What do I do for a living?" and "شنو شغلتي؟" did.
+  Asking for advice ("What should I do for a living?", "ماذا يجب أن أفعل لكسب
+  رزقي؟") does not.
+- Kazma's memory benchmark now keeps its facts under the names Kazma itself
+  keeps them by (dataset version 9). This showed the miss above.
+
+## Memory: "Nothing is wrong", "No, Omar" and a voice note (2026-11-26)
+
+- "Nothing is wrong, I met Omar" and "ما في شي غلط" no longer take the meeting
+  with Ali away; "لا غلط، عمر" still puts it right.
+- A reply of just "No, Omar", "Nope Omar!" or "لا، عمر" now puts right what
+  Kazma had just said was Ali; "No, Omar too", "لا، عمر بعد" and "لا، وعمر" add
+  Omar.
+- A message that starts "رسالة صوتية:" or "رسالة صوتية مني:" keeps what you did,
+  as "Voice note:" and "فويس:" did.
+
+## Memory: Arabic questions about what you told find it as English ones do (2026-11-26)
+
+- Asking in Arabic about the thing itself finds what you told Kazma, as English
+  does: "أي طبيب أراجع؟", "أي تويوتا أسوق؟", "شنو اسم قطوتي؟", "شنو حالتي
+  الاجتماعية؟", "عدد كل الأماكن اللي زرتها", "أقدر آكل جلوتين؟". Of 132 such
+  questions a way, Gulf Arabic missed 16, Modern Standard Arabic 9 and English
+  3; now 3, 2 and 1. The rest are a store holding one fact, and a detail the
+  fact does not keep ("at the gym").
+- Places you visited, your pets ("What is my cat called?" as "شنو اسم قطوتي؟")
+  and whether you are married are asked in Arabic and English alike now.
+  "Can I eat gluten?" asks what you may not eat; "Can I eat here?", "What can I
+  eat for dinner?", "أقدر آكل الحين؟", "أقدر آكل هذا؟" and "هل أستطيع أن أتناول
+  البنادول مع القهوة؟" ask nothing of you, and "my drive" is no car. "What is
+  my pet's name?" and "ما اسم حيواني الأليف؟" find your pet.
+- Every question of Kazma's own benchmark, its small-store run and the
+  shared-space set shows what it did. One question of the Spaces study ("What
+  kind of pet do I have at home?") shows one unrelated memory fewer.
+
 ## Adding a provider, step by step (2026-11-25)
 
 - **Add provider is a guided setup**: the provider (searchable, grouped, or by
@@ -177,24 +214,6 @@
   millisecond.
 - The settings are counted as Kazma's own: they stay outside any space's
   lock.
-
-## Memory: Arabic questions about what you told find it as English ones do (2026-11-26)
-
-- Asking in Arabic about the thing itself finds what you told Kazma, as English
-  does: "أي طبيب أراجع؟", "أي تويوتا أسوق؟", "شنو اسم قطوتي؟", "شنو حالتي
-  الاجتماعية؟", "عدد كل الأماكن اللي زرتها", "أقدر آكل جلوتين؟". Of 132 such
-  questions a way, Gulf Arabic missed 16, Modern Standard Arabic 9 and English
-  3; now 3, 2 and 1. The rest are a store holding one fact, and a detail the
-  fact does not keep ("at the gym").
-- Places you visited, your pets ("What is my cat called?" as "شنو اسم قطوتي؟")
-  and whether you are married are asked in Arabic and English alike now.
-  "Can I eat gluten?" asks what you may not eat; "Can I eat here?", "What can I
-  eat for dinner?", "أقدر آكل الحين؟", "أقدر آكل هذا؟" and "هل أستطيع أن أتناول
-  البنادول مع القهوة؟" ask nothing of you, and "my drive" is no car. "What is
-  my pet's name?" and "ما اسم حيواني الأليف؟" find your pet.
-- Every question of Kazma's own benchmark, its small-store run and the
-  shared-space set shows what it did. One question of the Spaces study ("What
-  kind of pet do I have at home?") shows one unrelated memory fewer.
 
 ## A page closed while sending is not a server error (2026-11-25)
 

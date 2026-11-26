@@ -12,12 +12,12 @@ The datasets are Kazma's own, built for these questions in English, Arabic and b
 
 ## Memory: does it find what you told it? {#memory}
 
-Dataset version 8: a private memory seeded the product's way (turns, facts, weekly summaries), then asked questions through the real `recall()`, with the meaning-search model's recorded vectors. **Hit rate**: the answer is among what Kazma shows the model. **MRR**: how high it ranks (1 = first). **Precision**: how much of what is shown is about the question.
+Dataset version 9: a private memory seeded the product's way (turns, facts, weekly summaries), then asked questions through the real `recall()`, with the meaning-search model's recorded vectors. **Hit rate**: the answer is among what Kazma shows the model. **MRR**: how high it ranks (1 = first). **Precision**: how much of what is shown is about the question.
 
 | Question | Hit rate | MRR | Precision |
 |---|---|---|---|
 | A fact you told it | 100.0 % | 1.00 | 28.1 % |
-| Something said in one turn | 100.0 % | 0.82 | 52.4 % |
+| Something said in one turn | 100.0 % | 0.82 | 52.2 % |
 | Something spread over several turns | 100.0 % | 1.00 | 73.8 % |
 | A fact that changed (the newest wins) | 100.0 % | 1.00 | 49.2 % |
 | Asked in other words | 100.0 % | 0.94 | 42.4 % |
@@ -32,17 +32,15 @@ Dataset version 8: a private memory seeded the product's way (turns, facts, week
 | A time, or what was true before | 88.9 % | 0.76 | 51.4 % |
 | A month, or a project over many weeks | 100.0 % | 0.44 | 44.2 % |
 | **All questions** | **90.0 %** | **0.75** | **48.7 %** |
-| **Second set** (see below) | **86.2 %** | **0.76** | **40.4 %** |
+| **Second set** (see below) | **86.2 %** | **0.73** | **40.5 %** |
 
 Questions it has no memory for are answered with nothing in 0.0 % of cases (0.0 % in the second set); the goal is 60.0 %: the weakest number on this page.
 
 The second set was written after the settings were chosen, and no setting is chosen by sweeping it. It is not an unseen test: two decisions were taken by looking at it, and a change that lowers it fails the build like any other score, so it is a second check on the same memories. A set nobody has looked at would be a sealed one, scored only on request.
 
-One answer stands at the edge of what the recorded vectors can tell: "what is it that I do for a living?" (A question with noise around it) is shown by 0.0004 of evidence, and with the vectors moved inside their rounding it changes in 1 of 10 replays. Its hit counts in the table above; the lock names it (`lock --edge`) instead of moving a threshold for it.
+**In a small store** (a new install's size): each of 164 questions asked of a store holding only its own conversations and facts, five unrelated conversations and ten other facts. Every answer shown in 96.4 % of answerable questions, precision 67.7 %, and questions it has no memory for answered with nothing in 3.9 % of cases (it still shows unrelated facts there).
 
-**In a small store** (a new install's size): each of 164 questions asked of a store holding only its own conversations and facts, five unrelated conversations and ten other facts. Every answer shown in 96.4 % of answerable questions, precision 67.5 %, and questions it has no memory for answered with nothing in 3.9 % of cases (it still shows unrelated facts there).
-
-**As memory grows**: the same questions on a store whose unrelated chat is 4 times as large (4,774 memories, every conversation different): hit rate 89.7 % (against 90.0 %), MRR 0.74 (0.75), precision 43.8 % (48.7 %); questions it has no memory for answered with nothing in 5.6 % of cases (0.0 %).
+**As memory grows**: the same questions on a store whose unrelated chat is 4 times as large (4,774 memories, every conversation different): hit rate 89.7 % (against 90.0 %), MRR 0.74 (0.75), precision 43.7 % (48.7 %); questions it has no memory for answered with nothing in 5.6 % of cases (0.0 %).
 
 ### Learning facts from a conversation {#memory-facts}
 
@@ -72,7 +70,7 @@ Turns that tell of something the user did, each shape in English and in Arabic: 
 **Right** and **Quiet** are the model's alone: asked to fix or explain pasted words, it often reads them as the user's. Kazma keeps what is not in the user's own words out, which **Safe** measures.
 Asked again, a score in this table moves by at most 0.4 points (two standard errors over the askings).
 
-With Postgres and pgvector as the memory store: not yet measured on dataset version 8. CI's pgvector job measures it on every run, with pgvector's own search and with every row compared, and its numbers are printed here once they are locked from a named run.
+With Postgres and pgvector as the memory store: not yet measured on dataset version 9. CI's pgvector job measures it on every run, with pgvector's own search and with every row compared, and its numbers are printed here once they are locked from a named run.
 
 Reproduce: `python scripts/memory_bench.py run` (add `--real` to use the real model), and `python -m pytest tests/test_memory_benchmark.py`.
 

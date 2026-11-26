@@ -51,7 +51,10 @@ def md_to_whatsapp(text: str) -> str:
     # The end is read once, possessively, on the heading's own line: "\s*#*\s*$"
     # retried every split of a whitespace run (cubic), and crossed the newline,
     # eating the blank line after a heading.
-    out = re.sub(r"(?m)^\s{0,3}#{1,6}\s++(.+?)(?<!\s)[^\S\n]*+#*+[^\S\n]*+$",
+    # Inside a run of "#" the words end only where the run does (or the
+    # heading is hashes alone): each "#" retried the closing run to its end
+    # (quadratic on "# a" + "#" * n, step 4's third review); the same matches.
+    out = re.sub(r"(?m)^\s{0,3}#{1,6}\s++((?=#++[^\S\n]*+$)#|.+?(?<!\s)(?:(?<!#)|(?!#)))[^\S\n]*+#*+[^\S\n]*+$",
                  lambda m: "\x01" + m.group(1).strip() + "\x01", out)
     # Bold (** or __) first, held as \x01 so the italic pass leaves it.
     out = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", lambda m: "\x01" + m.group(1) + "\x01", out)

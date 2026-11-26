@@ -116,6 +116,29 @@ def current_dataset(data: dict[str, Any]) -> dict[str, Any]:
             **{part: [x for x in data.get(part) or [] if not x.get("retired_in")] for part in _DATASET_PARTS}}
 
 
+#: From this dataset version on, a fact is filed under the name the product
+#: holds it by (the memory plan's W6, dataset v9): the dataset's "job_title"
+#: and "name" for the user are names no writer of the product keeps
+#: (``fact_names.users_names``, ``name_to_file``), so the benchmark measured a
+#: store no user has. Older versions seed as they did, so they replay exactly.
+NAMED_AS_THE_PRODUCT_FROM = 9
+
+
+def _as_the_product_names(conn: sqlite3.Connection, fact: dict[str, Any]) -> tuple[str, str]:
+    """``(subject, predicate)`` of the dataset's *fact* as the extraction pass
+    files it (``belief_extractor._apply_beliefs_to_v2``)."""
+    from kazma_core.memory.fact_names import name_to_file, users_names
+
+    subject, predicate = users_names(fact["subject"], fact["predicate"])
+    filing = name_to_file(conn, tenant_id=BENCH_TENANT, subject=str(subject), predicate=predicate,
+                          predicate_type=fact["predicate_type"], value=fact["object"])
+    if filing.refile:
+        from kazma_core.memory.belief_mutation import file_under
+
+        file_under(conn, filing.refile, filing.name, tenant_id=BENCH_TENANT)
+    return str(subject), filing.name
+
+
 def _seed(conn: sqlite3.Connection, dataset: dict[str, Any]) -> dict[str, str]:
     """Write every turn and fact as the product would; return ``ref -> row id``."""
     from kazma_core.memory.belief_mutation import mutate_belief
@@ -151,12 +174,15 @@ def _seed(conn: sqlite3.Connection, dataset: dict[str, Any]) -> dict[str, str]:
             refs[f"{session['id']}#{i}"] = row["id"]
     conn.commit()
     fill_passages_whole(conn)
+    as_the_product = int(dataset.get("version") or 0) >= NAMED_AS_THE_PRODUCT_FROM
     for fact in dataset.get("facts", []):
         stated = BASE_TIME + fact["day"] * 86400 + (fact["turn"] or 0) * 60 + 30
+        subject, predicate = (_as_the_product_names(conn, fact) if as_the_product
+                              else (fact["subject"], fact["predicate"]))
         result = mutate_belief(
             conn,
-            fact["subject"],
-            fact["predicate"],
+            subject,
+            predicate,
             fact["object"],
             predicate_type=fact["predicate_type"],
             confidence=0.9,

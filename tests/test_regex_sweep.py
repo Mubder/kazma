@@ -63,6 +63,10 @@ SLOW_S = 0.008         # at 4 N characters, and more than 8 times the time at N
 CLEARLY_SLOW_S = 0.1   # at N/4 or N characters: no linear pattern comes near
 PATTERN_TIMEOUT_S = 10.0
 TAIL = chr(0x2603)  # a snowman: no product pattern names one
+#: A tail that fails late: a word, a stop, a word. The snowman is a non-word
+#: character and completes a pattern ending ``\W*$`` at once, so a quadratic
+#: head (``no,`` + "-" * n, step 4's delta review N2) answered fast.
+LATE_TAIL = "a.a"
 
 #: The packages whose regexes are swept (``kazma-*/kazma_*``, not their tests).
 PACKAGES = ("kazma-cli/kazma_cli", "kazma-core/kazma_core", "kazma-gateway/kazma_gateway",
@@ -143,6 +147,10 @@ DECLARED: dict[tuple[str, str], str] = {
         'A fetched page, read in the parser child process (a 15 s deadline): only that page fails.',
     ('kazma-core/kazma_core/web_acquire/html_extract.py',
      '<[^>]+>'):
+        'A fetched page, read in the parser child process (a 15 s deadline): only that page fails.',
+    # Seen once the sweep read a head through an alternation ("<script", step 4's review).
+    ('kazma-core/kazma_core/web_acquire/html_extract.py',
+     r'(?is)<(script|style|noscript|svg|iframe)[^>]*>.*?</\1>'):
         'A fetched page, read in the parser child process (a 15 s deadline): only that page fails.',
     ('kazma-core/kazma_core/web_acquire/search_http.py',
      '<[^>]*>'):
@@ -286,16 +294,35 @@ def _characters(pattern: str, flags: int) -> tuple[list[str], str]:
 
     parsed = sre_parse.parse(pattern, flags)
     walk(parsed)
+    printable = sorted(c for c in names if c.isprintable() or c in " \t\n")
+    return printable[:48], _literal_head(list(parsed))[0]
+
+
+def _literal_head(items: list) -> tuple[str, bool]:
+    """The literal text a pattern's match begins with, and whether it ran to
+    the end of *items*. An anchor and a leading run that may be empty
+    (``^\\W*``) are stepped over, and an alternation gives its first branch's
+    head (``(?:no|nope|لا)``: "no"): a quadratic tail behind ``^\\W*(?:no|..)``
+    was out of the sweep's sight (step 4's review, M2)."""
     head = ""
-    for op, av in parsed:
+    for op, av in items:
         if op is sre_c.LITERAL:
             head += chr(av)
         elif op is sre_c.AT:
             continue
+        elif op in (sre_c.MAX_REPEAT, sre_c.MIN_REPEAT, sre_c.POSSESSIVE_REPEAT) and av[0] == 0 and not head:
+            continue
+        elif op is sre_c.SUBPATTERN:
+            more, whole = _literal_head(list(av[3]))
+            head += more
+            if not whole:
+                return head, False
+        elif op is sre_c.BRANCH and av[1]:
+            more, _whole = _literal_head(list(av[1][0]))
+            return head + more, False
         else:
-            break
-    printable = sorted(c for c in names if c.isprintable() or c in " \t\n")
-    return printable[:48], head
+            return head, False
+    return head, True
 
 
 @dataclass(frozen=True)
@@ -304,12 +331,99 @@ class Recipe:
 
     prefix: str
     unit: str
+    tail: str = TAIL
 
     def text(self, n: int) -> str:
-        return self.prefix + self.unit * max(1, n // len(self.unit)) + TAIL
+        return self.prefix + self.unit * max(1, n // len(self.unit)) + self.tail
 
     def __str__(self) -> str:
-        return (f"{self.prefix!r} + " if self.prefix else "") + f"{self.unit!r} * n"
+        return ((f"{self.prefix!r} + " if self.prefix else "") + f"{self.unit!r} * n"
+                + (f" + {self.tail!r}" if self.tail != TAIL else ""))
+
+
+_CATEGORY_TEST = {
+    sre_c.CATEGORY_DIGIT: str.isdigit, sre_c.CATEGORY_NOT_DIGIT: lambda c: not c.isdigit(),
+    sre_c.CATEGORY_SPACE: str.isspace, sre_c.CATEGORY_NOT_SPACE: lambda c: not c.isspace(),
+    sre_c.CATEGORY_WORD: lambda c: c.isalnum() or c == "_",
+    sre_c.CATEGORY_NOT_WORD: lambda c: not (c.isalnum() or c == "_"),
+    sre_c.CATEGORY_LINEBREAK: lambda c: c == "\n", sre_c.CATEGORY_NOT_LINEBREAK: lambda c: c != "\n",
+}
+_SAMPLE_CANDIDATES = "a x ,-.0\tا"
+
+
+def _in_class(items: list, ch: str) -> bool | None:
+    """Whether a parsed character class holds *ch* (None: one it cannot read)."""
+    negate, hit = False, False
+    for op, av in items:
+        if op is sre_c.NEGATE:
+            negate = True
+        elif op is sre_c.LITERAL:
+            hit = hit or ch == chr(av)
+        elif op is sre_c.RANGE:
+            hit = hit or av[0] <= ord(ch) <= av[1]
+        elif op is sre_c.CATEGORY and av in _CATEGORY_TEST:
+            hit = hit or _CATEGORY_TEST[av](ch)
+        else:
+            return None
+    return hit != negate
+
+
+def _sample(items: list, named: set[int]) -> tuple[str, bool]:
+    """Text the opening of *items* matches, up to a named group (a value):
+    an optional group that begins with a literal is taken once ("يا <name>"
+    after "no,"), a class gives a character it holds. Whether it ran to the
+    end of *items*."""
+    out = ""
+    for op, av in items:
+        if op in (sre_c.AT, sre_c.ASSERT, sre_c.ASSERT_NOT):
+            continue
+        if op is sre_c.LITERAL:
+            out += chr(av)
+        elif op is sre_c.ANY:
+            out += "a"
+        elif op is sre_c.IN:
+            ch = next((c for c in _SAMPLE_CANDIDATES if _in_class(av, c)), None)
+            if ch is None:
+                return out, False
+            out += ch
+        elif op in (sre_c.MAX_REPEAT, sre_c.MIN_REPEAT, sre_c.POSSESSIVE_REPEAT):
+            lo, _hi, sub = av
+            sub = list(sub)
+            opens = sub[:1] and (sub[0][0] is sre_c.LITERAL or (
+                sub[0][0] is sre_c.SUBPATTERN and list(sub[0][1][3])[:1]
+                and list(sub[0][1][3])[0][0] is sre_c.LITERAL))
+            if lo == 0 and not opens:
+                continue
+            more, whole = _sample(sub, named)
+            out += more * max(1, min(lo, 3))
+            if not whole:
+                return out, False
+        elif op is sre_c.SUBPATTERN:
+            if av[0] in named:
+                return out, False
+            more, whole = _sample(list(av[3]), named)
+            out += more
+            if not whole:
+                return out, False
+        elif op is sre_c.BRANCH and av[1]:
+            more, whole = _sample(list(av[1][0]), named)
+            out += more
+            if not whole:
+                return out, False
+        else:
+            return out, False
+    return out, True
+
+
+def sample_head(pattern: str, flags: int) -> str:
+    """The text a match of *pattern* opens with, through its optional
+    literal-led groups, to its first named group: "no,يا a " for
+    ``_NO_THEN``, whose vocative ran quadratic behind it (step 4's third
+    review, A). "" when it is no longer than the literal head."""
+    parsed = sre_parse.parse(pattern, flags)
+    named = set(parsed.state.groupdict.values())
+    text = _sample(list(parsed), named)[0]
+    return text if len(text) > len(_literal_head(list(parsed))[0]) else ""
 
 
 def hostile_inputs(pattern: str, flags: int) -> list[Recipe]:
@@ -320,6 +434,10 @@ def hostile_inputs(pattern: str, flags: int) -> list[Recipe]:
     if head:
         out += [Recipe(head, c) for c in chars]
         out.append(Recipe("", head))
+    sampled = sample_head(pattern, flags)
+    if sampled and sampled != head:
+        out += [Recipe(sampled, c) for c in chars]
+    out += [Recipe(r.prefix, r.unit, LATE_TAIL) for r in list(out)]
     return out
 
 
@@ -516,15 +634,25 @@ def test_control_a_planted_quadratic_pattern_fails(tmp_path: Path):
         "QUADRATIC = re.compile(r'[ \\t]+\\n')\n"
         "SMALL_CONSTANT = re.compile(r'<[^>]+>')\n"  # 3 ms at 3,000 characters, 0.5 s at 40,000
         "TAGS = re.compile(r'<[^<>]+>')\n"
+        # Quadratic only behind its head "no" (event_text._NO_THEN before step 4's review, M2).
+        "HEADED = re.compile(r'^\\W*(?:no|nope)[ \\t]*[,.]+\\W*x')\n"
+        # Quadratic only on a tail that fails late: the snowman completes "\W*$"
+        # (event_text._NO_THEN at e4772d2ac, step 4's delta review N2).
+        "LATE = re.compile(r'^\\W*(?:no|nope)[,.-]\\W*(?P<v>[^.,\\n]{1,60}?)\\W*$')\n"
+        # Quadratic only behind an optional vocative, "no,يا <name>" (_NO_THEN at
+        # de794c799, step 4's third review A): the sampled head builds it.
+        "VOCATIVE = re.compile(r'^\\W*(?:no|nope),\\W*+(?:يا [^\\W\\d_]+\\W+)?(?P<v>[^.,\\n]{1,60}?)\\W*$')\n"
         "def strip(text):\n"
         "    return re.sub(r'\\s*->\\s*(\\S+)\\s*$', '', text)\n",
         encoding="utf-8",
     )
     literals, slow, hung = sweep(("kazma-planted/kazma_planted",), tmp_path)
     flagged = {literals[i].pattern for i in slow}
-    assert flagged == {r"[ \t]+\n", r"<[^>]+>", r"\s*->\s*(\S+)\s*$"}, (flagged, slow)
+    assert flagged == {r"[ \t]+\n", r"<[^>]+>", r"\s*->\s*(\S+)\s*$", r"^\W*(?:no|nope)[ \t]*[,.]+\W*x",
+                       r"^\W*(?:no|nope)[,.-]\W*(?P<v>[^.,\n]{1,60}?)\W*$",
+                       r"^\W*(?:no|nope),\W*+(?:يا [^\W\d_]+\W+)?(?P<v>[^.,\n]{1,60}?)\W*$"}, (flagged, slow)
     assert not hung
-    assert len(_report(literals, slow, hung)) == 3
+    assert len(_report(literals, slow, hung)) == 6
 
 
 def _plant_linear(tmp_path: Path) -> None:

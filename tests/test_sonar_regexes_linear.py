@@ -153,7 +153,10 @@ NEW_STUB_SPLIT = r"(?<!\s)\s++[—\-]\s+"
 NEW_AND_MY = r"(?<!\s)\s++And\s+my\s+"
 NEW_LOCAL_SUFFIX = r"(?<!\s)\s++(local|local time|utc|gmt)$"
 NEW_TRAILING_BLANKS = r"(?<![ \t])[ \t]++\n"
-NEW_WA_HEADING = r"(?m)^\s{0,3}#{1,6}\s++(.+?)(?<!\s)[^\S\n]*+#*+[^\S\n]*+$"
+NEW_WA_HEADING = r"(?m)^\s{0,3}#{1,6}\s++((?=#++[^\S\n]*+$)#|.+?(?<!\s)(?:(?<!#)|(?!#)))[^\S\n]*+#*+[^\S\n]*+$"
+#: The heading before step 4's third review: linear on spaces, quadratic on
+#: "# a" + "#" * n (each "#" retried the closing run to its end).
+STEP4_WA_HEADING = re.compile(r"(?m)^\s{0,3}#{1,6}\s++(.+?)(?<!\s)[^\S\n]*+#*+[^\S\n]*+$")
 NEW_WA_IMAGE = r"!\[([^\][]*)\]\(([^)\s[]+)\)"
 NEW_WA_LINK = r"\[([^\][]+)\]\(([^)\s[]+)\)"
 NEW_TARGET_SUFFIX = r"(?<!\s)\s*+->\s*+(\S+)\s*+$"
@@ -834,3 +837,152 @@ def test_the_settings_opening_is_linear():
     old_small = _timed(OLD_SETTINGS_OPENING.search, small)
     old_big = _timed(OLD_SETTINGS_OPENING.search, big)
     assert old_big > 6 * old_small, "control: the old pattern grows with the square"
+
+
+# -- event_text: "No" and a value, a whole message (step 4's review, M2) --
+
+OLD_NO_THEN = re.compile(r"^\W*(?:no|nope|nah|لا|لاء|كلا)(?:[ \t]*[,،.!]+|[ \t]+(?=يا ))\W*(?:يا [^\W\d_]+\W+)?"
+                         r"(?P<value>[^.,،!?؟\n]{1,60}?)"
+                         r"(?:\W+(?:i (?:told|said) (?:you|it|that)|i said|قلت ?لك|قلتلك|قلت لكم|قلت))?\W*$")
+
+
+def test_no_then_answers_as_the_old_pattern_on_one_mark():
+    from kazma_core.memory.event_text import _NO_THEN
+
+    for text in ("no, omar", "no! omar, i told you", "لا، عمر", "لا يا كازما، عمر", "nope, omar", "no.  omar",
+                 "no,, omar", "no omar", "لا عمر", "no", "no, omar and sara"):
+        new, old = _NO_THEN.match(text), OLD_NO_THEN.match(text)
+        assert (new and new["value"]) == (old and old["value"]), text
+    # The one that differs: the old pattern's value was a space, a value of no words.
+    from kazma_core.memory.event_text import no_then
+
+    assert _NO_THEN.match("no, ") is None and not no_then("no, ", "Omar")
+
+
+def test_no_then_is_linear():
+    from kazma_core.memory.event_text import _NO_THEN
+
+    for unit in (",", ".", "!", "،"):
+        assert _timed(_NO_THEN.match, "no" + unit * 20000) < 0.1, unit
+    small, big = "no" + "," * 3000, "no" + "," * 12000
+    old_small = _timed(OLD_NO_THEN.match, small)
+    old_big = _timed(OLD_NO_THEN.match, big)
+    assert old_big > 6 * old_small, "control: the old pattern grows with the square"
+
+
+# -- what the sweep found once it read a head behind "^\W*(...|...)" (step 4's review) --
+
+OLD_AUTO_ATTACH = re.compile(r"(?:kazma-data/documents/|reports/|data/)[^\s\"'\(\)\[\]`]+\.(?:pdf|docx|html)",
+                             re.IGNORECASE)
+OLD_SIGN_OFF_TAIL = re.compile(r"(?:best|thanks)(?:[ \t]\w+)?[ \t]*[,،.!]?[ \t]*")
+NEW_SIGN_OFF_TAIL = re.compile(r"(?:best|thanks)(?:[ \t]\w+)?[ \t]*(?:[,،.!][ \t]*)?")
+OLD_RUN_CODE = re.compile(r"\b(?:run|execute|exec)\s+(?:this|the|my)?\s*(?:code|script|program|snippet)", re.IGNORECASE)
+
+
+def test_the_auto_attach_paths_are_the_old_patterns():
+    from kazma_gateway.agent_handler.attachments import _auto_attach_matches
+
+    words = ["kazma-data/documents/", "data/", "reports/", "Data/", "a", "b.pdf", ".pdf", ".PDF", ".docx", ".html",
+             ".htm", " ", "\n", "(", ")", "'", '"', "`", "[", "]", "x/", ".", "/"]
+    for _ in range(40000):
+        s = _words(words, 12)
+        assert _auto_attach_matches(s) == OLD_AUTO_ATTACH.findall(s), s
+
+
+def test_the_auto_attach_paths_are_read_in_linear_time():
+    from kazma_gateway.agent_handler.attachments import _auto_attach_matches
+
+    for unit in ("data/", "kazma-data/documents/", "data/.pdf", "reports/x"):
+        assert _timed(_auto_attach_matches, unit * 20000) < 0.5, unit
+    small, big = "data/" * 1500, "data/" * 6000
+    assert _timed(OLD_AUTO_ATTACH.findall, big) > 6 * _timed(OLD_AUTO_ATTACH.findall, small), \
+        "control: the old pattern grows with the square"
+
+
+def test_the_sign_off_and_run_code_answer_as_before_and_are_linear():
+    from kazma_core.memory.pasted_text import _SIGN_OFF
+    from kazma_gateway import suggestions
+
+    run_code = next(rx for rx, _text, tool in suggestions._PATTERNS if tool == "python_exec")
+    for _ in range(30000):
+        s = _words(["best", "thanks", " ", "\t", ",", ".", "!", "x", "regards", "،"], 8)
+        assert bool(NEW_SIGN_OFF_TAIL.fullmatch(s)) == bool(OLD_SIGN_OFF_TAIL.fullmatch(s)), s
+        t = _words(["run", "exec", " ", "\t", "this", "the", "code", "script", "x", "thiscode"], 8)
+        assert bool(run_code.search(t)) == bool(OLD_RUN_CODE.search(t)), t
+    assert _timed(_SIGN_OFF.fullmatch, "best" + "\t" * 40000) < 0.1
+    assert _timed(run_code.search, "run" + "\t" * 40000) < 0.1
+    small, big = "run" + "\t" * 1500, "run" + "\t" * 6000
+    assert _timed(OLD_RUN_CODE.search, big) > 6 * _timed(OLD_RUN_CODE.search, small), "control"
+
+
+#: ``_NO_THEN`` at e4772d2ac: one mark, then ``\W*`` that hands marks back to the value.
+STEP4_NO_THEN = re.compile(r"^\W*(?:(?:no|لا|لاء|كلا)(?:[ \t]*[,،.!-]|[ \t]+(?=يا ))|(?:nope|nah)(?:[ \t]*[,،.!-]|[ \t]))"
+                           r"\W*(?:يا [^\W\d_]+\W+)?"
+                           r"(?P<value>[^.,،!?؟\n]{1,60}?)"
+                           r"(?:\W+(?:i (?:told|said) (?:you|it|that)|i said|قلت ?لك|قلتلك|قلت لكم|قلت))?\W*$")
+
+
+def test_no_then_reads_a_run_of_marks_after_the_mark_once():
+    """Step 4's delta review, N2: "No," + "-" * 6000 + "x.y" took 28 s and
+    "Nope " the same 56 s, through ``no_then``. Each mark, each head, and a
+    tail that fails late."""
+    from kazma_core.memory.event_text import _NO_THEN, no_then
+
+    no_then("No, Omar", "Omar")  # warm the folding
+    for head in ("No,", "Nope ", "Nah ", "لا،", "No ~", "لا يا كازما", "No, يا x", "كلا يا x", "لا، يا كازما"):
+        for unit in ("-", "~", "*", "#", ":", ";", '"', "/", "(", "@", "- ", "—"):
+            # Inside the own-text cap (6,000): the tail that fails late is read
+            # (the third review, C: past the cap it was cut off, and proved nothing).
+            text = head + unit * ((5980 - len(head)) // len(unit)) + "x.y"
+            assert _timed(no_then, text, "Omar") < 0.2, (head, unit)
+            # And the pattern itself, past the cap, on the folded text.
+            assert _timed(_NO_THEN.match, head.lower() + unit * 24000 + "x.y") < 0.2, (head, unit)
+    for text in ("no, omar", "no - omar", "nope omar!", "لا، عمر", "no,- omar", "no, -omar", "no.  omar",
+                 "لا يا كازما، عمر", "no, omar, i told you"):
+        new, old = _NO_THEN.match(text), STEP4_NO_THEN.match(text)
+        assert (new and new["value"]) == (old and old["value"]), text
+    small, big = "no," + "-" * 500 + "x.y", "no," + "-" * 2000 + "x.y"
+    assert _timed(STEP4_NO_THEN.match, big) > 6 * _timed(STEP4_NO_THEN.match, small), \
+        "control: step 4's pattern grows with the square"
+
+
+#: ``_NO_THEN`` at de794c799: the vocative's ``\W+`` handed its run back.
+STEP4_DELTA_NO_THEN = re.compile(r"^\W*(?:(?:no|لا|لاء|كلا)(?:[ \t]*[,،.!-]|[ \t]+(?=يا ))|(?:nope|nah)(?:[ \t]*[,،.!-]|[ \t]))"
+                                 r"\W*+(?:يا [^\W\d_]+\W+)?"
+                                 r"(?P<value>[^.,،!?؟\n]{1,60}?)"
+                                 r"(?:\W+(?:i (?:told|said) (?:you|it|that)|i said|قلت ?لك|قلتلك|قلت لكم|قلت))?\W*$")
+
+
+def test_no_then_reads_the_vocative_once():
+    """Step 4's third review, A: "لا يا كازما" + "-" * 5980 + "x.y" took 43 s
+    and "No, يا x" the same 51 s. The same values as before on a vocative."""
+    from kazma_core.memory.event_text import _NO_THEN
+
+    for text in ("لا يا كازما، عمر", "لا يا كازما - عمر", "no, يا كازما، عمر", "لا يا عمر", "كلا يا صديقي، عمر",
+                 "لا، يا كازما، عمر"):
+        new, old = _NO_THEN.match(text), STEP4_DELTA_NO_THEN.match(text)
+        assert (new and new["value"]) == (old and old["value"]), text
+    small, big = "لا يا كازما" + "-" * 300 + "x.y", "لا يا كازما" + "-" * 1200 + "x.y"
+    assert _timed(STEP4_DELTA_NO_THEN.match, big) > 6 * _timed(STEP4_DELTA_NO_THEN.match, small), \
+        "control: the vocative grew with the square"
+
+
+def test_the_whatsapp_heading_and_the_plan_approval_answer_as_before_and_are_linear():
+    """What the sweep found once it built a head through optional groups
+    (step 4's third review): the same matches as before, linear."""
+    from kazma_core.agent import plan_mode
+
+    old_approve = re.compile(plan_mode._APPROVE_RE.pattern.replace(r"\s*+(?:[.!]\s*+)?$", r"\s*[.!]?\s*$"))
+    assert old_approve.pattern != plan_mode._APPROVE_RE.pattern
+    heading = re.compile(NEW_WA_HEADING)
+    for _ in range(40000):
+        s = _words(["#", "#", " ", "\t", "a", "b", "\n", "C#", "\r"], 12)
+        assert heading.sub(lambda m: f"<{m.group(1)}>", s) == STEP4_WA_HEADING.sub(lambda m: f"<{m.group(1)}>", s), s
+        t = _words(["/plan", "plan", " ", "\t", "go", "approve", " the plan", ".", "!", "\n", "موافق", "x"], 6)
+        assert bool(plan_mode._APPROVE_RE.match(t)) == bool(old_approve.match(t)), t
+    assert _timed(heading.sub, "x", "# a#" + "#" * 48000 + "a.a") < 0.05
+    assert _timed(plan_mode._APPROVE_RE.match, "/plan go" + "\t" * 48000 + "a.a") < 0.05
+    small, big = "# a#" + "#" * 3000 + "a.a", "# a#" + "#" * 12000 + "a.a"
+    assert _timed(STEP4_WA_HEADING.sub, "x", big) > 6 * _timed(STEP4_WA_HEADING.sub, "x", small), "control"
+    small, big = "/plan go" + "\t" * 1500 + "a.a", "/plan go" + "\t" * 6000 + "a.a"
+    assert _timed(old_approve.match, big) > 6 * _timed(old_approve.match, small), "control"

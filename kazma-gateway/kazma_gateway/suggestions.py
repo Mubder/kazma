@@ -227,7 +227,8 @@ _PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     # "run this code" / "execute this" / "run the script"
     (
         re.compile(
-            r"\b(?:run|execute|exec)\s+(?:this|the|my)?\s*(?:code|script|program|snippet)",
+            # The spaces read once (step 4's review: "\s+(?:...)?\s*" read a run twice).
+            r"\b(?:run|execute|exec)\s+(?:(?:this|the|my)\s*)?(?:code|script|program|snippet)",
             re.IGNORECASE,
         ),
         "💡 You can use python_exec to run code safely.",
