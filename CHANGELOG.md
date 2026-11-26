@@ -115,12 +115,14 @@
   what you attended and habits. "List the books I plan to read" shows the books
   first, and the other plans only where they name a book. "عطني كل خططي", "قائمة" and "لستة" ask for a list,
   and "ومتى؟" goes on from what was said, as "list" and "And when?" did.
-- A person's new occupation or employer takes the place of the old one when it
-  is told as an occupation, profession or job title (an employer as one), and
-  your own job and age do too. A part in a play, a captain, a weekend job, the
-  boss, a workplace's town, a list of jobs, two members' sisters and what you
-  said yourself all stay as they are. Forgotten, denied ("Not me") or ended, a
-  fact is known whatever the next reply calls it.
+- Your own job and age are kept under one name whatever words a reply uses for
+  them, so a new one takes the old one's place. A club role, a child's age, a
+  part in a play, a weekend job and a list of jobs stay beside them. Another
+  person's new job takes the old one's place where the reply says it replaces
+  it; a second job of theirs stays beside the first. In what Kazma reads from a
+  turn, a fact you forgot, denied ("Not me") or that ended is known whatever the
+  next reply calls it, a "role" included. The memory tools, the Memory page's
+  link, "About me", a confirmed change and the history import write as they did.
 - A change about a person kept in one alphabet and spoken of in the other
   ("عمر" and Omar) replaces the fact it changes, for names written out as one
   person's in both; a name that could be two people's ("Hassan", "Samer" and

@@ -1489,8 +1489,7 @@ def _apply_beliefs_to_v2(
         # The fact's name is settled here, once: every check below asks by it.
         filing = name_to_file(
             primary_conn, tenant_id=tenant_id, subject=slug(clean["subject"]), predicate=clean["predicate"],
-            predicate_type=clean["predicate_type"], value=clean["object"], extraction_method=_method,
-            said_by=people.said_by(said_by), shared=people.shared)
+            predicate_type=clean["predicate_type"], value=clean["object"])
         clean["predicate"] = filing.name
         if not_again and _forgotten_of_them(clean, not_again):
             stats["rejected"] += 1

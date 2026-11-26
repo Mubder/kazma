@@ -70,35 +70,58 @@ def _past(conn, subject):
 JOBS = [("noura", "dentist", "surgeon"), ("نورة", "طبيبة أسنان", "جراحة"), ("هنا", "مهندسة", "مديرة مشروع")]
 
 
+def _replacing(conn, who, name, value, at, *, held_name, **more):
+    """A reply that says its fact replaces the one held under *held_name*."""
+    from kazma_core.memory.held_facts import held_facts
+
+    held = held_facts(conn, tenant_id="default", text=f"{who} {value}")
+    ref = next(h["ref"] for h in held if h["subject"] == who and h["predicate"] == held_name)
+    return _say(conn, who, name, value, at, held=held, fact={"replaces": ref, **more.pop("fact", {})}, **more)
+
+
+NAMES = [("occupation", "job_title"), ("job_title", "profession_is"), ("profession", "occupation_is"),
+         ("has_profession", "current_occupation"), ("employer", "current_employer")]
+
+
 @pytest.mark.parametrize(("who", "old", "new"), JOBS)
-@pytest.mark.parametrize("names", [("occupation", "job_title"), ("job_title", "profession_is"), ("profession", "occupation_is"),
-                                   ("has_profession", "current_occupation"), ("job_title", "has_occupation")])
-def test_a_persons_changed_job_is_one_current_value(conn, who, old, new, names):
+@pytest.mark.parametrize("names", NAMES)
+def test_a_persons_changed_job_is_one_value_where_the_reply_says_it_replaces(conn, who, old, new, names):
     _say(conn, who, names[0], old, 1.0)
-    _say(conn, who, names[1], new, 2.0)
+    _replacing(conn, who, names[1], new, 2.0, held_name=names[0])
     assert _current(conn, who) == [(names[0], new)] and _past(conn, who) == [old]
 
 
 @pytest.mark.parametrize(("who", "old", "new"), JOBS)
-def test_three_names_and_the_old_ones_are_history(conn, who, old, new):
-    _say(conn, who, "occupation", old, 1.0)
-    _say(conn, who, "profession_is", "x1", 2.0)
-    _say(conn, who, "job_title", new, 3.0, kind="state")
-    assert _current(conn, who) == [("occupation", new)] and _past(conn, who) == sorted(["x1", old])
+@pytest.mark.parametrize("names", NAMES)
+def test_another_persons_job_under_another_name_alone_stays_beside(conn, who, old, new, names):
+    """By the name alone another true occupation was closed (the delta check of the review of step 2)."""
+    _say(conn, who, names[0], old, 1.0)
+    _say(conn, who, names[1], new, 2.0)
+    assert _current(conn, who) == sorted([(names[0], old), (names[1], new)])
 
 
-@pytest.mark.parametrize(("who", "old", "new"), [("sara", "Google", "Initech"), ("سارة", "بنك الخليج", "أكمي")])
-def test_a_persons_employer_too(conn, who, old, new):
-    _say(conn, who, "employer", old, 1.0)
-    _say(conn, who, "current_employer", new, 2.0)
-    assert _current(conn, who) == [("employer", new)]
+#: The delta check's seven: a second true occupation, with no word that says so.
+SECOND = [("noura", "occupation", "dentist", "job_title", "clinical consultant to Zain"),
+          ("omar", "occupation", "engineer", "profession", "lecturer at night school"),
+          ("omar", "employer", "KNPC", "current_employer", "his own bakery on Fridays"),
+          ("ali", "occupation", "pilot", "job_title", "chairman of the diwaniya committee"),
+          ("عمر", "occupation", "مهندس", "job_title", "مدرب كرة بالعصر"),
+          ("ريم", "occupation", "طبيبة", "job_title", "عضوة مجلس إدارة الجمعية"),
+          ("سارة", "occupation", "محامية", "profession", "كاتبة روايات")]
+
+
+@pytest.mark.parametrize(("who", "name", "value", "other", "second"), SECOND)
+def test_a_second_true_occupation_never_closes_the_first(conn, who, name, value, other, second):
+    _say(conn, who, name, value, 1.0)
+    _say(conn, who, other, second, 2.0)
+    assert {v for _n, v in _current(conn, who)} == {value, second}
 
 
 @pytest.mark.parametrize(("who", "old", "new"), JOBS)
-def test_control_todays_table_keeps_both(conn, monkeypatch, who, old, new):
-    monkeypatch.setattr(fact_names, "name_to_file", lambda conn, *, predicate, **kw: fact_names.Filing(predicate))
+def test_control_without_replaces_read_the_join_is_gone(conn, monkeypatch, who, old, new):
+    monkeypatch.setattr(belief_extractor, "_take_replaces", lambda clean, *_a, **_k: clean.pop("replaces", None) and None)
     _say(conn, who, "occupation", old, 1.0)
-    _say(conn, who, "job_title", new, 2.0)
+    _replacing(conn, who, "job_title", new, 2.0, held_name="occupation")
     assert _current(conn, who) == [("job_title", new), ("occupation", old)]
 
 
@@ -162,17 +185,17 @@ def test_a_value_that_says_less_does_not_replace_it(conn, who, held, told):
 
 @pytest.mark.parametrize(("who", "held", "read"), [("noura", "dentist", "surgeon"), ("نورة", "طبيبة أسنان", "جراحة")])
 def test_what_the_user_said_of_a_person_stands_and_the_reading_is_kept(conn, who, held, read):
-    """Under the held name the trust gate would drop the reading: it is kept under its own."""
+    """A reading that says it replaces what the user said is refused: the held value stands."""
     _say(conn, who, "occupation", held, 1.0, method="user_explicit")
-    _say(conn, who, "job_title", read, 2.0)
-    assert _current(conn, who) == [("job_title", read), ("occupation", held)]
-    _say(conn, who, "profession", read, 3.0, method="user_stated")
-    assert read in {v for _n, v in _current(conn, who)}
+    _replacing(conn, who, "job_title", read, 2.0, held_name="occupation")
+    assert ("occupation", held) in _current(conn, who)
+    _replacing(conn, who, "profession", read, 3.0, held_name="occupation", method="user_stated")
+    assert _current(conn, who) == [("occupation", read)]
 
 
 def test_an_earlier_statement_never_becomes_current(conn):
     _say(conn, "noura", "occupation", "surgeon", 5.0)
-    _say(conn, "noura", "job_title", "dentist", 1.0)
+    _replacing(conn, "noura", "job_title", "dentist", 1.0, held_name="occupation")
     assert _current(conn, "noura") == [("occupation", "surgeon")]
 
 
@@ -339,7 +362,7 @@ def test_forgotten_under_kazmas_name_while_a_list_of_the_kind_is_held(conn, monk
 def test_an_ended_fact_is_ended_whatever_the_reply_calls_it(conn, who, old, new, names, ended_as):
     """The review's M3: the surgeon filed under "occupation" stayed when the reply ended "job_title surgeon"."""
     _say(conn, who, names[0], old, 1.0)
-    _say(conn, who, names[1], new, 2.0)
+    _replacing(conn, who, names[1], new, 2.0, held_name=names[0])
     assert _current(conn, who) == [(names[0], new)]
     stats = _say(conn, who, names[ended_as], new, 3.0, fact={"ended": True})
     assert stats.get("ended") == 1 and _current(conn, who) == []
@@ -467,7 +490,16 @@ ONE_NAME = {
     ("belief_mutation.py", "_entry_told_again"): "an entry told again under its own name",
     ("belief_mutation.py", "_mutate_set"): "a note ('noted') is Kazma's own name",
     ("belief_mutation.py", "_users_list_entry"): "Kazma's own names a person holds several of (_LISTABLE)",
-    ("belief_mutation.py", "mutate_belief"): "the write of the one name it is given",
+    ("belief_mutation.py", "_is_favorite"): "a favourite's name by its own words",
+    ("belief_mutation.py", "file_under"): "the fact re-filed, and the open changes of its old name with it",
+    ("belief_extractor.py", "_llm_extract"): "the prompt's words (a module text that holds 'predicate'), no statement",
+    ("schema_v2.py", "ensure_primary_schema"): "the schema's own text, no statement",
+    ("hygiene.py", "is_blocked_belief_triple"): "the name's shape (its length, a space), not which name",
+    ("forget.py", "finish_old_tombstones"): "an emptied name (''), not which one",
+    ("forget.py", "_mentions_found"): "what the user asked to forget, matched in the name's words",
+    ("current_facts.py", "parse_current_facts"): "one current fact a subject and name, as the store keeps it",
+    ("graph_sync.py", "_plan_changes"): "the graph copy's edge against the fact's own name",
+    ("recall.py", "_named_facts"): "reads by the kind (fact_kind)",
     ("belief_extractor.py", "_tells_an_undated_event"): "the reply's own name, before it is settled: is it an event",
     ("belief_extractor.py", "extract_beliefs_heuristic"): "the quick pass's own names, Kazma's",
     ("changes.py", "_recorded"): "a change of one fact, recorded under the name it was settled as",
@@ -479,7 +511,6 @@ ONE_NAME = {
     ("backfill_v2.py", "_llm_extract_beliefs_from_memories"): "a note ('noted') is Kazma's own name",
     ("ego_anchor.py", "object_should_mint_entity"): "Kazma's names of a link between two things",
     ("fact_names.py", "asked_words"): "Kazma's own name of a role, against the other names of it",
-    ("fact_names.py", "name_to_file"): "the name the fact is filed under, of the kinds the table reads as one",
     ("fact_names.py", "names_one_value"): "Kazma's name against the one it was told by",
     ("predicates.py", "canonical_predicate"): "the names of the same words: what it is for",
     ("profile_suggestions.py", "_line_for"): "Kazma's own names, as lines of About me",
@@ -495,8 +526,17 @@ ONE_NAME = {
 #: A statement that compares a fact's name -- "=", "==", "IN", "LIKE", "IS", in
 #: SQL however it is written -- and not one that sets it.
 _BY_NAME = re.compile(r"(?<!SET )(?<![\w.])(?:\w+\.)?predicate\s*\)?\s*(?:=|==|!=|<>|\bIS\b|\bLIKE\b|\bGLOB\b|\bNOT\s+IN\b|"
-                      r"\bIN\b)(?!\s*(?:NULL|NOT NULL|''|excluded|CASE))", re.IGNORECASE)
+                      r"\bIN\b|\bBETWEEN\b|\bREGEXP\b|\bMATCH\b)(?!\s*(?:NULL|NOT NULL|''|excluded|CASE))"
+                      r"|(?:=|==|!=|<>|\bLIKE\b|\bIN\s*\()\s*(?:\w+\.)?predicate\b|\binstr\s*\(\s*(?:\w+\.)?predicate\b",
+                      re.IGNORECASE)
+#: A statement's conditions: what follows WHERE, ON or HAVING, its grouping and order taken out.
+_CONDITION = re.compile(r"\b(?:WHERE|ON|HAVING)\b(.*?)(?=\bSELECT\b|\bUNION\b|\bGROUP\s+BY\b|\bORDER\s+BY\b|\bLIMIT\b|"
+                        r"\bBEGIN\b|\bFOR\s+EACH\b|$)", re.IGNORECASE | re.DOTALL)
+_NOT_A_CONDITION = re.compile(r"\bpredicate\s+IS\s+(?:NOT\s+)?NULL\b", re.IGNORECASE)
 _NAME_WORDS = ("predicate", "pred", "predicates")
+#: What compares one value with another, called.
+_COMPARING_CALLS = {"startswith", "endswith", "find", "index", "count", "__eq__", "__contains__", "eq", "ne", "contains",
+                    "is_", "is_not", "fullmatch", "match", "search"}
 
 
 def _a_name(node: ast.AST) -> bool:
@@ -514,10 +554,47 @@ def _a_name(node: ast.AST) -> bool:
     return False
 
 
+def _holds_a_name(node: ast.AST) -> bool:
+    """Whether *node* reads a fact's name anywhere in it: a tuple, a set of them, a call over one."""
+    return any(_a_name(x) for x in ast.walk(node))
+
+
+def _a_count(node: ast.AST) -> bool:
+    """``len(...)``: how many, not which."""
+    return isinstance(node, ast.Call) and getattr(node.func, "id", "") == "len"
+
+
+def _compares_a_name(node: ast.AST) -> bool:
+    """A comparison, a comparing call, a table keyed by names, or a ``match`` over a fact's name."""
+    if isinstance(node, ast.Compare):
+        sides = [node.left, *node.comparators]
+        return any((_holds_a_name(a) or _holds_a_name(b))
+                   and not any(isinstance(x, ast.Constant) and x.value in (None, "") or _a_count(x) for x in (a, b))
+                   for a, b in zip(sides, sides[1:], strict=False))
+    if isinstance(node, ast.Call):
+        called = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+        on = node.func.value if isinstance(node.func, ast.Attribute) else None
+        return called in _COMPARING_CALLS and ((on is not None and _a_name(on)) or any(_holds_a_name(a) for a in node.args))
+    if isinstance(node, ast.DictComp):
+        return _holds_a_name(node.key)
+    if isinstance(node, ast.Match):
+        return _holds_a_name(node.subject)
+    return False
+
+
+def _reads_by_name(text: str) -> bool:
+    """Whether a statement's text compares a fact's name, however it is put."""
+    if _BY_NAME.search(text):
+        return True
+    return any(re.search(r"(?<![\w.])(?:\w+\.)?predicate\b", _NOT_A_CONDITION.sub(" ", condition)) is not None
+               for condition in _CONDITION.findall(text))
+
+
 def _readers(source: str) -> set[str]:
     """The functions of *source* that read or compare facts by one name: in a
     statement however its text is put together (a constant, an f-string, "+",
-    a module's constant), or in Python."""
+    a module's constant), or in Python. Not read: a row's name by its place
+    (``row[2] == name``), a reader in another module than the statement."""
     tree = ast.parse(source)
     module = {t.id: "".join(str(c.value) for c in ast.walk(n.value) if isinstance(c, ast.Constant) and isinstance(c.value, str))
               for n in tree.body if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None
@@ -539,13 +616,10 @@ def _readers(source: str) -> set[str]:
                 text = node.value
             elif isinstance(node, ast.Name) and node.id in module:
                 text = module[node.id]
-            elif isinstance(node, ast.Compare):
-                sides = [node.left, *node.comparators]
-                if any(isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)) and (_a_name(a) or _a_name(b))
-                       and not any(isinstance(x, ast.Constant) and x.value in (None, "") for x in (a, b))
-                       for op, a, b in zip(node.ops, sides, sides[1:], strict=False)):
-                    out.add(func.name)
-            if text and _BY_NAME.search(text):
+            elif _compares_a_name(node):
+                out.add(func.name)
+            if text and re.search(r"\b(?:FROM|UPDATE|DELETE|JOIN|WHERE|AND|OR)\b|^\s*(?:=|IN)\b", text, re.IGNORECASE) \
+                    and _reads_by_name(text):
                 out.add(func.name)
     return out
 
@@ -577,6 +651,18 @@ PLANTED = [
     'return _field(row, "predicate") in names',
     'return str(pred).lower() != other',
     'if pred == clean["predicate"]:\n        return 1',
+    # The delta check of the review: eleven it did not see.
+    'conn.execute("SELECT id FROM beliefs WHERE ? = predicate", ())',
+    'conn.execute("SELECT id FROM beliefs WHERE predicate BETWEEN ? AND ?", ())',
+    'conn.execute("SELECT id FROM beliefs WHERE instr(predicate, ?) > 0", ())',
+    'conn.execute("SELECT id FROM beliefs WHERE predicate REGEXP ?", ())',
+    'return {r["predicate"]: r for r in rows}.get(name)',
+    'return name in {r["predicate"] for r in rows}',
+    'return row.predicate.startswith(name)',
+    'return row.predicate is name',
+    'return (row.subject, row.predicate) == (x, name)',
+    'return operator.eq(row["predicate"], name)',
+    'match row["predicate"]:\n        case "lives_in":\n            return 1',
 ]
 
 
@@ -606,3 +692,83 @@ def test_every_kind_that_is_asked_is_some_names_kind():
     for key, words in {**fact_names.ASKED_WITH, **fact_names.ASKED_ALONE}.items():
         assert any(w.isascii() for w in words) and any(not w.isascii() for w in words), key
     assert fact_names.fact_kind("owns_boat") is None  # control
+
+
+# ── the delta check of the review of step 2 ─────────────────────────────
+
+@pytest.mark.parametrize(("value", "text"), [("a lawyer", "I am a lawyer"), ("محامي", "أنا محامي"), ("محامية", "أعمل محامية")])
+@pytest.mark.parametrize("again", ["role", "role_is", "has_role"])
+def test_a_denied_role_told_as_a_role_stays_out(conn, value, text, again):
+    """N2: "Not me" to ``current_role lawyer``, then ``role_is lawyer`` was filed again."""
+    _say(conn, "user", "has_occupation", value, 1.0, text=text)
+    card = next(c for c in changes.list_changes(conn, tenant_id="default") if c["kind"] == "reading")
+    changes.dismiss(conn, card["id"], tenant_id="default")
+    _say(conn, "user", again, value, 2.0, text=text)
+    assert _current(conn, "user") == []
+
+
+@pytest.mark.parametrize("again", ["role", "role_is", "has_role"])
+def test_a_forgotten_job_retold_as_a_role_stays_out(conn, monkeypatch, again):
+    from types import MappingProxyType
+
+    from kazma_core.memory.speakers import Member, Room
+
+    room = Room(space="shared", shared=True, members=MappingProxyType({"sara": Member(account="sara", name="Sara")}))
+    monkeypatch.setattr("kazma_core.memory.speakers.room", lambda _tenant: room)
+    belief_extractor._apply_beliefs_to_v2(
+        [{"subject": "Sara", "predicate": again, "predicate_type": "functional", "object": "dentist", "confidence": 0.95}],
+        conn, None, session_id="c", turn=1, tenant_id="shared", now=1.0, private=True, user_text="Sara is a dentist",
+        said_by="sara", not_again={("member_sara", "current_role", "dentist")})
+    assert conn.execute("SELECT COUNT(*) FROM beliefs").fetchone()[0] == 0
+
+
+def test_a_role_is_compared_never_joined():
+    assert fact_names.same_statement("role_is", "current_role") and fact_names.same_statement("has_role", "job_title")
+    assert fact_names.fact_kind("role") is None, "a part in a play asks no job"
+
+
+@pytest.mark.parametrize(("name", "value"), [("has_job_title", "treasurer of the chess club"),
+                                             ("current_occupation", "part of a volunteer team"),
+                                             ("has_job_title", "أمين صندوق النادي"), ("current_occupation", "عضو في لجنة الحي")])
+def test_a_club_role_never_replaces_the_users_job(conn, name, value):
+    """N7: the user's "engineer" was closed by a club treasurer's title."""
+    _say(conn, "user", "job_title", "engineer", 1.0)
+    _say(conn, "user", name, value, 2.0)
+    assert {v for _n, v in _current(conn, "user")} == {"engineer", value}
+
+
+@pytest.mark.parametrize("child", ["5", "٥"])
+def test_a_childs_age_never_replaces_the_users(conn, child):
+    _say(conn, "user", "has_age", "32", 1.0)
+    _say(conn, "user", "current_age", child, 2.0)
+    assert {v for _n, v in _current(conn, "user")} == {"32", child}
+    _say(conn, "user", "current_age", "33", 3.0)
+    assert ("age_is", "33") in _current(conn, "user"), "control: the user's next age replaces it"
+
+
+def test_an_open_reading_follows_the_fact_it_is_filed_under(conn):
+    """N8: re-filed under Kazma's name, the reading's card was left under the old one."""
+    _say(conn, "user", "has_profession", "engineer", 1.0, text="I am an engineer")
+    conn.execute("UPDATE beliefs SET predicate = 'has_profession'")
+    conn.execute("UPDATE memory_changes SET predicate = 'has_profession'")
+    _say(conn, "user", "has_profession", "manager", 2.0, method="user_stated", text="I am a manager")
+    assert _current(conn, "user") == [("current_role", "manager")]
+    open_ = [c for c in changes.list_changes(conn, tenant_id="default")]
+    assert all(c["predicate"] == "current_role" for c in open_) and all(c["state"] != "open" for c in
+                                                                         changes.list_changes(conn, tenant_id="default",
+                                                                                              states=("open",)))
+
+
+def test_the_kinds_rows_are_read_by_their_words(conn):
+    """N6: a role's name read every fact of the user's; now the rows whose names hold the kind's words."""
+    import time
+
+    rows = [(f"b{i}", "default", "user", f"likes_{i}", f"thing {i}", "set", float(i), float(i), "llm_inferred")
+            for i in range(10000)]
+    conn.executemany("INSERT INTO beliefs (id, tenant_id, subject, predicate, object, predicate_type, valid_from, ingested_at, "
+                     "extraction_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    start = time.perf_counter()
+    for _ in range(10):
+        fact_names.name_to_file(conn, tenant_id="default", subject="user", predicate="has_occupation",
+                                predicate_type="functional", value="engineer")
+    assert (time.perf_counter() - start) / 10 < 0.02

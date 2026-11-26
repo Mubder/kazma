@@ -27,6 +27,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 _RE = {"compile", "search", "match", "fullmatch", "findall", "finditer", "sub", "subn", "split"}
 _COMPARES = {"startswith", "endswith", "removeprefix", "removesuffix", "replace", "split", "partition", "count", "find", "index"}
+#: A table asked whether it holds a folded word: ``_ORG_HEADS.__contains__(word)``.
+_HOLDS = {"__contains__", "get", "index", "count", "issuperset", "intersection", "isdisjoint"}
 _WORD = re.compile("[\u0621-\u0652\u0670-\u06d3]+")
 
 #: (file, words that are not folded): why they may stand as they are written.
@@ -34,7 +36,8 @@ DECLARED = {
     ("memory/arabic_facts.py", frozenset({"يٱ"})): "a range of letters",
     ("memory/arabic_facts.py", frozenset({"أ"})): "_says_i asks the word as written (w.text): folded, أ is no 'I'",
     ("memory/clause_subject.py", frozenset({"أ"})): "the word as written: folded, أ is no 'I'",
-    ("memory/speakers.py", frozenset({"آ"})): "refers_to_asker reads the word as written (unjoined)",
+    ("memory/speakers.py", frozenset({"آ", "آخر", "آدم", "آسف", "آلة", "آمن", "آية"})): "refers_to_asker reads the word as "
+                                                                                 "written (unjoined)",
     ("memory/held_facts.py", frozenset({"ة"})): "_Said reads whether the word was written with a taa marbuta",
     ("memory/query_terms.py", frozenset({"إلى", "الى", "على", "متى"})): "_word_pattern's terms are folded already "
                                                                        "(content_terms); a name it shares is another function's",
@@ -118,21 +121,27 @@ def unfolded(source: str) -> list[tuple[int, frozenset[str]]]:
         if bad:
             out.setdefault(line, set()).update(bad)
 
+    regex = {"re", "regex", "_re"} | {a.asname for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names
+                                     if a.name in ("re", "regex") and a.asname}
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
             on = node.func.value if isinstance(node.func, ast.Attribute) else None
-            if name in _RE and node.args and (on is None or getattr(on, "id", "") in ("re", "regex", "_re")):
+            if name in _RE and node.args and (on is None or getattr(on, "id", "") in regex):
                 if "fold_for_search" not in ast.unparse(node.args[0]):
                     look(node.lineno, reach(node.args[0]))
+            elif name == "partial" and len(node.args) > 1 and getattr(node.args[0], "attr", "") in _RE:
+                look(node.lineno, reach(node.args[1]))
             elif name in _COMPARES and on is not None and is_folded(on):
-                look(node.lineno, [w for a in node.args for w in _arabic(a)])
+                look(node.lineno, {w for a in node.args if not is_folded(a) for w in reach(a)})
+            elif name in _HOLDS and on is not None and any(is_folded(a) for a in node.args) and not is_folded(on):
+                look(node.lineno, reach(on))
         elif isinstance(node, ast.Compare):
             sides = [node.left, *node.comparators]
             for one, other in zip(sides, sides[1:], strict=False):
                 for text, words in ((one, other), (other, one)):
-                    if is_folded(text):
-                        look(node.lineno, _arabic(words))
+                    if is_folded(text) and not is_folded(words):
+                        look(node.lineno, reach(words))
     return sorted((line, frozenset(words)) for line, words in out.items())
 
 
@@ -205,6 +214,14 @@ PLANTED = [
     'def f(s):\n    t = fold(s)\n    return t.startswith(("قائمة", "كم"))',
     'def f(s):\n    return [w for w in fold(s).split() if w == "قائمة"]',
     'def f(s):\n    words = fold(s).split()\n    return any(w in ("متى", "كم") for w in words)',
+    # The delta check of the review: a table named in a comparison, an alias of re, partial, __contains__.
+    'HEADS = {"مؤسسه", "بنك"}\ndef f(s):\n    return fold(s) in HEADS',
+    'HEADS = frozenset({"هيئه"})\ndef f(s):\n    w = fold(s)\n    return w not in HEADS',
+    'WORDS = {"متى": 1}\ndef f(s):\n    return WORDS.get(fold(s))',
+    'import re as r2\ndef f(s):\n    return r2.search("قائمة", fold(s))',
+    'import functools\nP = functools.partial(re.search, "قائمة")\ndef f(s):\n    return P(fold(s))',
+    'HEADS = {"مؤسسه"}\ndef f(s):\n    return HEADS.__contains__(fold(s))',
+    'class W:\n    head = ""\nHEADS = ("هيئه",)\ndef f(w):\n    return w.folded in HEADS',
 ]
 
 
@@ -212,7 +229,7 @@ PLANTED = [
 def test_control_each_way_of_writing_one_is_found(planted):
     source = "import re\nfold = fold_for_search\n" + planted
     assert unfolded(source), planted
-    for wrong, right in (("قائمة", "قايمه"), ("متى", "متي"), ("الى", "الي")):
+    for wrong, right in (("قائمة", "قايمه"), ("متى", "متي"), ("الى", "الي"), ("مؤسسه", "موسسه"), ("هيئه", "هييه")):
         source = source.replace(wrong, right)
     assert unfolded(source) == [], "control: folded, it is fine"
 
@@ -249,3 +266,22 @@ def test_a_follow_up_is_one_in_either_language(english, arabic):
     from kazma_core.memory.question_shape import is_follow_up
 
     assert is_follow_up(english) and is_follow_up(arabic)
+
+
+@pytest.mark.parametrize(("gulf", "msa", "employer"), [
+    ("أشتغل في مؤسسة البترول الكويتية", "أعمل في مؤسسة البترول الكويتية", "مؤسسة البترول الكويتية"),
+    ("أشتغل في هيئة الاستثمار", "أعمل في هيئة الاستثمار", "هيئة الاستثمار")])
+def test_an_employer_with_a_hamza_is_an_employer(gulf, msa, employer):
+    """The delta check of the review: "مؤسسة" and "هيئة" were read folded and held unfolded; "شركة" was found."""
+    from kazma_core.memory.belief_extractor import extract_beliefs_heuristic
+
+    for said in (gulf, msa):
+        assert ("works_at", employer) in {(b["predicate"], b["object"]) for b in extract_beliefs_heuristic(said)}, said
+
+
+@pytest.mark.parametrize("asked", ["When do I move to Dubai?", "متى أسكن في دبي؟", "متى سأسكن في دبي؟", "متى أعمل في زين؟"])
+def test_a_question_is_never_filed_as_the_users_statement(asked):
+    """"متى" was held unfolded and read folded: "متى أسكن في دبي؟" filed the user's home (§15 H)."""
+    from kazma_core.memory.belief_extractor import extract_beliefs_heuristic
+
+    assert extract_beliefs_heuristic(asked) == []

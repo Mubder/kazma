@@ -458,3 +458,11 @@ def test_a_friend_held_in_the_other_alphabet_is_shown_with_no_embedder(conn):
                       now=10.0 + n, private=True, tenant_id="default")
     shown = {h["subject"] for h in held_facts.held_facts(conn, tenant_id="default", text="عمر نقل الدوحة")}
     assert "omar" in shown and "عمر_العتيبي" not in shown
+
+
+@pytest.mark.parametrize(("text", "named"), [
+    ("Sultan moved to Doha.", ["سلطان"]), ("The sultan moved to Doha.", []), ("Badr Hall is booked.", []),
+    ("We met Badr at Badr Hall.", []), ("Badr called.", ["بدر"]), ("Fahad Street is closed and Omar called.", ["عمر"])])
+def test_a_name_at_a_sentences_head_is_one_and_a_place_is_none(text, named):
+    """N8 of the delta check: "Sultan moved" named nobody; "Badr Hall" named بدر."""
+    assert sorted(name_alphabets.arabic_names_in(text)) == sorted(named)

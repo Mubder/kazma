@@ -343,8 +343,17 @@ four injected were noise.
   expression -- compiled or not, joined, from a table, an f-string, a class's
   attribute -- and of a comparison with folded text, in every module that folds;
   a word the fold changes stands beside its folded spelling or is declared with
-  why (a pattern asked of the text as written). Eighteen planted ways of
-  writing one and the five live ones are the control.
+  why (a pattern asked of the text as written). A table named beside a folded
+  word (`x in _ORG_HEADS`, `.get`, `__contains__`), an alias of `re` and
+  `functools.partial` are read too; the delta check found six more live ones that
+  way ("مؤسسة" and "هيئة" filed no employer; "متى أسكن في دبي؟" filed a home;
+  `own_words`' "ترى", "سؤال", "معنى"; `pasted_text`'s "نهائي", "الرئيس"),
+  each now written beside its folded spelling. 25 planted ways of writing one
+  and the live ones are the control. Not read: a pattern built in another
+  module, `content_terms` and `str.translate` tables.
+- **A list's question word in an entry's name** (the delta check, N5):
+  `recall._named_by` reads the fact's name's words beside its value, so "List all
+  the trips I am planning" puts `planning_trip` entries before other plans.
 - **One fact, one predicate name (W6, `memory/predicates.py`).** The
   extractor names predicates freely; under two names a single-valued fact is
   never superseded (live 2026-09-27: "daily_tweet_cap" 16 and

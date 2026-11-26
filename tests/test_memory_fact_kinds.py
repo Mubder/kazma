@@ -203,3 +203,17 @@ def test_all_of_mine_is_a_list_in_both_languages(asked, english, arabic):
     if asked:
         assert question_shape.asks_for_all(english)
     assert question_shape.asks_for_all(arabic) is asked
+
+
+@pytest.mark.parametrize(("question", "name", "value"), [
+    ("List all the trips I am planning.", "planning_trip", "to Oman in spring"),
+    ("عطني كل السفرات اللي أخطط لها", "planning_سفرة", "إلى عمان"),
+    ("List every concert I attended.", "attended_concert", "Fairouz in Beirut")])
+def test_a_list_entrys_name_holds_a_word_of_the_question(question, name, value):
+    """N5 of the delta check: "trip" is in ``planning_trip``; read from the value alone, other plans came first."""
+    from kazma_core.memory import recall
+
+    row = {"predicate": name, "object": value}
+    if name.isascii():
+        assert recall._named_by(question)(row)
+    assert not recall._named_by(question)({"predicate": "plans_to", "object": "paint the kitchen"})

@@ -197,19 +197,25 @@ def _arabic_words(subject: str) -> tuple[str, ...]:
 
 
 #: A word with a capital, and no sentence beginning at it.
-_CAPITAL = re.compile(r"(?<=[^\W_][\s,;:(\"'-])[A-Z][^\W_]*")
+_CAPITAL = re.compile(r"(?<![Tt]he )(?<![Aa] )(?<![Aa]n )(?<![Tt]his )(?<![Tt]hat )(?<!\w)[A-Z][^\W_]*")
+#: A name before one of these is a place's ("Badr Hall", "Salem Street").
+_PLACE = re.compile(r"(?<!\w)([^\W\d_]+)\s+(?:Hall|Street|St|Road|Rd|Avenue|Ave|Tower|Towers|Mall|Mosque|School|Hospital|"
+                    r"Clinic|Center|Centre|Bank|Park|Club|Hotel|Square|Building|University|College|Company|Stadium|"
+                    r"Market|Beach|Island|Bridge|Palace|Gate|Complex)(?!\w)")
 
 
 def arabic_names_in(text: str) -> dict[str, list[int]]:
     """The names the Latin words of *text* are the one spelling of, in folded
     Arabic, and where they stand ("Omar met Sara Al-Harbi" names عمر, ساره and
     الحربي). An English word is one only where it is written as a name
-    (:data:`_ENGLISH_WORDS`)."""
+    (:data:`_ENGLISH_WORDS`: "Sultan moved", never "the sultan"), and a name
+    before a place's word is the place's ("Badr Hall")."""
     found: dict[str, list[int]] = {}
     as_names = {w.casefold() for w in _CAPITAL.findall(text)}
+    places = {w.casefold() for w in _PLACE.findall(text)}
     for at, word in enumerate(_latin_words(text)):
         name = _arabic_of(word)
-        if name and (word not in _ENGLISH_WORDS or word in as_names):
+        if name and word not in places and (word not in _ENGLISH_WORDS or word in as_names):
             found.setdefault(name, []).append(at)
     return found
 

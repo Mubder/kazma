@@ -143,30 +143,34 @@
   age go under Kazma's name (`ONE_VALUE_NAMES`: has_occupation, has_profession,
   has_job_title, current_occupation, current_profession; has_age, current_age),
   and a value held under one of those from before is filed anew under it
-  (`belief_mutation.file_under`) so the trust gate and the card see one fact;
-  another person's occupation and employer go under the name they already have
-  one under (`_ONE_OF_ANOTHERS`: occupation, profession, job_title; employer,
-  current_employer, employer_name). **Only names that say it of a person's work
-  in any sentence**: "role" is a part, a captain, a father of three; "has_job"
-  and "current_job" a weekend one or a chore; "works_as" a lifeguard at weekends
-  (and a cache); "works_for" the boss, "workplace" a town, "employed_by" an
-  agency, "works_at" the airport -- each stays beside. A value that says it is
-  beside ("part-time", "متطوعة", `_BESIDE`), says less of the held one, comes from
-  a source the held one may not be overruled by, or -- in a shared space -- is
-  another account's words than the held one's ("my sister" of two members) is
-  filed as it came. Where a list of the kind is held, Kazma's name included,
-  nothing is joined. What was forgotten, denied or ended is compared by
+  (`belief_mutation.file_under`, with the open changes of the old name) so the
+  trust gate and the card see one fact. **Another person's job is filed as it
+  came**: it joins the held one only where the reply says it `replaces` it
+  (`_take_replaces`). By the name alone, "clinical consultant to Zain" closed
+  Noura's "dentist" and "كاتبة روايات" Sara's "محامية" (the delta check, N1),
+  and the pilots' 250 stores hold nobody with two such names. **Only names that
+  say it of the user's work in any sentence**: "role" is a part, a captain, a
+  father of three; "has_job" and "current_job" a weekend one or a chore; each
+  stays beside. A value that says it is beside ("part-time", "chess club",
+  "متطوعة", "النادي": `_BESIDE`), or an age lower than the one held (a child's),
+  is filed as it came. The rows of the kind are read by their names' words
+  (`_KIND_WORDS`), not every fact of the user's. Where a list of the kind is
+  held, Kazma's name included, nothing is joined. What was forgotten, denied or
+  ended is compared by
   `fact_names.same_statement` (the same words, or the same kind), so it is
   known whatever the next reply calls it (M3: an ended "job_title surgeon"
-  ended nothing filed under "occupation"). Cost: forgetting the turn that told
-  the second value of another person does not reopen the first, as under one
-  name. A store that holds both of the user's names stays doubled (the weekly
+  ended nothing filed under "occupation"); "role", "role_is" and "has_role" are
+  compared as a role and never joined or asked by (`_SAID_ALIKE`). Only in the
+  pass: the memory tools, the Memory page's link, `about_you`, `changes.confirm`
+  and the backfill ask neither the name nor "Not me", as on 5f9bd053c. A store that holds both of the user's names stays doubled (the weekly
   rebuild does not join them). Gates: `tests/test_memory_one_name_for_a_person.py`
   (EN/AR: today's table as the control; what stands beside a job; forgotten,
   denied and ended under every pair of the tables' names; the pass's order read
   from its source with five planted moves as the control; every statement in
   `memory/` that reads facts by one name -- in SQL however it is written, or in
-  Python -- declared with why, sixteen planted ways as the control).
+  Python, a comparison of tuples, sets, ``match`` and comparing calls included --
+  declared with why, 27 planted ways as the control; a row's name read by its
+  place, ``row[2]``, is not seen).
 - **The deep pass reads the turn inside a data fence** (2026-11-20, the
   framework audit's F10, part C2). `turn_message` (form 4) puts the turn
   before, the facts held and the turn itself inside one
