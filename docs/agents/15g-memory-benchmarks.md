@@ -358,6 +358,57 @@
   cut memory read whole, three tool rounds and no fourth with five as the
   control, the question's clock in recall with the real clock as the
   control, a refused call never judged).
+- **LongMemEval written as Kazma writes it** (2026-11-26, the memory plan's
+  W6 step 5, the framework audit's F-C (1)-(3)). The harness wrote each
+  history's episodes alone: no facts, no weekly summaries or roll-ups, no
+  nightly merge, though every real block has them. Now one seeding serves
+  `kazma`, `kazma_whole` and `kazma_turn` (`longmemeval_bench.seed_from`):
+  `answer --written LABEL` reads each question's store from
+  `scripts/longmemeval_written.py`, which copies the question's facts store
+  (`longmemeval_facts_pilot.py extract`, or `scripts/longmemeval_replay.py`
+  from its kept replies through this checkout's write path, no model call)
+  and adds, at the question's time and with the product's own code, the
+  summaries sweep (`topic_summaries.queue_due_work`: the weeks ended a day
+  before, the roll-ups it plans) and the queue's own tasks for what it queues
+  (`worker_bootstrap._handle_topic_summaries`, `_handle_topic_summary_rebuild`,
+  the model routed as the active one, replies kept by message, `--stop-usd`),
+  then the nightly merge (`run_global_reconsolidation` with the cadence's
+  numbers, once a night the history spans until a night merges less than its
+  most). Weeks and months are read in UTC (the benchmark's zone). Each store
+  says what wrote each step (`done/<id>.json` `written_with`); a store lacking
+  one (`WRITTEN_STEPS`) refuses the run; the episodes-alone block stays as the
+  labelled row `kazma_episodes`, and the result file and the benchmarks page
+  say what Kazma's memory held for each number (`written_with`; a run that
+  does not say held the episodes alone, `WRITTEN_EPISODES`). The pilot's
+  `extract` keeps a map a question (each deep pass's reply and the facts it
+  was shown); the replay finds a reply's "replaces fN" by what the fact was
+  among what this code shows, hands the pass a fact it holds but did not
+  show (`refs_added`), and counts a number it cannot place (`refs_lost`) and a
+  round with no kept reply (`no_reply`, never asked). Measured on the pilot's
+  50 (Qwen's kept replies replayed at step 4's head: 11,945 deep passes,
+  13,911 facts against the extraction's 13,900, 2 numbers handed, none lost;
+  summaries on qwen3.8-flash, 1,333 calls, about $1.13): 1,275 weekly
+  summaries, 49 month and 3 project roll-ups, 20 twins merged; 10 questions
+  hold no ended week. 22 of 50 blocks change (38 summaries shown), the median
+  block 1,456 -> 1,459 tokens; the answer's words in the block of the 37
+  worded questions: 12 written, 12 facts alone, 12 episodes alone, none lost.
+  Answered twice (reader qwen3.7-plus, judges qwen3.8-flash and
+  qwen3.7-plus; `answers_dev_w6-5.json`, `_w6-5-noise.json`): written 0.78
+  in both runs, facts alone 0.74, episodes alone 0.58 (multi-session 0.75 /
+  0.63-0.69 / 0.31). On the 22 changed blocks written 19-20 of 22, facts
+  alone 19, episodes alone 18: none lost in both runs, one gained in both
+  (gpt4_1d80365e); 9bbe84a2, lost in one run, holds the old goal in its June
+  summary. Two questions whose blocks did not change flipped in both runs
+  (the same prompt: the reader's and the judges' noise). The summaries take
+  room from the rounds' excerpts within the block's budget. Counts:
+  `docs/audits/evidence/memory_ingestion/pilot_written.json`. Gate: `tests/test_longmemeval_written.py` (a scripted
+  model: the facts, one summary and the merge in the block and in the turn;
+  controls: today's seeding shows none, a week not ended is not summarized,
+  the facts run keeps the twin, a store lacking each step refuses the run),
+  `tests/test_longmemeval_replay.py` (the map kept, the same store with no
+  model asked, a changed job replaced by its number; controls: a round with
+  no reply, a fact no longer held), `tests/test_benchmarks_page.py` (the
+  page says what the memory held).
 - **Dataset v9: the facts under the names the product holds** (2026-11-26,
   the memory plan's W6, the framework audit's F-C (5)). v8 seeded the user's
   role as `job_title` and name as `name`, names no writer of the product keeps

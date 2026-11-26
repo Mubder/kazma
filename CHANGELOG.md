@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Memory benchmarks: LongMemEval reads memory as Kazma writes it (2026-11-26)
+
+- The LongMemEval benchmark now measures Kazma's memory as Kazma itself writes
+  it: the facts it keeps from each conversation, a summary of each topic once
+  its week has ended, monthly and project roll-ups, and the nightly merge. It
+  used to measure the conversations alone.
+- On 50 questions this answered 78 % right, against 74 % with the facts alone
+  and 58 % with the conversations alone, the same in two runs; no question was
+  lost. The benchmarks page now says what Kazma's memory held for each number.
+
 ## Memory: "What is it that I do for a living?" finds your job (2026-11-26)
 
 - Asking "What is it that I do for a living?" or "ما الذي أعمله لكسب عيشي؟"

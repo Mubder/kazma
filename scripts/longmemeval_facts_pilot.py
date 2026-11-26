@@ -18,7 +18,10 @@ product's way, before anyone pays for the rest:
            in use, its writes and vectors. Every round of the history is
            written, so the unrelated chat stays real. Replies are cached by
            message in the data folder: a run that stops goes on, and asks
-           nothing twice.
+           nothing twice. Each question's map (``map/<id>.json``: a round's
+           reply and the facts its pass was shown) lets
+           ``longmemeval_replay.py`` write the store again through another
+           checkout's code, with no model call.
   blocks   each question's recall block from its store (``facts_events``) and
            from a copy without the dated event facts (``facts_no_events``),
            for ``longmemeval_bench.py answer --ids ... --blocks NAME=FILE``.
@@ -89,6 +92,30 @@ def pilot_ids(questions: str = "pilot") -> list[str]:
 #: ``kazma_core.paths`` for its databases, so each task's calls -- and the
 #: threads they run in, which copy the context -- find their own.
 _STORE: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar("pilot_store", default=None)
+
+
+#: The round the running task's deep pass is for: the facts it was shown and
+#: the model's reply, for the question's map (``longmemeval_replay.py``).
+_ROUND: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("pilot_round", default=None)
+
+
+def _record_shown() -> None:
+    """Keep the facts each deep pass is shown in its round's map entry."""
+    import kazma_core.memory.held_facts as where
+
+    if getattr(where.held_facts, "records_rounds", False):
+        return
+    held = where.held_facts
+
+    def held_facts(conn: Any, **kw: Any) -> list[dict[str, Any]]:
+        shown = held(conn, **kw)
+        entry = _ROUND.get()
+        if entry is not None:
+            entry["held"] = [{k: h.get(k) for k in ("ref", "subject", "predicate", "object")} for h in shown]
+        return shown
+
+    held_facts.records_rounds = True  # type: ignore[attr-defined]
+    where.held_facts = held_facts  # type: ignore[assignment]
 
 
 def _route_memory_paths() -> None:
@@ -207,8 +234,11 @@ class CachedModel:
         from kazma_core.token_usage import token_counts
 
         key = self.key(messages, kw)
+        entry = _ROUND.get()
         if key in self.replies:
             self.usage["cached_replies"] += 1
+            if entry is not None:
+                entry.update(content=self.replies[key], key=key)
             return LLMResponse(content=self.replies[key], model=self.config.model)
         if self.spend.reached:
             raise SpendLimitError(f"${self.spend.usd:.2f} of ${self.spend.stop:.2f} spent")
@@ -224,6 +254,8 @@ class CachedModel:
             self.usage["reasoning"] += int((usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
                                            or 0)
             self.replies[key] = response.content or ""
+            if entry is not None:
+                entry.update(content=response.content or "", key=key)
             with self.path.open("a", encoding="utf-8") as out:
                 out.write(json.dumps({"key": key, "content": response.content or "", "usage": usage},
                                      ensure_ascii=False) + "\n")
@@ -309,6 +341,7 @@ async def _one_question(qid: str, item: dict[str, Any], folder: Path, gate: asyn
         _STORE.set((str(db), str(ops)))
         rows = await asyncio.to_thread(_seed, item, db, ops)
         stats = {"rounds": len(rows), "quick": 0, "deep": 0, "deep_failed": 0}
+        mapped: list[dict[str, Any]] = []
         started = time.monotonic()
         for row in rows:
             user = (row["user_text"] or "").strip()
@@ -318,8 +351,15 @@ async def _one_question(qid: str, item: dict[str, Any], folder: Path, gate: asyn
             stats["quick"] += 1
             if is_filler_turn(user):
                 continue  # small talk queues no deep pass
+            entry: dict[str, Any] = {"episode": row["id"], "held": [], "content": None, "key": None}
+            mapped.append(entry)
             for attempt in range(4):
-                if await worker_bootstrap._handle_micro_consolidation({"episode_id": row["id"]}):
+                token = _ROUND.set(entry)
+                try:
+                    ok = await worker_bootstrap._handle_micro_consolidation({"episode_id": row["id"]})
+                finally:
+                    _ROUND.reset(token)
+                if ok:
                     stats["deep"] += 1
                     break
                 if spend.reached:
@@ -332,6 +372,9 @@ async def _one_question(qid: str, item: dict[str, Any], folder: Path, gate: asyn
             progress["deep"] += 1
         stats.update(await asyncio.to_thread(store_counts, db))
         stats["seconds"] = round(time.monotonic() - started)
+        (folder / "map").mkdir(exist_ok=True)
+        (folder / "map" / f"{qid}.json").write_text(json.dumps({"stats": stats, "rounds": mapped},
+                                                               ensure_ascii=False) + "\n", encoding="utf-8")
         done.write_text(json.dumps(stats) + "\n", encoding="utf-8")
         progress["questions"] += 1
         print(f"  {qid}: {stats}", flush=True)
@@ -407,6 +450,7 @@ def _cmd_extract(data: Path, model_name: str, base_url: str, key_env: str, worke
                         folder / f"replies-{model_name}.jsonl", spend)
     registry = type("Registry", (), {"get_client": lambda self, *_a, **_k: model})()
     _route_memory_paths()
+    _record_shown()
     print(f"{len(items)} questions, prompt {prompt_tag()}, {model_name}; {len(model.replies)} replies held, "
           f"${model.spend.usd:.2f} spent", flush=True)
     try:
