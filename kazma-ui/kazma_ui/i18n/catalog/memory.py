@@ -60,6 +60,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "البحث بالمعنى غير متاح: مطابقات الكلمات فقط.",
         "en": "Meaning search was unavailable: keyword matches only.",
     },
+    "memory.console.mirror_unread": {
+        "ar": "تعذّرت قراءة ذكريات نسخ Kazma الأخرى الآن، وقد بُحث في ذكريات هذه النسخة كلها.",
+        "en": "Memories from other Kazma installs could not be read just now; this install's own were all searched.",
+    },
     "memory.console.memory_search_failed": {
         "ar": "تعذّر البحث في الذاكرة: هذه ليست نتيجة فارغة.",
         "en": "Memory search failed: this is not an empty result.",

@@ -77,7 +77,7 @@ def test_merge_remote_state_hits_dedupes(monkeypatch):
     other = '{"install": "%s"}' % ("b" * 32)
     monkeypatch.setattr(
         "kazma_core.memory.state_backend.search_state_episodes",
-        lambda q, tenant_id="default", limit=10: [
+        lambda q, tenant_id="default", limit=10, strict=False: [
             {"id": "ep-local", "user_text": "already have", "tier": "episodic", "metadata_json": other},
             {"id": "ep-remote", "user_text": "from postgres teal", "tier": "episodic",
              "metadata_json": other},
@@ -85,7 +85,7 @@ def test_merge_remote_state_hits_dedupes(monkeypatch):
     )
     monkeypatch.setattr(
         "kazma_core.memory.state_backend.search_state_beliefs",
-        lambda q, tenant_id="default", limit=10: [
+        lambda q, tenant_id="default", limit=10, strict=False: [
             {
                 "id": "b-remote",
                 "subject": "user",

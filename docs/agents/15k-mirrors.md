@@ -37,7 +37,21 @@ an answer ("User prefers dark mode").
   sweeps and the memory restore, a request, call them) are the install's
   (`install_statements`). `fetch_*` take `strict` like `search_*`, and a space
   refusal raises from all four and from `search_state_*` whatever *strict*
-  says (never "nothing found"). Gate: `tests/test_memory_rows_in_their_space.py`
+  says (never "nothing found"). Recall reads the mirror so too: on the
+  Postgres-primary path every read is strict (a failed fetch is a failed
+  recall, said); the top-up of a thin local result fails the recall on a
+  refusal, and when the mirror is away (does not answer its ping, or is down
+  since start: a configured mirror's null backend) keeps this install's
+  answer and says so in its own field, `RecallResult.mirror_unread`, never
+  `degraded` (0b delta review L-a, §44; recall-strict review M1, L1). A top-up
+  works on copies, so one that fails half way keeps none of its rows (L2).
+  The explicit searches say it (the memory tool, the Memory page's probe and
+  search, EN and AR, beside the hits or "no hits"); the per-turn note and
+  the quality page do not: this install's memories were searched in full,
+  and the outage is said where it is. Gate: every reader of `degraded` and
+  of `mirror_unread` is declared, no writer puts the mirror into `degraded`,
+  and every Memory page banner site shows it, each with a planted control
+  (`tests/test_recall_mirror_reads.py`). Gate: `tests/test_memory_rows_in_their_space.py`
   (each fails on the code before; a real Postgres keeps another space's fact).
 - **Every tier or text change reaches the mirror.** `remirror_episodes` is the
   one call after a local change (macro_sleep's moves, the working-turn
