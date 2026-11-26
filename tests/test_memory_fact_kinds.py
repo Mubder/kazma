@@ -223,16 +223,13 @@ def test_a_list_entrys_name_holds_a_word_of_the_question(question, name, value):
 # ── told as a turn, asked three ways (W6 step 3) ─────────────────────────
 
 TOLD_FIXTURE = Path(__file__).parent / "fixtures" / "memory_bench" / benchmark_kinds.TOLD_VECTORS
-#: Lost of 138 a way and form, with this run's vectors: step 3 as first
-#: built (0f0c3186c) and now, after its review. Shown in another sense, by way
-#: and store size (of 68, 64 and 62 a size): 0f0c3186c, now, and meaning alone.
-TOLD_STEP3 = {("en", "mine"): 1, ("en", "thing"): 2, ("gulf", "mine"): 0, ("gulf", "thing"): 3, ("msa", "mine"): 0,
-              ("msa", "thing"): 2}
-TOLD_NOW = {("en", "mine"): 0, ("en", "thing"): 1, ("gulf", "mine"): 0, ("gulf", "thing"): 2, ("msa", "mine"): 0,
-            ("msa", "thing"): 1}
-OTHER_SENSE_STEP3 = {("en", 5): 36, ("en", 30): 48, ("gulf", 5): 21, ("gulf", 30): 42, ("msa", 5): 22, ("msa", 30): 39}
-OTHER_SENSE_TOLD = {("en", 5): 32, ("en", 30): 44, ("gulf", 5): 17, ("gulf", 30): 38, ("msa", 5): 20, ("msa", 30): 37}
-OTHER_SENSE_MEANING = {("en", 5): 31, ("en", 30): 43, ("gulf", 5): 16, ("gulf", 30): 34, ("msa", 5): 18, ("msa", 30): 35}
+#: Lost of 138 a way and form (and of the ``also`` rows, "my pet": 12 in
+#: English, 6 in Gulf and in MSA), with this run's vectors. Shown in another
+#: sense, by way and store size (of 78, 70 and 68 a size), at most. What step 3 as first built
+#: (0f0c3186c) lost and showed, and meaning alone, are in 15g-recall.
+TOLD_NOW = {("en", "mine"): 0, ("en", "thing"): 1, ("en", "also"): 0, ("gulf", "mine"): 0, ("gulf", "thing"): 2,
+            ("gulf", "also"): 0, ("msa", "mine"): 0, ("msa", "thing"): 1, ("msa", "also"): 0}
+OTHER_SENSE_TOLD = {("en", 5): 37, ("en", 30): 51, ("gulf", 5): 18, ("gulf", 30): 41, ("msa", 5): 22, ("msa", 30): 40}
 
 
 def _told(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
@@ -245,7 +242,7 @@ def _told(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
 
 def _told_lost(rows: list[dict]) -> dict[tuple[str, str], int]:
     return {(way, form): sum(1 for r in rows if r["asked"] == way and r["form"] == form and not r["found"])
-            for way in WAYS for form in ("mine", "thing")}
+            for way in WAYS for form in ("mine", "thing", "also")}
 
 
 def _other_shown(rows: list[dict]) -> dict[tuple[str, int], int]:
@@ -303,7 +300,7 @@ def test_control_the_table_before_step_3_loses_arabic_questions_of_the_thing(mon
         monkeypatch.delitem(fact_names.ASKED_WITH, kind)
     monkeypatch.delitem(fact_names.ASKED_ALONE, "pets")
     monkeypatch.setitem(fact_names.ASKED_WITH, "doctor", ("doctor", "physician", "دكتوري", "دكتورتي", "طبيبي", "طبيبتي"))
-    for kind in ("married", "doctor", "interests"):
+    for kind in ("married", "doctor", "interests", "pets"):
         monkeypatch.delitem(fact_names.ASKED_AS_MINE, kind)
     _clear()
     try:
@@ -388,3 +385,97 @@ def test_a_pet_is_looked_up_by_every_name_it_is_kept_under():
     """``has_dog``, ``has_cat`` are split into words by the index (the review of step 3, L2)."""
     assert {"pet", "cat", "dog"} <= set(fact_names.indexed_words(("pets",)))
     assert all(fact_names.fact_kind(n) == "pets" for n in ("has_dog", "has_cat", "owns_cat", "cat_name", "has_pet"))
+
+
+# ── the delta review of step 3 (N1-N4): the three ways alike ─────────────
+
+#: (the kind all three ask, or None for nothing; English, Gulf, MSA).
+ALIKE = [
+    # N1: "أهتم" ends the question and "which" is of a thing.
+    ("interests", "Which art am I interested in?", "بأي فن أهتم؟", "في أي مجال نهتم؟"),
+    (None, "How do I care for my mother?", "بأي طريقة أهتم بأمي؟", "بأي شكل أهتم بنفسي؟"),
+    (None, "When do I care?", "اي وقت اهتم؟", "بأي طريقة أهتم؟"),
+    # N2: "my pet", and "حيواني" beside "الأليف".
+    ("pets", "What is my pet's name?", "شنو اسم حيواني الأليف؟", "ما اسم حيواني الأليف؟"),
+    ("pets", "What's my pet called?", "شنو حيواني الأليف؟", "ما هو حيواني الأليف؟"),
+    (None, "Is my pet project done?", "البروتين الحيواني زين؟", "هل البروتين الحيواني صحي؟"),
+    (None, "What's my pet peeve?", "حيوان أليف مناسب للشقة؟", "أي حيوان أليف يعيش أكثر؟"),
+    # N4: the car by what or which; a doctor asked ends the question.
+    ("car", "What car do I drive?", "شنو سيارتي؟", "ما هي سيارتي؟"),
+    (None, "Where did I drive?", "وين سقت؟", "أين قدت؟"),
+    (None, "Did we drive there?", "متى سقت؟", "هل قدت إلى هناك؟"),
+    ("doctor", "Which doctor do I see?", "أي دكتور أروح له؟", "أي طبيب أراجع؟"),
+    (None, "What doctor do I see for a cold?", "لأي دكتور أروح للأسنان؟", "أي طبيب أراجع لعيوني؟"),
+    (None, "Which doctor do I see for my back?", "أي دكتور أراجع عشان ظهري؟", "أي طبيب أراجع لعيوني؟"),
+]
+
+#: N3: what follows "eat" that is no food, English beside Arabic.
+NOT_FOOD = [("here", "هني"), ("at home", "بالبيت"), ("in the car", "بالسيارة"), ("this", "هذا"),
+            ("on the plane", "بالطيارة"), ("inside", "داخل الفصل"), ("later", "بعدين"), ("in the morning", "الصبح"),
+            ("on the bed", "على السرير"), ("now", "الحين"), ("a little", "شوي"), ("the cake", "الكيكة"),
+            ("with you", "عندكم"), ("at noon", "الظهر")]
+
+
+def _diet_rows() -> list[tuple[str | None, str, str, str]]:
+    """The food list's pairs and the words that are no food, as (kind, EN, Gulf, MSA)."""
+    foods = [("diet", f"Can I eat {en}?", f"أقدر آكل {ar}؟", f"هل أستطيع أكل ال{ar}؟")
+             for en, ars in fact_names.DIET_FOODS for ar in ars]
+    return foods + [(None, f"Can I eat {en}?", f"أقدر آكل {ar}؟", f"هل يمكنني أن آكل {ar}؟") for en, ar in NOT_FOOD]
+
+
+def _unalike(rows) -> list[tuple[str, frozenset[str]]]:
+    """Each question whose named kinds are not its row's: the three ways must
+    ask the same kind, or none."""
+    out = []
+    for kind, *questions in rows:
+        for question in questions:
+            said = frozenset(fact_names.kinds_said_of_the_user(question))
+            if said != (frozenset({kind}) if kind else frozenset()):
+                out.append((question, said))
+    return out
+
+
+def test_the_three_ways_ask_alike():
+    """The class (the delta review of step 3, N1-N4, §57): a question asks a
+    kind in English exactly when its Gulf and MSA twins do."""
+    assert _unalike(ALIKE) == []
+
+
+def test_a_food_asks_the_diet_and_nothing_else_does_in_both_languages():
+    """N3: whether the user may eat a food, read from one list in both
+    languages; "Can I eat here / this / later?" and their Arabic twins ask
+    nothing."""
+    assert len(fact_names.DIET_FOODS) >= 20
+    assert _unalike(_diet_rows()) == []
+
+
+#: The Arabic head form as the review of step 3 left it: any word after "eat"
+#: but a list of times and meals.
+_EXCLUDING_AR = re.compile(r"^\W*(?:هل )?(?:اقدر|اكدر|استطيع|يمكنني|يصير) (?:ان )?(?:اكل|اكله) "
+                           r"(?!(?:الحين|الان|هني|هنا|هناك|برا|بره|بالليل|الليله|اليوم|بكره|قبل|بعد|مع|في|شي|شيء|"
+                           r"الغدا|الغداء|العشا|العشاء|الفطور|الريوق)(?:\s|$|[؟?.,]))[^\W\d_]")
+
+
+def test_control_an_exclusion_list_is_unalike(monkeypatch):
+    """Negative control: the Arabic form as the review of step 3 left it names
+    the diet for "أقدر آكل بالبيت؟", "أقدر آكل هذا؟" while English names none."""
+    monkeypatch.setitem(fact_names.ASKED_AS_MINE["diet"], "ar_said", _EXCLUDING_AR)
+    unalike = {q for q, _ in _unalike(_diet_rows())}
+    assert {"أقدر آكل بالبيت؟", "أقدر آكل هذا؟", "هل يمكنني أن آكل هذا؟"} <= unalike
+    assert not any(q.startswith("Can I") for q in unalike)
+
+
+def test_control_the_named_kinds_before_the_delta_review_are_unalike(monkeypatch):
+    """Negative control for the three ways: without "pet" and "حيواني الأليف",
+    and with "أهتم" free to go on, the rows differ."""
+    monkeypatch.setitem(fact_names.ASKED_ALONE, "pets", tuple(w for w in fact_names.ASKED_ALONE["pets"] if w != "pet"))
+    monkeypatch.delitem(fact_names.ASKED_AS_MINE, "pets")
+    monkeypatch.setitem(fact_names.ASKED_AS_MINE["interests"], "ar_said",
+                        re.compile(r"(?:^|\s)(?:ب|في )?اي [^\W\d_]+ (?:اهتم|نهتم)(?=\s|$|[؟?.,])"))
+    _clear()
+    try:
+        unalike = {q for q, _ in _unalike(ALIKE)}
+    finally:
+        monkeypatch.undo()
+        _clear()
+    assert {"What is my pet's name?", "ما اسم حيواني الأليف؟", "بأي طريقة أهتم بأمي؟", "اي وقت اهتم؟"} <= unalike

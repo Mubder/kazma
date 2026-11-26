@@ -424,16 +424,29 @@ TOLD_SIZES = (1, 5, 30)
 #: to see what is added. Asked in the stores of five and of thirty. By the
 #: told row's name.
 TOLD_OTHER_BARE: dict[str, dict[str, tuple[str, ...]]] = {
-    "doctor": {"en": ("Which doctor is best for teeth?",), "gulf": ("أي دكتور أسنان أفضل؟", "شنو لازم أراجع قبل الامتحان؟"),
-               "msa": ("أي طبيب أسنان أفضل في المدينة؟", "متى أراجع البنك؟")},
-    "has_pet": {"en": ("What's my pet peeve?",), "gulf": ("البروتين الحيواني زين؟",), "msa": ("هل البروتين الحيواني صحي؟",)},
-    "is_interested_in": {"en": ("How do I take care of my health?",), "gulf": ("شلون أهتم بصحتي؟",), "msa": ("كيف أهتم بصحتي؟",)},
-    "drives": {"en": ("What's in my drive?", "Where did I save the file on Google Drive?", "How is my driving?"),
+    "doctor": {"en": ("Which doctor is best for teeth?", "What doctor do I see for a cold?"),
+               "gulf": ("أي دكتور أسنان أفضل؟", "شنو لازم أراجع قبل الامتحان؟", "لأي دكتور أروح للأسنان؟"),
+               "msa": ("أي طبيب أسنان أفضل في المدينة؟", "متى أراجع البنك؟", "أي طبيب أراجع لعيوني؟")},
+    "has_pet": {"en": ("What's my pet peeve?", "Is my pet project done?"), "gulf": ("البروتين الحيواني زين؟",),
+                "msa": ("هل البروتين الحيواني صحي؟",)},
+    "is_interested_in": {"en": ("How do I take care of my health?", "How do I care for my mother?"),
+                         "gulf": ("شلون أهتم بصحتي؟", "بأي طريقة أهتم بأمي؟"), "msa": ("كيف أهتم بصحتي؟", "بأي شكل أهتم بنفسي؟")},
+    "drives": {"en": ("What's in my drive?", "Where did I save the file on Google Drive?", "How is my driving?",
+                      "Where did I drive?"),
             "gulf": ("وين السوق؟",), "msa": ("أين السوق؟",)},
     "visited": {"en": ("What should I visit in Paris?",), "gulf": ("شنو أزور بباريس؟",), "msa": ("ماذا أزور في باريس؟",)},
     "marital_status": {"en": ("Is the actor married?",), "gulf": ("الممثل متزوج؟",), "msa": ("هل الممثل متزوج؟",)},
-    "dietary_restriction": {"en": ("Can I eat here?", "Can we eat outside?", "Can I take Panadol with coffee?"),
-             "gulf": ("أقدر آكل الحين؟", "يصير آكل بالليل؟"), "msa": ("هل أستطيع أن أتناول البنادول مع القهوة؟",)},
+    "dietary_restriction": {"en": ("Can I eat here?", "Can we eat outside?", "Can I take Panadol with coffee?",
+                                   "Can I eat this?"),
+             "gulf": ("أقدر آكل الحين؟", "يصير آكل بالليل؟", "أقدر آكل بالبيت؟"),
+             "msa": ("هل أستطيع أن أتناول البنادول مع القهوة؟", "هل يمكنني أن آكل هذا؟")},
+}
+
+#: More first-person questions of a told row, by its name (form ``also``):
+#: "my pet" in both languages (the delta review of step 3, N2).
+TOLD_ASKED_ALSO: dict[str, dict[str, tuple[str, ...]]] = {
+    "has_pet": {"en": ("What is my pet's name?", "What's my pet called?"), "gulf": ("شنو اسم حيواني الأليف؟",),
+                "msa": ("ما اسم حيواني الأليف؟",)},
 }
 
 
@@ -477,8 +490,10 @@ def run_fact_languages_kinds(kinds: tuple[dict[str, Any], ...] = TOLD) -> list[d
                     _tell(conn, ops, store)
                     for n, kind in enumerate(kinds) if at is None else ((at, kinds[at]),):
                         value = facts[n][3]
+                        also = TOLD_ASKED_ALSO.get(kind["name"], {})
                         for way, questions in kind["asked"].items():
-                            for form, question in zip(("mine", "thing"), questions, strict=True):
+                            for form, question in (*zip(("mine", "thing"), questions, strict=True),
+                                                   *(("also", q) for q in also.get(way, ()))):
                                 result = _ask(conn, question)
                                 rows.append({"told": told, "size": size, "asked": way, "form": form, "kind": kind["kind"],
                                              "question": question, "found": any(value in h.content for h in result.beliefs),
