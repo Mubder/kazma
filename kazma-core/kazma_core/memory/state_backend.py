@@ -392,13 +392,11 @@ class PostgresStateBackend:
             return None
         return _parse_meta(hit[0])
 
-    def _may_write(self, conn: Any, table: str, row_id: str) -> bool:
+    def _may_write(self, conn: Any, table: str, row_id: str, *, region: str, policy: str) -> bool:
         existing = self._existing_meta(conn, table, str(row_id))
         if existing is None:
             return True
-        ok, reason = should_apply_remote_write(
-            existing, region=state_region(), policy=state_conflict_policy()
-        )
+        ok, reason = should_apply_remote_write(existing, region=region, policy=policy)
         if not ok:
             # The mirror sync counts these and, under fail_closed, reports
             # them once a pass; one line per refused write would be noise.
@@ -434,9 +432,14 @@ class PostgresStateBackend:
         return written
 
     def _write_episodes(self, rows: list[dict[str, Any]]) -> list[str]:
+        # The settings first, outside the connection's checkout: inside it a
+        # settings read is a second checkout, and a full install pool made
+        # it fail and the policy fall back (S4-01 step 3 delta review N2).
+        region, policy = state_region(), state_conflict_policy()
         conn = self._connect()
         try:
-            allowed = self._writable(conn, "kazma_episodes", [str(r["id"]) for r in rows])
+            allowed = self._writable(conn, "kazma_episodes", [str(r["id"]) for r in rows], region=region,
+                                     policy=policy)
             rows = [r for r in rows if str(r["id"]) in allowed]
             if not rows:
                 return []
@@ -448,7 +451,7 @@ class PostgresStateBackend:
         finally:
             conn.close()
 
-    def _writable(self, conn: Any, table: str, ids: list[str]) -> set[str]:
+    def _writable(self, conn: Any, table: str, ids: list[str], *, region: str, policy: str) -> set[str]:
         """Which of *ids* this region may write (:func:`should_apply_remote_write`
         on each existing row's metadata), read in one query."""
         cur = conn.cursor()
@@ -457,7 +460,6 @@ class PostgresStateBackend:
             existing = {str(r[0]): _parse_meta(r[1]) for r in cur.fetchall()}
         finally:
             cur.close()
-        region, policy = state_region(), state_conflict_policy()
         out = set()
         for rid in ids:
             meta = existing.get(rid)
@@ -479,9 +481,10 @@ class PostgresStateBackend:
             return False
 
     def _write_belief(self, row: dict[str, Any]) -> bool:
+        region, policy = state_region(), state_conflict_policy()  # before the checkout (delta review N2)
         conn = self._connect()
         try:
-            if not self._may_write(conn, "kazma_beliefs", str(row.get("id"))):
+            if not self._may_write(conn, "kazma_beliefs", str(row.get("id")), region=region, policy=policy):
                 return False
             cur = conn.cursor()
             cur.execute(

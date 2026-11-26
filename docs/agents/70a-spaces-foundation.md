@@ -155,20 +155,25 @@ an install with one account behaves as before.
   refusals are `NoSpaceBound`s: no other store answers for them (H2). The
   step 3 review: the checkout's one message also reads `current_user`, and
   a connection that is not `kazma_space` is closed and refused
-  (`_NotTheSpaceRole`); the pool's reset (`end_space`) sends `RESET ALL;
-  RESET ROLE; DISCARD TEMP` -- a session `SET ROLE NONE` a checkout left made
-  the next checkout, in another space, the owner, and `RESET ALL` leaves the
-  role (M1). Settings statements are declared inside a space checkout (the
-  space role holds none of the settings table's locks), so the mirror reads
-  its conflict policy there (M2). Armed, a refusal is one whether or not
+  (`_NotTheSpaceRole`); the pool's reset (`end_space`) sends `CLOSE ALL;
+  UNLISTEN *; SELECT pg_advisory_unlock_all(); RESET ALL; RESET ROLE;
+  DISCARD TEMP` -- a session `SET ROLE NONE` a checkout left made the next
+  checkout, in another space, the owner (`RESET ALL` leaves the role), and a
+  cursor held past its commit read the first space's rows into the next
+  (M1, delta N1); not `DISCARD ALL`, which drops psycopg's prepared
+  statements. Settings statements are declared inside a space checkout (the
+  space role holds none of the settings table's locks), and only
+  `ConfigStore._pg_access` may declare one (a gate, delta N2); the mirror
+  reads its region and conflict policy before its checkout (M2, N2). Armed, a refusal is one whether or not
   Spaces is enforced (`pg_helpers._space_refusal`, M3). A cursor of the
   ended transaction is refused too (L1); a held connection rolls back what
   its store left open (L2); a failed space checkout is judged once a minute
   and said as a refused sign-in, connections of another role or a full
   pool (L3); a row of no space's shape is refused before a connection
   (`_NotASpace`, L4); a space checkout inside another is refused unless
-  declared (`space_inside_a_space`, L5); while not armed, a recorded
-  workload sends its own statements and nothing more (L7). After a deploy,
+  declared (`space_inside_a_space`, L5); while not armed, a workload's
+  statements reach the server and nothing more, recorded on the wire by a
+  proxy (L7, delta N3). After a deploy,
   read `scripts/space_doors_report.py --since <the deploy's time>`: older
   entries say `none` and are listed as new (L6). Not
   armed, the pool takes today's path and opens no space half. The workers'

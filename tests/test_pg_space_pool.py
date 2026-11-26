@@ -248,11 +248,31 @@ def test_a_role_a_checkout_set_for_its_session_is_gone_in_the_next(db: dict[str,
             conn.execute("SET ROLE NONE")  # the session's, not the transaction's
             conn.execute("SELECT set_config('kazma.space', 'sb', false)")
             conn.execute("CREATE TEMP TABLE kazma_left AS SELECT session_id FROM kazma_chat_sessions")
+            # Delta review N1: a cursor held past the commit, a session lock, a channel.
+            conn.execute("DECLARE kazma_held CURSOR WITH HOLD FOR SELECT session_id FROM kazma_chat_sessions")
+            conn.execute("SELECT pg_advisory_lock(4401)")
+            conn.execute("LISTEN kazma_left")
             conn.commit()
+        # The idle connection as the pool's reset left it: the session's own
+        # values, which a checkout's opening message would overwrite.
+        half = made._space_half()
+        idle = half.getconn()
+        try:
+            with idle.cursor() as cur:
+                cur.execute("SELECT current_user::text AS who, coalesce(current_setting('kazma.space', true), '') AS space, "
+                            "to_regclass('pg_temp.kazma_left') IS NULL AS gone, "
+                            "(SELECT count(*) FROM pg_cursors WHERE name = 'kazma_held') AS held, "
+                            "(SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+                            "AND pid = pg_backend_pid()) AS locks, "
+                            "(SELECT count(*) FROM pg_listening_channels()) AS channels")
+                assert cur.fetchone() == {"who": "kazma_space", "space": "", "gone": True, "held": 0,
+                                          "locks": 0, "channels": 0}
+            idle.rollback()
+        finally:
+            half.putconn(idle)
         with bind_scope("sb", "owner"), made.connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT current_user::text AS who, current_setting('kazma.space') AS space, "
-                        "to_regclass('pg_temp.kazma_left') IS NULL AS gone")
-            assert cur.fetchone() == {"who": "kazma_space", "space": "sb", "gone": True}
+            cur.execute("SELECT current_user::text AS who, current_setting('kazma.space') AS space")
+            assert cur.fetchone() == {"who": "kazma_space", "space": "sb"}
             cur.execute("SELECT session_id FROM kazma_chat_sessions")
             assert _sessions(cur.fetchall()) == ["c2"]
     finally:
@@ -402,37 +422,112 @@ def test_a_space_checkout_inside_another_is_refused_unless_declared(pool: Any) -
         assert pool.execute("SELECT 1 AS one") == [{"one": 1}]
 
 
-# ── what is sent, recorded (L7) ──────────────────────────────────────────
+# ── what reaches the server, recorded on the wire (L7, delta review N3) ──
 
 _WORKLOAD = ["SELECT session_id FROM kazma_chat_sessions", "SELECT count(*) FROM kazma_chat_sessions", "SELECT 1"]
+#: Transaction control psycopg sends around a workload's own statements.
+_CONTROL = {"BEGIN", "COMMIT", "ROLLBACK"}
 
 
-def _recorder(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
-    """Every statement a cursor sends, every checkout's opening message and
-    every address a connection is made to, as they happen."""
-    from kazma_core.db import row_security
+class _Wire:
+    """A TCP proxy between the pools and the server that records what reaches
+    it: each connection's start parameters and every statement it sends,
+    simple (``Q``) or extended (``P``), whatever psycopg's build -- libpq's
+    own sends (``pgconn.exec_``), commits and rollbacks included. A message
+    is recorded before it is passed on, so the record is whole when the
+    answer arrives."""
 
-    seen: dict[str, list[str]] = {"sent": [], "began": [], "signed": []}
-    execute = psycopg.Cursor.execute
-    connect = psycopg.Connection.connect.__func__  # type: ignore[attr-defined]
-    begin = row_security.begin_space
+    _NOT_A_START = (80877103, 80877104)  # SSLRequest, GSSENCRequest
 
-    def _execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
-        seen["sent"].append(str(query))
-        return execute(self, query, *args, **kwargs)
+    def __init__(self, host: str, port: int) -> None:
+        import socket
+        import threading
 
-    def _connect(cls: Any, conninfo: str = "", **kwargs: Any) -> Any:
-        seen["signed"].append(str(conninfo))
-        return connect(cls, conninfo, **kwargs)
+        self._target = (host, port)
+        self._listen = socket.create_server(("127.0.0.1", 0))
+        self.port = int(self._listen.getsockname()[1])
+        self.startups: list[dict[str, str]] = []
+        self.sent: list[str] = []
+        self._open: list[Any] = []
+        threading.Thread(target=self._accept, daemon=True).start()
 
-    def _begin(conn: Any, space: str) -> None:
-        seen["began"].append(space)
-        begin(conn, space)
+    def _accept(self) -> None:
+        import socket
+        import threading
 
-    monkeypatch.setattr(psycopg.Cursor, "execute", _execute)
-    monkeypatch.setattr(psycopg.Connection, "connect", classmethod(_connect))
-    monkeypatch.setattr(row_security, "begin_space", _begin)
-    return seen
+        while True:
+            try:
+                client, _ = self._listen.accept()
+            except OSError:
+                return
+            upstream = socket.create_connection(self._target)
+            self._open += [client, upstream]
+            threading.Thread(target=self._from_client, args=(client, upstream), daemon=True).start()
+            threading.Thread(target=self._pump, args=(upstream, client), daemon=True).start()
+
+    @staticmethod
+    def _close(*socks: Any) -> None:
+        for sock in socks:
+            try:
+                sock.close()
+            except OSError:
+                continue
+
+    def _pump(self, src: Any, dst: Any) -> None:
+        try:
+            while data := src.recv(65536):
+                dst.sendall(data)
+        except OSError:
+            return
+        finally:
+            self._close(src, dst)
+
+    def _from_client(self, client: Any, upstream: Any) -> None:
+        buf, started = b"", False
+        try:
+            while data := client.recv(65536):
+                buf, started = self._read(buf + data, started)
+                upstream.sendall(data)
+        except OSError:
+            return
+        finally:
+            self._close(client, upstream)
+
+    def _read(self, buf: bytes, started: bool) -> tuple[bytes, bool]:
+        while True:
+            if not started:
+                if len(buf) < 8 or len(buf) < int.from_bytes(buf[:4], "big"):
+                    return buf, started
+                size = int.from_bytes(buf[:4], "big")
+                if int.from_bytes(buf[4:8], "big") not in self._NOT_A_START:
+                    words = buf[8:size].split(b"\0")
+                    self.startups.append({words[i].decode(): words[i + 1].decode()
+                                          for i in range(0, len(words) - 1, 2) if words[i]})
+                    started = True
+                buf = buf[size:]
+                continue
+            if len(buf) < 5 or len(buf) < 1 + int.from_bytes(buf[1:5], "big"):
+                return buf, started
+            size = int.from_bytes(buf[1:5], "big")
+            kind, body = buf[:1], buf[5:1 + size]
+            if kind == b"Q":
+                self.sent.append(body.rstrip(b"\0").decode(errors="replace"))
+            elif kind == b"P":
+                self.sent.append(body.split(b"\0")[1].decode(errors="replace"))
+            buf = buf[1 + size:]
+
+    def close(self) -> None:
+        self._close(self._listen, *self._open)
+
+
+def _via(url: str, port: int) -> str:
+    """*url* through the wire on *port*, in plain text (the record reads it)."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(url)
+    userinfo = parts.netloc.rpartition("@")[0]
+    return urlunsplit(parts._replace(netloc=f"{userinfo}@127.0.0.1:{port}",
+                                     query="sslmode=disable&gssencmode=disable"))
 
 
 def _workload(made: Any) -> None:
@@ -448,32 +543,56 @@ def _workload(made: Any) -> None:
         made.execute(_WORKLOAD[2])
 
 
+def _beyond_its_own(wire: _Wire, since: int, signed: int) -> list[str]:
+    """What reached the server beyond the workload's own statements and
+    psycopg's transaction control, what of the workload did not, and every
+    sign-in not as Kazma's login alone."""
+    from kazma_core.db import row_security
+
+    sent = wire.sent[since:]
+    out = [f"sent {s!r}" for s in sent if s.strip() and s.strip() not in _WORKLOAD and s.strip() not in _CONTROL]
+    out += [f"missing {w!r}" for w in _WORKLOAD if w not in sent]
+    out += [f"signed in {p}" for p in wire.startups[signed:]
+            if row_security.SPACE_ROLE in p.get("options", "") or p.get("user") != "kazma_app"]
+    return out
+
+
 @pytest.mark.parametrize("armed", [False, True])
-def test_what_a_workload_sends_is_its_own_statements(db: dict[str, str], monkeypatch: pytest.MonkeyPatch,
-                                                     armed: bool) -> None:
-    """Not armed, a workload sends its own statements and nothing more, on
-    Kazma's login: no space setting, no role, no second pool (the plan's
-    byte-for-byte check, step 3 review L7). The control: armed, the same
-    workload's space checkouts are the space role's, set in their one message."""
+def test_what_reaches_the_server_is_the_workloads_own(db: dict[str, str], monkeypatch: pytest.MonkeyPatch,
+                                                      armed: bool) -> None:
+    """Not armed, a workload's statements reach the server and nothing more,
+    on Kazma's login, with no space half: the plan's byte-for-byte check,
+    recorded on the wire (step 3 review L7, delta review N3). The control:
+    armed, the same rule fails on what arming sends -- the checkout's opening
+    message, the pool's reset, the space role's sign-in."""
+    import time
+    from urllib.parse import urlsplit
+
     from kazma_core.db import row_security
     from kazma_core.db.postgres_pool import PostgresPool
+    from kazma_core.spaces.row_work import install_statements
 
+    address = urlsplit(db["app"])
+    wire = _Wire(address.hostname or "127.0.0.1", address.port or 5432)
     monkeypatch.setattr(row_security, "_armed", armed)
-    made = PostgresPool(db["app"], min_size=1, max_size=2)
+    made = PostgresPool(_via(db["app"], wire.port), min_size=1, max_size=2)
     try:
-        from kazma_core.spaces.row_work import install_statements
-
         with install_statements("a test: the pool's own first connection, before the record"):
             made.execute("SELECT 1")
-        seen = _recorder(monkeypatch)
+        since, signed = len(wire.sent), len(wire.startups)
         _workload(made)
-        sent = [s for s in seen["sent"] if s]  # "" is the pool's own liveness check
-        space_signins = [c for c in seen["signed"] if row_security.SPACE_ROLE in c]
+        deadline = time.monotonic() + 5  # the pool's reset runs on its own thread
+        while armed and not any("RESET ROLE" in s for s in wire.sent[since:]) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        beyond = _beyond_its_own(wire, since, signed)
         if not armed:
-            assert sent == _WORKLOAD, sent
-            assert seen["began"] == [] and space_signins == [] and made._space_pool is None
+            assert beyond == [], beyond
+            assert made._space_pool is None
         else:
-            assert [s for s in sent if s in _WORKLOAD] == _WORKLOAD, sent
-            assert seen["began"] == ["sa", "sa"] and space_signins, seen
+            assert beyond, "armed, the unarmed rule must fail"
+            assert any("set_config('kazma.space'" in b and "current_user" in b for b in beyond), beyond
+            assert any("RESET ROLE" in b for b in beyond), beyond
+            assert any(b.startswith("signed in") and row_security.SPACE_ROLE in b for b in beyond), beyond
     finally:
         made.close()
+        wire.close()

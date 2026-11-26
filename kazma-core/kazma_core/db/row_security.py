@@ -1213,12 +1213,17 @@ def end_space(conn: Any) -> None:
     (step 3 review M1). ``RESET ALL`` leaves the role (a session ``SET ROLE
     NONE`` made the next checkout the owner); ``RESET ROLE`` is the start
     option's again; a temporary table one space made is gone before another
-    space's checkout. Raising discards the connection."""
+    space's checkout, and so are a cursor held past its commit (it read the
+    first space's rows into the next checkout), what the session listens
+    to, and its advisory locks (delta review N1). Not ``DISCARD ALL``: it
+    drops psycopg's prepared statements under it. Raising discards the
+    connection."""
     import psycopg
     from psycopg import pq
 
     conn._kazma_out = False
-    result = conn.pgconn.exec_(b"RESET ALL; RESET ROLE; DISCARD TEMP")
+    result = conn.pgconn.exec_(b"CLOSE ALL; UNLISTEN *; SELECT pg_advisory_unlock_all(); RESET ALL; RESET ROLE; "
+                               b"DISCARD TEMP")
     if result.status != pq.ExecStatus.COMMAND_OK:
         said = (result.error_message or b"").decode(errors="replace").strip()
         raise psycopg.OperationalError(f"a space connection could not be reset ({said or 'no answer'})")
