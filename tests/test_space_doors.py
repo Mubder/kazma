@@ -498,3 +498,15 @@ def test_the_mirror_knows_whose_database_it_is_before_it_says_it_knows(monkeypat
     assert backend._connect() == "a connection"
     assert seen == [None, None], "_ours is set last"
     assert backend._kazmas_database is True and backend._ours is True
+
+
+@pytest.mark.parametrize("raw", ["{not json", "[1, 2]", "[" * 100_000, "null"])
+def test_a_mirror_rows_odd_metadata_reads_as_none(raw: str) -> None:
+    """The handler L7's ``except Exception`` was paid for with (the debt
+    ratchet only goes down): a row's metadata is read by ``json.loads`` alone,
+    whose failures are a ValueError or, nested past its depth, a
+    RecursionError -- each still reads as no metadata."""
+    from kazma_core.memory.state_backend import _parse_meta
+
+    assert _parse_meta(raw) == {}
+    assert _parse_meta('{"region": "kw"}') == {"region": "kw"}

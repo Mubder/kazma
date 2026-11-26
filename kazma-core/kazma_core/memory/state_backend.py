@@ -1003,7 +1003,7 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
         try:
             data = json.loads(raw)
             return data if isinstance(data, dict) else {}
-        except Exception:
+        except (ValueError, RecursionError):  # not JSON, or nested past the parser's depth
             return {}
     return {}
 
