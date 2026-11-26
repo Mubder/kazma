@@ -1,31 +1,25 @@
 """W4's left list, by harm (the memory plan's W6, step 4).
 
-The final check of W4 (9ea531ce1) left seven small ones. Three are built here:
+The final check of W4 (9ea531ce1) left seven small ones. Built here:
 
-* **L1:** "Not only Ali, I met Omar", "ليس فقط علي", "مو بس علي", "No, I didn't
-  see Ali alone, I met Omar too" and "Nothing is wrong, I met Omar" closed
-  the meeting with Ali when the model wrongly named it replaced and no day
-  was given. A denial that adds ("not only", "alone") denies nothing, and
-  "wrong" said of nothing puts nothing right.
+* **L1, in part:** "Nothing is wrong, I met Omar", "ما في شي غلط" put nothing
+  right; "لا غلط، عمر" still does (never a bare "لا"), and "خطأ" corrects
+  only as an answer ("لا خطأ، كان عمر"). L1's "adds" rules ("not only Ali",
+  "alone", "only ... too") were taken out after six review rounds: a denial
+  behaves exactly as before step 4. Their cases wait in the notes folder
+  (``memory-w6/adds-rules-later.md``) for a step of their own.
 * **L3:** a whole message "No, Omar" / "لا، عمر" / "كلا، عمر" whose reply
   names the fact replaced puts it right. Bare, with no reply naming it,
-  nothing changes.
+  nothing changes; "No, Omar too", "No, not Omar", "لا، وعمر" are not it.
 * **L4:** MSA "رسالة صوتية: ..." (a voice note) lost the user's own event,
   read as someone else's message; "Voice note:" and Gulf "فويس:" did not.
-  "رسالة صوتية من عمر:" stays Omar's. "Omar's voice note:" is the user's
-  in doubt, as any label line is (W4's L2, declared).
+  "رسالة صوتية من عمر:" stays Omar's; "مني" and "لأمي" stay the user's.
 
-Step 4's review (H1, H2, M1, M4, L3, L4): "alone" anywhere after a denial
-turned real denials into additions ("Not Ali I met Omar alone", "مو علي قابلت
-عمر بروحه", a day put right "alone"); now only an "only" or "alone" word right
-after the denied value adds. A bare "لا" made "لا غلط، عمر" say nothing was
-wrong. "No, Omar too" and "لا، عمر بعد" were read as "No, Omar". Each case is a
-test here in EN, Gulf and MSA.
-
-The others are left, with why (``docs/agents/15h-facts.md``). The classes:
-every denial word before every "only" word adds; every text noun before
-every medium word is the user's own. Both are read from the source's own
-tables, with the rule taken away as the negative control.
+The reviews' corrections are put-right rows in EN, Gulf and MSA, each
+correct as before step 4. The others are left, with why
+(``docs/agents/15h-facts.md``). The class: every text noun before every
+medium word is the user's own, read from the source's own tables, with the
+rule taken away as the negative control.
 """
 
 from __future__ import annotations
@@ -77,30 +71,20 @@ EN = ("Ali", "I met Ali yesterday", "Omar")
 GULF = ("علي", "قابلت علي أمس", "عمر")
 MSA = ("علي", "التقيت بعلي أمس", "عمر")
 
-#: L1: a denial that adds, or "wrong" said of nothing: both meetings stay.
+#: "Wrong" said of nothing puts nothing right, and "خطأ" said of something
+#: else neither: both meetings stay. (The adds rules of W4's L1 -- "not only",
+#: "alone", "only ... too" -- were taken out of step 4 after six review rounds:
+#: a denial behaves as before step 4. Their cases are in the notes folder,
+#: ``memory-w6/adds-rules-later.md``, for a step of their own.)
 ADDS = [
-    (EN, "Not only Ali, I met Omar"), (EN, "Not just Ali, I met Omar too"),
-    (EN, "No, I didn't see Ali alone, I met Omar too"), (EN, "Nothing is wrong, I met Omar"),
-    (GULF, "مو بس علي، قابلت عمر"), (GULF, "مب بس علي، قابلت عمر بعد"), (GULF, "لا ما رحت بروحي، قابلت عمر بعد"),
-    (GULF, "ما في شي غلط، قابلت عمر"),
-    (MSA, "ليس فقط علي، التقيت بعمر"), (MSA, "لم ألتق بعلي وحده، التقيت بعمر أيضا"), (MSA, "لا يوجد خطأ، التقيت بعمر"),
-    # "Only" or "alone" right after the value, Arabic's usual order too (step 4's review, M4).
-    (EN, "not only Ali but Omar too"), (EN, "Not just Ali - Omar too"), (EN, "I didn't meet Ali alone, Omar was there"),
-    (EN, "It wasn't Ali only, Omar too"), (EN, "Not Ali alone, Omar too"),
-    (GULF, "مو بس علي قابلت عمر بعد"), (GULF, "مو علي بس، قابلت عمر بعد"), (GULF, "ما قابلت علي بروحه، عمر كان معاه"),
-    (GULF, "مو علي لحاله، عمر بعد"),
-    (MSA, "ليس فقط علي بل عمر أيضا"), (MSA, "ليس علي فقط، عمر أيضا"), (MSA, "لم ألتق بعلي فقط، بل بعمر أيضا"),
-    # A "No." before the sentence that adds goes with it (step 4's fifth review).
-    (EN, "No. Not only Ali, Omar too."), (GULF, "لا. مو بس علي، عمر بعد"),
-    # "خطأ" said of something else puts nothing right (the fifth review, Low).
+    (EN, "Nothing is wrong, I met Omar"), (GULF, "ما في شي غلط، قابلت عمر"), (MSA, "لا يوجد خطأ، التقيت بعمر"),
+    (GULF, "لا ما رحت بروحي، قابلت عمر بعد"), (GULF, "ما قابلت علي بروحه، عمر كان معاه"),
     (GULF, "قابلت عمر بعد، وكان خطأ اني ما عزمت علي"),
-    # "بعد" ending the clause after the new value, as "Omar too" (the third review, D).
-    (EN, "Not Ali only Omar too"), (GULF, "مو علي بس عمر بعد"), (GULF, "مو علي بس، عمر بعد"),
 ]
 
 
 @pytest.mark.parametrize(("who", "text"), ADDS)
-def test_a_denial_that_adds_closes_nothing(conn, who, text):
+def test_wrong_said_of_nothing_closes_nothing(conn, who, text):
     first, said, new = who
     assert _met(conn, first, said, new, text) == sorted([first, new])
 
@@ -245,101 +229,6 @@ def test_control_someone_elses_voice_note_is_theirs(conn, text, value):
 
 
 # ── the classes, from the source's own tables ────────────────────────────
-
-def _denials() -> list[str]:
-    """Every denial word the product reads, folded, but the ones it says
-    never add (``_NEVER_ADDING``: "Actually just Omar" puts right)."""
-    from kazma_core.documents.arabic import fold_for_search
-
-    words = event_text._DENIALS_EN | {fold_for_search(w) for w in event_text._DENIALS_AR_RAW}
-    return sorted(words - event_text._NEVER_ADDING)
-
-
-def test_every_denial_before_every_only_word_adds():
-    for denial in (d for d in _denials() if d not in event_text._BARE_NO):
-        for only in event_text._ONLY:
-            assert event_text._adds_rather_than_denies(f"{denial} {only} X, Y"), (denial, only)
-    # A bare "no" before "only" puts right: "No, just Omar", "لا بس عمر".
-    for no in event_text._BARE_NO:
-        for only in event_text._ONLY:
-            assert not event_text._adds_rather_than_denies(f"{no} {only} X"), (no, only)
-    # Control: a plain denial.
-    assert not event_text._adds_rather_than_denies("Not Ali, Omar")
-
-
-def test_a_denial_adds_only_in_its_narrow_shapes():
-    """Step 4's fourth review: base's denial is the rule, and a denial adds
-    only in the narrow shapes ``event_text`` names, for every denial, every
-    "only", "alone" and "too" word of the product's own sets; each shape's
-    near miss denies."""
-    adds, denies = event_text._adds_rather_than_denies, []
-    for denial in _denials():
-        if denial in event_text._ANSWER_NO:
-            continue
-        for only in event_text._ONLY:
-            shapes = [f"{denial} Ali {only} but Omar", f"{denial} Ali {only}, but Omar", f"{denial} Ali {only}, Omar too",
-                      f"{denial} Ali {only}, also Omar", f"{denial} Ali {only} Omar as well"]
-            shapes += [f"{denial} Ali {only} Omar {too}" for too in event_text._TOO_END]
-            if denial not in event_text._BARE_NO:
-                shapes.append(f"{denial} {only} Ali, Omar")
-            for text in shapes:
-                assert adds(text, "Ali"), text
-            denies += [f"{denial} Ali {only} Omar", f"{denial} Ali {only}, Omar", f"{denial} Ali {only}",
-                       f"{denial} Ali {only} Omar, I saw him again", f"{denial} Ali {only} Omar again",
-                       f"{denial} Ali {only} Omar and Sara too", f"{denial} Ali {only} Omar who was too tired",
-                       f"{denial} Ali {only} Omar plus his wife", f"{denial} Ali {only} Omar as well as Sara",
-                       f"{denial} Ali {only} Omar but Sara too", f"{denial} Ali {only} Omar, Sara too",
-                       f"{denial} Ali met Omar {only}", f"{denial} Ali {only} but Omar|Sara"]
-        for alone in event_text._ALONE:
-            assert adds(f"{denial} Ali {alone}, Omar", "Ali"), (denial, alone)
-            assert adds(f"{denial} Ali {alone}", "Ali"), (denial, alone)
-            denies += [f"{denial} Ali {alone} Omar", f"{denial} Ali met Omar {alone}"]
-    for text in denies:
-        value = "Sara" if text.endswith("|Sara") else "Ali"
-        assert not adds(text.split("|")[0], value), text
-    for no in event_text._ANSWER_NO:
-        for word in event_text._ALONE:
-            assert not adds(f"{no} went gym {word}", "gym"), (no, word)
-    for word in event_text._NEVER_ADDING:
-        assert not adds(f"{word} just Omar", "Ali"), word
-    # "وحده ثانيه": another one, not alone.
-    assert not adds("مو علي وحده ثانيه اسمها عمر", "علي")
-
-
-def test_a_sentence_that_adds_never_silences_another_sentences_denial():
-    """Step 4's fifth review, the class: an adding shape ("Not only X, Y
-    too") cancels only the denial of its own sentence. Every shape, said of
-    something else after each kind of denial ("No, Omar.", "Not Ali.", "لا،
-    عمر.", "مو علي."), leaves that denial standing. Controls: the shape alone
-    adds; a bare "No." right before it goes with it."""
-    shapes = ["Not only the coffee, lunch too", "It wasn't just a coffee, lunch too",
-              "مو بس قهوة، غدا بعد", "ليس فقط القهوة، بل الغداء أيضا", "Not the coffee alone, lunch too"]
-    for opener in ("No, Omar.", "Not Ali, Omar.", "لا، عمر.", "مو علي، عمر.", "لا، التقيت بعمر."):
-        for shape in shapes:
-            assert event_text.denies(f"{opener} {shape}", "Ali" if opener.isascii() else "علي"), (opener, shape)
-    for shape in ("Not only Ali, Omar too", "مو بس علي، عمر بعد", "ليس فقط علي، بل عمر أيضا"):
-        value = "Ali" if shape.isascii() else "علي"
-        assert not event_text.denies(shape, value), shape
-        assert not event_text.denies(f"{'No' if shape.isascii() else 'لا'}. {shape}", value), shape
-
-
-def test_control_the_rule_before_the_review_turns_denials_into_additions(monkeypatch):
-    """Step 4's rule ("alone" anywhere after a denial): the message whose
-    "alone" is the user's denies nothing."""
-    def anywhere(words, at, wanted=None, later=""):
-        return any(w in event_text._ALONE for w in words[at + 1:])
-
-    assert not event_text._adds_rather_than_denies("Not Ali I met Omar alone", "Ali")
-    monkeypatch.setattr(event_text, "_adds_rather", anywhere)
-    assert event_text._adds_rather_than_denies("Not Ali I met Omar alone", "Ali")
-    assert event_text._adds_rather_than_denies("مو علي قابلت عمر بروحه", "علي")
-
-
-def test_control_without_the_rule_a_denial_that_adds_denies(monkeypatch):
-    monkeypatch.setattr(event_text, "_adds_rather", lambda *_a, **_k: False)
-    assert event_text.denies("Not only Ali, I met Omar", "Ali") and event_text.denies("مو بس علي، قابلت عمر", "علي")
-    assert event_text.denies("مو علي بس، قابلت عمر بعد", "علي")
-
 
 def test_every_text_noun_before_every_medium_is_the_users_own():
     for noun in own_words._TEXT_NOUNS_AR:

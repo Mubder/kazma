@@ -251,37 +251,19 @@
 - **W4's left list, by harm** (2026-11-26, the memory plan's W6, step 4).
   The final check of W4 (9ea531ce1) left seven small ones. Three are built;
   `tests/test_memory_w4_left_list.py` holds them in EN, Gulf and MSA.
-  - *L1, a denial that adds* (`event_text._adds_rather`): "Not only Ali, I
-    met Omar", "مو بس علي", "No, I didn't see Ali alone, I met Omar too" closed
-    Ali when the model named him replaced and no day was given. After five
-    review rounds (each wider "too" turned a correction into an addition) a
-    denial denies, as before step 4, except in five narrow shapes:
-    - a denial, then "only": "not only Ali", "مو بس علي", "ليس فقط علي";
-    - "alone" ending its clause right after the denied value ("I didn't see
-      Ali alone,", "ما قابلت علي بروحه،");
-    - "only" right after the value, then "but": "not Ali only but Omar";
-    - "only", the new value alone (no "and"/"و" between), then "too" ending
-      the clause (`_TOO_END`): "Not Ali only Omar too", "مو علي بس عمر بعد";
-    - "only" ending its clause, and the next clause opens with but/also
-      (`_ADDING_OPENERS`) or ends with "too": "It wasn't Ali only, Omar too".
-    Every other shape denies ("Not Ali just Omar", "مو علي بس، عمر", "Not Ali
-    just Omar, I saw him again", "No I went to the gym alone on Thursday",
-    "مو علي قابلت عمر بروحه"); "again" and "مرة ثانية" never add, an
-    answer's "no"/"لا" never attaches "alone", and actually / instead / بل /
-    الصحيح never add (`_NEVER_ADDING`). **By sentence** (`denies`,
-    `_outside_adding_sentences`): a sentence that adds sets aside only its
-    own denial (when it names the held value, or is the only sentence; a bare
-    "No." right before it goes with it); a "No" or denial in any other
-    sentence still denies ("No, Thursday. I'm not just guessing", "لا،
-    الخميس. مو بس النادي، رحت المسبح بعد"). Clause words are read once and a
-    value runs at most its words and two more (`_value_end`): linear.
-    "Wrong" said of nothing ("Nothing is wrong", "ما في شي غلط", "لا يوجد
-    خطأ") puts nothing right (`_NOTHING_WRONG`), never a bare "لا" ("لا غلط،
-    عمر" corrects); "خطأ" corrects as an answer only ("لا خطأ، كان عمر").
-    Measured against base on the reviewers' `cases.py`, `cases2.py`,
-    `cases3.py`: no case worse. Gates: each shape and its near misses from
-    the product's own sets; every adding shape after each kind of denial
-    still denies; the reviews' cases as rows in EN, Gulf, MSA.
+  - *L1, a denial that adds*: "Not only Ali, I met Omar", "مو بس علي", "I
+    didn't see Ali alone" close Ali when the model names him replaced and no
+    day is given. **Left, with why:** six review rounds of "adds" rules
+    ("not only", "alone", "only ... too", then by sentence) each turned some
+    real correction into an addition, worse than before ("Not Ali just
+    Omar", "No, Thursday, I'm not just guessing"). They were taken out of
+    step 4: `denies`, `_denies_value` and `puts_right` are as before step 4.
+    The cases, the four case sets as the bar and the design lessons wait in
+    the notes folder (`memory-w6/adds-rules-later.md`) for a step of their
+    own. Kept: "Wrong" said of nothing ("Nothing is wrong", "ما في شي غلط",
+    "لا يوجد خطأ") puts nothing right (`_NOTHING_WRONG`), never a bare "لا"
+    ("لا غلط، عمر" corrects); "خطأ" corrects only as a sentence-start answer
+    ("لا خطأ، كان عمر"; "وكان خطأ اني ما عزمت علي" is something else).
   - *L3, a bare "No, Omar"* (`event_text.no_then`): a whole message that is
     "no" and a value ("No, Omar", "Nope Omar!", "No - Omar", "لا، عمر", "لا
     يا كازما، عمر", "كلا، عمر") puts right the fact the reply says it

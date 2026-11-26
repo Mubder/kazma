@@ -992,33 +992,3 @@ def test_the_whatsapp_heading_and_the_plan_approval_answer_as_before_and_are_lin
     assert _timed(STEP4_WA_HEADING.sub, "x", big) > 6 * _timed(STEP4_WA_HEADING.sub, "x", small), "control"
     small, big = "/plan go" + "\t" * 1500 + "a.a", "/plan go" + "\t" * 6000 + "a.a"
     assert _timed(old_approve.match, big) > 6 * _timed(old_approve.match, small), "control"
-
-
-def _unbounded_value_end(words, at, wanted):
-    """``event_text._value_end`` before step 4's fourth review: a value of
-    denial words stretched over the whole run, for every denial."""
-    from kazma_core.memory.event_text import _DENIES_IT_REACH, words_said
-
-    start = next((i for i in range(at + 1, min(len(words), at + 1 + _DENIES_IT_REACH))
-                  if words_said(wanted, words[i])), None)
-    if start is None:
-        return None
-    end = start
-    while end + 1 < len(words) and words_said(wanted, words[end + 1]):
-        end += 1
-    return end
-
-
-def test_a_held_value_of_denial_words_is_read_in_linear_time(monkeypatch):
-    """Step 4's fourth review: "مو" or "Not Me" held, and the message that word
-    repeated to the cap, took about 0.9 s (15 ms before step 4)."""
-    from kazma_core.memory import event_text
-
-    event_text.denies("warm up, not Ali", "Ali")
-    for unit, value in (("مو ", "مو"), ("لم ", "لم"), ("not me ", "Not Me"), ("مش هيك ", "مش هيك")):
-        text = unit * (5990 // len(unit))
-        assert _timed(event_text.denies, text, value) < 0.3, value
-    small, big = "مو " * 400, "مو " * 1600
-    monkeypatch.setattr(event_text, "_value_end", _unbounded_value_end)
-    assert _timed(event_text.denies, big, "مو") > 6 * _timed(event_text.denies, small, "مو"), \
-        "control: the unbounded walk grows with the square"
