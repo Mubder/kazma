@@ -2911,6 +2911,8 @@ def _cmd_fact_languages_kinds_vectors() -> int:
     shown = [r for r in rows if r["form"] == "other" and r["shown"]]
     print(f"{out}: {n} vectors from {model}; lost {len(lost)} of {sum(r['form'] != 'other' for r in rows)}, "
           f"another sense shown {len(shown)} of {sum(r['form'] == 'other' for r in rows)}")
+    if hasattr(sys.stdout, "reconfigure"):  # Arabic rows on a cp1252 console
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     for r in [*lost, *shown]:
         print("  ", json.dumps(r, ensure_ascii=False))
     return 0

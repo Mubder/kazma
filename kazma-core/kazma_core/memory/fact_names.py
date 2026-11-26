@@ -179,7 +179,9 @@ NOT_ASKED_BY_WORDS: dict[str, str] = {
 ASKED_ALONE: dict[str, tuple[str, ...]] = {
     "car": ("car", "سيارتي", "سيارتنا"),
     # "What is my cat called?" as "شنو اسم قطوتي؟" (the review of step 3, L3).
-    "pets": ("pets", "cat", "cats", "dog", "dogs", "قطوتي", "قطتي", "كلبي", "حيواناتي"),
+    # "What is my pet's name?": "pet" is asked alone; "my pet peeve" and "my
+    # pet project" hold another word and ask nothing (the delta review, N2).
+    "pets": ("pet", "pets", "cat", "cats", "dog", "dogs", "قطوتي", "قطتي", "كلبي", "حيواناتي"),
     "daughters": ("daughter", "daughters", "بنتي", "ابنتي", "بناتي"),
     "sons": ("son", "sons", "ولدي", "ابني"),
 }
@@ -326,6 +328,21 @@ _INDEXED: dict[str, tuple[str, ...]] = {
 #: "في بيتي"), never another kind of city ("my favourite city", "مدينتي
 #: المفضلة", "مدينتي الأصلية"). The small store's abstain question q805, "What
 #: is my home Wi-Fi network called?", showed the home before this rule.
+#: Foods a diet question names, English beside Arabic (folded as search folds
+#: it, the article read off): "Can I eat gluten?" as "أقدر آكل جلوتين؟". Both
+#: languages are read from this one list, and tested as pairs from it.
+DIET_FOODS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("gluten", ("جلوتين", "غلوتين")), ("wheat", ("قمح",)), ("nuts", ("مكسرات",)), ("peanuts", ("فول سوداني",)),
+    ("dairy", ("البان",)), ("lactose", ("لاكتوز",)), ("milk", ("حليب",)), ("cheese", ("جبن", "جبنه")),
+    ("eggs", ("بيض",)), ("fish", ("سمك",)), ("shellfish", ("قشريات",)), ("shrimp", ("روبيان", "ربيان", "جمبري")),
+    ("meat", ("لحم", "لحوم")), ("beef", ("لحم بقر",)), ("pork", ("خنزير", "لحم خنزير")), ("sugar", ("سكر",)),
+    ("sweets", ("حلويات",)), ("carbs", ("نشويات",)), ("bread", ("خبز",)), ("rice", ("رز", "عيش")),
+    ("salt", ("ملح",)), ("chocolate", ("شوكولاته", "شوكولا")), ("soy", ("صويا",)), ("sesame", ("سمسم",)),
+    ("fried food", ("مقليات",)), ("spicy food", ("اكل حار",)),
+)
+_DIET_EN = tuple(re.escape(en) + ("s?" if not en.endswith("s") and " " not in en else "") for en, _ar in DIET_FOODS)
+_DIET_AR = tuple(" (?:ال)?".join(map(re.escape, ar.split())) for _en, ars in DIET_FOODS for ar in ars)
+
 ASKED_AS_MINE: dict[str, dict[str, object]] = {
     "lives_in": {
         "words": ("city", "home", "town", "مدينة", "بيت", "ديرة"),
@@ -355,22 +372,23 @@ ASKED_AS_MINE: dict[str, dict[str, object]] = {
         "ar_not_before": ("المفضله", "السابقه", "القديمه", "الاولي"),
         "as": "job",
     },
+    # "Can I eat gluten?", "أقدر آكل جلوتين؟": whether the user may eat a
+    # food (:data:`DIET_FOODS`); "Can I eat here / this / later?", "أقدر آكل
+    # بالبيت / هذا / بعدين؟" ask nothing (the delta review of step 3, N3).
     "diet": {
         "words": ("eat", "آكل", "آكله"),
         "en": re.compile(r"\b(?:can(?:'t| ?not)|should(?:n't| not)|must(?:n't| not)) (?:i|we) (?:not )?eat\b"
                          r"|\b(?:can|should|must) (?:i|we) not eat\b|\bwhat (?:can't|cannot|shouldn't|mustn't) (?:i|we) eat\b"
                          r"|\bwhat (?:foods? )?(?:do|should) (?:i|we) avoid(?: eating)?\b(?=\s*(?:$|[?.!]))"
-                         # "Can I eat gluten?": whether the user may, at the question's head
-                         # (step 3); "What can I eat for dinner?" asks no diet.
-                         r"|^\W*(?:can|may) (?:i|we) eat (?!(?:here|there|now|today|tonight|later|outside|out|in|at|"
-                         r"before|after|with|it|this|that|something|anything|lunch|dinner|breakfast)\b)[a-z]"),
+                         # "Can I eat gluten?": whether the user may eat a food, at the
+                         # question's head; "What can I eat for dinner?" asks no diet.
+                         r"|^\W*(?:can|may) (?:i|we) eat (?:any |some )?(?:" + "|".join(_DIET_EN) + r")\b"),
         "ar": (),
         "ar_after": (), "ar_not_before": (),
         "ar_said": re.compile(r"(?:^|\s)(?:ما|لا) (?:اقدر|اكدر|استطيع|يمكنني|يصير|لازم) (?:ان )?اكله?(?=\s|$|[؟?.,])"
                               r"|(?:^|\s)ممنوع (?:علي )?(?:من )?(?:اكل|اكله)(?=\s|$|[؟?.,])"
-                              r"|^\W*(?:هل )?(?:اقدر|اكدر|استطيع|يمكنني|يصير) (?:ان )?(?:اكل|اكله) "
-                              r"(?!(?:الحين|الان|هني|هنا|هناك|برا|بره|بالليل|الليله|اليوم|بكره|قبل|بعد|مع|في|شي|شيء|"
-                              r"الغدا|الغداء|العشا|العشاء|الفطور|الريوق)(?:\s|$|[؟?.,]))[^\W\d_]"),
+                              r"|^\W*(?:هل )?(?:اقدر|اكدر|استطيع|يمكنني|يصير) (?:ان )?(?:اكل|اكله) (?:ال)?(?:"
+                              + "|".join(_DIET_AR) + r")(?=\s|$|[؟?.,])"),
         "as": "diet",
     },
     # "What is my marital status?", "شنو حالتي الاجتماعية؟": a phrase, not
@@ -388,20 +406,37 @@ ASKED_AS_MINE: dict[str, dict[str, object]] = {
     # (the review of step 3, L1).
     "doctor": {
         "words": ("doctor",),
-        "en": re.compile(r"\b(?:which|what) doctor do (?:i|we) (?:see|go to|visit)\b"),
+        "en": re.compile(r"\b(?:which|what) doctor do (?:i|we) (?:see|go to|visit)\b(?=\s*(?:$|[?.!]))"),
         "ar": (),
         "ar_after": (), "ar_not_before": (),
-        "ar_said": re.compile(r"(?:^|\s)(?:عند |ل|ب)?اي (?:دكتور|دكتوره|طبيب|طبيبه) (?:اراجع|نراجع|اروح|نروح)(?=\s|$|[؟?.,])"),
+        # The question ends with the visit: "لأي دكتور أروح للأسنان؟" asks the
+        # teeth (the delta review, N4).
+        "ar_said": re.compile(r"(?:^|\s)(?:عند |ل|ب)?اي (?:دكتور|دكتوره|طبيب|طبيبه) (?:اراجع|نراجع|اروح|نروح)"
+                              r"(?: (?:له|لها))?(?=\s*(?:$|[؟?.,]))"),
         "as": "doctor",
     },
-    # "بأي فن أهتم؟": "أهتم" after "which", not "كيف أهتم بصحتي؟" (take care of).
+    # "بأي فن أهتم؟": "أهتم" after "which", not "كيف أهتم بصحتي؟" (take care of);
+    # it ends the question, and "which" is of a thing: "بأي طريقة أهتم بأمي؟",
+    # "اي وقت اهتم؟" ask nothing (the delta review of step 3, N1).
     "interests": {
         "words": ("interest",),
         "en": re.compile(r"\bwhich \w+ (?:am i|are we) interested in\b"),
         "ar": (),
         "ar_after": (), "ar_not_before": (),
-        "ar_said": re.compile(r"(?:^|\s)(?:ب|في )?اي [^\W\d_]+ (?:اهتم|نهتم)(?=\s|$|[؟?.,])"),
+        "ar_said": re.compile(r"(?:^|\s)(?:ب|في )?اي (?!(?:وقت|طريقه|شكل|ساعه|يوم|مكان|حد|احد)\s)[^\W\d_]+ "
+                              r"(?:اهتم|نهتم)(?=\s*(?:$|[؟?.,]))"),
         "as": "interest",
+    },
+    # "ما اسم حيواني الأليف؟": "حيواني" beside "الأليف" is my pet; alone it
+    # is the adjective ("البروتين الحيواني"). "my pet" is asked alone in
+    # English (:data:`ASKED_ALONE`; the delta review of step 3, N2).
+    "pets": {
+        "words": ("pet",),
+        "en": re.compile(r"\bmy pet(?:'s)? (?:name|called)\b"),
+        "ar": (),
+        "ar_after": (), "ar_not_before": (),
+        "ar_said": re.compile(r"(?:^|\s)حيواني (?:ال)?اليف(?=\s|$|[؟?.,])|(?:^|\s)حيواناتي (?:ال)?اليفه(?=\s|$|[؟?.,])"),
+        "as": "pet",
     },
 }
 
@@ -478,7 +513,7 @@ _ALL_MINE_EN: dict[str, str] = {
     "bought": r"(?:did|have) (?:i|we) (?:buy|bought|purchased?)", "received": r"(?:did|have) (?:i|we) received?",
     "study": r"do (?:i|we) study|am i studying", "met": r"(?:did|have) (?:i|we) me(?:e)?t",
     "attended": r"(?:did|have) (?:i|we) attend(?:ed)?", "finished": r"(?:did|have) (?:i|we) (?:finish|complete)(?:e?d)?",
-    "visited": r"(?:did|have) (?:i|we) visit(?:ed)?", "car": r"(?:do|did) (?:i|we) drive",
+    "visited": r"(?:did|have) (?:i|we) visit(?:ed)?", "car": r"(?:what|which)(?: [a-z]+){0,3} (?:do|did) (?:i|we) drive",
 }
 
 

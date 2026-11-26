@@ -11,8 +11,9 @@
 - Places you visited, your pets ("What is my cat called?" as "شنو اسم قطوتي؟")
   and whether you are married are asked in Arabic and English alike now.
   "Can I eat gluten?" asks what you may not eat; "Can I eat here?", "What can I
-  eat for dinner?", "أقدر آكل الحين؟" and "Can I take Panadol with coffee?" ask
-  nothing of you, and "my drive" is no car.
+  eat for dinner?", "أقدر آكل الحين؟", "أقدر آكل هذا؟" and "هل أستطيع أن أتناول
+  البنادول مع القهوة؟" ask nothing of you, and "my drive" is no car. "What is
+  my pet's name?" and "ما اسم حيواني الأليف؟" find your pet.
 - Every question of Kazma's own benchmark, its small-store run and the
   shared-space set shows what it did. One question of the Spaces study ("What
   kind of pet do I have at home?") shows one unrelated memory fewer.

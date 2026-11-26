@@ -316,9 +316,10 @@ four injected were noise.
     the fact does not hold.
   - Shown in another sense, by way and store (5 / 30; of 68, 64, 62): step 3 as
     built EN 36/48, Gulf 21/42, MSA 22/39; now 32/44, 17/38, 20/37; meaning
-    alone 31/43, 16/34, 18/35. The table still adds 1 to 4 a way and store
-    (its words for the kinds asked before this step); the review's fixes took
-    off what this step had added.
+    alone 31/43, 16/34, 18/35. The table still adds 1 to 4 a way and store:
+    its words for the kinds asked before this step, and a few of this step's
+    by meaning ("When did the king get married?", and "أي حيوان أليف يعيش
+    أكثر؟" in the Arabic-told store of five).
   - Added only where a question was measured lost:
     - a doctor's nobody's nouns ("طبيب", "دكتور", as English has "doctor"), and
       "أراجع" only beside them ("أي طبيب أراجع؟"; "متى أراجع البنك؟" asks none);
@@ -330,14 +331,36 @@ four injected were noise.
       alone by, never its verbs ("my drive" is no car, M1);
     - "حالتي الاجتماعية" and "my marital status" as phrases (`ASKED_AS_MINE`);
     - "Can I eat ...?" / "أقدر آكل ...؟" at a question's head with a food after
-      it (diet). "Can I eat here?", "أقدر آكل الحين؟", "What can I eat for
+      it (diet), the food from one list in both languages
+      (`fact_names.DIET_FOODS`, the delta review N3). "Can I eat here / this /
+      at home?", "أقدر آكل الحين / هذا / بالبيت؟", "What can I eat for
       dinner?" ask none, and "أتناول" is out ("أتناول البنادول", M2);
     - "عدد" as asking (L-f, "عدد كل الأماكن اللي زرتها"), and "places" / "الأماكن"
       as words that only ask.
   - Kazma's benchmark (183), the small store (164) and the speakers set (105):
-    no question moved (hit, rank, precision, fact hit, what was shown;
-    cdbcfb65e against this step, and against its review's fixes). The Spaces R3
-    study's q103 (pets) shows one memory fewer (re-recorded).
+    no hit, rank or precision moved (cdbcfb65e against this step, and against
+    its review's fixes). Two margins did, for the better: q001 "What is my
+    dog's name?" and q009 "What car do I drive?" are found by the named path
+    now (0.08 and 0.15 to 1.0). The Spaces R3 study's q103 (pets) shows one
+    memory fewer (re-recorded).
+  - **The delta review of the fixes** (N1-N5): "أهتم" ends the question and
+    "which" is of a thing ("بأي طريقة أهتم بأمي؟", "اي وقت اهتم؟" ask none);
+    "my pet" is asked alone again, and "حيواني" beside "الأليف" is the user's
+    pet ("ما اسم حيواني الأليف؟"; "my pet peeve" and "my pet project" ask none;
+    the `also` rows of the told run); the car is asked by what or which ("Where
+    did I drive?" asks none); a doctor asked ends the question ("What doctor do
+    I see for a cold?", "لأي دكتور أروح للأسنان؟" ask none). Shown in another
+    sense (5 / 30; of 78, 70, 68, with the review's added rows): before EN
+    38/51, Gulf 23/44, MSA 26/43; now 37/51, 18/41, 22/40. Nothing lost. The
+    gate: a question asks a kind in English exactly when its Gulf and MSA twins
+    do (`test_the_three_ways_ask_alike`, the diet's pairs read from the food
+    list), with the forms before as its controls.
+  - Left, written down (the delta review, N4): "Did I visit Rome?" and "Do I
+    drive a Toyota?" ask the keyword index nothing in English, while "زرت
+    روما؟" and "أسوق تويوتا؟" do: "visit" and "drive" left the table for their
+    other senses (L1). The told run's English questions of both kinds ("Which
+    mosque did I visit?", "Which Toyota do I drive?") are found; a keyword twin
+    would need the question's wording, not its words.
   - Gates: `tests/test_memory_fact_kinds.py`. The step's numbers are held there,
     and the table before step 3, and as step 3 first built it, are the negative
     controls. Every kind the tables ask has a told row, questions in all three
