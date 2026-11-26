@@ -260,7 +260,13 @@
       denial's reach ("didn't see Ali alone", "مو علي بس", "ليس علي فقط",
       "بعلي وحده"), adds rather than denies. A bare "no" before "just" still
       puts right ("No, just Omar"), and actually / correct / instead / rather
-      / بل / الصحيح never add (`_NEVER_ADDING`).
+      / بل / الصحيح never add (`_NEVER_ADDING`). An "only" word after the
+      value adds only when what follows goes on with "but" (`_BUT`) or says
+      "too" (`_ONCE_MORE`), in its clause or after it ("not Ali only but
+      Omar", "It wasn't Ali only, Omar too", "مو علي بس، قابلت عمر بعد");
+      before another word it is that word's, and the denial stands ("Not Ali
+      just Omar", "مو علي بس عمر", "مو علي بس، عمر", "I didn't see Ali just
+      now, it was Omar": step 4's delta review, N1, each a put-right test).
     - **Step 4's review (H1, M4):** step 4 read "alone" anywhere after a
       denial, and an unpunctuated message lost its denial: "No I didn't meet
       Ali I was home alone", "مو علي قابلت عمر بروحه", "لم ألتق بعلي بل
@@ -289,8 +295,15 @@
     بعد", "لا، مو عمر" deny or add and close nothing, and "لا يا عمر" speaks
     to Omar (the review's M1). "No - Omar" and "Nope Omar!" are read; "No
     Omar" and "لا عمر" are not ("no" and "لا" come before nouns: "no sugar",
-    "لا تسوس"). One mark, then the rest: linear (M2), and the regex sweep
-    now reads a head behind `^\W*(...|...)`.
+    "لا تسوس"). Articles and prepositions are no new words ("No, the gym",
+    "No, with Omar", "لا، في دبي"), and "and" on the value's front adds in
+    Arabic as in English ("لا، وعمر", "لا، فعمر"; a name that begins with the
+    letter, "وليد", is itself: `_and_then`, the delta review's N3). One mark,
+    then the rest read once (`\W*+`, possessive: "No," + "-" * 6000 + "x.y"
+    took 28 s, the delta review's N2): linear. The regex sweep reads a head
+    behind `^\W*(...|...)`, and runs each input again with a tail that fails
+    late ("a.a"): the snowman it ended with completes a pattern ending
+    `\W*$` at once, which hid this one.
   - *L4, a voice note* (`own_words._MEDIUM_AR`): "رسالة صوتية:" was read as
     someone else's message and lost the user's event in MSA (keep 117 of 120;
     now 120, as English and Gulf). A text noun before a medium ("صوتية",

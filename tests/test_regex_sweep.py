@@ -63,6 +63,10 @@ SLOW_S = 0.008         # at 4 N characters, and more than 8 times the time at N
 CLEARLY_SLOW_S = 0.1   # at N/4 or N characters: no linear pattern comes near
 PATTERN_TIMEOUT_S = 10.0
 TAIL = chr(0x2603)  # a snowman: no product pattern names one
+#: A tail that fails late: a word, a stop, a word. The snowman is a non-word
+#: character and completes a pattern ending ``\W*$`` at once, so a quadratic
+#: head (``no,`` + "-" * n, step 4's delta review N2) answered fast.
+LATE_TAIL = "a.a"
 
 #: The packages whose regexes are swept (``kazma-*/kazma_*``, not their tests).
 PACKAGES = ("kazma-cli/kazma_cli", "kazma-core/kazma_core", "kazma-gateway/kazma_gateway",
@@ -327,12 +331,14 @@ class Recipe:
 
     prefix: str
     unit: str
+    tail: str = TAIL
 
     def text(self, n: int) -> str:
-        return self.prefix + self.unit * max(1, n // len(self.unit)) + TAIL
+        return self.prefix + self.unit * max(1, n // len(self.unit)) + self.tail
 
     def __str__(self) -> str:
-        return (f"{self.prefix!r} + " if self.prefix else "") + f"{self.unit!r} * n"
+        return ((f"{self.prefix!r} + " if self.prefix else "") + f"{self.unit!r} * n"
+                + (f" + {self.tail!r}" if self.tail != TAIL else ""))
 
 
 def hostile_inputs(pattern: str, flags: int) -> list[Recipe]:
@@ -343,6 +349,7 @@ def hostile_inputs(pattern: str, flags: int) -> list[Recipe]:
     if head:
         out += [Recipe(head, c) for c in chars]
         out.append(Recipe("", head))
+    out += [Recipe(r.prefix, r.unit, LATE_TAIL) for r in list(out)]
     return out
 
 
@@ -541,16 +548,19 @@ def test_control_a_planted_quadratic_pattern_fails(tmp_path: Path):
         "TAGS = re.compile(r'<[^<>]+>')\n"
         # Quadratic only behind its head "no" (event_text._NO_THEN before step 4's review, M2).
         "HEADED = re.compile(r'^\\W*(?:no|nope)[ \\t]*[,.]+\\W*x')\n"
+        # Quadratic only on a tail that fails late: the snowman completes "\W*$"
+        # (event_text._NO_THEN at e4772d2ac, step 4's delta review N2).
+        "LATE = re.compile(r'^\\W*(?:no|nope)[,.-]\\W*(?P<v>[^.,\\n]{1,60}?)\\W*$')\n"
         "def strip(text):\n"
         "    return re.sub(r'\\s*->\\s*(\\S+)\\s*$', '', text)\n",
         encoding="utf-8",
     )
     literals, slow, hung = sweep(("kazma-planted/kazma_planted",), tmp_path)
     flagged = {literals[i].pattern for i in slow}
-    assert flagged == {r"[ \t]+\n", r"<[^>]+>", r"\s*->\s*(\S+)\s*$", r"^\W*(?:no|nope)[ \t]*[,.]+\W*x"}, \
-        (flagged, slow)
+    assert flagged == {r"[ \t]+\n", r"<[^>]+>", r"\s*->\s*(\S+)\s*$", r"^\W*(?:no|nope)[ \t]*[,.]+\W*x",
+                       r"^\W*(?:no|nope)[,.-]\W*(?P<v>[^.,\n]{1,60}?)\W*$"}, (flagged, slow)
     assert not hung
-    assert len(_report(literals, slow, hung)) == 4
+    assert len(_report(literals, slow, hung)) == 5
 
 
 def _plant_linear(tmp_path: Path) -> None:

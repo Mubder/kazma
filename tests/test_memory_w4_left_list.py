@@ -114,6 +114,14 @@ PUT_RIGHT = [
     (GULF, "لا ما قابلت علي كنت بروحي مع عمر"), (GULF, "مو علي قابلت عمر بروحه"), (GULF, "مو علي - قابلت عمر لحاله"),
     (GULF, "مو علي وحده ثانيه اسمها عمر"),
     (MSA, "لم ألتق بعلي بل التقيت بعمر وحده"), (MSA, "لم ألتق بعلي فقد كنت وحدي مع عمر"),
+    # "Only" before the new value is the new value's (step 4's delta review, N1:
+    # each kept Ali at e4772d2ac).
+    (EN, "Not Ali just Omar"), (EN, "not Ali only Omar"), (EN, "It wasn't Ali just Omar"),
+    (EN, "I didn't meet Ali just Omar"), (EN, "No not Ali just Omar"), (EN, "Not Ali simply Omar"),
+    (EN, "I didn't see Ali just now, it was Omar"),
+    (GULF, "مو علي بس عمر"), (GULF, "لا مو علي بس عمر"), (GULF, "مب علي بس عمر"), (GULF, "لا ما قابلت علي بس عمر"),
+    (GULF, "مو علي بس عمر اللي قابلته"), (GULF, "مو علي بس، عمر"),
+    (MSA, "ليس علي فقط عمر"), (MSA, "لم ألتق بعلي فقط بعمر"),
 ]
 
 
@@ -160,7 +168,13 @@ def test_control_a_bare_no_whose_reply_names_nothing_changes_nothing(conn, who, 
     ("No, and Omar", "Omar", False), ("No, Omar was there too", "Omar", False), ("لا، عمر بعد", "عمر", False),
     ("لا، مو عمر", "عمر", False), ("لا، وعمر بعد", "عمر", False), ("كلا، ليس عمر", "عمر", False),
     ("لا يا عمر", "عمر", False), ("No - Omar", "Omar", True), ("Nope Omar!", "Omar", True),
-    ("no, it's Omar", "Omar", True), ("لا، هو عمر", "عمر", True)])
+    ("no, it's Omar", "Omar", True), ("لا، هو عمر", "عمر", True),
+    # "And" on the value's front adds in Arabic as in English; articles and
+    # prepositions are no new words (step 4's delta review, N3).
+    ("لا، وعمر", "عمر", False), ("لا، فعمر", "عمر", False), ("لا، وليد", "وليد", True),
+    ("No, the gym", "the gym", True), ("No, my dentist", "my dentist", True), ("No, at the gym", "the gym", True),
+    ("No, with Omar", "Omar", True), ("No, in Dubai", "Dubai", True), ("لا، في دبي", "دبي", True),
+    ("لا، مع عمر", "عمر", True), ("كلا، في دبي", "دبي", True)])
 def test_no_then_is_the_whole_message(text, value, whole):
     assert event_text.no_then(text, value) is whole
 
@@ -224,9 +238,20 @@ def test_every_only_or_alone_word_adds_right_after_the_denied_value_and_nowhere_
     for denial in _denials():
         for word in event_text._ONLY | event_text._ALONE:
             if denial not in event_text._ANSWER_NO:
-                assert event_text._adds_rather_than_denies(f"{denial} Ali {word} Omar", "Ali"), (denial, word)
+                # "Only" goes on with "but" or "too", in the clause or after it.
+                assert event_text._adds_rather_than_denies(f"{denial} Ali {word} but Omar", "Ali"), (denial, word)
+                assert event_text._adds_rather_than_denies(f"{denial} Ali {word}, Omar too", "Ali"), (denial, word)
             assert not event_text._adds_rather_than_denies(f"{denial} Ali met Omar {word}", "Ali"), (denial, word)
-            assert not event_text._adds_rather_than_denies(f"{denial} Ali {word} Omar", "Sara"), (denial, word)
+            assert not event_text._adds_rather_than_denies(f"{denial} Ali {word} but Omar", "Sara"), (denial, word)
+        for word in event_text._ALONE:
+            if denial not in event_text._ANSWER_NO:
+                assert event_text._adds_rather_than_denies(f"{denial} Ali {word} Omar", "Ali"), (denial, word)
+        # Before another word "only" is that word's: "Not Ali just Omar", "مو
+        # علي بس عمر", "مو علي بس، عمر" put right (step 4's delta review, N1).
+        for word in event_text._ONLY:
+            for text in (f"{denial} Ali {word} Omar", f"{denial} Ali {word}, Omar", f"{denial} Ali {word}"):
+                assert not event_text._adds_rather(text.replace(",", "").lower().split(), 0, ["ali"],
+                                                   "omar" if "," in text else ""), (text,)
     for no in event_text._ANSWER_NO:
         for word in event_text._ALONE:
             assert not event_text._adds_rather_than_denies(f"{no} went gym {word}", "gym"), (no, word)
@@ -240,11 +265,12 @@ def test_every_only_or_alone_word_adds_right_after_the_denied_value_and_nowhere_
 def test_control_the_rule_before_the_review_turns_denials_into_additions(monkeypatch):
     """Step 4's rule ("alone" anywhere after a denial): the message whose
     "alone" is the user's denies nothing."""
-    def anywhere(words, at, wanted=None):
+    def anywhere(words, at, wanted=None, later=""):
         return any(w in event_text._ALONE for w in words[at + 1:])
 
+    assert not event_text._adds_rather_than_denies("Not Ali I met Omar alone", "Ali")
     monkeypatch.setattr(event_text, "_adds_rather", anywhere)
-    assert not event_text.denies("Not Ali I met Omar alone", "Ali") or         event_text._adds_rather_than_denies("Not Ali I met Omar alone", "Ali")
+    assert event_text._adds_rather_than_denies("Not Ali I met Omar alone", "Ali")
     assert event_text._adds_rather_than_denies("مو علي قابلت عمر بروحه", "علي")
 
 

@@ -853,9 +853,13 @@ def test_no_then_answers_as_the_old_pattern_on_one_mark():
     from kazma_core.memory.event_text import _NO_THEN
 
     for text in ("no, omar", "no! omar, i told you", "لا، عمر", "لا يا كازما، عمر", "nope, omar", "no.  omar",
-                 "no,, omar", "no omar", "لا عمر", "no", "no, ", "no, omar and sara"):
+                 "no,, omar", "no omar", "لا عمر", "no", "no, omar and sara"):
         new, old = _NO_THEN.match(text), OLD_NO_THEN.match(text)
         assert (new and new["value"]) == (old and old["value"]), text
+    # The one that differs: the old pattern's value was a space, a value of no words.
+    from kazma_core.memory.event_text import no_then
+
+    assert _NO_THEN.match("no, ") is None and not no_then("no, ", "Omar")
 
 
 def test_no_then_is_linear():
@@ -912,3 +916,29 @@ def test_the_sign_off_and_run_code_answer_as_before_and_are_linear():
     assert _timed(run_code.search, "run" + "\t" * 40000) < 0.1
     small, big = "run" + "\t" * 1500, "run" + "\t" * 6000
     assert _timed(OLD_RUN_CODE.search, big) > 6 * _timed(OLD_RUN_CODE.search, small), "control"
+
+
+#: ``_NO_THEN`` at e4772d2ac: one mark, then ``\W*`` that hands marks back to the value.
+STEP4_NO_THEN = re.compile(r"^\W*(?:(?:no|لا|لاء|كلا)(?:[ \t]*[,،.!-]|[ \t]+(?=يا ))|(?:nope|nah)(?:[ \t]*[,،.!-]|[ \t]))"
+                           r"\W*(?:يا [^\W\d_]+\W+)?"
+                           r"(?P<value>[^.,،!?؟\n]{1,60}?)"
+                           r"(?:\W+(?:i (?:told|said) (?:you|it|that)|i said|قلت ?لك|قلتلك|قلت لكم|قلت))?\W*$")
+
+
+def test_no_then_reads_a_run_of_marks_after_the_mark_once():
+    """Step 4's delta review, N2: "No," + "-" * 6000 + "x.y" took 28 s and
+    "Nope " the same 56 s, through ``no_then``. Each mark, each head, and a
+    tail that fails late."""
+    from kazma_core.memory.event_text import _NO_THEN, no_then
+
+    no_then("No, Omar", "Omar")  # warm the folding
+    for head in ("No,", "Nope ", "Nah ", "لا،", "No ~"):
+        for unit in ("-", "~", "*", "#", ":", ";", '"', "/", "(", "@", "- ", "—"):
+            assert _timed(no_then, head + unit * 16000 + "x.y", "Omar") < 0.2, (head, unit)
+    for text in ("no, omar", "no - omar", "nope omar!", "لا، عمر", "no,- omar", "no, -omar", "no.  omar",
+                 "لا يا كازما، عمر", "no, omar, i told you"):
+        new, old = _NO_THEN.match(text), STEP4_NO_THEN.match(text)
+        assert (new and new["value"]) == (old and old["value"]), text
+    small, big = "no," + "-" * 500 + "x.y", "no," + "-" * 2000 + "x.y"
+    assert _timed(STEP4_NO_THEN.match, big) > 6 * _timed(STEP4_NO_THEN.match, small), \
+        "control: step 4's pattern grows with the square"
