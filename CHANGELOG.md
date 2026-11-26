@@ -29,6 +29,9 @@
   "keyword matches only", the note to the model on each turn leaves it out,
   and it pages nobody: the outage is said where it happens (and by the
   database's own alert when the copy is in Kazma's own database).
+- A Postgres copy that is down when Kazma starts no longer slows every
+  memory search by seconds: Kazma asks it again once a minute, not on each
+  search.
 
 ## Kazma reaches its database when Windows refuses psycopg's library (2026-11-26)
 

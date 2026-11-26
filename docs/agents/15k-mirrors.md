@@ -41,7 +41,10 @@ an answer ("User prefers dark mode").
   Postgres-primary path every read is strict (a failed fetch is a failed
   recall, said); the top-up of a thin local result fails the recall on a
   refusal, and when the mirror is away (does not answer its ping, or is down
-  since start: a configured mirror's null backend) keeps this install's
+  since start: a configured mirror's null backend, pinged again once per
+  ping window, `state_backend._state_backend_down`; it was one new backend
+  and ping per thin recall, 5.1 s each: `tests/test_mirror_down_since_start.py`)
+  keeps this install's
   answer and says so in its own field, `RecallResult.mirror_unread`, never
   `degraded` (0b delta review L-a, §44; recall-strict review M1, L1). A top-up
   works on copies, so one that fails half way keeps none of its rows (L2).

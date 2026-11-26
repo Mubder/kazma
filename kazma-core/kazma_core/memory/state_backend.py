@@ -85,6 +85,13 @@ def _say_kept(row_id: str, outcome: str) -> None:
 
 # Singleton cache for the shared-state mirror backend (see get_state_backend).
 _state_backend_cache: dict[tuple, Any] = {}
+#: A configured Postgres mirror that did not answer, by its key: when it was
+#: found down. Within the ping window (``_READY_PROBE_TTL``) the factory
+#: answers the null backend without building and pinging another: down since
+#: start, every recall of a thin result paid a new backend and its ping
+#: (5.1 s each, measured 2026-11-26). A changed setting is another key, tried
+#: at once; a mirror that answers takes its key out.
+_state_backend_down: dict[tuple, float] = {}
 _state_backend_lock = threading.Lock()
 
 
@@ -1239,7 +1246,9 @@ def get_state_backend() -> Any:
     connections per turn — a Postgres connection storm (audit finding). The
     cache key captures every config field that changes the backend, so a
     Settings change naturally invalidates (new key → new backend). The null
-    fallback is NOT cached so a later postgres-comes-back can be picked up.
+    fallback is NOT cached as a backend, so a later postgres-comes-back can be
+    picked up; a mirror found down is pinged again once per window
+    (:data:`_state_backend_down`), not on every call.
     """
     c = _cfg()
     st = c.get("state") or {}
@@ -1249,9 +1258,12 @@ def get_state_backend() -> Any:
     key = (provider, url, timeout_ms)
     with _state_backend_lock:
         cached = _state_backend_cache.get(key)
+        down_at = _state_backend_down.get(key)
     if cached is not None:
         return cached
     if provider in ("postgres", "postgresql", "pg") and url:
+        if down_at is not None and time.monotonic() - down_at < _READY_PROBE_TTL:
+            return _NullStateBackend()  # pinged within the window: still down
         be = PostgresStateBackend(url, timeout_s=timeout_ms / 1000.0)
         if be.available:
             with _state_backend_lock:
@@ -1259,11 +1271,15 @@ def get_state_backend() -> Any:
                 # is closed, not left reconnecting for the life of the process.
                 stale = [_state_backend_cache.pop(k) for k in list(_state_backend_cache) if k != key]
                 _state_backend_cache[key] = be
+                _state_backend_down.clear()
             for old in stale:
                 getattr(old, "close", lambda: None)()
             return be
         be.close()
-        logger.info("[state_backend] postgres unavailable — null sink")
+        with _state_backend_lock:
+            _state_backend_down.clear()  # only the current setting's is kept
+            _state_backend_down[key] = time.monotonic()
+        logger.info("[state_backend] postgres unavailable — null sink until the next ping")
     return _NullStateBackend()
 
 
