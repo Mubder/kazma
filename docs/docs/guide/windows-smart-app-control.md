@@ -74,9 +74,11 @@ signatures rather than reputation.
 
 A company may manage its PCs with **App Control for Business** instead of Smart App Control. Unlike
 Smart App Control, a company policy can name what it allows. If your IT team
-manages the policy, they may choose to allow Kazma's signed files (by its
-publisher certificate, once releases are signed) or the folder Kazma is
-installed in. This is an option for the administrators who own that policy;
+manages the policy, they may choose to allow Kazma's files by its publisher
+certificate, once releases are signed. A publisher rule is the one Kazma
+suggests: it allows only the files Kazma signed, while a rule naming a folder
+would allow anything later written into it. This is an option for the
+administrators who own that policy;
 nobody using Kazma needs to do anything, and Kazma works the same way under
 either: it uses signed alternatives, keeps the running version, or names the
 feature that waits. `kazma doctor` lists each of Kazma's native parts and

@@ -625,9 +625,15 @@ def consume_reload_request() -> bool:
 _RELOAD_PREFLIGHT = r"""
 import importlib.util, json, os, subprocess, sys
 out = {"ok": True, "steps": {}}
+def masked(text):
+    try:  # URL passwords and token-shaped values, when Kazma's core loads
+        from kazma_core.security.url_credentials import mask_urls_in_text
+        return mask_urls_in_text(text)
+    except BaseException:
+        return text  # the guard masks tokens again with the same table
 def finish(step=None, exc=None):
     if step is not None:
-        text = " ".join(str(exc).split())[:300]
+        text = masked(" ".join(str(exc).split()))[:300]
         out.update(ok=False, step=step,
                    detail=(type(exc).__name__ + ": " + text) if text else type(exc).__name__,
                    winerror=getattr(exc, "winerror", None))
@@ -695,11 +701,42 @@ _PREFLIGHT_PARTS = {
 
 def preflight_refused_by_windows(result: dict) -> bool:
     """True when a failed preflight met Windows' file check (a policy
-    refusal), not an error in the code."""
+    refusal), not an error in the code. A settled result carries the answer
+    (``windows_check``, decided before its detail was masked)."""
+    if "windows_check" in result:
+        return result.get("windows_check") is True
     if result.get("winerror") in _windows_refusal_codes() and result.get("step") in {"python", "docker"}:
         return True
     text = str(result.get("detail") or "").lower()
     return any(word in text for word in _WINDOWS_POLICY_WORDS)
+
+
+_TOKEN_SHAPES_MODULE = None
+#: What a detail reads when the masker could not load: never shown unmasked.
+DETAIL_WITHHELD = "(the detail is withheld: the masker could not load)"
+
+
+def _mask_tokens(text: str) -> str:
+    """*text* with every token-shaped value masked, by the one table
+    (``kazma_core/security/token_shapes.py``, standard library only, loaded
+    by path: the guard never imports the app). Fails closed."""
+    global _TOKEN_SHAPES_MODULE
+    try:
+        if _TOKEN_SHAPES_MODULE is None:
+            import importlib.util
+
+            path = REPO_ROOT / "kazma-core" / "kazma_core" / "security" / "token_shapes.py"
+            name = "kazma_guard_token_shapes"
+            spec = importlib.util.spec_from_file_location(name, path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"cannot load {path}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module  # registered before it runs
+            spec.loader.exec_module(module)
+            _TOKEN_SHAPES_MODULE = module
+        return str(_TOKEN_SHAPES_MODULE.mask_tokens(text))
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return DETAIL_WITHHELD
 
 
 def run_reload_preflight(python: str, cwd: Path, *, timeout_s: float | None = None,
@@ -709,9 +746,23 @@ def run_reload_preflight(python: str, cwd: Path, *, timeout_s: float | None = No
     Returns ``{"ok": bool, "steps": {...}, "seconds": float}`` and, when not
     ok, ``step`` (``python``, ``kazma_core``, ``psycopg``, ``app``,
     ``docker`` or ``timeout``), ``detail`` (the error's type and words, for
-    the operator) and ``winerror``. *tick* is called about once a second
-    while the child runs, so the guard keeps its heartbeat. Never raises.
+    the operator, masked by value: it reaches guard.log, the state file and
+    the owner's card -- review L7, AGENTS §26 F), ``winerror`` and
+    ``windows_check`` (Windows' file check refused a file, decided before
+    the masking). *tick* is called about once a second while the child
+    runs, so the guard keeps its heartbeat. Never raises.
     """
+    result = _preflight_child(python, cwd, timeout_s=timeout_s, tick=tick)
+    if not result.get("ok"):
+        result["windows_check"] = preflight_refused_by_windows(result)
+        if result.get("detail"):
+            result["detail"] = _mask_tokens(str(result["detail"]))[:300]
+    return result
+
+
+def _preflight_child(python: str, cwd: Path, *, timeout_s: float | None,
+                     tick: Callable[[], None] | None) -> dict:
+    """:func:`run_reload_preflight`'s child process and its raw answer."""
     limit = RELOAD_PREFLIGHT_TIMEOUT_S if timeout_s is None else timeout_s
     started = time.monotonic()
 
@@ -2472,7 +2523,7 @@ _BROKER_ENV_KEEP = (
     "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP",
     "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES",
     "PROGRAMW6432", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_CERT_PATH",
-    "DOCKER_TLS_VERIFY", "KAZMA_DOCKER_BIN", "LANG", "LC_ALL", "TZ",
+    "DOCKER_TLS_VERIFY", "KAZMA_DOCKER_BIN", "KAZMA_DOCKER_ROUTE", "LANG", "LC_ALL", "TZ",
 )
 _BROKER_REQUEST_MAGIC = b"KZDB-REQ/1\n"
 
@@ -3738,9 +3789,12 @@ class Dependencies:
         if not self.containers and not (broker is not None and broker.wanted):
             self._set("idle", "Kazma uses no container and no document broker")
             return
-        if self.cli is None and _docker_route_argv(["version"]) is not None:
+        if _docker_route_argv(["version"]) is not None:
             # Kazma's own engine is reached through wsl.exe: no Windows CLI to
-            # find, and none Windows could refuse.
+            # find, and none Windows could refuse. Asked first even when a
+            # Windows CLI was chosen on an earlier tick: a wsl call that times
+            # out is an engine that does not answer, never a refused CLI
+            # (review L3, 2026-11-26).
             if self._engine_answers():
                 self._engine_is_up(now)
                 if self.containers:

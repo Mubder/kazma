@@ -229,12 +229,29 @@ def _database_client() -> PartState:
     return PartState("database_client", WAITS, names, detail=detail)
 
 
+#: What reaches Kazma's own engine when its Windows tools are not needed.
+WSL_ROUTE = "Microsoft's wsl.exe and the engine's own Docker"
+
+
+def _through_wsl() -> bool:
+    """Kazma's engine is reached through wsl.exe (``docker_cli.docker_command``):
+    its Windows docker.exe and compose plugin are then not needed (review M2)."""
+    from kazma_core import docker_cli
+
+    routed = docker_cli.docker_command(["version"])
+    return routed is not None and routed.route == "wsl"
+
+
 def _docker_cli() -> PartState:
     from kazma_core import docker_cli
 
     own = docker_cli.kazma_engine_dir() / "bin" / "docker.exe"
     if not own.is_file():
         return PartState("docker_cli", ABSENT)
+    if _through_wsl():
+        why = docker_cli.refused_by_os(own)
+        return (PartState("docker_cli", ALLOWED, (own.name,)) if why is None
+                else PartState("docker_cli", ALTERNATIVE, (own.name,), WSL_ROUTE, why))
     if _checks_files():
         chosen = docker_cli.find_docker_cli()
         if chosen and Path(chosen) != own:
@@ -264,6 +281,8 @@ def _compose() -> PartState:
     why = docker_cli.refused_by_os(plugin)
     if why is None:
         return PartState("compose", ALLOWED, (plugin.name,))
+    if _through_wsl():  # compose runs inside the engine's distro
+        return PartState("compose", ALTERNATIVE, (plugin.name,), WSL_ROUTE, why)
     return PartState("compose", WAITS, (plugin.name,), detail=why)
 
 

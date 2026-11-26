@@ -377,6 +377,26 @@ def log_errors(live: Path, since_epoch: float) -> list[str]:
     return found
 
 
+#: ``kazma_guard.py --reload``'s exit when the guard kept the running server
+#: because the new code could not start on this PC (its reload preflight).
+RELOAD_WAITS_EXIT = 4
+
+
+def reload_waits_for_windows(live: Path) -> dict | None:
+    """After ``--reload`` exited :data:`RELOAD_WAITS_EXIT`: the guard's
+    preflight record when Windows' file check refused a file the new code
+    needs (``windows_check``), else None -- the code itself failed, or there
+    is no record to tell, and the deploy is undone as any failed one."""
+    try:
+        state = json.loads((live / ".kazma" / "guard.state.json").read_text(encoding="utf-8") or "{}")
+    except (OSError, ValueError):
+        return None
+    if not isinstance(state, dict) or state.get("reload_action") != "kept_running":
+        return None
+    record = state.get("reload_preflight")
+    return record if isinstance(record, dict) and record.get("windows_check") is True else None
+
+
 def page(live: Path, title: str, detail: str) -> None:
     code, out = run_live(live, "scripts/service/kazma_guard.py", "--page", title, "--detail", detail, timeout=120)
     say(f"   paged the owner ({'sent' if code == 0 else 'NOT sent: ' + out[-200:]})")
@@ -419,6 +439,17 @@ def deploy(live: Path, *, dev: Path = DEV, revert: bool = True, skip_turn: bool 
     boot_from = time.time()
     say("-> reload when idle")
     code, out = run_live(live, "scripts/service/kazma_guard.py", "--reload", "--when-idle", timeout=1200)
+    waits = reload_waits_for_windows(live) if code == RELOAD_WAITS_EXIT else None
+    if waits is not None:
+        # The code is not at fault: a revert would push an undo of good code
+        # to main, and its own reload would wait the same way (review M3).
+        step = str(waits.get("step") or "a part of the new version")
+        say(f"   the update waits: Windows' file check did not allow a file the new version needs ({step});"
+            " Kazma keeps running the version it had. Not reverted.")
+        page(live, "A deploy waits for Windows' file check",
+             f"{after[:12]} is pulled; Kazma keeps running the version it had. Windows' file check did not allow"
+             f" a file the new version needs ({step}). Nothing is wrong with the code or the PC; not reverted.")
+        return RELOAD_WAITS_EXIT
     if code != 0:
         return fail(live, dev, shipped, after, f"the reload did not happen: {essential(out)}", revert,
                     packages=packages)

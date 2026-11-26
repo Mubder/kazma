@@ -399,7 +399,9 @@ def _docker_adjusted_parts(tool_cmd: Sequence[str], parts: _DsnParts) -> _DsnPar
     Override the internal port with ``KAZMA_DB_INTERNAL_PORT`` if your
     container listens elsewhere.
     """
-    if len(tool_cmd) >= 2 and "docker" in tool_cmd[0].lower() and tool_cmd[1] == "exec":
+    from kazma_core.docker_cli import is_docker_exec
+
+    if is_docker_exec(tool_cmd):
         internal_port = os.environ.get("KAZMA_DB_INTERNAL_PORT", "5432").strip() or "5432"
         return _DsnParts(
             host="localhost",

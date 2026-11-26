@@ -287,3 +287,58 @@ def test_a_live_checkout_with_its_own_commit_is_undone_too(repos, stub, recorded
     assert deploy_live.deploy(live, dev=dev, server=server) == 1
     assert (live / "app.txt").read_text(encoding="utf-8") == "v1\n"
     assert (live / "local.yaml").read_text(encoding="utf-8") == "mine\n"
+
+
+def _reload_kept_running(recorded_calls, monkeypatch, live: Path, *, windows_check: bool) -> None:
+    """``--reload`` exits 4 the first time: the guard kept the running server,
+    its state naming why (Windows' file check, or the new code itself)."""
+    state = live / ".kazma" / "guard.state.json"
+    reloads = []
+
+    def run_live(where, *args, timeout=1800):
+        recorded_calls["live"].append(args)
+        if args[:2] == ("scripts/service/kazma_guard.py", "--reload"):
+            reloads.append(args)
+            if len(reloads) == 1:
+                state.parent.mkdir(parents=True, exist_ok=True)
+                state.write_text(json.dumps({
+                    "reload_action": "kept_running",
+                    "reload_preflight": {"at": 1.0, "step": "psycopg", "detail": "refused",
+                                         "windows_check": windows_check}}), encoding="utf-8")
+                return 4, "An update waits"
+            state.write_text(json.dumps({"reload_action": "restarting"}), encoding="utf-8")
+        return 0, ""
+
+    monkeypatch.setattr(deploy_live, "run_live", run_live)
+
+
+def test_an_update_windows_held_back_is_kept_and_paged_not_reverted(repos, stub, recorded, monkeypatch):
+    # Review M3 (2026-11-26): exit 4 because Windows' file check refused a
+    # file is not the code's fault -- a revert would push an undo of good code
+    # to main and its own reload would wait the same way.
+    dev, live = repos
+    handler, url = stub
+    after = _push(dev, "v2\n")
+    _reload_kept_running(recorded, monkeypatch, live, windows_check=True)
+    assert deploy_live.deploy(live, dev=dev, server=_server(live, url, handler, after)) == deploy_live.RELOAD_WAITS_EXIT
+    assert _git(live, "rev-parse", "HEAD") == after
+    assert "Revert" not in _git(dev.parent / "origin.git", "log", "-1", "--format=%s", "main")
+    (title, detail), = recorded["pages"]
+    assert title == "A deploy waits for Windows' file check" and "not reverted" in detail
+    assert "psycopg" in detail
+
+
+def test_control_an_update_whose_own_code_failed_is_reverted(repos, stub, recorded, monkeypatch):
+    dev, live = repos
+    handler, url = stub
+    after = _push(dev, "v2 broken\n")
+    _reload_kept_running(recorded, monkeypatch, live, windows_check=False)
+    assert deploy_live.deploy(live, dev=dev, server=_server(live, url, handler, after)) == 1
+    assert (live / "app.txt").read_text(encoding="utf-8") == "v1\n"
+    assert "Revert" in _git(dev.parent / "origin.git", "log", "-1", "--format=%s", "main")
+    assert recorded["pages"][0][0] == "A deploy failed and was undone"
+
+
+def test_the_waits_exit_is_the_guards():
+    text = (ROOT / "scripts" / "service" / "kazma_guard.py").read_text(encoding="utf-8")
+    assert f"RELOAD_WAITS_EXIT = {deploy_live.RELOAD_WAITS_EXIT}\n" in text

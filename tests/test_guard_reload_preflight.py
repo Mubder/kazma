@@ -290,3 +290,57 @@ def test_the_state_file_is_json_the_cli_reads(tmp_path, stops):
     g._take_reload_request()
     raw = json.loads(guard._state_path().read_text(encoding="utf-8"))
     assert set(raw["reload_preflight"]) == {"at", "step", "detail", "windows_check"}
+
+
+# ── the detail is masked before anyone reads it (review L7, AGENTS §26 F) ──
+
+def _secrets() -> tuple[str, str]:
+    """A URL password and a token, built from pieces (no file holds one)."""
+    return "pw" + "Zq81" * 4, "gh" + "p_" + "A1b2" * 9
+
+
+def _plant_failing_app_with_secrets(folder: Path) -> tuple[str, str]:
+    password, token = _secrets()
+    pkg = folder / "psycopg"
+    pkg.mkdir(parents=True, exist_ok=True)
+    words = f"cannot reach postgresql://kazma:{password}@db:5432/kazma with {token}"
+    (pkg / "__init__.py").write_text(f"raise RuntimeError({words!r})\n", encoding="utf-8")
+    return password, token
+
+
+def test_a_secret_in_the_failure_reaches_no_log_state_or_card(tmp_path, stops):
+    password, token = _plant_failing_app_with_secrets(tmp_path)
+    g = _guard_for(tmp_path)
+    guard.request_reload()
+    assert g._take_reload_request() is False
+    record = guard._read_state()["reload_preflight"]
+    assert record["step"] == "psycopg" and record["windows_check"] is False
+    said = [json.dumps(record), json.dumps(g.log.events, default=str), *g.notify.sent,
+            guard._state_path().read_text(encoding="utf-8")]
+    for text in said:
+        assert password[:12] not in text and token[:12] not in text, text
+    assert "RuntimeError" in record["detail"] and "postgresql://" in record["detail"]
+
+
+def test_the_guard_masks_what_the_child_could_not(tmp_path, monkeypatch):
+    _, token = _secrets()
+    raw = {"ok": False, "steps": {}, "step": "kazma_core", "detail": f"ImportError: bad {token}"}
+    monkeypatch.setattr(guard, "_preflight_child", lambda *a, **k: dict(raw))
+    result = guard.run_reload_preflight(sys.executable, tmp_path)
+    assert token[:12] not in result["detail"] and "ImportError: bad" in result["detail"]
+    assert result["windows_check"] is False
+    # The control: what the child said held the token.
+    assert token in raw["detail"]
+
+
+def test_without_the_masker_the_detail_is_withheld_and_windows_still_decides(tmp_path, monkeypatch):
+    _, token = _secrets()
+    monkeypatch.setattr(guard, "_TOKEN_SHAPES_MODULE", None)
+    monkeypatch.setattr(guard, "REPO_ROOT", tmp_path)  # token_shapes.py is not there
+    raw = {"ok": False, "steps": {}, "step": "psycopg", "detail": f"ImportError: {_REFUSAL} {token}"}
+    monkeypatch.setattr(guard, "_preflight_child", lambda *a, **k: dict(raw))
+    result = guard.run_reload_preflight(sys.executable, tmp_path)
+    assert result["detail"] == guard.DETAIL_WITHHELD
+    assert result["windows_check"] is True and guard.preflight_refused_by_windows(result)
+    title, words = guard.preflight_words(result)
+    assert "Windows checked" in words and token[:12] not in words

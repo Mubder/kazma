@@ -241,6 +241,40 @@ def _docker_command(args: list[str], env: dict[str, str] | None = None):
     return docker_command(args, env=env)
 
 
+#: A jail's container name: the prefix, then a fresh id per run.
+JAIL_NAME_PREFIX = "kazma-code-"
+
+
+def _kill_jail(name: str) -> None:
+    """Stop a timed-out jail's container by its name.
+
+    Killing the ``docker run`` client (or the wsl.exe carrying it) does not
+    stop the container: it ran on until its own code ended, and on the
+    wsl.exe route the distro's client stayed attached to it (review L1,
+    2026-11-26). The broker stops its document jobs the same way."""
+    import subprocess
+
+    from kazma_core.security.child_env import tool_child_env
+
+    docker = _docker_command(["kill", name], env=tool_child_env())
+    if docker is None:
+        logger.warning("[code_exec] the timed-out container %s could not be stopped: no way to reach Docker", name)
+        return
+    try:
+        done = subprocess.run(  # nosec B603 - fixed argv through the one docker decision, no shell
+            # docker.env is the secret-free environment above plus the
+            # route's own entries (WSLENV, WSL_UTF8).
+            docker.argv, env=tool_child_env(docker.env), capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=30, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("[code_exec] the timed-out container %s could not be stopped: %s", name, type(exc).__name__)
+        return
+    if done.returncode != 0 and "no such container" not in (done.stderr or "").lower():
+        logger.warning("[code_exec] the timed-out container %s could not be stopped (exit %s)", name, done.returncode)
+
+
 def docker_available() -> bool:
     """True if a Docker engine can be reached (does not pull images)."""
     global _docker_available
@@ -821,8 +855,12 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
             exc_info=True,
         )
 
+    import uuid
+
+    jail = f"{JAIL_NAME_PREFIX}{uuid.uuid4().hex[:12]}"
     run_args = [
         "run", "--rm", "-i",
+        "--name", jail,
         "--network", joined,
         "--memory", f"{MEMORY_LIMIT_MB}m",
         "--memory-swap", f"{MEMORY_LIMIT_MB}m",
@@ -863,6 +901,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(input=script), timeout=timeout + 15)
         except TimeoutError:
+            await asyncio.to_thread(_kill_jail, jail)
             proc.kill()
             await proc.wait()
             return f"[Exit code: 124 — docker timed out after {timeout}s]"
@@ -882,6 +921,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
                 body_str = _format_output(p.returncode or 0, out, err)
                 return f"{label}\n{body_str}"
             except subprocess.TimeoutExpired:
+                _kill_jail(jail)
                 p.kill()
                 p.wait()
                 return f"[Exit code: 124 — docker timed out after {timeout}s]"

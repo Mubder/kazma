@@ -6,6 +6,7 @@ import inspect
 import os
 import sys
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 from kazma_core.tools import code_exec
@@ -366,7 +367,9 @@ async def test_docker_stdin_avoids_private_temp_mount(
         captured.update(args=args, kwargs=kwargs)
         return SyncProcess()
 
+    stopped: list[str] = []
     monkeypatch.setattr(code_exec, "_docker_command", _cli_route)
+    monkeypatch.setattr(code_exec, "_kill_jail", stopped.append)
     monkeypatch.setattr(code_exec._fw, "_get_workspace", lambda: workspace)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_async)
     monkeypatch.setattr(subprocess, "Popen", spawn_sync)
@@ -386,11 +389,17 @@ async def test_docker_stdin_avoids_private_temp_mount(
         assert flag in args
     assert args[args.index("--memory") + 1] == "512m"
     assert args[args.index("--pids-limit") + 1] == "64"
+    name = args[args.index("--name") + 1]
+    assert name.startswith(code_exec.JAIL_NAME_PREFIX)
     if times_out:
         assert "Exit code: 124" in result
         assert captured["killed"] and captured["waited"]
+        # Review L1 (2026-11-26): killing the client left the container
+        # running; it is stopped by its name.
+        assert stopped == [name]
     else:
         assert "sandbox: docker" in result and "Exit code: 0" in result and "مرحبا" in result
+        assert stopped == []  # the control: a run that ends stops nothing
 
 
 class TestCodeExecWindowsPortability:
@@ -467,3 +476,27 @@ class TestCodeExecWindowsPortability:
         await python_exec("print('test')")
         assert len(captured_args) == 1
         assert captured_args[0][0] == sys.executable
+
+
+def test_a_timed_out_jail_is_killed_through_the_one_docker_decision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_kill_jail`` asks ``docker_command`` (the wsl.exe route included) and
+    runs ``docker kill <name>``; a container already gone is no warning."""
+    import subprocess
+
+    ran: list[list[str]] = []
+    envs: list[dict] = []
+
+    def fake_run(argv, **kwargs):
+        ran.append(list(argv))
+        envs.append(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 1, "", "Error response from daemon: No such container: x")
+
+    routed = ["wsl.exe", "-d", "kazma-engine", "-u", "root", "--exec", "docker"]
+    monkeypatch.setenv("KAZMA_VAULT_KEY", "not-for-a-child")
+    monkeypatch.setattr(code_exec, "_docker_command", lambda args, env=None: SimpleNamespace(
+        argv=[*routed, *args], env={**(env or {}), "WSL_UTF8": "1"}, route="wsl"))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    code_exec._kill_jail("kazma-code-abc")
+    assert ran == [[*routed, "kill", "kazma-code-abc"]]
+    # The child's environment is the secret-free one, with the route's entry.
+    assert "KAZMA_VAULT_KEY" not in envs[0] and envs[0]["WSL_UTF8"] == "1"

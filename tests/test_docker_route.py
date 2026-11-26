@@ -190,3 +190,150 @@ def test_control_a_module_with_its_own_lookup_is_found():
     }
     assert sorted({h.split(":")[0] for h in _lookups(planted)}) == ["kazma-core/kazma_core/x.py",
                                                                     "kazma-core/kazma_core/y.py"]
+
+
+# ── a docker exec is recognised by its route, never by argv[0] (review H1) ──
+
+
+def test_a_dump_through_the_wsl_route_connects_inside_the_container():
+    from kazma_core.migration import pg_bridge
+
+    parts = pg_bridge._DsnParts(host="127.0.0.1", port="55433", user="u", password="pw", dbname="d")
+    inside = pg_bridge._docker_adjusted_parts([*PREFIX, "exec", "-i", "kazma-db", "pg_dump"], parts)
+    assert (inside.host, inside.port) == ("localhost", "5432")
+    host = pg_bridge._docker_adjusted_parts([r"C:\Program Files\PostgreSQL\18\bin\pg_dump.exe"], parts)
+    assert (host.host, host.port) == ("127.0.0.1", "55433"), "control: a host pg_dump keeps the DSN's address"
+
+
+def test_the_restore_drill_pipes_the_archive_through_the_wsl_route(tmp_path, monkeypatch):
+    from kazma_core.backup import restore_drill
+
+    dump = tmp_path / "x.dump"
+    dump.write_bytes(b"PGDMP")
+    seen = {}
+
+    def run(cmd, **kw):
+        seen.update(cmd=cmd, stdin=kw.get("stdin"), env=kw.get("env"))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(restore_drill.subprocess, "run", run)
+    prefix = [*PREFIX, "exec", "-i", "-e", "PGPASSWORD", "kazma-db", "pg_restore"]
+    restore_drill._run_pg_restore(prefix, dump, ["--list"], env={"PGPASSWORD": "pw"})
+    assert str(dump) not in seen["cmd"] and seen["stdin"] is not None, "the archive goes over stdin"
+    assert "PGPASSWORD/u" in seen["env"]["WSLENV"]
+    restore_drill._run_pg_restore([r"C:\pg\pg_restore.exe"], dump, ["--list"])
+    assert seen["cmd"][-1] == str(dump), "control: a host pg_restore reads the file"
+
+
+def test_the_rehearsal_pipes_and_carries_through_the_wsl_route():
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location("_route_rehearsal", REPO / "scripts" / "restore_rehearsal.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    text = (REPO / "scripts" / "restore_rehearsal.py").read_text(encoding="utf-8")
+    assert "is_docker_exec(prefix)" in text and text.count("carry_env(cmd, self.env)") == 2
+
+
+def _argv0_checks(sources: dict[str, str]) -> list[str]:
+    """Where code tells a docker call by ``"docker" in <x>[0]`` (also through
+    ``.lower()`` / ``Path(...).name``): wrong on the wsl.exe route."""
+    hits = []
+    for name, text in sources.items():
+        for node in ast.walk(ast.parse(text)):
+            if (isinstance(node, ast.Compare) and isinstance(node.left, ast.Constant)
+                    and isinstance(node.left.value, str) and "docker" in node.left.value
+                    and any(isinstance(op, (ast.In, ast.NotIn)) for op in node.ops)
+                    and any("[0]" in ast.unparse(c) for c in node.comparators)):
+                hits.append(f"{name}:{node.lineno}")
+    return hits
+
+
+def test_no_docker_call_is_told_by_its_first_argument():
+    sources = _product_sources()
+    sources.update({n: (REPO / n).read_text(encoding="utf-8") for n in ("scripts/restore_rehearsal.py",)})
+    assert _argv0_checks(sources) == [], "use docker_cli.is_docker_exec / docker_args_start"
+
+
+def test_control_a_first_argument_check_is_found():
+    planted = {"x.py": 'if prefix and "docker" in prefix[0].lower():\n    pass\n',
+               "y.py": 'ok = "docker" not in Path(out[0]).name.lower()\n'}
+    assert sorted(h.split(":")[0] for h in _argv0_checks(planted)) == ["x.py", "y.py"]
+
+
+# ── the stored choice decides the first call too; no Windows context needed (M1, M4) ──
+
+
+@pytest.fixture
+def fresh_process(tmp_path, monkeypatch):
+    """A process that has made no docker call yet: the CLI's current context
+    is Docker Desktop's, the stored choice is Kazma's engine, its distro is
+    registered."""
+    import json
+
+    from kazma_core import container_engine
+
+    config = tmp_path / "docker"
+    config.mkdir()
+    (config / "config.json").write_text(json.dumps({"currentContext": "desktop-linux"}), encoding="utf-8")
+    monkeypatch.setenv("DOCKER_CONFIG", str(config))
+    for name in ("DOCKER_CONTEXT", "DOCKER_HOST", "KAZMA_DOCKER_BIN", docker_cli.ROUTE_ENV):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(docker_cli, "_choice_applied", False)
+    monkeypatch.setattr(docker_cli, "_engine_choice", "")
+    monkeypatch.setattr(docker_cli, "_applied", None)
+    monkeypatch.setattr(docker_cli, "_on_windows", lambda: True)
+    monkeypatch.setattr(docker_cli, "_wsl_exe", lambda: WSL)
+    monkeypatch.setattr(docker_cli, "wsl_distro_location", lambda name: (Path(r"C:\engine"), "ext4.vhdx"))
+    monkeypatch.setattr(docker_cli, "find_docker_cli", lambda: r"C:\Program Files\Docker\docker.exe")
+    monkeypatch.setattr(container_engine, "apply_engine_setting", lambda: docker_cli.apply_engine_choice("kazma"))
+    return monkeypatch
+
+
+def test_the_first_call_of_a_process_follows_the_stored_choice(fresh_process):
+    fresh_process.setattr(docker_cli, "_context_exists", lambda name: True)
+    assert docker_cli.docker_command(["version"]).route == "wsl"
+
+
+def test_control_without_the_choice_applied_first_the_first_call_took_the_cli(fresh_process):
+    fresh_process.setattr(docker_cli, "_context_exists", lambda name: True)
+    fresh_process.setattr(docker_cli, "_apply_stored_choice_once", lambda: None)
+    assert docker_cli.docker_command(["version"]).route == "cli"
+
+
+def test_kazmas_engine_needs_no_windows_context(fresh_process):
+    """Only the Windows docker.exe creates the kazma-engine context; a PC
+    where Windows refuses it (no Docker Desktop) still reaches the engine."""
+    fresh_process.setattr(docker_cli, "_context_exists", lambda name: False)
+    cmd = docker_cli.docker_command(["run", "-v", r"G:\w:/w", "alpine"])
+    assert cmd.route == "wsl" and docker_cli.engine_in_force() == "kazma"
+    assert docker_cli.engine_host_path(r"G:\w", windows=True) == "/g/w"
+
+
+def test_control_without_the_distro_the_cli_and_its_context(fresh_process):
+    fresh_process.setattr(docker_cli, "_context_exists", lambda name: False)
+    fresh_process.setattr(docker_cli, "wsl_distro_location", lambda name: None)
+    assert docker_cli.docker_command(["version"]).route == "cli"
+    assert docker_cli.engine_in_force() == "desktop"
+
+
+# ── the lows: UTF-8, another engine, only docker's own paths (L2, L5, L6) ──
+
+
+def test_wsl_route_speaks_utf8(kazma_engine):
+    assert docker_cli.docker_command(["version"]).env["WSL_UTF8"] == "1"
+
+
+def test_another_engine_named_is_never_sent_to_kazmas_distro(kazma_engine, monkeypatch):
+    monkeypatch.setenv(docker_cli.ROUTE_ENV, "wsl")
+    assert docker_cli.docker_command(["rm", "-f", "x"], context=docker_cli.DESKTOP_CONTEXT).route == "cli"
+    assert docker_cli.docker_command(["ps"]).route == "wsl", "control: unnamed, wsl is honoured"
+
+
+def test_only_dockers_own_paths_are_translated(kazma_engine):
+    cmd = docker_cli.docker_command(["exec", "c", "python", "-c", r"C:\x"])
+    assert cmd.argv[-1] == r"C:\x", "the container program's own argument is the caller's"
+    build = docker_cli.docker_command(["build", "-f", r"G:\k\Dockerfile", "-t", "kazma:1", r"G:\k"]).argv[7:]
+    assert build == ["build", "-f", "/g/k/Dockerfile", "-t", "kazma:1", "/g/k"]

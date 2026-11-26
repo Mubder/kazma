@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Windows' file check: the review's fixes (2026-11-26)
+
+- Backups of a Postgres that runs in a container on Kazma's engine work on
+  the route through `wsl.exe` again: the dump reached a closed port and the
+  restore check called a good backup corrupt.
+- The route to Kazma's engine is chosen from the engine you picked, even in
+  a program's first docker call and on a PC where Windows' file check refuses
+  the Windows docker tool; `kazma doctor` then says the tool is not needed
+  instead of naming a feature that waits.
+- A deploy that waits because Windows checked a file the new version needs
+  is kept and reported, never undone.
+- A code run that runs out of time stops its container too. A reload's
+  failure detail never shows a password or a token. The company-IT section
+  suggests publisher rules only.
+
 ## Every Windows file Kazma runs, and its route without Kazma's certificate (2026-11-26)
 
 - A new Windows install runs on python.org's Python, which the Python

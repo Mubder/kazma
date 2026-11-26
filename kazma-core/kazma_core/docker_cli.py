@@ -79,6 +79,7 @@ __all__ = [
     "docker_args_start",
     "docker_argv",
     "docker_command",
+    "is_docker_exec",
     "ENGINE_KEY",
     "KAZMA_CONTEXT",
     "KAZMA_DISTRO",
@@ -432,7 +433,7 @@ def engine_in_force() -> str:
     if os.environ.get("DOCKER_HOST"):
         return "other"
     context = _context_in_force()
-    if context == KAZMA_CONTEXT:
+    if context == KAZMA_CONTEXT or _kazma_by_choice():
         return "kazma"
     if context == DESKTOP_CONTEXT:
         return "desktop"
@@ -537,12 +538,33 @@ def _chosen_context(engine: object) -> str | None:
     context = KAZMA_CONTEXT if choice == "kazma" else DESKTOP_CONTEXT
     if _context_exists(context):
         return context
+    if choice == "kazma" and _on_windows() and wsl_distro_location(KAZMA_DISTRO) is not None:
+        return None  # reached through wsl.exe, no Windows context needed (docker_command)
     _say_once(f"no-context:{context}",
               "[docker] the container engine chosen (%s) has no Docker context %r on this "
               "machine; the docker CLI's current context is used. %s", choice, context,
               "Set Kazma's engine up again: kazma setup engine" if choice == "kazma"
               else "Start Docker Desktop once to create it")
     return None
+
+
+#: The engine the stored choice names (``kazma``, ``desktop`` or ""), as
+#: :func:`apply_engine_choice` last saw it.
+_engine_choice = ""
+
+
+def _kazma_by_choice() -> bool:
+    """Kazma's own engine is the stored choice and its distro is registered,
+    with no engine of the operator's own in the way: it is reached through
+    wsl.exe whether or not the Windows CLI's ``kazma-engine`` context exists
+    (only the Windows docker.exe creates that, and Windows may refuse it:
+    review M4, 2026-11-26)."""
+    if _engine_choice != "kazma" or not _on_windows() or os.environ.get("DOCKER_HOST"):
+        return False
+    pinned = (os.environ.get("DOCKER_CONTEXT") or "").strip()
+    if pinned and pinned != KAZMA_CONTEXT:
+        return False
+    return wsl_distro_location(KAZMA_DISTRO) is not None
 
 
 #: The DOCKER_CONTEXT this module set; one the operator set is never changed.
@@ -557,9 +579,10 @@ def apply_engine_choice(engine: object) -> str | None:
     docker call it starts (children inherit it, the document broker's
     included). Returns the context in force (None: the CLI's current one).
     The operator's own ``DOCKER_CONTEXT`` or ``DOCKER_HOST`` is left alone."""
-    global _applied, _choice_applied
+    global _applied, _choice_applied, _engine_choice
     with _apply_lock:
         _choice_applied = True
+        _engine_choice = normalize_engine(engine)
         current = os.environ.get("DOCKER_CONTEXT")
         if os.environ.get("DOCKER_HOST") or (current and current != _applied):
             return current or None
@@ -625,7 +648,8 @@ def engine_host_path(path: str, *, windows: bool | None = None) -> str | None:
     sent ``G:\\...`` to it for a minute). *windows* defaults to this OS."""
     if windows is None:
         windows = os.name == "nt"
-    if not windows or os.environ.get("DOCKER_HOST") or _context_in_force() != KAZMA_CONTEXT:
+    if not windows or os.environ.get("DOCKER_HOST") or not (
+            _context_in_force() == KAZMA_CONTEXT or _kazma_by_choice()):
         return path
     win = PureWindowsPath(path)
     if len(win.drive) != 2 or not win.drive.endswith(":") or not _drive_is_fixed(win.drive):
@@ -713,6 +737,34 @@ def _cross(arg: str, before: str | None) -> str | None:
     return arg
 
 
+def _cross_args(args: Sequence[str]) -> list[str] | None:
+    """*args* with docker's own paths as the distro reads them, or None when
+    one names a place the distro cannot reach (the Windows CLI then).
+
+    Only the values of docker's own path options, a build's context and a
+    cp's host side are translated; the container program's own arguments
+    are left as the caller wrote them (review L6, 2026-11-26)."""
+    path_options = frozenset({"-v", "--volume", "--mount", "--env-file", "-f", "--file", "--iidfile",
+                              "--cidfile", "--label-file", "--project-directory", "--config"})
+    words = [a for a in args if not a.startswith("-")]
+    command = words[0] if words else ""
+    positional_paths = command in ("build", "cp") or (command in ("buildx", "image") and "build" in words[:2])
+    out: list[str] = []
+    before: str | None = None
+    for arg in args:
+        name = arg.split("=", 1)[0] if arg.startswith("--") else ""
+        if (before in path_options or name in path_options
+                or (positional_paths and not arg.startswith("-") and before not in ("-t", "--tag"))):
+            value = _cross(arg, before)
+            if value is None:
+                return None
+            out.append(value)
+        else:
+            out.append(arg)
+        before = arg
+    return out
+
+
 def _passed_by_name(args: Sequence[str]) -> list[str]:
     """Variables a docker call takes from its environment (``-e NAME``,
     ``--env NAME``, ``--env=NAME``: a value never on the command line, §26)."""
@@ -742,6 +794,14 @@ def docker_args_start(argv: Sequence[str]) -> int | None:
                 return i + 3
         return None
     return 1 if "docker" in name else None
+
+
+def is_docker_exec(argv: Sequence[str]) -> bool:
+    """*argv* is a ``docker exec`` by either route (the Windows CLI, or
+    ``wsl.exe ... --exec docker``). Never "``docker`` in argv[0]": on the
+    wsl.exe route argv[0] is ``wsl.exe`` (review H1, 2026-11-26)."""
+    start = docker_args_start(argv)
+    return start is not None and len(argv) > start and str(argv[start]) == "exec"
 
 
 def carry_env(argv: Sequence[str], env: Mapping[str, str] | None,
@@ -786,24 +846,26 @@ def docker_command(args: Sequence[str], *, env: Mapping[str, str] | None = None,
     engine take the Windows CLI (:func:`find_docker_cli`). None when neither
     route exists. Standard library only; nothing is started here."""
     args = [str(a) for a in args]
+    # The stored engine choice first: the first docker call of a process
+    # decides as every later one does (review M1, 2026-11-26).
+    _apply_stored_choice_once()
     mode = (os.environ.get(ROUTE_ENV) or "auto").strip().lower()
     engine_context = context or _context_in_force()
+    kazmas = engine_context == KAZMA_CONTEXT or (context is None and _kazma_by_choice())
     if (_on_windows() and mode != "cli" and not os.environ.get("DOCKER_HOST")
             and not (os.environ.get(_ENV) or "").strip()
-            and (mode == "wsl" or engine_context == KAZMA_CONTEXT)):
+            # An explicit other engine (Docker Desktop's context) is never
+            # sent to Kazma's distro, whatever KAZMA_DOCKER_ROUTE says (L5).
+            and (kazmas or (mode == "wsl" and context in (None, KAZMA_CONTEXT)))):
         wsl = _wsl_exe()
         if wsl and wsl_distro_location(KAZMA_DISTRO) is not None:
-            crossed, before = [], None
-            for arg in args:
-                value = _cross(arg, before)
-                if value is None:
-                    crossed = None
-                    break
-                crossed.append(value)
-                before = arg
+            crossed = _cross_args(args)
             if crossed is not None:
                 argv = [wsl, *_WSL_ARGS, *crossed]
-                return DockerCommand(argv, carry_env(argv, env), "wsl")
+                run_env = carry_env(argv, env)
+                run_env = dict(run_env if run_env is not None else os.environ)
+                run_env["WSL_UTF8"] = "1"  # wsl.exe's own messages in UTF-8, not UTF-16 (L2)
+                return DockerCommand(argv, run_env, "wsl")
     cli = find_docker_cli()
     if not cli:
         return None

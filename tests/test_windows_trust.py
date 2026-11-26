@@ -130,6 +130,7 @@ def engine_cli(tmp_path, monkeypatch):
     own.write_bytes(b"")
     monkeypatch.setattr(docker_cli, "kazma_engine_dir", lambda: tmp_path / "engine")
     monkeypatch.setattr(windows_trust, "_checks_files", lambda: False)
+    monkeypatch.setattr(windows_trust, "_through_wsl", lambda: False)  # the Windows CLI's own cases
     return own
 
 
@@ -490,26 +491,52 @@ def _docstrings(tree: ast.AST) -> set[int]:
     return ids
 
 
+#: Calls that start a program from their first argument (an argv, or the
+#: program itself), and ``which``, which would find a launcher to start.
+_STARTS = frozenset({"run", "Popen", "call", "check_call", "check_output", "create_subprocess_exec",
+                     "execv", "execvp", "execvpe", "spawnv", "spawnvp", "startfile", "which"})
+
+
+def _bare_launcher(node: ast.AST, bare: set[str]) -> bool:
+    """A call that starts a launcher by its bare name: ``run(["kazma",
+    "serve"])``, ``create_subprocess_exec("kazma-web")``,
+    ``which("kazma-tui")`` -- Windows runs ``kazma.exe`` for "kazma" too
+    (review L10, 2026-11-26)."""
+    if not (isinstance(node, ast.Call) and node.args):
+        return False
+    func = node.func
+    if (func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")) not in _STARTS:
+        return False
+    first = node.args[0]
+    if isinstance(first, (ast.List, ast.Tuple)) and first.elts:
+        first = first.elts[0]
+    return isinstance(first, ast.Constant) and isinstance(first.value, str) and first.value.lower() in bare
+
+
 def _launcher_uses(sources: dict[str, str], names: list[str]) -> list[str]:
     """Where Kazma's code or scripts would start a console-script launcher
     (made on the user's PC, never signed) instead of ``python -m``: a string
-    a program runs, or a script line that is not a comment."""
+    a program runs, an argv that starts with a launcher's bare name, or a
+    script line that is not a comment and runs one."""
+    bare = {exe.removesuffix(".exe") for exe in names}
+    runs = re.compile(r"""^\s*(?:&\s*)?['"]?(?:""" + "|".join(sorted(map(re.escape, bare), key=len, reverse=True))
+                      + r""")(?:\.exe)?['"]?(?:\s|$)""")
     hits = []
     for name, text in sources.items():
         if name.endswith(".py"):
             tree = ast.parse(text)
             skip = _docstrings(tree)
             for node in ast.walk(tree):
-                if (isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skip
-                        and any(exe in node.value.lower() for exe in names)):
+                if ((isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skip
+                        and any(exe in node.value.lower() for exe in names)) or _bare_launcher(node, bare)):
                     hits.append(f"{name}:{node.lineno}")
         else:
             for number, line in enumerate(text.splitlines(), 1):
                 code = line.split("#", 1)[0] if name.endswith((".ps1", ".sh")) else line
                 if not line.lstrip().startswith((";", "//", "REM", "rem", "::")) and \
-                        any(exe in code.lower() for exe in names):
+                        (any(exe in code.lower() for exe in names) or runs.match(code)):
                     hits.append(f"{name}:{number}")
-    return hits
+    return sorted(set(hits), key=lambda hit: (hit.rsplit(":", 1)[0], int(hit.rsplit(":", 1)[1])))
 
 
 def test_kazma_never_starts_its_own_launchers():
@@ -528,3 +555,55 @@ def test_control_a_launcher_started_by_name_is_found():
         "setup.ps1": "& (Join-Path $ScriptsDir 'kazma-tui.exe')\n# kazma.exe in a comment is fine\n",
     }
     assert _launcher_uses(planted, names) == ["kazma-cli/kazma_cli/x.py:2", "setup.ps1:1"]
+
+
+def test_control_a_launcher_started_by_its_bare_name_is_found():
+    # Review L10 (2026-11-26): Windows runs kazma.exe for "kazma" too.
+    names = _launcher_names()
+    planted = {
+        "kazma-cli/kazma_cli/y.py": ('import shutil, subprocess\nsubprocess.run(["kazma", "serve"])\n'
+                                     'subprocess.run(("kazma-web",))\nshutil.which("kazma-tui")\n'),
+        "scripts/z.ps1": "kazma serve\n& kazma-tui\nWrite-Host 'run kazma serve'\n# kazma serve\n",
+        "setup.cmd": "kazma update\nrem kazma serve\n",
+    }
+    found = _launcher_uses(planted, names)
+    assert found == ["kazma-cli/kazma_cli/y.py:2", "kazma-cli/kazma_cli/y.py:3", "kazma-cli/kazma_cli/y.py:4",
+                     "scripts/z.ps1:1", "scripts/z.ps1:2", "setup.cmd:1"], found
+    # The word alone, a choice list, a printed hint, prose and a comment are not a launch.
+    assert _launcher_uses({"kazma-cli/kazma_cli/w.py": ('NAME = "kazma"\nprint("kazma serve")\n'
+                                                        'CHOICES = ("kazma", "desktop")\n'),
+                           "scripts/w.ps1": "Write-Host 'kazma serve'\n    Kazma (setup) for Windows\n"},
+                          names) == []
+
+
+# ── the wsl.exe route: Kazma's engine needs no Windows docker tools (review M2) ──
+
+
+def test_a_refused_engine_cli_is_no_wait_when_the_engine_is_reached_through_wsl(engine_cli, monkeypatch):
+    monkeypatch.setattr(windows_trust, "_through_wsl", lambda: True)
+    monkeypatch.setattr(docker_cli, "refused_by_os", lambda p: "WinError 4551: refused")
+    monkeypatch.setattr(docker_cli, "find_docker_cli", lambda: None)
+    state = windows_trust._docker_cli()
+    assert state.status == windows_trust.ALTERNATIVE and state.alternative == windows_trust.WSL_ROUTE
+    report = _report(state)
+    assert windows_trust.notes(report)[-1].endswith("Everything works.")
+
+
+def test_control_without_the_wsl_route_the_same_refusal_waits(engine_cli, monkeypatch):
+    monkeypatch.setattr(windows_trust, "_through_wsl", lambda: False)
+    monkeypatch.setattr(docker_cli, "refused_by_os", lambda p: "WinError 4551: refused")
+    monkeypatch.setattr(docker_cli, "find_docker_cli", lambda: None)
+    assert windows_trust._docker_cli().status == windows_trust.WAITS
+
+
+def test_a_refused_compose_plugin_is_no_wait_through_wsl(tmp_path, monkeypatch):
+    from kazma_core import container_engine_setup
+
+    plugin = tmp_path / "docker-compose.exe"
+    plugin.write_bytes(b"")
+    monkeypatch.setattr(container_engine_setup, "compose_plugin", lambda: plugin)
+    monkeypatch.setattr(docker_cli, "refused_by_os", lambda p: "WinError 4551: refused")
+    monkeypatch.setattr(windows_trust, "_through_wsl", lambda: True)
+    assert windows_trust._compose().status == windows_trust.ALTERNATIVE
+    monkeypatch.setattr(windows_trust, "_through_wsl", lambda: False)
+    assert windows_trust._compose().status == windows_trust.WAITS  # control

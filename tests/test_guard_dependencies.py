@@ -1104,6 +1104,34 @@ def test_kazmas_engine_through_wsl_needs_no_windows_cli(monkeypatch):
     assert seen and all(c[:7] == _WSL_PREFIX for c in seen)
 
 
+def test_a_wsl_call_that_times_out_is_never_read_as_a_refused_cli(monkeypatch):
+    """Review L3 (2026-11-26): a Windows CLI chosen on an earlier tick and
+    refused since, then a wsl.exe ``version`` that times out: the engine does
+    not answer. It was read as a refused CLI (a forced ``deps.docker_cli_waits``
+    card with untrue words, no restart that tick)."""
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    h.deps.cli = "docker-fake"
+    fake = h.docker
+
+    def run(cmd, timeout):
+        cmd = [str(c) for c in cmd]
+        if cmd[:7] == _WSL_PREFIX:
+            fake.calls.append(cmd)
+            return None  # timed out
+        return fake(cmd, timeout)
+
+    monkeypatch.setattr(guard, "_run_command", run)
+    monkeypatch.setattr(guard, "_docker_route_argv", lambda args: [*_WSL_PREFIX, *args])
+    monkeypatch.setattr(guard, "_docker_cli_refusal", lambda cli: _REFUSAL)
+    monkeypatch.setattr(guard, "_refused_docker_clis", lambda: ["docker-fake"])
+    h.run(30)
+    assert "deps.cli_refused" not in h.events()
+    assert h.deps.state != "cli_refused"
+    assert not h.pages_titled("Kazma could not keep a feature working")
+
+
 def test_control_without_the_route_the_windows_cli_is_asked(monkeypatch):
     _engine_contexts(monkeypatch)
     h = _Harness(monkeypatch, containers=None)

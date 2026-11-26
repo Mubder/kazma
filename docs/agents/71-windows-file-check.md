@@ -147,6 +147,33 @@ exceptions; a user cannot be asked to turn a protection off.
   function run in PowerShell: a python.org interpreter chosen, uv's build
   passed over as the control). Every file and its route:
   `docs/plans/WINDOWS_TRUST_INVENTORY.md`.
+- **The review's fixes (2026-11-26)**: a docker call is recognised by
+  `docker_cli.is_docker_exec` (the word after the route's own prefix), never
+  by `"docker"` in argv[0] -- on the wsl.exe route argv[0] is `wsl.exe`, and
+  `pg_bridge`, `restore_drill` and `restore_rehearsal` dumped to a refused
+  port and read a backup as corrupt (H1; gate in `test_docker_route.py`
+  finds argv-0 recognition, a planted one as control; the rehearsal's env
+  goes through `carry_env`). `docker_command` applies the stored engine
+  choice before deciding, and takes the wsl.exe route on the choice plus the
+  distro's registration alone: a fresh PC whose Windows CLI is refused never
+  needs the CLI to make its context (M1, M4). `windows_trust` reports the
+  docker tool and compose as `alternative` (wsl.exe and the engine's own
+  Docker) when that route is taken: no false `windows.feature_waits` (M2).
+  `deploy_live` reads a reload's exit 4 from the guard's state and never
+  reverts code Windows held back (M3, `server-deploy-details.md`). Lows: a
+  timed-out code-exec container has a name and is killed by it (L1);
+  `WSL_UTF8=1` on the route (L2); the guard asks the wsl.exe route first, so
+  a wsl timeout is an engine that does not answer, never a refused CLI (L3);
+  `KAZMA_DOCKER_ROUTE` reaches the broker (L4); an explicit non-Kazma context
+  always takes the CLI (L5); only docker's own path options are translated
+  (`_cross_args`, L6); the preflight's detail is masked by value in the
+  child (URL passwords and tokens) and again in the guard (the token table,
+  loaded by path; withheld when it cannot load), and `windows_check` is
+  decided before the masking (L7); the company-IT section names publisher
+  rules only (L9); the launcher gate also finds a start by bare name
+  (`run(["kazma", ...])`, `which("kazma-tui")`, a script line `kazma serve`;
+  L10). `kazma update` (L8) and `--when-idle`'s window (L11) are in the VM
+  test notes.
 - **User page**: `docs/docs/guide/windows-smart-app-control.md` and its
   Arabic text `windows-smart-app-control-ar.md` (the site's
   `ar/windows-smart-app-control`). The plan it states: signed releases (a
