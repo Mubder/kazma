@@ -171,30 +171,39 @@ CHECKOUTS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-#: Kazma's own work known to reach the database through no door today, by a
-#: function on its way there (the report matches any of a finding's callers)
-#: -> (why, the step of S4-01 that gives it one). Each was seen in report
-#: mode (an app start and stop, the Postgres suites, the maintenance passes,
-#: 2026-11-26) or read by the review ("V"). The report calls every other
-#: finding new. An entry leaves when its step lands; one is added only with
-#: the step that ends it.
-KNOWN_OPEN: dict[str, tuple[str, str]] = {
+#: Kazma's own work known to reach the database through no door today, by
+#: the function it is entered at -> (why, the step of S4-01 that gives it
+#: one, the functions that check the connection out on its way). A finding
+#: is known only when it passes through the entry AND its first caller is
+#: one of those: a new store function reached from inside a known sweep is
+#: new (review L5). Each was seen in report mode (an app start and stop, the
+#: Postgres suites, the maintenance passes, 2026-11-26) or read by the review
+#: ("V"). An entry leaves when its step lands; one is added only with the
+#: step that ends it.
+KNOWN_OPEN: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "kazma-ui/kazma_ui/session_manager.py::SessionManager._load_all_from_primary": (
         "every space's chats, read whole when the chat store starts, nothing bound (section 5: the install's)",
-        "step 3, chats"),
+        "step 3, chats",
+        ("kazma-ui/kazma_ui/session_manager.py::SessionManager._load_all_from_primary",)),
     "kazma-core/kazma_core/swarm/metrics.py::MetricsCollector._flush_metric": (
         "the workers' metrics table has no space column: the install's, outside the policies (L9)",
-        "step 2, the rules"),
+        "step 2, the rules",
+        ("kazma-core/kazma_core/swarm/task_store.py::TaskStore.record_worker_metric",)),
     "kazma-core/kazma_core/memory/backends.py::probe_vector_backend": (
         "the vector store's probe at a start, nothing bound: a probe is the install's (M14)",
-        "step 3, the mirror and pgvector"),
+        "step 3, the mirror and pgvector",
+        ("kazma-core/kazma_core/memory/backends.py::PgvectorBackend.probe",)),
     "kazma-core/kazma_core/memory/worker_bootstrap.py::_reconcile_memory_turns": (
         "memory's turn reconcile reads every space's changed chats with nothing bound (review 19)",
-        "0b, memory's half"),
+        "0b, memory's half",
+        ("kazma-core/kazma_core/memory/chat_history.py::sessions_changed_since",)),
     "kazma-core/kazma_core/memory/worker_bootstrap.py::_recover_erased_memories": (
-        "memory recovery reads every space's checkpoints with nothing bound (review 19, V)",
-        "0b, memory's half"),
+        "memory recovery reads every space's chats and checkpoints with nothing bound (review 19, V)",
+        "0b, memory's half",
+        ("kazma-core/kazma_core/memory/chat_history.py::conversations_for", "kazma-core/kazma_core/memory/chat_history.py::checkpoint_message_versions", "kazma-core/kazma_core/memory/chat_history.py::threads_containing")),
     "kazma-core/kazma_core/memory/worker_bootstrap.py::_sync_memory_mirror": (
         "the mirror's sync compares and pushes every space's rows with nothing bound (review 28, V)",
-        "0b, memory's half"),
+        "0b, memory's half",
+        ("kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.available", "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend._digest", "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.present_ids", "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.row_regions",
+         "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.mirror_belief_snapshot", "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.mirror_belief", "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.mirror_episode_rows", "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.delete_belief")),
 }

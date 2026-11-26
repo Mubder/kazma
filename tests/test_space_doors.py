@@ -428,3 +428,73 @@ def test_pgvector_counts_kazmas_own_database_only(monkeypatch: pytest.MonkeyPatc
     assert len(seen) == (1 if same else 0)
     if same:
         assert seen[0]["door"] == "install"
+
+
+# ── the review's findings (2026-11-26) ───────────────────────────────────
+
+
+def test_two_equal_functions_of_two_modules_keep_their_own_names(pool: Any) -> None:
+    """L1: code objects compare by value -- same name, bytecode and first
+    line in two files are equal -- so a cache keyed by them named one
+    function by the other's name (and hashed each code object whole)."""
+    source = "def read(pool):\n    with pool.connection() as conn:\n        return conn\n"
+    found = []
+    for module in ("kazma_core.planted_a", "kazma_core.planted_b"):
+        space: dict[str, Any] = {"__name__": module}
+        exec(compile(source, f"{module.replace('.', '/')}.py", "exec"), space)  # noqa: S102 - a planted module
+        found.append(space["read"])
+    assert found[0].__code__ == found[1].__code__, "the premise: equal by value"
+    for read in found:
+        _unbound(lambda read=read: read(pool))
+    names = sorted(e["callers"][0] for e in space_doors.entries())
+    assert names == ["kazma-core/kazma_core/planted_a.py::read", "kazma-core/kazma_core/planted_b.py::read"]
+
+
+def test_a_report_with_an_odd_item_is_said_and_started_again(pool: Any, tmp_path: Path,
+                                                             caplog: pytest.LogCaptureFixture) -> None:
+    """L4: valid JSON holding an item flush() did not write stopped every
+    later flush (a sweep WARNING each 15 minutes, nothing kept)."""
+    report = tmp_path / "space_doors.json"
+    report.write_text(json.dumps({"version": 1, "checkouts": 1, "entries": [
+        {"pool": "shared", "door": "none", "how": "nothing", "reason": "", "callers": "not a list",
+         "count": 1, "first": "x", "last": "x"}]}), encoding="utf-8")
+    with pytest.raises(ValueError):
+        space_doors.read_report(report)
+    _checkout(pool)
+    with caplog.at_level(logging.WARNING, logger=LOGGER):
+        space_doors.flush(report)
+    assert any("cannot be read" in r.getMessage() for r in caplog.records if r.name == LOGGER)
+    assert space_doors.read_report(report)["checkouts"] == 1
+
+
+@pytest.mark.parametrize("broken", [ImportError("a module renamed"), LookupError("a name gone"),
+                                    NameError("a name gone")])
+def test_whatever_fails_inside_the_counter_never_reaches_the_checkout(pool: Any, monkeypatch: pytest.MonkeyPatch,
+                                                                     broken: Exception) -> None:
+    """L7: "never raises" rested on a list of seven exception types."""
+    def fails(depth: int) -> tuple[str, ...]:
+        raise broken
+
+    monkeypatch.setattr(space_doors, "_callers", fails)
+    assert _checkout(pool) == "a connection"
+
+
+def test_the_mirror_knows_whose_database_it_is_before_it_says_it_knows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """L6: _ours was set before _kazmas_database, so a second thread between
+    the two read "not Kazma's database" and its checkout went uncounted."""
+    pytest.importorskip("psycopg")
+    from kazma_core.db import availability
+    from kazma_core.memory.state_backend import PostgresStateBackend
+
+    backend = PostgresStateBackend("postgresql://kazma@db.example:5432/kazma")
+    seen: list[object] = []
+
+    def answer(dsn: object, *, or_its_server: bool = False) -> bool:
+        seen.append(backend._ours)  # what another thread would read now
+        return True
+
+    monkeypatch.setattr(availability, "is_kazma_database", answer)
+    monkeypatch.setattr(backend, "_open_connection", lambda: "a connection")
+    assert backend._connect() == "a connection"
+    assert seen == [None, None], "_ours is set last"
+    assert backend._kazmas_database is True and backend._ours is True

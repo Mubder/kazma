@@ -62,13 +62,16 @@ an install with one account behaves as before.
   that the report does not hold yet. The report is `space_doors.json` in the
   data folder, added to by the maintenance runner (`space door report`) and
   at a stop; `scripts/space_doors_report.py` prints it against the lists
-  below. The settings table is the install's (`ConfigStore._pg_access`,
+  below (the file never forgets: `--since` the deploy that fixed a caller).
+  The settings table is the install's (`ConfigStore._pg_access`,
   decision 4). **A new connection or pool is a door that counts, or one of
-  the install's own sign-ins, declared with why** (`MADE`); a helper that
+  the install's own sign-ins, declared with why** (`MADE`; read through the
+  file's own imports, every spelling psycopg allows); a helper that
   only passes a statement on goes in `space_doors.DOOR_FUNCTIONS`, so the
   report names who wanted it; every function that checks a connection out is
   in `CHECKOUTS`; a caller known to go through no door is in `KNOWN_OPEN`,
-  with the step that gives it one, and leaves when that step lands
+  with the step that gives it one and the functions that check out on its
+  way (a new one inside it is new), and leaves when that step lands
   (`tests/_space_door_lists.py`; gate `tests/test_space_doors_gates.py`, both
   ways, planted connections, checkouts and a door that stops counting as
   controls; behaviour `tests/test_space_doors.py`, real pools

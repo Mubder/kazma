@@ -9,10 +9,14 @@
   are before the database's own lock between spaces is ever turned on.
 - The count is kept in `space_doors.json` in Kazma's data folder, added to
   every 15 minutes and when Kazma stops, by part of Kazma and with how many
-  times. `python scripts/space_doors_report.py` prints it. A part found
-  saying nothing is logged once, at INFO.
-- `KAZMA_SPACE_DOOR_REPORT=0` turns the counting off. It costs a few
-  microseconds a statement.
+  times. `python scripts/space_doors_report.py` prints it (`--since` a time
+  leaves out what came before, such as a part fixed since). A part found
+  saying nothing is logged once, at INFO. A report file that is not one is
+  said and started again.
+- `KAZMA_SPACE_DOOR_REPORT=0` turns the counting off. It costs about 5
+  microseconds a statement to Kazma's own stores and about 20 in the chat
+  history's (LangGraph's) calls, measured; a statement takes about a
+  millisecond.
 - The settings are counted as Kazma's own: they stay outside any space's
   lock.
 

@@ -44,7 +44,7 @@ UNKNOWN = "kazma-core/kazma_core/documents/jobs_pg.py::PostgresDocumentJobReposi
 
 def test_a_known_finding_and_a_new_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                        capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr(_space_door_lists, "KNOWN_OPEN", {OPEN: ("the whole table at a start", "step 3")})
+    monkeypatch.setattr(_space_door_lists, "KNOWN_OPEN", {OPEN: ("the whole table at a start", "step 3", (OPEN,))})
     path = _report(tmp_path, _entry("none", [OPEN, "kazma-ui/kazma_ui/app.py::KazmaApp._on_startup"]),
                    _entry("none", [UNKNOWN]),
                    _entry("install", ["kazma-ui/kazma_ui/health.py::check_database"], "statements", "a ping"),
@@ -61,7 +61,7 @@ def test_a_known_finding_and_a_new_one(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_only_known_findings_pass_strict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_space_door_lists, "KNOWN_OPEN", {OPEN: ("the whole table at a start", "step 3")})
+    monkeypatch.setattr(_space_door_lists, "KNOWN_OPEN", {OPEN: ("the whole table at a start", "step 3", (OPEN,))})
     path = _report(tmp_path, _entry("none", [OPEN]))
     assert _script().main(["--file", str(path), "--strict", "--json"]) == 0
 
@@ -79,3 +79,44 @@ def test_no_report_and_an_unreadable_one(tmp_path: Path, capsys: pytest.CaptureF
     bad = tmp_path / "bad.json"
     bad.write_text("[]", encoding="utf-8")
     assert script.main(["--file", str(bad)]) == 1
+
+
+SWEEP = "kazma-core/kazma_core/memory/worker_bootstrap.py::_sync_memory_mirror"
+PUSH = "kazma-core/kazma_core/memory/state_backend.py::PostgresStateBackend.mirror_belief"
+
+
+def test_a_new_caller_inside_a_known_sweep_is_new(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review L5: a finding was known when any of its callers was listed, so a
+    new store function reached from inside a known sweep passed --strict."""
+    monkeypatch.setattr(_space_door_lists, "KNOWN_OPEN", {SWEEP: ("the mirror's sync", "0b", (PUSH,))})
+    path = _report(tmp_path, _entry("none", [PUSH, SWEEP]), _entry("none", [UNKNOWN, SWEEP]))
+    summary = _script().summarise(json.loads(path.read_text(encoding="utf-8")))
+    assert [f["callers"][0] for f in summary["new"]] == [UNKNOWN]
+    assert [f["callers"][0] for f in summary["findings"] if f["known"]] == [PUSH]
+
+
+def test_since_leaves_out_what_a_step_fixed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                            capsys: pytest.CaptureFixture[str]) -> None:
+    """Review L2: the report never forgets; a finding a step fixed stayed and
+    --strict stayed red."""
+    monkeypatch.setattr(_space_door_lists, "KNOWN_OPEN", {})
+    old = dict(_entry("none", [UNKNOWN]), last="2026-11-26T00:30:00+00:00")
+    fresh = _entry("space", ["kazma-ui/kazma_ui/health.py::check_database"], "scope")
+    fresh["last"] = "2026-12-02T09:00:00+00:00"
+    path = _report(tmp_path, old, fresh)
+    script = _script()
+    assert script.main(["--file", str(path), "--strict"]) == 1
+    assert script.main(["--file", str(path), "--strict", "--since", "2026-12-01T10:00"]) == 0
+    assert "Only what was seen since 2026-12-01T10:00:00+00:00" in capsys.readouterr().out
+    assert script.main(["--file", str(path), "--since", "not a time"]) == 1
+
+
+def test_the_checkpointers_own_callers_count_as_seen(tmp_path: Path) -> None:
+    """Review L3: the four checkpointer-pool functions always read as never seen."""
+    listing = "kazma-ui/kazma_ui/hitl_approval.py::_enumerate_thread_ids"
+    path = _report(tmp_path, _entry("install", [listing], "statements", "a listing", pool="checkpoints"),
+                   _entry("space", ["langgraph.checkpoint.postgres.aio::AsyncPostgresSaver.aput"], "scope",
+                          pool="checkpoints"))
+    summary = _script().summarise(json.loads(path.read_text(encoding="utf-8")))
+    assert listing not in summary["not_seen"]
+    assert not [c for c in summary["not_listed"] if c.startswith("langgraph")]

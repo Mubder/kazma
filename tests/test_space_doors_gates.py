@@ -43,11 +43,17 @@ PACKAGES = ("kazma-core", "kazma-ui", "kazma-gateway", "kazma-cli", "kazma-tui",
 _FOLDERS = {"kazma_core": "kazma-core", "kazma_ui": "kazma-ui", "kazma_gateway": "kazma-gateway",
             "kazma_cli": "kazma-cli", "kazma_tui": "kazma-tui", "kazma_skills": "kazma-skills"}
 
-#: What makes a connection or a pool.
+#: What makes a connection: ``<driver>...connect`` (``psycopg.connect``,
+#: ``psycopg.AsyncConnection.connect``, ``psycopg2.connect``), however the file
+#: imported it; and a pool: any ``psycopg_pool`` class ending in ``Pool``.
 _DRIVERS = ("psycopg", "psycopg2")
-_POOL_MAKERS = {"ConnectionPool", "AsyncConnectionPool", "_reported_pool_class"}
+_POOL_MODULE = "psycopg_pool"
+#: Pool classes by their own name, for a file that did not import them.
+_POOL_CLASSES = {"ConnectionPool", "AsyncConnectionPool", "NullConnectionPool", "AsyncNullConnectionPool"}
+#: Kazma's own: answers a pool class (``checkpoints_pg``).
+_OWN_POOL_MAKERS = {"_reported_pool_class"}
 #: A receiver that is a pool (``pool.execute``, ``self._pool.connection``,
-#: ``get_pool().execute``).
+#: ``get_pool().execute``), or a name a pool is kept under in the file.
 _POOLISH = re.compile(r"pool|^_?pg$", re.IGNORECASE)
 _POOL_GETTERS = {"get_pool", "get_postgres_pool", "_pg_pool", "_get_pool"}
 
@@ -85,16 +91,49 @@ def _walk(source: str, rel: str) -> Iterable[tuple[str, ast.Call]]:
     return out
 
 
+def _imports(tree: ast.AST) -> dict[str, str]:
+    """Each name the file's imports bind (a function's own included) -> the
+    dotted name it stands for."""
+    out: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                out[alias.asname or top] = alias.name if alias.asname else top
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                out[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return out
+
+
+def _dotted(node: ast.AST, imports: dict[str, str]) -> str:
+    """``pg.AsyncConnection.connect`` -> ``psycopg.AsyncConnection.connect``
+    after ``import psycopg as pg``; ``""`` for anything but a dotted name."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return ""
+    parts.append(imports.get(node.id, node.id))
+    return ".".join(reversed(parts))
+
+
+def _makes(dotted: str) -> bool:
+    head, last = dotted.partition(".")[0], dotted.rpartition(".")[2]
+    return (head in _DRIVERS and last == "connect") or (head == _POOL_MODULE and last.endswith("Pool"))
+
+
 def made_in(source: str, rel: str) -> set[str]:
-    """Functions that make a connection or a pool of their own."""
+    """Functions that make a connection or a pool of their own, however the
+    file imported what makes it (review M1)."""
+    imports = _imports(ast.parse(source))
     found: set[str] = set()
     for where, call in _walk(source, rel):
         func = call.func
-        if isinstance(func, ast.Attribute) and func.attr == "connect" and _name(func.value) in _DRIVERS:
+        if _makes(_dotted(func, imports)) or _name(func) in _POOL_CLASSES | _OWN_POOL_MAKERS:
             found.add(where)
-        elif _name(func) in _POOL_MAKERS:
-            found.add(where)
-        elif isinstance(func, ast.Call) and _name(func.func) in _POOL_MAKERS:
+        elif isinstance(func, ast.Call) and _name(func.func) in _OWN_POOL_MAKERS:
             found.add(where)
         elif isinstance(func, ast.Attribute) and func.attr == "getconn":
             found.add(where)
@@ -112,10 +151,24 @@ def doors_in(source: str, rel: str) -> dict[str, set[str]]:
     return found
 
 
-def _is_pool(node: ast.AST) -> bool:
+def _is_pool(node: ast.AST, kept: set[str] = frozenset()) -> bool:
     if isinstance(node, ast.Call):
         return _name(node.func) in _POOL_GETTERS
-    return bool(_POOLISH.search(_name(node)))
+    return bool(_POOLISH.search(_name(node))) or _name(node) in kept
+
+
+def _kept_pools(source: str) -> set[str]:
+    """The names (a variable, an attribute) the file keeps a pool under:
+    assigned from a pool getter or a ``PostgresPool`` (``self._db =
+    get_postgres_pool()``, review M1)."""
+    kept: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        value = getattr(node, "value", None)
+        if isinstance(node, ast.Assign | ast.AnnAssign) and isinstance(value, ast.Call) and \
+                _name(value.func) in _POOL_GETTERS | {"PostgresPool"}:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            kept |= {_name(t) for t in targets}
+    return kept - {""}
 
 
 def checkouts_in(source: str, rel: str, doors: set[str] = frozenset(), machinery: set[str] = frozenset()) -> set[str]:
@@ -125,6 +178,7 @@ def checkouts_in(source: str, rel: str, doors: set[str] = frozenset(), machinery
     or a door or pass-through of *doors* called in its own file. The doors
     themselves, and their *machinery*, are not."""
     own = {d.rpartition("::")[2].rpartition(".")[2] for d in doors if d.startswith(f"{rel}::")}
+    kept = _kept_pools(source)
     found: set[str] = set()
     for where, call in _walk(source, rel):
         if where in doors or where in machinery:
@@ -133,7 +187,7 @@ def checkouts_in(source: str, rel: str, doors: set[str] = frozenset(), machinery
         name = _name(func)
         if isinstance(func, ast.Attribute) and name == "connection":
             found.add(where)
-        elif isinstance(func, ast.Attribute) and name in ("execute", "execute_one") and _is_pool(func.value):
+        elif isinstance(func, ast.Attribute) and name in ("execute", "execute_one") and _is_pool(func.value, kept):
             found.add(where)
         elif name in own and (isinstance(func, ast.Name) or _name(getattr(func, "value", None)) == "self"):
             found.add(where)
@@ -234,10 +288,12 @@ def test_every_function_that_checks_a_connection_out_is_declared() -> None:
 
 
 def test_every_caller_known_to_go_through_no_door_says_which_step_gives_it_one() -> None:
-    for where, (why, step) in KNOWN_OPEN.items():
+    declared = _declared_checkouts()
+    for where, (why, step, firsts) in KNOWN_OPEN.items():
         rel, _, function = where.partition("::")
         assert function.split(".") in _defined(_read(rel)), f"{where}: no such function"
         assert len(why.split()) >= 8 and step.startswith(("0b", "step ")), where
+        assert firsts and set(firsts) <= declared, f"{where}: its first callers are functions that check out"
 
 
 def _defined(source: str) -> list[list[str]]:
@@ -273,9 +329,28 @@ def test_a_known_open_entry_for_no_function_is_found() -> None:
     "class S:\n    def open(self):\n        self.pool = ConnectionPool(conninfo='x')\n",
     "async def f():\n    pool = AsyncConnectionPool('x', open=False)\n",
     "def f(p):\n    return p.getconn()\n",
+    # The review's (M1): every spelling psycopg allows.
+    "async def f(dsn):\n    import psycopg\n    return await psycopg.AsyncConnection.connect(dsn)\n",
+    "def f(dsn):\n    import psycopg\n    return psycopg.Connection.connect(dsn)\n",
+    "from psycopg import connect\ndef f(dsn):\n    return connect(dsn)\n",
+    "import psycopg as pg\ndef f(dsn):\n    return pg.connect(dsn)\n",
+    "from psycopg import AsyncConnection as Conn\nasync def f(dsn):\n    return await Conn.connect(dsn)\n",
+    "from psycopg_pool import NullConnectionPool\ndef f(dsn):\n    return NullConnectionPool(dsn)\n",
+    "def f(dsn):\n    from psycopg_pool import AsyncNullConnectionPool\n    return AsyncNullConnectionPool(dsn)\n",
+    "from psycopg_pool import ConnectionPool as Pool\ndef f(dsn):\n    return Pool(dsn)\n",
+    "import psycopg_pool as pools\ndef f(dsn):\n    return pools.ConnectionPool(dsn)\n",
 ])
 def test_a_planted_connection_is_found(source: str) -> None:
-    assert made_in(source, "x.py"), source
+    assert made_in(source, "x.py") == {"x.py::f"} or made_in(source, "x.py") == {"x.py::S.open"}, source
+
+
+@pytest.mark.parametrize("source", [
+    "import sqlite3\ndef f(path):\n    return sqlite3.connect(path)\n",
+    "from psycopg.conninfo import conninfo_to_dict\ndef f(dsn):\n    return conninfo_to_dict(dsn)\n",
+    "from psycopg_pool import ConnectionPool\ndef f(conn):\n    return ConnectionPool.check_connection\n",
+])
+def test_what_makes_no_connection_is_not_found(source: str) -> None:
+    assert made_in(source, "x.py") == set(), source
 
 
 def test_a_door_that_stops_counting_is_found() -> None:
@@ -302,6 +377,14 @@ def test_a_door_naming_an_unknown_pool_is_found() -> None:
 ])
 def test_a_planted_checkout_is_found(source: str, found: bool) -> None:
     assert (checkouts_in(source, "x.py") == {"x.py::f"}) is found
+
+
+def test_a_pool_kept_under_another_name_is_found() -> None:
+    """Review M1: ``self._db.execute`` was missed, the name looks like no pool."""
+    source = ("class S:\n    def __init__(self):\n        self._db = get_postgres_pool()\n"
+              "    def read(self):\n        return self._db.execute_one('x')\n"
+              "def other(store):\n    return store.execute_one('x')\n")
+    assert checkouts_in(source, "x.py") == {"x.py::S.read"}
 
 
 def test_a_pass_through_hides_no_caller() -> None:
