@@ -184,6 +184,7 @@ __all__ = [
     "LocalSqliteVectorBackend",
     "get_backends_cfg",
     "get_vector_backend",
+    "pgvector_table",
     "vector_capability",
     "save_backends_cfg",
     "mask_backends_cfg",
@@ -677,7 +678,7 @@ class PgvectorBackend:
         self._dsn = dsn or ""
         # Auto-selected from the DSN rather than chosen (see vector_auto).
         self._auto = auto
-        self._table = "".join(c for c in (collection or "kazma_memory_vectors") if c.isalnum() or c == "_") or "kazma_memory_vectors"
+        self._table = _pgvector_table_name(collection)
         self._dim = int(dimension or 1024)
         self._timeout = max(0.5, float(timeout_s))
         self._kazmas_database: bool | None = None
@@ -811,6 +812,7 @@ class PgvectorBackend:
                         "pgvector", self._dsn, "not_permitted", "CREATE EXTENSION was refused"
                     )
                     raise
+            # Named: the second lock keys pgvector's rule by its table (S4-01 M9).
             ensure_schema(cur, [
                 f"""
                 CREATE TABLE IF NOT EXISTS {self._table} (
@@ -821,7 +823,7 @@ class PgvectorBackend:
                   meta JSONB DEFAULT '{{}}'::jsonb
                 )
                 """
-            ])
+            ], vector_table=self._table)
             conn.commit()
             try:
                 ensure_schema(cur, [
@@ -1160,6 +1162,23 @@ class HybridVectorBackend:
             # the local store is the source of truth for recall.
             logger.debug("[hybrid] remote delete failed", exc_info=True)
         return bool(a or b)
+
+
+def _pgvector_table_name(collection: str | None) -> str:
+    """The table pgvector's vectors live in: the collection's name, letters,
+    digits and ``_`` only."""
+    default = "kazma_memory_vectors"
+    return "".join(c for c in (collection or default) if c.isalnum() or c == "_") or default
+
+
+def pgvector_table(cfg: dict[str, Any]) -> str | None:
+    """The table memory's vectors are kept in when they are on pgvector, under
+    the name the settings give it, else None. The second lock keys pgvector's
+    rule by it (``db/row_security``, Spaces S4-01 review M9)."""
+    vec = cfg.get("vector") or {}
+    if str(vec.get("provider") or "").lower() != "pgvector" or not str(vec.get("url") or "").strip():
+        return None
+    return _pgvector_table_name(str(vec.get("collection") or "kazma_memory"))
 
 
 def _embedding_dimension(vec: dict[str, Any]) -> int:

@@ -118,6 +118,8 @@ def drill():
             pytest.skip("creating a role needs a superuser DSN")
         if admin.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (ROLE,)).fetchone():
             pytest.skip(f"{ROLE} already exists on this server: not a throwaway one")
+        # The script makes the second lock's role too (Spaces S4-01).
+        had_space_role = bool(admin.execute("SELECT 1 FROM pg_roles WHERE rolname = 'kazma_space'").fetchone())
         name = f"kazma_role_{uuid.uuid4().hex[:10]}"
         admin.execute(f'CREATE DATABASE "{name}"')
     su_dsn = _with(base, db=name)
@@ -137,6 +139,8 @@ def drill():
                     "SELECT datname FROM pg_database WHERE pg_get_userbyid(datdba) = %s", (ROLE,)).fetchall():
                 admin.execute(f'DROP DATABASE IF EXISTS "{scratch}" WITH (FORCE)')
             admin.execute(f"DROP ROLE IF EXISTS {ROLE}")
+            if not had_space_role:
+                admin.execute("DROP ROLE IF EXISTS kazma_space")
 
 
 def _role_check(psycopg, dsn: str) -> str | None:

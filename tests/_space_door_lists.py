@@ -46,6 +46,10 @@ MADE: dict[str, str] = {
         "own sign-in: a migration bundle carries every space's documents, as the owner",
     "kazma-core/kazma_core/migration/pg_bridge.py::_create_kazma_functions":
         "own sign-in: a restore makes Kazma's database functions before its tables",
+    "kazma-core/kazma_core/db/row_security.py::_owner_connect":
+        "own sign-in: the second lock's rules are read and put in place as the tables' owner (S4-01 step 2)",
+    "kazma-core/kazma_core/db/row_security.py::_space_connect":
+        "own sign-in: the proof signs in as the space role to see that the lock holds; it writes nothing",
     "kazma-core/kazma_core/postgres_upgrade.py::server_major":
         "own sign-in: the upgrade asks the server for its version, no row of any table",
     "kazma-core/kazma_core/postgres_upgrade.py::_snapshot":

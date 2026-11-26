@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Spaces: the database's own lock between spaces, its rules in place (2026-11-26)
+
+- Every table Kazma keeps on Postgres now has a rule for Spaces' second lock:
+  a space's table gets a policy that lets a connection in one space see and
+  change that space's rows only, whatever its query says; Kazma's own tables
+  (settings, schema versions) are kept from spaces entirely. Nothing uses the
+  lock yet: Kazma signs in as the tables' owner, as before, and with Spaces
+  off nothing it sends changes.
+- `deploy/postgres/kazma_app_role.sql` (run by `kazma setup postgres`, the
+  upgrade to a new PostgreSQL and the move into the service) also makes the
+  role a space's connection will run as, `kazma_space`: it cannot sign in,
+  owns nothing, and may use a space's table only where its policy is on.
+  `deploy/postgres/kazma_space_role_remove.sql` takes it all out again.
+- `kazma doctor` and `kazma spaces migrate --check` say whether the role is
+  there and every table holds its rule; `python scripts/row_security.py`
+  checks, lists rows whose space is unknown, proves the lock holds, and puts
+  the rules in place by hand.
+- Every restore also makes the function the policies call, with Spaces on or
+  off; dumps, restores, the upgrade's copy and the weekly restore rehearsal
+  work with the rules in place, and name no role.
+
 ## Memory's copies in Postgres keep to their spaces (2026-11-26)
 
 - When Kazma removes a forgotten fact or memory from its Postgres copies, it

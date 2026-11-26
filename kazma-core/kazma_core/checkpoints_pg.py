@@ -12,6 +12,7 @@ for the life of the process.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from collections.abc import AsyncIterator
@@ -102,6 +103,7 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
         saver = AsyncPostgresSaver(conn=pool, serde=kazma_checkpoint_serde())  # type: ignore[arg-type]
         with install_statements("the checkpoint tables, made for every space"):
             await saver.setup()
+        await _rules_after_setup(conninfo)
         ready = True
         availability.note_success("checkpoints", since=began)
     finally:
@@ -113,6 +115,25 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
                 availability.note_failure("checkpoints", failure)
             await pool.close()  # a failed setup must not leave its pool open
     return saver
+
+
+async def _rules_after_setup(conninfo: str) -> None:
+    """The second lock's rules on tables ``setup()`` just made (Spaces S4-01
+    review H3): LangGraph makes them outside :func:`pg_schema.ensure_schema`.
+    Nothing until the rules are in place in this process. A failure is said
+    and the checkpointer still opens: the space role is refused those tables
+    until the next start puts their rules in place."""
+    from kazma_core.db import row_security
+
+    if not row_security.in_place():
+        return
+    import psycopg
+
+    try:
+        await asyncio.to_thread(row_security.after_checkpointer_setup, conninfo)
+    except psycopg.Error as exc:
+        logger.warning("[checkpoints] the checkpoint tables' rules were not put in place (%s); the next start "
+                       "tries again", type(exc).__name__)
 
 
 async def close_postgres_checkpointer(saver: Any) -> bool:

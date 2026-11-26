@@ -138,6 +138,20 @@ transaction and can be run again. Postgres refuses the shorter
 `tests/test_pg_app_role.py` runs Kazma's own setup of every Postgres store,
 a dump and the restore rehearsal as the new role.
 
+The same script makes a second role, `kazma_space`, for Spaces' second lock
+(each space's rows held apart by the database itself, built in steps and
+not armed yet): it cannot sign in, owns nothing and is a member of nothing;
+`kazma_app` holds it without inheriting its rights, and it may use a space's
+table only where Kazma's policy is on that table. Nothing uses it until the
+lock is armed. `kazma doctor` shows whether it is there and whether every
+table holds its rule, and `python scripts/row_security.py check` lists any
+difference. To take the lock out for good, run
+[`deploy/postgres/kazma_space_role_remove.sql`](https://github.com/Mubder/kazma/blob/main/deploy/postgres/kazma_space_role_remove.sql)
+as the superuser: Kazma signs in as the tables' owner, which the policies
+never held back, so nothing it reads or writes changes. Every restore now
+also makes the function the policies call (`kazma_space_id`), with Spaces on
+or off.
+
 1. Run the script as the superuser, in Kazma's database:
 
    ```bash
