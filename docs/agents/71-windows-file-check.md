@@ -135,6 +135,18 @@ exceptions; a user cannot be asked to turn a protection off.
   .iss lines outside comments; a planted start as control). The engine's
   shutdown helper, built by `csc.exe` on the PC, is planned as a signed
   release asset (`docs/plans/WINDOWS_TRUST_PLAN.md`).
+- **A new Windows install runs on a signed interpreter** (2026-11-26):
+  `setup.ps1` `Find-SignedPython` takes a python.org Python 3.12, 3.13,
+  3.14 or 3.11 (>= 3.11.5) whose `python.exe` reads Valid, signed by the
+  Python Software Foundation (the `py` launcher, then the per-user and
+  Program Files folders), installs `Python.Python.3.12` with winget when
+  none is there, and passes it to `uv sync --python` for a new `.venv` only;
+  an environment that is there keeps its interpreter. Measured: python.org
+  3.14 has no unsigned interpreter file outside Tcl/Tk (never loaded); uv's
+  3.12 build 41 of 49. Gate: `tests/test_setup_signed_python.py` (the
+  function run in PowerShell: a python.org interpreter chosen, uv's build
+  passed over as the control). Every file and its route:
+  `docs/plans/WINDOWS_TRUST_INVENTORY.md`.
 - **User page**: `docs/docs/guide/windows-smart-app-control.md` and its
   Arabic text `windows-smart-app-control-ar.md` (the site's
   `ar/windows-smart-app-control`). The plan it states: signed releases (a

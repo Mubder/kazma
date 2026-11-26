@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Every Windows file Kazma runs, and its route without Kazma's certificate (2026-11-26)
+
+- A new Windows install runs on python.org's Python, which the Python
+  Software Foundation signs (3.12 first, installed for you when none is
+  there); the Python builds uv downloads are not signed. An existing install
+  keeps its Python.
+- The installer's SmartScreen notice is said as it is: Windows shows it for
+  installers that aren't signed yet, and signed releases are on the way.
+- `docs/plans/WINDOWS_TRUST_INVENTORY.md` lists every Windows-native file
+  Kazma runs or loads, its signature, and how it keeps working with Smart App
+  Control on; what is left needs Kazma's own certificate, four tools still
+  need a route, and three script rows need the VM test.
+
 ## Kazma reaches its own container engine without a Windows docker program (2026-11-26)
 
 - Every docker call Kazma makes to its own engine now runs the engine's own

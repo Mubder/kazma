@@ -1,6 +1,7 @@
 # Windows' file check: the plan to a Kazma Windows trusts by its signatures
 
-Status 2026-11-26. AGENTS §71; user page `docs/docs/guide/windows-smart-app-control.md`.
+Status 2026-11-26. AGENTS §71; user page `docs/docs/guide/windows-smart-app-control.md`; every file
+and its route: `docs/plans/WINDOWS_TRUST_INVENTORY.md`.
 
 Smart App Control lets a program or library run when a known publisher signed
 it or when Windows' cloud already knows the file well ("reputation"). On the
@@ -29,6 +30,12 @@ plan is signatures, in this order.
   (`windows_policy.REFUSAL_CODES`, prepush loads `docker_cli.py` by path);
   a CLI that started is asked again after 15 minutes; the guard never
   restarts the engine for a CLI Windows refuses.
+
+- Docker through `wsl.exe` for Kazma's own engine: no Windows `docker.exe`
+  needed (`docker_cli.docker_command`).
+- A new Windows install runs on a signed python.org Python (`setup.ps1`
+  `Find-SignedPython`, winget's `Python.Python.3.12` when none): uv's own
+  builds are unsigned.
 
 ## Next
 

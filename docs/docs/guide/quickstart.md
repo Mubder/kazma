@@ -39,8 +39,9 @@ a window that shows each step. When Windows must restart for WSL, setup goes
 on by itself at the next sign-in. The Start menu then has **Kazma** (opens its
 page), **Update Kazma**, **Finish or repair Kazma setup** and the
 documentation. **Settings → Apps** uninstalls it with `kazma uninstall`, which
-keeps your data (`kazma-data`, `.env`). An installer that is not yet signed
-makes Windows show a SmartScreen warning: **More info → Run anyway**. Updating
+keeps your data (`kazma-data`, `.env`). Windows shows a SmartScreen notice for
+installers that aren't signed yet, and signed releases are on the way: choose
+**More info**, then **Run anyway** ([Kazma and Windows Smart App Control](windows-smart-app-control.md)). Updating
 is `kazma update`, from the next release's signed source archive
 ([Kazma Update](../ops/kazma-update.md#release-install)).
 

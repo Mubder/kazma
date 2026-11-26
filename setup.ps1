@@ -409,6 +409,41 @@ if (Test-Path "pyproject.toml" -PathType Leaf) {
     exit 1
 }
 
+# Windows' file check (Smart App Control) judges the interpreter's own files:
+# python.org's Python is signed by the Python Software Foundation, the builds
+# uv downloads are not (measured 2026-11-26: python.org 3.14 has no unsigned
+# interpreter file outside Tcl/Tk, which Kazma never loads; uv's 3.12 build
+# 41 of 49). A new environment is made from a python.org Python, 3.12 first:
+# its wheels are the most widely installed, so Windows knows them best (on
+# 2026-11-26 cp314's psycopg was refused where cp312's loaded).
+# docs/plans/WINDOWS_TRUST_INVENTORY.md
+function Find-SignedPython {
+    $found = [System.Collections.Generic.List[string]]::new()
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        foreach ($version in @("3.12", "3.13", "3.14", "3.11")) {
+            $exe = Invoke-Native -StdoutOnly { py "-$version" -c "import sys; print(sys.executable)" }
+            if ($LASTEXITCODE -eq 0 -and $exe) { $found.Add("$exe".Trim()) }
+        }
+    }
+    foreach ($root in @("$env:LOCALAPPDATA\Programs\Python", "$env:ProgramFiles")) {
+        foreach ($name in @("Python312", "Python313", "Python314", "Python311")) {
+            $found.Add((Join-Path $root "$name\python.exe"))
+        }
+    }
+    foreach ($exe in $found) {
+        if (-not $exe -or -not (Test-Path $exe -PathType Leaf)) { continue }
+        $version = Invoke-Native -StdoutOnly { & $exe -I -c "import sys; print('%d.%d.%d' % sys.version_info[:3])" }
+        if ($LASTEXITCODE -ne 0 -or -not ("$version".Trim() -as [version])) { continue }
+        $v = [version]"$version".Trim()
+        if ($v -lt [version]"3.11.5" -or $v -ge [version]"3.15") { continue }
+        $sig = Get-AuthenticodeSignature -FilePath $exe
+        if ($sig.Status -eq "Valid" -and "$($sig.SignerCertificate.Subject)" -match "Python Software Foundation") {
+            return $exe
+        }
+    }
+    return $null
+}
+
 # ── 2. The Sync Handshake ────────────────────────────────────────────────────
 
 Log-Header "2. Sync Handshake (uv sync)"
@@ -432,6 +467,23 @@ if ($existingPython) {
 }
 $syncArgs = @("--inexact")
 foreach ($x in $extras) { $syncArgs += @("--extra", $x) }
+# A new environment: from a signed python.org Python (Find-SignedPython above),
+# installed for this user with winget when there is none. An environment that
+# is there keeps its interpreter.
+if (-not (Test-Path ".venv")) {
+    $signedPython = Find-SignedPython
+    if (-not $signedPython -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Log-Info "Installing Python 3.12 from python.org (signed by the Python Software Foundation)"
+        $null = Invoke-Native { winget install --exact --silent --disable-interactivity --accept-package-agreements --accept-source-agreements --scope user --id Python.Python.3.12 }
+        $signedPython = Find-SignedPython
+    }
+    if ($signedPython) {
+        $syncArgs += @("--python", $signedPython)
+        Log-Ok "Python: $signedPython (signed by the Python Software Foundation)"
+    } else {
+        Log-Info "No python.org Python here: uv chooses the Python"
+    }
+}
 Log-Info "Installing Kazma's base packages"
 Invoke-Native { uv sync @syncArgs } | ForEach-Object { Write-Verbose $_ }
 if ($LASTEXITCODE -eq 0) {

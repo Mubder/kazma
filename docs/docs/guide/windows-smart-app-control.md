@@ -101,6 +101,10 @@ recognise them.
 **Is something wrong with my PC?** No. A message about Windows' file check
 means Windows checked a file and Kazma adapted.
 
+**Windows shows a notice when I run Kazma's installer.** Windows shows this
+for installers that aren't signed yet, and signed releases are on the way.
+Choose **More info**, then **Run anyway**.
+
 **My company manages the PC with App Control for Business.** Kazma reads it the
 same way and behaves the same way. Your IT team can see each part Kazma uses
 in `kazma doctor`.

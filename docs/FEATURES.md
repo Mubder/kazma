@@ -168,7 +168,7 @@ Every line below describes that setup.
 | Postgres for settings, chats, tasks and checkpoints; SQLite with no setup | Shipped | [Postgres](docs/ops/postgres-and-saas.md) |
 | Admin answer-quality signals without storing answer text in the signal record | Shipped | [Documentation](docs/guide/api-and-extension-points.md) |
 | Prometheus metrics; OpenTelemetry and Langfuse traces | Shipped / Opt-in | `/metrics`, [OpenTelemetry](docs/ops/opentelemetry.md) |
-| A Windows installer: no git and no terminal; it installs a release and runs the same setup, and `kazma update` keeps it current from each release's signed source | Partial — from the release after 0.21.2; Windows shows a SmartScreen warning until the installer is signed | [Quickstart](docs/guide/quickstart.md#windows-installer) |
+| A Windows installer: no git and no terminal; it installs a release and runs the same setup, and `kazma update` keeps it current from each release's signed source | Partial — from the release after 0.21.2; Windows shows a SmartScreen notice for installers that aren't signed yet, and signed releases are on the way | [Quickstart](docs/guide/quickstart.md#windows-installer) |
 | Updates in one command: on a supervised install it waits for the chats to go quiet, stops Kazma, installs and starts it again | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
 | Updates install the package versions Kazma was tested with, and every release is tested as an upgrade from the one before | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
 | Uninstall: takes off what setup put on; your data is kept unless you ask, and then moved aside (Kazma's database backed up first) | Shipped | `kazma uninstall`, [CLI reference](docs/guide/cli-reference.md) |
