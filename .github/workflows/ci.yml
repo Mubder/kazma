@@ -12,6 +12,15 @@ on:
 permissions:
   contents: read
 
+# A pull request's newer commit cancels the run of its older one; a push to
+# main is never cancelled (its group is its own commit). On 2026-11-25 the
+# shards of main's run ended at 12 minutes and its two required checks waited
+# 19 more for a runner, behind ten Dependabot pull requests' runs of 36 jobs
+# each (run 45723281289). tests/test_ci_shards.py holds the rule.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   PYTHON_VERSION: "3.11"
 

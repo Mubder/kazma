@@ -312,3 +312,47 @@ def test_a_path_outside_the_repository_and_the_temp_folders_is_refused(tmp_path,
     assert not outside.exists()
     monkeypatch.setenv("RUNNER_TEMP", str(outside.parent))  # GitHub's own temp folder
     assert ci_shards.contained(outside) == outside.resolve()
+
+
+# ── what may hold the runners the required checks wait for ───────────────
+# Run 45723281289 (2026-11-25): the shards of main's run ended at 12 minutes
+# and `Tests` and `Playwright smoke` started 19 minutes later. A job that needs
+# others is queued only when they end, behind every job queued meanwhile: ten
+# Dependabot pull requests' runs of 36 jobs each, and Coverage's six.
+
+def queue_problems(ci: dict, coverage: dict, dependabot: dict) -> list[str]:
+    problems = []
+    group = str((ci.get("concurrency") or {}).get("group") or "")
+    cancel = str((ci.get("concurrency") or {}).get("cancel-in-progress"))
+    if "github.event.pull_request.number" not in group or "github.sha" not in group:
+        problems.append("CI's runs of one pull request do not share a group, or main's pushes do")
+    if cancel != "${{ github.event_name == 'pull_request' }}":
+        problems.append("CI cancels other than a pull request's older run (never a push to main)")
+    triggers = coverage.get(True) or coverage.get("on") or {}
+    if "push" in triggers or "pull_request" in triggers:
+        problems.append("Coverage runs on a push: its six jobs hold the runners CI's required checks wait for")
+    for update in dependabot["updates"]:
+        if update["package-ecosystem"] != "npm" and not update.get("groups"):
+            problems.append(f"Dependabot opens one pull request per {update['package-ecosystem']} update")
+    return problems
+
+
+def _workflow(name: str) -> dict:
+    return yaml.safe_load((REPO / ".github" / "workflows" / name).read_text(encoding="utf-8"))
+
+
+def test_nothing_queues_ahead_of_the_required_checks_that_need_not():
+    dependabot = yaml.safe_load((REPO / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
+    assert queue_problems(_workflow("ci.yml"), _workflow("coverage.yml"), dependabot) == []
+
+
+def test_control_each_rule_finds_what_it_is_for():
+    dependabot = yaml.safe_load((REPO / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
+    ci, coverage = _workflow("ci.yml"), _workflow("coverage.yml")
+    assert len(queue_problems({**ci, "concurrency": None}, coverage, dependabot)) == 2
+    every_push = {**ci, "concurrency": {**ci["concurrency"], "cancel-in-progress": True}}
+    assert queue_problems(every_push, coverage, dependabot) == [
+        "CI cancels other than a pull request's older run (never a push to main)"]
+    assert queue_problems(ci, {True: {"push": {"branches": ["main"]}}}, dependabot) != []
+    one_each = {"updates": [{**u, "groups": None} for u in dependabot["updates"]]}
+    assert any("github-actions" in p for p in queue_problems(ci, coverage, one_each))
