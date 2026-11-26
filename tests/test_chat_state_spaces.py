@@ -58,9 +58,12 @@ TOOLS = (
 
 
 @pytest.fixture
-def matrix(monkeypatch) -> Matrix:
+def matrix(monkeypatch, request) -> Matrix:
     monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
     with Matrix() as made:
+        # A test marked postgres keeps its checkpoints on the real Postgres;
+        # every other one in its world's SQLite file (``world``).
+        made.database = "postgres" if request.node.get_closest_marker("postgres") else "sqlite"
         yield made
 
 

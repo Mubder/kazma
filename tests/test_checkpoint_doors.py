@@ -212,3 +212,34 @@ def test_no_blocking_libpq_send_runs_on_the_loop() -> None:
     assert _blocking_in_async(_product()) == [], "await conn.execute(..., prepare=False), never pgconn.exec_"
     planted = {"kazma-core/kazma_core/planted.py": "async def begin(conn):\n    conn.pgconn.exec_(b'BEGIN')\n"}
     assert _blocking_in_async(planted) == ["kazma-core/kazma_core/planted.py::begin"]
+
+
+# ── a caller that names its store (Spaces S4-01 step 5) ──────────────────
+
+
+def test_a_caller_that_names_sqlite_gets_its_file_whatever_the_address(monkeypatch: pytest.MonkeyPatch,
+                                                                        tmp_path: Path) -> None:
+    """A test's world named no store and took Postgres whenever the run's
+    address was set (the Postgres job sets it for every test)."""
+    from kazma_gateway.stores import checkpoint as module
+
+    monkeypatch.setattr("kazma_core.db.pg_helpers.use_postgres", lambda: True)
+    opened: list[str] = []
+
+    async def _no_postgres(dsn: str, **_: Any) -> Any:
+        opened.append(dsn)
+        raise ImportError("not in this test")
+
+    monkeypatch.setattr("kazma_core.checkpoints_pg.open_postgres_checkpointer", _no_postgres)
+
+    async def _go(backend: str | None) -> Any:
+        manager = await module.create_checkpoint_manager(str(tmp_path / f"{backend}.db"), backend=backend)
+        await manager.close()
+        return manager
+
+    asyncio.run(_go("sqlite"))
+    assert opened == [], "named sqlite: Postgres is not tried"
+    asyncio.run(_go(None))
+    assert len(opened) == 1, "the control: as set up, Postgres is tried first"
+    with pytest.raises(ValueError):
+        asyncio.run(_go("mysql"))
