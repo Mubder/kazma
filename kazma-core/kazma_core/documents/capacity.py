@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from kazma_core.db.pg_helpers import store_errors
+from kazma_core.db.pg_helpers import is_space_refusal, store_errors
 
 from .config import DocumentConfig
 from .policy import DocumentPolicy, policy_operation
@@ -211,6 +211,8 @@ class DocumentCapacityGuard:
         except CapacityError:
             raise
         except store_errors() as exc:  # noqa: BLE001 - unavailable authority refuses intake
+            if is_space_refusal(exc):
+                raise  # refused, not away: never "retry shortly" (S4-01 H2)
             logger.debug("[documents.capacity] global queue stats failed", exc_info=True)
             raise CapacityError(
                 "capacity_unavailable", "Document queue capacity is unavailable; retry shortly.",
@@ -239,6 +241,8 @@ class DocumentCapacityGuard:
         except CapacityError:
             raise
         except store_errors() as exc:  # noqa: BLE001
+            if is_space_refusal(exc):
+                raise  # refused, not away: never "retry shortly" (S4-01 H2)
             logger.debug("[documents.capacity] tenant load failed", exc_info=True)
             raise CapacityError(
                 "capacity_unavailable", "Document tenant capacity is unavailable; retry shortly.",

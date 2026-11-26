@@ -198,6 +198,15 @@ class PostgresPool:
             raise
         _availability.note_success("pool", since=start)
 
+    def held_connection(self) -> Any:
+        """A checkout of this pool's door, held open until its ``close()``:
+        for the stores that open and close a connection themselves (the
+        memory mirror, pgvector) on Kazma's own database once the second lock
+        is armed, so their statements take the door of their space, the
+        install's, or none (S4-01 step 3). Its rows are tuples while held, as
+        those stores' own connections give them."""
+        return _HeldConnection(self.connection())
+
     def _space_half(self) -> Any:
         """The pool that signs in as the space role (the address's own
         options kept, the role last: ``row_security.space_conninfo``), as
@@ -284,6 +293,41 @@ class PostgresPool:
                 pool.close()
             except (*self._driver_errors, OSError, RuntimeError) as exc:
                 logger.debug("[PostgresPool] close failed: %s", type(exc).__name__)
+
+
+class _HeldConnection:
+    """:meth:`PostgresPool.connection` entered now and left at ``close()``.
+
+    A transaction a failed statement left open is rolled back first; the
+    door's own block then commits whatever is left and gives the connection
+    back. Closed where it was opened (the door's context is this thread's)."""
+
+    def __init__(self, door: Any) -> None:
+        from psycopg.rows import tuple_row
+
+        self._door = door
+        self._conn = door.__enter__()
+        self._rows = self._conn.row_factory
+        self._conn.row_factory = tuple_row
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+    def close(self) -> None:
+        door, self._door = self._door, None
+        if door is None:
+            return
+        import psycopg
+        from psycopg.pq import TransactionStatus
+
+        try:
+            if not self._conn.closed and self._conn.info.transaction_status == TransactionStatus.INERROR:
+                self._conn.rollback()
+        except (psycopg.Error, OSError) as exc:  # the door's block below discards a broken connection
+            logger.debug("[PostgresPool] rollback before giving back a held connection failed: %s",
+                         type(exc).__name__)
+        self._conn.row_factory = self._rows
+        door.__exit__(None, None, None)
 
 
 class PostgresUnreachable(RuntimeError):

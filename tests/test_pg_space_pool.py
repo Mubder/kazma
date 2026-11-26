@@ -68,7 +68,9 @@ def db() -> Iterator[dict[str, str]]:
         app = _with(base, user="kazma_app", password=password, db=name)
         from kazma_core.db import row_security
 
+        was = row_security.in_place()
         done = row_security.apply(app, vector_table="")
+        row_security._mark_in_place(was)  # this module's apply is no process's
         assert done.complete, (done.refused, done.left)
         _sql(app, "DELETE FROM kazma_chat_sessions")
         _sql(app, "INSERT INTO kazma_chat_sessions (tenant_id, session_id) VALUES ('sa', 'c1'), ('sb', 'c2'), "

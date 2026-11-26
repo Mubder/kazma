@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Spaces: the database's own lock between spaces, wired and tried (2026-11-26)
+
+- Kazma's connection to its own Postgres can now hold each space to its own
+  rows: once the second lock is armed, a space's statements run as a role
+  that sees that space's rows only, Kazma's own as before, and a statement
+  that says neither is refused before it is sent. Nothing arms it yet: with
+  Spaces on or off, Kazma works exactly as before.
+- Tried armed: documents (upload, processing, recovery, moving, leaving a
+  space, clean-up), the swarm's tasks, chats and the memory copies each read
+  and write their own space only.
+- A document upload refused by the database says so, instead of "capacity
+  unavailable; retry shortly".
+
 ## Memory search says when the Postgres copy could not be read (2026-11-26)
 
 - Where Postgres holds memory, a memory found by meaning that could then not

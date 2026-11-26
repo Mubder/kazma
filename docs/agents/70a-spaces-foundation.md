@@ -155,8 +155,18 @@ an install with one account behaves as before.
   refusals are `NoSpaceBound`s: no other store answers for them (H2). Not
   armed, the pool takes today's path and opens no space half. The workers'
   metrics table, which has no space, is the install's
-  (`TaskStore.record_worker_metric` and its two readers). Gate:
-  `tests/test_pg_space_pool.py` (real Postgres, each with its control).
+  (`TaskStore.record_worker_metric` and its two readers); so is the chat
+  store's whole read into its one cache (`_load_all_from_primary`):
+  `KNOWN_OPEN` is empty. The memory mirror and pgvector on Kazma's own
+  database take the shared door once armed (`PostgresPool.held_connection`,
+  a checkout held until `close()`, tuple rows); elsewhere they stay outside
+  the lock. Gates: `tests/test_pg_space_pool.py` (the doors, real Postgres,
+  each with its control) and `tests/test_pg_armed_flows.py` (documents,
+  swarm, chats and the mirror armed and enforced, seeded as requests bind:
+  each space reads its own; not armed as the control).
+  `KAZMA_TEST_SECOND_LOCK=armed` runs any Postgres suite armed
+  (`tests/_second_lock_armed.py`); a test there that reaches the database
+  with nothing bound fails, and binding every test is step 5's.
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner

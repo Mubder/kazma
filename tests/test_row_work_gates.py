@@ -98,6 +98,9 @@ INSTALL: dict[str, str] = {
         "the workers' metrics table has no space column: the install's (S4-01 step 2's rule)",
     "kazma-core/kazma_core/swarm/task_store.py::TaskStore.get_all_worker_metrics":
         "the workers' metrics table has no space column: the install's (S4-01 step 2's rule)",
+    "kazma-ui/kazma_ui/session_manager.py::SessionManager._load_all_from_primary":
+        "every space's chats into the one process-wide cache, keyed by space; each is then served to its own "
+        "space (design section 5)",
     "kazma-core/kazma_core/memory/forget.py::converge":
         "every space's pending forgets; each row it removes in its own space",
     "kazma-core/kazma_core/memory/rehydrate.py::run_rehydrate_pass":

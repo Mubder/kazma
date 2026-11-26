@@ -215,6 +215,9 @@ class PostgresStateBackend:
             self._kazmas_database = availability.is_kazma_database(self._dsn)
             self._ours = ours
         ours = self._ours
+        held = _armed_door(self._kazmas_database)
+        if held is not None:
+            return held
         if self._kazmas_database:
             # Kazma's own database: which door it goes through is counted
             # (Spaces S4-01 step 1, report mode; nothing is refused).
@@ -956,6 +959,22 @@ class PostgresStateBackend:
                 conn.close()
         except Exception:
             return 0
+
+
+def _armed_door(kazmas_database: bool | None) -> Any | None:
+    """Once the second lock is armed (S4-01 step 3), a connection to Kazma's
+    own database is a checkout of the shared pool's door: a space's
+    statements as the space role, the install's as the owner, none refused.
+    None while it is not armed, or for a database elsewhere (outside the
+    lock, as memory health says)."""
+    from kazma_core.db import row_security
+
+    if not kazmas_database or not row_security.armed():
+        return None
+    from kazma_core.db.postgres_pool import get_postgres_pool
+
+    pool = get_postgres_pool()
+    return pool.held_connection() if pool is not None else None
 
 
 class _PooledConnection:

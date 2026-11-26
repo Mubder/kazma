@@ -51,7 +51,10 @@ an answer ("User prefers dark mode").
   and the outage is said where it is. Gate: every reader of `degraded` and
   of `mirror_unread` is declared, no writer puts the mirror into `degraded`,
   and every Memory page banner site shows it, each with a planted control
-  (`tests/test_recall_mirror_reads.py`). Gate: `tests/test_memory_rows_in_their_space.py`
+  (`tests/test_recall_mirror_reads.py`). Once the second lock is armed
+  (S4-01 step 3) the mirror's and pgvector's connections to Kazma's own
+  database are checkouts of the shared pool's door
+  (`state_backend._armed_door`): a space's statements run as `kazma_space`. Gate: `tests/test_memory_rows_in_their_space.py`
   (each fails on the code before; a real Postgres keeps another space's fact).
 - **Every tier or text change reaches the mirror.** `remirror_episodes` is the
   one call after a local change (macro_sleep's moves, the working-turn

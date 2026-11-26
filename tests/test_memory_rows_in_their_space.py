@@ -717,3 +717,38 @@ def test_spaces_off_a_mirrored_fact_is_deleted_by_id_on_postgres(real_mirror: An
     assert real_mirror.mirror_belief(_fact(fact, "telegram:42")) is True
     assert real_mirror.delete_belief(fact, tenant_id="default") is True
     assert real_mirror.fetch_beliefs([fact], tenant_id="telegram:42") == []
+
+
+# ── S4-01 step 3: once armed, Kazma's own database through the shared door ──
+
+
+@pytest.mark.parametrize(("armed", "ours", "through_the_door"), [
+    (True, True, True),     # armed, Kazma's own database: the shared pool's door
+    (False, True, False),   # the control: not armed, today's own connection
+    (True, False, False),   # a database elsewhere is outside the lock
+])
+@pytest.mark.parametrize("store", ["mirror", "pgvector"])
+def test_once_armed_kazmas_database_is_reached_through_the_shared_door(
+        monkeypatch: pytest.MonkeyPatch, store: str, armed: bool, ours: bool, through_the_door: bool) -> None:
+    from kazma_core.db import row_security
+    from kazma_core.memory.backends import PgvectorBackend
+    from kazma_core.memory.state_backend import PostgresStateBackend
+
+    held, own = object(), object()
+
+    class _Pool:
+        def held_connection(self) -> Any:
+            return held
+
+    monkeypatch.setattr(row_security, "_armed", armed)
+    monkeypatch.setattr("kazma_core.db.postgres_pool.get_postgres_pool", lambda: _Pool())
+    dsn = f"postgresql://kazma@db.example/{uuid.uuid4().hex}"
+    if store == "mirror":
+        backend: Any = PostgresStateBackend(dsn)
+        backend._ours = backend._kazmas_database = ours
+        monkeypatch.setattr(backend, "_open_connection", lambda: own)
+    else:
+        backend = PgvectorBackend(dsn=dsn)
+        backend._kazmas_database = ours
+        monkeypatch.setattr("psycopg.connect", lambda *a, **k: own)
+    assert (backend._connect() is held) is through_the_door

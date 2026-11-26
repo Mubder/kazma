@@ -88,7 +88,7 @@ CHECKOUTS: dict[str, tuple[str, ...]] = {
         "verify_required_pg_tables",
     ),
     "kazma-core/kazma_core/db/postgres_pool.py": (
-        "PostgresPool._space_checkout", "_ensure_core_schema",
+        "PostgresPool._space_checkout", "PostgresPool.held_connection", "_ensure_core_schema",
     ),
     "kazma-core/kazma_core/documents/admission.py": (
         "IntakeAdmissionStore._transaction",
@@ -190,8 +190,4 @@ CHECKOUTS: dict[str, tuple[str, ...]] = {
 #: ("V"). An entry leaves when its step lands; one is added only with the
 #: step that ends it.
 KNOWN_OPEN: dict[str, tuple[str, str, tuple[str, ...]]] = {
-    "kazma-ui/kazma_ui/session_manager.py::SessionManager._load_all_from_primary": (
-        "every space's chats, read whole when the chat store starts, nothing bound (section 5: the install's)",
-        "step 3, chats",
-        ("kazma-ui/kazma_ui/session_manager.py::SessionManager._load_all_from_primary",)),
 }

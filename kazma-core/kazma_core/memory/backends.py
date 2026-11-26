@@ -710,6 +710,11 @@ class PgvectorBackend:
             from kazma_core.db.availability import is_kazma_database
 
             self._kazmas_database = is_kazma_database(self._dsn)
+        from kazma_core.memory.state_backend import _armed_door
+
+        held = _armed_door(self._kazmas_database)
+        if held is not None:
+            return held
         if self._kazmas_database:
             # Kazma's own database: which door it goes through is counted
             # (Spaces S4-01 step 1, report mode; nothing is refused).
