@@ -24,6 +24,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
+import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,20 @@ _added: Path | None = None
 
 def _on_windows() -> bool:
     return os.name == "nt"
+
+
+def _in_workflow_sandbox() -> bool:
+    """True inside Temporal's workflow sandbox, which imports ``kazma_core`` again.
+
+    The sandbox refuses file access at import ("Cannot access
+    pathlib.Path.glob.__call__ from inside a workflow"), and a workflow
+    never opens a database connection: the check is not for it. Read
+    without importing Temporal (2026-11-26: every durable swarm worker on
+    Windows failed to start because this module looked for files there)."""
+    workflow = sys.modules.get("temporalio.workflow")
+    unsafe = getattr(workflow, "unsafe", None)
+    in_sandbox = getattr(unsafe, "in_sandbox", None)
+    return bool(in_sandbox()) if callable(in_sandbox) else False
 
 
 def _bundled() -> list[Path]:
@@ -62,7 +77,8 @@ def _refused(path: Path) -> bool:
 
 def _postgres_bins() -> list[Path]:
     """Installed PostgreSQL ``bin`` folders that hold ``libpq.dll``, the newest major first."""
-    roots = {os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432")} | {r"C:\Program Files"}
+    # Windows sets these; the literal is for a process started without them.
+    roots = {os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432")} - {None, ""} or {r"C:\Program Files"}
     found = {lib.parent for root in roots if root for lib in Path(root, "PostgreSQL").glob("*/bin/libpq.dll")}
 
     def major(folder: Path) -> int:
@@ -78,7 +94,7 @@ def reach_libpq() -> Path | None:
     Returns the folder added, or None when nothing was needed or nothing
     could be done (said at WARNING then)."""
     global _added
-    if not _on_windows() or _added is not None:
+    if not _on_windows() or _added is not None or _in_workflow_sandbox():
         return _added
     try:
         bundled = _bundled()

@@ -41,6 +41,11 @@
   psycopg the signed `libpq.dll` of the installed PostgreSQL instead, and
   says so once in the log. Where the bundled library is allowed, nothing
   changes.
+- **The durable swarm starts on Windows again**: Temporal imports Kazma's core
+  once more inside its workflow sandbox, which refuses file access, and the
+  library check above looked for files there, so no Temporal worker could
+  start on Windows. The check now stays out of the sandbox, where no
+  database is opened.
 
 ## A docker program Windows refuses is passed over (2026-11-26)
 

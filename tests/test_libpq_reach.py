@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import logging
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -123,3 +124,32 @@ def test_control_a_top_level_psycopg_import_is_seen():
     assert _imports_psycopg_at_top("import psycopg\n")
     assert _imports_psycopg_at_top("from psycopg_pool import ConnectionPool\n")
     assert not _imports_psycopg_at_top("def f():\n    import psycopg\n")
+
+
+# ── Temporal's workflow sandbox imports kazma_core again (2026-11-26) ─────
+
+
+def _sandbox(monkeypatch, inside: bool) -> None:
+    import types
+
+    unsafe = types.SimpleNamespace(in_sandbox=lambda: inside)
+    monkeypatch.setitem(sys.modules, "temporalio.workflow", types.SimpleNamespace(unsafe=unsafe))
+
+
+def test_inside_temporals_workflow_sandbox_nothing_is_probed(monkeypatch):
+    """Every durable swarm worker on Windows failed to start: the sandbox refuses file access at import."""
+    monkeypatch.setattr(libpq_reach, "_on_windows", lambda: True)
+    monkeypatch.setattr(libpq_reach, "_added", None)
+    _sandbox(monkeypatch, True)
+
+    def no_probe():
+        raise AssertionError("probed inside the workflow sandbox")
+
+    monkeypatch.setattr(libpq_reach, "_bundled", no_probe)
+    assert libpq_reach.reach_libpq() is None
+
+
+def test_control_outside_the_sandbox_the_check_runs(windows, monkeypatch):
+    _sandbox(monkeypatch, False)
+    monkeypatch.setattr(libpq_reach, "_refused", lambda path: True)
+    assert libpq_reach.reach_libpq() == windows[1]
