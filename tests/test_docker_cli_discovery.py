@@ -154,10 +154,13 @@ def test_the_installed_postgres_tools_come_before_any_container(fake_docker, mon
     assert pg_bridge.resolve_pg_dump()[-2:] == ["kazma-db-win", "pg_dump"]
 
 
-def test_the_python_exec_jail_uses_the_same_lookup(fake_docker):
+def test_the_python_exec_jail_uses_the_same_lookup(fake_docker, monkeypatch):
+    """The jail's docker call is built by the one route (docker_command); on
+    the Windows CLI route it is this lookup's CLI."""
     from kazma_core.tools import code_exec
 
-    assert code_exec._docker_cli() == str(fake_docker)
+    monkeypatch.setenv(docker_cli.ROUTE_ENV, "cli")
+    assert code_exec._docker_command(["ps"]).argv == [str(fake_docker), "ps"]
 
 
 # ── the alert says why ────────────────────────────────────────────────────
@@ -280,7 +283,11 @@ def test_the_document_broker_uses_the_one_lookup_without_importing_kazma(tmp_pat
     cli = tmp_path / "docker.exe"
     cli.write_text("", encoding="utf-8")
     monkeypatch.setenv("KAZMA_DOCKER_BIN", str(cli))
-    assert worker_broker._find_docker_cli() == docker_cli.find_docker_cli() == str(cli)
+    # In a checkout: Kazma's one route (docker_command), here the CLI named.
+    assert worker_broker._find_docker_cli() == worker_broker._ROUTE
+    assert worker_broker._docker_argv(worker_broker._ROUTE, ["ps"]) == [docker_cli.find_docker_cli(), "ps"]
+    assert docker_cli.find_docker_cli() == str(cli)
+    monkeypatch.setattr(worker_broker, "_DOCKER_MODULE", None)
     alone = tmp_path / "opt" / "kazma-broker" / "worker_broker.py"
     monkeypatch.setattr(worker_broker, "__file__", str(alone))
     assert worker_broker._find_docker_cli() == str(cli)

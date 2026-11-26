@@ -660,18 +660,18 @@ try:
     docker_cli = importlib.util.module_from_spec(loader)
     sys.modules[loader.name] = docker_cli
     loader.loader.exec_module(docker_cli)
-    cli = docker_cli.find_docker_cli()
+    cmd = docker_cli.docker_command(["--version"])
 except BaseException as exc:
     finish("docker", exc)
-if cli:
+if cmd is not None:
     try:
-        subprocess.run([cli, "--version"], capture_output=True, timeout=15, check=False,
+        subprocess.run(cmd.argv, capture_output=True, timeout=15, check=False, env=cmd.env,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:
         pass
     except OSError as exc:
         finish("docker", exc)
-out["steps"]["docker"] = "started" if cli else "none found"
+out["steps"]["docker"] = f"started ({cmd.route})" if cmd is not None else "none found"
 finish()
 """
 _RELOAD_PREFLIGHT_MARK = "KAZMA_RELOAD_PREFLIGHT "
@@ -3406,6 +3406,17 @@ def _docker_cli_refusal(cli: str) -> str | None:
         return None
 
 
+def _docker_route_argv(args: list[str]) -> list[str] | None:
+    """``docker <args>`` through wsl.exe when Kazma's own engine is in force
+    (``docker_cli.docker_command``: no Windows docker.exe is needed for it);
+    None when the call takes the Windows CLI instead."""
+    try:
+        cmd = _docker_cli_module().docker_command(args)
+    except (OSError, ImportError, SyntaxError, AttributeError):
+        return None
+    return cmd.argv if cmd is not None and cmd.route == "wsl" else None
+
+
 def _refused_docker_clis() -> list[str]:
     """The docker CLIs here that Windows does not allow to start."""
     try:
@@ -3727,6 +3738,18 @@ class Dependencies:
         if not self.containers and not (broker is not None and broker.wanted):
             self._set("idle", "Kazma uses no container and no document broker")
             return
+        if self.cli is None and _docker_route_argv(["version"]) is not None:
+            # Kazma's own engine is reached through wsl.exe: no Windows CLI to
+            # find, and none Windows could refuse.
+            if self._engine_answers():
+                self._engine_is_up(now)
+                if self.containers:
+                    self._check_containers(now)
+            else:
+                self._next_check = now + DEPS_CHECK_DOWN_S
+                self._engine_is_down(now)
+            self._write()
+            return
         if self.cli is None:
             self.cli = _docker_cli()
         if self.cli is None:
@@ -3764,10 +3787,16 @@ class Dependencies:
             self._engine_is_down(now)
         self._write()
 
+    def _docker(self, *args: str) -> list[str]:
+        """``docker <args>``: through wsl.exe for Kazma's own engine (the
+        distro's docker, outside Windows' file check), else the CLI chosen."""
+        routed = _docker_route_argv(list(args))
+        return routed if routed is not None else [self.cli or "docker", *args]
+
     def _engine_answers(self) -> bool | None:
         """True when the engine answers, False when it does not, None when
         the docker CLI itself could not be started."""
-        got = _run_command([self.cli or "docker", "version", "--format", "{{.Server.Version}}"], 15)
+        got = _run_command(self._docker("version", "--format", "{{.Server.Version}}"), 15)
         if got is None:
             return None
         return bool(got[0] == 0 and got[1].strip())
@@ -4000,8 +4029,8 @@ class Dependencies:
 
     def _container_states(self) -> dict[str, str]:
         """{name: status} for the recorded containers Docker knows."""
-        got = _run_command([self.cli or "docker", "inspect", "--format",
-                            "{{.Name}}|{{.State.Status}}", *self.containers], 15)
+        got = _run_command(self._docker("inspect", "--format",
+                                        "{{.Name}}|{{.State.Status}}", *self.containers), 15)
         states: dict[str, str] = {}
         if got is None:
             return states
@@ -4044,7 +4073,7 @@ class Dependencies:
             self._start_container(name, now)
 
     def _start_container(self, name: str, now: float) -> None:
-        got = _run_command([self.cli or "docker", "start", name], 60)
+        got = _run_command(self._docker("start", name), 60)
         if got is not None and got[0] == 0:
             self.log("warn", "deps.container_started", container=name)
             self._exited_seen.pop(name, None)

@@ -149,19 +149,28 @@ class Docker:
     CLI in the tests. Every call names its engine; the process's own
     ``DOCKER_CONTEXT`` (Kazma's pinned choice) never decides."""
 
-    def __init__(self, prefix: list[str], *, env: dict[str, str] | None = None) -> None:
-        self.prefix = list(prefix)
+    def __init__(self, prefix: list[str] | None, *, env: dict[str, str] | None = None) -> None:
+        #: A docker CLI's argv prefix (the tests'), or None: Kazma's one route
+        #: per call (``docker_cli.docker_command``: its engine through
+        #: wsl.exe, Docker Desktop through the Windows CLI).
+        self.prefix = list(prefix) if prefix is not None else None
         self.env = env if env is not None else _child_env()
 
     @classmethod
     def found(cls) -> Docker | None:
-        from kazma_core.docker_cli import find_docker_cli
+        from kazma_core.docker_cli import DESKTOP_CONTEXT, KAZMA_CONTEXT, docker_command
 
-        cli = find_docker_cli()
-        return cls([cli]) if cli else None
+        reachable = any(docker_command(["version"], context=c) is not None for c in (KAZMA_CONTEXT, DESKTOP_CONTEXT))
+        return cls(None) if reachable else None
 
     def argv(self, context: str, args: Iterable[str]) -> list[str]:
-        return [*self.prefix, "--context", context, *[str(a) for a in args]]
+        args = [str(a) for a in args]
+        if self.prefix is not None:
+            return [*self.prefix, "--context", context, *args]
+        from kazma_core.docker_cli import docker_command
+
+        cmd = docker_command(args, context=context)
+        return cmd.argv if cmd is not None else ["docker", "--context", context, *args]
 
     def call(self, context: str, *args: str, input: bytes | None = None, timeout: float = 120.0) -> _Answer:
         try:

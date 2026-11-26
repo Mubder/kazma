@@ -229,21 +229,24 @@ def sandbox_refusal(code: str, *, network: bool | None = None) -> str | None:
 _docker_available: bool | None = None
 
 
-def _docker_cli() -> str | None:
-    # PATH, KAZMA_DOCKER_BIN, then Docker's install folders: a Docker Desktop
-    # update that drops the CLI from PATH must not silently move the jail's
-    # code onto the host (auto mode) or refuse it (forced mode).
-    from kazma_core.docker_cli import find_docker_cli
+def _docker_command(args: list[str], env: dict[str, str] | None = None):
+    """How to run ``docker <args>`` (``docker_cli.docker_command``, the one
+    decision: Kazma's own engine through wsl.exe, another through the docker
+    CLI found on PATH, KAZMA_DOCKER_BIN or Docker's install folders -- a
+    Docker Desktop update that dropped the CLI from PATH must not move the
+    jail's code onto the host (auto mode) or refuse it (forced mode)). None
+    when there is no way to reach a Docker engine."""
+    from kazma_core.docker_cli import docker_command
 
-    return find_docker_cli()
+    return docker_command(args, env=env)
 
 
 def docker_available() -> bool:
-    """True if the docker CLI can be found (does not pull images)."""
+    """True if a Docker engine can be reached (does not pull images)."""
     global _docker_available
     if _docker_available is not None:
         return _docker_available
-    _docker_available = _docker_cli() is not None
+    _docker_available = _docker_command(["version"]) is not None
     return _docker_available
 
 
@@ -772,8 +775,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
     """
     # Off the loop: the first lookup of a process applies the engine choice
     # (a settings read).
-    docker = await asyncio.to_thread(_docker_cli)
-    if not docker:
+    if await asyncio.to_thread(_docker_command, ["version"]) is None:
         raise RuntimeError("docker CLI not found")
 
     image = (os.environ.get("KAZMA_CODE_EXEC_IMAGE") or DEFAULT_DOCKER_IMAGE).strip()
@@ -819,8 +821,8 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
             exc_info=True,
         )
 
-    cmd = [
-        docker, "run", "--rm", "-i",
+    run_args = [
+        "run", "--rm", "-i",
         "--network", joined,
         "--memory", f"{MEMORY_LIMIT_MB}m",
         "--memory-swap", f"{MEMORY_LIMIT_MB}m",
@@ -843,12 +845,17 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
         image,
         "python", "-I", "-",
     ]
+    docker = await asyncio.to_thread(_docker_command, run_args)
+    if docker is None:
+        raise RuntimeError("docker CLI not found")
+    cmd = docker.argv
 
     logger.info("[code_exec] Docker jail: image=%s timeout=%s network=%s", image, timeout, joined)
     label = f"[sandbox: docker network={joined} image={image}]"
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            env=docker.env,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -868,7 +875,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int, *, netwo
 
         def _run_docker_sync() -> str:
             p = subprocess.Popen(
-                cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                cmd, env=docker.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
             try:
                 out, err = p.communicate(input=script, timeout=timeout + 15)

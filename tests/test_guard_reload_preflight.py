@@ -115,7 +115,7 @@ def test_the_check_passes_for_code_that_starts_here(tmp_path):
     assert result["ok"] is True, result
     assert result["steps"]["kazma_core"] == "ok" and result["steps"]["app"] == "ok"
     assert result["steps"]["psycopg"] in {"c", "binary", "python", "not installed"}
-    assert result["steps"]["docker"] in {"started", "none found"}
+    assert result["steps"]["docker"] in {"started (wsl)", "started (cli)", "none found"}
 
 
 def test_the_check_fails_where_windows_refuses_a_library_the_new_code_loads(tmp_path):

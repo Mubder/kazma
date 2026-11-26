@@ -262,6 +262,19 @@ class Machine:
     file_check: Callable[[], object] | None = None
 
 
+def _docker_argv(machine: Machine, args: list[str]) -> list[str] | None:
+    """``docker <args>``: by the machine's own docker finder when it has one
+    (the tests), else by Kazma's one route (``docker_cli.docker_argv``:
+    Kazma's engine through wsl.exe, else the docker CLI). None: no Docker."""
+    finder = machine.finders.get("docker")
+    if finder is not None:
+        docker = finder()
+        return [docker, *args] if docker else None
+    from kazma_core.docker_cli import docker_argv
+
+    return docker_argv(args)
+
+
 def _say_file_check(platform, machine: Machine, say) -> None:
     """Windows' file check, as notes (``kazma_core.windows_trust``): Smart
     App Control checking files, and each native part Windows did not allow
@@ -457,7 +470,6 @@ def _postgres_state(platform, machine: Machine) -> tuple[bool | None, str]:
 
 
 def _container_state(machine: Machine, root: Path | None) -> tuple[bool | None, str]:
-    from kazma_core.docker_cli import find_docker_cli
     from kazma_core.safety.deployment_policy import DOCUMENT_WORKER_ISOLATION_KEY
 
     if root is None or not (root / "deploy" / "document-worker").is_dir():
@@ -468,14 +480,14 @@ def _container_state(machine: Machine, root: Path | None) -> tuple[bool | None, 
         profile = str(get_config_store().get(DOCUMENT_WORKER_ISOLATION_KEY) or "")
     except (RuntimeError, OSError) as exc:  # the settings store may be away: cannot tell
         return None, f"the settings cannot be read ({type(exc).__name__})"
-    docker = machine.finders.get("docker", find_docker_cli)()
-    if not docker:
-        return False, "Docker is not installed"
     from kazma_core.documents.worker_image import expected_tag
 
     tag = expected_tag(root)
+    argv = _docker_argv(machine, ["image", "inspect", tag])
+    if argv is None:
+        return False, "Docker is not installed"
     try:
-        done = machine.run([docker, "image", "inspect", tag], stdin=subprocess.DEVNULL, capture_output=True,
+        done = machine.run(argv, stdin=subprocess.DEVNULL, capture_output=True,
                            text=True, timeout=60, check=False)
         image = done.returncode == 0
     except (OSError, subprocess.SubprocessError):
@@ -901,12 +913,10 @@ def _run_planned(item: PlannedStep, machine: Machine, env_path: Path, log) -> tu
     if step.action.startswith("service_"):
         return _run_service_step(step.action, machine, env_path, log)
     if step.argv and step.argv[0] == "docker":
-        from kazma_core.docker_cli import find_docker_cli
-
-        docker = machine.finders.get("docker", find_docker_cli)()
-        if not docker:
+        argv = _docker_argv(machine, list(step.argv[1:]))
+        if argv is None:
             return False, "Docker is not installed"
-        step = type(step)(step.title, (docker, *step.argv[1:]), admin=step.admin)
+        step = type(step)(step.title, tuple(argv), admin=step.admin)
     if step.action or step.dep:
         return run_system_step(step, which=machine.which, run=machine.run, log=log,
                                house_font=machine.finders.get("house_font"))

@@ -74,7 +74,9 @@ SERVICE (a tunnel) reach its published ports, and it is back 19 s after a
   blocked this file", WinError 4551; it was chosen because the file was
   there, every docker call failed, the guard restarted an engine that
   answered and code execution waited). A CLI Windows refuses by policy
-  (`windows_policy.REFUSAL_CODES`, §71) is passed over for the next, said
+  (`windows_policy.REFUSAL_CODES`, §71; Kazma's own engine needs no Windows CLI
+  at all since 2026-11-26: `docker_cli.docker_command` runs the distro's docker
+  through `wsl.exe`) is passed over for the next, said
   once at INFO and tried again every 5 minutes (one that started, after 15);
   while Smart App Control is on, Docker Desktop's signed CLI comes first; a
   file that is no program is not a refusal (gate:

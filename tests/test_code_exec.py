@@ -12,6 +12,13 @@ from kazma_core.tools import code_exec
 from kazma_core.tools.code_exec import python_exec, use_docker_jail, reset_docker_probe
 
 
+
+def _cli_route(args, env=None):
+    """The jail's docker call on the Windows CLI route (docker_cli.docker_command)."""
+    from kazma_core.docker_cli import DockerCommand
+
+    return DockerCommand(["docker", *args], None, "cli")
+
 @pytest.fixture(autouse=True)
 def _force_local_sandbox(monkeypatch: pytest.MonkeyPatch):
     """Unit tests use local sandbox so CI does not require Docker."""
@@ -284,7 +291,7 @@ class TestDockerJailConfig:
         monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "1")
         monkeypatch.setenv("KAZMA_CODE_EXEC_IMAGE", "python:3.12-slim")
         reset_docker_probe()
-        monkeypatch.setattr(code_exec, "_docker_cli", lambda: "docker")
+        monkeypatch.setattr(code_exec, "_docker_command", _cli_route)
         monkeypatch.setattr(code_exec.asyncio, "create_subprocess_exec", _fake_exec)
 
         result = await python_exec("print('hi')")
@@ -359,7 +366,7 @@ async def test_docker_stdin_avoids_private_temp_mount(
         captured.update(args=args, kwargs=kwargs)
         return SyncProcess()
 
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "docker")
+    monkeypatch.setattr(code_exec, "_docker_command", _cli_route)
     monkeypatch.setattr(code_exec._fw, "_get_workspace", lambda: workspace)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_async)
     monkeypatch.setattr(subprocess, "Popen", spawn_sync)

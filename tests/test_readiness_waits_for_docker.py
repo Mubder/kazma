@@ -31,6 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from kazma_core.docker_cli import DockerCommand  # the jail's docker call, by the one route
 from kazma_ui import health
 
 _GUARD = Path(__file__).resolve().parents[1] / "scripts" / "service" / "kazma_guard.py"
@@ -54,7 +55,7 @@ def docker(monkeypatch):
     monkeypatch.setattr(deployment_policy, "container_required", lambda: True)
     monkeypatch.setattr(e2b, "e2b_available", lambda: False)
     monkeypatch.setattr(code_exec, "local_exec_forbidden", lambda: True)
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "fixture-docker")
+    monkeypatch.setattr(code_exec, "_docker_command", lambda args, env=None: DockerCommand(["fixture-docker", *args], env, "cli"))
     monkeypatch.setattr(code_exec, "use_docker_jail", lambda: True)
     monkeypatch.setattr(health, "_docker_answered_at", None)
     monkeypatch.setattr(health, "_docker_down_said", False)
@@ -96,7 +97,7 @@ def test_each_way_docker_is_away_waits_for_it(docker, answer):
 def test_no_docker_cli_waits_for_docker_too(docker, monkeypatch):
     from kazma_core.tools import code_exec
 
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: None)
+    monkeypatch.setattr(code_exec, "_docker_command", lambda args, env=None: None)
     assert health._check_code_execution()["waits_for"] == "docker"
 
 

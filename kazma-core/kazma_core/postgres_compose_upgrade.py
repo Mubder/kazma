@@ -48,6 +48,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kazma_core.container_services import docker_call
+
 __all__ = ["JOURNAL_NAME", "OLD_IMAGES", "upgrade_compose"]
 
 #: The journal, beside the compose file.
@@ -64,19 +66,32 @@ class _StepFailedError(Exception):
 
 
 class _Docker:
-    def __init__(self, docker: str, compose_file: Path, project: str | None, run) -> None:
+    """``docker`` is a CLI's path, or ``docker_cli.docker_argv`` (the one
+    route: Kazma's engine through wsl.exe, else the Windows CLI)."""
+
+    def __init__(self, docker, compose_file: Path, project: str | None, run) -> None:
         self.docker, self.file, self.project, self.run = docker, compose_file, project, run
 
     def compose(self, *args: str, env: dict[str, str] | None = None, timeout: float = 600) -> str:
-        argv = [self.docker, "compose", "-f", str(self.file), *(["-p", self.project] if self.project else []), *args]
+        from kazma_core.container_services import docker_call
+        from kazma_core.docker_cli import carry_env
+
+        argv = docker_call(self.docker, ["compose", "-f", str(self.file),
+                                         *(["-p", self.project] if self.project else []), *args])
+        # What compose interpolates from its environment reaches it through
+        # wsl.exe too (WSLENV), never on the command line.
+        run_env = carry_env(argv, {**os.environ, **env}, names=tuple(env)) if env else None
         done = self.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
-                        check=False, stdin=subprocess.DEVNULL, env={**os.environ, **env} if env else None)
+                        check=False, stdin=subprocess.DEVNULL, env=run_env)
         if done.returncode != 0:
             raise _StepFailedError(f"docker compose {args[0]}: {(done.stderr or done.stdout or '').strip()[-300:]}")
         return done.stdout or ""
 
     def __call__(self, *args: str, check: bool = True, timeout: float = 600) -> subprocess.CompletedProcess:
-        done = self.run([self.docker, *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+        from kazma_core.container_services import docker_call
+
+        done = self.run(docker_call(self.docker, list(args)), capture_output=True, text=True, encoding="utf-8",
+                        errors="replace",
                         timeout=timeout, check=False, stdin=subprocess.DEVNULL)
         if check and done.returncode != 0:
             raise _StepFailedError(f"docker {args[0]}: {(done.stderr or done.stdout or '').strip()[-300:]}")
@@ -284,8 +299,8 @@ def _open_source(dep: _Deployment, say: Callable[[str], None]) -> tuple[dict[str
 def _dump(dep: _Deployment, dump: Path, run) -> int:
     """``pg_dump -Fc`` of the 16 data into *dump*; the temporary server gone after."""
     with dump.open("wb") as fh:
-        done = run([dep.d.docker, "exec", dep.source, "pg_dump", "-U", dep.user, "-d", dep.database, "-Fc",
-                    "--no-owner", "--no-privileges"], stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.PIPE,
+        done = run(docker_call(dep.d.docker, ["exec", dep.source, "pg_dump", "-U", dep.user, "-d", dep.database, "-Fc",
+                    "--no-owner", "--no-privileges"]), stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.PIPE,
                    timeout=3600, check=False)
     if dep.mode == "volume":
         dep.d("stop", dep.source, check=False)
@@ -303,8 +318,8 @@ def _move_in(dep: _Deployment, dump: Path, before, journal: dict[str, Any], run,
     _wait_ready(d, dep.name, dep.user, dep.database)
     say(f"-> Restoring the dump ({dump.stat().st_size // 1024} KiB)")
     with dump.open("rb") as fh:
-        done = run([d.docker, "exec", "-i", dep.name, "pg_restore", "-U", dep.user, "-d", dep.database,
-                    "--no-owner", "--no-privileges", "--single-transaction", "--exit-on-error"],
+        done = run(docker_call(d.docker, ["exec", "-i", dep.name, "pg_restore", "-U", dep.user, "-d", dep.database,
+                    "--no-owner", "--no-privileges", "--single-transaction", "--exit-on-error"]),
                    stdin=fh, capture_output=True, timeout=3600, check=False)
     if done.returncode != 0:
         said = (done.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-1:] or [""]
@@ -338,10 +353,10 @@ def upgrade_compose(compose_file: str | Path, *, project: str | None = None, yes
                     run=subprocess.run, docker: str | None = None) -> int:
     """The whole move (see the module docstring). 0 done or nothing to do,
     1 failed with 16 put back, 2 refused before anything changed."""
-    from kazma_core.docker_cli import find_docker_cli
+    from kazma_core.docker_cli import docker_argv
 
     compose_file = Path(compose_file).resolve()
-    docker = docker or find_docker_cli()
+    docker = docker or (docker_argv if docker_argv(["version"]) is not None else None)
     if not docker:
         say("No docker CLI was found.")
         return 2

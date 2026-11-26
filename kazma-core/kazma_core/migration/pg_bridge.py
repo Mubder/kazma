@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import urlparse
 
+from kazma_core.docker_cli import carry_env
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -141,24 +143,30 @@ def _resolve_tool(tool: str) -> Sequence[str]:
     container = os.environ.get("KAZMA_DB_CONTAINER", "").strip() or "kazma-db"
     # Not shutil.which("docker"): a Docker Desktop update dropped the CLI from
     # PATH on 2026-09-25 and every pg dump after it failed while docker and the
-    # container were fine. find_docker_cli() also checks KAZMA_DOCKER_BIN and
-    # Docker's own install folders.
-    from kazma_core.docker_cli import find_docker_cli
+    # container were fine. docker_command() (the one route: Kazma's engine
+    # through wsl.exe, else the CLI found on PATH, KAZMA_DOCKER_BIN or
+    # Docker's own install folders) reaches it either way.
+    from kazma_core.docker_cli import docker_command
 
-    docker = find_docker_cli()
-    if docker:
+    probe_cmd = docker_command(["exec", container, "which", tool])
+    docker = probe_cmd.argv[0] if probe_cmd is not None else None
+    if probe_cmd is not None:
         # Verify the container is reachable before committing to it (avoids
         # a confusing "docker: not found" deep inside the dump call).
         probe = subprocess.run(
-            [docker, "exec", container, "which", tool],
+            probe_cmd.argv,
             capture_output=True,
             timeout=15,
+            env=probe_cmd.env,
         )
         if probe.returncode == 0:
             # PGPASSWORD is injected at dump/restore time via
             # ``_with_docker_pgpassword`` (docker exec does not inherit
-            # the host env — audit M-9).
-            return [docker, "exec", "-i", container, tool]
+            # the host env — audit M-9), and carried into the engine's
+            # distro by ``docker_cli.carry_env`` on the wsl.exe route.
+            run_cmd = docker_command(["exec", "-i", container, tool])
+            if run_cmd is not None:
+                return run_cmd.argv
     # (3) Neither — clear error.
     hint_path = f"install PostgreSQL client tools (so '{tool}' is on PATH)"
     hint_docker = (
@@ -236,8 +244,8 @@ def dump_database(
         "-p", conn_parts.port,
         conn_parts.dbname,
     ]
-    env = _libpq_env(parts)
     cmd = _with_docker_pgpassword(cmd, parts)
+    env = carry_env(cmd, _libpq_env(parts))
     if progress:
         progress(f"pg_dump {conn_parts.dbname}@{conn_parts.host}:{conn_parts.port} -> {out_path.name}")
     logger.info("[pg_bridge] dump: %s", " ".join(_redact_cmd(cmd)))
@@ -335,8 +343,8 @@ def restore_database(
         "-p", conn_parts.port,
         "-d", conn_parts.dbname,
     ]
-    env = _libpq_env(parts)
     cmd = _with_docker_pgpassword(cmd, parts)
+    env = carry_env(cmd, _libpq_env(parts))
     if progress:
         progress(f"pg_restore {dump_path.name} -> {conn_parts.dbname}@{conn_parts.host}:{conn_parts.port}")
     logger.info("[pg_bridge] restore: %s", " ".join(_redact_cmd(cmd)))
@@ -413,15 +421,15 @@ def _with_docker_pgpassword(cmd: Sequence[str], parts: _DsnParts) -> list[str]:
     process listing for the whole dump, and a timeout's message (the full
     argv) put it in kazma.log (audit 2026-10-26 AUD-091).
     """
+    from kazma_core.docker_cli import docker_args_start
+
     out = list(cmd)
     if not parts.password:
         return out
-    if len(out) < 4:
+    start = docker_args_start(out)
+    if start is None or len(out) < start + 3 or out[start] != "exec":
         return out
-    exe = Path(out[0]).name.lower()
-    if "docker" not in exe or out[1] != "exec":
-        return out
-    i = 2
+    i = start + 1
     while i < len(out) and out[i].startswith("-") and out[i] not in ("-e", "--env"):
         i += 1
     out[i:i] = ["-e", "PGPASSWORD"]

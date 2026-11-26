@@ -131,6 +131,9 @@ class _Harness:
         self.docker = _Docker()
         monkeypatch.setattr(guard, "_run_command", self.docker)
         monkeypatch.setattr(guard, "_docker_cli", lambda: "docker-fake")
+        # The Windows CLI route (Docker Desktop, or Kazma's engine with
+        # KAZMA_DOCKER_ROUTE=cli); the wsl.exe route has tests of its own.
+        monkeypatch.setattr(guard, "_docker_route_argv", lambda args: None)
         self.images = {"explorer.exe", "svchost.exe"}
         monkeypatch.setattr(guard, "_running_images", lambda: set(self.images))
         self.launches: list[str] = []
@@ -1069,3 +1072,42 @@ def test_a_refused_cli_gives_way_to_one_windows_allows(monkeypatch):
     assert "deps.cli_replaced" in h.events()
     assert not [c for c in h.docker.calls if c[0] in ("schtasks", "wsl.exe")]
     assert not h.pages
+
+
+# ── Kazma's engine through wsl.exe: no Windows docker CLI at all ─────────
+
+_WSL_PREFIX = ["wsl.exe", "-d", "kazma-engine", "-u", "root", "--exec", "docker"]
+
+
+def test_kazmas_engine_through_wsl_needs_no_windows_cli(monkeypatch):
+    """The distro's own docker answers through Microsoft's wsl.exe: the guard
+    asks, inspects and starts containers that way, and never looks a Windows
+    docker.exe up, so none Windows could refuse is in the way."""
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    fake = h.docker
+    seen: list[list[str]] = []
+
+    def run(cmd, timeout):
+        cmd = [str(c) for c in cmd]
+        seen.append(cmd)
+        if cmd[:7] == _WSL_PREFIX:
+            return fake(["docker-in-distro", *cmd[7:]], timeout)
+        return fake(cmd, timeout)
+
+    monkeypatch.setattr(guard, "_run_command", run)
+    monkeypatch.setattr(guard, "_docker_route_argv", lambda args: [*_WSL_PREFIX, *args])
+    monkeypatch.setattr(guard, "_docker_cli", lambda: pytest.fail("a Windows docker CLI was looked up"))
+    h.run(30)
+    assert h.deps.state == "ok"
+    assert seen and all(c[:7] == _WSL_PREFIX for c in seen)
+
+
+def test_control_without_the_route_the_windows_cli_is_asked(monkeypatch):
+    _engine_contexts(monkeypatch)
+    h = _Harness(monkeypatch, containers=None)
+    h.write_record(["kazma-searxng"], engine="kazma")
+    h.run(30)
+    assert h.deps.state == "ok" and h.deps.cli == "docker-fake"
+    assert all(c[0] == "docker-fake" for c in h.docker.calls if c[0] not in ("whoami",))

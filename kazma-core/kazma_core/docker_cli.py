@@ -57,11 +57,14 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess  # nosec B404 - runs only the docker CLI's own --version, never shell
 import sys
 import threading
 import time
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
 logger = logging.getLogger(__name__)
@@ -69,6 +72,13 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DESKTOP_CONTEXT",
     "ENGINE_CHOICES",
+    "ROUTE_ENV",
+    "DockerCommand",
+    "carry_env",
+    "distro_path",
+    "docker_args_start",
+    "docker_argv",
+    "docker_command",
     "ENGINE_KEY",
     "KAZMA_CONTEXT",
     "KAZMA_DISTRO",
@@ -622,3 +632,194 @@ def engine_host_path(path: str, *, windows: bool | None = None) -> str | None:
         return None
     rest = "/".join(win.parts[1:])
     return f"/{win.drive[0].lower()}" + (f"/{rest}" if rest else "")
+
+
+# ── how a docker call is made: one decision (2026-11-26) ─────────────────
+#
+# Kazma's own engine is Docker Engine inside the ``kazma-engine`` WSL
+# distro. Its docker CLI is reached through Microsoft's signed ``wsl.exe``
+# (``wsl.exe -d kazma-engine -u root --exec docker ...``): a Linux program
+# inside WSL is outside Windows' file check, so Kazma needs no Windows
+# ``docker.exe`` for its own engine. Measured on the owner's PC (26 Nov,
+# medians, the Windows CLI first): ``docker version`` 145 ms either way,
+# ``docker exec`` 281 -> 152 ms, ``docker run --rm`` 699 -> 425 ms, 50 MB out
+# of ``docker exec`` 551 -> 316 ms, 20 MB into ``docker exec -i`` 334 ->
+# 198 ms, bytes intact both ways. The Windows CLI stays the route for Docker
+# Desktop and the operator's own engine, and the fallback where Windows allows
+# it (an argument the distro cannot reach, ``KAZMA_DOCKER_ROUTE=cli``).
+
+#: ``auto`` (the default): Kazma's engine through wsl.exe, any other engine
+#: through the Windows CLI; ``cli``: always the Windows CLI; ``wsl``: the
+#: distro's CLI even when the context in force is another (diagnostics).
+ROUTE_ENV = "KAZMA_DOCKER_ROUTE"
+#: The distro's own docker CLI, as root (the engine's distro is Kazma's own),
+#: started with ``--exec``: no Linux shell reads the arguments (AGENTS §26).
+_WSL_ARGS = ("-d", KAZMA_DISTRO, "-u", "root", "--exec", "docker")
+#: A network share (two backslashes): never reachable from the distro.
+_UNC = "\\\\"
+#: An absolute Windows path (``C:\\x``, ``C:/x``).
+_WINDOWS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+def _wsl_exe() -> str | None:
+    """Microsoft's ``wsl.exe`` in System32 (never one found on PATH)."""
+    root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+    path = Path(root) / "System32" / "wsl.exe"
+    return str(path) if path.is_file() else None
+
+
+def _distro_path(path: str) -> str | None:
+    """*path* on this machine as the engine's distro reads it (``G:\\x`` ->
+    ``/g/x``: its drives are mounted at the root), or None (a network share,
+    a removable, mapped or ``subst`` drive)."""
+    win = PureWindowsPath(path)
+    if len(win.drive) != 2 or not win.drive.endswith(":") or not _drive_is_fixed(win.drive):
+        return None
+    rest = "/".join(win.parts[1:])
+    return f"/{win.drive[0].lower()}" + (f"/{rest}" if rest else "")
+
+
+def _cross(arg: str, before: str | None) -> str | None:
+    """*arg* as the distro's docker CLI must read it, or None when it names a
+    place the distro cannot reach. Paths on this machine are translated
+    wherever Kazma passes them: a whole argument, ``--opt=<path>``, a
+    ``-v <path>:<dst>`` source, a ``--mount`` ``src=``/``source=`` field."""
+    if before in ("-v", "--volume") and _WINDOWS_PATH.match(arg):
+        cut = arg.find(":", 2)
+        host, rest = (arg, "") if cut < 0 else (arg[:cut], arg[cut:])
+        crossed = _distro_path(host)
+        return None if crossed is None else crossed + rest
+    if arg.startswith("--mount="):
+        spec = _cross(arg[len("--mount="):], "--mount")
+        return None if spec is None else f"--mount={spec}"
+    if before == "--mount" or (arg.startswith(("type=", "src=", "source=")) and "," in arg):
+        fields = []
+        for field in arg.split(","):
+            key, eq, value = field.partition("=")
+            if eq and key in ("src", "source") and _WINDOWS_PATH.match(value):
+                crossed = _distro_path(value)
+                if crossed is None:
+                    return None
+                field = f"{key}={crossed}"
+            fields.append(field)
+        return ",".join(fields)
+    if _WINDOWS_PATH.match(arg):
+        return _distro_path(arg)
+    if arg.startswith(_UNC) or f"={_UNC}" in arg or (before in ("-v", "--volume") and arg.startswith(_UNC)):
+        return None  # a network share: the distro cannot reach it
+    if arg.startswith("--") and "=" in arg:
+        name, _, value = arg.partition("=")
+        if _WINDOWS_PATH.match(value):
+            crossed = _distro_path(value)
+            return None if crossed is None else f"{name}={crossed}"
+    return arg
+
+
+def _passed_by_name(args: Sequence[str]) -> list[str]:
+    """Variables a docker call takes from its environment (``-e NAME``,
+    ``--env NAME``, ``--env=NAME``: a value never on the command line, §26)."""
+    names = []
+    for i, arg in enumerate(args):
+        value = None
+        if arg in ("-e", "--env") and i + 1 < len(args):
+            value = args[i + 1]
+        elif arg.startswith("--env="):
+            value = arg[len("--env="):]
+        if value and "=" not in value and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+            names.append(value)
+    return names
+
+
+def docker_args_start(argv: Sequence[str]) -> int | None:
+    """Where docker's own arguments begin in an argv :func:`docker_command`
+    built (after the Windows CLI, or after ``wsl.exe ... --exec docker``);
+    None when *argv* is no docker call."""
+    if not argv:
+        return None
+    name = PureWindowsPath(str(argv[0])).name.lower()
+    if name == "wsl.exe":
+        tail = [str(a) for a in argv[1:]]
+        for i in range(len(tail) - 1):
+            if tail[i] == "--exec" and tail[i + 1] == "docker":
+                return i + 3
+        return None
+    return 1 if "docker" in name else None
+
+
+def carry_env(argv: Sequence[str], env: Mapping[str, str] | None,
+              names: Sequence[str] = ()) -> dict[str, str] | None:
+    """*env* for running *argv*: through wsl.exe, the variables a docker call
+    takes by name (``-e NAME``) and *names* (what compose interpolates from
+    its environment) are carried into the distro (``WSLENV``), so a value
+    never goes on a command line (AGENTS §26). Elsewhere *env* as it is
+    (None: this process's)."""
+    start = docker_args_start(argv)
+    if start is None or PureWindowsPath(str(argv[0])).name.lower() != "wsl.exe":
+        return dict(env) if env is not None else None
+    names = [*_passed_by_name([str(a) for a in argv[start:]]), *names]
+    if not names:
+        return dict(env) if env is not None else None
+    run_env = dict(env if env is not None else os.environ)
+    have = [w for w in (run_env.get("WSLENV") or "").split(":") if w]
+    run_env["WSLENV"] = ":".join(have + [f"{n}/u" for n in names if f"{n}/u" not in have])
+    return run_env
+
+
+@dataclass(frozen=True)
+class DockerCommand:
+    """A docker call ready to run: its argv, its environment (None: this
+    process's), and the route (``wsl`` or ``cli``)."""
+
+    argv: list[str]
+    env: dict[str, str] | None
+    route: str
+
+
+def docker_command(args: Sequence[str], *, env: Mapping[str, str] | None = None,
+                   context: str | None = None) -> DockerCommand | None:
+    """How to run ``docker <args>`` now: the one decision every docker call in
+    Kazma goes through (``tests/test_docker_route.py`` finds a caller that
+    builds its own). *context* names the engine when the caller chooses one
+    (``kazma-engine``, ``desktop-linux``); else the context in force.
+
+    Kazma's own engine is reached through ``wsl.exe`` (no Windows docker.exe
+    needed); an argument the distro cannot reach, ``KAZMA_DOCKER_ROUTE=cli``,
+    an explicit ``KAZMA_DOCKER_BIN`` or ``DOCKER_HOST``, and every other
+    engine take the Windows CLI (:func:`find_docker_cli`). None when neither
+    route exists. Standard library only; nothing is started here."""
+    args = [str(a) for a in args]
+    mode = (os.environ.get(ROUTE_ENV) or "auto").strip().lower()
+    engine_context = context or _context_in_force()
+    if (_on_windows() and mode != "cli" and not os.environ.get("DOCKER_HOST")
+            and not (os.environ.get(_ENV) or "").strip()
+            and (mode == "wsl" or engine_context == KAZMA_CONTEXT)):
+        wsl = _wsl_exe()
+        if wsl and wsl_distro_location(KAZMA_DISTRO) is not None:
+            crossed, before = [], None
+            for arg in args:
+                value = _cross(arg, before)
+                if value is None:
+                    crossed = None
+                    break
+                crossed.append(value)
+                before = arg
+            if crossed is not None:
+                argv = [wsl, *_WSL_ARGS, *crossed]
+                return DockerCommand(argv, carry_env(argv, env), "wsl")
+    cli = find_docker_cli()
+    if not cli:
+        return None
+    pinned = ["--context", context] if context else []
+    return DockerCommand([cli, *pinned, *args], dict(env) if env is not None else None, "cli")
+
+
+def docker_argv(args: Sequence[str], *, context: str | None = None) -> list[str] | None:
+    """The argv of :func:`docker_command` (for a caller that runs it with its
+    own environment and takes no variable by name), or None."""
+    cmd = docker_command(args, context=context)
+    return cmd.argv if cmd is not None else None
+
+
+def distro_path(path: str) -> str | None:
+    """*path* on this machine as Kazma's engine's distro reads it (``G:/x``
+    -> ``/g/x``), or None when the distro cannot reach it. A compose label
+    written through the wsl.exe route holds this form (``container_services``)."""
+    return _distro_path(path)

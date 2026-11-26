@@ -1152,13 +1152,13 @@ _MEMORY_ADDRESS_KEYS = ("memory.backends.state.url", "memory.backends.vector.url
 
 def _container_port(name: str, *, run=subprocess.run) -> int | None:
     """The port on this machine the container publishes its Postgres on."""
-    from kazma_core.docker_cli import find_docker_cli
+    from kazma_core.docker_cli import docker_argv
 
-    docker = find_docker_cli()
-    if not docker:
+    argv = docker_argv(["port", name, "5432/tcp"])
+    if argv is None:
         return None
     try:
-        done = run([docker, "port", name, "5432/tcp"], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        done = run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                    timeout=60, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -1226,12 +1226,12 @@ def _repoint_memory_backends(container: str, new_url: str, *, run=subprocess.run
 
 def _stop_container(name: str, *, run=subprocess.run) -> bool:
     """The container stopped and kept (never removed): it is the way back."""
-    from kazma_core.docker_cli import find_docker_cli
+    from kazma_core.docker_cli import docker_argv
 
-    docker = find_docker_cli()
-    if not docker:
+    calls = [docker_argv(["update", "--restart=no", name]), docker_argv(["stop", name])]
+    if None in calls:
         return False
-    for argv in ([docker, "update", "--restart=no", name], [docker, "stop", name]):
+    for argv in calls:
         try:
             done = run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120, check=False)
         except (OSError, subprocess.SubprocessError):

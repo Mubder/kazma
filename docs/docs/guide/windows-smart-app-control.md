@@ -23,7 +23,7 @@ feature waits. Kazma never asks you to change Windows' protection.
 | Part | When Windows does not allow it | What you notice |
 |---|---|---|
 | The database client library (bundled with psycopg) | Kazma uses the signed library that comes with PostgreSQL, which `kazma setup postgres` installs. While Smart App Control checks files, Kazma uses the signed one from the start | Nothing: everything works |
-| Kazma's Docker command-line tool | Kazma uses the signed one Docker Desktop installs, when it is on the PC. While Smart App Control checks files, Kazma uses the signed one from the start | Nothing: everything works |
+| Kazma's Docker command-line tool | Kazma reaches its own container engine without it: through Microsoft's `wsl.exe` and the engine's own Docker, inside WSL, which Windows' file check does not judge. With Docker Desktop, Kazma uses Docker Desktop's signed tool | Nothing: everything works |
 | A new version of Kazma | Before the guard switches to a new version, it checks that the new version can start on this PC. If it cannot, Kazma keeps running the version it had | One message: "An update waits; Kazma keeps running" |
 | A part with no signed alternative on the PC | The feature that needs it waits for an update that brings a signed version; everything else keeps working | One message naming the feature |
 

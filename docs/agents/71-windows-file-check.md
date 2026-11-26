@@ -41,6 +41,33 @@ exceptions; a user cannot be asked to turn a protection off.
   one is refused; `docker_cli._usable` passes over a CLI Windows refuses.
   Both say it at INFO now; libpq's WARNING is only "no signed PostgreSQL
   client here: reaching the database waits".
+- **Docker through wsl.exe: one decision for every docker call**
+  (`docker_cli.docker_command` / `docker_argv`, 2026-11-26). Kazma's own
+  engine (context `kazma-engine`, its distro registered) is reached as
+  `wsl.exe -d kazma-engine -u root --exec docker ...`: Microsoft's signed
+  `wsl.exe`, the distro's own docker, compose and buildx, no Linux shell
+  (`--exec`). Paths on this machine are given as the distro reads them
+  (`_cross`: a whole argument, `--opt=<path>`, a `-v` source, a `--mount`
+  `src=`/`source=`; drives at `/<letter>`); a network share or a removable
+  drive takes the Windows CLI. A variable taken by name (`-e NAME`, and
+  compose's interpolated names through `carry_env(names=)`) is carried in
+  `WSLENV`, never on a command line. Docker Desktop, `DOCKER_HOST`, an
+  explicit `KAZMA_DOCKER_BIN` and `KAZMA_DOCKER_ROUTE=cli` take the Windows
+  CLI (`find_docker_cli`). A call through wsl.exe starts the distro when it
+  is stopped, as the KazmaEngine task does. Measured (medians, the Windows CLI
+  first): version 145/145 ms, exec 281/152 ms, run --rm 699/425 ms, 50 MB out
+  551/316 ms, 20 MB in 334/198 ms, bytes intact; nothing is cached. Callers:
+  readiness, code execution, `pg_bridge` (`docker_args_start` places
+  `-e PGPASSWORD`), `pg_move`, `container_services` (a `Docker` is a CLI path
+  or the route; `_made_from` accepts the compose label's distro path),
+  install, uninstall, update's image refresh, setup, the compose upgrade,
+  `engine_move`, the worker image build (absolute paths), the document broker
+  (`_ROUTE`), the engine setup's `_docker`, prepush (`docker_route`), the
+  guard's Docker watch (`_docker_route_argv`; the Windows CLI and its
+  refusal handling only for Docker Desktop) and its reload preflight. Gate:
+  `tests/test_docker_route.py` (each route's command, the controls, and no
+  module that looks the CLI up itself unless declared); the boot drill reads
+  the route (`docker_route` part, `scripts/engine_boot_drill.py`).
 - **Signed first while Smart App Control is on** (`kazma_core/windows_policy.py`,
   the one reader of the setting, standard library; the guard loads it by
   path through `docker_cli`): measured with `Get-AuthenticodeSignature`,

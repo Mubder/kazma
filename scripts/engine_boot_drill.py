@@ -85,10 +85,11 @@ INSTALL_ROUNDS = 4
 RESTART_SAID = "Restart Windows to finish WSL"
 
 #: The container parts and how each is read. Order is the report's.
-PARTS = ("engine", "code_sandbox", "document_worker", "private_search")
+PARTS = ("engine", "docker_route", "code_sandbox", "document_worker", "private_search")
 ENGINE_NAMES = {"kazma": "Kazma's container engine", "desktop": "Docker Desktop"}
 PART_TITLES = {
     "engine": "Container engine (kazma_guard.py --status: docker)",
+    "docker_route": "Docker through wsl.exe, no Windows docker.exe (docker_cli.docker_command)",
     "code_sandbox": "Code sandbox (readiness: code_execution)",
     "document_worker": "Document worker (kazma_guard.py --status: doc broker)",
     "private_search": "Private search (SearXNG /healthz)",
@@ -137,6 +138,14 @@ def part_readings(reading: dict[str, Any], engine: str) -> dict[str, tuple[bool,
         ok = check.get("status") == "ok" and named == engine
         said = check.get("error") or f"{check.get('status')} on engine {named}"
         out["code_sandbox"] = (ok, str(said))
+
+    # How Kazma reaches its engine (2026-11-26): Kazma's own through wsl.exe
+    # and the distro's docker; Docker Desktop through the Windows CLI.
+    route = str(reading.get("route") or "")
+    wanted = "wsl" if engine == "kazma" else "cli"
+    words = route.split()
+    out["docker_route"] = (len(words) >= 2 and words[0] == wanted and words[1] == "0",
+                           route or "no route reading")
 
     broker = status.get("doc broker", "")
     out["document_worker"] = (broker.startswith("running"), broker or "no doc broker line in --status")
@@ -426,6 +435,20 @@ reading["status"] = status[-6000:]
 url = env_value("KAZMA_SEARXNG_URL")
 code, text = get(url.rstrip("/") + "/healthz") if url else (None, "KAZMA_SEARXNG_URL not set")
 reading["searxng"] = {"url": url, "http": code, **({"error": text} if code is None else {})}
+ROUTE_PROBE = (
+    "import subprocess\n"
+    "from kazma_core.env_files import load_env_files\n"
+    "load_env_files(include_cwd=False)\n"
+    "from kazma_core.docker_cli import docker_command\n"
+    "c = docker_command(['version', '--format', '{{.Server.Version}}'])\n"
+    "if c is None:\n"
+    "    print('none')\n"
+    "else:\n"
+    "    p = subprocess.run(c.argv, capture_output=True, text=True, env=c.env, timeout=60)\n"
+    "    print(c.route, p.returncode, (p.stdout or p.stderr).strip()[:80])\n"
+)
+_, route = run([sys.executable, "-c", ROUTE_PROBE], timeout=120)
+reading["route"] = (route.strip().splitlines() or [""])[-1][:200]
 _, task = run(["schtasks", "/Query", "/TN", "KazmaEngine", "/FO", "LIST"], timeout=20)
 reading["engine_task"] = " ".join(l.strip() for l in task.splitlines() if l.strip().startswith("Status"))
 _, procs = run(["tasklist", "/FI", "IMAGENAME eq Docker Desktop.exe", "/NH"], timeout=20)

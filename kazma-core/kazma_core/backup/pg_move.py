@@ -130,20 +130,24 @@ def move_from_container(container: str, dest_url: str, *, port: int,
     (which drops and makes the database again) only when
     :func:`_replace_refusal` allows it; without *empty_target* it is refused."""
     from kazma_core.db.pg_backup import KAZMA_PG_TABLES
-    from kazma_core.docker_cli import find_docker_cli
+    from kazma_core.docker_cli import docker_command
     from kazma_core.postgres_service import bin_dir_for, detect_platform
 
-    docker = find_docker_cli()
-    if not docker:
+    if docker_command(["version"]) is None:
         say("The docker command was not found: the container cannot be read.")
         return False
+
+    def docker(*args: str) -> list[str]:
+        """``docker <args>`` by the one route (docker_cli.docker_command)."""
+        cmd = docker_command(list(args))
+        return cmd.argv if cmd is not None else ["docker", *args]
     user, database = _container_login()
     bin_dir = bin_dir or bin_dir_for(detect_platform())
     pg_restore = str(Path(bin_dir) / ("pg_restore.exe" if os.name == "nt" else "pg_restore"))
 
     # Which Kazma tables the container holds (a table a feature never made is not compared).
-    listed = run([docker, "exec", container, "psql", "-U", user, "-d", database, "-At", "-c",
-                  "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"],
+    listed = run(docker("exec", container, "psql", "-U", user, "-d", database, "-At", "-c",
+                  "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"),
                  stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120, check=False)
     if listed.returncode != 0:
         say(f"The container's tables could not be listed (exit {listed.returncode}).")
@@ -161,8 +165,8 @@ def move_from_container(container: str, dest_url: str, *, port: int,
     if replace:
         container_boot = None
         if "kazma_settings" in present:
-            stamp = run([docker, "exec", container, "psql", "-U", user, "-d", database, "-At", "-c",
-                         f"SELECT value FROM kazma_settings WHERE key = '{BOOT_KEY}'"],
+            stamp = run(docker("exec", container, "psql", "-U", user, "-d", database, "-At", "-c",
+                         f"SELECT value FROM kazma_settings WHERE key = '{BOOT_KEY}'"),
                         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120, check=False)
             container_boot = _boot_time(stamp.stdout) if stamp.returncode == 0 else None
         refusal = _replace_refusal(container_boot, target_boot, others)
@@ -177,8 +181,8 @@ def move_from_container(container: str, dest_url: str, *, port: int,
         dump = Path(tmp) / "kazma.dump"
         say(f"-> Dumping {database} from container {container}")
         with dump.open("wb") as fh:
-            done = run([docker, "exec", container, "pg_dump", "-U", user, "-d", database, "-Fc",
-                        "--no-owner", "--no-privileges"], stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.PIPE,
+            done = run(docker("exec", container, "pg_dump", "-U", user, "-d", database, "-Fc",
+                        "--no-owner", "--no-privileges"), stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.PIPE,
                        timeout=3600, check=False)
         if done.returncode != 0 or dump.stat().st_size == 0:
             say(f"The dump failed (exit {done.returncode}).")
@@ -204,7 +208,7 @@ def move_from_container(container: str, dest_url: str, *, port: int,
         say("The container holds no Kazma table: nothing to compare.")
         return True
     sql = _count_sql(tables)
-    source = run([docker, "exec", container, "psql", "-U", user, "-d", database, "-At", "-F", "|", "-c", sql],
+    source = run(docker("exec", container, "psql", "-U", user, "-d", database, "-At", "-F", "|", "-c", sql),
                  stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600, check=False)
     import psycopg
 

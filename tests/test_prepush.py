@@ -195,6 +195,8 @@ def test_docker_desktop_first_and_no_docker_is_a_failure_not_a_skip(monkeypatch,
         return run
 
     monkeypatch.setattr(prepush, "docker_exe", lambda: "docker")
+    # The calls as the Windows CLI makes them (the wsl.exe route is docker_cli's, tested there).
+    monkeypatch.setattr(prepush, "docker_route", lambda context: (lambda args: ["docker", "--context", context, *args]))
     monkeypatch.setattr(prepush.subprocess, "run", docker({"desktop-linux", "kazma-engine"}))
     assert prepush.docker_context() == "desktop-linux" and asked == ["desktop-linux"]
     monkeypatch.setattr(prepush.subprocess, "run", docker({"kazma-engine"}))

@@ -271,13 +271,23 @@ def _distros(run: Runner, *, running: bool = False) -> list[str] | None:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def _docker(run: Runner, *args: str, timeout: float = 30) -> tuple[int, str]:
-    from kazma_core.docker_cli import find_docker_cli
+def _docker_reachable() -> bool:
+    """A way to ask Kazma's engine exists (``docker_cli.docker_command``)."""
+    from kazma_core.docker_cli import docker_command
 
-    cli = find_docker_cli()
-    if not cli:
+    return docker_command(["version"], context=CONTEXT) is not None
+
+
+def _docker(run: Runner, *args: str, timeout: float = 30) -> tuple[int, str]:
+    """``docker <args>`` on Kazma's engine by the one route
+    (``docker_cli.docker_command``: the distro's own docker through wsl.exe,
+    else the Windows CLI with the kazma-engine context)."""
+    from kazma_core.docker_cli import docker_command
+
+    cmd = docker_command(list(args), context=CONTEXT)
+    if cmd is None:
         return 127, "the docker CLI is not installed"
-    return _out(run, [cli, "--context", CONTEXT, *args], timeout=timeout)
+    return _out(run, cmd.argv, timeout=timeout, env=cmd.env)
 
 
 # ── checking ──────────────────────────────────────────────────────────────
@@ -299,7 +309,7 @@ class EngineCheck:
 
 def check(run: Runner = subprocess.run) -> EngineCheck:
     """What of Kazma's engine is on this machine (Windows)."""
-    from kazma_core.docker_cli import engine_installed, find_docker_cli
+    from kazma_core.docker_cli import engine_installed
 
     missing: list[str] = []
     distros = _distros(run)
@@ -321,7 +331,7 @@ def check(run: Runner = subprocess.run) -> EngineCheck:
     # too): Kazma's own copy missing is the "cli" step's, never a reason to
     # set up a Docker that answers again.
     code, text = (_docker(run, "version", "--format", "{{.Server.Version}}")
-                  if not {"distro", "context"} & set(missing) and find_docker_cli() else (1, ""))
+                  if not {"distro", "context"} & set(missing) and _docker_reachable() else (1, ""))
     waiting: list[str] = []
     if code == 0 and text.strip():
         version = text.strip().splitlines()[-1]

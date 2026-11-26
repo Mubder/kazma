@@ -51,6 +51,9 @@ from kazma_core.tools import code_exec
 from tests._space_matrix import Matrix
 
 A, B = Matrix.SPACE_A, Matrix.SPACE_B
+
+from kazma_core.docker_cli import DockerCommand  # the jail's docker call, by the one route
+
 CONTAINER = CodeRule(container_only=True, network=False)
 AS_BEFORE = CodeRule(container_only=False, network=False)
 
@@ -261,7 +264,7 @@ def no_docker_and_the_lab_switch(monkeypatch):
     monkeypatch.delenv("KAZMA_CODE_EXEC_DOCKER", raising=False)
     monkeypatch.delenv("E2B_API_KEY", raising=False)
     monkeypatch.delenv("KAZMA_E2B_API_KEY", raising=False)
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: None)
+    monkeypatch.setattr(code_exec, "_docker_command", lambda args, env=None: None)
     code_exec.reset_docker_probe()
     yield
     code_exec.reset_docker_probe()
@@ -344,7 +347,7 @@ def _docker_args(monkeypatch, space: str, person: str) -> tuple[list[str], bytes
     monkeypatch.delenv("E2B_API_KEY", raising=False)
     monkeypatch.delenv("KAZMA_E2B_API_KEY", raising=False)
     code_exec.reset_docker_probe()
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "docker")
+    monkeypatch.setattr(code_exec, "_docker_command", lambda args, env=None: DockerCommand(["docker", *args], env, "cli"))
     monkeypatch.setattr(code_exec.asyncio, "create_subprocess_exec", spawn)
     out = _exec_as(space, person, "print('hi')")
     assert "[sandbox: docker" in out, out
@@ -402,7 +405,7 @@ def test_a_network_that_is_not_setups_refuses_the_run(two_people, filtered, monk
 
     monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "1")
     code_exec.reset_docker_probe()
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "docker")
+    monkeypatch.setattr(code_exec, "_docker_command", lambda args, env=None: DockerCommand(["docker", *args], env, "cli"))
     monkeypatch.setattr(code_exec.asyncio, "create_subprocess_exec", spawn)
     out = _exec_as(A, m.account_b, "print('hi')")
     assert out.startswith("[Exit code: 1]") and "kazma setup engine" in out, out
@@ -429,7 +432,7 @@ def test_rules_no_longer_in_effect_refuse_the_run(two_people, filtered, monkeypa
 
     monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "1")
     code_exec.reset_docker_probe()
-    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "docker")
+    monkeypatch.setattr(code_exec, "_docker_command", lambda args, env=None: DockerCommand(["docker", *args], env, "cli"))
     monkeypatch.setattr(code_exec.asyncio, "create_subprocess_exec", spawn)
     out = _exec_as(A, m.account_b, "print('hi')")
     assert out.startswith("[Exit code: 1]") and "not in effect" in out and "kazma setup engine" in out, out
@@ -537,15 +540,14 @@ async def test_control_the_owners_linked_account_keeps_the_admins_rules(linked) 
 
 
 def _docker_with_image() -> bool:
-    from kazma_core.docker_cli import find_docker_cli
+    from kazma_core.docker_cli import docker_command
 
-    docker = find_docker_cli()
-    if not docker:
+    docker = docker_command(["image", "inspect", code_exec.DEFAULT_DOCKER_IMAGE])
+    if docker is None:
         return False
     try:
-        probe = subprocess.run(  # noqa: S603 - fixed argv, the docker CLI
-            [docker, "image", "inspect", code_exec.DEFAULT_DOCKER_IMAGE],
-            capture_output=True, timeout=20, check=False)
+        probe = subprocess.run(  # noqa: S603 - fixed argv, docker by the one route
+            docker.argv, capture_output=True, timeout=20, check=False, env=docker.env)
     except (OSError, subprocess.TimeoutExpired):
         return False
     return probe.returncode == 0

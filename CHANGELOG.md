@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Kazma reaches its own container engine without a Windows docker program (2026-11-26)
+
+- Every docker call Kazma makes to its own engine now runs the engine's own
+  Docker inside WSL through Microsoft's `wsl.exe`, so Kazma needs no Windows
+  `docker.exe` for it and Windows' file check has nothing to refuse there.
+  Docker Desktop keeps its own signed tool. It is as fast or faster: a
+  container command 281 -> 152 ms, a container start 699 -> 425 ms, 50 MB out
+  of a container 551 -> 316 ms (measured on the owner's PC).
+- Paths are given as the engine reads them, a value a container takes from
+  the environment never goes on a command line, and the reboot drill checks
+  this route with nobody signed in. `KAZMA_DOCKER_ROUTE=cli` keeps the old way.
+
 ## Windows' file check: the outside audit's findings (2026-11-26)
 
 - A docker program Windows does not allow is never taken for a Docker engine
