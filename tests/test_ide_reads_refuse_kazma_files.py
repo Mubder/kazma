@@ -65,6 +65,14 @@ IDE_READS: dict[str, str] = {
     "kazma-core/kazma_core/ide/service.py::IdeService._git_read._run":
         "git_policy.validate_read_paths: no --no-index, diff only in a repository, "
         "every operand inside the workspace and asked is_kazma_store",
+    "kazma-core/kazma_core/ide/file_checkpoints.py::FileCheckpointStore.review":
+        "check_path_access(read) on each held path again, before it is read",
+    "kazma-core/kazma_core/ide/file_checkpoints.py::FileCheckpointStore.restore_hunk":
+        "_held_file: check_path_access(write) on the held path before it is read",
+    "kazma-core/kazma_core/ide/lsp.py::_local_symbols":
+        "extract_symbols is handed the buffer handle_lsp read from a resolved path",
+    "kazma-core/kazma_core/ide/lsp.py::_index_symbols":
+        "the code index (indexer._kazmas_own) asks is_kazma_store before it reads a file",
 }
 
 #: Processes the IDE's modules start whose command is Kazma's own literal:
@@ -74,10 +82,20 @@ FIXED_PROCESSES: dict[str, str] = {
         "git config --get remote.origin.url and git branch --show-current, literals",
 }
 
-#: IdeService methods that take a path and are not a door of their own.
+#: Public IdeService methods that are not a door of their own, and why.
 NOT_A_DOOR: dict[str, str] = {
     "diff": "the path only labels the diff; both texts come from the caller",
     "resolve": "the resolver every door asks; each probe below goes through it",
+    "refresh_root": "re-reads the workspace root; takes no path",
+    "search": "the file_search tool through the registry, which refuses Kazma's files itself "
+              "(tests/test_kazma_secret_files_refused.py, its searches and search_walk doors)",
+    "codebase_search": "the codebase_search tool; the code index drops Kazma's files "
+                       "(code_index.ripgrep._without_kazma_stores)",
+    "run": "shell_exec through LocalToolRegistry.execute: an approval card, and the shell's own "
+           "refusal of Kazma's files (tests/test_shell_exec_kazma_files.py)",
+    "send_to_swarm": "a task for the swarm; each tool its workers call asks the predicate itself",
+    "restore_file_checkpoint": "FileCheckpointStore.restore writes only a held path "
+                               "check_path_access allows for writing (Kazma's files never)",
 }
 
 
@@ -130,21 +148,61 @@ _PROCESS_STARTS = frozenset({
 })
 
 
-def ide_read_sites(sources: dict[str, str]) -> set[str]:
+def _dotted(rel: str) -> str:
+    """``kazma-core/kazma_core/tools/x.py`` -> ``kazma_core.tools.x``."""
+    parts = rel.removesuffix(".py").split("/")[1:]
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+def _reads_directly(func: ast.AST) -> bool:
+    """Whether *func*'s own body reads a file (the census's primitives)."""
+    for node in ast.walk(func):
+        if isinstance(node, ast.Attribute) and node.attr in ("read_text", "read_bytes"):
+            return True
+        if isinstance(node, ast.Call):
+            fn = node.func
+            if isinstance(fn, ast.Name) and fn.id == "open" and not _write_only(_mode_of(node, 1)):
+                return True
+            if isinstance(fn, ast.Attribute) and fn.attr == "open" and not _write_only(_mode_of(node, 0)):
+                return True
+    return False
+
+
+def read_helpers(sources: dict[str, str]) -> set[tuple[str, str]]:
+    """``(module, function)`` for each module-level function of the packages
+    whose own body reads a file (``text_newlines.read_exact`` and its kin):
+    a call of one is a read where it is called."""
+    found: set[tuple[str, str]] = set()
+    for rel, text in sources.items():
+        for node in ast.parse(text).body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _reads_directly(node):
+                found.add((_dotted(rel), node.name))
+    return found
+
+
+def ide_read_sites(sources: dict[str, str], helpers: set[tuple[str, str]] | None = None) -> set[str]:
     """``<file>::<qualname>`` of every file read in the IDE's modules.
 
     The IDE's modules are ``kazma_core/ide/`` and every module that calls
     ``get_ide_service()``. A read is ``.read_text`` or ``.read_bytes``
     (called or handed to a thread), ``.open(...)`` and ``open(...)`` unless
-    their literal mode only writes, and a process the module starts
+    their literal mode only writes, a call of a function imported from
+    another module of the packages that reads a file itself
+    (:func:`read_helpers`), and a process the module starts
     (``subprocess.run`` and its kin, ``asyncio.create_subprocess_*``): what
     the process prints is read too.
     """
+    helpers = read_helpers(sources) if helpers is None else helpers
     found: set[str] = set()
     for rel, text in sources.items():
         tree = ast.parse(text)
         if "/kazma_core/ide/" not in rel and not _drives_the_ide(tree):
             continue
+        imported = {
+            alias.asname or alias.name
+            for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module
+            for alias in node.names if (node.module, alias.name) in helpers
+        }
         stack: list[str] = []
         writes: set[int] = set()
 
@@ -168,6 +226,8 @@ def ide_read_sites(sources: dict[str, str]) -> set[str]:
                 if isinstance(func, ast.Name) and func.id == "open":
                     if not _write_only(_mode_of(node, 1)):
                         found.add(f"{rel}::{'.'.join(stack)}")
+                elif isinstance(func, ast.Name) and func.id in imported:
+                    found.add(f"{rel}::{'.'.join(stack)}")
                 elif isinstance(func, ast.Attribute) and func.attr == "open":
                     if _write_only(_mode_of(node, 0)):
                         writes.add(id(func))
@@ -204,6 +264,7 @@ def test_every_ide_read_is_declared_with_its_check() -> None:
 def test_control_the_census_finds_an_undeclared_read() -> None:
     planted = {
         "kazma-core/kazma_core/ide/planted.py": (
+            "from kazma_core.tools.planted_reader import slurp as take, label\n"
             "class Peek:\n"
             "    def look(self, p):\n"
             "        return p.read_text()\n"
@@ -212,6 +273,16 @@ def test_control_the_census_finds_an_undeclared_read() -> None:
             "            fh.write('x')\n"
             "        with p.open('ab') as fh:\n"
             "            fh.write(b'x')\n"
+            "    def through_a_helper(self, p):\n"
+            "        return take(p)\n"
+            "    def names_it(self, p):\n"
+            "        return label(p)\n"
+        ),
+        "kazma-core/kazma_core/tools/planted_reader.py": (
+            "def slurp(p):\n"
+            "    return p.read_bytes()\n"
+            "def label(p):\n"
+            "    return p.name\n"
         ),
         "kazma-ui/kazma_ui/planted_front.py": (
             "import asyncio\n"
@@ -225,9 +296,12 @@ def test_control_the_census_finds_an_undeclared_read() -> None:
     }
     assert ide_read_sites(planted) == {
         "kazma-core/kazma_core/ide/planted.py::Peek.look",
+        "kazma-core/kazma_core/ide/planted.py::Peek.through_a_helper",
         "kazma-ui/kazma_ui/planted_front.py::show",
         "kazma-ui/kazma_ui/planted_front.py::peek_with_git",
     }
+    assert ("kazma_core.tools.planted_reader", "slurp") in read_helpers(planted)
+    assert ("kazma_core.tools.planted_reader", "label") not in read_helpers(planted)
 
 
 def test_every_declared_read_has_a_probe() -> None:
@@ -265,7 +339,9 @@ def install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(f"KAZMA_VAULT_KEY={SECRET}\n", encoding="utf-8")
     (root / "conf").mkdir()
-    (root / "conf" / "kazma_env.py").write_text(f'VAULT_KEY = "{SECRET}"\n', encoding="utf-8")
+    # A definition named like the secret too: the code index keeps names.
+    (root / "conf" / "kazma_env.py").write_text(
+        f'VAULT_KEY = "{SECRET}"\n\n\ndef {SECRET}():\n    return VAULT_KEY\n', encoding="utf-8")
     (root / "src").mkdir()
     (root / "src" / "app.py").write_text("def greet_all(items):\n    return items\n",
                                          encoding="utf-8")
@@ -423,8 +499,65 @@ def _probe_git(root: Path, calls: list) -> str:
     return json.dumps([asyncio.run(svc.git(c)) for c in commands])
 
 
+def _probe_lsp_index(root: Path, calls: list) -> str:
+    """Completion and hover in an ordinary file, with the code index on: the
+    index's names come from every source file of the workspace it read."""
+    from kazma_core.ide.lsp import handle_lsp
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("KAZMA_CODE_INDEX", "1")
+        out = [
+            handle_lsp("textDocument/completion", path="src/app.py", prefix="demo"),
+            handle_lsp("hover", path="src/app.py", content=f"{SECRET}()\n", line=0, character=3),
+            handle_lsp("definition", path="src/app.py", content=f"{SECRET}()\n", line=0, character=3),
+        ]
+    return json.dumps(out)
+
+
+def _held_while_missing(root: Path) -> tuple[Any, str, list[Path]]:
+    """A checkpoint that holds paths which were nobody's when it was taken
+    (missing) and are Kazma's files now, as a folder on their way linked
+    into the data folder afterwards makes them."""
+    from kazma_core import store_registry
+    from kazma_core.ide.file_checkpoints import FileCheckpointStore
+
+    later = [root / "kazma-data" / "backups" / "2" / ".env"]
+    store = FileCheckpointStore(root.parent / "checkpoints.db")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(store_registry, "is_kazma_store", lambda *_a, **_k: False)
+        checkpoint = store.create([str(p) for p in later], root=root)
+    for path in later:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"KAZMA_VAULT_KEY={SECRET}\n", encoding="utf-8")
+    return store, checkpoint, later
+
+
+def _probe_checkpoint_review(root: Path, calls: list) -> str:
+    store, checkpoint, _later = _held_while_missing(root)
+    return json.dumps(store.review(checkpoint))
+
+
+def _probe_restore_hunk(root: Path, calls: list) -> str:
+    """Undoing a change reads the held file first. The evidence is what the
+    door did with it: a refusal, or the file read and rewritten."""
+    store, checkpoint, later = _held_while_missing(root)
+    out: list[str] = []
+    for path in later:
+        try:
+            out.append(store.restore_hunk(checkpoint, str(path), 0))
+        except ValueError as exc:
+            out.append(str(exc))
+        if SECRET not in path.read_text(encoding="utf-8"):
+            out.append(f"read and rewrote the file that held {SECRET}")
+    return json.dumps(out)
+
+
 PROBES: dict[str, Callable[[Path, list], str]] = {
     "kazma-core/kazma_core/ide/service.py::IdeService._read_file_sync": _probe_read_file,
+    "kazma-core/kazma_core/ide/lsp.py::_local_symbols": _probe_lsp,
+    "kazma-core/kazma_core/ide/lsp.py::_index_symbols": _probe_lsp_index,
+    "kazma-core/kazma_core/ide/file_checkpoints.py::FileCheckpointStore.review": _probe_checkpoint_review,
+    "kazma-core/kazma_core/ide/file_checkpoints.py::FileCheckpointStore.restore_hunk": _probe_restore_hunk,
     "kazma-core/kazma_core/ide/service.py::IdeService.run_file": _probe_run_file,
     "kazma-core/kazma_core/ide/lsp.py::_buffer": _probe_lsp,
     "kazma-core/kazma_core/ide/file_checkpoints.py::FileCheckpointStore.create": _probe_checkpoint,
@@ -482,22 +615,20 @@ _PATH_CALLS: dict[str, Callable[[Any, str], Any]] = {
     "delete_file": lambda svc, rel: svc.delete_file(rel),
     "list_path": lambda svc, rel: svc.list_path(rel),
     "run_file": lambda svc, rel: svc.run_file(rel),
+    "git": lambda svc, rel: svc.git(f"show HEAD:{rel}"),
 }
 
 
-def ide_path_methods() -> set[str]:
-    """The IdeService methods that take a path, read from the class."""
+def ide_public_methods() -> set[str]:
+    """Every public method of IdeService, read from the class."""
     from kazma_core.ide.service import IdeService
 
-    return {
-        name for name, fn in inspect.getmembers(IdeService, inspect.isfunction)
-        if not name.startswith("_")
-        and {"rel_path", "patches"} & set(inspect.signature(fn).parameters)
-    }
+    return {name for name, _fn in inspect.getmembers(IdeService, inspect.isfunction)
+            if not name.startswith("_")}
 
 
-def test_every_path_method_of_the_ide_service_is_probed() -> None:
-    assert ide_path_methods() == set(_PATH_CALLS) | set(NOT_A_DOOR)
+def test_every_public_method_of_the_ide_service_is_probed_or_declared() -> None:
+    assert ide_public_methods() == set(_PATH_CALLS) | set(NOT_A_DOOR)
 
 
 @pytest.mark.parametrize("method", sorted(_PATH_CALLS))
@@ -635,3 +766,64 @@ def test_a_folder_named_git_is_no_repository(tmp_path: Path) -> None:
     linked.mkdir()
     (linked / ".git").write_text("gitdir: ../.git/worktrees/linked\n", encoding="utf-8")
     assert is_a_repository(linked)
+
+
+# ── The checkpoint review page reads a held path only when it may ───────
+
+
+def test_the_review_route_leaves_out_a_held_path_that_is_kazmas_now(
+    install: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``GET /api/ide/checkpoints/{id}/review`` read every held path again;
+    one that names a Kazma file now went back to the page in ``after``."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from kazma_ui.ide_api import create_ide_router
+
+    store, checkpoint, later = _held_while_missing(install)
+    monkeypatch.setattr("kazma_core.ide.file_checkpoints.get_file_checkpoint_store", lambda: store)
+    app = FastAPI()
+    app.include_router(create_ide_router())
+    answer = TestClient(app).get(f"/api/ide/checkpoints/{checkpoint}/review").json()
+    assert answer["ok"] is True and answer["files"] == [], answer
+    assert SECRET not in json.dumps(answer)
+
+
+# ── A save outside the workspace asks in write mode ─────────────────────
+
+
+def test_a_save_outside_the_workspace_asks_the_policy_in_write_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``resolve`` answered a path outside the workspace from
+    ``check_path_access`` in read mode, a save's included: where a grant
+    reaches Kazma's configuration (here the escape hatch), it resolved for
+    writing. The write tool refused it later, after its card."""
+    from kazma_core import paths
+    from kazma_core.ide.service import get_ide_service, reset_ide_service
+    from kazma_core.workspace.binding import configure_workspace
+
+    install, project = tmp_path / "install", tmp_path / "project"
+    (install / "kazma-data").mkdir(parents=True)
+    project.mkdir()
+    (install / "kazma.yaml").write_text("agent:\n  name: kazma\n", encoding="utf-8")
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(install / "kazma-data"))
+    monkeypatch.setenv("KAZMA_USER_HOME", str(install / ".kazma"))
+    monkeypatch.setenv("KAZMA_WORKSPACE", str(project))
+    monkeypatch.setattr(paths, "installed_project_root", lambda: install)
+    monkeypatch.setattr(paths, "get_project_root", lambda: install)
+    monkeypatch.setattr(
+        "kazma_core.stores.get_workspace_store",
+        lambda: type("S", (), {"get_active_workspace": staticmethod(lambda: None)})(),
+    )
+    configure_workspace(workspace=str(project), allow_absolute=True)
+    reset_ide_service()
+    try:
+        svc = get_ide_service()
+        config = str(install / "kazma.yaml")
+        # The control: read mode lets configuration through (every door reads it).
+        assert svc.resolve(config) == (install / "kazma.yaml").resolve()
+        with pytest.raises(ValueError):
+            svc.resolve(config, write=True)
+    finally:
+        reset_ide_service()

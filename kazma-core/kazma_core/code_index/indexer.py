@@ -47,6 +47,16 @@ def _rel(root: Path, path: Path) -> str | None:
         return None
 
 
+def _kazmas_own(path: Path) -> bool:
+    """One of Kazma's own stores or secret files (``store_registry.is_kazma_store``):
+    the index reads none of them. Asked only before a file is read (about a
+    millisecond a file, too slow for every stat of a walk), so an unchanged
+    file costs nothing (2026-11-27, tests/test_ide_reads_refuse_kazma_files.py)."""
+    from kazma_core.store_registry import is_kazma_store
+
+    return is_kazma_store(path, write=False)
+
+
 def ensure_index(root: Path | None = None) -> dict[str, int]:
     """Stat-walk the workspace and refresh stale/missing files. Never raises."""
     if not code_index_enabled():
@@ -72,6 +82,11 @@ def ensure_index(root: Path | None = None) -> dict[str, int]:
                 continue
             prev = known.get(rel)
             if prev and prev[0] == st.st_mtime and prev[1] == st.st_size:
+                continue
+            if _kazmas_own(path):
+                # Read by no door, the index included: what it held of the
+                # file before is dropped below (not seen).
+                seen.discard(rel)
                 continue
             try:
                 source = path.read_text(encoding="utf-8", errors="replace")
@@ -124,7 +139,7 @@ def notify_file_changed(path: str | Path, *, deleted: bool = False) -> None:
             return
         conn = connect(root)
         try:
-            if deleted or not p.is_file():
+            if deleted or not p.is_file() or _kazmas_own(p):
                 drop_file(conn, rel)
             elif p.suffix.lower() in INDEX_EXTS:
                 st = p.stat()

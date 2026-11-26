@@ -96,12 +96,19 @@ workspace. Three new modules; understanding their interaction is essential.
   option, `diff` runs only when the workspace is a repository
   (`is_a_repository`: outside one git compares its operands as files), and
   every operand, inside the workspace, is asked `is_kazma_store` too. The
-  census counts a process an IDE module starts as a read. Gate: `tests/test_ide_reads_refuse_kazma_files.py` (a census of
-  every file read in `kazma_core/ide/` and every module that drives
-  `get_ide_service()`, each declared with a probe that plants Kazma's
-  secret files in the workspace; every IdeService method that takes a path
-  refuses one before a tool runs; the control blinds the predicate and
-  every probe finds the secret).
+  census counts as a read a process an IDE module starts, and a call of a
+  helper of the packages that reads a file itself (`read_exact` and its
+  kin). Paths read again later ask again: the checkpoint review
+  (`FileCheckpointStore.review`, `check_path_access` before each held
+  path is read), and the code index (`indexer._kazmas_own`, asked before a
+  file is read, not at every stat: about a millisecond a file). A path
+  `resolve` answers outside the workspace is asked in the caller's mode, a
+  save's in write mode. Gate: `tests/test_ide_reads_refuse_kazma_files.py`
+  (a census of every file read in `kazma_core/ide/` and every module that
+  drives `get_ide_service()`, each declared with a probe that plants
+  Kazma's secret files in the workspace; every public IdeService method is
+  probed or declared with why it is no door; the control blinds the
+  predicate and every probe finds the secret).
 - **A relative path an agent tool is given means the active workspace**
   (`binding.resolve_tool_path`), the directory `shell_exec` runs in — never
   the server process's CWD. Every file tool, `check_path_access` and the

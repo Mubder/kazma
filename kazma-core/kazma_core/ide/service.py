@@ -213,9 +213,10 @@ class IdeService:
             try:
                 from kazma_core.workspace.path_policy import check_path_access
 
-                # resolve() is used for both read and write IDE ops — require
-                # at least read; write tools still re-check write mode.
-                access = check_path_access(target, "read")
+                # In the caller's own mode: a save outside the workspace is a
+                # write, and Kazma's configuration is readable but never
+                # writable (2026-11-27); the write tools re-check anyway.
+                access = check_path_access(target, "write" if write else "read")
                 if access.allowed:
                     return target
             except Exception:
