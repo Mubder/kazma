@@ -1269,7 +1269,14 @@ class ConfigStore(_ChangeNotices):
             # The settings table is the install's, outside every space's lock
             # (Spaces S4-01, decision 4): one key space and one cache for the
             # install. Every settings statement runs in this block.
-            with install_statements("the settings table, one key space for the install (S4-01 decision 4)"):
+            from kazma_core.db.row_security import install_inside_a_space
+
+            # Inside a space's checkout too (a mirror reading its conflict
+            # policy): the space role has no right on the settings table and
+            # holds none of its locks (S4-01 step 3 review M2).
+            with install_statements("the settings table, one key space for the install (S4-01 decision 4)"), \
+                    install_inside_a_space("the settings table: the space role has no right on it and holds "
+                                           "none of its locks"):
                 yield
         except ConfigStoreUnavailableError:
             self._mark_pg_down(None)

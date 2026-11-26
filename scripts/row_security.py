@@ -19,15 +19,21 @@ preparing the arming) looks at a database and puts the rules in place:
   may make it, the function, row security, policies, rights. Asks first
   (``--yes`` does not). A table another session holds is left and said.
 
-The address is ``--url`` or this install's (``KAZMA_DATABASE_URL``, read from
-its ``.env`` as the server reads it). The address is never printed.
+The address is this install's (``KAZMA_DATABASE_URL``, read from its
+``.env`` as the server reads it), or the one held by the environment variable
+``--url-from`` names -- never an address on the command line, where its
+password would be in the process list and the shell's history (§26 D). The
+address is never printed.
+
+``rows`` and ``prove`` count and group every space's table in full, the
+checkpoints' included: on a live install, run them when it is idle.
 
 Usage (repo root, the dev checkout's Python)::
 
     python scripts/row_security.py check
     python scripts/row_security.py rows
     python scripts/row_security.py prove
-    python scripts/row_security.py apply --url postgresql://...
+    python scripts/row_security.py apply --url-from KAZMA_SCRATCH_URL
 
 Exit code: 0 when the answer is clean (or the rules were put in place whole),
 1 otherwise.
@@ -38,20 +44,39 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 
-def _url(given: str | None) -> str:
-    if given:
-        return given
+def _url(variable: str | None) -> str:
+    """This install's address, or the one in the environment variable named."""
+    import os
+
+    if variable:
+        return (os.environ.get(variable) or "").strip()
     from kazma_core.db.backend import get_database_url
     from kazma_core.env_files import load_env_files
 
     load_env_files(include_cwd=False)
     return get_database_url() or ""
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse, whose errors never repeat an address typed on the command
+    line: a refused ``--url postgresql://user:password@...`` came back on
+    stderr, password included (§26 D; step 2 delta review N3)."""
+
+    def error(self, message: str) -> NoReturn:
+        from kazma_core.security.url_credentials import mask_urls_in_text
+
+        if message.startswith("unrecognized arguments"):
+            message = ("unrecognized arguments (not repeated here: one may hold a password); another "
+                       "database's address is read only from --url-from VARIABLE")
+        self.print_usage(sys.stderr)
+        self.exit(2, f"{self.prog}: error: {mask_urls_in_text(message)}\n")
 
 
 def _known(given: str | None) -> set[str]:
@@ -83,15 +108,21 @@ def _print_strays(strays: list) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    # No abbreviations: ``--url`` must not pass for ``--url-from`` (step 2 review L4).
+    parser = _Parser(description=__doc__.split("\n", 1)[0], allow_abbrev=False)
     parser.add_argument("action", choices=("check", "rows", "prove", "apply"))
-    parser.add_argument("--url", help="the database (default: this install's)")
+    parser.add_argument("--url-from", metavar="VARIABLE",
+                        help="the environment variable that holds the database's address (default: this install's)")
     parser.add_argument("--known", help="the spaces there are, comma-separated (default: the registry's)")
     parser.add_argument("--yes", action="store_true", help="apply without asking")
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    url = _url(args.url)
+    url = _url(args.url_from)
+    if args.url_from and not url:
+        print(f"The environment variable {args.url_from} is not set, or empty: no address to read.",
+              file=sys.stderr)
+        return 1
     if not url.startswith(("postgres://", "postgresql://")):
         print("Kazma's database is not Postgres here: there is no second lock to look at.", file=sys.stderr)
         return 1
@@ -130,6 +161,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     for change in done.changed:
         print(f"  {change}")
+    for problem in done.unresolved:
+        print(f"  [NOT IN PLACE] {problem}")
     for table in done.left:
         print(f"  [LEFT] {table}: its lock was not had in time; run this again when Kazma is idle")
     print("The rules are in place." if done.complete else "The rules are not all in place.")

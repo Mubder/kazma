@@ -203,6 +203,12 @@ def move_from_container(container: str, dest_url: str, *, port: int,
             said = ((done.stderr or "").strip().splitlines() or [""])[-1][:300]
             say(f"The restore failed (exit {done.returncode}): {said}")
             return False
+    from kazma_core.db.pg_backup import revoke_public_execute
+
+    problem = revoke_public_execute(dest_url)  # restored without privileges: PUBLIC's default (L3)
+    if problem:
+        say(f"   PUBLIC may still run Kazma's functions on the new server ({problem}): "
+            "python scripts/row_security.py apply takes it away.")
 
     if not tables:
         say("The container holds no Kazma table: nothing to compare.")

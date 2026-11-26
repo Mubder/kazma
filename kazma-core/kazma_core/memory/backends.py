@@ -710,6 +710,11 @@ class PgvectorBackend:
             from kazma_core.db.availability import is_kazma_database
 
             self._kazmas_database = is_kazma_database(self._dsn)
+        from kazma_core.memory.state_backend import _armed_door
+
+        held = _armed_door(self._kazmas_database)
+        if held is not None:
+            return held
         if self._kazmas_database:
             # Kazma's own database: which door it goes through is counted
             # (Spaces S4-01 step 1, report mode; nothing is refused).
@@ -1195,7 +1200,9 @@ def _pgvector_table_name(collection: str | None) -> str:
     """The table pgvector's vectors live in: the collection's name, letters,
     digits and ``_`` only."""
     default = "kazma_memory_vectors"
-    return "".join(c for c in (collection or default) if c.isalnum() or c == "_") or default
+    # Lower case, as Postgres folds the unquoted name it is made with (step 2
+    # review L1: the rules looked it up as written and found nothing).
+    return ("".join(c for c in (collection or default) if c.isalnum() or c == "_") or default).lower()
 
 
 def pgvector_table(cfg: dict[str, Any]) -> str | None:

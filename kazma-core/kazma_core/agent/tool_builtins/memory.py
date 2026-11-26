@@ -998,6 +998,7 @@ def register_memory_tools(registry: Any) -> None:
         # Returns its results even when empty: an empty result is a real
         # "no memories match", not a signal to consult a legacy store.
         try:
+            from kazma_core.memory.recall import MIRROR_UNREAD, MIRROR_UNREAD_LOCAL_WHOLE
             from kazma_core.memory.recall import recall as v2_recall
             from kazma_core.safety.hitl import get_current_tenant_id
 
@@ -1024,15 +1025,28 @@ def register_memory_tools(registry: Any) -> None:
                         "id": h.id, "content": content, "score": h.score,
                         "kind": kind, "source": h.source, "metadata": h.metadata,
                     })
+            # The mirror unread for the top-up is its own sentence: this
+            # install's memories were searched in full (recall-strict M1).
+            mirror = ""
+            if result.mirror_unread:
+                # "Searched in full" only when it was: not beside "keyword
+                # matches only" (recall-strict delta review Low 1).
+                whole = "" if result.degraded else f"; {MIRROR_UNREAD_LOCAL_WHOLE}"
+                mirror = f"{MIRROR_UNREAD[:1].upper()}{MIRROR_UNREAD[1:]}{whole}."
             if result.degraded:
                 # Not "nothing remembered": a search that could not look by
                 # meaning says so (Memory audit M16).
-                note = f"Memory search was incomplete ({result.degraded}); keyword matches only."
+                note = f"Memory search was incomplete ({result.degraded}); keyword matches only. {mirror}".rstrip()
                 if out:
                     return note + "\n" + json.dumps(out, ensure_ascii=False, indent=2), False
                 return note + " " + _RECALL_DEGRADED, True
             if out:
-                return json.dumps(out, ensure_ascii=False, indent=2), False
+                body = json.dumps(out, ensure_ascii=False, indent=2)
+                return (f"{mirror}\n{body}" if mirror else body), False
+            if mirror:
+                # The search ran in full here and found nothing: no failure
+                # (recall-strict review L3).
+                return f"No relevant memories found among this install's memories. {mirror}", True
             return "No relevant memories found.", True
         except Exception as exc:
             logger.warning("[memory_search] V2 recall failed: %s", exc)

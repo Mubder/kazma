@@ -126,6 +126,14 @@ class RecallResult:
     #: "whole" (it read every candidate) or "partial" (the budget ended first:
     #: the unread kept today's rule).
     rerank: str = ""
+    #: The Postgres mirror could not be read for the top-up of a thin local
+    #: result (an outage, no answer to its ping, or down since start): this
+    #: install's own memories were searched in full, other installs' were not
+    #: asked. Its own field, never ``degraded``: meaning search did not fall
+    #: short, and every reader of ``degraded`` says it did (recall-strict
+    #: review M1). An explicit search says it (:data:`MIRROR_UNREAD`); the
+    #: per-turn note and the quality page do not (:func:`recall_incomplete_note`).
+    mirror_unread: bool = False
 
     @property
     def empty(self) -> bool:
@@ -143,6 +151,17 @@ class RecallResult:
 #: found." -- a locked database or a Postgres outage told the user nothing was
 #: remembered (audit 2026-10-26 AUD-026, §26 G, Memory audit M11).
 RECALL_FAILED = "recall_failed:"
+
+#: What an explicit search (the memory tool) says when
+#: ``RecallResult.mirror_unread``: other installs' memories were not asked
+#: (§44: said, never read as "nothing more found"). A refusal is no outage:
+#: that recall fails (Spaces S4-01).
+MIRROR_UNREAD = ("memories other Kazma installs wrote could not be read just now (the Postgres mirror "
+                 "did not answer)")
+#: Said after :data:`MIRROR_UNREAD` only when meaning search did not fall
+#: short (``degraded`` is None): then this install's search was whole
+#: (recall-strict delta review Low 1).
+MIRROR_UNREAD_LOCAL_WHOLE = "this install's own memories were searched in full"
 
 
 def _failed_recall(code: str) -> RecallResult:
@@ -321,8 +340,8 @@ def recall(
         _BELIEF_KEEP.reset(keeps)
         _ENTRY_NAMES.reset(names)
         _QUERY_MEMO.reset(token)
-    if memo["degraded"] and result.degraded is None:
-        result.degraded = memo["degraded"]
+    if memo["degraded"] and not result.failed:
+        result.degraded = memo["degraded"] if result.degraded is None else f"{memo['degraded']}; {result.degraded}"
     if "rerank_read" in memo:
         result.rerank = "partial" if memo.get("rerank_unread") else "whole"
     result.listing = listing
@@ -930,22 +949,33 @@ def _recall(
         )
         # Multi-replica assist: merge sparse hits from Postgres state mirror
         # when local results are thin (does not replace SQLite FTS/dense).
+        mirror_unread = False
         if not local_only and (len(episodes) < limit or len(beliefs) < limit):
             try:
+                # On copies: a top-up that fails half way keeps none of its
+                # rows, as the answer says (recall-strict review L2).
                 episodes, beliefs = _merge_remote_state_hits(
                     query,
                     tenant_id=tenant_id,
                     limit=limit,
-                    episodes=episodes,
-                    beliefs=beliefs,
+                    episodes=list(episodes),
+                    beliefs=list(beliefs),
                     explain=bool(do_explain),
                     local_conn=conn,
                 )
-            except Exception:
+            except Exception as exc:
+                from kazma_core.db.pg_helpers import is_space_refusal
+
+                if is_space_refusal(exc):
+                    raise  # refused, not away: this recall fails and says so (S4-01 0b delta L-a)
+                # Away (§44: the mirror's connect said the outage once): this
+                # install's memories stand, and the answer says what it lacks.
                 logger.debug("[recall] remote state merge skipped", exc_info=True)
+                mirror_unread = True
         result = RecallResult(
             beliefs=beliefs, episodes=episodes,
             summaries=_recall_summaries(conn, query, tenant_id),
+            mirror_unread=mirror_unread,
         )
         # Phase A: bump access so macro_sleep promotion/retention is real.
         if not result.empty:
@@ -1266,7 +1296,7 @@ def _pg_primary_episodes(
     if need and callable(fetch):
         # The mirror answers 50 ids a call.
         for start in range(0, len(need), 50):
-            for row in fetch(need[start:start + 50], tenant_id=tenant_id) or []:
+            for row in fetch(need[start:start + 50], tenant_id=tenant_id, strict=True) or []:
                 if row.get("id"):
                     rows[str(row["id"])] = row
     # What this install forgot stays forgotten, whatever the shared store
@@ -1424,7 +1454,7 @@ def _pg_primary_beliefs(
         need = [bid for bid in ids if bid not in rows]
         if need and callable(fetch):
             for start in range(0, len(need), 50):
-                for row in fetch(need[start:start + 50], tenant_id=tenant_id) or []:
+                for row in fetch(need[start:start + 50], tenant_id=tenant_id, strict=True) or []:
                     if row.get("id"):
                         rows[str(row["id"])] = row
         return {bid: rows[bid] for bid in ids if bid in rows}
@@ -1630,14 +1660,22 @@ def _merge_remote_state_hits(
     from kazma_core.memory.query_terms import content_terms, coverage
     from kazma_core.memory.state_backend import (
         get_state_backend,
+        mirrors_to_postgres,
         search_state_beliefs,
         search_state_episodes,
         written_elsewhere,
     )
 
     be = get_state_backend()
-    if not getattr(be, "available", False) or getattr(be, "name", "") == "null":
+    if getattr(be, "name", "") == "null":
+        if mirrors_to_postgres():
+            # A configured mirror down since start comes back as the null
+            # backend: no mirror is not "no mirror" (recall-strict review L1).
+            raise ConnectionError("the memory mirror could not be reached")
         return episodes, beliefs
+    if not getattr(be, "available", False):
+        # A mirror that does not answer its ping is not "no more memories".
+        raise ConnectionError("the memory mirror did not answer")
 
     terms = _without_time_words(content_terms(query))
 
@@ -1664,7 +1702,8 @@ def _merge_remote_state_hits(
 
     seen_ep = {h.id for h in episodes}
     if len(episodes) < limit:
-        remote = search_state_episodes(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 2)
+        remote = search_state_episodes(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 2,
+                                       strict=True)
         held = _held_locally("episodes", [str(r.get("id") or "") for r in remote])
         for i, row in enumerate(remote):
             eid = str(row.get("id") or "")
@@ -1703,7 +1742,8 @@ def _merge_remote_state_hits(
 
     seen_b = {h.id for h in beliefs}
     if len(beliefs) < limit:
-        remote_b = search_state_beliefs(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 2)
+        remote_b = search_state_beliefs(" ".join(_search_words(query)), tenant_id=tenant_id, limit=limit * 2,
+                                        strict=True)
         held_b = _held_locally("beliefs", [str(r.get("id") or "") for r in remote_b])
         for i, row in enumerate(remote_b):
             bid = str(row.get("id") or "")
@@ -4663,7 +4703,14 @@ def recall_incomplete_note(result: RecallResult) -> str:
     (part F, framework audit F9): the supervisor read only "empty or not",
     so a recall that could not search by meaning, or could not search at
     all, looked like "nothing remembered". Empty when recall was whole. Put
-    OUTSIDE any fence by the caller (a registered turn note)."""
+    OUTSIDE any fence by the caller (a registered turn note).
+
+    The mirror unread (``RecallResult.mirror_unread``) is not this note's:
+    this install's memories were searched in full; on an install no other
+    install writes to the top-up adds nothing, and every turn of an outage
+    would hedge for no reason. The outage is said where it is (the mirror's
+    connect, ``database.away`` on Kazma's own Postgres) and in an explicit
+    search (recall-strict review M1)."""
     degraded = getattr(result, "degraded", None)  # a result that says nothing was whole
     if not degraded:
         return ""

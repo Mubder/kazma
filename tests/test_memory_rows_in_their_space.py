@@ -276,6 +276,7 @@ def test_the_probe_is_a_ping_of_the_install(mirror: Any) -> None:
 @pytest.mark.parametrize("method", ["fetch_episodes", "fetch_beliefs", "search_episodes", "search_beliefs"])
 def test_a_refused_read_is_never_nothing_found(mirror: Any, monkeypatch: pytest.MonkeyPatch, method: str) -> None:
     """Review 40: a refusal answered [] even on recall's strict path."""
+    from kazma_core.db import row_security
     from kazma_core.spaces.scope import NoSpaceBound
 
     def refused() -> Any:
@@ -285,7 +286,16 @@ def test_a_refused_read_is_never_nothing_found(mirror: Any, monkeypatch: pytest.
     monkeypatch.setattr(mirror, "_ensure", lambda: None)
     ask = getattr(mirror, method)
     args = (["e1"],) if method.startswith("fetch") else ("trip to kuwait",)
+    # Spaces off and nothing armed: as before. Its own state, whatever the
+    # suite runs as (KAZMA_TEST_SECOND_LOCK=armed arms every test).
+    monkeypatch.setattr(row_security, "_armed", False)
+    monkeypatch.setattr(scope, "_enforced", False)
     assert ask(*args, tenant_id="family") == [], "Spaces off: as before"
+    # Armed, Spaces not enforced: a refusal is one (S4-01 step 3 review M3).
+    monkeypatch.setattr(row_security, "_armed", True)
+    with pytest.raises(NoSpaceBound):
+        ask(*args, tenant_id="family")
+    monkeypatch.setattr(row_security, "_armed", False)
     monkeypatch.setattr(scope, "_enforced", True)
     with pytest.raises(NoSpaceBound):
         ask(*args, tenant_id="family")
@@ -717,3 +727,62 @@ def test_spaces_off_a_mirrored_fact_is_deleted_by_id_on_postgres(real_mirror: An
     assert real_mirror.mirror_belief(_fact(fact, "telegram:42")) is True
     assert real_mirror.delete_belief(fact, tenant_id="default") is True
     assert real_mirror.fetch_beliefs([fact], tenant_id="telegram:42") == []
+
+
+# ── S4-01 step 3: once armed, Kazma's own database through the shared door ──
+
+
+@pytest.mark.parametrize(("armed", "ours", "through_the_door"), [
+    (True, True, True),     # armed, Kazma's own database: the shared pool's door
+    (False, True, False),   # the control: not armed, today's own connection
+    (True, False, False),   # a database elsewhere is outside the lock
+])
+@pytest.mark.parametrize("store", ["mirror", "pgvector"])
+def test_once_armed_kazmas_database_is_reached_through_the_shared_door(
+        monkeypatch: pytest.MonkeyPatch, store: str, armed: bool, ours: bool, through_the_door: bool) -> None:
+    from kazma_core.db import row_security
+    from kazma_core.memory.backends import PgvectorBackend
+    from kazma_core.memory.state_backend import PostgresStateBackend
+
+    held, own = object(), object()
+
+    class _Pool:
+        def held_connection(self) -> Any:
+            return held
+
+    monkeypatch.setattr(row_security, "_armed", armed)
+    monkeypatch.setattr("kazma_core.db.postgres_pool.get_postgres_pool", lambda: _Pool())
+    dsn = f"postgresql://kazma@db.example/{uuid.uuid4().hex}"
+    if store == "mirror":
+        backend: Any = PostgresStateBackend(dsn)
+        backend._ours = backend._kazmas_database = ours
+        monkeypatch.setattr(backend, "_open_connection", lambda: own)
+    else:
+        import sys
+        from types import SimpleNamespace
+
+        backend = PgvectorBackend(dsn=dsn)
+        backend._kazmas_database = ours
+        # Its own connection, with or without the driver installed (CI's main job has none).
+        monkeypatch.setitem(sys.modules, "psycopg", SimpleNamespace(connect=lambda *a, **k: own))
+    assert (backend._connect() is held) is through_the_door
+
+
+def test_the_mirror_reads_its_policy_before_its_checkout(mirror: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """S4-01 step 3 delta review N2: inside the held connection a settings read
+    is a second checkout; with the install pool full it failed and the
+    conflict policy fell back to last_write_wins in silence."""
+    from kazma_core.memory import state_backend
+
+    order: list[str] = []
+    connect = mirror._connect
+    monkeypatch.setattr(mirror, "_connect", lambda: order.append("connect") or connect())
+    monkeypatch.setattr(mirror, "_ensure", lambda: None)
+    monkeypatch.setattr(state_backend, "state_region", lambda cfg=None: order.append("region") or "")
+    monkeypatch.setattr(state_backend, "state_conflict_policy",
+                        lambda cfg=None: order.append("policy") or "fail_closed")
+    mirror.mirror_belief(_fact("b9", "family"))
+    assert order[:3] == ["region", "policy", "connect"], order
+    order.clear()
+    mirror.mirror_episode_rows([{"id": "e9", "tenant_id": "family", "user_text": "x"}])
+    assert order[:3] == ["region", "policy", "connect"], order

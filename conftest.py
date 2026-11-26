@@ -204,7 +204,7 @@ os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 # load itself. The first recall that wants it loads it instead (and a test
 # that reaches it is the guard's to report).
 os.environ.setdefault("KAZMA_EMBEDDER_PREWARM", "0")
-pytest_plugins = ["tests._egress_guard"]
+pytest_plugins = ["tests._egress_guard", "tests._second_lock_armed"]
 
 # Force the sqlite backend and strip every DSN variant BEFORE any kazma
 # module can read them.

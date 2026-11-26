@@ -108,7 +108,7 @@ an install with one account behaves as before.
   row security, policies, rights incl. PUBLIC's, schema CREATE, default
   privileges, views, SECURITY DEFINER functions); `space_rows` lists rows
   whose space the registry does not know (M6) and `prove` adds a connection
-  as the role (`_space_conninfo`: the address's own options kept, the role
+  as the role (`space_conninfo`: the address's own options kept, the role
   last, M10). A table made later gets its rule as it is made
   (`ensure_schema` -> `apply_made_tables`; the checkpointer after `setup()`),
   only once `apply` succeeded in this process (`in_place`) and only in a
@@ -121,7 +121,75 @@ an install with one account behaves as before.
   `tests/test_pg_row_security.py` (the role file and its repairs, apply
   once, each planted difference, a space's own rows only, no space raises,
   M6, the refusals, a dump's lock left, tables made later, dump, restore,
-  the upgrade's copy, the rehearsal, the remove file).
+  the upgrade's copy, the rehearsal, the remove file). Step 2 review: how
+  Kazma's login holds the role has one answer, `_membership`, read from
+  `pg_auth_members` (`pg_has_role` says yes for a superuser and for a
+  PostgreSQL 16 creator's own grant, which has no SET); `apply` grants it
+  explicitly and is not `complete` while a role, function or schema finding
+  remains (`Applied.unresolved`); a grant or function it may not touch is
+  said, never raised. The policies call `public.kazma_space_id()`, which
+  PUBLIC may not run (a reader set up to run no function stays one), nor
+  any function of `KAZMA_PG_FUNCTIONS`: each DDL revokes it, `apply` does,
+  and every whole restore (the upgrade's and the move's copies, the compose
+  upgrade, the migration bundle's import) calls
+  `pg_backup.revoke_public_execute` after, which fails when PUBLIC still may
+  (delta review N1, N4). `rows`
+  and `prove` read a database the rules never reached (a missing rule column
+  is the owner's rows) and count every space's table in full: on live, when
+  it is idle. `scripts/row_security.py` takes another address only from an
+  environment variable it is named (`--url-from`), never its command line
+  (§26 D); `kazma doctor` gives it one line while nothing is armed.
+- **Once armed, the shared pool has a space half** (S4-01 step 3,
+  `db/postgres_pool.py`, `db/row_security.py`; nothing arms it yet but tests:
+  `row_security.armed()`, step 6 arms at start). `PostgresPool.connection`
+  asks `row_security.checkout_space()`: nothing said is `NoSpaceBound` before
+  anything is sent; the install's door is the owner's pool as today; a
+  space's goes to a second pool on the same address that signs in as
+  `kazma_space` (`space_conninfo`; every new connection checked to be that
+  role, M10), as large as the install's (M2), and opens the transaction with
+  `BEGIN; SELECT set_config('kazma.space', ...)` in one message, its result
+  read (M3). After that transaction ends the checkout refuses a second one
+  (M4); an install checkout inside a space one is refused unless declared
+  (`install_inside_a_space`, M13); a space half that cannot sign in while
+  the owner can is its own problem, said, not §44's outage (M1). Those
+  refusals are `NoSpaceBound`s: no other store answers for them (H2). The
+  step 3 review: the checkout's one message also reads `current_user`, and
+  a connection that is not `kazma_space` is closed and refused
+  (`_NotTheSpaceRole`); the pool's reset (`end_space`) sends `CLOSE ALL;
+  UNLISTEN *; SELECT pg_advisory_unlock_all(); RESET ALL; RESET ROLE;
+  DISCARD TEMP` -- a session `SET ROLE NONE` a checkout left made the next
+  checkout, in another space, the owner (`RESET ALL` leaves the role), and a
+  cursor held past its commit read the first space's rows into the next
+  (M1, delta N1); not `DISCARD ALL`, which drops psycopg's prepared
+  statements. Settings statements are declared inside a space checkout (the
+  space role holds none of the settings table's locks), and only
+  `ConfigStore._pg_access` may declare one (a gate, delta N2); the mirror
+  reads its region and conflict policy before its checkout (M2, N2). Armed, a refusal is one whether or not
+  Spaces is enforced (`pg_helpers._space_refusal`, M3). A cursor of the
+  ended transaction is refused too (L1); a held connection rolls back what
+  its store left open (L2); a failed space checkout is judged once a minute
+  and said as a refused sign-in, connections of another role or a full
+  pool (L3); a row of no space's shape is refused before a connection
+  (`_NotASpace`, L4); a space checkout inside another is refused unless
+  declared (`space_inside_a_space`, L5); while not armed, a workload's
+  statements reach the server and nothing more, recorded on the wire by a
+  proxy (L7, delta N3). After a deploy,
+  read `scripts/space_doors_report.py --since <the deploy's time>`: older
+  entries say `none` and are listed as new (L6). Not
+  armed, the pool takes today's path and opens no space half. The workers'
+  metrics table, which has no space, is the install's
+  (`TaskStore.record_worker_metric` and its two readers); so is the chat
+  store's whole read into its one cache (`_load_all_from_primary`):
+  `KNOWN_OPEN` is empty. The memory mirror and pgvector on Kazma's own
+  database take the shared door once armed (`PostgresPool.held_connection`,
+  a checkout held until `close()`, tuple rows); elsewhere they stay outside
+  the lock. Gates: `tests/test_pg_space_pool.py` (the doors, real Postgres,
+  each with its control) and `tests/test_pg_armed_flows.py` (documents,
+  swarm, chats and the mirror armed and enforced, seeded as requests bind:
+  each space reads its own; not armed as the control).
+  `KAZMA_TEST_SECOND_LOCK=armed` runs any Postgres suite armed
+  (`tests/_second_lock_armed.py`); a test there that reaches the database
+  with nothing bound fails, and binding every test is step 5's.
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner

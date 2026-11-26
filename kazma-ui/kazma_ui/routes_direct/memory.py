@@ -474,6 +474,7 @@ def register_memory_routes(self: Any) -> None:
                 "query": query,
                 "empty": result.empty,
                 "degraded": result.degraded,
+                "mirror_unread": result.mirror_unread,
                 "hints": hints,
                 "beliefs": [
                     {

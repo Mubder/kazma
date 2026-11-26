@@ -28,7 +28,7 @@ holds what the database needs for it, and nothing uses it at run time yet:
   the registry knows; on a connection as the space role each policy table is
   under row security, raises with nothing set, and shows nothing of a space
   that does not exist.
-* :func:`_space_conninfo` -- the one function that builds the space
+* :func:`space_conninfo` -- the one function that builds the space
   connection's address (decision 5; review M10: the address's own options and
   ``PGOPTIONS`` kept, the role last).
 
@@ -47,6 +47,7 @@ as today. Grants are lost on a restore; :func:`apply` puts them back.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import re
@@ -82,6 +83,9 @@ SPACE_FUNCTION = "kazma_space_id"
 POLICY = "kazma_space_rows"
 #: The checkpoint tables' space (review L9), filled by its default.
 SPACE_COLUMN = "space_id"
+
+#: What puts a missing piece in place.
+_APPLY = "python scripts/row_security.py apply"
 
 #: The owner's space: an empty or missing space is the owner's (N19).
 _OWNER_SPACE = "default"
@@ -196,7 +200,7 @@ def _role_option() -> str:
     return f"-c role={SPACE_ROLE}"
 
 
-def _space_conninfo(url: str, environ: Mapping[str, str] | None = None) -> str:
+def space_conninfo(url: str, environ: Mapping[str, str] | None = None) -> str:
     """The space connection's address: *url* with the role as a start option.
 
     The address's own ``options`` and ``PGOPTIONS`` (a ``search_path``, a
@@ -228,7 +232,7 @@ def _space_connect(url: str) -> Any:
     """A connection as the space role, for :func:`prove` only."""
     import psycopg
 
-    return psycopg.connect(_space_conninfo(url), autocommit=False, connect_timeout=10)
+    return psycopg.connect(space_conninfo(url), autocommit=False, connect_timeout=10)
 
 
 def _one(cur: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
@@ -249,7 +253,7 @@ def _quoted(table: str) -> str:
 
 
 def _policy_sql(table: str, rule: Rule) -> str:
-    match = f"{rule.expression} = (SELECT {SPACE_FUNCTION}())"
+    match = f"{rule.expression} = (SELECT public.{SPACE_FUNCTION}())"
     return (f"CREATE POLICY {POLICY} ON {_quoted(table)} AS PERMISSIVE FOR ALL TO PUBLIC "
             f"USING ({match}) WITH CHECK ({match})")
 
@@ -261,10 +265,10 @@ def _same_expression(stored: str | None, rule: Rule) -> bool:
     """A policy's stored text against the rule's, as Postgres prints it back
     (casts and brackets added, the sub-select named)."""
     def norm(text: str) -> str:
-        text = _CASTS.sub("", text.lower()).replace(f" as {SPACE_FUNCTION}", "")
+        text = _CASTS.sub("", text.lower()).replace(f" as {SPACE_FUNCTION}", "").replace("public.", "")
         return re.sub(r"[\s()]", "", text)
 
-    want = f"{rule.expression} = (SELECT {SPACE_FUNCTION}())"
+    want = f"{rule.expression} = (SELECT public.{SPACE_FUNCTION}())"
     return stored is not None and norm(stored) == norm(want)
 
 
@@ -312,31 +316,69 @@ def _role_findings(cur: Any) -> list[Finding]:
     if parents:
         out.append(Finding(SPACE_ROLE, f"the role is a member of {', '.join(parents)}: it would count as them",
                            "run deploy/postgres/kazma_app_role.sql as the superuser"))
-    if _version(cur) >= 160000:
-        member = _rows(cur, "SELECT m.inherit_option, m.set_option FROM pg_auth_members m "
-                            "WHERE m.roleid = %s AND m.member = (SELECT oid FROM pg_roles WHERE rolname = session_user)",
-                       (role[0],))
-        if not member:
-            out.append(Finding(SPACE_ROLE, "Kazma's login is not a member of the role",
-                               "run deploy/postgres/kazma_app_role.sql as the superuser"))
-        elif member[0][0] or not member[0][1]:
-            out.append(Finding(SPACE_ROLE, "Kazma's login holds the role with INHERIT or without SET",
-                               "run deploy/postgres/kazma_app_role.sql as the superuser"))
-    elif not _one(cur, "SELECT pg_has_role(session_user, %s, 'MEMBER')", (SPACE_ROLE,)):
-        out.append(Finding(SPACE_ROLE, "Kazma's login is not a member of the role",
-                           "run deploy/postgres/kazma_app_role.sql as the superuser"))
+    wrong = _membership(cur, role[0])
+    if wrong:
+        out.append(Finding(SPACE_ROLE, f"Kazma's login {wrong}",
+                           "run deploy/postgres/kazma_app_role.sql as the superuser, or apply as a login that may "
+                           "grant the role"))
     return out
 
 
-def _function_findings(cur: Any) -> list[Finding]:
+_LOGIN = "(SELECT oid FROM pg_roles WHERE rolname = session_user)"
+
+
+def _membership(cur: Any, role_oid: Any) -> str:
+    """How Kazma's login holds the space role: ``""`` when as it must (it may
+    switch to it and inherits none of its rights), else what is wrong. One
+    answer, read from ``pg_auth_members`` for every grant: ``pg_has_role``
+    says yes for a superuser always, and on PostgreSQL 16 for a CREATEROLE
+    login's own automatic grant, which has no SET (step 2 review M2)."""
+    if _version(cur) >= 160000:
+        grants = _rows(cur, f"SELECT inherit_option, set_option FROM pg_auth_members "  # noqa: S608  # nosec B608 - a fixed sub-select
+                            f"WHERE roleid = %s AND member = {_LOGIN}", (role_oid,))
+        if any(inherit for inherit, _set in grants):
+            return "holds the role with INHERIT"
+        if not any(may_set for _inherit, may_set in grants):
+            return "is not a member of the role with SET"
+        return ""
+    held = _one(cur, f"SELECT count(*) FROM pg_auth_members WHERE roleid = %s AND member = {_LOGIN}",  # noqa: S608  # nosec B608 - a fixed sub-select
+                (role_oid,))
+    return "" if held else "is not a member of the role"
+
+
+def _function_state(cur: Any) -> str:
+    """``""`` when the policies' function is Kazma's, else what it is not."""
     found = _rows(cur, "SELECT prosrc, provolatile, proparallel, prosecdef FROM pg_proc "
                        "WHERE oid = to_regprocedure(%s)", (f"public.{SPACE_FUNCTION}()",))
     if not found:
-        return [Finding(f"{SPACE_FUNCTION}()", "the function does not exist", "kazma's apply makes it")]
+        return "the function does not exist"
     src, volatile, parallel, definer = found[0]
     if _body(KAZMA_PG_FUNCTIONS[SPACE_FUNCTION]) != str(src).strip() or volatile != "s" or parallel != "s" or definer:
-        return [Finding(f"{SPACE_FUNCTION}()", "the function is not Kazma's", "kazma's apply makes it again")]
-    return []
+        return "the function is not Kazma's"
+    return ""
+
+
+def _function_findings(cur: Any) -> list[Finding]:
+    name = f"public.{SPACE_FUNCTION}()"
+    state = _function_state(cur)
+    if state:
+        return [Finding(name, state, _APPLY)]
+    out: list[Finding] = []
+    if _role_row(cur) is not None and not _one(cur, "SELECT has_function_privilege(%s, %s, 'EXECUTE')",
+                                               (SPACE_ROLE, name)):
+        out.append(Finding(name, "the space role may not run the function its policies call", _APPLY))
+    return out
+
+
+def _public_findings(cur: Any) -> list[Finding]:
+    """Each function of Kazma's PUBLIC may run: a note (step 2 review L3)."""
+    return [Finding(name, "PUBLIC may run the function: a reader that may run no function is refused "
+                          "Kazma's database", _APPLY, blocking=False) for name in _public_functions(cur)]
+
+
+def _public_functions(cur: Any) -> list[str]:
+    """Kazma's functions there are that PUBLIC may run."""
+    return [name for name in (f"public.{fn}()" for fn in KAZMA_PG_FUNCTIONS) if _public_may_run(cur, name)]
 
 
 def _body(ddl: str) -> str:
@@ -385,20 +427,20 @@ def _table_findings(cur: Any, table: str, rule: Rule, role: bool) -> list[Findin
     policies = _policies(cur, table)
     if rule.kind == _SPACE:
         if rule.column and not _has_column(cur, table, rule.column):
-            out.append(Finding(table, f"no {rule.column} column", "kazma's apply adds it"))
+            out.append(Finding(table, f"no {rule.column} column", _APPLY))
         if not enabled:
-            out.append(Finding(table, "row security is off", "kazma's apply turns it on"))
+            out.append(Finding(table, "row security is off", _APPLY))
         ours = [p for p in policies if p[0] == POLICY]
         if not ours:
-            out.append(Finding(table, "Kazma's policy is missing", "kazma's apply makes it"))
+            out.append(Finding(table, "Kazma's policy is missing", _APPLY))
         else:
             name, cmd, permissive, public, qual, check = ours[0]
             if cmd != "*" or not permissive or not public or not _same_expression(qual, rule) \
                     or not _same_expression(check, rule):
                 out.append(Finding(table, "Kazma's policy is not the rule's (command, roles or text)",
-                                   "kazma's apply makes it again"))
+                                   _APPLY))
     elif enabled:
-        out.append(Finding(table, "row security is on for a table with no policy rule", "kazma's apply turns it off"))
+        out.append(Finding(table, "row security is on for a table with no policy rule", _APPLY))
     if forced:
         out.append(Finding(table, "row security is forced: dumps fail and the owner sees nothing",
                            "ALTER TABLE ... NO FORCE ROW LEVEL SECURITY as the owner"))
@@ -412,12 +454,12 @@ def _table_findings(cur: Any, table: str, rule: Rule, role: bool) -> list[Findin
         if held != want:
             out.append(Finding(table, f"the space role may {', '.join(sorted(held)) or 'do nothing'}; the rule "
                                       f"says {', '.join(sorted(want)) or 'nothing'}",
-                               "kazma's apply grants the rule's; a PUBLIC grant is revoked by the owner"))
+                               "python scripts/row_security.py apply; a PUBLIC grant is revoked by the owner"))
         if "INSERT" in want:
             for seq in _owned_sequences(cur, table):
                 if not _one(cur, "SELECT has_sequence_privilege(%s, %s, 'USAGE')", (SPACE_ROLE, seq)):
                     out.append(Finding(seq, "the space role may not use the sequence of its inserts",
-                                       "kazma's apply grants it"))
+                                       _APPLY))
     return out
 
 
@@ -425,7 +467,7 @@ def _schema_findings(cur: Any, all_rules: dict[str, Rule], role: bool) -> list[F
     out: list[Finding] = []
     if role:
         if not _one(cur, "SELECT has_schema_privilege(%s, 'public', 'USAGE')", (SPACE_ROLE,)):
-            out.append(Finding("schema public", "the space role may not use the schema", "kazma's apply grants it"))
+            out.append(Finding("schema public", "the space role may not use the schema", _APPLY))
         if _one(cur, "SELECT has_schema_privilege(%s, 'public', 'CREATE')", (SPACE_ROLE,)):
             out.append(Finding("schema public", "the space role may create in the schema (review L3)",
                                "REVOKE CREATE ON SCHEMA public FROM PUBLIC as the owner"))
@@ -462,7 +504,7 @@ def _schema_findings(cur: Any, all_rules: dict[str, Rule], role: bool) -> list[F
 def _findings(cur: Any, all_rules: dict[str, Rule]) -> list[Finding]:
     out = _role_findings(cur)
     role = _role_row(cur) is not None
-    out += _function_findings(cur)
+    out += _function_findings(cur) + _public_findings(cur)
     for table in _present(cur, all_rules):
         out += _table_findings(cur, table, all_rules[table], role)
     return out + _schema_findings(cur, all_rules, role)
@@ -486,10 +528,13 @@ class Applied:
     changed: list[str] = field(default_factory=list)
     left: list[str] = field(default_factory=list)
     refused: str = ""
+    #: What still keeps the lock from holding after the pass (the role, its
+    #: membership, the function): said, never "complete" (step 2 review M2).
+    unresolved: list[str] = field(default_factory=list)
 
     @property
     def complete(self) -> bool:
-        return not self.refused and not self.left
+        return not self.refused and not self.left and not self.unresolved
 
 
 _in_place = False
@@ -518,21 +563,59 @@ def _not_the_owner(cur: Any, login: str, tables: list[str]) -> list[str]:
 
 
 def _make_role(cur: Any, version: int) -> list[str]:
-    """The role and Kazma's login's membership, when the login may make roles
-    (a compose install that signs in as the superuser). Otherwise the role
-    file does it (``deploy/postgres/kazma_app_role.sql``)."""
+    """The role, when the login may make roles (a compose install that signs
+    in as the superuser; otherwise the role file makes it), and Kazma's
+    login's membership as it must be (:func:`_membership`), granted
+    explicitly. A grant the login may not make is left for the role file and
+    said in the result, never raised (step 2 review M2, L5)."""
+    import psycopg
+
     done: list[str] = []
     if _role_row(cur) is None:
         cur.execute(f"CREATE ROLE {SPACE_ROLE} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION "
                     "NOBYPASSRLS NOINHERIT")
         done.append(f"made the role {SPACE_ROLE}")
-    if not _one(cur, "SELECT pg_has_role(session_user, %s, 'MEMBER')", (SPACE_ROLE,)):
-        if version >= 160000:
-            cur.execute(f"GRANT {SPACE_ROLE} TO SESSION_USER WITH INHERIT FALSE, SET TRUE")
-        else:
-            cur.execute(f"GRANT {SPACE_ROLE} TO SESSION_USER")
+    role = _role_row(cur)
+    state = _membership(cur, role[0]) if role is not None else ""
+    if role is None or state not in ("is not a member of the role with SET", "is not a member of the role"):
+        return done  # held as it must be, or with INHERIT, which only the role file mends
+    grant = (f"GRANT {SPACE_ROLE} TO SESSION_USER WITH INHERIT FALSE, SET TRUE" if version >= 160000
+             else f"GRANT {SPACE_ROLE} TO SESSION_USER")
+    try:
+        with cur.connection.transaction():
+            cur.execute(grant)
         done.append(f"made Kazma's login a member of {SPACE_ROLE}")
+    except psycopg.errors.InsufficientPrivilege:
+        logger.warning("[row_security] Kazma's login may not grant itself %s: the role file does", SPACE_ROLE)
     return done
+
+
+def _make_function(cur: Any) -> list[str]:
+    """The policies' function, as Kazma's (made again when it is not), which
+    the space role may run; PUBLIC may run none of Kazma's functions: a
+    reader of Kazma's database that may run no function stays one (step 2
+    review L3)."""
+    done: list[str] = []
+    if _function_state(cur):  # missing, or not Kazma's: made again (a right alone is only granted)
+        cur.execute(KAZMA_PG_FUNCTIONS[SPACE_FUNCTION])
+        done.append(f"made {SPACE_FUNCTION}()")
+    name = f"public.{SPACE_FUNCTION}()"
+    # PUBLIC's first: while PUBLIC may run it, so may the role, and its own
+    # grant would look done (a whole copy restores it with PUBLIC's default).
+    for public in _public_functions(cur):
+        cur.execute(f"REVOKE EXECUTE ON FUNCTION {public} FROM PUBLIC")
+        if not _public_may_run(cur, public):  # another role's function only warns: check's note says it
+            done.append(f"PUBLIC may no longer run {public}")
+    if not _one(cur, "SELECT has_function_privilege(%s, %s, 'EXECUTE')", (SPACE_ROLE, name)):
+        cur.execute(f"GRANT EXECUTE ON FUNCTION {name} TO {SPACE_ROLE}")
+        done.append(f"{SPACE_ROLE} may run {name}")
+    return done
+
+
+def _public_may_run(cur: Any, name: str) -> bool:
+    return bool(_one(cur, "SELECT EXISTS (SELECT 1 FROM pg_proc p, aclexplode(coalesce(p.proacl, "
+                          "acldefault('f', p.proowner))) a WHERE p.oid = to_regprocedure(%s) AND a.grantee = 0)",
+                     (name,)))
 
 
 @contextmanager
@@ -590,6 +673,23 @@ def _apply_table(cur: Any, table: str, rule: Rule) -> list[str]:
     return done
 
 
+def _grant_schema(cur: Any, login: str) -> list[str]:
+    """The space role's use of the schema. A login that may not grant it (the
+    schema is another role's) leaves it to that role, said in the result
+    (step 2 review L5)."""
+    import psycopg
+
+    if _one(cur, "SELECT has_schema_privilege(%s, 'public', 'USAGE')", (SPACE_ROLE,)):
+        return []
+    try:
+        with cur.connection.transaction():
+            cur.execute(f"GRANT USAGE ON SCHEMA public TO {SPACE_ROLE}")
+    except psycopg.errors.InsufficientPrivilege:
+        logger.warning("[row_security] %s may not let %s use the schema public: its owner does", login, SPACE_ROLE)
+        return []
+    return [f"{SPACE_ROLE} may use the schema"]
+
+
 def _lock_wait(exc: BaseException) -> bool:
     return getattr(exc, "sqlstate", None) == "55P03"
 
@@ -606,6 +706,8 @@ def apply(url: str, *, tables: Iterable[str] | None = None, vector_table: str | 
     it (a dump's lock must not queue every reader behind ours: review M15),
     *tries* times, all within *budget_s*; a table not taken is in ``left``.
     """
+    import psycopg
+
     all_rules = rules(vector_table if vector_table is not None else _configured_vector_table())
     wanted = [t for t in (tables if tables is not None else all_rules) if t in all_rules]
     result = Applied()
@@ -625,12 +727,19 @@ def apply(url: str, *, tables: Iterable[str] | None = None, vector_table: str | 
                 logger.warning("[row_security] the rules were not put in place: %s", result.refused)
                 return result
             result.changed += _make_role(cur, _version(cur))
-            if _function_findings(cur):
-                cur.execute(KAZMA_PG_FUNCTIONS[SPACE_FUNCTION])
-                result.changed.append(f"made {SPACE_FUNCTION}()")
+            try:
+                with conn.transaction():
+                    result.changed += _make_function(cur)
+            except psycopg.errors.InsufficientPrivilege:
+                result.refused = (f"{SPACE_FUNCTION}() belongs to another role: its owner, or the superuser, "
+                                  "drops it, and the next pass makes it Kazma's")
+                logger.warning("[row_security] the rules were not put in place: %s", result.refused)
+                return result
+            result.changed += _grant_schema(cur, login)
+            result.unresolved = [f"{f.subject}: {f.problem}" for f in _role_findings(cur) + _function_findings(cur)
+                                 if f.blocking]
             if not _one(cur, "SELECT has_schema_privilege(%s, 'public', 'USAGE')", (SPACE_ROLE,)):
-                cur.execute(f"GRANT USAGE ON SCHEMA public TO {SPACE_ROLE}")
-                result.changed.append(f"{SPACE_ROLE} may use the schema")
+                result.unresolved.append("schema public: the space role may not use the schema")
         for table in present:
             if not _take(conn, table, all_rules[table], result, lock_timeout_ms, tries, deadline):
                 result.left.append(table)
@@ -726,7 +835,11 @@ def _strays(cur: Any, table: str, rule: Rule, known: set[str]) -> list[StrayRows
     from kazma_core.spaces.scope import valid_space_id
 
     # A name from the rules, quoted; the expression is the rule's own text.
-    sql = f"SELECT {rule.expression} AS space, count(*) FROM {_quoted(table)} GROUP BY 1"  # noqa: S608  # nosec B608 - a rule's table, quoted
+    # Before the rules were ever put in place the checkpoints have no space
+    # column: every row there is the owner's, as it will be once it is added
+    # (step 2 review M1: the check this exists for failed on live).
+    space = rule.expression if not rule.column or _has_column(cur, table, rule.column) else f"'{_OWNER_SPACE}'"
+    sql = f"SELECT {space} AS space, count(*) FROM {_quoted(table)} GROUP BY 1"  # noqa: S608  # nosec B608 - a rule's table, quoted
     out: list[StrayRows] = []
     for space, count in _rows(cur, sql):
         space = str(space)
@@ -740,7 +853,8 @@ def _strays(cur: Any, table: str, rule: Rule, known: set[str]) -> list[StrayRows
 def space_rows(url: str, known: Iterable[str], *, vector_table: str | None = None) -> list[StrayRows]:
     """Every row whose space the registry does not know, by table and space,
     as the owner and read-only (review M6). An empty list is the answer the
-    lock needs before it may be armed: such rows would be no space's."""
+    lock needs before it may be armed: such rows would be no space's. It
+    groups every space's table in full (L8: on a live install, when idle)."""
     all_rules = rules(vector_table if vector_table is not None else _configured_vector_table())
     spaces = set(known)
     out: list[StrayRows] = []
@@ -832,16 +946,24 @@ def prove(url: str, known: Iterable[str], *, vector_table: str | None = None) ->
     (:func:`space_rows`), and on a connection as the space role each space's
     table is under row security, raises with no space set, and shows nothing
     of a space that does not exist while its owner counts its rows. The
-    install's tables are refused to it. Nothing is written; each statement on
-    the space connection is rolled back.
+    install's tables are refused to it. Nothing is written: the space
+    connection only reads, and each of its transactions ends there. It
+    counts and groups every space's table in full as the owner (L8: run it on
+    a live install when it is idle).
     """
     import psycopg
 
     table = vector_table if vector_table is not None else _configured_vector_table()
     all_rules = rules(table)
     proof = Proof(findings=check(url, vector_table=table or ""), strays=space_rows(url, known, vector_table=table or ""))
-    if any(f.subject == SPACE_ROLE for f in proof.findings if f.blocking):
-        proof.failed.append("the space role is missing or wrong: nothing could be read as it")
+    # What stopped it, in the finding's own words (delta review N2).
+    role = [f.problem for f in proof.findings if f.subject == SPACE_ROLE and f.blocking]
+    if role:
+        proof.failed.append(f"the space role ({'; '.join(role)}): nothing could be read as it")
+        return proof
+    function = [f.problem for f in proof.findings if f.subject == f"public.{SPACE_FUNCTION}()" and f.blocking]
+    if function:
+        proof.failed.append(f"the policies' function ({'; '.join(function)}): no space could be read")
         return proof
     with _owner_connect(url, autocommit=True) as conn, conn.cursor() as cur:
         counts = {t: int(_one(cur, f"SELECT count(*) FROM {_quoted(t)}"))  # noqa: S608  # nosec B608 - a rule's table, quoted
@@ -852,3 +974,304 @@ def prove(url: str, known: Iterable[str], *, vector_table: str | None = None) ->
     except psycopg.OperationalError as exc:
         proof.failed.append(f"Kazma's login could not sign in as {SPACE_ROLE} ({type(exc).__name__})")
     return proof
+
+
+# ── the space half of a pool (S4-01 step 3; armed in tests only) ────────
+#
+# Once armed, a checkout of Kazma's own database asks whose statements these
+# are: a space's go to a pool that signs in as the space role, with the
+# space set for the transaction; the install's to the owner's pool as today;
+# nothing said is refused before anything is sent (design 3 and 6). Nothing
+# arms it yet but tests: arming at start is step 6. Not armed, a pool takes
+# today's path and sends nothing more.
+
+_armed = False
+
+
+def armed() -> bool:
+    """True once the second lock is armed in this process."""
+    return _armed
+
+
+def _arm(value: bool = True) -> None:
+    """Arm (or disarm) the second lock in this process: tests now, the
+    server's start in step 6, after :func:`apply` and :func:`prove`."""
+    global _armed
+    _armed = value
+
+
+def _refusal_base() -> type:
+    from kazma_core.spaces.scope import NoSpaceBound
+
+    return NoSpaceBound
+
+
+class _SecondTransaction(_refusal_base()):  # type: ignore[misc]
+    """A statement after the checkout's own transaction ended: it has no
+    space, and the policy would answer it with nothing found when no row is
+    reached (review M4). A refusal (``NoSpaceBound``): no other store answers
+    for it (H2)."""
+
+
+class _NestedInstallCheckout(_refusal_base()):  # type: ignore[misc]
+    """An install checkout while this context holds a space one: a space
+    transaction holding a lock the install's statement waits for would wait
+    for good, and Postgres sees no deadlock (review M13). A refusal, like
+    ``NoSpaceBound``."""
+
+
+class _NestedSpaceCheckout(_refusal_base()):  # type: ignore[misc]
+    """A space checkout while this context holds one: the second connection
+    can wait for a lock the first holds (a ``FOR UPDATE`` row), for good
+    (step 3 review L5). A refusal, unless :func:`space_inside_a_space`
+    declares it."""
+
+
+class _NotASpace(_refusal_base()):  # type: ignore[misc]
+    """A space id of no space's shape: refused before a connection is asked
+    for (step 3 review L4)."""
+
+
+class _NotTheSpaceRole(_refusal_base()):  # type: ignore[misc]
+    """A space checkout's connection was not the space role: a role a
+    checkout set for its session, or a pooler. Closed and refused, never used
+    (step 3 review M1)."""
+
+
+#: The space a checkout of this context holds, while it holds one.
+_holding: contextvars.ContextVar[str] = contextvars.ContextVar("kazma_space_checkout", default="")
+#: Why an install checkout inside a space one is declared safe, when it is.
+_nested_said: contextvars.ContextVar[str] = contextvars.ContextVar("kazma_nested_install", default="")
+#: Why a space checkout inside a space one is declared safe, when it is.
+_nested_space_said: contextvars.ContextVar[str] = contextvars.ContextVar("kazma_nested_space", default="")
+
+
+def checkout_space() -> str:
+    """Whose statements a checkout of Kazma's own database is for, once armed:
+    a space's id, or ``""`` for the install's (said by
+    ``row_work.install_statements`` or ``scope.install_work``).
+
+    Nothing said raises ``NoSpaceBound`` before any statement is sent (design
+    6.1): no fallback to the owner's space. A space id of no space's shape
+    raises :class:`_NotASpace` (L4). While this context holds a space
+    checkout, another checkout raises -- :class:`_NestedInstallCheckout`
+    (review M13) or :class:`_NestedSpaceCheckout` (step 3 review L5) --
+    unless :func:`install_inside_a_space` or :func:`space_inside_a_space`
+    declares it. No I/O."""
+    from kazma_core.spaces.row_work import Door
+    from kazma_core.spaces.scope import NoSpaceBound, valid_space_id
+
+    door = Door.now()
+    if door is None:
+        raise NoSpaceBound("a statement to Kazma's database said no space and no install door: refused before "
+                           "it was sent (Spaces S4-01)")
+    held = _holding.get()
+    if door.space:
+        if not valid_space_id(door.space):
+            raise _NotASpace(f"not a space id: {door.space!r}")
+        if held and not _nested_space_said.get():
+            raise _NestedSpaceCheckout(f"a checkout of space {door.space} while this context holds one of "
+                                       f"space {held}")
+        return door.space
+    if held and not _nested_said.get():
+        raise _NestedInstallCheckout(f"an install checkout while this context holds a checkout of space {held}")
+    return ""
+
+
+@contextmanager
+def _declared(var: contextvars.ContextVar[str], reason: str) -> Iterator[None]:
+    if not reason.strip():
+        raise ValueError("a declared nested checkout needs its reason")
+    token = var.set(reason.strip())
+    try:
+        yield
+    finally:
+        var.reset(token)
+
+
+@contextmanager
+def install_inside_a_space(reason: str) -> Iterator[None]:
+    """Declare an install checkout made while a space one is held safe:
+    *reason* says why no lock of the space transaction is waited for."""
+    with _declared(_nested_said, reason):
+        yield
+
+
+@contextmanager
+def space_inside_a_space(reason: str) -> Iterator[None]:
+    """Declare a space checkout made while another is held safe: *reason*
+    says why the second waits for no lock the first holds."""
+    with _declared(_nested_space_said, reason):
+        yield
+
+
+@contextmanager
+def holding(space: str) -> Iterator[None]:
+    """This context holds a checkout of *space* for the block (M13)."""
+    token = _holding.set(space)
+    try:
+        yield
+    finally:
+        _holding.reset(token)
+
+
+_space_class: type | None = None
+
+
+def space_connection_class() -> type:
+    """The space half's connection: after its checkout's transaction ends
+    (a commit or a rollback), the next statement is refused, never run with
+    no space (review M4). Reset when the pool takes it back."""
+    global _space_class
+    if _space_class is None:
+        import psycopg
+
+        def _refuse_spent(conn: Any) -> None:
+            if conn._kazma_out and conn._kazma_spent:
+                raise _SecondTransaction("a second transaction in one checkout has no space: check out again")
+
+        class SpaceCursor(psycopg.Cursor):  # type: ignore[type-arg,misc]
+            """A cursor made in the checkout's transaction refuses to run
+            after it ended, as a new one does (step 3 review L1)."""
+
+            def execute(self, *args: Any, **kwargs: Any) -> Any:
+                _refuse_spent(self.connection)
+                return super().execute(*args, **kwargs)
+
+            def executemany(self, *args: Any, **kwargs: Any) -> Any:
+                _refuse_spent(self.connection)
+                return super().executemany(*args, **kwargs)
+
+            def copy(self, *args: Any, **kwargs: Any) -> Any:
+                _refuse_spent(self.connection)
+                return super().copy(*args, **kwargs)
+
+            def stream(self, *args: Any, **kwargs: Any) -> Any:
+                _refuse_spent(self.connection)
+                return super().stream(*args, **kwargs)
+
+        class SpaceConnection(psycopg.Connection):  # type: ignore[type-arg,misc]
+            _kazma_out = False
+            _kazma_spent = False
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self.cursor_factory = SpaceCursor
+
+            def commit(self) -> None:
+                super().commit()
+                self._kazma_spent = True
+
+            def rollback(self) -> None:
+                super().rollback()
+                self._kazma_spent = True
+
+            def cursor(self, *args: Any, **kwargs: Any) -> Any:
+                _refuse_spent(self)
+                return super().cursor(*args, **kwargs)
+
+        _space_class = SpaceConnection
+    return _space_class
+
+
+def begin_space(conn: Any, space: str) -> None:
+    """Open the checkout's transaction in *space*: ``BEGIN`` and the setting
+    in one message, so psycopg finds the connection in a transaction and
+    sends no ``BEGIN`` of its own (design 3). Blocking libpq: the sync pool's
+    caller only, never on the loop (review H4). Its result is read: a dead
+    backend or a refused setting raises psycopg's error, so the pool discards
+    the connection and §44 sees an outage (review M3).
+
+    The same message reads ``current_user``: a connection that is not the
+    space role -- a session ``SET ROLE NONE`` a checkout left, a pooler -- is
+    closed and refused, never used (step 3 review M1: the next checkout, in
+    another space, ran as the owner and saw every row)."""
+    import psycopg
+    from psycopg import pq
+
+    from kazma_core.spaces.scope import valid_space_id
+
+    if not valid_space_id(space):
+        raise _NotASpace(f"not a space id: {space!r}")
+    literal = pq.Escaping(conn.pgconn).escape_literal(space.encode())
+    result = conn.pgconn.exec_(b"BEGIN; SELECT set_config('" + SPACE_SETTING.encode() + b"', " + literal
+                               + b", true), current_user::text")
+    if result.status != pq.ExecStatus.TUPLES_OK:
+        said = (result.error_message or b"").decode(errors="replace").strip()
+        raise psycopg.OperationalError(f"the checkout could not set its space ({said or 'no answer'})")
+    who = (result.get_value(0, 1) or b"").decode(errors="replace")
+    if who != SPACE_ROLE:
+        conn.close()  # the pool discards a closed connection: never handed out again
+        raise _NotTheSpaceRole(f"a space checkout's connection was {who or 'no role'}, not {SPACE_ROLE}: "
+                               "closed and refused")
+    conn._kazma_out, conn._kazma_spent = True, False
+
+
+def end_space(conn: Any) -> None:
+    """The pool took the connection back: it belongs to no checkout, and
+    what a checkout set for the session is taken back before the next one
+    (step 3 review M1). ``RESET ALL`` leaves the role (a session ``SET ROLE
+    NONE`` made the next checkout the owner); ``RESET ROLE`` is the start
+    option's again; a temporary table one space made is gone before another
+    space's checkout, and so are a cursor held past its commit (it read the
+    first space's rows into the next checkout), what the session listens
+    to, and its advisory locks (delta review N1). Not ``DISCARD ALL``: it
+    drops psycopg's prepared statements under it. Raising discards the
+    connection."""
+    import psycopg
+    from psycopg import pq
+
+    conn._kazma_out = False
+    result = conn.pgconn.exec_(b"CLOSE ALL; UNLISTEN *; SELECT pg_advisory_unlock_all(); RESET ALL; RESET ROLE; "
+                               b"DISCARD TEMP")
+    if result.status != pq.ExecStatus.COMMAND_OK:
+        said = (result.error_message or b"").decode(errors="replace").strip()
+        raise psycopg.OperationalError(f"a space connection could not be reset ({said or 'no answer'})")
+
+
+def check_space_role(conn: Any) -> None:
+    """Every new connection of the space half must be the space role: a
+    pooler that drops start options would hand out the owner, who sees every
+    row (review M10). Asked of each connection, not once at arming."""
+    import psycopg
+
+    global _role_refused
+    with conn.cursor() as cur:
+        who = _one(cur, "SELECT current_user::text")
+    conn.rollback()
+    if who != SPACE_ROLE:
+        _role_refused = (time.monotonic(), str(who))
+        raise psycopg.OperationalError(f"the space pool signed in as {who}, not {SPACE_ROLE}")
+
+
+#: When a new space connection was last refused for its role, and as whom.
+_role_refused: tuple[float, str] = (0.0, "")
+#: When each kind of space half failure was last said.
+_half_said: dict[str, float] = {}
+
+
+def say_space_half_failed(signin_refused: str | None, failure: str) -> None:
+    """A space checkout failed while Kazma's login signs in: the space
+    half's own problem, never the outage of §44 (review M1), said in words
+    that tell its kinds apart (step 3 review L3): the space role refused at
+    sign-in; connections signed in as another role (M10); or both logins
+    sign in, and the pool was full or its connection broke. Each kind at
+    most once a minute."""
+    now = time.monotonic()
+    at, who = _role_refused
+    if signin_refused:
+        kind = "sign-in"
+        text = (f"the space role cannot sign in while Kazma's login can ({signin_refused}): a space's statements "
+                "are refused until it can (deploy/postgres/kazma_app_role.sql)")
+    elif who and now - at < 60.0:
+        kind = "role"
+        text = (f"the space half's connections sign in as {who}, not {SPACE_ROLE}: a pooler or the address "
+                "drops the start option, and a space's statements are refused until it does not")
+    else:
+        kind = "pool"
+        text = (f"a space checkout failed ({failure}) while both logins sign in: the space half's pool was full "
+                "or its connection broke; not an outage")
+    if now - _half_said.get(kind, -1e9) < 60.0:
+        return
+    _half_said[kind] = now
+    logger.warning("[row_security] %s", text)
