@@ -345,6 +345,13 @@ as one `user`): there "my car" is anyone's, so Layla's fact is shown before the
 turns. Its mrr 0.624 to 0.608, precision 0.453 to 0.450, misattributed 80 items
 to 81, a wrong fact first 14 to 15 (Arabic mrr 0.648 to 0.593).
 
+**Re-run on 2026-11-26.** W6 step 3 reads "pet" as asking the user's pets
+(`fact_names.ASKED_WITH`). In dataset v5 with its one member filed by id
+(`id`, `id_names`), q103 "What kind of pet do I have at home?" shows 4
+memories where it showed 5. It still finds the answer, at the same rank. So
+precision rises: overall 0.6392 to 0.6413, paraphrase 0.5899 to 0.6086. No
+other number moves.
+
 By kind of question, chosen design (today in brackets): about the asker,
 fact hit 0.957 (0.522) and mrr 0.971 (0.621); the asker never said, 3 of 3
 show nothing as the asker's (0 of 3); another member by name, hit 1.000

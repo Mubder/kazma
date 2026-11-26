@@ -8784,7 +8784,7 @@
     "noise.precision": 0.6111,
     "overall.hit_rate": 0.9139,
     "overall.mrr": 0.8185,
-    "overall.precision": 0.6392,
+    "overall.precision": 0.6413,
     "overview.hit_rate": 0.9,
     "overview.mrr": 0.5667,
     "overview.order": 1.0,
@@ -8792,7 +8792,7 @@
     "paraphrase.hit_rate": 1.0,
     "paraphrase.mrr": 0.875,
     "paraphrase.order": 1.0,
-    "paraphrase.precision": 0.5899,
+    "paraphrase.precision": 0.6086,
     "second.abstain.hit_rate": 0.0,
     "second.arabic.hit_rate": 1.0,
     "second.arabic.mrr": 0.8333,
@@ -8876,7 +8876,7 @@
     ],
     "overall.precision": [
      0.6443,
-     0.6392
+     0.6413
     ],
     "overview.mrr": [
      0.6667,
@@ -8892,7 +8892,7 @@
     ],
     "paraphrase.precision": [
      0.6295,
-     0.5899
+     0.6086
     ],
     "second.arabic.mrr": [
      1.0,
@@ -8965,7 +8965,7 @@
     "noise.precision": 0.6111,
     "overall.hit_rate": 0.9139,
     "overall.mrr": 0.8185,
-    "overall.precision": 0.6392,
+    "overall.precision": 0.6413,
     "overview.hit_rate": 0.9,
     "overview.mrr": 0.5667,
     "overview.order": 1.0,
@@ -8973,7 +8973,7 @@
     "paraphrase.hit_rate": 1.0,
     "paraphrase.mrr": 0.875,
     "paraphrase.order": 1.0,
-    "paraphrase.precision": 0.5899,
+    "paraphrase.precision": 0.6086,
     "second.abstain.hit_rate": 0.0,
     "second.arabic.hit_rate": 1.0,
     "second.arabic.mrr": 0.8333,
@@ -9057,7 +9057,7 @@
     ],
     "overall.precision": [
      0.6443,
-     0.6392
+     0.6413
     ],
     "overview.mrr": [
      0.6667,
@@ -9073,7 +9073,7 @@
     ],
     "paraphrase.precision": [
      0.6295,
-     0.5899
+     0.6086
     ],
     "second.arabic.mrr": [
      1.0,

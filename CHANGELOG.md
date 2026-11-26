@@ -21,6 +21,16 @@
   off; dumps, restores, the upgrade's copy and the weekly restore rehearsal
   work with the rules in place, and name no role.
 
+## A busy test machine cannot hide a slow pattern (2026-11-26)
+
+- **The regex tests time both inputs in turns**: the tests that prove an old
+  pattern slows down faster than its input (and a new one does not) now ask
+  one shared measure, `tests/_growth.py`. It times the small and the large
+  input in turns, five of each, so a burst of load on a CI runner can no
+  longer cover every small call. CI read the old `dd` pattern, sixteen times
+  slower on four times the input, as linear. A gate keeps every such helper
+  on the one measure.
+
 ## Memory's copies in Postgres keep to their spaces (2026-11-26)
 
 - When Kazma removes a forgotten fact or memory from its Postgres copies, it
@@ -39,26 +49,6 @@
   separate transaction.
 - With Spaces on, a memory read that the database refuses is an error, never
   "no memories found". With Spaces off nothing changes.
-
-## Spaces: whose each database statement is, counted (2026-11-26)
-
-- Kazma now counts, for each statement it sends to its own Postgres, whose
-  statement it is: a space's, Kazma's own (with the reason it gives), or
-  nobody's. Nothing is refused and Kazma does nothing differently: this is
-  the record that must show every part of Kazma saying whose its statements
-  are before the database's own lock between spaces is ever turned on.
-- The count is kept in `space_doors.json` in Kazma's data folder, added to
-  every 15 minutes and when Kazma stops, by part of Kazma and with how many
-  times. `python scripts/space_doors_report.py` prints it (`--since` a time
-  leaves out what came before, such as a part fixed since). A part found
-  saying nothing is logged once, at INFO. A report file that is not one is
-  said and started again.
-- `KAZMA_SPACE_DOOR_REPORT=0` turns the counting off. It costs about 5
-  microseconds a statement to Kazma's own stores and about 20 in the chat
-  history's (LangGraph's) calls, measured; a statement takes about a
-  millisecond.
-- The settings are counted as Kazma's own: they stay outside any space's
-  lock.
 
 ## Adding a provider, step by step (2026-11-25)
 
@@ -95,6 +85,44 @@
   its own model only.
 - A provider whose name has a space ("Qwen 1") can be changed from the page:
   every such change was refused as coming from another site.
+
+## Spaces: whose each database statement is, counted (2026-11-26)
+
+- Kazma now counts, for each statement it sends to its own Postgres, whose
+  statement it is: a space's, Kazma's own (with the reason it gives), or
+  nobody's. Nothing is refused and Kazma does nothing differently: this is
+  the record that must show every part of Kazma saying whose its statements
+  are before the database's own lock between spaces is ever turned on.
+- The count is kept in `space_doors.json` in Kazma's data folder, added to
+  every 15 minutes and when Kazma stops, by part of Kazma and with how many
+  times. `python scripts/space_doors_report.py` prints it (`--since` a time
+  leaves out what came before, such as a part fixed since). A part found
+  saying nothing is logged once, at INFO. A report file that is not one is
+  said and started again.
+- `KAZMA_SPACE_DOOR_REPORT=0` turns the counting off. It costs about 5
+  microseconds a statement to Kazma's own stores and about 20 in the chat
+  history's (LangGraph's) calls, measured; a statement takes about a
+  millisecond.
+- The settings are counted as Kazma's own: they stay outside any space's
+  lock.
+
+## Memory: Arabic questions about what you told find it as English ones do (2026-11-26)
+
+- Asking in Arabic about the thing itself finds what you told Kazma, as English
+  does: "أي طبيب أراجع؟", "أي تويوتا أسوق؟", "شنو اسم قطوتي؟", "شنو حالتي
+  الاجتماعية؟", "عدد كل الأماكن اللي زرتها", "أقدر آكل جلوتين؟". Of 132 such
+  questions a way, Gulf Arabic missed 16, Modern Standard Arabic 9 and English
+  3; now 3, 2 and 1. The rest are a store holding one fact, and a detail the
+  fact does not keep ("at the gym").
+- Places you visited, your pets ("What is my cat called?" as "شنو اسم قطوتي؟")
+  and whether you are married are asked in Arabic and English alike now.
+  "Can I eat gluten?" asks what you may not eat; "Can I eat here?", "What can I
+  eat for dinner?", "أقدر آكل الحين؟", "أقدر آكل هذا؟" and "هل أستطيع أن أتناول
+  البنادول مع القهوة؟" ask nothing of you, and "my drive" is no car. "What is
+  my pet's name?" and "ما اسم حيواني الأليف؟" find your pet.
+- Every question of Kazma's own benchmark, its small-store run and the
+  shared-space set shows what it did. One question of the Spaces study ("What
+  kind of pet do I have at home?") shows one unrelated memory fewer.
 
 ## A page closed while sending is not a server error (2026-11-25)
 

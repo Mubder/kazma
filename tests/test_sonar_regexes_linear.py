@@ -45,6 +45,8 @@ from kazma_gateway.adapters import telegram as telegram_adapter
 from kazma_gateway.adapters import voice_helpers, whatsapp_format
 from kazma_gateway.agent_handler import swarm_dispatch
 
+from tests._growth import grows_faster_than_linear
+
 RNG = random.Random(20261116)
 
 # ── the old patterns, as they were ────────────────────────────────────────
@@ -212,17 +214,9 @@ def _same(old, new, op: str, inputs) -> None:
 def _grows_faster_than_linear(fn, make, small: int, factor: int = 4) -> bool:
     """True when ``factor`` times the input takes more than 1.5 x ``factor`` times as long.
 
-    The majority of three measurements (two that agree end it): one noisy
-    measurement on a busy machine must decide neither way (2026-11-21)."""
-    fn(make(small))
-
-    def once() -> bool:
-        t1 = min(_timed(fn, make(small)) for _ in range(3))
-        t2 = min(_timed(fn, make(factor * small)) for _ in range(3))
-        return t2 > 1.5 * factor * t1
-
-    first, second = once(), once()
-    return first if first == second else once()
+    Measured by ``tests/_growth.py`` (in turns, the majority of three), so a
+    busy machine decides neither way."""
+    return grows_faster_than_linear(fn, make, small, factor)
 
 
 SPACE = " \t\n"

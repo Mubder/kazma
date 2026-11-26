@@ -39,6 +39,8 @@ from kazma_core.security import token_shapes
 from kazma_core.support import problem_report
 from kazma_core.url_utils import normalize_provider_url
 
+from tests._growth import grows_faster_than_linear
+
 OLD_VERSION = re.compile(r"^v?\d+([._]\d+)+([._-]?[a-z0-9]+)*$", re.I)
 OLD_VERSIONED = re.compile(r"/v\d+[a-z0-9]*(?:/|$)")
 OLD_FENCE = re.compile(r"</?kazma:data[^>]*>", re.I)
@@ -173,20 +175,13 @@ def _grows_faster_than_linear(fn, make, small: int, factor: int = 2) -> bool:
     2026-11-15). The exponential one keeps 2: four times its input would take
     minutes.
 
-    The answer is the majority of three measurements (two that agree end it):
-    a linear function at a size that runs in microseconds read as growing once
-    on a busy CI runner (2026-11-21), and one noisy measurement must decide
-    neither way. A function that does grow faster reads so every time.
+    Measured by ``tests/_growth.py``: the two inputs timed in turns, the
+    majority of three comparisons. A linear function at a size that runs in
+    microseconds read as growing once on a busy CI runner (2026-11-21), and
+    one noisy measurement must decide neither way. A function that does grow
+    faster reads so every time.
     """
-    fn(make(small))  # warm
-
-    def once() -> bool:
-        t1 = min(_timed(fn, make(small)) for _ in range(3))
-        t2 = min(_timed(fn, make(factor * small)) for _ in range(3))
-        return t2 > 1.5 * factor * t1
-
-    first, second = once(), once()
-    return first if first == second else once()
+    return grows_faster_than_linear(fn, make, small, factor)
 
 
 #: The time the smaller input must take before a "stays linear" reading

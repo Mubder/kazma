@@ -19,7 +19,8 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["FACT_KINDS", "FACT_KINDS_VECTORS", "run_fact_kinds", "run_lists", "run_narrow_lists"]
+__all__ = ["FACT_KINDS", "FACT_KINDS_VECTORS", "TOLD", "TOLD_VECTORS", "run_fact_kinds", "run_fact_languages_kinds",
+           "run_lists", "run_narrow_lists"]
 
 FACT_KINDS_VECTORS = "fact_kinds_vectors.npz"
 
@@ -273,4 +274,234 @@ def run_narrow_lists() -> list[dict[str, Any]]:
                     rows.append({"name": one["name"], "told": told, "asked": way, "question": question, "of": n,
                                  "own": sum(1 for p in shown if p < n), "degraded": result.degraded,
                                  "other": sum(1 for p in shown if n <= p < n + len(one["others"]))})
+    return rows
+
+
+# ── Told as a turn, asked three ways (the memory plan's W6, step 3) ─────────
+#
+# :data:`FACT_KINDS` seeds the deep pass's names straight into the store. Here
+# each fact is TOLD, as a user turn, and filed as the product files it: the
+# quick pass first, then the deep pass's reply (scripted, with the names the
+# pilots' models gave), through ``belief_extractor._apply_beliefs_to_v2`` --
+# ``users_names``, ``name_to_file`` and the quick pass's own names are in the
+# measure. Told in English and in Arabic, in stores of one, five and thirty
+# facts; asked in English, Gulf and Modern Standard Arabic, in the first
+# person and with the thing asked ("Which bike did I buy?"); and, of each
+# kind, a question that uses its word in another sense, which shows nothing.
+# ``run_fact_languages``' table (five kinds the quick pass writes) grown by
+# the kinds a model names. Its vectors are recorded apart
+# (:data:`TOLD_VECTORS`), so the locked run keeps its own.
+
+TOLD_VECTORS = "fact_languages_kinds_vectors.npz"
+
+#: kind -> the deep pass's name and label, the turn and the value in English and
+#: in Arabic, the questions (first person, then with the thing asked) and the
+#: question in another sense, each in English, Gulf and MSA.
+TOLD: tuple[dict[str, Any], ...] = (
+    {"kind": "bought", "name": "bought", "type": "set",
+     "told": {"en": ("I bought a blue bicycle.", "a blue bicycle"), "ar": ("شريت دراجة زرقاء.", "دراجة زرقاء")},
+     "asked": {"en": ("What did I buy?", "Which bike did I buy?"), "gulf": ("شنو شريت؟", "شنو الدراجة اللي شريتها؟"),
+               "msa": ("ماذا اشتريت؟", "ما الدراجة التي اشتريتها؟")},
+     "other": {"en": "What can I buy here?", "gulf": "شنو أشتري هدية؟", "msa": "ماذا أشتري هدية؟"}},
+    {"kind": "visited", "name": "visited", "type": "set",
+     "told": {"en": ("I visited the Grand Mosque.", "the Grand Mosque"), "ar": ("زرت المسجد الكبير.", "المسجد الكبير")},
+     "asked": {"en": ("Which places have I visited?", "Which mosque did I visit?"),
+               "gulf": ("عدد كل الأماكن اللي زرتها", "أي مسجد زرت؟"), "msa": ("ما الأماكن التي زرتها؟", "أي مسجد زرت؟")},
+     "other": {"en": "Which places do tourists visit?", "gulf": "وين يروحون السياح؟", "msa": "ما الأماكن التي يزورها السياح؟"}},
+    {"kind": "attended", "name": "attended", "type": "set",
+     "told": {"en": ("I attended a pottery workshop.", "a pottery workshop"), "ar": ("حضرت ورشة فخار.", "ورشة فخار")},
+     "asked": {"en": ("What did I attend?", "Which workshop did I attend?"), "gulf": ("شنو حضرت؟", "أي ورشة حضرت؟"),
+               "msa": ("ماذا حضرت؟", "أي ورشة حضرتها؟")},
+     "other": {"en": "Who attended the meeting?", "gulf": "منو حضر الاجتماع؟", "msa": "من حضر الاجتماع؟"}},
+    {"kind": "met", "name": "met", "type": "set",
+     "told": {"en": ("I met Omar at the gym.", "Omar"), "ar": ("قابلت عمر في النادي.", "عمر")},
+     "asked": {"en": ("Who did I meet?", "Who did I meet at the gym?"), "gulf": ("منو قابلت؟", "منو قابلت في النادي؟"),
+               "msa": ("من قابلت؟", "من التقيت في النادي؟")},
+     "other": {"en": "Where should we meet?", "gulf": "وين نتقابل؟", "msa": "أين نلتقي؟"}},
+    {"kind": "received", "name": "received", "type": "set",
+     "told": {"en": ("I received a silver watch.", "a silver watch"), "ar": ("استلمت ساعة فضية.", "ساعة فضية")},
+     "asked": {"en": ("What did I receive?", "Which watch did I receive?"), "gulf": ("شنو استلمت؟", "شنو الساعة اللي استلمتها؟"),
+               "msa": ("ماذا استلمت؟", "ما الساعة التي استلمتها؟")},
+     "other": {"en": "When will the parcel be received?", "gulf": "متى يوصل الطرد؟", "msa": "متى يصل الطرد؟"}},
+    {"kind": "finished", "name": "finished", "type": "set",
+     "told": {"en": ("I finished the night course.", "the night course"), "ar": ("خلصت الدورة المسائية.", "الدورة المسائية")},
+     "asked": {"en": ("What did I finish?", "Which course did I finish?"), "gulf": ("شنو خلصت؟", "أي دورة خلصت؟"),
+               "msa": ("ماذا أنهيت؟", "أي دورة أنهيتها؟")},
+     "other": {"en": "Has the match finished?", "gulf": "خلصت المباراة؟", "msa": "هل انتهت المباراة؟"}},
+    {"kind": "plans", "name": "intends_to", "type": "set",
+     "told": {"en": ("I plan to visit Japan.", "visit Japan"), "ar": ("ناوي أزور اليابان.", "أزور اليابان")},
+     "asked": {"en": ("What are my plans?", "Which country do I plan to visit?"), "gulf": ("شنو خططي؟", "أي دولة ناوي أزورها؟"),
+               "msa": ("ما هي خططي؟", "أي بلد أنوي زيارته؟")},
+     "other": {"en": "Where is the plan of the building?", "gulf": "وين خطة المبنى؟", "msa": "أين خطة المبنى؟"}},
+    {"kind": "goals", "name": "has_goal", "type": "set",
+     "told": {"en": ("My goal is to run a marathon.", "run a marathon"), "ar": ("هدفي أركض ماراثون.", "أركض ماراثون")},
+     "asked": {"en": ("What are my goals?", "Which race is my goal?"), "gulf": ("شنو أهدافي؟", "شنو هدفي بالجري؟"),
+               "msa": ("ما هي أهدافي؟", "ما هدفي في الجري؟")},
+     "other": {"en": "How many goals did he score?", "gulf": "كم هدف سجل؟", "msa": "كم هدفاً سجل اللاعب؟"}},
+    {"kind": "interests", "name": "is_interested_in", "type": "set",
+     "told": {"en": ("I'm interested in calligraphy.", "calligraphy"), "ar": ("أنا مهتم بالخط العربي.", "الخط العربي")},
+     "asked": {"en": ("What am I interested in?", "Which art am I interested in?"), "gulf": ("شنو اهتماماتي؟", "أي فن مهتم فيه؟"),
+               "msa": ("ما هي اهتماماتي؟", "بأي فن أهتم؟")},
+     "other": {"en": "What is the interest rate?", "gulf": "شنو نسبة الفايدة؟", "msa": "ما نسبة الفائدة؟"}},
+    {"kind": "habits", "name": "has_routine", "type": "set",
+     "told": {"en": ("Every day I walk at dawn.", "walk at dawn"), "ar": ("كل يوم أمشي عند الفجر.", "أمشي عند الفجر")},
+     "asked": {"en": ("What is my routine?", "When do I walk?"), "gulf": ("شنو روتيني؟", "متى أمشي؟"),
+               "msa": ("ما هو روتيني؟", "متى أمشي؟")},
+     "other": {"en": "What is a soldier's routine?", "gulf": "شنو روتين الجندي؟", "msa": "ما روتين الجندي؟"}},
+    {"kind": "diet", "name": "dietary_restriction", "type": "set",
+     "told": {"en": ("I can't eat gluten.", "gluten"), "ar": ("ما أقدر آكل جلوتين.", "جلوتين")},
+     "asked": {"en": ("What can I not eat?", "Can I eat gluten?"), "gulf": ("شنو ما أقدر آكل؟", "أقدر آكل جلوتين؟"),
+               "msa": ("ما الذي لا أستطيع أن آكله؟", "هل أستطيع أكل الجلوتين؟")},
+     "other": {"en": "What can I eat for dinner?", "gulf": "شنو آكل على العشا؟", "msa": "ماذا آكل على العشاء؟"}},
+    {"kind": "doctor", "name": "doctor", "type": "functional",
+     "told": {"en": ("My doctor is Dr Sara.", "Dr Sara"), "ar": ("دكتوري الدكتورة سارة.", "الدكتورة سارة")},
+     "asked": {"en": ("Who is my doctor?", "Which doctor do I see?"), "gulf": ("منو دكتوري؟", "عند أي دكتور أراجع؟"),
+               "msa": ("من هو طبيبي؟", "أي طبيب أراجع؟")},
+     "other": {"en": "Can you recommend a doctor?", "gulf": "تنصحني بدكتور؟", "msa": "هل تنصحني بطبيب؟"}},
+    {"kind": "age_is", "name": "has_age", "type": "functional",
+     "told": {"en": ("I am 32 years old.", "32"), "ar": ("عمري ٣٢ سنة.", "٣٢")},
+     "asked": {"en": ("How old am I?", "What is my age?"), "gulf": ("كم عمري؟", "شكثر عمري؟"), "msa": ("كم عمري؟", "ما هو عمري؟")},
+     "other": {"en": "How old is the castle?", "gulf": "كم عمر القلعة؟", "msa": "ما عمر القلعة؟"}},
+    {"kind": "birthday", "name": "birthday_is", "type": "functional",
+     "told": {"en": ("My birthday is on 4 May.", "4 May"), "ar": ("عيد ميلادي يوم ٤ مايو.", "٤ مايو")},
+     "asked": {"en": ("When is my birthday?", "Which month is my birthday in?"), "gulf": ("متى عيد ميلادي؟", "بأي شهر ميلادي؟"),
+               "msa": ("متى عيد ميلادي؟", "في أي شهر يوم ميلادي؟")},
+     "other": {"en": "What is the Gregorian calendar?", "gulf": "شنو التقويم الميلادي؟", "msa": "ما هو التقويم الميلادي؟"}},
+    {"kind": "study", "name": "enrolled_in", "type": "functional",
+     "told": {"en": ("I study at Kuwait University.", "Kuwait University"), "ar": ("أدرس في جامعة الكويت.", "جامعة الكويت")},
+     "asked": {"en": ("Where do I study?", "Which university do I study at?"), "gulf": ("وين أدرس؟", "بأي جامعة أدرس؟"),
+               "msa": ("أين أدرس؟", "في أي جامعة أدرس؟")},
+     "other": {"en": "What should I teach the students?", "gulf": "شنو أدرس الطلاب؟", "msa": "ماذا أدرّس الطلاب؟"}},
+    {"kind": "car", "name": "drives", "type": "functional",
+     "told": {"en": ("I drive a Toyota Corolla.", "a Toyota Corolla"), "ar": ("أسوق تويوتا كورولا.", "تويوتا كورولا")},
+     "asked": {"en": ("What car do I drive?", "Which Toyota do I drive?"), "gulf": ("شنو سيارتي؟", "أي تويوتا أسوق؟"),
+               "msa": ("ما هي سيارتي؟", "ما نوع السيارة التي أقودها؟")},
+     "other": {"en": "Which car is the fastest?", "gulf": "أي سيارة أسرع؟", "msa": "ما أسرع سيارة؟"}},
+    {"kind": "daughters", "name": "has_daughter", "type": "set",
+     "told": {"en": ("My daughter is called Lulwa.", "Lulwa"), "ar": ("بنتي اسمها لولوة.", "لولوة")},
+     "asked": {"en": ("What is my daughter called?", "Who is my daughter?"), "gulf": ("شنو اسم بنتي؟", "منو بنتي؟"),
+               "msa": ("ما اسم ابنتي؟", "من هي ابنتي؟")},
+     "other": {"en": "What are good names for a girl?", "gulf": "شنو أحلى أسامي البنات؟", "msa": "ما أجمل أسماء البنات؟"}},
+    {"kind": "sons", "name": "has_son", "type": "set",
+     "told": {"en": ("My son is called Fahad.", "Fahad"), "ar": ("ولدي اسمه فهد.", "فهد")},
+     "asked": {"en": ("What is my son called?", "Who is my son?"), "gulf": ("شنو اسم ولدي؟", "منو ولدي؟"),
+               "msa": ("ما اسم ابني؟", "من هو ابني؟")},
+     "other": {"en": "What shall I build in the garden?", "gulf": "شنو أبني بالحديقة؟", "msa": "ماذا أبني في الحديقة؟"}},
+    {"kind": "current_role", "name": "has_occupation", "type": "functional",
+     "told": {"en": ("I'm a nurse.", "a nurse"), "ar": ("أنا ممرض.", "ممرض")},
+     "asked": {"en": ("What do I do for a living?", "What is my job?"), "gulf": ("شنو شغلتي؟", "شنو وظيفتي؟"),
+               "msa": ("ما هي مهنتي؟", "ما وظيفتي؟")},
+     "other": {"en": "How much is the living room lamp?", "gulf": "شكثر سعر ليت الصالة؟", "msa": "كم سعر مصباح غرفة المعيشة؟"}},
+    {"kind": "pets", "name": "has_pet", "type": "set",
+     "told": {"en": ("I have a cat named Milo.", "a cat named Milo"), "ar": ("عندي قطوة اسمها ميلو.", "قطوة اسمها ميلو")},
+     "asked": {"en": ("Do I have any pets?", "What is my cat called?"), "gulf": ("عندي حيوانات أليفة؟", "شنو اسم قطوتي؟"),
+               "msa": ("هل لدي حيوانات أليفة؟", "ما اسم قطتي؟")},
+     "other": {"en": "Which pets live the longest?", "gulf": "أي حيوان أليف يعيش أكثر؟", "msa": "ما الحيوانات الأليفة الأطول عمراً؟"}},
+    # A pet held by its name alone ("has_cat Milo"): "What is my cat called?"
+    # shares no word with it (the review of step 3, L3).
+    {"kind": "pets", "name": "has_cat", "type": "set",
+     "told": {"en": ("My cat is called Simba.", "Simba"), "ar": ("قطوتي اسمها سمبا.", "سمبا")},
+     "asked": {"en": ("What is my cat called?", "What's my cat's name?"), "gulf": ("شنو اسم قطوتي؟", "منو قطوتي؟"),
+               "msa": ("ما اسم قطتي؟", "ما هو اسم قطتي؟")},
+     "other": {"en": "Are cats clever?", "gulf": "القطاوة ذكية؟", "msa": "هل القطط ذكية؟"}},
+    {"kind": "languages", "name": "speaks_language", "type": "set",
+     "told": {"en": ("I speak Italian.", "Italian"), "ar": ("أتكلم إيطالي.", "إيطالي")},
+     "asked": {"en": ("What languages do I speak?", "Do I speak Italian?"), "gulf": ("شنو اللغات اللي أتكلمها؟", "أتكلم إيطالي؟"),
+               "msa": ("ما اللغات التي أتحدثها؟", "هل أتحدث الإيطالية؟")},
+     "other": {"en": "What language is spoken in Brazil?", "gulf": "شنو لغة البرازيل؟", "msa": "ما لغة البرازيل؟"}},
+    {"kind": "married", "name": "marital_status", "type": "functional",
+     "told": {"en": ("I am married.", "married"), "ar": ("أنا متزوج.", "متزوج")},
+     "asked": {"en": ("Am I married?", "What is my marital status?"), "gulf": ("أنا متزوج؟", "شنو حالتي الاجتماعية؟"),
+               "msa": ("هل أنا متزوج؟", "ما حالتي الاجتماعية؟")},
+     "other": {"en": "When did the king get married?", "gulf": "متى تزوج الملك؟", "msa": "متى عقد الملك قرانه؟"}},
+)
+
+#: Store sizes: a fact alone, among four others, and among all.
+TOLD_SIZES = (1, 5, 30)
+
+#: Questions in another sense that hold a word the tables give the kind, as a
+#: word of its own (the review of step 3, M3): the precision rows must be able
+#: to see what is added. Asked in the stores of five and of thirty. By the
+#: told row's name.
+TOLD_OTHER_BARE: dict[str, dict[str, tuple[str, ...]]] = {
+    "doctor": {"en": ("Which doctor is best for teeth?", "What doctor do I see for a cold?"),
+               "gulf": ("أي دكتور أسنان أفضل؟", "شنو لازم أراجع قبل الامتحان؟", "لأي دكتور أروح للأسنان؟"),
+               "msa": ("أي طبيب أسنان أفضل في المدينة؟", "متى أراجع البنك؟", "أي طبيب أراجع لعيوني؟")},
+    "has_pet": {"en": ("What's my pet peeve?", "Is my pet project done?"), "gulf": ("البروتين الحيواني زين؟",),
+                "msa": ("هل البروتين الحيواني صحي؟",)},
+    "is_interested_in": {"en": ("How do I take care of my health?", "How do I care for my mother?"),
+                         "gulf": ("شلون أهتم بصحتي؟", "بأي طريقة أهتم بأمي؟"), "msa": ("كيف أهتم بصحتي؟", "بأي شكل أهتم بنفسي؟")},
+    "drives": {"en": ("What's in my drive?", "Where did I save the file on Google Drive?", "How is my driving?",
+                      "Where did I drive?"),
+            "gulf": ("وين السوق؟",), "msa": ("أين السوق؟",)},
+    "visited": {"en": ("What should I visit in Paris?",), "gulf": ("شنو أزور بباريس؟",), "msa": ("ماذا أزور في باريس؟",)},
+    "marital_status": {"en": ("Is the actor married?",), "gulf": ("الممثل متزوج؟",), "msa": ("هل الممثل متزوج؟",)},
+    "dietary_restriction": {"en": ("Can I eat here?", "Can we eat outside?", "Can I take Panadol with coffee?",
+                                   "Can I eat this?"),
+             "gulf": ("أقدر آكل الحين؟", "يصير آكل بالليل؟", "أقدر آكل بالبيت؟"),
+             "msa": ("هل أستطيع أن أتناول البنادول مع القهوة؟", "هل يمكنني أن آكل هذا؟")},
+}
+
+#: More first-person questions of a told row, by its name (form ``also``):
+#: "my pet" in both languages (the delta review of step 3, N2).
+TOLD_ASKED_ALSO: dict[str, dict[str, tuple[str, ...]]] = {
+    "has_pet": {"en": ("What is my pet's name?", "What's my pet called?"), "gulf": ("شنو اسم حيواني الأليف؟",),
+                "msa": ("ما اسم حيواني الأليف؟",)},
+}
+
+
+def _other_sense(kind: dict[str, Any]) -> list[tuple[str, str]]:
+    """The kind's questions in another sense, (way, question)."""
+    bare = TOLD_OTHER_BARE.get(kind["name"], {})
+    return [(way, q) for way in ("en", "gulf", "msa") for q in (kind["other"][way], *bare.get(way, ()))]
+
+
+def _tell(primary: Any, ops: Any, facts: list[tuple[str, str, str, str]]) -> None:
+    """Each (turn, deep pass name, label, value) filed as the product files it:
+    the quick pass, then the deep pass's reply about it."""
+    from kazma_core.memory.belief_extractor import _apply_beliefs_to_v2, extract_and_apply_beliefs_sync
+    from kazma_core.memory.benchmark import BASE_TIME, BENCH_TENANT
+
+    for n, (text, name, kind, value) in enumerate(facts):
+        at = BASE_TIME + n * 60
+        extract_and_apply_beliefs_sync(primary, ops, text, "Noted.", session_id=f"s{n}", turn=1, tenant_id=BENCH_TENANT,
+                                       now=at, private=True)
+        _apply_beliefs_to_v2([{"subject": "user", "predicate": name, "predicate_type": kind, "object": value,
+                               "confidence": 0.9}], primary, ops, session_id=f"s{n}", turn=1, tenant_id=BENCH_TENANT,
+                             now=at, private=True, user_text=text, extraction_method="llm_inferred")
+
+
+def run_fact_languages_kinds(kinds: tuple[dict[str, Any], ...] = TOLD) -> list[dict[str, Any]]:
+    """Every (language told, store size, fact, way asked, form): whether recall
+    showed the fact, and for the questions in another sense, whether it showed
+    the kind's fact (``never``)."""
+    from kazma_core.memory.benchmark import _private_stores
+
+    rows: list[dict[str, Any]] = []
+    for told in ("en", "ar"):
+        facts = [(k["told"][told][0], k["name"], k["type"], k["told"][told][1]) for k in kinds]
+        fillers = [(f"Note: {en if told == 'en' else ar}.", name, kind, en if told == "en" else ar)
+                   for name, kind, en, ar in _OTHERS]
+        for size in TOLD_SIZES:
+            groups = ([(at, [facts[at], *fillers[:size - 1]]) for at in range(len(facts))] if size <= 5
+                      else [(None, [*facts, *fillers][:max(size, len(facts))])])
+            for at, store in groups:
+                with _private_stores("kazma-told-kinds") as (conn, ops):
+                    _tell(conn, ops, store)
+                    for n, kind in enumerate(kinds) if at is None else ((at, kinds[at]),):
+                        value = facts[n][3]
+                        also = TOLD_ASKED_ALSO.get(kind["name"], {})
+                        for way, questions in kind["asked"].items():
+                            for form, question in (*zip(("mine", "thing"), questions, strict=True),
+                                                   *(("also", q) for q in also.get(way, ()))):
+                                result = _ask(conn, question)
+                                rows.append({"told": told, "size": size, "asked": way, "form": form, "kind": kind["kind"],
+                                             "question": question, "found": any(value in h.content for h in result.beliefs),
+                                             "degraded": result.degraded})
+                        if size > 1:
+                            for way, question in _other_sense(kind):
+                                result = _ask(conn, question)
+                                rows.append({"told": told, "size": size, "asked": way, "form": "other", "kind": kind["kind"],
+                                             "question": question, "shown": any(value in h.content for h in result.beliefs),
+                                             "degraded": result.degraded})
     return rows
