@@ -341,6 +341,91 @@ class Recipe:
                 + (f" + {self.tail!r}" if self.tail != TAIL else ""))
 
 
+_CATEGORY_TEST = {
+    sre_c.CATEGORY_DIGIT: str.isdigit, sre_c.CATEGORY_NOT_DIGIT: lambda c: not c.isdigit(),
+    sre_c.CATEGORY_SPACE: str.isspace, sre_c.CATEGORY_NOT_SPACE: lambda c: not c.isspace(),
+    sre_c.CATEGORY_WORD: lambda c: c.isalnum() or c == "_",
+    sre_c.CATEGORY_NOT_WORD: lambda c: not (c.isalnum() or c == "_"),
+    sre_c.CATEGORY_LINEBREAK: lambda c: c == "\n", sre_c.CATEGORY_NOT_LINEBREAK: lambda c: c != "\n",
+}
+_SAMPLE_CANDIDATES = "a x ,-.0\tا"
+
+
+def _in_class(items: list, ch: str) -> bool | None:
+    """Whether a parsed character class holds *ch* (None: one it cannot read)."""
+    negate, hit = False, False
+    for op, av in items:
+        if op is sre_c.NEGATE:
+            negate = True
+        elif op is sre_c.LITERAL:
+            hit = hit or ch == chr(av)
+        elif op is sre_c.RANGE:
+            hit = hit or av[0] <= ord(ch) <= av[1]
+        elif op is sre_c.CATEGORY and av in _CATEGORY_TEST:
+            hit = hit or _CATEGORY_TEST[av](ch)
+        else:
+            return None
+    return hit != negate
+
+
+def _sample(items: list, named: set[int]) -> tuple[str, bool]:
+    """Text the opening of *items* matches, up to a named group (a value):
+    an optional group that begins with a literal is taken once ("يا <name>"
+    after "no,"), a class gives a character it holds. Whether it ran to the
+    end of *items*."""
+    out = ""
+    for op, av in items:
+        if op in (sre_c.AT, sre_c.ASSERT, sre_c.ASSERT_NOT):
+            continue
+        if op is sre_c.LITERAL:
+            out += chr(av)
+        elif op is sre_c.ANY:
+            out += "a"
+        elif op is sre_c.IN:
+            ch = next((c for c in _SAMPLE_CANDIDATES if _in_class(av, c)), None)
+            if ch is None:
+                return out, False
+            out += ch
+        elif op in (sre_c.MAX_REPEAT, sre_c.MIN_REPEAT, sre_c.POSSESSIVE_REPEAT):
+            lo, _hi, sub = av
+            sub = list(sub)
+            opens = sub[:1] and (sub[0][0] is sre_c.LITERAL or (
+                sub[0][0] is sre_c.SUBPATTERN and list(sub[0][1][3])[:1]
+                and list(sub[0][1][3])[0][0] is sre_c.LITERAL))
+            if lo == 0 and not opens:
+                continue
+            more, whole = _sample(sub, named)
+            out += more * max(1, min(lo, 3))
+            if not whole:
+                return out, False
+        elif op is sre_c.SUBPATTERN:
+            if av[0] in named:
+                return out, False
+            more, whole = _sample(list(av[3]), named)
+            out += more
+            if not whole:
+                return out, False
+        elif op is sre_c.BRANCH and av[1]:
+            more, whole = _sample(list(av[1][0]), named)
+            out += more
+            if not whole:
+                return out, False
+        else:
+            return out, False
+    return out, True
+
+
+def sample_head(pattern: str, flags: int) -> str:
+    """The text a match of *pattern* opens with, through its optional
+    literal-led groups, to its first named group: "no,يا a " for
+    ``_NO_THEN``, whose vocative ran quadratic behind it (step 4's third
+    review, A). "" when it is no longer than the literal head."""
+    parsed = sre_parse.parse(pattern, flags)
+    named = set(parsed.state.groupdict.values())
+    text = _sample(list(parsed), named)[0]
+    return text if len(text) > len(_literal_head(list(parsed))[0]) else ""
+
+
 def hostile_inputs(pattern: str, flags: int) -> list[Recipe]:
     """The hostile inputs built from *pattern*'s own characters."""
     chars, head = _characters(pattern, flags)
@@ -349,6 +434,9 @@ def hostile_inputs(pattern: str, flags: int) -> list[Recipe]:
     if head:
         out += [Recipe(head, c) for c in chars]
         out.append(Recipe("", head))
+    sampled = sample_head(pattern, flags)
+    if sampled and sampled != head:
+        out += [Recipe(sampled, c) for c in chars]
     out += [Recipe(r.prefix, r.unit, LATE_TAIL) for r in list(out)]
     return out
 
@@ -551,6 +639,9 @@ def test_control_a_planted_quadratic_pattern_fails(tmp_path: Path):
         # Quadratic only on a tail that fails late: the snowman completes "\W*$"
         # (event_text._NO_THEN at e4772d2ac, step 4's delta review N2).
         "LATE = re.compile(r'^\\W*(?:no|nope)[,.-]\\W*(?P<v>[^.,\\n]{1,60}?)\\W*$')\n"
+        # Quadratic only behind an optional vocative, "no,يا <name>" (_NO_THEN at
+        # de794c799, step 4's third review A): the sampled head builds it.
+        "VOCATIVE = re.compile(r'^\\W*(?:no|nope),\\W*+(?:يا [^\\W\\d_]+\\W+)?(?P<v>[^.,\\n]{1,60}?)\\W*$')\n"
         "def strip(text):\n"
         "    return re.sub(r'\\s*->\\s*(\\S+)\\s*$', '', text)\n",
         encoding="utf-8",
@@ -558,9 +649,10 @@ def test_control_a_planted_quadratic_pattern_fails(tmp_path: Path):
     literals, slow, hung = sweep(("kazma-planted/kazma_planted",), tmp_path)
     flagged = {literals[i].pattern for i in slow}
     assert flagged == {r"[ \t]+\n", r"<[^>]+>", r"\s*->\s*(\S+)\s*$", r"^\W*(?:no|nope)[ \t]*[,.]+\W*x",
-                       r"^\W*(?:no|nope)[,.-]\W*(?P<v>[^.,\n]{1,60}?)\W*$"}, (flagged, slow)
+                       r"^\W*(?:no|nope)[,.-]\W*(?P<v>[^.,\n]{1,60}?)\W*$",
+                       r"^\W*(?:no|nope),\W*+(?:يا [^\W\d_]+\W+)?(?P<v>[^.,\n]{1,60}?)\W*$"}, (flagged, slow)
     assert not hung
-    assert len(_report(literals, slow, hung)) == 5
+    assert len(_report(literals, slow, hung)) == 6
 
 
 def _plant_linear(tmp_path: Path) -> None:

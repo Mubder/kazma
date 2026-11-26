@@ -360,10 +360,25 @@ def _value_end(words: list[str], at: int, wanted: list[str]) -> int | None:
     return end
 
 
-def _adds_rather(words: list[str], at: int, wanted: list[str] | None = None, later: str = "") -> bool:
+#: "Too" said after "not Ali only" (never "again", "another", "مرة ثانية": the
+#: same thing again is no addition, step 4's third review B). Folded.
+_TOO = frozenset({"too", "also", "plus", "ايضا", "كمان", "كذلك", "برضه", "برضو", "بردو"})
+
+
+def _goes_on_adding(words: list[str]) -> bool:
+    """Whether *words* go on with "but" or say "too": "but Omar", "Omar too",
+    "وكمان عمر", "قابلت عمر بعد" ("بعد" ending them, after a word)."""
+    if not words:
+        return False
+    return (words[0] in _BUT or any(w in _TOO or (w[:1] == "و" and w[1:] in _TOO) for w in words)
+            or " as well" in " " + " ".join(words) or (len(words) > 1 and words[-1] == "بعد"))
+
+
+def _adds_rather(words: list[str], at: int, wanted: list[str] | None = None,
+                 following: list[str] | None = None) -> bool:
     """Whether the denial at *at* in a clause's *words* says "not only" or
-    "not alone" of the value whose words are *wanted*; *later* is what the
-    message says after the clause."""
+    "not alone" of the value whose words are *wanted*; *following* is the
+    next clause's words."""
     after = words[at + 1:]
     if not after or words[at] in _NEVER_ADDING:
         return False
@@ -378,12 +393,12 @@ def _adds_rather(words: list[str], at: int, wanted: list[str] | None = None, lat
     if words[end + 1] in _ALONE:
         return not (rest and rest[0] in _ANOTHER)
     # "Only" after the value adds where what follows goes on with "but" or
-    # says "too" ("not Ali only but Omar", "It wasn't Ali only, Omar too",
-    # "مو علي بس، قابلت عمر بعد"); else it is the next word's ("Not Ali just
-    # Omar", "مو علي بس عمر", "مو علي بس، عمر", "didn't see Ali just now"):
-    # the denial stands (step 4's delta review, N1).
-    follow = rest + re.findall(r"[\w']+", later)
-    return bool(follow) and (follow[0] in _BUT or bool(_ONCE_MORE.search(" ".join(rest) + " " + later)))
+    # says "too": in its own clause when a word follows it ("not Ali only but
+    # Omar", "مو علي بس عمر بعد"), else in the next clause alone ("It wasn't
+    # Ali only, Omar too", "مو علي بس، قابلت عمر بعد"). Otherwise it is the
+    # next word's ("Not Ali just Omar", "مو علي بس، عمر", "Not Ali just Omar,
+    # I saw him again today"): the denial stands (step 4's reviews, N1 and B).
+    return _goes_on_adding(rest if rest else list(following or ()))
 
 
 def _adds_rather_than_denies(user_text: str, value: str = "") -> bool:
@@ -393,13 +408,19 @@ def _adds_rather_than_denies(user_text: str, value: str = "") -> bool:
     folded = _own_folded(user_text)
     arabic = _folded_words(_DENIALS_AR_RAW)
     wanted = value_words(value) if value else None
-    for clause in _CLAUSE.finditer(folded):
-        words = re.findall(r"[\w']+", clause.group())
+    clauses = _clause_words(folded)
+    for n, words in enumerate(clauses):
+        following = clauses[n + 1] if n + 1 < len(clauses) else []
         for at, word in enumerate(words):
             if (word in _DENIALS_EN or word in arabic or word in _BARE_NO) and _adds_rather(
-                    words, at, wanted, folded[clause.end():]):
+                    words, at, wanted, following):
                 return True
     return False
+
+
+def _clause_words(folded: str) -> list[list[str]]:
+    """Each clause's words, in order: one pass over the message."""
+    return [re.findall(r"[\w']+", clause) for clause in _CLAUSE.findall(folded)]
 
 
 def _denies_value(folded: str, value: str) -> bool:
@@ -409,11 +430,12 @@ def _denies_value(folded: str, value: str) -> bool:
     wanted = value_words(value)
     arabic = _folded_words(_DENIALS_AR_RAW)
     denials = (_DENIALS_EN - {"actually", "correct", "rather", "never"}) | (arabic - _folded_words(("بل", "الصحيح")))
-    for clause in _CLAUSE.finditer(folded) if wanted else ():
-        words = re.findall(r"[\w']+", clause.group())
+    clauses = _clause_words(folded) if wanted else []
+    for n, words in enumerate(clauses):
+        following = clauses[n + 1] if n + 1 < len(clauses) else []
         for at, word in enumerate(words):
             if word not in denials and not (word[:1] in "وف" and word[1:] in denials) or _adds_rather(
-                    words, at, wanted, folded[clause.end():]):
+                    words, at, wanted, following):
                 continue
             after = " ".join(words[at + 1:at + 1 + _DENIES_IT_REACH])
             if after and _share(wanted, after) >= EVENT_WORDS:
@@ -436,7 +458,7 @@ _NO_THEN = re.compile(r"^\W*(?:(?:no|لا|لاء|كلا)(?:[ \t]*[,،.!-]|[ \t]+
                       # Possessive: the marks after "no" are read once, never
                       # handed back to the value ("No," + "-" * 6000 + "x.y"
                       # took 28 s, step 4's delta review N2).
-                      r"\W*+(?:يا [^\W\d_]+\W+)?"
+                      r"\W*+(?:يا [^\W\d_]+\W++)?"
                       r"(?P<value>[^.,،!?؟\n]{1,60}?)"
                       r"(?:\W+(?:i (?:told|said) (?:you|it|that)|i said|قلت ?لك|قلتلك|قلت لكم|قلت))?\W*$")
 
@@ -471,7 +493,7 @@ def _and_then(word: str, wanted: list[str]) -> bool:
 #: "لا، في دبي", "لا، بل عمر" say beside the value (step 4's delta review, N3:
 #: articles and prepositions).
 _NO_THEN_FILLERS = frozenset({"its", "it's", "it", "was", "كان", "كانت", "هو", "هي", "actually", "بل", "the", "a", "an",
-                              "my", "at", "in", "to", "with", "on", "في", "مع", "عند", "الى", "الي"}) | _ONLY
+                              "my", "at", "in", "to", "with", "on", "في", "مع", "عند", "الى", "الي", "يوم", "الصحيح"}) | _ONLY
 
 
 def says_once_more(user_text: str) -> bool:
