@@ -374,7 +374,11 @@
     أعمله لكسب عيشي؟", "شنو أسوي لكسب رزقي؟" (`fact_names.ASKED_AS_MINE`);
     never with a modal or "how" ("What should I do for a living?", "ماذا يجب
     أن أفعل لكسب رزقي؟" ask advice: step 4's review, M3, its controls in
-    `tests/test_memory_benchmark_v9.py`). With that, v9 against v8 loses no
+    `tests/test_memory_benchmark_v9.py`). Kept, and said (the delta review's
+    N5): "ماذا أفعل لكسب رزقي؟" and "شنو أسوي لكسب رزقي؟" are often advice too,
+    and "ما أعمل لكسب رزقي" ("I don't work for my living") matches; each names
+    the job, which harms little (a fact shown beside the question). With
+    that, v9 against v8 loses no
     question of the benchmark (183), the small store (164) or the scale run
     (183).
   - **What moves:** h022 ("شنو فصيلة دمي؟") and h024 ("What's my brother's

@@ -341,6 +341,8 @@ _BARE_NO = frozenset({"no", "nope", "لا", "ما"})
 _ANSWER_NO = frozenset({"no", "nope", "لا"})
 #: "وحده ثانيه": another one (a woman), not "alone".
 _ANOTHER = frozenset({"ثانيه", "ثاني", "ثانيين", "غير", "ثانيات"})
+#: "But" going on after "not Ali only".
+_BUT = frozenset({"but", "بل", "لكن", "ولكن", "وانما", "انما"})
 #: Words that put right and never say "not only": "Actually just Omar".
 _NEVER_ADDING = frozenset({"actually", "correct", "instead", "rather", "بل", "الصحيح"})
 
@@ -358,9 +360,10 @@ def _value_end(words: list[str], at: int, wanted: list[str]) -> int | None:
     return end
 
 
-def _adds_rather(words: list[str], at: int, wanted: list[str] | None = None) -> bool:
+def _adds_rather(words: list[str], at: int, wanted: list[str] | None = None, later: str = "") -> bool:
     """Whether the denial at *at* in a clause's *words* says "not only" or
-    "not alone" of the value whose words are *wanted*."""
+    "not alone" of the value whose words are *wanted*; *later* is what the
+    message says after the clause."""
     after = words[at + 1:]
     if not after or words[at] in _NEVER_ADDING:
         return False
@@ -371,7 +374,16 @@ def _adds_rather(words: list[str], at: int, wanted: list[str] | None = None) -> 
     end = _value_end(words, at, wanted)
     if end is None or end + 1 >= len(words) or words[end + 1] not in _ONLY | _ALONE:
         return False
-    return not (end + 2 < len(words) and words[end + 2] in _ANOTHER)
+    rest = words[end + 2:]
+    if words[end + 1] in _ALONE:
+        return not (rest and rest[0] in _ANOTHER)
+    # "Only" after the value adds where what follows goes on with "but" or
+    # says "too" ("not Ali only but Omar", "It wasn't Ali only, Omar too",
+    # "مو علي بس، قابلت عمر بعد"); else it is the next word's ("Not Ali just
+    # Omar", "مو علي بس عمر", "مو علي بس، عمر", "didn't see Ali just now"):
+    # the denial stands (step 4's delta review, N1).
+    follow = rest + re.findall(r"[\w']+", later)
+    return bool(follow) and (follow[0] in _BUT or bool(_ONCE_MORE.search(" ".join(rest) + " " + later)))
 
 
 def _adds_rather_than_denies(user_text: str, value: str = "") -> bool:
@@ -381,10 +393,11 @@ def _adds_rather_than_denies(user_text: str, value: str = "") -> bool:
     folded = _own_folded(user_text)
     arabic = _folded_words(_DENIALS_AR_RAW)
     wanted = value_words(value) if value else None
-    for clause in _CLAUSE.findall(folded):
-        words = re.findall(r"[\w']+", clause)
+    for clause in _CLAUSE.finditer(folded):
+        words = re.findall(r"[\w']+", clause.group())
         for at, word in enumerate(words):
-            if (word in _DENIALS_EN or word in arabic or word in _BARE_NO) and _adds_rather(words, at, wanted):
+            if (word in _DENIALS_EN or word in arabic or word in _BARE_NO) and _adds_rather(
+                    words, at, wanted, folded[clause.end():]):
                 return True
     return False
 
@@ -396,11 +409,11 @@ def _denies_value(folded: str, value: str) -> bool:
     wanted = value_words(value)
     arabic = _folded_words(_DENIALS_AR_RAW)
     denials = (_DENIALS_EN - {"actually", "correct", "rather", "never"}) | (arabic - _folded_words(("بل", "الصحيح")))
-    for clause in _CLAUSE.findall(folded) if wanted else ():
-        words = re.findall(r"[\w']+", clause)
+    for clause in _CLAUSE.finditer(folded) if wanted else ():
+        words = re.findall(r"[\w']+", clause.group())
         for at, word in enumerate(words):
-            if word not in denials and not (word[:1] in "وف" and word[1:] in denials) or _adds_rather(words, at,
-                                                                                                    wanted):
+            if word not in denials and not (word[:1] in "وف" and word[1:] in denials) or _adds_rather(
+                    words, at, wanted, folded[clause.end():]):
                 continue
             after = " ".join(words[at + 1:at + 1 + _DENIES_IT_REACH])
             if after and _share(wanted, after) >= EVENT_WORDS:
@@ -420,7 +433,10 @@ def puts_right(user_text: str, value: str) -> bool:
 #: (W4's left list, L3). Folded. One mark, then ``\W*``: a run of marks is
 #: read once (linear, step 4's review M2).
 _NO_THEN = re.compile(r"^\W*(?:(?:no|لا|لاء|كلا)(?:[ \t]*[,،.!-]|[ \t]+(?=يا ))|(?:nope|nah)(?:[ \t]*[,،.!-]|[ \t]))"
-                      r"\W*(?:يا [^\W\d_]+\W+)?"
+                      # Possessive: the marks after "no" are read once, never
+                      # handed back to the value ("No," + "-" * 6000 + "x.y"
+                      # took 28 s, step 4's delta review N2).
+                      r"\W*+(?:يا [^\W\d_]+\W+)?"
                       r"(?P<value>[^.,،!?؟\n]{1,60}?)"
                       r"(?:\W+(?:i (?:told|said) (?:you|it|that)|i said|قلت ?لك|قلتلك|قلت لكم|قلت))?\W*$")
 
@@ -441,11 +457,21 @@ def no_then(user_text: str, value: str) -> bool:
     if not said or said[0] == "يا":
         return False
     named = [w for w in said if w not in _NO_THEN_FILLERS]
-    return bool(named) and all(words_said(wanted, w) for w in named)
+    return bool(named) and all(words_said(wanted, w) and not _and_then(w, wanted) for w in named)
 
 
-#: What "No, it was Omar", "No, just Omar", "لا، بل عمر" say beside the value.
-_NO_THEN_FILLERS = frozenset({"its", "it's", "it", "was", "كان", "كانت", "هو", "هي", "actually", "بل"}) | _ONLY
+def _and_then(word: str, wanted: list[str]) -> bool:
+    """Whether *word* is the value with "and" or "so" written on its front:
+    "لا، وعمر" adds as "No, and Omar" does (step 4's delta review, N3). A
+    value that begins with the letter ("وليد") is itself."""
+    return len(word) > 2 and word[0] in "وف" and word not in wanted and bool(words_said(wanted, word[1:]))
+
+
+#: What "No, it was Omar", "No, just Omar", "No, the gym", "No, with Omar",
+#: "لا، في دبي", "لا، بل عمر" say beside the value (step 4's delta review, N3:
+#: articles and prepositions).
+_NO_THEN_FILLERS = frozenset({"its", "it's", "it", "was", "كان", "كانت", "هو", "هي", "actually", "بل", "the", "a", "an",
+                              "my", "at", "in", "to", "with", "on", "في", "مع", "عند", "الى", "الي"}) | _ONLY
 
 
 def says_once_more(user_text: str) -> bool:
