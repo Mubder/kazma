@@ -143,16 +143,23 @@ code before styles, links and images. Gate: `tests/js/test_markdown_render.js`.
   it, outside code, alone on its line and not introduced by a colon, closing a
   sentence at a line's end, or with the same text on both sides; a content
   list's reasoning parts. Every other text is the answer, tags and all: a
-  `<think>...</think>` on one line with the answer is shown as it came.
+  `<think>...</think>` on one line with the answer is shown as it came. An
+  answer that itself writes a tag in a cut shape is cut there (the review of
+  d3ae5b2c8, N4): the docs say exactly that, never "never cut".
   **What is not so:** thinking with no opening tag (vLLM with no reasoning
   parser) streams to the page until its closing tag, since nothing says what
   it is before; then the rest is held, the streamed part is taken back
   (`StreamDelta.retract`, `on_chat_model_retract`) and neither the saved row,
-  its narration nor the final frame holds it; the running turn's own token
+  its narration nor the final frame holds it. Tokens leave the queue's last
+  places to control events (`llm_stream._CONTROL_ROOM`), and a retraction names
+  only the tokens that were queued (`_queued_tail`), so a dropped token does
+  not leave the rest in the narration (N6); the running turn's own token
   frames, and a surface that reads tokens alone (the CLI), still do. Gate:
   `tests/test_reasoning_is_never_the_answer.py` (a recorded Qwen-shaped
   stream; the old stream as the control; every client's streamed and whole
-  text, in nested files too, positional or named).
+  text, in nested files too, positional or named, every binding of the name
+  in its function, a `replace(..., content=)` copy and a `.content =` set
+  after).
 - **A content filter's refusal is another vendor's to answer**
   (`agent/content_refusal.py`, `llm_provider.content_refusal`): an
   `LLMError` of kind `content_refused`, permanent, asked once (never again
@@ -167,5 +174,10 @@ code before styles, links and images. Gate: `tests/js/test_markdown_render.js`.
   rest. With no such backup the turn says what refused it and what can be
   done, in the person's language. Every other 4xx still fails fast. The final
   synthesis of a turn that ended with no answer text (`graph_respond`) is
-  asked of the turn's own client only. Gate:
-  `tests/test_content_refusal_failover.py`.
+  asked of the turn's own client only. A router that passes the upstream's
+  error on (OpenRouter's `error.metadata.raw`) is read one level down, and a
+  request refused again after a refused field was dropped
+  (`_raise_refused`) is asked too (the review of d3ae5b2c8, N5, N7). Gate:
+  `tests/test_content_refusal_failover.py` (every function of a client that
+  raises `LLMError` where it reads a status code in any spelling,
+  `is_error`, an HTTP or boto error class, asks `content_refusal`).

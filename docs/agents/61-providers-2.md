@@ -173,16 +173,21 @@ is so basic ... if I clicked outside the card the card gone").
   lookup answer them) and is refused whole when a row, or a key in it, changed
   meanwhile (with the vault on a new key leaves the stored row as it was, so
   the keys are read again inside the update); a row a person's list names, a
-  member may hold a key for (Spaces on), that lives on a key of the
-  environment (`env_key`), or with a key that does not open, its own headers
+  member may hold a key for (Spaces on), that is on and lives on a key of the
+  environment (`env_key`; an off row sends nothing, so it lives on none), or
+  with a key that does not open, its own headers
   or sign-in, stays with the reason. The owner's prices are copied before the
   rows are written and dropped from the old name after. A row that is off and
   holds a key is not ticked, and the confirm says whose key is used first.
 - **A secret goes to the address it was saved with, and a typed key to the
   provider it was typed for** (the review, 2026-11-26): a save that moves a
-  row and names no extra keys, headers or AWS fields drops them
-  (`ModelRegistry.upsert_provider`, every writer), one with the key left empty
-  is refused as a masked one is, a setup never writes over a set-up row
+  row and names no key, extra keys, headers or AWS fields drops them
+  (`ModelRegistry.upsert_provider`, every writer), the page's save of one with
+  the key left empty is refused as a masked one is, and a save is checked
+  against the row it writes, by its exact name (`ModelRegistry.provider_row`,
+  never `get_provider`'s fuzzy match: a new `router` is not `openrouter`; the
+  review of d3ae5b2c8, N1, N3); `add_key` refuses a key with a line break or
+  another control character; a setup never writes over a set-up row
   (`create`, 409 `name_taken`), `add_key` checks the row is still at the
   address it was offered for, and the page carries a key to another provider
   only from the search box or the "looks like a key from" button and clears

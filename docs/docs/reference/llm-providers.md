@@ -356,12 +356,16 @@ refused it and what can be done. The last summary of a turn that ended with no
 answer text is asked of the turn's own model only.
 
 **A model's thinking text is kept out of its answer** when the provider sends
-it in a field of its own, as parts of a list, or in `<think>` tags that are
-certainly that: an opening tag alone on its line at the start, or a lone
-closing tag alone on its line or at a sentence's end. When it is not certain,
-the text is left as it came: a real answer is never cut. A model that thinks
-with no opening tag shows its thinking while it streams, until its closing
-tag; the saved answer does not hold it.
+it in a field of its own, as parts of a list, or in `<think>` tags of the
+shapes models write: an opening tag alone on its line at the start, or a lone
+closing tag alone on its line or at a sentence's end. An answer that names
+the tag mid-sentence or in code is left whole, and so is
+`<think>...</think>` on one line with the answer. An answer that itself
+writes the tag in one of the cut shapes (an opening tag alone on the first
+line, a closing tag alone on a line or right after a full stop) cannot be
+told from thinking and is cut there. A model that thinks with no opening tag
+shows its thinking while it streams, until its closing tag; the saved answer
+does not hold it.
 
 **The backup model** (Settings → System → Non-stop → failover) must be one a
 provider can answer for: switched on, with a key or on your network, listing

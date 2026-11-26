@@ -194,10 +194,13 @@ def _stored_keys(row: dict[str, Any]) -> list[tuple[str, str]]:
 def _on_env_key(registry: Any, row: dict[str, Any]) -> bool:
     """True when *row* holds no key of its own and the runtime sends one all
     the same (``<PROVIDER>_API_KEY``, ``KAZMA_API_KEY``): a key put in the row
-    would take its place, so a setup or a tidy never does it silently."""
+    would take its place, so a setup or a tidy never does it silently. A row
+    that is off sends nothing, so it lives on no key (the review of
+    d3ae5b2c8, N2: an off catalog ``zai`` beside ``Z.AI`` could never be
+    tidied while ``KAZMA_API_KEY`` was set)."""
     from kazma_core.runtime.live_llm import coerce_api_key, key_is_usable
 
-    if _stored_keys(row):
+    if _stored_keys(row) or not row.get("enabled"):
         return False
     _url, key = registry.resolve_provider_credentials(str(row.get("name") or ""))
     return key_is_usable(coerce_api_key(key))
@@ -288,7 +291,9 @@ def add_key(registry: Any, name: str, key: str, label: str = "", *, base_url: st
     from kazma_core.runtime.live_llm import coerce_api_key, key_is_usable
 
     clean = coerce_api_key(key)
-    if not key_is_usable(clean) or "****" in clean:
+    # A line break or other control character is no key's: httpx refused it
+    # only when the key was sent (the review of d3ae5b2c8, N7).
+    if not key_is_usable(clean) or "****" in clean or any(ord(c) < 32 or ord(c) == 127 for c in clean):
         raise SetupRefused("bad_key", "Paste the key to add.", "api_key")
     row = next((r for r in registry.list_providers() if str(r.get("name") or "") == name), None)
     if row is None:

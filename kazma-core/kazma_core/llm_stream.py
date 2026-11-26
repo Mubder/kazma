@@ -65,6 +65,38 @@ class StreamDelta:
 # thread_id → asyncio.Queue that SSE/WS already consume as astream_events.
 _delta_queues: dict[str, asyncio.Queue[Any]] = {}
 
+#: Places of a bounded delta queue that tokens leave free: a token is dropped
+#: before the queue is full, so a retraction (and a tool row) still finds
+#: room. A retraction lost to a full queue left the thinking in the turn's
+#: narration (the review of d3ae5b2c8, N6).
+_CONTROL_ROOM = 16
+
+
+def _token_room(queue: asyncio.Queue[Any]) -> bool:
+    """Whether a token may still go on *queue*."""
+    return queue.maxsize <= 0 or queue.qsize() < max(1, queue.maxsize - _CONTROL_ROOM)
+
+
+def _queued_tail(pieces: list[tuple[str, bool]], length: int) -> str:
+    """The part of the last *length* characters of *pieces* (each a token and
+    whether it was queued) that reached the consumer, in order; the pieces it
+    covers are taken off *pieces*. A token dropped from a full queue was never
+    painted, so it is not taken back: what is taken back is exactly the end
+    of what the consumer holds."""
+    out: list[str] = []
+    left = length
+    while pieces and left > 0:
+        text, queued = pieces[-1]
+        part = text[-left:] if left < len(text) else text
+        left -= len(part)
+        if queued:
+            out.append(part)
+        if len(part) == len(text):
+            pieces.pop()
+        else:
+            pieces[-1] = (text[: len(text) - len(part)], queued)
+    return "".join(reversed(out))
+
 
 def stream_enabled() -> bool:
     """True unless the operator killed streaming (``KAZMA_LLM_STREAM=0``)."""
@@ -189,15 +221,16 @@ def emit_tool_activity(
         logger.debug("[llm_stream] tool activity emit failed thread=%s", tid[:12], exc_info=True)
 
 
-def emit_token_delta(content: str, *, thread_id: str | None = None) -> None:
+def emit_token_delta(content: str, *, thread_id: str | None = None) -> bool:
     """Inject a synthetic ``on_chat_model_stream`` event for SSE/WS.
 
     Looks up the queue by ``thread_id`` or the HITL ``get_current_thread_id()``
-    ContextVar (set on every chat transport). Never raises.
+    ContextVar (set on every chat transport). Never raises. True when the
+    token was queued.
     """
     text = content if isinstance(content, str) else str(content or "")
     if not text:
-        return
+        return False
     tid = (thread_id or "").strip()
     if not tid:
         try:
@@ -207,28 +240,36 @@ def emit_token_delta(content: str, *, thread_id: str | None = None) -> None:
         except Exception:
             tid = ""
     if not tid:
-        return
+        return False
     queue = _delta_queues.get(tid)
     if queue is None:
-        return
+        return False
     event = {
         "event": "on_chat_model_stream",
         "name": "llm",
         "data": {"chunk": {"content": text}},
     }
+    if not _token_room(queue):
+        # Bounded SSE queue: drop tokens rather than block the LLM read, and
+        # before it is full (_CONTROL_ROOM). Post-stream backfill still
+        # paints the final answer.
+        logger.debug("[llm_stream] delta queue full — dropping token thread=%s", tid[:12])
+        return False
     try:
         queue.put_nowait(event)
+        return True
     except asyncio.QueueFull:
-        # Bounded SSE queue: drop tokens rather than block the LLM read.
-        # Post-stream backfill still paints the final answer.
         logger.debug("[llm_stream] delta queue full — dropping token thread=%s", tid[:12])
     except Exception:
         logger.debug("[llm_stream] emit failed thread=%s", tid[:12], exc_info=True)
+    return False
 
 
 def emit_retraction(text: str, *, thread_id: str | None = None) -> None:
     """Tell the stream's consumer that *text*, the end of what it was sent as
-    tokens, was thinking after all (``on_chat_model_retract``). Never raises."""
+    tokens, was thinking after all (``on_chat_model_retract``). Never raises.
+    Tokens leave room for it (``_CONTROL_ROOM``); it is lost only when that
+    room is taken by other control events (tool rows) too."""
     tid = _resolve_stream_thread(thread_id)
     queue = _delta_queues.get(tid) if tid and text else None
     if queue is None:
@@ -269,12 +310,15 @@ async def invoke_llm_chat(
     """
     if stream_enabled() and _has_chat_stream(client):
         response: Any = None
+        # What this call streamed, and whether each token reached the queue:
+        # a retraction takes back only what the consumer was given.
+        pieces: list[tuple[str, bool]] = []
         try:
             async for delta in client.chat_stream(*args, **kwargs):
                 if getattr(delta, "content", None) and emit_deltas:
-                    emit_token_delta(delta.content)
+                    pieces.append((str(delta.content), emit_token_delta(delta.content)))
                 if getattr(delta, "retract", None) and emit_deltas:
-                    emit_retraction(delta.retract)
+                    emit_retraction(_queued_tail(pieces, len(str(delta.retract))))
                 if getattr(delta, "response", None) is not None:
                     response = delta.response
         except TypeError:

@@ -63,6 +63,11 @@ def _add(registry, name, url, key="", **more):
     registry.upsert_provider({"name": name, "base_url": url, "api_key": key, "enabled": True, **more})
 
 
+def _row(registry, name) -> dict:
+    """The row named exactly *name* (or {})."""
+    return next((r for r in registry.list_providers() if r.get("name") == name), {})
+
+
 def _sent(registry, name) -> str:
     return registry.resolve_provider_credentials(name)[1]
 
@@ -329,3 +334,88 @@ def test_a_refused_body_is_not_answered_back(api, path, body):  # L14
     assert answer.status_code == 422
     assert "demo-" not in answer.text and "kkkk" not in answer.text
     assert answer.json()["detail"][0]["loc"]  # where, still said
+
+
+# ── The review of d3ae5b2c8 (N1, N2, N3, N7) ────────────────────────────
+
+
+@pytest.mark.parametrize("keyed, new", [("openrouter", "router"), ("Qwen 1", "qwen")])
+def test_a_new_row_is_checked_against_itself_alone(api, registry, keyed, new):
+    """N1: the move check found a keyed row by a fuzzy match (a unique part of
+    its name), so a new keyless local row was refused as "moving" its key."""
+    _add(registry, keyed, "https://keyed.example/v1", KEY_A)
+    answer = api.post("/api/providers", json={"name": new, "base_url": "http://192.168.1.20:8000/v1", "api_key": ""})
+    assert answer.status_code == 200, answer.text
+    assert _row(registry, new)["base_url"] == "http://192.168.1.20:8000/v1"
+    assert _sent(registry, keyed) == KEY_A and _sent(registry, new) != KEY_A
+    # The control: the row itself, moved with its key left empty, still is.
+    moved = api.post("/api/providers", json={"name": keyed, "base_url": "https://two.example/v1", "api_key": ""})
+    assert moved.status_code == 400
+
+
+def test_a_masked_key_is_never_another_rows(registry):
+    """The sibling in the registry: a masked key for a new ``router`` took the
+    stored ``openrouter``'s key by the same fuzzy match."""
+    _add(registry, "openrouter", "https://keyed.example/v1", KEY_A)
+    registry.upsert_provider({"name": "router", "base_url": "https://keyed.example/v1", "api_key": "****aaaa"})
+    assert _row(registry, "router").get("api_key", "") != KEY_A
+
+
+def test_the_check_never_takes_another_rows_key(registry):
+    """And in the check: a candidate ``router`` was the stored ``openrouter``
+    with its key and address."""
+    from kazma_core.provider_check import CandidateRefused, candidate_entry
+
+    _add(registry, "openrouter", "https://keyed.example/v1", KEY_A)
+    try:
+        entry = candidate_entry(registry, "router")
+    except CandidateRefused:
+        entry = {}
+    assert KEY_A not in str(entry)
+    assert candidate_entry(registry, "openrouter")["api_key"] == KEY_A  # the control: its own row
+
+
+def test_an_off_row_lives_on_no_environment_key(registry, monkeypatch):
+    """N2: with KAZMA_API_KEY set, the off, keyless ``zai`` beside ``Z.AI``
+    (the live install's case) was kept as ``env_key`` and could never be
+    tidied, nor take a key."""
+    url = "https://api.z.ai/api/paas/v4"
+    _add(registry, "Z.AI", url, KEY_A, models=["m"])
+    registry.upsert_provider({"name": "zai", "base_url": url, "api_key": "", "enabled": False})
+    monkeypatch.setenv("KAZMA_API_KEY", ENV_KEY)
+    report = tidy_report(registry)
+    kept = [k for group in report["merges"] for k in group["kept"] if k["name"] == "zai"]
+    assert kept == [] and "zai" in str(report)
+    assert add_key(registry, "zai", KEY_B)["added"] is True
+    # The control: switched on, it does live on that key.
+    _add(registry, "mygate", "https://gate.example/v1")
+    with pytest.raises(SetupRefused):
+        add_key(registry, "mygate", KEY_C)
+
+
+@pytest.mark.parametrize("vault", [False, True])
+def test_every_writer_drops_the_key_at_a_new_address(registry, request, vault):
+    """N3: ``ModelRegistry.upsert_provider`` kept the stored key at a new
+    address; the route alone refused it."""
+    if vault:
+        request.getfixturevalue("vault_env")
+    _add(registry, "gateway", "https://one.example/v1", KEY_A)
+    registry.upsert_provider({"name": "gateway", "base_url": "https://two.example/v1"})
+    assert _row(registry, "gateway")["base_url"] == "https://two.example/v1"
+    assert _sent(registry, "gateway") != KEY_A
+    # The controls: the same address keeps it, a posted key is the new one.
+    _add(registry, "same", "https://one.example/v1", KEY_A)
+    registry.upsert_provider({"name": "same", "base_url": "https://one.example/v1/", "models": ["m"]})
+    assert _sent(registry, "same") == KEY_A
+    registry.upsert_provider({"name": "same", "base_url": "https://two.example/v1", "api_key": KEY_C})
+    assert _sent(registry, "same") == KEY_C
+
+
+@pytest.mark.parametrize("key", ["demo-key\nX-Other: 1", "demo-key\rmore", "demo\tkey", "demo-key\x7f"])
+def test_a_key_with_a_line_break_is_not_taken(registry, key):
+    """N7: httpx refused it only when it was sent."""
+    _add(registry, "gateway", "https://one.example/v1", KEY_A)
+    with pytest.raises(SetupRefused) as refused:
+        add_key(registry, "gateway", key)
+    assert refused.value.code == "bad_key"
+    assert add_key(registry, "gateway", KEY_B + "\n")["added"] is True  # a trailing line break is trimmed

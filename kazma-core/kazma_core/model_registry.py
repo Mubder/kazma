@@ -1590,6 +1590,13 @@ class ModelRegistry:
             return dict(matches[0])
         return None
 
+    def provider_row(self, name: str) -> dict[str, Any] | None:
+        """The row named exactly *name* (``provider_check.exact_row``): the
+        one :meth:`upsert_provider` writes."""
+        from kazma_core.provider_check import exact_row
+
+        return exact_row(self, name)
+
     def upsert_provider(self, data: dict[str, Any]) -> dict[str, Any]:
         """Insert or update a provider entry.
 
@@ -1609,7 +1616,7 @@ class ModelRegistry:
         if incoming_key and ("****" in incoming_key or incoming_key == "***"):
             from kazma_core.provider_check import address_moved
 
-            existing_provider = self.get_provider(name)
+            existing_provider = self.provider_row(name)
             # Kept only for the address it was saved with (2026-11-15): a
             # masked key beside another address is cleared, never moved.
             if (
@@ -1621,15 +1628,20 @@ class ModelRegistry:
                 data["api_key"] = ""  # Clear the masked placeholder
 
         providers = self.list_providers()
+        cleared: set[str] = set()
         for provider in providers:
             if provider.get("name") == name:
                 from kazma_core.provider_check import STORED_SECRET_FIELDS, address_moved
 
                 if address_moved(str(data.get("base_url") or ""), provider):
+                    if not data.get("api_key"):
+                        cleared.add(name)
                     # A secret goes to the address it was saved with alone: an
-                    # extra key the caller did not name was sent to the new one.
+                    # extra key the caller did not name was sent to the new
+                    # one, and so was the key itself (the review of
+                    # d3ae5b2c8, N3: the route refused it, this writer kept it).
                     for secret in STORED_SECRET_FIELDS:
-                        if secret != "api_key" and not data.get(secret):
+                        if not data.get(secret):
                             provider.pop(secret, None)
                             data.pop(secret, None)
                 for key, value in data.items():
@@ -1643,7 +1655,7 @@ class ModelRegistry:
                         provider[key] = value
                 if not provider.get("display_name"):
                     provider["display_name"] = name
-                self._save_providers(providers)
+                self._save_providers(providers, cleared=cleared)
                 # Invalidate cached client for this provider
                 self._clients.pop(name, None)
                 try:
@@ -1956,10 +1968,13 @@ class ModelRegistry:
         set_as_typed_urls(r.get("base_url") for r in rows if r.get("url_as_typed"))
         return rows
 
-    def _save_providers(self, providers: list[dict[str, Any]], *, removed: frozenset[str] | set[str] | None = None) -> None:
+    def _save_providers(
+        self, providers: list[dict[str, Any]], *, removed: frozenset[str] | set[str] | None = None,
+        cleared: frozenset[str] | set[str] = frozenset(),
+    ) -> None:
         from kazma_core.model_registry_store import save_providers
 
-        save_providers(self._config_store, providers, removed=removed)
+        save_providers(self._config_store, providers, removed=removed, cleared=cleared)
         self._config_changed()
 
     def _removed_presets(self) -> frozenset[str]:

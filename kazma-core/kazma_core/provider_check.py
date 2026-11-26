@@ -93,6 +93,17 @@ STORED_SECRET_FIELDS = (
 )
 
 
+def exact_row(registry: Any, name: str) -> dict[str, Any] | None:
+    """The row named exactly *name*: the one ``ModelRegistry.upsert_provider``
+    writes. A write or a check of a named row is held against it, never
+    against ``get_provider``'s fuzzy match (a new ``router`` is not the stored
+    ``openrouter``; the review of d3ae5b2c8, N1)."""
+    wanted = str(name or "").strip()
+    if not wanted:
+        return None
+    return next((dict(p) for p in registry.list_providers() if p.get("name") == wanted), None)
+
+
 def address_moved(typed_base_url: str, stored: dict[str, Any] | None) -> bool:
     """True when a form names another address than the stored row's.
 
@@ -169,7 +180,7 @@ def credentials_problem(registry: Any, entry: dict[str, Any], key: str = "") -> 
         return None if str(entry.get("project_id") or "").strip() else "project_required"
     if key_is_usable(coerce_api_key(key)):
         return None
-    if registry is not None and registry.get_provider(name) is not None:
+    if registry is not None and exact_row(registry, name) is not None:
         _url, resolved = registry.resolve_provider_credentials(name)
         if key_is_usable(coerce_api_key(resolved)):
             return None
@@ -223,7 +234,9 @@ def candidate_entry(
     from kazma_core.runtime.live_llm import coerce_api_key, key_is_usable
 
     pid = str(name or "").strip()
-    stored = registry.get_provider(pid) if pid else None
+    # The row by its exact name: a new ``router`` is not the stored
+    # ``openrouter`` (the review of d3ae5b2c8, N1).
+    stored = exact_row(registry, pid) if pid else None
     extra = {k: v for k, v in (typed or {}).items() if k in TYPED_FIELDS}
     preset_id = str(extra.get("preset") or (stored or {}).get("preset") or pid).strip().lower()
     preset = PROVIDER_PRESETS.get(preset_id) if preset_id else None

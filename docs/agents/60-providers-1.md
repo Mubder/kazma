@@ -39,7 +39,9 @@ provider list as data with per-type forms, per-model details with
   `unpriced_llm_calls`): it said `$0.0000` beside "Spent today"'s "—" (live
   2026-11-15). `dashboard._cost_text` and `dashboard.js` `costText` are one rule
   (`tests/test_dashboard_total_cost.py`).
-- **Cached input has its own price** (2026-11-25): the owner's price, the
+- **Cached input has its own price** (2026-11-25; its gate reads every call
+  of the rule under any name it is imported or assigned as, `partial`, and a
+  price computed by hand with `/ 1_000_000` or `* 1e-6`): the owner's price, the
   catalog and OpenRouter's list carry `cached_input`, and
   `llm_provider.cost_from_usage` reads the cached and written tokens through
   the ledger's own reading (`token_usage.token_counts`,

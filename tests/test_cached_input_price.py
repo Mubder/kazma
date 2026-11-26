@@ -124,23 +124,74 @@ def test_openrouters_list_states_the_cached_price():
 # ── Every place that prices a call passes the cached price ──────────────
 
 
+_PRICED = ("cost", "price", "usd", "per_1m")
+
+
+def _per_million(node: ast.AST) -> bool:
+    """``x / 1_000_000`` (any spelling of the number) or ``x * 1e-6``."""
+    if not isinstance(node, ast.BinOp) or not isinstance(node.right, ast.Constant):
+        return False
+    number = node.right.value
+    return isinstance(number, (int, float)) and not isinstance(number, bool) and (
+        (isinstance(node.op, (ast.Div, ast.FloorDiv)) and number == 1_000_000)
+        or (isinstance(node.op, ast.Mult) and number == 1e-6))
+
+
 def _calls_without_the_cached_price(source: str) -> list[int]:
-    """The calls of ``cost_from_usage``, by name or as an attribute, with no
-    cached price named. Not read: a call through another name or a partial, a
-    price computed with no call of it."""
-    return [n.lineno for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Call)
-            and getattr(n.func, "id", getattr(n.func, "attr", "")) == "cost_from_usage"
-            and not any(k.arg == "cached_input_cost_per_1m" for k in n.keywords)]
+    """Where a call is priced without the cached price: a call of
+    ``cost_from_usage`` -- by name, as an attribute, under a name it was
+    imported or assigned as, or through ``partial`` -- with no cached price
+    named; and a price computed by hand (a statement with ``/ 1_000_000`` or
+    ``* 1e-6`` that names a cost or a price) outside the rule itself (the review of d3ae5b2c8,
+    N5: Bedrock's old ``usage_in / 1e6 * in_cost``). Not read: a per-million
+    number held in a name first, a call through ``getattr``."""
+    tree = ast.parse(source)
+    names = {"cost_from_usage"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            names |= {a.asname for a in node.names if a.name == "cost_from_usage" and a.asname}
+        elif isinstance(node, ast.Assign) and getattr(node.value, "id", getattr(node.value, "attr", "")) == "cost_from_usage":
+            names |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+    out = []
+    rule = {id(n) for f in ast.walk(tree) if isinstance(f, ast.FunctionDef) and f.name == "cost_from_usage"
+            for n in ast.walk(f)}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            called = getattr(node.func, "id", getattr(node.func, "attr", ""))
+            if called == "partial" and node.args:
+                called = getattr(node.args[0], "id", getattr(node.args[0], "attr", ""))
+            if called in names and not any(k.arg == "cached_input_cost_per_1m" for k in node.keywords):
+                out.append(node.lineno)
+        elif isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Return, ast.Expr)) and (
+            id(node) not in rule and any(_per_million(n) for n in ast.walk(node)) and any(
+                word in getattr(n, "id", getattr(n, "attr", "")).lower() for n in ast.walk(node) for word in _PRICED)
+        ):
+            out.append(node.lineno)
+    return sorted(set(out))
 
 
 def test_every_call_of_the_cost_rule_passes_the_cached_price():
     root = Path(inspect.getfile(LLMProvider)).parent
-    files = [p for p in sorted(root.rglob("*.py")) if "cost_from_usage(" in p.read_text(encoding="utf-8")]
-    assert len(files) >= 3  # the OpenAI-shaped, Anthropic and Bedrock clients
+    ui = Path(inspect.getfile(__import__("kazma_ui"))).parent
+    files = sorted(root.rglob("*.py")) + sorted(ui.rglob("*.py"))
+    assert len([p for p in files if "cost_from_usage(" in p.read_text(encoding="utf-8")]) >= 3
     bad = {p.name: lines for p in files if (lines := _calls_without_the_cached_price(p.read_text(encoding="utf-8")))}
     assert bad == {}
 
 
-def test_the_gate_sees_a_call_without_it():
-    planted = "cost_from_usage(u, input_cost_per_1m=1, output_cost_per_1m=2)\n"
-    assert _calls_without_the_cached_price(planted) == [1]
+@pytest.mark.parametrize("planted", [
+    "cost_from_usage(u, input_cost_per_1m=1, output_cost_per_1m=2)",
+    "from kazma_core.llm_provider import cost_from_usage as price_of\nprice_of(u, input_cost_per_1m=1, output_cost_per_1m=2)",
+    "priced = llm_provider.cost_from_usage\npriced(u, input_cost_per_1m=1, output_cost_per_1m=2)",
+    "f = functools.partial(cost_from_usage, input_cost_per_1m=1)",
+    "cost = usage_in / 1e6 * in_cost + usage_out / 1e6 * out_cost",
+    "cost = (tokens * input_price) / 1_000_000",
+    "usd = tokens * per_1m * 1e-6",
+])
+def test_the_gate_sees_a_call_without_it(planted):
+    assert _calls_without_the_cached_price(planted)
+    assert not _calls_without_the_cached_price(
+        "cost_from_usage(u, input_cost_per_1m=1, output_cost_per_1m=2, cached_input_cost_per_1m=0.1)\n"
+        "ms = nanoseconds // 1_000_000\n"
+        "def cost_from_usage(u, input_cost_per_1m, output_cost_per_1m, cached_input_cost_per_1m=None):\n"
+        "    return (u * input_cost_per_1m) / 1_000_000\n")

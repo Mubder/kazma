@@ -173,8 +173,15 @@ def save_providers(
     providers: list[dict[str, Any]],
     *,
     removed: frozenset[str] | set[str] | None = None,
+    cleared: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     """Persist providers list, refusing to blank an api_key that is on disk.
+
+    *cleared*: the rows whose key the writer drops on purpose -- a row moved
+    to another address, whose key is kept only for the one it was saved with
+    (``ModelRegistry.upsert_provider``). An undecryptable read never moves an
+    address, so the guard below still holds for every other blank (the review
+    of d3ae5b2c8, N3: the masked-key "clear" put the stored key back here).
 
     **Why this guard exists.** Every provider mutation -- ``toggle_provider``,
     ``set_provider_health``, ``upsert_provider`` -- is a read-modify-write over
@@ -208,7 +215,7 @@ def save_providers(
             protected.append(entry)
             continue
         name = str(entry.get("name", ""))
-        if name in stored_keys and not str(entry.get("api_key") or "").strip():
+        if name in stored_keys and name not in cleared and not str(entry.get("api_key") or "").strip():
             entry = dict(entry)
             entry["api_key"] = stored_keys[name]
             logger.warning(

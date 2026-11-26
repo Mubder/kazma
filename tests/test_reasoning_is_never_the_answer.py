@@ -199,9 +199,12 @@ def test_anthropic_and_bedrock_too():
 #
 # Read: every file under kazma_core, nested ones too. A StreamDelta's text,
 # positional or named, is a whole parsed response's, or a name that is only
-# ever given ThinkFilter's answers in its file. An LLMResponse made from a
-# provider's text takes it from split_reasoning. Not read: a client that names
-# the classes otherwise, or builds them through a helper.
+# ever given ThinkFilter's answers in its file. Every text a response is given
+# -- LLMResponse(...), a ``replace(..., content=...)`` of one, a ``x.content =``
+# or ``+=`` after it was made -- is a constant or a name every binding of which
+# in its function is split_reasoning's answer (the review of d3ae5b2c8, N5). Not
+# read: a client that names the classes otherwise, builds them through a
+# helper, or sets the text through ``setattr``.
 
 
 def _delta_text(call: ast.Call) -> ast.expr | None:
@@ -227,6 +230,14 @@ def _filtered(value: ast.expr | None) -> bool:
 def _raw_text(source: str) -> list[str]:
     """What streams or returns a provider's text as it came."""
     tree = ast.parse(source)
+    scope: dict[ast.AST, ast.AST] = {}  # node -> the function it is in (or the module)
+
+    def mark(node: ast.AST, inside: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            scope[child] = inside
+            mark(child, child if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else inside)
+
+    mark(tree, tree)
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -239,23 +250,47 @@ def _raw_text(source: str) -> list[str]:
             given = _names_given(tree, text.id) if isinstance(text, ast.Name) else []
             if not given or not all(_filtered(v) for v in given):
                 out.append(ast.unparse(node))
-        elif made == "LLMResponse":
-            text = next((k.value for k in node.keywords if k.arg == "content"), node.args[0] if node.args else None)
-            if text is None or isinstance(text, ast.Constant):
-                continue
-            if not (isinstance(text, ast.Name) and _split_into(tree, text.id)):
+        elif made in ("LLMResponse", "replace"):
+            text = next((k.value for k in node.keywords if k.arg == "content"),
+                        node.args[0] if node.args and made == "LLMResponse" else None)
+            if text is not None and not _answer_of_split(scope.get(node, tree), text):
+                out.append(ast.unparse(node)[:80])
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, ast.Attribute) and t.attr == "content" for t in targets) and (
+                isinstance(node, ast.AugAssign) or not _answer_of_split(scope.get(node, tree), node.value)
+            ):
                 out.append(ast.unparse(node)[:80])
     return out
 
 
+def _answer_of_split(tree: ast.AST, text: ast.expr | None) -> bool:
+    """A constant, or a name every binding of which in the function it is
+    used in is split_reasoning's answer."""
+    if text is None or isinstance(text, ast.Constant):
+        return True
+    return isinstance(text, ast.Name) and _split_into(tree, text.id)
+
+
 def _split_into(tree: ast.AST, name: str) -> bool:
-    """Every value *name* is given in the file is split_reasoning's answer."""
+    """Every value *name* is given in the file is split_reasoning's answer:
+    any other binding of it (a plain assignment, ``+=``, a loop or ``with``
+    target, ``:=``) counts against it."""
     given = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Tuple) and target.elts and getattr(target.elts[0], "id", "") == name:
                     given.append(getattr(getattr(node.value, "func", None), "id", "") == "split_reasoning")
+                elif any(getattr(t, "id", "") == name for t in ast.walk(target)):
+                    given.append(False)
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign, ast.NamedExpr, ast.For, ast.AsyncFor, ast.comprehension)):
+            if any(getattr(t, "id", "") == name for t in ast.walk(node.target)):
+                given.append(False)
+        elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+            if any(getattr(t, "id", "") == name for t in ast.walk(node.optional_vars)):
+                given.append(False)
     return bool(given) and all(given)
 
 
@@ -279,11 +314,20 @@ def test_no_client_gives_a_providers_text_as_it_came():
     "shown = f.feed(piece)\nshown += piece\nyield StreamDelta(content=shown)",
     "answer = LLMResponse(content=''.join(parts))", "content = ''.join(parts)\nanswer = LLMResponse(content=content)",
     "answer = LLMResponse(text)",
+    # The review of d3ae5b2c8, N5: the name given another text too, a copy
+    # with another text, and the text set after the response was made.
+    "content, h = split_reasoning(t)\ncontent = ''.join(parts)\nanswer = LLMResponse(content=content)",
+    "content, h = split_reasoning(t)\nfor content in parts: pass\nanswer = LLMResponse(content=content)",
+    "answer = dataclasses.replace(resp, content=''.join(parts))",
+    "content, h = split_reasoning(t)\nresp = LLMResponse(content=content)\nresp.content = raw",
+    "resp.content += piece",
 ])
 def test_the_gate_sees_a_providers_text(planted):
     assert _raw_text(planted)
     assert not _raw_text("shown = f.feed(piece)\nyield StreamDelta(content=shown)\nyield StreamDelta(response=r)")
     assert not _raw_text("content, hidden = split_reasoning(text)\nanswer = LLMResponse(content=content)")
+    assert not _raw_text("content, hidden = split_reasoning(text)\nanswer = replace(resp, content=content)\n"
+                         "answer.content = ''")
 
 
 async def test_thinking_with_no_opening_tag_is_not_kept_as_the_turns_words(monkeypatch):
@@ -338,3 +382,63 @@ def test_a_turn_keeps_no_thinking_of_a_model_with_no_opening_tag(monkeypatch, tm
     done, row = _turn(monkeypatch, tmp_path, _Thinks(), f"retract-{retracts}")
     assert done["content"] == ANSWER and row["content"] == ANSWER
     assert ("First the date" in json.dumps(row)) is not retracts
+
+
+# ── The review of d3ae5b2c8, N6: a retraction and a full queue ──────────
+
+
+def test_a_retraction_names_only_what_reached_the_page():
+    from kazma_core.llm_stream import _queued_tail
+
+    pieces = [("a", True), ("bc", False), ("de", True)]
+    assert _queued_tail(pieces, 4) == "de" and pieces == [("a", True)]
+    pieces = [("xab", True), ("c", True)]
+    assert _queued_tail(pieces, 3) == "abc" and pieces == [("x", True)]
+    assert _queued_tail([("ab", False)], 2) == ""
+
+
+@pytest.mark.parametrize("size", [3, 5, 40])
+async def test_a_full_queue_does_not_keep_the_thinking(monkeypatch, size):
+    """A token dropped from a full queue made the retraction miss (it took
+    back an exact end), and a retraction itself was dropped when the queue was
+    full: the narration kept the thinking."""
+    import asyncio
+
+    from kazma_core import llm_stream
+    from kazma_core.llm_provider import LLMResponse
+    from kazma_core.llm_stream import StreamDelta, invoke_llm_chat
+
+    monkeypatch.setenv("KAZMA_LLM_STREAM", "1")
+    thinking = ["First ", "the ", "date, ", "then ", "the ", "room. "]
+
+    class _Client:
+        async def chat_stream(self, *a, **kw):
+            for piece in thinking:
+                yield StreamDelta(content=piece)
+            yield StreamDelta(retract="".join(thinking))
+            yield StreamDelta(response=LLMResponse(content=ANSWER))
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=size)
+    llm_stream.register_delta_queue("n6-thread", queue)
+    try:
+        await _run(invoke_llm_chat, _Client())
+    finally:
+        llm_stream._delta_queues.pop("n6-thread", None)
+    painted = ""
+    while not queue.empty():
+        event = queue.get_nowait()
+        if event["event"] == "on_chat_model_stream":
+            painted += event["data"]["chunk"]["content"]
+        elif event["event"] == "on_chat_model_retract":
+            painted = painted.removesuffix(event["data"]["text"])
+    assert painted == ""
+
+
+async def _run(invoke, client):
+    from kazma_core.safety.hitl import reset_current_thread_id, set_current_thread_id
+
+    token = set_current_thread_id("n6-thread")
+    try:
+        return await invoke(client, [{"role": "user", "content": "x"}])
+    finally:
+        reset_current_thread_id(token)

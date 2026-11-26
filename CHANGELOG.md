@@ -25,8 +25,9 @@
   free; Bedrock's were not counted.
 - **A model's thinking text is kept out of its answer** when it is certainly
   thinking: a `<think>` block, a stray `</think>` (Qwen showed one, with the
-  answer twice), or reasoning parts of a list. An answer that names the tags is
-  left whole.
+  answer twice), or reasoning parts of a list. An answer that names a tag
+  mid-sentence or in code is left whole; one that writes it alone on a line,
+  as thinking does, is cut there.
 - **A message a provider's content filter refuses goes to a backup model of
   another vendor** (Qwen, OpenAI, Azure, DeepSeek, Anthropic, Bedrock), and the
   answer says why. It used to end the turn in an error. The closing summary of

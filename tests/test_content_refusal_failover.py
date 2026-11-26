@@ -295,9 +295,18 @@ async def test_an_answer_kept_back_whole():
     assert is_content_refused(raised.value)
 
 
+#: What a function that meets a refused request reads: a status code in any
+#: spelling (``!= 200``, ``400 <=``, ``.status``), ``is_error``, an HTTP or
+#: boto error class, or the boto error's dict (the review of d3ae5b2c8, N5:
+#: the gate matched three literal strings).
+_MEETS_A_REFUSAL = ("status_code", ".status", "is_error", "is_client_error", "HTTPError", "HTTPStatusError",
+                    "ClientError", "'Error'")
+
+
 def _unasked(source: str) -> list[str]:
-    """The functions of a client that raise on a refused request and never ask
-    ``content_refusal`` (nested functions with the one they are in)."""
+    """The functions of a client that raise ``LLMError`` where they meet a
+    refused request and never ask ``content_refusal`` (nested functions with
+    the one they are in)."""
     import ast
 
     out = []
@@ -308,9 +317,8 @@ def _unasked(source: str) -> list[str]:
                 walk(node.body, node.name + ".")
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 text = ast.unparse(node)
-                reads = any(mark in text for mark in ("resp.status_code >= 400", "except httpx.HTTPStatusError",
-                                                      "err_resp.get('Error')"))
-                if reads and "LLMError" in text and "content_refusal(" not in text:
+                raises = any(isinstance(n, ast.Raise) and "LLMError" in ast.unparse(n) for n in ast.walk(node))
+                if raises and any(mark in text for mark in _MEETS_A_REFUSAL) and "content_refusal(" not in text:
                     out.append(prefix + node.name)
 
     walk(ast.parse(source).body)
@@ -335,10 +343,17 @@ def test_every_client_asks_whether_a_filter_refused():
     assert {k: v for k, v in found.items() if v} == {}
 
 
-def test_the_gate_sees_a_client_that_does_not_ask():
-    planted = ("class C(LLMProvider):\n    async def chat(self):\n        if resp.status_code >= 400:\n"
-               "            raise LLMError('x')\n")
+@pytest.mark.parametrize("meets", [
+    "if resp.status_code >= 400:", "if resp.status_code != 200:", "if 400 <= resp.status_code:",
+    "if resp.is_error:", "if r.status >= 400:", "try:\n            pass\n        except httpx.HTTPError:",
+    "try:\n            pass\n        except ClientError:",
+])
+def test_the_gate_sees_a_client_that_does_not_ask(meets):
+    planted = f"class C(LLMProvider):\n    async def chat(self):\n        {meets}\n            raise LLMError('x')\n"
     assert _unasked(planted) == ["C.chat"]
+    asked = planted.replace("raise LLMError('x')", "raise content_refusal('C', 400, b) or LLMError('x')")
+    assert _unasked(asked) == []
+    assert _unasked(planted.replace("LLMError('x')", "ValueError('x')")) == []
 
 
 async def test_another_permanent_error_still_fails_fast(quiet):
@@ -423,3 +438,43 @@ def test_a_backup_that_refuses_a_turn_too_does_not_rest_and_the_failure_says_so(
     done, _row = _turn(monkeypatch, tmp_path, _Refused("dashscope-intl.aliyuncs.com"), "refusal-both")
     assert graph_supervisor._failover_cooldowns == {}
     assert "did not answer either" in done["content"] and "set a backup" not in done["content"]
+
+
+# ── The review of d3ae5b2c8 (N5, N7) ────────────────────────────────────
+
+
+def _routed(upstream):
+    import json
+
+    return json.dumps({"error": {"code": 400, "message": "Provider returned error",
+                                 "metadata": {"raw": upstream, "provider_name": "Alibaba"}}})
+
+
+@pytest.mark.parametrize("raw", [
+    '{"error": {"code": "data_inspection_failed", "message": "Input data may contain inappropriate content."}}',
+    {"error": {"code": "data_inspection_failed", "message": "x"}},
+    "Input data may contain inappropriate content.",
+])
+def test_a_refusal_passed_on_by_a_router_is_classed(raw):
+    """N7: OpenRouter's ``metadata.raw`` held Qwen's own refusal."""
+    assert _is_content_refusal(400, _routed(raw))
+
+
+@pytest.mark.parametrize("raw", ['{"error": {"code": "invalid_parameter", "message": "bad"}}', "", None, 7])
+def test_another_error_passed_on_is_not(raw):
+    assert not _is_content_refusal(400, _routed(raw))
+    nested = _routed(_routed('{"error": {"code": "data_inspection_failed"}}'))
+    assert not _is_content_refusal(400, nested)  # one level down only
+
+
+async def test_a_refusal_after_a_refused_field_is_classed():
+    """Found by the widened gate: a request asked again without a refused
+    field and refused by the filter this time ended as an ordinary error."""
+    answers = iter([
+        httpx.Response(400, json={"error": {"message": "temperature is not supported by this model"}}),
+        httpx.Response(400, json={"error": {"code": "data_inspection_failed", "message": "Input data may contain inappropriate content."}}),
+    ])
+    client = _client(lambda req: next(answers), host="refused-field.example")
+    with pytest.raises(LLMError) as raised:
+        await client.chat([{"role": "user", "content": "x"}], temperature=0.3)
+    assert is_content_refused(raised.value)

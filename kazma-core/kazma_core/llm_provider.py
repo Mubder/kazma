@@ -305,7 +305,7 @@ _REFUSAL_PHRASES = (
 _REFUSAL_FINISHES = frozenset({"content_filter", "refusal", "content_filtered", "guardrail_intervened"})
 
 
-def _is_content_refusal(status_code: int, detail: Any) -> bool:
+def _is_content_refusal(status_code: int, detail: Any, *, _depth: int = 0) -> bool:
     """True when a refused request was refused by the provider's content
     filter (Qwen answered a harmless Arabic question so, and the turn ended in
     an error: the real-use runs of 2026-11-22). Read from the error's own
@@ -328,7 +328,14 @@ def _is_content_refusal(status_code: int, detail: Any) -> bool:
     if named & _REFUSAL_CODES:
         return True
     said = error.get("message") or (body["error"] if isinstance(body.get("error"), str) else "")
-    return any(phrase in str(said or "")[:300].lower() for phrase in _REFUSAL_PHRASES)
+    if any(phrase in str(said or "")[:300].lower() for phrase in _REFUSAL_PHRASES):
+        return True
+    # A router that passes the upstream's own error on (OpenRouter's
+    # ``metadata.raw``: Qwen's data_inspection_failed behind it, the review of
+    # d3ae5b2c8, N7) is read the same way, one level down.
+    raw = error.get("metadata", {}).get("raw") if isinstance(error.get("metadata"), dict) else None
+    return bool(_depth < 1 and raw and isinstance(raw, (str, dict))
+                and _is_content_refusal(status_code, raw, _depth=_depth + 1))
 
 
 def content_refusal(endpoint: str, status_code: int, detail: Any) -> LLMError | None:
@@ -2510,9 +2517,11 @@ class LLMProvider:
             data = self._json_answer(resp)
             return self._parse_response(data, (time.monotonic() - start) * 1000)
 
-    @staticmethod
-    def _raise_refused(status_code: int, detail: str) -> LLMResponse:
-        raise LLMError(
+    def _raise_refused(self, status_code: int, detail: str) -> LLMResponse:
+        # A request asked again without a refused field may be refused by the
+        # content filter this time (found by the widened gate, the review of
+        # d3ae5b2c8, N5).
+        raise content_refusal(self._describe_endpoint(), status_code, detail) or LLMError(
             f"LLM call failed (HTTP {status_code}): {str(detail or '')[:300]}",
             transient=_http_status_is_transient(status_code),
         )

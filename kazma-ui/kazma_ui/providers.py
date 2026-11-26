@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from kazma_core.config_store import ConfigStore, is_vault_ref
 from kazma_core.env_files import env_credential
 from kazma_core.model_registry import get_model_registry
-from kazma_core.provider_check import MOVED_KEY_MESSAGE, STORED_SECRET_FIELDS, address_moved
+from kazma_core.provider_check import MOVED_KEY_MESSAGE, STORED_SECRET_FIELDS, address_moved, exact_row
 from kazma_core.security.provider_mask import mask_provider_entry
 from kazma_core.security.url_credentials import (
     mask_url_credentials,
@@ -125,7 +125,7 @@ def _can_be_called(registry: Any, name: str) -> bool:
     message and that Kazma might fall back to (providers stage 1)."""
     from kazma_core.provider_check import credentials_problem
 
-    entry = registry.get_provider(name) or {"name": name}
+    entry = exact_row(registry, name) or {"name": name}
     return credentials_problem(registry, entry) is None
 
 
@@ -521,7 +521,9 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             raise HTTPException(status_code=409, detail={
                 "code": "name_taken", "message": "There is already a provider with this name.", "field": "name"})
 
-        existing = registry.get_provider(data["name"]) or {}
+        # The row this save writes, by its exact name: a fuzzy match made a new
+        # keyless ``router`` beside a keyed ``openrouter`` "move" that key.
+        existing = exact_row(registry, data["name"]) or {}
         _refuse_bad_fields(data, existing)
         data["base_url"] = _restore_url("base_url", data.get("base_url"), existing.get("base_url"))
         # A stored secret is kept only for the address it was saved with: a
