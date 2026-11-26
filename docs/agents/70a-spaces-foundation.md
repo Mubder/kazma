@@ -150,9 +150,27 @@ an install with one account behaves as before.
   `BEGIN; SELECT set_config('kazma.space', ...)` in one message, its result
   read (M3). After that transaction ends the checkout refuses a second one
   (M4); an install checkout inside a space one is refused unless declared
-  (`_install_inside_a_space`, M13); a space half that cannot sign in while
+  (`install_inside_a_space`, M13); a space half that cannot sign in while
   the owner can is its own problem, said, not §44's outage (M1). Those
-  refusals are `NoSpaceBound`s: no other store answers for them (H2). Not
+  refusals are `NoSpaceBound`s: no other store answers for them (H2). The
+  step 3 review: the checkout's one message also reads `current_user`, and
+  a connection that is not `kazma_space` is closed and refused
+  (`_NotTheSpaceRole`); the pool's reset (`end_space`) sends `RESET ALL;
+  RESET ROLE; DISCARD TEMP` -- a session `SET ROLE NONE` a checkout left made
+  the next checkout, in another space, the owner, and `RESET ALL` leaves the
+  role (M1). Settings statements are declared inside a space checkout (the
+  space role holds none of the settings table's locks), so the mirror reads
+  its conflict policy there (M2). Armed, a refusal is one whether or not
+  Spaces is enforced (`pg_helpers._space_refusal`, M3). A cursor of the
+  ended transaction is refused too (L1); a held connection rolls back what
+  its store left open (L2); a failed space checkout is judged once a minute
+  and said as a refused sign-in, connections of another role or a full
+  pool (L3); a row of no space's shape is refused before a connection
+  (`_NotASpace`, L4); a space checkout inside another is refused unless
+  declared (`space_inside_a_space`, L5); while not armed, a recorded
+  workload sends its own statements and nothing more (L7). After a deploy,
+  read `scripts/space_doors_report.py --since <the deploy's time>`: older
+  entries say `none` and are listed as new (L6). Not
   armed, the pool takes today's path and opens no space half. The workers'
   metrics table, which has no space, is the install's
   (`TaskStore.record_worker_metric` and its two readers); so is the chat

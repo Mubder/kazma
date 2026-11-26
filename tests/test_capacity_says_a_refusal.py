@@ -49,3 +49,20 @@ def test_an_outage_is_still_a_retry(monkeypatch: pytest.MonkeyPatch, tmp_path: A
     with pytest.raises(CapacityError) as caught:
         guard.check_intake(tenant_id="family", byte_size=1)
     assert caught.value.status == 503
+
+
+def test_armed_and_not_enforced_a_refusal_is_still_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Spaces S4-01 step 3 review M3: with the lock armed and Spaces not
+    enforced, a refusal read as a store failure and the SQLite fallbacks
+    answered."""
+    from kazma_core.db import row_security
+    from kazma_core.db.pg_helpers import is_space_refusal
+
+    monkeypatch.setattr(scope, "_enforced", False)
+    monkeypatch.setattr(row_security, "_armed", True)
+    assert is_space_refusal(NoSpaceBound("refused")) and is_space_refusal(row_security._SecondTransaction("spent"))
+    with pytest.raises(NoSpaceBound):
+        _guard(NoSpaceBound("refused"), tmp_path).check_intake(tenant_id="family", byte_size=1)
+    # The control: neither armed nor enforced, an install reads its errors as before.
+    monkeypatch.setattr(row_security, "_armed", False)
+    assert not is_space_refusal(NoSpaceBound("refused"))

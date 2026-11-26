@@ -45,12 +45,16 @@ def _space_refusal(exc: BaseException | None) -> BaseException | None:
     this role do it. The store is there and said no, so nothing may be read
     as missing or empty and no other store takes its place. Never an outage.
 
-    Always None while Spaces is not enforced: an install without it reads its
-    errors as before. ``store_errors()`` holds both kinds, so code that
-    catches it to fall back asks here first (S4-01, H2)."""
+    Always None while Spaces is not enforced and the second lock is not
+    armed: an install without either reads its errors as before. Armed, the
+    pool's own refusals are refusals whatever the switch says (S4-01 step 3
+    review M3: armed and not enforced, a refusal let the SQLite fallbacks
+    answer). ``store_errors()`` holds both kinds, so code that catches it to
+    fall back asks here first (S4-01, H2)."""
+    from kazma_core.db.row_security import armed
     from kazma_core.spaces.scope import NoSpaceBound, spaces_enforced
 
-    if not spaces_enforced():
+    if not spaces_enforced() and not armed():
         return None
     seen: set[int] = set()
     while exc is not None and id(exc) not in seen:
