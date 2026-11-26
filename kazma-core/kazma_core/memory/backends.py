@@ -1195,7 +1195,9 @@ def _pgvector_table_name(collection: str | None) -> str:
     """The table pgvector's vectors live in: the collection's name, letters,
     digits and ``_`` only."""
     default = "kazma_memory_vectors"
-    return "".join(c for c in (collection or default) if c.isalnum() or c == "_") or default
+    # Lower case, as Postgres folds the unquoted name it is made with (step 2
+    # review L1: the rules looked it up as written and found nothing).
+    return ("".join(c for c in (collection or default) if c.isalnum() or c == "_") or default).lower()
 
 
 def pgvector_table(cfg: dict[str, Any]) -> str | None:

@@ -121,7 +121,24 @@ an install with one account behaves as before.
   `tests/test_pg_row_security.py` (the role file and its repairs, apply
   once, each planted difference, a space's own rows only, no space raises,
   M6, the refusals, a dump's lock left, tables made later, dump, restore,
-  the upgrade's copy, the rehearsal, the remove file).
+  the upgrade's copy, the rehearsal, the remove file). Step 2 review: how
+  Kazma's login holds the role has one answer, `_membership`, read from
+  `pg_auth_members` (`pg_has_role` says yes for a superuser and for a
+  PostgreSQL 16 creator's own grant, which has no SET); `apply` grants it
+  explicitly and is not `complete` while a role, function or schema finding
+  remains (`Applied.unresolved`); a grant or function it may not touch is
+  said, never raised. The policies call `public.kazma_space_id()`, which
+  PUBLIC may not run (a reader set up to run no function stays one), nor
+  any function of `KAZMA_PG_FUNCTIONS`: each DDL revokes it, `apply` does,
+  and every whole restore (the upgrade's and the move's copies, the compose
+  upgrade, the migration bundle's import) calls
+  `pg_backup.revoke_public_execute` after, which fails when PUBLIC still may
+  (delta review N1, N4). `rows`
+  and `prove` read a database the rules never reached (a missing rule column
+  is the owner's rows) and count every space's table in full: on live, when
+  it is idle. `scripts/row_security.py` takes another address only from an
+  environment variable it is named (`--url-from`), never its command line
+  (§26 D); `kazma doctor` gives it one line while nothing is armed.
 - **The identity store** (`spaces/identity.py`): accounts, spaces and
   memberships in one document (`identity.REGISTRY_KEY`) changed only by
   `update_registry`, one `atomic_update` per change. The owner

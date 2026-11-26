@@ -35,7 +35,15 @@
   the rules in place by hand.
 - Every restore also makes the function the policies call, with Spaces on or
   off; dumps, restores, the upgrade's copy and the weekly restore rehearsal
-  work with the rules in place, and name no role.
+  work with the rules in place, and name no role. Only the role may run that
+  function, so a reader the owner set up to run none is not refused after a
+  restore.
+- The rules go in place, and say so truly, on an install that signs in as the
+  superuser too (Docker Compose) and on PostgreSQL 16's own role grants;
+  what the login may not do itself is said, not raised. Listing and proving
+  work on a database the rules never reached, the script takes another
+  database's address only from an environment variable (never its command
+  line), and `kazma doctor` gives the second lock one line.
 
 ## A busy test machine cannot hide a slow pattern (2026-11-26)
 
