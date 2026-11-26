@@ -701,6 +701,64 @@ def test_public_may_not_run_the_function_and_the_space_role_may(rs: Any, db: dic
     assert _sql(app, "SELECT has_function_privilege('kazma_space', %s, 'EXECUTE')", (fn,)) == [(True,)]
 
 
+# ── the delta review of the step 2 review ───────────────────────────────
+
+
+def test_a_bundles_whole_dump_restores_functions_public_may_not_run(rs: Any, db: dict[str, Any], tmp_path: Path,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """N1: the migration bundle dumps the whole database and its import
+    restores with --clean --no-privileges: the functions came back with
+    PUBLIC's EXECUTE."""
+    from kazma_core.migration.pg_bridge import dump_database, restore_database
+
+    _tools()
+    dump = dump_database(db["app"], tmp_path / "whole.dump")  # no tables named: the bundle's
+    target = _with(db["base"], user="kazma_app", password=db["password"], db=_new_database(db))
+    restore_database(dump, target)
+    assert _sql(target, _PUBLIC_RUNS) == [(False, False)]
+    # The control: the same restore with the take-away left out.
+    from kazma_core.migration import pg_bridge
+
+    bare = _with(db["base"], user="kazma_app", password=db["password"], db=_new_database(db))
+    monkeypatch.setattr(pg_bridge, "_close_kazma_functions", lambda dsn, progress=None: None)
+    restore_database(dump, bare)
+    assert _sql(bare, _PUBLIC_RUNS) != [(False, False)], "the restore made them PUBLIC's again"
+
+
+def test_taking_publics_execute_away_says_when_it_could_not(rs: Any, db: dict[str, Any]) -> None:
+    """N4: a REVOKE by a login that does not own the function only warns, and
+    the take-away said it was done."""
+    from kazma_core.db.pg_backup import revoke_public_execute
+
+    name = _new_database(db)
+    fresh = _with(db["base"], user="kazma_app", password=db["password"], db=name)
+    _sql(_with(db["base"], db=name), "CREATE FUNCTION public.kazma_space_id() RETURNS text LANGUAGE sql STABLE "
+                                     "AS $$ SELECT 'x' $$")  # the superuser's: PUBLIC may run it
+    assert revoke_public_execute(fresh) == "InsufficientPrivilege"
+    assert _sql(fresh, "SELECT has_function_privilege('public', 'public.kazma_space_id()', 'EXECUTE')") == [(True,)]
+    # The control: as its owner it is done, and said done.
+    assert revoke_public_execute(_with(db["base"], db=name)) == ""
+    assert _sql(fresh, "SELECT has_function_privilege('public', 'public.kazma_space_id()', 'EXECUTE')") == [(False,)]
+
+
+def test_the_proof_says_what_stopped_it(rs: Any, db: dict[str, Any]) -> None:
+    """N2: with the function there and the space role not allowed to run it,
+    the proof said it was "missing or not Kazma's"."""
+    app = db["app"]
+    _sql(app, "REVOKE EXECUTE ON FUNCTION public.kazma_space_id() FROM kazma_space")
+    try:
+        failed = " ".join(rs.prove(app, KNOWN, vector_table="").failed)
+        assert "may not run the function its policies call" in failed and "missing" not in failed, failed
+    finally:
+        assert rs.apply(app, vector_table="").complete
+    # The control: a missing function says it is missing.
+    _sql(app, "ALTER FUNCTION public.kazma_space_id() RENAME TO kazma_space_id_away")
+    try:
+        assert "does not exist" in " ".join(rs.prove(app, KNOWN, vector_table="").failed)
+    finally:
+        _sql(app, "ALTER FUNCTION public.kazma_space_id_away() RENAME TO kazma_space_id")
+
+
 # ── the way out (last: it drops the role) ───────────────────────────────
 
 

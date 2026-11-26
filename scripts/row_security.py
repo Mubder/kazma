@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
@@ -61,6 +62,21 @@ def _url(variable: str | None) -> str:
 
     load_env_files(include_cwd=False)
     return get_database_url() or ""
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse, whose errors never repeat an address typed on the command
+    line: a refused ``--url postgresql://user:password@...`` came back on
+    stderr, password included (§26 D; step 2 delta review N3)."""
+
+    def error(self, message: str) -> NoReturn:
+        from kazma_core.security.url_credentials import mask_urls_in_text
+
+        if message.startswith("unrecognized arguments"):
+            message = ("unrecognized arguments (not repeated here: one may hold a password); another "
+                       "database's address is read only from --url-from VARIABLE")
+        self.print_usage(sys.stderr)
+        self.exit(2, f"{self.prog}: error: {mask_urls_in_text(message)}\n")
 
 
 def _known(given: str | None) -> set[str]:
@@ -93,7 +109,7 @@ def _print_strays(strays: list) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     # No abbreviations: ``--url`` must not pass for ``--url-from`` (step 2 review L4).
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0], allow_abbrev=False)
+    parser = _Parser(description=__doc__.split("\n", 1)[0], allow_abbrev=False)
     parser.add_argument("action", choices=("check", "rows", "prove", "apply"))
     parser.add_argument("--url-from", metavar="VARIABLE",
                         help="the environment variable that holds the database's address (default: this install's)")
@@ -103,6 +119,10 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     url = _url(args.url_from)
+    if args.url_from and not url:
+        print(f"The environment variable {args.url_from} is not set, or empty: no address to read.",
+              file=sys.stderr)
+        return 1
     if not url.startswith(("postgres://", "postgresql://")):
         print("Kazma's database is not Postgres here: there is no second lock to look at.", file=sys.stderr)
         return 1

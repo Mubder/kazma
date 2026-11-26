@@ -171,13 +171,19 @@ REVOKE EXECUTE ON FUNCTION public.kazma_space_id() FROM PUBLIC
 def revoke_public_execute_sql() -> str:
     """One statement that takes PUBLIC's EXECUTE away from each function of
     :data:`KAZMA_PG_FUNCTIONS` there is, as their owner. A copy restored with
-    ``--no-privileges`` makes them with PUBLIC's default (step 2 review L3)."""
+    ``--no-privileges`` makes them with PUBLIC's default (step 2 review L3).
+    It fails (42501) when PUBLIC may still run one after it: a REVOKE by a
+    login that does not own the function only warns (delta review N4)."""
     # Nested: SQL does not promise AND stops early, and the privilege check
     # raises on a function that is not there.
     checks = "\n".join(
         f"    IF to_regprocedure('public.{name}()') IS NOT NULL THEN\n"
         f"        IF has_function_privilege('public', 'public.{name}()', 'EXECUTE') THEN\n"
         f"            REVOKE EXECUTE ON FUNCTION public.{name}() FROM PUBLIC;\n"
+        f"            IF has_function_privilege('public', 'public.{name}()', 'EXECUTE') THEN\n"
+        f"                RAISE EXCEPTION 'PUBLIC may still run public.{name}(): only its owner takes it away'\n"
+        "                    USING ERRCODE = 'insufficient_privilege';\n"
+        "            END IF;\n"
         "        END IF;\n"
         "    END IF;"
         for name in KAZMA_PG_FUNCTIONS)
@@ -186,8 +192,9 @@ def revoke_public_execute_sql() -> str:
 
 def revoke_public_execute(url: str) -> str:
     """:func:`revoke_public_execute_sql` on the database at *url*, after a
-    whole copy into it. ``""`` when done, else what kept it (the caller says
-    it; ``python scripts/row_security.py apply`` takes it away later)."""
+    whole copy or restore into it. ``""`` only when PUBLIC may run none of
+    Kazma's functions there, else what kept it (the caller says it; ``python
+    scripts/row_security.py apply`` as their owner takes it away later)."""
     try:
         import psycopg
     except ImportError:

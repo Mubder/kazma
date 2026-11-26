@@ -323,9 +323,40 @@ def test_the_script_reads_its_address_from_a_named_variable(monkeypatch: pytest.
     monkeypatch.setenv("KAZMA_SCRATCH_URL", "sqlite:///nothing")
     assert script.main(["check", "--url-from", "KAZMA_SCRATCH_URL"]) == 1
     assert "not Postgres" in capsys.readouterr().err
+    # An empty variable is named, not read as "not Postgres" (delta review N3).
+    monkeypatch.setenv("KAZMA_SCRATCH_URL", "")
+    assert script.main(["check", "--url-from", "KAZMA_SCRATCH_URL"]) == 1
+    assert "KAZMA_SCRATCH_URL is not set, or empty" in capsys.readouterr().err
     # The control: an address on the command line is no option any more.
     with pytest.raises(SystemExit):
         script.main(["check", "--url", "postgresql://kazma:secret@db/kazma"])
+
+
+@pytest.mark.parametrize("argv", [
+    ["check", "--url", "postgresql://kazma:s3cret-pw@db/kazma"],
+    ["check", "--url-from", "X", "postgresql://kazma:s3cret-pw@db/kazma"],
+    ["postgresql://kazma:s3cret-pw@db/kazma"],  # typed where the action goes
+])
+def test_a_refused_argument_is_never_repeated_with_its_password(argv: list[str],
+                                                                capsys: pytest.CaptureFixture[str]) -> None:
+    """N3: argparse's own error echoed the refused value, password included."""
+    with pytest.raises(SystemExit) as stopped:
+        _script().main(argv)
+    err = capsys.readouterr().err
+    assert stopped.value.code == 2 and "error:" in err
+    assert "s3cret-pw" not in err, err
+
+
+def test_argparse_alone_would_repeat_it() -> None:
+    # The control: the plain parser's message carries the value.
+    import argparse
+
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument("action", choices=("check",))
+    said: list[str] = []
+    parser.error = said.append  # type: ignore[method-assign]
+    parser.parse_args(["check", "--url", "postgresql://kazma:s3cret-pw@db/kazma"])
+    assert said and "s3cret-pw" in said[0]
 
 
 # ── PUBLIC may run no function of Kazma's (step 2 review L3) ────────────
@@ -333,9 +364,6 @@ def test_the_script_reads_its_address_from_a_named_variable(monkeypatch: pytest.
 #: Product files that restore with ``--no-privileges`` and need not take
 #: PUBLIC's EXECUTE away after, and why.
 RESTORES_KEEPING_FUNCTIONS: dict[str, str] = {
-    "kazma-core/kazma_core/migration/pg_bridge.py": (
-        "restore_database makes Kazma's functions first from KAZMA_PG_FUNCTIONS, each of which takes PUBLIC's "
-        "EXECUTE away; a dump by table carries no function"),
     "scripts/restore_rehearsal.py": "a scratch database, dropped when the rehearsal ends",
 }
 
@@ -376,7 +404,8 @@ def test_every_copy_restored_without_privileges_takes_publics_execute_away() -> 
         "a restore with --no-privileges makes Kazma's functions with PUBLIC's EXECUTE: call "
         "pg_backup.revoke_public_execute after it, or say why not in RESTORES_KEEPING_FUNCTIONS")
     assert {"kazma-core/kazma_core/postgres_upgrade.py", "kazma-core/kazma_core/backup/pg_move.py",
-            "kazma-core/kazma_core/postgres_compose_upgrade.py"} <= set(sources), "the gate reads the copies"
+            "kazma-core/kazma_core/postgres_compose_upgrade.py",
+            "kazma-core/kazma_core/migration/pg_bridge.py"} <= set(sources), "the gate reads the restores"
     stale = sorted(set(RESTORES_KEEPING_FUNCTIONS) - set(sources))
     assert not stale, f"no longer restores without privileges: take out of RESTORES_KEEPING_FUNCTIONS {stale}"
     # Negative control: a planted restore that leaves them.

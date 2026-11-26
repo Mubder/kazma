@@ -955,11 +955,14 @@ def prove(url: str, known: Iterable[str], *, vector_table: str | None = None) ->
     table = vector_table if vector_table is not None else _configured_vector_table()
     all_rules = rules(table)
     proof = Proof(findings=check(url, vector_table=table or ""), strays=space_rows(url, known, vector_table=table or ""))
-    if any(f.subject == SPACE_ROLE for f in proof.findings if f.blocking):
-        proof.failed.append("the space role is missing or wrong: nothing could be read as it")
+    # What stopped it, in the finding's own words (delta review N2).
+    role = [f.problem for f in proof.findings if f.subject == SPACE_ROLE and f.blocking]
+    if role:
+        proof.failed.append(f"the space role ({'; '.join(role)}): nothing could be read as it")
         return proof
-    if any(f.subject == f"public.{SPACE_FUNCTION}()" for f in proof.findings if f.blocking):
-        proof.failed.append("the policies' function is missing or not Kazma's: the rules were never put in place")
+    function = [f.problem for f in proof.findings if f.subject == f"public.{SPACE_FUNCTION}()" and f.blocking]
+    if function:
+        proof.failed.append(f"the policies' function ({'; '.join(function)}): no space could be read")
         return proof
     with _owner_connect(url, autocommit=True) as conn, conn.cursor() as cur:
         counts = {t: int(_one(cur, f"SELECT count(*) FROM {_quoted(t)}"))  # noqa: S608  # nosec B608 - a rule's table, quoted
