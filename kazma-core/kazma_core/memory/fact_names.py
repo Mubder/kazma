@@ -138,7 +138,7 @@ ASKED_WITH: dict[str, tuple[str, ...]] = {
               "ناوي", "ناوية", "ناوين", "أنوي", "ننوي"),
     "goals": ("goal", "goals", "هدفي", "أهدافي", "أهدافنا", "طموحي", "طموحاتي"),
     "interests": ("interest", "interests", "interested", "hobby", "hobbies", "اهتماماتي", "مهتم", "مهتمة", "هوايتي",
-                  "هواياتي", "أهتم", "نهتم"),
+                  "هواياتي"),
     "bought": ("bought", "purchased", "purchases", "شريت", "شريته", "شريتها", "شرينا", "اشتريت", "اشتريته",
                "اشتريتها", "اشترينا", "مشترياتي"),
     "received": ("received", "استلمت", "استلمته", "استلمتها", "استلمنا", "تلقيت"),
@@ -150,17 +150,20 @@ ASKED_WITH: dict[str, tuple[str, ...]] = {
     "diet": ("diet", "dietary", "حميتي", "دايت"),
     # A doctor is asked as English asks one, with nobody's noun ("Which doctor
     # do I see?", "أي طبيب أراجع؟"): English held "doctor" and Arabic only "my".
-    "doctor": ("doctor", "physician", "دكتوري", "دكتورتي", "طبيبي", "طبيبتي", "دكتور", "دكتورة", "طبيب", "طبيبة", "أراجع",
-               "نراجع"),
+    "doctor": ("doctor", "physician", "دكتوري", "دكتورتي", "طبيبي", "طبيبتي", "دكتور", "دكتورة", "طبيب", "طبيبة"),
     "age_is": ("age", "عمري"),
     "birthday": ("birthday", "birthdate", "ميلادي", "مولدي"),
     "study": ("study", "studies", "studying", "أدرس", "ندرس", "دراستي", "جامعتي"),
     # Step 3 (told as turns, asked three ways): what English found by the
     # fact's own name ("drives", "visited", "has_pet", "marital_status") and
     # Arabic by no word of it.
-    "car": ("drive", "drives", "driving", "أسوق", "نسوق", "أسوقها"),
-    "visited": ("visit", "visited", "زرت", "زرتها", "زرته", "زرتهم", "زرنا"),
-    "pets": ("pet", "pets", "قطوتي", "قطتي", "كلبي", "حيواني", "حيواناتي", "أليفة", "اليف"),
+    # Not "drive" (Google Drive, "my drive"), "visit" (what to visit), "حيواني"
+    # (animal, the adjective), "أهتم" (take care of), "أراجع" (review): each
+    # has another common sense (the review of step 3, L1).
+    "car": ("أسوق", "نسوق", "أسوقها"),
+    "visited": ("visited", "زرت", "زرتها", "زرته", "زرتهم", "زرنا"),
+    # "أليفة" folds to "يفه" and "الأليفة" to "اليفه" (the article read off): both are here.
+    "pets": ("pet", "pets", "قطوتي", "قطتي", "كلبي", "حيواناتي", "أليفة", "الأليفة", "اليف"),
     "married": ("married", "marital", "متزوج", "متزوجة"),
     #: Every favourite_<kind>: the kind's own words come with it
     #: (:func:`_favourite_kind_words`).
@@ -175,6 +178,8 @@ NOT_ASKED_BY_WORDS: dict[str, str] = {
 #: another word the question is of that word ("وش رقم سيارتي؟", its number).
 ASKED_ALONE: dict[str, tuple[str, ...]] = {
     "car": ("car", "سيارتي", "سيارتنا"),
+    # "What is my cat called?" as "شنو اسم قطوتي؟" (the review of step 3, L3).
+    "pets": ("pets", "cat", "cats", "dog", "dogs", "قطوتي", "قطتي", "كلبي", "حيواناتي"),
     "daughters": ("daughter", "daughters", "بنتي", "ابنتي", "بناتي"),
     "sons": ("son", "sons", "ولدي", "ابني"),
 }
@@ -302,7 +307,7 @@ _INDEXED: dict[str, tuple[str, ...]] = {
     "plans": ("plan", "intend"), "goals": ("goal",), "interests": ("interest", "hobb"), "habits": ("habit", "routine"),
     "diet": ("diet", "vegetarian", "vegan"), "age_is": ("age",), "study": ("studies", "enrolled", "university"),
     "car": ("drives", "car"), "daughters": ("daughter",), "sons": ("son",), "favorite_": ("favorite",),
-    "visited": ("visit",), "pets": ("pet",), "married": ("married", "marital"),
+    "visited": ("visit",), "pets": ("pet", "cat", "dog"), "married": ("married", "marital"),
 }
 
 #: Words that ask a fact only when they are said of the user: "my city",
@@ -357,12 +362,15 @@ ASKED_AS_MINE: dict[str, dict[str, object]] = {
                          r"|\bwhat (?:foods? )?(?:do|should) (?:i|we) avoid(?: eating)?\b(?=\s*(?:$|[?.!]))"
                          # "Can I eat gluten?": whether the user may, at the question's head
                          # (step 3); "What can I eat for dinner?" asks no diet.
-                         r"|^\W*(?:can|may) (?:i|we) eat\b"),
+                         r"|^\W*(?:can|may) (?:i|we) eat (?!(?:here|there|now|today|tonight|later|outside|out|in|at|"
+                         r"before|after|with|it|this|that|something|anything|lunch|dinner|breakfast)\b)[a-z]"),
         "ar": (),
         "ar_after": (), "ar_not_before": (),
         "ar_said": re.compile(r"(?:^|\s)(?:ما|لا) (?:اقدر|اكدر|استطيع|يمكنني|يصير|لازم) (?:ان )?اكله?(?=\s|$|[؟?.,])"
                               r"|(?:^|\s)ممنوع (?:علي )?(?:من )?(?:اكل|اكله)(?=\s|$|[؟?.,])"
-                              r"|^\W*(?:هل )?(?:اقدر|اكدر|استطيع|يمكنني|يصير) (?:ان )?(?:اكل|اكله|اتناول)(?=\s|$|[؟?.,])"),
+                              r"|^\W*(?:هل )?(?:اقدر|اكدر|استطيع|يمكنني|يصير) (?:ان )?(?:اكل|اكله) "
+                              r"(?!(?:الحين|الان|هني|هنا|هناك|برا|بره|بالليل|الليله|اليوم|بكره|قبل|بعد|مع|في|شي|شيء|"
+                              r"الغدا|الغداء|العشا|العشاء|الفطور|الريوق)(?:\s|$|[؟?.,]))[^\W\d_]"),
         "as": "diet",
     },
     # "What is my marital status?", "شنو حالتي الاجتماعية؟": a phrase, not
@@ -374,6 +382,26 @@ ASKED_AS_MINE: dict[str, dict[str, object]] = {
         "ar_after": (), "ar_not_before": (),
         "ar_said": re.compile(r"(?:^|\s)حالتي الاجتماعيه(?=\s|$|[؟?.,])"),
         "as": "married",
+    },
+    # "Which doctor do I see?", "أي طبيب أراجع؟": "أراجع" alone is reviewing or
+    # any office ("متى أراجع البنك؟"); beside a doctor it is a visit to one
+    # (the review of step 3, L1).
+    "doctor": {
+        "words": ("doctor",),
+        "en": re.compile(r"\b(?:which|what) doctor do (?:i|we) (?:see|go to|visit)\b"),
+        "ar": (),
+        "ar_after": (), "ar_not_before": (),
+        "ar_said": re.compile(r"(?:^|\s)(?:عند |ل|ب)?اي (?:دكتور|دكتوره|طبيب|طبيبه) (?:اراجع|نراجع|اروح|نروح)(?=\s|$|[؟?.,])"),
+        "as": "doctor",
+    },
+    # "بأي فن أهتم؟": "أهتم" after "which", not "كيف أهتم بصحتي؟" (take care of).
+    "interests": {
+        "words": ("interest",),
+        "en": re.compile(r"\bwhich \w+ (?:am i|are we) interested in\b"),
+        "ar": (),
+        "ar_after": (), "ar_not_before": (),
+        "ar_said": re.compile(r"(?:^|\s)(?:ب|في )?اي [^\W\d_]+ (?:اهتم|نهتم)(?=\s|$|[؟?.,])"),
+        "as": "interest",
     },
 }
 
@@ -450,7 +478,7 @@ _ALL_MINE_EN: dict[str, str] = {
     "bought": r"(?:did|have) (?:i|we) (?:buy|bought|purchased?)", "received": r"(?:did|have) (?:i|we) received?",
     "study": r"do (?:i|we) study|am i studying", "met": r"(?:did|have) (?:i|we) me(?:e)?t",
     "attended": r"(?:did|have) (?:i|we) attend(?:ed)?", "finished": r"(?:did|have) (?:i|we) (?:finish|complete)(?:e?d)?",
-    "visited": r"(?:did|have) (?:i|we) visit(?:ed)?",
+    "visited": r"(?:did|have) (?:i|we) visit(?:ed)?", "car": r"(?:do|did) (?:i|we) drive",
 }
 
 
@@ -470,11 +498,16 @@ def _all_mine() -> tuple[dict[str, str], dict[str, re.Pattern[str]]]:
     arabic = {word: kind for kind, words in _alone_sets().items() for word in words & mine}
     english = {kind: re.compile(rf"\b(?:{phrase})\b") for kind, phrase in _ALL_MINE_EN.items()}
     for kind in dict.fromkeys((*ASKED_WITH, *ASKED_ALONE)):
-        # A kind in both tables ("car": "my car", and "drive") is asked by either's words.
-        words = (*ASKED_WITH.get(kind, ()), *ASKED_ALONE.get(kind, ()))
+        # "my X" by the nouns the kind is asked alone by ("my car", "my cat"),
+        # never its verbs: "my drive" is no car (the review of step 3, M1).
+        words = ASKED_ALONE.get(kind) or ASKED_WITH.get(kind, ())
         own = [re.escape(w) for w in words if w.isascii()]
-        if (kind in LISTS or kind in _FEW) and kind not in english and own:
+        if not own or not (kind in LISTS or kind in _FEW):
+            continue
+        if kind not in english:
             english[kind] = re.compile(rf"\bmy (?:{'|'.join(own)})\b")
+        elif kind in ASKED_ALONE:  # "What car do I drive?" and "What is my car?"
+            english[kind] = re.compile(rf"\bmy (?:{'|'.join(own)})\b|{english[kind].pattern}")
     return arabic, english
 
 

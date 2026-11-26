@@ -8,11 +8,14 @@
   questions a way, Gulf Arabic missed 16, Modern Standard Arabic 9 and English
   3; now 3, 2 and 1. The rest are a store holding one fact, and a detail the
   fact does not keep ("at the gym").
-- Places you visited, your pets and whether you are married are asked in Arabic
-  and English alike now, and "Can I eat gluten?" asks what you may not eat,
-  while "What can I eat for dinner?" still asks nothing of you.
-- Nothing else that recall shows moved: every question of Kazma's own
-  benchmark, its small-store run and the shared-space set shows what it did.
+- Places you visited, your pets ("What is my cat called?" as "شنو اسم قطوتي؟")
+  and whether you are married are asked in Arabic and English alike now.
+  "Can I eat gluten?" asks what you may not eat; "Can I eat here?", "What can I
+  eat for dinner?", "أقدر آكل الحين؟" and "Can I take Panadol with coffee?" ask
+  nothing of you, and "my drive" is no car.
+- Every question of Kazma's own benchmark, its small-store run and the
+  shared-space set shows what it did. One question of the Spaces study ("What
+  kind of pet do I have at home?") shows one unrelated memory fewer.
 
 ## A page closed while sending is not a server error (2026-11-25)
 
