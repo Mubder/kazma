@@ -141,6 +141,20 @@ ok("an environment key's row takes none", !a.setupRowTakesKey({ env_key: true })
   ok("what changes is said", a.tidyMergeNote(a.tidy.merges[0]).indexOf("A") !== -1);
 })();
 
+// ── A list is shown, and "Another" types one ──
+const pk = fresh();
+pk.setupData.fields = { region: { options: "aws" } };
+pk.setupData.regions = { aws: ["us-east-1", "eu-west-1"] };
+ok("no choices: typed", pk.setupTyping("project_id", "") === true);
+ok("choices: picked from the list", pk.setupTyping("region", "") === false && pk.setupTyping("region", "eu-west-1") === false);
+ok("a value that is none of them is typed", pk.setupTyping("region", "ap-south-9") === true);
+ok("a pick is its value", pk.setupPick("region", "v:eu-west-1") === "eu-west-1" && pk.setupTyping("region", "eu-west-1") === false);
+ok("Another types it", pk.setupPick("region", "other") === "" && pk.setupTyping("region", "") === true);
+ok("a pick again lists it", pk.setupPick("region", "v:us-east-1") === "us-east-1" && pk.setupTyping("region", "us-east-1") === false);
+ok("no value of the list's own making", pk.setupPick("region", "us-east-1") === "");
+pk.setup.found = [{ id: "model-a" }, { id: "model-b" }];
+ok("the models found are the model's list", pk.setupOptions("model").join() === "model-a,model-b" && !pk.setupTyping("model", "model-b"));
+
 // ── A late answer about an earlier key is dropped ──
 (async () => {
   let release;
