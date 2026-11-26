@@ -90,7 +90,7 @@
                 <template x-for="f in setupEndpointFields()" :key="f">
                     <div class="form-group">
                         <label class="form-label" :for="(setupTyping(f, setup.values[f]) ? 'setup-field-' : 'setup-pick-') + f" x-text="setupFieldLabel(f)"></label>
-                        <select class="form-select" :id="'setup-pick-' + f" x-show="setupOptions(f).length" x-cloak
+                        <select class="form-select" :id="'setup-pick-' + f" x-show="setupOptions(f).length" x-cloak :aria-label="setupFieldLabel(f)"
                                 @change="setup.values[f] = setupPick(f, $event.target.value); setupChanged()">
                             <option value="" :selected="!setup.values[f] && !setupTyping(f, setup.values[f])">{{ t('settings.setup.choose') }}</option>
                             <template x-for="o in setupOptions(f)" :key="o">
@@ -111,7 +111,7 @@
                             <span x-text="setupFieldLabel(f.id)"></span>
                             <span class="setting-desc" x-show="!f.required" x-cloak>{{ t('settings.setup.optional') }}</span>
                         </label>
-                        <select class="form-select" :id="'setup-pick-' + f.id" x-show="setupOptions(f.id).length" x-cloak
+                        <select class="form-select" :id="'setup-pick-' + f.id" x-show="setupOptions(f.id).length" x-cloak :aria-label="setupFieldLabel(f.id)"
                                 @change="setup[f.model] = setupPick(f.id, $event.target.value); setupChanged()">
                             <option value="" :selected="!setup[f.model] && !setupTyping(f.id, setup[f.model])">{{ t('settings.setup.choose') }}</option>
                             <template x-for="o in setupOptions(f.id)" :key="o">
@@ -238,7 +238,7 @@
                     <label class="form-label" :for="setupTyping('model', setup.model) ? 'setup-model' : 'setup-model-pick'">{{ t('settings.setup.try_with') }}</label>
                     {#- The models found are shown, never hidden in a <datalist>
                         (tests/test_no_hidden_lists.py); "Another" types one. -#}
-                    <select class="form-select" id="setup-model-pick" x-show="setupOptions('model').length" x-cloak
+                    <select class="form-select" id="setup-model-pick" x-show="setupOptions('model').length" x-cloak aria-label="{{ t('settings.setup.try_with') }}"
                             @change="setup.model = setupPick('model', $event.target.value); setup.test = null">
                         <option value="" :selected="!setup.model && !setupTyping('model', setup.model)">{{ t('settings.setup.choose') }}</option>
                         <template x-for="m in setupOptions('model')" :key="m">
