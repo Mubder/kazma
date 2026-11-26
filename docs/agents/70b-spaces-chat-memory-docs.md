@@ -195,6 +195,13 @@
   made anew, empty; a chat app's turn it loses is a WARNING and the alert of
   a reply that was not saved (§33). Gates: `tests/test_chat_rows_in_their_space.py`
   (and no Postgres row is read by its place, inside a pool's block).
+- **Memory's copies in Postgres are written in their rows' spaces (S4-01
+  step 0b, 2026-11-26; §15 K).** The mirror's and pgvector's writes and
+  deletes say their row's space where Kazma does the work, a delete names its
+  tenant and is "done" only when no row of that id is left, the schema is the
+  install's on its own connection, and memory's sweeps over every space's
+  chats, the mirror sync and the forget convergence are the install's. Left
+  for after memory W6: `recall.py` passing `strict=True` to `fetch_*`.
 - **A document's work runs in the document's space (S4-01 step 0a,
   2026-11-25).** The worker binds each job's scope before its first stage
   (`DocumentWorker._process_claimed`: heartbeat, stages and outcome; an

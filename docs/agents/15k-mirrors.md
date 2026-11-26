@@ -5,6 +5,38 @@ working-turn promotion never told it), 17 facts that never reached it, and 53
 rows only the mirror held -- test data written before the database shield and
 memories removed here since -- which recall's top-up could bring back into
 an answer ("User prefers dark mode").
+- **Memory's copies in Postgres say whose rows they are** (S4-01 step 0b,
+  2026-11-26, §70 (2)). A mirror write, a mirror delete and a vector write or
+  delete run in their row's own space where Kazma does the work itself (a
+  sweep, the forget convergence; `row_work.row_statements`), and in the bound
+  space (or the declared one) where a request or a turn does; a row of
+  another space there keeps that door and is said as `cross`, a finding of
+  its own in step 1's report (0b review M1, L3). The mirror's pushes are
+  grouped by space, one transaction each. **A delete says whether the row is
+  gone** (`delete_belief(id, tenant_id=)`, pgvector's `delete`): it runs in
+  the row's space; once Spaces is enforced it names the tenant
+  (`COALESCE(NULLIF(tenant_id, ''), 'default')`, decision M6), and with
+  Spaces off it is by id, as before (review L1). Gone is deleted now, or no
+  row of that id left. Not gone -- False, and a WARNING once per id, DEBUG
+  after -- is a row of that id kept under another space, or a door of
+  another space (`row_work.door_hides`: once armed its "nothing there" says
+  nothing). Then pgvector's forget journal keeps the vector queued; the
+  mirror's own callers (`macro_sleep`, graph-clear) do not retry, and the
+  outbox the `beliefs_mirror_ad` trigger fills, which deletes by id in the
+  sync's install door, finishes it (H5: "deleted" was answered whatever the
+  statement did, pgvector dropped its tenant, and a forgotten fact could stay
+  for good). Callers that know the fact's space pass it
+  (`unmirror_belief_to_state(id, tenant)`). The schema is made on a
+  connection of its own, as the install's (`_ensure()`, `_ensure_table()`):
+  on the caller's, its commits put the caller's statement in a second
+  transaction. The probes, the sync, the comparison, the drift summary, the
+  forget convergence and the passes that read every space's chats
+  (`run_rehydrate_pass`, `run_turn_reconcile_pass`, `run_text_fill_pass`: the
+  sweeps and the memory restore, a request, call them) are the install's
+  (`install_statements`). `fetch_*` take `strict` like `search_*`, and a space
+  refusal raises from all four and from `search_state_*` whatever *strict*
+  says (never "nothing found"). Gate: `tests/test_memory_rows_in_their_space.py`
+  (each fails on the code before; a real Postgres keeps another space's fact).
 - **Every tier or text change reaches the mirror.** `remirror_episodes` is the
   one call after a local change (macro_sleep's moves, the working-turn
   promotion, forget, retire). Every `UPDATE episodes SET tier/text` in product

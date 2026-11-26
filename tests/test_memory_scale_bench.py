@@ -191,7 +191,7 @@ def _mirror_half(db: Path, dsn: str, monkeypatch) -> dict:
     conn = sqlite3.connect(str(db))
     pg = backend._connect()
     try:
-        backend._ensure(pg)
+        backend._ensure()
         pg.execute("TRUNCATE kazma_episodes, kazma_beliefs")
         pg.commit()
         # The mirror as a steady state: every row already there (a direct copy).

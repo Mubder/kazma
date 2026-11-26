@@ -10,6 +10,45 @@
   slower on four times the input, as linear. A gate keeps every such helper
   on the one measure.
 
+## Memory's copies in Postgres keep to their spaces (2026-11-26)
+
+- When Kazma removes a forgotten fact or memory from its Postgres copies, it
+  does so in the space the memory belongs to, and calls it gone only when it
+  is: a copy kept under another space is said in the log once and never
+  recorded as deleted. A vector is tried again by the forget journal; a
+  fact's copy is removed by the mirror's queue of deletions. With Spaces off
+  the copy is removed by its id, as before. The vector index had dropped
+  which space a vector belonged to when deleting it.
+- Memory's work over every space's chats (recovery, catching up on chats,
+  filling in cut text, the mirror's sync, finishing forgets) says that it
+  reads every space -- also when a memory restore runs it -- and writes each
+  memory in its own space.
+- The tables of the memory mirror and of the vector index are made on a
+  connection of their own, so the first write after a start is never in a
+  separate transaction.
+- With Spaces on, a memory read that the database refuses is an error, never
+  "no memories found". With Spaces off nothing changes.
+
+## Spaces: whose each database statement is, counted (2026-11-26)
+
+- Kazma now counts, for each statement it sends to its own Postgres, whose
+  statement it is: a space's, Kazma's own (with the reason it gives), or
+  nobody's. Nothing is refused and Kazma does nothing differently: this is
+  the record that must show every part of Kazma saying whose its statements
+  are before the database's own lock between spaces is ever turned on.
+- The count is kept in `space_doors.json` in Kazma's data folder, added to
+  every 15 minutes and when Kazma stops, by part of Kazma and with how many
+  times. `python scripts/space_doors_report.py` prints it (`--since` a time
+  leaves out what came before, such as a part fixed since). A part found
+  saying nothing is logged once, at INFO. A report file that is not one is
+  said and started again.
+- `KAZMA_SPACE_DOOR_REPORT=0` turns the counting off. It costs about 5
+  microseconds a statement to Kazma's own stores and about 20 in the chat
+  history's (LangGraph's) calls, measured; a statement takes about a
+  millisecond.
+- The settings are counted as Kazma's own: they stay outside any space's
+  lock.
+
 ## Adding a provider, step by step (2026-11-25)
 
 - **Add provider is a guided setup**: the provider (searchable, grouped, or by

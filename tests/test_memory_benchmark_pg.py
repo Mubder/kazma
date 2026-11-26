@@ -141,7 +141,7 @@ def test_the_benchmark_on_pgvector_exact_and_approximate(tmp_path, monkeypatch):
     conn.row_factory = sqlite3.Row
     pg = state._connect()
     try:
-        state._ensure(pg)
+        state._ensure()
         pg.execute("TRUNCATE kazma_episodes, kazma_beliefs")
         pg.commit()
     finally:

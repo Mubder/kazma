@@ -294,7 +294,7 @@ def run_macro_sleep(
 
         for bid in archived_facts:
             try:
-                unmirror_belief_to_state(bid)
+                unmirror_belief_to_state(bid, tenant_id)
             except Exception:
                 logger.debug("[macro_sleep] unmirror skipped for %s", bid, exc_info=True)
         _propagate_episode_moves(

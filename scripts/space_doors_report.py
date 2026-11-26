@@ -7,7 +7,8 @@ in ``<data dir>/space_doors.json`` (``kazma_core.db.space_doors``). This
 reads one, from this install or from a file named, and sets it beside the
 lists in ``tests/_space_door_lists.py``:
 
-* **findings**: checkouts through no door, by where they came from; each is
+* **findings**: checkouts through no door, or through a space's door for
+  another space's row (``cross``), by where they came from; each is
   ``known`` (``KNOWN_OPEN``: through a listed entry, from one of its listed
   first callers, with the step that gives it one) or **new**;
 * **install**: the install's door, by reason and caller;
@@ -83,7 +84,7 @@ def summarise(report: dict[str, Any], *, since: str | None = None) -> dict[str, 
         entries = [e for e in entries if str(e.get("last") or "") >= cut]
     findings = []
     for entry in entries:
-        if entry.get("door") != "none":
+        if entry.get("door") not in ("none", "cross"):
             continue
         said = _known(entry.get("callers") or [], known)
         findings.append({**entry, "known": said is not None, "why": said[0] if said else "",
@@ -114,7 +115,8 @@ def render(summary: dict[str, Any]) -> str:
     if summary.get("cut"):
         out.append(f"Only what was seen since {summary['since']}; each count is its total since first seen.")
     out.append("")
-    out.append(f"Findings, through no door: {len(summary['findings'])} ({len(summary['new'])} new)")
+    out.append(f"Findings, through no door or another space's: {len(summary['findings'])} "
+               f"({len(summary['new'])} new)")
     for finding in summary["findings"]:
         mark = f"known, {finding['step']}" if finding["known"] else "NEW"
         out.append(f"{_line(finding)}  [{finding.get('how')}; {mark}]")

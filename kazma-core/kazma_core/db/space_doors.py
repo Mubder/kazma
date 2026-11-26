@@ -14,7 +14,12 @@ answer down, with Spaces off and nothing refused. There are three doors:
   ``tests/test_row_work_gates.py``; ``how="work"``: ``scope.install_work``);
 * ``none`` -- nothing said: the finding. ``how`` says what was bound: a
   tenant only (the first lock's variable, which the second refuses) or
-  nothing at all.
+  nothing at all;
+* ``cross`` -- a space's door kept for a row of another space
+  (``row_work.row_statements``: a request bound to one space writing or
+  removing another's copy). The statements stay the bound space's, so once
+  the lock is armed that row is hidden from them: a finding too (0b review
+  M1), with its callers like ``none``.
 
 Every place Kazma hands out a connection to its own database asks
 :func:`checkout` (:data:`POOLS`): the shared pool (``PostgresPool.connection``;
@@ -152,6 +157,9 @@ class _Entry:
 #: ``(pool, door, how, reason, callers)`` -> what was counted.
 _Key = tuple[str, str, str, str, tuple[str, ...]]
 
+#: The doors that are findings: said once each, named by where they came from.
+_FINDINGS = ("none", "cross")
+
 _lock = threading.Lock()
 _flush_lock = threading.Lock()
 _entries: dict[_Key, _Entry] = {}
@@ -193,6 +201,8 @@ def _record(pool: str) -> None:
     if door is None:
         bound = "a tenant only" if tenant_context.get_current_tenant_id() else "nothing"
         door_kind, how, reason, depth = "none", bound, "", CHAIN
+    elif door.how == "cross":
+        door_kind, how, reason, depth = "cross", "a space's door for another space's row", "", CHAIN
     elif door.space:
         door_kind, how, reason, depth = "space", door.how or "scope", "", 1
     else:
@@ -211,12 +221,13 @@ def _record(pool: str) -> None:
             full, _full_said = not _full_said, True
         else:
             _entries[key] = _Entry(1, now, now)
-            if door_kind == "none" and key not in _said:
+            if door_kind in _FINDINGS and key not in _said:
                 _said.add(key)
                 new = True
     if new:
-        logger.info("[space-doors] a checkout of the %s pool went through no door (%s bound): %s. "
-                    "Report mode: nothing is refused (Spaces S4-01 step 1)", pool, how, " <- ".join(key[4]))
+        what = "no door" if door_kind == "none" else "another space's door than its row's"
+        logger.info("[space-doors] a checkout of the %s pool went through %s (%s): %s. "
+                    "Report mode: nothing is refused (Spaces S4-01 step 1)", pool, what, how, " <- ".join(key[4]))
     if full:
         logger.warning("[space-doors] the door report holds %d entries; further new ones are counted "
                        "as dropped, not named", MAX_ENTRIES)
@@ -377,7 +388,7 @@ def start(path: Path | str | None = None) -> None:
         return
     target = Path(path) if path is not None else report_path()
     known = [_ident(item) for item in _kept(target).get("entries", ()) if isinstance(item, dict)
-             and item.get("door") == "none"]
+             and item.get("door") in _FINDINGS]
     with _lock:
         _said.update(known)
 
@@ -417,8 +428,8 @@ def flush(path: Path | str | None = None) -> int:
             item["first"] = min(str(item.get("first") or _when(first)), _when(first))
             item["last"] = max(str(item.get("last") or ""), _when(last))
         now = _when(time.time())
-        kept = sorted(items.values(), key=lambda i: (("none", "install", "space").index(i["door"])
-                                                    if i.get("door") in ("none", "install", "space") else 3,
+        kept = sorted(items.values(), key=lambda i: (("none", "cross", "install", "space").index(i["door"])
+                                                    if i.get("door") in ("none", "cross", "install", "space") else 4,
                                                     -int(i.get("count") or 0), i.get("callers") or []))
         report = {
             "about": ("Spaces S4-01 step 1, report mode: which door each checkout of Kazma's own Postgres "

@@ -502,7 +502,7 @@ def test_the_mirrors_facts_carry_their_day(monkeypatch):
 
     backend = PostgresStateBackend("postgresql://unused")
     monkeypatch.setattr(backend, "_connect", Conn)
-    monkeypatch.setattr(backend, "_ensure", lambda conn: None)
+    monkeypatch.setattr(backend, "_ensure", lambda: None)
     (row,) = backend.fetch_beliefs(["b1"], tenant_id="default")
     assert fact_days.event_day(fact_days.metadata_of(row["metadata_json"])) == "2026-05-30"
     assert "metadata_json FROM kazma_beliefs" in asked[-1]

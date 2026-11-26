@@ -174,10 +174,10 @@ def test_postgres_primary_fuses_pgvector_dense(monkeypatch) -> None:
                 }
             ]
 
-        def fetch_episodes(self, ids, *, tenant_id="default"):
+        def fetch_episodes(self, ids, *, tenant_id="default", strict=False):
             return [{"id": "e-dense", "summary_text": "moved to Lyon last year", "tier": "episodic"}]
 
-        def fetch_beliefs(self, ids, *, tenant_id="default"):
+        def fetch_beliefs(self, ids, *, tenant_id="default", strict=False):
             return [
                 {
                     "id": "b-dense",
@@ -288,7 +288,7 @@ def test_pgvector_search_filters_kind(monkeypatch) -> None:
     dsn = "postgresql://localhost/kazma"
     be = PgvectorBackend(dsn=dsn, dimension=3)
     monkeypatch.setattr(be, "_connect", lambda: _Conn())
-    monkeypatch.setattr(be, "_ensure_table", lambda conn: None)
+    monkeypatch.setattr(be, "_ensure_table", lambda: None)
     # search asks the extension probe first (tests/test_vector_store_probe.py)
     monkeypatch.setitem(
         backends._REMOTE_VECTOR_STATE, ("pgvector", dsn), (time.monotonic(), "installed")

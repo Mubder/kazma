@@ -361,7 +361,9 @@ def test_the_mirror_on_kazmas_own_database_is_counted(counted: Any) -> None:
     backend = PostgresStateBackend(dsn)
     try:
         with bind_scope("family", "layla"):
-            assert backend.available
+            assert backend.available  # a ping: the install's (0b, review 10)
+            assert backend.count_beliefs(tenant_id="family") >= 0  # the request's own read
     finally:
         backend.close()
-    assert _doors(counted, "memory mirror") == [("space", "scope")]
+    assert _doors(counted, "memory mirror") == [("install", "statements"), ("install", "statements"),
+                                                ("space", "scope")], "the ping, the tables, the read"
