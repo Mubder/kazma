@@ -108,10 +108,26 @@ def test_the_shared_pool_refuses_a_connection_of_a_lost_role_and_says_why(
         assert any("space role cannot sign in" in r.getMessage() for r in caplog.records), caplog.text
         assert noted == [], "the owner signs in: no outage of the database"
         role_lost.give_back()
-        with bind_scope("sa", "owner"):
-            assert made.execute("SELECT current_user::text AS who") == [{"who": "kazma_space"}]
+        assert _back(made), "the role back, the pool's new connections are the space role's again"
     finally:
         made.close()
+
+
+def _back(made: Any, within_s: float = 10.0) -> bool:
+    """The space half answers as the space role again, within *within_s*:
+    the pool waits out its reconnect backoff after the failed sign-ins, as a
+    running server's would."""
+    import time
+
+    deadline = time.monotonic() + within_s
+    while True:
+        try:
+            with bind_scope("sa", "owner"):
+                return made.execute("SELECT current_user::text AS who") == [{"who": "kazma_space"}]
+        except psycopg.OperationalError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)
 
 
 def test_the_checkpointers_half_refuses_a_connection_of_a_lost_role(armed: Any, role_lost: Any) -> None:  # noqa: F811 - the armed flows' fixture
