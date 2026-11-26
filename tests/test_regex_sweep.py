@@ -144,6 +144,10 @@ DECLARED: dict[tuple[str, str], str] = {
     ('kazma-core/kazma_core/web_acquire/html_extract.py',
      '<[^>]+>'):
         'A fetched page, read in the parser child process (a 15 s deadline): only that page fails.',
+    # Seen once the sweep read a head through an alternation ("<script", step 4's review).
+    ('kazma-core/kazma_core/web_acquire/html_extract.py',
+     r'(?is)<(script|style|noscript|svg|iframe)[^>]*>.*?</\1>'):
+        'A fetched page, read in the parser child process (a 15 s deadline): only that page fails.',
     ('kazma-core/kazma_core/web_acquire/search_http.py',
      '<[^>]*>'):
         'Search results, parsed in the search child process (a fixed deadline).',
@@ -286,16 +290,35 @@ def _characters(pattern: str, flags: int) -> tuple[list[str], str]:
 
     parsed = sre_parse.parse(pattern, flags)
     walk(parsed)
+    printable = sorted(c for c in names if c.isprintable() or c in " \t\n")
+    return printable[:48], _literal_head(list(parsed))[0]
+
+
+def _literal_head(items: list) -> tuple[str, bool]:
+    """The literal text a pattern's match begins with, and whether it ran to
+    the end of *items*. An anchor and a leading run that may be empty
+    (``^\\W*``) are stepped over, and an alternation gives its first branch's
+    head (``(?:no|nope|لا)``: "no"): a quadratic tail behind ``^\\W*(?:no|..)``
+    was out of the sweep's sight (step 4's review, M2)."""
     head = ""
-    for op, av in parsed:
+    for op, av in items:
         if op is sre_c.LITERAL:
             head += chr(av)
         elif op is sre_c.AT:
             continue
+        elif op in (sre_c.MAX_REPEAT, sre_c.MIN_REPEAT, sre_c.POSSESSIVE_REPEAT) and av[0] == 0 and not head:
+            continue
+        elif op is sre_c.SUBPATTERN:
+            more, whole = _literal_head(list(av[3]))
+            head += more
+            if not whole:
+                return head, False
+        elif op is sre_c.BRANCH and av[1]:
+            more, _whole = _literal_head(list(av[1][0]))
+            return head + more, False
         else:
-            break
-    printable = sorted(c for c in names if c.isprintable() or c in " \t\n")
-    return printable[:48], head
+            return head, False
+    return head, True
 
 
 @dataclass(frozen=True)
@@ -516,15 +539,18 @@ def test_control_a_planted_quadratic_pattern_fails(tmp_path: Path):
         "QUADRATIC = re.compile(r'[ \\t]+\\n')\n"
         "SMALL_CONSTANT = re.compile(r'<[^>]+>')\n"  # 3 ms at 3,000 characters, 0.5 s at 40,000
         "TAGS = re.compile(r'<[^<>]+>')\n"
+        # Quadratic only behind its head "no" (event_text._NO_THEN before step 4's review, M2).
+        "HEADED = re.compile(r'^\\W*(?:no|nope)[ \\t]*[,.]+\\W*x')\n"
         "def strip(text):\n"
         "    return re.sub(r'\\s*->\\s*(\\S+)\\s*$', '', text)\n",
         encoding="utf-8",
     )
     literals, slow, hung = sweep(("kazma-planted/kazma_planted",), tmp_path)
     flagged = {literals[i].pattern for i in slow}
-    assert flagged == {r"[ \t]+\n", r"<[^>]+>", r"\s*->\s*(\S+)\s*$"}, (flagged, slow)
+    assert flagged == {r"[ \t]+\n", r"<[^>]+>", r"\s*->\s*(\S+)\s*$", r"^\W*(?:no|nope)[ \t]*[,.]+\W*x"}, \
+        (flagged, slow)
     assert not hung
-    assert len(_report(literals, slow, hung)) == 3
+    assert len(_report(literals, slow, hung)) == 4
 
 
 def _plant_linear(tmp_path: Path) -> None:

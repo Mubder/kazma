@@ -255,24 +255,49 @@
     Ali, I met Omar", "ليس فقط علي", "مو بس علي", "No, I didn't see Ali alone,
     I met Omar too", "لم ألتق بعلي وحده" closed Ali when the model named him
     replaced and no day was given.
-    - "Only" right after a negation, or "alone" anywhere after a denial, now
-      adds rather than denies. A bare "no" before "just" still puts right
-      ("No, just Omar").
+    - "Only" right after a negation ("not only", "مو بس"), or an "only" or
+      "alone" word right after the denied value's own words within the
+      denial's reach ("didn't see Ali alone", "مو علي بس", "ليس علي فقط",
+      "بعلي وحده"), adds rather than denies. A bare "no" before "just" still
+      puts right ("No, just Omar"), and actually / correct / instead / rather
+      / بل / الصحيح never add (`_NEVER_ADDING`).
+    - **Step 4's review (H1, M4):** step 4 read "alone" anywhere after a
+      denial, and an unpunctuated message lost its denial: "No I didn't meet
+      Ali I was home alone", "مو علي قابلت عمر بروحه", "لم ألتق بعلي بل
+      التقيت بعمر وحده" kept Ali, and "No I went to the gym alone on
+      Thursday" kept the wrong day as `day_sure` (11 of 13 measured). "Alone"
+      said of someone else, or of the user, adds nothing now; an answer's
+      "no" / "لا" never attaches it ("لا رحت النادي بروحي"), and "وحده
+      ثانيه" is another one (`_ANOTHER`). Arabic's usual order ("مو علي بس،
+      قابلت عمر بعد", "It wasn't Ali only") adds, as "not only" does.
     - "Wrong" said of nothing ("Nothing is wrong", "ما في شي غلط", "لا يوجد
-      خطأ") puts nothing right (`_NOTHING_WRONG`).
-    - Gate: every denial of the source's tables before every "only" and
-      "alone" word, with the rule taken away as the control.
+      خطأ") puts nothing right (`_NOTHING_WRONG`). Never a bare "لا": "لا
+      غلط، عمر" is the commonest Gulf correction (the review's H2); "خطأ" puts
+      right as "غلط" does ("لا خطأ، كان عمر").
+    - Gate: every denial of the source's tables before every "only" word; every
+      "only" and "alone" word right after the denied value adds and after
+      another word does not, for every denial; the answer words, the
+      never-adding words and "وحده ثانيه"; with step 4's rule and with no rule
+      as the controls, and each of the review's cases a test in EN, Gulf, MSA.
   - *L3, a bare "No, Omar"* (`event_text.no_then`): a whole message that is
     "no" and a value ("No, Omar", "Nope, Omar", "No! Omar, I told you", "لا،
     عمر", "لا يا كازما، عمر", "كلا، عمر") puts right the fact the reply says
     it replaces. Bare, it says no more than that, so it is read only beside a
     reply's `replaces` (`belief_extractor._same_event`). With none, both stay
-    (the control).
+    (the control). Every word said is the value's, or "it was", "just",
+    "actually", "بل": "No, not Omar", "No, Omar too", "No, and Omar", "لا، عمر
+    بعد", "لا، مو عمر" deny or add and close nothing, and "لا يا عمر" speaks
+    to Omar (the review's M1). "No - Omar" and "Nope Omar!" are read; "No
+    Omar" and "لا عمر" are not ("no" and "لا" come before nouns: "no sugar",
+    "لا تسوس"). One mark, then the rest: linear (M2), and the regex sweep
+    now reads a head behind `^\W*(...|...)`.
   - *L4, a voice note* (`own_words._MEDIUM_AR`): "رسالة صوتية:" was read as
     someone else's message and lost the user's event in MSA (keep 117 of 120;
     now 120, as English and Gulf). A text noun before a medium ("صوتية",
     "نصية") is the user's own label unless a word after it says whose ("رسالة
-    صوتية من عمر:"). Gate: every text noun before every medium word.
+    صوتية من عمر:"); from the user or to their own it stays theirs ("رسالة
+    صوتية مني:", "لأمي:", the review's L3). Gate: every text noun before every
+    medium word.
   - *Left, with why:*
     - L2: label lines and "My brother:" follow "in doubt the user's", and a
       paste let in is filed as Kazma's reading.

@@ -72,6 +72,12 @@ def test_what_i_do_for_a_living_asks_the_role(question):
 
 @pytest.mark.parametrize("question", [
     "What do they do for a living?", "How do I make a living online?", "كيف أكسب رزقي من الإنترنت؟",
-    "What is the cost of living here?", "كم تكلفة المعيشة هنا؟"])
+    "What is the cost of living here?", "كم تكلفة المعيشة هنا؟",
+    # The phrase itself, asking advice or another thing (step 4's review, M3).
+    "What should I do for a living?", "What could I do for a living if I quit?", "What can I do for work in Dubai?",
+    "What jobs can I do for a living from home?", "What would I do for a living without a degree?",
+    "Is it weird that I do for a living what my dad did?",
+    "ماذا يجب أن أفعل لكسب رزقي؟", "هل يكفي راتبي لكسب عيشي؟", "اقترح علي طريقة لكسب رزقي", "كيف أوفر لكسب قوتي؟",
+    "شو لازم أسوي لكسب رزقي بعد التقاعد؟", "شنو أقدر أسوي لكسب رزقي؟", "شنو لازم أسوي لكسب عيشي؟"])
 def test_control_a_living_not_said_of_the_user_asks_nothing(question):
     assert fact_names.kinds_said_of_the_user(question) == ()

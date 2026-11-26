@@ -840,3 +840,75 @@ def test_the_settings_opening_is_linear():
     old_small = _timed(OLD_SETTINGS_OPENING.search, small)
     old_big = _timed(OLD_SETTINGS_OPENING.search, big)
     assert old_big > 6 * old_small, "control: the old pattern grows with the square"
+
+
+# -- event_text: "No" and a value, a whole message (step 4's review, M2) --
+
+OLD_NO_THEN = re.compile(r"^\W*(?:no|nope|nah|لا|لاء|كلا)(?:[ \t]*[,،.!]+|[ \t]+(?=يا ))\W*(?:يا [^\W\d_]+\W+)?"
+                         r"(?P<value>[^.,،!?؟\n]{1,60}?)"
+                         r"(?:\W+(?:i (?:told|said) (?:you|it|that)|i said|قلت ?لك|قلتلك|قلت لكم|قلت))?\W*$")
+
+
+def test_no_then_answers_as_the_old_pattern_on_one_mark():
+    from kazma_core.memory.event_text import _NO_THEN
+
+    for text in ("no, omar", "no! omar, i told you", "لا، عمر", "لا يا كازما، عمر", "nope, omar", "no.  omar",
+                 "no,, omar", "no omar", "لا عمر", "no", "no, ", "no, omar and sara"):
+        new, old = _NO_THEN.match(text), OLD_NO_THEN.match(text)
+        assert (new and new["value"]) == (old and old["value"]), text
+
+
+def test_no_then_is_linear():
+    from kazma_core.memory.event_text import _NO_THEN
+
+    for unit in (",", ".", "!", "،"):
+        assert _timed(_NO_THEN.match, "no" + unit * 20000) < 0.1, unit
+    small, big = "no" + "," * 3000, "no" + "," * 12000
+    old_small = _timed(OLD_NO_THEN.match, small)
+    old_big = _timed(OLD_NO_THEN.match, big)
+    assert old_big > 6 * old_small, "control: the old pattern grows with the square"
+
+
+# -- what the sweep found once it read a head behind "^\W*(...|...)" (step 4's review) --
+
+OLD_AUTO_ATTACH = re.compile(r"(?:kazma-data/documents/|reports/|data/)[^\s\"'\(\)\[\]`]+\.(?:pdf|docx|html)",
+                             re.IGNORECASE)
+OLD_SIGN_OFF_TAIL = re.compile(r"(?:best|thanks)(?:[ \t]\w+)?[ \t]*[,،.!]?[ \t]*")
+NEW_SIGN_OFF_TAIL = re.compile(r"(?:best|thanks)(?:[ \t]\w+)?[ \t]*(?:[,،.!][ \t]*)?")
+OLD_RUN_CODE = re.compile(r"\b(?:run|execute|exec)\s+(?:this|the|my)?\s*(?:code|script|program|snippet)", re.IGNORECASE)
+
+
+def test_the_auto_attach_paths_are_the_old_patterns():
+    from kazma_gateway.agent_handler.attachments import _auto_attach_matches
+
+    words = ["kazma-data/documents/", "data/", "reports/", "Data/", "a", "b.pdf", ".pdf", ".PDF", ".docx", ".html",
+             ".htm", " ", "\n", "(", ")", "'", '"', "`", "[", "]", "x/", ".", "/"]
+    for _ in range(40000):
+        s = _words(words, 12)
+        assert _auto_attach_matches(s) == OLD_AUTO_ATTACH.findall(s), s
+
+
+def test_the_auto_attach_paths_are_read_in_linear_time():
+    from kazma_gateway.agent_handler.attachments import _auto_attach_matches
+
+    for unit in ("data/", "kazma-data/documents/", "data/.pdf", "reports/x"):
+        assert _timed(_auto_attach_matches, unit * 20000) < 0.5, unit
+    small, big = "data/" * 1500, "data/" * 6000
+    assert _timed(OLD_AUTO_ATTACH.findall, big) > 6 * _timed(OLD_AUTO_ATTACH.findall, small), \
+        "control: the old pattern grows with the square"
+
+
+def test_the_sign_off_and_run_code_answer_as_before_and_are_linear():
+    from kazma_core.memory.pasted_text import _SIGN_OFF
+    from kazma_gateway import suggestions
+
+    run_code = next(rx for rx, _text, tool in suggestions._PATTERNS if tool == "python_exec")
+    for _ in range(30000):
+        s = _words(["best", "thanks", " ", "\t", ",", ".", "!", "x", "regards", "،"], 8)
+        assert bool(NEW_SIGN_OFF_TAIL.fullmatch(s)) == bool(OLD_SIGN_OFF_TAIL.fullmatch(s)), s
+        t = _words(["run", "exec", " ", "\t", "this", "the", "code", "script", "x", "thiscode"], 8)
+        assert bool(run_code.search(t)) == bool(OLD_RUN_CODE.search(t)), t
+    assert _timed(_SIGN_OFF.fullmatch, "best" + "\t" * 40000) < 0.1
+    assert _timed(run_code.search, "run" + "\t" * 40000) < 0.1
+    small, big = "run" + "\t" * 1500, "run" + "\t" * 6000
+    assert _timed(OLD_RUN_CODE.search, big) > 6 * _timed(OLD_RUN_CODE.search, small), "control"

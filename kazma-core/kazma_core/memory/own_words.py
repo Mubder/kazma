@@ -688,7 +688,13 @@ def _names_someones_text_ar(words: list[str]) -> bool:
     if first in _TEXT_NOUNS_AR and len(words) >= 2 and words[1] in _MEDIUM_AR:
         # "رسالة صوتية:" is the user's voice note, as "Voice note:" is; "رسالة
         # صوتية من عمر:" Omar's (W4's left list, L4): a word after it says whose.
-        return len(words) >= 3
+        # From the user or to their own ("مني", "لأمي": to my mother) it is
+        # theirs still (step 4's review, L3).
+        if len(words) < 3:
+            return False
+        third = words[2]
+        return not (third in ("مني", "لي") or third in _OWN_LABELS or _speaks_in_first_person(third)
+                    or (len(third) > 3 and third.startswith("ل") and third.endswith("ي")))
     return (first in _TEXT_NOUNS_AR and len(words) >= 2 and words[1] not in _OWN_LABELS
             and not _speaks_in_first_person(words[1]))
 

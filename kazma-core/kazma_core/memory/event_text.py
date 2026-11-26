@@ -246,7 +246,7 @@ def mentions_value(value: str, user_text: str) -> bool:
 _CORRECTING_EN = frozenset("sorry wrong mistake mistaken mistyped typo correction correcting meant oops misspoke "
                            "apologies".split())
 _CORRECTING_AR_RAW = ("غلط", "أقصد", "قصدي", "آسف", "آسفة", "عفوا", "عفواً", "تصحيح", "صححها", "أخطأت", "غلطت",
-                      "معليش", "السموحة", "متأسف", "متأسفة", "أعني", "معذرة", "أعتذر", "خربطت", "لخبطت", "تلخبطت",
+                      "معليش", "السموحة", "متأسف", "متأسفة", "أعني", "معذرة", "أعتذر", "خطأ", "خربطت", "لخبطت", "تلخبطت",
                       "التبس", "عدلها", "سامحني")
 #: ... said in more than a word; "No, it was ..." as a message begins.
 _CORRECTING_PHRASES = re.compile(
@@ -302,7 +302,10 @@ def _own_folded(user_text: str) -> str:
 #: "Nothing is wrong", "ما في شي غلط": a word of putting right, said of nothing
 #: (W4's left list, L1; the memory plan's W6, step 4).
 _NOTHING_WRONG = re.compile(r"\b(?:nothing|no ?one|nobody|none|no ?thing)(?:'s| is| was)? (?:wrong|a mistake)\b"
-                            r"|(?<!\w)(?:ما ?(?:في|فيه|فيها)|مافي|مافيه|لا ?يوجد|ليس هناك|لا) (?:شي |شيء |اي )?(?:غلط|خطا)(?!\w)")
+                            r"|(?<!\w)(?:ما ?(?:في|فيه|فيها)|مافي|مافيه|لا ?يوجد|ليس هناك) (?:شي |شيء |اي )?(?:غلط|خطا)(?!\w)"
+                            # Never a bare "لا": "لا غلط، عمر" is the commonest
+                            # Gulf correction (step 4's review, H2).
+                            r"|(?<!\w)لا (?:شي|شيء|اي) (?:غلط|خطا)(?!\w)")
 
 
 def corrects(user_text: str) -> bool:
@@ -320,33 +323,68 @@ _CLAUSE = re.compile(r"[^.,،;؛!?؟\n]+")
 _DENIES_IT_REACH = 4
 
 
-#: A denial that adds instead: "not only Ali", "not just", "I didn't go alone",
-#: "ليس فقط علي", "مو بس علي", "ما رحت بروحي" (W4's left list, L1), folded.
-#: "Only" right after a negation ("not only", "مو بس"); never after a bare "no"
-#: ("No, just Omar", "لا بس عمر" put right). "Alone" anywhere after a denial.
+#: A denial that adds instead: "not only Ali", "not just", "I didn't see Ali
+#: alone", "ليس فقط علي", "مو علي بس", "ما قابلت علي بروحه" (W4's left list,
+#: L1), folded. "Only" right after a negation ("not only", "مو بس"), never
+#: after a bare "no" ("No, just Omar", "لا بس عمر" put right); or an "only"
+#: or "alone" word right after the denied value's own words, within the
+#: denial's reach ("Ali alone", "علي بس", "بعلي وحده"). Said of someone else
+#: ("Not Ali, I met Omar alone", "مو علي قابلت عمر بروحه") or of the user
+#: ("I was home alone") it adds nothing: the denial stands (step 4's review,
+#: H1 and M4).
 _ONLY = frozenset({"only", "just", "merely", "simply", "فقط", "بس"})
 _ALONE = frozenset({"alone", "بروحي", "لحالي", "لوحدي", "وحدي", "بمفردي", "بروحه", "لحاله", "لوحده", "وحده", "بروحها",
                     "لحالها", "لوحدها", "وحدها"})
 _BARE_NO = frozenset({"no", "nope", "لا", "ما"})
+#: An answer, not a negation of what follows: "No I went to the gym alone",
+#: "لا رحت النادي بروحي" deny the day, not the gym.
+_ANSWER_NO = frozenset({"no", "nope", "لا"})
+#: "وحده ثانيه": another one (a woman), not "alone".
+_ANOTHER = frozenset({"ثانيه", "ثاني", "ثانيين", "غير", "ثانيات"})
+#: Words that put right and never say "not only": "Actually just Omar".
+_NEVER_ADDING = frozenset({"actually", "correct", "instead", "rather", "بل", "الصحيح"})
 
 
-def _adds_rather(words: list[str], at: int) -> bool:
+def _value_end(words: list[str], at: int, wanted: list[str]) -> int | None:
+    """Where the denied value's words end, when they begin within the
+    denial's reach after *at*; None when they are not there."""
+    start = next((i for i in range(at + 1, min(len(words), at + 1 + _DENIES_IT_REACH))
+                  if words_said(wanted, words[i])), None)
+    if start is None:
+        return None
+    end = start
+    while end + 1 < len(words) and words_said(wanted, words[end + 1]):
+        end += 1
+    return end
+
+
+def _adds_rather(words: list[str], at: int, wanted: list[str] | None = None) -> bool:
     """Whether the denial at *at* in a clause's *words* says "not only" or
-    "not alone"."""
+    "not alone" of the value whose words are *wanted*."""
     after = words[at + 1:]
-    return (words[at] not in _BARE_NO and bool(after) and after[0] in _ONLY) or any(w in _ALONE for w in after)
+    if not after or words[at] in _NEVER_ADDING:
+        return False
+    if words[at] not in _BARE_NO and after[0] in _ONLY:
+        return True
+    if not wanted or words[at] in _ANSWER_NO:
+        return False
+    end = _value_end(words, at, wanted)
+    if end is None or end + 1 >= len(words) or words[end + 1] not in _ONLY | _ALONE:
+        return False
+    return not (end + 2 < len(words) and words[end + 2] in _ANOTHER)
 
 
-def _adds_rather_than_denies(user_text: str) -> bool:
+def _adds_rather_than_denies(user_text: str, value: str = "") -> bool:
     """Whether the message's denial adds to what it names rather than denying
     it: "Not only Ali, I met Omar", "مو بس علي، قابلت عمر", "No, I didn't see
-    Ali alone, I met Omar too"."""
+    Ali alone, I met Omar too" (of *value* "Ali")."""
     folded = _own_folded(user_text)
     arabic = _folded_words(_DENIALS_AR_RAW)
+    wanted = value_words(value) if value else None
     for clause in _CLAUSE.findall(folded):
         words = re.findall(r"[\w']+", clause)
         for at, word in enumerate(words):
-            if (word in _DENIALS_EN or word in arabic or word in _BARE_NO) and _adds_rather(words, at):
+            if (word in _DENIALS_EN or word in arabic or word in _BARE_NO) and _adds_rather(words, at, wanted):
                 return True
     return False
 
@@ -361,7 +399,8 @@ def _denies_value(folded: str, value: str) -> bool:
     for clause in _CLAUSE.findall(folded) if wanted else ():
         words = re.findall(r"[\w']+", clause)
         for at, word in enumerate(words):
-            if word not in denials and not (word[:1] in "وف" and word[1:] in denials) or _adds_rather(words, at):
+            if word not in denials and not (word[:1] in "وف" and word[1:] in denials) or _adds_rather(words, at,
+                                                                                                    wanted):
                 continue
             after = " ".join(words[at + 1:at + 1 + _DENIES_IT_REACH])
             if after and _share(wanted, after) >= EVENT_WORDS:
@@ -377,9 +416,11 @@ def puts_right(user_text: str, value: str) -> bool:
 
 
 #: A whole message that is "no" and a value: "No, Omar", "Nope, Omar", "No!
-#: Omar, I told you", "لا، عمر", "لأ، عمر", "لا يا كازما، عمر" (W4's left list,
-#: L3). Folded.
-_NO_THEN = re.compile(r"^\W*(?:no|nope|nah|لا|لاء|كلا)(?:[ \t]*[,،.!]+|[ \t]+(?=يا ))\W*(?:يا [^\W\d_]+\W+)?"
+#: Omar, I told you", "No - Omar", "لا، عمر", "لأ، عمر", "لا يا كازما، عمر"
+#: (W4's left list, L3). Folded. One mark, then ``\W*``: a run of marks is
+#: read once (linear, step 4's review M2).
+_NO_THEN = re.compile(r"^\W*(?:(?:no|لا|لاء|كلا)(?:[ \t]*[,،.!-]|[ \t]+(?=يا ))|(?:nope|nah)(?:[ \t]*[,،.!-]|[ \t]))"
+                      r"\W*(?:يا [^\W\d_]+\W+)?"
                       r"(?P<value>[^.,،!?؟\n]{1,60}?)"
                       r"(?:\W+(?:i (?:told|said) (?:you|it|that)|i said|قلت ?لك|قلتلك|قلت لكم|قلت))?\W*$")
 
@@ -390,10 +431,21 @@ def no_then(user_text: str, value: str) -> bool:
     Bare, it says no more than that, so it is read only beside a reply that
     names the fact replaced (``belief_extractor._same_event``)."""
     found = _NO_THEN.match(_own_folded(user_text))
-    if not found:
+    wanted = value_words(value)
+    if not found or not wanted:
         return False
-    said, wanted = value_words(found["value"]), value_words(value)
-    return bool(said) and bool(wanted) and set(said) <= set(wanted) | {"its", "it", "was", "كان", "كانت", "هو", "هي"}
+    # Every word said is the value's or "it was": "No, not Omar", "No, Omar
+    # too", "No, and Omar", "لا، عمر بعد" deny or add (step 4's review, M1),
+    # and "لا يا عمر" speaks to Omar.
+    said = re.findall(r"[\w'-]+", found["value"])
+    if not said or said[0] == "يا":
+        return False
+    named = [w for w in said if w not in _NO_THEN_FILLERS]
+    return bool(named) and all(words_said(wanted, w) for w in named)
+
+
+#: What "No, it was Omar", "No, just Omar", "لا، بل عمر" say beside the value.
+_NO_THEN_FILLERS = frozenset({"its", "it's", "it", "was", "كان", "كانت", "هو", "هي", "actually", "بل"}) | _ONLY
 
 
 def says_once_more(user_text: str) -> bool:
@@ -411,7 +463,7 @@ def denies(user_text: str, value: str = "") -> bool:
     folded = _own_folded(user_text)
     if corrects(user_text):
         return True
-    if _adds_rather_than_denies(user_text):
+    if _adds_rather_than_denies(user_text, value):
         return bool(value) and _denies_value(folded, value)
     if _NO_FIRST.search(folded) or (value and _denies_value(folded, value)):
         return True

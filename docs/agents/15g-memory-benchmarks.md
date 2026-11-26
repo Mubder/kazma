@@ -370,12 +370,21 @@
   embedded three texts.
   - **The miss it showed:** q601 "what is it that I do for a living?" was lost
     under the product's names. The role phrase asked only "do I do for a
-    living". It now takes "I do for a living", and MSA "لكسب عيشي/رزقي"
-    (`fact_names.ASKED_AS_MINE`). With that, v9 against v8 loses no question
-    of the benchmark (183), the small store (164) or the scale run (183).
+    living". It now takes "what (is it that) I do for a living", and "ما الذي
+    أعمله لكسب عيشي؟", "شنو أسوي لكسب رزقي؟" (`fact_names.ASKED_AS_MINE`);
+    never with a modal or "how" ("What should I do for a living?", "ماذا يجب
+    أن أفعل لكسب رزقي؟" ask advice: step 4's review, M3, its controls in
+    `tests/test_memory_benchmark_v9.py`). With that, v9 against v8 loses no
+    question of the benchmark (183), the small store (164) or the scale run
+    (183).
   - **What moves:** h022 ("شنو فصيلة دمي؟") and h024 ("What's my brother's
-    name?") still find their answer, second where it was first: the renamed
-    name fact ("user name_is Sami") stands nearer them by meaning. q006
+    name?") still find their answer, second where it was first; both are
+    near-ties, and the second set's MRR drop rests on them (step 4's review,
+    L1). h022: the renamed name fact's evidence rose 0.0953 to 0.1049, and it
+    now outscores the blood type by 0.0012 (0.1145 against 0.1133). h024: the
+    name fact's evidence fell 0.0916 to 0.0869, exactly the cut, so it left
+    the block, and the recency tie-break put x07 (0.1895) ahead of g01
+    (0.1869). q006
     precision is a little lower, q1008 (small store) ranks higher. Locked
     again with `--rebaseline`: overall precision 0.4872 to 0.4868, second set
     MRR 0.7574 to 0.7347 (mixed 0.9048 to 0.7619, its two questions h022 and

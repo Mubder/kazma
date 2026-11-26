@@ -365,17 +365,25 @@ ASKED_AS_MINE: dict[str, dict[str, object]] = {
     "current_role": {
         # "living" alone is a room, a cost; only with what the user does.
         "words": ("living",),
-        # "What do I do for a living?", and "What is it that I do for a living?"
-        # (dataset v9's q601: the phrase asked "do I do" only).
-        "en": re.compile(r"\b(?:(?:do|am) )?(?:i|we) (?:do(?:ing)?|doing) for (?:a |my )?(?:living|work|job)\b"
+        # "What do I do for a living?", and "What is it that I do for a living?",
+        # "Tell me what I do for work" (dataset v9's q601). Asked what, never
+        # with a modal: "What should / could / can I do for a living?", "Is it
+        # weird that I do for a living ..." ask advice or another thing (step
+        # 4's review, M3).
+        "en": re.compile(r"\b(?:do|am) (?:i|we) (?:do|doing) for (?:a |my )?(?:living|work|job)\b"
+                         r"|\bwhat(?:'s| is)? (?:it )?(?:that )?(?:i|we) do for (?:a |my )?(?:living|work|job)\b"
                          r"|\bwhat do (?:i|we) work as\b|\bmy line of work\b"),
         "ar": ("شغلتي", "شغلتنا", "مهنتي", "وظيفتي"),
         "ar_after": ("شنو", "وش", "ايش", "شو", "ما", "ماهي", "هي", "هو"),
         "ar_not_before": ("المفضله", "السابقه", "القديمه", "الاولي"),
-        # "for a living", in MSA: "ما الذي أعمله لكسب عيشي؟", "لكسب رزقي".
-        # Only "for earning" ("لكسب"): "كيف أكسب رزقي من الإنترنت؟" asks how, as
-        # "How do I make a living online?" does.
-        "ar_said": re.compile(r"(?:^|\s)لكسب (?:عيشي|رزقي|قوتي|لقمه عيشي)(?=\s|$|[؟?.,])"),
+        # "for a living", asked what: "ما الذي أعمله لكسب عيشي؟", "شنو أسوي
+        # لكسب رزقي؟". Never with a modal or "how" between ("ماذا يجب أن
+        # أفعل لكسب رزقي؟", "شو لازم أسوي لكسب رزقي؟" ask advice, step 4's
+        # review M3), and "كيف أكسب رزقي من الإنترنت؟" asks how, as "How do I
+        # make a living online?" does.
+        "ar_said": re.compile(r"(?:^|\s)(?:ما|ماذا|شنو|شو|وش|ايش) (?:هو )?(?:الذي |اللي )?"
+                              r"(?:اعمل|اعمله|افعل|افعله|اسوي|اسويه|نعمل|نعمله|نسوي)(?: انا)? "
+                              r"لكسب (?:عيشي|رزقي|قوتي|لقمه عيشي|عيشنا|رزقنا)(?=\s|$|[؟?.,])"),
         "as": "job",
     },
     # "Can I eat gluten?", "أقدر آكل جلوتين؟": whether the user may eat a
